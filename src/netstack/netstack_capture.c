@@ -7,8 +7,8 @@
  *           frame that crosses a wire, in the exact shape the device saw it,
  *           ARP included.
  *
- *   lo0 , the NetX Duo IP packet filter, installed here.  NetX Duo's
- *           loopback interface has no link driver (nx_ip_create.c:157 sets
+ *   lo0 , the NetX Duo IP packet filter, installed here.  The loopback
+ *           interface in NetX Duo has no link driver (nx_ip_create.c:157 sets
  *           nx_interface_link_driver_entry to NX_NULL) and
  *           _nx_ip_driver_packet_send() shortcuts a loopback destination
  *           straight into _nx_ip_packet_deferred_receive(), so no tap on a
@@ -16,14 +16,14 @@
  *           in docs/RESEARCH.md 11 was measured on.
  *
  * The loopback tap fires on NX_IP_PACKET_OUT only.  A loopback datagram is
- * sent once and received once, so capturing both directions would put two
- * identical records in the file and analysers downstream would read the second
- * as a retransmission.  The out direction is taken after _nx_ip_header_add(),
- * so the IP header is real and the checksum final.
+ * sent once and received once, so capturing both directions puts two identical
+ * records in the file, and analysers downstream read the second as a
+ * retransmission.  The out direction is taken after _nx_ip_header_add(), so
+ * the IP header is real and the checksum final.
  *
- * DLT_EN10MB for both; lo0's fourteen bytes are synthesised here with zeroed
- * addresses.  A single link type means one pcap writer and one filter program;
- * DLT_NULL for loopback would cost a second code path everywhere.
+ * DLT_EN10MB for both.  The fourteen bytes for lo0 are synthesised here with
+ * zeroed addresses.  A single link type means one pcap writer and one filter
+ * program.  DLT_NULL for loopback costs a second code path everywhere.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,7 +34,7 @@
 
 /* ------------------------------------------------------------ the lo0 tap */
 
-/* The address of this object identifies the loopback pseudo-interface; it is
+/* The address of this object identifies the loopback pseudo-interface.  It is
    not a pointer to anything the taps also use. */
 static const UBYTE ami_ns_lo_cookie;
 
@@ -107,7 +107,7 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
 
     ami_bpf_tap_view((APTR)&ami_ns_lo_cookie, &view);
 
-    /* Anything other than NX_SUCCESS drops the packet; a capture never
+    /* Anything other than NX_SUCCESS drops the packet.  A capture never
        rejects. */
     return NX_SUCCESS;
 }
@@ -197,9 +197,9 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
 /*
  * One interface, registered or unregistered after the stack is already up.
  * An interface added at run time through AddInterfaceTagList() must be
- * capturable like any other; one removed through RemoveInterface() must stop
- * being reachable before its AmiSana2If is freed, since src/bpf/ holds the
- * pointer as an opaque cookie and would hand a freed one to an injector.
+ * capturable like any other.  One removed through RemoveInterface() must stop
+ * being reachable before its AmiSana2If is freed, because src/bpf/ holds the
+ * pointer as an opaque cookie and otherwise hands a freed one to an injector.
  */
 VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
 {
@@ -233,7 +233,7 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns)
 
     /*
      * The filter first.  Detaching an interface unbinds the channels pointing
-     * at it, and a filter still installed could reach a slot being zeroed.
+     * at it, and a filter still installed can reach a slot being zeroed.
      */
     if (ns->ns_IpCreated)
         ns->ns_Ip.nx_ip_packet_filter_extended = NX_NULL;

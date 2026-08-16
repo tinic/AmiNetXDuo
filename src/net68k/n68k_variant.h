@@ -2,11 +2,11 @@
  * AmiNetXDuo, which CPU an inner loop in this directory is written for.
  *
  * n68k_checksum.S and n68k_copy.S each hold three or four forms of the same
- * routine, one per CPU class, and until now the preprocessor picked one from
- * __mc68020__ and friends: the answer was frozen at compile time, so the
- * archive shipped a library per CPU.  N68K_MV replaces that switch with a
- * number the build passes in, so the same source can be assembled once per
- * class into one binary and the choice made at run time from
+ * routine, one per CPU class.  The preprocessor used to pick one from
+ * __mc68020__ and the related macros, which froze the answer at compile time,
+ * so the archive shipped one library per CPU.  N68K_MV replaces that switch
+ * with a number the build passes in, so the same source can be assembled once
+ * per class into one binary.  The choice is then made at run time from
  * SysBase->AttnFlags (n68k_cpu.c).
  *
  * N68K_MV is 0, 20, 40 or 60 and names the class, not the part: a 68010 takes

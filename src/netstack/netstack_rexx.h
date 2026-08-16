@@ -13,18 +13,18 @@
 #define RX_KEYWORDLEN   24
 
 /*
- * AmiTCP's REPLYBUFLEN was 255 and its own netstat asks for 46 TCP counters in
- * one QUERY. Eleven digits each overruns 255, so on a machine that had moved
- * any traffic AmiTCP answered its own netstat with "Result too long". 1024
- * holds the longest query any of the corpus scripts sends.
+ * REPLYBUFLEN in AmiTCP was 255, and its own netstat asks for 46 TCP counters
+ * in one QUERY. Eleven digits each overruns 255, so on a machine that had
+ * moved any traffic AmiTCP answered its own netstat with "Result too long".
+ * 1024 holds the reply to the longest query any of the corpus scripts sends.
  */
 #define RX_REPLYBUFLEN  1024
 
 /*
- * The reply, and the room for it. Starts as the host's stack buffer;
- * CONNECTIONS and ROUTES grow it, because their length is a function of how
- * many sockets and routes exist. AmiTCP did the same in CS_Alloc(), leaving
- * the old buffer for its caller to free.
+ * The reply, and the room for it. It starts as the stack buffer of the host.
+ * CONNECTIONS and ROUTES grow it, because their length depends on how many
+ * sockets and routes exist. AmiTCP did the same in CS_Alloc(), and left the
+ * old buffer for its caller to free.
  */
 typedef struct AmiRxReply
 {

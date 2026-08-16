@@ -1,11 +1,12 @@
 /*
  * AmiNetXDuo, portable fallback for the n68k_iocopy.S routines.
  *
- * Same reason n68k_copy.c exists: the symbols have to be present when
+ * The same reason as n68k_copy.c: the symbols have to be present when
  * AMINETXDUO_NET68K_ASM is off -- a host build, or a bisect of a suspected
- * assembly bug -- and the movem.l loop has no C spelling.  The accesses are
- * longword-wide here as they are there, so the rule the far side depends on
- * (never a byte access to card memory or to a data port) holds on both paths.
+ * assembly bug -- and the movem.l loop has no C spelling.  Each routine keeps
+ * the access width it has in the assembly, so the rule the far side depends
+ * on (never a byte access to card memory or to a data port) holds on both
+ * paths.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -2,17 +2,17 @@
  * AmiNetXDuo, QUERY and SET for the AMITCP ARexx host.
  *
  * The names, their abbreviations, their order and the shape of every answer
- * come from AmiTCP/IP 3.0b2's own source: kern/variables.src for the name
+ * come from the AmiTCP/IP 3.0b2 source: kern/variables.src for the name
  * space, kern/amiga_config.c for the parser and the error strings, and
  * kern/amiga_cstat.c for the three formatted answers (CONNECTIONS, ICMPHIST,
  * ROUTES). Nothing here is guessed from documentation.
  *
- * One name is not AmiTCP's: SERVICES, which browses for mDNS services and is
- * documented at ami_rx_services(). AmiTCP had no discovery to have a name for,
- * so there was nothing to copy.
+ * One name does not come from AmiTCP: SERVICES, which browses for mDNS
+ * services and is documented at ami_rx_services(). AmiTCP had no discovery to
+ * name, so there was nothing to copy.
  *
- * Two programs in the corpus read the variable space rather than just sending
- * KILL. AmiTCP's own `netstat` asks for, in this order:
+ * Two programs in the corpus read the variable space rather than only sending
+ * KILL. The AmiTCP `netstat` asks for, in this order:
  *
  *     QUERY CONNECTIONS
  *     Q ICMP CHksum ICMP COde ...              8 names
@@ -28,14 +28,14 @@
  * whether or not they moved.
  *
  * A counter this stack does not keep answers 0, which is what AmiTCP answered
- * for a counter that had not moved, there is no way to say "unmeasured" in a
+ * for a counter that had not moved. There is no way to say "unmeasured" in a
  * space-separated list of numbers, and src/bsdsocket/netstats.c makes the same
  * call for the same reason. Which of the 83 are real is listed at each fill.
  *
- * A variable this stack has no counterpart for at all, the mbuf
- * configuration, the log console, the SANA-II debug switches, is refused
+ * A variable this stack has no counterpart for at all -- the mbuf
+ * configuration, the log console, the SANA-II debug switches -- is refused
  * with the message AmiTCP used for a variable that was not readable, rather
- * than answered 0. A zero there would be a measurement.
+ * than answered 0. A zero there reads as a measurement.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -63,7 +63,7 @@ const char ami_rx_err_state[]       = "No active stack\n";
 /* ------------------------------------------------------------- name space, */
 
 /*
- * KW_VARS, generated from variables.src by AmiTCP's own kern/config_var.awk
+ * KW_VARS, generated from variables.src by the AmiTCP kern/config_var.awk
  * with TARGETTI=C. The enum below is its order, which is what FindArg()
  * returns.
  */
@@ -75,9 +75,9 @@ static const char ami_rx_vars[] =
     "ULO=USELOOPBACK,TCPSND=TCP_SENDSPACE,TCPRCV=TCP_RECVSPACE,"
     "CON=CONSOLENAME,LOGF=LOGFILENAME,"
     /*
-     * Ours, and the only name here that is not AmiTCP's, appended so every
-     * index above it keeps the value FindArg() has always returned for it.
-     * AmiTCP had no service discovery to have a name for; see ami_rx_services().
+     * The one name added here, appended so that every index above it keeps the
+     * value FindArg() has always returned for it.  AmiTCP had no service
+     * discovery to name.  See ami_rx_services().
      */
     "SVC=SERVICES";
 
@@ -150,9 +150,9 @@ static const char ami_rx_kw_mbuf_conf[] =
 static const char ami_rx_kw_log[] = "COUNT,LEN";
 
 /*
- * KW_ROUTES, and variables.src's warning with it: "These are in the numeric
- * order as in <sys/socket.h>. Do not change the order!", ROUTES' argument is
- * an address family number, not a name lookup, and netstat prints
+ * KW_ROUTES, with the warning from variables.src: "These are in the numeric
+ * order as in <sys/socket.h>. Do not change the order!".  The ROUTES argument
+ * is an address family number rather than a name lookup, and netstat prints
  * afamily.<number> from it.
  */
 static const char ami_rx_kw_routes[] =
@@ -162,13 +162,13 @@ static const char ami_rx_kw_routes[] =
 #define RXV_AF_ALL      0
 #define RXV_AF_INET     2
 
-/* How many counters each table has; the index template's length in names. */
+/* How many counters each table has: the length of the index template. */
 #define RX_ICMP_COUNT       8
 #define RX_IP_COUNT         20
 #define RX_TCP_COUNT        46
 #define RX_UDP_COUNT        9
 
-/* icmpstat's histograms are ICMP_MAXTYPE + 1 entries, out then in. */
+/* The icmpstat histograms are ICMP_MAXTYPE + 1 entries, out then in. */
 #define RX_ICMP_MAXTYPE     18
 #define RX_ICMP_HIST        (RX_ICMP_MAXTYPE + 1)
 
@@ -176,14 +176,14 @@ static const char ami_rx_kw_routes[] =
 #define RX_ICMP_ECHOREPLY   0
 
 /*
- * What QUERY can answer, and what SET can change. AmiTCP's flags were
- * VF_READ/VF_WRITE/VF_CONF per variable; the readable set here is smaller
- * because several of its variables describe machinery this stack does not have,
- * and the writeable set is empty, see ami_rx_setvalue().
+ * What QUERY can answer, and what SET can change. The AmiTCP flags were
+ * VF_READ/VF_WRITE/VF_CONF per variable.  The readable set here is smaller,
+ * because several of those variables describe machinery this stack does not
+ * have, and the writeable set is empty.  See ami_rx_setvalue().
  *
  * rvd_Index is the level-2 template, NULL for a variable that takes no index.
  * A variable whose answer is a formatted list (CONNECTIONS, ICMPHIST, ROUTES)
- * parses its own argument, exactly as AmiTCP's VAR_FUNC did, so it has no
+ * parses its own argument, exactly as the AmiTCP VAR_FUNC did, so it has no
  * template either.
  */
 typedef struct AmiRxVarDef
@@ -248,7 +248,7 @@ VOID ami_rx_reply_done(AmiRxReply *r)
     }
 }
 
-/* AmiTCP's CS_Alloc(), except that what is already written is carried over. */
+/* The AmiTCP CS_Alloc(), except that what is written is carried over. */
 static BOOL ami_rx_reply_room(AmiRxReply *r, LONG want)
 {
     STRPTR next;
@@ -323,8 +323,8 @@ static BOOL ami_rx_put_dec(AmiRxReply *r, ULONG value)
     return TRUE;
 }
 
-/* Fixed-width lower-case hex, which is what netstat's x2d() and substr() read
-   the addresses, ports and queue lengths out of. */
+/* Fixed-width lower-case hex, which is what the netstat x2d() and substr()
+   read the addresses, ports and queue lengths out of. */
 static BOOL ami_rx_put_hex(AmiRxReply *r, ULONG value, UWORD width)
 {
     static const char hex[] = "0123456789abcdef";
@@ -347,10 +347,10 @@ static BOOL ami_rx_put_hex(AmiRxReply *r, ULONG value, UWORD width)
 }
 
 /*
- * An error that names the variable it is about: AmiTCP's ERR_ILLEGAL_VAR and
- * friends are printf formats taking the function name and the keyword, and it
- * built them into the reply buffer and pointed errstrp at it. Same here, so a
- * script that displays the message sees the name it got wrong.
+ * An error that names the variable it is about: the AmiTCP ERR_ILLEGAL_VAR and
+ * the related strings are printf formats taking the function name and the
+ * keyword, and it built them into the reply buffer and pointed errstrp at it.
+ * Same here, so a script that displays the message sees the name it got wrong.
  */
 static VOID ami_rx_error_named(AmiRxReply *r, const char **errstr,
                                const char *format, const char *func,
@@ -387,9 +387,9 @@ static VOID ami_rx_zero(ULONG *out, UWORD count)
 
 /*
  * ICMP, in KW_ICMP order. nx_icmp_info_get() gives one of the eight:
- * icmp_checksum_errors is CHKSUM. Its other five numbers are this host's own
- * outbound ping bookkeeping, which icmpstat has no member for, icmpstat is a
- * per-type histogram plus input failure causes, not a ping client's diary.
+ * icmp_checksum_errors is CHKSUM. Its other five numbers count the outbound
+ * pings of this host, which icmpstat has no member for: icmpstat is a per-type
+ * histogram plus input failure causes.
  */
 static VOID ami_rx_icmp(NX_IP *ip, ULONG *out)
 {
@@ -406,7 +406,7 @@ static VOID ami_rx_icmp(NX_IP *ip, ULONG *out)
 }
 
 /*
- * IP, in KW_IP order, which is struct ipstat's member order, so these
+ * IP, in KW_IP order, which is the member order of struct ipstat, so these
  * positions are the ones src/bsdsocket/netstats.c fills by name.
  *
  *   0  T=TOTAL       14 LO=LOCALOUT    6  FS=FRAGMENTS
@@ -434,15 +434,15 @@ static VOID ami_rx_ip(NX_IP *ip, ULONG *out)
 }
 
 /*
- * TCP, in KW_TCP order, struct tcpstat's first 46 members.
+ * TCP, in KW_TCP order, the first 46 members of struct tcpstat.
  *
  *   2  CO=CONNECT    15 ST=STOTAL      25 RTO=RTOTAL
  *   3  DR=DROPS      17 SB=SBYTE       27 RB=RBYTE
  *   5  CL=CLOSED     18 SREP=SREPACK   28 RC=RCHKSUM
  *
- * CATTEM and ACCEPTS stay 0 on purpose: nx_tcp_info_get()'s tcp_connections is
- * incoming and outgoing together and there is no basis for splitting it, which
- * is the same call netstats.c makes.
+ * CATTEM and ACCEPTS stay 0 on purpose: the tcp_connections from
+ * nx_tcp_info_get() is incoming and outgoing together and there is no basis
+ * for splitting it, which is the same call netstats.c makes.
  */
 static VOID ami_rx_tcp(NX_IP *ip, ULONG *out)
 {
@@ -471,8 +471,8 @@ static VOID ami_rx_tcp(NX_IP *ip, ULONG *out)
 }
 
 /*
- * UDP, in KW_UDP order, struct udpstat's members, all nine of them, and six
- * are real.
+ * UDP, in KW_UDP order, the members of struct udpstat, all nine of them, and
+ * six are real.
  *
  *   0  I=ITOTAL      2  C=CHKSUM       6  F=FULLSOC
  *   1  H=HEADSHORT   4  N=NOPORT       8  O=OTOTAL
@@ -502,7 +502,7 @@ static VOID ami_rx_udp(NX_IP *ip, ULONG *out)
 /* ------------------------------------------------------- formatted answers */
 
 /*
- * ICMPHIST. AmiTCP's read_icmphist(): icps_outhist[0..18] then
+ * ICMPHIST. The AmiTCP read_icmphist(): icps_outhist[0..18] then
  * icps_inhist[0..18], decimal, space separated, no trailing space. netstat
  * indexes it as subword(icmphist, a*19 + b + 1, 1), so all 38 have to be
  * there whether or not they moved.
@@ -543,27 +543,27 @@ full:
 }
 
 /*
- * CONNECTIONS. AmiTCP's getsockets():
+ * CONNECTIONS. The AmiTCP getsockets():
  *
  *     "%lc %04lx %04lx %08lx %04lx %08lx %04lx %1lx"
  *      proto recvq sendq laddr lport faddr fport state, entries space separated
  *
- * 't' or 'u'; TCP first, then UDP; the addresses in host order, because
- * netstat pulls them apart with substr() and x2d() rather than reading them as
- * a number. The state digit is 4.4BSD's t_state, and netstat's state.0..state.A
- * table indexes it directly.
+ * 't' or 'u', TCP first and then UDP, with the addresses in host order,
+ * because netstat pulls them apart with substr() and x2d() rather than reading
+ * them as a number. The state digit is the 4.4BSD t_state, and the netstat
+ * state.0..state.A table indexes it directly.
  *
- * Which sockets, and why a listen() shows as one: the rules are
- * src/bsdsocket/netstats.c's, because a monitor reading GetNetworkStatistics()
- * and a script reading this must not be told different things. NetX Duo parks a
- * second socket on a listening port with the accept already posted; it has no
- * descriptor, so it is skipped, and the descriptor's own socket, which
- * NetX Duo leaves in CLOSED, is reported as LISTEN.
+ * Which sockets, and why a listen() shows as one: the rules come from
+ * src/bsdsocket/netstats.c, because a monitor reading GetNetworkStatistics()
+ * and a script reading this must not be told different things. NetX Duo parks
+ * a second socket on a listening port with the accept already posted.  It has
+ * no descriptor, so it is skipped, and the socket of the descriptor itself,
+ * which NetX Duo leaves in CLOSED, is reported as LISTEN.
  */
 #define RX_STATLEN  42
 
-/* NetX Duo's TCP states to 4.4BSD's. The two enumerations agree to CLOSE_WAIT
-   and then diverge; netstats.c has the full note. */
+/* The NetX Duo TCP states to the 4.4BSD ones. The two enumerations agree to
+   CLOSE_WAIT and then diverge.  netstats.c has the full note. */
 static LONG ami_rx_tcp_state(ULONG nx_state)
 {
     static const UBYTE map[][2] =
@@ -639,7 +639,7 @@ typedef struct AmiRxSocket
 /*
  * Copy the sockets out under the IP's protection mutex, then format outside
  * it, which is the shape AmiTCP used with splnet(): the formatting can grow
- * the reply buffer, and allocating inside the lock invites both an unbounded
+ * the reply buffer, and allocating inside the lock risks both an unbounded
  * hold and a deadlock against the IP thread.
  */
 static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
@@ -717,7 +717,7 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
 /*
  * NetX Duo puts no ceiling on created sockets, so this is generous rather than
  * exact: past it the list is truncated, and the walk stops cleanly. AmiTCP
- * counted first and allocated exactly, which it could do because its counting
+ * counted first and allocated exactly, which was possible because its counting
  * and its copying were both inside one splnet().
  */
 #define RX_MAX_SOCKETS  64
@@ -782,7 +782,7 @@ static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
 }
 
 /*
- * ROUTES <family>. AmiTCP's getroutes():
+ * ROUTES <family>. The AmiTCP getroutes():
  *
  *     "%02lx %08lx %08lx %-8.8s %04lx %08lx %s%ld "
  *      family dest gateway flags refs use interface
@@ -790,14 +790,14 @@ static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
  * with a trailing space after every entry, including the last, and the flag
  * field padded to eight characters, netstat parses positionally with
  * `parse value rest with af dest gate flags refs used iface rest`, so both
- * matter. An entry with no flag letters prints `""`, AmiTCP's own guard
- * against confusing the parser with an empty word.
+ * matter. An entry with no flag letters prints `""`, the AmiTCP guard against
+ * confusing the parser with an empty word.
  *
- * The entries, and their flags, are src/bsdsocket/routing.c's set: an
- * interface's own network, NetX Duo's static routing table when it is compiled
- * in, and the default gateway. Refs and use are 0, neither is counted, and
- * the netmask pseudo-family AmiTCP emitted as family 0 has no counterpart,
- * since NetX Duo has no radix tree to walk.
+ * The entries, and their flags, are the set from src/bsdsocket/routing.c: the
+ * network of an interface, the NetX Duo static routing table when it is
+ * compiled in, and the default gateway. Refs and use are 0, neither is
+ * counted, and the netmask pseudo-family AmiTCP emitted as family 0 has no
+ * counterpart, because NetX Duo has no radix tree to walk.
  */
 typedef struct AmiRxRoute
 {
@@ -811,9 +811,9 @@ typedef struct AmiRxRoute
 #define RX_RT_GATEWAY   0x0002
 #define RX_RT_HOST      0x0004
 
-/* src/bsdsocket/routing.c's own bound, minus its ARP entries: an interface's
-   attached prefix each, the whole static table, and the default gateway.
-   AmiTCP's netstat has no column for an ARP entry. */
+/* The bound from src/bsdsocket/routing.c, minus its ARP entries: the attached
+   prefix of each interface, the whole static table, and the default gateway.
+   The AmiTCP netstat has no column for an ARP entry. */
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
 #define RX_ROUTE_STATIC_MAX     NX_IP_ROUTING_TABLE_SIZE
 #else
@@ -822,8 +822,8 @@ typedef struct AmiRxRoute
 
 #define RX_MAX_ROUTES   (NX_MAX_PHYSICAL_INTERFACES + RX_ROUTE_STATIC_MAX + 1)
 
-/* AmiTCP sized this 90, allowing 32 for the interface name; ours can be
-   AMI_CFG_NAME_LEN. 45 is the fixed part, six hex fields, the eight-column
+/* AmiTCP sized this 90, allowing 32 for the interface name.  Here it can be
+   AMI_CFG_NAME_LEN. 45 is the fixed part: six hex fields, the eight-column
    flag field and their separators. */
 #define RX_ROUTELEN     (45 + AMI_CFG_NAME_LEN + 1)
 
@@ -891,8 +891,8 @@ static BOOL ami_rx_put_rtflags(AmiRxReply *r, UWORD flags)
     char letters[9];
     UWORD n = 0;
 
-    /* AmiTCP's bits[] order: U G H D M C X L R. Only the first three can be
-       set here; the other six describe route entries this stack never makes. */
+    /* The AmiTCP bits[] order: U G H D M C X L R. Only the first three can be
+       set here.  The other six describe entries this stack never makes. */
     if ((flags & RX_RT_UP) != 0)
         letters[n++] = 'U';
     if ((flags & RX_RT_GATEWAY) != 0)
@@ -926,8 +926,8 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
     LONG        rc = RETURN_OK;
 
     /* AmiTCP opens getvalue(), setvalue() and parseroute() with this line, and
-       it is load-bearing: ReadItem() leaves the buffer alone when there is
-       nothing to read, and the error paths below name what they read. */
+       it is required: ReadItem() leaves the buffer alone when there is nothing
+       to read, and the error paths below name what they read. */
     buf[0] = '\0';
 
     if (ReadItem((STRPTR)buf, (LONG)sizeof(buf), args) <= 0)
@@ -1015,23 +1015,24 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
 /*
  * QUERY SERVICES <type|ALL> [<seconds>]
  *
- * ALL is the DNS-SD meta-query: it answers with the service TYPES something on
+ * ALL is the DNS-SD meta-query: it answers with the service types something on
  * the network offers, which is what a script asks first when it does not
  * already know what to look for. A type, "_http._tcp", answers with the
  * instances of it.
  *
- * The argument is mandatory for the reason ROUTES' is: getvalue() reads names
- * until the line ends, so an optional first argument could not be told from the
- * next variable. The seconds are optional because they can: a number is not a
- * variable name, so the CSource is rewound when the next item is not one.
+ * The argument is mandatory for the same reason as the ROUTES argument:
+ * getvalue() reads names until the line ends, so an optional first argument
+ * cannot be told from the next variable. The seconds are optional, because a
+ * number is not a variable name, so the CSource is rewound when the next item
+ * is not one.
  *
- * WHY THIS BLOCKS
+ * This blocks, for three reasons.
  *
  *   mDNS answers arrive over seconds and a browse never completes, so there is
- *   nothing to return immediately and nothing to poll for that would not be the
- *   same wait moved into the script. The alternative, one verb to start and
- *   another to read, makes every caller write the sleep itself and leaves a
- *   query running when a script exits between the two.
+ *   nothing to return immediately and nothing to poll for except the same wait
+ *   moved into the script. The alternative, one verb to start and another to
+ *   read, makes every caller write the sleep itself and leaves a query running
+ *   when a script exits between the two.
  *
  *   The host services one message at a time and always has, so a script that
  *   sends this stops the port for the window. That is why the window is capped
@@ -1039,11 +1040,11 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
  *   the same wire takes to answer and short enough that a second script waiting
  *   behind this one does not read as a hang.
  *
- *   The wait is Delay() on the host's own task, taken with no ThreadX bracket
- *   held, browse_start() and browse_collect() each take and release their
- *   own. A wait taken while adopted would stop the whole stack for the window,
- *   and a handshake through a MsgPort here is the shape of the death-port hang
- *   this file already fixed once.
+ *   The wait is Delay() on the task of the host itself, taken with no ThreadX
+ *   bracket held.  browse_start() and browse_collect() each take and release
+ *   their own. A wait taken while adopted stops the whole stack for the
+ *   window, and a handshake through a MsgPort here repeats the port hang this
+ *   file already fixed once.
  */
 
 #define RX_SVC_MAX          48
@@ -1069,10 +1070,10 @@ static BOOL ami_rx_put_dotted(AmiRxReply *r, ULONG addr)
 }
 
 /*
- * A TXT record is whatever the responder put in it. Control characters would
- * break the line format this answer is parsed with, and a TAB inside a field
- * would shift every field after it, so both become '.', the record is still
- * legible and the row still parses.
+ * A TXT record is whatever the responder put in it. Control characters break
+ * the line format this answer is parsed with, and a TAB inside a field shifts
+ * every field after it, so both become '.'.  The record is still legible and
+ * the row still parses.
  */
 static BOOL ami_rx_put_txt(AmiRxReply *r, const char *text)
 {
@@ -1093,7 +1094,8 @@ static BOOL ami_rx_put_txt(AmiRxReply *r, const char *text)
 }
 
 /* The optional collection window. Digits only, and the CSource is left where
-   it was when the next item is not one, it is the next variable then. */
+   it was when the next item is not a number, because it is the next variable
+   then. */
 static ULONG ami_rx_svc_seconds(struct CSource *args)
 {
     char  buf[RX_KEYWORDLEN];
@@ -1216,7 +1218,7 @@ static LONG ami_rx_services(struct CSource *args, const char **errstr,
 
 /* --------------------------------------------------------------- scalars, */
 
-/* AmiTCP's boolean_enum, and its answer is the first name of the pair. */
+/* The AmiTCP boolean_enum, and its answer is the first name of the pair. */
 static const char *ami_rx_bool(BOOL value)
 {
     return value ? "YES" : "NO";
@@ -1242,13 +1244,13 @@ static const char *ami_rx_scalar(UWORD var, char *buf, ULONG buflen)
             return buf;
         }
 
-        /* AmiTCP's was the name of its stack task, which a script used to find
-           the process. Ours is the NX_IP thread's, the closest thing that
-           exists and the name that shows in a task list. */
+        /* In AmiTCP this was the name of its stack task, which a script used
+           to find the process. Here it is the name of the NX_IP thread, the
+           closest equivalent and the name that shows in a task list. */
         case RXV_TASKNAME:
             return "AmiNetXDuo IP";
 
-        /* AmiTCP counted its own library bases so a second instance could take
+        /* AmiTCP counted its own library bases, so that a second instance took
            a second port name. This library is a singleton. */
         case RXV_NTHBASE:
             return "0";
@@ -1285,10 +1287,10 @@ static const char *ami_rx_scalar(UWORD var, char *buf, ULONG buflen)
 /* --------------------------------------------------------------- getvalue, */
 
 /*
- * AmiTCP's getvalue(): read names until the line runs out, appending one value
- * per name separated by a space. An unreadable or unknown name aborts the whole
- * command, a partial answer would be silently misparsed by the caller, which
- * splits on position.
+ * The AmiTCP getvalue(): read names until the line runs out, appending one
+ * value per name separated by a space. An unreadable or unknown name aborts
+ * the whole command, because the caller splits on position and silently
+ * misparses a partial answer.
  */
 LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 {
@@ -1343,7 +1345,7 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 
         /*
          * The formatted answers write the whole reply themselves and are not
-         * space-separated from a neighbour, which is AmiTCP's VAR_FUNC path:
+         * space-separated from a neighbour, which is the AmiTCP VAR_FUNC path:
          * it wrote through the same CSource and skipped the separator.
          */
         switch (var)
@@ -1449,20 +1451,22 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 
 /*
  * SET. AmiTCP had fourteen writeable variables and three more writeable only
- * while it was reading its configuration file; every one of them wrote a kernel
- * global that this stack does not have. Its debug switches, log console, log
- * file and mbuf chunk sizes have no counterpart, the receive window is computed
- * per socket from the live packet pool (src/bsdsocket/socket.c) so there is no
- * tcp_recvspace to assign to, and HOSTNAME comes from the configuration file.
+ * while it was reading its configuration file.  Every one of them wrote a
+ * kernel global that this stack does not have. Its debug switches, log
+ * console, log file and mbuf chunk sizes have no counterpart, the receive
+ * window is computed per socket from the live packet pool
+ * (src/bsdsocket/socket.c) so there is no tcp_recvspace to assign to, and
+ * HOSTNAME comes from the configuration file.
  *
- * So the writeable set is empty, and a recognised name is refused with AmiTCP's
- * own ERR_NOWRITE rather than reported unknown.
+ * So the writeable set is empty, and a recognised name is refused with the
+ * AmiTCP ERR_NOWRITE rather than reported unknown.
  *
- * One archive sends a SET: TCP_Start_Stop's startnet, twice, both `SET
- * HOSTNAME`, and it is a PPP dial-up front end, the value it wants to install
- * is the name the dial-up's local address resolves to. Its other branch sets
- * the name to the one already in the configuration file, and both calls discard
- * the return code. So there is nothing here for a writeable HOSTNAME to fix.
+ * One archive sends a SET: the startnet in TCP_Start_Stop, twice, both `SET
+ * HOSTNAME`.  It is a dial-up front end, and the value it wants to install is
+ * the name the local address of the link resolves to. Its other branch sets
+ * the name to the one already in the configuration file, and both calls
+ * discard the return code. So there is nothing here for a writeable HOSTNAME
+ * to fix.
  */
 LONG ami_rx_setvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 {
