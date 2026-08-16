@@ -104,7 +104,7 @@ static VOID join_path(char *dst, ULONG dstlen, const char *dir, const char *name
     ami_cfg_copy_string(dst + pos, dstlen - pos, name);
 }
 
-/* Workbench icons sit next to the config files; they are not config files. */
+/* Workbench icons sit next to the configuration files, and are not one. */
 static BOOL is_icon(const char *name)
 {
     ULONG len = ami_cfg_strlen(name);
@@ -137,8 +137,8 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
 
     /*
      * `path` is on this stack frame and the reporter is handed it by pointer,
-     * so the name has to be taken back before we return, hence the explicit
-     * clear rather than letting the next caller overwrite it.
+     * so the name is cleared before this function returns rather than left for
+     * the next caller to overwrite.
      */
     ami_cfg_problem_file(path);
     result = ami_cfg_parse_interface(name, buf, out);
@@ -151,8 +151,8 @@ LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
 
 /*
  * Roadshow processes the interface files in alphabetical order (a PRI tooltype
- * can override that; icons are not read here). Keeping the array sorted makes
- * the first interface deterministic, and its gateway becomes the default route
+ * can override that, and icons are not read here). A sorted array makes the
+ * first interface deterministic, and its gateway becomes the default route
  * when no routes file exists.
  */
 static VOID insert_interface(AmiConfig *cfg, const AmiIfConfig *iface)
@@ -212,7 +212,7 @@ static VOID load_interfaces(AmiConfig *cfg)
         while (ExNext(lock, fib))
         {
             AmiIfConfig iface;
-            /* fib_FileName is TEXT[] (unsigned char), our strings are char. */
+            /* fib_FileName is TEXT[] (unsigned char), the strings here are char. */
             const char *entry_name = (const char *)fib->fib_FileName;
 
             if (fib->fib_DirEntryType > 0)      /* a drawer */
@@ -274,7 +274,7 @@ static VOID load_resolver(AmiConfig *cfg)
 
     /*
      * AmiTCP installations keep NAMESERVER/DOMAIN/HOST lines in the netdb
-     * file itself. Read them too, but only to fill gaps: a real
+     * file itself. They are read too, but only to fill gaps: a real
      * name_resolution file always wins.
      */
     if (cfg->resolver.nameserver_count == 0 || cfg->hostname[0] == '\0')
@@ -311,7 +311,7 @@ static VOID load_resolver(AmiConfig *cfg)
     /*
      * A HOSTNAME or HOST line went straight into cfg->hostname, so the rank is
      * recorded here rather than through ami_config_hostname_offer(). This is
-     * the strongest source; nothing later can displace it.
+     * the strongest source. Nothing later can displace it.
      */
     if (cfg->hostname[0] != '\0')
         cfg->hostname_source = (UWORD)AMI_HOSTNAME_NAMERES;
@@ -373,9 +373,9 @@ static VOID load_tcp_handler(AmiConfig *cfg)
 
 #ifdef AMINETXDUO_MDNS
 /*
- * Only in an mDNS build. The AmiSdService fields exist in both, so nothing
- * else has to change, but a build with no responder in it should not open a
- * file it can do nothing with.
+ * Only in an mDNS build. The AmiSdService fields exist in both builds, so
+ * nothing else changes. A build with no responder must not open a file it can
+ * do nothing with.
  */
 static VOID load_dnssd(AmiConfig *cfg)
 {
@@ -401,16 +401,15 @@ static VOID load_dnssd(AmiConfig *cfg)
  * The name an administrator gave this machine, or nothing.
  *
  * load_resolver() has already taken any HOSTNAME or HOST line from
- * DEVS:Internet/name_resolution, which outranks both of these. The rest of the
- * chain, offered weakest first, is an interface file's ID= and then
- * ENV:HOSTNAME; AmiHostnameSource in aminetxduo/config.h says why in that
- * order. DHCP option 12 outranks both and arrives later, once there is a
- * lease.
+ * DEVS:Internet/name_resolution, which outranks both sources here. The rest of
+ * the chain, offered weakest first, is an interface file's ID= and then
+ * ENV:HOSTNAME. AmiHostnameSource in aminetxduo/config.h gives the order. DHCP
+ * option 12 outranks both and arrives later, once there is a lease.
  *
- * Nothing is invented after that: gethostname() derives a name from the
- * interface address instead (bsdsocket.doc NOTES), and the two consumers that
- * need a network label whatever happens, DHCP option 12 and the mDNS host
- * label, carry their own default.
+ * Nothing is invented after that. gethostname() derives a name from the
+ * interface address instead (bsdsocket.doc NOTES). DHCP option 12 and the mDNS
+ * host label need a network label whatever happens, and carry their own
+ * default.
  */
 static VOID load_hostname(AmiConfig *cfg)
 {
@@ -427,21 +426,17 @@ static VOID load_hostname(AmiConfig *cfg)
 /*
  * Fills cfg from DEVS: and allocates nothing the caller has to give back.
  *
- * It used to call ami_netdb_load() here as well, which was the whole cost of
- * the call and no part of its name: 12,616 bytes of hosts/networks/protocols/
- * services tables charged to whoever asked for the interface list, held in
- * file-scope statics in netdb.c, and never reclaimed by AmigaOS when the
- * process exited. Nothing this function parses reads the netdb, and a lookup
- * loads it on its own (netdb_table()), so the eager load bought only the
- * surprise. `hostname` acquired the debt in its first week by asking for the
- * interface list, and has no netdb lookup in it at all.
+ * This function does not call ami_netdb_load(). That load is 12,616 bytes of
+ * hosts/networks/protocols/services tables, held in file-scope statics in
+ * netdb.c and never reclaimed by AmigaOS when the process exits. Nothing
+ * parsed here reads the netdb, and a lookup loads it on its own through
+ * netdb_table().
  *
- * Whoever needs the tables asks for them: bsd_lib_open() does, explicitly and
- * on a Process, because the netstack's own threads then look up names from a
- * context that cannot open a file; four commands do; the rest do not and now
- * allocate nothing here. tools/check-netdb-free.sh holds the other half of
- * the bargain, that anything reaching ami_netdb_load() also links
- * ami_netdb_free().
+ * A caller that needs the tables asks for them. bsd_lib_open() does, on a
+ * Process, because the netstack's own threads then look up names from a
+ * context that cannot open a file. Four commands do. The rest allocate nothing
+ * here. tools/check-netdb-free.sh checks that anything reaching
+ * ami_netdb_load() also links ami_netdb_free().
  */
 LONG ami_config_load(AmiConfig *cfg)
 {

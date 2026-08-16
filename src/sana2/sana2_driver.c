@@ -1,7 +1,7 @@
 /*
  * AmiNetXDuo, the NX_IP driver entry.
  *
- * NetX Duo talks to this in NX_LINK_* commands; SANA-II answers in exec
+ * NetX Duo talks to this in NX_LINK_* commands. SANA-II answers in exec
  * IORequests. Framing is handled elsewhere: sana2_tx.c never builds a link
  * header in cooked mode, and sana2_rx.c synthesises one from
  * ios2_SrcAddr/DstAddr/PacketType. Everything here is dispatch, state and
@@ -25,11 +25,11 @@
 /*
  * `iface` is the publication flag: attach writes it last, unbind clears it
  * first, and ami_sana2_lookup() below tests it first and reads the other two
- * only after. The reader takes no lock, so that ordering is the whole of what
- * makes it safe, volatile is here to stop the compiler sinking the `ip` and
- * `index` stores past the `iface` one, which it is otherwise free to do: the
- * three are independent stores to distinct members of a plain static that it
- * can prove nothing about. Three extra stores once per interface attach.
+ * only after. The reader takes no lock, so that ordering is what makes it
+ * safe. volatile stops the compiler sinking the `ip` and `index` stores past
+ * the `iface` one, which it is otherwise free to do: the three are independent
+ * stores to distinct members of a plain static it can prove nothing about. It
+ * costs three extra stores once per interface attach.
  */
 typedef struct AmiSana2Binding
 {
@@ -170,7 +170,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     iface = ami_sana2_lookup(driver_req);
     if (iface == NULL)
     {
-        /* An unbound interface can still fail cleanly; a packet it was asked
+        /* An unbound interface can still fail cleanly. A packet it was asked
            to send must not leak. */
         if (driver_req->nx_ip_driver_packet != NULL)
             nx_packet_transmit_release(driver_req->nx_ip_driver_packet);
@@ -215,8 +215,8 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 
 #ifdef AMINETXDUO_RX_VERIFY
         /*
-         * RECEIVE only.  ami_sana2_rx_deliver() verifies a frame and publishes
-         * what it verified in nx_packet_interface_capability_flag; the fork
+         * Receive only.  ami_sana2_rx_deliver() checks a frame and publishes
+         * what it checked in nx_packet_interface_capability_flag. The fork
          * requires that per-packet flag as well as this one, so a frame the
          * glue declines -- a fragment, IPv6, a protocol it does not know -- is
          * checked by the stack exactly as before.
@@ -277,12 +277,12 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 
     /*
      * SM_Down: "the stack will no longer attempt to transmit messages through
-     * this interface", and nothing more. The readers are left alone, stopping
-     * them means S2_OFFLINE, because that is the only thing that returns a
-     * queued CMD_READ on a device which ignores AbortIO() (ami_sana2_rx_stop),
-     * and taking the wire away is what this command exists not to do. NetX Duo
-     * hands a link-down interface no packets to send; the readers keep feeding
-     * a stack that will not answer, and NX_LINK_ENABLE picks them back up.
+     * this interface", and nothing more. The readers are left alone. Stopping
+     * them means S2_OFFLINE, the only thing that returns a queued CMD_READ on
+     * a device which ignores AbortIO() (ami_sana2_rx_stop), and this command
+     * exists not to take the wire away. NetX Duo hands a link-down interface
+     * no packets to send. The readers keep feeding a stack that does not
+     * answer, and NX_LINK_ENABLE picks them back up.
      */
     case AMI_LINK_STACK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
@@ -320,8 +320,8 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         {
             /*
              * Many SANA-II devices answer S2ERR_NOT_SUPPORTED here and pass
-             * multicast through anyway. Failing the join would break IGMP and
-             * IPv6 ND on working hardware, so it is logged and swallowed.
+             * multicast through anyway. A failed join breaks IGMP and IPv6 ND
+             * on working hardware, so the error is logged and ignored.
              */
             AMI_WARN("sana2: multicast join not honoured by %s", iface->device);
         }
@@ -388,9 +388,9 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         req.ios2_SrcAddr[5] = (UBYTE)(lsw);
 
         /*
-         * S2_CONFIGINTERFACE may only run once per unit, so this generally
-         * fails with S2WERR_IS_CONFIGURED. Nothing in this tree needs it; it
-         * is implemented for completeness.
+         * S2_CONFIGINTERFACE can only run once per unit, so this usually fails
+         * with S2WERR_IS_CONFIGURED. Nothing in this tree needs it. It is
+         * implemented for completeness.
          */
         if (ami_sana2_command(iface, &req, S2_CONFIGINTERFACE) != 0)
         {
@@ -409,14 +409,14 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
          * The transmit ring's completion handler. A SANA-II CMD_WRITE finishes
          * long after the driver entry returned, and the packet cannot go back
          * to TCP until then. A reader thread notices the completion and calls
-         * _nx_ip_driver_deferred_processing(); the reap happens here, on the
+         * _nx_ip_driver_deferred_processing(). The reap happens here, on the
          * IP thread, under nx_ip_protection, in the same context as every
          * send. See sana2_tx.c.
          *
-         * Nothing else belongs in this case. Refreshing the SANA-II statistics
-         * here would be a synchronous DoIO() to the device on every
-         * transmitted frame; the counters are refreshed by the
-         * NX_LINK_GET_*_COUNT commands instead.
+         * Nothing else belongs in this case. A refresh of the SANA-II
+         * statistics here is a synchronous DoIO() to the device on every
+         * transmitted frame. The NX_LINK_GET_*_COUNT commands refresh the
+         * counters instead.
          */
         ami_sana2_tx_reap(iface);
         break;

@@ -2,13 +2,13 @@
  * AmiNetXDuo, SANA-II device interface definitions.
  *
  * The m68k-amigaos-gcc NDK that this project builds against ships no
- * <devices/sana2.h>, so the interface is restated here from the published
- * SANA-II Network Device Driver Specification (AmigaMail Vol. 2 / SANA-II
- * revision 2 autodocs). Command numbers, structure layouts and error codes are
+ * <devices/sana2.h>. The interface is restated here from the published SANA-II
+ * Network Device Driver Specification (AmigaMail Vol. 2 / SANA-II revision 2
+ * autodocs). Command numbers, structure layouts and error codes are
  * wire-and-ABI facts of the protocol, not implementation.
  *
- * The include guard matches Commodore's, so that if a future NDK does provide
- * <devices/sana2.h> only one of the two definitions is ever seen. The
+ * The include guard matches Commodore's. If a future NDK does provide
+ * <devices/sana2.h>, only one of the two definitions is ever seen. The
  * AmiNetXDuo-specific extras below sit outside that guard.
  *
  * SPDX-License-Identifier: MIT
@@ -193,10 +193,9 @@ struct Sana2DeviceStats
  * Post-Commodore buffer-management tags.
  *
  * S2_CopyToBuff16 / S2_CopyFromBuff16 are a widely-deployed extension for
- * devices whose DMA or PIO path moves 16-bit units: the hook has the same
- * (a0=to, a1=from, d0=len) signature, but the device is allowed to round the
- * length up to an even number of bytes, so the destination must tolerate one
- * spare byte.
+ * devices whose DMA or PIO path moves 16-bit units. The hook has the same
+ * (a0=to, a1=from, d0=len) signature, but the device can round the length up
+ * to an even number of bytes. The destination must tolerate one spare byte.
  *
  * These tag numbers are not present in any header shipped with this toolchain
  * or in the Commodore SANA-II sources, so they are unverified. A mis-numbered
