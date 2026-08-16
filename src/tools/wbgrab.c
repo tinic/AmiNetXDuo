@@ -210,14 +210,14 @@ static BOOL geometry_of(struct BitMap *bm, Geometry *g)
     if ((flags & BMF_STANDARD) == 0)
     {
         tool_error("the Workbench screen is not a standard planar bitmap "
-                   "(BMA_FLAGS=0x%lx), so it has no bitplanes to read; this "
+                   "(BMA_FLAGS=0x%lx), so it has no bitplanes to read. This "
                    "grabs planar screens only", (LONG)flags);
         return FALSE;
     }
 
     if (depth < 1 || depth > PFS_MAX_DEPTH)
     {
-        tool_error("the Workbench screen is %ld planes deep; this handles "
+        tool_error("the Workbench screen is %ld planes deep. This handles "
                    "1 to %ld", (LONG)depth, (LONG)PFS_MAX_DEPTH);
         return FALSE;
     }
@@ -253,7 +253,7 @@ static BOOL geometry_of(struct BitMap *bm, Geometry *g)
     if ((ULONG)g->row_bytes * 8UL < width)
     {
         tool_error("bitmap says %ld bytes a row for %ld pixels, which is too "
-                   "few; refusing to read past the plane", (LONG)g->row_bytes,
+                   "few. This will not read past the plane", (LONG)g->row_bytes,
                    (LONG)width);
         return FALSE;
     }
@@ -372,7 +372,7 @@ static BOOL grab_frame(const Geometry *want, UBYTE *buf, BOOL *changed)
     ok = geometry_of(sc->RastPort.BitMap, &now);
     if (ok && !geometry_same(want, &now))
     {
-        tool_error("the Workbench screen changed under us: %ldx%ldx%ld, was "
+        tool_error("the Workbench screen changed: %ldx%ldx%ld, was "
                    "%ldx%ldx%ld", (LONG)now.width, (LONG)now.height,
                    (LONG)now.depth, (LONG)want->width, (LONG)want->height,
                    (LONG)want->depth);
@@ -471,7 +471,7 @@ int main(int argc, char **argv)
 
         if (n < 1 || n > 65535)
         {
-            tool_error("FRAMES is %ld; the file format counts 1 to 65535",
+            tool_error("FRAMES is %ld. The file format counts 1 to 65535",
                        (LONG)n);
             FreeArgs(rda);
             return RETURN_ERROR;
@@ -485,7 +485,7 @@ int main(int argc, char **argv)
 
         if (n < 0)
         {
-            tool_error("DELAY is %ld; ticks cannot be negative", (LONG)n);
+            tool_error("DELAY is %ld. Ticks cannot be negative", (LONG)n);
             FreeArgs(rda);
             return RETURN_ERROR;
         }

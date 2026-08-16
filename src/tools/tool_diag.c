@@ -511,7 +511,7 @@ VOID tool_explain_no_stack(VOID)
      */
     tool_printf("%s: network not started\n", (LONG)tool_name);
     tool_printf("  AddNetInterface <interface> starts it and says why it will\n");
-    tool_printf("  not start; CheckNetConfig reads the configuration files.\n");
+    tool_printf("  not start. CheckNetConfig reads the configuration files.\n");
 }
 
 /* ------------------------------------------------------------ stack state, */

@@ -213,7 +213,7 @@ BOOL tool_from_workbench(int argc)
      */
     if (argc == 0)
     {
-        tool_error("this is a Shell command; run it from a Shell");
+        tool_error("this is a Shell command. Run it from a Shell");
         return TRUE;
     }
 
