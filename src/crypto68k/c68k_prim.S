@@ -23,9 +23,9 @@
 |       1b10:  b1cc       cmpal a4,a0
 |       1b12:  66d6       bnes 1aea
 |
-|   (If you repeat this: objdump's default architecture is plain 68000, which
+|   (To repeat this: the default architecture of objdump is plain 68000, which
 |   cannot decode MULU.L and prints it as `.short 0x4c06`.  Pass
-|   `-m m68k:68020` or you will conclude there is no multiply at all.)
+|   `-m m68k:68020`, or the disassembly shows no multiply.)
 |
 |   So there is no __muldi3 helper call to eliminate.  That matters for
 |   calibration against the prior art: when Howard Chu measured his 68k bignum
@@ -38,28 +38,29 @@
 |   in a register instead of being spilled) against five and a half below, on a
 |   CPU where MULU.L alone is 44 of the ~101 cycles.  Measured on the emulated
 |   68020, this file is 1.4x the portable C for a 64-limb multiply-accumulate,
-|   and no instruction selection will make it 4x: at 44 cycles of a ~67 cycle
+|   and no instruction selection makes it 4x: at 44 cycles of a ~67 cycle
 |   loop, the multiply is the floor and everything else is rounding.
 |
-|   The two-limb unroll with the carry ping-ponged between d0 and d1 is GMP's
-|   design, from mpn/m68k/mc68020/aorsmul_1.asm (25 cycles/limb on a 68040);
-|   libgcrypt's mpi/m68k/mc68020/mpih-mul1.S is the same code.  It beats the
-|   obvious formulation for two reasons:
+|   The two-limb unroll with the carry alternated between d0 and d1 is the GMP
+|   design, from mpn/m68k/mc68020/aorsmul_1.asm (25 cycles/limb on a 68040).
+|   The mpi/m68k/mc68020/mpih-mul1.S of libgcrypt is the same code.  It beats
+|   the obvious formulation for two reasons:
 |
-|     - alternating the carry register removes a MOVE.L per limb;
-|     - ADDX.L folds the previous limb's memory carry (X) into this limb's
-|       carry add, so one instruction does two jobs.
+|     - an alternated carry register removes a MOVE.L per limb.
+|     - ADDX.L folds the memory carry (X) of the previous limb into the carry
+|       add of this limb, so one instruction does two jobs.
 |
-|   Nothing between the ADDX chain may disturb the condition codes, which is
-|   why the loop counter is DBRA: it is the only decrement-and-branch on this
-|   machine that leaves CCR alone.  MULU.L and MOVE do not affect X, which is
-|   what makes the fold legal across the multiply.
+|   Nothing between the ADDX chain is allowed to disturb the condition codes,
+|   which is why the loop counter is DBRA: it is the only
+|   decrement-and-branch on this machine that leaves CCR alone.  MULU.L and
+|   MOVE do not affect X, which is what makes the fold legal across the
+|   multiply.
 |
 | Cycle counts (MC68020UM section 8.2.8 / MC68030UM section 11.6.8)
 |
 |   MULU.L <ea>,Dh:Dl is 41 best / 43 cached / 44 worst on 68020, and 44 max on
-|   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented
-|, it traps to vector 61 and is emulated in software, so this file is a
+|   68030.  It is 20 on a 68040.  On a 68060 the 64-bit form is unimplemented.
+|   It traps to vector 61 and is emulated in software, so this file is a
 |   pessimisation there and must not be enabled for a 68060 build.  Confirmed
 |   elsewhere: AmiSSL shipped the same finding in 4.4 ("disabled m68k asm
 |   replacement as it's slower"), and Roberto Ragusa's 1998 PGP 68060 patch got
@@ -83,7 +84,7 @@
 | c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n,
 |                         c68k_limb a)
 |
-|   r[0..n-1] += a * b[0..n-1]; returns the carry out.
+|   r[0..n-1] += a * b[0..n-1].  Returns the carry out.
 |
 | The running carry is split across a register (d0 or d1) and the X flag.  The
 | pair is always worth at most 2^32-1 together, so
@@ -189,13 +190,13 @@ Lac_done:
 | portable form is a 64-bit divide, which on this toolchain reaches __udivdi3
 | in src/common/ami_udivdi3.c because libgcc.a is empty here.
 |
-| The caller must ensure hi < d.  DIVU.L traps on quotient overflow rather than
-| saturating, and Knuth's algorithm D produces exactly one case that would
-| overflow, the partial remainder's top limb equal to the divisor's, whose
+| The caller must check that hi < d.  DIVU.L traps on quotient overflow rather
+| than saturating, and Knuth's algorithm D produces exactly one case that
+| overflows, the top limb of the partial remainder equal to the divisor, whose
 | quotient digit is B-1.  c68k_mod() tests for it and never calls here with it.
 |
-| DIVU.L is 78 cycles on a 68020 and, like MULU.L's 32x32->64 form, is
-| unimplemented on a 68060, it traps to vector 61 and is emulated.  Same
+| DIVU.L is 78 cycles on a 68020 and, like the 32x32->64 form of MULU.L, is
+| unimplemented on a 68060.  It traps to vector 61 and is emulated.  Same
 | guard, same rule: AMINETXDUO_CRYPTO68K_ASM must never be enabled for a 68060
 | build.
 |
@@ -217,7 +218,7 @@ C68K_MV_SYM(_c68k_div_2by1):
 |
 |   r += b, returns the carry out.  The mirror of c68k_sub below, and DBRA for
 |   the same reason: it is the only decrement-and-branch that leaves the CCR
-|   alone, so the X flag survives from one limb's ADDX to the next.
+|   alone, so the X flag survives from the ADDX of one limb to the next.
 |
 |   Added for Karatsuba.  The recombination is four passes of add and subtract
 |   over half-width operands and nothing else, so on the 64-limb squaring it

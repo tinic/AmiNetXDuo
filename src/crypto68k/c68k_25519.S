@@ -9,44 +9,46 @@
 |   The measurement now exists.  Profiling one real ssh handshake from inside
 |   the guest (tools/profiler, 7,655 samples at 1000 Hz on a 13.9 MHz 68020)
 |   puts 45.8% of the whole connection in fe_mul and 19.7% in fe_sqr.  The
-|   field multiply is not a hot loop in a program, it very nearly IS the
+|   field multiply is not a hot loop in a program, it is very nearly the whole
 |   program.
 |
-| WHY THIS BEATS THE C, WHICH IS NOT THE USUAL REASON
+| Why this beats the C
 |
 |   Not instruction selection.  GCC does emit MULU.L for the 68020 inner loop,
 |   exactly as 35.4 said.  Three other things cost it:
 |
 |     - t[16] is zeroed with memset.  It shows up in the profile under its own
 |       name at 4.3%, which is more than sha256 and chacha20 together.  Row 0
-|       here has nothing to add to, so the low half needs no clearing at all
-|       and the high half is written by the rows as they go.
+|       here has nothing to add to, so the low half needs no clearing, and the
+|       rows write the high half as they go.
 |     - the accumulator round trip.  The C carries `v` as a uint64_t through
-|       an array subscript on t[i+j], so every limb reloads and restores it;
-|       below, the carry lives in a register and ADDX folds the previous
-|       limb's memory carry in for free.
+|       an array subscript on t[i+j], so every limb reloads and restores it.
+|       Below, the carry lives in a register and ADDX folds the memory carry
+|       of the previous limb in for free.
 |     - the 38-fold is a second pass over sixteen words in the C.  Here it is
 |       the same row primitive with a multiplier of 38.
 |
-| THE TWO PARTS, WHICH NEED DIFFERENT MULTIPLIES
+| Two parts, which need different multiplies
 |
 |   68020/68040   MULU.L Dn,Dh:Dl, 32x32 -> 64 in one instruction.
-|   68000/68060   that form does not exist.  The 68000 never had it; the 68060
-|                 dropped it and traps to vector 61, where 68060.library
-|                 emulates it at a cost far worse than doing it by hand.  Both
+|   68000/68060   that form does not exist.  The 68000 never had it.  The
+|                 68060 dropped it and traps to vector 61, where 68060.library
+|                 emulates it at a cost far worse than the hand-written form.
+|                 Both
 |                 have MULU.W, so the product is built from four of them, the
 |                 way c68k_prim_mulw.S builds it.
 |
 |   Both rows below are transcribed from the two proven files rather than
-|   invented: the MULU.L row is c68k_prim.S's, the MULU.W row is
-|   c68k_prim_mulw.S's, including its T-split and its rule about what may
-|   touch X.  The commentary there is the explanation for both; what is new
-|   here is only the 8x8 structure around them and the 38-fold.
+|   invented: the MULU.L row is the one from c68k_prim.S, the MULU.W row the
+|   one from c68k_prim_mulw.S, including its T-split and its rule about what
+|   can touch X.  The commentary there is the explanation for both.  What is
+|   new here is only the 8x8 structure around them and the 38-fold.
 |
-| THE ROW IS FULLY UNROLLED, and that is forced rather than chosen.  The
+| The row is fully unrolled, and that is forced rather than chosen.  The
 | MULU.W row needs all eight data registers, so there is no register left to
 | count a loop in, and the loop cannot be closed on a SUB/BNE anyway because
-| nothing between the deferred X and the ADDX that consumes it may disturb it.
+| nothing between the deferred X and the ADDX that consumes it is allowed to
+| disturb it.
 | Eight limbs is a fixed length here, so the counter simply goes away.
 |
 | Register rules (m68k-amigaos, stack calling convention)
@@ -71,7 +73,8 @@
 |   CIN   the carry register this limb reads
 |   COUT  the one it leaves for the next
 |
-| d1 is a hard zero throughout, d2 is a's low half and d5 is a's high half.
+| d1 is a hard zero throughout, d2 is the low half of a and d5 is the high
+| half.
 
 #define FEROW(CIN, COUT)                        \
         move.l  (a1)+,d3                      ; \
@@ -97,7 +100,7 @@
 
 #else   /* C68K_ASM: 68020/68040 */
 
-| One limb, one MULU.L.  c68k_prim.S's row.
+| One limb, one MULU.L.  The row from c68k_prim.S.
 
 #define FEROW(CIN, COUT)                        \
         move.l  (a1)+,d3                      ; \
@@ -111,9 +114,9 @@
 | ---------------------------------------------------------------------------
 | Lfe_row  --  r[0..7] += a * b[0..7], eight limbs, carry out in d0.
 |
-| Internal, NOT the C ABI: a0 = r, a1 = b, d2 = a.  Clobbers d0-d7, a0, a1.
-| The carry ping-pongs between d0 and d7 so that no limb spends an instruction
-| moving it into place; eight limbs is an even number, so it ends in d0.
+| Internal, not the C ABI: a0 = r, a1 = b, d2 = a.  Clobbers d0-d7, a0, a1.
+| The carry alternates between d0 and d7 so that no limb spends an instruction
+| on a move into place.  Eight limbs is an even number, so it ends in d0.
 | ---------------------------------------------------------------------------
 
 c68k_fe_row:
@@ -145,10 +148,10 @@ c68k_fe_row:
 | ---------------------------------------------------------------------------
 | void c68k_fe_mul_asm(fe r, const fe a, const fe b)
 |
-|   r = a * b mod 2^255-19, lazily reduced, exactly as c68k_25519.c's fe_mul:
-|   the schoolbook 8x8 into t[16], then r = t_low + 38 * t_high, then the same
-|   carry fold.  r may alias a or b -- r is not written until the product is
-|   complete, which is what makes that safe.
+|   r = a * b mod 2^255-19, lazily reduced, exactly as the fe_mul of
+|   c68k_25519.c: the schoolbook 8x8 into t[16], then r = t_low + 38 * t_high,
+|   then the same carry fold.  r can alias a or b -- r is not written until the
+|   product is complete, which is what makes that safe.
 |
 | Eleven registers saved, then 64 bytes of t, so the return address is at
 | 108(sp) and the arguments follow it.
@@ -195,11 +198,11 @@ Lfe_mul_outer:
         rts
 
 | ---------------------------------------------------------------------------
-| c68k_fe_rowv  --  the same row for a VARIABLE number of limbs.
+| c68k_fe_rowv  --  the same row for a variable number of limbs.
 |
-| a0 = r, a1 = b, a2 = one past the last b limb, d2 = a; carry out in d0, and
-| a0 is left one past the last limb written, which is where the squaring wants
-| to put it.  Clobbers d0-d7, a0, a1.
+| a0 = r, a1 = b, a2 = one past the last b limb, d2 = a.  Carry out in d0, and
+| a0 is left one past the last limb written, which is where the squaring needs
+| it.  Clobbers d0-d7, a0, a1.
 |
 | fe_mul's rows are all eight limbs and take the unrolled c68k_fe_row above.
 | The squaring's are 7, 6, 5, 4, 3, 2, 1 and 0, so this one closes on the end
@@ -274,14 +277,14 @@ c68k_fe_reduce:
 | ---------------------------------------------------------------------------
 | c68k_fe_foldc  --  fold a carry out of the top back into r.
 |
-| a2 = r, d1 = the carry, which may be 0.  2^256 = 38 (mod p), so a carry of c
+| a2 = r, d1 = the carry, which can be 0.  2^256 = 38 (mod p), so a carry of c
 | is worth 38c at the bottom.  Clobbers d1, d3, d4, d5, a0.
 |
-| The LOOP is required, and c68k_25519.c's fe_fold comment is the reason: with
-| lazy reduction 0 is routinely carried as 2^256-38 and 1 as 2^256-37, so
-| adding 38 to either carries straight through all eight limbs.  Dropping that
-| second carry loses exactly 38, which is the bug that made an Ed25519
-| doubling return 37 where it owed -1 and passed every published vector on the
+| The loop is required, and the fe_fold comment in c68k_25519.c is the reason.
+| With lazy reduction 0 is routinely carried as 2^256-38 and 1 as 2^256-37, so
+| an addition of 38 to either carries straight through all eight limbs.  A
+| dropped second carry loses exactly 38, which is the bug that made an Ed25519
+| doubling return 37 where it owed -1 and pass every published vector on the
 | way.  A second pass always terminates: a carry out means every limb is now
 | small.
 | ---------------------------------------------------------------------------
@@ -312,12 +315,12 @@ Lfoldc_done:
 | void c68k_fe_add_asm(fe r, const fe a, const fe b)
 | void c68k_fe_sub_asm(fe r, const fe a, const fe b)
 |
-|   r = a + b and r = a - b, both lazily reduced, exactly as c68k_25519.c's
-|   fe_add and fe_sub.  Nothing clever: eight limbs of ADDX or SUBX with the
-|   carry in X where the C had to carry it in a uint64_t through an array
-|   subscript, reloading and restoring it every limb.
+|   r = a + b and r = a - b, both lazily reduced, exactly as the fe_add and
+|   fe_sub of c68k_25519.c.  Eight limbs of ADDX or SUBX with the carry in X,
+|   where the C had to carry it in a uint64_t through an array subscript and
+|   reload and restore it every limb.
 |
-|   These are here because they stopped being rounding.  With fe_mul and
+|   These are here because they are no longer rounding.  With fe_mul and
 |   fe_sqr in assembly, fe_sub was the largest routine left in an ssh
 |   handshake at 9.6% and fe_add was 5.1%.
 |
@@ -398,17 +401,17 @@ Lsub_done:
 | ---------------------------------------------------------------------------
 | void c68k_fe_sqr_asm(fe r, const fe a)
 |
-|   r = a * a mod 2^255-19, the same lazily-reduced result as c68k_25519.c's
-|   fe_sqr and by the same route: THIRTY-SIX products rather than sixty-four,
-|   because every off-diagonal appears twice.  Sum the upper triangle once,
-|   double the lot, then add the eight diagonal squares.
+|   r = a * a mod 2^255-19, the same lazily-reduced result as the fe_sqr of
+|   c68k_25519.c and by the same route: thirty-six products rather than
+|   sixty-four, because every off-diagonal appears twice.  The upper triangle
+|   is summed once, then doubled, then the eight diagonal squares are added.
 |
 |   Row i is a[i] * a[i+1..7] landing at t[2i+1], so the rows shorten as i
 |   grows and the last is empty -- which is not a special case here: a zero
 |   length falls straight through c68k_fe_rowv and stores the 0 that the C
 |   writes as t[15].
 |
-|   A transcription error in here would still produce plausible output, which
+|   A transcription error in here still produces plausible output, which
 |   is why tests/crypto68k checks it against the portable C on random inputs
 |   rather than only against published vectors.
 | ---------------------------------------------------------------------------

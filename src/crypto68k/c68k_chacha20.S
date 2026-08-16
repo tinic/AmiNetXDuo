@@ -7,19 +7,19 @@
 |   the key schedule and CBC there.
 |
 |   Written here from RFC 8439 section 2.3, as the C beside it was.  The
-|   register schedule below was derived and checked against RFC 8439's own
-|   2.3.2 block before this was written; the result is checked against 2.4.2,
+|   register schedule below was derived and checked against the 2.3.2 block of
+|   RFC 8439 before this was written.  The result is checked against 2.4.2,
 |   2.5.2 and 2.8.2 by tests/crypto68k/crypto68k_bulk, and against the C core
 |   block for block.
 |
 |   The tree moved to -Os and this cipher regressed by 22.3%
-|   (docs/RESEARCH.md 57); that section settled on writing the kernel rather
-|   than raising the optimisation level of a whole stack to suit one file.
-|   ChaCha20 is worth hand-writing not because it is hot but because it is add,
-|   rotate and exclusive-or over sixteen 32-bit words with no table and no
-|   carry, so the only thing left to decide is which words are in registers
-|   when, which a compiler answers with a spill heuristic and a human can
-|   answer exactly.
+|   (docs/RESEARCH.md 57).  That section settled on a hand-written kernel
+|   rather than a higher optimisation level over a whole stack to suit one
+|   file.  ChaCha20 suits a hand-written kernel because it is add, rotate and
+|   exclusive-or over sixteen 32-bit words with no table and no carry, so the
+|   only thing left to decide is which words are in registers when.  A compiler
+|   answers that with a spill heuristic, and a hand-written schedule answers it
+|   exactly.
 |
 | Sixteen words, eight data registers
 |
@@ -32,8 +32,8 @@
 |   address register: EOR has no An destination and no An source, and the
 |   rotates have neither, so `b`, `c` and `d` are excluded outright, and `a`,
 |   which is only ever added to, is still read by `d ^= a`.  Four data
-|   registers per quarter-round, no temporary needed, so the part's eight hold
-|   exactly two quarter-rounds at a time.
+|   registers per quarter-round, no temporary needed, so the eight of the part
+|   hold exactly two quarter-rounds at a time.
 |
 |   That fixes the schedule.  A double round is eight quarter-rounds, taken
 |   two at a time:
@@ -64,16 +64,17 @@
 |   MOVEs cannot be used, because there is no ninth data register to stage the
 |   outgoing word through.  EXG is the whole exchange in one instruction, at
 |   the price of the two MOVEs and with no temporary: it retires the word this
-|   data register has finished with and produces the next one in the same
+|   data register no longer needs and produces the next one in the same
 |   register.
 |
 |   Eight data registers plus seven address registers is fifteen homes for
-|   sixteen words, so one word is on the stack at any moment, and which one is
-|   chosen.  A word resident in adjacent groups is exchanged once a double
-|   round; a word resident in G1 and G3, or G2 and G4, is exchanged twice.  The
+|   sixteen words, so one word is on the stack at any moment, and the choice of
+|   which word is deliberate.  A word resident in adjacent groups is exchanged
+|   once a double round.  A word resident in G1 and G3, or G2 and G4, is
+|   exchanged twice.  The
 |   stack word must be one of the once-only kind, and there are two to place:
 |   x15, in G2 and G3, sits on the stack across G4 and G1; x9, in G4 and G1,
-|   sits there across G2 and G3.  They hand over in d6, the one data register
+|   sits there across G2 and G3.  They change over in d6, the one data register
 |   that touches memory inside the loop.
 |
 |   The round loop therefore costs 22 EXG, one store and one load a double
@@ -85,27 +86,27 @@
 |       d0 x0   d1 x4   d2 x8   d3 x12   d4 x1  d5 x5  d6 x9  d7 x13
 |       a0 x2   a1 x3   a2 x6   a3 x7    a4 x10 a5 x11 a6 x14   stack x15
 |
-|   It has to repeat, or the body could not be a loop; that it repeats after
-|   one double round with 22 exchanges rather than 24 follows from picking the
-|   two stack words above.  Both SWAP8s use the same seven EXG pairs and both
+|   It has to repeat, or the body cannot be a loop.  The repeat after one
+|   double round with 22 exchanges rather than 24 follows from the two stack
+|   words above.  Both SWAP8s use the same seven EXG pairs and both
 |   SWAP4s the same four, because the column-to-diagonal relabelling is the
 |   same permutation both times.
 |
 | Size
 |
 |   The body is 270 bytes against the 68020's 256-byte instruction cache, so it
-|   overhangs by one cache line's worth.  Not unrolled further for that reason:
-|   two double rounds would be 540 bytes and fetched from the bus every pass.
-|   Shrinking the body under 256 would mean giving up the immediate rotate
-|   counts, and the rotates are the arithmetic.
+|   overhangs by the size of one cache line.  Not unrolled further for that
+|   reason: two double rounds are 540 bytes and are fetched from the bus every
+|   pass.  A body under 256 bytes costs the immediate rotate counts, and the
+|   rotates are the arithmetic.
 |
 | Registers
 |
 |   d0-d7    eight of the sixteen state words, two quarter-rounds' worth
 |   a0-a6    seven more; a0 is the input pointer during the prologue only
-|   0(sp)    x9 across G2 and G3, then x11's parking space in the epilogue
+|   0(sp)    x9 across G2 and G3, then the parking space of x11 in the epilogue
 |   4(sp)    x15 across G4 and G1
-|   8(sp)    x14's parking space in the epilogue
+|   8(sp)    the parking space of x14 in the epilogue
 |   12(sp)   the double-round counter
 |
 |   m68k-amigaos: arguments on the stack, d0/d1/a0/a1 scratch, d2-d7/a2-a6
@@ -152,8 +153,8 @@
         .endm
 
 | ---------------------------------------------------------------------------
-| The two shuffles.  \spill and \fill are the stack slots d6 hands over
-| through; every other exchange is one EXG.
+| The two shuffles.  \spill and \fill are the stack slots d6 changes over
+| through.  Every other exchange is one EXG.
 | ---------------------------------------------------------------------------
         .macro  CC_SWAP8  spill, fill
         exg     d0,a0
@@ -177,9 +178,9 @@
 | ---------------------------------------------------------------------------
 | VOID c68k_chacha20_core_asm(const ULONG *in, ULONG *out)
 |
-| out[i] = round20(in)[i] + in[i], sixteen words.  `in` and `out` may be the
+| out[i] = round20(in)[i] + in[i], sixteen words.  `in` and `out` can be the
 | same array: the epilogue reads and writes one index at a time and never
-| reads an index it has already written.
+| reads an index it already wrote.
 | ---------------------------------------------------------------------------
         .globl  _c68k_chacha20_core_asm
 _c68k_chacha20_core_asm:
@@ -226,9 +227,9 @@ _c68k_chacha20_core_asm:
 
 | ------------------------------------------------- the original added back in
 | Two address registers have to become the two pointers, so x11 and x14 are
-| parked in the two frame slots the round loop has finished with.  The
-| eight in data registers go first; that frees d0 as the staging register for
-| the seven that are not.
+| parked in the two frame slots the round loop no longer needs.  The eight in
+| data registers go first, which frees d0 as the staging register for the seven
+| that are not.
         move.l  a5,CC_S0(sp)            | x11
         move.l  a6,CC_S2(sp)            | x14
         movea.l CC_IN(sp),a5

@@ -10,8 +10,8 @@
 |   This file is that one function and nothing else.  The 68060 does implement
 |   MULU.W (16x16 -> 32) and MULU.L's 32x32 -> 32 form, so the product is built
 |   from four MULU.W the way c68k_wide_mul() in c68k_prim.c builds it.  The
-|   arithmetic is therefore the same as the C's; what the C cannot do is keep
-|   it in registers.  From objdump of the 68060 object:
+|   arithmetic is therefore the same as the arithmetic of the C.  What the C
+|   cannot do is keep it in registers.  From objdump of the 68060 object:
 |
 |       move.l  d1,40(sp)       | spill, in the loop
 |       add.l   40(sp),d1       | reload
@@ -19,21 +19,21 @@
 |       moveq   #16,d4          | the shift constant, rematerialised every limb
 |
 |   with movem.l d2-d7/a2-a5 at the top: ten registers saved and the loop still
-|   goes to the stack.  Below, `a`'s two halves, the carry, the zero the ADDX
-|   sinks need and both pointers are live in registers for the whole loop and
-|   nothing touches the stack between entry and exit.
+|   goes to the stack.  Below, the two halves of `a`, the carry, the zero the
+|   ADDX sinks need and both pointers are live in registers for the whole loop,
+|   and nothing touches the stack between entry and exit.
 |
 | Per limb
 |
-|   Writing a = ah:al and b = bh:bl as 16-bit halves,
+|   With a = ah:al and b = bh:bl as 16-bit halves,
 |
 |       a*b = (ah*bh << 32) + ((ah*bl + al*bh) << 16) + (al*bl)
 |
 |   T = ah*bl + al*bh is 33 bits, so its carry out belongs at bit 48, which is
 |   bit 16 of the high limb.  SUBX Dn,Dn turns the X flag into 0 or -1 without
-|   needing a second register, AND leaves it as 0 or 0x10000, and OR.W drops
-|   T's high half into the low word beside it, so the whole of T's contribution
-|   to the high limb is one ADD.
+|   a second register, AND leaves it as 0 or 0x10000, and OR.W drops the high
+|   half of T into the low word beside it, so the whole contribution of T to
+|   the high limb is one ADD.
 |
 |   Twenty instructions per limb, no memory traffic but b[j] in and r[j]
 |   read-modify-written.
@@ -41,28 +41,30 @@
 | The carry
 |
 |   Split across a register and the X flag, as in c68k_prim.S.  X is the carry
-|   out of the previous limb's `add.l d3,(a0)+`, which has the weight of this
-|   limb's bit 0, so ADDX folds it into the first add for free.  The register
+|   out of the `add.l d3,(a0)+` of the previous limb, which has the weight of
+|   bit 0 of this limb, so ADDX folds it into the first add for free.  The
+|   register
 |   and X are worth at most 2^32-1 together, by induction on
 |
 |       a*b[j] + (carry + X) + r[j]  <=  (2^32-1)^2 + 2*(2^32-1)  =  2^64-1
 |
 |   so nothing below can carry out of the high limb.
 |
-|   Nothing between the deferred X and the ADDX that consumes it may disturb
-|   it.  MOVE, MOVEM, MOVEQ, SWAP, CLR, AND, OR, MULU, BTST, CMP and CMPA all
-|   leave X alone; only the add/subtract/shift group touches it, which is why
-|   the loop is closed with CMPA/BNE against a precomputed end pointer rather
-|   than with SUB/BNE.
+|   Nothing between the deferred X and the ADDX that consumes it is allowed to
+|   disturb it.  MOVE, MOVEM, MOVEQ, SWAP, CLR, AND, OR, MULU, BTST, CMP and
+|   CMPA all leave X alone.  Only the add/subtract/shift group touches it,
+|   which is why the loop is closed with CMPA/BNE against a precomputed end
+|   pointer rather than with SUB/BNE.
 |
 | Two phases
 |
-|   The loop is unrolled by two with the carry ping-ponged between d0 and d7,
-|   which is c68k_prim.S's structure and GMP's before it: phase A reads its
-|   carry from d0 and leaves the next one in d7, phase B the other way round,
-|   so no limb spends an instruction moving the carry into place.  Each phase
-|   reuses its own spent carry register as the scratch the T split needs, which
-|   is what makes eight data registers enough.  An odd n enters at phase B.
+|   The loop is unrolled by two with the carry alternated between d0 and d7,
+|   which is the structure of c68k_prim.S and of GMP before it: phase A reads
+|   its carry from d0 and leaves the next one in d7, phase B the other way
+|   round, so no limb spends an instruction on a move of the carry into place.
+|   Each phase reuses its own spent carry register as the scratch the T split
+|   needs, which is what makes eight data registers enough.  An odd n enters at
+|   phase B.
 |
 | Register rules (m68k-amigaos, stack calling convention)
 |
@@ -82,7 +84,7 @@
 | c68k_limb c68k_addmul_1(c68k_limb *r, const c68k_limb *b, UINT n,
 |                         c68k_limb a)
 |
-|   r[0..n-1] += a * b[0..n-1]; returns the carry out.
+|   r[0..n-1] += a * b[0..n-1].  Returns the carry out.
 |
 | Seven registers saved, so the arguments sit 28 bytes further up than the
 | return address: r at 32(sp), b at 36(sp), n at 40(sp), a at 44(sp).
