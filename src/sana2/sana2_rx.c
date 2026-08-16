@@ -3,12 +3,12 @@
  *
  * SANA-II devices have no buffers of their own: a frame that arrives with no
  * matching CMD_READ outstanding is dropped, and CMD_READ is per packet type.
- * So the shim runs one reader thread per type, 0x0800, 0x0806 and, when
+ * The shim therefore runs one reader thread per type, 0x0800, 0x0806 and, when
  * AMINETXDUO_IPV6 is defined, 0x86DD, each keeping several reads in flight
  * so the pipeline never empties.
  *
  * Because S2_CopyToBuff is called at interrupt level, the NX_PACKET a read
- * will land in must already exist when the read is posted. Each outstanding
+ * lands in must already exist when the read is posted. Each outstanding
  * read therefore pins one packet, and the copy hook writes straight into it at
  * the right offset. There is no bounce buffer anywhere in this path.
  *
@@ -19,11 +19,11 @@
  *
  * One of these threads also notices transmit completions. They are the only
  * threads in the shim that block in exec Wait() rather than on a ThreadX
- * object, so they are the only ones a device's ReplyMsg can wake, and without
- * a thread that wakes on a completion TCP never learns that the driver has
- * finished with a segment and never retransmits it. The reader does not touch
+ * object, so they are the only ones a device's ReplyMsg can wake. Without a
+ * thread that wakes on a completion, TCP never learns that the driver has
+ * finished with a segment, and never retransmits it. The reader does not touch
  * the packet: it asks NetX Duo for deferred processing and the IP thread does
- * the work. See sana2_tx.c; the mechanism here is one extra signal bit in a
+ * the work. See sana2_tx.c. The mechanism here is one extra signal bit in a
  * Wait() the reader was making anyway.
  *
  * SPDX-License-Identifier: MIT
@@ -214,7 +214,7 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
 
         sp->behind++;
 
-        /* A hole closing sub-millisecond is a frame that came late; one
+        /* A hole closing sub-millisecond is a frame that came late. One
            closing an RTT later is one the peer sent again. */
         for (g = 0; g < sp->gaps && g < AMI_RXPROBE_GAPS; g++)
         {
@@ -241,9 +241,9 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
  * the packet fail on their own.  `partial` flags a checksum field holding
  * exactly the transport pseudo-header sum (or its complement): the frame left
  * a CHECKSUM_PARTIAL offload path with the hardware step never applied, so the
- * fault is the sender's or a bridge's, not this stack's or the driver's.  The
- * 2026-08 read-collapse rig was attributed with this line: every rejected
- * segment was a burst first-transmission carrying the pseudo-header sum.
+ * fault is the sender's or a bridge's, not this stack's or the driver's.  This
+ * line attributed the 2026-08 read-collapse rig: every rejected segment was a
+ * burst first-transmission carrying the pseudo-header sum.
  */
 static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSlot *slot)
 {
@@ -353,9 +353,10 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
     }
 
     /*
-     * The device's own receive count against ours. iface->stats.packets_received
-     * is incremented in ami_sana2_rx_deliver(); the device's is what a2065.device
-     * saw on the wire, so the difference is what never reached a CMD_READ.
+     * The device's own receive count against the shim's.
+     * iface->stats.packets_received is incremented in ami_sana2_rx_deliver().
+     * The device's count is what a2065.device saw on the wire, so the
+     * difference is what never reached a CMD_READ.
      */
     AMI_ERROR("rxprobe dev: rx %ld tx %ld, shim rx %ld tx %ld, "
               "bad %ld ovr %ld unk %ld alloc %ld err %ld",
@@ -454,9 +455,9 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
     case AMI_ETHERTYPE_IPV4:
 #ifdef AMINETXDUO_RX_VERIFY
         /*
-         * Verify here and tell the stack what was verified, so it does not
-         * walk the payload a second time.  A frame this declines carries no
-         * bits and the stack checks it exactly as it always has; a frame it
+         * Check here and tell the stack what was checked, so it does not walk
+         * the payload a second time.  A frame this declines carries no bits,
+         * and the stack checks it exactly as it always has.  A frame it
          * rejects never reaches the stack at all.  See
          * src/net68k/n68k_rx_verify.c.
          */
@@ -527,7 +528,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
  * _nx_packet_pool_create() rounds it, and the IP header sits at
  * data_start + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE in both modes.  If that
  * sum is not a multiple of 4, every IP, TCP and UDP header field NetX Duo
- * reads as a ULONG is misaligned, n68k_checksum.c's `long_ptr` walks the
+ * reads as a ULONG is misaligned.  n68k_checksum.c's `long_ptr` then walks the
  * payload from an unaligned start (its end-pointer rounding assumes it does
  * not), and on a 68000 an odd one is an address error rather than a slow path.
  * 2 + 14 == 16 is not a coincidence and is not free to change.
@@ -555,14 +556,14 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
     slot->copied   = 0;
 #ifdef AMINETXDUO_RX_VERIFY
     /* And the sum with it.  ami_sana2_copy_to_buff() clears this on entry and
-       sets it only on the aligned path, so a driver that never calls the copy
-       hook -- it is optional in SANA-II, a device may hand the frame over
-       another way -- would otherwise leave the previous frame's verdict here
-       and have ami_sana2_rx_deliver() verify these bytes against that frame's
+       sets it only on the aligned path.  A driver that never calls the copy
+       hook -- it is optional in SANA-II, and a device can hand the frame over
+       another way -- otherwise leaves the previous frame's verdict here, and
+       ami_sana2_rx_deliver() checks these bytes against that frame's
        accumulator.
 
        The guard is the member's: AmiRxSlot.summed only exists in an
-       AMINETXDUO_RX_VERIFY build, so without it this line did not compile and
+       AMINETXDUO_RX_VERIFY build, so without it this line did not compile, and
        -DAMINETXDUO_RX_VERIFY=OFF, which CMakeLists.txt offers, built nothing.
        No CI arm turned it off, so nothing said so. */
     slot->summed   = FALSE;
@@ -614,8 +615,8 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
         slot->req.ios2_Data           = slot;
         slot->posted                  = TRUE;
 
-        /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and would drop the
-           SANA2IOF_RAW just set. Both lines it would have run are above. */
+        /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
+           SANA2IOF_RAW just set. Both lines it runs are above. */
         BeginIO((struct IORequest *)&slot->req);
 #ifdef AMINETXDUO_RXPROBE
         rx->probe.posts++;
@@ -646,7 +647,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     if (packet == NULL)
         return;
 
-    /* ios2_DataLength is the documented answer; fall back to what the copy
+    /* ios2_DataLength is the documented answer. Fall back to what the copy
        hook took, for devices that fill only one of the two. */
     if (length == 0)
         length = slot->copied;
@@ -670,7 +671,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
                 UWORD i;
 
                 /* Drivers are inconsistent about what they leave in DstAddr
-                   for a broadcast; the flag is the authority. */
+                   for a broadcast. The flag is the authority. */
                 for (i = 0; i < AMI_ETH_ADDR_SIZE; i++)
                     eth[i] = 0xFF;
             }
@@ -783,7 +784,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         }
         else if (err == (LONG)IOERR_ABORTED)
         {
-            /* Our own doing; nothing to count. */
+            /* Asked for here, so nothing to count. */
         }
         else if (err == (LONG)S2ERR_OUTOFSERVICE)
         {
@@ -803,8 +804,8 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
              * `Online` recovers it: netstack.c:2208 issues NX_LINK_ENABLE,
              * whose driver case sets nx_interface_link_up back to NX_TRUE.
              * There is no automatic retry here: this runs on the reader, and a
-             * driver that has gone out of service should not be hammered with
-             * S2_ONLINE from inside a receive loop.
+             * driver that has gone out of service must not be sent S2_ONLINE
+             * over and over from inside a receive loop.
              */
             rx->iface->online = FALSE;
 
@@ -850,7 +851,7 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
     req.ios2_Req.io_Error                   = 0;
     req.ios2_WireError                      = 0;
 
-    /* DoIO() blocks in exec Wait(); nothing inside the bracket may touch
+    /* DoIO() blocks in exec Wait(). Nothing inside the bracket can touch
        ThreadX or NetX Duo state. */
     ami_sana2_block_enter();
     (VOID)DoIO((struct IORequest *)&req);
@@ -872,7 +873,7 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
  * of the sixteen seconds a lone `curl --version` cost.
  *
  * GetMsg() does not block, so no ami_sana2_block_enter() bracket is needed
- * here; tx_thread_sleep() must be outside one, which is why the loop is shaped
+ * here. tx_thread_sleep() must be outside one, which is why the loop is shaped
  * this way.
  */
 static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
@@ -916,14 +917,14 @@ static UWORD ami_sana2_rx_reap(AmiSana2Rx *rx, UWORD tries)
  *
  * Three steps, since no one of them works on every driver:
  *
- *   1. AbortIO() on each. Cheap, and answered immediately by a well-behaved
- *      device; a2065.device 2.16 ignores it.
+ *   1. AbortIO() on each. Cheap, and answered at once by a well-behaved
+ *      device. a2065.device 2.16 ignores it.
  *   2. CMD_FLUSH, which exec defines as "abort all queued requests for this
  *      unit" and SANA-II carries forward. Unit-wide rather than per-request,
  *      hence second: x-surf-100.device returns every opener's reads, not just
- *      ours. That is accepted rather than overlooked, the alternative is
- *      step 3, and another program losing its posted reads is recoverable
- *      where writing into memory we have freed is not.
+ *      this stack's. That is accepted rather than overlooked: the alternative
+ *      is step 3, and another program losing its posted reads is recoverable
+ *      where a write into freed memory is not.
  *   3. Give up and report it, having freed nothing the device can still write
  *      into. Freeing the reply port, releasing the pinned packets or letting
  *      ami_sana2_close() free the interface while the device still holds
@@ -958,7 +959,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
 
     if (outstanding != 0)
     {
-        /* Nothing below this line may run: each of those is a pointer the
+        /* Nothing below this line can run: each of those is a pointer the
            device still holds. */
         AMI_ERROR("sana2: %ld read(s) still owned by the device; leaking the "
                   "reader rather than corrupting memory", (long)outstanding);
@@ -1003,8 +1004,9 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->wake_mask = 1UL << rx->port->mp_SigBit;
 
     /*
-     * TX reaping duty. One reader takes it, giving the transmit ring a context
-     * that runs when nothing is being sent; see the header of sana2_tx.c.
+     * TX reaping duty. One reader takes it, which gives the transmit ring a
+     * context that runs when nothing is being sent. See the header of
+     * sana2_tx.c.
      *
      * A failure here is not fatal: the interface falls back to reaping on the
      * next transmit, which leaves a lone unacknowledged segment unrecoverable,
@@ -1046,7 +1048,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     }
 
 #ifdef AMINETXDUO_RXPROBE
-    /* TimerBase is opened lazily; the probe's clock needs it before the first
+    /* TimerBase is opened lazily. The probe's clock needs it before the first
        drain, not after. */
     (VOID)ami_millis();
 #endif
@@ -1062,7 +1064,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * releasing finished writes is one of the things that returns packets
          * to the pool it is waiting for.
          *
-         * This does not reap; it asks the IP thread to. See sana2_tx.c.
+         * This does not reap. It asks the IP thread to. See sana2_tx.c.
          */
         if (rx->reap_mask != 0)
             ami_sana2_tx_defer(iface);
@@ -1070,7 +1072,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         if (ami_sana2_rx_post(rx) == 0)
         {
             /* Either the pool is empty or the interface is down. Back off
-               rather than spin; ami_sana2_rx_stop() signals out of this. */
+               rather than spin. ami_sana2_rx_stop() signals out of this. */
             tx_thread_sleep(2);
             continue;
         }
@@ -1159,13 +1161,13 @@ static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
 };
 
 /*
- * How deep the IPv4 read queue should be on this machine.
+ * The depth of the IPv4 read queue on this machine.
  *
  * The device discards every frame that arrives with no CMD_READ outstanding,
  * so this number is the receive window in frames, and bursts overrun it:
  * sixteen TCP connections opening at once answer with sixteen SYN/ACKs inside
  * a few hundred microseconds, and a 14 MHz 68020 cannot re-post a read between
- * them.  A fixed four lost six of those sixteen; see sana2_internal.h for the
+ * them.  A fixed four lost six of those sixteen.  See sana2_internal.h for the
  * measurements.
  *
  * Sized from the packet pool rather than fixed, because each outstanding read
@@ -1191,14 +1193,14 @@ static UWORD ami_sana2_rx_ipv4_depth(NX_PACKET_POOL *pool)
 }
 
 /*
- * A stack ThreadX will accept.
+ * A stack ThreadX accepts.
  *
  * tx_thread_create() refuses a stack that lies inside one it still has on its
  * created list, and a dead Task's adopted thread stays on that list holding a
  * range the allocator has since given back (tx_amiga_stack_in_use()). The
  * command that starts the network keeps bsdsocket.library open on purpose and
- * then exits, so there is always at least one, and an interface added at run
- * time is the first thing to allocate a stack afterwards: readers refused this
+ * then exits, so there is always at least one. An interface added at run time
+ * is the first thing to allocate a stack afterwards, and readers refused this
  * way left the interface attached with its link down, addressed and unable to
  * send anything.
  *
@@ -1276,14 +1278,14 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         rx->reap_sigbit = -1;
         rx->reap_mask   = 0;
         /* Stale from the previous run: ami_sana2_rx_stop() Signal()s this mask
-           at rx->task, and a reader that then fails to get a MsgPort would be
-           poked on a bit it does not hold. */
+           at rx->task, and a reader that then fails to get a MsgPort is
+           signalled on a bit it does not hold. */
         rx->wake_mask   = 0;
         rx->orphans     = 0;
 
         /* The first reader carries the TX reaping duty. It is the IPv4 one,
            the reader that always exists, but nothing depends on which: any
-           thread that blocks in exec Wait() will do. */
+           thread that blocks in exec Wait() serves. */
         rx->reap_tx     = (i == 0) ? TRUE : FALSE;
 
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
@@ -1300,8 +1302,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         /*
          * One at a time, not `a() || b()`: the control blocks live inside the
          * ami_alloc()ed AmiSana2If, so a `ready` left created while `exited`
-         * failed would stay on ThreadX's created list after ami_sana2_close()
-         * freed the interface.
+         * failed stays on ThreadX's created list after ami_sana2_close() frees
+         * the interface.
          */
         if (tx_semaphore_create(&rx->ready, (CHAR *)"s2rxrdy", 0) != TX_SUCCESS)
         {
@@ -1372,21 +1374,21 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
      * queued. Measured on an A1200 profile: `curl --version` took 16.22 s when
      * nothing else held bsdsocket.library open and 0.32 s when AddNetInterface
      * did, the difference being two five-second `reader did not stop` timeouts
-     * on every last close. Doing it here rather than at each call site keeps
-     * the next caller from getting it wrong; ami_sana2_offline() is
-     * idempotent, so the offline() callers still do afterwards costs nothing.
+     * on every last close. This happens here rather than at each call site, so
+     * the next caller cannot get it wrong. ami_sana2_offline() is idempotent,
+     * so the offline() calls that still follow cost nothing.
      *
-     * Going offline before setting `stop` leaves a window in which a reader is
-     * still running and still posting fresh CMD_READs onto a device that is
-     * now offline, so they are never returned, and the drain that follows
-     * finds them outstanding, times out after five seconds and orphans the
-     * reader. The window is widest for an Offline() issued within ~20 ms of
-     * link-up, while the reader is filling all its slots at once;
+     * If the offline happens before `stop` is set, a window is left in which a
+     * reader is still running and still posting fresh CMD_READs onto a device
+     * that is now offline, so they are never returned, and the drain that
+     * follows finds them outstanding, times out after five seconds and orphans
+     * the reader. The window is widest for an Offline() issued within ~20 ms
+     * of link-up, while the reader is filling all its slots at once.
      * docs/RESEARCH.md 56 records it as the reason a DHCP test had to wait
      * 200 ms before taking the wire away.
      *
      * Three phases, each needing the one before it:
-     *   1. stop posting , `stop` seen at the top of the reader's loop
+     *   1. stop posting, `stop` is seen at the top of the reader's loop
      *   2. offline, S2_OFFLINE returns every read still queued
      *   3. join, every reader is then guaranteed to reach its exit
      */
@@ -1399,8 +1401,8 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
 
         rx->stop = TRUE;
 
-        /* Kick the reader out of Wait(). Signalling a bit the reader has
-           already freed with its MsgPort is harmless; the Task stays alive
+        /* Wake the reader out of Wait(). A signal on a bit the reader has
+           already freed with its MsgPort is harmless. The Task stays alive
            until it has put the "exited" semaphore. */
         if (rx->task != NULL && rx->wake_mask != 0)
             Signal(rx->task, rx->wake_mask);
@@ -1419,10 +1421,10 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             {
                 /*
                  * The reader is still inside its own teardown, which has its own
-                 * deadline, so this should not happen. If it does, the thread is
-                 * running on `rx->stack` and the ThreadX control block is live,
-                 * so neither may be freed: leaking 4 KB is recoverable, a thread
-                 * executing freed memory is not.
+                 * deadline, so this does not normally happen. If it does, the
+                 * thread is running on `rx->stack` and the ThreadX control block
+                 * is live, so neither can be freed: a 4 KB leak is recoverable,
+                 * a thread executing freed memory is not.
                  */
                 AMI_ERROR("sana2: reader %ld did not stop; leaking its stack "
                           "rather than freeing memory it is running on", (long)i);
@@ -1433,8 +1435,8 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             /*
              * The reader exited, but ami_sana2_rx_teardown() kept its reply
              * port because the device would not give every read back. That
-             * port's mp_SigTask is this thread's Task and exec will Signal()
-             * through it on the next matching frame, so the Task has to outlive
+             * port's mp_SigTask is this thread's Task and exec signals through
+             * it on the next matching frame, so the Task has to outlive
              * the port: no terminate, no delete, no stack free. Its slots and
              * packets are inside the interface, which rx_orphaned then keeps
              * alive as well.
@@ -1452,7 +1454,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
             /*
              * Give the thread time to run off the end of its entry function
              * before the control block and stack go away. This is the one place
-             * the shim relies on port behaviour it cannot yet verify
+             * the shim relies on port behaviour it cannot yet check
              * (docs/RESEARCH.md §6.2).
              */
             tx_thread_sleep(5);
@@ -1466,13 +1468,13 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              * tx_thread_delete() removes the Task by asking it to destroy
              * itself and gives up after two seconds. A reader that has put
              * `exited` is on its way out of its entry function with no Exec
-             * call left to block in, so it always arrives; if it ever did not,
-             * the port would hand back a zombie still running on rx->stack and
-             * this would free the memory under it. The live count is the only
-             * signal that happened (tx_amiga.h), and it falls inside the
-             * Forbid() the dying task holds until Exec removes it, so seeing it
-             * unchanged here means the Task is gone. Leak the stack otherwise,
-             * as the two paths above do.
+             * call left to block in, so it always arrives. A failure leaves a
+             * zombie still running on rx->stack, and this frees the memory
+             * under it. The live count is the only signal that happened
+             * (tx_amiga.h), and it falls inside the Forbid() the dying task
+             * holds until Exec removes it, so an unchanged count here means
+             * the Task is gone. Leak the stack otherwise, as the two paths
+             * above do.
              */
             if (tx_amiga_zombie_tasks_live() != zombies)
             {
@@ -1490,7 +1492,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
         /*
          * Outside the started gate. A reader whose semaphores or thread would
          * not create has a stack and nothing else, and ami_sana2_rx_start()
-         * unwinds by calling this rather than by hand; before, that stack was
+         * unwinds by calling this rather than by hand. Before, that stack was
          * lost, and again on every Online retry (sana2_driver.c, NX_LINK_ENABLE
          * re-enters and overwrites the pointer).
          */
