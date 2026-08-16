@@ -370,13 +370,14 @@ a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
 EOF
 
-    # The graphics card.  8 MB is four times a 640x480x8 screen and is what
-    # leaves room for Picasso96's own buffers; rtg_modes is the emulator's
-    # mode list and 0x111 is the three sizes uaegfx offers at 8 bits.
+    # The graphics card: uaegfx, which is board type 0 and therefore what a
+    # gfxcard_size on its own asks for.  8 MB is a good deal more than a
+    # 640x480x8 screen needs and leaves Picasso96 room for its own buffers.
+    # rtg_modes is deliberately NOT set: the default mask already carries
+    # RGBFF_CLUT, and a hand-written one that did not would take away the
+    # only format this serves.
     [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
 gfxcard_size=8
-gfxcard_type=uaegfx
-rtg_modes=0x111
 EOF
 
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
