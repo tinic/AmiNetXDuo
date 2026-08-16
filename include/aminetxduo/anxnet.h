@@ -47,6 +47,6 @@
  */
 #define ANXNET_CARD_NAMES \
     { "xsurf100", "xsurf", "ariadne2", "hydra", "lanrover", "a2065", \
-      "ariadne", "pcmcia", "xsurf500" }
+      "ariadne", "pcmcia", "xsurf500", "3c589" }
 
 #endif /* AMINETXDUO_ANXNET_H */

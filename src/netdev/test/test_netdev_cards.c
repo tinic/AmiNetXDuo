@@ -28,6 +28,7 @@
 const struct NetdevNicOps netdev_nic_ne2000;
 const struct NetdevNicOps netdev_nic_ed;
 const struct NetdevNicOps netdev_nic_lance;
+const struct NetdevNicOps netdev_nic_el3;
 
 static int failures;
 

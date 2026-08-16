@@ -24,6 +24,7 @@
 #define NETDEV_CHIP_NE2000  0   /* DP8390 clone with an ASIC remote-DMA port */
 #define NETDEV_CHIP_ED      1   /* DP8390 with a memory-mapped packet buffer */
 #define NETDEV_CHIP_LANCE   2   /* Am7990/Am79C960: bus master, rings in RAM  */
+#define NETDEV_CHIP_EL3     3   /* 3Com EtherLink III: windowed, PIO FIFO     */
 
 /*
  * How the board tells us the interrupt was its.  A Zorro INT2 is shared, so a
@@ -84,5 +85,17 @@ extern const UWORD      netdev_card_count;
 
 /* NULL when the name matches no row. */
 const NetdevCard *netdev_card_by_name(const char *name);
+
+/*
+ * Which PCMCIA row drives the card whose CIS says (manf, prod).
+ *
+ * A PCMCIA row's manid/prodid are its CISTPL_MANFID, not an autoconfig
+ * record; the slot has no autoconfig record to carry one.  An exact match
+ * wins, and a row with 0/0 is the catch-all -- the NE2000 clones, which are a
+ * hundred manufacturer IDs for one chip and cannot be enumerated.  NULL when
+ * the table has neither, which cannot happen while the catch-all row exists
+ * and is the answer if it ever stops existing.
+ */
+const NetdevCard *netdev_card_by_cis(UWORD manf, UWORD prod);
 
 #endif /* AMINETXDUO_NETDEV_CARDS_H */

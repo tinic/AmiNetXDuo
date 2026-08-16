@@ -139,6 +139,12 @@ static const char *cnd_why(ULONG why)
         return "the register file did not answer a write followed by a read";
     case ANXDIAG_WHY_CSR:
         return "CSR0 did not read back as a stopped LANCE";
+    case ANXDIAG_WHY_MFGID:
+        return "the manufacturer ID read back as neither $6d50 nor $506d, so "
+               "no EtherLink III is decoding at that address";
+    case ANXDIAG_WHY_EEPROM:
+        return "the card's EEPROM never reported itself ready, so no station "
+               "address could be read out of it";
     default:
         break;
     }
@@ -174,6 +180,7 @@ static const char *cnd_chip(ULONG chip)
     case 0:  return "a DP8390 reached through a remote-DMA port (NE2000)";
     case 1:  return "a DP8390 with a memory-mapped packet buffer";
     case 2:  return "an Am7990 LANCE, which masters the bus itself";
+    case 3:  return "a 3Com EtherLink III, windowed, with PIO FIFOs";
     default: break;
     }
 
@@ -286,7 +293,7 @@ static VOID cnd_step(const AnxDiagStep *st)
          * whatever netdev_bus_setup() left there and reporting it would be an
          * invented fact.  The chip step above is what says which this is.
          */
-        if (cnd_chip_seen == 2)
+        if (cnd_chip_seen == 2 || cnd_chip_seen == 3)
         {
             say("  ATTACHED.\n");
             return;
@@ -459,6 +466,39 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_PC_CLAIMED:
         say("  The slot is claimed.  The chip's registers are at $%08lx.\n", v);
+        return;
+    case ANXDIAG_PC_CARD:
+        say("  The card in the slot was identified from its CIS as card row\n"
+            "  %lu.  Everything printed for THIS MACHINE above about the slot\n"
+            "  happened before that and so belongs to no card.\n", v);
+        return;
+    case ANXDIAG_PC_CFTABLE:
+        say("  The first configuration table entry begins $%02lx $%02lx $%02lx\n"
+            "  $%02lx.  This driver reads the configuration index out of it and\n"
+            "  assumes the card row's register offset for the rest; those bytes\n"
+            "  are what would say otherwise.\n",
+            (v >> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff);
+        return;
+
+    /* ---- the EtherLink III ---- */
+    case ANXDIAG_EL3_MFG:
+        say("  The manufacturer ID read back as $%04lx.  It is $6d50 on every\n"
+            "  EtherLink III, so $506d means the register window exchanges the\n"
+            "  halves of a word and anything else means no such card answered.\n",
+            v);
+        return;
+    case ANXDIAG_EL3_ORDER:
+        if (v == 0)
+            say("  Register words arrive as the chip holds them; no swap.\n");
+        else
+            say("  The register window exchanges the halves of every word, and\n"
+                "  the driver measured that rather than being told it.\n");
+        return;
+    case ANXDIAG_EL3_MEDIA:
+        say("  The card was built with:%s%s%s\n",
+            (LONG)((v & 0x0200) != 0 ? " 10BASE-T" : ""),
+            (LONG)((v & 0x1000) != 0 ? " 10BASE2" : ""),
+            (LONG)((v & 0x2000) != 0 ? " AUI" : ""));
         return;
 
     default:

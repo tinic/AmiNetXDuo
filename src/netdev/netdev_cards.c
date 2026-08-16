@@ -113,6 +113,40 @@ const NetdevCard netdev_cards[] =
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
       NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0 },
+
+    /*
+     * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  Same slot
+     * and the same two Gayle windows as the "pcmcia" row; what differs is the
+     * chip, which is windowed rather than paged and moves frames through one
+     * PIO port instead of a remote-DMA ring.
+     *
+     * APPENDED, NOT PUT BESIDE THE OTHER PCMCIA ROW.  A unit pin is
+     * (index + 1) * 100, so inserting a row renumbers every row after it and
+     * silently repoints somebody's DEVICE= UNIT=.  The table's order is a
+     * published interface; new cards go on the end.
+     *
+     * manid/prodid ARE THE CIS MANFID, 0x0101/0x0589, and that is how
+     * netdev_pcmcia.c tells this card from an NE2000 clone in the same slot.
+     * A PCMCIA row is never matched against a ConfigDev -- the probe's Zorro
+     * loop skips any row that is not NETDEV_BUS_ZORRO -- so the two uses of
+     * these two fields cannot collide.
+     *
+     * reg_off 0x0300 IS AN ASSUMPTION, and the one thing here a hardware
+     * reporter has to settle.  The card decodes wherever the configuration
+     * table entry it was given says, and this driver writes the first entry's
+     * index without parsing that entry's I/O descriptor -- the same thing it
+     * does for the NE2000 row, where 0x300 is what cnet.device has assumed
+     * against a hundred real cards.  The entry's raw bytes go into the probe
+     * record (ANXDIAG_PC_CFTABLE) so one report settles it either way.
+     *
+     * NOTHING EMULATES THIS CARD.  Amiberry's PCMCIA support is NE2000 only,
+     * so this row has never been run against a chip; it is written the way
+     * the X-Surf 500 row above is, to cost nothing when the card is absent --
+     * the claim gives the slot straight back when no EtherLink III answers.
+     */
+    { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
+      NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
+      NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0 },
 };
 
 const UWORD netdev_card_count =
@@ -132,8 +166,35 @@ const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
         return &netdev_nic_ed;
     if (chip == NETDEV_CHIP_LANCE)
         return &netdev_nic_lance;
+    if (chip == NETDEV_CHIP_EL3)
+        return &netdev_nic_el3;
 
     return NULL;
+}
+
+const NetdevCard *netdev_card_by_cis(UWORD manf, UWORD prod)
+{
+    const NetdevCard *fallback = NULL;
+    UWORD             i;
+
+    for (i = 0; i < netdev_card_count; i++)
+    {
+        const NetdevCard *card = &netdev_cards[i];
+
+        if (card->bus != NETDEV_BUS_PCMCIA)
+            continue;
+
+        if (card->manid == 0 && card->prodid == 0)
+        {
+            fallback = card;
+            continue;
+        }
+
+        if (card->manid == manf && card->prodid == prod)
+            return card;
+    }
+
+    return fallback;
 }
 
 static int card_streq(const char *a, const char *b)

@@ -37,6 +37,7 @@
 #include "netdev_internal.h"
 #include "netdev_cards.h"
 #include "netdev_macgen.h"
+#include "el3.h"        /* el3_answers(), and no EtherLink III register */
 
 #include <exec/types.h>
 #include <exec/nodes.h>
@@ -202,7 +203,7 @@ static VOID pc_trace(const char *s, ULONG v)
  */
 static UBYTE pc_last_cr;
 
-static BOOL pc_chip_answers(const NetdevCard *card)
+static BOOL pc_dp8390_answers(const NetdevCard *card)
 {
     volatile UBYTE *cr =
         (volatile UBYTE *)(ULONG)(card->base + card->reg_off);
@@ -227,6 +228,28 @@ static BOOL pc_chip_answers(const NetdevCard *card)
      * address nothing decodes at all reads 0x00, also not 0x21.
      */
     return (BOOL)((v & (UBYTE)~0x02u) == 0x21);
+}
+
+/*
+ * IS THE CHIP THIS ROW NAMES DECODING AT THE REGISTER BASE?
+ *
+ * Chip-switched, and it has to be.  The test above writes 0x21 to the byte at
+ * the register base and demands it back, which is a DP8390 command register
+ * and nothing else: on an EtherLink III that address is the low half of the
+ * transmit FIFO, so the write pushes a byte into the transmitter and the read
+ * comes back as whatever the receive FIFO holds.  It said "no card here" for
+ * every card that was not an NE2000 clone, which is why nothing but an NE2000
+ * clone could ever be claimed.
+ *
+ * The EtherLink III's own test is in el3.c, beside the register definitions
+ * it needs.  A third family adds an arm here and a function there.
+ */
+static BOOL pc_chip_answers(const NetdevCard *card)
+{
+    if (card->chip == NETDEV_CHIP_EL3)
+        return el3_answers(card);
+
+    return pc_dp8390_answers(card);
 }
 
 /*
@@ -368,9 +391,34 @@ static VOID pc_give_up(struct CardHandle *handle)
     handle->cah_CardNode.ln_Name = NULL;
 }
 
-APTR netdev_pcmcia_claim(const NetdevCard *card)
+/*
+ * CLAIM ONCE, THEN IDENTIFY, THEN PICK THE CORE.
+ *
+ * This used to take a card row and be called once per matching row, which
+ * could only ever work while there was exactly one PCMCIA row: pc_handle and
+ * pc_unit are single file-statics -- there is one slot in the machine, so
+ * there is nothing for a second handle to point at -- and a second call would
+ * have overwritten the first card's handle while card.resource still held it.
+ * The loop was therefore not "try each row", it was "try the first row and
+ * then corrupt it".
+ *
+ * There is one card in the slot and it says what it is, so the shape that
+ * works is the shape of the fact: own the slot, read the CIS, let the CIS
+ * choose the row, and configure for that row's chip.  CISTPL_MANFID is the
+ * identity -- a 3C589 is 0x0101/0x0589 -- and netdev_card_by_cis() falls back
+ * to the row with no MANFID of its own, which is the NE2000 clones, because
+ * those are a hundred manufacturer IDs for one chip and cannot be listed.
+ *
+ * *card_out is set only on success.  Every step before the row is known is
+ * recorded against the MACHINE rather than a card: there is no card yet, and
+ * a slot step filed under the wrong row is worse than one filed under none.
+ */
+APTR netdev_pcmcia_claim(const NetdevCard **card_out)
 {
     struct CardHandle *handle = &pc_handle;
+    const NetdevCard  *card;
+    UWORD              manf = 0;
+    UWORD              prod = 0;
     /* Zeroed because CopyTuple() fills it through an inline asm the analyzer
        cannot see into, so every byte read out of it afterwards reads as
        uninitialized to -fanalyzer.  This is NOT the pre-zeroing the FUNCID
@@ -381,7 +429,7 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
-    UWORD            ci = netdev_diag_card(card);
+    UWORD            ci = ANXDIAG_NOCARD;
 
     if (CardResource == NULL)
         CardResource = OpenResource((STRPTR)CARDRESNAME);
@@ -491,10 +539,12 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
      */
     if (pc_cis_read(handle, CISTPL_MANFID, buf, sizeof(buf)))
     {
-        pc_trace("pc: manfid ", ((ULONG)buf[3] << 8) | (ULONG)buf[2]);
+        /* Little-endian words, which is how every tuple carries a number. */
+        manf = (UWORD)(((UWORD)buf[3] << 8) | (UWORD)buf[2]);
+        prod = (UWORD)(((UWORD)buf[5] << 8) | (UWORD)buf[4]);
+        pc_trace("pc: manfid ", (ULONG)manf);
         netdev_diag_note(ANXDIAG_PC_MANFID, ci,
-                         ((((ULONG)buf[3] << 8) | (ULONG)buf[2]) << 16) |
-                         (((ULONG)buf[5] << 8) | (ULONG)buf[4]));
+                         ((ULONG)manf << 16) | (ULONG)prod);
     }
     else
     {
@@ -561,6 +611,35 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     index = (UBYTE)(buf[2] & 0x3f);
     pc_trace("pc: index ", (ULONG)index);
     netdev_diag_note(ANXDIAG_PC_INDEX, ci, (ULONG)index);
+
+    /*
+     * The rest of the entry, recorded and not parsed.
+     *
+     * What is in there is the I/O descriptor -- which address the card was
+     * told to decode at -- and reading it properly means walking the power
+     * and timing descriptors that precede it, whose lengths are themselves
+     * encoded.  This driver assumes the card row's register offset instead,
+     * the same assumption cnet.device makes and has been right about across a
+     * hundred cards.  Recording the bytes costs one probe step and means a
+     * single report from somebody holding a card settles whether the
+     * assumption holds for theirs, rather than the question staying open.
+     */
+    netdev_diag_note(ANXDIAG_PC_CFTABLE, ci,
+                     ((ULONG)buf[2] << 24) | ((ULONG)buf[3] << 16) |
+                     ((ULONG)buf[4] << 8) | (ULONG)buf[5]);
+
+    /*
+     * WHICH ROW DRIVES THIS CARD.  Everything above was about the slot; from
+     * here on there is a card, so the steps carry its row index.
+     */
+    card = netdev_card_by_cis(manf, prod);
+    if (card == NULL)
+    {
+        pc_give_up(handle);
+        return NULL;            /* no PCMCIA row at all: nothing to drive it */
+    }
+    ci = netdev_diag_card(card);
+    netdev_diag_note(ANXDIAG_PC_CARD, ci, (ULONG)ci);
 
     /*
      * PUT THE SOCKET INTO I/O MODE, BEFORE THE COR WRITE AND NOT AFTER IT.
@@ -680,6 +759,9 @@ APTR netdev_pcmcia_claim(const NetdevCard *card)
     pc_trace("pc: claimed ", (ULONG)card->base);
     netdev_diag_note(ANXDIAG_PC_CLAIMED, ci,
                      (ULONG)(card->base + card->reg_off));
+
+    *card_out = card;
+
     return (APTR)(ULONG)card->base;
 }
 

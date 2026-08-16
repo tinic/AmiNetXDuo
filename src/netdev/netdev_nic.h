@@ -131,6 +131,18 @@ struct NetdevNic
     ULONG               serial;     /* the board's autoconfig serial number */
     UWORD               txb_inuse;
 
+    /*
+     * EtherLink III.  el3_swap is MEASURED at attach from the window 0
+     * manufacturer ID and is not a card-table knob; el3_win is the window
+     * last selected, because the part has no readable window register and an
+     * access in the wrong one is not an error it reports; el3_media is which
+     * transceivers the card was built with, which is read-only and decides
+     * what init switches on.
+     */
+    UBYTE               el3_swap;
+    UBYTE               el3_win;
+    UWORD               el3_media;
+
     /* LANCE ring cursors.  The DP8390 cores do not use them: their ring is
        the chip's own page walk, not a descriptor list we index. */
     UWORD               rx_next;
@@ -238,6 +250,7 @@ VOID  netdev_diag_unpublish(AnxDiagMark *mark);
 extern const struct NetdevNicOps netdev_nic_ne2000;
 extern const struct NetdevNicOps netdev_nic_ed;
 extern const struct NetdevNicOps netdev_nic_lance;
+extern const struct NetdevNicOps netdev_nic_el3;
 
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip);
 

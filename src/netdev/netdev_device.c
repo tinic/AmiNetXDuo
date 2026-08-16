@@ -1354,6 +1354,11 @@ static VOID netdev_probe(NetdevDevice *dev)
 
         for (i = 0; i < netdev_card_count; i++)
         {
+            /* A PCMCIA row's manid/prodid are its CIS MANFID, not an
+               autoconfig record, so it must never match a board here. */
+            if (netdev_cards[i].bus != NETDEV_BUS_ZORRO)
+                continue;
+
             if (cd->cd_Rom.er_Manufacturer == netdev_cards[i].manid &&
                 cd->cd_Rom.er_Product == (UBYTE)netdev_cards[i].prodid)
             {
@@ -1405,13 +1410,15 @@ static VOID netdev_probe(NetdevDevice *dev)
     {
         UWORD i;
 
+        /* The fixed-address rows: nothing to claim and nothing to configure.
+           The board is wherever the machine puts it, and attach() deciding
+           the chip is not answering is the whole of the probe. */
         for (i = 0; i < netdev_card_count; i++)
         {
             const NetdevCard *card = &netdev_cards[i];
             APTR              base;
 
-            if (card->bus != NETDEV_BUS_PCMCIA &&
-                card->bus != NETDEV_BUS_FIXED)
+            if (card->bus != NETDEV_BUS_FIXED)
                 continue;
             if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
             {
@@ -1421,30 +1428,35 @@ static VOID netdev_probe(NetdevDevice *dev)
                 break;
             }
 
-            if (card->bus == NETDEV_BUS_FIXED)
-            {
-                /* Nothing to claim and nothing to configure: the board is
-                   wherever the machine puts it, and attach() deciding a
-                   DP8390 is not answering is the whole of the probe. */
-                base = (APTR)(ULONG)card->base;
-                netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
-            }
-            else
-            {
-                base = netdev_pcmcia_claim(card);
-            }
-            if (base == NULL)
-                continue;       /* no slot, nothing in it, or not a LAN card */
+            base = (APTR)(ULONG)card->base;
+            netdev_diag_note(ANXDIAG_FIXED_TRY, i, (ULONG)base);
 
-            nd_tracex("anx: fixed/pcmcia base ", (ULONG)base);
-            if (!netdev_add_unit(dev, card, base, 0))
+            nd_tracex("anx: fixed base ", (ULONG)base);
+            (VOID)netdev_add_unit(dev, card, base, 0);
+        }
+
+        /*
+         * And the slot, ONCE, not once per PCMCIA row.
+         *
+         * There is one slot in the machine and netdev_pcmcia.c holds one
+         * handle for it, so a loop that claimed per row could only ever have
+         * worked while exactly one row was PCMCIA -- a second claim would
+         * overwrite the handle card.resource still held.  The card says what
+         * it is in its CIS, so the claim reads that and hands back the row
+         * rather than being asked to confirm a guess.
+         */
+        if (dev->nd_UnitCount < NETDEV_MAX_UNITS)
+        {
+            const NetdevCard *card = NULL;
+            APTR              base = netdev_pcmcia_claim(&card);
+
+            if (base != NULL)
             {
-                if (card->bus == NETDEV_BUS_PCMCIA)
+                nd_tracex("anx: pcmcia base ", (ULONG)base);
+                if (!netdev_add_unit(dev, card, base, 0))
                     netdev_pcmcia_release();
-            }
-            else if (card->bus == NETDEV_BUS_PCMCIA)
-            {
-                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
+                else
+                    netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
             }
         }
     }

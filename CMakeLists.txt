@@ -654,6 +654,11 @@ endif()
 # directories. enable_testing() has to be called HERE as well, or the build
 # root's CTestTestfile.cmake never descends into them and `ctest` from the top
 # reports "No tests were found" even though each subdirectory has some.
+# Wraps add_test() so that what CI builds is computed from what is registered
+# instead of being kept in step by hand.  Must precede every add_test() call
+# and every add_subdirectory() below.  cmake/HostTests.cmake says why.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HostTests.cmake")
+
 if(NOT CMAKE_CROSSCOMPILING)
     enable_testing()
 
@@ -777,6 +782,14 @@ if(AMINETXDUO_TESTS)
     # Diagnostic probes, built, never auto-run.  Two of them crash on
     # purpose; see tools/smoke/CMakeLists.txt.
     add_subdirectory(tools/smoke)
+endif()
+
+# Every add_test() in the tree has now run.  Write out the targets they need,
+# for tools/ci.sh's host and sanitize stages to build.  Here and not earlier:
+# a target defined in a directory added after the test that names it is still
+# a target by this point, and was not one when the registration was recorded.
+if(NOT CMAKE_CROSSCOMPILING)
+    anx_write_host_test_targets("${CMAKE_BINARY_DIR}/host-test-targets.txt")
 endif()
 
 # ------------------------------------------------------------------ report --
