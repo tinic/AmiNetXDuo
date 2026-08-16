@@ -89,7 +89,7 @@ static VOID iperf_help(VOID)
     tool_printf("  -t SECONDS                      how long to run (10)\n");
     tool_printf("  -n KBYTES                       stop after this much instead\n");
     tool_printf("  -l BYTES                        bytes per send (4096, UDP 1470)\n");
-    tool_printf("  -b KBIT                         UDP send rate (1000)\n");
+    tool_printf("  -b KBIT                         UDP send rate, 0 flat out (1000)\n");
     tool_printf("  -q                              print only the key=value line\n");
     tool_printf("  -4 / -6                         pin the address family\n");
     tool_printf("\n");
@@ -371,11 +371,28 @@ int main(int argc, char **argv)
         else
         {
             tool_addr_text(sb, &plan.peer, addr, sizeof(addr));
-            tool_printf("%s: %s to %s port %lu for %lu %s\n",
+            tool_printf("%s: %s to %s port %lu for %lu %s",
                         (LONG)tool_name, (LONG)(udp ? "UDP" : "TCP"),
                         (LONG)addr, (LONG)plan.port,
                         (LONG)(plan.seconds != 0 ? plan.seconds : plan.kbytes),
                         (LONG)(plan.seconds != 0 ? "seconds" : "KBytes"));
+
+            /*
+             * And at what rate, because a UDP send that was given no -b is
+             * paced at 1000 kbit/s all the same, the way iperf 2 is.  A run
+             * that says only "UDP to X for 3 seconds" and reports 1.00 Mbit/s
+             * reads as a machine that could go no faster; it was asked to go
+             * no faster.  That misreading cost a bug report.
+             */
+            if (udp)
+            {
+                if (plan.rate_kbit != 0)
+                    tool_printf(" at %lu kbit/s", (LONG)plan.rate_kbit);
+                else
+                    tool_printf(" flat out");
+            }
+
+            tool_printf("\n");
         }
     }
 

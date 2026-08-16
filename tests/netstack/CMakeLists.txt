@@ -83,7 +83,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
         "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"
-        "${AMINETXDUO_THREADX}/common/inc")
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket")            # connfail.h, tested
 
     target_compile_definitions(test_tcp_retries PRIVATE
         NX_INCLUDE_USER_DEFINE_FILE

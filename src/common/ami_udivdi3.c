@@ -83,7 +83,26 @@ typedef unsigned short      u16;
  *
  * A zero divisor still goes the long way round: the C below answers ~0 with a
  * zero remainder deliberately, where the instruction would trap.
+ *
+ * `.chip` has no push and pop, so the directive that closes one of these
+ * blocks has to name the part the REST of the file is being compiled for, not
+ * 68000.  Naming 68000 unconditionally left the assembler in 68000 mode for
+ * everything after the first block, and a -mcpu=68060 build then failed on
+ * GCC's own `extb.l' and `tst.l aN'.
  */
+#if defined(__mc68060__)
+#define AMI_CHIP_HOME   "\n\t.chip 68060"
+#elif defined(__mc68040__)
+#define AMI_CHIP_HOME   "\n\t.chip 68040"
+#elif defined(__mc68030__)
+#define AMI_CHIP_HOME   "\n\t.chip 68030"
+#elif defined(__mc68020__)
+#define AMI_CHIP_HOME   "\n\t.chip 68020"
+#else
+#define AMI_CHIP_HOME   "\n\t.chip 68000"
+#endif
+#define AMI_CHIP_020    ".chip 68020\n\t"
+
 static int ami_rt_020;
 static int ami_rt_mulul;
 
@@ -144,7 +163,7 @@ int     bit;
      */
     if (ami_rt_mulul != 0)
     {
-        __asm__ (".chip 68020\n\tdivu.l %2,%0:%1\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "divu.l %2,%0:%1" AMI_CHIP_HOME
                  : "+d" (hi), "+d" (lo)
                  : "d"  (divisor));
 
@@ -404,7 +423,7 @@ u32     lo = a;
     u32     w_hi;
     u32     w_lo = a;
 
-        __asm__ (".chip 68020\n\tmulu.l %2,%1:%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "mulu.l %2,%1:%0" AMI_CHIP_HOME
                  : "=d" (w_lo), "=d" (w_hi)
                  : "dmi" (b), "0" (w_lo));
 
@@ -483,7 +502,7 @@ u32 __mulsi3(u32 a, u32 b)
     if (ami_rt_020 != 0)
     {
         /* Signed or unsigned makes no difference to the low 32 bits. */
-        __asm__ (".chip 68020\n\tmuls.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "muls.l %1,%0" AMI_CHIP_HOME
                  : "+d" (a) : "d" (b));
         return(a);
     }
@@ -577,7 +596,7 @@ u32 __udivsi3(u32 numerator, u32 denominator)
 
     if (ami_rt_020 != 0 && denominator != 0)
     {
-        __asm__ (".chip 68020\n\tdivu.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "divu.l %1,%0" AMI_CHIP_HOME
                  : "+d" (numerator) : "d" (denominator));
         return(numerator);
     }
@@ -597,9 +616,9 @@ u32     remainder;
 
         /* n - (n/d)*d.  The one instruction that returns both is DIVU.L's
            64/32 form, which is what the 68060 dropped, so this is two. */
-        __asm__ (".chip 68020\n\tdivu.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "divu.l %1,%0" AMI_CHIP_HOME
                  : "+d" (q) : "d" (denominator));
-        __asm__ (".chip 68020\n\tmuls.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "muls.l %1,%0" AMI_CHIP_HOME
                  : "+d" (q) : "d" (denominator));
         return(numerator - q);
     }
@@ -623,7 +642,7 @@ u32     quotient;
 
         /* DIVS.L truncates toward zero, which is what C99 asks for, so the
            sign handling below is not needed on this path. */
-        __asm__ (".chip 68020\n\tdivs.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "divs.l %1,%0" AMI_CHIP_HOME
                  : "+d" (q) : "d" (denominator));
         return(q);
     }
@@ -655,9 +674,9 @@ u32     remainder = 0;
     {
     long    q = numerator;
 
-        __asm__ (".chip 68020\n\tdivs.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "divs.l %1,%0" AMI_CHIP_HOME
                  : "+d" (q) : "d" (denominator));
-        __asm__ (".chip 68020\n\tmuls.l %1,%0\n\t.chip 68000"
+        __asm__ (AMI_CHIP_020 "muls.l %1,%0" AMI_CHIP_HOME
                  : "+d" (q) : "d" (denominator));
         return(numerator - q);
     }
