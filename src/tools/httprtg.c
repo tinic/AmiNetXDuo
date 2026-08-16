@@ -201,6 +201,12 @@ static UBYTE           rtg_on_board;    /* P96BMA_ISONBOARD / ISLINEARMEM     */
 static UBYTE           rtg_on_board_known;
 static int             rtg_route = -1;
 static ULONG           rtg_kbs[RTG_N_ROUTE];   /* 0 = the route was not there */
+/* Routes that answered, and answered with something that was not the screen.
+   One bit each, kept rather than folded into rtg_kbs, because the rate is the
+   evidence: a route that reads a band seventy times faster than every other
+   route on the same board is not fast, and both numbers have to be visible in
+   the same word for that to be readable. */
+static ULONG           rtg_stale;
 
 /* The offscreen the snapshot route blits into.  Allocated only when the
    screen's bitmap is really in card memory: when P96 kept it in system RAM
@@ -417,14 +423,29 @@ static BOOL rtg_read_p96_lock(struct BitMap *bm, UBYTE *dst,
     return TRUE;
 }
 
+/*
+ * THE COUNT IS THE ONLY THING THAT SAYS IT READ ANYTHING.
+ *
+ * ReadPixelArray() returns the number of pixels it moved, and this discarded
+ * it and reported success.  On Picasso96's cybergraphics emulation the call
+ * declines RECTFMT_LUT8 and returns 0 at once, so the route came back
+ * instantly having copied nothing -- 436540 KB/s against 5890 for the P96
+ * route on the same board, seventy times every other route, which is not a
+ * fast read but no read at all.  It therefore WON the probe above, and the
+ * console then streamed the buffer's first contents for the life of the
+ * session: a frozen Workbench that answers the keyboard, changes nothing, and
+ * passes every assertion the harness makes on an idle screen.
+ */
 static BOOL rtg_read_cgx_rpa(UBYTE *dst, UWORD y0, UWORD rows)
 {
+    ULONG got;
+
     if (RtgCgxBase == NULL)
         return FALSE;
 
-    (VOID)rtg_cgx_read((APTR)dst, 0, 0, (UWORD)rtg_stride, rtg_rp,
+    got = rtg_cgx_read((APTR)dst, 0, 0, (UWORD)rtg_stride, rtg_rp,
                        0, y0, rtg_w, rows, (UBYTE)RECTFMT_LUT8);
-    return TRUE;
+    return got == (ULONG)rtg_w * (ULONG)rows;
 }
 
 static BOOL rtg_read_cgx_lock(struct BitMap *bm, UBYTE *dst,
@@ -563,12 +584,79 @@ static BOOL rtg_off_take(UWORD w, UWORD rows)
 /* ----------------------------------------------------------- the measure -- */
 
 /*
+ * A ROUTE THAT ANSWERS IS NOT A ROUTE THAT READ THE SCREEN.
+ *
+ * The band a route just read, against the same band read through a route that
+ * can only be a memcpy out of mapped board memory.  ReadPixelArray() reports
+ * how many pixels it moved and Picasso96's cybergraphics emulation reports the
+ * whole band for RECTFMT_LUT8 while leaving the buffer as it found it: the
+ * route came back in no time at all, won the probe below at 429926 KB/s
+ * against 5890 for the P96 route on the same board, and the console then
+ * served one frame for the life of the session.  A Workbench that takes the
+ * keyboard, runs what is typed at it and never changes on screen is what that
+ * looks like from a browser, and every assertion an idle-screen harness makes
+ * passes on it.  Neither the return count nor the clock catches it.  Reading
+ * the same pixels twice, two ways, does.
+ *
+ * ref holds the reference band, packed; dst is the caller's staging buffer and
+ * is strided.  The screen is live, so a disagreement is only evidence when the
+ * reference agrees with ITSELF across the same interval: if the second
+ * reference read differs from the first, something drew while this was
+ * looking, and the route keeps the benefit of the doubt.
+ */
+static BOOL rtg_verify(int route, int ref_route, struct BitMap *bm,
+                       UBYTE *dst, UWORD rows, UBYTE *ref)
+{
+    UWORD r;
+
+    if (!rtg_read_via(ref_route, bm, dst, 0, rows))
+        return TRUE;                    /* nothing to check against */
+    for (r = 0; r < rows; r++)
+        memcpy(ref + (ULONG)r * rtg_w, dst + (ULONG)r * rtg_stride,
+               (size_t)rtg_w);
+
+    /*
+     * POISONED FIRST, or the check checks nothing.  The reference was just
+     * read into this same buffer, so a route that writes nothing leaves the
+     * reference's own pixels behind and compares equal to them -- which is
+     * how the first version of this passed the very route it was written to
+     * catch.  A byte no read can leave behind is what makes a silent route
+     * visible.
+     */
+    for (r = 0; r < rows; r++)
+        memset(dst + (ULONG)r * rtg_stride, 0xA5, (size_t)rtg_w);
+
+    if (!rtg_read_via(route, bm, dst, 0, rows))
+        return FALSE;
+
+    for (r = 0; r < rows; r++)
+        if (memcmp(ref + (ULONG)r * rtg_w, dst + (ULONG)r * rtg_stride,
+                   (size_t)rtg_w) != 0)
+            break;
+    if (r == rows)
+        return TRUE;
+
+    /* They differ.  Did the screen? */
+    if (!rtg_read_via(ref_route, bm, dst, 0, rows))
+        return TRUE;
+    for (r = 0; r < rows; r++)
+        if (memcmp(ref + (ULONG)r * rtg_w, dst + (ULONG)r * rtg_stride,
+                   (size_t)rtg_w) != 0)
+            return TRUE;                /* the screen moved, not the route */
+
+    return FALSE;
+}
+
+/*
  * Every route the machine offers reads the same band, three times, and the
  * fastest pass is kept.  A slow pass can be the scheduler and a fast one can
  * only be the hardware.  The rate is recorded for every route rather than for
  * the winner alone, because the spread is the unknown: which route a
  * particular board and driver make cheap is what nobody has published, and one
  * report of five numbers answers it for that board.
+ *
+ * Every route is then read against a reference route before it may be chosen,
+ * because the fastest is the one most likely not to have read anything.
  *
  * The EClock is ~709 kHz, so a band that takes eight milliseconds is measured
  * to about a part in five thousand.  DateStamp() ticks are fiftieths and would
@@ -583,8 +671,11 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
     ULONG            bytes = (ULONG)rtg_w * rows;
     int              r;
     ULONG            pass;
+    UBYTE           *ref;
+    int              ref_route = -1;
 
     rtg_route = -1;
+    rtg_stale = 0;
     for (r = 0; r < RTG_N_ROUTE; r++)
         rtg_kbs[r] = 0;
 
@@ -647,9 +738,48 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
         }
 
         rtg_kbs[r] = best;
-        if (best != 0UL && (rtg_route < 0 || best > rtg_kbs[rtg_route]))
+    }
+
+    /*
+     * THE REFERENCE, and it is a mapping and a memcpy rather than a driver
+     * call.  A lock route hands back the address of the pixels the card is
+     * displaying; there is nowhere for it to be wrong that would not also make
+     * the screen wrong.  The blit route is last because it goes through an
+     * offscreen bitmap, which is one more place for a copy to be stale.
+     */
+    {
+        static const int prefer[3] =
+            { RTG_R_P96_LOCK, RTG_R_CGX_LOCK, RTG_R_BLIT };
+        int i;
+
+        for (i = 0; i < 3; i++)
+            if (rtg_kbs[prefer[i]] != 0UL)
+            {
+                ref_route = prefer[i];
+                break;
+            }
+    }
+
+    /* No reference, or no room to hold one: choose on the clock alone, which
+       is what this did before there was a check at all. */
+    ref = (ref_route < 0) ? NULL : (UBYTE *)AllocVec(bytes, MEMF_ANY);
+
+    for (r = 0; r < RTG_N_ROUTE; r++)
+    {
+        if (rtg_kbs[r] == 0UL)
+            continue;
+        if (ref != NULL && r != ref_route &&
+            !rtg_verify(r, ref_route, bm, dst, rows, ref))
+        {
+            rtg_stale |= 1UL << (ULONG)r;
+            continue;
+        }
+        if (rtg_route < 0 || rtg_kbs[r] > rtg_kbs[rtg_route])
             rtg_route = r;
     }
+
+    if (ref != NULL)
+        FreeVec((APTR)ref);
 }
 
 /* ---------------------------------------------------------------- attach -- */
@@ -832,6 +962,17 @@ ULONG http_rtg_word(char *out, ULONG cap)
         at = rtg_put(out, cap, at, rtg_route_name[r]);
         at = rtg_put(out, cap, at, "=");
         at = rtg_put_num(out, cap, at, rtg_kbs[r]);
+    }
+
+    /* And the ones that answered with something other than the screen.  Named
+       rather than dropped: a board whose fastest route reads nothing is worth
+       knowing about from one line of a log, and the rate above says why. */
+    for (r = 0; r < RTG_N_ROUTE; r++)
+    {
+        if ((rtg_stale & (1UL << (ULONG)r)) == 0UL)
+            continue;
+        at = rtg_put(out, cap, at, " stale=");
+        at = rtg_put(out, cap, at, rtg_route_name[r]);
     }
 
     if (at >= cap)
