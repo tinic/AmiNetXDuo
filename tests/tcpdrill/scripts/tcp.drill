@@ -204,7 +204,23 @@ tx A seq=101 ack=1 len=1 within=6000
 # longer than it was.
 #
 # 1700 is deliberately not a multiple of the 1460-byte MSS: the first segment
-# fills, the second is cut off at 240 bytes with 348 left over.
+# fills and 240 bytes of window are left over.
+#
+# THOSE 240 BYTES DO NOT LEAVE, and that is RFC 1122 4.2.3.4 rather than a
+# window this stack failed to use.  With 1460 bytes in flight the usable window
+# is 240, which is neither a full segment nor half of the largest window this
+# peer has ever advertised (1700/2 = 850), so the sender holds them until the
+# acknowledgement widens the window -- which is guaranteed to come, because
+# 1460 bytes are outstanding.  Sending them would be the silly window from the
+# sending side: a peer that reopens 240 bytes at a time would get 240-byte
+# segments for as long as it kept doing it.
+#
+# What the case still asserts is what it was written for.  `wirebytes` compares
+# the bytes send() credited against the bytes that left, and 1460 out of 2048
+# is still a short send: the fault it guards -- crediting only the whole
+# segments while a cut one is already on the wire -- is a difference between
+# those two numbers whatever the window rule allows.  z03 below keeps the cut
+# segment itself, where nothing is in flight and the rule permits it.
 case z02_short_send_credits_what_left
 socket
 connect
@@ -213,7 +229,7 @@ rx SA seq=0 ack=1 win=1700 mss=1460
 tx A seq=1 ack=1
 send 2048 = SHORT
 tx PA seq=1 ack=1 len=1460
-tx PA seq=1461 ack=1 len=240
+notx 400
 wirebytes
 
 # The same fault with nothing in front of it to hide it.  The window is
