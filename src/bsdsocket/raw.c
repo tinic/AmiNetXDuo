@@ -450,8 +450,9 @@ static VOID bsd_raw_icmpv6_checksum(NX_PACKET *packet, ULONG *source,
  * The source address is picked first and then named on the send, rather than
  * left to nxd_ip_raw_packet_send() to pick again: the checksum below is
  * computed over it, and a second independent choice can differ.
- * _nxd_ipv6_interface_find() is the stack's own RFC 6724 selection and is what
- * nx_icmp_ping6() uses for the same reason.
+ * _nxd_ipv6_interface_find() is the RFC 6724 selection in
+ * src/ipv6/ipv6_srcsel.c, and is what nx_icmp_ping6() uses for the same
+ * reason.
  *
  * An RFC 3542 PKTINFO, a bound address or a zone overrides that selection, in
  * that order. Each of the three is a choice the caller already made. The cmsg

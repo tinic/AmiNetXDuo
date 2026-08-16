@@ -941,8 +941,8 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
  * the interface its packets leave by, so getsockname() names what the peer
  * sees.
  *
- * There is no RFC 6724 for IPv4 and nothing in NetX Duo picks a v4 source on
- * its own.  _nx_ip_packet_send() stamps the packet with the address of
+ * RFC 6724 is IPv6 only -- src/ipv6/ipv6_srcsel.c has no IPv4 half -- and
+ * nothing in NetX Duo picks a v4 source on its own.  _nx_ip_packet_send() stamps the packet with the address of
  * whichever interface the route matched, so the route is the whole question.
  *
  * A connected TCP socket has had it answered already: the connect, or the
@@ -1021,9 +1021,10 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
     {
         /*
          * Bound to in6addr_any. This reports the source address the stack
-         * puts on a packet to this socket's peer, using NetX Duo's own RFC
-         * 6724 selection, so the answer matches what the peer sees. An
-         * application cannot choose between link-local and global for itself.
+         * puts on a packet to this socket's peer, through the RFC 6724
+         * selection in src/ipv6/ipv6_srcsel.c, so the answer matches what the
+         * peer sees. An application cannot choose between link-local and
+         * global for itself.
          */
         ULONG chosen[4];
 
