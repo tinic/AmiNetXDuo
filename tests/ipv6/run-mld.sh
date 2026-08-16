@@ -231,7 +231,7 @@ AMINETXDUO_RUN_TAG="$TAG" AMINETXDUO_AMIBERRY_MAC="$MAC" \
     "$ROOT/tools/amiberry-run.sh" \
     -N a2065 -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
-    "$STAGE/ConfigureNetInterface" "$STAGE/ShowNetStatus" "$STAGE/commands.txt" \
+    "$STAGE/McastProbe" "$STAGE/ShowNetStatus" "$STAGE/commands.txt" \
     > "$ROOT/build/$TAG.out" 2>&1 &
 RUNPID=$!
 
@@ -256,6 +256,8 @@ done
 
 if [ "$anchor" = 0 ]; then
     echo "guest_first_frame=none"
+    echo "  (the guest sent no IPv6 at all: read build/$TAG.out and"
+    echo "   build/amiberry-serial-$TAG.log before reading anything below)"
 else
     echo "guest_first_frame=seen"
 fi
