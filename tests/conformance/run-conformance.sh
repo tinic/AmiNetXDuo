@@ -2,8 +2,16 @@
 #
 # Run the bsdsocktest conformance suite against our bsdsocket.library.
 #
-#   tests/conformance/run-fsuae.sh [-m MODEL] [-c CPU] [-t SECONDS]
-#                                  [-T TAG] [-a "SUITE ARGS"] [-p] [-b BUILDDIR]
+#   tests/conformance/run-conformance.sh [-m MODEL] [-c CPU] [-t SECONDS]
+#                                        [-T TAG] [-a "SUITE ARGS"] [-p] [-b BUILDDIR]
+#
+# It was called run-fsuae.sh and it has driven tools/amiberry-run.sh since
+# fs-uae left the tree on 2026-08-04.  The name was the only thing left saying
+# otherwise, and it said it in the one place that is read as a decision: the
+# job in .github/workflows/emulator.yml was titled after it.  Named for what it
+# tests now, like every other wired harness -- run-tls13.sh, run-addifup.sh,
+# run-cardsweep.sh -- so that which emulator boots the guest stays a question
+# tools/amiberry-run.sh answers, once, for all of them.
 #
 # -b (or AMINETXDUO_BUILD) picks the build tree the library comes from, so the
 # floor build and an -DAMINETXDUO_IPV6=ON build can both be measured.
@@ -39,9 +47,9 @@
 #      (DHCP lease, resolver) as the library is opened.
 #
 # Results land in:
-#   build/testhd-<tag>/bsdsocktest.log   the TAP log, the actual result
-#   build/testhd-<tag>/conf-out.txt      the suite's console summary
-#   build/serial-<tag>.log               our ami_log output
+#   build/amiberry-testhd-<tag>/bsdsocktest.log  the TAP log, the result
+#   build/amiberry-testhd-<tag>/conf-out.txt     the suite's console summary
+#   build/serial-<tag>.log                       our ami_log output
 #
 # SPDX-License-Identifier: MIT
 
@@ -55,8 +63,8 @@ CPU=""
 # environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
 # to tools/amiberry-run.sh, so taking the default unconditionally used to
 # OVERWRITE a caller's tag, two runs started with different
-# AMINETXDUO_RUN_TAG values would silently share build/testhd-conformance and
-# clobber each other's results.
+# AMINETXDUO_RUN_TAG values would silently share build/amiberry-testhd-conformance
+# and clobber each other's results.
 TAG="${AMINETXDUO_RUN_TAG:-conformance}"
 ARGS="NOPAGE"
 PROBE=0
@@ -167,7 +175,7 @@ esac
 # `return RETURN_OK;` unconditional, with the comment "hand the harness a
 # success so the run is scored from the TAP log".  Nothing scored the TAP log.
 # The only read of it above greps one line for attribution.  So the whole
-# bsdsocktest conformance suite, at .github/workflows/emulator.yml:117, was
+# bsdsocktest conformance suite, as .github/workflows/emulator.yml runs it, was
 # green however many conformance tests failed.
 #
 # The scorer is in tests/conformance/tap-verdict.sh so that

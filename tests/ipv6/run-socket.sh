@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 #
-# Run the AF_INET6 bsdsocket.library test under FS-UAE.
+# Run the AF_INET6 bsdsocket.library test, RFC 3542's whole surface.
 #
-#   tests/ipv6/run-socket-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#   tests/ipv6/run-socket.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#                            [-N BOARD] [-B BACKEND]
+#
+# It was called run-socket-fsuae.sh and both halves of it drove
+# tools/amiberry-run.sh; -A picked between two branches that ran the same
+# emulator.  fs-uae left the tree on 2026-08-04 and the name outlived it.
 #
 # Stages LIBS:bsdsocket.library, LIBS:usergroup.library and the DEVS: config.
 #
@@ -25,23 +30,22 @@ MODEL=A1200
 TIMEOUT=240
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
-# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
-# guest boots, so -A picks Amiberry, which runs genuinely headless. Same block
-# run-fsuae.sh beside this one carries.
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 BOARD=a2065
+# Both defaults are tools/amiberry-run.sh's own, repeated here only so -N and
+# -B can override them.  Leave AMINETXDUO_AMIBERRY_BACKEND unset and this is
+# SLIRP, which is what the test wants: it talks to ::1 and needs no LAN.
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:b:AN:B:" opt; do
+while getopts "m:t:c:b:N:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir] [-A [-N board] [-B backend]]" >&2
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" \
+                "[-N board] [-B backend]" >&2
            exit 2 ;;
     esac
 done
@@ -86,18 +90,9 @@ verdict() {
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
-if [ "$RUNNER" = "amiberry" ]; then
-    set +e
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-         -t "$TIMEOUT" "${CPUARG[@]}" "$EXE" "$STAGE/devs" "$STAGE/libs"
-    RUN_RC=$?
-    set -e
-    verdict "$RUN_RC"
-fi
-
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
-     "$EXE" "$STAGE/devs" "$STAGE/libs"
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+     -t "$TIMEOUT" "${CPUARG[@]}" "$EXE" "$STAGE/devs" "$STAGE/libs"
 RUN_RC=$?
 set -e
 verdict "$RUN_RC"

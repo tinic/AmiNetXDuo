@@ -5,7 +5,7 @@
 #   . "$ROOT/tests/conformance/tap-verdict.sh"
 #   tap_verdict <log> <emulator-exit-status>
 #
-# Separate from tests/conformance/run-fsuae.sh so that
+# Separate from tests/conformance/run-conformance.sh so that
 # tests/conformance/tap-verdict-selftest.sh can drive it, which needs no ROM,
 # no a2065.device and no third_party/bsdsocktest checkout.
 #
