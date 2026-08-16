@@ -1,10 +1,10 @@
 /*
  * bsdsocket.library, getaddrinfo / getnameinfo / freeaddrinfo / gai_strerror.
  *
- * These are the four vectors at the very end of the Roadshow LVO table
- * (0x324..0x336) and the only family-agnostic name lookup the ABI has.  They
- * ship in both build configurations, an IPv4-only build still answers them,
- * just never with an AF_INET6 result.
+ * These are the four vectors at the end of the Roadshow LVO table
+ * (0x324..0x336), and the only family-agnostic name lookup the ABI has.  They
+ * ship in both build configurations.  An IPv4-only build still answers them,
+ * but never with an AF_INET6 result.
  *
  * What AF_UNSPEC returns, and in what order.
  *
@@ -16,27 +16,27 @@
  *
  *   1. IPv6 results come first, then IPv4, so a caller that walks the list in
  *      order and connects to the first address that works prefers IPv6.
- *   2. AI_ADDRCONFIG is implied for AF_UNSPEC and cannot be turned off: AAAA
- *      is only looked up when this machine holds a global unicast address that
- *      has finished duplicate address detection (netstack_ipv6_have_global()).
- *      "IPv6 is running" is not that test and was the one used here: every
- *      interface gets a link-local unasked, so a machine that has never seen a
- *      router passed it, preferred the AAAA, and connected nowhere.  A caller
- *      that names AF_INET6 has said what it wants and is not second-guessed;
- *      it gets the AAAA lookup whenever IPv6 is running at all.
+ *   2. AI_ADDRCONFIG is implied for AF_UNSPEC and cannot be disabled.  AAAA is
+ *      only looked up when this machine holds a global unicast address that
+ *      finished duplicate address detection (netstack_ipv6_have_global()).
+ *      "IPv6 is running" is not that test, and was the one used here.  Every
+ *      interface gets a link-local unasked, so a machine that never saw a
+ *      router passed that test, preferred the AAAA, and connected nowhere.  A
+ *      caller that names AF_INET6 said what it wants and is taken at its
+ *      word.  It gets the AAAA lookup whenever IPv6 is running at all.
  *   3. AI_V4MAPPED is not implied and not available.  An AF_INET6 query
- *      returns AAAA records only; it never synthesises ::ffff:a.b.c.d from an
+ *      returns AAAA records only.  It never synthesises ::ffff:a.b.c.d from an
  *      A record.  A caller that wants both asks for AF_UNSPEC.
  *   4. At most one address per family is returned.  The resolver underneath
  *      (netstack_resolve/netstack_resolve6 over NetX Duo's addons/dns) answers
- *      with a single address, not a set, so a one-element list would
- *      misrepresent round-robin DNS.  A caller that walks the list still
- *      behaves correctly with fewer entries.
+ *      with a single address, not a set, so a one-element list misrepresents
+ *      round-robin DNS.  A caller that walks the list still behaves correctly
+ *      with fewer entries.
  *
- * Each result is one allocation: the addrinfo, its sockaddr and (on the first
+ * Each result is one allocation.  The addrinfo, its sockaddr and (on the first
  * node only) its canonical name live in one block, so freeaddrinfo() is a walk
  * and a free per node.  ai_canonname on the second node points into the first
- * node's block, so freeaddrinfo() must not free it separately and the list is
+ * node's block, so freeaddrinfo() must not free it separately.  The list is
  * only ever freed as a whole, as POSIX requires.
  *
  * SPDX-License-Identifier: MIT
@@ -49,12 +49,12 @@
 
 #include <proto/exec.h>
 
-/* Resolver patience, in ThreadX ticks. Matches resolver.c. */
+/* Resolver timeout, in ThreadX ticks. Matches resolver.c. */
 #define BSD_GAI_TIMEOUT     (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
  * One result node. The sockaddr is embedded so the whole node is one
- * allocation; ai_addr points at it.
+ * allocation, and ai_addr points at it.
  *
  * The union is sized by the larger of the two sockaddrs in the build. In the
  * floor build that is sockaddr_in (16 bytes) and the node is smaller.
@@ -75,7 +75,7 @@ typedef struct BsdAddrInfoNode
 
 /* ---------------------------------------------------------------- helpers */
 
-/* Strict unsigned decimal; FALSE on anything else, including empty. */
+/* Strict unsigned decimal. FALSE on anything else, including empty. */
 static BOOL bsd_gai_number(const char *s, ULONG *out)
 {
     ULONG value  = 0;
@@ -103,7 +103,7 @@ static BOOL bsd_gai_number(const char *s, ULONG *out)
 
 /*
  * Resolve the service name. Returns an EAI_* code, or 0 with *port set in host
- * order, the sockaddr writers do the conversion.
+ * order. The sockaddr writers do the conversion.
  */
 static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
                             UINT *port)
@@ -144,7 +144,7 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
 }
 
 /*
- * Build one node. `canon` is copied into it when non-NULL; otherwise the node
+ * Build one node. `canon` is copied into it when non-NULL. Otherwise the node
  * carries no name and ai_canonname is set to `inherit`, which points into an
  * earlier node's block, see the memory note at the top.
  */
@@ -154,7 +154,7 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
  * numerical indices ... MAY support other kinds of non-null strings", so both
  * a number and an interface name are taken. 0 when it names nothing, which the
  * caller turns into EAI_NONAME: a zone that resolves to no interface makes the
- * whole address unusable, and guessing an interface is what the zone was given
+ * whole address unusable, and a guessed interface is what the zone was given
  * to prevent.
  */
 static ULONG bsd_gai_zone_index(const char *zone)
@@ -250,11 +250,11 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
  * netstack error -> EAI_*, the getaddrinfo() half of bsd_herrno_of()
  * (resolver.c).
  *
- * RFC 3493 6.1 requires EAI_AGAIN, "temporary failure in name resolution",
- * and every failure here used to be reported as EAI_NONAME, so a caller that
- * retries on EAI_AGAIN never retried and a name server that was merely slow
- * looked like a name that does not exist. The backend has always told the two
- * apart; nothing was reading it.
+ * RFC 3493 6.1 requires EAI_AGAIN, "temporary failure in name resolution".
+ * Every failure here used to be reported as EAI_NONAME. A caller that retries
+ * on EAI_AGAIN therefore never retried, and a slow name server looked like a
+ * name that does not exist. The backend always told the two apart, and nothing
+ * read it.
  *
  * EAI_NODATA is not used. It means "the name exists but has no address of the
  * family asked for", which needs an empty answer section to be told from
@@ -283,9 +283,9 @@ static LONG bsd_gai_error(LONG status)
 
 /*
  * With AF_UNSPEC two lookups run and each has a verdict. "Try again" outranks
- * "no such name", because only the first is worth a retry: a machine with an
- * AAAA record and a name server that dropped the A query has not been shown to
- * be absent from IPv4.
+ * "no such name", because only the first is worth a retry. An A query dropped
+ * by a name server does not prove that a machine with an AAAA record is absent
+ * from IPv4.
  */
 static LONG bsd_gai_merge(LONG so_far, LONG now)
 {
@@ -320,10 +320,11 @@ static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
  *   pragmas/bsdsocket_pragmas.h:141  gai_strerror(a0)      <-- not d0
  *   pragmas/bsdsocket_pragmas.h:142  getnameinfo(a0,d0,a1,d1,a2,d2,d3)
  *
- * gai_strerror() takes a LONG in an address register. Not a typo in the
- * header: the libcall form on line 264 says "801" too, which is the same a0.
- * This is the second surprising register assignment in this ABI
- * (bpf_set_notify_mask takes (d1,d0) where its neighbour takes (d0,d1)).
+ * gai_strerror() takes a LONG in an address register. The libcall form on line
+ * 264 says "801" too, which is the same a0, so it is not a typo in the header.
+ * This is the second register assignment in this ABI that does not follow the
+ * pattern (bpf_set_notify_mask takes (d1,d0) where its neighbour takes
+ * (d0,d1)).
  * Every prototype here is generated from that pragma table by
  * tools/gen_vectors.py, so the definitions below must match
  * bsdsocket_vectors.h exactly.
@@ -367,8 +368,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         /*
          * AI_MASK is the NDK's own list of the flags that exist here
          * (netdb.h:176). A caller that sets a bit outside it was compiled
-         * against a different header and is asking for something this library
-         * cannot do, so refuse rather than ignore it.
+         * against a different header and asks for something this library
+         * cannot do. It is refused rather than ignored.
          */
         if ((flags & ~(LONG)(AI_MASK | AI_EXT)) != 0)
             return EAI_BADFLAGS;
@@ -439,7 +440,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
 #ifdef AMINETXDUO_IPV6
     /* No family guard out here: an IPv6 literal asked for with an AF_INET hint
-     * has to reach the check below and be told the family is wrong. Guarding
+     * has to reach the check below and be told the family is wrong. A guard on
      * the block made that check unreachable, so the literal fell through to
      * the resolver and was looked up as a name. Same shape as the IPv4 block. */
     {
@@ -455,9 +456,9 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                 return EAI_ADDRFAMILY;
 
             /* Safe to accept only because the send path honours it: see
-               bsd_source_select() in socket.c. Parsing a zone that
-               nothing then reads would make `ping fe80::1%eth0` look
-               supported while it left by whatever interface was routed to. */
+               bsd_source_select() in socket.c. A zone parsed and then never
+               read makes `ping fe80::1%eth0` look supported, while the packet
+               leaves by whatever interface was routed to. */
             scope = bsd_gai_zone_index(zone);
             if (zone[0] != '\0' && scope == 0)
                 return EAI_NONAME;
@@ -494,8 +495,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             {
                 /*
                  * A dotted quad with an AF_INET6 hint. On a stack with
-                 * AI_V4MAPPED this would return ::ffff:a.b.c.d; this NDK has
-                 * no such flag, so the caller cannot have asked for it and
+                 * AI_V4MAPPED this returns ::ffff:a.b.c.d. This NDK has no
+                 * such flag, so the caller cannot ask for it, and
                  * EAI_ADDRFAMILY is the right answer.
                  */
                 return EAI_ADDRFAMILY;
@@ -524,19 +525,19 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
     /*
      * Both lookups are given the caller's break signal, so Ctrl-C reaches a
-     * getaddrinfo() the way it reaches a recv(); see bsd_resolve_break() in
-     * resolver.c. A break during the second lookup does not throw away what the
-     * first one found, an answer already in hand is still an answer.
+     * getaddrinfo() the way it reaches a recv(). See bsd_resolve_break() in
+     * resolver.c. A break during the second lookup keeps what the first one
+     * found.
      */
     verdict = EAI_NONAME;
 
 #ifdef AMINETXDUO_IPV6
     /*
      * AF_INET6 was asked for by name, so it is asked for whatever this machine
-     * can reach; AF_UNSPEC is a preference, and preferring an address the
-     * machine has no source for is worse than not preferring it. Every
-     * interface carries a link-local whether or not a router has ever spoken
-     * to it, so netstack_ipv6_enabled() cannot tell those apart and
+     * can reach. AF_UNSPEC is a preference, and a preferred address the
+     * machine has no source for is worse than no preference at all. Every
+     * interface carries a link-local whether or not a router ever answered it,
+     * so netstack_ipv6_enabled() cannot tell those apart.
      * netstack_ipv6_have_global() is the test.
      */
     if ((family == AF_INET6 && netstack_ipv6_enabled()) ||
@@ -608,8 +609,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     }
 
     /*
-     * POSIX has no EAI code for an interrupted lookup; EAI_SYSTEM with errno
-     * set is the documented way to hand one back, and gai_strerror() already
+     * POSIX has no EAI code for an interrupted lookup. EAI_SYSTEM with errno
+     * set is the documented way to report one, and gai_strerror() already
      * names it.
      */
     if (aborted)
@@ -633,8 +634,8 @@ VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
         /*
          * ai_canonname is never freed separately: it is either inside this
          * node's own block or inside the first node's, and both go with the
-         * ami_free() below. The first node is freed first, which is fine,
-         * nothing reads the name once freeaddrinfo() has started.
+         * ami_free() below. The first node is freed first. Nothing reads the
+         * name once freeaddrinfo() starts.
          */
         ami_free(ai);
 
@@ -727,9 +728,9 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
          * feeds connect(), bind() and sendto() as well, where the mapped form
          * has to survive as far as bsd_addr_normalise() and its V6ONLY check.
          *
-         * The IPv4-COMPATIBLE form (::a.b.c.d) that sentence also names is
-         * not handled: RFC 4291 2.5.5.1 deprecated it, and a naive prefix
-         * test for it swallows :: and ::1.
+         * The IPv4-compatible form (::a.b.c.d) that sentence also names is
+         * not handled. RFC 4291 2.5.5.1 deprecated it, and a plain prefix
+         * test for it also matches :: and ::1.
          */
         if (!have_v4 && bsd_addr_is_v4mapped(&addr, &v4))
             have_v4 = TRUE;
@@ -738,7 +739,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
          * RFC 3493 6.2: "If the address is the IPv6 unspecified address
          * ("::"), a lookup is not performed, and the EAI_NONAME error is
          * returned." It names no node, so the numeric string this used to
-         * hand back was an answer to a question with none.
+         * return named nothing.
          */
         if (addr.nxd_ip_version == NX_IP_VERSION_V6 &&
             addr.nxd_ip_address.v6[0] == 0UL &&
@@ -762,12 +763,12 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                 resolved = (BOOL)(status == AMI_NET_OK);
             }
             /*
-             * No reverse lookup for a real IPv6 address. It would be an
-             * ip6.arpa PTR query, available through NetX Duo's
+             * No reverse lookup for a real IPv6 address. That is an ip6.arpa
+             * PTR query, available through NetX Duo's
              * nxd_dns_host_by_address_get() on an NXD_ADDRESS, but the
-             * nibble-reversed name it builds has never been exercised here.
-             * NI_NAMEREQD callers get EAI_NONAME and everyone else gets the
-             * numeric form, which is also what a host with no PTR record
+             * nibble-reversed name it builds is untested here. An
+             * NI_NAMEREQD caller gets EAI_NONAME and every other caller gets
+             * the numeric form, which is also what a host with no PTR record
              * produces.
              */
         }
@@ -798,10 +799,10 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
                 /*
                  * RFC 4007 11.1: the "%zone" notation is for addresses of
-                 * non-global scope. A scope_id sitting on a global address
-                 * names nothing, so it is not printed even when a caller has
-                 * set one, printing it would produce a string that parses
-                 * back to a destination the caller never gave.
+                 * non-global scope. A scope_id on a global address names
+                 * nothing, so it is not printed even when a caller set one. A
+                 * printed one produces a string that parses back to a
+                 * destination the caller never gave.
                  *
                  * bsd_if_name_by_index() rather than the if_indextoname()
                  * vector: that one reports ENXIO, and getnameinfo() returning
@@ -827,8 +828,8 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         }
         else if ((flags & (ULONG)NI_NOFQDN) != 0)
         {
-            /* Strip everything from the first dot; the short form is only
-               meaningful in the local domain. */
+            /* Strip everything from the first dot. The short form only means
+               anything in the local domain. */
             ULONG i;
 
             for (i = 0; name[i] != '\0'; i++)
@@ -842,7 +843,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
         }
 
         if (bsd_strlen(name) >= hostlen)
-            return EAI_MEMORY;      /* POSIX says EAI_OVERFLOW; the NDK has none */
+            return EAI_MEMORY;      /* POSIX says EAI_OVERFLOW, the NDK has none */
 
         bsd_strncpy((char *)host, name, hostlen);
     }
