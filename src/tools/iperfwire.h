@@ -33,7 +33,7 @@ extern "C" {
 /*
  * The server's answer to the end-of-test datagram.  16 bytes of echoed
  * datagram header (iperf 2.0.10 widened it to carry a 64-bit sequence number),
- * then the report itself.  128 is what 2.2.1 sends; the trailing fields are
+ * then the report itself.  128 is what 2.2.1 sends.  The trailing fields are
  * its own extensions and a receiver that stops at 56 reads every documented
  * one, so this is padded rather than filled.
  */
@@ -69,7 +69,7 @@ typedef struct IperfWireReport
  * Fill `len` bytes with iperf's own payload, the digits 0-9 repeating, taking
  * `offset` as the position of buf[0] in the stream.
  *
- * The pattern is not decoration.  A TCP receiver at the far end reads the first
+ * The pattern is load-bearing.  A TCP receiver at the far end reads the first
  * four bytes as a client_hdr and looks at the top two bits: 0x80000000 says
  * "version 1 header follows" and 0x40000000 "extended header follows", and a
  * stream that begins with an arbitrary byte sets one of them about half the
@@ -82,19 +82,19 @@ void iperf_pattern_fill(unsigned char *buf, unsigned long len,
 
 /*
  * Write a datagram header at `buf`, which must have IPERF_DG_TOTAL bytes.
- * A negative `id` is the end-of-test marker; iperf 2 sends -N after ids 1..N.
+ * A negative `id` is the end-of-test marker.  iperf 2 sends -N after ids 1..N.
  *
  * The 24 bytes after the header are zeroed rather than left to the caller's
  * buffer.  An iperf 2.2 server reads a client_hdr there and switches test mode
  * on its flag bits: fed uninitialised memory it enters trip-time mode, reports
- * one datagram and then silently drops the rest of the run.  That is not
- * hypothetical, it is what the vendored nx_iperf.c does, and it was reproduced
- * against iperf 2.2.1 before this was written.
+ * one datagram and then silently drops the rest of the run.  The vendored
+ * nx_iperf.c does exactly that, reproduced against iperf 2.2.1 before this was
+ * written.
  */
 void iperf_dg_put(unsigned char *buf, long id,
                   unsigned long sec, unsigned long usec);
 
-/* The id out of a received datagram; negative means end of test. */
+/* The id out of a received datagram.  Negative means end of test. */
 long iperf_dg_id(const unsigned char *buf);
 
 /* Build the server's end-of-test report.  `buf` needs IPERF_REPORT_LEN bytes. */
@@ -113,7 +113,7 @@ int iperf_report_get(const unsigned char *buf, unsigned long len,
 /*
  * Bits per second from a byte count and a millisecond count, rounded to
  * nearest.  0 when `ms` is 0, because a measurement with no duration has no
- * rate; callers report that rather than dividing.
+ * rate.  Callers report that rather than dividing.
  *
  * In 64 bits throughout.  The vendored engine computes
  * `bytes / ticks * rate / 125000` in integer, which divides first and then
@@ -142,16 +142,14 @@ void iperf_add64(unsigned long *hi, unsigned long *lo, unsigned long add);
 /* ---------------------------------------------------------------- limits - */
 
 /*
- * A measurement is bounded or it is not a measurement.  Every run states
- * either how long it may take or how much it may move, and neither may be
- * open-ended: iperf_limits_check() is the only place that decides, and both
- * the command and httpd go through it before a socket is opened.
+ * Every run states either how long it can take or how much it can move, and
+ * neither is open-ended.  iperf_limits_check() is the only place that decides,
+ * and both the command and httpd go through it before a socket is opened.
  *
- * This is not tidiness.  A server told to run until somebody stops it prints
- * progress for as long as it lives, and a caller that redirected that to a
- * file has an unbounded writer -- which is exactly how a wedged iperf 2.2.1
- * on the test host wrote 72 GB of interval reports into a shell redirect
- * while this was being developed.  The tool cannot be asked to do that.
+ * A server told to run until somebody stops it prints progress for as long as
+ * it lives, and a caller that redirected that to a file has an unbounded
+ * writer.  A wedged iperf 2.2.1 on the test host wrote 72 GB of interval
+ * reports into a shell redirect while this was being developed.
  *
  * An hour is the ceiling.  Longer than any measurement anybody wants from a
  * Shell, short enough that the millisecond clock cannot wrap inside one, and
@@ -170,18 +168,18 @@ const char *iperf_limits_check(unsigned long seconds, unsigned long kbytes,
                                unsigned long buflen, unsigned long port);
 
 /*
- * How many slices a run of this shape may take before it is declared stuck.
+ * How many slices a run of this shape can take before it is declared stuck.
  *
  * The deadline is a clock comparison, so a clock that stops advancing means a
- * deadline that never arrives and a transfer that never ends.  That is not a
- * hypothetical: the host-side iperf 2.2.1 used to pin this protocol down
- * wedged on a failed clock_nanosleep() and spun for seventeen hours, filling a
- * disk with interval reports.  A timing call that fails has to end the run
- * with a diagnosis, not become a busy loop, so there is a second bound that
- * does not consult the clock at all.
+ * deadline that never arrives and a transfer that never ends.  The host-side
+ * iperf 2.2.1 used to pin this protocol down wedged on a failed
+ * clock_nanosleep() and spun for seventeen hours, filling a disk with interval
+ * reports.  A timing call that fails has to end the run with a diagnosis
+ * rather than become a busy loop, so there is a second bound that does not
+ * consult the clock at all.
  *
- * Generous on purpose: this is a backstop, not a schedule.  It must never fire
- * on a slow machine, only on one whose clock has stopped.
+ * Generous on purpose.  It is a backstop, and must never fire on a slow
+ * machine, only on one whose clock has stopped.
  */
 unsigned long iperf_slice_budget(unsigned long seconds, unsigned long kbytes,
                                  unsigned long buflen);

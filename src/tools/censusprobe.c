@@ -3,7 +3,7 @@
  *
  *     CensusProbe HOST/K,ROUNDS/N/K,NOFLUSH/S
  *
- * Built ONLY when AMINETXDUO_ALLOCCENSUS is on, and it is the reason the
+ * Built only when AMINETXDUO_ALLOCCENSUS is on, and it is the reason the
  * census is testable rather than readable: something has to reach the two
  * moments the library reports at, and no existing command reaches the second
  * one.
@@ -22,10 +22,10 @@
  * them.  Once the segment goes there is nothing left to own anything, and
  * whatever the census still holds is memory that survives until reboot.
  *
- * TCP: MUST BE OFF FOR THE EXPUNGE TO HAPPEN.  bsd_lib_expunge() declines
+ * TCP has to be off for the expunge to happen.  bsd_lib_expunge() declines
  * while the handler Process is alive, and the handler is started by the first
- * open; tools/alloc-census.sh writes DEVS:Internet/tcp_handler accordingly and
- * this program says so when the flush does not take.
+ * open.  tools/alloc-census.sh writes DEVS:Internet/tcp_handler accordingly,
+ * and this program says so when the flush does not take.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -68,9 +68,9 @@ static VOID probe_check(const char *what, BOOL ok)
 
 /*
  * One pass of what an ordinary network command does: open the library, make
- * sockets of both kinds, ask the resolver something, give it all back.  The
- * point is not to test any of it -- tests/ does that -- but to walk the
- * allocation sites a command walks, so the census has something to hold.
+ * sockets of both kinds, ask the resolver something, give it all back.  This
+ * walks the allocation sites a command walks, so the census has something to
+ * hold.  Testing any of it is the job of tests/.
  */
 static VOID probe_round(const char *host)
 {
@@ -108,7 +108,7 @@ static VOID probe_round(const char *host)
 
     /*
      * getaddrinfo() is the other resolver, with an allocation surface of its
-     * own (src/bsdsocket/addrinfo.c) and a free the CALLER has to make.  A
+     * own (src/bsdsocket/addrinfo.c) and a free the caller has to make.  A
      * caller that forgets freeaddrinfo() is the leak shape this whole
      * instrument is for, so it is walked here deliberately.
      */
@@ -153,7 +153,7 @@ static VOID probe_flush(VOID)
     APTR huge = AllocMem(0x7FFFFFF0UL, MEMF_ANY);
 
     if (huge != NULL)
-        FreeMem(huge, 0x7FFFFFF0UL);    /* a machine with 2 GB. Unlikely. */
+        FreeMem(huge, 0x7FFFFFF0UL);    /* only on a machine with 2 GB */
 }
 
 int main(void)
@@ -189,10 +189,10 @@ int main(void)
 
     /*
      * The library is closed now, so the reports it prints have already gone to
-     * the serial port.  This is the command's OWN census: src/common is linked
+     * the serial port.  This is the command's own census: src/common is linked
      * into every image separately, so a command has a table of its own and the
-     * two never mix.  That separation is the point -- "who still holds this"
-     * is answered per image, which is the granularity ownership has.
+     * two never mix.  Ownership is therefore answered per image, which is the
+     * granularity it has.
      */
     AMI_CENSUS_REPORT("cmd-censusprobe");
 

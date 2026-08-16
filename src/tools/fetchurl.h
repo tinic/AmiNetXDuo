@@ -4,7 +4,7 @@
  *
  * Its own file for the reason httppath.c is: these are the pieces whose
  * mistakes do not look like mistakes.  A relative Location: resolved as an
- * absolute URL asks the resolver for a host called "about.html"; an interim
+ * absolute URL asks the resolver for a host called "about.html".  An interim
  * 1xx taken for a final response writes the real response into the user's
  * file and reports success.  Both read as working code.  So this translation
  * unit includes nothing, is compiled natively by
@@ -48,7 +48,7 @@ typedef struct FetchUrl
 {
     int             secure;
     unsigned short  port;
-    char            host[FETCH_HOST_MAX];   /* no port, no userinfo; an
+    char            host[FETCH_HOST_MAX];   /* no port, no userinfo, and an
                                                IPv6 literal keeps its []  */
     char            path[FETCH_PATH_MAX];   /* origin-form, query and all,
                                                never a #fragment          */
@@ -63,13 +63,13 @@ FetchUrlResult fetch_url_parse(const char *url, FetchUrl *out);
 
 /*
  * RFC 3986 section 5.2.2, strict: resolve `ref`, a Location: value, absolute
- * or relative, against `base`.  `out` may alias neither argument.
+ * or relative, against `base`.  `out` must not alias either argument.
  *
  * Strict means a reference that names its own scheme is not merged with the
  * base even when the two schemes match, so "http:g" resolves to the path-only
  * URI "http:g" and is then refused for having no authority, per the note in
- * section 5.4.2.  Nothing sends that; a browser's leniency there buys
- * compatibility this command has no user for.
+ * section 5.4.2.  Nothing sends that, and a browser's leniency there buys
+ * compatibility this command has no use for.
  */
 FetchUrlResult fetch_url_resolve(const FetchUrl *base, const char *ref,
                                  FetchUrl *out);
@@ -95,7 +95,7 @@ const char *fetch_url_error(FetchUrlResult why);
  * Running past `size` stops us keeping headers, not reading them: the end of
  * the block is found from the last four bytes seen, not the last four stored,
  * so a chatty server costs the tail of its headers instead of the whole
- * transfer.  The status line and Location: are at the front; a caller that
+ * transfer.  The status line and Location: are at the front.  A caller that
  * needs the tail checks `truncated`.
  */
 typedef struct FetchHead

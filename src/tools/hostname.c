@@ -3,9 +3,7 @@
  *
  *     hostname NAME,QUIET/S
  *
- * WHY THE SOURCE IS PRINTED AND NOT JUST THE NAME
- *
- * Four places can name this machine, and they are RANKED
+ * Four places can name this machine, and they are ranked
  * (AmiHostnameSource, aminetxduo/config.h), weakest first:
  *
  *     1  an interface file's ID=       DEVS:NetInterfaces/<name>
@@ -13,58 +11,54 @@
  *     3  DHCP option 12                whatever the server said
  *     4  HOSTNAME= in DEVS:Internet/name_resolution
  *
- * A stronger source replaces a weaker one and a weaker one is refused, which is
- * why a machine can be renamed in the obvious place and go on answering to its
- * old name with nothing saying so. A leftover ENV:HOSTNAME did exactly that
- * here once. So a name on its own is not an answer to "what is this machine
- * called": the source is half of it, and this command prints both.
- *
- * SETTING WRITES ENV:HOSTNAME, AND SAYS SO
+ * A stronger source replaces a weaker one and a weaker one is refused, so a
+ * machine can be renamed in the obvious place and go on answering to its old
+ * name with nothing saying so. A leftover ENV:HOSTNAME did exactly that here
+ * once. The name on its own is therefore half an answer, and this command
+ * prints the source with it.
  *
  * `hostname beast` writes ENV:HOSTNAME and ENVARC:HOSTNAME -- ENV: so it is in
  * force now, ENVARC: so it survives the next boot -- and offers the name to the
  * running stack at the rank of ENV:HOSTNAME, which is the file it just wrote.
  *
- * It does NOT write the name_resolution file and it does not set the name at a
+ * It does not write the name_resolution file and it does not set the name at a
  * rank higher than the file it wrote. A command that quietly named the machine
  * at rank 4 with nothing in DEVS:Internet saying so would produce a machine
  * that renames itself back at the next boot with no record of why.
  *
- * So a machine whose name comes from DHCP or from name_resolution is NOT
- * renamed by this, and is told: the file is still written, because it decides
- * the name if the stronger source stops supplying one, and the running name is
+ * A machine whose name comes from DHCP or from name_resolution is not renamed
+ * by this, and is told so. The file is still written, because it decides the
+ * name if the stronger source stops supplying one, and the running name is
  * reported as what it still is.
- *
- * WHAT IT CHANGES IN THE RUNNING STACK, AND WHAT IT DOES NOT
  *
  * gethostname() answers the new name at once, and so does the DHCP client's
  * option 12 on its next request: NX_DHCP was handed the configuration's own
  * buffer rather than a copy.
  *
- * The mDNS responder is NOT renamed. It claimed <name>.local at start-up, and
+ * The mDNS responder is not renamed. It claimed <name>.local at start-up, and
  * claiming a new one means withdrawing the old record and probing for the new
  * one on every interface. Nothing here does that, so a machine that answers
  * .local goes on answering to the label it started with until the stack is
- * restarted, and this command says so rather than leaving it to be discovered.
+ * restarted, and this command says so.
  *
- * WITH THE NETWORK DOWN it still works, and is the normal way to name a machine
+ * With the network down it still works, and is the normal way to name a machine
  * before its first boot with an interface: the files are written, nothing is
  * running to be told, and the next start-up reads them.
  *
- * THE NAME IS CHECKED, by the same rule the configuration uses
+ * The name is checked by the same rule the configuration uses
  * (ami_config_hostname_valid): RFC 952 as RFC 1123 2.1 relaxes it, so letters,
  * digits and hyphens, no leading or trailing hyphen, dot-separated labels of at
- * most 63 characters. A name that would be refused by the config parser is
- * refused here rather than written to a file that then fails to load.
+ * most 63 characters. A name that would be refused by the configuration parser
+ * is refused here rather than written to a file that then fails to load.
  *
- * ROADSHOW HAS NO COMMAND OF THIS NAME. Its 26 C: commands were read out of the
- * shipped 1.13 archive and there is none, and RoadshowControl's settable
- * variables are all protocol tuning; the local name there comes from
- * DEVS:Internet/hosts and the only command-line way to assert one is
+ * Roadshow has no command of this name. Its 26 C: commands were read out of the
+ * shipped 1.13 archive and there is none. RoadshowControl's settable variables
+ * are all protocol tuning, the local name there comes from
+ * DEVS:Internet/hosts, and the only command-line way to assert one is
  * ConfigureNetInterface's ID= keyword, which tells the DHCP server what to call
- * you and does not name the machine. So the surface here is the Unix one -- the
- * name as the argument, no argument to report -- because that is what somebody
- * typing `hostname` expects, and there is nothing to be compatible with.
+ * the machine and does not name it. So the surface here is the Unix one -- the
+ * name as the argument, no argument to report -- and there is nothing to be
+ * compatible with.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -108,7 +102,8 @@ static BOOL running_name(char *out, ULONG outlen, UWORD *source)
         return FALSE;
 
     /* nss_HostSource is zero on a library too old to have it, which is
-       AMI_HOSTNAME_NONE and reads as "not stated" below, not as a guess. */
+       AMI_HOSTNAME_NONE. say_source() then reports the name as set by nothing,
+       rather than guessing at a source. */
     if (tool_netstatus_system(&sys))
         *source = (UWORD)sys.nss_HostSource;
 
@@ -116,7 +111,7 @@ static BOOL running_name(char *out, ULONG outlen, UWORD *source)
 }
 
 /*
- * The name the FILES say, for a machine with no stack running. The same chain
+ * The name the files say, for a machine with no stack running. The same chain
  * ami_config_load() runs at start-up, minus DHCP, which has no lease to have
  * come from.
  */
@@ -148,9 +143,8 @@ static VOID say_source(UWORD source, const char *name)
      * No source means nothing configured one, so the stack named the machine
      * after its card's hardware address (ami_ns_name_after_card()), and the
      * bare "amiga" is what that falls back to when no card would give one.
-     * The two are worth separating: the first is a name of this machine's
-     * own, the second is the name every other unnamed machine also has, and
-     * the reader needs to know which they are looking at.
+     * The two are separated: the first is a name of this machine's own, the
+     * second is the name every other unnamed machine also has.
      *
      * ShowNetStatus prints "(derived)" for the same case and this says more,
      * because here it is the answer rather than a footnote.

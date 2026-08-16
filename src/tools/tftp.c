@@ -27,7 +27,7 @@
  *
  * Transfer identifiers: the request goes to port 69, but the answer comes from
  * a different port the server picked, and every later packet of the transfer
- * belongs to that port alone. The first reply fixes the peer; anything
+ * belongs to that port alone. The first reply fixes the peer. Anything
  * arriving afterwards from elsewhere is sent an ERROR and otherwise ignored
  * (RFC 1350 section 4). That is how one server runs two transfers at once.
  *
@@ -372,7 +372,7 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
 
         /*
          * A block already dealt with, whose acknowledgement was lost. On a GET
-         * it is acknowledged again without advancing; advancing is the
+         * it is acknowledged again without advancing. Advancing is the
          * "sorcerer's apprentice" bug, which doubles every packet on the wire
          * for the rest of the transfer. On a PUT an old ACK is ignored.
          */
