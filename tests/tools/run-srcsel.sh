@@ -32,11 +32,24 @@
 #
 #   Three destinations and three different answers: a global on this node's own
 #   prefix takes the global source, a link-local destination takes the
-#   link-local, and ::1 takes ::1.  Getting the same address for all three is
-#   what a first-match walk over the address list does, and is the defect.
+#   link-local, and ::1 takes ::1.  The fourth is the refusal: a global on a
+#   prefix that is not on-link, with no default router, has no outgoing
+#   interface and therefore no source.
 #
-#   The fourth is the refusal: a global on a prefix that is not on-link, with
-#   no default router, has no outgoing interface and therefore no source.
+#   WHAT THIS ARM DOES NOT SEPARATE, said plainly.  The guest has one interface
+#   with one link-local and one global on it, and in that configuration the
+#   routine this replaced answers all four the same way -- every rule agrees
+#   when there is nothing for them to disagree about.  So this is a wiring and
+#   regression gate, not a rule gate: the rules are separated in
+#   tests/ipv6/host/test_ipv6_srcsel_host.c, which can build the address tables
+#   that force them apart, and a lab guest cannot.
+#
+#   It does go red.  Verified 2026-08-16 by building bsdsocket.library with the
+#   comparator neutralised, so the selection returns the first candidate: 9 of
+#   the 10 v6 keys FAIL and the harness exits 1.  A second global-scope address
+#   on the guest -- a ULA beside the global -- would let this arm separate Rule
+#   6 as well, which is the one docs/CONFORMANCE.md names; the interface file
+#   carries one ADDRESS6 and that is what stops it today.
 #
 # WHAT IT DOES NOT PROVE.  The case the source connect exists for is two
 # interfaces, source on one, route out of the other, and the guest here
