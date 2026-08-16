@@ -12,8 +12,9 @@
 # -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
 # so on a headless box, which the Amiga lab machine is, the run ends with
 # "fs-uae exited early after 1s" and no results at all.  Amiberry runs
-# genuinely headless.  Same block tests/ipv6/run-socket.sh carries, and
-# the same flag.
+# genuinely headless.  The flag survives here because this harness is
+# UNWIRED; the two that CI runs dropped it with the branch it selected,
+# both of which ran Amiberry.
 #
 # ONE BOOT PER SCRIPT FILE.  Every case in the file runs inside a single
 # emulator run, because a boot is the expensive part and the host is shared.  Cases are independent, each opens its own socket and each uses a
