@@ -265,7 +265,7 @@ UINT        i;
     }
 #endif /* NX_DISABLE_PACKET_CHAIN */
 
-    /* One, two or three bytes can be left over.  The odd byte is zero padded. */
+    /* One, two or three bytes can be left.  The odd byte is zero padded. */
     if (data_length)
     {
 

@@ -83,7 +83,7 @@ UINT        ok;
 
     ip =  packet -> nx_packet_prepend_ptr;
 
-    /* Shorter than an IPv4 header: nothing to check, and the stack rejects it. */
+    /* Shorter than an IPv4 header: nothing to check, the stack rejects it. */
     if (packet -> nx_packet_length < 20UL)
     {
         n68k_rx_verify_stats.skip_short++;

@@ -56,7 +56,7 @@ static char ami_rx_port_name[]  = "AMITCP";
 
 /*
  * The AmiTCP keyword list and its order. The enum has to match.
- * "ROUTE is currently not implemented" is the AmiTCP comment on its own line 95.
+ * "ROUTE is currently not implemented" is the AmiTCP comment on its line 95.
  */
 static const char ami_rx_keywords[] = "Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL";
 

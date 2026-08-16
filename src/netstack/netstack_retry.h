@@ -4,8 +4,8 @@
  * The DNS client in NetX Duo used to own this. It took the caller's timeout as
  * a per-query wait and spent it NX_DNS_MAX_RETRIES times over every server,
  * doubling between rounds, with its mutex held throughout. That is why one
- * gethostbyname() against unreachable servers blocked for minutes and could not
- * be interrupted. NX_DNS_MAX_RETRIES is 1 in port/netxduo-amiga/inc/nx_user.h
+ * gethostbyname() against unreachable servers blocked for minutes with no way
+ * to interrupt it. NX_DNS_MAX_RETRIES is 1 in port/netxduo-amiga/inc/nx_user.h
  * now, so a call into the DNS client is one round, and the loop below decides
  * what happens between rounds.
  *
@@ -42,7 +42,7 @@ typedef AmiNetAskResult (*AmiNetAskFn)(VOID *arg, ULONG wait_ticks);
 typedef enum
 {
     AMI_NET_LADDER_ANSWERED = 0,
-    AMI_NET_LADDER_REFUSED,     /* a server answered; the name is not there  */
+    AMI_NET_LADDER_REFUSED,     /* a server answered, the name is not there  */
     AMI_NET_LADDER_SILENT,      /* the budget ran out with nobody answering  */
     AMI_NET_LADDER_ABORTED      /* give_up() said so                         */
 } AmiNetLadderResult;

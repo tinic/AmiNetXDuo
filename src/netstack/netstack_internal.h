@@ -157,7 +157,7 @@
 #define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * Only for the case where the address-arrival semaphore could not be created.
+ * Only for the case where the address-arrival semaphore was not created.
  * ami_ns_wait_for_address() then has nothing to be woken by and has to look.
  * Each look walks every interface through nx_ip_interface_address_get(), which
  * takes the IP protection mutex. So the interval is set well clear of the IP
@@ -188,7 +188,7 @@ struct AmiNetStack
     AmiSana2If         *ns_Iface[AMI_CFG_MAX_INTERFACES];
 
     /* MDNS= for each interface, by NX interface index rather than by
-       config index: ns_Iface[] is filled in open order and an
+       configuration index: ns_Iface[] is filled in open order and an
        interface that fails to open takes no slot, so the two are not
        the same number. */
     BOOL                ns_IfaceMdns[AMI_CFG_MAX_INTERFACES];
@@ -200,10 +200,10 @@ struct AmiNetStack
        twice. */
     BOOL                ns_IfaceMdnsSvc[AMI_CFG_MAX_INTERFACES];
 
-    /* Which config slot each opened interface came from.  ns_Iface[]
-       is in open order, so this is the only mapping back: an
-       interface that failed to open advanced the config index and
-       not the NX one. */
+    /* Which configuration slot each opened interface came from.
+       ns_Iface[] is in open order, so this is the only mapping back:
+       an interface that failed to open advanced the configuration
+       index and not the NX one. */
     UWORD               ns_IfaceCfg[AMI_CFG_MAX_INTERFACES];
     UWORD               ns_IfaceCount;
 
@@ -310,7 +310,7 @@ struct AmiNetStack
 #ifdef AMINETXDUO_MDNS
     /*
      * The responder, its thread stack and its two caches. Sized in
-     * netstack_mdns.c; both caches are inline for the reason ns_DnsCache is,
+     * netstack_mdns.c.  Both caches are inline for the reason ns_DnsCache is,
      * and longword-aligned because the module lays resource records out from
      * both ends of the buffer and m68k gives a UCHAR array no alignment.
      */
@@ -451,7 +451,7 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns);
 LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
-/* The browse is public to bsdsocket.library; see <aminetxduo/netstack.h>. */
+/* The browse is public to bsdsocket.library.  See <aminetxduo/netstack.h>. */
 #endif
 
 /* ------------------------------------------------------------ AMITCP port,

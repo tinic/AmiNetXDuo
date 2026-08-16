@@ -16,7 +16,7 @@
  *   AUTO        Link-local, plus RFC 4862 stateless autoconfiguration: the
  *               stack sends a router solicitation, and a prefix from any
  *               router advertisement that comes back becomes a global
- *               address. The default when CONFIGURE6 is absent; on a link
+ *               address. The default when CONFIGURE6 is absent.  On a link
  *               with no IPv6 router it costs three ICMPv6 packets and behaves
  *               like LINK-LOCAL.
  *
@@ -162,7 +162,7 @@ static VOID ami_ns6_log_tentative(const char *what, const ULONG addr[4],
  * log line.
  *
  * So the line is printed from here instead, on the IP thread, when NetX Duo
- * has the answer. That is more than the wait could see: an address a router
+ * has the answer. That is more than the wait ever saw: an address a router
  * hands out through stateless autoconfiguration arrives long after bring-up
  * has returned, and went unreported entirely.
  */

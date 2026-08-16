@@ -1,8 +1,8 @@
 /*
  * AmiNetXDuo, name resolution.
  *
- * DEVS:Internet/hosts wins over the network, as in any BSD resolver; only then
- * does the query go to NetX Duo's addons/dns. The DNS client creates its own
+ * DEVS:Internet/hosts wins over the network, as in any BSD resolver.  Only
+ * then does the query go to addons/dns. The DNS client creates its own
  * packet pool (NX_DNS_CLIENT_USER_CREATE_PACKET_POOL is not defined upstream),
  * so nothing here competes with the stack pool.
  *
@@ -27,8 +27,8 @@
  * comes up routable and cannot resolve a name: there is no DHCPv6 in this
  * build and DEVS:Internet/name_resolution takes a dotted quad only.
  *
- * The advertisement arrives on the IP thread, which may not call the DNS
- * client, nxd_dns_server_add() waits on the mutex a query holds, and that
+ * The advertisement arrives on the IP thread, which must not call the DNS
+ * client: nxd_dns_server_add() waits on the mutex a query holds, and that
  * query is waiting on this thread.  So the callback records and the next
  * lookup absorbs.
  */
@@ -55,8 +55,8 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
             break;
 
     /* RFC 8106 5.1: a lifetime of zero withdraws the server.  Dropping it from
-       this array is what makes the absorb step take it out of the resolver;
-       returning here left it answering queries after the router had said to
+       this array is what makes the absorb step take it out of the resolver.
+       Returning here left it answering queries after the router had said to
        stop using it, for as long as the machine stayed up. */
     if (lifetime == 0UL)
     {
@@ -97,8 +97,8 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
  *
  * The bytes rather than the names, because the decoder for this encoding
  * belongs to the configuration (DHCP option 119 carries the same one) and
- * running it here would put a parser reached straight off the network on the
- * IP thread.
+ * running it here puts a parser reached straight off the network on the IP
+ * thread.
  */
 VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
                    UINT length, ULONG lifetime)
@@ -112,11 +112,10 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
     if (ns == NULL || domains == NULL || length == 0)
         return;
 
-    /* A list longer than this can hold is one no search list could hold
-       either; taking the front of it would be taking an arbitrary prefix of
-       somebody's domain list, so it is refused whole.  Whatever was already
-       recorded stands: an option this cannot read is not a reason to forget
-       the one that came before it. */
+    /* A list longer than this can hold is one no search list can hold either.
+       Taking the front of it takes an arbitrary prefix of a domain list, so it
+       is refused whole.  Whatever was already recorded stands: an option this
+       cannot read is not a reason to forget the one that came before it. */
     if (length > (UINT)AMI_DNSSL_MAX)
         return;
 
@@ -197,7 +196,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         /*
          * In: the DNS client first, and the configuration only if that worked.
          * ShowNetStatus, ObtainDomainNameServerList() and CheckNetConfig all
-         * report from the configuration, so the two must not disagree; the
+         * report from the configuration, so the two must not disagree.  The
          * DHCP path records its servers for the same reason, and this one
          * recorded none at all, which is the visible half of this defect.
          */
@@ -247,8 +246,9 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
                 /* What GetDefaultDomainName() reports and what a name with no
                    dot is qualified with when nothing else named a domain, the
-                   same standing DHCP option 15 is given.  A router that names
-                   several names only the first, since there is one default. */
+                   same standing DHCP option 15 is given.  When a router names
+                   several, only the first is used, because there is one
+                   default. */
                 if (r->domain[0] == '\0')
                     ami_ns_copy_name(r->domain, r->search[r->search_count - n],
                                      sizeof(r->domain));
@@ -258,18 +258,16 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 }
 
 /*
- * The same, for a caller that is about to REPORT the resolver rather than use
+ * The same, for a caller that is about to report the resolver rather than use
  * it.
  *
  * Absorbing only on the way into a lookup left a machine that had not resolved
  * anything yet describing a resolver it did not have: the advertisement had
  * arrived, the servers and the search list were recorded, and ShowNetStatus
- * printed "Name servers: none configured" beside a lookup that would have
- * worked. That is the reported symptom, one step further along than the
- * resolver itself.
+ * printed "Name servers: none configured" beside a lookup that worked.
  *
- * A caller task, not the IP thread, so the DNS client may be called from here
- * for the same reason a lookup may. The bracket is taken here rather than by
+ * A caller task, not the IP thread, so the DNS client can be called from here
+ * for the same reason a lookup can. The bracket is taken here rather than by
  * the caller because the published calls this serves are shared-library entry
  * points with no bracket of their own.
  */
@@ -314,21 +312,22 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 
 /*
  * What the lease said about naming, which nothing acted on until now: option
- * 12 was requested and reported per interface but never became the machine's
- * name, and option 15 never became its domain, so a DHCP machine had no
- * default domain at all and netstack_resolve()'s qualifying step never ran.
+ * 12 was requested and reported per interface but never became the name of the
+ * machine, and option 15 never became its domain, so a DHCP machine had no
+ * default domain at all and the qualifying step in netstack_resolve() never
+ * ran.
  *
  * The name is offered rather than assigned: a HOSTNAME in name_resolution
  * outranks it, and an option 12 that is not a host name is refused (see
  * AmiHostnameSource).
  *
- * The lease's domains are appended to the search list rather than weighed
- * against the file's. A DOMAIN= somebody wrote is still the default domain
- * GetDefaultDomainName() reports and still the first suffix tried, but it no
- * longer stops the lease being used: the machine this was reported from had
- * `domain localdomain` in its file and local.tinic.net in its lease, and only
- * the file's was ever tried, so `ssh playhouse2` did not resolve on the
- * network the lease describes.
+ * The domains from the lease are appended to the search list rather than
+ * weighed against the ones in the file. A DOMAIN= somebody wrote is still the
+ * default domain GetDefaultDomainName() reports and still the first suffix
+ * tried, but it no longer stops the lease being used: the machine this was
+ * reported from had `domain localdomain` in its file and local.tinic.net in
+ * its lease, and only the file entry was ever tried, so `ssh playhouse2` did
+ * not resolve on the network the lease describes.
  *
  * From the first interface holding a lease, not always interface 0: a machine
  * with a static interface 0 and a DHCP interface 1 has its lease on the one
@@ -380,7 +379,7 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
 
             /* Still the default domain when the file named none, which is what
                GetDefaultDomainName() reports and what SetDefaultDomainName()
-               would replace. */
+               replaces. */
             if (ns->ns_Config.resolver.domain[0] == '\0')
                 ami_ns_copy_name(ns->ns_Config.resolver.domain, text,
                                  sizeof(ns->ns_Config.resolver.domain));
@@ -417,11 +416,11 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
 #ifdef NX_DNS_CACHE_ENABLE
     /*
-     * NX_DNS_CACHE_ENABLE only compiles the code in; nx_dns_create() leaves
+     * NX_DNS_CACHE_ENABLE only compiles the code in.  nx_dns_create() leaves
      * nx_dns_cache NULL and every path checks for NULL, so without this call
      * the feature is inert. See AMI_DNS_CACHE_BYTES for the size.
      *
-     * Failure is not fatal: lookups still work, they just go to the wire.
+     * Failure is not fatal: lookups still work, and go to the wire.
      */
     status = nx_dns_cache_initialize(&ns->ns_Dns, ns->ns_DnsCache,
                                      (UINT)sizeof(ns->ns_DnsCache));
@@ -451,7 +450,8 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
     /*
      * DHCP normally supplies the servers. nx_dhcp handed them to the IP
-     * instance rather than to us, so pick them out of the lease.
+     * instance rather than to this module, so they are picked out of the
+     * lease.
      */
     if (ns->ns_DhcpStarted)
     {
@@ -528,8 +528,8 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
  *
  * Each of these is one attempt for the ladder in netstack_retry.c, which
  * decides whether there is another. They take the ThreadX bracket themselves
- * rather than sharing one across the ladder, so the caller's give_up(), an
- * exec SetSignal(), for bsdsocket.library, is asked outside it.
+ * rather than sharing one across the ladder, so the give_up() of the caller,
+ * an exec SetSignal() for bsdsocket.library, is asked outside it.
  *
  * "Nobody answered" and "answered, but not with an address" are different
  * outcomes and only the first is worth repeating. On the unicast path that
@@ -545,7 +545,7 @@ typedef struct
     const char  *name;
     ULONG        address;
     UINT         status;
-    BOOL         nocaller;      /* the ThreadX bracket could not be taken */
+    BOOL         nocaller;      /* the ThreadX bracket was not taken */
 } AmiNsNameAsk;
 
 typedef struct
@@ -564,8 +564,8 @@ typedef struct
  * Case-insensitive, as DNS is (RFC 4343). A trailing dot is accepted:
  * "amiga.local." is the fully-qualified spelling of the same name.
  *
- * The bare name "local" is not in the .local domain, it is a single label
- * with no domain, and sending it to mDNS would claim a top-level name.
+ * The bare name "local" is not in the .local domain. It is a single label with
+ * no domain, and sending it to mDNS claims a top-level name.
  */
 static BOOL ami_netstack_mdns_is_local(const char *name)
 {
@@ -697,7 +697,7 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     AmiNsNameAsk         ask;
     AmiNetLadderResult   done;
 
-    /* DEVS:Internet/hosts first, it must work with the network down. */
+    /* DEVS:Internet/hosts first: it must work with the network down. */
     entry = ami_netdb_host_by_name(name);
     if (entry != NULL)
     {
@@ -719,8 +719,8 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
      * RFC 6762 6.7 requires a name ending in ".local" to be sent to
      * 224.0.0.251 and never to a unicast DNS server. Many home routers answer
      * any name with their own NXDOMAIN-substitute search page, and some
-     * forward .local to the internet where somebody else's server answers, so
-     * the branch is exclusive: no mDNS answer means the name does not exist.
+     * forward .local to the internet where another server answers, so the
+     * branch is exclusive: no mDNS answer means the name does not exist.
      *
      * The check lives here rather than in a new command because every name an
      * AmigaOS program looks up arrives at this function, gethostbyname() and
@@ -826,8 +826,8 @@ static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
         dst[n++] = domain[i];
     }
 
-    /* A trailing dot on the domain would give "host..", and an empty domain
-       would give "host.", neither is the name the caller meant. */
+    /* A trailing dot on the domain gives "host..", and an empty domain gives
+       "host.".  Neither is the name the caller meant. */
     if (dst[n - 1] == '.')
         return FALSE;
 
@@ -861,9 +861,9 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
      * So `ping fileserver` reaches fileserver.lan.
      *
      * Only after a definite no: TIMEOUT and NOSERVER say nothing about the
-     * name, and a second query would just double the wait. ERR_STATE is worth
-     * a retry even so, because with the stack down the retry never reaches the
-     * network, it can only hit DEVS:Internet/hosts, which costs nothing.
+     * name, and a second query only doubles the wait. ERR_STATE is worth a
+     * retry even so, because with the stack down the retry never reaches the
+     * network and can only hit DEVS:Internet/hosts, which costs nothing.
      * ABORTED is the caller leaving, and must not start another lookup.
      */
     if (err != AMI_NET_ERR_NONAME && err != AMI_NET_ERR_STATE)
@@ -929,9 +929,9 @@ LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
      * RFC 6762 3, the other direction: 254.169.in-addr.arpa is reserved for
      * link-local multicast, so a reverse lookup of a 169.254/16 address must
      * not go to a unicast server.  It cannot be answered by one either,
-     * nobody is authoritative for another machine's self-assigned address,
-     * so the query only tells that server which link-local addresses this
-     * machine is talking to, and then times out.
+     * because nobody is authoritative for the self-assigned address of another
+     * machine, so the query only tells that server which link-local addresses
+     * this machine is talking to, and then times out.
      *
      * The immediate negative is also the fast answer: ShowNetStatus NAMES and
      * netstat reverse every address on screen, and on a network that fell back
@@ -981,15 +981,16 @@ LONG netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
  * aligned", and _nxde_dns_ipv6_address_by_name_get() enforces it -- an address
  * 2 mod 4 is refused with NX_PTR_ERROR before a query is built, let alone
  * sent.  On m68k nothing in the language reaches 4: __alignof__(ULONG) is 2,
- * so this struct's alignment is 2 and an instance of it on the stack lands
- * 2 mod 4 whenever the frame does.
+ * so the alignment of this struct is 2 and an instance of it on the stack
+ * lands 2 mod 4 whenever the frame does.
  *
  * That is what it did.  getaddrinfo() asks AAAA first and appends it ahead of
- * the A record, so the ordering was never the problem; the AAAA lookup was
- * refused by argument checking, the caller could not tell that apart from "the
- * name has no AAAA", and every name resolved IPv4 on a machine with a working
- * global IPv6 address.  nslookup builds its own query and never came through
- * here, which is why it could report the AAAA the resolver said did not exist.
+ * the A record, so the ordering was never the problem.  The AAAA lookup was
+ * refused by argument checking, the caller had no way to tell that apart from
+ * "the name has no AAAA", and every name resolved IPv4 on a machine with a
+ * working global IPv6 address.  nslookup builds its own query and never came
+ * through here, which is why it reported the AAAA the resolver said did not
+ * exist.
  *
  * docs/ALIGNMENT.md has the same defect twice before, in CMSG_BUFFER() and in
  * bsd_hostent_pack().
@@ -1048,21 +1049,21 @@ static LONG ami_ns_resolve6_once(const char *name, ULONG addr_out[4],
     AmiNetLadderResult done;
 
     /*
-     * DEVS:Internet/hosts is not consulted here: src/config/netdb.c parses a
-     * hosts entry's address with ami_config_parse_ip(), which only understands
-     * dotted quads, so the store cannot hold an IPv6 address. Fixing that
-     * means a netdb schema change (a second value field, or a family tag per
-     * entry) touching get{host,net}by* as well. Until then an IPv6 literal in
-     * DEVS:Internet/hosts is ignored and an IPv6-only name must be resolvable
-     * by DNS.
+     * DEVS:Internet/hosts is not consulted here: src/config/netdb.c parses the
+     * address of a hosts entry with ami_config_parse_ip(), which only
+     * understands dotted quads, so the store cannot hold an IPv6 address.
+     * Fixing that means a netdb schema change (a second value field, or a
+     * family tag per entry) touching get{host,net}by* as well. Until then an
+     * IPv6 literal in DEVS:Internet/hosts is ignored and an IPv6-only name
+     * must be resolvable by DNS.
      */
     if (ns == NULL || !ns->ns_DnsCreated)
         return AMI_NET_ERR_STATE;
 
     /*
-     * The IPv4 path routes a .local name to mDNS; this one had no test at all
+     * The IPv4 path routes a .local name to mDNS.  This one had no test at all
      * and handed it straight to the configured server.  Refused rather than
-     * routed: the vendored module's IPv6 half is not enabled in this build
+     * routed: the IPv6 half of the vendored module is not enabled in this build
      * (ami_ns_mdns_lookup() says why), so there is nothing to ask.
      */
     if (ami_netstack_mdns_is_local(name))
@@ -1156,8 +1157,9 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
 
 /*
  * Roadshow lets a program add and remove name servers while the stack is
- * running (AddDomainNameServer() and friends), and its own AddNetInterface
- * uses that to pass on the servers from a lease it obtained itself. Without
+ * running (AddDomainNameServer() and the related calls), and its own
+ * AddNetInterface uses those to pass on the servers from a lease it obtained
+ * itself. Without
  * these, that command configured an interface and then failed on the last step
  * (docs/RESEARCH.md 55).
  *
@@ -1170,18 +1172,18 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
  * AddDomainNameServer() nests: "adding the same address twice will require two
  * calls RemoveDomainNameServer() to remove it again" (autodoc). Two programs
  * can therefore share a server, and the first one to exit must not take the
- * other one's resolver with it.
+ * resolver of the other with it.
  *
  * nameserver_use[] carries the count, signed as ObtainDomainNameServerList()
  * reports it, negative for a server from DEVS:Internet/name_resolution,
  * positive for one DHCP or this call put there. Adding to a static entry keeps
- * it static and deepens it (-1 -> -2); the entry only leaves the list when the
- * count reaches zero. NetX Duo's own list does not count, so it is touched
- * only on the first add and the last remove.
+ * it static and deepens it (-1 -> -2).  The entry only leaves the list when
+ * the count reaches zero. The list in NetX Duo does not count, so it is
+ * touched only on the first add and the last remove.
  */
 
-/* A slot in use never stores 0; one that does predates the count and is the
-   file's own, as ObtainDomainNameServerList() also reads it. */
+/* A slot in use never stores 0.  One that does predates the count and belongs
+   to the file, as ObtainDomainNameServerList() also reads it. */
 static LONG ami_ns_use(LONG stored)
 {
     return (stored != 0) ? stored : -1;
@@ -1322,10 +1324,10 @@ LONG netstack_set_domain_name(const char *name)
         return AMI_NET_OK;
     }
 
-    /* Truncating a domain name silently would produce wrong lookups, so the
-       length is checked before anything is stored, writing the truncated
-       form and then reporting failure left the resolver on a domain the caller
-       was told had been refused. */
+    /* Truncating a domain name silently produces wrong lookups, so the length
+       is checked before anything is stored.  Writing the truncated form and
+       then reporting failure left the resolver on a domain the caller was told
+       had been refused. */
     for (i = 0; name[i] != '\0'; i++)
     {
         if (i + 1 >= (UWORD)sizeof(ns->ns_Config.resolver.domain))
