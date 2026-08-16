@@ -15,31 +15,31 @@
  *      down and hands its memory back rather than finding the library holding
  *      itself up until a reboot.
  *
- * STEP 1 IS NOT NEW BEHAVIOUR, IT IS THE EXISTING CONVENTION. AmiTCP's
- * api_sendbreaktotasks() signalled SIGBREAKF_CTRL_C to every task on its
- * socketBaseList, AmiTCP_NG still does, and Roadshow's manual describes this
- * command as telling "every network program currently running to let go of the
- * network resources and exit". A program written for any of those already
- * handles it, because it is the same signal the user sends with Ctrl-C.
+ * Step 1 follows the existing convention. AmiTCP's api_sendbreaktotasks()
+ * signalled SIGBREAKF_CTRL_C to every task on its socketBaseList, AmiTCP_NG
+ * still does, and Roadshow's manual describes this command as telling "every
+ * network program currently running to let go of the network resources and
+ * exit". A program written for any of those already handles it, because it is
+ * the same signal Ctrl-C sends.
  *
- * AND IT CANNOT BE MADE TO WORK. Roadshow's own documentation says why: "Unlike
- * on a Unix system, it is not possible for an Amiga program to be forced to
- * give up its network resources." A program that ignores the signal keeps its
- * sockets and keeps the library open, and the only honest thing to do is take
- * the traffic away, say which program it was, and let the shutdown finish when
- * that program eventually exits. Nothing here kills a task.
+ * The request cannot be enforced. Roadshow's own documentation says why:
+ * "Unlike on a Unix system, it is not possible for an Amiga program to be
+ * forced to give up its network resources." A program that ignores the signal
+ * keeps its sockets and keeps the library open. This command then takes the
+ * traffic away, says which program it was, and lets the shutdown finish when
+ * that program exits. Nothing here kills a task.
  *
- * STEP 2 IS OURS AND NOT ROADSHOW'S. Roadshow deactivates the interfaces only
- * once every program has let go, so a shutdown that times out there leaves the
- * network running. This one stops the traffic either way: "NetShutdown" that
- * leaves the machine on the network is the wrong answer to the question that
- * was asked, and a program that ignored the request is not a reason to keep
+ * Step 2 departs from Roadshow. Roadshow deactivates the interfaces only once
+ * every program has let go, so a shutdown that times out there leaves the
+ * network running. This one stops the traffic either way, because a shutdown
+ * that leaves the machine on the network does not answer the question that was
+ * asked, and a program that ignored the request is not a reason to keep
  * carrying its packets.
  *
- * Before this existed the command did step 2 alone, which meant `httpd`
- * serving a drawer and `nc` holding a listener were still there afterwards,
- * holding a library whose network had been taken out from under them, and the
- * stack could not be shut down at all short of a reboot.
+ * Before this existed the command did step 2 alone, which left `httpd` serving
+ * a drawer and `nc` holding a listener afterwards, holding a library whose
+ * network had been taken out from under them, with no way to shut the stack
+ * down short of a reboot.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,8 +65,7 @@ enum
 #define NSD_TIMEOUT     5UL
 
 /* How many holders to name. Past this the count is printed and the names are
-   not; a machine with more than this many network programs on it has a reader
-   who wants the number. */
+   not. */
 #define NSD_MAX_OPENERS 12
 
 static BOOL nsd_quiet;
@@ -129,7 +128,7 @@ static LONG count_up(struct Library *base)
 
 /*
  * The programs holding the library open, this one excluded. Fills the table
- * and returns how many there are, which may be more than it could list.
+ * and returns how many there are, which can be more than it could list.
  *
  * A base whose task has exited is counted: it is holding a reference that will
  * never be given back, and a shutdown that waits for it waits forever, so the
@@ -158,13 +157,14 @@ static LONG others_holding(struct Library *base, LONG *listed)
             nsd_openers.e[(*listed)++] = nsd_openers.e[i];
     }
 
-    /* nsh_Available is the true count; the table may hold fewer. */
+    /* nsh_Available is the true count. The table can hold fewer. */
     others = (LONG)nsd_openers.hdr.nsh_Available - 1;
 
     return (others > 0) ? others : 0;
 }
 
-/* "httpd, nc and 2 more", from whatever the last others_holding() listed. */
+/* Name the holders the last others_holding() listed, one to a line, then the
+   count of the ones it had no room for. */
 static VOID name_them(LONG listed, LONG total)
 {
     LONG i;
@@ -234,7 +234,7 @@ int main(int argc, char **argv)
         timeout = (given > 0) ? (ULONG)given : 0UL;
     }
 
-    /* Nothing to stop; tool_netstatus_open() will not start the stack. */
+    /* Nothing to stop. tool_netstatus_open() does not start the stack. */
     if (!tool_stack_library_running())
     {
         say("The network is not running, so there is nothing to stop.\n");
@@ -286,8 +286,8 @@ int main(int argc, char **argv)
 
                 if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
                 {
-                    /* Roadshow's third outcome, and the same words: the
-                       shutdown was already asked for and cannot be recalled. */
+                    /* Roadshow's third outcome: the shutdown was already asked
+                       for and cannot be recalled. */
                     stopped_waiting = TRUE;
                     break;
                 }
@@ -341,7 +341,7 @@ int main(int argc, char **argv)
 
     /*
      * Wait for the table to agree. The transition is synchronous, so the first
-     * look normally finds nothing left to wait for; the loop covers the case
+     * look normally finds nothing left to wait for. The loop covers the case
      * TIMEOUT is about, out of whatever is left of it.
      */
     while (!stopped_waiting && (stopped != 0 || failed != 0))
@@ -371,14 +371,14 @@ int main(int argc, char **argv)
     /* ---- 3: give the network's own reference back --------------------- */
 
     /*
-     * After the interfaces, not before: while it is held the stack cannot go
-     * down under us, and once it is given back the last CloseLibrary() takes
-     * the stack with it -- which may be the one at the bottom of this
+     * After the interfaces, not before. While the reference is held the stack
+     * cannot go down, and once it is given back the last CloseLibrary() takes
+     * the stack with it. That last close can be the one at the bottom of this
      * function.
      *
-     * A refusal is not reported. The only one is "the caller is the last
-     * reference", which means this command is about to shut the stack down by
-     * closing its own base, which is the outcome asked for.
+     * A refusal is not reported. The only refusal is that the caller is the
+     * last reference, which means this command is about to shut the stack down
+     * by closing its own base, and that is the outcome asked for.
      */
     for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
         ((ULONG *)&ctl)[w] = 0;

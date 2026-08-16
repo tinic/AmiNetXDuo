@@ -14,14 +14,14 @@
  * rather than rewritten. The checks here are the ones needing more than a
  * single line:
  *
- *   * the driver named exists on this machine, and the unit it names opens;
+ *   * the driver named exists on this machine, and the unit it names opens
  *   * the netmask is a mask at all, and the address is a host on it rather
- *     than the network or the broadcast address;
- *   * the router is on a network one of the interfaces is on;
- *   * no two interfaces claim the same card, or the same address;
+ *     than the network or the broadcast address
+ *   * the router is on a network one of the interfaces is on
+ *   * no two interfaces claim the same card, or the same address
  *   * a name server can be reached, or is at least on the far side of a
- *     default route that exists;
- *   * the netdb files parse as the columns they are meant to be.
+ *     default route that exists
+ *   * the netdb files parse as the columns they are meant to be
  *
  * Return codes: 0 when nothing was found, 5 (RETURN_WARN) when something was,
  * so a startup script can say
@@ -56,13 +56,13 @@ enum
 /* As many interface files as the drawer is scanned for. */
 #define CNC_MAX_FILES       16
 
-/* Long enough for any line in these files; longer ones are read in pieces. */
+/* Long enough for any line in these files. Longer ones are read in pieces. */
 #define CNC_LINE_MAX        200
 
 /* ---------------------------------------------------------------- output,
  *
  * QUIET suppresses the findings but not the counting, so the return code is
- * the same either way. Every printing path goes through these three;
+ * the same either way. Every printing path goes through these three, and
  * tool_printf() is not called directly below.
  */
 
@@ -71,7 +71,8 @@ static BOOL  cnc_verbose;
 static UWORD cnc_errors;
 static UWORD cnc_warnings;
 
-/* tool_printf() with the QUIET gate. Same body; there is no v-form to share. */
+/* tool_printf() with the QUIET gate. Same body, because there is no v-form to
+   share. */
 static VOID say(const char *fmt, ...)
 {
     va_list args;
@@ -199,7 +200,7 @@ static ULONG keyword_line(const char *path, const char *keyword)
 
 /*
  * A netmask is a run of ones followed by a run of zeroes and nothing else.
- * 0.0.0.0 and 255.255.255.255 both satisfy that; they are rejected elsewhere
+ * 0.0.0.0 and 255.255.255.255 both satisfy that. Both are rejected elsewhere
  * for being useless rather than for being malformed.
  */
 static BOOL mask_is_contiguous(ULONG mask)
@@ -270,9 +271,9 @@ static BOOL any_static_address(const AmiConfig *cfg)
  * right: the file names a driver that is not on this machine, or the wrong
  * unit of one that is.
  *
- * tool_explain_device() asks the hardware, it probes the unit, and unit 0
- * too when another was asked for, and prints what to do about it, so the
- * finding here only says where.
+ * tool_explain_device() asks the hardware. It probes the unit, and unit 0 too
+ * when another was asked for, and prints what to do about it, so the finding
+ * here only says where.
  */
 static VOID check_device(const char *path, const AmiIfConfig *ifc)
 {
@@ -289,7 +290,7 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
      * The probe is skipped while the network is running: the stack has the
      * driver open and a second OpenDevice() of a unit already in use fails,
      * which would report a working interface as broken. The network being up
-     * already answers whether the card opens; ShowNetStatus reports the rest.
+     * already answers whether the card opens. ShowNetStatus reports the rest.
      */
     if (where != NULL && tool_stack_library_running())
         return;
@@ -505,7 +506,7 @@ static VOID check_resolver(const AmiConfig *cfg)
 
     if (cfg->resolver.nameserver_count == 0)
     {
-        /* DHCP supplies name servers with the lease; see check_gateway(). */
+        /* DHCP supplies name servers with the lease, as check_gateway() says. */
         if (any_dynamic(cfg) || cfg->interface_count == 0)
             return;
 
@@ -595,7 +596,7 @@ static VOID check_collisions(const AmiConfig *cfg)
 
 /*
  * Interface files the stack will never look at. The parsed configuration holds
- * AMI_CFG_MAX_INTERFACES and the drawer may hold more; the rest are dropped
+ * AMI_CFG_MAX_INTERFACES and the drawer can hold more. The rest are dropped
  * silently, in alphabetical order rather than by write time.
  */
 static VOID check_drawer_size(const AmiConfig *cfg)
@@ -623,8 +624,8 @@ static VOID check_drawer_size(const AmiConfig *cfg)
 /*
  * Roadshow keeps interface files it is not to start at boot in
  * SYS:Storage/NetInterfaces, and a machine migrated from it will have them.
- * Reported as information, not as a fault: they explain "I wrote the file and
- * nothing happened".
+ * Reported as information rather than as a fault. They explain why a file
+ * written there has no effect.
  */
 static VOID check_storage_drawer(VOID)
 {
@@ -653,7 +654,7 @@ static VOID check_storage_drawer(VOID)
  * come up regardless.
  *
  * DEVS:Internet/networks is not checked: its second column is a network
- * number, which may be written short ("10", "192.168.1"), so a checker would
+ * number, which can be written short ("10", "192.168.1"), so a checker would
  * fire on correct files.
  */
 

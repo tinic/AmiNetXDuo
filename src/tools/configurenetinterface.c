@@ -11,7 +11,7 @@
  * out of it and re-reads the file, so it can only put back what the file says.
  * This changes the three numbers and touches nothing else.
  *
- * THE NAME AND THE KEYWORDS ARE ROADSHOW'S. Its ConfigureNetInterface 4.37
+ * The name and the keywords are Roadshow's. Its ConfigureNetInterface 4.37
  * carries this ReadArgs template:
  *
  *   INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,BROADCASTADDR/K,
@@ -21,28 +21,27 @@
  *
  * INTERFACE, QUIET, ADDRESS and NETMASK are taken from it unchanged, in its
  * order, so a script written for Roadshow reads the same here. The rest is
- * deliberate, and each one is a decision rather than an omission:
+ * deliberate:
  *
- *   GATEWAY/K          OURS, Roadshow has no such keyword. Roadshow sets the
- *                      default route from CONFIGURE=DHCP or from AddNetRoute
+ *   GATEWAY/K          Ours. Roadshow has no such keyword and sets the default
+ *                      route from CONFIGURE=DHCP or from AddNetRoute
  *                      DEFAULTGATEWAY. It is here because the gateway is the
  *                      third number a person re-addressing a machine has to
  *                      change, and because NetX Duo refuses a gateway that is
- *                      not on an interface's own subnet -- which is exactly
- *                      what the ADDRESS in the same call has just decided, so
- *                      the two belong in one call and in this order.
+ *                      not on an interface's own subnet, which is what the
+ *                      ADDRESS in the same call has just decided. The two
+ *                      belong in one call and in this order.
  *
- *   MDNS/K             OURS, Roadshow has no such keyword and no mDNS at all.
+ *   MDNS/K             Ours. Roadshow has no such keyword and no mDNS at all.
  *                      MDNS= is what DEVS:NetInterfaces/<name> is written with,
  *                      so it is the same word here, taking the same YES and NO.
  *                      It is on this command because answering .local is a
- *                      property of one interface that this is the command for
- *                      changing while the machine runs, and because it was
- *                      until now the one thing in an interface file that could
- *                      be asked for only at boot.
+ *                      property of one interface, and because it was until now
+ *                      the one thing in an interface file that could be asked
+ *                      for only at boot.
  *
  *   BROADCASTADDR      NetX Duo derives the broadcast address from the address
- *                      and the mask and has no separate one to set;
+ *                      and the mask and has no separate one to set.
  *                      IFQ_BroadcastAddress would contradict anything accepted
  *                      here. ConfigureInterfaceTagList() already refuses
  *                      IFC_BroadcastAddress for this reason.
@@ -54,49 +53,48 @@
  *   METRIC             there is no routing protocol in this stack to spend a
  *                      cost, and IFQ_Metric answers zero for every interface.
  *   MTU                ConfigureInterfaceTagList()'s IFC_LimitMTU does this and
- *                      nothing drives it yet; a keyword here would be a second
+ *                      nothing drives it yet. A keyword here would be a second
  *                      way in before the first one has a test.
  *   ONLINE/OFFLINE     Online and Offline are commands of their own here, with
  *   UP/DOWN            their own regression test over the whole of that
  *                      surface (tests/tools/run-onoff.sh). Two ways to switch
  *                      an interface would be two things to keep agreeing.
  *   DEBUG, COMPLETE    DEBUG prints DHCP progress, which NetTrace and
- *                      ShowNetStatus already answer; COMPLETE re-reads the
+ *                      ShowNetStatus already answer. COMPLETE re-reads the
  *                      static route file, and this stack reads all of
  *                      DEVS:NetInterfaces and DEVS:Internet at startup and
  *                      defers nothing, so there is no first time left to cause.
  *   LEASE, ID          LEASE asks the server for a lease of a stated length
- *   DHCPUNICAST        and ID names the client to it; both are things to put in
- *                      the request, and NetX Duo's client builds the request
- *                      from its own configuration rather than per call.
+ *   DHCPUNICAST        and ID names the client to it. Both are things to put
+ *                      in the request, and NetX Duo's client builds the
+ *                      request from its own configuration rather than per call.
  *                      DHCPUNICAST is for servers that must answer by unicast,
  *                      which is a property of a network and belongs in
  *                      DEVS:NetInterfaces beside CONFIGURE=DHCP, not in a
  *                      command run by hand.
  *
- * CONFIGURE, RELEASE and TIMEOUT ARE TAKEN, and are the DHCP half of this
- * command. That is Roadshow's answer to "where does releasing a lease live",
- * and it is the right one: a lease is a property of an interface, this is the
- * command that changes an interface's properties, and a DHCP command of its own
- * would be a second place to name an interface and a second thing to keep
- * agreeing with this one.
+ * CONFIGURE, RELEASE and TIMEOUT are taken, and are the DHCP half of this
+ * command. That is Roadshow's answer to where releasing a lease lives. A lease
+ * is a property of an interface, this is the command that changes an
+ * interface's properties, and a DHCP command of its own would be a second
+ * place to name an interface and a second thing to keep agreeing with this one.
  *
  *   CONFIGURE=DHCP     make this interface have a current lease. On an
- *                      interface that has none -- because it is static, or
- *                      because RELEASE dropped it -- that is a fresh
- *                      allocation. On one that is already bound it is a
- *                      renewal: RFC 2131 4.4.5's renewing state entered before
- *                      the timer would have entered it, which keeps the
- *                      address and asks the server that granted it for more
- *                      time. Both are waited for, up to TIMEOUT.
+ *                      interface that has none, because it is static or
+ *                      because RELEASE dropped it, that is a fresh allocation.
+ *                      On one that is already bound it is a renewal: RFC 2131
+ *                      4.4.5's renewing state entered before the timer would
+ *                      have entered it, which keeps the address and asks the
+ *                      server that granted it for more time. Both are waited
+ *                      for, up to TIMEOUT.
  *
- *                      Roadshow has no renewal at all -- its client extends
+ *                      Roadshow has no renewal at all. Its client extends
  *                      leases by itself and its documentation says the way to
  *                      stop it is to change the address or mark the interface
- *                      down -- so the renewal half is ours. It is on this
- *                      keyword rather than on a new one because "make this
- *                      interface have a current lease" is one thing to ask
- *                      for, and which of the two it takes is a fact about the
+ *                      down, so the renewal half is ours. It is on this
+ *                      keyword rather than on a new one because making an
+ *                      interface hold a current lease is one thing to ask for,
+ *                      and which of the two it takes is a fact about the
  *                      interface rather than about the request. The command
  *                      says which one it did.
  *
@@ -107,30 +105,29 @@
  *                      rather than something to ask for by hand.
  *
  *   RELEASE            DHCPRELEASE to the server: the address is free again as
- *   RELEASEADDRESS     far as it is concerned. Both spellings, as Roadshow has
- *                      them. "you can only release what was previously
- *                      allocated", so an interface with no lease is refused
- *                      rather than quietly doing nothing.
+ *   RELEASEADDRESS     far as the server is concerned. Both spellings, as
+ *                      Roadshow has them. Roadshow's documentation says "you
+ *                      can only release what was previously allocated", so an
+ *                      interface with no lease is refused rather than quietly
+ *                      doing nothing.
  *
- *                      The interface KEEPS the address until something takes
+ *                      The interface keeps the address until something takes
  *                      it away. NetX Duo's client does not unconfigure the
  *                      interface on release and this does not either: an
  *                      interface that lost its address the instant the lease
  *                      was dropped would lose the route the DHCPRELEASE itself
  *                      goes out on. `ConfigureNetInterface eth0 ADDRESS ...`
- *                      is how the address is then changed, which is the whole
- *                      reason the two halves are one command.
+ *                      is how the address is then changed, and that is why the
+ *                      two halves are one command.
  *
  *   TIMEOUT            seconds to wait for CONFIGURE=DHCP. Roadshow's default
- *                      is 60 and its floor is 10; both are kept.
+ *                      is 60 and its floor is 10. Both are kept.
  *
- * A KNOWN DEFECT NEXT DOOR, which this does not fix and does not depend on: a
+ * A known defect next door, which this does not fix and does not depend on: a
  * lease survives Offline followed by Online with its timer still running, so a
  * machine carried to another network keeps an address that network never gave
- * it. RELEASE followed by CONFIGURE=DHCP is the way round it by hand, which is
- * part of why these are worth having, but the two are separate pieces of work.
- *
- * WHAT IT CHANGES, AND WHAT IT DOES NOT
+ * it. RELEASE followed by CONFIGURE=DHCP is the way round it by hand. Fixing
+ * the defect itself is separate work.
  *
  * ADDRESS and NETMASK are the interface's, and are applied together in one
  * call even when only one of them is given: NetX Duo takes both at once, and an
@@ -138,52 +135,52 @@
  * attached route follows the pair, so `netstat -r` changes with them.
  *
  * GATEWAY is the machine's default route and not the interface's. NetX Duo
- * keeps one gateway for the whole stack, so setting it here is the same
- * gateway AddNetRoute DEFAULTGATEWAY sets; it is offered here because the
+ * keeps one gateway for the whole stack, so setting it here sets the same
+ * gateway AddNetRoute DEFAULTGATEWAY sets. It is offered here because the
  * gateway is the third number a person re-addressing a machine has to change,
  * and because a gateway is refused unless it is on an interface's own subnet,
- * which is exactly what the ADDRESS in the same call has just decided.
- * GATEWAY NONE clears it.
+ * which is what the ADDRESS in the same call has just decided. GATEWAY NONE
+ * clears it.
  *
- * MDNS IS THE ONE THING HERE THAT IS NOT AN ADDRESS. MDNS=YES makes this
- * interface join 224.0.0.251 and probe for <HOSTNAME>.local on it, which takes
- * about a second and is not waited for; MDNS=NO sends the RFC 6762 10.1
- * goodbye, so every cache on the link drops the name at once rather than in two
- * minutes, and leaves the group. ShowNetStatus reports which of the two an
- * interface is in, and reports what is running rather than what was asked for.
+ * MDNS=YES makes this interface join 224.0.0.251 and probe for
+ * <HOSTNAME>.local on it, which takes about a second and is not waited for.
+ * MDNS=NO sends the RFC 6762 10.1 goodbye, so every cache on the link drops the
+ * name at once rather than in two minutes, and leaves the group. ShowNetStatus
+ * reports which of the two an interface is in, and reports what is running
+ * rather than what was asked for.
  *
  * It combines with the rest: `ADDRESS 192.168.1.5/24 MDNS=YES` re-addresses the
  * machine and announces the new address under the same name, in that order,
  * because the responder takes the address the interface has when it is enabled
  * and follows it afterwards.
  *
- * NOTHING HERE IS PERSISTENT. This is the live interface, as Online, Offline
+ * Nothing here is persistent. This is the live interface, as Online, Offline
  * and AddNetRoute are. DEVS:NetInterfaces/<name> is not rewritten, so the next
- * boot brings the interface up the way that file says; NetSetup is what edits
+ * boot brings the interface up the way that file says. NetSetup is what edits
  * the file. A machine that must come up re-addressed needs both.
  *
- * AN INTERFACE ON DHCP IS TOLD SO. The client goes on running, and the next
+ * An interface on DHCP is told so. The client goes on running, and the next
  * lease it takes writes the address, the mask and the gateway again over
- * whatever was set here. That is not refused -- re-addressing a DHCP interface
- * for a few minutes is a real thing to want -- but it is said, because an
- * address that reverts on its own with nothing having reported an error is the
- * worst way to find out.
+ * whatever was set here. That is not refused, because re-addressing a DHCP
+ * interface for a few minutes is a real thing to want, but it is said, because
+ * the address otherwise reverts on its own with nothing having reported an
+ * error.
  *
- * ADDRESS TAKES A PREFIX LENGTH. `ADDRESS 192.168.1.5/24` is the address and
- * the mask in one argument, which is how a person writes it; NETMASK is the
- * other spelling and the two may not contradict each other.
+ * ADDRESS takes a prefix length. `ADDRESS 192.168.1.5/24` is the address and
+ * the mask in one argument, which is how a person writes it. NETMASK is the
+ * other spelling and the two must not contradict each other.
  *
- * ADDRESSES ONLY, NOT NAMES, which is where this deviates from
+ * Addresses only, and not names, which is where this deviates from
  * ConfigureInterfaceTagList()'s IFC_Address ("a host name to be resolved or an
  * IP address in dotted-decimal notation"). A machine being re-addressed is one
- * whose resolver is about to stop working, or has already stopped: the name
- * server is usually reached through the interface being changed. Resolving here
- * would make the command depend on the network it is repairing.
+ * whose resolver is about to stop working, or has already stopped, because the
+ * name server is usually reached through the interface being changed. Resolving
+ * here would make the command depend on the network it is repairing.
  *
- * IPv4 ONLY. An IPv6 address on an interface is not one number that replaces
- * another -- an interface holds several, always including its link-local one --
- * so there is nothing here for this command's shape to change. AddNetRoute
- * takes the IPv6 routes.
+ * IPv4 only. An IPv6 address on an interface is not one number that replaces
+ * another, because an interface holds several, always including its link-local
+ * one, so there is nothing here for this command's shape to change.
+ * AddNetRoute takes the IPv6 routes.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -285,7 +282,7 @@ static BOOL same_name(const char *a, const char *b)
 /*
  * The running stack's own list, which is the only one that counts: this command
  * links no netstack, so tool_find_interface() would read an empty one. -2 says
- * the library would not answer, which needs a different message from -1, a name
+ * the library did not answer, which needs a different message from -1, a name
  * that is not there.
  */
 static LONG find_index(struct Library *base, const char *name)
@@ -369,7 +366,7 @@ static BOOL dhcp_bound(struct Library *base, LONG index)
  *
  * The RAW state is what is watched, not nsd_State: BOUND, RENEWING and
  * REBINDING are all NETSTATUS_DHCP_BOUND, so a renewal asked for on a bound
- * interface would be "finished" before the request had left the machine. Here
+ * interface would look finished before the request had left the machine. Here
  * the wait ends when the client is back at plain BOUND, which is the state it
  * only re-enters on an ACK.
  */
@@ -384,7 +381,7 @@ static BOOL wait_for_lease(struct Library *base, LONG index, ULONG seconds)
         if (d != NULL && d->nsd_RawState == NETSTATUS_DHCPRAW_BOUND)
             return TRUE;
 
-        if (tool_delay_ticks(25))       /* half a second; Ctrl-C ends it */
+        if (tool_delay_ticks(25))       /* half a second. Ctrl-C ends it */
             return FALSE;
     }
 
@@ -592,8 +589,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The same two words DEVS:NetInterfaces takes, and no others: the file's
-     * parser accepts a wider set of spellings for a boolean and a command that
+     * The same two words DEVS:NetInterfaces takes, and no others. The file's
+     * parser accepts a wider set of spellings for a boolean. A command that
      * accepted one the file did not would teach a spelling that fails at the
      * next boot.
      */
@@ -622,8 +619,9 @@ int main(int argc, char **argv)
         const char *c = (const char *)args[ARG_CONFIGURE];
 
         /* Roadshow's other two values are AUTO and FASTAUTO, which are
-           link-local ZeroConf. Named in the refusal so that somebody who typed
-           one is told what this stack calls it rather than "bad argument". */
+           link-local ZeroConf. Named in the refusal, so that somebody who typed
+           one is told what this stack calls it rather than only that the value
+           is wrong. */
         if (tool_stricmp(c, "DHCP") != 0)
         {
             tool_error("CONFIGURE takes DHCP and nothing else. A link-local "
@@ -676,8 +674,8 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /* Opening the library would start the stack, and starting a network in
-       order to re-address an interface in it is not what was asked for. */
+    /* Opening the library would start the stack. Starting a network to
+       re-address an interface in it is not what was asked for. */
     if (!tool_stack_library_running())
     {
         say("The network is not running, so there is no interface to "
@@ -747,10 +745,10 @@ int main(int argc, char **argv)
         ULONG op       = renewing ? NETCTRL_DHCP_RENEW : NETCTRL_DHCP_START;
 
         /*
-         * "Combine CONFIGURE=DHCP with ADDRESS=x.x.x.x to request a specific
-         * address", which is Roadshow's own wording. A wish and not a demand:
-         * DISCOVER is still sent, so a server that disagrees offers something
-         * else rather than answering NAK.
+         * Roadshow's own wording is "Combine CONFIGURE=DHCP with
+         * ADDRESS=x.x.x.x to request a specific address". It is a request and
+         * not a demand: DISCOVER is still sent, so a server that disagrees
+         * offers something else rather than answering NAK.
          */
         if (control(base, op, index, address, 0, 0,
                     (have_address && !renewing) ? NETCTRL_F_ADDRESS : 0UL,
@@ -785,9 +783,9 @@ int main(int argc, char **argv)
             ami_config_format_ip((d != NULL) ? d->nsd_Server : 0UL,
                                  server, sizeof(server));
 
-            /* Which of the two it was is said, because "renewed" on a machine
-               that had no lease and "allocated" on one that did are both
-               reports of something other than what happened. */
+            /* Which of the two it was is said, because a renewal reported on a
+               machine that had no lease, and a new lease reported on one that
+               did, are both reports of something other than what happened. */
             say("%s: %s %s, from %s\n", (LONG)name,
                 (LONG)(renewing ? "lease renewed," : "lease taken,"),
                 (LONG)text, (LONG)server);
@@ -795,10 +793,10 @@ int main(int argc, char **argv)
     }
 
     /*
-     * With CONFIGURE=DHCP an ADDRESS is the address that was ASKED FOR, and it
-     * has already been asked for above; writing it on the interface here would
-     * overwrite whatever the server actually granted with what this machine
-     * would have preferred.
+     * With CONFIGURE=DHCP an ADDRESS is the address that was asked for, and it
+     * has already been asked for above. Writing it on the interface here would
+     * overwrite whatever the server granted with what this machine would have
+     * preferred.
      */
     if (!want_dhcp && (have_address || have_netmask || have_gateway))
     {
@@ -885,7 +883,7 @@ int main(int argc, char **argv)
         }
 
         /* Probing is three packets 250 ms apart and this does not wait for it,
-           so the line says what was started rather than what was claimed;
+           so the line says what was started rather than what was claimed.
            ShowNetStatus is where the name appears once it is this machine's. */
         if (mdns_on)
             say("%s: answering .local here, and the name is claimed now\n",

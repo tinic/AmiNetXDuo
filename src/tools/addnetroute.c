@@ -26,17 +26,18 @@
  *
  *   DESTINATION / HOSTDESTINATION / NETDESTINATION with GATEWAY add an entry
  *   to the static routing table, which NetX Duo consults before the gateway
- *   and matches longest prefix first, so a route can override the default for
- *   part of the address space, what a subnet behind a second router needs,
- *   and not expressible as a gateway. NETSTATUS_SYS_ROUTING says which build
- *   this is, and is asked before anything is attempted so the command refuses
- *   rather than quietly doing nothing.
+ *   and matches longest prefix first. A route can therefore override the
+ *   default for part of the address space, which is what a subnet behind a
+ *   second router needs and what a gateway cannot express.
+ *   NETSTATUS_SYS_ROUTING says which build this is, and is asked before
+ *   anything is attempted so the command refuses rather than quietly doing
+ *   nothing.
  *
  * The GATEWAY must be an address on one of this machine's own subnets. NetX
  * Duo derives the outgoing interface from the next hop
  * (nx_ip_static_route_add.c), so a next hop it cannot reach directly is
- * rejected rather than stored; the command says so instead of printing
- * "invalid argument".
+ * rejected rather than stored. The command says so instead of passing on a
+ * bare errno.
  *
  * Netmasks are inferred, because the template has nowhere to write one:
  *
@@ -51,13 +52,13 @@
  * that. It is not a new keyword, so the template is still Roadshow's.
  *
  * IPv6 uses the same keywords and a different pair of mechanisms, because NetX
- * Duo has no IPv6 equivalent of the static routing table, nothing anywhere in
+ * Duo has no IPv6 equivalent of the static routing table. Nothing anywhere in
  * it maps a prefix to a next hop. _nx_ipv6_packet_send() asks two lists and
  * nothing else, so those two are what these commands write:
  *
  *   DEFAULTGATEWAY fe80::1%eth0    the default-router list. Everything with
  *                                  nowhere better to go is handed to a router
- *                                  on it. Unlike IPv4 there may be more than
+ *                                  on it. Unlike IPv4 there can be more than
  *                                  one, and each is per interface, which is
  *                                  why a link-local next hop needs the zone
  *                                  after the '%': fe80::/64 exists on every
@@ -73,9 +74,9 @@
  *                                  put a per-prefix next hop, and a command
  *                                  that accepted one would be storing nothing.
  *
- * An IPv6 destination needs its prefix length written in; there is no
- * equivalent of "the octets that are not zero" to infer one from, and a bare
- * address is a single machine (/128).
+ * An IPv6 destination needs its prefix length written in. There is no
+ * equivalent of the non-zero-octet rule to infer one from, and a bare address
+ * is a single machine (/128).
  *
  * Both halves flush the IPv6 destination cache, which remembers where each
  * destination went last time and would otherwise keep sending packets the old
@@ -85,13 +86,13 @@
  * the entry whose destination matches, with the netmask that entry really has,
  * so a route added with any mask can be removed by naming where it goes.
  *
- * A destination may be a name as well as an address. DEVS:Internet/hosts is
- * consulted first because it needs no network and cannot time out; the running
+ * A destination can be a name as well as an address. DEVS:Internet/hosts is
+ * consulted first because it needs no network and cannot time out. The running
  * stack's resolver is asked only if that fails.
  *
  * Nothing here is persistent: this is the live table, as Online and Offline
- * are the live interface state. A route that should survive a reboot belongs
- * in S:User-Startup next to the AddNetInterface line.
+ * are the live interface state. A route that must survive a reboot belongs in
+ * S:User-Startup next to the AddNetInterface line.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -153,7 +154,7 @@ enum
  * AMINETXDUO_IPV6 build of nx_user.h, and this command is one binary for
  * either library, so these are its own. Comfortably above what the shipped
  * library can report (prefix list 4, routers 2, three addresses per
- * interface); a stack with more says so through nsh_Available.
+ * interface). A stack with more says so through nsh_Available.
  */
 #define NR_MAX_ROUTES6      16
 #define NR_MAX_ADDRS6       12
@@ -290,9 +291,8 @@ typedef struct NrAddr6
 
 /*
  * A colon is the whole test. No host name has one, and neither has a dotted
- * quad, so a text with one is meant as an IPv6 literal and nothing else,
- * which is what lets the IPv4 half below stay exactly as it was, including
- * when and how it refuses.
+ * quad, so a text with one is meant as an IPv6 literal and nothing else. The
+ * IPv4 half below is unchanged, including when and how it refuses.
  */
 static BOOL is_written_as_ip6(const char *text)
 {
@@ -360,8 +360,8 @@ static BOOL parse_address6(const char *text, NrAddr6 *out)
         return FALSE;
     copy[i] = '\0';
 
-    /* The zone comes after the prefix length if both are there, so it is cut
-       off first and the slash it may have moved past is re-found below. */
+    /* If both are there, the zone comes after the prefix length, so the zone is
+       cut off first and the slash it moved past is re-found below. */
     if (pct >= 0)
     {
         if (copy[pct + 1] == '\0')
@@ -472,7 +472,7 @@ static VOID format_route6(const ULONG addr[4], ULONG bits,
  * keyword instead.
  *
  * Add half only: DeleteNetRoute takes the mask out of the live table, and a
- * guess here could disagree with it.
+ * guess here can disagree with it.
  */
 static ULONG mask_for_network(ULONG addr)
 {
@@ -524,7 +524,7 @@ static VOID zero_control(NetStatusControl *ctl)
         ((ULONG *)ctl)[i] = 0;
 }
 
-/* The running stack's default gateway, or 0; *routing_out says whether the
+/* The running stack's default gateway, or 0. *routing_out says whether the
    static routing table is in this build at all. */
 static ULONG current_gateway(struct Library *base, BOOL *routing_out)
 {
@@ -577,7 +577,8 @@ static LONG find_route(struct Library *base, ULONG dest, ULONG *mask_out)
          * real route and netstat -r prints it, but it belongs to the
          * interface's address and nx_ip_static_route_delete() cannot remove
          * it, so matching one here would produce an unexplained failure from
-         * the stack instead of "that is not yours to delete".
+         * the stack instead of a message saying the route was not added by
+         * hand.
          */
         if (!(r->nsr_Flags & NETSTATUS_RT_STATIC))
             continue;
@@ -597,9 +598,9 @@ static LONG find_route(struct Library *base, ULONG dest, ULONG *mask_out)
 #ifndef TOOL_DELETE
 /*
  * TRUE when `addr` is on the network of an interface the stack has up, which a
- * next hop has to be. Checked before the call so the answer is "your router is
- * not reachable" rather than EINVAL. Add half only; nothing on the delete path
- * takes a next hop.
+ * next hop has to be. Checked before the call, so the answer names the
+ * unreachable router rather than being EINVAL. Add half only, because nothing
+ * on the delete path takes a next hop.
  */
 static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 {
@@ -610,7 +611,7 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
                              sizeof(nr_answer.iface),
                              sizeof(NetStatusInterface));
     if (n <= 0)
-        return TRUE;                /* cannot tell; assume reachable */
+        return TRUE;                /* cannot tell, so assume reachable */
 
     for (i = 0; i < n; i++)
     {
@@ -807,9 +808,9 @@ static LONG find_router6(struct Library *base, const ULONG addr[4])
 
 #ifdef TOOL_DELETE
 /*
- * The live on-link prefix `addr` falls in. With `bits` given only that exact
- * length matches; without, the first covering entry does, the table is kept
- * longest prefix first, so that is the one the stack would use.
+ * The live on-link prefix `addr` falls in. If `bits` is given, only that exact
+ * length matches. Without it the first covering entry matches, and the table
+ * is kept longest prefix first, so that is the one the stack would use.
  *
  * Delete half only: the add path lets the stack answer EEXIST rather than
  * asking first.
@@ -1221,8 +1222,8 @@ static int addnetroute_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /* DEFAULTGATEWAY wins outright; say so rather than silently ignoring the
-       destination. */
+    /* DEFAULTGATEWAY wins outright, so say so rather than silently ignoring
+       the destination. */
     if (have_default && have_dest)
         say("%s: DEFAULTGATEWAY was given, so the destination is ignored.\n",
             (LONG)tool_name);
@@ -1310,7 +1311,7 @@ static int addnetroute_main(int argc, char **argv)
                 return RETURN_ERROR;
             }
 
-            /* A non-zero last octet is a machine; anything else a network. */
+            /* A non-zero last octet is a machine, anything else a network. */
             if (!have_mask)
                 mask = mask_for_network(dest);
         }
@@ -1331,15 +1332,15 @@ static int addnetroute_main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
-        /* The destination is the network; the host bits are not ours to keep. */
+        /* The destination is the network, so the host bits are dropped. */
         dest &= mask;
 #endif
         /*
          * Not done on the delete path: there the mask is not known yet, it
          * comes out of the live table below, and masking with the zero it
-         * still holds turned every DESTINATION into 0.0.0.0, answering "there
-         * is no route to 0.0.0.0" for a route that was plainly there. Caught
-         * by tests/tools/run-livetools.sh.
+         * still holds turned every DESTINATION into 0.0.0.0. The command then
+         * reported no route to 0.0.0.0 for a route that was plainly there.
+         * Caught by tests/tools/run-livetools.sh.
          */
     }
 
@@ -1458,8 +1459,8 @@ static int addnetroute_main(int argc, char **argv)
     /* ---- a route to somewhere in particular ------------------------------ */
 
     /*
-     * Ask before doing rather than reading ENOSYS afterwards: "your gateway is
-     * wrong" and "this build cannot do it" read identically to a user.
+     * Ask before doing rather than reading ENOSYS afterwards. A wrong gateway
+     * and a build without static routing are otherwise reported the same way.
      */
     if (!routing)
     {
@@ -1525,7 +1526,7 @@ static int addnetroute_main(int argc, char **argv)
         tool_error("the route to %s was not added", (LONG)text);
 
         /* A refusal with no error number, and the route already there, is the
-           table saying so; anything else needs explain(). */
+           table saying so. Anything else needs explain(). */
         if (err != 0 || find_route(base, dest, NULL) < 0)
             explain(err, gateway);
 
