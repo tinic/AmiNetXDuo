@@ -387,11 +387,15 @@ EOF
     # The graphics card: uaegfx, which is board type 0 and therefore what a
     # gfxcard_size on its own asks for.  8 MB is a good deal more than a
     # 640x480x8 screen needs and leaves Picasso96 room for its own buffers.
-    # rtg_modes is deliberately NOT set: the default mask already carries
-    # RGBFF_CLUT, and a hand-written one that did not would take away the
-    # only format this serves.
+    # rtg_modes is the emulator's RGBFF_ mask and it is written out because a
+    # minimal config does not go through the path that fills in the default:
+    # 0x112 is RGBFF_CLUT | RGBFF_R5G6B5PC | RGBFF_R8G8B8A8, and the first of
+    # those is the only format the console serves.  A mask without bit 1 is a
+    # board that offers no palette mode and a Workbench that quietly stays on
+    # the chipset.
     [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
 gfxcard_size=8
+rtg_modes=0x112
 EOF
 
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
