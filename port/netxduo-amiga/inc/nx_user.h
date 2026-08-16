@@ -931,40 +931,62 @@
  * drawer pays nothing: it has this switch off and AMINETXDUO_IPV6 off, and
  * either alone compiles all of it out.
  *
- * And there is still no MLD in this tree.  nx_mld.h exists and is a stub that
- * declares nothing; no nx_mld_*.c exists; no Multicast Listener Report is ever
- * built or sent.  So a join registers 33:33:xx:xx:xx:xx with the interface and
- * tells the stack to accept the group, and announces nothing on the wire.
+ * What decided it was that without this define the receive path drops every
+ * non-solicited-node IPv6 multicast datagram outright (nx_ipv6_packet_receive.c,
+ * the NX_ENABLE_IPV6_MULTICAST arm around the join list).  There is no partial
+ * capability to preserve: it is 172 bytes for group reception, or no group
+ * reception.
  *
- * What decided it was the third fact, which is that without this define the
- * receive path drops every non-solicited-node IPv6 multicast datagram outright
- * (nx_ipv6_packet_receive.c, the NX_ENABLE_IPV6_MULTICAST arm around the join
- * list).  There is no partial capability to preserve: it is 172 bytes for
- * group reception, or no group reception.
- *
- * What silence on the wire costs is a question of scope, not of switches.
- * RFC 4541 section 3 requires an MLD snooping switch to forward FF02::/16 on
- * every port whatever its membership table says, precisely so that a node
- * which has not reported still receives neighbour discovery and the
- * link-scope service protocols; ff02::fb, ff02::c and ff02::1:3 are what an
- * Amiga program joins and all three are inside it.  A querying switch
- * therefore prunes none of them, and a router forwards none of them either,
- * so a report would change nothing for the groups that are used.
- *
- * Above link-local scope it would change everything: ff05:: and ff0e:: are
- * forwarded on membership and nothing here reports any, so a join of one of
- * those receives only what is already on the link.  IPV6_JOIN_GROUP does not
- * refuse them, refusing would break the on-link half, which works.
- *
- * MLD is a protocol, not a define: nx_mld.h is a 48-line stub that declares
- * nothing and there is no nx_mld_*.c to enable, so wanting it means writing
- * MLDv1, query reception, per-group report timers with the RFC 2710 random
- * delay, and a done message on leave, into the NetX fork.  That is a piece
- * of work for a scope no Amiga program asks for, and it is not a prerequisite
- * for this.
+ * The groups it reports are NX_ENABLE_MLD's business, below, and that switch
+ * is independent of this one: the joins that matter most are made by the
+ * stack itself and never reach the table here.
  */
 #ifdef AMINETXDUO_MULTICAST
 #define NX_ENABLE_IPV6_MULTICAST
+#endif
+
+/*
+ * Multicast Listener Discovery, host side: RFC 2710 (MLDv1) and the host half
+ * of RFC 9777 (MLDv2).  No querier and no router side, ever -- an Amiga is
+ * neither.
+ *
+ * WHAT IT IS FOR.  A listener that never reports is invisible to a snooping
+ * switch, which then has no reason to forward the group to this port.  The
+ * groups at risk are not the exotic ones: a solicited-node address is link
+ * scope, and it is where every neighbour solicitation addressed to this
+ * machine arrives.  Behind a switch that snoops with an active querier, an
+ * unreported solicited-node group means the solicitation never arrives, so
+ * neighbour discovery fails and with it every IPv6 conversation on the
+ * segment.  RFC 9777 section 6 puts it as an obligation: a report is sent for
+ * every multicast address of scope 2 or greater, ff02::1 excepted.
+ *
+ * RFC 4541 section 3 asks a snooping switch to forward FF02::/16 on every
+ * port regardless, which is why this was survivable for as long as it was.
+ * That is a recommendation to the switch, not a property of the link, and the
+ * failure it protects against is silent when a switch does not follow it.
+ *
+ * WHERE IT LIVES.  In the fork, nx_mld_*.c, and not in src/.  The joins that
+ * have to be reported are made inside NetX Duo -- nxd_ipv6_address_set()
+ * calls _nx_ipv6_multicast_join() and there is no callback out of it -- the
+ * timer is the IP thread's periodic event, and the receive dispatch is in
+ * nx_icmpv6_packet_process.c.  A table on our side of the line would have
+ * needed a fork change to be filled and a second one to be asked.
+ *
+ * Ours is one line: src/netstack/netstack.c calls nx_mld_enable(), next to
+ * nx_igmp_enable() and for the same reason.
+ *
+ * WHAT IT COSTS.  NX_IP grows by the group table, NX_MLD_MAX_GROUPS entries
+ * of 36 bytes, plus one ULONG per interface and five counters.  Every message
+ * carries a Hop-by-Hop Router Alert, which needed no new send path: an MLD
+ * message is built with the extension header as the first eight octets of its
+ * own payload and handed to _nx_ipv6_header_add() as protocol 0.
+ *
+ * It rides on AMINETXDUO_IPV6 alone, not on AMINETXDUO_MULTICAST: solicited-
+ * node groups exist in every IPv6 build, and they are the reason this is here.
+ * The floor drawer has IPv6 off and pays nothing.
+ */
+#ifdef AMINETXDUO_IPV6
+#define NX_ENABLE_MLD
 #endif
 
 /*

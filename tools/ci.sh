@@ -208,7 +208,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=69
+HOST_TESTS_EXPECTED=70
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet and test_route, both x86_64-only for the reason in
@@ -1153,6 +1153,31 @@ stage_bridged() {
             0) note "PASS  Type, Copy and Shell redirection over a socket" ;;
             2) fail "tcphandler: an ingredient is missing on this machine" ; bad=1 ;;
             *) fail "tcphandler: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
+
+    # MLD, which is the one gate that cannot be run anywhere but a real
+    # segment: what is being tested is whether a report reaches the wire, and
+    # under SLIRP there is no wire, no snooping switch and no second listener.
+    printf '\n-- the groups this host listens to, announced or not\n'
+    if [ -z "${AMINETXDUO_PEER:-}" ]; then
+        skip "mld: AMINETXDUO_PEER is not set, so there is no querier and no" \
+             "second listener.  Join and leave would still be checked;" \
+             "answering a query and being suppressed would not."
+    else
+        rc=0
+        "$ROOT/tests/ipv6/run-mld.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  reported on join, answered the query in the" \
+                    "version it was asked in, stayed quiet when another" \
+                    "host answered first, and gave the group back" ;;
+            2) fail "mld: an ingredient is missing -- most likely" \
+                    "python3-cap in the peer's home directory, with" \
+                    "CAP_NET_RAW set on it" ; bad=1 ;;
+            3) fail "mld: the run produced no capture to read" ; bad=1 ;;
+            *) fail "mld: read the failed= line above" ; bad=1 ;;
         esac
     fi
 
