@@ -120,12 +120,16 @@ static LONG p_sendto(struct Library *base, LONG sock, APTR buf, LONG len,
     register LONG            res __asm("d0");
     register LONG _clob_d1 __asm("d1");
     register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
 
+    /* a1 carries an argument here, so it is an output rather than a name in
+       the clobber list; the two cannot both claim it. */
     __asm __volatile ("jsr a6@(-60:W)"      /* sendto -0x03c */
-                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
                       : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2),
                         "r" (a1), "r" (d3)
-                      : "a1", "cc", "memory");
+                      : "cc", "memory");
     return res;
 }
 
