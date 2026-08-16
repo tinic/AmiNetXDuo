@@ -54,7 +54,7 @@ Trusted, and worth knowing that it is:
 
 | | |
 |---|---|
-| Conformance | `bsdsocktest`, an independent suite written for this ABI by someone else. `tests/conformance/run-fsuae.sh` |
+| Conformance | `bsdsocktest`, an independent suite written for this ABI by someone else. `tests/conformance/run-conformance.sh` |
 | Fuzzing, host, ASan + UBSan, in `ctest` | `fuzz_config` (every parser that reads a file out of `DEVS:`), `fuzz_bpf`, `fuzz_dns`, `fuzz_usergroup`, `fuzz_dhcp`, `fuzz_tls_record`, `fuzz_tls_x509`, `fuzz_httpframe` |
 | Fuzzing needing a 32-bit build (`tools/ci.sh host32`) | `fuzz_mdns` and `fuzz_tls_crypto`. NetX Duo's mDNS cache keeps pointers in `ULONG` slots, and the TLS crypto paths cast a pointer to a 32-bit `ULONG` in the signature bounds check itself. The stage counts the tests it ran, so a 64-bit configuration cannot report green having registered none |
 | Fuzz depth | `fuzz_dns` drives the real client through `_nx_dns_response_receive()`, the name unencoder and the resource walk. `fuzz_mdns` enters at `_nx_mdns_thread_entry()`, so the module's own receive loop, interface lookup and packet processing run for real |
