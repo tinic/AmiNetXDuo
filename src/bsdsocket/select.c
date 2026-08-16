@@ -318,8 +318,8 @@ VOID bsd_events_attach(AmiSocket *sock)
  * NetX Duo suspends instead of returning NX_NO_PACKET.
  *
  *   nx_tcp_socket_receive.c:257       suspends. NX_NO_PACKET at :276 is the else
- *   nx_tcp_socket_send_internal.c:1217  suspends. NX_WINDOW_OVERFLOW (:1250)
- *                                     and NX_TX_QUEUE_DEPTH (:1262) are the else
+ *   nx_tcp_socket_send_internal.c:1354  suspends. NX_WINDOW_OVERFLOW (:1387)
+ *                                     and NX_TX_QUEUE_DEPTH (:1399) are the else
  *   nx_packet_allocate.c:178          suspends on `if (wait_option)`.
  *                                     NX_NO_PACKET at :268 is the else
  *

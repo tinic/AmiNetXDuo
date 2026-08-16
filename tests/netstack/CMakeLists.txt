@@ -287,6 +287,40 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_rxflood COMMAND test_tcp_rxflood)
 
+    # RFC 1122 4.2.3.4 sender silly-window avoidance: what leaves when the peer
+    # hands its window back in slivers, and -- the half that matters more --
+    # that a one-byte write into an open window is still not delayed, because
+    # this rule must not become the Nagle the tree does not have.  Every peer
+    # the lab has runs receiver-side SWS avoidance of its own and cannot
+    # produce the increments, so it is asserted here against the real send
+    # path.
+    add_executable(test_tcp_sws
+        host/test_tcp_sws_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_transmit_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+
+    target_compile_options(test_tcp_sws PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_sws PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_sws PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_sws COMMAND test_tcp_sws)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
