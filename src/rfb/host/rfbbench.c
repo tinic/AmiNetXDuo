@@ -259,6 +259,11 @@ typedef struct {
 static int g_deflate;
 static int g_interleaved;
 
+/* --bands N encodes each screen pass as N messages instead of one, which is
+   what the Amiga does when it has to service its socket between them.  1 is
+   the whole frame and is the default. */
+static int g_bands = 1;
+
 /* The measured wire rate that the frame-rate column divides by. */
 #define WIRE_BYTES_PER_SEC 407552.0   /* 398 KB/s */
 
@@ -423,17 +428,67 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
 
     for (i = 0; i < s->frames; i++) {
         const unsigned char *src = s->data + (size_t)i * s->frame_bytes;
-        long n = rfb_encode_frame(&e, src, out, rfb_worst_case_frame(&g));
+        long n;
         int used;
-        if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
+        int bad = 0;
+
+        if (g_bands > 1) {
+            /*
+             * The same screen pass, as g_bands messages instead of one, each
+             * decoded as it is produced.  That is what the Amiga does when it
+             * has to let go of the CPU between bands, and the check is that
+             * the picture it builds is the same one: a band that got its tile
+             * indices, its shadow or its clipped bottom row wrong shows up
+             * here as a decode that does not match the source.
+             *
+             * The bytes are counted together, because the screen pass is what
+             * costs a frame's worth of wire whether it went in one message or
+             * five, and comparing a banded run's mean against an unbanded
+             * one's is the point.
+             */
+            const rfb_u8 *planes[RFB_MAX_DEPTH];
+            unsigned p, b;
+            rfb_u16 rows = (rfb_u16)((e.tiles_y + g_bands - 1) / g_bands);
+
+            if (rows == 0)
+                rows = 1;
+            for (p = 0; p < rfb_planes(&g); p++)
+                planes[p] = src + (size_t)p * e.plane_stride;
+
+            n = 0;
+            for (b = 0; b * rows < e.tiles_y; b++) {
+                rfb_u16 ty0 = (rfb_u16)(b * rows);
+                rfb_u16 ty1 = (rfb_u16)(ty0 + rows);
+                long bn;
+
+                if (ty1 > e.tiles_y)
+                    ty1 = e.tiles_y;
+                bn = rfb_encode_band(&e, planes, out,
+                                     rfb_worst_case_frame(&g), ty0, ty1);
+                if (bn < 0) {
+                    fprintf(stderr, "band encode error %ld\n", bn);
+                    return -1;
+                }
+                used = dec_frame(&d, out, (unsigned)bn);
+                if (used != (int)bn)
+                    bad = 1;
+                n += bn;
+            }
+        } else {
+            n = rfb_encode_frame(&e, src, out, rfb_worst_case_frame(&g));
+            if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
+            used = dec_frame(&d, out, (unsigned)n);
+            if (used != (int)n)
+                bad = 1;
+        }
+
         total += (unsigned long)n;
         if ((unsigned long)n > mx) mx = (unsigned long)n;
         if (i == 0)
             f0 = (unsigned long)n;
         else if ((unsigned long)n > mx_after)
             mx_after = (unsigned long)n;
-        used = dec_frame(&d, out, (unsigned)n);
-        if (used != (int)n || memcmp(decfb, src, s->frame_bytes) != 0)
+        if (bad || memcmp(decfb, src, s->frame_bytes) != 0)
             rt_fail++;
         else
             rt_ok++;
@@ -529,6 +584,8 @@ int main(int argc, char **argv)
             g_deflate = 1;
         } else if (strcmp(argv[a], "--reps") == 0 && a + 1 < argc) {
             reps = atoi(argv[++a]);
+        } else if (strcmp(argv[a], "--bands") == 0 && a + 1 < argc) {
+            g_bands = atoi(argv[++a]);
         } else {
             break;
         }

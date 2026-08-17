@@ -294,6 +294,38 @@ static ULONG           fb_frame_t0;
 static ULONG           fb_busy_ticks;
 
 /*
+ * Which tile row the next band starts at, and 0 means the next pass begins a
+ * fresh screen.
+ *
+ * A whole frame is one uninterruptible piece of work, and on a 68030 that is
+ * around a fifth of a second in which this task reads no socket -- so a click
+ * or a keystroke sent while a frame is being built is not looked at until the
+ * frame is finished.  Producing a band at a time puts the server's read back
+ * on the path between them, at the cost of five bytes of message header per
+ * band and nothing else.
+ *
+ * The screen is re-resolved and its geometry re-checked on every band, so a
+ * screen that changes shape half way through a pass is caught there rather
+ * than producing bands of two different pictures.
+ */
+static UWORD           fb_band_ty0;
+
+/* Whether the band just produced closed a screen pass.  Only that one counts
+   a frame, so the frame counter keeps meaning screens and not messages. */
+static UBYTE           fb_band_last;
+
+/*
+ * Tile rows in a band.
+ *
+ * A 640x480 screen at 16-row tiles is 30 tile rows, so four rows is eight
+ * bands and bounds one uninterrupted encode at an eighth of a screen.  Small
+ * enough to keep the socket answered on a 68030, large enough that the five
+ * bytes of header a band costs stay lost in the noise -- an idle 640x480
+ * screen measured 1840 bytes a pass whole and 1875 in eight bands.
+ */
+#define FB_BAND_ROWS        4
+
+/*
  * A resync is a sequence, and asking twice must not restart it.
  *
  * Honouring a refresh queues geom, then pal, then a full frame, and clears the
@@ -1501,9 +1533,11 @@ static VOID fb_pointer_poll(ULONG now)
  * bytes the far end was sent.  That failure would not correct itself on the
  * next frame.
  */
-static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap)
+static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap,
+                             UWORD ty0, UWORD ty1)
 {
-    return rfb_encode_frame_planes(&fb_enc, planes, out, out_cap);
+    return rfb_encode_band(&fb_enc, planes, out, out_cap,
+                           (rfb_u16)ty0, (rfb_u16)ty1);
 }
 
 enum
@@ -1618,7 +1652,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
  */
 static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
                          BOOL *palette_moved, UBYTE *out, ULONG out_cap,
-                         LONG *encoded)
+                         LONG *encoded, UWORD ty0, UWORD ty1)
 {
     struct Screen *sc;
     const UBYTE   *planes[FB_MAX_DEPTH];
@@ -1696,7 +1730,23 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format))
         {
-            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
+            /*
+             * Once a screen pass and not once a band.  The fetch is the whole
+             * frame in contiguous rows because that is the shape a card reads
+             * back fastest -- see httprtg.c, where a loop of small rectangles
+             * is measured as the wrong shape by an order of magnitude -- so
+             * the bands that follow encode the copy this one took rather than
+             * going back to the board four more times.
+             *
+             * The staging buffer therefore holds one moment of the screen for
+             * the whole pass, which is if anything better than re-reading:
+             * the bands cannot disagree with each other about what the screen
+             * was.
+             */
+            if (ty0 != 0)
+                planes[0] = fb_stage;
+            else if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort,
+                                   fb_stage))
                 planes[0] = fb_stage;
             else
                 rc = FB_GRAB_UNREADABLE;
@@ -1719,7 +1769,7 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
             fb_torn++;
 
         WaitBlit();
-        *encoded = fb_encode_planes(planes, out, out_cap);
+        *encoded = fb_encode_planes(planes, out, out_cap, ty0, ty1);
 
         if (locked)
             ReleaseSemaphore(&sc->LayerInfo.Lock);
@@ -2453,6 +2503,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_next_tick  = 0;
     fb_frame_t0   = 0;
     fb_busy_ticks = 0;
+    fb_band_ty0   = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2802,7 +2853,7 @@ BOOL http_fb_slice(ULONG now)
            has been sent and its real cost is known.  http_fb_write() replaces
            it then with the idle the duty cycle owes, which on anything but a
            trivial frame is the larger of the two. */
-        fb_next_tick = tick + FB_GRAB_FLOOR;
+        fb_next_tick = tick + ((fb_band_ty0 == 0) ? (ULONG)FB_GRAB_FLOOR : 0UL);
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
 
@@ -2820,10 +2871,36 @@ BOOL http_fb_slice(ULONG now)
      * to be a 40 KB copy and then a walk over the copy.  slice (gt+et) is the
      * figure that stayed comparable across that change.
      */
-    t0 = fb_ticks();
-    rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
-                       &fb_tx[10], fb_tx_cap - 10UL, &n);
-    t1 = fb_ticks();
+    {
+        /*
+         * The band to produce this pass.  FB_BAND_ROWS tile rows of it, so
+         * the work between two reads of the socket is bounded by a strip and
+         * not by a screen.  The last band of a pass is whatever is left, and
+         * a grid shorter than one band is a single band covering all of it,
+         * which is what a small screen gets.
+         */
+        UWORD ty1 = (UWORD)(fb_band_ty0 + FB_BAND_ROWS);
+
+        if (ty1 > fb_enc.tiles_y)
+            ty1 = (UWORD)fb_enc.tiles_y;
+
+        fb_band_last = (UBYTE)(ty1 >= fb_enc.tiles_y);
+
+        t0 = fb_ticks();
+        rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
+                           &fb_tx[10], fb_tx_cap - 10UL, &n,
+                           fb_band_ty0, ty1);
+        t1 = fb_ticks();
+
+        /* Where the next one starts.  Anything but a clean band restarts the
+           pass, because whatever went wrong resolved a different screen or
+           none, and half of one picture followed by half of another is worse
+           than a repeated frame. */
+        if (rc == FB_GRAB_OK && !palette_moved)
+            fb_band_ty0 = fb_band_last ? 0 : ty1;
+        else
+            fb_band_ty0 = 0;
+    }
     if (t1 >= t0)
         fb_encode_ticks += t1 - t0;
 
@@ -2951,7 +3028,12 @@ BOOL http_fb_slice(ULONG now)
        question rather than a repeat of this one. */
     fb_resync = 0;
 
-    fb_frames++;
+    /* Screens and not messages, so f= keeps meaning what it meant before the
+       frame was broken into bands and the rate derived from it stays
+       comparable across the change.  Bytes are every band's, because every
+       band's went on the wire. */
+    if (fb_band_last)
+        fb_frames++;
     fb_bytes += (ULONG)n;
 
     if (++fb_since_stat >= (ULONG)FB_STAT_EVERY)
@@ -3018,7 +3100,16 @@ BOOL http_fb_write(ULONG now)
             fb_busy_ticks += cost;
             fb_frame_t0 = 0;
 
-            if (idle < (ULONG)FB_GRAB_FLOOR)
+            /*
+             * The floor is about not re-reading a screen nobody drew on, so
+             * it belongs between screen passes and not between the bands of
+             * one.  fb_band_ty0 is zero exactly when the pass just finished,
+             * which is where a whole tick of waiting is the right answer;
+             * mid-pass the duty cycle is the only thing pacing, and a floor
+             * there would add a tick per band and quarter the frame rate for
+             * no reason.
+             */
+            if (fb_band_ty0 == 0 && idle < (ULONG)FB_GRAB_FLOOR)
                 idle = (ULONG)FB_GRAB_FLOOR;
 
             fb_next_tick = done + idle;

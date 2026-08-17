@@ -287,6 +287,11 @@ typedef struct {
     rfb_u8   miss_run;      /* consecutive probes that found nothing */
     rfb_u8   since_copy;    /* frames since a copy, saturating at 255 */
 
+    /* Accumulated across the bands of one screen pass, because they describe
+     * the pass and not the message.  Closed and cleared by the last band. */
+    rfb_u32  band_dirty;
+    rfb_u8   band_copy;
+
     rfb_stats st;
 } rfb_encoder;
 
@@ -339,6 +344,31 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
  * reads the planes without holding a drawing lock.
  *
  * rfb_encode_frame() above is this with planes[p] = src + p * plane_stride. */
+/*
+ * One BAND of a frame: the same message, carrying only the tiles of tile rows
+ * [ty0, ty1).
+ *
+ * It exists because a whole frame is one uninterruptible piece of work, and on
+ * a 68030 that is around a fifth of a second during which the caller services
+ * nothing -- so a person moving the mouse or typing while a frame is being
+ * built waits for it to finish.  A caller that encodes a band at a time can
+ * read its socket between them.
+ *
+ * Nothing on the wire changes and no receiver needs to know.  A message
+ * carries the ops it carries; there has never been anything in one that says
+ * it covers the whole screen.  The shadow is per tile, so a band leaves it
+ * exactly as the same tiles would have left it inside a whole frame.
+ *
+ * What the caller must not do is interleave two screen passes.  Bands are
+ * expected in order, 0 to tiles_y, and the scroll probe runs on the first
+ * while the counters that describe a frame are closed by the last.  The
+ * SOURCE may move underneath between bands -- that is a torn frame, which
+ * this has always allowed and which the next pass corrects.
+ */
+long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
+                     rfb_u8 *out, rfb_u32 out_cap,
+                     rfb_u16 ty0, rfb_u16 ty1);
+
 long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                              rfb_u8 *out, rfb_u32 out_cap);
 
