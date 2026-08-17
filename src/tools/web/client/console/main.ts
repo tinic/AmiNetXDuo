@@ -34,7 +34,15 @@ import {
   type PointerAt,
   type Pointer,
 } from "./pfs";
-import { frameBytes, palette32, pixelAspect } from "./planar";
+import {
+  FMT_RGB565,
+  frameBytes,
+  palColours,
+  palette32,
+  pixelAspect,
+  screenFormat,
+  type Screen,
+} from "./planar";
 import {
   applyUpdate,
   geometryFromWord,
@@ -81,6 +89,9 @@ function showGeometry(): void {
   const s = view.geometry;
   if (s.width === 0) { geomEl.textContent = "-"; return; }
   const a = pixelAspect(s);
+  /* Colours the screen can show, which on the palette formats is how many
+     entries it has and on the 16-bit one is what R5G6B5 can express.  Both
+     are 1 << depth, and it is the same sentence to a person either way. */
   geomEl.textContent =
     s.width + "x" + s.height + "x" + s.depth +
     "  " + (1 << s.depth) + " colours" +
@@ -318,9 +329,10 @@ let livePointer: {
 
 /* Frames arrive before the palette does, so there is one to start with: grey
    is what an Amiga screen is before LoadRGB4 runs, and a black one reads as
-   the viewer having failed. */
-function greyPalette(depth: number): Uint8Array {
-  const n = 1 << depth;
+   the viewer having failed.  `colours` is entries, so a format that has none
+   asks for none and gets an empty one. */
+function greyPalette(colours: number): Uint8Array {
+  const n = colours;
   const rgb = new Uint8Array(n * 3);
   for (let i = 0; i < n; i++) {
     const v = Math.round((i * 255) / Math.max(1, n - 1));
@@ -358,9 +370,18 @@ function heard(w: string): void {
       cap = null;
       setPlaying(false);
       setTransport(false);
-      const rgb = greyPalette(g.screen.depth);
+      /*
+       * NOTHING TO WAIT FOR ON A TRUECOLOUR SCREEN.  A 16-bit pixel carries
+       * its own colour, so no `pal` follows the geom and none ever will; a
+       * viewer that sat on a placeholder until one arrived would sit there
+       * for the whole session.  palColours() says none, which makes both of
+       * these empty and neither of them read -- 1 << 16 grey entries would
+       * be a palette nothing ever looks at.
+       */
+      const colours = palColours(g.screen);
+      const rgb = greyPalette(colours);
       liveRgb = rgb;
-      view.setScreen(g.screen, palette32(rgb, g.screen.depth));
+      view.setScreen(g.screen, palette32(rgb, colours));
       showGeometry();
       /* Before the pal that follows, so the file that closes here keeps the
          palette its frames were drawn with. */
@@ -408,9 +429,15 @@ function heard(w: string): void {
 
     if (w.startsWith("pal ")) {
       if (geom === null) return;
-      const rgb = paletteFromWord(w, geom.screen.depth);
+      /* A truecolour screen has none, so one here is a server that has got
+         the format wrong -- and reading it at depth 16 would ask for 393216
+         hex digits.  Dropped rather than thrown: the picture is correct
+         without it and the word is already in the log. */
+      if (screenFormat(geom.screen) === FMT_RGB565) return;
+      const colours = palColours(geom.screen);
+      const rgb = paletteFromWord(w, colours);
       liveRgb = rgb;
-      view.setPalette(palette32(rgb, geom.screen.depth));
+      view.setPalette(palette32(rgb, colours));
       if (planes !== null) view.paint(planes, 0);
       recRoll();
       return;
@@ -633,7 +660,10 @@ shotEl.onclick = (e: MouseEvent) => saveShot(e.shiftKey);
  * frameCount field, and hitting it rolls the file the same way a geom does.
  */
 interface Rec {
-  screen: { width: number; height: number; depth: number; bytesPerRow: number };
+  /* The whole Screen and not the four numbers it used to be: the FORMAT is
+     what decides how long the file's palette is, and a recorder that dropped
+     it would write a truecolour capture with a header that says planar. */
+  screen: Screen;
   rgb: Uint8Array;
   frames: Uint8Array<ArrayBuffer>[];
   /* When each frame arrived, on the page's clock.  buildPfs rebases them on
