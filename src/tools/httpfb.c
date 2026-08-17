@@ -2092,10 +2092,18 @@ static VOID fb_control(HttpWsEvent ev, const UBYTE *payload, ULONG len)
     fb_ctl_at = 0;
 }
 
+/*
+ * The other half of fb_close_saying(): a close this end sends because the far
+ * end broke the framing, where the code's own name is the whole reason.  It
+ * goes to fb_why as well, because fb_close_code is what the log keys off and
+ * a stale sentence there would name the wrong fault.
+ */
 static VOID fb_close_session(UWORD code)
 {
     if (fb_closing)
         return;
+
+    fb_say(http_ws_close_reason(code));
 
     fb_ctl_n      = (UWORD)http_ws_close_frame(fb_ctl, sizeof(fb_ctl), code,
                                                http_ws_close_reason(code));
