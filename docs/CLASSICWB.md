@@ -48,8 +48,8 @@ otherwise invisible: Workbench falls back to the chipset silently.
 | Manifest | `~/amiga-assets/classicwb/snapshots/<edition>/manifest.json` | `install.sh` |
 | Archive | `-b <builddir>`, default `build/cm` | `dist/make-dist.sh` and `clients/dropbear/build.sh` |
 
-The snapshot is ClassicWB and AmiSSL installed and settled, and carries no file
-of ours. A launch copies it, builds a release archive from the build directory, unpacks the
+The snapshot is ClassicWB installed and settled, and carries no file of ours. A
+launch copies it, builds a release archive from the build directory, unpacks the
 archive on the copy as a download arrives, and boots once with the Installer
 running against it. `-a` takes an archive as given instead of building one.
 `dbclient` is built as well, because it comes from `clients/dropbear/build.sh`
@@ -103,20 +103,9 @@ never reaches it, so a request from that host times out against a guest that is
 serving normally and the timeout says nothing about the guest. `-c` names
 another machine on the same segment. Without it the first two still run.
 
-## AmiSSL
-
-AmiSSL 5.27 is in the `full` and `p96` snapshots and not in `68k`. See
-[AMISSL.md](AMISSL.md) for where it lands, how to prove it opens, and what it
-costs in memory.
-
 ## Rebuilding a snapshot
 
     ~/amiga-assets/classicwb/install.sh <68k|full|p96>
 
-The archives are hash-pinned and verified before use, in
-`~/amiga-assets/classicwb/archives/` and `~/amiga-assets/amissl/archives/`. The
-snapshot is a cache; the script and the archives are the source of truth.
-
-A rebuild reproduces every byte of content, but `tree_sha256` is not stable
-across rebuilds: 43 `Fonts/*.font.uaem` sidecars carry a datestamp the guest
-writes from its own clock.
+The archives are hash-pinned and verified before use. The snapshot is a cache;
+the script and the archives are the source of truth.
