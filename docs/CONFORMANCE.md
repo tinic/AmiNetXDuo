@@ -39,6 +39,17 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 | `netstack_dns.c:719` | RFC 6762 §6.7 | §6.7 is Legacy Unicast Responses; the rule is §3, which `:757` and `:929` cite correctly |
 | `sntp.c:62-63` | all RFC 4330 §5 checks present | `sntp_validate()` (`:485-530`) checks mode, version, LI, stratum, transmit and originate. §5 check 5, root delay and dispersion, is absent |
 
+## Resisted, and measured
+
+| RFC | What is done | Where |
+|---|---|---|
+| 4987 §3.4, §3.6 | A connection to a listening port lives in a 512-entry SYN cache at 80 bytes each (~40 KB) until its handshake completes: no socket committed, no packet held. Past the cache the SYN-ACK's ISN is a stateless HalfSipHash-2-4 cookie carrying the MSS index, window scale, SACK-permitted and timestamps, so options are not downgraded under attack, and the peer's ISN is hashed in rather than summed. A RST against a cached connection is checked for sequence number (RFC 5961 §3). On by default, no flag | `nx_tcp_syncache.c` |
+
+Measured on nine emulated cards at 100 SYN/s from forged sources: pre-fix 0 of 5
+legitimate connections complete during the flood, defended 5 of 5, at no
+measurable cost to handshake latency or throughput when nothing is attacking
+(`tests/tools/run-synflood.sh`, `-u` inverts the verdict for a pre-fix build).
+
 ## Declined, with the cost of declining
 
 | Item | Reason |
