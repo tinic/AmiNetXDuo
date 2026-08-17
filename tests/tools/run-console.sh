@@ -753,8 +753,14 @@ probe() {
         python3 "$ROOT/tests/tools/console-probe.py" "$@" > "$out" 2>&1
         return $?
     fi
+    # Quoted one argument at a time, because "$*" is one string that the
+    # remote shell splits again on every space in it.  --type "dir SYS:" and
+    # anything else carrying a space arrived as several arguments, the probe
+    # rejected them, and the run reported INFRA with an empty probe file --
+    # which reads as the guest never answering rather than as this line.
     ssh -o BatchMode=yes -o ConnectTimeout=10 "$CLIENT" \
-        "python3 - $*" < "$ROOT/tests/tools/console-probe.py" > "$out" 2>&1
+        "python3 - $(printf '%q ' "$@")" \
+        < "$ROOT/tests/tools/console-probe.py" > "$out" 2>&1
 }
 
 # ONE HTTP CLIENT, AND IT IS THE ONE THE CLIENT MACHINE ALREADY HAS TO HAVE.
