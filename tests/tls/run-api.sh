@@ -119,7 +119,12 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlsapi}"
 
 verdict() {
     # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    verdict_guest "tls-api" 1 "$1" \
+    # A FLOOR OF 1 IS NOT A FLOOR: a guest that stopped after its first
+    # assertion cleared it.  tls_api.c makes 27 a_check() calls; 12 is set
+    # from that static count rather than from a measured run, because this
+    # harness needs a real HTTPS URL and has no home in CI.  Tighten it to the
+    # count of a clean run when there is one.
+    verdict_guest "tls-api" 12 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
     exit $?

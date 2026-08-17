@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run the netstack bring-up test under WinUAE with an emulated ethernet card on
-# SLIRP.  The WinUAE counterpart of tests/netstack/run-fsuae.sh.
+# SLIRP.  The WinUAE counterpart of tests/netstack/run-amiberry.sh.
 #
 #   tests/netstack/run-winuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                                [-N BOARD]

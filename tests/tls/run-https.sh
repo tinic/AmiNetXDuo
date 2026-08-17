@@ -4,7 +4,7 @@
 #
 #   tests/tls/run-https.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #
-# Same staging as tests/netstack/run-fsuae.sh, DEVS:NetInterfaces/eth0,
+# Same staging as tests/netstack/run-amiberry.sh, DEVS:NetInterfaces/eth0,
 # DEVS:Internet/* and a SANA-II a2065.device, because this test brings the
 # whole stack up through netstack_startup() before it opens a socket.
 #
@@ -69,7 +69,10 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlshttps}"
 
 verdict() {
     # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    verdict_guest "tls-https" 1 "$1" \
+    # A FLOOR OF 1 IS NOT A FLOOR.  tls_https.c makes 8 w_check() calls; 5 is
+    # set from that static count rather than from a measured run, for
+    # run-api.sh's reason.  Tighten it when there is a clean run to read.
+    verdict_guest "tls-https" 5 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
     exit $?

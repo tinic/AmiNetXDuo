@@ -5,7 +5,9 @@
 #   tests/netstack/run-amiberry.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                                  [-N BOARD] [-B BACKEND]
 #
-# The Linux counterpart of tests/netstack/run-fsuae.sh and run-winuae.sh.
+# The Linux counterpart of tests/netstack/run-winuae.sh.  There was a third,
+# run-fsuae.sh, which drove tools/amiberry-run.sh like this one and could do
+# strictly less: it is gone.
 #
 # -N picks the card and -B picks what it is wired to.  The default is the
 # A2065 on SLIRP, which is what the other two harnesses do.  -B <interface>

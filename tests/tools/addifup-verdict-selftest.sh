@@ -106,29 +106,37 @@ EOF
 : > "$T/empty"
 
 n=0; bad=0
-case_() { # description expected-rc report [ifname]
-    local what="$1" want="$2" report="$3" ifname="${4:-eth0}"
-    local out rc
-    out=$(addifup_verdict "$report" "$ifname" 2>&1); rc=$?
+# BOTH HALVES.  This used to grade the exit code alone, and
+# addifup-verdict.sh's documented interface is `addifup_result=` on stdout:
+# the two could drift apart -- addifup_result=PASS beside a return of 1 --
+# and nothing would say so.
+case_() { # description expected-rc expected-result report [ifname]
+    local what="$1" want="$2" wantr="$3" report="$4" ifname="${5:-eth0}"
+    local out rc gotr
+    out=$(addifup_verdict "$report" "$ifname" 2>"$T/err"); rc=$?
+    gotr=$(printf '%s\n' "$out" | sed -n 's/^addifup_result=//p' | tail -1)
+    out="$out
+$(cat "$T/err")"
     n=$((n + 1))
-    if [ "$rc" = "$want" ]; then
-        printf 'ok   %-38s -> %s\n' "$what" "$rc"
+    if [ "$rc" = "$want" ] && [ "$gotr" = "$wantr" ]; then
+        printf 'ok   %-38s -> %s %s\n' "$what" "$rc" "$gotr"
     else
-        printf 'FAIL %-38s -> %s, wanted %s\n' "$what" "$rc" "$want"
+        printf 'FAIL %-38s -> %s %s, wanted %s %s\n' \
+               "$what" "$rc" "$gotr" "$want" "$wantr"
         bad=$((bad + 1))
     fi
     printf '%s\n' "$out" | sed 's/^/       | /'
 }
 
-case_ "a lease that arrived"            0 "$T/good"
-case_ "no server answered"              1 "$T/nolease"
-case_ "RFC 3927 fallback, not a lease"  1 "$T/linklocal"
-case_ "header and a route, no interface" 1 "$T/headeronly"
-case_ "flags unreadable from here"      1 "$T/unreadable"
-case_ "link down"                       1 "$T/linkdown"
-case_ "an EMPTY transcript"             1 "$T/empty"
-case_ "no transcript at all"            1 "$T/does-not-exist"
-case_ "a good run, wrong interface"     1 "$T/good" eth1
+case_ "a lease that arrived"            0 PASS "$T/good"
+case_ "no server answered"              1 FAIL "$T/nolease"
+case_ "RFC 3927 fallback, not a lease"  1 FAIL "$T/linklocal"
+case_ "header and a route, no interface" 1 FAIL "$T/headeronly"
+case_ "flags unreadable from here"      1 FAIL "$T/unreadable"
+case_ "link down"                       1 FAIL "$T/linkdown"
+case_ "an EMPTY transcript"             1 FAIL "$T/empty"
+case_ "no transcript at all"            1 FAIL "$T/does-not-exist"
+case_ "a good run, wrong interface"     1 FAIL "$T/good" eth1
 
 # The two assertions this file replaced, run over the same fixtures, so the
 # record shows what they graded rather than only asserting that they were

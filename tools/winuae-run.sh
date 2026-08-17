@@ -369,7 +369,7 @@ if [ "$WANT_ENFORCER" = "1" ]; then
         # Built FOR the machine, not for the newest one.  A 68020 binary stops
         # a 68000 with an illegal instruction before the thing under test runs,
         # and the failure then looks like the thing under test.  Same case as
-        # ENVSETUP_ARCH in amiberry-run.sh and RUNNER_ARCH in run-fsuae.sh.
+        # ENVSETUP_ARCH in amiberry-run.sh and RUNNER_ARCH in run-dbclient.sh.
         case "${CPU:-}${MODEL:-}" in
             *68000*|*A500*|*A600*|*A2000*) _waitsecs_arch="-m68000" ;;
             *)                             _waitsecs_arch="-m68020" ;;

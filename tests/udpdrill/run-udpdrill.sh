@@ -5,7 +5,7 @@
 #   tests/udpdrill/run-udpdrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-A]
 #
 # -A picks Amiberry, which runs genuinely headless; FS-UAE dies in GLAD without
-# an X server. Same flag tests/sockopt/run-fsuae.sh carries.
+# an X server. Same flag tests/sockopt/run-sockopt.sh carries.
 #
 # NO DRIVER. The test installs its own interface, tests/tcpdrill/tapdev.c,
 # made at run time, and tests/tcpdrill/devs/NetInterfaces/tap0 names it, so
