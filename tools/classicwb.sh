@@ -372,10 +372,17 @@ fi
 # opens the library on the Amiga, initialises it, and gets the version string
 # back out of it by calling into it.
 #
-# It is not run here.  Opening a 3.5 MB library on a 68020 is minutes -- see
-# the number the probe itself prints -- and that is a cost every launch would
-# pay for an answer that does not change between launches.  Run it from the
-# web shell, or from the Shell on the guest, and read DH0:amisslprobe.txt.
+# It is not run here.  The open was expected to be minutes and measured 0.34 s
+# on the A1200 arm -- AmigaDOS reads the 3.5 MB through the emulator's
+# directory filesystem, which is a host memcpy, and only the relocation is
+# paid at 68020 speed -- so the reason is no longer cost.  It is that the
+# probe needs a stack a Shell does not give, so it cannot simply be appended
+# to a boot script, and the answer does not change between launches:
+#
+#     Stack 65536
+#     C:amisslprobe
+#
+# from the web shell or the guest's own Shell, then read DH0:amisslprobe.txt.
 #
 # The AmiSSL SDK supplies the headers.  It is not in the public tree and never
 # will be, so this is skipped rather than fatal when the asset store is not
