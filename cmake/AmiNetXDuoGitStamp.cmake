@@ -39,8 +39,8 @@ set(AMINETXDUO_VERSION_HASH "")
 set(AMINETXDUO_VERSION_DATE "")
 set(AMINETXDUO_VERSION_BUILD "")
 
-# EXISTS and not IS_DIRECTORY: in a `git worktree` .git is a FILE holding the
-# path to the real git dir, and every agent on this project works in one.
+# EXISTS, not IS_DIRECTORY: in a `git worktree` .git is a FILE holding the path
+# to the real git dir.
 if(GIT_EXECUTABLE AND EXISTS "${SRC_DIR}/.git")
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" rev-parse --short=7 HEAD
