@@ -418,12 +418,18 @@ start_peer() { # logname args...
 # back with the guest's end-of-test report, since a datagram sent at a guest
 # that is not listening yet is simply lost and looks like success.
 start_sender() { # logname proto port
-    local name="$1" proto="$2" port="$3"
+    local name="$1" proto="$2" port="$3" kbit=2000
+    # The UDP rate the peer offers the guest, raised from outside for a burst
+    # measurement.  2000 is what every assertion here is written against: the
+    # guest keeps up with it on every card, so a loss at 2000 is a defect.
+    # Above it the guest is meant to be overrun, and the arm becomes a
+    # frames-delivered measurement rather than a pass.
+    [ "$proto" != udp ] || kbit="${AMINETXDUO_IPERF_PEER_UDP_KBIT:-2000}"
     (
         deadline=$(( $(date +%s) + PEER_LIFE ))
         while [ "$(date +%s)" -lt "$deadline" ]; do
             if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
-                        --seconds "$SECS" --kbit 2000 \
+                        --seconds "$SECS" --kbit "$kbit" \
                         2>>"$PEERLOG/$name.err"); then
                 case "$proto" in
                     udp) case "$out" in *peer_report=1*) echo "$out"; exit 0 ;; esac ;;

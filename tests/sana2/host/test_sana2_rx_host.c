@@ -715,13 +715,17 @@ static void test_plan_budget(void)
     h_check((ULONG)d.ipv4 + d.arp + d.ipv6 < 17UL,
             "and the readers do not take the pool");
 
-    /* Forty packets: a budget of ten, floors of eight, two to hand out, and
-       IPv4 is handed them first. */
-    plan_at(100000000UL, 40UL, TRUE, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 + 2,
-            "forty packets spare two, and IPv4 gets them");
-    h_check(d.ipv6 == AMI_SANA2_RX_DEPTH_IPV6,
-            "which leaves the IPv6 reader exactly what it had");
+    /*
+     * The memory-tight A1200 measured in the constants' comments: 2 MB of chip
+     * and no Fast RAM is a pool of 47.  The window is 5, the budget is 11 and
+     * the floors are 8, so IPv4 gets its one packet above the floor and IPv6
+     * takes what is left.  Five and not eight is the whole of that comment: a
+     * deeper IPv4 queue caught a fifth as many datagrams under a flood.
+     */
+    plan_at(10000000UL, 47UL, TRUE, &d);
+    h_check(d.ipv4 == 5, "47 packets: IPv4 gets the pool's own number, five");
+    h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 47UL / AMI_SANA2_RX_BUDGET_SHARE,
+            "and the three of them stay inside a quarter of that pool");
 
     /*
      * The lab's 8 MB A1200: 368 packets, so 46 frames of window and a budget
@@ -821,9 +825,20 @@ static void test_plan_single_stack(void)
 
     h_check(single.ipv6 == 0,
             "no IPv6 reader is planned when none will be started");
-    h_check(single.ipv4 > dual.ipv4,
-            "and the packets it would have pinned go to IPv4 instead");
     h_check(single.arp == dual.arp, "the ARP reader is unmoved either way");
+
+    /*
+     * IPv4 is NOT given what the IPv6 reader would have had, and that is a
+     * property rather than an omission: its want is the pool's own eighth and
+     * the budget is the pool's quarter, so once the floors fit at all there is
+     * always enough for IPv4 to reach its want.  The IPv6 reader is spending
+     * what nothing else asked for.
+     */
+    h_check(single.ipv4 == dual.ipv4,
+            "and IPv4 is no deeper for it: its want was already affordable");
+    h_check((ULONG)single.ipv4 + single.arp <
+            (ULONG)dual.ipv4 + dual.arp + dual.ipv6,
+            "what changes is what the machine pins in total");
 }
 
 /*

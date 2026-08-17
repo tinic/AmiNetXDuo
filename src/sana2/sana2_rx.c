@@ -1284,8 +1284,8 @@ static UWORD ami_sana2_rx_window_depth(ULONG pool_total)
 {
     ULONG frames = pool_total / (ULONG)AMI_SANA2_RX_POOL_SHARE;
 
-    if (frames < (ULONG)AMI_SANA2_RX_WANT_MIN)
-        frames = (ULONG)AMI_SANA2_RX_WANT_MIN;
+    if (frames < (ULONG)AMI_SANA2_RX_DEPTH_IPV4)
+        frames = (ULONG)AMI_SANA2_RX_DEPTH_IPV4;
     if (frames > (ULONG)AMI_SANA2_RX_MAX_DEPTH)
         frames = (ULONG)AMI_SANA2_RX_MAX_DEPTH;
 

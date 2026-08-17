@@ -68,23 +68,26 @@
 #endif
 
 /*
- * And the least a reader asks for whatever the pool says.
+ * There is deliberately no minimum here above AMI_SANA2_RX_DEPTH_IPV4.
  *
- * Eight, from tests/curl/run-curlverify.sh -p: forty concurrent transfers lost
- * fifteen SYN/ACKs at four and none at eight. A streaming workload does not
- * see it -- on a 2 MB A1200, where the pool's own share is six, the receive
- * rate is 1.92 Mbit/s at four and 1.93 at eight -- because one flow's window
- * opens gradually and forty handshakes answer at once. The burst is what this
- * number is for, and it costs two packets on the smallest machine that can
- * afford anything above its floors at all.
+ * Eight looked right: tests/curl/run-curlverify.sh -p lost fifteen SYN/ACKs of
+ * forty at depth four and none at eight, so a want floored at eight was tried.
+ * It is wrong on the machine it was aimed at. Under a UDP flood the memory
+ * tight A1200 -- 2 MB chip, no Fast RAM, pool 47 -- caught 170 datagrams of
+ * 2552 with the pool's own number, five, and 30 with eight. Five times worse,
+ * three runs each, non-overlapping.
  *
- * It is a want and not a floor: AMI_SANA2_RX_DEPTH_* are the floors, and the
- * budget below can refuse this on a machine that cannot pay for it.
+ * The reason is that the read queue and the socket receive queue come out of
+ * the same 47 packets. A deeper read queue hands the socket more datagrams
+ * sooner, the socket queue overruns, and the reader then cannot allocate a
+ * replacement to re-arm with. On a pool that size the packets are worth more
+ * free than posted, and AROSTCP's floor of sixteen -- a third of this pool --
+ * would be far past the point where that turns over.
+ *
+ * The curl measurement is not contradicted: it was taken on a machine whose
+ * pool gives thirty-two anyway. Every machine with any Fast RAM at all is
+ * already above eight from the pool alone.
  */
-#ifndef AMI_SANA2_RX_WANT_MIN
-#define AMI_SANA2_RX_WANT_MIN       8
-#endif
-
 /*
  * The deepest the IPv6 reader is planned, however much the pool can spare.
  *
