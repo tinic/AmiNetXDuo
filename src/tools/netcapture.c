@@ -224,6 +224,35 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    /*
+     * ReadArgs takes a leading minus, so "SNAP=-5" parses and arrives as a
+     * negative LONG.  Cast to ULONG it becomes an enormous one, which the
+     * range checks below catch for SNAP and BLEN and would not catch for
+     * COUNT: COUNT=-1 is four thousand million packets, which is no limit at
+     * all, and the command would then run until Ctrl-C having been told to
+     * stop.  A limit of zero is the same mistake from the other end -- it
+     * would read as "no limit" and the user meant "nothing".
+     */
+    if ((args[ARG_SNAP]  != 0 && *(LONG *)args[ARG_SNAP]  < 0) ||
+        (args[ARG_BLEN]  != 0 && *(LONG *)args[ARG_BLEN]  < 0) ||
+        (args[ARG_PORT]  != 0 && *(LONG *)args[ARG_PORT]  < 0))
+    {
+        tool_error("SNAP, BLEN and PORT are counts, and a negative one is a "
+                   "mistake");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if ((args[ARG_COUNT]   != 0 && *(LONG *)args[ARG_COUNT]   < 1) ||
+        (args[ARG_SECONDS] != 0 && *(LONG *)args[ARG_SECONDS] < 1) ||
+        (args[ARG_SIZE]    != 0 && *(LONG *)args[ARG_SIZE]    < 1))
+    {
+        tool_error("COUNT, SECONDS and SIZE are limits: leave one out for no "
+                   "limit, and give it at least 1 to set one");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     out   = (args[ARG_OUT] != 0) ? (const char *)args[ARG_OUT]
                                  : "RAM:capture.pcap";
     iface = (args[ARG_IFACE] != 0) ? (const char *)args[ARG_IFACE] : "eth0";
