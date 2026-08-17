@@ -644,6 +644,8 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
 {
     ULONG waited;
+    ULONG sent_before;
+    ULONG answered_before;
 
     if (ns == NULL || !ns->ns_Dhcpv6Created || !ns->ns_Dhcpv6Started)
         return;
@@ -659,7 +661,16 @@ VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
     if (tx_thread_identify() == TX_NULL)
         return;
 
-    if (ns->ns_Dhcpv6State != NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
+    /*
+     * The client's own state, NOT ns_Dhcpv6State.
+     *
+     * ns_Dhcpv6State is a mirror written by ami_ns6_dhcp_state_changed(),
+     * which runs on the client's thread, so it lags every transition by
+     * however long that thread takes to get the CPU. Reading it here to
+     * decide whether there is a lease to give back can miss one that has just
+     * been taken.
+     */
+    if (ns->ns_Dhcpv6.nx_dhcpv6_state != NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
         !ns->ns_Dhcpv6Stateful)
     {
         /* Nothing was assigned, so there is nothing to give back. An
@@ -667,25 +678,60 @@ VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
         return;
     }
 
+    sent_before     = ns->ns_Dhcpv6.nx_dhcpv6_releases_sent;
+    answered_before = ns->ns_Dhcpv6.nx_dhcpv6_release_responses;
+
     if (nx_dhcpv6_request_release(&ns->ns_Dhcpv6) != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: the DHCPv6 Release was refused, the address stays "
+                 "leased until it expires");
         return;
+    }
 
     /*
-     * Bounded, because this is on the path of a machine being shut down and a
-     * server that does not answer must not hold it up. The client retries
-     * NX_DHCPV6_MAX_RELEASE_RETRANSMISSION_COUNT times; this waits for the
-     * first exchange and then gives up, which is what RFC 8415 18.2.7's
-     * "the client MUST NOT wait for a Reply" allows.
+     * WAIT FOR SOMETHING THAT HAPPENED, NOT FOR A STATE THAT IS TRANSIENTLY
+     * FALSE.
+     *
+     * This loop used to break on `ns_Dhcpv6State != SENDING_RELEASE`, which is
+     * true before the client's thread has picked the request up as well as
+     * after it has finished -- so it never waited at all, the interface went
+     * down underneath the client, and no Release reached the wire. It passed
+     * anyway on an AMINETXDUO_LOG build, because the log calls on this path
+     * are RawDoFmt() to a serial port and cost enough time for the client
+     * thread to run. A feature that works only when it is instrumented is
+     * worse than one that does not work, because every measurement of it says
+     * it is fine: measured on a shipping build, 0 Release packets and 440 ms;
+     * with logging on, 1 packet and 620 ms.
+     *
+     * So the exit needs the send counter to have moved -- the client has
+     * built a Release and handed it to _nx_dhcpv6_send_request() -- AND then
+     * either the server's Reply or the client leaving the state. Neither of
+     * those can be true before the client thread has run.
      */
     for (waited = 0; waited < AMI_DHCPV6_RELEASE_TICKS; waited++)
     {
-        if (ns->ns_Dhcpv6State != NX_DHCPV6_STATE_SENDING_RELEASE)
+        if (ns->ns_Dhcpv6.nx_dhcpv6_releases_sent != sent_before &&
+            (ns->ns_Dhcpv6.nx_dhcpv6_release_responses != answered_before ||
+             ns->ns_Dhcpv6.nx_dhcpv6_state != NX_DHCPV6_STATE_SENDING_RELEASE))
+        {
             break;
+        }
 
         tx_thread_sleep(1);
     }
 
-    AMI_INFO("netstack: DHCPv6 address released");
+    /*
+     * Bounded, because this is on the path of a machine being shut down and a
+     * server that does not answer must not hold it up.  RFC 8415 18.2.7 lets
+     * a client not wait for the Reply at all, so timing out here is a
+     * conforming outcome and is reported rather than retried.
+     */
+    if (ns->ns_Dhcpv6.nx_dhcpv6_releases_sent == sent_before)
+        AMI_WARN("netstack: the DHCPv6 Release never reached the wire");
+    else if (ns->ns_Dhcpv6.nx_dhcpv6_release_responses != answered_before)
+        AMI_INFO("netstack: DHCPv6 address released, the server answered");
+    else
+        AMI_INFO("netstack: DHCPv6 Release sent, the server did not answer");
 }
 
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
