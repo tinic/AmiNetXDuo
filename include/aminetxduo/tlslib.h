@@ -116,7 +116,6 @@
 #include <exec/types.h>
 #include <exec/libraries.h>
 #include <utility/tagitem.h>
-#include <utility/hooks.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -156,15 +155,8 @@ extern "C" {
  *   2   + TLSRandom, TLSBuffered.  Also the version at which TLSInfo() began
  *       filling ti_Resumed, ti_Resumable and ti_SessionsCached, see the note
  *       on ti_Size, which is what makes asking version 1 for those fields safe.
- *   3   No new vector.  TLSA_VerifyHook, struct TLSCertificate, and ti_Peer
- *       and ti_PeerChain placed in the middle of struct TLSInfo rather than on
- *       the end.  The version moves because the shape of that structure moved,
- *       which is the one thing ti_Size cannot paper over: a caller compiled
- *       against version 2 passes a size that no longer describes the layout it
- *       expects.  Growing it on the end would have preserved that caller, and
- *       there is no such caller, so the fields went where they read best.
  */
-#define TLS_LIB_VERSION     3
+#define TLS_LIB_VERSION     2
 #define TLS_LIB_REVISION    0
 
 /*
@@ -180,7 +172,6 @@ extern "C" {
  */
 #define TLS_LIB_VECTORS_V1  8
 #define TLS_LIB_VECTORS_V2  10
-#define TLS_LIB_VECTORS_V3  10  /* version 3 adds none; see the history above */
 
 #define TLS_LIB_VECTORS_FOR_(v) TLS_LIB_VECTORS_V##v
 #define TLS_LIB_VECTORS_FOR(v)  TLS_LIB_VECTORS_FOR_(v)
@@ -266,84 +257,6 @@ struct TLSConnection;
  */
 #define TLSA_SessionFile    (TLSA_Dummy + 9)
 
-/*
- * struct Hook *.  Consulted once per handshake, after the chain has been
- * checked and before TLSOpen() returns, so that the caller rather than this
- * library decides whether to talk to this peer.  Absent, the chain check
- * decides on its own and everything behaves as it did before this tag existed.
- *
- * It is called whatever the chain check concluded, not only on failure.  A
- * browser wants the failing case, to put the certificate in front of somebody
- * and take an answer; a program with a pinned key wants the succeeding case, to
- * refuse a certificate that verified perfectly well against a CA it does not
- * care about.  One call site serves both, and "who do I trust" ends up in one
- * place instead of two.
- *
- * TLSA_NoVerify turns it off along with everything else: nothing is checked, so
- * there is nothing to report and the hook is not called.  Setting both is not
- * an error, it just means the hook loses.  A caller reaching for NoVerify to
- * get past a certificate it could otherwise have prompted about wants this tag
- * instead.
- *
- * The call is the ordinary AmigaOS one:
- *
- *     a0   struct Hook *          the hook
- *     a2   struct TLSConnection * the connection being negotiated
- *     a1   struct TLSVerifyMsg *  what was found
- *
- * and the return in d0 is TRUE to go on with the connection or FALSE to drop
- * it.  FALSE fails TLSOpen() with TLS_ERR_REFUSED, which is distinguishable
- * from every other failure precisely so that a caller can tell "the user said
- * no" from "it did not work" and not offer to retry.
- *
- * A struct Hook and not a bare function pointer, for h_Data.  The evidence is
- * in AWeb: its AmiSSL backend has to stash its per-connection state with
- * Settaskuserdata() and dig it out again with Gettaskuserdata() inside the
- * callback, an entire side-channel that exists only because OpenSSL's verify
- * callback has nowhere to put a caller's pointer.  h_Data is that pointer, it
- * costs a longword, and it deletes the side-channel.
- *
- * ---- what the hook runs inside ------------------------------------------
- *
- * The task that called TLSOpen(), on that task's stack, with TLSOpen() still on
- * it.  Never the IP thread, never some task belonging to this library, and
- * never a task the caller has not heard of: the handshake is synchronous inside
- * TLSOpen(), so there is exactly one candidate and this is it.  That is worth
- * stating because it is what makes the hook safe to write normally, and it is
- * a property of the design rather than a promise that could quietly lapse.
- *
- * The ThreadX baton is released across the call and taken again afterwards.
- * Without that, a hook that opened a requester would hold the baton away from
- * the IP thread and both SANA-II readers for as long as somebody took to read
- * it, and the rest of the machine's networking would stop, including the other
- * connections of the very browser doing the asking.  This is the same treatment
- * already given to reading a CA root off disk in the middle of a handshake,
- * see nxc_BatonRelease in <aminetxduo/nxcontext.h>; a person reading a
- * requester is a disk access that takes thirty seconds.
- *
- * So the hook may do what its task could do anywhere else: Wait(), open a
- * window, read a file, put up a requester and block until an answer comes back.
- * Two things it may not do.  It must not call into tls.library on the
- * connection in a2, which is in the middle of being set up and is not yet a
- * connection.  And it must not recv() or send() on the descriptor, for the
- * reason the top of this header gives.
- *
- * Taking a long time is allowed and costs nothing local: the hook's time is not
- * charged against TLSA_Timeout, which measures the socket waits either side of
- * it, so a slow answer cannot make the handshake time out.  What it can do is
- * lose the connection at the far end, because the server is sitting mid-
- * handshake with its own idea of how long to hold one open, and thirty seconds
- * is generous by that standard.  A hook that never returns hangs TLSOpen()
- * forever, exactly as a Wait() for a signal that never arrives would; this
- * library has no timer with which to rescue a caller from its own callback and
- * does not pretend to.
- *
- * Everything the hook is given is read-only and stops being valid when the hook
- * returns, except that a struct TLSCertificate reached through TLSInfo() later
- * on lives until TLSClose().  Copy what is to be kept.
- */
-#define TLSA_VerifyHook     (TLSA_Dummy + 10)
-
 /* --------------------------------------------------------------- errors --- */
 
 #define TLS_OK               0
@@ -361,106 +274,6 @@ struct TLSConnection;
 #define TLS_ERR_NOHOSTNAME  12  /* verification asked for, no TLSA_HostName   */
 #define TLS_ERR_INTERNAL    13  /* a bug on our side                          */
 #define TLS_ERR_ALERT       14  /* the peer sent a fatal alert; data is short */
-#define TLS_ERR_REFUSED     15  /* a TLSA_VerifyHook said no                  */
-
-/* --------------------------------------------------------- certificates --- */
-
-#define TLS_KEY_UNKNOWN     0
-#define TLS_KEY_RSA         1
-#define TLS_KEY_EC          2
-
-/*
- * One certificate, already turned into something a person can be shown.
- *
- * The deciding question this exists to answer is "shall I talk to this peer",
- * and it is a question only a human can answer when the chain check has failed.
- * Answering it needs more than the subject line AWeb's AmiSSL backend pulls out
- * of X509_NAME_oneline(): a subject alone tells somebody who the certificate
- * claims to be and nothing about whether the claim is worth anything.  Who
- * signed it, when it is valid, and a fingerprint they can compare against one
- * they were given by another route are the rest of the usual set, so they are
- * all here rather than left for a second call.
- *
- * Strings are this library's, they are NUL-terminated, and they last until
- * TLSClose().  A hook that wants to keep one past its own return copies it.  A
- * field that could not be parsed out of the certificate is NULL, or 0 for the
- * times; none of this is worth failing a connection over, so a malformed corner
- * of a certificate costs the field and not the handshake.
- *
- * tc_Size is set by the library and says how much of this it filled, on the
- * same principle as ti_Size in the other direction.
- */
-struct TLSCertificate
-{
-    ULONG   tc_Size;
-
-    /* 0 is the leaf, the one the host name is supposed to match.  Counting up
-       goes towards the root, as in ti_ChainDepth. */
-    ULONG   tc_Depth;
-
-    /* "CN=example.com, O=Example Ltd, C=GB", assembled in that order from the
-       fields the certificate actually carries.  tc_CommonName is the CN on its
-       own, because that is what fits in a requester's title. */
-    STRPTR  tc_Subject;
-    STRPTR  tc_CommonName;
-    STRPTR  tc_Issuer;
-
-    /* The subject alternative names, comma separated: "example.com,
-       www.example.com".  This and not tc_CommonName is what the host name is
-       checked against, so it is what a person comparing by eye should be shown.
-       NULL when the certificate carries none. */
-    STRPTR  tc_AltNames;
-
-    /*
-     * Unix time, or 0 when the date would not parse.  Whether they were
-     * enforced is a different question from what they say: on a machine with no
-     * clock they are reported and not enforced, which is ti_ExpiryChecked at
-     * the top of this header.  A caller showing these to somebody on such a
-     * machine is giving them the one check the library could not make.
-     */
-    ULONG   tc_NotBefore;
-    ULONG   tc_NotAfter;
-
-    /*
-     * SHA-256 over the DER, raw.  Raw and not hex because the comparison a
-     * fingerprint is for is usually a memcmp against a pinned copy, and the
-     * caller that wants to print it knows what separator its user expects.
-     */
-    UBYTE   tc_Fingerprint[32];
-
-    ULONG   tc_KeyType;         /* TLS_KEY_*                                  */
-    ULONG   tc_KeyBits;         /* modulus or curve size                      */
-    BOOL    tc_SelfSigned;      /* subject equals issuer                      */
-};
-
-/*
- * What a TLSA_VerifyHook is called with.  See TLSA_VerifyHook above for the
- * context it runs in, which is the part that matters.
- */
-struct TLSVerifyMsg
-{
-    ULONG   tv_Size;
-
-    /* TLSA_HostName as given, so a hook does not have to have kept it.  NULL if
-       there was none. */
-    STRPTR  tv_HostName;
-
-    /*
-     * What the chain check concluded: TLS_OK, or TLS_ERR_UNTRUSTED,
-     * TLS_ERR_HOSTNAME or TLS_ERR_EXPIRED.  This is the whole reason the hook
-     * is being asked, and a hook that ignores it and returns TRUE has switched
-     * verification off for that connection.
-     */
-    LONG    tv_Reason;
-
-    /* The chain the server sent, tv_ChainDepth of them, tv_Chain[0] being the
-       leaf and the same certificate as tv_Leaf.  A hook that only wants to
-       identify the peer wants tv_Leaf; one deciding whether an unknown root is
-       acceptable wants the far end of tv_Chain. */
-    ULONG   tv_ChainDepth;
-    struct TLSCertificate *tv_Leaf;
-    struct TLSCertificate *tv_Chain;
-};
 
 /* ----------------------------------------------------------------- info --- */
 
@@ -484,24 +297,6 @@ struct TLSInfo
     ULONG   ti_ChainDepth;      /* certificates the server sent               */
     ULONG   ti_HandshakeMillis; /* how long TLSOpen() spent shaking hands     */
     LONG    ti_Error;           /* the last TLS_ERR_* on this connection      */
-
-    /*
-     * The certificate the peer proved it holds, and the chain it arrived in:
-     * ti_PeerChain[0] is ti_Peer and there are ti_ChainDepth of them.  Both are
-     * NULL on a connection that resumed a cached session, because a resumed
-     * handshake sends no certificate at all; ti_Resumed says which happened, and
-     * a padlock that wants a subject line on every connection wants TLSA_NoResume
-     * with it, at the cost the tag describes.
-     *
-     * They belong to the library and last until TLSClose().
-     *
-     * Here rather than appended to the end because this is the answer to "who am
-     * I talking to", which is the same question ti_Verified answers half of, and
-     * because putting them after ti_Error and before a pair of two-byte BOOLs
-     * costs no padding.
-     */
-    struct TLSCertificate  *ti_Peer;
-    struct TLSCertificate  *ti_PeerChain;
 
     BOOL    ti_Verified;        /* the chain reached a root in the trust store */
 
@@ -544,23 +339,16 @@ struct TLSInfo
 };
 
 /*
- * The structure up to but not including the resumption fields: the floor below
- * which what was passed is not a TLSInfo at all, and the boundary the library
- * fills up to when a caller passes less than the whole thing.  ti_Size still
- * means "fill what fits", in both directions, which is what lets this structure
- * grow again without a fourth version.
+ * The size of the structure before ti_Resumed existed.  A caller passing this
+ * gets the original fields and nothing else, which is the whole compatibility
+ * mechanism and is why ti_Size is a required input.
  *
- * Forty-eight and not fifty-six: BOOL on classic AmigaOS is a SHORT, so
- * ti_Verified and ti_ExpiryChecked are two bytes each, not four.  The library
- * asserts this number against the real offset at build time rather than
- * trusting the arithmetic in this comment.
- *
- * Version 3 reset this baseline rather than adding a third tier beside the
- * other two.  The old value described a layout that no longer exists, and
- * keeping a constant that names a shape nothing can produce is worse than
- * renumbering when nothing is depending on it.
+ * Forty and not forty-four: BOOL on classic AmigaOS is a SHORT, so ti_Verified
+ * and ti_ExpiryChecked are two bytes each, not four.  The library asserts this
+ * number against the real offset at build time rather than trusting the
+ * arithmetic in this comment.
  */
-#define TLS_INFO_SIZE_BASE  48
+#define TLS_INFO_SIZE_V1    40
 
 /* ------------------------------------------------------ WaitSelect() ------ */
 
