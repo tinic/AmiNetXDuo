@@ -26,6 +26,27 @@
 # EVERY CASE ENDS WITH A RESET from the peer, so a socket left retransmitting
 # cannot leak into the next case.  retransmit.drill explains why at length.
 #
+# THIS FILE NEEDS -DAMINETXDUO_TCP_LOSS_PROBE=OFF, and run-tcpdrill.sh skips it
+# by name otherwise.  RFC 8985 7.2's tail loss probe fires 2*SRTT + 200 ms
+# after a transmission, which is inside the round trip induced above, and the
+# probe is a retransmission: Karn's algorithm abandons the measurement, so the
+# 600 ms path is never sampled, the timeout stays on its one second floor, and
+# the extra copy sits in the queue until the next `tx` line matches it and
+# reports a sequence number from the previous segment.
+#
+# It cannot be written around.  A round trip that survives the probe has to be
+# under 2*SRTT + 200 ms and one that lifts the timeout off the floor has to be
+# over 333, which is a 67 ms window against a 100 ms fast timer.  RFC 7323
+# timestamps would settle it -- the echo names which transmission is being
+# answered and the stack samples that way already, no Karn exception needed --
+# but this peer cannot echo a TSval the stack chose, so no script here can
+# negotiate its way out.
+#
+# WHAT THAT LEAVES UNMEASURED IS REAL, and belongs on the backlog rather than
+# here: without timestamps, SRTT cannot grow past 2*SRTT + 200 ms, because
+# every sample longer than that is abandoned by the probe that fires first.
+# A path that slows down keeps the estimate it had.
+#
 # SPDX-License-Identifier: MIT
 
 # RFC 6298 2.2.  One acknowledged segment is one measurement, and the timeout
