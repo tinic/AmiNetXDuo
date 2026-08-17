@@ -131,8 +131,8 @@ done
 # boundary and is read by a tcpdump that knows nothing about how it was made.
 READER=local
 if [ -n "$PEER" ]; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=10 "$PEER" \
-           'command -v tcpdump > /dev/null' 2>/dev/null; then
+    if ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$PEER" \
+           'command -v tcpdump > /dev/null' 2>/dev/null < /dev/null; then
         READER=peer
     else
         kv peer_unusable "$PEER"
@@ -148,17 +148,26 @@ kv reader "$READER"
 kv ping_target "$TARGET"
 
 # Read a pcap wherever the reader is.  One place, so the two arms cannot drift.
+#
+# EVERY ssh AND scp HERE TAKES ITS STDIN FROM /dev/null.  ssh reads whatever
+# stdin it is given, and the card loop below feeds the card list on a file
+# descriptor these functions can see: without this the first card's tcpdump
+# swallowed the remaining eight and the sweep reported itself complete after
+# one.  tests/tools/run-cardsweep.sh:265 records the same bug from the other
+# end.  The loop also moves the list to fd 3, so both halves of the mistake
+# are closed.
+#
 #   pcap_lines <file> [expression]
 pcap_lines() {
     local file="$1" expr="${2:-}"
 
     if [ "$READER" = peer ]; then
         scp -q -o BatchMode=yes "$file" "$PEER:/tmp/$(basename "$file")" \
-            2>/dev/null || return 1
+            2>/dev/null < /dev/null || return 1
         # shellcheck disable=SC2029  # the expansion is meant to happen here
-        ssh -o BatchMode=yes "$PEER" \
+        ssh -n -o BatchMode=yes "$PEER" \
             "tcpdump -r /tmp/$(basename "$file") -nne ${expr:+\"$expr\"} 2>/dev/null" \
-            2>/dev/null
+            2>/dev/null < /dev/null
     else
         # shellcheck disable=SC2086
         tcpdump -r "$file" -nne ${expr:+"$expr"} 2>/dev/null
@@ -173,10 +182,10 @@ pcap_readable() {
 
     if [ "$READER" = peer ]; then
         scp -q -o BatchMode=yes "$file" "$PEER:/tmp/$(basename "$file")" \
-            2>/dev/null || return 1
-        ssh -o BatchMode=yes "$PEER" \
+            2>/dev/null < /dev/null || return 1
+        ssh -n -o BatchMode=yes "$PEER" \
             "tcpdump -r /tmp/$(basename "$file") -nn -c 1 > /dev/null" \
-            2>/dev/null
+            2>/dev/null < /dev/null
     else
         tcpdump -r "$file" -nn -c 1 > /dev/null 2>&1
     fi
@@ -356,10 +365,12 @@ EOF
     fi
 }
 
-while read -r board model addr mactail; do
+# The card list arrives on fd 3, not on stdin: everything in the loop body is
+# then free to have a stdin of its own, and nothing in it can eat the list.
+while read -r -u 3 board model addr mactail; do
     [ -n "$board" ] || continue
     run_card "$board" "$model" "$addr" "$mactail"
-done < <(cards_rows "$ONLY")
+done 3< <(cards_rows "$ONLY")
 
 # Cards this project names that no arm can reach.  A list of what is covered
 # is worth nothing without the list of what is not.
