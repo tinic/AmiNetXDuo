@@ -25,26 +25,21 @@
 /*
  * CMD_READ is per packet type and the device has no buffers of its own: every
  * frame that arrives with no matching read outstanding is dropped. Each
- * outstanding read pins one NX_PACKET for its whole life, so depth trades pool
- * occupancy against loss under burst.
+ * outstanding read pins one NX_PACKET for its whole life, so a reader's depth
+ * is its receive window in frames, and it is paid for out of the packet pool.
  *
- * The IPv4 depth is the receive window in frames, and four is too few.
- * Measured with tests/curl/run-curlverify.sh -p: sixteen concurrent HTTP
- * transfers through curl's multi interface lost six, twenty-four lost seven,
- * and forty lost fifteen. All failed as `curl: (7) Could not connect` after
- * about thirteen seconds, on connections the host had already accepted. The
- * SYN went out, the peer answered, and the SYN/ACK arrived in a burst with no
- * read outstanding to catch it. At depth eight, forty concurrent transfers
- * lost none.
+ * The floors below are what a reader gets when nothing else can be afforded.
+ * Four for IPv4 is measured: with tests/curl/run-curlverify.sh -p, sixteen
+ * concurrent HTTP transfers through curl's multi interface lost six at depth
+ * four, twenty-four lost seven, and forty lost fifteen. All failed as
+ * `curl: (7) Could not connect` after about thirteen seconds, on connections
+ * the host had already accepted -- the SYN went out, the peer answered, and
+ * the SYN/ACK arrived in a burst with no read outstanding to catch it. At
+ * depth eight, forty concurrent transfers lost none.
  *
- * The value below is therefore a floor. ami_sana2_rx_start() sizes the IPv4
- * reader from the packet pool instead (see the comment there), because the
- * pool is itself sized from AvailMem().
- *
- * The 1 MB floor (docs/RESEARCH.md §81) gives a pool of 17 packets, close to
- * AMI_POOL_MIN_PACKETS (16). Pinning a quarter of that starves transmit, so
- * such a machine keeps the four and cannot absorb the burst. ARP and IPv6 ND
- * are low-rate and stay shallow.
+ * What each reader gets ABOVE its floor is ami_sana2_rx_plan(), from the line
+ * rate the device reports and what the pool can spare. Both numbers are read
+ * there and the reasoning is there.
  */
 #ifndef AMI_SANA2_RX_DEPTH_IPV4
 #define AMI_SANA2_RX_DEPTH_IPV4     4
@@ -56,13 +51,75 @@
 #define AMI_SANA2_RX_DEPTH_IPV6     2
 #endif
 
-/* One in this many pool packets can be pinned by the IPv4 reader. */
+/*
+ * The receive window in frames, which is what a reader has to be deep enough
+ * to catch.
+ *
+ * One in AMI_SANA2_RX_POOL_SHARE pool packets is exactly the share
+ * src/bsdsocket/bsdsocket_internal.h's BSD_TCP_WINDOW_POOL_SHARE gives a
+ * socket's TCP receive window, and that is not a coincidence to be tidied
+ * away: the window is the bytes a peer is allowed to have in flight, and the
+ * read queue is where those bytes land. The two constants have to move
+ * together, and this comment is the only thing saying so -- sana2 is below
+ * bsdsocket and cannot include its header.
+ */
 #ifndef AMI_SANA2_RX_POOL_SHARE
 #define AMI_SANA2_RX_POOL_SHARE     8
 #endif
 
+/*
+ * And the least a reader asks for whatever the pool says.
+ *
+ * Eight, from tests/curl/run-curlverify.sh -p: forty concurrent transfers lost
+ * fifteen SYN/ACKs at four and none at eight. A streaming workload does not
+ * see it -- on a 2 MB A1200, where the pool's own share is six, the receive
+ * rate is 1.92 Mbit/s at four and 1.93 at eight -- because one flow's window
+ * opens gradually and forty handshakes answer at once. The burst is what this
+ * number is for, and it costs two packets on the smallest machine that can
+ * afford anything above its floors at all.
+ *
+ * It is a want and not a floor: AMI_SANA2_RX_DEPTH_* are the floors, and the
+ * budget below can refuse this on a machine that cannot pay for it.
+ */
+#ifndef AMI_SANA2_RX_WANT_MIN
+#define AMI_SANA2_RX_WANT_MIN       8
+#endif
+
+/*
+ * One in this many pool packets can be PINNED by the readers, all of them
+ * together and not one each.
+ *
+ * A quarter, and the floors override it: a machine whose pool cannot spare
+ * even the floors still gets them, because a reader below its floor cannot
+ * absorb the smallest burst there is and the alternative to spending the
+ * packets is a link that drops SYN/ACKs.
+ *
+ * Twice the window share above, so a machine can hold a window's worth of
+ * reads on one protocol and still have the same again for the other.
+ */
+#ifndef AMI_SANA2_RX_BUDGET_SHARE
+#define AMI_SANA2_RX_BUDGET_SHARE   4
+#endif
+
 #ifndef AMI_SANA2_RX_MAX_DEPTH
 #define AMI_SANA2_RX_MAX_DEPTH      32
+#endif
+
+/*
+ * The line rate assumed for a device that does not report one.
+ *
+ * S2_DEVICEQUERY answers into a zeroed block, so a device that does not fill
+ * BPS in, and one that supplies a short block that stops before it, both
+ * arrive here as 0. Ten megabits is what every Ethernet board in
+ * src/netdev/netdev_cards.c but the x-surf-100 reports, so a device that
+ * cannot say lands where the common case is rather than at either extreme.
+ *
+ * A nonsense rate needs no separate case: the ladder's bottom step covers
+ * every wire slower than the reader, so a device answering 1 is capped where a
+ * serial line is capped, which is the floor, which is where it belongs.
+ */
+#ifndef AMI_SANA2_BPS_DEFAULT
+#define AMI_SANA2_BPS_DEFAULT       10000000UL
 #endif
 
 /*
@@ -116,6 +173,31 @@
 #else
 #define AMI_SANA2_RX_READERS        2
 #endif
+
+/*
+ * How deep each read queue goes on this machine, on this wire.
+ *
+ * Three numbers rather than one, because the pool pays for all three at once
+ * and the ARP reader is not the same kind of consumer as the other two. Filled
+ * by ami_sana2_rx_plan(); see it for what decides each.
+ */
+typedef struct AmiRxDepths
+{
+    UWORD   ipv4;
+    UWORD   arp;
+    UWORD   ipv6;       /* 0 when the plan was asked for a single stack */
+} AmiRxDepths;
+
+/*
+ * `bps` is what S2_DEVICEQUERY reported, 0 when the device did not say.
+ * `pool_total` is nx_packet_pool_total, 0 when there is no pool yet.
+ * `dual_stack` says whether an IPv6 reader will be started at all.
+ *
+ * Extern, and taking scalars rather than the interface, so the arithmetic runs
+ * under tests/sana2/host with no device and no pool behind it.
+ */
+VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
+                       AmiRxDepths *out);
 
 /* ---------------------------------------------------------- receive probe */
 

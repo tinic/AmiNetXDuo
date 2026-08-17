@@ -1143,15 +1143,6 @@ static const ULONG ami_sana2_rx_types[AMI_SANA2_RX_READERS] =
 #endif
 };
 
-static const UWORD ami_sana2_rx_depths[AMI_SANA2_RX_READERS] =
-{
-    AMI_SANA2_RX_DEPTH_IPV4,
-    AMI_SANA2_RX_DEPTH_ARP
-#ifdef AMINETXDUO_IPV6
-, AMI_SANA2_RX_DEPTH_IPV6
-#endif
-};
-
 static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
 {
     "sana2 rx ip",
@@ -1161,36 +1152,175 @@ static const CHAR *const ami_sana2_rx_names[AMI_SANA2_RX_READERS] =
 #endif
 };
 
+/* ------------------------------------------------------------- read depth */
+
 /*
- * The depth of the IPv4 read queue on this machine.
+ * The most reads a wire this slow can ever need.
  *
- * The device discards every frame that arrives with no CMD_READ outstanding,
- * so this number is the receive window in frames, and bursts overrun it:
- * sixteen TCP connections opening at once answer with sixteen SYN/ACKs inside
- * a few hundred microseconds, and a 14 MHz 68020 cannot re-post a read between
- * them.  A fixed four lost six of those sixteen.  See sana2_internal.h for the
- * measurements.
+ * S2_DEVICEQUERY reports a line rate and AROSTCP scales its read pool up with
+ * it, on the reasoning that a faster wire delivers a burst sooner.  That is
+ * true and it is not the binding constraint here, which is why this table caps
+ * rather than scales, and why every Ethernet row in it is the ceiling.
  *
- * Sized from the packet pool rather than fixed, because each outstanding read
- * pins a packet for its whole life and the pool is already sized from
- * AvailMem().  A four-megabyte machine gets the floor, an eight-megabyte one
- * the ceiling.
+ * A read queue has to hold the burst a peer is allowed to send.  Whether the
+ * queue drains faster than the burst arrives is a race between the wire and
+ * the CPU, and on the machines this stack runs on the CPU loses at every
+ * Ethernet rate there is: an A1200 receives at 4.9 Mbit/s flat out
+ * (tests/tools/run-iperf.sh, a2065, 8 MB, guest receiving), which is 2.4 ms of
+ * CPU per full frame against the 1.2 ms a 10BASE-T wire takes to deliver the
+ * next one.  Ten megabits is already faster than the reader; a hundred is not
+ * differently faster.  Measured, n=3 interleaved, medians in kbit/s, guest
+ * receiving, depth forced:
+ *
+ *      depth              4      8     16     32
+ *      a2065     8 MB  1588   2254   4896   4843
+ *      a2065     0 MB  1917   1929   1910   1900
+ *      xsurf100  8 MB  1457   1976   3962   3964
+ *      xsurf100  0 MB  1554   1589   1586   1586
+ *
+ * The card that reports ten megabits and the card that reports a hundred want
+ * the same depth, and what separates the two rows of each is memory.
+ *
+ * That the lab's cards are unpaced is not what makes those rows agree.  The
+ * emulated a2065 delivers as fast as the host can push unless
+ * AMIBERRY_A2065_KBIT is set, so it was set: paced to a real ten megabits, the
+ * same machine reads 1683 / 2502 / 4798 / 4672 kbit/s at the same four depths,
+ * which is the unpaced row again.  A ten-megabit wire is not a constraint on a
+ * receiver that cannot fill it.
+ *
+ * A wire SLOWER than the receiver is the one case where the reported rate
+ * decides anything, and that is measured too.  Paced to two megabits, below
+ * the 4.9 Mbit/s the reader can manage, the same four depths read 1749 / 1579
+ * / 1580 / 1571 kbit/s: the floor is as good as the ceiling, and the twenty
+ * eight packets the ceiling would pin buy nothing.  Hence a cap and a
+ * threshold below the reader's own rate rather than a scale.
+ *
+ * No Ethernet board in src/netdev/netdev_cards.c reports under ten megabits,
+ * so nothing this project can boot takes the bottom row.  The wires that would
+ * are slip.device and rs485.device, which have no emulated board to run on
+ * (tests/tools/cards.sh); the paced card above is what stands in for them.
  */
-static UWORD ami_sana2_rx_ipv4_depth(NX_PACKET_POOL *pool)
+typedef struct AmiRxSpeedStep
 {
-    ULONG depth;
+    ULONG   bps;        /* the fastest wire this row covers */
+    UWORD   depth;      /* the most reads it can ever need  */
+} AmiRxSpeedStep;
 
-    if (pool == NULL)
-        return (UWORD)AMI_SANA2_RX_DEPTH_IPV4;
+static const AmiRxSpeedStep ami_sana2_rx_ladder[] =
+{
+    {     4000000UL,  AMI_SANA2_RX_DEPTH_IPV4 },
+    { 0xFFFFFFFFUL,   AMI_SANA2_RX_MAX_DEPTH  }
+};
 
-    depth = pool->nx_packet_pool_total / (ULONG)AMI_SANA2_RX_POOL_SHARE;
+static UWORD ami_sana2_rx_wire_depth(ULONG bps)
+{
+    UWORD i;
+    UWORD last = (UWORD)(sizeof(ami_sana2_rx_ladder) /
+                         sizeof(ami_sana2_rx_ladder[0]) - 1);
 
-    if (depth < (ULONG)AMI_SANA2_RX_DEPTH_IPV4)
-        depth = (ULONG)AMI_SANA2_RX_DEPTH_IPV4;
-    if (depth > (ULONG)AMI_SANA2_RX_MAX_DEPTH)
-        depth = (ULONG)AMI_SANA2_RX_MAX_DEPTH;
+    /* 0 is "the device did not say": either it left BPS alone or it supplied a
+       short block that stopped before it, and ami_sana2_query() zeroes the
+       block first, so both arrive as 0.  Nothing else needs a special case --
+       the bottom step covers every nonsense value a device can answer, and
+       0xFFFFFFFF, which is what a rate that did not fit a ULONG looks like,
+       falls off the top and is treated as very fast. */
+    if (bps == 0)
+        bps = (ULONG)AMI_SANA2_BPS_DEFAULT;
 
-    return (UWORD)depth;
+    for (i = 0; i < last; i++)
+    {
+        if (bps <= ami_sana2_rx_ladder[i].bps)
+            return ami_sana2_rx_ladder[i].depth;
+    }
+
+    return ami_sana2_rx_ladder[last].depth;
+}
+
+/*
+ * What each reader gets: the smaller of what the wire asks for and what the
+ * pool can spare.
+ *
+ * WHAT THE POOL CAN SPARE.  Each outstanding read pins one NX_PACKET for the
+ * whole life of the request, and the pool is sized from AvailMem()
+ * (src/netstack/netstack.c).  The budget is therefore over all three readers
+ * together and not one each: with the IPv6 reader built in, the old per-reader
+ * arithmetic pinned 4 + 2 + 2 on a machine whose whole pool was seventeen
+ * packets, and called it "the four".
+ *
+ * The floors are never given up.  A machine too small to spare them still gets
+ * them, because a reader below its floor cannot absorb the smallest burst
+ * there is -- the SYN/ACKs of a handful of connections opening at once -- and
+ * the failure is a connection that never completes, not a slow one.
+ *
+ * IPv4 is served before IPv6 out of what is left over.  Not a judgement about
+ * which protocol matters: the spare only runs out on a machine whose pool is
+ * around ten packets, and on a machine that small the IPv6 reader keeps
+ * exactly the depth it had before this function existed.
+ *
+ * THE IPv6 READER IS NOT A NEIGHBOUR-DISCOVERY READER.  Its packet type is
+ * 0x86DD, which is the whole protocol: every IPv6 TCP segment this machine
+ * receives arrives through it.  It was two deep, against IPv4's thirty-two, on
+ * the same wire and for the same traffic.
+ *
+ * ARP STAYS AT ITS FLOOR, deliberately.  Two is a request and its reply, which
+ * is the whole of what that reader carries; a deeper queue buys tolerance of a
+ * broadcast storm and nothing else, costs a pinned packet per slot on the
+ * smallest machine there is, and no workload in tests/ can overrun two.  The
+ * one that would is a LAN sweeping the segment while this machine is opening a
+ * connection, and nothing here measures it.  The test beside this asserts the
+ * flatness rather than leaving it to be inferred from its absence.
+ */
+static UWORD ami_sana2_rx_window_depth(ULONG pool_total)
+{
+    ULONG frames = pool_total / (ULONG)AMI_SANA2_RX_POOL_SHARE;
+
+    if (frames < (ULONG)AMI_SANA2_RX_WANT_MIN)
+        frames = (ULONG)AMI_SANA2_RX_WANT_MIN;
+    if (frames > (ULONG)AMI_SANA2_RX_MAX_DEPTH)
+        frames = (ULONG)AMI_SANA2_RX_MAX_DEPTH;
+
+    return (UWORD)frames;
+}
+
+VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
+                       AmiRxDepths *out)
+{
+    UWORD want;
+    UWORD cap;
+    ULONG budget;
+    ULONG floors;
+    ULONG spare;
+    UWORD give;
+
+    if (out == NULL)
+        return;
+
+    want = ami_sana2_rx_window_depth(pool_total);
+    cap  = ami_sana2_rx_wire_depth(bps);
+    if (want > cap)
+        want = cap;
+
+    out->ipv4 = (UWORD)AMI_SANA2_RX_DEPTH_IPV4;
+    out->arp  = (UWORD)AMI_SANA2_RX_DEPTH_ARP;
+    out->ipv6 = dual_stack ? (UWORD)AMI_SANA2_RX_DEPTH_IPV6 : (UWORD)0;
+
+    budget = pool_total / (ULONG)AMI_SANA2_RX_BUDGET_SHARE;
+    floors = (ULONG)out->ipv4 + (ULONG)out->arp + (ULONG)out->ipv6;
+    spare  = (budget > floors) ? (budget - floors) : 0UL;
+
+    give = (want > out->ipv4) ? (UWORD)(want - out->ipv4) : (UWORD)0;
+    if ((ULONG)give > spare)
+        give = (UWORD)spare;
+    out->ipv4 = (UWORD)(out->ipv4 + give);
+    spare    -= (ULONG)give;
+
+    if (dual_stack)
+    {
+        give = (want > out->ipv6) ? (UWORD)(want - out->ipv6) : (UWORD)0;
+        if ((ULONG)give > spare)
+            give = (UWORD)spare;
+        out->ipv6 = (UWORD)(out->ipv6 + give);
+    }
 }
 
 /*
@@ -1242,9 +1372,9 @@ static APTR ami_sana2_alloc_stack(ULONG size)
 
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
-    UWORD i;
-    UWORD ipv4_depth;
-    UINT  txstatus;
+    UWORD       i;
+    AmiRxDepths depths;
+    UINT        txstatus;
 
     if (iface->rx_running)
         return 0;
@@ -1260,9 +1390,18 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
     if (iface->pool == NULL || iface->ip == NULL)
         return -1;
 
-    ipv4_depth = ami_sana2_rx_ipv4_depth(iface->pool);
-    AMI_INFO("sana2: IPv4 read queue %ld deep (pool %ld packets)",
-             (long)ipv4_depth, (long)iface->pool->nx_packet_pool_total);
+    /*
+     * iface->bps is already here: ami_sana2_query() reads it at open, before
+     * any reader exists, so the line rate costs this path no device round trip
+     * and bring-up is not asked for one more answer than it was.
+     */
+    ami_sana2_rx_plan(iface->bps, iface->pool->nx_packet_pool_total,
+                      (BOOL)(AMI_SANA2_RX_READERS == 3), &depths);
+
+    AMI_INFO("sana2: read queues ip %ld arp %ld ip6 %ld "
+             "(pool %ld packets, %ld bps)",
+             (long)depths.ipv4, (long)depths.arp, (long)depths.ipv6,
+             (long)iface->pool->nx_packet_pool_total, (long)iface->bps);
 
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {
@@ -1270,9 +1409,12 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
         rx->iface       = iface;
         rx->packet_type = ami_sana2_rx_types[i];
-        rx->depth       = (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
-                              ? ipv4_depth
-                              : ami_sana2_rx_depths[i];
+        if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
+            rx->depth = depths.ipv4;
+        else if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_ARP)
+            rx->depth = depths.arp;
+        else
+            rx->depth = depths.ipv6;
         rx->stop        = FALSE;
         rx->failed      = FALSE;
         rx->running     = FALSE;
