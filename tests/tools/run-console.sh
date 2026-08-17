@@ -123,6 +123,12 @@ PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/src/tools/web/console.html}"
 CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
 ACTIVITY=idle
 TYPE=""
+# -L N measures how long the guest takes to act on a keystroke: N of them, each
+# from a screen that has been still, timed to the frame that shows the
+# character.  It needs something on the screen that echoes, so it goes with
+# -A idle and a Shell in front, and it is the number that says whether
+# producing a frame in bands got the input path looked at sooner.
+LATENCY=""
 DEPTHS=()
 # -R serves a GRAPHICS CARD instead of the chipset: Amiberry's uaegfx board,
 # Picasso96 staged onto the drive, and Workbench put on an RTG screen of the
@@ -143,7 +149,7 @@ RTG_DEPTHS="8 15 16 24 32"
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:R" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:R" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -158,6 +164,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:R" opt; do
         c) CLIENT="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
         A) ACTIVITY="$OPTARG" ;;
+        L) LATENCY="$OPTARG" ;;
         T) TYPE="$OPTARG" ;;
         R) RTG=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
@@ -932,6 +939,9 @@ for depth in "${DEPTHS[@]}"; do
     typing=()
     [ -z "$TYPE" ] || typing=(--type "$TYPE")
 
+    latency=()
+    [ -z "$LATENCY" ] || latency=(--latency "$LATENCY")
+
     # A frozen picture passes everything else.
     #
     # A readback route that reads nothing wins the speed probe, and the console
@@ -955,6 +965,7 @@ for depth in "${DEPTHS[@]}"; do
     probe "$OUTDIR/$tag-probe.txt" \
         "$ADDRESS" "$PORT" --seconds "$PROBE_SECONDS" \
         --png "$OUTDIR/$tag.png" --pfs "$OUTDIR/$tag.pfs" \
+        ${latency[@]+"${latency[@]}"} \
         ${typing[@]+"${typing[@]}"} ${moving[@]+"${moving[@]}"}
     rc=$?
     set -e
