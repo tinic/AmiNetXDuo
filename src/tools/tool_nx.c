@@ -290,6 +290,43 @@ const char *tool_addr6_state(UWORD state)
     }
 }
 
+BOOL tool_iface_has_address6(const ToolSnapshot *snap, UWORD nx_index)
+{
+    UWORD i;
+
+    if (snap == NULL)
+        return FALSE;
+
+    for (i = 0; i < snap->addr6_count; i++)
+    {
+        const ToolAddr6Info *a6 = &snap->addr6[i];
+
+        if (a6->nx_index != nx_index || a6->text[0] == '\0')
+            continue;
+
+        /* RFC 4862 5.4: TENTATIVE is still under duplicate address detection
+           and is not yet an address anything may use. DEPRECATED is: it is an
+           address on its way out that still carries existing traffic. */
+        if (a6->state == NETSTATUS_IP6_TENTATIVE)
+            continue;
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL tool_iface_has_address(const ToolSnapshot *snap, const ToolIfInfo *live)
+{
+    if (live == NULL)
+        return FALSE;
+
+    if (live->address != 0UL)
+        return TRUE;
+
+    return tool_iface_has_address6(snap, live->nx_index);
+}
+
 /* ---------------------------------------------------- protocol counters, */
 
 LONG tool_stats(ToolStats *out)

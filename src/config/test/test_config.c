@@ -832,6 +832,141 @@ static void test_problem_reporter(void)
  * of them. Names come from include/aminetxduo/anxnet.h; a name no card has
  * refuses the interface rather than coming up on whatever UNIT points at.
  */
+
+/*
+ * The IPv6-only interface, which the parser refused outright until this.
+ *
+ * Every case below is a file that must now come up, plus the one that must
+ * still be refused -- the sabotage check on the change. "DEVICE and nothing
+ * else" is a file whose author forgot the address, and losing that diagnostic
+ * in exchange for IPv6-only would be a bad trade.
+ */
+static void test_interface_ipv6_only(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: IPv6-only\n");
+
+    /* CONFIGURE=NONE is "no IPv4", not "static with no address". */
+    buf = dup_text("device=a2065.device\nconfigure=none\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.iptype == AMI_IPTYPE_NONE);
+    CHECK(iface.configured == TRUE);
+    CHECK(!ami_config_iface_wants_ipv4(&iface));
+    free(buf);
+
+    /* And its three spellings. */
+    buf = dup_text("device=a2065.device\nconfigure=off\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.iptype == AMI_IPTYPE_NONE);
+    free(buf);
+
+    /* A static IPv4 address means IPv4 is expected; DHCP and link-local too. */
+    buf = dup_text("device=a2065.device\naddress=10.0.0.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(ami_config_iface_wants_ipv4(&iface));
+    free(buf);
+
+    buf = dup_text("device=a2065.device\nconfigure=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(ami_config_iface_wants_ipv4(&iface));
+    free(buf);
+
+    buf = dup_text("device=a2065.device\nconfigure=linklocal\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(ami_config_iface_wants_ipv4(&iface));
+    free(buf);
+
+    /* STATIC with no ADDRESS expects nothing: there is no source left. */
+    buf = dup_text("device=a2065.device\nconfigure6=auto\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.iptype == AMI_IPTYPE_STATIC);
+    CHECK(!ami_config_iface_wants_ipv4(&iface));
+    free(buf);
+}
+
+/*
+ * The same set again, through the reporter, because the fault was never the
+ * parsed value: it was the AMI_CFG_PROBLEM_ERROR, which AddNetInterface
+ * prints and CheckNetConfig exits non-zero on.
+ */
+static void test_ipv6_only_no_error(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: IPv6-only raises no problem\n");
+
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/eth0");
+
+    /* An explicit CONFIGURE6 is a statement that IPv6 carries the interface. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure6=auto\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    free(buf);
+
+    /* So is an ADDRESS6. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\naddress6=2001:db8::10/64\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.ip6type == AMI_IP6TYPE_STATIC);
+    free(buf);
+
+    /* So is a GATEWAY6 on its own. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\ngateway6=fe80::1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    free(buf);
+
+    /* And so is CONFIGURE=NONE, which says which family carries it. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=none\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    free(buf);
+
+    /* CONFIGURE6=DHCP is the new mode and is spelled like CONFIGURE=DHCP. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure6=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.ip6type == AMI_IP6TYPE_DHCP);
+    CHECK(ami_config_iface_wants_ipv6(&iface));
+    free(buf);
+
+    /*
+     * THE SABOTAGE CHECK. A file that names a device and nothing else has
+     * forgotten its address, and must still be told so. CONFIGURE6 defaults
+     * to AUTO, so treating the default as an IPv6 plan would have swallowed
+     * this diagnostic whole.
+     */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 1);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+    CHECK(seen_mentions("no address"));
+    CHECK(seen_mentions("CONFIGURE6"));
+    free(buf);
+
+    /* And so must one that switches both families off. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=none\nconfigure6=off\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 1);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+    CHECK(!ami_config_iface_wants_ipv4(&iface));
+    CHECK(!ami_config_iface_wants_ipv6(&iface));
+    free(buf);
+
+    ami_config_set_reporter(NULL, NULL);
+}
+
 static void test_interface_card(void)
 {
     AmiIfConfig iface;
@@ -2111,6 +2246,10 @@ int main(int argc, char **argv)
     test_interface_amitcp_flavour();
     test_interface_errors();
     test_problem_reporter();
+    test_interface_ipv6_only();
+#ifdef AMINETXDUO_IPV6
+    test_ipv6_only_no_error();
+#endif
     test_interface_card();
     test_hostname_syntax();
     test_hostname_precedence();

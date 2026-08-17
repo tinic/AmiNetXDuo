@@ -1034,12 +1034,15 @@
 /*
  * Recursive DNS servers out of a router advertisement, RFC 8106.
  *
- * The one thing standing between an IPv6-only link and a usable machine.  A
+ * The first thing standing between an IPv6-only link and a usable machine.  A
  * link with no IPv4 on it configures addresses and a default route from the
- * advertisement and stops there: there is no DHCPv6 in this build
- * (src/netstack/netstack_ipv6.c says why), and DEVS:Internet/name_resolution
- * parses a nameserver as a dotted quad, so an IPv6 resolver cannot even be
- * written down.  The machine comes up routable and cannot resolve a name.
+ * advertisement, and DEVS:Internet/name_resolution parses a nameserver as a
+ * dotted quad, so an IPv6 resolver cannot even be written down.  The machine
+ * comes up routable and cannot resolve a name.
+ *
+ * DHCPv6 answers the same question a second way, and the two have to agree
+ * about who wins; src/netstack/netstack_dns.c states the rule and implements
+ * it.
  *
  * The option costs one else-if in nx_icmpv6_process_ra.c's option walk, which
  * skipped type 25 with everything else it does not know, and a callback field
@@ -1056,7 +1059,9 @@
  * suffix answers `ssh playhouse2.local.tinic.net` and not `ssh playhouse2`,
  * which is the failure DHCP option 119 was wired up for, and a link with no
  * DHCPv4 on it has no option 119.  The router already advertises the list --
- * pfSense does by default -- and it was walked past.
+ * pfSense does by default -- and it was walked past.  DHCPv6's
+ * OPTION_DOMAIN_LIST carries the same encoding and is decoded by the same
+ * function.
  *
  * The option costs another else-if in nx_icmpv6_process_ra.c and a second
  * callback field on NX_IP.  The RFC 1035 label sequences it carries are not
@@ -1064,6 +1069,51 @@
  * ami_config_search_from_rfc3397() already reads it.
  */
 #define NX_ENABLE_IPV6_DNSSL
+
+/* -------------------------------------------------------------- DHCPv6, */
+
+/*
+ * THE THREAD PRIORITY IS THE ONE THAT MATTERS.
+ *
+ * nxd_dhcpv6_client.h defaults NX_DHCPV6_THREAD_PRIORITY to 2, which is
+ * exactly AMI_IP_THREAD_PRIORITY.  A DHCPv6 client thread at the IP thread's
+ * priority preempts the thread it is waiting on, and the #error ladder in
+ * src/thread_priorities.h guards only the AMI_* constants, so this would have
+ * gone in silently.  Set here rather than there because it is the add-on's
+ * knob and the value is checked against the ladder there.
+ *
+ * The literal, not the AMI_ name: nx_user.h is included by the vendored
+ * sources, which have no business including ours.  A _Static_assert in
+ * src/netstack/netstack_dhcpv6.c holds the two together.
+ */
+#define NX_DHCPV6_THREAD_PRIORITY               4
+
+/*
+ * One address, which is what a machine on one link asks for.  The default is
+ * already 1; it is written down because NX_DHCPV6_MAX_IA_ADDRESS sizes an
+ * array in NX_DHCPV6 and doubling it doubles a structure that lives in the
+ * netstack singleton for the life of the machine.
+ */
+#define NX_DHCPV6_MAX_IA_ADDRESS                1
+
+/*
+ * The name servers and search domains a Reply may carry.  Four each, matching
+ * AMI_RDNSS_MAX and what RFC 8106 5.1 expects a router to advertise: the two
+ * sources feed one list of AMI_CFG_MAX_NAMESERVERS, so a fifth from either
+ * would be dropped by the layer above anyway.
+ */
+#define NX_DHCPV6_NUM_DNS_SERVERS               4
+
+/*
+ * The buffer OPTION_DOMAIN_LIST is decoded into, as a run of NUL-terminated
+ * names.  The default is 32 bytes, which holds one ordinary domain and
+ * truncates the second; AMI_CFG_MAX_SEARCH is 6 and AMI_CFG_NAME_LEN is 64,
+ * so 256 is the size at which the list the resolver can hold is the thing
+ * that limits it rather than this buffer.  _nx_dhcpv6_process_domain_name()
+ * stops cleanly when the buffer runs out, so the cost of undersizing is
+ * silently dropped suffixes.
+ */
+#define NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE       256
 
 /*
  * Not set, and why:

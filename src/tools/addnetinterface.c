@@ -242,6 +242,55 @@ static struct
     NetStatusInterface  e[NX_MAX_PHYSICAL_INTERFACES];
 } addif_ifaces;
 
+/* And its IPv6 counterpart, for the same reason.  Six entries, because
+   NX_MAX_IPV6_ADDRESSES is three per interface. */
+static struct
+{
+    NetStatusHeader     hdr;
+    NetStatusAddress6   e[NX_MAX_PHYSICAL_INTERFACES * 3];
+} addif_addr6;
+
+/*
+ * Has the running stack given this interface a usable IPv6 address.
+ *
+ * An IPv6-only interface reports nsi_Address == 0 forever, and every report
+ * this command made was built on that number: "the network is running, but
+ * this machine has no address yet", and RETURN_WARN with it. The address is in
+ * a different table, joined on the interface index.
+ *
+ * TENTATIVE is skipped: RFC 4862 5.4 says an address under duplicate address
+ * detection is not one anything may use yet, and reporting it would mean this
+ * command declares success a second before the address is real.
+ */
+static BOOL running_address6(struct Library *base, UWORD nx_index,
+                             char *text, ULONG text_len)
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &addif_addr6,
+                             sizeof(addif_addr6), sizeof(NetStatusAddress6));
+    if (n <= 0)
+        return FALSE;
+
+    for (i = 0; i < n && i < (LONG)(NX_MAX_PHYSICAL_INTERFACES * 3); i++)
+    {
+        const NetStatusAddress6 *a6 = &addif_addr6.e[i];
+
+        if (a6->nsn_Interface != nx_index)
+            continue;
+        if (a6->nsn_State == NETSTATUS_IP6_TENTATIVE)
+            continue;
+
+        if (text != NULL)
+            tool_format_ip6(a6->nsn_Address, text, text_len);
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 /*
  * What the running stack has by that name: its index, or -1 when there is no
  * such interface and -2 when the stack did not answer. `addr_out` receives
@@ -344,20 +393,25 @@ static VOID explain_add_failure(LONG err, const char *name,
 }
 
 /*
- * Wait up to `seconds` for that interface to be given an address. FALSE means
- * the time ran out, the interface went away, or Ctrl-C was pressed.
+ * Wait up to `seconds` for that interface to be given an address of either
+ * family. FALSE means the time ran out, the interface went away, or Ctrl-C was
+ * pressed. `text6` receives an IPv6 address when that is what arrived, so the
+ * caller can print the address it actually has rather than the one it does
+ * not.
  */
 static BOOL wait_for_running_address(struct Library *base, const char *name,
                                      ULONG seconds, ULONG *addr_out,
+                                     char *text6, ULONG text6_len,
                                      BOOL *broken)
 {
     ULONG waited = 0;
 
     for (;;)
     {
-        ULONG addr = 0;
+        ULONG addr  = 0;
+        LONG  where = running_index(base, name, &addr);
 
-        if (running_index(base, name, &addr) < 0)
+        if (where < 0)
             return FALSE;
 
         if (addr != 0)
@@ -365,6 +419,9 @@ static BOOL wait_for_running_address(struct Library *base, const char *name,
             *addr_out = addr;
             return TRUE;
         }
+
+        if (running_address6(base, (UWORD)where, text6, text6_len))
+            return TRUE;
 
         if (waited >= seconds)
             return FALSE;
@@ -504,7 +561,19 @@ int main(int argc, char **argv)
             return RETURN_FAIL;
         }
 
-        if (ifc.iptype != AMI_IPTYPE_STATIC)
+        /*
+         * "Dynamic" is what TIMEOUT is an allowance for: an address that has
+         * to be asked for and takes wall-clock time to arrive. DHCP and RFC
+         * 3927 are the IPv4 ones; on the IPv6 side a router advertisement and
+         * a DHCPv6 exchange are the same, and so is the second of duplicate
+         * address detection every configured IPv6 address pays. Without this
+         * an IPv6-only interface got an allowance of zero and was asked
+         * whether it had an address before it could possibly have had one.
+         */
+        if (ifc.iptype != AMI_IPTYPE_STATIC && ifc.iptype != AMI_IPTYPE_NONE)
+            dynamic = TRUE;
+        if (!ami_config_iface_wants_ipv4(&ifc) &&
+            ami_config_iface_wants_ipv6(&ifc))
             dynamic = TRUE;
     }
 
@@ -606,6 +675,7 @@ int main(int argc, char **argv)
         {
             ULONG addr = 0;
             char  text[16];
+            char  text6[AMI_CFG_IP6_STRLEN];
             LONG  where;
 
             name = tool_basename((const char *)names[n]);
@@ -637,18 +707,36 @@ int main(int argc, char **argv)
                 }
             }
 
+            text6[0] = '\0';
+
             if (addr == 0)
                 (VOID)wait_for_running_address(base, name, allowance, &addr,
-                                               &broken);
+                                               text6, sizeof(text6), &broken);
+            else if (where >= 0)
+                (VOID)running_address6(base, (UWORD)where, text6,
+                                       sizeof(text6));
 
             if (addr != 0)
             {
                 if (!quiet)
                 {
                     ami_config_format_ip(addr, text, sizeof(text));
-                    tool_printf("%s: online, address %s\n", (LONG)name,
-                                (LONG)text);
+                    if (text6[0] != '\0')
+                        tool_printf("%s: online, address %s and %s\n",
+                                    (LONG)name, (LONG)text, (LONG)text6);
+                    else
+                        tool_printf("%s: online, address %s\n", (LONG)name,
+                                    (LONG)text);
                 }
+            }
+            else if (text6[0] != '\0')
+            {
+                /* IPv6 only, and it is online.  Reported as success, which is
+                   the whole point: this branch used to be the RETURN_WARN
+                   below. */
+                if (!quiet)
+                    tool_printf("%s: online, address %s\n", (LONG)name,
+                                (LONG)text6);
             }
             else if (!ifc.up)
             {
@@ -759,6 +847,7 @@ int main(int argc, char **argv)
         {
             char  addr[16];
             char  mask[16];
+            char  live6[AMI_CFG_IP6_STRLEN];
             ULONG live_addr = 0;
             ULONG live_mask = 0;
             NX_IP *ip;
@@ -772,7 +861,8 @@ int main(int argc, char **argv)
              * arrive.
              */
             (VOID)wait_for_interface_address(index,
-                                             (ifc.iptype != AMI_IPTYPE_STATIC)
+                                             (ifc.iptype != AMI_IPTYPE_STATIC &&
+                                              ifc.iptype != AMI_IPTYPE_NONE)
                                                  ? timeout : 0UL,
                                              &live_addr, &broken);
 
@@ -781,14 +871,45 @@ int main(int argc, char **argv)
                 live_mask =
                     ip->nx_ip_interface[index].nx_interface_ip_network_mask;
 
+            /* The other family, for the same reason as in the library build:
+               an interface can be perfectly online and hold no IPv4 address
+               because none was asked for. */
+            live6[0] = '\0';
+#ifdef AMINETXDUO_IPV6
+            {
+                UWORD slot6;
+
+                for (slot6 = 0; ; slot6++)
+                {
+                    ULONG a6[4];
+                    ULONG state6 = 0;
+
+                    if (!netstack_ipv6_address_get((UWORD)index, slot6, a6,
+                                                   NULL, &state6))
+                        break;
+                    if (state6 == (ULONG)NETSTATUS_IP6_TENTATIVE)
+                        continue;
+
+                    tool_format_ip6(a6, live6, sizeof(live6));
+                    break;
+                }
+            }
+#endif
+
             /* Online with nothing on it is not a success. The library build
                above answers the same case the same way. */
-            if (live_addr == 0 && ifc.up && rc == RETURN_OK)
+            if (live_addr == 0 && live6[0] == '\0' && ifc.up &&
+                rc == RETURN_OK)
                 rc = RETURN_WARN;
 
             if (quiet)
             {
                 /* nothing to say */
+            }
+            else if (live_addr == 0 && live6[0] != '\0')
+            {
+                tool_printf("%s: online, address %s\n", (LONG)name,
+                            (LONG)live6);
             }
             else if (live_addr == 0)
             {

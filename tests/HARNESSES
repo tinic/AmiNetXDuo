@@ -55,6 +55,7 @@ tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdow
 tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: handler, driven by Commodore's own Type and Copy
 tests/tcpstall/run-tcpstall.sh     : tools/ci.sh                    : a peer that stops answering; the stall must be readable and a deadline must be served
 tests/ipv6/run-mld.sh              : tools/ci.sh                    : the groups this host listens to, announced or not, read out of a capture on the segment
+tests/ipv6/run-dhcpv6.sh           : tools/ci.sh                    : an IPv6-only machine addressed by a real DHCPv6 server on the peer, stateful and router-led
 tests/common/run-rt.sh             : .github/workflows/emulator.yml : the compiler runtime, both forms, on all five CPU classes
 tests/conformance/run-conformance.sh : .github/workflows/emulator.yml : the bsdsocktest conformance suite
 tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542

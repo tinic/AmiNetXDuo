@@ -45,6 +45,8 @@ UNIT=0
 ;             address so that at least the local network works.  FASTAUTO and
 ;             ZEROCONF mean the same thing.
 ;   STATIC    use the ADDRESS and NETMASK below.  MANUAL means the same.
+;   NONE      no IPv4 on this interface.  For an IPv6-only machine; see
+;             "eth0-ipv6" in this drawer.  OFF means the same.
 ;
 ; This keyword is CONFIGURE.  It is *not* IPTYPE -- IPTYPE is a number, the
 ; SANA-II packet type, and it defaults to 2048.  Documentation that gives
@@ -73,8 +75,12 @@ CONFIGURE=DHCP
 ;
 ;   CONFIGURE6=OFF          no IPv6 at all
 ;   CONFIGURE6=LINKLOCAL    fe80:: address only
-;   CONFIGURE6=AUTO         link-local, plus whatever a router advertises.
-;                           This is the default.
+;   CONFIGURE6=AUTO         link-local, plus whatever the router advertises:
+;                           a prefix to build an address from, and, if the
+;                           router says so, a DHCPv6 server to ask.  This is
+;                           the default.
+;   CONFIGURE6=DHCP         link-local, plus an address from a DHCPv6 server,
+;                           asked for without waiting to be told to.
 ;   CONFIGURE6=STATIC       use ADDRESS6 below
 ;
 ;CONFIGURE6=AUTO

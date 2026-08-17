@@ -128,6 +128,159 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
 }
 
 /*
+ * WHO WINS WHEN BOTH A ROUTER ADVERTISEMENT AND DHCPv6 NAME A NAME SERVER.
+ *
+ * DHCPv6 does, and this is the reason: the router is the one that said so.
+ * RFC 4861 4.2's O flag -- and M, which implies it -- is the router
+ * delegating the rest of the configuration to a DHCPv6 server, and a router
+ * that sets the flag and also advertises RFC 8106 RDNSS has said two things.
+ * Honouring the flag it set is the resolution that follows from the router's
+ * own statement rather than from a preference of ours.  On a link where the
+ * router sets neither flag no DHCPv6 exchange ever happens, so the question
+ * does not arise and RDNSS is the only answer, which is what it was before.
+ *
+ * "Wins" means goes first in the list the resolver tries, not "the other one
+ * is discarded".  Both are kept, because a name server that answers is worth
+ * having whoever named it, and because the file's own NAMESERVER lines are
+ * already ahead of both -- they were added at ami_netstack_dns_start() and
+ * nxd_dns_server_add() appends.  So the order is: name_resolution, then
+ * DHCPv6, then the advertisement.
+ *
+ * NEITHER MAY WITHDRAW THE OTHER'S.  The reconciliation below removes a
+ * configured server that its own source no longer names; it must not remove
+ * one the other source names, or an RDNSS option with a lifetime of zero
+ * would silently take away a server DHCPv6 supplied, and a Reply naming a
+ * shorter list would take away one the router still advertises.  That is what
+ * the ns_Dhcpv6Dns[] cross-check in each loop is for.
+ */
+static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
+                                    const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    UWORD i;
+
+    for (i = 0; i < ns->ns_Dhcpv6DnsCount; i++)
+    {
+        if (ami_ns6_same(addr, ns->ns_Dhcpv6Dns[i].nxd_ip_address.v6))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * A Reply has landed. Read what it carried out of the client and put it into
+ * the resolver, on a caller thread and not on the client's own, for the reason
+ * stated above ns_Rdnss in netstack_internal.h: the DNS client holds its mutex
+ * across a query and that query needs the IP thread.
+ */
+static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
+{
+    AmiResolverConfig *r;
+    char               text[AMI_CFG_IP6_STRLEN];
+    UINT               index;
+
+    if (!ns->ns_Dhcpv6DnsPending)
+        return;
+
+    ns->ns_Dhcpv6DnsPending = FALSE;
+
+    if (!ns->ns_Dhcpv6Started)
+        return;
+
+    r = &ns->ns_Config.resolver;
+
+    /*
+     * There is no withdrawal here, and that is a fact about the client rather
+     * than an omission.  _nx_dhcpv6_process_DNS_server() writes into
+     * nx_dhcpv6_DNS_name_server_address[] and nothing ever clears it
+     * (nxd_dhcpv6_client.c:4697), so a Reply naming fewer servers than the one
+     * before leaves the older entries in place and there is no "no longer
+     * named" signal to act on.  Written down because a withdrawal loop here
+     * would have looked like it worked and never removed anything.
+     *
+     * The advertisement's side does withdraw, because RFC 8106 5.1's lifetime
+     * of zero is an explicit retraction and ami_ns6_rdnss() acts on it; what
+     * that loop must not do is take away an entry this one put there, which is
+     * what the ns_Dhcpv6Dns[] cross-check in it is for.
+     */
+
+    /* In: the DNS client first, the configuration only if that worked -- the
+       invariant the advertisement path below states. */
+    ns->ns_Dhcpv6DnsCount = 0;
+
+    for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; index++)
+    {
+        NXD_ADDRESS server;
+        UINT        status;
+
+        if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, index, &server)
+                != NX_SUCCESS)
+            continue;
+
+        if ((server.nxd_ip_address.v6[0] | server.nxd_ip_address.v6[1] |
+             server.nxd_ip_address.v6[2] | server.nxd_ip_address.v6[3]) == 0UL)
+            continue;
+
+        if (ns->ns_Dhcpv6DnsCount < (UWORD)AMI_RDNSS_MAX)
+            ns->ns_Dhcpv6Dns[ns->ns_Dhcpv6DnsCount++] = server;
+
+        status = nxd_dns_server_add(&ns->ns_Dns, &server);
+
+        ami_config_format_ip6(server.nxd_ip_address.v6, text, sizeof(text));
+
+        if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
+        {
+            AMI_WARN("netstack: DHCPv6 name server %s rejected (%ld)", text,
+                     (long)status);
+            continue;
+        }
+
+        if (ami_config_nameserver6_offer(r, server.nxd_ip_address.v6))
+            AMI_INFO("netstack: DHCPv6 name server %s", text);
+    }
+
+    /*
+     * OPTION_DOMAIN_LIST. The client has already decoded the RFC 1035 label
+     * sequences into a run of NUL-terminated names, so this is not the
+     * ami_config_search_from_rfc3397() path the advertisement and DHCP option
+     * 119 share -- each name goes to ami_config_search_offer() as it stands,
+     * which is where it is checked against RFC 1123 2.1 before anything is
+     * pasted onto a query.
+     */
+    {
+        UCHAR  names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
+        ULONG  pos = 0;
+        UWORD  added = 0;
+
+        if (nx_dhcpv6_get_other_option_data(&ns->ns_Dhcpv6,
+                                            NX_DHCPV6_DOMAIN_NAME_OPTION,
+                                            names, sizeof(names))
+                == NX_SUCCESS)
+        {
+            while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
+            {
+                const char *name = (const char *)&names[pos];
+
+                if (ami_config_search_offer(r, name))
+                {
+                    added++;
+                    if (r->domain[0] == '\0')
+                        ami_ns_copy_name(r->domain, name, sizeof(r->domain));
+                }
+
+                while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
+                    pos++;
+                pos++;
+            }
+        }
+
+        if (added != 0)
+            AMI_INFO("netstack: DHCPv6 search list, %ld domain(s)",
+                     (long)added);
+    }
+}
+
+/*
  * Take what the callbacks recorded and make the resolver agree with it.
  * Called from a caller thread on the way into a lookup, which is where it is
  * safe: the DNS client holds its mutex across a query and the IP thread the
@@ -167,6 +320,11 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                     break;
 
             if (j != ns->ns_RdnssCount)
+                continue;
+
+            /* Named by DHCPv6 as well, so it is not the advertisement's to
+               take away.  See the note above ami_ns_dns_absorb_dhcpv6(). */
+            if (ami_ns_dns_dhcpv6_names(ns, r->nameserver6[i]))
                 continue;
 
             gone[0] = r->nameserver6[i][0];
@@ -281,13 +439,17 @@ VOID netstack_dns_absorb_ra(VOID)
 
     /* Nothing pending is the ordinary case, and it must not cost a report a
        trip into ThreadX. */
-    if (!ns->ns_RdnssPending && !ns->ns_DnsslPending)
+    if (!ns->ns_RdnssPending && !ns->ns_DnsslPending && !ns->ns_Dhcpv6DnsPending)
         return;
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
         return;
 
+    /* DHCPv6 first, so its servers are ahead of the advertisement's in the
+       list the resolver tries.  See the note above ami_ns_dns_absorb_dhcpv6()
+       for why that is the order. */
+    ami_ns_dns_absorb_dhcpv6(ns);
     ami_ns_dns_absorb_rdnss(ns);
 
     ami_netstack_leave_free(caller);
@@ -616,6 +778,7 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
     }
 
 #ifdef AMINETXDUO_IPV6
+    ami_ns_dns_absorb_dhcpv6(ask->ns);
     ami_ns_dns_absorb_rdnss(ask->ns);
 #endif
 
@@ -1022,6 +1185,7 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
         return AMI_NET_ASK_REFUSED;
     }
 
+    ami_ns_dns_absorb_dhcpv6(ask->ns);
     ami_ns_dns_absorb_rdnss(ask->ns);
 
     ask->count  = 0;

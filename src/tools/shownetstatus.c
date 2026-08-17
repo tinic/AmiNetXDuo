@@ -439,10 +439,24 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                              bcast, sizeof(bcast));
         tool_format_mac(live->mac, mac, sizeof(mac));
 
-        tool_printf("  address     %-15s netmask %s (/%ld)\n",
-                    (LONG)addr, (LONG)mask,
-                    (LONG)tool_prefix_len(live->netmask));
-        tool_printf("  broadcast   %s\n", (LONG)bcast);
+        /*
+         * An IPv6-only interface has no IPv4 address and never will, so the
+         * three IPv4 lines said 0.0.0.0 three times over. One line saying so
+         * is the truth; three zero addresses read as a fault.
+         */
+        if (live->address == 0UL &&
+            !ami_config_iface_wants_ipv4(cfg))
+        {
+            tool_printf("  address     none, this interface carries no "
+                        "IPv4\n");
+        }
+        else
+        {
+            tool_printf("  address     %-15s netmask %s (/%ld)\n",
+                        (LONG)addr, (LONG)mask,
+                        (LONG)tool_prefix_len(live->netmask));
+            tool_printf("  broadcast   %s\n", (LONG)bcast);
+        }
         tool_printf("  hardware    %s\n", (LONG)mac);
         /* What is running, not what the file asked for: an interface whose
            responder refused to start reads "no" here. */
@@ -471,8 +485,25 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
 
     tool_printf("  configured  %s\n",
                 (LONG)(cfg->iptype == AMI_IPTYPE_DHCP      ? "DHCP" :
-                       cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local"
+                       cfg->iptype == AMI_IPTYPE_LINKLOCAL ? "link-local" :
+                       cfg->iptype == AMI_IPTYPE_NONE      ? "no IPv4"
                                                            : "static"));
+
+    /*
+     * The IPv6 mode, which this report never printed. A machine whose
+     * interface file says CONFIGURE6 had no way of confirming that the stack
+     * had read it, and an IPv6-only machine had nothing on screen saying so at
+     * all -- only an address line reading 0.0.0.0.
+     *
+     * Printed only when there is something to say: the floor build always
+     * reports OFF and would gain a line that means nothing there.
+     */
+    if (cfg->ip6type != AMI_IP6TYPE_OFF)
+        tool_printf("  configured6 %s\n",
+                    (LONG)(cfg->ip6type == AMI_IP6TYPE_DHCP      ? "DHCPv6" :
+                           cfg->ip6type == AMI_IP6TYPE_STATIC    ? "static" :
+                           cfg->ip6type == AMI_IP6TYPE_LINKLOCAL ? "link-local"
+                                                                 : "auto"));
 
     show_lease(lease);
 
@@ -545,6 +576,38 @@ static VOID list_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
 
         tool_printf("%-33s %s/%lu\n", (LONG)"", (LONG)a6->text, a6->prefix);
     }
+}
+
+/*
+ * The IPv6 default router, as text, or NULL.
+ *
+ * The ::/0 entry of the routing table, which is where both a GATEWAY6 line and
+ * a router advertisement's own address end up.  A route with no next hop is
+ * on-link and is not a router, so it does not count.
+ */
+static const char *default_router6(void)
+{
+    static ToolRoutes6 snr_routes6;
+    UWORD              i;
+
+    if (tool_routes6(&snr_routes6) != 0)
+        return NULL;
+
+    for (i = 0; i < snr_routes6.count; i++)
+    {
+        const ToolRoute6 *r = &snr_routes6.route[i];
+
+        if (r->prefix != 0 || r->next_hop[0] == '\0')
+            continue;
+
+        if ((r->dest_words[0] | r->dest_words[1] |
+             r->dest_words[2] | r->dest_words[3]) != 0UL)
+            continue;
+
+        return r->next_hop;
+    }
+
+    return NULL;
 }
 
 static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
@@ -1027,6 +1090,7 @@ static VOID show_udp_sockets(const ToolSnapshot *snap, BOOL all)
  * that cannot reach anything.
  */
 static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
+                               const ToolSnapshot *snap,
                                BOOL up, BOOL stack_running, BOOL readable)
 {
     /*
@@ -1067,7 +1131,27 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         tool_printf("    at the far end is switched on.\n");
     }
 
-    if (live->address == 0)
+    /*
+     * "No address" is a question about the machine, not about IPv4.  An
+     * IPv6-only interface has no IPv4 address by design, and this block told
+     * such a machine it could not be used yet and to run NetSetup and give it
+     * one -- advice that would have switched off the only addressing it had.
+     */
+    if (tool_iface_has_address(snap, live))
+        return;
+
+    if (!ami_config_iface_wants_ipv4(cfg) &&
+        ami_config_iface_wants_ipv6(cfg))
+    {
+        problem_head();
+        tool_printf("  * %s carries IPv6 only and has no IPv6 address yet.\n",
+                    (LONG)cfg->name);
+        tool_printf("    Check the cable, and that a router on this network\n");
+        tool_printf("    advertises IPv6. Even without one the link-local\n");
+        tool_printf("    address should appear within a few seconds.\n");
+        return;
+    }
+
     {
         problem_head();
         tool_printf("  * %s has no address, so it cannot be used yet.\n",
@@ -1419,7 +1503,19 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         }
         else
         {
-            tool_printf("Default route:  none\n");
+            /*
+             * The IPv6 default router, before giving up.  This line read
+             * "none" on a machine whose only route off its own network was
+             * one a router advertisement had given it, which is every
+             * IPv6-only machine, and "no default route" is the first thing
+             * anyone reads it for.
+             */
+            const char *router6 = default_router6();
+
+            if (router6 != NULL)
+                tool_printf("Default route:  %s (IPv6)\n", (LONG)router6);
+            else
+                tool_printf("Default route:  none\n");
         }
     }
 
@@ -1516,7 +1612,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         if (have_live && i < snap.iface_count)
             live = &snap.iface[i];
 
-        diagnose_interface(&cfg->interfaces[i], live,
+        diagnose_interface(&cfg->interfaces[i], live, &snap,
                            iface_online(live), stack_running,
                            (BOOL)!elsewhere);
     }

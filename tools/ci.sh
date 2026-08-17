@@ -214,7 +214,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=76
+HOST_TESTS_EXPECTED=77
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet and test_route, both x86_64-only for the reason in
@@ -1264,6 +1264,49 @@ stage_bridged() {
             3) fail "mld: the run produced no capture to read" ; bad=1 ;;
             *) fail "mld: read the failed= line above" ; bad=1 ;;
         esac
+    fi
+
+    # DHCPv6, which needs a real server rather than a real segment: nothing
+    # in this tree implements one, and stubbing the thing under test would
+    # answer only that the stub and the client agree.  Two arms, because the
+    # two ways an interface can come to ask are different code: CONFIGURE6 =
+    # DHCP asks outright, CONFIGURE6 = AUTO asks only because the router
+    # advertisement on this link sets the M bit, and the second is the one
+    # that makes an IPv6-only machine work with nobody editing a file.
+    printf '\n-- an IPv6-only machine, addressed by DHCPv6\n'
+    if [ -z "${AMINETXDUO_DHCPV6_PEER:-}" ]; then
+        skip "dhcpv6: AMINETXDUO_DHCPV6_PEER is not set, so there is no" \
+             "DHCPv6 server to answer the guest.  Neither the stateful path" \
+             "nor the renewal is proven on this runner."
+    else
+        for arm in dhcp auto; do
+            rc=0
+            if [ "$arm" = dhcp ]; then
+                "$ROOT/tests/ipv6/run-dhcpv6.sh" -b "$BUILD/default" \
+                    -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+                    -P "$AMINETXDUO_DHCPV6_PEER" -a dhcp -l 120 -R || rc=$?
+            else
+                "$ROOT/tests/ipv6/run-dhcpv6.sh" -b "$BUILD/default" \
+                    -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+                    -P "$AMINETXDUO_DHCPV6_PEER" -a auto || rc=$?
+            fi
+            case "$rc" in
+                0) note "PASS  dhcpv6 $arm: addressed, reachable, renewed" \
+                        "and released, with no IPv4 anywhere on the machine" ;;
+                2) fail "dhcpv6 $arm: an ingredient is missing -- most" \
+                        "likely anxd-dhcpv6-server.sh in the peer's home" \
+                        "directory" ; bad=1 ;;
+                3) fail "dhcpv6 $arm: the guest never ran" ; bad=1 ;;
+                4) skip "dhcpv6 $arm: the link or the peer is not what this" \
+                        "needs -- read the reason= above.  The common one is" \
+                        "another_dhcpv6_server_answered_first: this link has" \
+                        "a second DHCPv6 server on it, the site router, and" \
+                        "which of the two the guest takes is a race no" \
+                        "server here can settle.  It is not a product" \
+                        "failure and must not be turned into one" ;;
+                *) fail "dhcpv6 $arm: read the FAIL lines above" ; bad=1 ;;
+            esac
+        done
     fi
 
     # The stall arm is here rather than in the emulator stage because the

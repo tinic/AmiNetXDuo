@@ -120,6 +120,23 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME ipv6_ra COMMAND test_ipv6_ra)
 
+    # The two DHCPv6 decisions that are ours: what the router advertisement's
+    # M and O flags ask for, and the DUID this machine identifies itself by.
+    # No NetX Duo and no shim -- src/netstack/dhcpv6_wire.c is plain C with no
+    # includes, precisely so that the stack and this binary compile the same
+    # bytes.  The lab router sets M and O together and cannot be told not to,
+    # so the emulator arm reaches one of the four combinations and this
+    # reaches all of them.
+
+    add_executable(test_dhcpv6
+        host/test_dhcpv6_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/dhcpv6_wire.c")
+
+    target_include_directories(test_dhcpv6 PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/netstack")
+
+    add_test(NAME dhcpv6 COMMAND test_dhcpv6)
+
     # The ICMPv6 Packet Too Big receive path and the destination table under
     # it.  Same shim.  It answers what a lab network cannot be made to answer:
     # a path that is genuinely narrower, and a forged error message.

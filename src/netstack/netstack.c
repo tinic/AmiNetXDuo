@@ -551,6 +551,17 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_DhcpCreated = FALSE;
     }
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The DHCPv6 Release goes on the wire, so it happens here rather than in
+     * the teardown below: nx_ip_delete() takes the interfaces down with it and
+     * a Release sent after that reaches nobody. The server keeps the address
+     * bound for the whole valid lifetime when this is skipped.
+     */
+    ami_netstack_dhcpv6_release(ns);
+    ami_netstack_dhcpv6_destroy(ns);
+#endif
+
     if (ns->ns_IpCreated)
     {
         (VOID)nx_ip_delete(&ns->ns_Ip);
@@ -986,6 +997,30 @@ static BOOL ami_ns_wants(const AmiNetStack *ns, AmiIpType type)
     return FALSE;
 }
 
+/*
+ * Is any interface on this machine expecting an IPv4 address at all.
+ *
+ * FALSE is the IPv6-only machine, and it is the answer three separate pieces
+ * of bring-up needed and none of them asked. Without it the boot waited 30
+ * seconds for a DHCP lease nobody had asked for, then forced an RFC 3927
+ * 169.254 address onto an interface configured for IPv6, waited 15 seconds
+ * more for that, and finally reported AMI_NET_ERR_CONFIG -- which makes
+ * OpenLibrary("bsdsocket.library") return NULL, so the machine had no network
+ * of either family.
+ */
+static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
+{
+    UWORD i;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static VOID ami_ns_start_autoip(AmiNetStack *ns)
 {
     UINT  status;
@@ -1037,13 +1072,33 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
     }
     ns->ns_AutoIpCreated = TRUE;
 
-    /* First interface that asked for a link-local address, else interface 0. */
+    /*
+     * First interface that asked for a link-local address; failing that, the
+     * first that expects an IPv4 address of any kind; failing that, interface
+     * 0, which is where this always landed.
+     *
+     * The middle rung is the IPv6-only interface: when interface 0 carries no
+     * IPv4, probing a 169.254 address on it is claiming an address on a wire
+     * for a family the operator switched off, and the DHCP interface that
+     * actually wanted the fallback is the one further up.
+     */
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
         if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
         {
             (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
             break;
+        }
+    }
+    if (i == ns->ns_IfaceCount)
+    {
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+        {
+            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            {
+                (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
+                break;
+            }
         }
     }
 
@@ -1634,7 +1689,42 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      * netstack_ipv6_address_get() reports what has arrived so far.
      */
     ami_netstack_ipv6_configure(ns);
+
+    /*
+     * And DHCPv6, after the addresses because the client needs the interface's
+     * link-local address as a source. It returns at once unless some interface
+     * asked for CONFIGURE6=DHCP or AUTO, and under AUTO it sends nothing until
+     * a router advertisement asks it to, so a machine that does not use DHCPv6
+     * pays a thread create here and no packets.
+     */
+    ami_netstack_dhcpv6_configure(ns);
 #endif
+
+    /*
+     * The IPv6-only machine returns here, and this is the whole of what it
+     * needed: nothing below waits for, falls back to, or reports an IPv4
+     * address, because none was ever asked for.
+     *
+     * `resolved` is what gates the AMI_NET_ERR_CONFIG return, and
+     * AMI_NET_ERR_CONFIG is what makes bsd_lib_open() answer NULL. Saying
+     * "resolved" about a machine with no IPv4 address reads wrong and is
+     * right: the question the flag answers is "did the configuration get what
+     * it asked for", and an interface that asked for no IPv4 has.
+     *
+     * It does not wait for an IPv6 address either. Bring-up has never waited
+     * for one -- the link-local is TENTATIVE for a second of duplicate address
+     * detection and a SLAAC or DHCPv6 global arrives later still, and the
+     * comment above ami_netstack_ipv6_configure() is about exactly that
+     * overlap being worth several seconds. ami_ns6_address_changed() reports
+     * each address as it lands and netstack_ipv6_address_get() reports what
+     * has arrived so far.
+     */
+    if (!resolved && !ami_ns_wants_ipv4(ns))
+    {
+        AMI_INFO("netstack: no interface expects an IPv4 address, not waiting "
+                 "for one");
+        resolved = TRUE;
+    }
 
     if (!resolved)
     {
@@ -1664,15 +1754,26 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
         (VOID)nx_ip_address_get(&ns->ns_Ip, &addr, &mask);
 
-        AMI_INFO("netstack: address %lu.%lu.%lu.%lu mask %lu.%lu.%lu.%lu",
-                 (unsigned long)((addr >> 24) & 0xFFUL),
-                 (unsigned long)((addr >> 16) & 0xFFUL),
-                 (unsigned long)((addr >>  8) & 0xFFUL),
-                 (unsigned long)(addr & 0xFFUL),
-                 (unsigned long)((mask >> 24) & 0xFFUL),
-                 (unsigned long)((mask >> 16) & 0xFFUL),
-                 (unsigned long)((mask >>  8) & 0xFFUL),
-                 (unsigned long)(mask & 0xFFUL));
+        /* An IPv6-only machine printed "address 0.0.0.0 mask 0.0.0.0" here,
+           which reads as a fault and is not one.  The IPv6 addresses are
+           reported one at a time by ami_ns6_address_changed(), as they pass
+           duplicate address detection. */
+        if (addr == 0UL && !ami_ns_wants_ipv4(ns))
+        {
+            AMI_INFO("netstack: no IPv4 address, this machine is IPv6-only");
+        }
+        else
+        {
+            AMI_INFO("netstack: address %lu.%lu.%lu.%lu mask %lu.%lu.%lu.%lu",
+                     (unsigned long)((addr >> 24) & 0xFFUL),
+                     (unsigned long)((addr >> 16) & 0xFFUL),
+                     (unsigned long)((addr >>  8) & 0xFFUL),
+                     (unsigned long)(addr & 0xFFUL),
+                     (unsigned long)((mask >> 24) & 0xFFUL),
+                     (unsigned long)((mask >> 16) & 0xFFUL),
+                     (unsigned long)((mask >>  8) & 0xFFUL),
+                     (unsigned long)(mask & 0xFFUL));
+        }
     }
 
     /*
@@ -2252,8 +2353,46 @@ static LONG ami_ns_interface_disable(UWORD index, UINT command)
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
 
+/*
+ * Give the DHCPv6 address back before the wire goes away.
+ *
+ * This is NetShutdown's second step -- src/tools/netshutdown.c takes every
+ * interface down through NETCTRL_INTERFACE_DOWN, which lands here -- and it is
+ * also Offline and the ARexx bulk-down. All three mean the same thing to a
+ * DHCPv6 server: this client is finished with the address, so RFC 8415 18.2.7
+ * says send a Release and let somebody else have it. Nothing else in the
+ * shutdown path can do it, because by the time the stack is being deleted the
+ * interface can no longer transmit.
+ *
+ * Inside a ThreadX bracket, because the release sleeps while it waits for the
+ * Reply and only a ThreadX thread may.
+ */
+static VOID ami_ns_release_dhcpv6(UWORD index)
+{
+#ifdef AMINETXDUO_IPV6
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+
+    if (ns == NULL || !ns->ns_Dhcpv6Started ||
+        (UWORD)ns->ns_Dhcpv6Iface != index)
+        return;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return;
+
+    ami_netstack_dhcpv6_release(ns);
+
+    ami_netstack_leave_free(caller);
+#else
+    (VOID)index;
+#endif
+}
+
 LONG netstack_interface_down(UWORD index)
 {
+    ami_ns_release_dhcpv6(index);
+
     return ami_ns_interface_disable(index, NX_LINK_DISABLE);
 }
 
@@ -2270,6 +2409,10 @@ LONG netstack_interface_stack_down(UWORD index)
     if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
         ns->ns_Config.interfaces[index].down_goes_offline)
         return netstack_interface_down(index);
+
+    /* SM_Down stops this stack transmitting on the interface, which ends the
+       lease as surely as taking the card offline does. */
+    ami_ns_release_dhcpv6(index);
 
     return ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
 }
@@ -2381,6 +2524,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 #endif
 
     /*
+     * netstack_interface_down() below sends the DHCPv6 Release before it takes
+     * the wire offline. That ordering is the whole difference from the DHCPv4
+     * release further down: nx_dhcp_interface_release() is best-effort and
+     * gets away with being called after NX_LINK_DISABLE, and a DHCPv6 Release
+     * has to reach the server, which after the disable it cannot.
+     *
      * Stop the readers before anything is detached. NX_LINK_DISABLE takes the
      * wire offline and reclaims the outstanding CMD_READs, and it is where a
      * device that does not give them back shows up, which has to be known

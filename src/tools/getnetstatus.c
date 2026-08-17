@@ -141,7 +141,9 @@ static VOID measure(BOOL satisfied[COND_COUNT])
          */
         satisfied[COND_BCASTINTERFACES] = TRUE;
 
-        if (info->address != 0)
+        /* Either family. Roadshow's INTERFACES asks whether this machine can
+           be reached, and an IPv6-only machine can. */
+        if (tool_iface_has_address(&gns_snap, info))
             satisfied[COND_INTERFACES] = TRUE;
     }
 

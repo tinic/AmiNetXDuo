@@ -452,7 +452,8 @@ static VOID report_bad_card(ULONG line, const char *value)
 
 #define CFG_HINT_KEYWORDS \
     "The keywords an interface file understands are DEVICE, UNIT, CONFIGURE, " \
-    "ADDRESS, NETMASK, GATEWAY and MTU.  The line was ignored."
+    "ADDRESS, NETMASK, GATEWAY, MTU, and CONFIGURE6, ADDRESS6 and GATEWAY6 " \
+    "for IPv6.  The line was ignored."
 
 #define CFG_HINT_IPV4 \
     "An address is four numbers from 0 to 255 with dots between them, for " \
@@ -474,7 +475,16 @@ ami_iptype_names[] =
     { "linklocal",AMI_IPTYPE_LINKLOCAL },
     { "static",   AMI_IPTYPE_STATIC    },
     { "manual",   AMI_IPTYPE_STATIC    },
-    { "none",     AMI_IPTYPE_STATIC    },
+    /*
+     * NONE used to be a synonym for STATIC, which made it the one value that
+     * did the opposite of what it said: STATIC with no ADDRESS is refused, so
+     * CONFIGURE=NONE refused the interface instead of leaving IPv4 off it.
+     * The IPv6-only machine is spelled with this word.
+     */
+    { "none",     AMI_IPTYPE_NONE      },
+    { "off",      AMI_IPTYPE_NONE      },
+    { "no",       AMI_IPTYPE_NONE      },
+    { "disabled", AMI_IPTYPE_NONE      },
     { NULL,       AMI_IPTYPE_STATIC    }
 };
 
@@ -501,6 +511,11 @@ ami_ip6type_names[] =
     { "ra",         AMI_IP6TYPE_AUTO      },
     { "static",     AMI_IP6TYPE_STATIC    },
     { "manual",     AMI_IP6TYPE_STATIC    },
+    /* Spelled the way CONFIGURE=DHCP is, and meaning the same thing one
+       family over: ask a server, do not wait to be told to. */
+    { "dhcp",       AMI_IP6TYPE_DHCP      },
+    { "dhcpv6",     AMI_IP6TYPE_DHCP      },
+    { "stateful",   AMI_IP6TYPE_DHCP      },
     { NULL,         AMI_IP6TYPE_OFF       }
 };
 
@@ -779,8 +794,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                                      value,
                                      "CONFIGURE is DHCP (let the network hand "
                                      "out an address), STATIC (use the ADDRESS "
-                                     "below) or AUTO (pick one without a "
-                                     "server).  STATIC was assumed.");
+                                     "below), AUTO (pick one without a server) "
+                                     "or NONE (no IPv4 on this interface).  "
+                                     "STATIC was assumed.");
                 }
                 break;
 
@@ -952,6 +968,12 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 else
                 {
                     AMI_WARN("config: %s: bad CONFIGURE6 '%s'", out->name, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "CONFIGURE6", value,
+                                     "CONFIGURE6 is AUTO (follow the router), "
+                                     "DHCP (ask a DHCPv6 server), STATIC (use "
+                                     "the ADDRESS6 below), LINKLOCAL (fe80:: "
+                                     "only) or OFF.  AUTO was assumed.");
                 }
                 break;
             }
@@ -1004,17 +1026,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         return AMI_CFG_ERR_SYNTAX;
     }
 
-    if (out->iptype == AMI_IPTYPE_STATIC && out->address == 0)
-    {
-        AMI_WARN("config: %s: static but no ADDRESS", out->name);
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                        "the interface has no address: there is no ADDRESS "
-                        "line and CONFIGURE does not say DHCP",
-                        "Add  CONFIGURE = DHCP  to have an address handed out, "
-                        "or  ADDRESS = 192.168.1.10  and  NETMASK = "
-                        "255.255.255.0  to set one by hand.");
-    }
-
 #ifdef AMINETXDUO_IPV6
     if (out->ip6type == AMI_IP6TYPE_STATIC &&
         (out->address6[0] | out->address6[1] |
@@ -1028,9 +1039,91 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     }
 #endif
 
+    /*
+     * The one question this check is really asking is "will this interface
+     * ever have an address", and until now it only ever asked it of IPv4.
+     *
+     * An IPv6 plan counts, and has to be SAID: CONFIGURE6 defaults to AUTO, so
+     * treating the default as a plan would turn "DEVICE=a2065.device and
+     * nothing else" -- a file whose author forgot the address -- into a
+     * silently accepted IPv6-only interface, and that diagnostic is worth
+     * keeping. ADDRESS6, GATEWAY6 and CONFIGURE6 are the three ways of saying
+     * it, and CONFIGURE=NONE is the fourth: an operator who switches IPv4 off
+     * on a build that has IPv6 has said which family carries the interface.
+     */
+    {
+        BOOL v4_plan = (out->iptype == AMI_IPTYPE_DHCP ||
+                        out->iptype == AMI_IPTYPE_LINKLOCAL ||
+                        (out->iptype == AMI_IPTYPE_STATIC &&
+                         out->address != 0));
+        BOOL v6_plan = FALSE;
+
+#ifdef AMINETXDUO_IPV6
+        if (out->ip6type != AMI_IP6TYPE_OFF)
+            v6_plan = (BOOL)(have_configure6 || out->have_gateway6 ||
+                             out->iptype == AMI_IPTYPE_NONE ||
+                             (out->address6[0] | out->address6[1] |
+                              out->address6[2] | out->address6[3]) != 0);
+#endif
+
+        if (!v4_plan && !v6_plan)
+        {
+            AMI_WARN("config: %s: no address of either family", out->name);
+            ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
+                            "the interface has no address: there is no ADDRESS "
+                            "line, CONFIGURE does not say DHCP, and nothing "
+                            "asks for IPv6 either",
+                            "Add  CONFIGURE = DHCP  to have an address handed "
+                            "out, or  ADDRESS = 192.168.1.10  and  NETMASK = "
+                            "255.255.255.0  to set one by hand, or  CONFIGURE6 "
+                            "= AUTO  for an IPv6-only interface.");
+        }
+    }
+
     out->configured = TRUE;
 
     return AMI_CFG_OK;
+}
+
+/*
+ * The two questions everything downstream of the parser was answering for
+ * itself, mostly by testing an address against zero.
+ *
+ * They are here rather than inline at each site because the sites disagreed:
+ * bring-up waited for an address on an interface that had asked for none, and
+ * three separate tools reported "no address yet" about a machine that was
+ * never going to have an IPv4 address and did not need one.
+ */
+BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg)
+{
+    if (cfg == NULL)
+        return FALSE;
+
+    switch (cfg->iptype)
+    {
+    case AMI_IPTYPE_DHCP:
+    case AMI_IPTYPE_LINKLOCAL:
+        return TRUE;
+
+    case AMI_IPTYPE_STATIC:
+        /* A static interface with no ADDRESS has nothing coming: no server is
+           being asked and no address was written down. */
+        return (BOOL)(cfg->address != 0);
+
+    case AMI_IPTYPE_NONE:
+    default:
+        return FALSE;
+    }
+}
+
+BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg)
+{
+    if (cfg == NULL)
+        return FALSE;
+
+    /* In the floor build ip6type is always OFF, so this is always FALSE and
+       the compiler folds every caller's branch away. */
+    return (BOOL)(cfg->ip6type != AMI_IP6TYPE_OFF);
 }
 
 /* ------------------------------------------------------- name_resolution */

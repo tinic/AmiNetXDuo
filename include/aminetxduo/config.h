@@ -63,10 +63,26 @@ extern "C" {
 #define AMI_CFG_SD_TYPE_LEN         22
 #define AMI_CFG_SD_TXT_LEN          256
 
+/*
+ * How an interface gets its IPv4 address.
+ *
+ * STATIC is 0 so a zeroed AmiIfConfig means what the parser's default means,
+ * and NONE is last for the same reason: nothing acquires "no IPv4" by being
+ * memset.
+ *
+ * NONE is not "static with no ADDRESS". It is the operator saying this
+ * interface carries no IPv4 at all, which is what CONFIGURE=NONE always looked
+ * like it said and never did: it parsed to STATIC, and STATIC with no address
+ * is the one configuration the parser refuses outright. An interface with
+ * ADDRESS6 and no ADDRESS was therefore unconfigurable, and that is the whole
+ * of the IPv6-only problem. Nothing waits for an address on a NONE interface
+ * and nothing falls back to RFC 3927 on one.
+ */
 typedef enum {
     AMI_IPTYPE_STATIC = 0,
     AMI_IPTYPE_DHCP,
-    AMI_IPTYPE_LINKLOCAL        /* RFC 3927, used as DHCP fallback */
+    AMI_IPTYPE_LINKLOCAL,       /* RFC 3927, used as DHCP fallback */
+    AMI_IPTYPE_NONE             /* no IPv4 on this interface at all  */
 } AmiIpType;
 
 /*
@@ -78,8 +94,10 @@ typedef enum {
 typedef enum {
     AMI_IP6TYPE_OFF = 0,        /* no IPv6 on this interface                  */
     AMI_IP6TYPE_LINKLOCAL,      /* fe80::/64 from the MAC, nothing else       */
-    AMI_IP6TYPE_AUTO,           /* link-local + RFC 4862 SLAAC from RAs       */
-    AMI_IP6TYPE_STATIC          /* link-local + the configured global address */
+    AMI_IP6TYPE_AUTO,           /* link-local + SLAAC, and whatever the RA's
+                                   M and O bits ask DHCPv6 for               */
+    AMI_IP6TYPE_STATIC,         /* link-local + the configured global address */
+    AMI_IP6TYPE_DHCP            /* link-local + stateful DHCPv6, no RA needed */
 } AmiIp6Type;
 
 /*
@@ -172,6 +190,24 @@ typedef struct AmiIfConfig {
     ULONG       gateway6[AMI_CFG_IP6_WORDS]; /* static default router            */
     BOOL        have_gateway6;
 } AmiIfConfig;
+
+/*
+ * Does this interface expect an IPv4 address, and does it expect an IPv6 one.
+ *
+ * "Expect" is the question bring-up asks before it waits, and the question a
+ * tool asks before it reports "no address yet".  An interface with
+ * CONFIGURE=NONE expects no IPv4; one whose CONFIGURE is STATIC with no
+ * ADDRESS line expects none either, because there is nothing left that could
+ * supply one.  Both used to be indistinguishable from "waiting", which is what
+ * made an IPv6-only machine look broken all the way up the stack.
+ *
+ * ami_config_iface_wants_ipv6() answers for the IPv6 build only: in the floor
+ * build ip6type is always AMI_IP6TYPE_OFF and it is always FALSE.  It is TRUE
+ * for LINKLOCAL as well, because fe80::/64 is an address the interface will
+ * have and can be reached on.
+ */
+BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg);
+BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
 
 /*
  * nameserver_use[] is what ObtainDomainNameServerList() reports as

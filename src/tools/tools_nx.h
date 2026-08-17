@@ -99,6 +99,7 @@ typedef struct ToolAddr6Info
 /* "valid", "tentative", or NULL when the state needs no comment. */
 const char *tool_addr6_state(UWORD state);
 
+
 typedef struct ToolSockInfo
 {
     BOOL    is_tcp;
@@ -144,6 +145,21 @@ typedef struct ToolSnapshot
        when nothing did, or when the library is too old to say. */
     UWORD           host_source;
 } ToolSnapshot;
+
+/*
+ * Does this interface have an address at all, of either family.
+ *
+ * Every command used to answer this with `info->address != 0`, which is
+ * false on an IPv6-only interface that is working perfectly, and which is why
+ * such a machine was told by four separate commands that it had no address
+ * yet and by a fifth that it should run NetSetup to fix that.
+ *
+ * Both need the snapshot as well as the interface, because the IPv6 addresses
+ * are a separate table joined on nx_index. A snapshot from a library without
+ * IPv6 has no entries, so the IPv4-only answer is unchanged.
+ */
+BOOL tool_iface_has_address6(const ToolSnapshot *snap, UWORD nx_index);
+BOOL tool_iface_has_address(const ToolSnapshot *snap, const ToolIfInfo *live);
 
 /*
  * One question to the running library. Set `want_sockets` only when the

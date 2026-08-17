@@ -2,7 +2,7 @@
  * NetSetup, set up a network interface by answering questions.
  *
  *     NetSetup NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,
- *              DNS/K,ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S
+ *              DNS/K,IPV6=CONFIGURE6/K,ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S
  *
  * Writes the DEVS:NetInterfaces/<name> keyword file from a few questions,
  * instead of requiring the SANA-II driver details to be known up front.
@@ -37,9 +37,15 @@ const char *const tool_name = "NetSetup";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("NetSetup");
 
+/*
+ * IPV6 takes the CONFIGURE6 word, so an interface file for an IPv6-only
+ * machine can be written by the command that writes every other one.  There is
+ * no ADDRESS6 argument: a static IPv6 address is a two-line hand edit and
+ * NetSetup's job is the machine that has nothing yet.
+ */
 #define TEMPLATE \
     "NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,DNS/K," \
-    "ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S"
+    "IPV6=CONFIGURE6/K,ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S"
 
 enum
 {
@@ -51,6 +57,7 @@ enum
     ARG_NETMASK,
     ARG_GATEWAY,
     ARG_DNS,
+    ARG_IPV6,
     ARG_ONLINE,
     ARG_NOONLINE,
     ARG_FORCE,
@@ -78,6 +85,15 @@ typedef struct Plan
     ULONG dns;
     BOOL  have_gateway;
     BOOL  have_dns;
+    /*
+     * The CONFIGURE6 word to write, as given, or empty for "say nothing and
+     * let the default stand".  Not an AmiIp6Type: this command writes a file,
+     * it does not configure a stack, and the parser is the one place that
+     * decides what the word means.
+     */
+    char  configure6[TOOL_NAME_LEN];
+    /* IPV6 was given AND no IPv4 addressing was: an IPv6-only interface. */
+    BOOL  ipv6_only;
 } Plan;
 
 /* ------------------------------------------------------------------ input, */
@@ -449,6 +465,12 @@ static VOID build_interface_file(const Plan *plan, Blob *out)
     {
         blob_add(out, "CONFIGURE = DHCP\n");
     }
+    else if (plan->ipv6_only)
+    {
+        /* Written out rather than left to the default: the whole point of
+           this file is that IPv4 is off on purpose. */
+        blob_add(out, "CONFIGURE = NONE\n");
+    }
     else
     {
         blob_add(out, "CONFIGURE = STATIC\n");
@@ -457,6 +479,13 @@ static VOID build_interface_file(const Plan *plan, Blob *out)
         blob_add(out, "\n");
         blob_add(out, "NETMASK   = ");
         blob_add_ip(out, plan->netmask);
+        blob_add(out, "\n");
+    }
+
+    if (plan->configure6[0] != '\0')
+    {
+        blob_add(out, "CONFIGURE6 = ");
+        blob_add(out, plan->configure6);
         blob_add(out, "\n");
     }
 
@@ -502,6 +531,10 @@ static VOID show_plan(const Plan *plan, const char *ifpath)
     {
         tool_printf("      CONFIGURE = DHCP\n");
     }
+    else if (plan->ipv6_only)
+    {
+        tool_printf("      CONFIGURE = NONE\n");
+    }
     else
     {
         tool_printf("      CONFIGURE = STATIC\n");
@@ -510,6 +543,9 @@ static VOID show_plan(const Plan *plan, const char *ifpath)
         ami_config_format_ip(plan->netmask, text, sizeof(text));
         tool_printf("      NETMASK   = %s\n", (LONG)text);
     }
+
+    if (plan->configure6[0] != '\0')
+        tool_printf("      CONFIGURE6 = %s\n", (LONG)plan->configure6);
 
     if (plan->have_gateway)
     {
@@ -990,6 +1026,41 @@ int main(int argc, char **argv)
         }
         plan.have_dns = TRUE;
     }
+    if (args[ARG_IPV6] != 0)
+    {
+        static const char *const modes[] =
+        {
+            "auto", "dhcp", "static", "linklocal", "off", NULL
+        };
+        UWORD m;
+
+        for (m = 0; modes[m] != NULL; m++)
+        {
+            if (tool_stricmp((const char *)args[ARG_IPV6], modes[m]) == 0)
+                break;
+        }
+
+        if (modes[m] == NULL)
+        {
+            tool_error("IPV6=%s is not a mode: AUTO, DHCP, STATIC, LINKLOCAL "
+                       "or OFF", (LONG)args[ARG_IPV6]);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        tool_copy_string(plan.configure6, sizeof(plan.configure6),
+                         (const char *)args[ARG_IPV6]);
+
+        /*
+         * IPV6 alone, with no DHCP and no ADDRESS, is the IPv6-only machine.
+         * OFF is not: an operator switching IPv6 off has said nothing about
+         * how IPv4 is configured, and an interface with neither is the file
+         * that has no address at all.
+         */
+        plan.ipv6_only = (BOOL)(!plan.dhcp && plan.address == 0 &&
+                                tool_stricmp((const char *)args[ARG_IPV6],
+                                             "off") != 0);
+    }
 
     if (plan.address != 0 && plan.netmask == 0)
         plan.netmask = default_netmask(plan.address);
@@ -999,7 +1070,7 @@ int main(int argc, char **argv)
      * nothing needs to be asked. An installer script drives NetSetup this way.
      */
     interactive = (BOOL)!(plan.device[0] != '\0' &&
-                          (plan.dhcp || plan.address != 0));
+                          (plan.dhcp || plan.address != 0 || plan.ipv6_only));
 
     if (!quiet)
     {
@@ -1056,7 +1127,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (interactive && !plan.dhcp && plan.address == 0)
+    if (interactive && !plan.dhcp && plan.address == 0 && !plan.ipv6_only)
     {
         if (!ask_addressing(&plan))
         {
@@ -1071,14 +1142,15 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!plan.dhcp && plan.address == 0)
+    if (!plan.dhcp && plan.address == 0 && !plan.ipv6_only)
     {
-        tool_error("no address: give ADDRESS=<address> or DHCP");
+        tool_error("no address: give ADDRESS=<address>, DHCP, or "
+                   "IPV6=<mode> for an IPv6-only interface");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    if (!plan.dhcp && plan.netmask == 0)
+    if (!plan.dhcp && !plan.ipv6_only && plan.netmask == 0)
         plan.netmask = default_netmask(plan.address);
 
     /* ---- confirm --------------------------------------------------------- */
