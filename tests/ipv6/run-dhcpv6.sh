@@ -396,6 +396,15 @@ fi
 # neither this harness nor this stack can currently decide -- see the top.
 if [ -n "$chosen_server" ] && [ "$chosen_server" != "$PEER_LL" ]; then
     echo "another_server_won=yes"
+    echo "NOT A FAILURE.  This link carries a second DHCPv6 server -- the site"
+    echo "router -- and the guest took its offer instead of the peer's.  Which"
+    echo "one wins is decided by OPTION_PREFERENCE, and dnsmasq cannot send it"
+    echo "(see the header of $0).  Every assertion after this point would be"
+    echo "about $chosen_server's exchange rather than the one under test, so"
+    echo "the run stops here and exits 4.  Re-run it; it is a race and the"
+    echo "other outcome is common.  DO NOT make this exit 1 -- the stack did"
+    echo "nothing wrong, and the missing piece is a server that can send the"
+    echo "preference option."
     fail_link "another_dhcpv6_server_answered_first"
 fi
 

@@ -1213,7 +1213,12 @@ stage_bridged() {
                         "directory" ; bad=1 ;;
                 3) fail "dhcpv6 $arm: the guest never ran" ; bad=1 ;;
                 4) skip "dhcpv6 $arm: the link or the peer is not what this" \
-                        "needs -- read the reason= above" ;;
+                        "needs -- read the reason= above.  The common one is" \
+                        "another_dhcpv6_server_answered_first: this link has" \
+                        "a second DHCPv6 server on it, the site router, and" \
+                        "which of the two the guest takes is a race no" \
+                        "server here can settle.  It is not a product" \
+                        "failure and must not be turned into one" ;;
                 *) fail "dhcpv6 $arm: read the FAIL lines above" ; bad=1 ;;
             esac
         done
