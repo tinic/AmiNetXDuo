@@ -76,7 +76,10 @@ over -- 2500 SYNs held 20 s each is about 2000 outstanding against 512 entries.
 | IP source routing | RFC 7126 / BCP 186 makes dropping it the recommendation |
 | ICMP Redirect | an established man-in-the-middle vector; ignoring it is current practice |
 | RFC 1042 / 802.3 receive | no remaining senders on Ethernet |
-| IGMPv3, RFC 4191, RFC 7371, DHCPv6, RFC 3396 | see `BACKLOG.md` |
+| IGMPv3 | the vendored tree speaks IGMPv2 and does not implement v3. Source-specific multicast has no caller here |
+| RFC 4191, RFC 7371 | router preference and more-specific routes, and the updated IPv6 multicast flags. Neither has ever been asked for on a machine of this kind |
+| RFC 3396 long-option concatenation, and option 52 overload | we request six options (1, 3, 6, 12, 15, 33) whose combined payload is far below the 312-byte options area, so a server has nothing to split |
+| DHCPv6 | stateless autoconfiguration covers the routers people have. Cost: a managed+other-stateful router describes an IPv6-only machine, and `config_parse.c:1007` refuses an interface with no IPv4 address, so such a machine cannot be configured at all -- see `BACKLOG.md` |
 
 ## Constraints on anything built next
 
