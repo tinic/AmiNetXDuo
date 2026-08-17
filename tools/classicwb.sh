@@ -4,7 +4,7 @@
 #
 #   tools/classicwb.sh [-m MODEL] [-v VARIANT] [-b BUILDDIR] [-a ARCHIVE.lha]
 #                      [-B BACKEND] [-n NAME] [-p PORT] [-t SECONDS]
-#                      [-s SNAPSHOTS] [-c HOST]
+#                      [-s SNAPSHOTS] [-c HOST] [-M SPEC]
 #
 # tools/demo.sh boots the drive tools/amiberry-run.sh builds, which is httpd
 # and whatever else the staging puts beside it.  This boots a ClassicWB
@@ -98,7 +98,7 @@ usage() {
     cat <<'EOF'
 usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
                           [-a archive.lha] [-B backend] [-n name] [-p port]
-                          [-t seconds] [-s snapshots] [-c host]
+                          [-t seconds] [-s snapshots] [-c host] [-M spec]
 
   -m  model, picks the Kickstart          (default A1200)
   -v  plain boots ClassicWB, rtg adds a Picasso96 screen  (default plain)
@@ -111,6 +111,10 @@ usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
   -s  snapshot store         (default ~/amiga-assets/classicwb/snapshots)
   -c  ssh host that checks the served version; this host cannot reach
       its own guest, so leaving it unset skips that one check
+  -M  run the TLS memory probes at boot, against a peer already serving.
+      SPEC is host,port,address,truststore,cafile: the name the certificate
+      carries, the port, the peer's dotted address, and the two host-side
+      files tests/peer/mkpki.sh writes (teststore and testroots.pem)
 EOF
 }
 
@@ -118,7 +122,9 @@ say() { printf '%s=%s\n' "$1" "$2"; }
 
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
-while getopts "m:v:b:a:B:n:p:t:s:c:h" opt; do
+MEMPROBE="${AMINETXDUO_CWB_MEMPROBE:-}"
+
+while getopts "m:v:b:a:B:n:p:t:s:c:M:h" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         v) VARIANT="$OPTARG" ;;
@@ -130,6 +136,7 @@ while getopts "m:v:b:a:B:n:p:t:s:c:h" opt; do
         t) WINDOW="$OPTARG" ;;
         s) SNAPROOT="$OPTARG" ;;
         c) CHECKHOST="$OPTARG" ;;
+        M) MEMPROBE="$OPTARG" ;;
         h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -160,6 +167,17 @@ case "$MODEL:$VARIANT" in
 esac
 
 [ -n "$NAME" ] || NAME="amiga-$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')-$VARIANT"
+
+# -M is read here and used at the very end, three minutes of installing later.
+# A typo in it that was only noticed then would cost the whole install.
+MP_HOST=""; MP_PORT=""; MP_ADDR=""; MP_STORE=""; MP_CA=""
+if [ -n "$MEMPROBE" ]; then
+    IFS=, read -r MP_HOST MP_PORT MP_ADDR MP_STORE MP_CA <<< "$MEMPROBE"
+    [ -n "$MP_HOST" ] && [ -n "$MP_PORT" ] && [ -n "$MP_ADDR" ] &&
+    [ -f "${MP_STORE:-/nonexistent}" ] || {
+        say error "-M wants host,port,address,truststore,cafile and a\
+ readable truststore"; exit 2; }
+fi
 
 # The asset store carries the ROMs and exports the Kickstart each model needs.
 # Skipping it boots a machine with no ROM, and the error names the ROM rather
@@ -423,6 +441,29 @@ if [ "$AMISSL_WANT" = yes ] && [ -n "$AMISSL_SDK" ] &&
     fi
 elif [ "$AMISSL_WANT" = yes ]; then
     say amissl_probe "absent: no AmiSSL SDK"
+fi
+
+# ---------------------------------------------------------- the TLS probe --
+#
+# install/test/tlsprobe.c, the same thing for tls.library, staged the same way
+# into the same place.  It needs no third-party SDK -- our own header and the
+# NDK are the whole of it -- so unlike the one above it is not conditional on
+# an asset store, and it is staged on the A600 as well, which is the machine
+# AmiSSL cannot serve at all.
+#
+# -m68000, for the reason installdrive.c is: nothing in the probe needs 68020
+# codegen and it has to run on whatever MODEL says.
+TLSPROBE="$ROOT/build/cwb-tlsprobe-$TAG"
+if "$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -I"$AMIGA_NDK" -I"$ROOT/include" \
+    -o "$TLSPROBE" "$ROOT/install/test/tlsprobe.c" \
+    > "$ROOT/build/cwb-tlsprobe-$TAG.log" 2>&1; then
+    cp "$TLSPROBE" "$HD/C/tlsprobe"
+    chmod 755 "$HD/C/tlsprobe"
+    say tls_probe "C:tlsprobe"
+    say tls_probe_bytes "$(wc -c < "$TLSPROBE" | tr -d ' ')"
+else
+    say warning "install/test/tlsprobe.c did not build; see\
+ $ROOT/build/cwb-tlsprobe-$TAG.log"
 fi
 
 # The download, where a download would be: its own drawer, and not the one the
@@ -953,6 +994,52 @@ C:Wait 30
 C:ShowNetStatus >>DH0:netstatus.txt
 EOF
 chmod 755 "$HD/S/AmiNetXDuo-Serve"
+
+# --------------------------------------------------------- the memory probes --
+#
+# WHAT THE TWO TLS LIBRARIES COST RESIDENT, measured in one boot with the arms
+# interleaved.  Between-run variation on this tree is several times the
+# within-run variation, so tls, amissl, tls, amissl is one measurement and four
+# separate launches would be four.
+#
+# The second round of each library is also the expunge measurement: exec
+# expunges a library only when it needs the memory, so a second opener may pay
+# nothing, and each probe's own resident_before_* lines say which happened.
+#
+# `Stack 65536` applies to the Shell running this script and therefore to the
+# commands it starts.  Both probes read the stack they were given and refuse on
+# one too small, so a missing line here is a reported refusal rather than a
+# hang.
+if [ -n "$MEMPROBE" ]; then
+    cp "$MP_STORE" "$HD/probestore"
+    say memprobe_store "$MP_STORE"
+    if [ -n "${MP_CA:-}" ] && [ -f "$MP_CA" ]; then
+        cp "$MP_CA" "$HD/probe-ca.pem"
+        say memprobe_cafile "$MP_CA"
+    fi
+
+    {
+        echo "; Written by tools/classicwb.sh."
+        echo "FailAt 9999"
+        echo "Stack 65536"
+        for round in 1 2; do
+            echo "C:tlsprobe $MP_HOST $MP_PORT $MP_ADDR STORE DH0:probestore\
+ REPORT DH0:tlsprobe-r$round.txt >DH0:tlsprobe-r$round-console.txt"
+            if [ "$AMISSL_WANT" = yes ] && [ -f "$HD/C/amisslprobe" ] &&
+               [ -f "$HD/probe-ca.pem" ]; then
+                echo "C:amisslprobe HOST $MP_HOST PORT $MP_PORT ADDR $MP_ADDR\
+ CAFILE DH0:probe-ca.pem REPORT DH0:amisslprobe-r$round.txt\
+ >DH0:amisslprobe-r$round-console.txt"
+            fi
+        done
+        echo 'Echo >DH0:.memprobe "done"'
+    } > "$HD/S/AmiNetXDuo-MemProbe"
+    chmod 755 "$HD/S/AmiNetXDuo-MemProbe"
+
+    printf 'Execute S:AmiNetXDuo-MemProbe\n' >> "$HD/S/AmiNetXDuo-Serve"
+    rm -f "$HD/.memprobe"
+    say memprobe "$MP_HOST:$MP_PORT at $MP_ADDR"
+fi
 
 startup_with 'FailAt 9999
 Execute S:AmiNetXDuo-Serve
