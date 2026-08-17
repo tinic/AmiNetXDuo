@@ -293,6 +293,11 @@ static ULONG           fb_next_tick;
 static ULONG           fb_frame_t0;
 static ULONG           fb_busy_ticks;
 
+/* And how much idle has actually been handed back on account of it, so the
+   share is enforced against the session's totals and not against whatever the
+   last band happened to round to. */
+static ULONG           fb_idle_given;
+
 /*
  * Which tile row the next band starts at, and 0 means the next pass begins a
  * fresh screen.
@@ -2505,6 +2510,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_next_tick  = 0;
     fb_frame_t0   = 0;
     fb_busy_ticks = 0;
+    fb_idle_given = 0;
     fb_band_ty0   = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
@@ -3098,18 +3104,29 @@ BOOL http_fb_write(ULONG now)
             ULONG done = fb_ticks();
             ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
             /*
-             * Rounded UP, which is the difference between a cap that holds
-             * and one that is nearly right.  A tick is a fiftieth and most
-             * bands cost a handful of them, so truncating the division throws
-             * away most of a tick every time: measured on the A3000 that came
-             * out at 78.5% against the 75% intended.  Rounding up can only
-             * leave more idle than the share demands, never less.
+             * Against the running totals rather than against this band alone.
+             *
+             * A tick is a fiftieth and a band costs a handful of them, so
+             * dividing one band's cost by three and rounding is wrong in
+             * whichever direction the rounding goes: truncating measured
+             * 78.5% on the A3000 and rounding up measured 53.9%, against the
+             * 75% both were aiming at.  The error is a whole tick either way
+             * on a quantity of two or three.
+             *
+             * So the idle owed is computed from every tick charged so far,
+             * and what has already been granted is subtracted.  Whatever a
+             * single band rounds to, the session converges on the share, and
+             * a band that is owed nothing waits for nothing.
              */
-            ULONG idle = (cost + (ULONG)FB_IDLE_DIVISOR - 1UL)
-                       / (ULONG)FB_IDLE_DIVISOR;
+            ULONG owed;
+            ULONG idle;
 
             fb_busy_ticks += cost;
             fb_frame_t0 = 0;
+
+            owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
+            idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
+            fb_idle_given += idle;
 
             /*
              * The floor is about not re-reading a screen nobody drew on, so
