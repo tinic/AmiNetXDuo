@@ -226,13 +226,16 @@ static UBYTE           fb_word_over;    /* the message is longer than is read  *
 /*
  * Why the last geometry was refused, for the close frame.
  *
- * httprtg.h promises that a 15, 16, 24 or 32-bit screen is refused by name,
- * and the sentence it hands back went to fb_say(), the server's own log, which
- * on a guest the harness starts with `Run >DH0:httpd.txt` is a file nobody
- * sees.  What the person watching got instead, when a 16-bit screen came to
- * the front of a live session, was the generic "the front screen is not one
- * this can read".  A string literal, so no copy.  Only the RTG refusals set
- * it, because they are the ones with a name to give.
+ * Every refusal sets it, and that is the point of it.  It used to be set by
+ * the RTG refusals alone, because they were the ones with a name to give, so
+ * the depth a planar refusal names -- "the front screen is 16 planes deep" --
+ * reached fb_why() and no further, and the person watching was closed on with
+ * a generic sentence that named nothing.  A close that cannot say what it
+ * found is a defect in its own right: the screen it would not read is the one
+ * fact needed to work out why.
+ *
+ * It points either at a string literal or at fb_why, which is filled by the
+ * same call that sets this and read by the close frame in the same pass.
  */
 static const char     *fb_refuse_why;
 
@@ -534,6 +537,25 @@ const char *http_fb_fault(VOID)
     return fb_why;
 }
 
+/*
+ * The same sentence to the log and to the close frame.  fb_say() alone leaves
+ * the reason in a file nobody reads, and the two refusals that set
+ * fb_refuse_why by hand were the only ones a person ever saw.  Every refusal
+ * goes through one of these two, so the generic fallback in the close is
+ * unreachable while that stays true.
+ */
+static VOID fb_refuse(const char *text)
+{
+    fb_say(text);
+    fb_refuse_why = fb_why;
+}
+
+static VOID fb_refuse3(const char *a, ULONG v, const char *b)
+{
+    fb_say3(a, v, b);
+    fb_refuse_why = fb_why;
+}
+
 /* ---------------------------------------------------------------- the clock */
 
 /* Fiftieths, wrapping at midnight the way httpterm.c's does.  A wrap makes one
@@ -692,10 +714,29 @@ static struct Screen *fb_lock_front(BOOL *pub)
 /* --------------------------------------------------------------- geometry -- */
 
 /*
- * FALSE having said why.  Every refusal here is a bitmap this cannot read
- * correctly, so none of them must fall through to a grab of something else.
+ * What a screen's bitmap is, or why it is not one that can be read.
+ *
+ * Three answers rather than two.  FB_GEOM_NO is a bitmap this cannot read
+ * correctly, and none of those must fall through to a grab of something else.
+ * FB_GEOM_UNSURE is the answer that used to be missing: a bitmap this could
+ * not identify from where it was standing, which is not the same finding and
+ * must not end a session.  See `blind` below.
  */
-static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
+enum
+{
+    FB_GEOM_OK = 0,
+    FB_GEOM_NO,         /* a bitmap this cannot read, and fb_why says why    */
+    FB_GEOM_UNSURE      /* the card that owns it could not be asked from here */
+};
+
+static int fb_unsure(VOID)
+{
+    fb_refuse("the front screen offers no lock and is not a planar bitmap, so "
+              "the graphics card that owns it cannot be asked from here");
+    return FB_GEOM_UNSURE;
+}
+
+static int fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 {
     ULONG flags;
     ULONG depth;
@@ -703,6 +744,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     ULONG height;
     ULONG stride;
     UWORD plane;
+    BOOL  blind;
 
     /* Cleared here, so a refusal from an earlier screen is never the sentence
        a later one closes with. */
@@ -710,8 +752,8 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 
     if (bm == NULL)
     {
-        fb_say("the front screen has no bitmap");
-        return FALSE;
+        fb_refuse("the front screen has no bitmap");
+        return FB_GEOM_NO;
     }
 
     /*
@@ -747,11 +789,10 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 
         if (!http_rtg_describe(bm, &rs, &why))
         {
-            fb_refuse_why = (why != NULL) ? why
-                                          : "the front screen is an RTG screen "
-                                            "this cannot read";
-            fb_say(fb_refuse_why);
-            return FALSE;
+            fb_refuse((why != NULL) ? why
+                                    : "the front screen is an RTG screen this "
+                                      "cannot read");
+            return FB_GEOM_NO;
         }
 
         /*
@@ -785,8 +826,28 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
         g->row_bytes   = (UWORD)((((ULONG)rs.width * rs.bpp) + 3UL) & ~3UL);
         g->row_stride  = (ULONG)g->row_bytes;
         g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height;
-        return TRUE;
+        return FB_GEOM_OK;
     }
+
+    /*
+     * Whether a refusal below is a finding or a guess.
+     *
+     * The two library calls above are the only way to tell a card's bitmap
+     * from a planar one, and on the pass that resolves a screen nothing can
+     * lock they are not made -- see may_ask_rtg.  Everything that follows is a
+     * planar test, and a card's bitmap fails those tests for reasons that say
+     * nothing about whether it can be read: it carries no BMF_STANDARD, or it
+     * carries it and answers BMA_DEPTH with 16.
+     *
+     * That is the defect this names.  A truecolour screen coming to the front
+     * of a live session was refused as a planar screen 16 planes deep, on the
+     * pass that caught it before it was lockable, and the session ended on a
+     * screen a fresh connection then served without trouble.  So on a machine
+     * with a card in it, a planar refusal made blind is FB_GEOM_UNSURE, the
+     * pass produces nothing, and the next one resolves the screen with the
+     * card asked and follows it.
+     */
+    blind = (BOOL)(!may_ask_rtg && http_rtg_present());
 
     flags  = GetBitMapAttr(bm, BMA_FLAGS);
     depth  = GetBitMapAttr(bm, BMA_DEPTH);
@@ -795,30 +856,39 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 
     if ((flags & BMF_STANDARD) == 0)
     {
-        fb_say(http_rtg_present()
-               ? "the front screen is not a standard planar bitmap and "
-                 "neither Picasso96 nor CyberGraphX claims it, so there are "
-                 "no pixels here anything can read"
-               : "the front screen is not a standard planar bitmap, so it "
-                 "has no bitplanes to read. A graphics card needs "
-                 "Picasso96API.library or cybergraphics.library, and neither "
-                 "answered OpenLibrary()");
-        return FALSE;
+        if (blind)
+            return fb_unsure();
+
+        fb_refuse(http_rtg_present()
+                  ? "the front screen is not a standard planar bitmap and "
+                    "neither Picasso96 nor CyberGraphX claims it, so there are "
+                    "no pixels here anything can read"
+                  : "the front screen is not a standard planar bitmap, so it "
+                    "has no bitplanes to read. A graphics card needs "
+                    "Picasso96API.library or cybergraphics.library, and neither "
+                    "answered OpenLibrary()");
+        return FB_GEOM_NO;
     }
 
     g->format = RFB_FMT_PLANAR;
 
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
-        fb_say3("the front screen is ", depth,
-                " planes deep. This handles 1 to 8");
-        return FALSE;
+        if (blind)
+            return fb_unsure();
+
+        fb_refuse3("the front screen is ", depth,
+                   " planes deep. This handles 1 to 8");
+        return FB_GEOM_NO;
     }
 
     if (width < 1 || width > 65535 || height < 1 || height > 65535)
     {
-        fb_say("the front screen does not fit the wire format");
-        return FALSE;
+        if (blind)
+            return fb_unsure();
+
+        fb_refuse("the front screen does not fit the wire format");
+        return FB_GEOM_NO;
     }
 
     stride = (ULONG)(UWORD)bm->BytesPerRow;
@@ -832,9 +902,12 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     {
         if (stride == 0 || (stride % depth) != 0)
         {
-            fb_say3("interleaved bitmap with BytesPerRow=", stride,
-                    ", which does not divide by the depth");
-            return FALSE;
+            if (blind)
+                return fb_unsure();
+
+            fb_refuse3("interleaved bitmap with BytesPerRow=", stride,
+                       ", which does not divide by the depth");
+            return FB_GEOM_NO;
         }
         g->row_bytes = (UWORD)(stride / depth);
     }
@@ -845,17 +918,23 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
 
     if ((ULONG)g->row_bytes * 8UL < width)
     {
-        fb_say3("the bitmap says ", (ULONG)g->row_bytes,
-                " bytes a row, which is too few for its width");
-        return FALSE;
+        if (blind)
+            return fb_unsure();
+
+        fb_refuse3("the bitmap says ", (ULONG)g->row_bytes,
+                   " bytes a row, which is too few for its width");
+        return FB_GEOM_NO;
     }
 
     for (plane = 0; plane < (UWORD)depth; plane++)
     {
         if (bm->Planes[plane] == NULL)
         {
-            fb_say3("bitplane ", (ULONG)plane, " is not allocated");
-            return FALSE;
+            if (blind)
+                return fb_unsure();
+
+            fb_refuse3("bitplane ", (ULONG)plane, " is not allocated");
+            return FB_GEOM_NO;
         }
     }
 
@@ -865,7 +944,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     g->row_stride  = stride;
     g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height * depth;
 
-    return TRUE;
+    return FB_GEOM_OK;
 }
 
 static BOOL fb_geometry_same(const FbGeometry *a, const FbGeometry *b)
@@ -1603,8 +1682,18 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
                       BOOL *palette_moved, BOOL locked)
 {
     UWORD plane;
+    int   what;
 
-    if (!fb_geometry_of(sc->RastPort.BitMap, now, locked))
+    what = fb_geometry_of(sc->RastPort.BitMap, now, locked);
+
+    /* Nothing this pass, rather than the end of the session.  The bitmap could
+       not be identified from here, so the next pass resolves the front screen
+       again and asks the card about it, and the geometry that comes back is
+       what FB_GRAB_CHANGED then follows. */
+    if (what == FB_GEOM_UNSURE)
+        return FB_GRAB_UNREADABLE;
+
+    if (what != FB_GEOM_OK)
         return FB_GRAB_REFUSED;
 
     if (!fb_geometry_same(want, now))
@@ -2018,6 +2107,13 @@ static VOID fb_close_session(UWORD code)
 /* A close carrying this module's own sentence rather than the codec's, for the
    refusals a person has to be able to read: a screen that went away, a mode
    change this could not follow. */
+/*
+ * `reason` is what the browser is told.  What the log is told is fb_why, which
+ * every caller here leaves holding the finding behind the close: the sentence
+ * itself where the two are the same, and the specific one where the browser
+ * gets a short sentence and the detail is longer than a close frame carries.
+ * So nothing passed here overwrites fb_why.
+ */
 static VOID fb_close_saying(UWORD code, const char *reason)
 {
     if (fb_closing)
@@ -2280,7 +2376,8 @@ static VOID fb_take_word(const char *w, ULONG len)
 
     case RFB_IN_RESET:
         fb_reset = 1;
-        fb_close_saying(HTTP_WS_CLOSE_GOING, "the Amiga is rebooting");
+        fb_say("the Amiga is rebooting");
+        fb_close_saying(HTTP_WS_CLOSE_GOING, fb_why);
         break;
 
     case RFB_IN_WHEEL:
@@ -2478,7 +2575,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = fb_geometry_of(sc->RastPort.BitMap, &g, pub);
+        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &g, pub) == FB_GEOM_OK);
     else
         fb_say("the front screen closed while it was being looked at");
 
@@ -2766,8 +2863,8 @@ BOOL http_fb_slice(ULONG now)
 
         if (len == 0UL)
         {
-            fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                            "the geometry word did not fit");
+            fb_say("the geometry word did not fit");
+            fb_close_saying(HTTP_WS_CLOSE_PROTOCOL, fb_why);
             return TRUE;
         }
 
@@ -2793,8 +2890,8 @@ BOOL http_fb_slice(ULONG now)
 
         if (len == 0UL)
         {
-            fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                            "the palette word did not fit");
+            fb_say("the palette word did not fit");
+            fb_close_saying(HTTP_WS_CLOSE_PROTOCOL, fb_why);
             return TRUE;
         }
 
@@ -2973,8 +3070,8 @@ BOOL http_fb_slice(ULONG now)
         if ((LONG)(fb_ticks() - fb_gone_at) < (LONG)FB_GONE_GRACE)
             return TRUE;
 
-        fb_close_saying(HTTP_WS_CLOSE_GOING,
-                        "there has been no screen to show for ten seconds");
+        fb_say("there has been no screen to show for ten seconds");
+        fb_close_saying(HTTP_WS_CLOSE_GOING, fb_why);
         return TRUE;
 
     case FB_GRAB_UNREADABLE:
@@ -3013,7 +3110,7 @@ BOOL http_fb_slice(ULONG now)
         if (!fb_take_buffers(&seen))
         {
             fb_close_saying(HTTP_WS_CLOSE_GOING,
-                            "the screen changed and this cannot follow it");
+                            "the new screen could not be read");
             return TRUE;
         }
         return TRUE;
@@ -3023,7 +3120,7 @@ BOOL http_fb_slice(ULONG now)
         fb_close_saying(HTTP_WS_CLOSE_GOING,
                         (fb_refuse_why != NULL)
                         ? fb_refuse_why
-                        : "the front screen is not one this can read");
+                        : "the front screen could not be read");
         return TRUE;
     }
 
@@ -3058,8 +3155,8 @@ BOOL http_fb_slice(ULONG now)
 
     if (n < 0)
     {
-        fb_close_saying(HTTP_WS_CLOSE_PROTOCOL,
-                        "the frame encoder did not encode this screen");
+        fb_say("the frame encoder did not encode this screen");
+        fb_close_saying(HTTP_WS_CLOSE_PROTOCOL, fb_why);
         return TRUE;
     }
 
