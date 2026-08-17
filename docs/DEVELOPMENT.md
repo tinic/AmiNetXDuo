@@ -166,3 +166,52 @@ shell, for CI naming an artefact before anything is built; the `version_scheme`
 host test checks the two agree.
 
 Release tags are plain `vX.Y.Z`.
+
+## How this was written
+
+Claude (Anthropic's Opus 5) wrote the code, under human direction and testing.
+Every commit records this in its `Co-Authored-By` line.
+[docs/RESEARCH.md](docs/RESEARCH.md) indexes the engineering record: one line per
+finding, with a statement of whether the tree still agrees with it. The full
+record is in git history. It holds what was measured, what was tried and
+abandoned, and the conclusions that later turned out to be wrong.
+
+The evidence available for checking is:
+
+- an independent conformance suite
+- every build configuration in continuous integration
+- a triaged static-analysis baseline
+- fuzzers
+- every bug a user has reported, each one recorded with its fix and a test that
+  reproduces it
+
+## Prior art
+
+Two other modern-stack projects appeared in July 2026.
+[lwip-amiga](https://github.com/rondoval/lwip-amiga) combines lwIP with
+`bsdsocket.library`. It uses a custom `netdev` driver ABI rather than SANA-II,
+which restricts it to PiStorm and Emu68.
+[AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) is a GPL fork of AmiTCP 3.0b2
+with a clean-room Roadshow ABI. Neither is MIT-licensed and neither drives
+SANA-II, which is why this one exists.
+
+## Measured on hardware, and under which emulator
+
+Most figures in this tree were measured under emulation. AmiNetXDuo has run on
+real hardware, an A3000 with an X-Surf-100: a user measured 795 KB/s reading and
+939 KB/s writing over Fitz, and found two defects, both since fixed.
+
+IPv6 under WinUAE requires a patch,
+[tonioni/WinUAE@d9df1d8](https://github.com/tonioni/WinUAE/commit/d9df1d8357ade4f9631491cf9f482e159554bfeb).
+Amiberry needs none, and Amiberry is what every harness here drives.
+
+On the conformance suite, AmiNetXDuo scores 142 of 142 and Roadshow scores 138.
+The comparison belongs here rather than in the README: it is a statement about
+another stack, and it is only meaningful beside the suite that produced it.
+
+## Regenerating the vector tables
+
+`tools/gen_vectors.py` regenerates the `bsdsocket.library` vector tables from the
+`.fd`, `.sfd` and pragma sources named in the README's licence section, and names
+each vector's source. `tools/ci.sh` runs it with `--check` in the cross stage, so
+a generated file that has drifted from its generator turns CI red.
