@@ -5,7 +5,7 @@
 #   tests/ipv6/run-tools-winuae.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                  [-T TAG] [-6 ADDR] [-4 ADDR]
 #
-# WHAT THIS PROVES THAT tests/ipv6/run-tools-fsuae.sh CANNOT.  FS-UAE's SLIRP
+# WHAT THIS PROVES THAT tests/ipv6/run-tools-amiberry.sh CANNOT.  SLIRP
 # forwards nothing beyond itself: `traceroute 8.8.8.8` is `*` at every hop
 # there for IPv4 as well, so every trace that harness can run terminates in
 # one hop because the target was one hop away.  RESEARCH 67 could show the

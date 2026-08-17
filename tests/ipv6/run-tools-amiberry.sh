@@ -2,7 +2,7 @@
 #
 # Run the shipped commands against IPv6, and assert on what they print.
 #
-#   tests/ipv6/run-tools-fsuae.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-s]
+#   tests/ipv6/run-tools-amiberry.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-s]
 #
 # docs/RESEARCH.md 66 measured every command answering an IPv6 literal with
 # "cannot resolve", followed by advice to check the spelling and the name

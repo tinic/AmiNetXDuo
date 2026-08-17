@@ -139,7 +139,7 @@ def main(argv):
             "fix-crt0: no 'pea/move.l/jsr' main() call found, "
             "copying crt0.o unchanged.\n"
             "          Check that argv works before trusting this build:\n"
-            "          clients/dropbear/run-fsuae.sh runs dbclient, which\n"
+            "          clients/dropbear/run-dbclient.sh runs dbclient, which\n"
             "          needs argv to say anything at all.\n")
     elif patched != 2:
         sys.stderr.write(

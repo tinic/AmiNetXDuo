@@ -11,7 +11,7 @@
  * libraries through their ABI, not through the C API: nothing here is linked
  * against our code.
  *
- * Stage the libraries into LIBS: first, see tests/libraries/run-fsuae.sh.
+ * Stage the libraries into LIBS: first, see tests/libraries/run-libraries.sh.
  *
  * SPDX-License-Identifier: MIT
  */

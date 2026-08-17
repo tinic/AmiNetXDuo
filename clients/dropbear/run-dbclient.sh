@@ -2,15 +2,17 @@
 #
 # Run the ported dbclient under Amiberry, against a real SSH server.
 #
-#   clients/dropbear/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
-#                                 [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
-#                                 [-C COMMANDS] [-A [-N BOARD] [-B BACKEND]]
-#                                 [-X FILE]...
+#   clients/dropbear/run-dbclient.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
+#                                    [-b STACKBUILD] [-D DBBUILD] [-i KEYFILE]
+#                                    [-C COMMANDS] [-N BOARD] [-B BACKEND]
+#                                    [-X FILE]...
 #
-#   -A  name the board and the backend (-N, -B) instead of taking the A2065 on
-#       SLIRP.  Both go through tools/amiberry-run.sh either way; SLIRP puts
-#       the host at 10.0.2.2, so the default command list's target does not
-#       move.
+# It was called run-fsuae.sh.  Both halves of it drove tools/amiberry-run.sh
+# and -A picked between them; fs-uae left the tree on 2026-08-04 and the name
+# outlived it.  -N and -B now say what they always meant: the board, and what
+# it is wired to.  Without -B the backend is tools/amiberry-run.sh's own
+# default, which is SLIRP, and SLIRP puts the host at 10.0.2.2, which is where
+# the default command list points.
 #
 #   EVERY timing here needs the machine to itself -- a handshake measured while
 #   two other emulators share the host is fiction, and this project has already
@@ -32,13 +34,13 @@
 #
 # WHAT IT NEEDS ON THE OTHER END
 #
-#   An SSH server the guest can reach.  FS-UAE's SLIRP puts the HOST at
+#   An SSH server the guest can reach.  SLIRP puts the HOST at
 #   10.0.2.2, so an sshd on this machine is the obvious target and is what the
 #   default command list uses.  clients/dropbear/sshd-testserver.sh starts one on port
 #   2222 with its own host keys, its own authorized_keys and no root:
 #
 #       clients/dropbear/sshd-testserver.sh start        # writes build/sshd-test/
-#       clients/dropbear/run-fsuae.sh
+#       clients/dropbear/run-dbclient.sh
 #       clients/dropbear/sshd-testserver.sh stop
 #
 #   -i names the PRIVATE KEY staged onto the Amiga.  It must be in Dropbear's
@@ -87,15 +89,14 @@ DB_SERVER=""
 KEYFILE="${AMINETXDUO_DBCLIENT_KEY:-$ROOT/build/sshd-test/id_amiga}"
 
 COMMANDS="${AMINETXDUO_DB_COMMANDS:-}"
-# -A names a board and a backend; without it the A2065 goes on SLIRP.  Both
-# branches are tools/amiberry-run.sh, and SLIRP puts the host at 10.0.2.2
-# either way, so DBHOST needs no change.
-RUNNER_KIND="${AMINETXDUO_RUNNER:-slirp}"
+# -N names the board, -B what it is wired to.  Unset, tools/amiberry-run.sh's
+# own default applies, and its default puts the host at 10.0.2.2, which is
+# where the default command list points.
 BOARD=a2065
 EXTRA=()
-BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-}"
 
-while getopts "m:t:c:k:b:D:E:i:C:S:AN:B:X:" opt; do
+while getopts "m:t:c:k:b:D:E:i:C:S:N:B:X:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -107,11 +108,10 @@ while getopts "m:t:c:k:b:D:E:i:C:S:AN:B:X:" opt; do
         i) KEYFILE="$OPTARG" ;;
         C) COMMANDS="$OPTARG" ;;
         S) DB_SERVER="$OPTARG" ;;
-        A) RUNNER_KIND=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         X) EXTRA+=("$OPTARG") ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-C commands] [-E dbbuild2] [-S srvbuild] [-A [-N board] [-B backend]] [-X file]..." >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b stackbuild] [-D dbbuild] [-i key] [-C commands] [-E dbbuild2] [-S srvbuild] [-N board] [-B backend] [-X file]..." >&2; exit 2 ;;
     esac
 done
 
@@ -383,14 +383,20 @@ STAGED+=("$STAGE/commands.txt")
 
 TRANSCRIPT="$ROOT/build/dropbear-run.log"
 
-if [ "$RUNNER_KIND" = "amiberry" ]; then
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$BACKEND" -m "$MODEL" \
-        -t "$TIMEOUT" ${CPU:+-c "$CPU"} "$RUNNER" "${STAGED[@]}" \
-        2>&1 | tee "$TRANSCRIPT" || true
-else
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
-        "$RUNNER" "${STAGED[@]}" 2>&1 | tee "$TRANSCRIPT" || true
-fi
+# CPUARG already carries -c and -k; -k is the emulated clock and dropping it
+# would change every figure this harness exists to take.
+RUNARG=(-N "$BOARD" "${CPUARG[@]}")
+[ -z "$BACKEND" ] || RUNARG+=(-B "$BACKEND")
+
+# KEEP THE RUNNER'S EXIT STATUS.  It used to end in `|| true` and the status
+# went with it, so a run that timed out, took an illegal instruction or came
+# up on the wrong backend was scored on a partial transcript as if it had
+# finished.  tools/amiberry-run.sh's header lists what 4, 5 and 124 mean.
+set +e
+"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "${RUNARG[@]}" \
+    "$RUNNER" "${STAGED[@]}" 2>&1 | tee "$TRANSCRIPT"
+RUN_RC=${PIPESTATUS[0]}
+set -e
 
 # ------------------------------------------------------------- verdict ----
 #
@@ -405,22 +411,55 @@ fi
 # the list to prove the ReadMe's "use -i" is not folklore and is expected to
 # fail; the version banner is not a connection at all.
 
-[ -z "$COMMANDS" ] || { echo "==> custom command list: no verdict"; exit 0; }
+# A custom command list has no markers to score, so there is no verdict here.
+# THAT IS A SKIP AND NOT A PASS: it used to `exit 0`, which is indistinguishable
+# from four connections that worked.  77 is the automake convention, the one
+# tools/test-verdict.sh already returns for a guest that skipped itself.
+if [ -n "$COMMANDS" ]; then
+    echo "==> custom command list: no markers to score, so no verdict"
+    printf 'name=dbclient\nverdict=SKIP\nreason=custom_command_list\n'
+    printf 'markers_ok=0\nmarkers_expected=0\nrun_rc=%s\ntranscript=%s\n' \
+           "$RUN_RC" "$TRANSCRIPT"
+    exit 77
+fi
 
 echo
 echo "==> verdict"
 fails=0
+ok=0
 for marker in AMIGA-SSH-OK "second connection" aes128-ctr chacha20; do
     if grep -q "^$marker" "$TRANSCRIPT"; then
         echo "  ok   $marker"
+        ok=$((ok + 1))
     else
         echo "  FAIL $marker"
         fails=$((fails + 1))
     fi
 done
 
+reason=ok
+case "$RUN_RC" in
+    0)   ;;
+    4)   echo "  FAIL the guest is built for a CPU this machine does not have"
+         reason=wrong_cpu;   fails=$((fails + 1)) ;;
+    5)   echo "  FAIL the run did not get the network backend it asked for"
+         reason=wrong_backend; fails=$((fails + 1)) ;;
+    124) echo "  FAIL the run TIMED OUT, so the transcript is partial"
+         reason=timeout;     fails=$((fails + 1)) ;;
+    *)   echo "  FAIL the run exited $RUN_RC"
+         reason=exit_nonzero; fails=$((fails + 1)) ;;
+esac
+
+kv() {
+    printf 'name=dbclient\nverdict=%s\nreason=%s\n' "$1" "$2"
+    printf 'markers_ok=%s\nmarkers_expected=4\nrun_rc=%s\ntranscript=%s\n' \
+           "$ok" "$RUN_RC" "$TRANSCRIPT"
+}
+
 if [ "$fails" != 0 ]; then
-    echo "dropbear: FAILED ($fails of 4), $TRANSCRIPT"
+    echo "dbclient: FAILED ($ok of 4 markers), $TRANSCRIPT"
+    kv FAIL "${reason/#ok/markers_missing}"
     exit 1
 fi
-echo "dropbear: PASSED"
+echo "dbclient: PASSED"
+kv PASS ok

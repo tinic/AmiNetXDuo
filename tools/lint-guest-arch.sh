@@ -10,7 +10,7 @@
 # machine idling at 50 fps.  It reads as "the stack does not work on a 68000"
 # and costs a day.
 #
-#   clients/dropbear/run-fsuae.sh   fixed, RUNNER_ARCH
+#   clients/dropbear/run-dbclient.sh  fixed, RUNNER_ARCH
 #   tools/amiberry-run.sh           fixed, ENVSETUP_ARCH
 #   tests/compare/run-compare.sh    NOT fixed until 2026-08-07, and it is the
 #                                   harness every measurement in this tree runs
