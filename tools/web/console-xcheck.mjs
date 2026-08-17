@@ -34,7 +34,11 @@ const ROOT = join(HERE, "..", "..");
 const TREE = process.env.RFB_TREE || ROOT;
 
 const args = process.argv.slice(2);
-const tile = (args[args.indexOf("--tile") + 1] || "16x8").split("x").map(Number);
+/* indexOf() answers -1 when the flag is absent, and reading args[0] off that
+   handed the first capture's path to Number() and ran the encoder at NaN by
+   NaN tiles.  The default only applies when the flag is really not there. */
+const tileAt = args.indexOf("--tile");
+const tile = (tileAt < 0 ? "16x8" : args[tileAt + 1]).split("x").map(Number);
 const captures = args.filter((a) => a.endsWith(".pfs"));
 
 const header = join(TREE, "include", "aminetxduo", "rfb_encode.h");
