@@ -124,8 +124,8 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 # because there is nothing to pick.
 #
 # minimal is the same stack with IPv6, mDNS, the packet filter, TLS, IPv4
-# multicast, the ARexx host and the TCP: handler compiled out: 234,768 bytes
-# against the full build's 335,752, 98 KB of options, both stripped.  It is for
+# multicast, the ARexx host and the TCP: handler compiled out: 243,332 bytes
+# against the full build's 369,820, 124 KB of options, both stripped.  It is for
 # somebody who has measured their 1 MB machine and decided, which is why it is
 # a drawer and not a threshold: a stack that silently drops IPv6 and .local
 # resolution on a machine that could have run them is a support question, not a
