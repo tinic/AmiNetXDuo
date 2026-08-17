@@ -255,7 +255,14 @@ rtg_mode_id() {
         id=$(rtg_mode_from_list "$f" "$d")
         if [ -n "$id" ]; then printf '0x%s' "$id"; return 0; fi
     done
-    [ "$d" = 8 ] && printf '%s' "$RTG_MODE_ID"
+    # The one constant, and it is not depth 8's alone.  Amiberry's uaegfx
+    # derives a mode ID from the width and the height and from nothing else --
+    # AssignModeID() in its picasso96.cpp looks up (w, h) in a table and
+    # returns 0x50001000 | id << 16 -- so 640x480 is 0x50031000 at 8, 15, 16,
+    # 24 and 32 bits alike, and the depth is chosen by the screenmode.prefs
+    # field beside it.  A board that numbers its modes some other way needs
+    # AMINETXDUO_RTG_MODE_ID_<depth>, which is why the override is first.
+    printf '%s' "$RTG_MODE_ID"
     return 0
 }
 
@@ -542,9 +549,30 @@ EOF
     # says so per run, so there is nothing for a second screen to insure
     # against -- an -R run that comes up planar is meant to fail, not to be
     # rescued by a blank screen that hides what Workbench did.
+    # AND IT NO LONGER RUNS THE MONITOR OR THE MODE LISTER, because both took
+    # the guest down before it ever reached the httpd line below.
+    #
+    # `DEVS:Monitors/uaegfx` was here to prove the board had been found.  By
+    # the time S:Startup-Sequence reaches it, LoadWB has already brought the
+    # board up -- the emulator log shows SetSwitch() on a Picasso96 640x480
+    # screen about fifteen seconds in -- so running the monitor a SECOND time
+    # meets a board context that already exists.  It printed "Could not create
+    # graphics board context for 'uaegfx'" and then took the machine with it:
+    # a Gary timeout and a B-Trap at PC=ffffffff, with everything after it in
+    # the sequence, httpd included, never reached.  From outside that is
+    # d8_up=no and RESULT=INFRA, which reads as a network or staging fault
+    # rather than as the guest having crashed on a diagnostic.  The message
+    # was doubly misleading: it is a symptom of the board WORKING.
+    #
+    # `C:rtgscreen 0` went with it.  Amiberry's uaegfx assigns a mode ID from
+    # the width and height alone -- AssignModeID() in its picasso96.cpp keys
+    # on nothing else -- so 640x480 is one ID at every depth and there is no
+    # per-depth list to learn.  What the lister cost was a whole boot and a
+    # second chance to wedge; what it bought was a number already known.
+    #
+    # The remaining lines are all reads.  None of them opens a board, a screen
+    # or a card, so none of them can do this again.
     [ "$RTG" = 1 ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'
-DEVS:Monitors/uaegfx >DH0:rtgmon.txt
-C:rtgscreen 0 >DH0:rtglist.txt
 C:Version >DH0:rtg-ver.txt LIBS:Picasso96/rtg.library FILE
 C:Version >>DH0:rtg-ver.txt LIBS:Picasso96API.library FILE
 C:Version >>DH0:rtg-ver.txt Picasso96API.library
@@ -761,22 +789,18 @@ alive() {
 
 # The board's own mode list, off the guest, while it is still booting.
 #
-# C:rtgscreen 0 runs early in the sequence -- before httpd, and long before
-# anything answers on the port -- and writes DH0:rtglist.txt.  DH0 is a host
-# directory, so the answer is readable from here without waiting for the
-# server, and the arm can restage on it and reboot rather than spend a whole
-# run finding out that the mode ID it wrote was not one the board has.
+# NOTHING ASKS FOR ONE ANY MORE and this waits for nothing.  The list came
+# from `C:rtgscreen 0` in the Startup-Sequence, which is gone: see the staging
+# above for why, and rtg_mode_id() for why the answer was not needed.  On this
+# board a mode ID follows the width and the height alone, so there is one ID
+# for the shape and the depth is the field beside it.
+#
+# Kept as a function, and kept returning failure, so that a board which does
+# number its modes some other way has an obvious place to start: fill this in,
+# and the caller already does the right thing with what it returns.  The
+# escape hatch until then is AMINETXDUO_RTG_MODE_ID_<depth>.
 rtg_wait_modes() {
-    local deadline
-    deadline=$(( $(date +%s) + ${1:-120} ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-        kill -0 "$EMU_PID" 2>/dev/null || return 1
-        if grep -q '^modes_total=' "$HD/rtglist.txt" 2>/dev/null; then
-            cp "$HD/rtglist.txt" "$RTG_MODES_SEEN"
-            return 0
-        fi
-        sleep 1
-    done
+    : "${1:-}"
     return 1
 }
 
@@ -854,8 +878,7 @@ for depth in "${DEPTHS[@]}"; do
             fi
             [ "$skipped" = yes ] || say "${tag}_rtg_mode" "$mode_id"
         else
-            say "${tag}_rtg_modes_seen" "none: the guest wrote no mode list\
- within 120s, so the mode ID staged for it is the one it booted with"
+            say "${tag}_rtg_mode" "${mode_id:-none}"
         fi
     fi
     if [ "$skipped" = yes ]; then
