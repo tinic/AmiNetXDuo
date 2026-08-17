@@ -3103,6 +3103,7 @@ BOOL http_fb_write(ULONG now)
         {
             ULONG done = fb_ticks();
             ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
+            int   pass_done = (fb_band_ty0 == 0);
             /*
              * Against the running totals rather than against this band alone.
              *
@@ -3123,6 +3124,26 @@ BOOL http_fb_write(ULONG now)
 
             fb_busy_ticks += cost;
             fb_frame_t0 = 0;
+
+            /*
+             * At the end of a screen pass and not between its bands.
+             *
+             * Waiting after every band stretches a pass across as many gated
+             * slices as it has bands, and on a screen where a frame is cheap
+             * that is all cost and no benefit: there is no long encode to
+             * interrupt, and the wait is simply added to how long input takes
+             * to be acted on.  Measured on the A3000 with an idle screen, the
+             * worst keystroke-to-frame delay was 95.8 ms banded against 42.0
+             * ms whole -- the banding made the thing it exists to improve
+             * more than twice as bad.
+             *
+             * Between bands the server still reads its socket, because that
+             * is what the band boundary is for, and it costs no wait at all.
+             * The share is a statement about the machine over time, so taking
+             * what is owed once a pass holds it just as well.
+             */
+            if (!pass_done)
+                return TRUE;
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
