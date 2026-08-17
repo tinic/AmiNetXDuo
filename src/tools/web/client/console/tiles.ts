@@ -24,19 +24,21 @@
  *                          2 PB_XOR  u16 len, PackBits of it XORed with what
  *                                    is already there
  *   OP_TILE8 0x03 u16 index, then ONE plane's u8 code and payload, exactly as
- *                 above.  The chunky sibling of OP_TILE: an eight-bit source
- *                 has one plane, so the mask would say 1 on every tile of
- *                 every frame and is not sent.  Which of the two arrives is
- *                 decided by FORMAT in the `geom` word and not by the op, so
- *                 an op that disagrees with the geometry is an error here
- *                 rather than a picture drawn eight times too wide.
+ *                 above.  The RTG sibling of OP_TILE: an eight-bit or a
+ *                 sixteen-bit source has one plane, so the mask would say 1
+ *                 on every tile of every frame and is not sent.  Which of the
+ *                 two arrives is decided by FORMAT in the `geom` word and not
+ *                 by the op, so an op that disagrees with the geometry is an
+ *                 error here rather than a picture drawn eight times too wide.
  *
  * tile_w is in BYTES and not pixels, and the tile grid is over bytesPerRow
  * rather than the width: every byte of a row is encoded, padding included, so
  * a decoded frame is byte-identical to the BitMap that went in.  Getting that
  * wrong is a picture that is right until the screen is not a whole number of
- * tiles wide.  A byte is eight pixels planar and one chunky, which is the
- * only other place the two formats part company.
+ * tiles wide.  A byte is eight pixels planar, one chunky and half of one at
+ * sixteen bits, which is the only other place the formats part company: the
+ * PackBits, the XOR and the copies are byte operations and read the same
+ * whichever it is.
  *
  * This is the only file that reads a byte off the socket.  It was written
  * against a placeholder framing for as long as the encoder did not exist, and
@@ -46,12 +48,20 @@
  */
 
 import {
+  FMT_CLUT8,
+  FMT_PLANAR,
+  FMT_RGB565,
   planeBytes,
   planeCount,
   pixelsPerByte,
   screenFault,
+  screenFormat,
   type Screen,
 } from "./planar";
+
+/* rfb_geom.format, as the `geom` word carries it.  They belong to a Screen
+   and are declared with one, and this is where everything else reads them. */
+export { FMT_CLUT8, FMT_PLANAR, FMT_RGB565 };
 
 export const RFB_VERSION = 1;
 
@@ -60,9 +70,8 @@ const OP_COPY = 0x01;
 const OP_TILE = 0x02;
 const OP_TILE8 = 0x03;
 
-/* rfb_geom.format, as the `geom` word carries it. */
-export const FMT_PLANAR = 0;
-export const FMT_CLUT8 = 1;
+/* For the one message that has to name a format rather than test one. */
+const FMT_NAME = ["planar", "chunky", "16-bit"];
 
 const CODE_RAW = 0;
 const CODE_PB_RAW = 1;
@@ -126,15 +135,18 @@ export function geometryFromWord(w: string): Geometry {
   if (n.some((x) => !Number.isInteger(x))) {
     throw new Error("geom has something that is not a whole number: " + w);
   }
-  if (n[6] !== FMT_PLANAR && n[6] !== FMT_CLUT8) {
+  if (n[6] !== FMT_PLANAR && n[6] !== FMT_CLUT8 && n[6] !== FMT_RGB565) {
     throw new Error("geom format " + n[6] + " is not one this viewer draws");
   }
   return makeGeometry(
     {
       width: n[0],
       height: n[1],
+      /* Planes on FMT_PLANAR, what sizes the palette on FMT_CLUT8, and bits
+         per pixel on FMT_RGB565.  screenFault() knows which. */
       depth: n[2],
       bytesPerRow: n[3],
+      format: n[6],
       chunky: n[6] === FMT_CLUT8,
     },
     n[4], n[5],
@@ -142,16 +154,19 @@ export function geometryFromWord(w: string): Geometry {
 }
 
 /*
- * `pal RRGGBB...`, hex, one triple per entry.  1536 characters at depth 8,
- * which is a text frame and not a problem; it is sent once per session and
- * again whenever LoadRGB4 moves something.
+ * `pal RRGGBB...`, hex, one triple per entry.  1536 characters at 256
+ * colours, which is a text frame and not a problem; it is sent once per
+ * session and again whenever LoadRGB4 moves something.
+ *
+ * `colours` is entries and not a depth, because the two are the same number
+ * on one format only; palColours() in planar.ts is what answers it.
  */
-export function paletteFromWord(w: string, depth: number): Uint8Array {
+export function paletteFromWord(w: string, colours: number): Uint8Array {
   const hex = w.trim().slice(4).replace(/\s+/g, "");
-  const want = 3 * (1 << depth);
+  const want = 3 * colours;
   if (hex.length !== want * 2) {
-    throw new Error("pal is " + hex.length / 2 + " bytes, depth " + depth +
-                    " needs " + want);
+    throw new Error("pal is " + hex.length / 2 + " bytes, " + colours +
+                    " colours need " + want);
   }
   const out = new Uint8Array(want);
   for (let i = 0; i < want; i++) {
@@ -241,10 +256,15 @@ export function applyUpdate(
   const h = g.screen.height;
   const bpr = g.screen.bytesPerRow;
   const plane = planeBytes(g.screen);
-  /* PLANES, not the depth.  A chunky screen is eight bits deep and one plane
-     wide, and every loop below wants the second number. */
+  /* PLANES, not the depth.  Both RTG formats are one plane and eight or
+     sixteen bits deep, and every loop below wants the first number. */
   const depth = planeCount(g.screen);
-  const chunky = g.screen.chunky === true;
+  const fmt = screenFormat(g.screen);
+  /* Which of the two tile ops the stream carries, and therefore whether a
+     tile has a plane mask on it.  Both RTG formats have one plane, so both
+     use OP_TILE8; how wide a tile's bytes are in pixels is the only thing
+     that separates them and no op reader here needs to know. */
+  const onePlane = fmt !== FMT_PLANAR;
   const perByte = pixelsPerByte(g.screen);
 
   const d: Damage = {
@@ -253,10 +273,15 @@ export function applyUpdate(
   };
 
   /* Byte columns to pixels, clipped to the screen: the padding at the end of
-     a row is encoded and is not on the display. */
+     a row is encoded and is not on the display.
+     Rounded outwards because a byte is HALF a pixel at 16 bits and a tile
+     grid over bytes need not land on one: the left edge floors and the right
+     edge ceils, so a rectangle that covers the low byte of a pixel covers
+     that whole pixel.  Rounding either edge the other way leaves a column
+     undrawn, which is a stale strip down the side of whatever moved. */
   const hit = (bx0: number, bw: number, y0: number, rows: number) => {
-    const px0 = bx0 * perByte;
-    const px1 = Math.min((bx0 + bw) * perByte, w);
+    const px0 = Math.floor(bx0 * perByte);
+    const px1 = Math.min(Math.ceil((bx0 + bw) * perByte), w);
     if (px1 <= px0 || rows <= 0) return;
     if (px0 < d.x0) d.x0 = px0;
     if (px1 > d.x1) d.x1 = px1;
@@ -320,19 +345,18 @@ export function applyUpdate(
        other one means the `geom` and the frames disagree about what a byte
        is.  That draws a picture rather than failing, which is why it is
        checked. */
-    if ((op === OP_TILE8) !== chunky) {
-      throw new Error("op " + op + " on a " + (chunky ? "chunky" : "planar") +
-                      " screen");
+    if ((op === OP_TILE8) !== onePlane) {
+      throw new Error("op " + op + " on a " + FMT_NAME[fmt] + " screen");
     }
 
-    /* No plane mask on a chunky tile: there is one plane and it is the one
+    /* No plane mask on a one-plane tile: there is one plane and it is the one
        that changed.  Two bytes of index either way. */
-    if (i + (chunky ? 2 : 3) > b.length) {
+    if (i + (onePlane ? 2 : 3) > b.length) {
       throw new Error("a tile op is cut short");
     }
     const idx = (b[i] << 8) | b[i + 1];
-    const mask = chunky ? 1 : b[i + 2];
-    i += chunky ? 2 : 3;
+    const mask = onePlane ? 1 : b[i + 2];
+    i += onePlane ? 2 : 3;
 
     if (idx >= g.across * g.down) {
       throw new Error("tile index " + idx + " is off the grid");

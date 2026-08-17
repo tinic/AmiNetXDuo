@@ -15,13 +15,14 @@
  *   0   char magic[4] = "PFS2"
  *   4   u16  width
  *   6   u16  height
- *   8   u8   depth            1..8
- *   9   u8   flags
+ *   8   u8   depth            1..8 planar, 8 CLUT8, 16 RGB565
+ *   9   u8   format           rfb_geom.format: 0 planar, 1 CLUT8, 2 RGB565
  *   10  u16  bytesPerRow      NOT width/8
  *   12  u16  frameCount
  *   14  u16  pointerCount     pointer images at the end; 0 when there are none
- *   16  palette, 3*(1<<depth) bytes, RGB8
- *   ..  frameCount frames of depth*bytesPerRow*height bytes, plane-major
+ *   16  palette, 3*(1<<depth) bytes RGB8, and NOTHING AT ALL on RGB565
+ *   ..  frameCount frames of planes*bytesPerRow*height bytes, plane-major,
+ *          where planes is depth planar and 1 on both RTG formats
  *   ..  frameCount frame records of 12 bytes:
  *          0  u32  milliseconds from the first frame
  *          4  s16  pointer x, in SCREEN pixels
@@ -44,6 +45,21 @@
  *          ..  depth * ((width + 15) / 16 * 2) * height bytes, plane-major
  *
  * Big-endian throughout, because the machine that writes it is.
+ *
+ * WHY BYTE 9 IS A FORMAT AND NOT A SET OF FLAGS
+ *
+ *   It was documented as flags and only ever carried bit 0, for the chunky
+ *   RTG capture; every writer that has ever existed put a 0 or a 1 there.  A
+ *   third format needs a third value, and the number the rest of the system
+ *   already has for it is rfb_geom.format -- so the byte holds that, 0 and 1
+ *   keep meaning exactly what they meant, and every file already written
+ *   loads with no special case.  A value this does not know is refused rather
+ *   than read as planar, which is the one thing a flags byte could not do.
+ *
+ *   The only arithmetic a format moves is the palette's length: RGB565 has no
+ *   palette and none is written, so its frames begin at offset 16.  The frame
+ *   records, the pointer table and pointerCount are all still found from
+ *   frameCount * frameBytes and are unchanged.
  *
  * WHY THERE ARE TIMESTAMPS AT ALL
  *
@@ -94,17 +110,23 @@
  */
 
 import {
+  FMT_CLUT8,
   frameBytes,
+  palColours,
   palette32,
   screenFault,
+  screenFormat,
   type Screen,
 } from "./planar";
 
 export const PFS_HEADER = 16;
 
-/* The one flag the header's flags byte carries: the frames are chunky, one
-   eight-bit palette index a pixel, and not depth separate bitplanes. */
-export const PFS_F_CHUNKY = 0x01;
+/* The palette a header carries, which is none at all on a format that has no
+   palette to carry.  Both the writer and the reader place the frames from
+   this, so it is the one place the offset is decided. */
+export function pfsPaletteBytes(s: Screen): number {
+  return 3 * palColours(s);
+}
 
 /* One frame record: when, where the pointer was, and which image it was. */
 export const PFS_FRAMEREC = 12;
@@ -146,10 +168,13 @@ export function pointerBits(p: { width: number; height: number; depth: number })
 
 export interface Capture {
   readonly screen: Screen;
+  /* Header byte 9 as it stands, which is screen.format and is kept here
+     because a reader looking at a file wants the byte and not the reading. */
   readonly flags: number;
   readonly frameCount: number;
   /* Kept as well as the 32-bit form: the header panel shows the entries and
-     an exporter would want the bytes back. */
+     an exporter would want the bytes back.  Both are empty on a truecolour
+     capture, which has no palette in the file. */
   readonly rgb: Uint8Array;
   readonly palette: Uint32Array;
   readonly frames: Uint8Array;
@@ -202,10 +227,10 @@ export function buildPfs(screen: Screen, rgb: Uint8Array,
                     " frames");
   }
 
-  const palBytes = 3 * (1 << screen.depth);
+  const palBytes = pfsPaletteBytes(screen);
   if (rgb.length < palBytes) {
-    throw new Error("palette is " + rgb.length + " bytes, depth " +
-                    screen.depth + " needs " + palBytes);
+    throw new Error("palette is " + rgb.length + " bytes, " +
+                    palColours(screen) + " colours need " + palBytes);
   }
 
   for (const p of pointers) {
@@ -234,7 +259,7 @@ export function buildPfs(screen: Screen, rgb: Uint8Array,
   v.setUint16(4, screen.width);
   v.setUint16(6, screen.height);
   out[8] = screen.depth;
-  out[9] = screen.chunky ? PFS_F_CHUNKY : 0;
+  out[9] = screenFormat(screen);
   v.setUint16(10, screen.bytesPerRow);
   v.setUint16(12, frames.length);
   v.setUint16(14, pointers.length);
@@ -321,10 +346,13 @@ export function parsePfs(buf: ArrayBuffer): Capture {
     height: v.getUint16(6),
     depth: b[8],
     bytesPerRow: v.getUint16(10),
-    /* Bit 0: one eight-bit plane rather than depth one-bit ones, which is
-       what an RTG capture is.  The byte was reserved and zero, so every file
-       written before it existed reads as the planar capture it is. */
-    chunky: (flags & PFS_F_CHUNKY) !== 0,
+    /* The byte was reserved and zero before there was an RTG capture and 1
+       once there was, which are the same two numbers this reads now, so every
+       file written before it was a format still says what it always said.
+       screenFault() below refuses one this does not know rather than drawing
+       it as the planar screen it is not. */
+    format: flags,
+    chunky: flags === FMT_CLUT8,
   };
   const frameCount = v.getUint16(12);
   const pointerCount = v.getUint16(14);
@@ -333,7 +361,7 @@ export function parsePfs(buf: ArrayBuffer): Capture {
   if (fault !== null) throw new Error("the header says " + fault);
   if (frameCount === 0) throw new Error("the header says no frames");
 
-  const palBytes = 3 * (1 << screen.depth);
+  const palBytes = pfsPaletteBytes(screen);
   const stride = frameBytes(screen);
   const pixels = PFS_HEADER + palBytes + frameCount * stride;
   const want = pixels + frameCount * PFS_FRAMEREC;
@@ -416,7 +444,9 @@ export function parsePfs(buf: ArrayBuffer): Capture {
     flags,
     frameCount,
     rgb,
-    palette: palette32(rgb, screen.depth),
+    /* Empty on a truecolour capture, and the decoder never looks at it: the
+       pixels carry their own colour. */
+    palette: palette32(rgb, palColours(screen)),
     frames: b.subarray(PFS_HEADER + palBytes, pixels),
     stride,
     times,
