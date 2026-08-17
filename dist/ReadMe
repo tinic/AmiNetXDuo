@@ -79,21 +79,36 @@ addresses, and the change afterwards is one line in one file.
 
 It puts
 
-     bsdsocket.library, usergroup.library      into LIBS:
-     NetSetup, AddNetInterface, Online, Offline,
-     ShowNetStatus, ShowNetServices,
-     ping, netstat, host,
-     nslookup, arp, fetch, nc, telnet,
-     NetTrace, sntp, traceroute, tftp, whois,
-     CheckNetConfig, GetNetStatus, NetShutdown,
-     RemoveNetInterface,
-     AddNetRoute, DeleteNetRoute, ssh, httpd   into C:
+     bsdsocket.library, usergroup.library,
+     tls.library                               into LIBS:
+     NetSetup, AddNetInterface, RemoveNetInterface,
+     ConfigureNetInterface, Online, Offline,
+     ShowNetStatus, ShowNetServices, GetNetStatus,
+     CheckNetConfig, CheckNetDevice, NetShutdown,
+     AddNetRoute, DeleteNetRoute, hostname,
+     ping, netstat, host, nslookup, arp,
+     fetch, nc, telnet, tftp, sntp, traceroute,
+     whois, ssh, httpd, iperf,
+     NetCapture, NetTrace                      into C:
      the interface description                 into DEVS:NetInterfaces
      the routing and name server files         into DEVS:Internet
      this file, the documentation, examples    into a selected drawer
 
 and, when it is allowed to, one line into S:User-Startup so the network
 comes up when the machine boots.
+
+tls.library is what makes encrypted (https:) connections work.  It is in the
+archive only when the archive was built with encryption in it, and the
+minimal stack leaves it out.  Its trust store goes to
+DEVS:Internet/certificates.
+
+Two things in the archive are NOT installed, deliberately.  Devs/Networks
+holds anxnet.device, AmiNetXDuo's own SANA-II driver, which drives ten cards
+and replaces the driver that came with them; copy it to DEVS:Networks by
+hand, name it with DEVICE=anxnet.device, and add a CARD= line when the probe
+has to be told which board it is.  CheckNetDevice reports what it found.
+The Developer drawer holds headers, and where headers belong is a property
+of the compiler rather than of this machine.
 
 A second run of the installer over a working installation is safe.  It
 notices the existing configuration and offers to leave it exactly as it is,
@@ -205,19 +220,27 @@ UNINSTALLING
 ------------
 
      Delete LIBS:bsdsocket.library LIBS:usergroup.library
-     Delete C:NetSetup C:AddNetInterface C:Online C:Offline
-     Delete C:ShowNetStatus C:ShowNetServices
-     Delete C:ping C:netstat C:host C:nslookup C:arp C:fetch
-     Delete C:nc C:telnet C:NetTrace
-     Delete C:sntp C:traceroute C:tftp C:whois
-     Delete C:CheckNetConfig C:GetNetStatus C:NetShutdown
-     Delete C:RemoveNetInterface
-     Delete C:AddNetRoute C:DeleteNetRoute C:ssh C:httpd
+     Delete LIBS:tls.library
+     Delete C:NetSetup C:AddNetInterface C:RemoveNetInterface
+     Delete C:ConfigureNetInterface C:Online C:Offline
+     Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
+     Delete C:CheckNetConfig C:CheckNetDevice C:NetShutdown
+     Delete C:AddNetRoute C:DeleteNetRoute C:hostname
+     Delete C:ping C:netstat C:host C:nslookup C:arp
+     Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
+     Delete C:whois C:ssh C:httpd C:iperf
+     Delete C:NetCapture C:NetTrace
      Delete DEVS:NetInterfaces/eth0
+     Delete DEVS:Internet/certificates
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
 S:User-Startup.  If another stack was installed before, rename
 LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.
+
+A minimal installation has no LIBS:tls.library and no
+DEVS:Internet/certificates, and Delete says so; add QUIET to those two lines
+to silence it.  DEVS:Networks/anxnet.device is there only if it was copied
+across by hand.
 
 
 STATUS
@@ -225,7 +248,7 @@ STATUS
 
 It gets a DHCP lease, answers ARP, pings its gateway, resolves DNS, moves
 TCP in both directions and listens for incoming connections.
-bsdsocket.library scores 141 of 142 on the bsdsocktest conformance suite.
+bsdsocket.library scores 142 of 142 on the bsdsocktest conformance suite.
 
 Everything above was measured on an emulated 68000, 68020 and 68030 under
 Kickstart 2.04 and 3.1.  It has also run on real hardware: an A3000 with

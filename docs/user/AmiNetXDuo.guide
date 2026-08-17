@@ -1159,8 +1159,11 @@
       1> Offline eth0
       eth0 is already offline: the network is not running.
 
-  While an interface is offline, ping cannot send anything. See
-  @{"ping cannot send the request" link T_OFFLINE}.
+  While an interface is offline nothing it carries reaches the
+  network. ping still accepts the request and reports every one of
+  them as timed out, at 100% loss. The refusal that reads
+  @{"ping cannot send the request" link T_OFFLINE} is a different
+  fault.
 
 @endnode
 
@@ -2174,32 +2177,45 @@
 
   @{b}Symptom@{ub}
 
-      1> ping 10.0.2.2
-      PING 10.0.2.2 (10.0.2.2): 56 data bytes
-      ping: cannot send the request: <reason>
+      1> ping 2001:4860:4860::8888
+      PING 2001:4860:4860::8888 (2001:4860:4860::8888): 56 data bytes
+      ping: cannot send the request: network unreachable
 
-      --- 10.0.2.2 ping statistics ---
-      0 packets transmitted, 0 received, 100% packet loss
+      --- 2001:4860:4860::8888 ping statistics ---
+      0 packets transmitted, 0 received, 0% packet loss
 
   @{b}What it means@{ub}
 
   The packet was not sent at all. This is a refusal, not a timeout.
-  The text after the second colon is what the socket reported, and the
-  usual reason is that the interface is offline, so there is no route
-  to anywhere. The count reads 0 packets transmitted because nothing
-  left the machine.
+  The text after the second colon is what the socket reported, and
+  "network unreachable" means this machine has no address of the same
+  kind as the one being pinged, so there is nothing to send from. An
+  IPv4-only machine asked for an IPv6 address gives it, and so does an
+  IPv6-only machine asked for an IPv4 one. The count reads 0 packets
+  transmitted, and 0% loss rather than 100%, because nothing was ever
+  sent and there was nothing to lose.
+
+  An interface that is merely offline does @{b}not@{ub} give this. The
+  request is accepted, it reaches no network, and every reply times
+  out at 100% loss. That case is
+  @{"The address is there but nothing can be reached" link T_CABLE}.
 
   @{b}Fix@{ub}
 
       1> ShowNetStatus
       ...
-        state       offline         link down
+        address     192.168.1.15    netmask 255.255.255.0 (/24)
 
-      1> Online eth0
-      eth0 is online, address 10.0.2.15
+  One address, and it is IPv4, so an IPv6 destination has no source to
+  go with it. Either give the interface IPv6, or ping something IPv4.
 
-  Then retry. If ShowNetStatus already says online, the interface has
-  no address. See
+  CONFIGURE6=OFF in DEVS:NetInterfaces/eth0 turns IPv6 off for that
+  interface; take the line out, or set CONFIGURE6=AUTO, and bring the
+  interface up again. The minimal stack has no IPv6 compiled into it
+  at all, so on that one the answer is to install the full stack.
+
+  If both families are listed and a ping still cannot be sent, the
+  interface has no usable address at all. See
   @{"Nothing happens and there is no address" link T_NOLEASE}.
 
 @endnode

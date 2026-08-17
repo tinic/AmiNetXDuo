@@ -1004,7 +1004,14 @@ static LONG fetch_run(VOID)
  * So this command brings its own stack via StackSwap() (exec V36, present on
  * the 3.1 floor) instead of requiring `stack 65536` first.  Any program that
  * opens tls.library must do the same.  64 KB against the ~40 KB the connection
- * allocates, on a machine assumed to have four megabytes.
+ * allocates.
+ *
+ * NOTHING HERE ASSUMES A MACHINE SIZE.  This used to say "on a machine assumed
+ * to have four megabytes", from before the floor was measured at 1 MB.  The
+ * 64 KB is asked for and not required: main() takes the AllocMem() failure and
+ * runs on the caller's stack instead, which is enough for http: and was never
+ * going to be enough for https:.  So the number is sized against the connection
+ * and not against the machine, and it is the same number on every machine.
  *
  * Hazard: fetch_trampoline() must have no locals and no arguments, and is
  * noinline for the same reason.  Between the two StackSwap() calls the stack

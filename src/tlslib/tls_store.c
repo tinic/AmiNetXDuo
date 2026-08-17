@@ -1,8 +1,9 @@
 /*
  * tls.library, the trust store, and the lazy loader that reads it.
  *
- *   The Mozilla root set is about 120 certificates and 125 KB of DER.  This
- *   machine has four megabytes.  A parse of all of them at startup is not
+ *   The Mozilla root set is about 120 certificates and 125 KB of DER.  The
+ *   floor this stack runs on is 1 MB (docs/RESEARCH.md 81), not the four
+ *   megabytes this note used to name.  A parse of all of them at startup is not
  *   viable, and neither is a resident copy.  An NX_SECURE_X509_CERT is 252
  *   bytes, so the parsed set alone is 30 KB before the DER it points into, and
  *   the parse itself is 120 ASN.1 walks on a 14 MHz 68020 in front of a user
