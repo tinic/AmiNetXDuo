@@ -6,7 +6,7 @@
                                 [--type TEXT] [--at N]
                                 [--pointer "X,Y,B; X,Y,B; ..."] [--step N]
                                 [--png-before OUT.png] [--reconnect N]
-                                [--min-changed N]
+                                [--min-changed N] [--latency N]
 
 WHY IT DECODES RATHER THAN COUNTING
 
@@ -79,6 +79,78 @@ WHY IT DECODES RATHER THAN COUNTING
   a pixel, so a change after the keys and none before them is the keys having
   arrived.  The table is the one the browser sends,
   src/tools/web/client/console/rawkey.ts.
+
+--latency TIMES ONE INPUT AGAINST THE FRAME THAT ANSWERS IT
+
+  N samples.  Each is a single keystroke sent from a screen that has been
+  still for half a second, and the milliseconds until a frame arrives whose
+  pixels differ from the one before it.  What is reported is the spread and
+  not a mean, because the complaint being answered is a freeze and a freeze
+  is the maximum: input_latency_ms_min, _mean, _p90 and _max, over
+  input_latency_samples of them.
+
+  It is a keystroke and not a mouse move.  The pointer the person sees is the
+  browser's own -- src/tools/web/client/console/pointer.ts draws it from the
+  host's cursor onto an overlay, and the `ptr` word in
+  include/aminetxduo/rfb_words.h carries the sprite's image and never its
+  position, sent when the shape changes and at no other time.  So a movement
+  over an idle screen changes no pixel anywhere and produces no frame, and a
+  number built on one would be the frame cadence wearing a mouse's name.  A
+  key echoed by a Shell does change pixels.  That means the figure is only
+  meaningful with a Shell in front, and a run against a screen that does not
+  echo reports zero samples rather than a number.
+
+  What the milliseconds contain, in order: this process writing the two text
+  frames, the network, the server getting round to reading its socket --
+  which is the part being changed, and on a server that finishes a frame
+  before it looks at input it is most of the number -- input.device and the
+  Shell drawing the character, the next grab, the encode, and the frame's
+  trip back.  It is a round trip through a whole machine and not a server
+  measurement, and what it is good for is the difference between two builds
+  of the server with everything else held still.
+
+  What it does not contain is the decode of the frame that carried the
+  change: the clock stops when the bytes come off the socket, before they are
+  applied.  The frames before it are another matter, and no care here removes
+  them, because this receiver decodes in Python and a frame it is busy
+  decoding is a frame waiting in the kernel's buffer.  probe_decode_ms_max is
+  printed beside the latency for exactly that reason, so that a maximum which
+  is really this file's own arithmetic can be recognised as one.
+
+  Where the key lands in the server's cycle is not left to chance, and that
+  is worth being plain about because it is what makes the maximum repeatable.
+  This receiver only acts when it wakes, and it wakes when a frame arrives, so
+  every sample goes out in the instant after one landed -- which on a server
+  that reads input between frames is the least favourable moment there is, the
+  key arriving just behind the poll and waiting out a whole frame before the
+  next one.  The figure is therefore the worst case by construction rather
+  than an average over arrival phases, and min, mean and max sitting close
+  together is that working and not a shortage of samples.  What the spread
+  does show is the guest's own variance: how long the Shell took, and whether
+  one sample in ten waited for something else entirely.
+
+fbstat IS THE GUEST'S HALF, AND THE ONLY PLACE A DUTY CYCLE CAN COME FROM
+
+  The server sends its own counters every so often as an `fbstat` word, and
+  they are printed one to a line as guest_*.  A tag this file has never been
+  taught is printed too, under its own name: the guest is meant to gain
+  counters without this being rebuilt on the same afternoon, which is the rule
+  the whole word protocol runs on, and a probe that failed on an unknown tag
+  would turn adding one into a breaking change.
+
+  duty_cycle_pct is the guest's busy ticks against the wall clock between the
+  session opening and that word arriving.  It cannot be had from out here:
+  what is observable at the socket is bytes and their timing, and a server
+  spending eighty per cent of a 68030 on frames looks from this end exactly
+  like one spending thirty on a machine that is slower.  So the busy measure
+  is the guest's own, and duty_cycle_basis says which counter it came from --
+  the busy total when the guest sends one, and grab plus encode ticks, which
+  is all the work this file knows the names of, when it does not.
+
+  Nothing clamps it at a hundred.  A figure above that is the guest's ticks
+  and this end's clock disagreeing, which is a counter being added up twice or
+  a session whose counters did not start where the socket did, and both are
+  worth seeing rather than rounding away.
 
 NO DEPENDENCIES
 
@@ -222,6 +294,120 @@ RAWKEY = {
 }
 for _c in "abcdefghijklmnopqrstuvwxyz":
     RAWKEY[_c.upper()] = (RAWKEY[_c][0], 1)
+
+
+# Backspace, which is not in the table above because that one maps characters
+# and this one produces none.  It is here so a latency sample can be undone by
+# the next one: a dot and then a backspace both make the Shell redraw a cell,
+# and alternating them leaves the command line as short at the end of thirty
+# samples as it was at the start, instead of a line of dots that the next run
+# has to scroll off the screen.
+RAWKEY_BACKSPACE = 0x41
+
+# How still the screen has to be before a latency sample is fired, and how long
+# one waits before it is written off.
+#
+# The quiet window is what makes the answer attributable.  The stop condition
+# is "a frame whose pixels differ", and a guest redrawing something of its own
+# -- a title bar counting memory -- satisfies that without the keystroke having
+# arrived at all.  Half a second of no change first means the only thing moving
+# is the one this file moved.
+#
+# The timeout is loose on purpose.  A key that takes four seconds to come back
+# is the defect being hunted, not a sample to throw away, and the only thing
+# this must not do is spend the whole session waiting on a screen that was
+# never going to echo.
+LATENCY_QUIET = 0.5
+LATENCY_TIMEOUT = 5.0
+
+
+def percentile(xs, pct):
+    """Nearest rank, which is the definition that returns a sample.
+
+    Interpolating between two samples would invent a number that never
+    happened, and with ten or thirty of them the honest answer to "the ninth
+    of ten" is the ninth of ten.
+    """
+    s = sorted(xs)
+    k = (pct * len(s) + 99) // 100
+    if k < 1:
+        k = 1
+    if k > len(s):
+        k = len(s)
+    return s[k - 1]
+
+
+# The `fbstat` tags this file has been taught, and what each one counts.  The
+# spelling is src/tools/httpfb.c's, and gt and et are disjoint halves of one
+# pass, so their sum is the work the guest did rather than a double count.
+FBSTAT_NAMES = {
+    "f":    "guest_frames",
+    "b":    "guest_bytes",
+    "gt":   "guest_grab_ticks",
+    "et":   "guest_encode_ticks",
+    "tn":   "guest_torn",
+    "gn":   "guest_gone_passes",
+    "nl":   "guest_nolock",
+    "bt":   "guest_busy_ticks",
+    "busy": "guest_busy_ticks",
+}
+
+# A guest tick is a DateStamp tick, and there are fifty of them in a second.
+TICKS_PER_SECOND = 50.0
+
+
+def fbstat_fields(text):
+    """`fbstat` split into pairs, tolerating tags this has never heard of.
+
+    An unrecognised word is ignored at both ends of this protocol and is never
+    an error, and the same has to be true one level down or the rule buys
+    nothing: the guest gains a counter, every probe in the tree fails on the
+    word carrying it, and the counter has to be reverted rather than read.  So
+    a tag with no entry in the table is printed under its own name and a value
+    that is not a number is printed as it arrived.
+
+    Returns the pairs to print, in the order they were sent, and the subset
+    that parsed as integers keyed by the guest's own tag.
+    """
+    pairs = []
+    nums = {}
+
+    for tok in text.split():
+        tag, sep, val = tok.partition("=")
+        if not sep:
+            continue
+        # A key=value line is what is being emitted, so the tag has to be
+        # something a reader can grep for; anything else in it is dropped
+        # rather than allowed to produce a line with two equals signs in it.
+        tag = "".join(c for c in tag if c.isalnum() or c == "_")
+        if not tag:
+            continue
+        pairs.append((FBSTAT_NAMES.get(tag, "guest_" + tag), val))
+        try:
+            nums[tag] = int(val)
+        except ValueError:
+            pass
+
+    return pairs, nums
+
+
+def busy_ticks(nums):
+    """The guest's busy time, and the name of where it came from.
+
+    A total the guest computes itself is preferred to one assembled here: it
+    is the guest that knows what it was doing, and grab plus encode is only
+    the work this file happens to know the names of -- a pass that found
+    nothing to send, or the walk over a tile grid outside those two clocks,
+    counts in the first and not in the second.  So the fallback is a floor on
+    the duty cycle rather than a measurement of it, and the basis is printed
+    beside the number so that the two are never read as the same figure.
+    """
+    for tag in ("bt", "busy"):
+        if tag in nums:
+            return nums[tag], tag
+    if "gt" in nums and "et" in nums:
+        return nums["gt"] + nums["et"], "gt+et"
+    return None, ""
 
 
 def type_text(wire, text):
@@ -1035,6 +1221,7 @@ def main(argv):
     png_before = None
     reconnects = 0
     min_changed = 0
+    latency = 0
 
     i = 3
     while i < len(argv):
@@ -1070,6 +1257,8 @@ def main(argv):
             reconnects = int(argv[i + 1]); i += 2
         elif argv[i] == "--min-changed":
             min_changed = int(argv[i + 1]); i += 2
+        elif argv[i] == "--latency":
+            latency = int(argv[i + 1]); i += 2
         elif argv[i] == "--refresh":
             want_refresh = True; i += 1
         else:
@@ -1098,7 +1287,6 @@ def main(argv):
     gaps = 0
     tiles = 0
     copies = 0
-    fbstat = ""
     kept = []
     changed = 0
     changed_before = 0
@@ -1109,6 +1297,17 @@ def main(argv):
     changed_before_pointer = 0
     last = None
     fault = None
+
+    guest_pairs = []
+    guest_nums = {}
+    fbstat_at = None
+
+    lat_ms = []
+    lat_sent_at = None
+    lat_missed = 0
+    lat_owed = 0                # dots typed that no backspace has taken back
+    lat_quiet_since = None
+    decode_ms = 0.0
 
     started = time.time()
     first_at = None
@@ -1153,7 +1352,15 @@ def main(argv):
                         raise Bad("a palette arrived before a geometry")
                     say("palette_bytes", take_pal(screen, text))
                 elif text.startswith("fbstat "):
-                    fbstat = text[7:]
+                    # Last one wins: the counters are cumulative over the
+                    # session and reset when it opened, so the newest word is
+                    # the whole story and the ones before it are prefixes of
+                    # it.  When it arrived is kept as well, because it is the
+                    # denominator of the duty cycle -- the word comes every so
+                    # many frames, not at the end, so the session's own elapsed
+                    # time is the wrong window by however long the tail was.
+                    guest_pairs, guest_nums = fbstat_fields(text[7:])
+                    fbstat_at = time.time()
                 else:
                     # WHOLE, not the first sixty characters.  The rtg word is
                     # the one deliverable of the readback probe and it is about
@@ -1169,8 +1376,15 @@ def main(argv):
             if screen is None:
                 raise Bad("a frame arrived before a geometry")
 
+            # The instant the bytes were off the socket, which is where a
+            # latency sample stops.  Taken before the decode on purpose: what
+            # this file spends turning the frame into pixels is this file's,
+            # and charging it to the guest would put a Python loop in the
+            # middle of a number about a 68030.
+            arrived = time.time()
+
             if first_at is None:
-                first_at = time.time()
+                first_at = arrived
 
             seq, t, c = screen.apply(body)
             frames += 1
@@ -1183,13 +1397,51 @@ def main(argv):
             expect_seq = (seq + 1) & 0xFFFF
 
             now = bytes(screen.planes)
-            if last is not None and now != last:
+            moved = last is not None and now != last
+            if moved:
                 changed += 1
                 if typing is not None and typed == 0:
                     changed_before += 1
                 if pointer is not None and pointed == 0:
                     changed_before_pointer += 1
             last = now
+
+            if latency:
+                if moved or lat_quiet_since is None:
+                    lat_quiet_since = arrived
+
+                if lat_sent_at is not None:
+                    if moved:
+                        # The first frame with different pixels in it after the
+                        # key went out.  Attributing it to the key is what the
+                        # quiet window below buys: the screen had not moved for
+                        # half a second, so this is what moved it.
+                        lat_ms.append((arrived - lat_sent_at) * 1000.0)
+                        lat_sent_at = None
+                    elif arrived - lat_sent_at > LATENCY_TIMEOUT:
+                        # Not a slow answer, at five seconds: it is a screen
+                        # that does not echo, or a key that never landed.
+                        # Counted and moved past, so a run against a Workbench
+                        # with no Shell on it ends up saying zero samples
+                        # rather than sitting on the first one all session.
+                        lat_missed += 1
+                        lat_sent_at = None
+
+                if (lat_sent_at is None
+                        and len(lat_ms) + lat_missed < latency
+                        and frames >= type_at
+                        and arrived - lat_quiet_since >= LATENCY_QUIET):
+                    # A dot and then a backspace, alternating, so that thirty
+                    # samples leave the Shell's line where they found it.  Both
+                    # redraw one character cell, which is all the stop
+                    # condition needs.
+                    raw = RAWKEY_BACKSPACE if lat_owed else RAWKEY["."][0]
+                    lat_owed = 0 if lat_owed else 1
+                    # As close to the sendall as it can be taken: the sample is
+                    # the round trip and not the decision to start one.
+                    lat_sent_at = time.time()
+                    wire.word("kd %d 0" % raw)
+                    wire.word("ku %d 0" % raw)
 
             # One step every `step` TENTHS OF A SECOND.  Not every N frames:
             # a drag holds the screen's layer lock, the grab then reads a torn
@@ -1217,6 +1469,14 @@ def main(argv):
             if pfs_path is not None and screen.colours and len(kept) < 200:
                 kept.append((screen, now, time.time()))
 
+            # Everything this file did with the frame, end to end.  It is the
+            # yardstick the latency is read against: while this is running the
+            # next frame is in the kernel's buffer going stale, so a latency
+            # maximum near this figure is this receiver's and not the guest's.
+            spent = (time.time() - arrived) * 1000.0
+            if spent > decode_ms:
+                decode_ms = spent
+
     except Fault as e:
         fault = ("INFRA", str(e))
     except Bad as e:
@@ -1225,6 +1485,19 @@ def main(argv):
         fault = ("INFRA", "nothing arrived within the window")
 
     elapsed = time.time() - started
+
+    # Give the Shell its line back.  An odd number of samples leaves a dot on
+    # it, and the next run's quiet window then starts from a screen this one
+    # scribbled on -- harmless once, and a line of them after an afternoon of
+    # arms.  Best effort: the session may already be closing, and a session
+    # that is over is not a reason to fail a run that has its numbers.
+    if lat_owed and fault is None:
+        try:
+            wire.word("kd %d 0" % RAWKEY_BACKSPACE)
+            wire.word("ku %d 0" % RAWKEY_BACKSPACE)
+        except OSError:
+            pass
+
     wire.close()
 
     say("seconds", "%.2f" % elapsed)
@@ -1245,8 +1518,30 @@ def main(argv):
         say("pointer_steps_sent", pointed)
         say("frames_changed_before_pointer", changed_before_pointer)
         say("frames_changed_after_pointer", changed - changed_before_pointer)
-    if fbstat:
-        say("guest_fbstat", fbstat)
+    if latency:
+        say("input_latency_samples", len(lat_ms))
+        say("input_latency_missed", lat_missed)
+        if lat_ms:
+            say("input_latency_ms_min", "%.1f" % min(lat_ms))
+            say("input_latency_ms_mean", "%.1f" % (sum(lat_ms) / len(lat_ms)))
+            say("input_latency_ms_p90", "%.1f" % percentile(lat_ms, 90))
+            say("input_latency_ms_max", "%.1f" % max(lat_ms))
+        say("probe_decode_ms_max", "%.1f" % decode_ms)
+
+    for k, v in guest_pairs:
+        say(k, v)
+
+    # The guest's busy time against the wall clock it was busy in.  Both halves
+    # end at the same instant -- the counters are as of the word arriving, so
+    # the window is measured to there and not to the end of the session.
+    if fbstat_at is not None:
+        ticks, basis = busy_ticks(guest_nums)
+        window = fbstat_at - started
+        if ticks is not None and window > 0:
+            say("duty_cycle_pct",
+                "%.1f" % (100.0 * (ticks / TICKS_PER_SECOND) / window))
+            say("duty_cycle_basis", basis)
+            say("duty_cycle_window_s", "%.2f" % window)
 
     if fault is not None:
         say("error", fault[1])
@@ -1307,6 +1602,23 @@ def main(argv):
             problems.append("the screen did not change after %d pointer words"
                             " went out, so nothing reached input.device"
                             % pointed)
+    if latency and not lat_ms:
+        # Two different failures, and they are not fixed the same way: a key
+        # that went out and was never echoed is a screen with no Shell on it,
+        # and a key that never went out is a screen that never stood still
+        # long enough to fire one -- which is what --activity scroll produces,
+        # and what makes this measurement and that arm mutually exclusive.
+        if lat_missed:
+            problems.append("%d latency keystrokes went out and no frame"
+                            " changed after any of them, so there is nothing"
+                            " to time: the figure needs a Shell in front,"
+                            " because a key that is not echoed changes no"
+                            " pixel" % lat_missed)
+        else:
+            problems.append("no latency keystroke ever went out: the screen"
+                            " never held still for %.1fs, so nothing this"
+                            " sent could have been told apart from what the"
+                            " guest was already drawing" % LATENCY_QUIET)
     if typing is not None:
         if typed == 0:
             problems.append("nothing was typed: too few frames arrived")
