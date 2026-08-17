@@ -91,8 +91,12 @@ struct RtgRenderInfo
 #define RGBFB_R5G5B5PC       5UL
 #define RGBFB_A8R8G8B8       6UL
 #define RGBFB_A8B8G8R8       7UL
-#define RGBFB_B8G8R8A8       8UL
-#define RGBFB_R8G8B8A8       9UL
+/* 8 is RGBA and 9 is BGRA, in that order.  Taken from the RGBFTYPE enum
+   itself and not from memory: they are easy to write down the other way
+   round, and a card reporting either would then have its red and blue
+   exchanged in every pixel, which is a picture that looks deliberate. */
+#define RGBFB_R8G8B8A8       8UL
+#define RGBFB_B8G8R8A8       9UL
 #define RGBFB_R5G6B5        10UL
 #define RGBFB_R5G5B5        11UL
 #define RGBFB_B5G6R5PC      12UL
@@ -262,8 +266,8 @@ static const RtgSrcFmt rtg_fmt_p96_tab[RGBFB_N] =
     { 2, RTG_L_R555, 1, 0, 0, 0 },      /* RGBFB_R5G5B5PC                   */
     { 4, 0,          0, 1, 2, 3 },      /* RGBFB_A8R8G8B8                   */
     { 4, 0,          0, 3, 2, 1 },      /* RGBFB_A8B8G8R8                   */
-    { 4, 0,          0, 2, 1, 0 },      /* RGBFB_B8G8R8A8                   */
     { 4, 0,          0, 0, 1, 2 },      /* RGBFB_R8G8B8A8                   */
+    { 4, 0,          0, 2, 1, 0 },      /* RGBFB_B8G8R8A8                   */
     { 2, RTG_L_R565, 0, 0, 0, 0 },      /* RGBFB_R5G6B5, the wire format    */
     { 2, RTG_L_R555, 0, 0, 0, 0 },      /* RGBFB_R5G5B5                     */
     { 2, RTG_L_B565, 1, 0, 0, 0 },      /* RGBFB_B5G6R5PC                   */
