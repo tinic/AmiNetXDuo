@@ -916,7 +916,8 @@
     @{"netstat         " link NETSTAT}  interfaces, routes and connections
     GetNetStatus      the same, for a script to read
     ShowNetServices   what this machine is announcing
-    NetTrace          watch packets on the network
+    NetCapture        capture packets to a file Wireshark reads
+    NetTrace          the same, for a transfer it runs itself
     arp               the machines on this network
 
   @{b}Asking other machines things@{ub}
