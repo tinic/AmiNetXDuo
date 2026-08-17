@@ -730,11 +730,23 @@ static void test_plan_budget(void)
      * deep in.
      */
     plan_at(10000000UL, 368UL, TRUE, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH && d.ipv6 == AMI_SANA2_RX_MAX_DEPTH,
-            "368 packets: both protocols get the ceiling, not two");
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+            "368 packets: IPv4 gets the ceiling");
+    h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
+            "and IPv6 gets its own cap rather than two");
     plan_at(100000000UL, 368UL, TRUE, &d);
-    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH && d.ipv6 == AMI_SANA2_RX_MAX_DEPTH,
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
             "and a hundred-megabit card on that machine asks for no more");
+
+    /*
+     * The IPv6 cap is a cap and not a share: a pool ten times bigger does not
+     * move it.  A packet pinned by a reader nothing is arriving on is one the
+     * other reader's window cannot have, and that is measured -- see the
+     * constant's own comment.
+     */
+    plan_at(10000000UL, 4096UL, TRUE, &d);
+    h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
+            "and a pool ten times that size does not move the IPv6 cap");
 
     /* The same machine on a wire slower than it: the cap bites, and it is the
        only configuration in which the reported line rate changes anything. */

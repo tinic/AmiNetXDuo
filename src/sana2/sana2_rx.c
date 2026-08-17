@@ -1252,15 +1252,17 @@ static UWORD ami_sana2_rx_wire_depth(ULONG bps)
  * there is -- the SYN/ACKs of a handful of connections opening at once -- and
  * the failure is a connection that never completes, not a slow one.
  *
- * IPv4 is served before IPv6 out of what is left over.  Not a judgement about
- * which protocol matters: the spare only runs out on a machine whose pool is
- * around ten packets, and on a machine that small the IPv6 reader keeps
- * exactly the depth it had before this function existed.
+ * IPv4 is served before IPv6 out of what is left over, and the IPv6 reader has
+ * a cap of its own on top of that (AMI_SANA2_RX_WANT_IPV6).  On a 2 MB machine
+ * the spare runs out first and the IPv6 reader keeps exactly the depth it had
+ * before this function existed; on an 8 MB one the cap is what stops it.
  *
  * THE IPv6 READER IS NOT A NEIGHBOUR-DISCOVERY READER.  Its packet type is
  * 0x86DD, which is the whole protocol: every IPv6 TCP segment this machine
  * receives arrives through it.  It was two deep, against IPv4's thirty-two, on
- * the same wire and for the same traffic.
+ * the same wire and for the same traffic, and that is a cliff rather than a
+ * handicap: 386 kbit/s against 1959 at eight, measured on the same boot as the
+ * IPv4 transfer beside it.
  *
  * ARP STAYS AT ITS FLOOR, deliberately.  Two is a request and its reply, which
  * is the whole of what that reader carries; a deeper queue buys tolerance of a
@@ -1316,7 +1318,12 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
 
     if (dual_stack)
     {
-        give = (want > out->ipv6) ? (UWORD)(want - out->ipv6) : (UWORD)0;
+        UWORD want6 = want;
+
+        if (want6 > (UWORD)AMI_SANA2_RX_WANT_IPV6)
+            want6 = (UWORD)AMI_SANA2_RX_WANT_IPV6;
+
+        give = (want6 > out->ipv6) ? (UWORD)(want6 - out->ipv6) : (UWORD)0;
         if ((ULONG)give > spare)
             give = (UWORD)spare;
         out->ipv6 = (UWORD)(out->ipv6 + give);

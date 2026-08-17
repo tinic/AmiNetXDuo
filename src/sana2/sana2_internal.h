@@ -86,6 +86,33 @@
 #endif
 
 /*
+ * The deepest the IPv6 reader is planned, however much the pool can spare.
+ *
+ * IPv4 is not capped this way and IPv6 is, because a packet pinned by a reader
+ * nothing is arriving on is a packet the other reader's window and the
+ * transmit path cannot have -- and a dual-stack machine is not receiving at
+ * full rate on both protocols at once. One CPU, one wire, one pool.
+ *
+ * Both sides are measured, a2065 on an 8 MB A1200 (pool 367), the guest
+ * pulling 2 MB over each protocol in the same boot, n=3 interleaved, medians
+ * in kbit/s:
+ *
+ *      IPv6 depth       2      8     32
+ *      IPv6 rate      386   1959   4013
+ *      IPv4 beside   4660   4686   4686
+ *
+ * Two is a cliff and eight is five times off it. Thirty-two is twice as good
+ * again and it is not what ships: the same tree at thirty-two read one to five
+ * per cent below `main` on all nine cards of the streaming gate, one sign,
+ * where eight does not -- and the twenty-four extra packets are eight per cent
+ * of the biggest pool this stack ever gets and unaffordable on every smaller
+ * one. Five times, for six packets.
+ */
+#ifndef AMI_SANA2_RX_WANT_IPV6
+#define AMI_SANA2_RX_WANT_IPV6      8
+#endif
+
+/*
  * One in this many pool packets can be PINNED by the readers, all of them
  * together and not one each.
  *
