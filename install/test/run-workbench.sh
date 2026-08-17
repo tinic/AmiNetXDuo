@@ -326,29 +326,49 @@ if [ -z "$AMIBERRY" ]; then
 fi
 [ -n "$AMIBERRY" ] || { echo "amiberry not found; set AMIBERRY=<path>" >&2; exit 2; }
 
-# The network backend the guest's A2065 is wired to.  A bare interface name
-# (`ens18`) puts it on the host's own LAN with its own MAC, which is what
-# makes the DHCP, DNS and http checks below real rather than NAT-shaped.
+# The network backend the guest's A2065 is wired to, and it is A BRIDGE.  A
+# bare interface name (`ens18`) puts the guest on the host's own LAN with its
+# own MAC, which is what makes the DHCP, DNS, http and TLS checks below a
+# statement about the machine a user gets.
 #
-# -H IMPLIES A BRIDGE.  The terminal arm is defined by a SECOND MACHINE
-# driving this guest, and no second machine can reach a SLIRP guest: SLIRP
-# hands out 10.0.2.15 inside the emulator and nothing outside it has a route
-# there.  Defaulted to slirp, every -H run reached the install checks, booted,
-# and then failed the whole peer half at once:
+# THERE IS NO SLIRP PATH HERE ANY MORE, and the reason is not taste.  This
+# script is the release gate: it is what decides "shipped" rather than
+# "tagged".  It defaulted to slirp for every run without -H, so the network arm
+# of every release gate ever run -- 0.23.0 included -- proved DHCP, HTTP and
+# TLS against slirp's 10.0.2.0/24 and against a gateway written in C inside the
+# emulator, and never once against a LAN, a real DHCP server, a real router or
+# a real neighbour.  A green gate that tested a different machine than the one
+# people download is worse than no gate, because it is believed.
 #
-#     guest_address=10.0.2.15
-#     httpd-drill against http://10.0.2.15:80/
-#     OSError: [Errno 101] Network is unreachable
+# So a backend that is not a bridge is refused by name, and a backend that
+# cannot be worked out is refused with what to pass.  It is never substituted
+# for: the whole failure above is a substitution nobody was told about.
 #
-# which reads as a broken httpd rather than a guest on the wrong network.  An
-# explicit AMINETXDUO_EMU_BACKEND still wins, and a run without -H is
-# unchanged: it needs nothing off this box, so SLIRP is the right default
-# there and asking for a bridge would need CAP_NET_RAW for no gain.
-if [ -z "${AMINETXDUO_EMU_BACKEND:-}" ] && [ "$TERMINAL" = "1" ]; then
-    BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
-else
-    BACKEND="${AMINETXDUO_EMU_BACKEND:-slirp}"
+# Nothing is guessed except the obvious: the interface the host's own default
+# route goes out of is the one that reaches the LAN this test needs.  On a host
+# where that is wrong, name it.
+BACKEND="${AMINETXDUO_EMU_BACKEND:-${AMINETXDUO_AMIBERRY_BACKEND:-}}"
+if [ -z "$BACKEND" ]; then
+    BACKEND=$(ip -4 route show default 2>/dev/null |
+              sed -n 's/.*[[:space:]]dev[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' |
+              head -1)
 fi
+case "$BACKEND" in
+"")
+    echo "No network backend, and this test needs the guest ON THE LAN:" >&2
+    echo "the host has no default route naming an interface to bridge onto." >&2
+    echo "Name one:  AMINETXDUO_EMU_BACKEND=<host interface>" >&2
+    exit 2
+    ;;
+slirp|slirp_inbound|none)
+    echo "AMINETXDUO_EMU_BACKEND=$BACKEND is not a bridge, and this test" >&2
+    echo "asserts what a machine on a LAN does: a DHCP lease from the" >&2
+    echo "network's own server, a router that is a router, and a peer that" >&2
+    echo "can reach the guest.  None of that exists behind slirp." >&2
+    echo "Name a host interface instead:  AMINETXDUO_EMU_BACKEND=<interface>" >&2
+    exit 2
+    ;;
+esac
 MAC="${AMINETXDUO_EMU_MAC:-52:54:00:c0:ff:ee}"
 
 XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
@@ -735,7 +755,7 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
 
 # One boot of the machine as it stands.  $1 names the run, $2 is the timeout,
-# $3 is "net" to attach the A2065 to SLIRP.  Returns the guest's own exit
+# $3 is "net" to attach the A2065 to the bridge.  Returns the guest's own exit
 # status out of DH0:.done, or 124.
 BOOT_STATUS=0
 boot() {
