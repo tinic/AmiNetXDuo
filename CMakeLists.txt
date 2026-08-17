@@ -593,6 +593,15 @@ set(NETXDUO_ADDON_SOURCES
     "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcp_client.c"
     "${AMINETXDUO_NETXDUO}/addons/dns/nxd_dns.c"
     "${AMINETXDUO_NETXDUO}/addons/auto_ip/nx_auto_ip.c")
+
+# The DHCPv6 client, in the IPv6 build only.  It is the largest single addon
+# here and every byte of it is unreachable without IPv6, so the floor build
+# does not compile it -- the same arrangement src/netstack/CMakeLists.txt uses
+# for netstack_ipv6.c.
+if(AMINETXDUO_IPV6)
+    list(APPEND NETXDUO_ADDON_SOURCES
+        "${AMINETXDUO_NETXDUO}/addons/dhcp/nxd_dhcpv6_client.c")
+endif()
 set(NETXDUO_ADDON_INCLUDES
     "${AMINETXDUO_NETXDUO}/addons/dhcp"
     "${AMINETXDUO_NETXDUO}/addons/dns"

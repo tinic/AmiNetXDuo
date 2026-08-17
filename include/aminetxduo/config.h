@@ -94,8 +94,10 @@ typedef enum {
 typedef enum {
     AMI_IP6TYPE_OFF = 0,        /* no IPv6 on this interface                  */
     AMI_IP6TYPE_LINKLOCAL,      /* fe80::/64 from the MAC, nothing else       */
-    AMI_IP6TYPE_AUTO,           /* link-local + RFC 4862 SLAAC from RAs       */
-    AMI_IP6TYPE_STATIC          /* link-local + the configured global address */
+    AMI_IP6TYPE_AUTO,           /* link-local + SLAAC, and whatever the RA's
+                                   M and O bits ask DHCPv6 for               */
+    AMI_IP6TYPE_STATIC,         /* link-local + the configured global address */
+    AMI_IP6TYPE_DHCP            /* link-local + stateful DHCPv6, no RA needed */
 } AmiIp6Type;
 
 /*

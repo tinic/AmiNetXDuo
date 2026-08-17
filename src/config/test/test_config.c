@@ -930,6 +930,15 @@ static void test_ipv6_only_no_error(void)
     CHECK(seen_count == 0);
     free(buf);
 
+    /* CONFIGURE6=DHCP is the new mode and is spelled like CONFIGURE=DHCP. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure6=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.ip6type == AMI_IP6TYPE_DHCP);
+    CHECK(ami_config_iface_wants_ipv6(&iface));
+    free(buf);
+
     /*
      * THE SABOTAGE CHECK. A file that names a device and nothing else has
      * forgotten its address, and must still be told so. CONFIGURE6 defaults

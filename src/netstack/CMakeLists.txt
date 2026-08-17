@@ -20,7 +20,8 @@ endif()
 # The floor build never compiles this file, so IPv6 costs it nothing at all --
 # not even a branch on a "is IPv6 on" flag.
 if(AMINETXDUO_IPV6)
-    list(APPEND NETSTACK_SOURCES netstack_ipv6.c)
+    list(APPEND NETSTACK_SOURCES netstack_ipv6.c netstack_dhcpv6.c
+                                 dhcpv6_wire.c)
 endif()
 
 # Capture: registers the SANA-II interfaces with src/bpf/ and installs the

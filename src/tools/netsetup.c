@@ -1030,7 +1030,7 @@ int main(int argc, char **argv)
     {
         static const char *const modes[] =
         {
-            "auto", "static", "linklocal", "off", NULL
+            "auto", "dhcp", "static", "linklocal", "off", NULL
         };
         UWORD m;
 
@@ -1042,8 +1042,8 @@ int main(int argc, char **argv)
 
         if (modes[m] == NULL)
         {
-            tool_error("IPV6=%s is not a mode: AUTO, STATIC, LINKLOCAL or "
-                       "OFF", (LONG)args[ARG_IPV6]);
+            tool_error("IPV6=%s is not a mode: AUTO, DHCP, STATIC, LINKLOCAL "
+                       "or OFF", (LONG)args[ARG_IPV6]);
             FreeArgs(rda);
             return RETURN_ERROR;
         }

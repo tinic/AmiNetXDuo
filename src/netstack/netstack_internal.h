@@ -15,6 +15,9 @@
 #include "nx_api.h"
 
 #include "nxd_dhcp_client.h"
+#ifdef AMINETXDUO_IPV6
+#include "nxd_dhcpv6_client.h"
+#endif
 #include "nxd_dns.h"
 #include "nx_auto_ip.h"
 #ifdef AMINETXDUO_MDNS
@@ -54,6 +57,35 @@
 #ifdef AMINETXDUO_IPV6
 /* Recursive DNS servers held from router advertisements.  See ns_Rdnss. */
 #define AMI_RDNSS_MAX               4
+
+/*
+ * The DHCPv6 client's own thread stack.
+ *
+ * 4096, sized the way AMI_AUTOIP_STACK_SIZE is rather than from the NetX Duo
+ * samples' 2048.  -fstack-usage over the m68000 build puts the deepest chain
+ * from _nx_dhcpv6_thread_entry at 812 bytes, and it reaches the IP thread's
+ * send path and the packet pool from there.  The margin is for the same
+ * reason AutoIP's is: no guard page and no fault on this target.
+ */
+#define AMI_DHCPV6_STACK_SIZE       4096
+
+/*
+ * And the deferred-work thread's, which is small because that thread does
+ * one thing: wake on an event flag and call into the client.  Its deepest
+ * chain is nx_dhcpv6_client_create() -- a thread create, a UDP socket create
+ * and a bind -- at 604 bytes measured, and it makes no Exec calls, so it
+ * needs none of the headroom the SANA-II paths do.
+ */
+#define AMI_DHCPV6_WORK_STACK_SIZE  2048
+
+/*
+ * How long a shutdown waits for the DHCPv6 Release to be answered.  Two
+ * seconds: the first retransmission is one second out
+ * (NX_DHCPV6_INIT_RELEASE_TRANSMISSION_TIMEOUT), and a machine being switched
+ * off must not be held up by a server that has gone away.  RFC 8415 18.2.7
+ * lets a client not wait at all.
+ */
+#define AMI_DHCPV6_RELEASE_TICKS    (2UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
  * One advertisement of RFC 8106 5.2 search domains, as they arrive: the
@@ -327,6 +359,45 @@ struct AmiNetStack
 
 #ifdef AMINETXDUO_IPV6
     BOOL                ns_Ipv6Enabled;
+
+    /*
+     * DHCPv6.  netstack_dhcpv6.c owns all of it and its file header explains
+     * the two threads; what matters here is that the NX_DHCPV6 is inline, for
+     * the reason ns_Dhcp is, while both stacks are allocated, because they
+     * exist only on a machine that asked for DHCPv6 and a machine that did
+     * not must not carry 6 KB it never touches.
+     */
+    NX_DHCPV6           ns_Dhcpv6;
+    APTR                ns_Dhcpv6Stack;
+    APTR                ns_Dhcpv6WorkStack;
+    TX_THREAD           ns_Dhcpv6Work;
+    TX_EVENT_FLAGS_GROUP ns_Dhcpv6Events;
+    BOOL                ns_Dhcpv6Created;
+    BOOL                ns_Dhcpv6Started;
+    BOOL                ns_Dhcpv6EventsReady;
+    BOOL                ns_Dhcpv6WorkReady;
+    /* TRUE for the IA_NA path, FALSE for an Information-Request. */
+    BOOL                ns_Dhcpv6Stateful;
+    /*
+     * A router advertisement has already asked for DHCPv6 once.  Every
+     * advertisement repeats the M and O flags and the router re-advertises
+     * for the life of the machine, so without this each one would restart the
+     * exchange.  Written from the IP thread, read there and from the worker.
+     */
+    volatile BOOL       ns_Dhcpv6Asked;
+    /* A Reply has landed and may carry name servers.  Same two-phase rule as
+       ns_RdnssPending: the client's thread writes, a caller thread absorbs. */
+    volatile BOOL       ns_Dhcpv6DnsPending;
+    /*
+     * The name servers the last Reply named, kept for the same reason
+     * ns_Rdnss[] is: the reconciliation has to know which of the entries in
+     * resolver.nameserver6[] came from which source, or each absorb would
+     * withdraw the other's.  netstack_dns.c states which source wins.
+     */
+    NXD_ADDRESS         ns_Dhcpv6Dns[AMI_RDNSS_MAX];
+    UWORD               ns_Dhcpv6DnsCount;
+    UBYTE               ns_Dhcpv6Iface;
+    UBYTE               ns_Dhcpv6State;     /* NX_DHCPV6_STATE_*             */
 #endif
 };
 
@@ -338,6 +409,24 @@ struct AmiNetStack
    link-local is left alone. */
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
+
+/*
+ * netstack_dhcpv6.c.  _configure() is called from
+ * ami_ns_configure_addresses() after ami_netstack_ipv6_configure(), and does
+ * nothing at all unless some interface asked for CONFIGURE6=DHCP or AUTO.
+ * _release() gives the address back and must run while the interface can
+ * still transmit.  _address_notify() is the chained DAD callback; see the
+ * file header for why it exists.
+ */
+VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_release(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_address_notify(NX_IP *ip_ptr, UINT status,
+                                        UINT interface_index,
+                                        UINT address_index, ULONG *address);
+
+/* netstack_ipv6.c, called from netstack_dhcpv6.c only.  See its comment. */
+VOID ami_netstack_ipv6_reclaim_notify(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD index);
 #endif
 

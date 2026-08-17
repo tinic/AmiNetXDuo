@@ -511,6 +511,11 @@ ami_ip6type_names[] =
     { "ra",         AMI_IP6TYPE_AUTO      },
     { "static",     AMI_IP6TYPE_STATIC    },
     { "manual",     AMI_IP6TYPE_STATIC    },
+    /* Spelled the way CONFIGURE=DHCP is, and meaning the same thing one
+       family over: ask a server, do not wait to be told to. */
+    { "dhcp",       AMI_IP6TYPE_DHCP      },
+    { "dhcpv6",     AMI_IP6TYPE_DHCP      },
+    { "stateful",   AMI_IP6TYPE_DHCP      },
     { NULL,         AMI_IP6TYPE_OFF       }
 };
 
@@ -965,10 +970,10 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                     AMI_WARN("config: %s: bad CONFIGURE6 '%s'", out->name, value);
                     report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
                                      "CONFIGURE6", value,
-                                     "CONFIGURE6 is AUTO (follow the "
-                                     "router), STATIC (use the ADDRESS6 "
-                                     "below), LINKLOCAL (fe80:: only) or "
-                                     "OFF.  AUTO was assumed.");
+                                     "CONFIGURE6 is AUTO (follow the router), "
+                                     "DHCP (ask a DHCPv6 server), STATIC (use "
+                                     "the ADDRESS6 below), LINKLOCAL (fe80:: "
+                                     "only) or OFF.  AUTO was assumed.");
                 }
                 break;
             }

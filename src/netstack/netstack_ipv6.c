@@ -23,12 +23,14 @@
  *   STATIC      Link-local, plus the ADDRESS6/prefix from the interface file,
  *               plus GATEWAY6 as a default router if given.
  *
- * DHCPv6 is not used. NetX Duo ships a client (addons/dhcp/nxd_dhcpv6_client.c)
- * but it is 40 KB of code before its own IANA/IAID option handling, needs its
- * own thread and UDP socket, and answers what SLAAC already answers on the
- * networks an Amiga is likely to be on. The floor target is a 68000 with 1 MB
- * (docs/RESEARCH.md §81). A stateful-only network needs the addon wired up
- * here.
+ *   DHCP        Link-local, plus a stateful DHCPv6 exchange, asked for
+ *               without waiting for a router to say so.
+ *
+ * DHCPv6 itself is in netstack_dhcpv6.c, which is also where AUTO's second
+ * half lives: the M and O flags of a router advertisement decide whether that
+ * mode asks a DHCPv6 server for an address, for the rest of the configuration,
+ * or for nothing at all.  A link whose router sets neither flag is exactly
+ * what AUTO always was, and costs the same three ICMPv6 packets.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -180,6 +182,17 @@ static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
 
     if (address_index >= NX_MAX_IPV6_ADDRESSES)
         return;
+
+    /*
+     * First, because it is the half with a deadline: NetX Duo has one
+     * address-change callback slot and the DHCPv6 client takes it for its own
+     * DAD handler in nx_dhcpv6_client_create(). netstack_dhcpv6.c takes the
+     * slot back and this is where the client's handler is called instead, so
+     * a duplicate address still produces a DECLINE. It does nothing when
+     * there is no DHCPv6 client.
+     */
+    ami_netstack_dhcpv6_address_notify(ip_ptr, status, interface_index,
+                                       address_index, address);
 
     name = (interface_index < (UINT)ns->ns_IfaceCount)
                ? ns->ns_Config.interfaces[interface_index].name
@@ -365,9 +378,10 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     else
     {
         /*
-         * LINKLOCAL and STATIC need an explicit disable. Otherwise a router
-         * advertisement adds a global address to an interface the operator
-         * asked to keep off the global Internet. Requires
+         * LINKLOCAL, STATIC and DHCP need an explicit disable. Otherwise a
+         * router advertisement adds a global address to an interface the
+         * operator asked to keep off the global Internet, or gives a DHCPv6
+         * machine a second address nobody asked for. Requires
          * NX_IPV6_STATELESS_AUTOCONFIG_CONTROL in nx_user.h, where the note
          * says what happens without it.
          */
@@ -389,6 +403,25 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         else
             ami_ns6_log("default router", cfg->gateway6, 128);
     }
+}
+
+/*
+ * Put ami_ns6_address_changed() back in the single address-change slot.
+ *
+ * nx_dhcpv6_client_create() takes that slot for its own DAD handler and says
+ * so in a comment -- "other modules should not set the address change notify
+ * function again" -- which would have switched off every IPv6 address report
+ * this stack makes, including the ip6-linklocal and ip6-global marks
+ * tests/ipv6/run-bringup.sh times the boot with. netstack_dhcpv6.c calls this
+ * immediately after the create, and ami_ns6_address_changed() calls the
+ * client's handler first, so both run.
+ */
+VOID ami_netstack_ipv6_reclaim_notify(AmiNetStack *ns)
+{
+    if (ns == NULL || !ns->ns_Ipv6Enabled)
+        return;
+
+    (VOID)nxd_ipv6_address_change_notify(&ns->ns_Ip, ami_ns6_address_changed);
 }
 
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns)

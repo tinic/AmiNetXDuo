@@ -500,7 +500,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
      */
     if (cfg->ip6type != AMI_IP6TYPE_OFF)
         tool_printf("  configured6 %s\n",
-                    (LONG)(cfg->ip6type == AMI_IP6TYPE_STATIC    ? "static" :
+                    (LONG)(cfg->ip6type == AMI_IP6TYPE_DHCP      ? "DHCPv6" :
+                           cfg->ip6type == AMI_IP6TYPE_STATIC    ? "static" :
                            cfg->ip6type == AMI_IP6TYPE_LINKLOCAL ? "link-local"
                                                                  : "auto"));
 

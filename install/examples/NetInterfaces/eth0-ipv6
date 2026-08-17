@@ -27,8 +27,13 @@ CONFIGURE=NONE
 ; Where IPv6 comes from.
 ;
 ;   AUTO    follow the router.  Its advertisement carries a prefix to build
-;           an address from, which is what makes this file work on a network
-;           nobody has described to it.
+;           an address from, and two flags: "managed" means ask a DHCPv6
+;           server for an address, "other" means ask one for the name
+;           servers.  AUTO does whatever the router asks for, which is what
+;           makes this file work on a network nobody has described to it.
+;   DHCP    ask a DHCPv6 server for an address, without waiting to be told
+;           to.  For a network that runs one and whose router does not say
+;           so.
 ;   STATIC  use the ADDRESS6 below.
 ;
 CONFIGURE6=AUTO
@@ -39,6 +44,8 @@ CONFIGURE6=AUTO
 ;ADDRESS6=2001:db8::10/64
 ;GATEWAY6=fe80::1
 
-; The name servers arrive with the address, in the router advertisement (RFC
-; 8106).  DEVS:Internet/name_resolution can hold a NAMESERVER line as well,
-; and what is written there wins.
+; The name servers arrive with the address: in a router advertisement (RFC
+; 8106), or in the DHCPv6 reply.  Where both answer, DHCPv6 is asked first,
+; because the router's own advertisement is what sent this machine to it.
+; DEVS:Internet/name_resolution can hold a NAMESERVER line as well, and what
+; is written there wins over both.

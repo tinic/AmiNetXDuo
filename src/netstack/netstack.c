@@ -551,6 +551,17 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_DhcpCreated = FALSE;
     }
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * The DHCPv6 Release goes on the wire, so it happens here rather than in
+     * the teardown below: nx_ip_delete() takes the interfaces down with it and
+     * a Release sent after that reaches nobody. The server keeps the address
+     * bound for the whole valid lifetime when this is skipped.
+     */
+    ami_netstack_dhcpv6_release(ns);
+    ami_netstack_dhcpv6_destroy(ns);
+#endif
+
     if (ns->ns_IpCreated)
     {
         (VOID)nx_ip_delete(&ns->ns_Ip);
@@ -1678,6 +1689,15 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
      * netstack_ipv6_address_get() reports what has arrived so far.
      */
     ami_netstack_ipv6_configure(ns);
+
+    /*
+     * And DHCPv6, after the addresses because the client needs the interface's
+     * link-local address as a source. It returns at once unless some interface
+     * asked for CONFIGURE6=DHCP or AUTO, and under AUTO it sends nothing until
+     * a router advertisement asks it to, so a machine that does not use DHCPv6
+     * pays a thread create here and no packets.
+     */
+    ami_netstack_dhcpv6_configure(ns);
 #endif
 
     /*
@@ -2333,8 +2353,46 @@ static LONG ami_ns_interface_disable(UWORD index, UINT command)
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
 }
 
+/*
+ * Give the DHCPv6 address back before the wire goes away.
+ *
+ * This is NetShutdown's second step -- src/tools/netshutdown.c takes every
+ * interface down through NETCTRL_INTERFACE_DOWN, which lands here -- and it is
+ * also Offline and the ARexx bulk-down. All three mean the same thing to a
+ * DHCPv6 server: this client is finished with the address, so RFC 8415 18.2.7
+ * says send a Release and let somebody else have it. Nothing else in the
+ * shutdown path can do it, because by the time the stack is being deleted the
+ * interface can no longer transmit.
+ *
+ * Inside a ThreadX bracket, because the release sleeps while it waits for the
+ * Reply and only a ThreadX thread may.
+ */
+static VOID ami_ns_release_dhcpv6(UWORD index)
+{
+#ifdef AMINETXDUO_IPV6
+    AmiNetStack  *ns = ami_ns;
+    AmiNetCaller *caller;
+
+    if (ns == NULL || !ns->ns_Dhcpv6Started ||
+        (UWORD)ns->ns_Dhcpv6Iface != index)
+        return;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return;
+
+    ami_netstack_dhcpv6_release(ns);
+
+    ami_netstack_leave_free(caller);
+#else
+    (VOID)index;
+#endif
+}
+
 LONG netstack_interface_down(UWORD index)
 {
+    ami_ns_release_dhcpv6(index);
+
     return ami_ns_interface_disable(index, NX_LINK_DISABLE);
 }
 
@@ -2351,6 +2409,10 @@ LONG netstack_interface_stack_down(UWORD index)
     if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
         ns->ns_Config.interfaces[index].down_goes_offline)
         return netstack_interface_down(index);
+
+    /* SM_Down stops this stack transmitting on the interface, which ends the
+       lease as surely as taking the card offline does. */
+    ami_ns_release_dhcpv6(index);
 
     return ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
 }
@@ -2462,6 +2524,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 #endif
 
     /*
+     * netstack_interface_down() below sends the DHCPv6 Release before it takes
+     * the wire offline. That ordering is the whole difference from the DHCPv4
+     * release further down: nx_dhcp_interface_release() is best-effort and
+     * gets away with being called after NX_LINK_DISABLE, and a DHCPv6 Release
+     * has to reach the server, which after the disable it cannot.
+     *
      * Stop the readers before anything is detached. NX_LINK_DISABLE takes the
      * wire offline and reclaims the outstanding CMD_READs, and it is where a
      * device that does not give them back shows up, which has to be known

@@ -75,8 +75,12 @@ CONFIGURE=DHCP
 ;
 ;   CONFIGURE6=OFF          no IPv6 at all
 ;   CONFIGURE6=LINKLOCAL    fe80:: address only
-;   CONFIGURE6=AUTO         link-local, plus whatever a router advertises.
-;                           This is the default.
+;   CONFIGURE6=AUTO         link-local, plus whatever the router advertises:
+;                           a prefix to build an address from, and, if the
+;                           router says so, a DHCPv6 server to ask.  This is
+;                           the default.
+;   CONFIGURE6=DHCP         link-local, plus an address from a DHCPv6 server,
+;                           asked for without waiting to be told to.
 ;   CONFIGURE6=STATIC       use ADDRESS6 below
 ;
 ;CONFIGURE6=AUTO

@@ -1,0 +1,199 @@
+/*
+ * AmiNetXDuo, the two DHCPv6 decisions that are ours rather than NetX Duo's,
+ * driven directly.
+ *
+ * WHAT IS UNDER TEST, AND WHY IT IS WORTH A HOST BINARY
+ *
+ *   1. The router advertisement's M and O flags decide whether an interface
+ *      with CONFIGURE6=AUTO asks a DHCPv6 server for an address, for the rest
+ *      of the configuration, or for nothing.  The lab router sets M and O
+ *      together and cannot be reconfigured, so the emulator arm can only ever
+ *      exercise one of the three combinations.  All eight values of the two
+ *      bits are here, plus the six bits that must be ignored.
+ *
+ *   2. The DUID this machine identifies itself by.  A DUID is meant to be the
+ *      same on the next boot as on this one, and nothing on the wire shows
+ *      that until the next boot: a capture of one exchange looks identical
+ *      whether the identity is stable or freshly invented.  So the wire form
+ *      is pinned here, byte for byte, and src/netstack/netstack_dhcpv6.c
+ *      checks what the vendored client actually built against the same
+ *      function.  A DUID-LLT would fail the first assertion below, which is
+ *      the point: on a machine with no battery-backed clock, a DUID-LLT is a
+ *      new identity every boot.
+ *
+ * Both are src/netstack/dhcpv6_wire.c, compiled into this binary.  Nothing is
+ * stubbed and nothing is reimplemented here; the expected bytes are written
+ * out from RFC 8415 11.4 rather than from the implementation.
+ *
+ * The DUID in test_duid_matches_the_wire() is the one a real dnsmasq matched
+ * during the emulator arm, so the two halves of the verification are pinned
+ * to the same ten octets.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "dhcpv6_wire.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static unsigned long h_checks;
+static unsigned long h_failures;
+
+#define CHECK(cond)                                                          \
+    do {                                                                     \
+        h_checks++;                                                          \
+        if (!(cond)) {                                                       \
+            h_failures++;                                                    \
+            printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);         \
+        }                                                                    \
+    } while (0)
+
+/* --------------------------------------------------- the M and O flags ---- */
+
+static void test_ra_flags(void)
+{
+    printf("dhcpv6: the M and O flags of a router advertisement\n");
+
+    /* Neither: SLAAC and nothing else.  This is the ordinary home router and
+       it must produce no DHCPv6 traffic at all. */
+    CHECK(ami_dhcpv6_action_for_ra(0x00U) == AMI_DHCPV6_ACT_NONE);
+
+    /* O alone: the addresses come from the prefix, everything else from a
+       server.  RFC 8415 4.3, the stateless mode. */
+    CHECK(ami_dhcpv6_action_for_ra(0x40U) == AMI_DHCPV6_ACT_STATELESS);
+
+    /* M alone: stateful. */
+    CHECK(ami_dhcpv6_action_for_ra(0x80U) == AMI_DHCPV6_ACT_STATEFUL);
+
+    /*
+     * M AND O, which is what the lab router advertises and what most managed
+     * networks advertise: STATEFUL, not both.  A client that answered this
+     * with a Solicit and an Information-Request would ask one question twice
+     * and merge two answers into one resolver.
+     */
+    CHECK(ami_dhcpv6_action_for_ra(0xC0U) == AMI_DHCPV6_ACT_STATEFUL);
+
+    /*
+     * The other six bits belong to other RFCs -- H (RFC 6275), Prf and P (RFC
+     * 4191, RFC 4389) and the reserved bit -- and must change nothing.  A
+     * router setting router-preference high is common; reading it as a
+     * request for DHCPv6 would put every such machine on a network that has
+     * no DHCPv6 server into a retransmission loop.
+     */
+    CHECK(ami_dhcpv6_action_for_ra(0x3FU) == AMI_DHCPV6_ACT_NONE);
+    CHECK(ami_dhcpv6_action_for_ra(0x7FU) == AMI_DHCPV6_ACT_STATELESS);
+    CHECK(ami_dhcpv6_action_for_ra(0xBFU) == AMI_DHCPV6_ACT_STATEFUL);
+    CHECK(ami_dhcpv6_action_for_ra(0xFFU) == AMI_DHCPV6_ACT_STATEFUL);
+}
+
+/* ------------------------------------------------------------- the DUID ---- */
+
+static void test_duid_matches_the_wire(void)
+{
+    /* 00:80:10:49:44:36, the address the a2065's LANCE puts on the wire in
+       the emulator arm.  dnsmasq matched DUID 00:03:00:01:00:80:10:49:44:36
+       against this machine, which is the ten octets below. */
+    static const unsigned char mac[6] =
+        { 0x00, 0x80, 0x10, 0x49, 0x44, 0x36 };
+    static const unsigned char want[AMI_DHCPV6_DUID_LL_LEN] =
+    {
+        0x00, 0x03,                             /* DUID-LL, RFC 8415 11.4  */
+        0x00, 0x01,                             /* Ethernet, RFC 826       */
+        0x00, 0x80, 0x10, 0x49, 0x44, 0x36      /* the link-layer address  */
+    };
+    unsigned char got[AMI_DHCPV6_DUID_LL_LEN];
+
+    printf("dhcpv6: the DUID on the wire\n");
+
+    memset(got, 0xAA, sizeof(got));
+
+    CHECK(ami_dhcpv6_duid_ll(mac, 6UL, got, sizeof(got)) ==
+          (unsigned long)AMI_DHCPV6_DUID_LL_LEN);
+    CHECK(memcmp(got, want, sizeof(want)) == 0);
+
+    /*
+     * DUID-LLT is type 1 and carries four octets of timestamp between the
+     * hardware type and the address, so it is 14 octets and begins 00 01.
+     * Spelled out because it is the choice this is not: on a machine whose
+     * clock reads 1978 every boot the timestamp is invented afresh each time,
+     * and the machine gets a new address every reboot.
+     */
+    CHECK(got[0] == 0x00 && got[1] == 0x03);
+    CHECK(AMI_DHCPV6_DUID_LL_LEN == 10);
+
+    /* Two machines differ only where their addresses do, and in that octet. */
+    {
+        static const unsigned char other[6] =
+            { 0x00, 0x80, 0x10, 0x49, 0x44, 0x37 };
+        unsigned char got2[AMI_DHCPV6_DUID_LL_LEN];
+
+        CHECK(ami_dhcpv6_duid_ll(other, 6UL, got2, sizeof(got2)) ==
+              (unsigned long)AMI_DHCPV6_DUID_LL_LEN);
+        CHECK(memcmp(got, got2, sizeof(got)) != 0);
+        CHECK(memcmp(got, got2, 9) == 0);
+    }
+
+    /* The same address twice is the same DUID.  This is the whole property. */
+    {
+        unsigned char again[AMI_DHCPV6_DUID_LL_LEN];
+
+        memset(again, 0x55, sizeof(again));
+        CHECK(ami_dhcpv6_duid_ll(mac, 6UL, again, sizeof(again)) ==
+              (unsigned long)AMI_DHCPV6_DUID_LL_LEN);
+        CHECK(memcmp(got, again, sizeof(got)) == 0);
+    }
+}
+
+static void test_duid_refusals(void)
+{
+    static const unsigned char mac[6] =
+        { 0x00, 0x80, 0x10, 0x49, 0x44, 0x36 };
+    static const unsigned char zero[6] = { 0, 0, 0, 0, 0, 0 };
+    unsigned char out[AMI_DHCPV6_DUID_LL_LEN];
+    unsigned char guard[AMI_DHCPV6_DUID_LL_LEN + 1];
+
+    printf("dhcpv6: what the DUID refuses\n");
+
+    CHECK(ami_dhcpv6_duid_ll(0, 6UL, out, sizeof(out)) == 0UL);
+    CHECK(ami_dhcpv6_duid_ll(mac, 6UL, 0, sizeof(out)) == 0UL);
+
+    /*
+     * All zeroes is what a card that has not answered S2_GETSTATIONADDRESS
+     * reads as, and it is the one value that would give every such machine on
+     * the link the same identity -- so it is refused rather than encoded.
+     */
+    CHECK(ami_dhcpv6_duid_ll(zero, 6UL, out, sizeof(out)) == 0UL);
+
+    /* A length this does not write.  EUI-64 is a real hardware type and this
+       function does not produce one, so it must say so rather than guess. */
+    CHECK(ami_dhcpv6_duid_ll(mac, 8UL, out, sizeof(out)) == 0UL);
+    CHECK(ami_dhcpv6_duid_ll(mac, 0UL, out, sizeof(out)) == 0UL);
+
+    /* A buffer one octet short writes nothing, rather than nine octets. */
+    memset(guard, 0x5A, sizeof(guard));
+    CHECK(ami_dhcpv6_duid_ll(mac, 6UL, guard,
+                             (unsigned long)AMI_DHCPV6_DUID_LL_LEN - 1UL)
+          == 0UL);
+    {
+        unsigned long i;
+        int untouched = 1;
+
+        for (i = 0; i < sizeof(guard); i++)
+            if (guard[i] != 0x5A)
+                untouched = 0;
+
+        CHECK(untouched);
+    }
+}
+
+int main(void)
+{
+    test_ra_flags();
+    test_duid_matches_the_wire();
+    test_duid_refusals();
+
+    printf("\n%lu checks, %lu failure(s)\n", h_checks, h_failures);
+
+    return (h_failures == 0) ? 0 : 1;
+}

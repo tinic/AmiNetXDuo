@@ -257,7 +257,8 @@ static BOOL any_dynamic(const AmiConfig *cfg)
             ifc->iptype != AMI_IPTYPE_NONE)
             return TRUE;
 
-        if (ifc->ip6type == AMI_IP6TYPE_AUTO)
+        if (ifc->ip6type == AMI_IP6TYPE_AUTO ||
+            ifc->ip6type == AMI_IP6TYPE_DHCP)
             return TRUE;
 
         if (ifc->have_gateway6)
