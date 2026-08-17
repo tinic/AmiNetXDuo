@@ -8,6 +8,7 @@
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
 #   tools/ci.sh cards                # tier 2: every network card, one boot each
 #   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
+#   tools/ci.sh capture              # tier 2: NetCapture, every card
 #   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
 #   tools/ci.sh host cross emulator  # pick and choose
 #
@@ -36,6 +37,11 @@
 #   cards6       tier 2, boots EVERY network card again and asks a different
 #                question: does IPv6 reach anything PAST THE ROUTER.  Needs a
 #                bridge and a working IPv6 delegation on it; no peer.
+#   capture      tier 2, boots EVERY card again and points NetCapture at a
+#                real segment: the frames are ping's, the filter is checked
+#                against an unfiltered capture of the same seconds, and
+#                tcpdump on another machine reads the files.  Needs a bridge;
+#                a peer makes the last claim stronger.
 #   bridged      tier 2, the two pass/fail harnesses that need a real link:
 #                NetShutdown against live services, and TCP: driven by
 #                Commodore's own Type and Copy.  Needs a bridge, and a peer
@@ -208,7 +214,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=75
+HOST_TESTS_EXPECTED=77
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet and test_route, both x86_64-only for the reason in
@@ -1046,6 +1052,52 @@ stage_cards() {
     return "$rc"
 }
 
+# --------------------------------------------------------------- capture ----
+#
+# NetCapture, on every card, reading traffic a DIFFERENT command made, with
+# the file read by tcpdump on another machine.
+#
+# NOT in the default set and not in `emulator`, for the reason `cards` is not:
+# it needs a BRIDGE.  Under SLIRP there is no segment, so an unfiltered
+# capture sees only the guest's own NAT'd traffic and the filtered/unfiltered
+# comparison that proves the filter works is vacuous.  Naming it runs it.
+#
+# The peer is optional and the run says which it used.  Without one the files
+# are read by the tcpdump on this host, which is a weaker claim -- the machine
+# that wrote the file is also the one saying it is readable.
+stage_capture() {
+    hr "NetCapture (tier 2, needs a bridge)"
+
+    local rc=0
+    local peer="${AMINETXDUO_NETCAPTURE_PEER:-${AMINETXDUO_PEER:-}}"
+    local args=(-b "$BUILD/default" -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}")
+
+    [ -z "$peer" ] || args+=(-P "$peer")
+    [ -z "${AMINETXDUO_NETCAPTURE_ADDRESS:-}" ] ||
+        args+=(-A "$AMINETXDUO_NETCAPTURE_ADDRESS")
+
+    [ -n "$peer" ] ||
+        skip "capture: neither AMINETXDUO_NETCAPTURE_PEER nor AMINETXDUO_PEER" \
+             "is set, so the pcap files are read by the machine that wrote" \
+             "them.  That they open on another machine is unproven here."
+
+    "$ROOT/tests/tools/run-netcapture.sh" "${args[@]}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  every card captured another program's traffic, the" \
+                "filter held, the count limit stopped it, and tcpdump read" \
+                "every file" ;;
+        1) fail "capture: an assertion failed -- the card_ line above names" \
+                "the card and the card_*_why line says which" ;;
+        2) fail "capture: the rig refused it before any card was booted" ;;
+        3) skip "capture: a card produced no file to read -- the card_ line" \
+                "above says which, and a driver that is not on this machine" \
+                "is one of the reasons" ;;
+        *) fail "capture: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -1312,7 +1364,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|cards|cards6|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|cards|cards6|capture|bridged|lossgate|smb)
             stage_toolchain; break ;;
     esac
 done
@@ -1341,6 +1393,7 @@ for s in "${WANT[@]}"; do
         emulator)    stage_emulator || srrc=$? ;;
         cards)       stage_cards || srrc=$? ;;
         cards6)      stage_cards6 || srrc=$? ;;
+        capture)     stage_capture || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;

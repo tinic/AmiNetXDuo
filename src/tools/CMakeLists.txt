@@ -285,11 +285,26 @@ aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c)
 # writable natively rather than ported.
 aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
 
-# NetTrace is config-only in exactly the same sense, and deliberately so: it
-# reaches the capture path through the eight published bpf_* LVOs rather than
-# by linking src/bpf/, because a tool that linked the archive would get its
-# OWN copy of the channel table and capture nothing at all.
-aminetxduo_add_tool(tool_nettrace NetTrace SOURCES nettrace.c toolsock.c)
+# NetTrace and NetCapture are config-only in exactly the same sense, and
+# deliberately so: they reach the capture path through the eight published
+# bpf_* LVOs rather than by linking src/bpf/, because a tool that linked the
+# archive would get its OWN copy of the channel table and capture nothing at
+# all.
+#
+# The three files they share are the reason a second capture command was worth
+# writing rather than copying: toolbpf.c is the channel (the LVOs, the ioctls,
+# the record walk), toolpcap.c is the file format, and bpffilter.c compiles the
+# filter that also sets the snap length.  Two copies of a pcap writer is how
+# they drift, and the two host tests below only exist because toolpcap.c and
+# bpffilter.c are files rather than halves of a command.
+#
+# NetTrace generates the traffic it records; NetCapture records what other
+# programs are doing.  Neither is the other with a flag: NetTrace's arguments
+# are its workload's and NetCapture's are the stop conditions and the filter.
+aminetxduo_add_tool(tool_nettrace NetTrace
+    SOURCES nettrace.c toolsock.c toolbpf.c toolpcap.c bpffilter.c)
+aminetxduo_add_tool(tool_netcapture NetCapture
+    SOURCES netcapture.c toolsock.c toolbpf.c toolpcap.c bpffilter.c)
 aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
 
 # traceroute is config-only too, and is the first command here to open a
@@ -543,7 +558,8 @@ add_dependencies(tools
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
     tool_netsetup tool_online tool_offline tool_host tool_hostname
-    tool_fetch tool_nc tool_telnet tool_nettrace tool_traceroute tool_nslookup tool_arp
+    tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
+    tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
     tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab)
@@ -696,6 +712,42 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
         PROPERTIES COMPILE_OPTIONS "")
 
+    # The pcap file format.  Host-side because that is where the bytes can be
+    # asserted: a wrong magic or a snap length below a record's own capture
+    # length is a file that opens and is nonsense, or that tcpdump stops
+    # reading part-way through, and neither shows on the machine that wrote it.
+    add_executable(test_toolpcap
+        test/test_toolpcap.c
+        toolpcap.c)
+
+    target_include_directories(test_toolpcap PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_toolpcap PRIVATE -Wall -Wextra)
+    set_target_properties(test_toolpcap PROPERTIES C_STANDARD 11)
+
+    # NetCapture's filter compiler, run through the REAL interpreter and the
+    # real validator: src/bpf/bpf_filter.c and src/bpf/bpf_validate.c are free
+    # of AmigaOS calls and build here against the replica layout, so the
+    # programs are executed by the same code that will execute them on the
+    # machine.  A second interpreter written for a test agrees with the
+    # compiler and with nothing else.
+    add_executable(test_bpffilter
+        test/test_bpffilter.c
+        bpffilter.c
+        "${CMAKE_SOURCE_DIR}/src/bpf/bpf_filter.c"
+        "${CMAKE_SOURCE_DIR}/src/bpf/bpf_validate.c")
+
+    target_include_directories(test_bpffilter PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/bpf"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_definitions(test_bpffilter PRIVATE AMI_BPF_REPLICA)
+    target_compile_options(test_bpffilter PRIVATE -Wall -Wextra)
+    set_target_properties(test_bpffilter PROPERTIES C_STANDARD 11)
+
     include(CTest)
     add_test(NAME httpws_rfc6455 COMMAND test_httpws)
     add_test(NAME httppath_escapes COMMAND test_httppath)
@@ -704,6 +756,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)
+    add_test(NAME toolpcap_file_format COMMAND test_toolpcap)
+    add_test(NAME bpffilter_programs COMMAND test_bpffilter)
     add_test(NAME tools_arg_templates COMMAND test_argtemplates enums)
     add_test(NAME tools_arg_contract  COMMAND test_argtemplates contract)
     add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)
