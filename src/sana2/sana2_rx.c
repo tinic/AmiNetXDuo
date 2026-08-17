@@ -1264,6 +1264,14 @@ static UWORD ami_sana2_rx_wire_depth(ULONG bps)
  * handicap: 386 kbit/s against 1959 at eight, measured on the same boot as the
  * IPv4 transfer beside it.
  *
+ * WHAT THE WHOLE CHANGE COSTS THE CARDS.  tests/tools/run-iperf.sh against a
+ * peer off the box, every board in tests/tools/cards.sh, both memory arms,
+ * arms alternating direction between reps, n=3, medians: no card's receive
+ * rate moves more than 2.7 per cent either way and the sign is not consistent
+ * -- by bytes rather than by rate the worst cell is a different one.  Transmit
+ * is inside 1.5 per cent.  Bring-up, the AddNetInterface block, is identical
+ * to within 20 ms on every card: iface->bps was already read at open.
+ *
  * ARP STAYS AT ITS FLOOR, deliberately.  Two is a request and its reply, which
  * is the whole of what that reader carries; a deeper queue buys tolerance of a
  * broadcast storm and nothing else, costs a pinned packet per slot on the
