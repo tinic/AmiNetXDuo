@@ -260,6 +260,7 @@ jobs:
             tools/amiga-toolchain.sh \
             tools/toolchain-resolve-selftest.sh \
             tools/amiberry-run.sh \
+            tools/classicwb.sh \
             tools/logcap.sh \
             tools/enforcer-run.sh \
             tools/ci-arm.sh \

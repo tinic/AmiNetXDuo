@@ -1,22 +1,65 @@
 #!/usr/bin/env bash
 #
-# A full Workbench on the LAN, in one command.
+# A full Workbench on the LAN, in one command, with AmiNetXDuo INSTALLED on it.
 #
-#   tools/classicwb.sh [-m MODEL] [-v VARIANT] [-b BUILDDIR] [-B BACKEND]
-#                      [-n NAME] [-p PORT] [-t SECONDS] [-s SNAPSHOTS]
+#   tools/classicwb.sh [-m MODEL] [-v VARIANT] [-b BUILDDIR] [-a ARCHIVE.lha]
+#                      [-B BACKEND] [-n NAME] [-p PORT] [-t SECONDS]
+#                      [-s SNAPSHOTS] [-c HOST]
 #
 # tools/demo.sh boots the drive tools/amiberry-run.sh builds, which is httpd
 # and whatever else the staging puts beside it.  This boots a ClassicWB
-# snapshot instead: a Workbench somebody could actually use, with our httpd,
-# bsdsocket.library and tools staged onto it at launch.
+# snapshot instead: a Workbench somebody could actually use.
 #
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/shell      an AmigaDOS Shell in a browser, no password
 #   http://<address>/console    the Workbench screen
 #
+# THE INSTALLER PUTS OUR FILES THERE, not this script.  A launch is: copy the
+# snapshot, unpack a release archive built from -b onto the copy the way a
+# download would arrive, boot once and drive Commodore's Installer over
+# Install-AmiNetXDuo, check what landed, then power cycle into the machine.
+# install/test/run-workbench.sh has done exactly this against a stock
+# Workbench 3.1 for months; the mechanism here is that one, and
+# install/test/installdrive.c is the same program clicking Proceed.
+#
+# It used to be a hand-written list of `cp` lines, and a hand-written list
+# drifts from install/Install-AmiNetXDuo, which is the only definition of a
+# complete install there is.  It had drifted three ways at once: anxnet.device
+# was built and never staged, so the rig tested Commodore's driver and never
+# ours; usergroup.library was built and never staged; and ssh was looked for in
+# three directories that a CMake build never writes, found nowhere, and skipped
+# without a word.  Nothing failed.  A rig that cannot notice its own incomplete
+# install is worse than one that installs nothing, so the install is now real
+# and the check that it was complete is what decides the exit status.
+#
+# WHAT THIS SCRIPT STILL PUTS THERE, after the Installer has finished, and why
+# each one is a step a user takes rather than a step the Installer skipped:
+#
+#   Devs/Networks/anxnet.device  Install-AmiNetXDuo deliberately does not
+#                                install the driver -- see its note -- so a
+#                                user copies it across and names it with a
+#                                CARD= line.  This is that copy, through
+#                                tools/sana2-stage.sh, which is the one place
+#                                that maps a board to a driver.
+#   MDNS=YES in the interface    one line in the file the Installer wrote, and
+#                                its own help text says so.  Without it the
+#                                .local name this script prints answers
+#                                nothing.
+#   hostname <name>              the same, in DEVS:Internet/name_resolution.
+#                                The Installer writes "amiga" for everybody and
+#                                five of these on one wire need five names.
+#   the httpd line               in S:Startup-Sequence, not in the Installer's
+#                                block: this rig serves a chosen drawer on a
+#                                chosen port with the console page as well, and
+#                                the Installer's own httpd question offers RAM:
+#                                on port 80 with no console.  The Installer's
+#                                block is left holding AddNetInterface alone,
+#                                which is the line the network comes up from.
+#
 # The snapshot is built once by ~/amiga-assets/classicwb/install.sh and carries
-# no file of ours.  Everything of ours arrives here, from -b, on every launch,
-# so pointing -b at a fresh build and booting is the whole update procedure.
+# no file of ours.  That is asserted on every launch and is what makes the
+# install honest: nothing of ours can survive in the snapshot to stand in for
+# a file the install failed to write.
 #
 # The run copy is a copy.  A guest that corrupts its drive costs the copy and
 # not the install.
@@ -31,6 +74,7 @@ cd "$ROOT"
 MODEL="${AMINETXDUO_CWB_MODEL:-A1200}"
 VARIANT="${AMINETXDUO_CWB_VARIANT:-plain}"
 BUILD="${AMINETXDUO_BUILD:-$ROOT/build/cm}"
+ARCHIVE="${AMINETXDUO_CWB_ARCHIVE:-}"
 BACKEND="${AMINETXDUO_DEMO_BACKEND:-ens18}"
 NAME=""
 PORT=80
@@ -39,15 +83,27 @@ SNAPROOT="${AMINETXDUO_CWB_SNAPSHOTS:-$HOME/amiga-assets/classicwb/snapshots}"
 P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
 CHECKHOST="${AMINETXDUO_CWB_CHECKHOST:-}"
 
+# The Installer needs a user level where the questions are drawn.  At NOVICE it
+# draws none and aborts on a machine with no network driver in DEVS: -- which a
+# ClassicWB snapshot is -- so the run would die before the first copy.
+LEVEL="${AMINETXDUO_CWB_LEVEL:-AVERAGE}"
+
+# How long the install boot gets.  It is a whole ClassicWB boot, then twelve
+# Installer pages, then about a megabyte and a half of copying on an emulated
+# 68020.  Measured at a little over two minutes; this is four times that, and
+# it is a ceiling rather than a wait.
+INSTALL_TIMEOUT="${AMINETXDUO_CWB_INSTALL_TIMEOUT:-600}"
+
 usage() {
     cat <<'EOF'
 usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
-                          [-B backend] [-n name] [-p port] [-t seconds]
-                          [-s snapshots]
+                          [-a archive.lha] [-B backend] [-n name] [-p port]
+                          [-t seconds] [-s snapshots] [-c host]
 
   -m  model, picks the Kickstart          (default A1200)
   -v  plain boots ClassicWB, rtg adds a Picasso96 screen  (default plain)
-  -b  build directory our binaries come from     (default build/cm)
+  -b  build directory the archive is built from  (default build/cm)
+  -a  install this archive instead of building one from -b
   -B  bridge interface                             (default ens18)
   -n  hostname and mDNS name          (default amiga-<model>-<variant>)
   -p  httpd port                                      (default 80)
@@ -62,11 +118,12 @@ say() { printf '%s=%s\n' "$1" "$2"; }
 
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
-while getopts "m:v:b:B:n:p:t:s:c:h" opt; do
+while getopts "m:v:b:a:B:n:p:t:s:c:h" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         v) VARIANT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
+        a) ARCHIVE="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         n) NAME="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -77,6 +134,9 @@ while getopts "m:v:b:B:n:p:t:s:c:h" opt; do
         *) usage >&2; exit 2 ;;
     esac
 done
+
+case "$BUILD"   in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
+case "$ARCHIVE" in ""|/*) ;; *) ARCHIVE="$PWD/$ARCHIVE" ;; esac
 
 MODEL=$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]')
 VARIANT=$(printf '%s' "$VARIANT" | tr '[:upper:]' '[:lower:]')
@@ -120,20 +180,25 @@ MANIFEST="$SNAPROOT/$DIST/manifest.json"
     say error "no snapshot at $SNAP -- build it with\
  ~/amiga-assets/classicwb/install.sh $DIST"; exit 2; }
 
-TOOLS="$BUILD/src/tools"
-HTTPD="$TOOLS/httpd"
-BSD="$BUILD/src/bsdsocket/bsdsocket.library"
-SHELLPAGE="$ROOT/src/tools/web/shell.html"
-CONSOLEPAGE="$ROOT/src/tools/web/console.html"
-A2065="${AMINETXDUO_A2065:-$HOME/amiga-assets/devs/a2065.device}"
-
-for f in "$HTTPD" "$BSD" "$SHELLPAGE" "$SHELLPAGE.gz" \
-         "$CONSOLEPAGE" "$CONSOLEPAGE.gz" "$A2065"; do
-    [ -f "$f" ] || { say error "missing $f"; exit 2; }
-done
-
 AMIBERRY="${AMIBERRY:-$(command -v amiberry || true)}"
 [ -n "$AMIBERRY" ] && [ -x "$AMIBERRY" ] || { say error "no amiberry"; exit 2; }
+
+# installdrive is compiled here and runs in the guest, so it needs the cross
+# compiler.  tools/amiga-toolchain.sh is the one resolver; a script with its
+# own copy of the search order is how a machine ends up building under a
+# compiler nobody chose.
+AMIGA_TOOLCHAIN_QUIET=1 . "$ROOT/tools/amiga-toolchain.sh"
+[ -x "${AMIGA_GCC:-}" ] || {
+    say error "no m68k-amigaos-gcc: installdrive.c cannot be built"; exit 2; }
+
+# The board -> driver -> CARD= table, shared with every card sweep.  Sourced
+# rather than copied so this rig cannot disagree with them about what drives
+# an A2065.
+. "$ROOT/tools/sana2-stage.sh"
+
+for need in lha sha256sum tcpdump; do
+    command -v "$need" >/dev/null 2>&1 || { say error "no $need"; exit 2; }
+done
 
 TAG="${AMINETXDUO_RUN_TAG:-cwb-$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')-$VARIANT}"
 
@@ -144,6 +209,53 @@ say kickstart "$(basename "$KICKSTART")"
 say snapshot "$SNAP"
 [ -f "$MANIFEST" ] && say manifest "$MANIFEST"
 
+# ---------------------------------------------------------------- the archive --
+#
+# THE ARTIFACT, and not a directory that happens to hold the same files.  What
+# a user has is an archive they downloaded, so that is what is installed here,
+# and -a takes one as given -- which is the way to boot a real release.
+#
+# dbclient is built by clients/dropbear/build.sh and not by the CMake tree, so
+# a plain `cmake --build` leaves it out and the archive would carry no ssh.
+# It used to be looked for in three directories and skipped in silence when it
+# was in none of them.  It is built here instead, once, and cached: the build
+# is four minutes the first time and nothing on every launch after it.
+SSHBIN="${AMINETXDUO_SSH:-}"
+BUILT_HERE=0
+if [ -z "$ARCHIVE" ]; then
+    BUILT_HERE=1
+    if [ -z "$SSHBIN" ]; then
+        SSHBIN="$BUILD-dropbear/dbclient"
+        if [ ! -f "$SSHBIN" ]; then
+            say ssh_build "$BUILD-dropbear"
+            AMINETXDUO_CLIENT_ANY=1 "$ROOT/clients/dropbear/build.sh" \
+                -b "$BUILD-dropbear" >"$ROOT/build/cwb-ssh-$TAG.log" 2>&1 || {
+                say error "clients/dropbear/build.sh failed, see\
+ $ROOT/build/cwb-ssh-$TAG.log"
+                exit 2; }
+        fi
+    fi
+    [ -f "$SSHBIN" ] || {
+        say error "no ssh at $SSHBIN: the archive would carry none"; exit 2; }
+
+    # AMINETXDUO_DIST_NO_MINIMAL, because the minimal stack is a second build
+    # tree and this rig has one.  The archive is otherwise the release layout.
+    DISTOUT="$ROOT/build/cwb-dist-$TAG"
+    rm -rf "$DISTOUT"
+    mkdir -p "$DISTOUT"
+    AMINETXDUO_DIST_NO_MINIMAL=1 AMINETXDUO_SSH="$SSHBIN" \
+        "$ROOT/dist/make-dist.sh" -b "$BUILD" -o "$DISTOUT" \
+        >"$ROOT/build/cwb-dist-$TAG.log" 2>&1 || {
+        say error "dist/make-dist.sh failed, see $ROOT/build/cwb-dist-$TAG.log"
+        tail -20 "$ROOT/build/cwb-dist-$TAG.log" >&2
+        exit 2; }
+    ARCHIVE=$(ls -1 "$DISTOUT"/AmiNetXDuo-*.lha 2>/dev/null | head -1)
+fi
+[ -n "$ARCHIVE" ] && [ -f "$ARCHIVE" ] || {
+    say error "no archive to install"; exit 2; }
+say archive "$ARCHIVE"
+say archive_bytes "$(wc -c < "$ARCHIVE" | tr -d ' ')"
+
 # ------------------------------------------------------------- the drive ----
 
 # A copy, every time.  The snapshot is the install and is never written to, so
@@ -153,85 +265,414 @@ rm -rf "$HD"
 mkdir -p "$HD"
 cp -a "$SNAP/." "$HD/"
 
-# Nothing of ours may already be here.  The snapshot is built without our
-# files precisely so a stale binary cannot survive in it, and this is the
-# assertion that says so rather than assuming it.
-for stale in C/httpd Libs/bsdsocket.library Devs/Networks/a2065.device; do
+# Nothing of ours may already be here, and this is the assertion the whole
+# install rests on: a file that survived in the snapshot would stand in for one
+# the Installer failed to write, and every check below would pass.
+for stale in C/httpd C/ssh C/AddNetInterface Libs/bsdsocket.library \
+             Libs/usergroup.library Libs/tls.library \
+             Devs/Networks/anxnet.device Devs/Networks/a2065.device \
+             Devs/NetInterfaces Devs/Internet AmiNetXDuo; do
     [ -e "$HD/$stale" ] && {
         say error "the snapshot carries $stale -- it must carry none of ours"
         exit 2; }
 done
-
-mkdir -p "$HD/Libs" "$HD/Devs/Networks" "$HD/Devs/NetInterfaces" \
-         "$HD/Devs/Internet" "$HD/Public/Docs" "$HD/Console"
-
-cp "$BSD"   "$HD/Libs/bsdsocket.library"
-cp "$A2065" "$HD/Devs/Networks/a2065.device"
-[ -f "$BUILD/src/tlslib/tls.library" ] &&
-    cp "$BUILD/src/tlslib/tls.library" "$HD/Libs/"
-
-# ClassicWB has the IEEE maths pair, but a snapshot that turned out not to is
-# a Shell where ssh dies saying mathieeedoubbas.library failed to load, which
-# reads like a broken binary.  -n so ClassicWB's own are left alone.
-for m in mathieeedoubbas mathieeedoubtrans; do
-    for src in "$HOME/amiga-assets/nglibs/$m.library" \
-               "$HOME/amiga-assets/libs/$m.library"; do
-        [ -f "$src" ] && { cp -n "$src" "$HD/Libs/"; break; }
-    done
-done
-
-# The built trust store, an 'ACS1' binary.  The PEM it is generated from has
-# the right name and is rejected at the magic check, and every https fetch
-# then complains about a file sitting there readable.
-[ -f "$BUILD/certificates" ] && cp "$BUILD/certificates" "$HD/Devs/Internet/certificates"
-
-# Our tools last, so a name that exists in both drawers resolves to ours:
-# ClassicWB has a Version and a Which of its own and the interesting one here
-# is not theirs.
-for t in "$TOOLS"/*; do
-    [ -f "$t" ] && [ -x "$t" ] || continue
-    case "$(basename "$t")" in
-        *.map|*.cmake|Makefile|ToolsSmoke|*Probe) continue ;;
-    esac
-    cp -f "$t" "$HD/C/" 2>/dev/null || true
-done
-
-# dbclient is built by clients/dropbear/build.sh and not by the CMake tree, so
-# a plain cmake --build leaves it out and the Shell simply has no ssh.
-SSHBIN="${AMINETXDUO_DEMO_SSH:-}"
-if [ -z "$SSHBIN" ]; then
-    for c in build/ssh build/dropbear build/dropbear-any; do
-        [ -f "$ROOT/$c/dbclient" ] && { SSHBIN="$ROOT/$c/dbclient"; break; }
-    done
+if [ -f "$HD/S/User-Startup" ] &&
+   grep -qi 'AddNetInterface\|BEGIN AmiNetXDuo' "$HD/S/User-Startup"; then
+    say error "the snapshot's S/User-Startup already names AmiNetXDuo"
+    exit 2
 fi
-[ -n "$SSHBIN" ] && [ -f "$SSHBIN" ] && cp -f "$SSHBIN" "$HD/C/ssh"
 
-chmod -R u+rw "$HD/C"
-chmod -R a+rx "$HD/C"
+# AmigaDOS does not care about case and this host does, so a file the guest
+# wrote as `libs/bsdsocket.library` is not `Libs/bsdsocket.library` to [ -f ].
+# Every name checked below is resolved the way the guest would, one component
+# at a time.  install/test/run-workbench.sh has the same helper and for the
+# same reason: without it an installed file reads as a missing one.
+amiga_path() {
+    local cur="$HD" part next
+    local -a parts
+    IFS=/ read -ra parts <<< "$1"
+    for part in "${parts[@]}"; do
+        next=$(ls -1 "$cur" 2>/dev/null |
+               awk -v p="$part" 'tolower($0) == tolower(p) { print; exit }')
+        [ -n "$next" ] || return 1
+        cur="$cur/$next"
+    done
+    printf '%s\n' "$cur"
+}
 
-cp "$SHELLPAGE"      "$HD/shell.html"
-cp "$SHELLPAGE.gz"   "$HD/shell.html.gz"
-cp "$CONSOLEPAGE"    "$HD/Console/console.html"
-cp "$CONSOLEPAGE.gz" "$HD/Console/console.html.gz"
+# The download, where a download would be: its own drawer, and not the one the
+# Installer is going to create.  install/test/installdrive.c spells this path.
+UNP="$HD/Unpacked/AmiNetXDuo"
+mkdir -p "$HD/Unpacked"
+( cd "$HD/Unpacked" && lha -xfq "$ARCHIVE" ) >/dev/null 2>&1 ||
+( cd "$HD/Unpacked" && lha xf "$ARCHIVE" ) >/dev/null 2>&1 || {
+    say error "could not unpack $ARCHIVE"; exit 2; }
+[ -d "$UNP" ] || {
+    say error "$ARCHIVE did not unpack to an AmiNetXDuo drawer"; exit 2; }
+chmod -R a+rx "$HD/Unpacked"
 
-# MDNS= is per interface and off by default, so this line is the whole of
-# turning the name on.
-cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
-DEVICE=a2065.device
-UNIT=0
-CONFIGURE=DHCP
-MDNS=YES
+# The version the archive says it is, read out of the Installer script the
+# archive carries.  dist/make-dist.sh stamps that line from tools/version.sh
+# and fails the build when it cannot, so it is the one label that is true of a
+# downloaded release as well as of one built here a minute ago.
+ARCH_VER=$(sed -n 's/^(set VERSION_STR "\(.*\)")$/\1/p' \
+           "$UNP/Install-AmiNetXDuo" 2>/dev/null | head -1)
+[ -n "$ARCH_VER" ] || {
+    say error "$ARCHIVE has no stamped VERSION_STR in Install-AmiNetXDuo"
+    exit 2; }
+say archive_version "$ARCH_VER"
+
+# WHAT THE ARCHIVE HOLDS, said out loud before anything is installed, because
+# a gap here is the failure this rewrite exists to end.  All four were built
+# and none of them reached the guest: bsdsocket.library was the only library
+# staged, usergroup.library was not, anxnet.device was not, and ssh was looked
+# for in directories a CMake build never writes.  A launch that cannot install
+# them stops here rather than coming up looking correct.
+ARCH_GAP=0
+for f in Libs/bsdsocket.library Libs/usergroup.library C/ssh \
+         Devs/Networks/anxnet.device; do
+    if [ -f "$UNP/$f" ]; then
+        say "archive_$(basename "$f" | tr . _)" "$(wc -c < "$UNP/$f" | tr -d ' ')"
+    else
+        say archive_absent "$f"
+        ARCH_GAP=$((ARCH_GAP + 1))
+    fi
+done
+[ -f "$UNP/Libs/tls.library" ] && say archive_tls_library \
+    "$(wc -c < "$UNP/Libs/tls.library" | tr -d ' ')"
+[ "$ARCH_GAP" = "0" ] || {
+    say error "$ARCHIVE is missing $ARCH_GAP file(s) the machine needs"
+    exit 2; }
+
+# The Commodore Installer rides in the archive (dist/make-dist.sh puts it
+# there so a double-click works), so there is nothing to find on this host.
+[ -f "$UNP/Installer" ] || {
+    say error "$ARCHIVE carries no Installer"; exit 2; }
+
+# -m68000: this runs INSIDE the guest and the guest is whatever MODEL says.
+# Nothing in it needs 68020 codegen, and built for one it takes an illegal
+# instruction on the A600 before the Installer ever starts -- which presents as
+# a boot that never finishes and leaves an empty drive, and an empty drive
+# passes every "this file is absent" assertion there is.
+DRIVER="$ROOT/build/cwb-installdrive-$TAG"
+"$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
+    -DDRIVE_RUNS=1 -DDRIVE_YES_LABEL="\"\"" -I"$AMIGA_NDK" \
+    -o "$DRIVER" "$ROOT/install/test/installdrive.c" || {
+    say error "could not build install/test/installdrive.c"; exit 2; }
+cp "$DRIVER" "$HD/C/installdrive"
+chmod 755 "$HD/C/installdrive"
+
+# ------------------------------------------------------------ the emulator --
+
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+
+# The emulator log is capped.  It used to be off here, because --log is
+# unbounded -- 87 MB per 30 s on an RTG guest, and this guest stands for eight
+# hours -- and off is how a wedge came to leave 94 bytes to read.  Through
+# tools/logcap.sh it is bounded whatever happens: the head holds the boot,
+# where the board and MAC lines and the first illegal instruction are printed,
+# a run of identical lines collapses to one and a count, and the last lines are
+# kept in a ring and written out when the emulator stops.  tools/demo.sh sizes
+# a standing guest's log this way and this is that size.
+export AMINETXDUO_LOG_HEAD="${AMINETXDUO_LOG_HEAD:-1048576}"
+export AMINETXDUO_LOG_TAIL="${AMINETXDUO_LOG_TAIL:-200}"
+
+EMU_PID=""
+LOGCAP_PID=""
+LOGPIPE=""
+
+# Start amiberry on $1 with its output capped into $2.  THROUGH A FIFO rather
+# than a pipeline, because $! after `a | b` is b and EMU_PID has to be the
+# emulator: it is what gets killed.  Degrades to the plain redirect when the
+# capper is missing, since opening a FIFO to write blocks until a reader
+# appears and a missing one would hang the launch rather than lose a log.
+start_emulator() {
+    local cfg="$1" log="$2"
+
+    LOGPIPE="$log.pipe"
+    rm -f "$LOGPIPE"
+    if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
+        "$ROOT/tools/logcap.sh" < "$LOGPIPE" > "$log" &
+        LOGCAP_PID=$!
+    else
+        say warning "no tools/logcap.sh; $log is UNCAPPED"
+        rm -f "$LOGPIPE"
+        LOGPIPE=""
+    fi
+    if [ -n "$LOGPIPE" ]; then
+        ( trap '' PIPE; exec setsid "$AMIBERRY" --log -f "$cfg" ) \
+            >"$LOGPIPE" 2>&1 &
+    else
+        ( trap '' PIPE; exec setsid "$AMIBERRY" --log -f "$cfg" ) \
+            >"$log" 2>&1 &
+    fi
+    EMU_PID=$!
+}
+
+# The capper still holds the tail of this boot in its ring, so it has to be
+# finished with before the next boot takes the same names.
+stop_emulator() {
+    [ -n "$EMU_PID" ] || return 0
+    kill -TERM "$EMU_PID" 2>/dev/null || true
+    sleep 2
+    kill -KILL "$EMU_PID" 2>/dev/null || true
+    wait "$EMU_PID" 2>/dev/null || true
+    EMU_PID=""
+    if [ -n "$LOGCAP_PID" ]; then
+        wait "$LOGCAP_PID" 2>/dev/null || true
+        LOGCAP_PID=""
+    fi
+    [ -z "$LOGPIPE" ] || { rm -f "$LOGPIPE"; LOGPIPE=""; }
+}
+
+# ----------------------------------------------------------- 1/2, the install --
+#
+# ClassicWB's own Startup-Sequence, with its final EndCLI taken off so a tail
+# can replace it.  Anchored at column 0, which is the whole of why that is
+# safe: ClassicWB's sequence has two more EndCLI lines indented inside the
+# boot-menu branches, and those end the shell on purpose.
+#
+# LoadWB stays.  The Installer draws on the default public screen, and
+# installdrive opens Workbench itself, but a machine that already has one is
+# the machine a user is sitting at.
+startup_with() {
+    [ -f "$SNAP/S/Startup-Sequence" ] || {
+        say error "the snapshot has no S/Startup-Sequence"; exit 2; }
+    sed -e '/^EndCLI/d' "$SNAP/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    printf '\n%s\n' "$1" >> "$HD/S/Startup-Sequence"
+    chmod 755 "$HD/S/Startup-Sequence"
+}
+
+# No network on this boot.  The install needs none, a second MAC on the wire is
+# a second machine to everything watching it, and the sniffer below would have
+# two candidates for the same address.
+INSTALL_CFG="$ROOT/build/$TAG-install.uae"
+cat > "$INSTALL_CFG" <<EOF
+config_description=AmiNetXDuo ClassicWB $DIST install on $MODEL
+use_gui=no
+headless=true
+quickstart=$MODEL,0
+kickstart_rom_file=$KICKSTART
+fastmem_size=8
+floppy0type=-1
+nr_floppies=0
+uaehf0=dir,rw,DH0:System:$HD,0
 EOF
 
-# DHCP supplies the servers and the domain.  Never the file under
-# tests/netstack, which names a SLIRP guest's 10.0.2.3.
-: > "$HD/Devs/Internet/name_resolution"
-echo "hostname $NAME" >> "$HD/Devs/Internet/name_resolution"
+startup_with 'FailAt 9999
+C:installdrive >DH0:install-console.txt
+Echo >DH0:.done "$RC"'
 
-echo "Hello from an Amiga." > "$HD/Public/readme.txt"
-echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" \
-    > "$HD/Public/index.html"
-echo "in a drawer" > "$HD/Public/Docs/notes.txt"
+rm -f "$HD/.done"
+SDL_VIDEODRIVER=dummy
+export SDL_VIDEODRIVER
+unset DISPLAY WAYLAND_DISPLAY 2>/dev/null || true
+
+say installer_level "$LEVEL"
+# Only for this boot: a launch that dies in the wait below must not leave an
+# emulator holding the drive.  The standing guest below wants no such trap.
+trap 'stop_emulator' EXIT INT TERM
+start_emulator "$INSTALL_CFG" "$ROOT/build/amiberry-$TAG-install.log"
+
+INSTALL_RC=124
+INSTALL_SECONDS=0
+while [ "$INSTALL_SECONDS" -lt "$INSTALL_TIMEOUT" ]; do
+    if [ -f "$HD/.done" ]; then
+        INSTALL_RC=$(tr -dc '0-9' < "$HD/.done" | head -c 4)
+        INSTALL_RC=${INSTALL_RC:-0}
+        break
+    fi
+    kill -0 "$EMU_PID" 2>/dev/null || {
+        say error "the emulator exited during the install"
+        break; }
+    sleep 2
+    INSTALL_SECONDS=$((INSTALL_SECONDS + 2))
+done
+stop_emulator
+trap - EXIT INT TERM
+
+say install_seconds "$INSTALL_SECONDS"
+say install_status "$INSTALL_RC"
+if [ "$INSTALL_RC" != "0" ]; then
+    say error "the Installer did not finish: status $INSTALL_RC"
+    say installdrive "$HD/installdrive.txt"
+    say installer_out "$HD/installer-out.txt"
+    say drive "$HD"
+    exit 1
+fi
+
+# ------------------------------------------- what the Installer actually did --
+#
+# WHAT THE INSTALLER WOULD INSTALL, derived from the archive rather than
+# written down here, so this cannot drift from install/Install-AmiNetXDuo the
+# way the `cp` list it replaces did.  Every file is compared by content: a name
+# that exists proves the copy started and nothing else.
+#
+# The one thing kept in step by hand is which archive drawer goes where, and
+# the Installer's own copy statements are the list:
+#
+#   Libs/*        -> LIBS:            copylib, tls.library only when packed
+#   C/*           -> C:               copyfiles (all)
+#   Docs/*        -> <docdir>         copyfiles (all) (infos) -- the drawer's
+#                                     CONTENTS, and its (dest) is DOCDIR
+#                                     itself, so the guide lands beside
+#                                     Examples and not under a Docs drawer
+#   Examples/*    -> <docdir>/Examples
+#   Terminal/*    -> <docdir>/Terminal
+#   AmiNetXDuo.info -> beside <docdir>
+#   Devs/Internet/{protocols,services,networks}  only where there is none
+#   Devs/Internet/certificates                   always, when packed
+#
+# Devs/Networks/anxnet.device is NOT in this list, and that is the Installer's
+# decision, not an omission: it ships and a user copies it deliberately.  This
+# script does that copy below, and the driver gate proves it is the one the
+# stack opened.
+#
+# <docdir> is DH0:AmiNetXDuo -- @default-dest on a machine with one volume --
+# and the askdir page is answered with its default.
+DOCDIR_REL="AmiNetXDuo"
+
+MISSING=0
+CHECKED=0
+sum_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+# $1 source file in the archive, $2 destination path on the drive.
+check_copy() {
+    local src="$1" dest="$2" real
+    CHECKED=$((CHECKED + 1))
+    if ! real=$(amiga_path "$dest") || [ ! -f "$real" ]; then
+        say install_missing_file "$dest"
+        MISSING=$((MISSING + 1))
+        return
+    fi
+    if [ "$(sum_of "$src")" != "$(sum_of "$real")" ]; then
+        say install_differs "$dest"
+        MISSING=$((MISSING + 1))
+    fi
+}
+
+# $1 a path the Installer WRITES rather than copies: it has to be there and
+# have something in it, and its content is checked where it matters below.
+check_written() {
+    local real
+    CHECKED=$((CHECKED + 1))
+    if ! real=$(amiga_path "$1") || [ ! -s "$real" ]; then
+        say install_missing_file "$1"
+        MISSING=$((MISSING + 1))
+    fi
+}
+
+check_copy "$UNP/Libs/bsdsocket.library" Libs/bsdsocket.library
+check_copy "$UNP/Libs/usergroup.library" Libs/usergroup.library
+[ -f "$UNP/Libs/tls.library" ] &&
+    check_copy "$UNP/Libs/tls.library" Libs/tls.library
+
+# Every command in the archive, because copyfiles (all) copies every one of
+# them.  ssh is in here, which is the whole reason the archive is built with a
+# dbclient in it.
+while IFS= read -r rel; do
+    check_copy "$UNP/C/$rel" "C/$rel"
+done < <(cd "$UNP/C" && find . -type f | sed 's|^\./||' | sort)
+
+for pair in "Docs:" "Examples:/Examples" "Terminal:/Terminal"; do
+    drawer="${pair%%:*}"
+    under="${pair#*:}"
+    [ -d "$UNP/$drawer" ] || continue
+    while IFS= read -r rel; do
+        check_copy "$UNP/$drawer/$rel" "$DOCDIR_REL$under/$rel"
+    done < <(cd "$UNP/$drawer" && find . -type f | sed 's|^\./||' | sort)
+done
+
+check_copy "$UNP/AmiNetXDuo.info" "$DOCDIR_REL.info"
+
+[ -f "$UNP/Devs/Internet/certificates" ] &&
+    check_copy "$UNP/Devs/Internet/certificates" Devs/Internet/certificates
+for ndb in protocols services networks; do
+    [ -f "$UNP/Devs/Internet/$ndb" ] &&
+        check_copy "$UNP/Devs/Internet/$ndb" "Devs/Internet/$ndb"
+done
+
+check_written Devs/NetInterfaces/eth0
+check_written Devs/Internet/routes
+check_written Devs/Internet/name_resolution
+check_written Devs/Internet/hosts
+check_written S/User-Startup
+
+# The managed block, once.  (startup) replaces what is between its markers, so
+# two lines here would mean it appended instead -- and none would mean the
+# network does not come up at all, which is the failure that reads as a driver
+# fault three checks later.
+IFACE_LINES=0
+USTART=$(amiga_path S/User-Startup || true)
+[ -n "$USTART" ] && [ -f "$USTART" ] &&
+    IFACE_LINES=$(grep -c 'AddNetInterface' "$USTART" || true)
+say startup_addnetinterface_lines "${IFACE_LINES:-0}"
+[ "${IFACE_LINES:-0}" = "1" ] || {
+    say install_missing_file "S/User-Startup: AddNetInterface"
+    MISSING=$((MISSING + 1)); }
+
+say install_files "$CHECKED"
+say install_missing "$MISSING"
+if [ "$MISSING" != "0" ]; then
+    say error "the install is incomplete: $MISSING of $CHECKED files are\
+ missing or differ from the archive"
+    say installdrive "$HD/installdrive.txt"
+    say drive "$HD"
+    exit 1
+fi
+say install_check ok
+
+# The harness's own binary goes away before the machine is handed over: a user
+# who logs into that Shell should find C: holding what the Installer put there
+# and nothing else.
+rm -f "$HD/C/installdrive"
+
+# ------------------------------------------------------- the deliberate steps --
+#
+# Install-AmiNetXDuo does not install anxnet.device, on purpose, so this is the
+# copy its note describes: into DEVS:Networks, named in DEVS:NetInterfaces/eth0
+# with a CARD= line.  tools/sana2-stage.sh owns the board-to-driver table, so
+# the rig and the card sweeps cannot disagree about what drives an A2065.
+#
+# The emulated board is the A2065, which is what the .uae below enables.
+BOARD=a2065
+sana2_select "$BOARD" "$BUILD"
+[ "$SANA2_SEL_SOURCE" = anxnet ] || {
+    say error "tools/sana2-stage.sh does not map $BOARD onto anxnet.device"
+    exit 2; }
+
+# From the ARCHIVE, not from the build directory.  The archive is what a user
+# has, and taking it from anywhere else would leave the one file on this drive
+# that no download could have produced.
+ANXNET="$UNP/Devs/Networks/anxnet.device"
+[ -f "$ANXNET" ] || {
+    say error "$ARCHIVE carries no Devs/Networks/anxnet.device"; exit 2; }
+
+DEVSDIR=$(amiga_path Devs)
+[ -f "$DEVSDIR/NetInterfaces/eth0" ] || {
+    say error "the Installer wrote no $DEVSDIR/NetInterfaces/eth0"; exit 1; }
+AMINETXDUO_SANA2_DRIVER="$ANXNET" \
+AMINETXDUO_SANA2_DRIVER_NAME=anxnet.device \
+AMINETXDUO_SANA2_DIR=Networks \
+AMINETXDUO_SANA2_DEVICE=DEVS:Networks/anxnet.device \
+AMINETXDUO_SANA2_CARD="$SANA2_SEL_CARD" \
+    sana2_stage "$BOARD" "$DEVSDIR"
+
+IFACE=$(amiga_path Devs/NetInterfaces/eth0)
+
+# MDNS= is one line in the file the Installer wrote, and its own help text says
+# so.  The Installer defaults it off -- the responder costs real time on a slow
+# machine -- and this rig publishes a .local name, so it goes on here.
+grep -v '^MDNS=' "$IFACE" > "$IFACE.new"
+echo "MDNS=YES" >> "$IFACE.new"
+mv "$IFACE.new" "$IFACE"
+
+# The name, likewise: the Installer writes "amiga" for every machine and five
+# of these on one wire need five names.
+RESOLV=$(amiga_path Devs/Internet/name_resolution)
+grep -vi '^hostname ' "$RESOLV" > "$RESOLV.new"
+echo "hostname $NAME" >> "$RESOLV.new"
+mv "$RESOLV.new" "$RESOLV"
 
 # ------------------------------------------------------------------ rtg ----
 
@@ -324,44 +765,73 @@ with open(sys.argv[1], "wb") as fh:
 EOF
 fi
 
-# ------------------------------------------------------- startup-sequence ---
+# --------------------------------------------------------- the served drawer --
 
-# ClassicWB's own sequence, with its final EndCLI taken off so the tail below
-# can replace it.  LoadWB stays: on the rtg arm the screen it opens is the
-# screen being served.
+mkdir -p "$HD/Public/Docs"
+echo "Hello from an Amiga." > "$HD/Public/readme.txt"
+echo "<html><body><h1>Amiga</h1><p>httpd is serving this drawer.</p></body></html>" \
+    > "$HD/Public/index.html"
+echo "in a drawer" > "$HD/Public/Docs/notes.txt"
+
+# ClassicWB has the IEEE maths pair, but a snapshot that turned out not to is a
+# Shell where ssh dies saying mathieeedoubbas.library failed to load, which
+# reads like a broken binary.  -n so ClassicWB's own are left alone.
+for m in mathieeedoubbas mathieeedoubtrans; do
+    for src in "$HOME/amiga-assets/nglibs/$m.library" \
+               "$HOME/amiga-assets/libs/$m.library"; do
+        [ -f "$src" ] && { cp -n "$src" "$HD/Libs/"; break; }
+    done
+done
+
+# ------------------------------------------------------- 2/2, the machine ----
 #
-# Anchored at column 0, which is the whole of why it is safe.  ClassicWB's
-# sequence has two more EndCLI lines indented inside the boot-menu branches,
-# and those end the shell on purpose; deleting them drops both branches
-# through into a normal boot.
-[ -f "$HD/S/Startup-Sequence" ] || {
-    say error "the snapshot has no S/Startup-Sequence"; exit 2; }
-sed -e '/^EndCLI/d' "$SNAP/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
-
-# Version of the binary the guest actually loads, written where the host can
-# read it: DH0 is a host directory, so this file appears beside the drive.  It
-# is how a launch proves it is serving the build it staged and not one left
-# over from an earlier run.
+# A POWER CYCLE, not a continuation.  The network comes up from the line the
+# Installer wrote in S:User-Startup, reached by ClassicWB's own
+# `Execute S:User-Startup`, with nothing in the path this script put there.
 #
-# Run >NIL: <NIL:, not a file redirect.  Run hands the started process the
-# stream it was given, so redirecting to a file leaves httpd holding the boot
-# shell's console: the shell ends, the window stays, and nothing can close it
-# because the process still owning it is the web server.  NIL: on both sides
-# is what lets EndCLI take the window with it.
-cat >> "$HD/S/Startup-Sequence" <<EOF
+# The tail is the rig's: the version of the binary the guest LOADED, written
+# where the host can read it, then httpd, then the stack's own account of which
+# driver it has open.
+#
+# The terminal and console pages are the INSTALLED ones, in the drawer the
+# Installer created.  Naming them here is a fourth assertion that the install
+# was complete, made by the thing that has to open them.
+#
+# THE SERVER'S OWN OUTPUT, WITHOUT THE BOOT WINDOW.  It used to go to NIL:,
+# which is why a wedged guest left nothing to read; and `Run >file` does not
+# move it, because Run keeps that stream for its own "[CLI n]" line and the
+# process it starts does not get it -- measured here, the file held those eight
+# bytes and nothing else after a request had been served.
+#
+# So the redirection is made by a Shell that is already detached.  `Run >NIL:
+# <NIL:` is unchanged and is what lets EndCLI take the boot window with it:
+# nothing is ever handed the console.  What it starts is Execute on the script
+# below, and the Shell running THAT script opens the file and hands it to httpd
+# as its output.
+#
+# The file grows with requests and not with time, so an idle guest writes its
+# own banner and stops.
+cat > "$HD/S/AmiNetXDuo-httpd" <<EOF
+; Written by tools/classicwb.sh.
+C:httpd DH0:Public $PORT -T PAGE=DH0:$DOCDIR_REL/Terminal/shell.html -C CONSOLEPAGE=DH0:$DOCDIR_REL/Terminal/console.html >DH0:httpd-log.txt
+EOF
+chmod 755 "$HD/S/AmiNetXDuo-httpd"
 
+cat > "$HD/S/AmiNetXDuo-Serve" <<'EOF'
+; Written by tools/classicwb.sh.  Nothing here is installed by AmiNetXDuo.
 FailAt 9999
 C:Wait 6
-C:Version >DH0:httpd-ver.txt DH0:C/httpd FILE
-Run >NIL: <NIL: C:httpd DH0:Public $PORT -T PAGE=DH0:shell.html -C CONSOLEPAGE=DH0:Console/console.html
-C:Wait 3
-EndCLI >NIL:
+C:Version >DH0:httpd-ver.txt C:httpd FILE
+C:ShowNetStatus >DH0:netstatus.txt
+Run >NIL: <NIL: C:Execute S:AmiNetXDuo-httpd
+C:Wait 30
+C:ShowNetStatus >>DH0:netstatus.txt
 EOF
-chmod 755 "$HD/S/Startup-Sequence"
+chmod 755 "$HD/S/AmiNetXDuo-Serve"
 
-# ------------------------------------------------------------ the emulator --
-
-export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+startup_with 'FailAt 9999
+Execute S:AmiNetXDuo-Serve
+EndCLI >NIL:'
 
 XVFB_PID=""
 if [ "$VARIANT" = rtg ]; then
@@ -378,11 +848,8 @@ if [ "$VARIANT" = rtg ]; then
     XVFB_PID=$!
     sleep 2
     export DISPLAY="$XDISP"
-    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
+    export SDL_VIDEODRIVER="${AMINETXDUO_CWB_SDL_VIDEO:-x11}"
     say xvfb "$XDISP pid $XVFB_PID"
-else
-    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
-    unset DISPLAY WAYLAND_DISPLAY 2>/dev/null || true
 fi
 
 # One MAC per combination, so two of these on one wire are two machines.  The
@@ -442,8 +909,7 @@ SNIFFER=$!
 trap 'kill "$SNIFFER" 2>/dev/null || true' INT TERM
 sleep 1
 
-setsid "$AMIBERRY" -f "$CFG" >"$EMULOG" 2>&1 &
-EMU_PID=$!
+start_emulator "$CFG" "$EMULOG"
 say emulator_pid "$EMU_PID"
 
 # A guest that is left up needs an end, and the emulator is the thing that has
@@ -512,16 +978,17 @@ say address "$ADDR"
 
 # --------------------------------------------------------- the version gate --
 
-# Three questions, because a demo that quietly serves last week's binary is
-# worse than one that does not start.  What the build directory holds, what
-# landed on the drive, and what the process that is answering says it is.
+# Four questions, because a demo that quietly serves last week's binary is
+# worse than one that does not start.  What the build directory holds, what the
+# archive carries, what landed on the drive, and what the process that is
+# answering says it is.
 BUILD_VER=""
 [ -f "$BUILD/include/aminetxduo/version.h" ] &&
     BUILD_VER=$(sed -n 's/.*AMINETXDUO_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' \
                 "$BUILD/include/aminetxduo/version.h" | head -1)
-BUILD_VER_TAG=$(strings -a "$HTTPD" 2>/dev/null | grep -m1 '\$VER: httpd' || true)
 say build_version "${BUILD_VER:-unknown}"
-say build_verstag "${BUILD_VER_TAG:-unknown}"
+say build_verstag \
+    "$(strings -a "$UNP/C/httpd" 2>/dev/null | grep -m1 '\$VER: httpd' || true)"
 
 # What the guest wrote about the binary it loaded, read straight out of the
 # host directory the drive is.
@@ -537,23 +1004,64 @@ if [ -z "$GUEST_VER" ]; then
  running the server"
     say emulog "$EMULOG"; say drive "$HD"; exit 1
 fi
-if [ -n "$BUILD_VER" ] && [ "${GUEST_VER#*"$BUILD_VER"}" = "$GUEST_VER" ]; then
-    say error "the guest loaded '$GUEST_VER' and $BUILD built $BUILD_VER --\
- the drive was staged from somewhere else"
+if [ "${GUEST_VER#*"$ARCH_VER"}" = "$GUEST_VER" ]; then
+    say error "the guest loaded '$GUEST_VER' and the archive is $ARCH_VER --\
+ the drive was installed from somewhere else"
     exit 1
 fi
 
-# The bytes on the drive against the bytes in the build directory.  Version
-# strings only catch a different release; this catches the same release built
-# from a different commit, which is the way a stale binary usually arrives.
-if command -v sha256sum >/dev/null 2>&1; then
-    a=$(sha256sum "$HTTPD" | cut -d' ' -f1)
-    b=$(sha256sum "$HD/C/httpd" | cut -d' ' -f1)
-    [ "$a" = "$b" ] || {
-        say error "the httpd on the drive is not the one in $BUILD"; exit 1; }
-    say staged_sha256 "$a"
+# The bytes on the drive against the bytes in the archive, and the bytes in the
+# archive against the bytes in the build directory.  Version strings only catch
+# a different release; these catch the same release built from a different
+# commit, which is how a stale binary usually arrives.  The second one is
+# skipped for an archive that was handed in with -a: it came from another
+# machine's build and there is nothing here for it to match.
+STAGED=$(sum_of "$(amiga_path C/httpd)")
+[ "$STAGED" = "$(sum_of "$UNP/C/httpd")" ] || {
+    say error "the httpd on the drive is not the one in the archive"; exit 1; }
+if [ "$BUILT_HERE" = "1" ]; then
+    [ "$STAGED" = "$(sum_of "$BUILD/src/tools/httpd")" ] || {
+        say error "the httpd in the archive is not the one in $BUILD"; exit 1; }
+    say build_match ok
 fi
+say staged_sha256 "$STAGED"
 say version_match ok
+
+# ------------------------------------------------------------- the driver gate --
+#
+# WHICH DRIVER THE STACK HAS OPEN, said by the stack.  ShowNetStatus prints the
+# live driver and falls back to the configuration file only when it cannot read
+# one (src/tools/shownetstatus.c:388), so this is the running interface and not
+# a file somebody wrote.
+#
+# It exists because the rig ran on Commodore's a2065.device for its whole life
+# and looked exactly like this from the outside: a lease, an address, a served
+# page.  Ours was built every time and staged never.  A guest that comes up on
+# any driver but the one that was installed fails the launch.
+WANT_DRIVER="${SANA2_SEL_DRIVER}"
+DRIVER_LINE=""
+for _ in $(seq 1 60); do
+    [ -s "$HD/netstatus.txt" ] && {
+        DRIVER_LINE=$(grep -a '^Interface ' "$HD/netstatus.txt" | tail -1)
+        [ -n "$DRIVER_LINE" ] && break; }
+    sleep 2
+done
+if [ -z "$DRIVER_LINE" ]; then
+    say error "the guest never reported an interface: ShowNetStatus wrote\
+ nothing to DH0:netstatus.txt"
+    say emulog "$EMULOG"; say drive "$HD"; exit 1
+fi
+DRIVER_IN_USE=$(printf '%s' "$DRIVER_LINE" | sed -n 's/.*(\(.*\) unit .*/\1/p')
+say driver_installed "$WANT_DRIVER"
+say driver_card "${SANA2_SEL_CARD:-none}"
+say driver_in_use "${DRIVER_IN_USE:-unknown}"
+case "$DRIVER_IN_USE" in
+    *"$WANT_DRIVER") say driver_match ok ;;
+    *) say error "the guest is running on '${DRIVER_IN_USE:-nothing}' and\
+ $WANT_DRIVER was installed"
+       say netstatus "$HD/netstatus.txt"
+       exit 1 ;;
+esac
 
 # What the running server says it is, asked from somewhere that can hear it.
 #
@@ -574,8 +1082,8 @@ if [ -n "$CHECKHOST" ]; then
     [ -n "$SERVED" ] || {
         say error "nothing answered on http://$ADDR:$PORT/ from $CHECKHOST"
         exit 1; }
-    [ -z "$BUILD_VER" ] || [ "$SERVED" = "AmiNetXDuo-httpd/$BUILD_VER" ] || {
-        say error "the guest is serving '$SERVED', not $BUILD_VER"; exit 1; }
+    [ "$SERVED" = "AmiNetXDuo-httpd/$ARCH_VER" ] || {
+        say error "the guest is serving '$SERVED', not $ARCH_VER"; exit 1; }
     say served_check ok
 fi
 
@@ -590,6 +1098,11 @@ NAMEPART="$NAME.local"
 [ "$PORT" = 80 ] || NAMEPART="$NAME.local:$PORT"
 say name "http://$NAMEPART/"
 say emulog "$EMULOG"
+say emulog_bytes "$(wc -c < "$EMULOG" | tr -d ' ')"
+say httpd_log "$HD/httpd-log.txt"
+say httpd_log_bytes "$(wc -c < "$HD/httpd-log.txt" 2>/dev/null | tr -d ' ' || echo 0)"
+say netstatus "$HD/netstatus.txt"
+say installdrive "$HD/installdrive.txt"
 say drive "$HD"
-say stop "pkill -f 'amiberry -f $CFG'"
+say stop "pkill -f 'amiberry --log -f $CFG'"
 say RESULT UP
