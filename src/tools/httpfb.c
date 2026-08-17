@@ -100,6 +100,29 @@
 #define FB_GRAB_FLOOR       1
 
 /*
+ * The share of the machine this may take, as the divisor of the idle owed
+ * after a frame.
+ *
+ * A frame that cost T ticks is followed by at least T / FB_IDLE_DIVISOR of
+ * doing nothing, so the console settles at T / (T + T/3), which is 75%.  The
+ * machine has to stay usable for whatever its owner is doing while somebody
+ * watches it, and on a 68030 a 640x480 frame is a fifth of a second of solid
+ * work: without this the console takes everything it can get and the guest
+ * belongs to the browser rather than to the person sitting at it.
+ *
+ * It is enforced against MEASURED cost and not against a frame rate, because
+ * the cost is what varies -- an idle screen is a few milliseconds and a
+ * scrolling one is hundreds -- and a fixed rate would either throttle the
+ * cheap case for nothing or fail to cap the expensive one at all.
+ *
+ * Task priority is not the mechanism.  A lower priority yields to a task that
+ * wants to run and caps nothing when the machine is otherwise idle, which is
+ * exactly when a long encode still makes the pointer stutter.  This is a
+ * duty cycle and it holds whether or not anything else is runnable.
+ */
+#define FB_IDLE_DIVISOR     3
+
+/*
  * How often a `refresh` can force a full frame, in fiftieths.
  *
  * A refresh is expensive and asymmetric.  The answer is a whole screen, about
@@ -254,6 +277,21 @@ static UBYTE           fb_rtg_ready;
 static UBYTE           fb_want_rtg;
 
 static ULONG           fb_next_tick;
+
+/*
+ * The duty cycle, in ticks.
+ *
+ * fb_frame_t0 is when the work for the frame in flight began, which is the
+ * grab and not the send: the cost this has to cap is everything the task does
+ * on the console's account, and the send is part of it.  fb_busy_ticks is the
+ * running total of that cost and is what fbstat reports, so the share taken
+ * can be checked from outside rather than trusted.
+ *
+ * fb_frame_t0 is 0 when no frame is in flight, and a tick of 0 is therefore
+ * nudged to 1 by its writer the way fb_next_tick's is.
+ */
+static ULONG           fb_frame_t0;
+static ULONG           fb_busy_ticks;
 
 /*
  * A resync is a sequence, and asking twice must not restart it.
@@ -2413,6 +2451,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_tx_len     = 0;
     fb_tx_sent    = 0;
     fb_next_tick  = 0;
+    fb_frame_t0   = 0;
+    fb_busy_ticks = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2727,16 +2767,16 @@ BOOL http_fb_slice(ULONG now)
     {
         /* An unrecognised word is ignored at the far end, which is what lets
            this go down the same channel without the viewer knowing it. */
-        static const char *const tags[7] = { "fbstat f=", " b=", " gt=", " et=",
-                                            " tn=", " gn=", " nl=" };
-        const ULONG values[7] = { fb_frames, fb_bytes, fb_grab_ticks,
+        static const char *const tags[8] = { "fbstat f=", " b=", " gt=", " et=",
+                                            " tn=", " gn=", " nl=", " bt=" };
+        const ULONG values[8] = { fb_frames, fb_bytes, fb_grab_ticks,
                                   fb_encode_ticks, fb_torn, fb_gone_passes,
-                                  fb_nolock };
+                                  fb_nolock, fb_busy_ticks };
         ULONG at = 0;
         ULONG f;
         ULONG i;
 
-        for (f = 0; f < 7UL; f++)
+        for (f = 0; f < 8UL; f++)
         {
             for (i = 0; tags[f][i] != '\0'; i++)
                 fb_tx[10 + at++] = (UBYTE)tags[f][i];
@@ -2758,9 +2798,19 @@ BOOL http_fb_slice(ULONG now)
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
+        /* The floor stands only until the frame this pass is about to produce
+           has been sent and its real cost is known.  http_fb_write() replaces
+           it then with the idle the duty cycle owes, which on anything but a
+           trivial frame is the larger of the two. */
         fb_next_tick = tick + FB_GRAB_FLOOR;
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
+
+        /* The clock the duty cycle is charged against starts here, at the
+           grab, and stops when the last byte of the frame has gone. */
+        fb_frame_t0 = tick;
+        if (fb_frame_t0 == 0UL)
+            fb_frame_t0 = 1UL;          /* 0 means no frame is in flight */
     }
 
     /*
@@ -2946,6 +2996,35 @@ BOOL http_fb_write(ULONG now)
 
         fb_tx_len  = 0;
         fb_tx_sent = 0;
+
+        /*
+         * The frame is out, so what it cost is now known: everything from the
+         * grab to this byte.  The idle owed against it is that over
+         * FB_IDLE_DIVISOR, and setting the next grab that far out is the whole
+         * of the duty cycle.  Charged here and not after the encode because
+         * the send is work this task did too.
+         *
+         * Only a frame is charged.  A word queued by the slice -- geom, pal,
+         * the pointer, fbstat -- leaves fb_frame_t0 at zero and passes
+         * through, so a session that is only talking is not throttled as if
+         * it were drawing.
+         */
+        if (fb_frame_t0 != 0UL)
+        {
+            ULONG done = fb_ticks();
+            ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
+            ULONG idle = cost / (ULONG)FB_IDLE_DIVISOR;
+
+            fb_busy_ticks += cost;
+            fb_frame_t0 = 0;
+
+            if (idle < (ULONG)FB_GRAB_FLOOR)
+                idle = (ULONG)FB_GRAB_FLOOR;
+
+            fb_next_tick = done + idle;
+            if (fb_next_tick == 0UL)
+                fb_next_tick = 1UL;
+        }
 
         /* A pong or a close does not wait behind a frame. */
         if (fb_ctl_at < fb_ctl_n)
