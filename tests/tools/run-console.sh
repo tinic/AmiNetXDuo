@@ -724,7 +724,12 @@ EOF
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
     # and a five-minute run left 427 MB of it here; nothing in this harness
     # reads it, because the backend assertion below is a better one.
-    ( trap '' PIPE; exec "$AMIBERRY" -f "$cfg" ) >"$EMULOG" 2>&1 &
+    # --log, because without it this file was 155 bytes and said nothing at
+    # all about a guest that had crashed on its own Startup-Sequence.  Finding
+    # that needed Amiberry run by hand outside the harness, which is the one
+    # thing a harness must not make necessary.  With it the log carries the
+    # autoconfig board list, the Picasso96 SetSwitch, and the trap.
+    ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) >"$EMULOG" 2>&1 &
     EMU_PID=$!
 }
 
