@@ -66,8 +66,9 @@ make_root "$STALE" 15.2.0
 ln -sfn "$STALE" "$CACHE/current"
 
 resolve() {
-    # Prints the resolved root on stdout, the diagnostic on fd 3, and returns
-    # what a caller of `. tools/amiga-toolchain.sh` sees.
+    # Prints the resolved root on stdout, puts the diagnostic in $TMP/err.txt,
+    # and returns what a caller of `. tools/amiga-toolchain.sh` sees.  The
+    # cases below grep that file, so it is overwritten by every call.
     AMINETXDUO_TOOLCHAIN_CACHE="$CACHE" AMIGA_TOOLCHAIN_QUIET=1 \
     AMIGA_TOOLCHAIN_ROOT="" AMIGA_GCC="" AMIGA_NDK="" AMIGA_SIZE="" \
     PATH="/usr/bin:/bin" HOME="$TMP/nohome" \
