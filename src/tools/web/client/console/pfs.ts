@@ -168,9 +168,9 @@ export function pointerBits(p: { width: number; height: number; depth: number })
 
 export interface Capture {
   readonly screen: Screen;
-  /* Header byte 9 as it stands, which is screen.format and is kept here
-     because a reader looking at a file wants the byte and not the reading. */
-  readonly flags: number;
+  /* Header byte 9 as it stands.  The same number as screen.format, kept
+     because a reader looking at a file wants the byte it read. */
+  readonly format: number;
   readonly frameCount: number;
   /* Kept as well as the 32-bit form: the header panel shows the entries and
      an exporter would want the bytes back.  Both are empty on a truecolour
@@ -340,7 +340,7 @@ export function parsePfs(buf: ArrayBuffer): Capture {
   }
 
   const v = new DataView(buf);
-  const flags = b[9];
+  const format = b[9];
   const screen: Screen = {
     width: v.getUint16(4),
     height: v.getUint16(6),
@@ -351,8 +351,8 @@ export function parsePfs(buf: ArrayBuffer): Capture {
        file written before it was a format still says what it always said.
        screenFault() below refuses one this does not know rather than drawing
        it as the planar screen it is not. */
-    format: flags,
-    chunky: flags === FMT_CLUT8,
+    format,
+    chunky: format === FMT_CLUT8,
   };
   const frameCount = v.getUint16(12);
   const pointerCount = v.getUint16(14);
@@ -441,7 +441,7 @@ export function parsePfs(buf: ArrayBuffer): Capture {
 
   return {
     screen,
-    flags,
+    format,
     frameCount,
     rgb,
     /* Empty on a truecolour capture, and the decoder never looks at it: the
