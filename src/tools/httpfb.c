@@ -323,7 +323,9 @@ static UBYTE           fb_band_last;
  * bytes of header a band costs stay lost in the noise -- an idle 640x480
  * screen measured 1840 bytes a pass whole and 1875 in eight bands.
  */
+#ifndef FB_BAND_ROWS
 #define FB_BAND_ROWS        4
+#endif
 
 /*
  * A resync is a sequence, and asking twice must not restart it.
