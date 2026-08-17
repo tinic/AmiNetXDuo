@@ -69,7 +69,10 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlshttps}"
 
 verdict() {
     # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    verdict_guest "tls-https" 1 "$1" \
+    # A FLOOR OF 1 IS NOT A FLOOR.  tls_https.c makes 8 w_check() calls; 5 is
+    # set from that static count rather than from a measured run, for
+    # run-api.sh's reason.  Tighten it when there is a clean run to read.
+    verdict_guest "tls-https" 5 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
     exit $?
