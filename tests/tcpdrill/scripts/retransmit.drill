@@ -41,6 +41,32 @@ rx R seq=0
 
 # The same rule on data.  Nothing acknowledges the segment, so every one of
 # these is a retransmission of the first.
+#
+# THE FIRST RESEND IS NOT THE TIMER'S.  RFC 8985 7.2's tail loss probe sends
+# one extra copy of what is outstanding two round trips after the transmission
+# rather than waiting the timeout out, and it deliberately leaves the ladder
+# alone: it restores the retry count and the timeout it found, so the rung
+# below still expires when it always would have.  A ladder written as if the
+# probe were the first rung would be reading the probe's clock, so the probe
+# gets a line of its own and the ladder starts on the line after it.
+#
+# WHERE THE TWO NUMBERS COME FROM (nx_user.h, and the 50 Hz IP tick):
+#   * the probe is 2*SRTT + NX_TCP_LOSS_PROBE_DELACK_MS, and SRTT is ZERO on
+#     the first segment of a connection: the estimator is armed by the data
+#     send path, not by the handshake, so there is no sample yet.  The floor
+#     the code takes instead is two ticks, giving 2 + 10 = 12 ticks, 240 ms.
+#   * the fast periodic that fires it runs at NX_IP_PERIODIC_RATE /
+#     NX_TCP_FAST_TIMER_RATE, every 100 ms, and is not synchronised to the
+#     transmission, so the probe leaves on its third tick: 200..300 ms.
+#   * the first rung is NX_TCP_RTO_MINIMUM_MS, one second, measured from the
+#     SEGMENT and not from the probe, which the probe restores the timeout to
+#     make sure of: 900..1000 ms.
+#   * a 14 MHz 68020 slips the whole schedule by up to about 140 ms, measured:
+#     probes at 212..433, first rungs at 913..1136.
+# So the probe is inside 300 + 140 = 600, and the gap below is 900 - 433 = 467
+# at its shortest and 1136 - 212 = 924 at its longest.  Measured 681, 702,
+# 703, 721.  The two rungs after it are the doubling, unchanged, and are the
+# point of the case.
 case rt02_data_retransmission_doubles
 socket
 connect
@@ -49,7 +75,8 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=300
-tx PA seq=1 ack=1 len=100 after=700  within=1400
+tx PA seq=1 ack=1 len=100 within=600
+tx PA seq=1 ack=1 len=100 after=400  within=1200
 tx PA seq=1 ack=1 len=100 after=1400 within=2800
 tx PA seq=1 ack=1 len=100 after=2800 within=5600
 rx R seq=1
@@ -63,3 +90,32 @@ connect
 tx S seq=0 within=200
 tx S seq=0 after=800 within=1300
 rx R seq=0
+
+# AND THE TIMER IS NOT THE ONLY THING THAT RECOVERS A SEGMENT.
+#
+# RFC 5827 section 2 lowers the fast retransmit threshold to one less than the
+# number of outstanding segments while there are fewer than four of them,
+# because three duplicate acknowledgments are three segments arriving past the
+# hole and a flight of two cannot produce them.  Two segments outstanding
+# therefore retransmit on the FIRST duplicate acknowledgment, in the round it
+# arrives in, not a second later.
+#
+# It is asserted here rather than in sack.drill because it has nothing to do
+# with SACK: the acknowledgment below carries no blocks.  sack.drill s14 used
+# to reach it by accident, with a two-segment flight and a comment describing
+# a three-segment one, and could say nothing about when the retransmission
+# happened -- it arrived between two of the injections it was counting.
+case rt04_two_segments_retransmit_on_one_dupack
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=100
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100
+send 100
+tx PA seq=101 ack=1 len=100
+rx A seq=1 ack=1 win=8192
+tx PA seq=1 ack=1 len=100 within=400
+notx 600
+rx R seq=1
