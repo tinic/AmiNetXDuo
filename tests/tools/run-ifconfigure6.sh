@@ -312,10 +312,20 @@ denies() { # key banner nth pattern
 
 routes() { block "SYS:netstat -r" "$1"; }
 
-# How many IPv6 default routers the table shows.  netstat -r prints the IPv6
-# default route as `::/0` with its next hop, which is the one line whose count
-# separates "replaced" from "added beside".
-routers6() { routes "$1" | grep -Ec '(^|[[:space:]])::/0([[:space:]]|$)' || true; }
+# How many IPv6 default routers the table shows WITH THIS NEXT HOP.  netstat -r
+# prints an IPv6 default route as `::/0` and then the next hop, so this counts
+# the ones this harness asked for and nothing else.
+#
+# BY ADDRESS AND NOT BY TOTAL, deliberately.  The link is a real one, and a
+# router advertising on it puts a default router in this table that no command
+# here asked for -- and does it whenever it likes, so a total taken between two
+# commands is a number that can change on its own.  Every claim below is about
+# fe80::1 and fe80::2, which are this harness's and cannot arrive by
+# themselves.
+routers6_via() { # nth-netstat next-hop
+    routes "$1" | grep -E '(^|[[:space:]])::/0[[:space:]]' \
+                | grep -Ec "[[:space:]]$2([[:space:]]|$)" || true
+}
 
 # ---- one boot -------------------------------------------------------------
 
@@ -327,7 +337,10 @@ if [ "$ADDS" -eq 1 ]; then pass ifconf6_no_reset; else fail ifconf6_no_reset; fi
 
 want_rc ifconf6_add_rc          "SYS:AddNetInterface eth0" 1 0
 says    ifconf6_up_has_v6       "SYS:netstat -i" 1 '2001:db8:6726:1::10'
-denies  ifconf6_up_has_no_v4    "SYS:netstat -i" 1 '10\.77\.0\.5'
+# netstat -i prints the interface's IPv4 address in its own column, so an
+# interface that asked for none reads 0.0.0.0 there.  That is the state the
+# command could not touch, asserted rather than assumed.
+says    ifconf6_up_has_no_v4    "SYS:netstat -i" 1 '^eth0[[:space:]]+[0-9]+[[:space:]]+0\.0\.0\.0'
 
 # Nothing to change: the message has to name GATEWAY6, because an IPv6-only
 # interface reading a list of IPv4 keywords is what the row was about.
@@ -340,9 +353,12 @@ want_rc ifconf6_badgw_rc \
 
 # ---- 2. GATEWAY6 sets it, and netstat -r shows the difference -------------
 
-BEFORE=$(routers6 1)
-echo "ifconf6_routers6_before=$BEFORE"
-if [ "$BEFORE" -eq 0 ]; then pass ifconf6_no_router_at_boot
+BEFORE_A=$(routers6_via 1 "$GW6_A")
+BEFORE_B=$(routers6_via 1 "$GW6_B")
+echo "ifconf6_boot_via_a=$BEFORE_A"
+echo "ifconf6_boot_via_b=$BEFORE_B"
+if [ "$BEFORE_A" -eq 0 ] && [ "$BEFORE_B" -eq 0 ]; then
+    pass ifconf6_no_router_at_boot
 else fail ifconf6_no_router_at_boot; fi
 
 want_rc ifconf6_set_a_rc \
@@ -354,18 +370,17 @@ says    ifconf6_set_a_said \
 says    ifconf6_set_a_shows_addr \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 1 '2001:db8:6726:1::10'
 
-AFTER_A=$(routers6 2)
+AFTER_A=$(routers6_via 2 "$GW6_A")
 echo "ifconf6_routers6_after_a=$AFTER_A"
 if [ "$AFTER_A" -eq 1 ]; then pass ifconf6_router_a_in_table
 else fail ifconf6_router_a_in_table; fi
-says ifconf6_router_a_is_a "SYS:netstat -r" 2 "$GW6_A"
 
 # ---- 4. asking again changes nothing --------------------------------------
 
 want_rc ifconf6_set_a_again_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_A" 2 0
 
-AGAIN=$(routers6 3)
+AGAIN=$(routers6_via 3 "$GW6_A")
 echo "ifconf6_routers6_again=$AGAIN"
 if [ "$AGAIN" -eq 1 ]; then pass ifconf6_idempotent
 else fail ifconf6_idempotent; fi
@@ -375,12 +390,13 @@ else fail ifconf6_idempotent; fi
 want_rc ifconf6_set_b_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 $GW6_B" 1 0
 
-AFTER_B=$(routers6 4)
+AFTER_B=$(routers6_via 4 "$GW6_B")
+GONE_A=$(routers6_via 4 "$GW6_A")
 echo "ifconf6_routers6_after_b=$AFTER_B"
-if [ "$AFTER_B" -eq 1 ]; then pass ifconf6_replaced_not_added
+echo "ifconf6_routers6_a_left=$GONE_A"
+if [ "$AFTER_B" -eq 1 ] && [ "$GONE_A" -eq 0 ]; then
+    pass ifconf6_replaced_not_added
 else fail ifconf6_replaced_not_added; fi
-says   ifconf6_router_b_is_b "SYS:netstat -r" 4 "$GW6_B"
-denies ifconf6_router_a_gone "SYS:netstat -r" 4 "$GW6_A([^0-9a-fA-F:]|$)"
 
 # ---- 6. what it cannot do is refused by name ------------------------------
 
@@ -398,9 +414,11 @@ says    ifconf6_configure6_names_file "$CONF6_CMD" 1 'DEVS:NetInterfaces/eth0'
 BOTH_CMD="SYS:ConfigureNetInterface eth0 ADDRESS 10.77.0.5 ADDRESS6 2001:db8:6726:1::99"
 want_rc ifconf6_mixed_rc "$BOTH_CMD" 1 10
 denies  ifconf6_mixed_no_v4_written "SYS:netstat -i" 2 '10\.77\.0\.5'
+says    ifconf6_mixed_still_v4_less "SYS:netstat -i" 2 \
+    '^eth0[[:space:]]+[0-9]+[[:space:]]+0\.0\.0\.0'
 says    ifconf6_mixed_v6_intact     "SYS:netstat -i" 2 '2001:db8:6726:1::10'
 
-AFTER_REFUSALS=$(routers6 5)
+AFTER_REFUSALS=$(routers6_via 5 "$GW6_B")
 echo "ifconf6_routers6_after_refusals=$AFTER_REFUSALS"
 if [ "$AFTER_REFUSALS" -eq 1 ]; then pass ifconf6_refusals_changed_nothing
 else fail ifconf6_refusals_changed_nothing; fi
@@ -412,15 +430,19 @@ want_rc ifconf6_clear_rc \
 says    ifconf6_clear_said \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 1 'default router is cleared'
 
-CLEARED=$(routers6 6)
-echo "ifconf6_routers6_after_clear=$CLEARED"
-if [ "$CLEARED" -eq 0 ]; then pass ifconf6_cleared
+CLEARED_A=$(routers6_via 6 "$GW6_A")
+CLEARED_B=$(routers6_via 6 "$GW6_B")
+echo "ifconf6_routers6_after_clear_a=$CLEARED_A"
+echo "ifconf6_routers6_after_clear_b=$CLEARED_B"
+if [ "$CLEARED_A" -eq 0 ] && [ "$CLEARED_B" -eq 0 ]; then pass ifconf6_cleared
 else fail ifconf6_cleared; fi
 
+# rc only.  Which of the two lines it prints depends on whether a router
+# advertised on this link in the seconds between the two calls, and that is not
+# this harness's to decide; what is being asserted is that clearing something
+# that is not there is not an error.
 want_rc ifconf6_clear_again_rc \
     "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 2 0
-says    ifconf6_clear_again_said \
-    "SYS:ConfigureNetInterface eth0 GATEWAY6 NONE" 2 'no IPv6 default router to clear'
 
 echo
 if [ "$FAILED" -ne 0 ]; then
