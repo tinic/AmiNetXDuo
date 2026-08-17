@@ -50,6 +50,12 @@ legitimate connections complete during the flood, defended 5 of 5, at no
 measurable cost to handshake latency or throughput when nothing is attacking
 (`tests/tools/run-synflood.sh`, `-u` inverts the verdict for a pre-fix build).
 
+The ceiling is the wire, not the cache: at 2000 SYN/s a defended a2065 drops to
+2 of 5, because the emulated LANCE and the 68020 saturate on receiving SYNs and
+transmitting SYN-ACKs. RFC 4987 says no SYN defence addresses a packet-rate
+attack. At 100/s the state the cache protects is already exhausted many times
+over -- 2500 SYNs held 20 s each is about 2000 outstanding against 512 entries.
+
 ## Declined, with the cost of declining
 
 | Item | Reason |
