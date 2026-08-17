@@ -115,7 +115,7 @@ tests/ipv6/run-bringup.sh          : manual : UNWIRED. how long the network take
 tests/tls/run-api.sh               : manual : UNWIRED. a real HTTPS URL through tls.library
 tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
 tests/tls/run-https.sh             : manual : UNWIRED. the real-HTTPS handshake
-tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the machine down
+tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the machine down. IT ASSERTS NOTHING TODAY: it forwards tests/tls/run-fetch.sh's custom-command status, which is now a SKIP rather than a pass, so the four cases its header documents are visibly unchecked instead of invisibly so
 
 # Reasons other than "no home".
 
