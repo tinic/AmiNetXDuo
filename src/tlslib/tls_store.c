@@ -453,7 +453,7 @@ static TLSRegistrySlot tls_registry[TLS_REGISTRY_SLOTS];
  * tls_conn_for_session() does that dereference, and reads tc_Session through
  * it.
  */
-static TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store)
+TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store)
 {
     TLSConnection *conn = NULL;
     UWORD          i;
@@ -590,12 +590,24 @@ static UINT tls_store_verify(NX_SECURE_X509_CERTIFICATE_STORE *store,
                              ULONG current_time)
 {
     TLSConnection *conn = tls_conn_for_store(store);
+    UINT           status;
 
     if (conn != NULL)
         tls_store_supply(conn, store);
 
-    return _nx_secure_remote_certificate_verify(store, certificate,
-                                                current_time);
+    status = _nx_secure_remote_certificate_verify(store, certificate,
+                                                  current_time);
+
+    /*
+     * The one place in a handshake where the chain has been checked and the
+     * handshake has not yet gone on without it.  Formatting the certificates
+     * and asking a TLSA_VerifyHook both belong here rather than after
+     * _nx_secure_tls_session_start() returns, because a hook that says yes to a
+     * chain that did not verify has to be able to let this handshake continue,
+     * and by the time session_start() has returned it is over either way.  See
+     * src/tlslib/tls_cert.c.
+     */
+    return tls_cert_verdict(conn, store, certificate, status);
 }
 
 /*
