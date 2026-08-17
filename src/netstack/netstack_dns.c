@@ -167,31 +167,16 @@ static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
     return FALSE;
 }
 
-static BOOL ami_ns_dns_rdnss_names(const AmiNetStack *ns,
-                                   const ULONG addr[AMI_CFG_IP6_WORDS])
-{
-    UWORD i;
-
-    for (i = 0; i < ns->ns_RdnssCount; i++)
-    {
-        if (ami_ns6_same(addr, ns->ns_Rdnss[i].nxd_ip_address.v6))
-            return TRUE;
-    }
-
-    return FALSE;
-}
-
 /*
- * A Reply has landed. Read what it carried out of the client and reconcile it,
- * the same shape as the advertisement's below and for the same reason: the
- * client's own thread must not call the DNS client, so it sets
- * ns_Dhcpv6DnsPending and this runs on a caller thread.
+ * A Reply has landed. Read what it carried out of the client and put it into
+ * the resolver, on a caller thread and not on the client's own, for the reason
+ * stated above ns_Rdnss in netstack_internal.h: the DNS client holds its mutex
+ * across a query and that query needs the IP thread.
  */
 static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 {
     AmiResolverConfig *r;
     char               text[AMI_CFG_IP6_STRLEN];
-    UWORD              i;
     UINT               index;
 
     if (!ns->ns_Dhcpv6DnsPending)
@@ -204,63 +189,20 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
 
-    /* Out: what this source named last time and does not name now. */
-    for (i = r->nameserver6_count; i-- != 0; )
-    {
-        ULONG gone[AMI_CFG_IP6_WORDS];
-
-        if (!ami_ns_dns_dhcpv6_names(ns, r->nameserver6[i]))
-            continue;
-
-        gone[0] = r->nameserver6[i][0];
-        gone[1] = r->nameserver6[i][1];
-        gone[2] = r->nameserver6[i][2];
-        gone[3] = r->nameserver6[i][3];
-
-        /* Still named by the new list, so it stays. */
-        {
-            NXD_ADDRESS probe;
-            UINT        slot;
-            BOOL        still = FALSE;
-
-            for (slot = 0; slot < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; slot++)
-            {
-                if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, slot,
-                                                     &probe) != NX_SUCCESS)
-                    continue;
-                if (ami_ns6_same(gone, probe.nxd_ip_address.v6))
-                {
-                    still = TRUE;
-                    break;
-                }
-            }
-
-            if (still)
-                continue;
-        }
-
-        /* The router still advertises it, so it is not ours to take away. */
-        if (ami_ns_dns_rdnss_names(ns, gone))
-            continue;
-
-        if (!ami_config_nameserver6_withdraw(r, gone))
-            continue;
-
-        {
-            NXD_ADDRESS address;
-
-            address.nxd_ip_version       = NX_IP_VERSION_V6;
-            address.nxd_ip_address.v6[0] = gone[0];
-            address.nxd_ip_address.v6[1] = gone[1];
-            address.nxd_ip_address.v6[2] = gone[2];
-            address.nxd_ip_address.v6[3] = gone[3];
-
-            (VOID)nxd_dns_server_remove(&ns->ns_Dns, &address);
-        }
-
-        ami_config_format_ip6(gone, text, sizeof(text));
-        AMI_INFO("netstack: DHCPv6 name server %s withdrawn", text);
-    }
+    /*
+     * There is no withdrawal here, and that is a fact about the client rather
+     * than an omission.  _nx_dhcpv6_process_DNS_server() writes into
+     * nx_dhcpv6_DNS_name_server_address[] and nothing ever clears it
+     * (nxd_dhcpv6_client.c:4697), so a Reply naming fewer servers than the one
+     * before leaves the older entries in place and there is no "no longer
+     * named" signal to act on.  Written down because a withdrawal loop here
+     * would have looked like it worked and never removed anything.
+     *
+     * The advertisement's side does withdraw, because RFC 8106 5.1's lifetime
+     * of zero is an explicit retraction and ami_ns6_rdnss() acts on it; what
+     * that loop must not do is take away an entry this one put there, which is
+     * what the ns_Dhcpv6Dns[] cross-check in it is for.
+     */
 
     /* In: the DNS client first, the configuration only if that worked -- the
        invariant the advertisement path below states. */
