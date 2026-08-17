@@ -300,6 +300,124 @@ amiga_path() {
     printf '%s\n' "$cur"
 }
 
+# ------------------------------------------------------------------ AmiSSL --
+#
+# WHAT THE SNAPSHOT BROUGHT, as opposed to what the archive brings below.
+#
+# AmiSSL is third party and does not change when AmiNetXDuo is rebuilt, so it
+# rides in the snapshot beside ClassicWB rather than being unpacked on every
+# launch, and the rule asserted above -- that the snapshot carries no file of
+# ours -- is about ours and is untouched by it.
+#
+# AmiSSL 5.27 wants AmigaOS 3.0+ and a 68020.  The A600 is a 68000, so the 68k
+# snapshot has none and this says so with the reason attached: a caller that
+# reads `amissl=absent` and nothing else has to go and find out why, and the
+# answer is not a thing that will change.
+#
+# A launch that expected AmiSSL and did not find it stops here, the same way
+# install_check and driver_match stop one.  A guest that came up without it
+# would serve every page it serves now and fail the first HTTPS request, which
+# is the shape of failure this rig exists to catch before a user does.
+case "$DIST" in
+    68k) AMISSL_WANT=no
+         AMISSL_WHY="AmiSSL 5.27 needs a 68020 and the $MODEL is a 68000" ;;
+    *)   AMISSL_WANT=yes
+         AMISSL_WHY="" ;;
+esac
+say amissl_expected "$AMISSL_WANT"
+
+# The version out of the binary's own VERSION tag.  A filename is what
+# somebody typed; this is what the library will tell the guest it is.
+amissl_verstag() {
+    LC_ALL=C tr -c '[:print:]' '\n' < "$1" | grep -m1 '^\$VER: ' || true
+}
+
+AMISSL_MASTER=$(amiga_path Libs/amisslmaster.library || true)
+AMISSL_LIBDIR=$(amiga_path Libs/AmiSSL || true)
+AMISSL_LIB=""
+[ -n "$AMISSL_LIBDIR" ] &&
+    AMISSL_LIB=$(ls -1 "$AMISSL_LIBDIR"/amissl_v*.library 2>/dev/null | head -1)
+
+if [ -n "$AMISSL_MASTER" ] && [ -n "$AMISSL_LIB" ]; then
+    AMISSL_CERTS=$(amiga_path AmiSSL/Certs || true)
+    say amissl "$(amissl_verstag "$AMISSL_LIB" | awk '{print $3}')"
+    say amissl_library "$(basename "$AMISSL_LIB")"
+    say amissl_library_bytes "$(wc -c < "$AMISSL_LIB" | tr -d ' ')"
+    say amissl_master "$(amissl_verstag "$AMISSL_MASTER" | awk '{print $3}')"
+    say amissl_certs \
+        "$(ls -1 "${AMISSL_CERTS:-/nonexistent}" 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$AMISSL_WANT" = no ]; then
+        say error "the $DIST snapshot carries AmiSSL and $AMISSL_WHY -- a\
+ library this machine cannot open is worse than none"
+        exit 1
+    fi
+    say amissl_check ok
+else
+    say amissl absent
+    if [ "$AMISSL_WANT" = yes ]; then
+        say amissl_reason "the $DIST snapshot carries none"
+        say error "$MODEL expects AmiSSL and the snapshot has no\
+ Libs/AmiSSL/amissl_v#?.library -- rebuild it with\
+ ~/amiga-assets/classicwb/install.sh $DIST"
+        exit 1
+    fi
+    say amissl_reason "$AMISSL_WHY"
+fi
+
+# ------------------------------------------------------- the AmiSSL probe --
+#
+# install/test/amisslprobe.c, staged into C: so the standing guest can be
+# asked whether AmiSSL WORKS rather than whether its file is on the drive.
+# Everything above is this host reading bytes it copied itself; the probe
+# opens the library on the Amiga, initialises it, and gets the version string
+# back out of it by calling into it.
+#
+# It is not run here.  Opening a 3.5 MB library on a 68020 is minutes -- see
+# the number the probe itself prints -- and that is a cost every launch would
+# pay for an answer that does not change between launches.  Run it from the
+# web shell, or from the Shell on the guest, and read DH0:amisslprobe.txt.
+#
+# The AmiSSL SDK supplies the headers.  It is not in the public tree and never
+# will be, so this is skipped rather than fatal when the asset store is not
+# on the machine: the probe is a diagnostic and a launch without one is still
+# a launch.
+AMISSL_SDK="${AMINETXDUO_AMISSL_SDK:-}"
+if [ "$AMISSL_WANT" = yes ] && [ -z "$AMISSL_SDK" ]; then
+    SDK_LHA=$(ls -1 "$HOME"/amiga-assets/amissl/archives/AmiSSL-*-SDK.lha \
+              2>/dev/null | head -1)
+    SDK_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/amissl-sdk"
+    if [ -n "$SDK_LHA" ]; then
+        if [ ! -d "$SDK_DIR/AmiSSL/Developer" ]; then
+            rm -rf "$SDK_DIR"
+            mkdir -p "$SDK_DIR"
+            ( cd "$SDK_DIR" && lha xq "$SDK_LHA" ) >/dev/null 2>&1 || true
+        fi
+        [ -d "$SDK_DIR/AmiSSL/Developer" ] &&
+            AMISSL_SDK="$SDK_DIR/AmiSSL/Developer"
+    fi
+fi
+if [ "$AMISSL_WANT" = yes ] && [ -n "$AMISSL_SDK" ] &&
+   [ -f "$AMISSL_SDK/include/proto/amissl.h" ]; then
+    # -m68000 for the same reason installdrive.c is: nothing in it needs
+    # 68020 codegen.  The library it opens does, and the machine it is staged
+    # on has one, but that is the library's business and not this file's.
+    PROBE="$ROOT/build/cwb-amisslprobe-$TAG"
+    if "$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -I"$AMIGA_NDK" \
+        -I"$AMISSL_SDK/include" -D__amigaos3__=1 \
+        -o "$PROBE" "$ROOT/install/test/amisslprobe.c" \
+        > "$ROOT/build/cwb-amisslprobe-$TAG.log" 2>&1; then
+        cp "$PROBE" "$HD/C/amisslprobe"
+        chmod 755 "$HD/C/amisslprobe"
+        say amissl_probe "C:amisslprobe"
+        say amissl_probe_bytes "$(wc -c < "$PROBE" | tr -d ' ')"
+    else
+        say warning "install/test/amisslprobe.c did not build; see\
+ $ROOT/build/cwb-amisslprobe-$TAG.log"
+    fi
+elif [ "$AMISSL_WANT" = yes ]; then
+    say amissl_probe "absent: no AmiSSL SDK"
+fi
+
 # The download, where a download would be: its own drawer, and not the one the
 # Installer is going to create.  install/test/installdrive.c spells this path.
 UNP="$HD/Unpacked/AmiNetXDuo"
