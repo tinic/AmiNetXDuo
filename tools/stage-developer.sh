@@ -42,15 +42,32 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #              struct, no vectors, same shape as in6.h.
 PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h)
 
+# Copy only when the bytes differ.  The CMake build re-runs this on EVERY
+# build (developer_drawer, tests/tools/CMakeLists.txt) so that editing a
+# drawer header is not compiled from a stale stage; a plain cp gives the
+# destination a new mtime every time, and IfNames.c and V6Only.c are compiled
+# from the stage, so an untouched tree recompiled and relinked both of them on
+# every no-op build.
+stage() {
+    local src="$1" dst="$2"
+    mkdir -p "$(dirname "$dst")"
+    cmp -s "$src" "$dst" || cp "$src" "$dst"
+}
+
 mkdir -p "$DEST/include/aminetxduo" "$DEST/sfd" "$DEST/examples"
 
 for h in "${PUBLIC_HEADERS[@]}"; do
-    cp "$ROOT/include/aminetxduo/$h" "$DEST/include/aminetxduo/$h"
+    stage "$ROOT/include/aminetxduo/$h" "$DEST/include/aminetxduo/$h"
 done
 
-# The generated glue is committed, so staging never needs sfdc.
-cp -R "$ROOT/developer/include/." "$DEST/include/"
-cp "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/"
-cp "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
-cp "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/"
-cp "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/"
+# The generated glue is committed, so staging never needs sfdc.  Walked rather
+# than `cp -R` so that stage() sees one file at a time; the drawer's include/
+# is proto/, clib/, lvo/, inline/ and pragmas/, and stage() recreates each.
+while IFS= read -r f; do
+    f=${f#./}
+    stage "$ROOT/developer/include/$f" "$DEST/include/$f"
+done < <(cd "$ROOT/developer/include" && find . -type f)
+stage "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/aminetxduo_lib.sfd"
+stage "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
+stage "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/IfNames.c"
+stage "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/V6Only.c"
