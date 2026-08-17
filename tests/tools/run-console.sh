@@ -903,9 +903,15 @@ EOF
     # server two lines below it.  The wait after it is the drawing -- eight
     # planes of 320x256, a byte at a time, is a few seconds on an emulated
     # 68020 -- and httpd must not start on a half-drawn picture.
+    #
+    # THE REPORT IS AN ARGUMENT, not a redirection.  `Run cmd >file` binds the
+    # redirection to Run, which then gives the process it starts an output
+    # stream of its own: the file collects Run's `[CLI 3]` line and not one
+    # word from the program.  The redirection here is kept anyway, because it
+    # is where Run says whether it managed to start anything at all.
     if [ -n "$CHIP" ]; then
         cat >> "$HD/S/Startup-Sequence" <<EOF
-Run >DH0:chipscreen.txt <NIL: C:chipscreen $(arm_mode_id "$CHIP") $CHIP_W $CHIP_H $depth
+Run >DH0:chipscreen-run.txt <NIL: C:chipscreen $(arm_mode_id "$CHIP") $CHIP_W $CHIP_H $depth DH0:chipscreen.txt
 C:Wait 15
 EOF
     fi
@@ -1504,7 +1510,9 @@ for arm in "${ARMS[@]}"; do
                 say "${tag}_chip_$k" "$v"
             done < <(grep '=' "$guest" || true)
         else
-            say "${tag}_chip_result" "C:chipscreen wrote nothing to DH0:"
+            say "${tag}_chip_result" "C:chipscreen wrote no report to DH0:"
+            say "${tag}_chip_run" \
+                "$(tr '\n' ' ' < "$HD/chipscreen-run.txt" 2>/dev/null || true)"
             VERDICT=fail
         fi
 

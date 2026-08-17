@@ -2,11 +2,20 @@
  * Open a chipset screen -- HAM6, HAM8 or extra half-brite -- with a picture on
  * it that a wrong decode cannot fake.
  *
- *   chipscreen [MODEID] [WIDTH] [HEIGHT] [DEPTH]    default 00021800 320 256 6
+ *   chipscreen [MODEID] [WIDTH] [HEIGHT] [DEPTH] [REPORT]
+ *                                              default 00021800 320 256 6
  *
- * MODEID is hex, the others decimal.  DEPTH 0 reports the Workbench screen and
- * returns without opening anything, which is how to ask whether screenmode.prefs
- * moved Workbench at all.
+ * MODEID is hex, the next three decimal.  DEPTH 0 reports the Workbench screen
+ * and returns without opening anything, which is how to ask whether
+ * screenmode.prefs moved Workbench at all.
+ *
+ * REPORT is a file to write the key=value lines to, and the harness always
+ * names one.  `Run C:chipscreen >file` does NOT redirect this program: the
+ * Shell binds that redirection to Run, and Run gives the process it starts an
+ * output stream of its own -- the file gets Run's `[CLI 3]` line and nothing
+ * else, which is exactly what the first run of this arm collected.  A file
+ * this opens itself is the one route that does not depend on how a shell
+ * parses the line it was started from.
  *
  * A TEST TOOL, for the same reason tests/perf/rtgscreen.c is one, and then for
  * a second reason that is the whole point of this file.
@@ -61,6 +70,10 @@
    in.  See rtgscreen.c, where a NULL GfxBase was a jump through zero. */
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
+
+/* Where every key=value goes.  stdout until a REPORT argument opens a file,
+   so a run started by hand from a Shell still prints. */
+static FILE *rep;
 
 /* What the picture is made of, which follows the mode and the depth exactly
    as fb_planar_format() in src/tools/httpfb.c follows them.  The guest and the
@@ -322,6 +335,25 @@ static ULONG arg_hex(const char **p, ULONG fallback)
     return digits ? v : fallback;
 }
 
+/* The rest of the line as a file name, or NULL when there is none.  Copied out
+   because GetArgStr()'s buffer is not this program's to write a terminator
+   into. */
+static const char *arg_name(const char **p)
+{
+    static char name[128];
+    const char *s = *p;
+    int n = 0;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+    while (*s != '\0' && *s != ' ' && *s != '\t' && *s != '\n' &&
+           n < (int)sizeof(name) - 1)
+        name[n++] = *s++;
+    name[n] = '\0';
+    *p = s;
+    return (n > 0) ? name : NULL;
+}
+
 /* What the front screen would be without this program: whether screenmode.prefs
    moved Workbench at all, and to what.  Printed before anything is opened,
    because after that the answer is this program's own screen. */
@@ -332,17 +364,17 @@ static VOID report_workbench(VOID)
 
     if (wb == NULL)
     {
-        printf("wb_screen=none\n");
+        fprintf(rep, "wb_screen=none\n");
         return;
     }
 
     id = GetVPModeID(&wb->ViewPort);
-    printf("wb_mode=%08lx\n", (unsigned long)id);
-    printf("wb_size=%ldx%ld\n", (long)wb->Width, (long)wb->Height);
-    printf("wb_depth=%d\n", (int)wb->RastPort.BitMap->Depth);
-    printf("wb_ham=%s\n", (id != (ULONG)INVALID_ID && (id & HAM_KEY) != 0UL)
+    fprintf(rep, "wb_mode=%08lx\n", (unsigned long)id);
+    fprintf(rep, "wb_size=%ldx%ld\n", (long)wb->Width, (long)wb->Height);
+    fprintf(rep, "wb_depth=%d\n", (int)wb->RastPort.BitMap->Depth);
+    fprintf(rep, "wb_ham=%s\n", (id != (ULONG)INVALID_ID && (id & HAM_KEY) != 0UL)
                           ? "yes" : "no");
-    printf("wb_ehb=%s\n",
+    fprintf(rep, "wb_ehb=%s\n",
            (id != (ULONG)INVALID_ID && (id & EXTRAHALFBRITE_KEY) != 0UL)
            ? "yes" : "no");
     UnlockPubScreen(NULL, wb);
@@ -385,6 +417,7 @@ int main(VOID)
 {
     struct Screen *sc;
     const char *args = (const char *)GetArgStr();
+    const char *report;
     ULONG id, width, height, depth, colours, open_id;
     int kind;
 
@@ -394,14 +427,24 @@ int main(VOID)
     width  = arg_word(&args, 320UL);
     height = arg_word(&args, 256UL);
     depth  = arg_word(&args, 6UL);
+    report = arg_name(&args);
+
+    rep = stdout;
+    if (report != NULL)
+    {
+        FILE *f = fopen(report, "w");
+
+        if (f != NULL)
+            rep = f;
+    }
 
     /* Unbuffered: the success path never returns, so anything left in a stdio
        buffer is output nobody ever sees. */
-    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(rep, NULL, _IONBF, 0);
 
-    printf("args_mode=%08lx\n", (unsigned long)id);
-    printf("args_size=%lux%lu\n", (unsigned long)width, (unsigned long)height);
-    printf("args_depth=%lu\n", (unsigned long)depth);
+    fprintf(rep, "args_mode=%08lx\n", (unsigned long)id);
+    fprintf(rep, "args_size=%lux%lu\n", (unsigned long)width, (unsigned long)height);
+    fprintf(rep, "args_depth=%lu\n", (unsigned long)depth);
 
     GfxBase = (struct GfxBase *)
         OpenLibrary((CONST_STRPTR)"graphics.library", 39);
@@ -409,7 +452,7 @@ int main(VOID)
         OpenLibrary((CONST_STRPTR)"intuition.library", 39);
     if (GfxBase == NULL || IntuitionBase == NULL)
     {
-        printf("result=no graphics.library or intuition.library at V39\n");
+        fprintf(rep, "result=no graphics.library or intuition.library at V39\n");
         return RETURN_FAIL;
     }
 
@@ -420,13 +463,13 @@ int main(VOID)
        boot on this line with the server still further down the sequence. */
     if (depth == 0UL)
     {
-        printf("result=reported\n");
+        fprintf(rep, "result=reported\n");
         return RETURN_OK;
     }
 
     if (width < 16UL || width > MAX_WIDTH || height < 16UL || depth > 8UL)
     {
-        printf("result=%lux%lux%lu is outside what this draws\n",
+        fprintf(rep, "result=%lux%lux%lu is outside what this draws\n",
                (unsigned long)width, (unsigned long)height,
                (unsigned long)depth);
         return RETURN_FAIL;
@@ -445,7 +488,7 @@ int main(VOID)
 
     if (sc == NULL)
     {
-        printf("result=OpenScreen refused mode %08lx at %lux%lu depth %lu\n",
+        fprintf(rep, "result=OpenScreen refused mode %08lx at %lux%lu depth %lu\n",
                (unsigned long)id, (unsigned long)width,
                (unsigned long)height, (unsigned long)depth);
         return RETURN_FAIL;
@@ -471,13 +514,13 @@ int main(VOID)
     PubScreenStatus(sc, 0);
     ScreenToFront(sc);
 
-    printf("screen_mode=%08lx\n", (unsigned long)open_id);
-    printf("screen_size=%ldx%ld\n", (long)sc->Width, (long)sc->Height);
-    printf("screen_depth=%lu\n", (unsigned long)depth);
-    printf("pattern=%s\n", pattern_name[kind]);
-    printf("palette_entries=%lu\n", (unsigned long)colours);
-    printf("result=open\n");
-    fflush(stdout);
+    fprintf(rep, "screen_mode=%08lx\n", (unsigned long)open_id);
+    fprintf(rep, "screen_size=%ldx%ld\n", (long)sc->Width, (long)sc->Height);
+    fprintf(rep, "screen_depth=%lu\n", (unsigned long)depth);
+    fprintf(rep, "pattern=%s\n", pattern_name[kind]);
+    fprintf(rep, "palette_entries=%lu\n", (unsigned long)colours);
+    fprintf(rep, "result=open\n");
+    fflush(rep);
 
     /* And it stays.  A screen that closed when this returned would be in front
        for no part of the session it exists for. */
