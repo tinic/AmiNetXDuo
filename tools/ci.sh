@@ -1199,6 +1199,23 @@ stage_bridged() {
         *) fail "netshutdown: the transcript above is the whole run" ; bad=1 ;;
     esac
 
+    # Here rather than in the emulator tier because it is bridged only and
+    # that tier runs on SLIRP.  It needs no peer and puts no traffic on the
+    # link: the bridge is there because a result taken over slirp says nothing
+    # about the stack, and every assertion is on what the guest printed.
+    printf '\n-- ConfigureNetInterface on an interface that has only IPv6\n'
+    rc=0
+    "$ROOT/tests/tools/run-ifconfigure6.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+    case "$rc" in
+        0) note "PASS  it came up on IPv6 alone, GATEWAY6 changed the route" \
+                "and replaced rather than accumulated, and ADDRESS6 and" \
+                "CONFIGURE6 were refused by name having changed nothing" ;;
+        2) fail "ifconfigure6: an ingredient is missing, or the guest ran" \
+                "fewer commands than the list has" ; bad=1 ;;
+        *) fail "ifconfigure6: the transcript above is the whole run" ; bad=1 ;;
+    esac
+
     # The peer that carries tc and tcpdump with capabilities, which is the
     # same one tests/perf/run-lossgate.sh needs and not AMINETXDUO_PEER: this
     # drill loses the guest's first ARP on purpose and cannot do it from here.
