@@ -16,7 +16,8 @@
  *   4   u16  width
  *   6   u16  height
  *   8   u8   depth            1..8 planar, 8 CLUT8, 16 RGB565
- *   9   u8   format           rfb_geom.format: 0 planar, 1 CLUT8, 2 RGB565
+ *   9   u8   format           rfb_geom.format: 0 planar, 1 CLUT8, 2 RGB565,
+ *                               3 HAM6, 4 HAM8, 5 EHB
  *   10  u16  bytesPerRow      NOT width/8
  *   12  u16  frameCount
  *   14  u16  pointerCount     pointer images at the end; 0 when there are none
@@ -113,7 +114,7 @@ import {
   FMT_CLUT8,
   frameBytes,
   palColours,
-  palette32,
+  renderPalette,
   screenFault,
   screenFormat,
   type Screen,
@@ -445,8 +446,9 @@ export function parsePfs(buf: ArrayBuffer): Capture {
     frameCount,
     rgb,
     /* Empty on a truecolour capture, and the decoder never looks at it: the
-       pixels carry their own colour. */
-    palette: palette32(rgb, palColours(screen)),
+       pixels carry their own colour.  Longer than the file on an EHB one,
+       where the half-bright half is made rather than stored. */
+    palette: renderPalette(screen, rgb),
     frames: b.subarray(PFS_HEADER + palBytes, pixels),
     stride,
     times,

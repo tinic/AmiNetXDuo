@@ -189,6 +189,15 @@ typedef struct FbGeometry
      * RFB_FMT_RGB565 is two bytes a pixel and no palette, which is what a 15,
      * 16, 24 or 32-bit card screen is converted to before it gets here.
      *
+     * RFB_FMT_HAM6, RFB_FMT_HAM8 and RFB_FMT_EHB are the chipset too, and this
+     * file treats them exactly as it treats RFB_FMT_PLANAR: the same planes at
+     * the same stride, read where they lie.  What they change is one number
+     * here -- how long the `pal` word is -- and what the browser does with an
+     * index after it has one.  The decode is the receiver's because HAM runs
+     * along a scanline, each pixel from the one before it, and that is a
+     * per-pixel chain on a 68000 for a picture the browser is going to walk
+     * anyway.  fb_planar_format() is where the mode is read.
+     *
      * row_bytes is bytes either way, so everything downstream that counts in
      * bytes is unchanged by any of this.  Only three things ask: how many
      * planes there are, how wide a row is, and whether there is a palette to
@@ -736,7 +745,59 @@ static int fb_unsure(VOID)
     return FB_GEOM_UNSURE;
 }
 
-static int fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
+/*
+ * Which of the planar pixel meanings a chipset screen carries.
+ *
+ * The answer is on the ViewPort and not in the bitmap.  HAM6, HAM8 and extra
+ * half-brite are ordinary planar bitmaps -- the same planes, the same stride,
+ * the same bytes -- and nothing in the BitMap says what the display hardware
+ * does with an index once it has assembled one.  Only the mode does.
+ *
+ * Read from GetVPModeID(), which is the display database's answer and the one
+ * Intuition asks itself.  The ViewPort's own Modes word is the fallback for a
+ * viewport the database does not know; it carries the same two bits at the
+ * same two values, which is why the mode id can be masked with them directly.
+ *
+ * Not inferred from the depth, in either direction.  Six planes is a plain
+ * 64-colour screen far more often than it is either of the two modes that are
+ * also six deep, and a plain screen drawn as HAM6 is three quarters of the
+ * picture turned into a modify of the pixel to its left.
+ *
+ * A mode bit at a depth the mode does not have is ignored rather than
+ * honoured.  Extra half-brite below six planes cannot reach the half-bright
+ * half at all, so it is the plain screen it already behaves as, and HAM at
+ * anything other than six or eight planes is not a HAM screen.  Neither is
+ * refused: the planes are readable and a plain palette draw is the honest
+ * reading of them.
+ */
+static UWORD fb_planar_format(struct ViewPort *vp, ULONG depth)
+{
+    ULONG id;
+    ULONG modes;
+
+    if (vp == NULL)
+        return (UWORD)RFB_FMT_PLANAR;
+
+    id    = GetVPModeID(vp);
+    modes = (id != (ULONG)INVALID_ID) ? id : (ULONG)(UWORD)vp->Modes;
+
+    if ((modes & HAM_KEY) != 0UL)
+    {
+        if (depth == 6UL)
+            return (UWORD)RFB_FMT_HAM6;
+        if (depth == 8UL)
+            return (UWORD)RFB_FMT_HAM8;
+        return (UWORD)RFB_FMT_PLANAR;
+    }
+
+    if ((modes & EXTRAHALFBRITE_KEY) != 0UL && depth == 6UL)
+        return (UWORD)RFB_FMT_EHB;
+
+    return (UWORD)RFB_FMT_PLANAR;
+}
+
+static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
+                          FbGeometry *g, BOOL may_ask_rtg)
 {
     ULONG flags;
     ULONG depth;
@@ -944,6 +1005,13 @@ static int fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
     g->row_stride  = stride;
     g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height * depth;
 
+    /* Last, because it is the only thing here that is not a property of the
+       bitmap, and because it needs the depth the checks above have settled.
+       It changes nothing this function has just measured -- a HAM screen is
+       the same planes at the same stride -- only what the receiver is told to
+       make of them. */
+    g->format = fb_planar_format(vp, depth);
+
     return FB_GEOM_OK;
 }
 
@@ -966,13 +1034,6 @@ VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
 /* ---------------------------------------------------------------- palette -- */
 
 /*
- * 3 * (1 << depth) bytes whatever the ColorMap holds.  A screen whose map is
- * shorter than its depth leaves the tail black rather than shortening the
- * word, so the receiver's arithmetic is the depth and nothing else.
- *
- * TRUE when it changed, which is what decides whether a `pal` word goes out.
- */
-/*
  * How many colours this screen's `pal` word carries, and 0 when it has none.
  *
  * Asked of the wire format rather than computed here, because 1 << depth is
@@ -992,6 +1053,13 @@ static ULONG fb_colours(const FbGeometry *g)
     return (ULONG)rfb_pal_colours(&q);
 }
 
+/*
+ * 3 * `colours` bytes whatever the ColorMap holds.  A screen whose map is
+ * shorter than that leaves the tail black rather than shortening the word, so
+ * the receiver's arithmetic is fb_colours() and nothing else.
+ *
+ * TRUE when it changed, which is what decides whether a `pal` word goes out.
+ */
 static BOOL fb_read_palette(struct ColorMap *cm, ULONG colours, UBYTE *pal)
 {
     /* Static rather than automatic: 768 bytes at depth 8, and a Shell command
@@ -1684,7 +1752,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     UWORD plane;
     int   what;
 
-    what = fb_geometry_of(sc->RastPort.BitMap, now, locked);
+    what = fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort, now, locked);
 
     /* Nothing this pass, rather than the end of the session.  The bitmap could
        not be identified from here, so the next pass resolves the front screen
@@ -2487,8 +2555,8 @@ BOOL http_fb_open(VOID)
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom, pub)
-                    == FB_GEOM_OK);
+        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort,
+                                   &fb_open_geom, pub) == FB_GEOM_OK);
     else
         fb_say("the front screen closed while it was being looked at");
 
@@ -2584,7 +2652,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &g, pub) == FB_GEOM_OK);
+        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort, &g,
+                                   pub) == FB_GEOM_OK);
     else
         fb_say("the front screen closed while it was being looked at");
 

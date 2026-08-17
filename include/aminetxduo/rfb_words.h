@@ -26,20 +26,35 @@
  *                         big-endian ((r5 << 11) | (g6 << 5) | b5), DEPTH is
  *                         16 and is bits a pixel.  NO `pal` FOLLOWS ONE OF
  *                         THESE, ever; see below.
+ *                       3 HAM6.  Six one-bit planes, laid out exactly as 0.
+ *                         An index's low four bits are data and its top two
+ *                         are what to do with them: 0 take base colour
+ *                         `data`, 1 replace blue, 2 replace red, 3 replace
+ *                         green, each in the colour of the pixel to the LEFT.
+ *                         A row starts from base colour 0.  16 colours in the
+ *                         `pal`.
+ *                       4 HAM8.  Eight planes, six data bits and two control,
+ *                         the same four operations.  A modify sets the top
+ *                         six bits of the component and keeps its low two.
+ *                         64 colours in the `pal`.
+ *                       5 extra half-brite.  Six planes, 32 colours in the
+ *                         `pal`, and indices 32..63 are 0..31 at half
+ *                         brightness -- the receiver builds that half itself
+ *                         rather than being sent it twice.
  *                     It decides which tile op the binary frames carry and
  *                     how a byte column turns into a pixel column, so a
  *                     viewer that ignored it would draw a chunky screen eight
  *                     times too wide.
- *                     A number rather than a flag because the list is going
- *                     to grow: the chipset modes where a plane is not a
- *                     palette index -- HAM6, HAM8, extra half-brite -- are
- *                     distinct pixel meanings over the same planar layout,
- *                     and each is a value here.  An unrecognised FORMAT is
- *                     refused by the viewer rather than drawn, which is the
- *                     one place the ignore-what-you-do-not-know rule below
- *                     does not apply: a format guessed wrong is a picture
- *                     made of the wrong bytes and it looks like a fault in
- *                     the server.
+ *                     A number rather than a flag, which is what let 3, 4 and
+ *                     5 arrive without the wire changing at all: they are
+ *                     distinct pixel meanings over the layout format 0
+ *                     already had, so the frames, the tiles, the PackBits and
+ *                     the XOR deltas are the same bytes they always were.
+ *                     An unrecognised FORMAT is refused by the viewer rather
+ *                     than drawn, which is the one place the
+ *                     ignore-what-you-do-not-know rule below does not apply:
+ *                     a format guessed wrong is a picture made of the wrong
+ *                     bytes and it looks like a fault in the server.
  *                     It is also the stream's only barrier: both ends zero
  *                     their shadow on it, and the next frame is a full one.
  *                     Frames still in flight when it arrives belong to the
@@ -53,11 +68,11 @@
  *                     use it; 1 << DEPTH is right only on FORMAT 0.  A format
  *                     whose answer is 0 -- truecolour today -- sends no `pal`
  *                     at all, and a viewer that waits for one before it draws
- *                     shows nothing for the whole session.  The modes coming
- *                     after truecolour are the other side of the same point:
- *                     HAM6 is six planes deep with sixteen base colours and
- *                     HAM8 is eight deep with sixty-four, so both send a
- *                     `pal` far shorter than their depth implies.
+ *                     shows nothing for the whole session.  The chipset modes
+ *                     are the other side of the same point: HAM6 is six planes
+ *                     deep with sixteen base colours, HAM8 eight deep with
+ *                     sixty-four and EHB six deep with thirty-two, so all
+ *                     three send a `pal` shorter than their depth implies.
  *   ptr W H DEPTH XS YS HOTX HOTY RRGGBB... BITS
  *                     the mouse pointer's IMAGE, which is a hardware sprite
  *                     and is therefore in no frame this ever sends.  Seven

@@ -38,8 +38,9 @@ import {
   FMT_RGB565,
   frameBytes,
   palColours,
-  palette32,
   pixelAspect,
+  renderPalette,
+  screenColours,
   screenFormat,
   type Screen,
 } from "./planar";
@@ -89,12 +90,13 @@ function showGeometry(): void {
   const s = view.geometry;
   if (s.width === 0) { geomEl.textContent = "-"; return; }
   const a = pixelAspect(s);
-  /* Colours the screen can show, which on the palette formats is how many
-     entries it has and on the 16-bit one is what R5G6B5 can express.  Both
-     are 1 << depth, and it is the same sentence to a person either way. */
+  /* Colours the screen can show, which is not always how many arrive in the
+     `pal` word: a HAM screen sends sixteen or sixty-four base entries and puts
+     up thousands.  screenColours() is the one that answers the question a
+     person is asking. */
   geomEl.textContent =
     s.width + "x" + s.height + "x" + s.depth +
-    "  " + (1 << s.depth) + " colours" +
+    "  " + screenColours(s) + " colours" +
     "  bpr " + s.bytesPerRow +
     "  " + frameBytes(s) + " B/frame" +
     "  displayed " + s.width * a.x + "x" + s.height * a.y;
@@ -378,10 +380,9 @@ function heard(w: string): void {
        * these empty and neither of them read -- 1 << 16 grey entries would
        * be a palette nothing ever looks at.
        */
-      const colours = palColours(g.screen);
-      const rgb = greyPalette(colours);
+      const rgb = greyPalette(palColours(g.screen));
       liveRgb = rgb;
-      view.setScreen(g.screen, palette32(rgb, colours));
+      view.setScreen(g.screen, renderPalette(g.screen, rgb));
       showGeometry();
       /* Before the pal that follows, so the file that closes here keeps the
          palette its frames were drawn with. */
@@ -434,10 +435,9 @@ function heard(w: string): void {
          hex digits.  Dropped rather than thrown: the picture is correct
          without it and the word is already in the log. */
       if (screenFormat(geom.screen) === FMT_RGB565) return;
-      const colours = palColours(geom.screen);
-      const rgb = paletteFromWord(w, colours);
+      const rgb = paletteFromWord(w, palColours(geom.screen));
       liveRgb = rgb;
-      view.setPalette(palette32(rgb, colours));
+      view.setPalette(renderPalette(geom.screen, rgb));
       if (planes !== null) view.paint(planes, 0);
       recRoll();
       return;

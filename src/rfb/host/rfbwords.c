@@ -73,6 +73,35 @@ static void word_geom(void)
     g.format = RFB_FMT_CLUT8;
     (void)rfb_word_geom(out, sizeof(out), &g);
     eq(out, "geom 640 480 8 640 16 16 1", "geom, a 640x480 8-bit RTG screen");
+
+    /* The three chipset modes.  Byte for byte a planar screen, so the only
+       thing in the word that separates them from format 0 is the last number,
+       and a viewer that read it as a depth would draw all three as a plain
+       palette screen and never say anything was wrong. */
+    g.width = 320;
+    g.height = 256;
+    g.depth = 6;
+    g.bytes_per_row = 40;
+    g.format = RFB_FMT_HAM6;
+    (void)rfb_word_geom(out, sizeof(out), &g);
+    eq(out, "geom 320 256 6 40 16 16 3", "geom, a 320x256 HAM6 screen");
+
+    g.format = RFB_FMT_EHB;
+    (void)rfb_word_geom(out, sizeof(out), &g);
+    eq(out, "geom 320 256 6 40 16 16 5", "geom, the same screen in half-brite");
+
+    g.width = 640;
+    g.height = 480;
+    g.depth = 8;
+    g.bytes_per_row = 80;
+    g.format = RFB_FMT_HAM8;
+    (void)rfb_word_geom(out, sizeof(out), &g);
+    eq(out, "geom 640 480 8 80 16 16 4", "geom, a 640x480 HAM8 screen");
+
+    g.width = 640;
+    g.height = 256;
+    g.depth = 2;
+    g.bytes_per_row = 80;
     g.format = RFB_FMT_PLANAR;
 
     /* The largest possible one still fits the buffer that the header promises. */
@@ -225,9 +254,81 @@ static void words_refused(void)
         "an unknown word leaves nothing behind");
 }
 
+
+/*
+ * How long a `pal` is, per format.
+ *
+ * The server sizes the word it sends from this and the receiver sizes the
+ * array it parses into, both before a frame has gone either way, so the two
+ * agree here or they do not agree at all.  1 << depth is the answer on one
+ * format out of six and is checked against the five it is wrong for.
+ */
+static void pal_colours(void)
+{
+    rfb_geom g;
+
+    memset(&g, 0, sizeof(g));
+    g.width = 320;
+    g.height = 256;
+    g.bytes_per_row = 40;
+    g.tile_w = 16;
+    g.tile_h = 16;
+
+    g.depth = 5;
+    g.format = RFB_FMT_PLANAR;
+    yes(rfb_pal_colours(&g) == 32u, "planar carries 1 << depth");
+
+    g.depth = 8;
+    g.format = RFB_FMT_CLUT8;
+    yes(rfb_pal_colours(&g) == 256u, "chunky carries 256");
+
+    g.depth = RFB_RGB565_DEPTH;
+    g.format = RFB_FMT_RGB565;
+    yes(rfb_pal_colours(&g) == 0u, "truecolour carries no palette");
+
+    /* Six planes, sixty-four indices, and sixteen colours: the depth says
+       nothing about the length here and that is the whole point of asking. */
+    g.depth = 6;
+    g.format = RFB_FMT_HAM6;
+    yes(rfb_pal_colours(&g) == 16u, "HAM6 carries 16 base colours");
+
+    g.format = RFB_FMT_EHB;
+    yes(rfb_pal_colours(&g) == 32u, "half-brite carries 32, not 64");
+
+    g.depth = 8;
+    g.format = RFB_FMT_HAM8;
+    yes(rfb_pal_colours(&g) == 64u, "HAM8 carries 64 base colours");
+
+    /* All three are planes and not one chunky one, which is what decides
+       whether the encoder walks the bitmap or a byte array. */
+    g.depth = 6;
+    g.format = RFB_FMT_HAM6;
+    yes(rfb_planes(&g) == 6, "HAM6 is six planes");
+    g.format = RFB_FMT_EHB;
+    yes(rfb_planes(&g) == 6, "half-brite is six planes");
+    g.depth = 8;
+    g.format = RFB_FMT_HAM8;
+    yes(rfb_planes(&g) == 8, "HAM8 is eight planes");
+
+    /* Each mode has one depth, and a screen at another is refused at init
+       rather than drawn with its control bits taken for picture. */
+    g.depth = 8;
+    g.format = RFB_FMT_HAM6;
+    yes(rfb_shadow_size(&g) == 0u, "HAM6 is refused at eight planes");
+    g.format = RFB_FMT_EHB;
+    yes(rfb_shadow_size(&g) == 0u, "half-brite is refused at eight planes");
+    g.depth = 6;
+    g.format = RFB_FMT_HAM8;
+    yes(rfb_shadow_size(&g) == 0u, "HAM8 is refused at six planes");
+
+    g.format = 6;
+    yes(rfb_shadow_size(&g) == 0u, "a format nothing knows is refused");
+}
+
 int main(void)
 {
     word_geom();
+    pal_colours();
     word_pal();
     words_in();
     words_pointer();

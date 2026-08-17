@@ -49,8 +49,13 @@
 
 import {
   FMT_CLUT8,
+  FMT_EHB,
+  FMT_HAM6,
+  FMT_HAM8,
   FMT_PLANAR,
   FMT_RGB565,
+  isChunky,
+  isHam,
   planeBytes,
   planeCount,
   pixelsPerByte,
@@ -61,7 +66,7 @@ import {
 
 /* rfb_geom.format, as the `geom` word carries it.  They belong to a Screen
    and are declared with one, and this is where everything else reads them. */
-export { FMT_CLUT8, FMT_PLANAR, FMT_RGB565 };
+export { FMT_CLUT8, FMT_EHB, FMT_HAM6, FMT_HAM8, FMT_PLANAR, FMT_RGB565 };
 
 export const RFB_VERSION = 1;
 
@@ -71,7 +76,7 @@ const OP_TILE = 0x02;
 const OP_TILE8 = 0x03;
 
 /* For the one message that has to name a format rather than test one. */
-const FMT_NAME = ["planar", "chunky", "16-bit"];
+const FMT_NAME = ["planar", "chunky", "16-bit", "HAM6", "HAM8", "EHB"];
 
 const CODE_RAW = 0;
 const CODE_PB_RAW = 1;
@@ -135,15 +140,16 @@ export function geometryFromWord(w: string): Geometry {
   if (n.some((x) => !Number.isInteger(x))) {
     throw new Error("geom has something that is not a whole number: " + w);
   }
-  if (n[6] !== FMT_PLANAR && n[6] !== FMT_CLUT8 && n[6] !== FMT_RGB565) {
+  if (n[6] < FMT_PLANAR || n[6] > FMT_EHB) {
     throw new Error("geom format " + n[6] + " is not one this viewer draws");
   }
   return makeGeometry(
     {
       width: n[0],
       height: n[1],
-      /* Planes on FMT_PLANAR, what sizes the palette on FMT_CLUT8, and bits
-         per pixel on FMT_RGB565.  screenFault() knows which. */
+      /* Planes on FMT_PLANAR and on all three chipset modes, what sizes the
+         palette on FMT_CLUT8, and bits per pixel on FMT_RGB565.  screenFault()
+         knows which, and which depths each one is allowed. */
       depth: n[2],
       bytesPerRow: n[3],
       format: n[6],
@@ -263,8 +269,11 @@ export function applyUpdate(
   /* Which of the two tile ops the stream carries, and therefore whether a
      tile has a plane mask on it.  Both RTG formats have one plane, so both
      use OP_TILE8; how wide a tile's bytes are in pixels is the only thing
-     that separates them and no op reader here needs to know. */
-  const onePlane = fmt !== FMT_PLANAR;
+     that separates them and no op reader here needs to know.
+     The three chipset modes are on the other side of this: they are the Amiga
+     BitMap and carry OP_TILE with a mask, exactly as a plain planar screen
+     does, which is why the test is chunkiness and not format 0. */
+  const onePlane = isChunky(fmt);
   const perByte = pixelsPerByte(g.screen);
 
   const d: Damage = {
@@ -415,5 +424,23 @@ export function applyUpdate(
   }
 
   if (d.x1 <= d.x0) { d.x0 = 0; d.y0 = 0; d.x1 = 0; d.y1 = 0; }
+
+  /*
+   * A HAM row is damaged from its left edge whatever moved in it.
+   *
+   * Every pixel takes its colour from the one before it, so changing a byte
+   * half way along a row changes the meaning of every pixel to the RIGHT of it
+   * as well -- and redrawing only the tile that moved would decode those from
+   * a running colour that is no longer what the encoder had.  Widening the
+   * rectangle to the full width is the whole fix: the rows are the ones that
+   * moved, and a row is what the HAM decoder works in anyway.
+   *
+   * It costs the width of the screen rather than the width of a tile, on a
+   * format that is 320 or 640 pixels across.  Left as a rectangle rather than
+   * pushed into the decoder because the same rectangle is what the caller
+   * uploads to the canvas, and the two must agree.
+   */
+  if (isHam(fmt) && d.x1 > d.x0) { d.x0 = 0; d.x1 = w; }
+
   return d;
 }

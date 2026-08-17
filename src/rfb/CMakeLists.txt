@@ -47,7 +47,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     # The control words against the spellings the browser reads.  Host-side
     # for the reason rfb_words.c is its own file: the words are what the two
     # ends have to agree on, and they can be checked with no Amiga in the room.
-    add_executable(rfbwords host/rfbwords.c rfb_words.c)
+    # rfb_encode.c comes along for rfb_pal_colours(): how long a `pal` is per
+    # format is the one number both ends size a buffer from without having
+    # seen a frame, so it is checked beside the words that carry it.
+    add_executable(rfbwords host/rfbwords.c rfb_words.c rfb_encode.c)
     target_include_directories(rfbwords PRIVATE "${CMAKE_SOURCE_DIR}/include")
     target_compile_options(rfbwords PRIVATE -Wall -Wextra)
     set_target_properties(rfbwords PROPERTIES C_STANDARD 99)

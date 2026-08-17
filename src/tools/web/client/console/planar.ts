@@ -47,6 +47,19 @@
  *                is sent.  depth is 16 and IS BITS PER PIXEL: there is no
  *                palette, none ever arrives, and 1 << depth is not a colour
  *                count anything should ask for.
+ *   FMT_HAM6     six one-bit planes, laid out exactly as FMT_PLANAR.  An
+ *   FMT_HAM8     index is data plus two control bits saying whether it is a
+ *                base colour or one component of the pixel to its left; the
+ *                palette is 16 entries at six planes and 64 at eight.
+ *   FMT_EHB      six one-bit planes, again exactly as FMT_PLANAR, and 32
+ *                colours.  32..63 are 0..31 halved and are built here.
+ *
+ * The last three arrive as the Amiga's own bitplanes because the decode is
+ * cheaper in a browser than on the machine that took them: HAM runs along a
+ * scanline with every pixel depending on the one to its left, which is a
+ * per-pixel chain on a 68000 and a loop here.  So the encoder, the tiles, the
+ * PackBits and the XOR deltas never learned about them at all -- only this
+ * file and the palette length did.
  *
  * Here rather than in tiles.ts because they are what a Screen means; tiles.ts
  * re-exports them, which is where the rest of the page reads them from.
@@ -54,6 +67,23 @@
 export const FMT_PLANAR = 0;
 export const FMT_CLUT8 = 1;
 export const FMT_RGB565 = 2;
+export const FMT_HAM6 = 3;
+export const FMT_HAM8 = 4;
+export const FMT_EHB = 5;
+
+/* One plane of bytes, which is what an RTG screen is.  Everything else is the
+   Amiga BitMap, and the three chipset modes are on that side of the line: they
+   change what an index means and not how the bytes are arranged.  The C side
+   spells the same rule RFB_FMT_IS_CHUNKY(). */
+export function isChunky(format: number): boolean {
+  return format === FMT_CLUT8 || format === FMT_RGB565;
+}
+
+/* Whether an index is a hold-and-modify code rather than a palette entry,
+   which is the one thing that makes a decode sequential along a row. */
+export function isHam(format: number): boolean {
+  return format === FMT_HAM6 || format === FMT_HAM8;
+}
 
 export interface Screen {
   readonly width: number;
@@ -96,13 +126,32 @@ export function palColours(s: Screen): number {
   switch (screenFormat(s)) {
     case FMT_CLUT8: return 256;
     case FMT_RGB565: return 0;
+    case FMT_HAM6: return 16;
+    case FMT_HAM8: return 64;
+    case FMT_EHB: return 32;
     default: return 1 << s.depth;
   }
 }
 
-/* Planes in the source, which is NOT the depth on either chunky format. */
+/*
+ * Colours the screen can put up, which is a different question from how many
+ * arrive in the `pal` word and is asked only by the status line.  A HAM screen
+ * sends sixteen or sixty-four and shows far more than that, because most of
+ * its indices are an adjustment of the pixel to the left rather than an entry.
+ */
+export function screenColours(s: Screen): number {
+  switch (screenFormat(s)) {
+    case FMT_HAM6: return 4096;
+    case FMT_HAM8: return 262144;
+    case FMT_RGB565: return 65536;
+    default: return 1 << s.depth;
+  }
+}
+
+/* Planes in the source, which is NOT the depth on either chunky format.  The
+   chipset modes are all planes and answer their depth. */
 export function planeCount(s: Screen): number {
-  return screenFormat(s) === FMT_PLANAR ? s.depth : 1;
+  return isChunky(screenFormat(s)) ? 1 : s.depth;
 }
 
 export function planeBytes(s: Screen): number {
@@ -117,7 +166,7 @@ export function frameBytes(s: Screen): number {
    bytesPerRow whatever the format is, so this is what turns a byte column
    into a pixel column -- and on a 16-bit screen it is a HALF, which is why
    every caller either multiplies a byte count by it or rounds the result. */
-const PIXELS_PER_BYTE = [8, 1, 0.5];
+const PIXELS_PER_BYTE = [8, 1, 0.5, 8, 8, 8];
 
 export function pixelsPerByte(s: Screen): number {
   return PIXELS_PER_BYTE[screenFormat(s)];
@@ -131,11 +180,12 @@ export function screenFault(s: Screen): string | null {
   if (!Number.isInteger(s.height) || s.height <= 0) return "height " + s.height;
 
   const f = screenFormat(s);
-  if (f !== FMT_PLANAR && f !== FMT_CLUT8 && f !== FMT_RGB565) {
+  if (f !== FMT_PLANAR && f !== FMT_CLUT8 && f !== FMT_RGB565 &&
+      f !== FMT_HAM6 && f !== FMT_HAM8 && f !== FMT_EHB) {
     return "format " + f + ", which is not one this viewer draws";
   }
 
-  /* Bits per pixel on the 16-bit format and a plane count on the other two,
+  /* Bits per pixel on the 16-bit format and a plane count on every other one,
      so the range depends on which it is: refusing 16 here is what a viewer
      that only knew about palettes did, and it is a blank screen. */
   if (f === FMT_RGB565) {
@@ -148,6 +198,13 @@ export function screenFault(s: Screen): string | null {
   } else if (f === FMT_CLUT8 && s.depth !== 8) {
     return "a chunky screen " + s.depth + " deep; a byte is the index, so it " +
            "is 8 or it is not this format";
+  } else if ((f === FMT_HAM6 || f === FMT_EHB) && s.depth !== 6) {
+    /* Six planes is the whole of both modes, and a screen that says otherwise
+       is one whose control bits would be drawn as picture. */
+    return (f === FMT_HAM6 ? "a HAM6" : "an EHB") + " screen " + s.depth +
+           " deep; both modes are six planes";
+  } else if (f === FMT_HAM8 && s.depth !== 8) {
+    return "a HAM8 screen " + s.depth + " deep; the mode is eight planes";
   }
 
   const per = pixelsPerByte(s);
@@ -173,6 +230,21 @@ const LITTLE_ENDIAN = (() => {
   return word[0] === 1;
 })();
 
+/*
+ * Where each component sits in one of those words, and the alpha that is
+ * always on.  Written once here because HAM takes a colour apart and puts it
+ * back together a component at a time, so the byte order stopped being
+ * something one function could keep to itself.
+ */
+const R_SHIFT = LITTLE_ENDIAN ? 0 : 24;
+const G_SHIFT = LITTLE_ENDIAN ? 8 : 16;
+const B_SHIFT = LITTLE_ENDIAN ? 16 : 8;
+const OPAQUE = (LITTLE_ENDIAN ? 0xff000000 : 0x000000ff) >>> 0;
+
+function pack(r: number, g: number, b: number): number {
+  return (OPAQUE | (r << R_SHIFT) | (g << G_SHIFT) | (b << B_SHIFT)) >>> 0;
+}
+
 /* `colours` is entries and NOT a depth: ask palColours() for it, which is the
    one place that knows how many a format has. */
 export function palette32(rgb: Uint8Array, colours: number): Uint32Array {
@@ -184,10 +256,43 @@ export function palette32(rgb: Uint8Array, colours: number): Uint32Array {
 
   const pal = new Uint32Array(n);
   for (let i = 0; i < n; i++) {
+    pal[i] = pack(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+  }
+  return pal;
+}
+
+/*
+ * The table the decoder indexes with, which is not always the palette that
+ * arrived.
+ *
+ * On extra half-brite it is twice as long: the hardware holds thirty-two
+ * registers and shows sixty-four colours, the top half being the bottom half
+ * with every component shifted right one, so the wire carries thirty-two and
+ * the other thirty-two are made here.  Sending sixty-four would be sending
+ * half of them twice and would let the two halves disagree.
+ *
+ * Everything else hands back what palette32() makes of the entries it was
+ * sent.  On HAM that is the BASE palette, sixteen entries or sixty-four, and
+ * the decode reaches past it into colours that are in no table at all.
+ *
+ * `rgb` is the palette word's bytes.  Callers pass what arrived and let this
+ * decide the length, rather than sizing a table at the call site.
+ */
+export function renderPalette(s: Screen, rgb: Uint8Array): Uint32Array {
+  const sent = palColours(s);
+
+  if (screenFormat(s) !== FMT_EHB) return palette32(rgb, sent);
+
+  if (rgb.length < sent * 3) {
+    throw new Error("palette is " + rgb.length + " bytes, " + sent +
+                    " colours need " + sent * 3);
+  }
+
+  const pal = new Uint32Array(sent * 2);
+  for (let i = 0; i < sent; i++) {
     const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
-    pal[i] = LITTLE_ENDIAN
-      ? ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0
-      : ((r << 24) | (g << 16) | (b << 8) | 255) >>> 0;
+    pal[i] = pack(r, g, b);
+    pal[sent + i] = pack(r >> 1, g >> 1, b >> 1);
   }
   return pal;
 }
@@ -234,6 +339,130 @@ for (let i = 0; i < 256; i++) {
 }
 
 /*
+ * Eight indices assembled from one byte column, reused rather than returned.
+ * The HAM loop needs its pixels one at a time and in order, so it cannot write
+ * eight accumulators straight out the way the palette loop below does, and
+ * allocating an array per byte would be one allocation per eight pixels.
+ */
+const EIGHT = new Int32Array(8);
+
+/*
+ * Hold and modify, whole rows at a time.
+ *
+ * A HAM index is not a colour. Two of its bits say what to do and the rest are
+ * data: take base colour `data`, or keep the colour of the pixel to the LEFT
+ * and replace one component of it. So a pixel is only meaningful after every
+ * pixel before it on its row has been worked out, and there is no way to start
+ * in the middle. That is why this takes rows and not a rectangle -- a caller
+ * that handed over a damaged column would get a row decoded from the wrong
+ * running colour, which draws a smear to the right of anything that moved.
+ * applyUpdate() in tiles.ts widens damage to the full width for the same
+ * reason.
+ *
+ * A row starts from base colour 0, which is what the hardware does: the pixel
+ * before the first one is the background.
+ *
+ * The two depths differ in where the split falls and in what a modify leaves
+ * behind. HAM6 has four data bits and replicates them, so 15 becomes 255 and
+ * white is white. HAM8 has six and keeps the low two bits of the component it
+ * is replacing, which is what the hardware does and is worth the extra mask:
+ * dropping them instead loses a quarter of a level on every modified pixel,
+ * which on a gradient is a visible step.
+ *
+ * Control 1 is blue, 2 is red, 3 is green. That order is the Amiga's and it is
+ * not the order anything else uses, so it is worth reading twice.
+ */
+function decodeHamRows(
+  s: Screen,
+  planes: Uint8Array,
+  off: number,
+  pal: Uint32Array,
+  out: Uint32Array,
+  y0: number,
+  y1: number,
+): void {
+  const w = s.width;
+  const d = s.depth;
+  const bpr = s.bytesPerRow;
+  const plane = bpr * s.height;
+  const ham8 = screenFormat(s) === FMT_HAM8;
+
+  /* Where the control bits stop and the data starts, and what a data field is
+     worth as an eight-bit component. */
+  const shift = ham8 ? 6 : 4;
+  const mask = ham8 ? 0x3f : 0x0f;
+
+  /* Base colour 0, taken apart once: it is what every row begins from. */
+  const zero = pal[0];
+  const zr = (zero >>> R_SHIFT) & 255;
+  const zg = (zero >>> G_SHIFT) & 255;
+  const zb = (zero >>> B_SHIFT) & 255;
+
+  const bx1 = (w + 7) >> 3;
+  const ry0 = Math.max(0, y0);
+  const ry1 = Math.min(s.height, y1);
+
+  for (let y = ry0; y < ry1; y++) {
+    const row = off + y * bpr;
+    let o = y * w;
+    let r = zr, g = zg, b = zb;
+
+    for (let bx = 0; bx < bx1; bx++) {
+      let a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
+
+      for (let p = 0, at = row + bx; p < d; p++, at += plane) {
+        const v = planes[at];
+        if (v === 0) continue;
+        const m = 1 << p;
+        if (v & 0x80) a0 |= m;
+        if (v & 0x40) a1 |= m;
+        if (v & 0x20) a2 |= m;
+        if (v & 0x10) a3 |= m;
+        if (v & 0x08) a4 |= m;
+        if (v & 0x04) a5 |= m;
+        if (v & 0x02) a6 |= m;
+        if (v & 0x01) a7 |= m;
+      }
+
+      EIGHT[0] = a0; EIGHT[1] = a1; EIGHT[2] = a2; EIGHT[3] = a3;
+      EIGHT[4] = a4; EIGHT[5] = a5; EIGHT[6] = a6; EIGHT[7] = a7;
+
+      /* The last byte of a width that is not a multiple of eight holds pixels
+         that are not on the screen. The row ends there, so the colour they
+         would have left behind is read by nothing. */
+      const n = Math.min(8, w - (bx << 3));
+
+      for (let k = 0; k < n; k++) {
+        const v = EIGHT[k];
+        const data = v & mask;
+
+        switch (v >> shift) {
+          case 0: {
+            const c = pal[data];
+            r = (c >>> R_SHIFT) & 255;
+            g = (c >>> G_SHIFT) & 255;
+            b = (c >>> B_SHIFT) & 255;
+            break;
+          }
+          case 1:
+            b = ham8 ? ((data << 2) | (b & 3)) : (data * 17);
+            break;
+          case 2:
+            r = ham8 ? ((data << 2) | (r & 3)) : (data * 17);
+            break;
+          default:
+            g = ham8 ? ((data << 2) | (g & 3)) : (data * 17);
+            break;
+        }
+
+        out[o++] = (OPAQUE | (r << R_SHIFT) | (g << G_SHIFT) |
+                    (b << B_SHIFT)) >>> 0;
+      }
+    }
+  }
+}
+
+/*
  * A rectangle of one frame, plane-major at `off`, into `out` -- a
  * Uint32Array over an ImageData's data at the screen's full width.
  *
@@ -270,6 +499,22 @@ export function decodeRectInto(
    * not on the display.
    */
   const fmt = screenFormat(s);
+
+  /*
+   * Hold and modify decodes whole rows and ignores the horizontal bounds it
+   * was given, because a pixel means nothing without the ones to its left.
+   * Snapped here rather than trusted from the caller: a rectangle is what
+   * every other format wants and a HAM decode started part way along a row is
+   * a smear, not a slightly wrong colour.
+   *
+   * Extra half-brite is deliberately not here. Its indices 32..63 are the
+   * first thirty-two halved, and renderPalette() has already put those in the
+   * table, so the ordinary palette loop below draws it with no branch at all.
+   */
+  if (isHam(fmt)) {
+    decodeHamRows(s, planes, off, pal, out, y0, y1);
+    return;
+  }
 
   if (fmt === FMT_CLUT8 || fmt === FMT_RGB565) {
     const cx0 = Math.max(0, x0);
@@ -376,8 +621,13 @@ export function decodeInto(
  * a graphics card has square pixels at every size it can put up, so a 320x240
  * RTG screen guessed at by the rule above would be drawn four times the area
  * it is.
+ *
+ * The test is therefore whether the screen is a card's and not whether it is
+ * format 0.  HAM6, HAM8 and extra half-brite are the chipset with a different
+ * meaning laid over the same planes, and they are the modes most likely to be
+ * lores: a 320x256 HAM6 picture drawn square is half as tall as it should be.
  */
 export function pixelAspect(s: Screen): { x: number; y: number } {
-  if (screenFormat(s) !== FMT_PLANAR) return { x: 1, y: 1 };
+  if (isChunky(screenFormat(s))) return { x: 1, y: 1 };
   return { x: s.width < 640 ? 2 : 1, y: s.height < 400 ? 2 : 1 };
 }

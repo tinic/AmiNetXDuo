@@ -22,11 +22,15 @@ WHY IT DECODES RATHER THAN COUNTING
   src/tools/web/client/console/tiles.ts is the one the person looks at; this
   one has never seen that file's output and agreeing with it is evidence.
 
-  Three formats, and the geom word's seventh number says which: 0 planar, 1
+  Six formats, and the geom word's seventh number says which: 0 planar, 1
   chunky with a palette, 2 truecolour r5g6b5, two bytes a pixel big-endian and
-  no palette at all.  A format this file does not know is a failure and not a
-  picture -- bytes read as the wrong format decode into something plausible,
-  which is the silent pass named above with better colours.
+  no palette at all, then 3 HAM6, 4 HAM8 and 5 extra half-brite.  The last
+  three are format 0's bytes exactly -- same planes, same tiles, same ops --
+  and differ only in how long the palette is and in what an assembled index
+  means, which is why they cost the frame decode nothing.  A format this file
+  does not know is a failure and not a picture -- bytes read as the wrong
+  format decode into something plausible, which is the silent pass named above
+  with better colours.
 
 --min-changed asks the guest, which is the only thing that can answer
 
@@ -189,9 +193,24 @@ CODE_PB_XOR = 2
 FMT_PLANAR = 0                  # depth planes of one bit, an Amiga BitMap
 FMT_CLUT8 = 1                   # one plane of eight bits, a palette index
 FMT_RGB565 = 2                  # one plane of sixteen, big-endian r5g6b5
-FORMATS = (FMT_PLANAR, FMT_CLUT8, FMT_RGB565)
+FMT_HAM6 = 3                    # six planes, 16 base colours, 4-bit modify
+FMT_HAM8 = 4                    # eight planes, 64 base colours, 6-bit modify
+FMT_EHB = 5                     # six planes, 32 colours, 32..63 are halved
+FORMATS = (FMT_PLANAR, FMT_CLUT8, FMT_RGB565, FMT_HAM6, FMT_HAM8, FMT_EHB)
 
-FORMAT_NAME = {FMT_PLANAR: "planar", FMT_CLUT8: "clut8", FMT_RGB565: "rgb565"}
+# The formats whose source is one plane of bytes.  Layout asks this and never
+# "is it format 0": the three chipset modes are the Amiga BitMap byte for byte
+# -- same planes, same tiles, same ops -- and only the last step from index to
+# colour is theirs, so a test against FMT_PLANAR would send them down the RTG
+# path and draw them eight times too wide.
+CHUNKY = (FMT_CLUT8, FMT_RGB565)
+
+FORMAT_NAME = {FMT_PLANAR: "planar", FMT_CLUT8: "clut8", FMT_RGB565: "rgb565",
+               FMT_HAM6: "ham6", FMT_HAM8: "ham8", FMT_EHB: "ehb"}
+
+# Planes each chipset mode has.  Fixed by the mode rather than a free field, so
+# a geom that says otherwise is describing something this cannot decode.
+FMT_DEPTH = {FMT_HAM6: 6, FMT_HAM8: 8, FMT_EHB: 6}
 
 
 def pal_colours(fmt, depth):
@@ -199,28 +218,34 @@ def pal_colours(fmt, depth):
     and not the depth's.
 
     1 << depth is right on format 0 alone.  A chunky screen sends 256 whatever
-    it says its depth is, a truecolour one sends no `pal` at all, and the modes
-    that are still to come break the rule the other way round: HAM6 is six
-    planes with sixteen base colours and EHB is six with thirty-two.  So this
-    is a rule per format rather than an expression, and every site that sizes a
-    palette asks here.
+    it says its depth is, a truecolour one sends no `pal` at all, and the
+    chipset modes break the rule the other way round: HAM6 is six planes with
+    sixteen base colours, HAM8 eight with sixty-four and EHB six with
+    thirty-two.  So this is a rule per format rather than an expression, and
+    every site that sizes a palette asks here.
     """
     if fmt == FMT_PLANAR:
         return 1 << depth
     if fmt == FMT_CLUT8:
         return 256
+    if fmt == FMT_HAM6:
+        return 16
+    if fmt == FMT_HAM8:
+        return 64
+    if fmt == FMT_EHB:
+        return 32
     return 0
 
 
 def source_planes(fmt, depth):
     """Planes in the source a frame's tiles index into."""
-    return depth if fmt == FMT_PLANAR else 1
+    return 1 if fmt in CHUNKY else depth
 
 
 def pixel_bytes(fmt):
     """Source bytes one pixel occupies, for the formats where a pixel is whole
-    bytes.  Planar answers 0: a pixel there is one bit in each of depth
-    planes and no byte belongs to it alone."""
+    bytes.  The planar formats answer 0: a pixel there is one bit in each of
+    depth planes and no byte belongs to it alone."""
     if fmt == FMT_RGB565:
         return 2
     if fmt == FMT_CLUT8:
@@ -231,7 +256,20 @@ def pixel_bytes(fmt):
 def tile_op(fmt):
     """Which tile op a format's binary frames carry.  The plane mask is a
     planar thing, so anything with one source plane uses the op without one."""
-    return OP_TILE if fmt == FMT_PLANAR else OP_TILE8
+    return OP_TILE8 if fmt in CHUNKY else OP_TILE
+
+
+def ehb_table(rgb):
+    """The 64 colours an extra-half-brite screen draws from the 32 it is sent.
+
+    Index 32 + k is entry k with every component shifted right by one, and the
+    receiver builds that half rather than being sent it twice.  Built once per
+    picture: the palette moves when a `pal` word arrives, so there is nothing
+    here worth keeping across one.
+    """
+    out = bytearray(rgb)
+    out += bytes(c >> 1 for c in rgb)
+    return out
 
 
 _RGB565_RGB = None
@@ -598,8 +636,10 @@ class Screen:
     # fmt is rfb_geom.format as the geom word carries it: 0 planar, `depth`
     # one-bit planes; 1 chunky, one eight-bit plane whose bytes are palette
     # indices; 2 truecolour, one plane of sixteen-bit big-endian r5g6b5 with
-    # no palette anywhere.  depth is bits a pixel, which on format 0 also
-    # happens to size the `pal` and on the other two does not.
+    # no palette anywhere; 3, 4 and 5 HAM6, HAM8 and extra half-brite, which
+    # are format 0's layout with a different rule for turning an index into a
+    # colour.  depth is bits a pixel, which on format 0 also happens to size
+    # the `pal` and on none of the others does.
     def __init__(self, w, h, depth, bpr, tile_w, tile_h, fmt=0):
         if fmt not in FORMATS:
             # Not drawn as planar and hoped for.  A format read as the wrong
@@ -607,6 +647,10 @@ class Screen:
             # silent pass this whole file exists to refuse.
             raise Bad("geom says format %d, and this decoder knows %s"
                       % (fmt, ", ".join(str(f) for f in FORMATS)))
+        planes = FMT_DEPTH.get(fmt)
+        if planes is not None and depth != planes:
+            raise Bad("geom says format %d at depth %d, and %s is %d planes"
+                      % (fmt, depth, FORMAT_NAME[fmt], planes))
         self.w = w
         self.h = h
         self.depth = depth
@@ -749,9 +793,16 @@ class Screen:
         """One number a pixel, w * h of them, the padding past the width gone.
 
         What the number means is the format's: a palette index on 0 and 1, the
-        r5g6b5 word itself on 2.  Everything downstream -- the difference, the
-        distinct count, the PNG -- wants a pixel and not a byte, and on a
-        truecolour screen those stopped being the same thing.
+        r5g6b5 word itself on 2, and on 3, 4 and 5 the index the planes hold
+        before the chipset's own rule is applied to it -- a HAM control code
+        and its data, or an EHB index that may name a half-bright colour.
+        Everything downstream -- the difference, the distinct count, the PNG --
+        wants a pixel and not a byte, and on a truecolour screen those stopped
+        being the same thing.
+
+        The chipset modes stop here rather than being decoded to colour: two
+        pictures are compared for having the same PIXELS, and an index is what
+        the guest sent.  png() is where they become colours.
         """
         if self.fmt != FMT_RGB565:
             return bytes(self.chunky())
@@ -786,17 +837,67 @@ class Screen:
                         out[o + x] |= bit
         return out
 
+    def ham_row(self, pix, o):
+        """One HAM row as RGB triples, decoded left to right from x 0.
+
+        A pixel is either a base colour or a modification of the colour of the
+        pixel to its LEFT, so the row is a chain and not a table lookup.  The
+        control codes are 0 base colour, 1 blue, 2 red, 3 green -- the Amiga's
+        order, and getting it wrong still draws a plausible picture.
+
+        A row starts from base colour 0 rather than from where the row above
+        ended, which is what the hardware does at the start of a scanline.
+
+        HAM6 replaces a component with the data nibble repeated into eight
+        bits; HAM8 sets its top six bits and keeps the low two it already had,
+        so a modify there is exact only to a quarter of a level.
+        """
+        ham6 = self.fmt == FMT_HAM6
+        shift, mask = (4, 0x0F) if ham6 else (6, 0x3F)
+        out = bytearray()
+        r, g, b = self.rgb[0], self.rgb[1], self.rgb[2]
+
+        for x in range(self.w):
+            v = pix[o + x]
+            ctl = v >> shift
+            data = v & mask
+            if ctl == 0:
+                r = self.rgb[3 * data]
+                g = self.rgb[3 * data + 1]
+                b = self.rgb[3 * data + 2]
+            elif ctl == 1:
+                b = data * 17 if ham6 else (data << 2) | (b & 3)
+            elif ctl == 2:
+                r = data * 17 if ham6 else (data << 2) | (r & 3)
+            else:
+                g = data * 17 if ham6 else (data << 2) | (g & 3)
+            out += bytes((r, g, b))
+
+        return out
+
     def png(self, path):
         made(path)
         pix = self.values()
-        # A truecolour pixel indexes the whole of RGB565 the way an indexed one
-        # indexes the palette, so one loop writes either screen.
-        rgb = rgb565_rgb() if self.fmt == FMT_RGB565 else self.rgb
         raw = bytearray()
-        for y in range(self.h):
-            raw.append(0)
-            for v in pix[y * self.w:(y + 1) * self.w]:
-                raw += rgb[v * 3:v * 3 + 3]
+
+        if self.fmt in (FMT_HAM6, FMT_HAM8):
+            for y in range(self.h):
+                raw.append(0)
+                raw += self.ham_row(pix, y * self.w)
+        else:
+            # A truecolour pixel indexes the whole of RGB565 the way an indexed
+            # one indexes the palette, and an EHB pixel indexes the 64 colours
+            # built out of the 32 that arrived, so one loop writes any of them.
+            if self.fmt == FMT_RGB565:
+                rgb = rgb565_rgb()
+            elif self.fmt == FMT_EHB:
+                rgb = ehb_table(self.rgb)
+            else:
+                rgb = self.rgb
+            for y in range(self.h):
+                raw.append(0)
+                for v in pix[y * self.w:(y + 1) * self.w]:
+                    raw += rgb[v * 3:v * 3 + 3]
 
         def chunk(tag, payload):
             return (struct.pack(">I", len(payload)) + tag + payload +

@@ -25,6 +25,13 @@
  *                   bytes_per_row apart.  depth is 16, and it is bits a pixel
  *                   rather than the size of anything: there is no palette on
  *                   this format and the receiver is sent none.
+ *   RFB_FMT_HAM6
+ *   RFB_FMT_HAM8
+ *   RFB_FMT_EHB     the Amiga BitMap again, byte for byte what RFB_FMT_PLANAR
+ *                   is, and the encoder does not tell them apart.  What differs
+ *                   is how many colours the palette carries and what the
+ *                   receiver makes of an index once it has one; see the format
+ *                   list below.
  *
  * Everything else is deliberately shared.  A tile is a rectangle of BYTES
  * whichever it is, the tile grid is over bytes_per_row whichever it is,
@@ -153,22 +160,33 @@ typedef signed int     rfb_s32;
  *                 screen and is wrong for anything whose planes carry
  *                 something other than a palette index.
  *
- * Two of the three are deliberately not derivable from the depth, because the
- * modes that are coming are exactly the ones where the depth stops being a
- * palette width.  A HAM6 screen is six planes deep with sixteen base colours
- * and a HAM8 one is eight deep with sixty-four; an EHB screen is six deep
- * with thirty-two.  None of those changes what the encoder does -- they are
- * ordinary planar bitmaps and it walks them as it always has -- and all of
- * them change what the receiver draws.  So the room for them is here, in the
- * meaning, and a new one is a value plus a line in rfb_pal_colours() plus a
- * branch in the browser, not a change to the wire.
+ * Two of the three are deliberately not derivable from the depth, and the last
+ * three formats are why.  A HAM6 screen is six planes deep with sixteen base
+ * colours and a HAM8 one is eight deep with sixty-four; an EHB screen is six
+ * deep with thirty-two.  None of those changes what the encoder does -- they
+ * are ordinary planar bitmaps and it walks them as it always has -- and all of
+ * them change what the receiver draws.  So the meaning is what carries them,
+ * and each one cost a value here, a line in rfb_pal_colours() and a branch in
+ * the browser.  The wire did not move.
+ *
+ * The three chipset modes are decoded by the RECEIVER and not on the Amiga.
+ * HAM is sequential along a scanline -- a pixel modifies the one to its left --
+ * which is a per-pixel dependency chain on a 68000 and a loop in a browser.
+ * EHB is free at either end and is done in the same place for one rule.  So the
+ * planes go out as they sit in chip RAM, the base palette goes out as a
+ * palette, and the format says what to make of the pair.
  */
 #define RFB_FMT_PLANAR   0      /* depth one-bit planes, pixel is an index  */
 #define RFB_FMT_CLUT8    1      /* one plane, a byte is an index            */
 #define RFB_FMT_RGB565   2      /* one plane, two bytes are a colour        */
+#define RFB_FMT_HAM6     3      /* 6 planes, 16 base colours, 4-bit modify  */
+#define RFB_FMT_HAM8     4      /* 8 planes, 64 base colours, 6-bit modify  */
+#define RFB_FMT_EHB      5      /* 6 planes, 32 colours, 32..63 are halved  */
 
 /* Planes, not bits: the chunky formats are one plane of bytes and differ only
- * in how many bytes make a pixel. */
+ * in how many bytes make a pixel.  The three chipset modes are not chunky --
+ * they are the Amiga BitMap, and only the last step from index to colour is
+ * theirs. */
 #define RFB_FMT_IS_CHUNKY(f) ((f) == RFB_FMT_CLUT8 || (f) == RFB_FMT_RGB565)
 
 /* Source bytes one pixel occupies, and 0 on a planar format, where it is not
@@ -215,7 +233,8 @@ typedef struct {
     rfb_u16 width;          /* pixels, for the receiver; not used to index */
     rfb_u16 height;         /* rows */
     rfb_u16 bytes_per_row;  /* from the BitMap; one plane's row either way */
-    rfb_u8  depth;          /* 1..8 planar, 8 for CLUT8, 16 for RGB565      */
+    rfb_u8  depth;          /* 1..8 planar, 8 CLUT8, 16 RGB565, 6/8/6 HAM
+                               and EHB, where it is still the plane count  */
     rfb_u8  tile_w;         /* tile width in BYTES, 1..RFB_MAX_TILE_W */
     rfb_u8  tile_h;         /* tile height in rows, 1..RFB_MAX_TILE_H */
     rfb_u8  format;         /* one of the three RFB_FMT_ */

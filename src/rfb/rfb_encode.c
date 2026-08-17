@@ -161,6 +161,20 @@ static int rfb_geom_ok(const rfb_geom *g)
         if ((g->bytes_per_row & 1u) != 0u)
             return 0;
         break;
+    case RFB_FMT_HAM6:
+    case RFB_FMT_EHB:
+        /* Planes again, and six of them is the whole of both modes: HAM6 is
+         * two control bits over four data bits and EHB is five index bits
+         * under one that halves.  A screen carrying either bit at another
+         * depth is not one of these, and taking it for one draws the control
+         * bits as picture. */
+        if (g->depth != 6)
+            return 0;
+        break;
+    case RFB_FMT_HAM8:
+        if (g->depth != 8)
+            return 0;
+        break;
     default:
         return 0;
     }
@@ -190,6 +204,17 @@ rfb_u32 rfb_pal_colours(const rfb_geom *g)
     case RFB_FMT_RGB565:
         /* The colour is in the pixel.  No `pal` word is sent. */
         return 0u;
+    case RFB_FMT_HAM6:
+        /* Four of the six planes select a base colour; the other two say
+         * whether that is what the pixel is at all. */
+        return 16u;
+    case RFB_FMT_HAM8:
+        return 64u;
+    case RFB_FMT_EHB:
+        /* Half of what the depth implies.  32..63 are 0..31 at half
+         * brightness, so the hardware holds thirty-two registers and the
+         * receiver makes the other thirty-two itself. */
+        return 32u;
     default:
         return 0u;
     }
