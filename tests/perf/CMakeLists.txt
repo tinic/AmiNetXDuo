@@ -274,7 +274,7 @@ endif()
 #
 # rfb_encode.c is compiled TWICE into it.  aminetxduo_rfb is the shipping
 # object, which on AMINETXDUO_CPU=any is -m68000; rfb_encode_020 is the same
-# source at -m68020 with its eight public symbols renamed, so one run times
+# source at -m68020 with its public symbols renamed, so one run times
 # both codegens over the same bytes in the same second.  That is the only way
 # to answer "what is the -m68000 codegen costing the hottest loop in the
 # program" without comparing two runs on a shared host.
@@ -287,6 +287,7 @@ if(CMAKE_CROSSCOMPILING)
         -m68020 -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
     target_compile_definitions(rfb_encode_020 PRIVATE
         rfb_planes=rfb020_planes
+        rfb_pal_colours=rfb020_pal_colours
         rfb_packbits=rfb020_packbits
         rfb_unpackbits=rfb020_unpackbits
         rfb_shadow_size=rfb020_shadow_size
@@ -308,6 +309,7 @@ if(CMAKE_CROSSCOMPILING)
         -Wall -Wextra)
     target_compile_definitions(rfb_encode_o2 PRIVATE
         rfb_planes=rfbo2_planes
+        rfb_pal_colours=rfbo2_pal_colours
         rfb_packbits=rfbo2_packbits
         rfb_unpackbits=rfbo2_unpackbits
         rfb_shadow_size=rfbo2_shadow_size
@@ -325,6 +327,7 @@ if(CMAKE_CROSSCOMPILING)
         -Wall -Wextra)
     target_compile_definitions(rfb_encode_o220 PRIVATE
         rfb_planes=rfb220_planes
+        rfb_pal_colours=rfb220_pal_colours
         rfb_packbits=rfb220_packbits
         rfb_unpackbits=rfb220_unpackbits
         rfb_shadow_size=rfb220_shadow_size
