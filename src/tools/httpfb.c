@@ -2479,7 +2479,8 @@ BOOL http_fb_open(VOID)
 
     ok = (BOOL)(pub || fb_listed(sc));
     if (ok)
-        ok = fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom, pub);
+        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &fb_open_geom, pub)
+                    == FB_GEOM_OK);
     else
         fb_say("the front screen closed while it was being looked at");
 
