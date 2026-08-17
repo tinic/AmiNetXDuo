@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "aminetxduo/rfb_encode.h"
+
 static unsigned g_w, g_h, g_depth, g_bpr;
 static unsigned char *g_idx;   /* w*h colour indices */
 
@@ -22,6 +24,12 @@ static unsigned g_fmt;
 #define GEN_FMT_PLANAR  0u
 #define GEN_FMT_CLUT8   1u
 #define GEN_FMT_RGB565  2u
+/* The three chipset modes.  Their frames are a planar screen's, byte for
+   byte, so emit() does not know about them at all; what they change is the
+   header's byte 9 and how long the palette in front of the frames is. */
+#define GEN_FMT_HAM6    3u
+#define GEN_FMT_HAM8    4u
+#define GEN_FMT_EHB     5u
 
 /* What the drawing may put in g_idx, which is a byte array whatever the
    format is.  It follows the depth on a planar screen and is a byte
@@ -181,9 +189,17 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
     unsigned i, ncol;
     FILE *f;
 
-    /* No palette on the truecolour format, so none is written and the frames
-       begin at offset 16.  The colours are in the pixels. */
-    ncol = (g_fmt == GEN_FMT_RGB565) ? 0u : (1u << g_depth);
+    /* Asked rather than computed.  1 << depth is the answer on one format of
+       the six: truecolour has no palette at all and the three chipset modes
+       carry fewer colours than their depth implies.  Getting it wrong puts
+       every frame in the file at the wrong offset. */
+    {
+        rfb_geom q;
+        memset(&q, 0, sizeof(q));
+        q.depth  = (rfb_u8)g_depth;
+        q.format = (rfb_u8)g_fmt;
+        ncol = rfb_pal_colours(&q);
+    }
 
     snprintf(path, sizeof(path), "%s/%s.pfs", dir, name);
     f = fopen(path, "wb");
@@ -319,6 +335,25 @@ static void setup_rgb565(unsigned w, unsigned h)
     g_planes = malloc((size_t)g_bpr * h);
     if (!g_idx || !g_planes) { fprintf(stderr, "oom\n"); exit(1); }
 }
+
+/*
+ * And the three chipset modes, which are a planar screen with a different
+ * meaning laid over it.  The planes, the stride and the frames are what
+ * setup() makes; only the format changes, and with it how long the palette in
+ * front of the frames is -- 16 colours at HAM6, 64 at HAM8 and 32 at EHB,
+ * none of them 1 << depth.
+ *
+ * The index mask stays the full depth on purpose.  A HAM6 index runs 0..63 and
+ * only its low four bits are a colour; the other two say what to do with them,
+ * so a generator that masked to 15 would emit no modify codes at all and the
+ * round trip would never carry one.
+ */
+static void setup_chipset(unsigned w, unsigned h, unsigned depth, unsigned fmt)
+{
+    setup(w, h, depth);
+    g_fmt = fmt;
+}
+
 
 /* --------------------------------------------------------- sequences ----- */
 
@@ -475,6 +510,27 @@ int main(int argc, char **argv)
     setup_rgb565(404, 200);
     seq_idle(dir, "idle_rgbpad");
     seq_menu(dir, "menu_rgbpad");
+
+    /*
+     * And the chipset modes.  Nothing in the encoder tells them from a planar
+     * screen, which is the point: what the round trip checks here is that the
+     * palette in front of the frames is the length the format says, so the
+     * frames are found, and that a six or eight plane screen at those formats
+     * is accepted rather than refused at init.
+     *
+     * 320x256 is what HAM6 and half-brite actually run at, and the 40-byte
+     * row it gives is not a whole number of 16-byte tiles, so the clipped
+     * tile at the right edge is walked as well.
+     */
+    setup_chipset(320, 256, 6, GEN_FMT_HAM6);
+    seq_idle(dir, "idle_ham6");
+    seq_menu(dir, "menu_ham6");
+    setup_chipset(320, 256, 6, GEN_FMT_EHB);
+    seq_idle(dir, "idle_ehb");
+    seq_scroll(dir, "scroll_ehb", 8, 20);
+    setup_chipset(640, 480, 8, GEN_FMT_HAM8);
+    seq_idle(dir, "idle_ham8");
+    seq_full(dir, "full_ham8");
 
     free(g_idx); free(g_planes);
     return 0;

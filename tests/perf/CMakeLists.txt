@@ -57,6 +57,17 @@ foreach(rtgtool rtgmodes rtgbars)
     target_link_options(${rtgtool} PRIVATE -nostartfiles)
 endforeach()
 
+# The chipset screen prober: a public HAM6, HAM8 or extra half-brite screen
+# with a deterministic ramp on it, left in front for the console to serve.  A
+# TEST TOOL and nothing ships it; see the file for why a photograph on the
+# screen would prove nothing about a HAM decode.
+add_executable(chipscreen chipscreen.c)
+target_include_directories(chipscreen PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(chipscreen PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(chipscreen PRIVATE -Wall -Wextra)
+
 add_executable(perf_test perf_test.c)
 
 # aminetxduo_net68k for the algorithm, and NOT its hook: perf_test.c defines

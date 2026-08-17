@@ -26,7 +26,10 @@ target_compile_options(aminetxduo_rfb PRIVATE
     -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
 
 if(NOT CMAKE_CROSSCOMPILING)
-    add_executable(rfbgen host/rfbgen.c)
+    # rfb_encode.c for rfb_pal_colours(): how long the palette in front of the
+    # frames is per format, which is what places every frame in the file.
+    add_executable(rfbgen host/rfbgen.c rfb_encode.c)
+    target_include_directories(rfbgen PRIVATE "${CMAKE_SOURCE_DIR}/include")
     target_compile_options(rfbgen PRIVATE -Wall -Wextra)
     set_target_properties(rfbgen PROPERTIES C_STANDARD 99)
 
