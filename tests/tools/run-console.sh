@@ -3,8 +3,9 @@
 # THE WORKBENCH SCREEN, OFF THE WIRE, DECODED, AS PIXELS.
 #
 #   tests/tools/run-console.sh [-a ADDRESS] [-p PORT] [-b BUILDDIR] [-m MODEL]
-#                              [-B BACKEND] [-d DEPTH]... [-t SECONDS]
-#                              [-s SECONDS] [-H CONSOLEHTML] [-o OUTDIR] [-P]
+#                              [-B BACKEND] [-d DEPTH]... [-C MODE]...
+#                              [-t SECONDS] [-s SECONDS] [-H CONSOLEHTML]
+#                              [-o OUTDIR] [-P]
 #
 # WHAT IT PROVES
 #
@@ -29,6 +30,24 @@
 #   the arms is what the guest read from.  The bytes and the frame rate are
 #   directly comparable with the 8-bit arm: the same Workbench, the same size,
 #   two bytes a pixel instead of one.
+#
+#   -C ham6, -C ham8 and -C ehb serve the OTHER three chipset screens, the ones
+#   whose planes are not a palette index.  Each is one boot, named by its mode
+#   rather than by its depth, and what it serves is not Workbench: the
+#   ScreenMode editor filters HAM and EHB out of the list it offers, so a
+#   Workbench asked for one through screenmode.prefs may come up PAL hires and
+#   two planes deep with nothing saying so.  C:chipscreen opens the screen
+#   itself, draws a deterministic ramp on it and leaves it in front, and the arm
+#   asserts the wire format the session then reports.  ham8 is AGA and needs an
+#   AGA model.
+#
+#   THE PICTURE IS THE POINT.  A HAM decode with its control codes permuted or
+#   its data field in the wrong place still draws a plausible image, so an arm
+#   that only checked the pixels were not all one colour would pass on a wrong
+#   receiver.  tests/perf/chipscreen.c draws four bands -- base colours, then a
+#   red, a green and a blue ramp in that order -- on a palette that is exact in
+#   a 4-bit colour register, so the decoded PNG is something a person can hold
+#   against what was drawn.
 #
 # BRIDGED, AND NOT SLIRP
 #
@@ -88,6 +107,15 @@
 #                           board rather than written down here; relearned once
 #                           and reported as d<N>_rtg_mode_relearned when the
 #                           first boot asked for a mode the board does not hold
+#
+#   A -C arm prints its own, under the mode's name rather than a depth:
+#
+#     <mode>_chipset_format     the geom word's format: 3 HAM6, 4 HAM8, 5 EHB.
+#                               0 is the planar screen a failed staging falls
+#                               back to, and the arm fails on it
+#     <mode>_chipset_wire_depth and its depth, 6 or 8
+#     <mode>_chip_*             what C:chipscreen said on the guest, including
+#                               the mode Workbench itself came up on
 #
 #   A depth the board publishes no mode for is reported as d<N>_skipped and
 #   the arm does not run.  Which modes an emulated uaegfx offers is the
@@ -195,9 +223,23 @@ RTG_W=640
 RTG_H=480
 RTG_DEPTHS="8 15 16 24 32"
 
+# -C serves a chipset screen whose planes are not a palette index: HAM6, HAM8
+# or extra half-brite.  One boot per mode, and the screen comes from
+# C:chipscreen rather than from LoadWB -- see the header.  320x256 because
+# both HAM and EHB are lores modes.
+CHIPSET=()
+CHIPSCREEN=""
+CHIP_W=320
+CHIP_H=256
+CHIP_MODES="ham6 ham8 ehb"
+# The chipset screen this arm is on, empty on every other kind of arm.  A
+# global for the same reason RTG is one: stage() and startup_for() both need
+# it and neither is called from anywhere else.
+CHIP=""
+
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:RP" opt; do
+while getopts "a:p:b:m:B:d:C:t:s:H:o:c:g:A:T:L:RP" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -205,6 +247,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:RP" opt; do
         m) MODEL="$OPTARG" ;;
         B) BACKEND="$OPTARG" ;;
         d) DEPTHS+=("$OPTARG") ;;
+        C) CHIPSET+=("$OPTARG") ;;
         t) BOOT_MAX="$OPTARG" ;;
         s) PROBE_SECONDS="$OPTARG"; PROBE_SECONDS_SET=1 ;;
         H) PAGE="$OPTARG" ;;
@@ -220,7 +263,43 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:RP" opt; do
     esac
 done
 
-if [ "$RTG" = 1 ]; then
+if [ "$RTG" = 1 ] && [ ${#CHIPSET[@]} -gt 0 ]; then
+    say error "-R and -C are two different screens and one run serves one of them"
+    say RESULT INFRA
+    exit 2
+fi
+
+if [ ${#CHIPSET[@]} -gt 0 ]; then
+    for m in "${CHIPSET[@]}"; do
+        case " $CHIP_MODES " in
+            *" $m "*) ;;
+            *) say error "-C takes one of $CHIP_MODES, not $m"
+               say RESULT INFRA
+               exit 2 ;;
+        esac
+    done
+    # HAM8 IS AGA, so an ECS machine opens no such screen and the arm would be
+    # asserting against whatever OpenScreen handed back instead.  Named here
+    # rather than discovered on the guest: a boot costs minutes and the model
+    # is on the command line.
+    case " ${CHIPSET[*]} " in
+        *" ham8 "*)
+            case "$MODEL" in
+                A1200|a1200|A4000|a4000|CD32|cd32) ;;
+                *) say error "-C ham8 is an AGA mode and $MODEL is not an AGA machine"
+                   say hint "-m A1200"
+                   say RESULT INFRA
+                   exit 2 ;;
+            esac ;;
+    esac
+    CHIPSCREEN="${AMINETXDUO_CHIPSCREEN:-$BUILD/tests/perf/chipscreen}"
+    [ -f "$CHIPSCREEN" ] || {
+        say error "no $CHIPSCREEN"
+        say hint "cmake --build $BUILD --parallel --target chipscreen"
+        say RESULT INFRA
+        exit 2
+    }
+elif [ "$RTG" = 1 ]; then
     # -R alone is the 8-bit arm it has always been.  -d names the others, and
     # only the depths the card can hold: a chipset depth here would ask
     # Picasso96 for a screen it cannot open and the run would come up planar,
@@ -409,6 +488,53 @@ rtg_mode_id() {
     # AMINETXDUO_RTG_MODE_ID_<depth>, which is why the override is first.
     printf '%s' "$RTG_MODE_ID"
     return 0
+}
+
+# ---------------------------------------------------------------- the arms --
+#
+# An arm is one boot.  A plain or -R arm is named by its depth and a -C arm by
+# its mode, so the loop reads these rather than the token it was given and
+# nothing below has to know which kind of run it is in.
+
+arm_tag() {
+    case "$1" in
+        ham6|ham8|ehb) printf '%s' "$1" ;;
+        *)             printf 'd%s' "$1" ;;
+    esac
+}
+
+arm_depth() {
+    case "$1" in
+        ham6|ehb) printf 6 ;;
+        ham8)     printf 8 ;;
+        *)        printf '%s' "$1" ;;
+    esac
+}
+
+# The PAL mode ID a -C arm opens on: the monitor key with the mode's own key
+# OR'd into it.  PAL_MONITOR_ID is 0x00021000, HAM_KEY is 0x0800 and
+# EXTRAHALFBRITE_KEY is 0x0080, all from graphics/modeid.h.  Lores in both
+# cases -- HIRES_KEY, 0x8000, is not set -- because HAM and EHB are lores
+# modes and 320x256 is the shape the chipset produces them in.  HAM8 is the
+# same HAM key eight planes deep, which is why it is AGA and the other two are
+# not.
+arm_mode_id() {
+    case "$1" in
+        ham6|ham8) printf '0x00021800' ;;
+        ehb)       printf '0x00021080' ;;
+        *)         printf '' ;;
+    esac
+}
+
+# What rfb_geom.format must be for a -C arm.  0 is the plain planar screen a
+# failed staging falls back to and is the one value this exists to refuse.
+arm_wire_format() {
+    case "$1" in
+        ham6) printf 3 ;;
+        ham8) printf 4 ;;
+        ehb)  printf 5 ;;
+        *)    printf 0 ;;
+    esac
 }
 
 # --------------------------------------------------------------- the parts --
@@ -658,6 +784,16 @@ EOF
             cp "$RTGMODES" "$HD/C/rtgmodes"; chmod 755 "$HD/C/rtgmodes"
             cp "$RTGBARS"  "$HD/C/rtgbars";  chmod 755 "$HD/C/rtgbars"
         fi
+    elif [ -n "$CHIP" ]; then
+        # The prefs file first, so that the run also answers whether a 3.1
+        # Workbench asked for one of these modes takes it -- C:chipscreen
+        # reports the mode it finds the Workbench screen on before it opens
+        # its own.  Nothing here depends on the answer: the screen the console
+        # serves is the one chipscreen opens either way.
+        wb31_screenmode_prefs_id "$HD" "$depth" "$(arm_mode_id "$CHIP")" \
+                                 "$CHIP_W" "$CHIP_H"
+        cp "$CHIPSCREEN" "$HD/C/chipscreen"
+        chmod 755 "$HD/C/chipscreen"
     else
         wb31_screenmode_prefs "$HD" "$depth"
     fi
@@ -758,6 +894,19 @@ EOF
 C:rtgmodes >DH0:rtglist.txt
 Run >NIL: <NIL: C:rtgbars $db_depth $RTG_W $RTG_H
 C:Wait 5
+EOF
+    fi
+
+    # THE SCREEN THE -C ARMS SERVE, and it is not Workbench's.  Run rather than
+    # called, because chipscreen does not return: it opens the screen, draws on
+    # it and waits, so a plain call would stop the boot on this line with the
+    # server two lines below it.  The wait after it is the drawing -- eight
+    # planes of 320x256, a byte at a time, is a few seconds on an emulated
+    # 68020 -- and httpd must not start on a half-drawn picture.
+    if [ -n "$CHIP" ]; then
+        cat >> "$HD/S/Startup-Sequence" <<EOF
+Run >DH0:chipscreen.txt <NIL: C:chipscreen $(arm_mode_id "$CHIP") $CHIP_W $CHIP_H $depth
+C:Wait 15
 EOF
     fi
 
@@ -862,14 +1011,15 @@ trap 'cleanup; reap_xvfb' EXIT INT TERM HUP
 EMULOG=""
 
 boot() {
-    local depth="$1"
+    local tag="$1"
+    local depth="$2"
     local mask=""
-    local cfg="$ROOT/build/console-d$depth.uae"
+    local cfg="$ROOT/build/console-$tag.uae"
 
-    EMULOG="$ROOT/build/amiberry-console-d$depth.log"
+    EMULOG="$ROOT/build/amiberry-console-$tag.log"
 
     cat > "$cfg" <<EOF
-config_description=AmiNetXDuo console depth $depth
+config_description=AmiNetXDuo console $tag
 use_gui=no
 headless=true
 quickstart=$MODEL,0
@@ -1048,15 +1198,26 @@ fi
 VERDICT=pass
 ran=0
 
-for depth in "${DEPTHS[@]}"; do
-    tag="d$depth"
+# One list, whichever kind of run this is: depths on a plain or -R run, mode
+# names on a -C one.
+if [ ${#CHIPSET[@]} -gt 0 ]; then
+    ARMS=("${CHIPSET[@]}")
+else
+    ARMS=("${DEPTHS[@]}")
+fi
+
+for arm in "${ARMS[@]}"; do
+    tag=$(arm_tag "$arm")
+    depth=$(arm_depth "$arm")
+    CHIP=""
+    [ ${#CHIPSET[@]} -gt 0 ] && CHIP="$arm"
     skipped=no
 
     mode_id=$(rtg_mode_id "$depth")
     stage "$depth" "$mode_id"
     startup_for "$depth"
     started=$(date +%s)
-    boot "$depth"
+    boot "$tag" "$depth"
 
     # The mode ID comes off the board rather than out of this file.
     #
@@ -1099,7 +1260,7 @@ for depth in "${DEPTHS[@]}"; do
                 stage "$depth" "$mode_id"
                 startup_for "$depth"
                 started=$(date +%s)
-                boot "$depth"
+                boot "$tag" "$depth"
             fi
             [ "$skipped" = yes ] || say "${tag}_rtg_mode" "$mode_id"
         else
@@ -1302,6 +1463,63 @@ for depth in "${DEPTHS[@]}"; do
             esac
         else
             say "${tag}_error" "no decoded frame at $OUTDIR/$tag.png to check"
+            VERDICT=fail
+        fi
+    fi
+
+    #
+    # -C MUST FAIL IF THE SESSION DID NOT COME UP ON THE MODE IT ASKED FOR.
+    #
+    # The same rule as the -R block above and for the same reason: format 0 is
+    # the plain planar screen every other check in this file passes on, and a
+    # run that tested the planar path while reporting on HAM is worse than a
+    # run that fails.  The failure is a real possibility rather than a
+    # precaution -- the ScreenMode editor filters these modes out, so a
+    # Workbench that stayed PAL hires is what a broken staging leaves behind,
+    # and it is a perfectly good two-plane screen.
+    #
+    # The guest's own account is read as well.  It says which mode OpenScreen
+    # actually gave chipscreen and which pattern it therefore drew, so a
+    # mismatch between the picture and the geom word has both halves in the
+    # output rather than one.  EVERY geom, collapsed with sort -u, for the
+    # reason the -R block gives: a session that dropped to another screen half
+    # way through must still fail.
+    if [ -n "$CHIP" ]; then
+        want_fmt=$(arm_wire_format "$CHIP")
+        want_depth="$depth"
+        fmt=$(awk '/^geom=/ { print $NF }' "$OUTDIR/$tag-probe.txt" 2>/dev/null \
+              | sort -u | tr '\n' ' ' || true)
+        fmt=${fmt% }
+        wire_depth=$(awk '/^geom=/ { print $3 }' "$OUTDIR/$tag-probe.txt" \
+                     2>/dev/null | sort -u | tr '\n' ' ' || true)
+        wire_depth=${wire_depth% }
+        say "${tag}_chipset_format" "${fmt:-none}"
+        say "${tag}_chipset_wire_depth" "${wire_depth:-none}"
+
+        guest="$HD/chipscreen.txt"
+        if [ -f "$guest" ]; then
+            cp "$guest" "$OUTDIR/$tag-chipscreen.txt"
+            while IFS='=' read -r k v; do
+                [ -n "$k" ] || continue
+                say "${tag}_chip_$k" "$v"
+            done < <(grep '=' "$guest" || true)
+        else
+            say "${tag}_chip_result" "C:chipscreen wrote nothing to DH0:"
+            VERDICT=fail
+        fi
+
+        drew=$(awk -F= '/^pattern=/ { print $2 }' "$guest" 2>/dev/null || true)
+        if [ "$drew" != "$CHIP" ]; then
+            say "${tag}_error" "C:chipscreen drew ${drew:-nothing}, not $CHIP,\
+ so the picture on the wire is not the one this arm asserts against"
+            VERDICT=fail
+        fi
+
+        if [ "${fmt:-0}" != "$want_fmt" ] ||
+           [ "${wire_depth:-0}" != "$want_depth" ]; then
+            say "${tag}_error" "-C asked for a $CHIP screen, which is format\
+ $want_fmt depth $want_depth on the wire, and the geom word says format\
+ ${fmt:-none} depth ${wire_depth:-none}"
             VERDICT=fail
         fi
     fi
