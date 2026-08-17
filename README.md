@@ -120,7 +120,8 @@ files by hand.
 | `iperf` | measure throughput against an `iperf` server, or act as one |
 | `telnet` | negotiates the options that a real server requires |
 | `ssh` | Dropbear's dbclient, public-key authentication. The ReadMe covers keys |
-| `NetTrace` | capture packets to a `.pcap` file that Wireshark can open |
+| `NetCapture` | capture what is on the wire to a `.pcap` file that Wireshark and tcpdump open, filtered by host, port or protocol |
+| `NetTrace` | the same file for a transfer it runs itself, with the throughput number beside it |
 | `traceroute` | trace the path to a host |
 | `tftp`, `whois` | small TFTP and WHOIS clients |
 | `CheckNetConfig` | read the configuration and report what is wrong with it |

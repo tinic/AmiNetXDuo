@@ -272,11 +272,22 @@ tx PA seq=201 ack=1 len=100 within=300
 notx 600
 rx R seq=1 ack=1
 
-# AND THE SKIP IS CONDITIONAL.  The same three segments and the same three
+# AND THE SKIP IS CONDITIONAL.  The same four segments and the same three
 # duplicate acknowledgements with no blocks on them: nothing says which
 # segment the peer holds, so the stack may only retransmit the first and must
 # not walk the queue.  Without this case the change could retransmit
 # everything every time and s13 would still pass.
+#
+# FOUR SEGMENTS, NOT TWO, and that is the whole of what was wrong with it.
+# The case sent two while its comment said three and its sibling sent four,
+# and a flight of fewer than four is the one RFC 5827 section 2 lowers the
+# duplicate-acknowledgement threshold for: two outstanding segments retransmit
+# on the FIRST duplicate acknowledgement.  So the retransmission this case
+# waits for had already gone out, between the first injection and the second,
+# and the harness measured its gap from the third -- a negative interval,
+# reported as six thousand seconds.  Nothing about SACK was being tested by
+# the shortfall; the case simply was not the mirror of s13 it says it is.
+# retransmit.drill rt04 keeps the short-flight behaviour, where it belongs.
 case s14_no_blocks_still_retransmits_only_the_first
 socket
 connect
@@ -287,6 +298,10 @@ send 100
 tx PA seq=1 ack=1 len=100
 send 100
 tx PA seq=101 ack=1 len=100
+send 100
+tx PA seq=201 ack=1 len=100
+send 100
+tx PA seq=301 ack=1 len=100
 rx A seq=1 ack=1 win=8192
 rx A seq=1 ack=1 win=8192
 rx A seq=1 ack=1 win=8192

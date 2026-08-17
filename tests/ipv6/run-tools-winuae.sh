@@ -5,7 +5,7 @@
 #   tests/ipv6/run-tools-winuae.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                  [-T TAG] [-6 ADDR] [-4 ADDR]
 #
-# WHAT THIS PROVES THAT tests/ipv6/run-tools-fsuae.sh CANNOT.  FS-UAE's SLIRP
+# WHAT THIS PROVES THAT tests/ipv6/run-tools-amiberry.sh CANNOT.  SLIRP
 # forwards nothing beyond itself: `traceroute 8.8.8.8` is `*` at every hop
 # there for IPv4 as well, so every trace that harness can run terminates in
 # one hop because the target was one hop away.  RESEARCH 67 could show the
@@ -245,9 +245,28 @@ V6FIRST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | head -1)
     || bad "hop 1 was '$V6FIRST', the destination was one hop away"
 
 echo
+
+# THE EMULATOR'S OWN STATUS IS PART OF THE VERDICT.  RUN_RC was captured and
+# used only in the "the guest wrote no transcript" message, so a run that
+# timed out half way through, or took an illegal instruction, was graded on a
+# partial transcript as though it had finished.  Same fix as the Amiberry
+# sibling, tests/ipv6/run-tools-amiberry.sh.
+case "$RUN_RC" in
+    0) ;;
+    4)   bad "the guest is built for a CPU this machine does not have,\
+ so nothing above ran" ;;
+    124) bad "the run TIMED OUT, so the transcript above is partial\
+ whatever it says" ;;
+    *)   bad "the run exited $RUN_RC" ;;
+esac
+
 if [ "$FAILED" -gt 0 ]; then
     echo "FAILED: $FAILED assertion(s)"
+    printf 'name=ipv6-tools-winuae\nverdict=FAIL\nreason=assertions\n'
+    printf 'failed=%s\nrun_rc=%s\ntranscript=%s\n' "$FAILED" "$RUN_RC" "$REPORT"
     exit 1
 fi
 echo "PASS: IPv6 and IPv4 both reach off-link destinations through routers"
+printf 'name=ipv6-tools-winuae\nverdict=PASS\nreason=ok\n'
+printf 'failed=0\nrun_rc=%s\ntranscript=%s\n' "$RUN_RC" "$REPORT"
 exit 0

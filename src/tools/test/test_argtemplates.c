@@ -104,6 +104,7 @@ static const char *const commands[] = {
     "configurenetinterface", "fetch",
     "getnetstatus", "host", "hostname", "httpd", "iperf", "nc", "netsetup",
     "netshutdown",
+    "netcapture",
     "netstat", "nettrace", "nslookup", "onoff", "ping", "removenetinterface",
     "shownetservices",
     "shownetstatus", "sntp", "telnet", "tftp", "traceroute", "whois",

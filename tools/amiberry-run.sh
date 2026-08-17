@@ -71,7 +71,20 @@
 #   until something connects, so the host has to RETRY, losing that race
 #   leaves an emulator waiting forever and looks like a hang, not a lost log.
 #
-# Exit status is the test's own, read from DH0:.done, or 124 on timeout.
+# EXIT STATUS
+#
+#   0..n  the test's own, read from DH0:.done
+#   4     an illegal instruction outside ROM: the guest is built for a CPU
+#         this machine does not have, so nothing under test ran
+#   5     the run did not get the network backend it asked for, so anything
+#         it proved about the LAN is worthless
+#   124   the timeout expired with no DH0:.done
+#
+# 4 and 5 are DISTINCT FROM THE GUEST'S OWN CODES on purpose.  The backend
+# fault used to be reported by overwriting a zero status with 1, and the one
+# caller that reads it, tools/test-verdict.sh, then said "the guest exited 1"
+# about a guest whose transcript ended `113 checks, 0 failures, PASS`.  A rig
+# fault named as a code failure sends the reader to the wrong file.
 #
 # SPDX-License-Identifier: MIT
 
@@ -609,7 +622,7 @@ if [ -n "$BOARD" ]; then
                 echo "!! it cannot match, so this run was almost certainly on NAT and" >&2
                 echo "!! anything it proved about the LAN is worthless.  From the log:" >&2
                 grep -E "UAENET|7990:|NE2000:|slirp" "$UAELOG" 2>/dev/null | head -10 >&2
-                [ "$status" = "0" ] && status=1
+                BACKEND_MISSING=1
             fi ;;
     esac
 fi
@@ -660,5 +673,14 @@ fi
 # genuine failure, so a caller can tell "wrong binary" from "wrong code".
 if [ "${ILLEGAL_SEEN:-0}" = "1" ]; then
     exit 4
+fi
+
+# Same argument for the backend: a run that came up on something other than
+# what it asked for proved nothing about the LAN, and that is a fault of the
+# rig rather than of the guest.  It used to be reported as status 1, which
+# tools/test-verdict.sh rendered as "the guest exited 1" over a transcript
+# that said PASS.
+if [ "${BACKEND_MISSING:-0}" = "1" ]; then
+    exit 5
 fi
 exit "$status"

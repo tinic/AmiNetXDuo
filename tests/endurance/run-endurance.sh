@@ -26,7 +26,7 @@
 #
 # No host peer and no SLIRP traffic: everything is over 127.0.0.1.  The A2065
 # is still attached because the library brings the stack up on an interface,
-# exactly as tests/clients/run-fsuae.sh does it.
+# exactly as tests/clients/run-clients.sh does it.
 #
 # SPDX-License-Identifier: MIT
 
@@ -109,7 +109,8 @@ nbevery 50
 seed 20260726
 EOF
 
-# FS-UAE's own bsdsocket emulation off, as tests/clients/run-fsuae.sh does it,
+# the emulator's own bsdsocket emulation off, as tests/clients/run-clients.sh
+# does it,
 # so a pass cannot be WinUAE's host-socket shim answering instead of ours.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"

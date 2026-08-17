@@ -60,7 +60,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 18 | The hand-written 68020 SHA-256 lost to GCC 15.2 C, 67,656 against 66,687 us, and was deleted. Only the misaligned `MOVE.L` survived. | `src/crypto68k/c68k_sha256.h:22` | see code |
 | 18.1 | Measured 68020 instruction costs: no data cache, byte read equals longword read, `ROR.L #n` 5.94 cycles against `ROR.L Dm,Dn` 7.91. The shifter is flat, so the SWAP idiom is worthless. This table exists nowhere else. | `clients/dropbear/localoptions.h:46` | current |
 | 18.2 | AES-128-CBC costs 233 cycles/byte and HMAC-SHA256 236. Four 1 KB T-tables in assembly beat the one-table layout by ~14%. | `src/crypto68k/c68k_aes.h:129` | current |
-| 18.6 | A wire figure through an emulator carries host-contention variance, so an A/B must be two binaries from one commit measured back to back. | `clients/dropbear/run-fsuae.sh:29` | current |
+| 18.6 | A wire figure through an emulator carries host-contention variance, so an A/B must be two binaries from one commit measured back to back. | `clients/dropbear/run-dbclient.sh:29` | current |
 | 19 | An unset clock silently accepts expired certificates. `sntp` sets `timer.device` and `battclock`, and takes the timezone from `locale.library`'s `loc_GMTOffset`. | `src/tools/sntp.c:24` | see code |
 | 19.6 | A Shell command links its own ThreadX and NetX Duo whose kernel was never entered, so it can never read the running stack by linking. The fix is published LVOs. | `include/aminetxduo/netstatus.h:1` | see code |
 | 20 | `traceroute`, `tftp` and `whois` design notes. | `src/tools/tftp.c`, `whois.c` | historical |

@@ -48,6 +48,7 @@ extern const char *const tool_name;
  * newlib's: every integer is 32 bits and must be written %ld / %lu / %lx.
  */
 VOID tool_printf(const char *fmt, ...);
+VOID tool_say(const char *fmt, ...);       /* tool_printf, flushed at once   */
 VOID tool_error(const char *fmt, ...);     /* "<tool>: ..." + newline        */
 VOID tool_fault(LONG code);                /* PrintFault(code, tool_name)    */
 

@@ -31,7 +31,7 @@ endif()
 # 0x86DD reader, neighbour discovery, against a real device, and reports
 # what the wire actually has rather than asserting what it should have.
 #
-#   AMINETXDUO_RUN_TAG=v6link ./tests/ipv6/run-fsuae.sh -b build/v6
+#   AMINETXDUO_RUN_TAG=v6link ./tests/ipv6/run-link.sh -b build/v6
 
 add_executable(ipv6_link_test ipv6_link_test.c)
 

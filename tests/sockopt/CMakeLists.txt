@@ -11,7 +11,7 @@
 #   against nothing of ours.  Its interface comes from tests/tcpdrill/tapdev.c,
 #   a SANA-II device made at run time, so it needs no a2065.device.
 #
-#   AMINETXDUO_RUN_TAG=sockopt ./tests/sockopt/run-fsuae.sh -b build/sockopt
+#   AMINETXDUO_RUN_TAG=sockopt ./tests/sockopt/run-sockopt.sh -b build/sockopt
 
 if(NOT CMAKE_CROSSCOMPILING)
 

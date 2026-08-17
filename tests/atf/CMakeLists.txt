@@ -10,7 +10,7 @@
 # opens bsdsocket.library, linked against none of our code, with the interface
 # coming from tests/tcpdrill/tapdev.c.
 #
-#   AMINETXDUO_RUN_TAG=atf ./tests/sockopt/run-fsuae.sh -b build/atf
+#   AMINETXDUO_RUN_TAG=atf ./tests/sockopt/run-sockopt.sh -b build/atf
 
 if(NOT CMAKE_CROSSCOMPILING)
     return()

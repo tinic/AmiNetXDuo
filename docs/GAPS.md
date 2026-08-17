@@ -15,7 +15,7 @@ and **AmiTCP_NG 4.1.5-beta** (`src/netinclude/fd/socket_lib.fd`, `src/api/`,
 |---|---|
 | `bsdsocket.library` socket API | AmiTCP's `socket_lib.fd` is 45 entries and we implement all of them. Roadshow's sfd is 125, 10 of which are varargs aliases; the 31 names we do not implement are below, and every one is outside the socket API proper |
 | `usergroup.library` | all 39 vectors (`src/usergroup/`), the same set as AmiTCP's `usergroup_lib.fd` |
-| BPF / packet capture | `bpf_*`, 8 vectors, plus `NetTrace` |
+| BPF / packet capture | `bpf_*`, 8 vectors, plus `NetCapture` and `NetTrace` |
 | `TCP:` handler | `src/bsdsocket/tcp_handler.c`, `TCPHANDLER=` in the interface file |
 | Interface, routing, monitoring, status, DNS, local-database, address-conversion APIs | implemented, and `SBTC_HAVE_*` says so truthfully (`errno.c:488-536`) |
 
@@ -113,7 +113,7 @@ do with PPP, PPPoE, SLIP or a modem.
 | `NetLogViewer` | Roadshow | A commodity that catches what the stack and its clients log |
 | `ipf` `ipfstat` `ipnat` `ipmon` | Roadshow | Packet filtering and NAT |
 | `CheckRoadshowConfig` | Roadshow | We have `CheckNetConfig`, the same idea under our name |
-| `wget`, `tcpdump` | Roadshow | We have `fetch` and `NetTrace` |
+| `wget`, `tcpdump` | Roadshow | We have `fetch` and `NetCapture` |
 
 ## Behaviour, not surface
 

@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 #
-# Run the client access-pattern test under FS-UAE.
+# Run the client access-pattern test under Amiberry.
 #
-#   tests/clients/run-fsuae.sh [-m MODEL] [-c CPU] [-t SECONDS] [-T TAG]
-#                              [-b BUILDDIR]
+#   tests/clients/run-clients.sh [-m MODEL] [-c CPU] [-t SECONDS] [-T TAG]
+#                                [-b BUILDDIR]
+#
+# It was called run-fsuae.sh and it drove tools/amiberry-run.sh.  fs-uae left
+# the tree on 2026-08-04 and the name outlived it.
 #
 # Stages LIBS:bsdsocket.library and LIBS:usergroup.library out of the build
 # tree plus DEVS:a2065.device and the netstack config, exactly as
 # tests/ipv6/run-socket.sh does.  Everything the test does happens over
 # 127.0.0.1, but the library still needs an interface to bring the stack up on.
 #
-# FS-UAE's own bsdsocket.library emulation is turned off the same way
-# tests/conformance/run-conformance.sh turns it off, a host configuration
-# dropped into the run's private base directory, so a pass cannot be WinUAE's
+# The emulator's own bsdsocket.library emulation is off, the same way
+# tests/conformance/run-conformance.sh turns it off, so a pass cannot be a
 # host-socket shim answering instead of ours.
 #
-# Results: build/testhd-<tag>/stdout.txt
+# Results: build/amiberry-testhd-<tag>/stdout.txt
 #
 # SPDX-License-Identifier: MIT
 
@@ -73,5 +75,24 @@ cp "$UG"  "$STAGE/libs/usergroup.library"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-exec "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
+# ---------------------------------------------------------- the verdict ---
+#
+# This used to end in `exec <runner>`, so the script's exit status was the
+# guest's own return code: a guest that opened nothing, ran no checks and
+# returned 0 was a pass, and so was one whose transcript never arrived.  It
+# was the last harness in the tree still doing that.
+. "$ROOT/tools/test-verdict.sh"
+
+set +e
+"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
+RUN_RC=$?
+set -e
+
+# 100 t_ok() calls in client_patterns.c, and the floor is under the count a
+# whole run reports rather than at it: some cases are conditional on what the
+# peer end did.  Raise it, never lower it.
+verdict_guest "clients" 90 "$RUN_RC" \
+    "$(verdict_hd_amiberry)/stdout.txt" \
+    "$(verdict_serial_amiberry)"
+exit $?
