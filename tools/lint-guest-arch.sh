@@ -69,8 +69,17 @@ while IFS= read -r f; do
         grep -qE 'build\.sh$|build-.*\.sh$' <<<"$f" ||
         case "$f" in */build*.sh) ;; *) continue ;; esac
 
-    # A literal -m680x0 on a compiler line, not in a comment or a case arm.
-    hits=$(grep -nE '^[^#]*\$\{?[A-Za-z_]*GCC[A-Za-z_]*\}?[^#]*-m68[0-9]{3}' "$f" || true)
+    # A literal -m680x0 ABOVE THE FLOOR on a compiler line, not in a comment
+    # or a case arm.
+    #
+    # -m68000 IS NOT THE BUG AND NEVER WAS.  A 68000 binary runs on every
+    # machine in the matrix; the failure this lint is named for is the other
+    # direction -- a 68020 binary handed to an A600, which stops on an illegal
+    # instruction inside its own C constructor.  Flagging the safe direction
+    # made the lint red on three scripts that had made the right choice, and a
+    # lint that is red on correct code is a lint nobody runs.  It was invoked
+    # by nothing until 2026-08-17, which is exactly what that costs.
+    hits=$(grep -nE '^[^#]*\$\{?[A-Za-z_]*GCC[A-Za-z_]*\}?[^#]*-m68(0[1-9]0|[1-9][0-9]0)' "$f" || true)
     [ -n "$hits" ] || continue
 
     found=1
@@ -80,9 +89,11 @@ while IFS= read -r f; do
 done < <(git ls-files '*.sh' 2>/dev/null)
 
 if [ "$found" = "0" ]; then
-    echo "guest-arch: no hardcoded -m680x0 in a model-aware script"
+    echo "guest_arch=PASS"
+    echo "guest-arch: no hardcoded -m68020-or-newer in a model-aware script"
     exit 0
 fi
+echo "guest_arch=FAIL"
 
 cat <<'EOF'
 

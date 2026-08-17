@@ -355,6 +355,24 @@ stage_host() {
         return 1
     fi
 
+    # No harness may build a guest binary for a newer CPU than the machine it
+    # then points that binary at.  It costs a day every time: the program stops
+    # in its own C constructor, no serial, no stdout.txt, and it reads as "the
+    # stack does not work on a 68000".
+    #
+    # THE LINT EXISTED AND NOTHING RAN IT, which is the state its own three
+    # case studies were found in.  It was also red on `main`, on three scripts
+    # that hardcode -m68000 -- the SAFE direction, which runs on every machine
+    # in the matrix and is never this bug; it flags -m68020 and newer now.
+    if tools/lint-guest-arch.sh > "$BUILD/guest-arch.log" 2>&1; then
+        note "guest arch: $(sed -n 's/^guest-arch: //p' "$BUILD/guest-arch.log")"
+    else
+        cat "$BUILD/guest-arch.log"
+        fail "a harness builds a guest binary for a newer CPU than the machine\
+ it runs it on (tools/lint-guest-arch.sh)"
+        return 1
+    fi
+
     # Every drawer in the archive is a configuration this script compiles.
     # The minimal drawer is not, and says so with its reason.
     if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
