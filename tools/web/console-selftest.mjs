@@ -36,6 +36,8 @@ import {
   readPng,
   synth,
   synthChunky,
+  synthRgb565,
+  quantise565,
   writePfs,
   writePng,
 } from "./console-host.mjs";
@@ -144,35 +146,69 @@ function pfsTimes(cap) {
  * stride from the width shears the picture one byte further left every row,
  * and that is the single most likely bug in this file.
  */
+/* The three source layouts, spelled here so the tables below read as a format
+   and not as a boolean.  A boolean is what this used to carry and it is
+   exactly what a third format does not fit into. */
+const FMT_PLANAR = 0;
+const FMT_CLUT8  = 1;
+const FMT_RGB565 = 2;
+
+/* One capture of the shape asked for, whichever format it is. */
+function synthOf(fmt, w, h, depth, frames, bpr) {
+  if (fmt === FMT_RGB565) return synthRgb565(w, h, frames, bpr);
+  if (fmt === FMT_CLUT8)  return synthChunky(w, h, frames, bpr);
+  return synth(w, h, depth, frames, bpr);
+}
+
+/* And the colours a decode of it has to produce.  A truecolour capture has no
+   palette on the wire, so the reference uses the one the picture was drawn
+   from, put through the format's own loss. */
+function referenceOf(fmt, depth) {
+  if (fmt === FMT_RGB565) return quantise565(palette(8));
+  if (fmt === FMT_CLUT8)  return palette(8);
+  return palette(depth);
+}
+
 const SHAPES = [
-  ["640x256x3 hires PAL", 640, 256, 3, undefined, false],
-  ["320x200x5 lores NTSC", 320, 200, 5, undefined, false],
-  ["634x242x4 padded bpr", 634, 242, 4, 80, false],
-  ["800x600x8 big", 800, 600, 8, undefined, false],
-  ["640x480x3", 640, 480, 3, undefined, false],
+  ["640x256x3 hires PAL", 640, 256, 3, undefined, FMT_PLANAR],
+  ["320x200x5 lores NTSC", 320, 200, 5, undefined, FMT_PLANAR],
+  ["634x242x4 padded bpr", 634, 242, 4, 80, FMT_PLANAR],
+  ["800x600x8 big", 800, 600, 8, undefined, FMT_PLANAR],
+  ["640x480x3", 640, 480, 3, undefined, FMT_PLANAR],
   /* The RTG shapes.  The reference is built from drawFrame's indices straight
-     through the palette and knows nothing about either layout, so a chunky
-     decode that read the bytes as bitplanes fails here on frame 0 -- which is
-     the check the planar path has had and the one a new format needs most. */
-  ["640x480 chunky", 640, 480, 8, undefined, true],
-  ["804x300 chunky padded bpr", 804, 300, 8, 808, true],
+     through the palette and knows nothing about any of the layouts, so a
+     chunky decode that read the bytes as bitplanes fails here on frame 0 --
+     which is the check the planar path has had and the one a new format needs
+     most.
+     The truecolour ones carry the same picture with no palette at all, and
+     their reference goes through quantise565() because that is the loss the
+     format applies: 640 wide is 1280 bytes to a row and a whole number of
+     16-byte tiles, 404 wide is 808 and is not. */
+  ["640x480 chunky", 640, 480, 8, undefined, FMT_CLUT8],
+  ["804x300 chunky padded bpr", 804, 300, 8, 808, FMT_CLUT8],
+  ["640x480 rgb565", 640, 480, 16, undefined, FMT_RGB565],
+  ["404x200 rgb565 ragged bpr", 404, 200, 16, 808, FMT_RGB565],
 ];
 
-for (const [name, w, h, depth, bpr, chunky] of SHAPES) {
+
+for (const [name, w, h, depth, bpr, fmt] of SHAPES) {
   const cap = M.parsePfs(bufferToArrayBuffer(writePfs(
-    chunky ? synthChunky(w, h, 3, bpr) : synth(w, h, depth, 3, bpr))));
+    synthOf(fmt, w, h, depth, 3, bpr))));
 
   ok(name + ": header survives the round trip",
      cap.screen.width === w && cap.screen.height === h &&
      cap.screen.depth === depth && cap.frameCount === 3 &&
-     (cap.screen.chunky === true) === chunky,
+     M.screenFormat(cap.screen) === fmt,
      JSON.stringify(cap.screen));
 
   let same = true;
   let why = "";
   for (let t = 0; t < 3; t++) {
     const got = decodeFrame(cap, t);
-    const want = referenceRGBA(w, h, depth, t, palette(depth));
+    /* drawFrame draws at the capture's own depth: eight for both card
+       formats, since a card screen is drawn from the same indices. */
+    const want = referenceRGBA(w, h, fmt === FMT_PLANAR ? depth : 8, t,
+                               referenceOf(fmt, depth));
     if (Buffer.compare(Buffer.from(got), Buffer.from(want)) !== 0) {
       same = false;
       why = "frame " + t + ", " + firstDifference(got, want, w);
@@ -188,9 +224,8 @@ for (const [name, w, h, depth, bpr, chunky] of SHAPES) {
   }
 }
 
-for (const [name, w, h, depth, bpr, chunky] of SHAPES) {
-  const src = writePfs(chunky ? synthChunky(w, h, 3, bpr)
-                              : synth(w, h, depth, 3, bpr));
+for (const [name, w, h, depth, bpr, fmt] of SHAPES) {
+  const src = writePfs(synthOf(fmt, w, h, depth, 3, bpr));
   const cap = M.parsePfs(bufferToArrayBuffer(src));
   const built = M.buildPfs(cap.screen, cap.rgb, pfsFrames(cap),
                            pfsTimes(cap), cap.pointerAt, cap.pointers);
@@ -360,17 +395,22 @@ ok("a file with the old magic is refused rather than read as this one",
  * Tile widths are BYTES.  The sizes are rfbbench's own sweep, and the ragged
  * grid is there because bytesPerRow is not always a whole number of tiles.
  */
-for (const [name, w, h, depth, tw, th, chunky] of [
-  ["640x480x3 16x8 tiles", 640, 480, 3, 16, 8, false],
-  ["800x600x8 32x16 tiles", 800, 600, 8, 32, 16, false],
-  ["634x242x4 ragged grid", 634, 242, 4, 12, 10, false],
-  /* And the RTG shapes: one eight-bit plane, a tile grid over a stride that
-     is a byte a pixel, and 804 wide padded to 808 so the tile at the right
-     edge is clipped. */
-  ["640x480 chunky 16x8 tiles", 640, 480, 8, 16, 8, true],
-  ["804x300 chunky ragged grid", 804, 300, 8, 32, 16, true],
+for (const [name, w, h, depth, tw, th, fmt] of [
+  ["640x480x3 16x8 tiles", 640, 480, 3, 16, 8, FMT_PLANAR],
+  ["800x600x8 32x16 tiles", 800, 600, 8, 32, 16, FMT_PLANAR],
+  ["634x242x4 ragged grid", 634, 242, 4, 12, 10, FMT_PLANAR],
+  /* And the RTG shapes: one plane of bytes, a tile grid over a stride that is
+     bytes and not pixels, and a width that pads so the tile at the right
+     edge is clipped.  The 11-byte tile on the last row is the case nothing
+     else reaches: an odd tile width puts a tile boundary between the two
+     bytes of a pixel, so the damage rectangle has to round its left edge
+     down to a pixel and its right edge up to one. */
+  ["640x480 chunky 16x8 tiles", 640, 480, 8, 16, 8, FMT_CLUT8],
+  ["804x300 chunky ragged grid", 804, 300, 8, 32, 16, FMT_CLUT8],
+  ["640x480 rgb565 16x8 tiles", 640, 480, 16, 16, 8, FMT_RGB565],
+  ["404x200 rgb565 odd tile", 404, 200, 16, 11, 10, FMT_RGB565],
 ]) {
-  const cap = chunky ? synthChunky(w, h, 20) : synth(w, h, depth, 20);
+  const cap = synthOf(fmt, w, h, depth, 20);
   const g = makeGeometry(cap.screen, tw, th);
   const cg = M.makeGeometry(cap.screen, tw, th);
   const fb = new Uint8Array(cap.stride);
@@ -409,11 +449,11 @@ for (const [name, w, h, depth, tw, th, chunky] of [
 
   const word = "geom " + w + " " + h + " " + cap.screen.depth + " " +
                cap.screen.bytesPerRow + " " + tw + " " + th + " " +
-               (chunky ? 1 : 0);
+               fmt;
   const parsed = M.geometryFromWord(word);
   ok(name + ": the geom word parses to the same grid",
      parsed.across === cg.across && parsed.down === cg.down &&
-     (parsed.screen.chunky === true) === chunky);
+     M.screenFormat(parsed.screen) === fmt);
 }
 
 {
@@ -454,10 +494,10 @@ for (const [name, w, h, depth, tw, th, chunky] of [
 {
   const rgb = palette(3);
   const hex = Buffer.from(rgb).toString("hex");
-  const back = M.paletteFromWord("pal " + hex, 3);
+  const back = M.paletteFromWord("pal " + hex, 8);
   ok("the pal word round trips", Buffer.compare(Buffer.from(back), rgb) === 0);
   ok("a pal word of the wrong length is refused",
-     throws(() => M.paletteFromWord("pal " + hex.slice(0, 10), 3)));
+     throws(() => M.paletteFromWord("pal " + hex.slice(0, 10), 8)));
   ok("a tile wider than RFB_MAX_TILE_W is refused",
      throws(() => M.makeGeometry({ width: 64, height: 64, depth: 2, bytesPerRow: 8 }, 65, 16)));
   ok("a tile taller than RFB_MAX_TILE_H is refused",
@@ -616,7 +656,7 @@ function timeLive(w, h, depth, tw, th, label) {
   const shadow = new Uint8Array(cap.stride);
   const scratch = new Uint8Array(M.scratchBytes(cg));
   const words = new Uint32Array(w * h);
-  const pal = M.palette32(cap.rgb, depth);
+  const pal = M.palette32(cap.rgb, M.palColours(cap.screen));
 
   const frames = [];
   for (let t = 0; t < cap.frameCount; t++) {

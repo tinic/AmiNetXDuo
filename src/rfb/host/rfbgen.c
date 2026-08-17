@@ -13,11 +13,21 @@
 static unsigned g_w, g_h, g_depth, g_bpr;
 static unsigned char *g_idx;   /* w*h colour indices */
 
-/* The frames go out as one eight-bit plane, and not as g_depth one-bit ones.
-   That is a Picasso96 or CyberGraphX screen, and the flag that the .pfs header
-   carries in its byte 9.  g_idx is already indices, so this only changes what
+/* Which of the three source layouts the frames go out as: RFB_FMT_PLANAR,
+   RFB_FMT_CLUT8 or RFB_FMT_RGB565, which is also what the .pfs header carries
+   in its byte 9.  g_idx is indices whichever it is, so this changes only what
    emit() writes and how wide a row is. */
-static unsigned g_chunky;
+static unsigned g_fmt;
+
+#define GEN_FMT_PLANAR  0u
+#define GEN_FMT_CLUT8   1u
+#define GEN_FMT_RGB565  2u
+
+/* What the drawing may put in g_idx, which is a byte array whatever the
+   format is.  It follows the depth on a planar screen and is a byte
+   everywhere else, including truecolour, where an index is a way of choosing
+   a colour and not something the frames carry. */
+static unsigned g_idxmask;
 
 static unsigned hash32(unsigned x)
 {
@@ -151,12 +161,29 @@ static unsigned g_emitted;
    lab captures. */
 #define GEN_FRAME_MS    40u
 
+/*
+ * The generator's palette entry for an index, which is the one open_pfs()
+ * writes.  A function so that the truecolour frames carry the same colours
+ * the palette formats do, and a sequence looks the same whichever format it
+ * was written in.
+ */
+static void gen_rgb(unsigned i, unsigned char *out)
+{
+    out[0] = (unsigned char)(i * 37u);
+    out[1] = (unsigned char)(i * 91u);
+    out[2] = (unsigned char)(i * 53u);
+}
+
 static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
 {
     char path[512];
     unsigned char hdr[16];
-    unsigned i, ncol = 1u << g_depth;
+    unsigned i, ncol;
     FILE *f;
+
+    /* No palette on the truecolour format, so none is written and the frames
+       begin at offset 16.  The colours are in the pixels. */
+    ncol = (g_fmt == GEN_FMT_RGB565) ? 0u : (1u << g_depth);
 
     snprintf(path, sizeof(path), "%s/%s.pfs", dir, name);
     f = fopen(path, "wb");
@@ -168,15 +195,14 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
     hdr[4] = (unsigned char)(g_w >> 8);   hdr[5] = (unsigned char)g_w;
     hdr[6] = (unsigned char)(g_h >> 8);   hdr[7] = (unsigned char)g_h;
     hdr[8] = (unsigned char)g_depth;
-    hdr[9] = (unsigned char)(g_chunky ? 1u : 0u);
+    hdr[9] = (unsigned char)g_fmt;
     hdr[10] = (unsigned char)(g_bpr >> 8); hdr[11] = (unsigned char)g_bpr;
     hdr[12] = (unsigned char)(frames >> 8); hdr[13] = (unsigned char)frames;
     hdr[14] = 0; hdr[15] = 0;
     fwrite(hdr, 1, 16, f);
     for (i = 0; i < ncol; i++) {
         unsigned char rgb[3];
-        rgb[0] = (unsigned char)(i * 37u); rgb[1] = (unsigned char)(i * 91u);
-        rgb[2] = (unsigned char)(i * 53u);
+        gen_rgb(i, rgb);
         fwrite(rgb, 1, 3, f);
     }
     return f;
@@ -184,7 +210,7 @@ static FILE *open_pfs(const char *dir, const char *name, unsigned frames)
 
 static void emit(FILE *f)
 {
-    if (g_chunky) {
+    if (g_fmt == GEN_FMT_CLUT8) {
         unsigned y;
         /* One byte a pixel, at the row stride, and the padding past the width
            left as it was allocated.  That is the shape of a card framebuffer,
@@ -192,6 +218,34 @@ static void emit(FILE *f)
         memset(g_planes, 0, (size_t)g_bpr * g_h);
         for (y = 0; y < g_h; y++)
             memcpy(g_planes + (size_t)y * g_bpr, g_idx + (size_t)y * g_w, g_w);
+        fwrite(g_planes, 1, (size_t)g_bpr * g_h, f);
+    } else if (g_fmt == GEN_FMT_RGB565) {
+        unsigned y, x;
+        /*
+         * Two bytes a pixel, big-endian, the same padding rule.  The colour
+         * is the index's palette entry with a gradient mixed into the blue,
+         * so the frames are not 256 flat colours: a synthetic truecolour
+         * screen made of nothing but palette entries would compress far
+         * better than any real one and would make the round trip agree with
+         * itself for the wrong reason.
+         */
+        memset(g_planes, 0, (size_t)g_bpr * g_h);
+        for (y = 0; y < g_h; y++) {
+            unsigned char *row = g_planes + (size_t)y * g_bpr;
+            for (x = 0; x < g_w; x++) {
+                unsigned char rgb[3];
+                unsigned v;
+
+                gen_rgb(g_idx[(size_t)y * g_w + x], rgb);
+                rgb[2] = (unsigned char)((rgb[2] + x * 255u / g_w) / 2u);
+
+                v = ((unsigned)(rgb[0] >> 3) << 11)
+                  | ((unsigned)(rgb[1] >> 2) << 5)
+                  | (unsigned)(rgb[2] >> 3);
+                row[x * 2u]      = (unsigned char)(v >> 8);
+                row[x * 2u + 1u] = (unsigned char)v;
+            }
+        }
         fwrite(g_planes, 1, (size_t)g_bpr * g_h, f);
     } else {
         pack();
@@ -222,7 +276,8 @@ static void close_pfs(FILE *f)
 
 static void setup(unsigned w, unsigned h, unsigned depth)
 {
-    g_w = w; g_h = h; g_depth = depth; g_chunky = 0;
+    g_w = w; g_h = h; g_depth = depth; g_fmt = GEN_FMT_PLANAR;
+    g_idxmask = (1u << depth) - 1u;
     g_bpr = ((w + 15u) / 16u) * 2u;
     free(g_idx); free(g_planes);
     g_idx = malloc((size_t)w * h);
@@ -239,8 +294,26 @@ static void setup(unsigned w, unsigned h, unsigned depth)
  */
 static void setup_chunky(unsigned w, unsigned h)
 {
-    g_w = w; g_h = h; g_depth = 8; g_chunky = 1;
+    g_w = w; g_h = h; g_depth = 8; g_fmt = GEN_FMT_CLUT8;
+    g_idxmask = 255u;
     g_bpr = ((w + 7u) / 8u) * 8u;
+    free(g_idx); free(g_planes);
+    g_idx = malloc((size_t)w * h);
+    g_planes = malloc((size_t)g_bpr * h);
+    if (!g_idx || !g_planes) { fprintf(stderr, "oom\n"); exit(1); }
+}
+
+/*
+ * And as a truecolour card screen: two bytes a pixel, no palette, and the row
+ * rounded up to a longword, which is what the server does with the width it
+ * gets from the card.  The depth is 16 and is bits a pixel, so nothing here
+ * may size a palette from it.
+ */
+static void setup_rgb565(unsigned w, unsigned h)
+{
+    g_w = w; g_h = h; g_depth = 16; g_fmt = GEN_FMT_RGB565;
+    g_idxmask = 255u;
+    g_bpr = ((w * 2u + 3u) / 4u) * 4u;
     free(g_idx); free(g_planes);
     g_idx = malloc((size_t)w * h);
     g_planes = malloc((size_t)g_bpr * h);
@@ -341,7 +414,7 @@ static void seq_full(const char *dir, const char *name)
             for (x = 0; x < g_w; x++)
                 g_idx[y * g_w + x] =
                     (unsigned char)(hash32(x + y * 1237u + i * 99991u)
-                                    & ((1u << g_depth) - 1u));
+                                    & g_idxmask);
         emit(f);
     }
     close_pfs(f);
@@ -383,6 +456,25 @@ int main(int argc, char **argv)
     setup_chunky(804, 300);
     seq_idle(dir, "idle_c8pad");
     seq_full(dir, "full_c8pad");
+
+    /*
+     * And the truecolour shape: two bytes a pixel and no palette.  640 wide
+     * is 1280 bytes to a row, a whole number of 16-byte tiles; 404 wide is
+     * 808 and is not, so the clipped tile at the right edge is walked with a
+     * pixel straddling it.
+     *
+     * Shorter sequences than the palette ones on purpose.  A frame here is
+     * twice the bytes of an 8-bit one of the same size, and the round trip
+     * encodes and decodes every frame of every sequence under three tile
+     * sizes and two layouts, so 60 frames of 640x480 would put a quarter of a
+     * gigabyte through it to test what 20 frames test.
+     */
+    setup_rgb565(640, 480);
+    seq_scroll(dir, "scroll_rgb", 8, 20);
+    seq_full(dir, "full_rgb");
+    setup_rgb565(404, 200);
+    seq_idle(dir, "idle_rgbpad");
+    seq_menu(dir, "menu_rgbpad");
 
     free(g_idx); free(g_planes);
     return 0;

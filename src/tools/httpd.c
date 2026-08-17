@@ -7057,9 +7057,38 @@ static BOOL httpd_writable(HttpConn *c)
 
             if (!http_fb_start(httpd_sb, c->sock, c->in, first, httpd_now()))
             {
-                if (httpd_verbose || httpd_trace)
-                    httpd_log(c, "console did not start: %s",
-                              (LONG)http_fb_fault(), 0);
+                /*
+                 * The refusal, to the browser and to the log, and it used to
+                 * reach neither.
+                 *
+                 * The 101 has gone by this point, so the socket is a
+                 * WebSocket and the only thing on it a browser reports to the
+                 * page is a close frame.  Returning FALSE alone drops the
+                 * connection with a FIN, which every browser shows as the
+                 * server having closed and nothing more, so the sentence
+                 * http_fb_fault() holds -- which names the depth of the
+                 * screen it would not serve -- went nowhere.  The log line
+                 * was behind -v as well, so a guest started without it
+                 * recorded nothing either, and a person with a truecolour
+                 * screen in front had two silences and no reason.
+                 *
+                 * Best effort, like http_fb_evict(): out[] is empty here and
+                 * belongs to this connection, the frame is at most 127 bytes,
+                 * and the connection is going either way.  A close frame
+                 * longer than a control frame may be is truncated by
+                 * http_ws_close_frame() rather than dropped, so a long
+                 * sentence still arrives short instead of not at all, and the
+                 * whole of it goes to the log below.
+                 */
+                unsigned long n =
+                    http_ws_close_frame(c->out, sizeof(c->out),
+                                        HTTP_WS_CLOSE_GOING, http_fb_fault());
+
+                if (n > 0UL)
+                    (VOID)tool_sock_send(httpd_sb, c->sock, c->out, (LONG)n);
+
+                httpd_log(c, "console did not start: %s",
+                          (LONG)http_fb_fault(), 0);
                 return FALSE;
             }
 

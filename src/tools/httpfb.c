@@ -100,6 +100,29 @@
 #define FB_GRAB_FLOOR       1
 
 /*
+ * The share of the machine this may take, as the divisor of the idle owed
+ * after a frame.
+ *
+ * A frame that cost T ticks is followed by at least T / FB_IDLE_DIVISOR of
+ * doing nothing, so the console settles at T / (T + T/3), which is 75%.  The
+ * machine has to stay usable for whatever its owner is doing while somebody
+ * watches it, and on a 68030 a 640x480 frame is a fifth of a second of solid
+ * work: without this the console takes everything it can get and the guest
+ * belongs to the browser rather than to the person sitting at it.
+ *
+ * It is enforced against MEASURED cost and not against a frame rate, because
+ * the cost is what varies -- an idle screen is a few milliseconds and a
+ * scrolling one is hundreds -- and a fixed rate would either throttle the
+ * cheap case for nothing or fail to cap the expensive one at all.
+ *
+ * Task priority is not the mechanism.  A lower priority yields to a task that
+ * wants to run and caps nothing when the machine is otherwise idle, which is
+ * exactly when a long encode still makes the pointer stutter.  This is a
+ * duty cycle and it holds whether or not anything else is runnable.
+ */
+#define FB_IDLE_DIVISOR     3
+
+/*
  * How often a `refresh` can force a full frame, in fiftieths.
  *
  * A refresh is expensive and asymmetric.  The answer is a whole screen, about
@@ -155,13 +178,23 @@ typedef struct FbGeometry
     ULONG frame_bytes;
     UWORD interleaved;      /* BMF_INTERLEAVED, as the BitMap reported it */
     /*
-     * A graphics card's screen, which is one eight-bit plane rather than eight
-     * one-bit ones.  depth is 8 and row_bytes is a byte a pixel, so everything
-     * downstream that counts in bytes is unchanged.  What changes is that the
-     * bitplanes cannot be read where they are, so a staging buffer stands in
-     * for them and httprtg.c fills it.  See fb_grab_frame().
+     * What a pixel is, as one of the RFB_FMT_ values, and it is the field the
+     * whole of the rest of this file branches on.
+     *
+     * RFB_FMT_PLANAR is the chipset: depth one-bit planes read where they
+     * lie.  The two chunky ones are a graphics card, one plane of bytes,
+     * where the bitplanes cannot be read where they are at all -- a staging
+     * buffer in Fast RAM stands in for them and httprtg.c fills it, see
+     * fb_grab_frame().  RFB_FMT_CLUT8 is a byte a pixel and a palette;
+     * RFB_FMT_RGB565 is two bytes a pixel and no palette, which is what a 15,
+     * 16, 24 or 32-bit card screen is converted to before it gets here.
+     *
+     * row_bytes is bytes either way, so everything downstream that counts in
+     * bytes is unchanged by any of this.  Only three things ask: how many
+     * planes there are, how wide a row is, and whether there is a palette to
+     * send.
      */
-    UWORD chunky;
+    UWORD format;
 } FbGeometry;
 
 /* ------------------------------------------------------------- the module -- */
@@ -244,6 +277,89 @@ static UBYTE           fb_rtg_ready;
 static UBYTE           fb_want_rtg;
 
 static ULONG           fb_next_tick;
+
+/*
+ * The duty cycle, in ticks.
+ *
+ * fb_frame_t0 is when the work for the frame in flight began, which is the
+ * grab and not the send: the cost this has to cap is everything the task does
+ * on the console's account, and the send is part of it.  fb_busy_ticks is the
+ * running total of that cost and is what fbstat reports, so the share taken
+ * can be checked from outside rather than trusted.
+ *
+ * fb_frame_t0 is 0 when no frame is in flight, and a tick of 0 is therefore
+ * nudged to 1 by its writer the way fb_next_tick's is.
+ */
+static ULONG           fb_frame_t0;
+static ULONG           fb_busy_ticks;
+
+/* And how much idle has actually been handed back on account of it, so the
+   share is enforced against the session's totals and not against whatever the
+   last band happened to round to. */
+static ULONG           fb_idle_given;
+
+/*
+ * Which tile row the next band starts at, and 0 means the next pass begins a
+ * fresh screen.
+ *
+ * A whole frame is one uninterruptible piece of work, and on a 68030 that is
+ * around a fifth of a second in which this task reads no socket -- so a click
+ * or a keystroke sent while a frame is being built is not looked at until the
+ * frame is finished.  Producing a band at a time puts the server's read back
+ * on the path between them, at the cost of five bytes of message header per
+ * band and nothing else.
+ *
+ * The screen is re-resolved and its geometry re-checked on every band, so a
+ * screen that changes shape half way through a pass is caught there rather
+ * than producing bands of two different pictures.
+ */
+static UWORD           fb_band_ty0;
+
+/* Whether the band just produced closed a screen pass.  Only that one counts
+   a frame, so the frame counter keeps meaning screens and not messages. */
+static UBYTE           fb_band_last;
+
+/* What the last complete screen pass cost, in ticks, which is what decides
+   whether the next one is worth banding.  Zero until one has finished, so the
+   first pass of a session is whole. */
+static ULONG           fb_pass_ticks;
+
+/* And what the pass in progress has cost so far, since it is charged a band
+   at a time. */
+static ULONG           fb_pass_acc;
+
+/*
+ * Tile rows in a band.
+ *
+ * A 640x480 screen at 16-row tiles is 30 tile rows, so four rows is eight
+ * bands and bounds one uninterrupted encode at an eighth of a screen.  Small
+ * enough to keep the socket answered on a 68030, large enough that the five
+ * bytes of header a band costs stay lost in the noise -- an idle 640x480
+ * screen measured 1840 bytes a pass whole and 1875 in eight bands.
+ */
+#ifndef FB_BAND_ROWS
+#define FB_BAND_ROWS        4
+#endif
+
+/*
+ * How expensive a screen pass has to have been for the next one to be banded,
+ * in fiftieths.
+ *
+ * Banding is not free and it is not always worth it.  A band boundary buys a
+ * read of the socket, which is only worth having when there is a long stretch
+ * of work to interrupt; and it costs a pass that is spread over more turns of
+ * the server loop, which on a cheap screen is all cost.  Measured on the
+ * A3000 with an idle screen: worst keystroke-to-frame 42.0 ms with the frame
+ * whole against 82.5 ms banded into eight, because a change is only encoded
+ * when its own band comes round and eight bands of nothing take longer to
+ * come round than one pass over everything.
+ *
+ * So the previous pass decides.  Two ticks is 40 ms, which is about where a
+ * pass stops being something a person would not notice; a Workbench doing
+ * nothing sits far below it and is never banded, and a screen that is
+ * scrolling sits far above it and always is.
+ */
+#define FB_BAND_WHEN        2
 
 /*
  * A resync is a sequence, and asking twice must not restart it.
@@ -643,13 +759,30 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
          * own stride is not used, so nothing here depends on a value that is
          * only valid while the bitmap is locked.  Rounded up to a longword so
          * the encoder's word-at-a-time compare stays on the fast path.
+         *
+         * rs.bpp is what httprtg.c will deliver into that buffer, a byte a
+         * pixel for a palette screen and two for a truecolour one, and it is
+         * the only thing that differs between the two here.  The depth
+         * follows it rather than the card's own: a 24 or 32-bit screen
+         * arrives as RGB565 and 16 is what the receiver is told, because 16
+         * is what the bytes are.
          */
         g->interleaved = 0;
-        g->chunky      = 1;
         g->width       = rs.width;
         g->height      = rs.height;
-        g->depth       = 8;
-        g->row_bytes   = (UWORD)((rs.width + 3U) & ~3U);
+
+        if (rs.bpp == 2)
+        {
+            g->format = RFB_FMT_RGB565;
+            g->depth  = RFB_RGB565_DEPTH;
+        }
+        else
+        {
+            g->format = RFB_FMT_CLUT8;
+            g->depth  = 8;
+        }
+
+        g->row_bytes   = (UWORD)((((ULONG)rs.width * rs.bpp) + 3UL) & ~3UL);
         g->row_stride  = (ULONG)g->row_bytes;
         g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height;
         return TRUE;
@@ -673,7 +806,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
         return FALSE;
     }
 
-    g->chunky = 0;
+    g->format = RFB_FMT_PLANAR;
 
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
@@ -741,7 +874,7 @@ static BOOL fb_geometry_same(const FbGeometry *a, const FbGeometry *b)
                   a->depth == b->depth && a->row_bytes == b->row_bytes &&
                   a->row_stride == b->row_stride &&
                   a->interleaved == b->interleaved &&
-                  a->chunky == b->chunky);
+                  a->format == b->format);
 }
 
 VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
@@ -760,16 +893,43 @@ VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
  *
  * TRUE when it changed, which is what decides whether a `pal` word goes out.
  */
-static BOOL fb_read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
+/*
+ * How many colours this screen's `pal` word carries, and 0 when it has none.
+ *
+ * Asked of the wire format rather than computed here, because 1 << depth is
+ * right on a plain planar screen and on nothing else: a truecolour screen is
+ * 16 deep with no palette at all, and the chipset modes coming after it are
+ * deeper than their base palette rather than equal to it.  One rule, in
+ * rfb_pal_colours(), and both ends read it.
+ */
+static ULONG fb_colours(const FbGeometry *g)
+{
+    rfb_geom q;
+
+    memset(&q, 0, sizeof(q));
+    q.depth  = (rfb_u8)g->depth;
+    q.format = (rfb_u8)g->format;
+
+    return (ULONG)rfb_pal_colours(&q);
+}
+
+static BOOL fb_read_palette(struct ColorMap *cm, ULONG colours, UBYTE *pal)
 {
     /* Static rather than automatic: 768 bytes at depth 8, and a Shell command
        has 4 KB of stack for everything httpd already has on it. */
     static UBYTE fresh[3U * FB_MAX_COLOURS];
-    ULONG colours = 1UL << depth;
     ULONG have    = (cm != NULL) ? (ULONG)cm->Count : 0;
     ULONG first;
     ULONG i;
     BOOL  moved = FALSE;
+
+    /* A truecolour screen has no palette, so there is nothing to compare and
+       nothing ever moves.  Answering FALSE here is what keeps the `pal` word
+       off the wire for the whole session. */
+    if (colours == 0UL)
+        return FALSE;
+    if (colours > FB_MAX_COLOURS)
+        colours = FB_MAX_COLOURS;
 
     memset(fresh, 0, (size_t)(3UL * colours));
 
@@ -1409,9 +1569,11 @@ static VOID fb_pointer_poll(ULONG now)
  * bytes the far end was sent.  That failure would not correct itself on the
  * next frame.
  */
-static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap)
+static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap,
+                             UWORD ty0, UWORD ty1)
 {
-    return rfb_encode_frame_planes(&fb_enc, planes, out, out_cap);
+    return rfb_encode_band(&fb_enc, planes, out, out_cap,
+                           (rfb_u16)ty0, (rfb_u16)ty1);
 }
 
 enum
@@ -1451,7 +1613,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     fb_display_units(sc);
 
     *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
-                                     want->depth, fb_pal);
+                                     fb_colours(want), fb_pal);
 
     /* Colours before pixels, and the encode is skipped entirely on the pass
        that finds them moved. */
@@ -1462,7 +1624,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
        library call, so they are read in fb_grab_frame() where the lock that
        makes the call safe is still held.  planes[0] is the staging buffer and
        is filled there. */
-    if (want->chunky)
+    if (RFB_FMT_IS_CHUNKY(want->format))
         return FB_GRAB_OK;
 
     for (plane = 0; plane < want->depth; plane++)
@@ -1526,7 +1688,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
  */
 static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
                          BOOL *palette_moved, UBYTE *out, ULONG out_cap,
-                         LONG *encoded)
+                         LONG *encoded, UWORD ty0, UWORD ty1)
 {
     struct Screen *sc;
     const UBYTE   *planes[FB_MAX_DEPTH];
@@ -1575,7 +1737,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
          * on a card is rare, and a frozen picture is recoverable where a guru
          * is not.
          */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky && !pub)
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format) && !pub)
             rc = FB_GRAB_UNREADABLE;
 
         /* Attach on the first frame of a geometry rather than in
@@ -1583,7 +1746,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
            screen and this is where one is held.  It also has to happen again
            after a screen change, which is what fb_rtg_ready being cleared with
            the buffers arranges. */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky &&
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format) &&
             !fb_rtg_ready)
         {
             fb_rtg_ready = (UBYTE)http_rtg_attach(sc->RastPort.BitMap,
@@ -1599,9 +1763,26 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         /* The fetch itself: whole contiguous rows into Fast RAM, with the
            screen still held.  Everything after this, the compare, the PackBits
            and the socket, runs on the copy. */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky)
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format))
         {
-            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
+            /*
+             * Once a screen pass and not once a band.  The fetch is the whole
+             * frame in contiguous rows because that is the shape a card reads
+             * back fastest -- see httprtg.c, where a loop of small rectangles
+             * is measured as the wrong shape by an order of magnitude -- so
+             * the bands that follow encode the copy this one took rather than
+             * going back to the board four more times.
+             *
+             * The staging buffer therefore holds one moment of the screen for
+             * the whole pass, which is if anything better than re-reading:
+             * the bands cannot disagree with each other about what the screen
+             * was.
+             */
+            if (ty0 != 0)
+                planes[0] = fb_stage;
+            else if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort,
+                                   fb_stage))
                 planes[0] = fb_stage;
             else
                 rc = FB_GRAB_UNREADABLE;
@@ -1624,7 +1805,7 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
             fb_torn++;
 
         WaitBlit();
-        *encoded = fb_encode_planes(planes, out, out_cap);
+        *encoded = fb_encode_planes(planes, out, out_cap, ty0, ty1);
 
         if (locked)
             ReleaseSemaphore(&sc->LayerInfo.Lock);
@@ -1683,7 +1864,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
     /* One eight-bit plane or eight one-bit ones.  The depth above stays 8 on a
        card because it is what sizes the palette.  rfb_planes() is what says
        there is one plane. */
-    fb_rg.format        = (rfb_u8)(g->chunky ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
+    fb_rg.format        = (rfb_u8)g->format;
 
     rfb_scroll_defaults(&fb_cfg);
 
@@ -1716,7 +1897,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     /* One frame of the card, in Fast RAM.  Only on a card, because the chipset
        path has no copy of the screen and this would be 40 KB for nothing. */
-    if (g->chunky)
+    if (RFB_FMT_IS_CHUNKY(g->format))
     {
         fb_stage_len = (ULONG)g->row_bytes * (ULONG)g->height;
         fb_stage = (UBYTE *)ami_alloc(fb_stage_len);
@@ -2356,6 +2537,12 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_tx_len     = 0;
     fb_tx_sent    = 0;
     fb_next_tick  = 0;
+    fb_frame_t0   = 0;
+    fb_busy_ticks = 0;
+    fb_idle_given = 0;
+    fb_band_ty0   = 0;
+    fb_pass_ticks = 0;
+    fb_pass_acc   = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2589,10 +2776,20 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
+    /*
+     * A format with no palette never has one to send, and every place that
+     * raises the flag -- a refresh, a screen change, the start of a session --
+     * raises it without asking what the format is.  Dropped here, in the one
+     * place that would act on it, and the pass then carries on to the grab
+     * below rather than spending itself on a word that does not exist.
+     */
+    if (fb_want_pal && fb_colours(&fb_geom) == 0UL)
+        fb_want_pal = 0;
+
     if (fb_want_pal)
     {
         rfb_u32 len = rfb_word_pal((char *)&fb_tx[10], fb_tx_cap - 10UL,
-                                   fb_pal, 1UL << fb_geom.depth);
+                                   fb_pal, (rfb_u32)fb_colours(&fb_geom));
 
         if (len == 0UL)
         {
@@ -2660,16 +2857,16 @@ BOOL http_fb_slice(ULONG now)
     {
         /* An unrecognised word is ignored at the far end, which is what lets
            this go down the same channel without the viewer knowing it. */
-        static const char *const tags[7] = { "fbstat f=", " b=", " gt=", " et=",
-                                            " tn=", " gn=", " nl=" };
-        const ULONG values[7] = { fb_frames, fb_bytes, fb_grab_ticks,
+        static const char *const tags[8] = { "fbstat f=", " b=", " gt=", " et=",
+                                            " tn=", " gn=", " nl=", " bt=" };
+        const ULONG values[8] = { fb_frames, fb_bytes, fb_grab_ticks,
                                   fb_encode_ticks, fb_torn, fb_gone_passes,
-                                  fb_nolock };
+                                  fb_nolock, fb_busy_ticks };
         ULONG at = 0;
         ULONG f;
         ULONG i;
 
-        for (f = 0; f < 7UL; f++)
+        for (f = 0; f < 8UL; f++)
         {
             for (i = 0; tags[f][i] != '\0'; i++)
                 fb_tx[10 + at++] = (UBYTE)tags[f][i];
@@ -2691,9 +2888,19 @@ BOOL http_fb_slice(ULONG now)
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
-        fb_next_tick = tick + FB_GRAB_FLOOR;
+        /* The floor stands only until the frame this pass is about to produce
+           has been sent and its real cost is known.  http_fb_write() replaces
+           it then with the idle the duty cycle owes, which on anything but a
+           trivial frame is the larger of the two. */
+        fb_next_tick = tick + ((fb_band_ty0 == 0) ? (ULONG)FB_GRAB_FLOOR : 0UL);
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
+
+        /* The clock the duty cycle is charged against starts here, at the
+           grab, and stops when the last byte of the frame has gone. */
+        fb_frame_t0 = tick;
+        if (fb_frame_t0 == 0UL)
+            fb_frame_t0 = 1UL;          /* 0 means no frame is in flight */
     }
 
     /*
@@ -2703,10 +2910,38 @@ BOOL http_fb_slice(ULONG now)
      * to be a 40 KB copy and then a walk over the copy.  slice (gt+et) is the
      * figure that stayed comparable across that change.
      */
-    t0 = fb_ticks();
-    rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
-                       &fb_tx[10], fb_tx_cap - 10UL, &n);
-    t1 = fb_ticks();
+    {
+        /*
+         * The band to produce this pass.  FB_BAND_ROWS tile rows of it, so
+         * the work between two reads of the socket is bounded by a strip and
+         * not by a screen.  The last band of a pass is whatever is left, and
+         * a grid shorter than one band is a single band covering all of it,
+         * which is what a small screen gets.
+         */
+        UWORD rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
+                             ? FB_BAND_ROWS : fb_enc.tiles_y);
+        UWORD ty1 = (UWORD)(fb_band_ty0 + rows);
+
+        if (ty1 > fb_enc.tiles_y)
+            ty1 = (UWORD)fb_enc.tiles_y;
+
+        fb_band_last = (UBYTE)(ty1 >= fb_enc.tiles_y);
+
+        t0 = fb_ticks();
+        rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
+                           &fb_tx[10], fb_tx_cap - 10UL, &n,
+                           fb_band_ty0, ty1);
+        t1 = fb_ticks();
+
+        /* Where the next one starts.  Anything but a clean band restarts the
+           pass, because whatever went wrong resolved a different screen or
+           none, and half of one picture followed by half of another is worse
+           than a repeated frame. */
+        if (rc == FB_GRAB_OK && !palette_moved)
+            fb_band_ty0 = fb_band_last ? 0 : ty1;
+        else
+            fb_band_ty0 = 0;
+    }
     if (t1 >= t0)
         fb_encode_ticks += t1 - t0;
 
@@ -2834,7 +3069,12 @@ BOOL http_fb_slice(ULONG now)
        question rather than a repeat of this one. */
     fb_resync = 0;
 
-    fb_frames++;
+    /* Screens and not messages, so f= keeps meaning what it meant before the
+       frame was broken into bands and the rate derived from it stays
+       comparable across the change.  Bytes are every band's, because every
+       band's went on the wire. */
+    if (fb_band_last)
+        fb_frames++;
     fb_bytes += (ULONG)n;
 
     if (++fb_since_stat >= (ULONG)FB_STAT_EVERY)
@@ -2879,6 +3119,91 @@ BOOL http_fb_write(ULONG now)
 
         fb_tx_len  = 0;
         fb_tx_sent = 0;
+
+        /*
+         * The frame is out, so what it cost is now known: everything from the
+         * grab to this byte.  The idle owed against it is that over
+         * FB_IDLE_DIVISOR, and setting the next grab that far out is the whole
+         * of the duty cycle.  Charged here and not after the encode because
+         * the send is work this task did too.
+         *
+         * Only a frame is charged.  A word queued by the slice -- geom, pal,
+         * the pointer, fbstat -- leaves fb_frame_t0 at zero and passes
+         * through, so a session that is only talking is not throttled as if
+         * it were drawing.
+         */
+        if (fb_frame_t0 != 0UL)
+        {
+            ULONG done = fb_ticks();
+            ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
+            int   pass_done = (fb_band_ty0 == 0);
+            /*
+             * Against the running totals rather than against this band alone.
+             *
+             * A tick is a fiftieth and a band costs a handful of them, so
+             * dividing one band's cost by three and rounding is wrong in
+             * whichever direction the rounding goes: truncating measured
+             * 78.5% on the A3000 and rounding up measured 53.9%, against the
+             * 75% both were aiming at.  The error is a whole tick either way
+             * on a quantity of two or three.
+             *
+             * So the idle owed is computed from every tick charged so far,
+             * and what has already been granted is subtracted.  Whatever a
+             * single band rounds to, the session converges on the share, and
+             * a band that is owed nothing waits for nothing.
+             */
+            ULONG owed;
+            ULONG idle;
+
+            fb_busy_ticks += cost;
+            fb_pass_acc += cost;
+            fb_frame_t0 = 0;
+
+            /*
+             * At the end of a screen pass and not between its bands.
+             *
+             * Waiting after every band stretches a pass across as many gated
+             * slices as it has bands, and on a screen where a frame is cheap
+             * that is all cost and no benefit: there is no long encode to
+             * interrupt, and the wait is simply added to how long input takes
+             * to be acted on.  Measured on the A3000 with an idle screen, the
+             * worst keystroke-to-frame delay was 95.8 ms banded against 42.0
+             * ms whole -- the banding made the thing it exists to improve
+             * more than twice as bad.
+             *
+             * Between bands the server still reads its socket, because that
+             * is what the band boundary is for, and it costs no wait at all.
+             * The share is a statement about the machine over time, so taking
+             * what is owed once a pass holds it just as well.
+             */
+            if (!pass_done)
+                return TRUE;
+
+            /* What the pass that just ended cost, which is what decides
+               whether the next one is banded.  See FB_BAND_WHEN. */
+            fb_pass_ticks = fb_pass_acc;
+            fb_pass_acc = 0;
+
+            owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
+            idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
+            fb_idle_given += idle;
+
+            /*
+             * The floor is about not re-reading a screen nobody drew on, so
+             * it belongs between screen passes and not between the bands of
+             * one.  fb_band_ty0 is zero exactly when the pass just finished,
+             * which is where a whole tick of waiting is the right answer;
+             * mid-pass the duty cycle is the only thing pacing, and a floor
+             * there would add a tick per band and quarter the frame rate for
+             * no reason.
+             */
+            if (fb_band_ty0 == 0 && idle < (ULONG)FB_GRAB_FLOOR)
+                idle = (ULONG)FB_GRAB_FLOOR;
+
+            fb_next_tick = done + idle;
+            if (fb_next_tick == 0UL)
+                fb_next_tick = 1UL;
+        }
 
         /* A pong or a close does not wait behind a frame. */
         if (fb_ctl_at < fb_ctl_n)

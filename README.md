@@ -12,32 +12,8 @@ existing SANA-II network cards.
 > discovery, and pings its gateway. It resolves DNS, moves TCP in both
 > directions, does HTTPS, and accepts incoming connections from other
 > machines. It scores **142 of 142** on the independent
-> [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite, where
-> Roadshow scores 138. Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
->
-> Most of the figures here were measured under emulation. AmiNetXDuo has since
-> run on real hardware, an A3000 with an X-Surf-100. A user measured 795 KB/s
-> reading and 939 KB/s writing over Fitz, and found two bugs that are fixed.
->
-> IPv6 under WinUAE requires a patch [(tinic/winuae@d9df1d8)](https://github.com/tonioni/WinUAE/commit/d9df1d8357ade4f9631491cf9f482e159554bfeb)
-
-## How this was written
-
-Claude (Anthropic's Opus 5) wrote the code, under human direction and testing.
-Every commit records this in its `Co-Authored-By` line.
-[docs/RESEARCH.md](docs/RESEARCH.md) indexes the engineering record: one line per
-finding, with a statement of whether the tree still agrees with it. The full
-record is in git history. It holds what was measured, what was tried and
-abandoned, and the conclusions that later turned out to be wrong.
-
-The evidence available for checking is:
-
-- an independent conformance suite
-- every build configuration in continuous integration
-- a triaged static-analysis baseline
-- fuzzers
-- every bug a user has reported, each one recorded with its fix and a test that
-  reproduces it
+> [`bsdsocktest`](https://github.com/tbdye/bsdsocktest) conformance suite.
+> Dropbear's `dbclient` runs on it, so the Amiga can `ssh`.
 
 ## Why
 
@@ -202,28 +178,10 @@ The first connection to a site takes twenty seconds or more, and some servers
 give up before it finishes. The second attempt to the same site takes less than
 a second, because the session is kept on disk and survives a reboot.
 
-## Prior art
+## Building from source
 
-Two other modern-stack projects appeared in July 2026.
-[lwip-amiga](https://github.com/rondoval/lwip-amiga) combines lwIP with
-`bsdsocket.library`. It uses a custom `netdev` driver ABI rather than SANA-II,
-which restricts it to PiStorm and Emu68.
-[AmiTCP_NG](https://github.com/MW0MWZ/AmiTCP_NG) is a GPL fork of AmiTCP 3.0b2
-with a clean-room Roadshow ABI. Neither is MIT-licensed and neither drives
-SANA-II, which is why this one exists.
-
-## Building
-
-```sh
-git submodule update --init --recursive
-cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
-cmake --build build --parallel
-```
-
-If no m68k cross-compiler is installed, `tools/fetch-toolchain.sh` downloads the
-pinned one. **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build
-options, the test suites, continuous integration and the measurement method.
-**[docs/RESEARCH.md](docs/RESEARCH.md)** holds the engineering record.
+**[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build, its options, the
+test suites, continuous integration and the measurement method.
 
 ## Licence
 
@@ -241,8 +199,7 @@ be read. Those sources are named here:
 
 For example, the 39 vectors of `usergroup.library` were settled by a comparison
 of AmiTCP's `fd/usergroup_lib.fd` with Roadshow's `sfd/usergroup_lib.sfd` and
-the NDK pragma, all three agreeing. `tools/gen_vectors.py` regenerates the
-vector tables from those sources and names each one.
+the NDK pragma, all three agreeing.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
 ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not.**

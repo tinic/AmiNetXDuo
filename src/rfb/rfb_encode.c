@@ -123,7 +123,7 @@ long rfb_unpackbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n)
 
 static int rfb_geom_ok(const rfb_geom *g)
 {
-    if (!g || g->depth < 1 || g->depth > RFB_MAX_DEPTH)
+    if (!g)
         return 0;
     if (g->height == 0 || g->bytes_per_row == 0)
         return 0;
@@ -131,15 +131,39 @@ static int rfb_geom_ok(const rfb_geom *g)
         return 0;
     if (g->tile_h < 1 || g->tile_h > RFB_MAX_TILE_H)
         return 0;
-    if (g->format != RFB_FMT_PLANAR && g->format != RFB_FMT_CLUT8)
+
+    /* The depth is checked per format, because it means a different thing in
+     * each of the three and only one of them is a plane count.  A refusal
+     * here, instead of a derived depth, tells a caller that gets it wrong at
+     * init, and not after a picture goes out against a palette of the wrong
+     * length. */
+    switch (g->format) {
+    case RFB_FMT_PLANAR:
+        /* Planes, one bit each. */
+        if (g->depth < 1 || g->depth > RFB_MAX_DEPTH)
+            return 0;
+        break;
+    case RFB_FMT_CLUT8:
+        /* A chunky byte is the palette index, so the depth belongs to the
+         * palette.  Eight bits is the only width this format has. */
+        if (g->depth != 8)
+            return 0;
+        break;
+    case RFB_FMT_RGB565:
+        /* Bits a pixel, and nothing at the far end is sized from it: there is
+         * no palette here.  It is carried so that a receiver can say what it
+         * is looking at without decoding a frame first. */
+        if (g->depth != RFB_RGB565_DEPTH)
+            return 0;
+        /* Two bytes a pixel, so an odd row would put the second byte of a
+         * pixel in the next row.  The caller rounds bytes_per_row up and this
+         * is what says so. */
+        if ((g->bytes_per_row & 1u) != 0u)
+            return 0;
+        break;
+    default:
         return 0;
-    /* A chunky byte is the palette index, so the depth belongs to the palette
-     * and is not a plane count.  Eight bits is the only width that this format
-     * has.  A refusal here, instead of a derived depth, tells a caller that
-     * gets it wrong at init, and not after a picture goes out against a
-     * palette of the wrong length. */
-    if (g->format == RFB_FMT_CLUT8 && g->depth != 8)
-        return 0;
+    }
     return 1;
 }
 
@@ -147,7 +171,28 @@ rfb_u8 rfb_planes(const rfb_geom *g)
 {
     if (!g)
         return 0;
-    return (rfb_u8)((g->format == RFB_FMT_CLUT8) ? 1u : (rfb_u32)g->depth);
+    return (rfb_u8)(RFB_FMT_IS_CHUNKY(g->format) ? 1u : (rfb_u32)g->depth);
+}
+
+rfb_u32 rfb_pal_colours(const rfb_geom *g)
+{
+    if (!g)
+        return 0;
+
+    switch (g->format) {
+    case RFB_FMT_PLANAR:
+        /* The planes are the index, so the depth is the palette's width.
+         * This is the only format where those two are the same number, which
+         * is why every other one is listed rather than defaulted. */
+        return 1u << g->depth;
+    case RFB_FMT_CLUT8:
+        return 256u;
+    case RFB_FMT_RGB565:
+        /* The colour is in the pixel.  No `pal` word is sent. */
+        return 0u;
+    default:
+        return 0u;
+    }
 }
 
 rfb_u32 rfb_shadow_size(const rfb_geom *g)
@@ -205,7 +250,7 @@ rfb_u32 rfb_worst_case_frame(const rfb_geom *g)
 
     /* What a tile op costs before its first plane: op and index either way,
      * and the plane mask on top of that when there are planes to mask. */
-    head = (g->format == RFB_FMT_CLUT8) ? 3u : 4u;
+    head = RFB_FMT_IS_CHUNKY(g->format) ? 3u : 4u;
 
     /* Header, one copy op, every tile carrying every plane at the PackBits
      * expansion bound, and the terminator. */
@@ -254,8 +299,8 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
 
     /* A chunky source has one plane, and BMF_INTERLEAVED is a statement about
      * how eight of them are laid out.  Accepted here, it computes a row stride
-     * of bytes_per_row * 8 and reads one row in eight. */
-    if (g->format == RFB_FMT_CLUT8 && (flags & RFB_F_INTERLEAVED))
+     * of bytes_per_row * depth and reads one row in depth. */
+    if (RFB_FMT_IS_CHUNKY(g->format) && (flags & RFB_F_INTERLEAVED))
         return RFB_E_GEOM;
 
     memset(e, 0, sizeof(*e));
@@ -858,6 +903,17 @@ long rfb_encode_frame(rfb_encoder *e, const rfb_u8 *src,
 long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                              rfb_u8 *out, rfb_u32 out_cap)
 {
+    if (!e)
+        return RFB_E_GEOM;
+    return rfb_encode_band(e, planes, out, out_cap, 0, e->tiles_y);
+}
+
+long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
+                     rfb_u8 *out, rfb_u32 out_cap,
+                     rfb_u16 ty0, rfb_u16 ty1)
+{
+    int first, last;
+
     rfb_u32 bpr, depth, tb, tile_row;
     int keep_xor, min_run, word, chunky;
     rfb_out o;
@@ -871,12 +927,28 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
 
     if (!e || !planes || !out)
         return RFB_E_GEOM;
+    if (ty1 > e->tiles_y || ty0 > ty1)
+        return RFB_E_GEOM;
+
+    /* A band is a whole frame message carrying only the tiles of tile rows
+     * [ty0, ty1).  Nothing in the wire format says a message covers the whole
+     * screen -- it carries the ops it carries -- so the receiver applies a
+     * band exactly as it applies anything else and needs to know nothing
+     * about this.  What the two ends do have to agree on is the shadow, and
+     * that is per tile and so is already right.
+     *
+     * first and last are what the per-FRAME work hangs off: the scroll probe
+     * runs once at the top of a screen pass and its copy op is emitted in the
+     * first band, and the counters that describe a frame are closed in the
+     * last one.  A band in between is tiles and nothing else. */
+    first = (ty0 == 0);
+    last  = (ty1 >= e->tiles_y);
 
     bpr = e->g.bytes_per_row;
-    /* The plane count, not the depth: a chunky source is one eight-bit plane,
-     * and its depth sizes the palette at the far end, nothing here. */
+    /* The plane count, not the depth: a chunky source is one plane of bytes,
+     * and its depth is about the far end, nothing here. */
     depth = e->nplanes;
-    chunky = (e->g.format == RFB_FMT_CLUT8) ? 1 : 0;
+    chunky = RFB_FMT_IS_CHUNKY(e->g.format) ? 1 : 0;
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;
@@ -893,7 +965,7 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
     rfb_put8(&o, 0);
     rfb_put16(&o, e->seq++);
 
-    if (e->flags & RFB_F_COPYRECT) {
+    if (first && (e->flags & RFB_F_COPYRECT)) {
         int probe = 1;
         if (e->flags & RFB_F_SCROLL_ADAPTIVE) {
             /* Nothing much moved last frame, so nothing can be scrolling. */
@@ -964,9 +1036,12 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         xor_plane[p] = e->xorbuf + p * tb;
     }
 
-    y0 = 0;
-    tile_index = 0;
-    for (ty = 0; ty < e->tiles_y; ty++, y0 += tile_row) {
+    /* Where the band starts, rather than where the screen does.  Each of
+     * these was an accumulator that only ever counted up from zero. */
+    y0 = (rfb_u32)ty0 * tile_row;
+    top = (rfb_u32)ty0 * e->g.tile_h;
+    tile_index = (rfb_u32)ty0 * e->tiles_x;
+    for (ty = ty0; ty < ty1; ty++, y0 += tile_row) {
         rfb_u32 th = e->g.height - top;
         rfb_u32 x0 = 0;
 
@@ -1104,15 +1179,32 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
     if (o.over)
         return RFB_E_OVERFLOW;
 
+    /* Bytes out are this message's and are counted whichever band it was. */
+    e->st.bytes_out += o.len;
+
+    /* Dirty tiles and whether anything was copied describe the SCREEN pass
+       and not the band, so they accumulate until the last one closes them.
+       The scroll detector reads last_dirty to decide whether to probe, and a
+       band's worth of dirty tiles would make it decide on a fifth of the
+       evidence. */
+    e->band_dirty += dirty_tiles;
+    if (did_copy)
+        e->band_copy = 1;
+
+    if (!last)
+        return (long)o.len;
+
     /* Every tile of every plane was read, and the clipped tiles at the edges
        sum to exactly one frame.  This is therefore the frame, and not a
        running total with a 32-bit multiply per tile in it. */
     e->st.src_bytes += e->frame_bytes;
-    if (!did_copy && e->since_copy < 255u)
+    if (!e->band_copy && e->since_copy < 255u)
         e->since_copy++;
-    e->last_dirty = (rfb_u16)(dirty_tiles > 0xFFFFu ? 0xFFFFu : dirty_tiles);
-    e->last_copy = (rfb_u8)did_copy;
+    e->last_dirty = (rfb_u16)(e->band_dirty > 0xFFFFu ? 0xFFFFu
+                                                      : e->band_dirty);
+    e->last_copy = e->band_copy;
+    e->band_dirty = 0;
+    e->band_copy = 0;
     e->st.frames++;
-    e->st.bytes_out += o.len;
     return (long)o.len;
 }
