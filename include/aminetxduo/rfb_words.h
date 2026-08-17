@@ -16,21 +16,48 @@
  *                     changes under it.  TILEWBYTES is BYTES and not pixels,
  *                     and the tile grid is over BYTESPERROW rather than W:
  *                     every byte of a row is encoded, padding included.
- *                     FORMAT is rfb_geom.format: 0 planar, DEPTH one-bit
- *                     planes; 1 chunky, ONE eight-bit plane whose bytes are
- *                     palette indices and whose DEPTH is 8 because that is
- *                     what sizes the `pal` that follows.  It decides which
- *                     tile op the binary frames carry and how a byte column
- *                     turns into a pixel column, so a viewer that ignored it
- *                     would draw a chunky screen eight times too wide.
+ *                     FORMAT is rfb_geom.format, and it says what a pixel
+ *                     means:
+ *                       0 planar, DEPTH one-bit planes, a pixel is a palette
+ *                         index.
+ *                       1 chunky, ONE eight-bit plane, a byte is a palette
+ *                         index, DEPTH is 8.
+ *                       2 truecolour, ONE plane of two-byte pixels,
+ *                         big-endian ((r5 << 11) | (g6 << 5) | b5), DEPTH is
+ *                         16 and is bits a pixel.  NO `pal` FOLLOWS ONE OF
+ *                         THESE, ever; see below.
+ *                     It decides which tile op the binary frames carry and
+ *                     how a byte column turns into a pixel column, so a
+ *                     viewer that ignored it would draw a chunky screen eight
+ *                     times too wide.
+ *                     A number rather than a flag because the list is going
+ *                     to grow: the chipset modes where a plane is not a
+ *                     palette index -- HAM6, HAM8, extra half-brite -- are
+ *                     distinct pixel meanings over the same planar layout,
+ *                     and each is a value here.  An unrecognised FORMAT is
+ *                     refused by the viewer rather than drawn, which is the
+ *                     one place the ignore-what-you-do-not-know rule below
+ *                     does not apply: a format guessed wrong is a picture
+ *                     made of the wrong bytes and it looks like a fault in
+ *                     the server.
  *                     It is also the stream's only barrier: both ends zero
  *                     their shadow on it, and the next frame is a full one.
  *                     Frames still in flight when it arrives belong to the
  *                     picture it replaces and are discarded with it.
- *   pal RRGGBB...     hex, one triple per colour, 3 << DEPTH bytes of it.
- *                     Sent after geom and again whenever the ColorMap moves.
- *                     A geom leaves the viewer on a grey palette until one
- *                     arrives, so a geom is always followed by a pal.
+ *   pal RRGGBB...     hex, one triple per colour.  Sent after geom and again
+ *                     whenever the ColorMap moves.  A geom leaves the viewer
+ *                     on a grey palette until one arrives, so a geom that
+ *                     wants a palette is always followed by a pal.
+ *                     HOW MANY COLOURS IS A PROPERTY OF THE FORMAT AND NOT OF
+ *                     THE DEPTH.  rfb_pal_colours() is the rule and both ends
+ *                     use it; 1 << DEPTH is right only on FORMAT 0.  A format
+ *                     whose answer is 0 -- truecolour today -- sends no `pal`
+ *                     at all, and a viewer that waits for one before it draws
+ *                     shows nothing for the whole session.  The modes coming
+ *                     after truecolour are the other side of the same point:
+ *                     HAM6 is six planes deep with sixteen base colours and
+ *                     HAM8 is eight deep with sixty-four, so both send a
+ *                     `pal` far shorter than their depth implies.
  *   ptr W H DEPTH XS YS HOTX HOTY RRGGBB... BITS
  *                     the mouse pointer's IMAGE, which is a hardware sprite
  *                     and is therefore in no frame this ever sends.  Seven

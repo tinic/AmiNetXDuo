@@ -208,6 +208,72 @@ export function synthChunky(w, h, frames, bytesPerRow) {
   };
 }
 
+/* --------------------------------------------------------- truecolour -- */
+
+/*
+ * The colours a truecolour capture can actually show.
+ *
+ * A synthesised RGB565 frame is drawFrame's indices put through the palette
+ * and then through the format, so five bits of red and blue and six of green
+ * are what survive.  A reference built straight from the palette would differ
+ * from a correct decode in the low bits of nearly every pixel, so the
+ * reference is built from this instead: the same palette, through the same
+ * loss.
+ */
+export function quantise565(rgb) {
+  const out = Buffer.alloc(rgb.length);
+  for (let i = 0; i < rgb.length; i += 3) {
+    const r = rgb[i] >> 3, g = rgb[i + 1] >> 2, b = rgb[i + 2] >> 3;
+    out[i]     = (r << 3) | (r >> 2);
+    out[i + 1] = (g << 2) | (g >> 4);
+    out[i + 2] = (b << 3) | (b >> 2);
+  }
+  return out;
+}
+
+/* Two bytes a pixel, big-endian, at the row stride, and the padding past the
+   width left as it was allocated.  That is what a card's framebuffer looks
+   like once the Amiga has converted it, and the encoder codes every byte of
+   it, the padding included. */
+export function toRgb565(px, w, h, bytesPerRow, rgb) {
+  const out = new Uint8Array(bytesPerRow * h);
+  for (let y = 0; y < h; y++) {
+    let o = y * bytesPerRow;
+    for (let x = 0; x < w; x++) {
+      const i = px[y * w + x] * 3;
+      const v = ((rgb[i] >> 3) << 11) | ((rgb[i + 1] >> 2) << 5) |
+                (rgb[i + 2] >> 3);
+      out[o++] = v >> 8;
+      out[o++] = v & 0xff;
+    }
+  }
+  return out;
+}
+
+export function synthRgb565(w, h, frames, bytesPerRow) {
+  /* Rounded up to a longword, which is what the server does with the width
+     the card gives it. */
+  const bpr = bytesPerRow ?? ((w * 2 + 3) & ~3);
+  const stride = bpr * h;
+  const out = new Uint8Array(stride * frames);
+  const rgb = palette(8);
+
+  for (let t = 0; t < frames; t++) {
+    out.set(toRgb565(drawFrame(w, h, 8, t), w, h, bpr, rgb), t * stride);
+  }
+
+  return {
+    /* depth 16 is bits a pixel and sizes nothing: there is no palette here,
+       and rgb is empty rather than absent so a writer can concatenate it
+       without asking what the format is. */
+    screen: { width: w, height: h, depth: 16, bytesPerRow: bpr, format: 2 },
+    rgb: Buffer.alloc(0),
+    frames: out,
+    frameCount: frames,
+    stride,
+  };
+}
+
 /* --------------------------------------------------------------- the file -- */
 
 /* The cadence a synthesised capture claims.  It was not recorded, so there is
@@ -221,10 +287,10 @@ export function writePfs(cap) {
   head.writeUInt16BE(cap.screen.width, 4);
   head.writeUInt16BE(cap.screen.height, 6);
   head.writeUInt8(cap.screen.depth, 8);
-  /* Bit 0 of the flags byte: one eight-bit plane rather than depth one-bit
-     ones.  It was reserved and zero, so every file written before this reads
-     as the planar capture it is. */
-  head.writeUInt8(cap.screen.chunky ? 1 : 0, 9);
+  /* Byte 9 is rfb_geom.format.  It was documented as flags and only ever
+     written as 0 or 1, and those two still mean planar and one eight-bit
+     plane, so every file written before this reads as the capture it is. */
+  head.writeUInt8(cap.screen.format ?? (cap.screen.chunky ? 1 : 0), 9);
   head.writeUInt16BE(cap.screen.bytesPerRow, 10);
   head.writeUInt16BE(cap.frameCount, 12);
   head.writeUInt16BE(0, 14);          /* no pointer images */
@@ -318,9 +384,12 @@ const CODE_PB_XOR = 2;
 export function encodeFrame(g, shadow, next, seq, copy) {
   const bpr = g.screen.bytesPerRow;
   const h = g.screen.height;
-  /* Planes, not depth: a chunky screen is eight bits deep and one plane
-     wide, and every loop here wants the second number. */
-  const chunky = g.screen.chunky === true;
+  /* Planes, not depth: both card formats are one plane of bytes whatever
+     their depth says, and every loop here wants the second number.  Which of
+     the two it is does not reach this function at all -- a tile is a
+     rectangle of bytes either way. */
+  const fmt = g.screen.format ?? (g.screen.chunky === true ? 1 : 0);
+  const chunky = fmt === 1 || fmt === 2;
   const depth = chunky ? 1 : g.screen.depth;
   const plane = bpr * h;
 

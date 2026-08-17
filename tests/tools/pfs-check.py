@@ -9,8 +9,9 @@ right frame count, and is worthless, so this also reports how many frames
 differ from the one before them and how many distinct pixel values a frame
 holds -- a grab that read unmapped memory or the wrong pointer fails both.
 
---png writes a decoded frame with no image library: planar to chunky, the
-palette out of the header, and a PNG assembled from zlib and struct.
+--png writes a decoded frame with no image library: one number a pixel, the
+colour from the header's palette or from the pixel itself on a truecolour
+capture, and a PNG assembled from zlib and struct.
 
 Output is key=value; the exit code is the verdict.
 
@@ -25,6 +26,16 @@ HEADER = 16
 MAGIC = b"PFS2"
 FRAMEREC = 12
 PTRHEAD = 16
+
+# Header byte 9, which is rfb_geom.format: 0 is depth one-bit planes, 1 is one
+# eight-bit plane of palette indices, 2 is one sixteen-bit plane of big-endian
+# R5G6B5 and carries no palette at all.  The byte was documented as flags and
+# only ever held 0 or 1, so both keep their old meaning and every file already
+# written reads as what it is.
+FMT_PLANAR = 0
+FMT_CLUT8 = 1
+FMT_RGB565 = 2
+FMT_NAME = {FMT_PLANAR: "planar", FMT_CLUT8: "clut8", FMT_RGB565: "rgb565"}
 
 
 def say(k, v):
@@ -41,16 +52,30 @@ def parse(path):
     magic = blob[0:4]
     width, height = struct.unpack(">HH", blob[4:8])
     depth = blob[8]
-    flags = blob[9]
+    fmt = blob[9]
     bpr, frames, pointers = struct.unpack(">HHH", blob[10:16])
 
     if magic != MAGIC:
         return None, "magic is %r, not %r" % (magic, MAGIC)
-    if not 1 <= depth <= 8:
+    if fmt not in FMT_NAME:
+        return None, "format is %d, which is not one this reads" % fmt
+    # Bits per pixel on the truecolour format and a plane count on the other
+    # two, so what a legal depth is depends on which it is.
+    if fmt == FMT_RGB565:
+        if depth != 16:
+            return None, "a %s capture %d deep" % (FMT_NAME[fmt], depth)
+    elif not 1 <= depth <= 8:
         return None, "depth is %d" % depth
+    elif fmt == FMT_CLUT8 and depth != 8:
+        return None, "a %s capture %d deep" % (FMT_NAME[fmt], depth)
 
-    pal_bytes = 3 * (1 << depth)
-    frame_bytes = depth * bpr * height
+    # Entries the palette has, which is a property of the format: a truecolour
+    # capture carries none, so its frames begin at offset 16.
+    colours = (1 << depth) if fmt == FMT_PLANAR else \
+              256 if fmt == FMT_CLUT8 else 0
+    pal_bytes = 3 * colours
+    # Planes, not the depth: both RTG formats are one plane.
+    frame_bytes = (depth if fmt == FMT_PLANAR else 1) * bpr * height
     pixels = HEADER + pal_bytes + frames * frame_bytes
     want = pixels + frames * FRAMEREC
 
@@ -76,7 +101,7 @@ def parse(path):
         "width": width,
         "height": height,
         "depth": depth,
-        "flags": flags,
+        "format": FMT_NAME[fmt],
         "bytesperrow": bpr,
         "frames": frames,
         "pointers": pointers,
@@ -88,9 +113,11 @@ def parse(path):
 
     if len(blob) != want:
         return hdr, "file is %d bytes, header arithmetic says %d" % (len(blob), want)
-    if bpr * 8 < width:
+    per_byte = 8 if fmt == FMT_PLANAR else 1 if fmt == FMT_CLUT8 else 0.5
+    if bpr * per_byte < width:
         return hdr, "bytesPerRow %d cannot hold %d pixels" % (bpr, width)
 
+    hdr["_fmt"] = fmt
     hdr["_blob"] = blob
     hdr["_palette"] = blob[HEADER:HEADER + pal_bytes]
     hdr["_frames"] = [
@@ -101,15 +128,33 @@ def parse(path):
     return hdr, None
 
 
-def chunky(hdr, index):
-    """One frame, planar and plane-major, to one byte per pixel."""
+def values(hdr, index):
+    """One frame to one number per pixel.
+
+    A palette index on the two palette formats, and the sixteen-bit colour
+    itself on the truecolour one -- which is what both callers want: the
+    distinct-value count is asking how much is in the picture either way, and
+    the PNG writer knows which number it has.
+    """
+    fmt = hdr["_fmt"]
     depth = hdr["depth"]
     bpr = hdr["bytesperrow"]
     width = hdr["width"]
     height = hdr["height"]
     data = hdr["_frames"][index]
-    plane_bytes = bpr * height
 
+    if fmt == FMT_CLUT8:
+        return bytearray(b"".join(data[y * bpr:y * bpr + width]
+                                  for y in range(height)))
+
+    if fmt == FMT_RGB565:
+        out = []
+        for y in range(height):
+            row = data[y * bpr: y * bpr + width * 2]
+            out += [(row[x * 2] << 8) | row[x * 2 + 1] for x in range(width)]
+        return out
+
+    plane_bytes = bpr * height
     out = bytearray(width * height)
     for p in range(depth):
         base = p * plane_bytes
@@ -123,17 +168,30 @@ def chunky(hdr, index):
     return out
 
 
+def rgb_of(hdr, v):
+    """One pixel value to RGB8.
+
+    Bit replication and not a shift on the truecolour format, so 0x1f comes
+    out 0xff: white on the Amiga has to be white in the PNG.
+    """
+    if hdr["_fmt"] != FMT_RGB565:
+        return hdr["_palette"][v * 3:v * 3 + 3]
+    r5, g6, b5 = (v >> 11) & 0x1F, (v >> 5) & 0x3F, v & 0x1F
+    return bytes(((r5 << 3) | (r5 >> 2),
+                  (g6 << 2) | (g6 >> 4),
+                  (b5 << 3) | (b5 >> 2)))
+
+
 def write_png(path, hdr, index):
     width, height = hdr["width"], hdr["height"]
-    pal = hdr["_palette"]
-    pix = chunky(hdr, index)
+    pix = values(hdr, index)
 
     raw = bytearray()
     for y in range(height):
         raw.append(0)
         row = pix[y * width:(y + 1) * width]
         for v in row:
-            raw += pal[v * 3:v * 3 + 3]
+            raw += rgb_of(hdr, v)
 
     def chunk(tag, payload):
         return (struct.pack(">I", len(payload)) + tag + payload +
@@ -170,7 +228,7 @@ def main(argv):
 
     hdr, err = parse(path)
     if hdr is not None:
-        for key in ("width", "height", "depth", "flags", "bytesperrow",
+        for key in ("width", "height", "depth", "format", "bytesperrow",
                     "frames", "pointers", "palette_bytes", "frame_bytes",
                     "expect_bytes", "actual_bytes"):
             say(key, hdr[key])
@@ -188,11 +246,13 @@ def main(argv):
     say("frames_all_zero", zero)
 
     # The palette a screen really has: 3.1's Workbench is grey/black/white/blue
-    # and a grab that missed the ColorMap has 3 * (1 << depth) zeroes here.
+    # and a grab that missed the ColorMap has nothing but zeroes here.  A
+    # truecolour capture has no palette, so this is 0 and says nothing; the
+    # format key above is what tells the two apart.
     say("palette_nonzero", sum(1 for b in hdr["_palette"] if b))
 
     if frames:
-        pix = chunky(hdr, min(frame, len(frames) - 1))
+        pix = values(hdr, min(frame, len(frames) - 1))
         say("frame%d_distinct_values" % frame, len(set(pix)))
         say("frame%d_set_pixels" % frame, sum(1 for v in pix if v))
 
