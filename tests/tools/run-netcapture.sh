@@ -44,8 +44,13 @@
 #   card added there is a card this boots.  The MAC head here is 02:41:4d:4e,
 #   which is neither sweep's and is not the demo's, and the tail is the card's:
 #   two Amigas on one segment with one address take each other off the network.
-#   Note the A2065's LANCE rewrites the first three octets with Commodore's
-#   OUI, so the address this looks for in the capture is the derived one.
+#
+#   THE FRAMES ARE IDENTIFIED BY IP ADDRESS, NOT BY MAC.  Every card mangles
+#   the configured MAC in its own way -- the A2065's LANCE writes Commodore's
+#   OUI over the first three octets -- so a harness that derives the address it
+#   expects fails on whichever family it derived wrong, and says nothing about
+#   the capture.  The guest's leased address is printed by AddNetInterface and
+#   is read back from the transcript instead.
 #
 # THE PEER
 #
@@ -199,25 +204,18 @@ failed=0
 novrd=0
 
 run_card() {
-    local board=$1 model=$2 addr=$3 mactail=$4
+    # $3 is the cards.sh static address, unused here: nothing calls in, so the
+    # guest takes a lease and the harness reads back what it got.
+    local board=$1 model=$2 mactail=$4
     local tag="nc-$board"
     local mac="$MACHEAD:$mactail"
     local hd="$ROOT/build/amiberry-testhd-$tag"
     local ok=1
     local run_rc=0
-    local guest_mac tail4 tail5 tail6
+    local guest_mac=none
+    local guest_addr=""
 
     cards=$((cards + 1))
-
-    # The address that reaches the wire.  The LANCE keeps the last three
-    # octets and writes Commodore's 00:80:10 over the first three, so the MAC
-    # to look for in a capture is not the one configured.  Only the a2065
-    # family does that; for the rest the configured address is what goes out,
-    # and both spellings are searched rather than guessed at.
-    tail4=$(printf '%s' "$mac" | cut -d: -f4)
-    tail5=$(printf '%s' "$mac" | cut -d: -f5)
-    tail6=$(printf '%s' "$mac" | cut -d: -f6)
-    guest_mac="00:80:10:$tail4:$tail5:$tail6"
 
     local stage="$ROOT/build/$tag-stage"
     rm -rf "$stage"
@@ -321,11 +319,32 @@ EOF
     # ICMP means the pings: echo request or reply, not merely IP protocol 1.
     n_echo=$(pcap_lines "$icmp" | grep -ci 'echo re')
 
-    # The frames are this machine's.  Either spelling: the LANCE forces
-    # Commodore's OUI over the configured address and the other cards do not,
-    # so looking for one of the two would fail on every card of the other kind
-    # for a reason that has nothing to do with the capture.
-    n_mac=$(pcap_lines "$all" | grep -ciE "$guest_mac|$mac")
+    # The frames are this machine's.
+    #
+    # ASKED BY ADDRESS, NOT BY MAC.  The address the guest leased is printed by
+    # AddNetInterface and is therefore known; the MAC that reaches the wire is
+    # not.  The A2065's LANCE writes Commodore's OUI over the configured
+    # address, the other eight cards each do something of their own, and a
+    # harness that guesses fails on whichever family it guessed wrong -- for a
+    # reason that has nothing to do with the capture.  ariadne failed exactly
+    # that way on 2026-08-17 with all nine other assertions holding.
+    #
+    # It is also the stronger claim: these are the frames of the ping between
+    # this machine and the target, not merely frames carrying an address.
+    guest_addr=$(sed -n 's/.*online, address \([0-9.]*\).*/\1/p' \
+                 "$hd/tools.txt" 2>/dev/null | head -1)
+
+    if [ -n "$guest_addr" ]; then
+        n_mac=$(pcap_lines "$icmp" "host $guest_addr and host $TARGET" |
+                grep -c . )
+    else
+        n_mac=0
+    fi
+
+    # Whatever MAC that turned out to be, off the wire rather than derived.
+    guest_mac=$(pcap_lines "$icmp" | grep -i 'echo request' | head -1 |
+                awk '{print $2}')
+    [ -n "$guest_mac" ] || guest_mac=none
 
     # Everything the ICMP filter kept must be ICMP.  Asked as its negation, so
     # a tcpdump that printed nothing does not read as a pass.
@@ -347,7 +366,8 @@ EOF
     [ "$n_noticmp" -gt 0 ]  || { ok=0; kv "card_${board}_why" "unfiltered_is_icmp_only"; }
     [ "$n_all" -ge "$n_icmp" ] || { ok=0; kv "card_${board}_why" "icmp_exceeds_all"; }
     [ "$n_five" -eq 5 ]     || { ok=0; kv "card_${board}_why" "count_stop_gave_$n_five"; }
-    [ "$n_mac" -gt 0 ]      || { ok=0; kv "card_${board}_why" "guest_mac_absent"; }
+    [ -n "$guest_addr" ]    || { ok=0; kv "card_${board}_why" "no_address_in_tools_txt"; }
+    [ "$n_mac" -gt 0 ]      || { ok=0; kv "card_${board}_why" "no_frame_between_${guest_addr:-?}_and_$TARGET"; }
     [ "${said_all:-x}" = "$n_all" ] ||
         { ok=0; kv "card_${board}_why" "said_${said_all:-none}_wrote_$n_all"; }
     [ "${said_five:-x}" = "5" ] ||
@@ -356,7 +376,7 @@ EOF
         { ok=0; kv "card_${board}_why" "five_stopped_on_${said_stop:-none}"; }
 
     kv "card_$board" \
-       "mac=$guest_mac addr=$addr all=$n_all icmp=$n_icmp echo=$n_echo leaked=$n_wrong nonicmp=$n_noticmp count5=$n_five mine=$n_mac said=${said_all:-none} dropped=${dropped:-none} run_rc=$run_rc"
+       "mac=$guest_mac addr=${guest_addr:-none} all=$n_all icmp=$n_icmp echo=$n_echo leaked=$n_wrong nonicmp=$n_noticmp count5=$n_five mine=$n_mac said=${said_all:-none} dropped=${dropped:-none} run_rc=$run_rc"
 
     if [ "$ok" = 1 ]; then
         passed=$((passed + 1))
