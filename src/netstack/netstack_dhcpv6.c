@@ -161,17 +161,20 @@ static const char *ami_ns6_dhcp_state_name(UCHAR state)
 {
     switch (state)
     {
-    case NX_DHCPV6_STATE_INIT:                   return "init";
-    case NX_DHCPV6_STATE_SENDING_SOLICIT:        return "solicit";
-    case NX_DHCPV6_STATE_SENDING_REQUEST:        return "request";
-    case NX_DHCPV6_STATE_SENDING_RENEW:          return "renew";
-    case NX_DHCPV6_STATE_SENDING_REBIND:         return "rebind";
-    case NX_DHCPV6_STATE_SENDING_DECLINE:        return "decline";
-    case NX_DHCPV6_STATE_SENDING_CONFIRM:        return "confirm";
-    case NX_DHCPV6_STATE_SENDING_INFORM_REQUEST: return "information-request";
-    case NX_DHCPV6_STATE_SENDING_RELEASE:        return "release";
-    case NX_DHCPV6_STATE_BOUND_TO_ADDRESS:       return "bound";
-    default:                                     return "?";
+    /* Prefixed, because these go to ami_netstack_mark() as well as to the
+       log, and a bring-up mark is matched by name -- "bound" or "init" on
+       their own belong to nobody. */
+    case NX_DHCPV6_STATE_INIT:                   return "dhcp6-init";
+    case NX_DHCPV6_STATE_SENDING_SOLICIT:        return "dhcp6-solicit";
+    case NX_DHCPV6_STATE_SENDING_REQUEST:        return "dhcp6-request";
+    case NX_DHCPV6_STATE_SENDING_RENEW:          return "dhcp6-renew";
+    case NX_DHCPV6_STATE_SENDING_REBIND:         return "dhcp6-rebind";
+    case NX_DHCPV6_STATE_SENDING_DECLINE:        return "dhcp6-decline";
+    case NX_DHCPV6_STATE_SENDING_INFORM_REQUEST: return "dhcp6-inform";
+    case NX_DHCPV6_STATE_SENDING_CONFIRM:        return "dhcp6-confirm";
+    case NX_DHCPV6_STATE_SENDING_RELEASE:        return "dhcp6-release";
+    case NX_DHCPV6_STATE_BOUND_TO_ADDRESS:       return "dhcp6-bound";
+    default:                                     return "dhcp6-?";
     }
 }
 
