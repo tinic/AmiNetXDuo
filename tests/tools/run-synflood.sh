@@ -16,9 +16,15 @@
 #
 #   A stack that pins a socket or a packet per SYN stops answering: the flood
 #   fills its backlog and its packet pool and the legitimate GET times out.  A
-#   stack that holds 76 bytes per half-open connection and answers past its
+#   stack that holds 80 bytes per half-open connection and answers past its
 #   cache with a stateless cookie does not, and the GET goes through while the
-#   flood runs at full rate.
+#   flood runs.
+#
+#   MEASURED, every card under Amiberry on playhouse3, flooded from
+#   playhouse4 at 100 SYN/s: pre-fix, 0 of 5 legitimate GETs complete under
+#   the flood; defended, 5 of 5, at a handshake within reach of the quiet one.
+#   The rate is chosen to exhaust half-open STATE without saturating the
+#   emulated NIC; see FLOOD_PPS below.
 #
 #   -u ("unprotected") inverts the verdict.  It is the same run against a tree
 #   built from the submodule pin BEFORE the defence -- d1358950, the parent of
@@ -97,10 +103,25 @@ GATEWAY="${AMINETXDUO_SYNFLOOD_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
 PORT="${AMINETXDUO_SYNFLOOD_PORT:-8080}"
 
-# The flood: how hard, and from where.  2000 SYNs a second is far past the 512
-# entries the cache holds, so the cookie path is exercised, and well within
-# what a bridged card carries.  The source range must be dead; see the header.
-FLOOD_PPS="${AMINETXDUO_SYNFLOOD_PPS:-2000}"
+# The flood: how hard, and from where.  The default is 100 SYNs a second, and
+# the reason it is not higher is measured, not guessed.
+#
+# THE DEFENCE IS ABOUT STATE, AND 100/s EXHAUSTS IT MANY TIMES OVER.  The
+# thing that used to fall over is a queue eight deep and a pool of 512
+# packets: 100 new half-open connections a second, each held for the 20-second
+# cache timeout, is two thousand outstanding, four times the cache and two
+# hundred and fifty times the old backlog.  A pre-fix guest stops answering at
+# this rate within the first second (measured: 0 of 5 legitimate GETs
+# complete), and a defended one does not (5 of 5).  That is the property, and
+# this rate proves it on every card.
+#
+# HIGHER RATES TEST THE EMULATED NIC, NOT THE DEFENCE.  At 2000/s the a2065's
+# emulated LANCE and the 68020 spend the run receiving SYNs and transmitting
+# SYN-ACKs, and a legitimate connection is dropped at the wire before the
+# stack sees it -- a defended guest falls to 2 of 5 there, on a limit that has
+# nothing to do with half-open state.  Raise AMINETXDUO_SYNFLOOD_PPS to
+# characterise a card's packet ceiling; leave it here to measure the defence.
+FLOOD_PPS="${AMINETXDUO_SYNFLOOD_PPS:-100}"
 FLOOD_NET="${AMINETXDUO_SYNFLOOD_NET:-10.99.0.0/16}"
 FLOOD_SECS="${AMINETXDUO_SYNFLOOD_SECS:-40}"
 
