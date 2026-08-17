@@ -76,6 +76,20 @@ const geom = makeGeometry(screen, TILE_W, TILE_H);
 const rgb = cap.rgb;
 const stride = cap.stride;
 
+/* How many colours a format's palette carries, which is rfb_pal_colours() in
+   include/aminetxduo/rfb_encode.h.  Spelt out rather than imported for the
+   reason the reader below is: the mock is a second opinion, not the page's. */
+function PAL_COLOURS(format, depth) {
+  switch (format) {
+    case 1: return 256;      /* chunky, a byte is the index   */
+    case 2: return 0;        /* truecolour, none at all       */
+    case 3: return 16;       /* HAM6, 16 base colours         */
+    case 4: return 64;       /* HAM8, 64 base colours         */
+    case 5: return 32;       /* half-brite; 32..63 are made   */
+    default: return 1 << depth;
+  }
+}
+
 /* The .pfs reader, which is the one the page has in TypeScript; kept short
    here rather than shared, because sharing it would mean the mock and the
    page agreeing with each other about a file neither of them wrote. */
@@ -87,11 +101,17 @@ function readCapture(path) {
     height: b.readUInt16BE(6),
     depth: b[8],
     bytesPerRow: b.readUInt16BE(10),
-    /* Byte 9 bit 0: one eight-bit plane, an RTG capture. */
-    chunky: (b[9] & 1) !== 0,
+    /* Byte 9 IS rfb_geom.format, all six of them.  Read as a flag it made
+       HAM6 and half-brite -- 3 and 5, both odd -- come out as chunky RTG
+       captures, which is one plane of bytes read out of six of bits. */
+    format: b[9],
+    chunky: b[9] === 1,
   };
   const frameCount = b.readUInt16BE(12);
-  const palBytes = 3 * (1 << s.depth);
+  /* Not 1 << depth.  That is the answer on format 0 alone: truecolour carries
+     no palette and the three chipset modes carry fewer colours than their
+     depth implies, and the palette is what the frames sit behind. */
+  const palBytes = 3 * PAL_COLOURS(s.format, s.depth);
   const st = s.bytesPerRow * s.height * (s.chunky ? 1 : s.depth);
   return {
     screen: s,
@@ -132,7 +152,7 @@ function makeSession(sock) {
 
   word("geom " + screen.width + " " + screen.height + " " + screen.depth +
        " " + screen.bytesPerRow + " " + TILE_W + " " + TILE_H +
-       " " + (screen.chunky ? 1 : 0));
+       " " + (screen.format ?? (screen.chunky ? 1 : 0)));
   word("pal " + Buffer.from(rgb).toString("hex"));
 
   const timer = setInterval(() => {
