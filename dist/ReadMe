@@ -128,6 +128,7 @@ hand.  There is a commented example of each of them in the Examples drawer:
      Examples/NetInterfaces/eth0        every keyword there is, explained
      Examples/NetInterfaces/a2065       the short version, one per card
      Examples/NetInterfaces/eth0-static a fixed address, worked through
+     Examples/NetInterfaces/eth0-ipv6   IPv6 only, no IPv4 at all
      Examples/Internet/routes           the default route
      Examples/Internet/name_resolution  name servers and the host name
      Examples/Internet/hosts            names known without a name server

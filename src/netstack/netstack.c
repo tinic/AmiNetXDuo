@@ -986,6 +986,30 @@ static BOOL ami_ns_wants(const AmiNetStack *ns, AmiIpType type)
     return FALSE;
 }
 
+/*
+ * Is any interface on this machine expecting an IPv4 address at all.
+ *
+ * FALSE is the IPv6-only machine, and it is the answer three separate pieces
+ * of bring-up needed and none of them asked. Without it the boot waited 30
+ * seconds for a DHCP lease nobody had asked for, then forced an RFC 3927
+ * 169.254 address onto an interface configured for IPv6, waited 15 seconds
+ * more for that, and finally reported AMI_NET_ERR_CONFIG -- which makes
+ * OpenLibrary("bsdsocket.library") return NULL, so the machine had no network
+ * of either family.
+ */
+static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
+{
+    UWORD i;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static VOID ami_ns_start_autoip(AmiNetStack *ns)
 {
     UINT  status;
@@ -1037,13 +1061,33 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
     }
     ns->ns_AutoIpCreated = TRUE;
 
-    /* First interface that asked for a link-local address, else interface 0. */
+    /*
+     * First interface that asked for a link-local address; failing that, the
+     * first that expects an IPv4 address of any kind; failing that, interface
+     * 0, which is where this always landed.
+     *
+     * The middle rung is the IPv6-only interface: when interface 0 carries no
+     * IPv4, probing a 169.254 address on it is claiming an address on a wire
+     * for a family the operator switched off, and the DHCP interface that
+     * actually wanted the fallback is the one further up.
+     */
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
         if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
         {
             (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
             break;
+        }
+    }
+    if (i == ns->ns_IfaceCount)
+    {
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+        {
+            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            {
+                (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
+                break;
+            }
         }
     }
 
@@ -1636,6 +1680,32 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     ami_netstack_ipv6_configure(ns);
 #endif
 
+    /*
+     * The IPv6-only machine returns here, and this is the whole of what it
+     * needed: nothing below waits for, falls back to, or reports an IPv4
+     * address, because none was ever asked for.
+     *
+     * `resolved` is what gates the AMI_NET_ERR_CONFIG return, and
+     * AMI_NET_ERR_CONFIG is what makes bsd_lib_open() answer NULL. Saying
+     * "resolved" about a machine with no IPv4 address reads wrong and is
+     * right: the question the flag answers is "did the configuration get what
+     * it asked for", and an interface that asked for no IPv4 has.
+     *
+     * It does not wait for an IPv6 address either. Bring-up has never waited
+     * for one -- the link-local is TENTATIVE for a second of duplicate address
+     * detection and a SLAAC or DHCPv6 global arrives later still, and the
+     * comment above ami_netstack_ipv6_configure() is about exactly that
+     * overlap being worth several seconds. ami_ns6_address_changed() reports
+     * each address as it lands and netstack_ipv6_address_get() reports what
+     * has arrived so far.
+     */
+    if (!resolved && !ami_ns_wants_ipv4(ns))
+    {
+        AMI_INFO("netstack: no interface expects an IPv4 address, not waiting "
+                 "for one");
+        resolved = TRUE;
+    }
+
     if (!resolved)
     {
         /* Block until some interface has an address, or DHCP gives up. */
@@ -1664,15 +1734,26 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
         (VOID)nx_ip_address_get(&ns->ns_Ip, &addr, &mask);
 
-        AMI_INFO("netstack: address %lu.%lu.%lu.%lu mask %lu.%lu.%lu.%lu",
-                 (unsigned long)((addr >> 24) & 0xFFUL),
-                 (unsigned long)((addr >> 16) & 0xFFUL),
-                 (unsigned long)((addr >>  8) & 0xFFUL),
-                 (unsigned long)(addr & 0xFFUL),
-                 (unsigned long)((mask >> 24) & 0xFFUL),
-                 (unsigned long)((mask >> 16) & 0xFFUL),
-                 (unsigned long)((mask >>  8) & 0xFFUL),
-                 (unsigned long)(mask & 0xFFUL));
+        /* An IPv6-only machine printed "address 0.0.0.0 mask 0.0.0.0" here,
+           which reads as a fault and is not one.  The IPv6 addresses are
+           reported one at a time by ami_ns6_address_changed(), as they pass
+           duplicate address detection. */
+        if (addr == 0UL && !ami_ns_wants_ipv4(ns))
+        {
+            AMI_INFO("netstack: no IPv4 address, this machine is IPv6-only");
+        }
+        else
+        {
+            AMI_INFO("netstack: address %lu.%lu.%lu.%lu mask %lu.%lu.%lu.%lu",
+                     (unsigned long)((addr >> 24) & 0xFFUL),
+                     (unsigned long)((addr >> 16) & 0xFFUL),
+                     (unsigned long)((addr >>  8) & 0xFFUL),
+                     (unsigned long)(addr & 0xFFUL),
+                     (unsigned long)((mask >> 24) & 0xFFUL),
+                     (unsigned long)((mask >> 16) & 0xFFUL),
+                     (unsigned long)((mask >>  8) & 0xFFUL),
+                     (unsigned long)(mask & 0xFFUL));
+        }
     }
 
     /*

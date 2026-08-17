@@ -187,6 +187,85 @@ static struct
     NetStatusInterface  e[NX_MAX_PHYSICAL_INTERFACES];
 } onoff_ifaces;
 
+static struct
+{
+    NetStatusHeader     hdr;
+    NetStatusAddress6   e[NX_MAX_PHYSICAL_INTERFACES * 3];
+} onoff_addr6;
+
+/*
+ * The first usable IPv6 address of that interface, as text.
+ *
+ * An interface carrying no IPv4 reported "online but has no address yet"
+ * forever, and offered DHCP advice about a family it was not using. The
+ * addresses live in their own table, joined on the interface index.
+ *
+ * TENTATIVE is skipped, because RFC 4862 5.4 says an address still running
+ * duplicate address detection is not one anything may use.
+ */
+static BOOL live_address6(struct Library *base, UWORD nx_index,
+                          char *text, ULONG text_len)
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &onoff_addr6,
+                             sizeof(onoff_addr6), sizeof(NetStatusAddress6));
+    if (n <= 0)
+        return FALSE;
+
+    for (i = 0; i < n && i < (LONG)(NX_MAX_PHYSICAL_INTERFACES * 3); i++)
+    {
+        const NetStatusAddress6 *a6 = &onoff_addr6.e[i];
+
+        if (a6->nsn_Interface != nx_index)
+            continue;
+        if (a6->nsn_State == NETSTATUS_IP6_TENTATIVE)
+            continue;
+
+        if (text != NULL)
+            tool_format_ip6(a6->nsn_Address, text, text_len);
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * The same answer for a build with src/netstack linked in rather than reached
+ * through the library.  FALSE in every shipped build, where
+ * netstack_ipv6_address_get() is the weak stub in netstack_weak.c.
+ */
+#ifndef TOOL_OFFLINE
+static BOOL linked_address6(UWORD index, char *text, ULONG text_len)
+{
+#ifdef AMINETXDUO_IPV6
+    UWORD slot;
+
+    for (slot = 0; ; slot++)
+    {
+        ULONG a6[4];
+        ULONG state = 0;
+
+        if (!netstack_ipv6_address_get(index, slot, a6, NULL, &state))
+            break;
+        if (state == (ULONG)NETSTATUS_IP6_TENTATIVE)
+            continue;
+
+        tool_format_ip6(a6, text, text_len);
+        return TRUE;
+    }
+#else
+    (VOID)index;
+    (VOID)text;
+    (VOID)text_len;
+#endif
+
+    return FALSE;
+}
+#endif /* TOOL_OFFLINE */
+
 /*
  * The NX interface index of `name` in the running stack, or -1. *online is
  * set when the answer is found.
@@ -341,6 +420,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     else if (!broken && up)
     {
         char  addr[16];
+        char  addr6[AMI_CFG_IP6_STRLEN];
         ULONG live = 0;
 
         /* The live address, not the one in the file: see addnetinterface.c. */
@@ -363,6 +443,11 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         {
             ami_config_format_ip(live, addr, sizeof(addr));
             tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr);
+        }
+        else if (index >= 0 &&
+                 live_address6(base, (UWORD)index, addr6, sizeof(addr6)))
+        {
+            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
         }
         else
         {
@@ -433,8 +518,16 @@ int main(int argc, char **argv)
     BOOL           broken = FALSE;
     LONG           index;
     LONG           err;
+#ifndef TOOL_OFFLINE
+    /* Captured while the library base is open; printed after it is released. */
+    char           started6[AMI_CFG_IP6_STRLEN];
+#endif
 
     (VOID)argv;
+
+#ifndef TOOL_OFFLINE
+    started6[0] = '\0';
+#endif
 
     if (tool_from_workbench(argc))
         return RETURN_FAIL;
@@ -564,6 +657,17 @@ int main(int argc, char **argv)
                 return RETURN_WARN;
             }
 
+            /* While the base is still open: the IPv6 addresses come from a
+               NetStackQuery() and there is no base after the release below. */
+            {
+                BOOL  online6 = FALSE;
+                LONG  where6  = live_index(base, name, &online6);
+
+                if (where6 >= 0)
+                    (VOID)live_address6(base, (UWORD)where6, started6,
+                                        sizeof(started6));
+            }
+
             /* The library is holding the stack now (tool_stack_start()), so
                this open has done its job and goes back like any other. */
             tool_stack_release(base);
@@ -577,6 +681,11 @@ int main(int argc, char **argv)
             {
                 ami_config_format_ip(addr, text, sizeof(text));
                 tool_printf("%s is online, address %s\n", (LONG)name, (LONG)text);
+            }
+            else if (started6[0] != '\0')
+            {
+                tool_printf("%s is online, address %s\n", (LONG)name,
+                            (LONG)started6);
             }
             else
             {
@@ -681,6 +790,7 @@ int main(int argc, char **argv)
     {
         NX_IP *ip = netstack_ip();
         char   addr[16];
+        char   addr6[AMI_CFG_IP6_STRLEN];
         ULONG  live = 0;
 
         /* The live address, not the one in the file: see addnetinterface.c. */
@@ -691,6 +801,10 @@ int main(int argc, char **argv)
         {
             ami_config_format_ip(live, addr, sizeof(addr));
             tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr);
+        }
+        else if (linked_address6((UWORD)index, addr6, sizeof(addr6)))
+        {
+            tool_printf("%s is online, address %s\n", (LONG)name, (LONG)addr6);
         }
         else
         {

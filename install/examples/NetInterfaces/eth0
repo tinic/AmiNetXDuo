@@ -45,6 +45,8 @@ UNIT=0
 ;             address so that at least the local network works.  FASTAUTO and
 ;             ZEROCONF mean the same thing.
 ;   STATIC    use the ADDRESS and NETMASK below.  MANUAL means the same.
+;   NONE      no IPv4 on this interface.  For an IPv6-only machine; see
+;             "eth0-ipv6" in this drawer.  OFF means the same.
 ;
 ; This keyword is CONFIGURE.  It is *not* IPTYPE -- IPTYPE is a number, the
 ; SANA-II packet type, and it defaults to 2048.  Documentation that gives

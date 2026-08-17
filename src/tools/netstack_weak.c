@@ -84,6 +84,20 @@ TOOL_WEAK LONG netstack_interface_start(const AmiIfConfig *cfg,
     return AMI_NET_ERR_STATE;
 }
 
+#ifdef AMINETXDUO_IPV6
+TOOL_WEAK BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
+                                         ULONG addr_out[4], ULONG *prefix_out,
+                                         ULONG *state_out)
+{
+    (VOID)interface_index;
+    (VOID)slot;
+    (VOID)addr_out;
+    (VOID)prefix_out;
+    (VOID)state_out;
+    return FALSE;
+}
+#endif
+
 TOOL_WEAK LONG netstack_resolve(const char *name, ULONG *addr_out,
                                 ULONG timeout_ticks)
 {

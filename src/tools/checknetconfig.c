@@ -237,14 +237,30 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
     return -1;
 }
 
-/* TRUE when at least one interface will be given its address at run time. */
+/*
+ * TRUE when at least one interface will be given its address at run time.
+ *
+ * IPv6 counts. This gates "there is no default route": a router advertisement
+ * carries one, a DHCPv6 lease can, and an IPv6-only machine was told it had
+ * nowhere to send packets because the file it was reading had no IPv4 GATEWAY
+ * in it and never would.
+ */
 static BOOL any_dynamic(const AmiConfig *cfg)
 {
     UWORD i;
 
     for (i = 0; i < cfg->interface_count; i++)
     {
-        if (cfg->interfaces[i].iptype != AMI_IPTYPE_STATIC)
+        const AmiIfConfig *ifc = &cfg->interfaces[i];
+
+        if (ifc->iptype != AMI_IPTYPE_STATIC &&
+            ifc->iptype != AMI_IPTYPE_NONE)
+            return TRUE;
+
+        if (ifc->ip6type == AMI_IP6TYPE_AUTO)
+            return TRUE;
+
+        if (ifc->have_gateway6)
             return TRUE;
     }
 
@@ -589,6 +605,27 @@ static VOID check_collisions(const AmiConfig *cfg)
                 say("      share an address\n");
                 note("Give one of them an address of its own, on its own "
                      "network.");
+            }
+
+            /* The same fault one family over, which nothing checked: two
+               ADDRESS6 lines naming one address is duplicate address
+               detection failing on this machine's own wire. */
+            if ((b->address6[0] | b->address6[1] |
+                 b->address6[2] | b->address6[3]) != 0 &&
+                a->address6[0] == b->address6[0] &&
+                a->address6[1] == b->address6[1] &&
+                a->address6[2] == b->address6[2] &&
+                a->address6[3] == b->address6[3])
+            {
+                char text[AMI_CFG_IP6_STRLEN];
+
+                tool_format_ip6(b->address6, text, sizeof(text));
+
+                finding(CNC_DIR_INTERFACES, 0, AMI_CFG_PROBLEM_ERROR);
+                say("      %s and %s are both %s, and two interfaces cannot\n",
+                    (LONG)a->name, (LONG)b->name, (LONG)text);
+                say("      share an address\n");
+                note("Give one of them an ADDRESS6 of its own.");
             }
         }
     }

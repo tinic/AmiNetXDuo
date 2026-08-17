@@ -1,0 +1,44 @@
+;
+; DEVS:NetInterfaces/eth0 -- IPv6 only, no IPv4 at all
+;
+; Use this shape on a network that runs IPv6 and where this machine has no
+; business holding an IPv4 address: a lab segment, a machine reached only
+; over IPv6, or a network whose IPv4 addresses have run out.
+;
+; Copy this into DEVS:NetInterfaces as "eth0", then either reboot or type
+;
+;     C:AddNetInterface DEVS:NetInterfaces/eth0
+;
+; Two keywords carry the whole of it.  CONFIGURE=NONE switches IPv4 off, so
+; nothing waits for an address that is never coming and nothing falls back to
+; a 169.254 one.  CONFIGURE6 says where the IPv6 address comes from.
+;
+; A build without IPv6 cannot use this file: it recognises CONFIGURE6 and
+; ignores it, so the interface would be left with no address of either
+; family and AddNetInterface will say so.
+;
+
+DEVICE=a2065.device
+UNIT=0
+
+; No IPv4 on this interface.
+CONFIGURE=NONE
+
+; Where IPv6 comes from.
+;
+;   AUTO    follow the router.  Its advertisement carries a prefix to build
+;           an address from, which is what makes this file work on a network
+;           nobody has described to it.
+;   STATIC  use the ADDRESS6 below.
+;
+CONFIGURE6=AUTO
+
+; With CONFIGURE6=STATIC these two are what the interface uses.  The prefix
+; length goes on the address; 64 is the usual one and is the default.
+;
+;ADDRESS6=2001:db8::10/64
+;GATEWAY6=fe80::1
+
+; The name servers arrive with the address, in the router advertisement (RFC
+; 8106).  DEVS:Internet/name_resolution can hold a NAMESERVER line as well,
+; and what is written there wins.
