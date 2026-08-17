@@ -74,30 +74,38 @@ hdr='# bsdsocktest 1.7
 : > "$T/empty"
 
 n=0; bad=0
-case_() { # description expected-rc log [emulator-status]
-    local what="$1" want="$2" log="$3" st="${4:-0}"
-    local out rc
-    out=$(tap_verdict "$log" "$st" 2>&1); rc=$?
+# BOTH HALVES.  This used to grade the exit code alone, and tap_verdict's
+# documented interface is `conformance=` on stdout: the two could drift apart
+# -- a run reporting conformance=PASS beside exit 1 -- and nothing would say
+# so.  tools/ci.sh and .github/workflows/emulator.yml read the field.
+case_() { # description expected-rc expected-conformance log [emulator-status]
+    local what="$1" want="$2" wantc="$3" log="$4" st="${5:-0}"
+    local out rc gotc
+    out=$(tap_verdict "$log" "$st" 2>"$T/err"); rc=$?
+    gotc=$(printf '%s\n' "$out" | sed -n 's/^conformance=//p' | tail -1)
+    out="$out
+$(cat "$T/err")"
     n=$((n + 1))
-    if [ "$rc" = "$want" ]; then
-        printf 'ok   %-40s -> %s\n' "$what" "$rc"
+    if [ "$rc" = "$want" ] && [ "$gotc" = "$wantc" ]; then
+        printf 'ok   %-40s -> %s %s\n' "$what" "$rc" "$gotc"
     else
-        printf 'FAIL %-40s -> %s, wanted %s\n' "$what" "$rc" "$want"
+        printf 'FAIL %-40s -> %s %s, wanted %s %s\n' \
+               "$what" "$rc" "$gotc" "$want" "$wantc"
         bad=$((bad + 1))
     fi
     printf '%s\n' "$out" | sed 's/^/       | /'
 }
 
-case_ "a clean run"                        0 "$T/clean"
-case_ "two conformance failures"           1 "$T/failures"
-case_ "known failure and a skip"           0 "$T/known"
-case_ "a known limitation that passed"     0 "$T/unexpected_pass"
-case_ "stopped part way, no not-ok at all" 1 "$T/short"
-case_ "the suite bailed out"               1 "$T/bail"
-case_ "no plan line"                       3 "$T/noplan"
-case_ "an empty log"                       3 "$T/empty"
-case_ "clean, but the emulator timed out"  1 "$T/clean" 124
-case_ "clean, but the guest was wrong-CPU" 1 "$T/clean" 4
+case_ "a clean run"                        0 PASS         "$T/clean"
+case_ "two conformance failures"           1 FAIL         "$T/failures"
+case_ "known failure and a skip"           0 PASS         "$T/known"
+case_ "a known limitation that passed"     0 PASS         "$T/unexpected_pass"
+case_ "stopped part way, no not-ok at all" 1 FAIL         "$T/short"
+case_ "the suite bailed out"               1 FAIL         "$T/bail"
+case_ "no plan line"                       3 NOT_MEASURED "$T/noplan"
+case_ "an empty log"                       3 NOT_MEASURED "$T/empty"
+case_ "clean, but the emulator timed out"  1 FAIL         "$T/clean" 124
+case_ "clean, but the guest was wrong-CPU" 1 FAIL         "$T/clean" 4
 
 # What the superseded harness graded, for the record: it exited with the
 # emulator's status, and conf_launcher.c:134 makes that 0 whatever happened.

@@ -184,9 +184,20 @@ echo ""
 echo "The 45 B column is the handshake: connect, curve25519 twice, an ed25519"
 echo "verify and an ed25519 sign.  It is not part of any KB/s figure above."
 echo "-------------------------------------------------------------"
-if [ "$FAIL" = "0" ] && [ "$NOK" = "$NCHECK" ]; then
+# `NCHECK -gt 0` IS THE WHOLE POINT OF THE THIRD TERM.  Without it a
+# transcript in which no staged filename was ever matched leaves NCHECK=0 and
+# NOK=0, the two are equal, and this printed
+# `VERDICT: PASS, 0/0 transfers byte-identical` and exited 0 -- a pass over a
+# run that transferred nothing.  tests/bebboget/check.sh has carried the term
+# all along; this file was written from it and lost it.
+if [ "$FAIL" = "0" ] && [ "$NOK" = "$NCHECK" ] && [ "$NCHECK" -gt 0 ]; then
     echo "VERDICT: PASS, $NOK/$NCHECK transfers byte-identical"
+    printf 'name=bebbossh\nverdict=PASS\nreason=ok\nok=%s\nchecked=%s\n' \
+           "$NOK" "$NCHECK"
     exit 0
 fi
 echo "VERDICT: FAIL, $NOK/$NCHECK transfers byte-identical"
+printf 'name=bebbossh\nverdict=FAIL\nreason=%s\nok=%s\nchecked=%s\n' \
+       "$([ "$NCHECK" -eq 0 ] && echo nothing_transferred || echo mismatch)" \
+       "$NOK" "$NCHECK"
 exit 1
