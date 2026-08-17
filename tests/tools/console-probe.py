@@ -6,6 +6,7 @@
                                 [--type TEXT] [--at N]
                                 [--pointer "X,Y,B; X,Y,B; ..."] [--step N]
                                 [--png-before OUT.png] [--reconnect N]
+                                [--min-changed N]
 
 WHY IT DECODES RATHER THAN COUNTING
 
@@ -20,6 +21,24 @@ WHY IT DECODES RATHER THAN COUNTING
   It is the same decode the browser does, written a second time on purpose.
   src/tools/web/client/console/tiles.ts is the one the person looks at; this
   one has never seen that file's output and agreeing with it is evidence.
+
+  Three formats, and the geom word's seventh number says which: 0 planar, 1
+  chunky with a palette, 2 truecolour r5g6b5, two bytes a pixel big-endian and
+  no palette at all.  A format this file does not know is a failure and not a
+  picture -- bytes read as the wrong format decode into something plausible,
+  which is the silent pass named above with better colours.
+
+--min-changed asks the guest, which is the only thing that can answer
+
+  Streaming zeroes is one failure and streaming one real frame for ever is
+  the other: a readback route that grabs nothing wins the speed probe, the
+  console then serves the frozen picture for the whole session, and every
+  check that only looks at the socket passes on it -- frames arrive, the
+  sequence is whole, the picture has colours in it.  What separates the two
+  is whether the picture follows a screen that is moving, so an arm that puts
+  something in motion on the guest passes --min-changed N and fails unless N
+  frames differed from the one before them.  On an idle screen there is
+  nothing to assert and the flag is left off.
 
 --pointer PROVES THE MOUSE HALF
 
@@ -73,6 +92,7 @@ assertion, 2 infrastructure -- nothing answered, the upgrade was refused.
 SPDX-License-Identifier: MIT
 """
 
+import array
 import base64
 import hashlib
 import os
@@ -92,6 +112,79 @@ OP_TILE8 = 0x03
 CODE_RAW = 0
 CODE_PB_RAW = 1
 CODE_PB_XOR = 2
+
+# rfb_geom.format, and what each one says a source byte is.
+FMT_PLANAR = 0                  # depth planes of one bit, an Amiga BitMap
+FMT_CLUT8 = 1                   # one plane of eight bits, a palette index
+FMT_RGB565 = 2                  # one plane of sixteen, big-endian r5g6b5
+FORMATS = (FMT_PLANAR, FMT_CLUT8, FMT_RGB565)
+
+FORMAT_NAME = {FMT_PLANAR: "planar", FMT_CLUT8: "clut8", FMT_RGB565: "rgb565"}
+
+
+def pal_colours(fmt, depth):
+    """How many colours a `pal` word carries, which is the format's business
+    and not the depth's.
+
+    1 << depth is right on format 0 alone.  A chunky screen sends 256 whatever
+    it says its depth is, a truecolour one sends no `pal` at all, and the modes
+    that are still to come break the rule the other way round: HAM6 is six
+    planes with sixteen base colours and EHB is six with thirty-two.  So this
+    is a rule per format rather than an expression, and every site that sizes a
+    palette asks here.
+    """
+    if fmt == FMT_PLANAR:
+        return 1 << depth
+    if fmt == FMT_CLUT8:
+        return 256
+    return 0
+
+
+def source_planes(fmt, depth):
+    """Planes in the source a frame's tiles index into."""
+    return depth if fmt == FMT_PLANAR else 1
+
+
+def pixel_bytes(fmt):
+    """Source bytes one pixel occupies, for the formats where a pixel is whole
+    bytes.  Planar answers 0: a pixel there is one bit in each of depth
+    planes and no byte belongs to it alone."""
+    if fmt == FMT_RGB565:
+        return 2
+    if fmt == FMT_CLUT8:
+        return 1
+    return 0
+
+
+def tile_op(fmt):
+    """Which tile op a format's binary frames carry.  The plane mask is a
+    planar thing, so anything with one source plane uses the op without one."""
+    return OP_TILE if fmt == FMT_PLANAR else OP_TILE8
+
+
+_RGB565_RGB = None
+
+
+def rgb565_rgb():
+    """A colour table for a format that has no palette: all 65536 RGB565
+    values expanded to eight bits a channel by bit replication, so the PNG
+    writer indexes one table whatever the screen is.
+
+    Replication and not a shift, because r5 15 has to reach ff and not f8: the
+    top bits repeated into the bottom ones are what make white white.
+    """
+    global _RGB565_RGB
+    if _RGB565_RGB is None:
+        t = bytearray(3 * 65536)
+        for v in range(65536):
+            r = (v >> 11) & 0x1F
+            g = (v >> 5) & 0x3F
+            b = v & 0x1F
+            t[3 * v] = (r << 3) | (r >> 2)
+            t[3 * v + 1] = (g << 2) | (g >> 4)
+            t[3 * v + 2] = (b << 3) | (b >> 2)
+        _RGB565_RGB = bytes(t)
+    return _RGB565_RGB
 
 
 # KeyboardEvent.code to Amiga rawkey, the letters and the two keys this needs.
@@ -317,9 +410,17 @@ def unpackbits(src, at, end, want):
 
 class Screen:
     # fmt is rfb_geom.format as the geom word carries it: 0 planar, `depth`
-    # one-bit planes; 1 chunky, ONE eight-bit plane whose bytes are palette
-    # indices.  depth stays 8 there because it is what sizes the `pal`.
+    # one-bit planes; 1 chunky, one eight-bit plane whose bytes are palette
+    # indices; 2 truecolour, one plane of sixteen-bit big-endian r5g6b5 with
+    # no palette anywhere.  depth is bits a pixel, which on format 0 also
+    # happens to size the `pal` and on the other two does not.
     def __init__(self, w, h, depth, bpr, tile_w, tile_h, fmt=0):
+        if fmt not in FORMATS:
+            # Not drawn as planar and hoped for.  A format read as the wrong
+            # one decodes real bytes into a plausible picture, which is the
+            # silent pass this whole file exists to refuse.
+            raise Bad("geom says format %d, and this decoder knows %s"
+                      % (fmt, ", ".join(str(f) for f in FORMATS)))
         self.w = w
         self.h = h
         self.depth = depth
@@ -327,13 +428,27 @@ class Screen:
         self.tile_w = tile_w
         self.tile_h = tile_h
         self.fmt = fmt
-        self.clut8 = (fmt == 1)
-        self.nplanes = 1 if self.clut8 else depth
+        self.op = tile_op(fmt)
+        self.colours = pal_colours(fmt, depth)
+        self.nplanes = source_planes(fmt, depth)
         self.across = (bpr + tile_w - 1) // tile_w
         self.down = (h + tile_h - 1) // tile_h
         self.plane = bpr * h
         self.planes = bytearray(self.plane * self.nplanes)
-        self.rgb = bytearray(3 * (1 << depth))
+        self.rgb = bytearray(3 * self.colours)
+
+        if fmt == FMT_RGB565:
+            # Both of these are the geometry contradicting itself, and both
+            # would otherwise be read off the end of a row: depth is bits a
+            # pixel here, and the stride is the width in bytes rounded up to
+            # four, so it may exceed 2 * w but never falls short of it.
+            if depth != 16:
+                raise Bad("format 2 says depth %d; r5g6b5 is 16 bits a pixel"
+                          % depth)
+            if bpr < pixel_bytes(fmt) * w:
+                raise Bad("format 2 says %d bytes a row, and %d pixels at %d"
+                          " bytes each is %d" % (bpr, w, pixel_bytes(fmt),
+                                                 pixel_bytes(fmt) * w))
 
     def apply(self, b):
         """One frame, in place.  Returns (seq, tiles, copies)."""
@@ -380,17 +495,17 @@ class Screen:
             # Which op arrives is the geometry's answer and not a choice, so
             # the other one means the geom and the frames disagree about what
             # a byte is -- which draws a picture rather than failing.
-            if (op == OP_TILE8) != self.clut8:
-                raise Bad("op %d on a %s screen"
-                          % (op, "chunky" if self.clut8 else "planar"))
+            if op != self.op:
+                raise Bad("op %d on a %s screen, which sends op %d"
+                          % (op, FORMAT_NAME[self.fmt], self.op))
 
-            # No plane mask on a chunky tile: one plane, and it is the one
-            # that changed.
-            head = 2 if self.clut8 else 3
+            # No plane mask where there is one plane: it is the one that
+            # changed, and a mask byte would say nothing.
+            head = 3 if op == OP_TILE else 2
             if i + head > len(b):
                 raise Bad("a tile op is cut short")
             idx = (b[i] << 8) | b[i + 1]
-            mask = 1 if self.clut8 else b[i + 2]
+            mask = b[i + 2] if op == OP_TILE else 1
             i += head
 
             if idx >= self.across * self.down:
@@ -444,10 +559,29 @@ class Screen:
 
         return seq, tiles, copies
 
+    def values(self):
+        """One number a pixel, w * h of them, the padding past the width gone.
+
+        What the number means is the format's: a palette index on 0 and 1, the
+        r5g6b5 word itself on 2.  Everything downstream -- the difference, the
+        distinct count, the PNG -- wants a pixel and not a byte, and on a
+        truecolour screen those stopped being the same thing.
+        """
+        if self.fmt != FMT_RGB565:
+            return bytes(self.chunky())
+
+        wide = pixel_bytes(self.fmt) * self.w
+        out = array.array("H")
+        for y in range(self.h):
+            o = y * self.bpr
+            out.extend(struct.unpack(">%dH" % self.w,
+                                     bytes(self.planes[o:o + wide])))
+        return out
+
     def chunky(self):
         # Already chunky on a card: the bytes are the indices and the only
         # thing to do is drop the padding past the width.
-        if self.clut8:
+        if self.fmt == FMT_CLUT8:
             out = bytearray(self.w * self.h)
             for y in range(self.h):
                 o = y * self.w
@@ -468,12 +602,15 @@ class Screen:
 
     def png(self, path):
         made(path)
-        pix = self.chunky()
+        pix = self.values()
+        # A truecolour pixel indexes the whole of RGB565 the way an indexed one
+        # indexes the palette, so one loop writes either screen.
+        rgb = rgb565_rgb() if self.fmt == FMT_RGB565 else self.rgb
         raw = bytearray()
         for y in range(self.h):
             raw.append(0)
             for v in pix[y * self.w:(y + 1) * self.w]:
-                raw += self.rgb[v * 3:v * 3 + 3]
+                raw += rgb[v * 3:v * 3 + 3]
 
         def chunk(tag, payload):
             return (struct.pack(">I", len(payload)) + tag + payload +
@@ -505,6 +642,11 @@ def pfs(path, screens):
     carries what happened rather than a cadence somebody has to guess at.
     There is no pointer image here: this probe never asked for one, so every
     frame names image 0.
+
+    Formats 0 and 1 only.  PFS2 carries a depth of 1..8 and a palette, and has
+    no way to say that a frame is two bytes a pixel with no palette at all, so
+    a truecolour session is written as no file rather than as a file whose
+    header lies about what is in it.
     """
     made(path)
     first = screens[0][0]
@@ -513,7 +655,7 @@ def pfs(path, screens):
     # Byte 9 is the .pfs flags byte, and bit 0 says the frames are chunky --
     # one eight-bit plane and not `depth` one-bit ones.  See pfs.ts.
     blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth,
-                        1 if first.clut8 else 0,
+                        1 if first.fmt == FMT_CLUT8 else 0,
                         first.bpr, len(screens), 0)
     blob += bytes(first.rgb)
     for _, planes, _ms in screens:
@@ -552,6 +694,25 @@ def differ(a, b, width):
     if n == 0:
         return 0, ""
     return n, "x %d..%d y %d..%d" % (x0, x1, y0, y1)
+
+
+def take_pal(screen, text):
+    """A `pal` word onto a screen, sized by the format's rule.  Returns bytes.
+
+    A truecolour screen is sent no palette at any point, so one arriving means
+    the two ends disagree about what the format is -- and that is said here,
+    now, rather than by a receiver that waited for a word that was never
+    coming and reported a timeout.
+    """
+    hexes = text[4:].strip()
+    if screen.colours == 0:
+        raise Bad("a pal word arrived on a %s screen, which has no palette"
+                  % FORMAT_NAME[screen.fmt])
+    if len(hexes) != screen.colours * 6:
+        raise Bad("pal is %d colours; format %d at depth %d takes %d"
+                  % (len(hexes) // 6, screen.fmt, screen.depth, screen.colours))
+    screen.rgb = bytearray.fromhex(hexes)
+    return screen.colours * 3
 
 
 def refresh_to_truth(wire, screen, limit=8.0):
@@ -598,12 +759,13 @@ def refresh_to_truth(wire, screen, limit=8.0):
                 # The reset lands here, so this is the last instant the
                 # incremental copy is worth anything.
                 if before is None:
-                    before = bytes(screen.chunky())
+                    before = screen.values()
                 fresh = Screen(f[0], f[1], f[2], f[3], f[4], f[5], f[6])
-                fresh.rgb = bytearray(screen.rgb)
+                if fresh.colours == screen.colours:
+                    fresh.rgb = bytearray(screen.rgb)
             elif text.startswith("pal "):
                 target = fresh if fresh is not None else screen
-                target.rgb = bytearray.fromhex(text[4:].strip())
+                take_pal(target, text)
             continue
         if op != 0x2:
             raise Bad("opcode %d is not one this server sends" % op)
@@ -613,7 +775,7 @@ def refresh_to_truth(wire, screen, limit=8.0):
             continue
 
         fresh.apply(body)
-        return before, bytes(fresh.chunky()), fresh
+        return before, fresh.values(), fresh
 
     raise Bad("the server never answered a refresh with a geometry and a"
               " full frame")
@@ -745,7 +907,7 @@ def session_picture(host, port, path, seconds, refresh_at=4,
             elif text.startswith("pal "):
                 if screen is None:
                     raise Bad("a palette arrived before a geometry")
-                screen.rgb = bytearray.fromhex(text[4:].strip())
+                take_pal(screen, text)
             continue
         if op != 0x2:
             raise Bad("opcode %d is not one this server sends" % op)
@@ -767,7 +929,7 @@ def session_picture(host, port, path, seconds, refresh_at=4,
     wire.close()
     if screen is None:
         raise Bad("no geometry word ever arrived")
-    return Shot(bytes(screen.chunky()), screen.w, frames, words, geoms,
+    return Shot(screen.values(), screen.w, frames, words, geoms,
                 drift, box, live)
 
 
@@ -870,6 +1032,7 @@ def main(argv):
     step = 4
     png_before = None
     reconnects = 0
+    min_changed = 0
 
     i = 3
     while i < len(argv):
@@ -903,6 +1066,8 @@ def main(argv):
             png_before = argv[i + 1]; i += 2
         elif argv[i] == "--reconnect":
             reconnects = int(argv[i + 1]); i += 2
+        elif argv[i] == "--min-changed":
+            min_changed = int(argv[i + 1]); i += 2
         elif argv[i] == "--refresh":
             want_refresh = True; i += 1
         else:
@@ -968,6 +1133,7 @@ def main(argv):
                     screen = Screen(n[0], n[1], n[2], n[3], n[4], n[5], n[6])
                     expect_seq = None
                     say("geom", " ".join(f[1:]))
+                    say("pixel_format", FORMAT_NAME[screen.fmt])
                     say("frame_bytes", screen.plane * screen.nplanes)
                     # ONCE, and not on every geom.  A geom already means both
                     # sides are at zero -- the server clears its shadow
@@ -983,13 +1149,7 @@ def main(argv):
                 elif text.startswith("pal "):
                     if screen is None:
                         raise Bad("a palette arrived before a geometry")
-                    hexes = text[4:].strip()
-                    want = 3 * (1 << screen.depth)
-                    if len(hexes) != want * 2:
-                        raise Bad("pal is %d bytes, depth %d needs %d"
-                                  % (len(hexes) // 2, screen.depth, want))
-                    screen.rgb = bytearray.fromhex(hexes)
-                    say("palette_bytes", want)
+                    say("palette_bytes", take_pal(screen, text))
                 elif text.startswith("fbstat "):
                     fbstat = text[7:]
                 else:
@@ -1052,7 +1212,7 @@ def main(argv):
             if typing is not None and typed == 0 and frames >= type_at:
                 typed = type_text(wire, typing + "\n")
                 say("typed_keys", typed)
-            if pfs_path is not None and len(kept) < 200:
+            if pfs_path is not None and screen.colours and len(kept) < 200:
                 kept.append((screen, now, time.time()))
 
     except Fault as e:
@@ -1096,12 +1256,13 @@ def main(argv):
         say("RESULT", "INFRA")
         return 2
 
-    pix = screen.chunky()
+    pix = screen.values()
     distinct = len(set(pix))
     setpix = sum(1 for v in pix if v)
     say("distinct_pixel_values", distinct)
     say("set_pixels", setpix)
-    say("palette_nonzero", sum(1 for b in screen.rgb if b))
+    if screen.colours:
+        say("palette_nonzero", sum(1 for b in screen.rgb if b))
 
     if png is not None:
         screen.png(png)
@@ -1109,20 +1270,35 @@ def main(argv):
     if pfs_path is not None and kept:
         pfs(pfs_path, kept)
         say("pfs", pfs_path)
+    elif pfs_path is not None and not screen.colours:
+        say("pfs_skipped", "PFS2 has no truecolour frame; see pfs.ts")
 
     # What separates a screen from a session that streamed zeroes: more than
     # one colour on it, a palette that is not all black, and no gap in the
     # sequence, since every delta after a gap is applied to bytes the encoder
     # did not think were there.
+    #
+    # A truecolour screen has no palette to be black, so that check is not
+    # available on it and the distinct count is carrying more weight than it
+    # does on an indexed screen.  It catches a readback that returns nothing,
+    # which decodes to one value; it does not catch a readback that returns
+    # the same plausible picture for ever, and neither does anything else that
+    # only looks at the socket.  --min-changed is what asks the guest, and the
+    # arms that put something moving on the screen must pass it.
     problems = []
     if frames == 0:
         problems.append("no frames arrived")
     if distinct < 2:
         problems.append("the screen has %d distinct pixel value(s)" % distinct)
-    if sum(screen.rgb) == 0:
+    if screen.colours and sum(screen.rgb) == 0:
         problems.append("the palette is entirely black")
     if gaps:
         problems.append("%d gap(s) in the sequence" % gaps)
+    if min_changed and changed < min_changed:
+        problems.append("%d frame(s) differed from the one before, and %d were"
+                        " asked for: a readback that reads nothing serves one"
+                        " frozen picture for a whole session and passes every"
+                        " check that is not this one" % (changed, min_changed))
     if pointer is not None:
         if pointed < len(pointer):
             problems.append("only %d of %d pointer steps went out: too few"
