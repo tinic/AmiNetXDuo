@@ -428,7 +428,12 @@ int main(int argc, char **argv)
                  (LONG)iface, (LONG)snaplen, (LONG)nc_cap.buflen,
                  (LONG)proglen);
         tool_say("capture: %s -> %s\n", (LONG)what, (LONG)out);
-        tool_say("capture: Ctrl-C stops it and closes the file\n");
+
+        /* Only when nothing else will stop it.  A run that already has a
+           limit does not need telling how to end one. */
+        if (want_count == 0 && want_seconds == 0 && want_kb == 0)
+            tool_say("capture: no limit set, so Ctrl-C is what ends it and "
+                     "the file is closed when it does\n");
     }
 
     started  = ami_millis();
