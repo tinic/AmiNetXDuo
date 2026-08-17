@@ -123,7 +123,7 @@ long rfb_unpackbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 out_n)
 
 static int rfb_geom_ok(const rfb_geom *g)
 {
-    if (!g || g->depth < 1 || g->depth > RFB_MAX_DEPTH)
+    if (!g)
         return 0;
     if (g->height == 0 || g->bytes_per_row == 0)
         return 0;
@@ -131,15 +131,39 @@ static int rfb_geom_ok(const rfb_geom *g)
         return 0;
     if (g->tile_h < 1 || g->tile_h > RFB_MAX_TILE_H)
         return 0;
-    if (g->format != RFB_FMT_PLANAR && g->format != RFB_FMT_CLUT8)
+
+    /* The depth is checked per format, because it means a different thing in
+     * each of the three and only one of them is a plane count.  A refusal
+     * here, instead of a derived depth, tells a caller that gets it wrong at
+     * init, and not after a picture goes out against a palette of the wrong
+     * length. */
+    switch (g->format) {
+    case RFB_FMT_PLANAR:
+        /* Planes, one bit each. */
+        if (g->depth < 1 || g->depth > RFB_MAX_DEPTH)
+            return 0;
+        break;
+    case RFB_FMT_CLUT8:
+        /* A chunky byte is the palette index, so the depth belongs to the
+         * palette.  Eight bits is the only width this format has. */
+        if (g->depth != 8)
+            return 0;
+        break;
+    case RFB_FMT_RGB565:
+        /* Bits a pixel, and nothing at the far end is sized from it: there is
+         * no palette here.  It is carried so that a receiver can say what it
+         * is looking at without decoding a frame first. */
+        if (g->depth != RFB_RGB565_DEPTH)
+            return 0;
+        /* Two bytes a pixel, so an odd row would put the second byte of a
+         * pixel in the next row.  The caller rounds bytes_per_row up and this
+         * is what says so. */
+        if ((g->bytes_per_row & 1u) != 0u)
+            return 0;
+        break;
+    default:
         return 0;
-    /* A chunky byte is the palette index, so the depth belongs to the palette
-     * and is not a plane count.  Eight bits is the only width that this format
-     * has.  A refusal here, instead of a derived depth, tells a caller that
-     * gets it wrong at init, and not after a picture goes out against a
-     * palette of the wrong length. */
-    if (g->format == RFB_FMT_CLUT8 && g->depth != 8)
-        return 0;
+    }
     return 1;
 }
 
@@ -147,7 +171,28 @@ rfb_u8 rfb_planes(const rfb_geom *g)
 {
     if (!g)
         return 0;
-    return (rfb_u8)((g->format == RFB_FMT_CLUT8) ? 1u : (rfb_u32)g->depth);
+    return (rfb_u8)(RFB_FMT_IS_CHUNKY(g->format) ? 1u : (rfb_u32)g->depth);
+}
+
+rfb_u32 rfb_pal_colours(const rfb_geom *g)
+{
+    if (!g)
+        return 0;
+
+    switch (g->format) {
+    case RFB_FMT_PLANAR:
+        /* The planes are the index, so the depth is the palette's width.
+         * This is the only format where those two are the same number, which
+         * is why every other one is listed rather than defaulted. */
+        return 1u << g->depth;
+    case RFB_FMT_CLUT8:
+        return 256u;
+    case RFB_FMT_RGB565:
+        /* The colour is in the pixel.  No `pal` word is sent. */
+        return 0u;
+    default:
+        return 0u;
+    }
 }
 
 rfb_u32 rfb_shadow_size(const rfb_geom *g)
@@ -205,7 +250,7 @@ rfb_u32 rfb_worst_case_frame(const rfb_geom *g)
 
     /* What a tile op costs before its first plane: op and index either way,
      * and the plane mask on top of that when there are planes to mask. */
-    head = (g->format == RFB_FMT_CLUT8) ? 3u : 4u;
+    head = RFB_FMT_IS_CHUNKY(g->format) ? 3u : 4u;
 
     /* Header, one copy op, every tile carrying every plane at the PackBits
      * expansion bound, and the terminator. */
@@ -254,8 +299,8 @@ long rfb_encoder_init(rfb_encoder *e, const rfb_geom *g, rfb_u32 flags,
 
     /* A chunky source has one plane, and BMF_INTERLEAVED is a statement about
      * how eight of them are laid out.  Accepted here, it computes a row stride
-     * of bytes_per_row * 8 and reads one row in eight. */
-    if (g->format == RFB_FMT_CLUT8 && (flags & RFB_F_INTERLEAVED))
+     * of bytes_per_row * depth and reads one row in depth. */
+    if (RFB_FMT_IS_CHUNKY(g->format) && (flags & RFB_F_INTERLEAVED))
         return RFB_E_GEOM;
 
     memset(e, 0, sizeof(*e));
@@ -873,10 +918,10 @@ long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
         return RFB_E_GEOM;
 
     bpr = e->g.bytes_per_row;
-    /* The plane count, not the depth: a chunky source is one eight-bit plane,
-     * and its depth sizes the palette at the far end, nothing here. */
+    /* The plane count, not the depth: a chunky source is one plane of bytes,
+     * and its depth is about the far end, nothing here. */
     depth = e->nplanes;
-    chunky = (e->g.format == RFB_FMT_CLUT8) ? 1 : 0;
+    chunky = RFB_FMT_IS_CHUNKY(e->g.format) ? 1 : 0;
     tb = (rfb_u32)e->g.tile_w * e->g.tile_h;
     keep_xor = (e->flags & RFB_F_XOR) ? 1 : 0;
     min_run = (e->flags & RFB_F_RLE2) ? 2 : 3;

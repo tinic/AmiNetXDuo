@@ -90,7 +90,7 @@ static int dec_frame(rfb_dec *d, const unsigned char *in, unsigned n)
          * carries no plane mask, because there is one plane. */
         if (op != RFB_OP_TILE && op != RFB_OP_TILE8)
             return -5;
-        if ((op == RFB_OP_TILE8) != (d->g.format == RFB_FMT_CLUT8))
+        if ((op == RFB_OP_TILE8) != RFB_FMT_IS_CHUNKY(d->g.format))
             return -13;
 
         {
@@ -168,18 +168,28 @@ static int pfs_load(const char *path, pfs *s)
     s->g.width = (rfb_u16)rd16(hdr + 4);
     s->g.height = (rfb_u16)rd16(hdr + 6);
     s->g.depth = hdr[8];
-    /* Byte 9 bit 0: one eight-bit plane, and not depth one-bit ones. */
-    s->g.format = (rfb_u8)((hdr[9] & 1u) ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
+    /* Byte 9 is rfb_geom.format, which is what it has always been: the two
+       values a writer has ever put there, 0 and 1, are planar and CLUT8. */
+    s->g.format = hdr[9];
     s->g.bytes_per_row = (rfb_u16)rd16(hdr + 10);
     s->frames = rd16(hdr + 12);
-    if (s->g.depth < 1 || s->g.depth > RFB_MAX_DEPTH || s->g.bytes_per_row == 0) {
-        fprintf(stderr, "%s: bad geometry\n", path); fclose(f); return -1;
+    /* Which depths go with which format is the encoder's rule and it knows
+       all three, so it is asked rather than copied here where the copy can
+       drift.  The tile size is not in the file -- the sweep sets it per run --
+       so a legal one is filled in to ask about the fields that are. */
+    {
+        rfb_geom probe = s->g;
+        probe.tile_w = 16;
+        probe.tile_h = 16;
+        if (rfb_shadow_size(&probe) == 0) {
+            fprintf(stderr, "%s: bad geometry, format %u depth %u bpr %u\n",
+                    path, s->g.format, s->g.depth, s->g.bytes_per_row);
+            fclose(f); return -1;
+        }
     }
-    if (s->g.format == RFB_FMT_CLUT8 && s->g.depth != 8) {
-        fprintf(stderr, "%s: chunky and %u deep\n", path, s->g.depth);
-        fclose(f); return -1;
-    }
-    palette = (size_t)3u << s->g.depth;
+    /* Not 3 << depth: a truecolour capture carries no palette and its depth
+       is bits a pixel. */
+    palette = (size_t)3u * rfb_pal_colours(&s->g);
     if (fseek(f, (long)(16 + palette), SEEK_SET) != 0) { fclose(f); return -1; }
 
     s->frame_bytes = (unsigned)s->g.bytes_per_row * s->g.height *
@@ -532,7 +542,7 @@ int main(int argc, char **argv)
         /* BMF_INTERLEAVED is a statement about eight planes and a chunky
            source has one, so the interleaved pass of the sweep skips those
            files. */
-        if (g_interleaved && s.g.format == RFB_FMT_CLUT8) { free(s.data); continue; }
+        if (g_interleaved && RFB_FMT_IS_CHUNKY(s.g.format)) { free(s.data); continue; }
         if (g_interleaved && pfs_interleave(&s) != 0) { rc = 1; continue; }
         printf("seq=%s file=%s w=%u h=%u depth=%u bpr=%u fmt=%u frames=%u "
                "frame_bytes=%u\n",

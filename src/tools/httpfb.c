@@ -155,13 +155,23 @@ typedef struct FbGeometry
     ULONG frame_bytes;
     UWORD interleaved;      /* BMF_INTERLEAVED, as the BitMap reported it */
     /*
-     * A graphics card's screen, which is one eight-bit plane rather than eight
-     * one-bit ones.  depth is 8 and row_bytes is a byte a pixel, so everything
-     * downstream that counts in bytes is unchanged.  What changes is that the
-     * bitplanes cannot be read where they are, so a staging buffer stands in
-     * for them and httprtg.c fills it.  See fb_grab_frame().
+     * What a pixel is, as one of the RFB_FMT_ values, and it is the field the
+     * whole of the rest of this file branches on.
+     *
+     * RFB_FMT_PLANAR is the chipset: depth one-bit planes read where they
+     * lie.  The two chunky ones are a graphics card, one plane of bytes,
+     * where the bitplanes cannot be read where they are at all -- a staging
+     * buffer in Fast RAM stands in for them and httprtg.c fills it, see
+     * fb_grab_frame().  RFB_FMT_CLUT8 is a byte a pixel and a palette;
+     * RFB_FMT_RGB565 is two bytes a pixel and no palette, which is what a 15,
+     * 16, 24 or 32-bit card screen is converted to before it gets here.
+     *
+     * row_bytes is bytes either way, so everything downstream that counts in
+     * bytes is unchanged by any of this.  Only three things ask: how many
+     * planes there are, how wide a row is, and whether there is a palette to
+     * send.
      */
-    UWORD chunky;
+    UWORD format;
 } FbGeometry;
 
 /* ------------------------------------------------------------- the module -- */
@@ -643,13 +653,30 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
          * own stride is not used, so nothing here depends on a value that is
          * only valid while the bitmap is locked.  Rounded up to a longword so
          * the encoder's word-at-a-time compare stays on the fast path.
+         *
+         * rs.bpp is what httprtg.c will deliver into that buffer, a byte a
+         * pixel for a palette screen and two for a truecolour one, and it is
+         * the only thing that differs between the two here.  The depth
+         * follows it rather than the card's own: a 24 or 32-bit screen
+         * arrives as RGB565 and 16 is what the receiver is told, because 16
+         * is what the bytes are.
          */
         g->interleaved = 0;
-        g->chunky      = 1;
         g->width       = rs.width;
         g->height      = rs.height;
-        g->depth       = 8;
-        g->row_bytes   = (UWORD)((rs.width + 3U) & ~3U);
+
+        if (rs.bpp == 2)
+        {
+            g->format = RFB_FMT_RGB565;
+            g->depth  = RFB_RGB565_DEPTH;
+        }
+        else
+        {
+            g->format = RFB_FMT_CLUT8;
+            g->depth  = 8;
+        }
+
+        g->row_bytes   = (UWORD)((((ULONG)rs.width * rs.bpp) + 3UL) & ~3UL);
         g->row_stride  = (ULONG)g->row_bytes;
         g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height;
         return TRUE;
@@ -673,7 +700,7 @@ static BOOL fb_geometry_of(struct BitMap *bm, FbGeometry *g, BOOL may_ask_rtg)
         return FALSE;
     }
 
-    g->chunky = 0;
+    g->format = RFB_FMT_PLANAR;
 
     if (depth < 1 || depth > FB_MAX_DEPTH)
     {
@@ -741,7 +768,7 @@ static BOOL fb_geometry_same(const FbGeometry *a, const FbGeometry *b)
                   a->depth == b->depth && a->row_bytes == b->row_bytes &&
                   a->row_stride == b->row_stride &&
                   a->interleaved == b->interleaved &&
-                  a->chunky == b->chunky);
+                  a->format == b->format);
 }
 
 VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
@@ -760,16 +787,43 @@ VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
  *
  * TRUE when it changed, which is what decides whether a `pal` word goes out.
  */
-static BOOL fb_read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
+/*
+ * How many colours this screen's `pal` word carries, and 0 when it has none.
+ *
+ * Asked of the wire format rather than computed here, because 1 << depth is
+ * right on a plain planar screen and on nothing else: a truecolour screen is
+ * 16 deep with no palette at all, and the chipset modes coming after it are
+ * deeper than their base palette rather than equal to it.  One rule, in
+ * rfb_pal_colours(), and both ends read it.
+ */
+static ULONG fb_colours(const FbGeometry *g)
+{
+    rfb_geom q;
+
+    memset(&q, 0, sizeof(q));
+    q.depth  = (rfb_u8)g->depth;
+    q.format = (rfb_u8)g->format;
+
+    return (ULONG)rfb_pal_colours(&q);
+}
+
+static BOOL fb_read_palette(struct ColorMap *cm, ULONG colours, UBYTE *pal)
 {
     /* Static rather than automatic: 768 bytes at depth 8, and a Shell command
        has 4 KB of stack for everything httpd already has on it. */
     static UBYTE fresh[3U * FB_MAX_COLOURS];
-    ULONG colours = 1UL << depth;
     ULONG have    = (cm != NULL) ? (ULONG)cm->Count : 0;
     ULONG first;
     ULONG i;
     BOOL  moved = FALSE;
+
+    /* A truecolour screen has no palette, so there is nothing to compare and
+       nothing ever moves.  Answering FALSE here is what keeps the `pal` word
+       off the wire for the whole session. */
+    if (colours == 0UL)
+        return FALSE;
+    if (colours > FB_MAX_COLOURS)
+        colours = FB_MAX_COLOURS;
 
     memset(fresh, 0, (size_t)(3UL * colours));
 
@@ -1451,7 +1505,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     fb_display_units(sc);
 
     *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
-                                     want->depth, fb_pal);
+                                     fb_colours(want), fb_pal);
 
     /* Colours before pixels, and the encode is skipped entirely on the pass
        that finds them moved. */
@@ -1462,7 +1516,7 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
        library call, so they are read in fb_grab_frame() where the lock that
        makes the call safe is still held.  planes[0] is the staging buffer and
        is filled there. */
-    if (want->chunky)
+    if (RFB_FMT_IS_CHUNKY(want->format))
         return FB_GRAB_OK;
 
     for (plane = 0; plane < want->depth; plane++)
@@ -1575,7 +1629,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
          * on a card is rare, and a frozen picture is recoverable where a guru
          * is not.
          */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky && !pub)
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format) && !pub)
             rc = FB_GRAB_UNREADABLE;
 
         /* Attach on the first frame of a geometry rather than in
@@ -1583,7 +1638,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
            screen and this is where one is held.  It also has to happen again
            after a screen change, which is what fb_rtg_ready being cleared with
            the buffers arranges. */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky &&
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format) &&
             !fb_rtg_ready)
         {
             fb_rtg_ready = (UBYTE)http_rtg_attach(sc->RastPort.BitMap,
@@ -1599,7 +1655,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         /* The fetch itself: whole contiguous rows into Fast RAM, with the
            screen still held.  Everything after this, the compare, the PackBits
            and the socket, runs on the copy. */
-        if (rc == FB_GRAB_OK && !*palette_moved && want->chunky)
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format))
         {
             if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
                 planes[0] = fb_stage;
@@ -1683,7 +1740,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
     /* One eight-bit plane or eight one-bit ones.  The depth above stays 8 on a
        card because it is what sizes the palette.  rfb_planes() is what says
        there is one plane. */
-    fb_rg.format        = (rfb_u8)(g->chunky ? RFB_FMT_CLUT8 : RFB_FMT_PLANAR);
+    fb_rg.format        = (rfb_u8)g->format;
 
     rfb_scroll_defaults(&fb_cfg);
 
@@ -1716,7 +1773,7 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     /* One frame of the card, in Fast RAM.  Only on a card, because the chipset
        path has no copy of the screen and this would be 40 KB for nothing. */
-    if (g->chunky)
+    if (RFB_FMT_IS_CHUNKY(g->format))
     {
         fb_stage_len = (ULONG)g->row_bytes * (ULONG)g->height;
         fb_stage = (UBYTE *)ami_alloc(fb_stage_len);
@@ -2589,10 +2646,20 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
+    /*
+     * A format with no palette never has one to send, and every place that
+     * raises the flag -- a refresh, a screen change, the start of a session --
+     * raises it without asking what the format is.  Dropped here, in the one
+     * place that would act on it, and the pass then carries on to the grab
+     * below rather than spending itself on a word that does not exist.
+     */
+    if (fb_want_pal && fb_colours(&fb_geom) == 0UL)
+        fb_want_pal = 0;
+
     if (fb_want_pal)
     {
         rfb_u32 len = rfb_word_pal((char *)&fb_tx[10], fb_tx_cap - 10UL,
-                                   fb_pal, 1UL << fb_geom.depth);
+                                   fb_pal, (rfb_u32)fb_colours(&fb_geom));
 
         if (len == 0UL)
         {

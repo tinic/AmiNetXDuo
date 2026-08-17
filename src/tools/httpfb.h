@@ -31,9 +31,21 @@
  * of its own that is not public, so the browser went on showing an unchanged
  * Workbench with no way to see or dismiss what had opened in front.
  *
- * Planar screens only.  An RTG screen's BitMap has no Planes[] to read,
- * GetBitMapAttr(BMA_FLAGS) is what says so, and that case is refused with a
- * sentence rather than read anyway.
+ * Three kinds of screen, and the difference between them stops at this file's
+ * edge.  A chipset screen is depth one-bit planes, read where they lie.  A
+ * graphics card's is one plane of bytes, which cannot be read where it lies
+ * at all -- httprtg.c fetches it into a staging buffer in Fast RAM and the
+ * encoder is pointed at that -- and is either a byte a pixel with a palette
+ * or two bytes a pixel with none, the second being what a 15, 16, 24 or
+ * 32-bit screen is converted to on the way.  Which one it is travels as
+ * rfb_geom.format, and past the geometry nothing here asks: the encoder walks
+ * bytes and the tile grid is over bytes whichever it is.
+ *
+ * What is still refused is a bitmap nothing can read: no BMF_STANDARD and
+ * neither Picasso96 nor CyberGraphX claiming it, or a card format there is no
+ * conversion for.  Those get a sentence, and since the browser is the only
+ * place it can usefully arrive, httpd.c sends it in the WebSocket close
+ * frame as well as writing it to the log.
  *
  * The locks are not held across the socket.  docs/FORBID.md: nothing inside
  * Forbid() must not block, LockLayers stops every other task drawing, and
