@@ -103,13 +103,12 @@ VOID tls13_probe(const char *tag, ULONG v)
 #define TLS_FD_MASK(fd)     (1UL << ((ULONG)(fd) % TLS_FD_BITS))
 #define TLS_FD_MAX          256
 
-/* TLS_INFO_SIZE_BASE is the floor below which what was passed is not a
-   TLSInfo, and the boundary the fill below stops at for a caller that passed
-   less than the whole structure.  If a field is ever inserted above
-   ti_Resumed, this stops the build.  Without it the resumption fields go
-   silently into an older caller's stack. */
-_Static_assert(__builtin_offsetof(struct TLSInfo, ti_Resumed) == TLS_INFO_SIZE_BASE,
-               "TLS_INFO_SIZE_BASE must be the offset of the first added field");
+/* TLS_INFO_SIZE_V1 is what keeps callers compiled against the header before
+   resumption existed working.  If a field is ever inserted above ti_Resumed,
+   this stops the build.  Without it the new fields go silently into an old
+   caller's stack. */
+_Static_assert(__builtin_offsetof(struct TLSInfo, ti_Resumed) == TLS_INFO_SIZE_V1,
+               "TLS_INFO_SIZE_V1 must be the offset of the first added field");
 
 /* --------------------------------------------------------------- tags --- */
 
@@ -252,7 +251,6 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
     case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
-    case TLS_ERR_REFUSED:   return (CONST_STRPTR)"the certificate was refused by this program";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
@@ -277,16 +275,6 @@ static ULONG tls_certificate_callback(NX_SECURE_TLS_SESSION *session,
     if ((conn->tc_Flags & TLSF_VERIFY) == 0)
         return NX_SUCCESS;
 
-    /*
-     * A TLSA_VerifyHook has already been shown this certificate, including
-     * whether the name matched, and said to go on.  nx_secure runs this
-     * callback after the verification function, so this is the second half of
-     * a decision the caller has already made; making it again here would let
-     * the library overrule the program it exists to serve.
-     */
-    if ((conn->tc_Flags & TLSF_HOOKED) != 0)
-        return NX_SUCCESS;
-
     if (conn->tc_HostNameLength == 0)
         return NX_SECURE_X509_CERTIFICATE_DNS_MISMATCH;
 
@@ -307,19 +295,9 @@ static UINT tls_verify_none(NX_SECURE_X509_CERTIFICATE_STORE *store,
                             NX_SECURE_X509_CERT *certificate,
                             ULONG current_time)
 {
-    TLSConnection *conn = tls_conn_for_store(store);
-
+    (VOID)store;
     (VOID)certificate;
     (VOID)current_time;
-
-    /*
-     * Nothing is checked, so no hook is consulted; the public header says
-     * TLSA_NoVerify turns it off along with everything else.  The certificates
-     * are still formatted, because "who am I talking to" is a question
-     * TLSInfo() answers on an unverified connection too, and on those it is
-     * the only answer there is.
-     */
-    tls_cert_capture(conn, store);
 
     return NX_SUCCESS;
 }
@@ -333,7 +311,6 @@ static VOID tls_conn_free(TLSConnection *conn)
 
     tls_store_detach(conn);
     tls_store_close(&conn->tc_StoreIndex);
-    tls_cert_release(conn);
 
     tls_free(conn->tc_Ticket);
     tls_free(conn->tc_RootDer);
@@ -452,20 +429,6 @@ struct TLSConnection *tls_TLSOpenA(
 
     if (tls_tag_data(tags, TLSA_NoVerify, 0) == 0)
         conn->tc_Flags |= TLSF_VERIFY;
-
-    /*
-     * TLSA_VerifyHook.  Read only when there is something to report on: with
-     * TLSA_NoVerify nothing is checked, so the hook has nothing to be asked
-     * about and the header says setting both means the hook loses.  A hook with
-     * no entry point is no hook, rather than a wild jump inside a handshake.
-     */
-    if ((conn->tc_Flags & TLSF_VERIFY) != 0)
-    {
-        struct Hook *hook = (struct Hook *)tls_tag_data(tags, TLSA_VerifyHook, 0);
-
-        if (hook != NULL && hook->h_Entry != NULL)
-            conn->tc_Hook = hook;
-    }
 
     conn->tc_Timeout = (timeout_ms == 0)
                        ? NX_WAIT_FOREVER
@@ -713,20 +676,10 @@ struct TLSConnection *tls_TLSOpenA(
          * forever.  A wrong answer here costs one full handshake.  An omission
          * costs a host that never works again until the entry ages out.
          */
-        if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0 &&
-            (conn->tc_Flags & TLSF_REFUSED) == 0)
-        {
+        if ((conn->tc_ResumeFlags & TLSR_OFFERED) != 0)
             tls_resume_evict(conn);
-        }
 
-        /*
-         * A refusal is not a failure.  Every status that stops a handshake
-         * looks alike from here, so the flag rather than the status carries
-         * it, and TLS_ERR_REFUSED is what lets a caller tell "the user said
-         * no" from "it did not work" and not offer to retry.
-         */
-        error = ((conn->tc_Flags & TLSF_REFUSED) != 0)
-                ? TLS_ERR_REFUSED : tls_error_from_nx(status);
+        error = tls_error_from_nx(status);
         goto fail_session;
     }
 
@@ -741,19 +694,8 @@ struct TLSConnection *tls_TLSOpenA(
     }
     conn->tc_Protocol = (ULONG)conn->tc_Session.nx_secure_tls_protocol_version;
 
-    /*
-     * Also outside the bracket: this is the other half of the disk mirror.
-     *
-     * Not when a TLSA_VerifyHook let a chain through that did not check out.
-     * A cached session records that the check happened and against what, and a
-     * later connection that resumes it performs no check at all: caching this
-     * one would let one program's "yes, I know, go on" silently answer for
-     * every program after it, including ones with no hook.  The cost is one
-     * full handshake next time, on the connections where that is the right
-     * price.
-     */
-    if (conn->tc_VerifyReason == TLS_OK)
-        tls_resume_record(conn);
+    /* Also outside the bracket: this is the other half of the disk mirror. */
+    tls_resume_record(conn);
 
     if (error_out != NULL)
         *error_out = TLS_OK;
@@ -1055,7 +997,7 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
      * structure is big enough to hold them.  Anything smaller than the
      * original structure is not a TLSInfo.
      */
-    if (info->ti_Size < (ULONG)TLS_INFO_SIZE_BASE)
+    if (info->ti_Size < (ULONG)TLS_INFO_SIZE_V1)
         return -1;
 
     info->ti_Version         = conn->tc_Protocol;
@@ -1063,24 +1005,8 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
     info->ti_ChainDepth      = conn->tc_ChainDepth;
     info->ti_HandshakeMillis = conn->tc_HandshakeMillis;
     info->ti_Error           = conn->tc_Error;
-
-    /*
-     * NULL on a resumed handshake, because a resumed handshake sends no
-     * certificate; ti_Resumed is what tells the two apart.  The library's, and
-     * alive until TLSClose().
-     */
-    info->ti_PeerChain       = conn->tc_Certs;
-    info->ti_Peer            = (conn->tc_CertCount > 0) ? conn->tc_Certs : NULL;
-
-    /*
-     * The chain reached a root in the trust store, which is not the same as
-     * the handshake having completed once a TLSA_VerifyHook can carry one
-     * past a check that failed.  tc_VerifyReason is what the check concluded
-     * before the caller was asked.
-     */
     info->ti_Verified        = (BOOL)(((conn->tc_Flags & TLSF_VERIFY) != 0 &&
-                                       (conn->tc_Flags & TLSF_HANDSHAKEN) != 0 &&
-                                       conn->tc_VerifyReason == TLS_OK)
+                                       (conn->tc_Flags & TLSF_HANDSHAKEN) != 0)
                                       ? TRUE : FALSE);
     info->ti_ExpiryChecked   = conn->tc_ExpiryChecked;
     info->ti_UnixTime        = conn->tc_UnixTime;
