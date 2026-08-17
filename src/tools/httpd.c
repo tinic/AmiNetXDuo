@@ -7442,13 +7442,28 @@ static VOID httpd_serve(LONG lsock)
 
                 if (!keep)
                 {
+                    /*
+                     * Whatever the log level, when this end is the one that
+                     * ended it.  fb_close_code is set by nothing but a close
+                     * this server sent, and http_ws_close_reason() renders
+                     * every one of those as "going away", so the sentence
+                     * http_fb_fault() holds is the only record of what the
+                     * screen did.  A session the browser closed is ordinary
+                     * and stays behind -v.
+                     */
+                    if (http_fb_why() != 0)
+                        httpd_log(c, "console ended: %s",
+                                  (LONG)http_fb_fault(), 0);
+
                     if (httpd_verbose || httpd_trace)
                     {
                         ULONG frames = 0, bytes = 0, gt = 0, et = 0;
 
                         http_fb_stats(&frames, &bytes, &gt, &et);
-                        httpd_log(c, "console ended: %s",
-                                  (LONG)http_ws_close_reason(http_fb_why()), 0);
+                        if (http_fb_why() == 0)
+                            httpd_log(c, "console ended: %s",
+                                      (LONG)http_ws_close_reason(
+                                          http_fb_why()), 0);
                         httpd_log(c, "console sent %lu frames, %lu bytes",
                                   (LONG)frames, (LONG)bytes);
                         httpd_log(c, "console spent %lu ticks grabbing and "
