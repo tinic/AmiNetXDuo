@@ -578,6 +578,38 @@ static VOID list_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
     }
 }
 
+/*
+ * The IPv6 default router, as text, or NULL.
+ *
+ * The ::/0 entry of the routing table, which is where both a GATEWAY6 line and
+ * a router advertisement's own address end up.  A route with no next hop is
+ * on-link and is not a router, so it does not count.
+ */
+static const char *default_router6(void)
+{
+    static ToolRoutes6 snr_routes6;
+    UWORD              i;
+
+    if (tool_routes6(&snr_routes6) != 0)
+        return NULL;
+
+    for (i = 0; i < snr_routes6.count; i++)
+    {
+        const ToolRoute6 *r = &snr_routes6.route[i];
+
+        if (r->prefix != 0 || r->next_hop[0] == '\0')
+            continue;
+
+        if ((r->dest_words[0] | r->dest_words[1] |
+             r->dest_words[2] | r->dest_words[3]) != 0UL)
+            continue;
+
+        return r->next_hop;
+    }
+
+    return NULL;
+}
+
 static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                                 BOOL have_live, BOOL readable)
 {
@@ -1471,7 +1503,19 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         }
         else
         {
-            tool_printf("Default route:  none\n");
+            /*
+             * The IPv6 default router, before giving up.  This line read
+             * "none" on a machine whose only route off its own network was
+             * one a router advertisement had given it, which is every
+             * IPv6-only machine, and "no default route" is the first thing
+             * anyone reads it for.
+             */
+            const char *router6 = default_router6();
+
+            if (router6 != NULL)
+                tool_printf("Default route:  %s (IPv6)\n", (LONG)router6);
+            else
+                tool_printf("Default route:  none\n");
         }
     }
 

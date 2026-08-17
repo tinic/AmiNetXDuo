@@ -871,6 +871,66 @@ static VOID check_netdb_file(const NetdbFile *spec)
     Close(file);
 }
 
+/*
+ * The IPv6 half, which nothing checked: check_addressing() above returns
+ * before it starts on an interface with no IPv4 address, which is every
+ * IPv6-only one.
+ *
+ * Three addresses a machine cannot have.  A prefix out of range is refused by
+ * the parser already, and an address on a link with no router is a network
+ * fact rather than a file fault, so neither is here.
+ */
+static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
+{
+    char text[AMI_CFG_IP6_STRLEN];
+
+    if ((ifc->address6[0] | ifc->address6[1] |
+         ifc->address6[2] | ifc->address6[3]) == 0)
+        return;
+
+    tool_format_ip6(ifc->address6, text, sizeof(text));
+
+    /* ::1, RFC 4291 2.5.3.  The IPv6 127.0.0.1: it always means "this
+       machine", so no other machine can reach an interface that has one. */
+    if (ifc->address6[0] == 0 && ifc->address6[1] == 0 &&
+        ifc->address6[2] == 0 && ifc->address6[3] == 1)
+    {
+        finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_ERROR);
+        note("::1 is the loopback address. It always means \"this machine\", "
+             "so no other machine can reach an interface that has one.");
+        note("Use an address from the prefix this network uses, or leave "
+             "ADDRESS6 out and set CONFIGURE6 = AUTO to be given one.");
+        return;
+    }
+
+    /* ff00::/8, RFC 4291 2.7.  A group, not a machine. */
+    if ((ifc->address6[0] & 0xFF000000UL) == 0xFF000000UL)
+    {
+        finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_ERROR);
+        say("      %s is a multicast address: it names a group of\n",
+            (LONG)text);
+        say("      machines and cannot be one machine's own address\n");
+        return;
+    }
+
+    /*
+     * fe80::/10, RFC 4291 2.5.6.  Not an error and not ignorable: the
+     * interface configures its own link-local from the MAC in every mode, so
+     * writing one down either duplicates that or replaces it with one derived
+     * from nothing, and either way the address reaches no further than this
+     * wire.
+     */
+    if ((ifc->address6[0] & 0xFFC00000UL) == 0xFE800000UL)
+    {
+        finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_WARN);
+        say("      %s is a link-local address, which reaches only this\n",
+            (LONG)text);
+        say("      wire, and the interface gives itself one already\n");
+        note("For an address that reaches further, use the prefix this "
+             "network uses, or CONFIGURE6 = AUTO to be given one.");
+    }
+}
+
 /* --------------------------------------------------------------- the run, */
 
 /* Static: an AmiConfig is far larger than a Shell command's 4 KB stack. */
@@ -892,6 +952,7 @@ static VOID check_interfaces(const AmiConfig *cfg)
 
         check_device(path, ifc);
         check_addressing(path, ifc);
+        check_addressing6(path, ifc);
 
         if (tool_break())
             return;
