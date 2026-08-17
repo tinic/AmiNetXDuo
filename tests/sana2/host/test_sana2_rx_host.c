@@ -724,8 +724,34 @@ static void test_plan_budget(void)
      */
     plan_at(10000000UL, 47UL, TRUE, &d);
     h_check(d.ipv4 == 5, "47 packets: IPv4 gets the pool's own number, five");
+    h_check(d.arp == 2 && d.ipv6 == 4, "and the plan is 5/2/4 exactly");
     h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 47UL / AMI_SANA2_RX_BUDGET_SHARE,
             "and the three of them stay inside a quarter of that pool");
+
+    /*
+     * The whole plan is asserted here rather than read off a guest because the
+     * one machine where it cannot be: on a 2 MB A1200 the interface's own log
+     * line is overwritten by the tick line from another task at exactly that
+     * point, deterministically, so `ip 5 arp` is all a serial capture gets.
+     * The other five machines were read off the guest and agree with this
+     * table:
+     *
+     *      pool  47 (A1200, no Fast)      5 / 2 / 4    (ip4 observed)
+     *      pool 127 (A1200, 2 MB Fast)   15 / 2 / 8    observed
+     *      pool 207 (A1200, 4 MB Fast)   25 / 2 / 8    observed
+     *      pool 367 (A1200, 8 MB Fast)   32 / 2 / 8    observed
+     *      pool 367 (A3000, no Fast)     32 / 2 / 8    observed
+     *      pool 513 (A3000, 8 MB Fast)   32 / 2 / 8    observed
+     */
+    plan_at(10000000UL, 127UL, TRUE, &d);
+    h_check(d.ipv4 == 15 && d.arp == 2 && d.ipv6 == 8,
+            "127 packets: 15/2/8, which is what the guest printed");
+    plan_at(10000000UL, 207UL, TRUE, &d);
+    h_check(d.ipv4 == 25 && d.arp == 2 && d.ipv6 == 8,
+            "207 packets: 25/2/8, which is what the guest printed");
+    plan_at(100000000UL, 513UL, TRUE, &d);
+    h_check(d.ipv4 == 32 && d.arp == 2 && d.ipv6 == 8,
+            "513 packets: 32/2/8, which is what the A3000 printed");
 
     /*
      * The lab's 8 MB A1200: 368 packets, so 46 frames of window and a budget
