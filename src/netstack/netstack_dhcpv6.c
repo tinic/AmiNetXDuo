@@ -3,8 +3,8 @@
  *
  * Compiled only in an AMINETXDUO_IPV6 build, like netstack_ipv6.c. The engine
  * is NetX Duo's own addons/dhcp/nxd_dhcpv6_client.c; everything here is the
- * wiring, the policy and the three places the vendored client and this stack
- * disagreed about who owns something.
+ * wiring, the policy, and the four places the vendored client and this stack
+ * disagreed about who owns something or about what a state means.
  *
  * WHAT ASKS FOR IT
  *
@@ -58,7 +58,7 @@
  * correct -- the operator has said this is a different machine on the wire --
  * and it is why the test harness pins a MAC.
  *
- * THREE THINGS THE VENDORED CLIENT GETS WRONG HERE
+ * FOUR THINGS THE VENDORED CLIENT DOES THAT HAD TO BE ANSWERED
  *
  *   1. It takes the single nxd_ipv6_address_change_notify() slot for itself
  *      (nxd_dhcpv6_client.c:1315, whose comment says "other modules should
@@ -85,6 +85,14 @@
  *      module's chain checks ns_Dhcpv6Created, so nothing calls it. Left
  *      alone rather than worked around twice.
  *
+ *   4. A successful Information-Request leaves the client in
+ *      NX_DHCPV6_STATE_INIT rather than BOUND, because the state after a
+ *      Reply is chosen from the IANA address status (:4147) and an
+ *      Information-Request never asks for an address. A caller watching for
+ *      BOUND to know the exchange worked never sees it, and the name servers
+ *      it carried are recorded and never read. ami_ns6_dhcp_state_changed()
+ *      watches the transition out of SENDING_INFORM_REQUEST instead.
+ *
  * WHY THERE IS A THREAD HERE THAT DOES ALMOST NOTHING
  *
  * A router advertisement arrives on the IP thread. Everything that moves the
@@ -96,8 +104,13 @@
  *
  * So the RA callback does one non-blocking thing -- tx_event_flags_set() --
  * and this thread does the blocking work. It is created only when some
- * interface asks for AUTO or DHCP, waits on the flag group forever, and costs
- * its stack and a TX_THREAD when it is never used.
+ * interface asks for AUTO or DHCP, and waits on the flag group forever.
+ *
+ * Both thread stacks are allocated at bring-up rather than when the client is
+ * created, because allocating is an Exec AllocVec() and bring-up is the only
+ * one of the two that runs on an adopted task where that is legal. A machine
+ * whose CONFIGURE6 is AUTO and whose router asks for no DHCPv6 therefore
+ * carries 6 KB it never uses, and sends no packets at all.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -180,17 +193,29 @@ static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
     ns->ns_Dhcpv6State = (UBYTE)new_state;
 
     AMI_INFO("netstack: DHCPv6 %s -> %s",
-             (long)ami_ns6_dhcp_state_name((UCHAR)old_state),
-             (long)ami_ns6_dhcp_state_name((UCHAR)new_state));
+             ami_ns6_dhcp_state_name((UCHAR)old_state),
+             ami_ns6_dhcp_state_name((UCHAR)new_state));
 
     ami_netstack_mark(ami_ns6_dhcp_state_name((UCHAR)new_state));
 
     /*
-     * A Reply has landed, whether it carried an address (BOUND) or only the
-     * other configuration (the Information-Request path returns to BOUND as
-     * well). Either can carry name servers and a domain list.
+     * A Reply has landed and may have carried name servers and a domain list.
+     *
+     * TWO transitions, not one, and the second is not obvious. A stateful
+     * exchange ends at BOUND. A successful Information-Request ends at INIT:
+     * nxd_dhcpv6_client.c:4147 restores the state "depending on its IANA
+     * address status", and an Information-Request never asks for an address,
+     * so the status is not VALID and the client goes back to INIT having
+     * succeeded. Watching only for BOUND would have meant the name servers
+     * from the stateless path were recorded by the client and never read --
+     * which is the entire purpose of that path.
+     *
+     * So the transition OUT of SENDING_INFORM_REQUEST counts as well,
+     * wherever it lands. A failed one lands in INIT too, and absorbing then
+     * costs a walk of an empty server list.
      */
-    if (new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS)
+    if (new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
+        old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST)
         ns->ns_Dhcpv6DnsPending = TRUE;
 }
 
@@ -614,6 +639,17 @@ VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
     if (ns == NULL || !ns->ns_Dhcpv6Created || !ns->ns_Dhcpv6Started)
         return;
 
+    /*
+     * Only from a ThreadX thread. ami_ns_destroy() has seven call sites, four
+     * of them before the kernel exists and one of them the fallback branch in
+     * netstack_shutdown() that could not take a bracket, and both the mutex
+     * this takes and the sleep below are caller errors outside one. There is
+     * nothing to release on those paths anyway -- the client cannot have been
+     * started -- but the check is the guard rather than the reasoning.
+     */
+    if (tx_thread_identify() == TX_NULL)
+        return;
+
     if (ns->ns_Dhcpv6State != NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
         !ns->ns_Dhcpv6Stateful)
     {
@@ -665,6 +701,36 @@ VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
 
     if (ns->ns_Dhcpv6Work.tx_thread_id != 0)
     {
+        /*
+         * Ask it to leave, and give it a second to, before taking it apart.
+         * The QUIT above is answered immediately by a thread waiting on the
+         * flag group, which is where it is nearly always found; a thread
+         * caught inside ami_ns6_dhcp_begin() is holding the client's mutex,
+         * and terminating it there leaves that mutex owned by a dead thread
+         * for nx_dhcpv6_client_delete() to find. Only reachable from a
+         * ThreadX thread, so a shutdown from outside one falls through to the
+         * terminate and accepts that.
+         */
+        if (tx_thread_identify() != TX_NULL)
+        {
+            ULONG waited;
+
+            for (waited = 0; waited < (ULONG)NX_IP_PERIODIC_RATE; waited++)
+            {
+                UINT state = 0;
+
+                if (tx_thread_info_get(&ns->ns_Dhcpv6Work, TX_NULL, &state,
+                                       TX_NULL, TX_NULL, TX_NULL, TX_NULL,
+                                       TX_NULL, TX_NULL) != TX_SUCCESS)
+                    break;
+
+                if (state == TX_COMPLETED || state == TX_TERMINATED)
+                    break;
+
+                tx_thread_sleep(1);
+            }
+        }
+
         (VOID)tx_thread_terminate(&ns->ns_Dhcpv6Work);
         (VOID)tx_thread_delete(&ns->ns_Dhcpv6Work);
     }
