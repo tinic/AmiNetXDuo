@@ -643,19 +643,21 @@ def pfs(path, screens):
     There is no pointer image here: this probe never asked for one, so every
     frame names image 0.
 
-    Formats 0 and 1 only.  PFS2 carries a depth of 1..8 and a palette, and has
-    no way to say that a frame is two bytes a pixel with no palette at all, so
-    a truecolour session is written as no file rather than as a file whose
-    header lies about what is in it.
+    Every format, including truecolour.  Byte 9 of the header is
+    rfb_geom.format, the same number the `geom` word carries, and the palette
+    that follows it is as long as that format says -- none at all on a
+    truecolour capture, whose frames therefore begin at offset 16.
     """
     made(path)
     first = screens[0][0]
     base = screens[0][2]
     blob = bytearray(b"PFS2")
-    # Byte 9 is the .pfs flags byte, and bit 0 says the frames are chunky --
-    # one eight-bit plane and not `depth` one-bit ones.  See pfs.ts.
+    # Byte 9 is rfb_geom.format.  It was documented as a flags byte and only
+    # ever written as 0 or 1, and those two still mean planar and one
+    # eight-bit plane, so a file written before this reads unchanged.  See
+    # pfs.ts and src/rfb/host/rfbbench.c, which read the same byte.
     blob += struct.pack(">HHBBHHH", first.w, first.h, first.depth,
-                        1 if first.fmt == FMT_CLUT8 else 0,
+                        first.fmt,
                         first.bpr, len(screens), 0)
     blob += bytes(first.rgb)
     for _, planes, _ms in screens:
@@ -1270,8 +1272,6 @@ def main(argv):
     if pfs_path is not None and kept:
         pfs(pfs_path, kept)
         say("pfs", pfs_path)
-    elif pfs_path is not None and not screen.colours:
-        say("pfs_skipped", "PFS2 has no truecolour frame; see pfs.ts")
 
     # What separates a screen from a session that streamed zeroes: more than
     # one colour on it, a palette that is not all black, and no gap in the
