@@ -4,7 +4,7 @@
 #
 #   tools/classicwb.sh [-m MODEL] [-v VARIANT] [-b BUILDDIR] [-a ARCHIVE.lha]
 #                      [-B BACKEND] [-n NAME] [-p PORT] [-t SECONDS]
-#                      [-s SNAPSHOTS] [-c HOST] [-M SPEC]
+#                      [-s SNAPSHOTS] [-c HOST]
 #
 # tools/demo.sh boots the drive tools/amiberry-run.sh builds, which is httpd
 # and whatever else the staging puts beside it.  This boots a ClassicWB
@@ -98,7 +98,7 @@ usage() {
     cat <<'EOF'
 usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
                           [-a archive.lha] [-B backend] [-n name] [-p port]
-                          [-t seconds] [-s snapshots] [-c host] [-M spec]
+                          [-t seconds] [-s snapshots] [-c host]
 
   -m  model, picks the Kickstart          (default A1200)
   -v  plain boots ClassicWB, rtg adds a Picasso96 screen  (default plain)
@@ -111,10 +111,6 @@ usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
   -s  snapshot store         (default ~/amiga-assets/classicwb/snapshots)
   -c  ssh host that checks the served version; this host cannot reach
       its own guest, so leaving it unset skips that one check
-  -M  run the TLS memory probes at boot, against a peer already serving.
-      SPEC is host,port,address,truststore,cafile: the name the certificate
-      carries, the port, the peer's dotted address, and the two host-side
-      files tests/peer/mkpki.sh writes (teststore and testroots.pem)
 EOF
 }
 
@@ -122,9 +118,7 @@ say() { printf '%s=%s\n' "$1" "$2"; }
 
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
-MEMPROBE="${AMINETXDUO_CWB_MEMPROBE:-}"
-
-while getopts "m:v:b:a:B:n:p:t:s:c:M:h" opt; do
+while getopts "m:v:b:a:B:n:p:t:s:c:h" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         v) VARIANT="$OPTARG" ;;
@@ -136,7 +130,6 @@ while getopts "m:v:b:a:B:n:p:t:s:c:M:h" opt; do
         t) WINDOW="$OPTARG" ;;
         s) SNAPROOT="$OPTARG" ;;
         c) CHECKHOST="$OPTARG" ;;
-        M) MEMPROBE="$OPTARG" ;;
         h) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -167,17 +160,6 @@ case "$MODEL:$VARIANT" in
 esac
 
 [ -n "$NAME" ] || NAME="amiga-$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')-$VARIANT"
-
-# -M is read here and used at the very end, three minutes of installing later.
-# A typo in it that was only noticed then would cost the whole install.
-MP_HOST=""; MP_PORT=""; MP_ADDR=""; MP_STORE=""; MP_CA=""
-if [ -n "$MEMPROBE" ]; then
-    IFS=, read -r MP_HOST MP_PORT MP_ADDR MP_STORE MP_CA <<< "$MEMPROBE"
-    [ -n "$MP_HOST" ] && [ -n "$MP_PORT" ] && [ -n "$MP_ADDR" ] &&
-    [ -f "${MP_STORE:-/nonexistent}" ] || {
-        say error "-M wants host,port,address,truststore,cafile and a\
- readable truststore"; exit 2; }
-fi
 
 # The asset store carries the ROMs and exports the Kickstart each model needs.
 # Skipping it boots a machine with no ROM, and the error names the ROM rather
@@ -317,154 +299,6 @@ amiga_path() {
     done
     printf '%s\n' "$cur"
 }
-
-# ------------------------------------------------------------------ AmiSSL --
-#
-# WHAT THE SNAPSHOT BROUGHT, as opposed to what the archive brings below.
-#
-# AmiSSL is third party and does not change when AmiNetXDuo is rebuilt, so it
-# rides in the snapshot beside ClassicWB rather than being unpacked on every
-# launch, and the rule asserted above -- that the snapshot carries no file of
-# ours -- is about ours and is untouched by it.
-#
-# AmiSSL 5.27 wants AmigaOS 3.0+ and a 68020.  The A600 is a 68000, so the 68k
-# snapshot has none and this says so with the reason attached: a caller that
-# reads `amissl=absent` and nothing else has to go and find out why, and the
-# answer is not a thing that will change.
-#
-# A launch that expected AmiSSL and did not find it stops here, the same way
-# install_check and driver_match stop one.  A guest that came up without it
-# would serve every page it serves now and fail the first HTTPS request, which
-# is the shape of failure this rig exists to catch before a user does.
-case "$DIST" in
-    68k) AMISSL_WANT=no
-         AMISSL_WHY="AmiSSL 5.27 needs a 68020 and the $MODEL is a 68000" ;;
-    *)   AMISSL_WANT=yes
-         AMISSL_WHY="" ;;
-esac
-say amissl_expected "$AMISSL_WANT"
-
-# The version out of the binary's own VERSION tag.  A filename is what
-# somebody typed; this is what the library will tell the guest it is.
-amissl_verstag() {
-    LC_ALL=C tr -c '[:print:]' '\n' < "$1" | grep -m1 '^\$VER: ' || true
-}
-
-AMISSL_MASTER=$(amiga_path Libs/amisslmaster.library || true)
-AMISSL_LIBDIR=$(amiga_path Libs/AmiSSL || true)
-AMISSL_LIB=""
-[ -n "$AMISSL_LIBDIR" ] &&
-    AMISSL_LIB=$(ls -1 "$AMISSL_LIBDIR"/amissl_v*.library 2>/dev/null | head -1)
-
-if [ -n "$AMISSL_MASTER" ] && [ -n "$AMISSL_LIB" ]; then
-    AMISSL_CERTS=$(amiga_path AmiSSL/Certs || true)
-    say amissl "$(amissl_verstag "$AMISSL_LIB" | awk '{print $3}')"
-    say amissl_library "$(basename "$AMISSL_LIB")"
-    say amissl_library_bytes "$(wc -c < "$AMISSL_LIB" | tr -d ' ')"
-    say amissl_master "$(amissl_verstag "$AMISSL_MASTER" | awk '{print $3}')"
-    say amissl_certs \
-        "$(ls -1 "${AMISSL_CERTS:-/nonexistent}" 2>/dev/null | wc -l | tr -d ' ')"
-    if [ "$AMISSL_WANT" = no ]; then
-        say error "the $DIST snapshot carries AmiSSL and $AMISSL_WHY -- a\
- library this machine cannot open is worse than none"
-        exit 1
-    fi
-    say amissl_check ok
-else
-    say amissl absent
-    if [ "$AMISSL_WANT" = yes ]; then
-        say amissl_reason "the $DIST snapshot carries none"
-        say error "$MODEL expects AmiSSL and the snapshot has no\
- Libs/AmiSSL/amissl_v#?.library -- rebuild it with\
- ~/amiga-assets/classicwb/install.sh $DIST"
-        exit 1
-    fi
-    say amissl_reason "$AMISSL_WHY"
-fi
-
-# ------------------------------------------------------- the AmiSSL probe --
-#
-# install/test/amisslprobe.c, staged into C: so the standing guest can be
-# asked whether AmiSSL WORKS rather than whether its file is on the drive.
-# Everything above is this host reading bytes it copied itself; the probe
-# opens the library on the Amiga, initialises it, and gets the version string
-# back out of it by calling into it.
-#
-# It is not run here.  The open was expected to be minutes and measured 0.34 s
-# on the A1200 arm -- AmigaDOS reads the 3.5 MB through the emulator's
-# directory filesystem, which is a host memcpy, and only the relocation is
-# paid at 68020 speed -- so the reason is no longer cost.  It is that the
-# probe needs a stack a Shell does not give, so it cannot simply be appended
-# to a boot script, and the answer does not change between launches:
-#
-#     Stack 65536
-#     C:amisslprobe
-#
-# from the web shell or the guest's own Shell, then read DH0:amisslprobe.txt.
-#
-# The AmiSSL SDK supplies the headers.  It is not in the public tree and never
-# will be, so this is skipped rather than fatal when the asset store is not
-# on the machine: the probe is a diagnostic and a launch without one is still
-# a launch.
-AMISSL_SDK="${AMINETXDUO_AMISSL_SDK:-}"
-if [ "$AMISSL_WANT" = yes ] && [ -z "$AMISSL_SDK" ]; then
-    SDK_LHA=$(ls -1 "$HOME"/amiga-assets/amissl/archives/AmiSSL-*-SDK.lha \
-              2>/dev/null | head -1)
-    SDK_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/amissl-sdk"
-    if [ -n "$SDK_LHA" ]; then
-        if [ ! -d "$SDK_DIR/AmiSSL/Developer" ]; then
-            rm -rf "$SDK_DIR"
-            mkdir -p "$SDK_DIR"
-            ( cd "$SDK_DIR" && lha xq "$SDK_LHA" ) >/dev/null 2>&1 || true
-        fi
-        [ -d "$SDK_DIR/AmiSSL/Developer" ] &&
-            AMISSL_SDK="$SDK_DIR/AmiSSL/Developer"
-    fi
-fi
-if [ "$AMISSL_WANT" = yes ] && [ -n "$AMISSL_SDK" ] &&
-   [ -f "$AMISSL_SDK/include/proto/amissl.h" ]; then
-    # -m68000 for the same reason installdrive.c is: nothing in it needs
-    # 68020 codegen.  The library it opens does, and the machine it is staged
-    # on has one, but that is the library's business and not this file's.
-    PROBE="$ROOT/build/cwb-amisslprobe-$TAG"
-    if "$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -I"$AMIGA_NDK" \
-        -I"$AMISSL_SDK/include" -D__amigaos3__=1 \
-        -o "$PROBE" "$ROOT/install/test/amisslprobe.c" \
-        > "$ROOT/build/cwb-amisslprobe-$TAG.log" 2>&1; then
-        cp "$PROBE" "$HD/C/amisslprobe"
-        chmod 755 "$HD/C/amisslprobe"
-        say amissl_probe "C:amisslprobe"
-        say amissl_probe_bytes "$(wc -c < "$PROBE" | tr -d ' ')"
-    else
-        say warning "install/test/amisslprobe.c did not build; see\
- $ROOT/build/cwb-amisslprobe-$TAG.log"
-    fi
-elif [ "$AMISSL_WANT" = yes ]; then
-    say amissl_probe "absent: no AmiSSL SDK"
-fi
-
-# ---------------------------------------------------------- the TLS probe --
-#
-# install/test/tlsprobe.c, the same thing for tls.library, staged the same way
-# into the same place.  It needs no third-party SDK -- our own header and the
-# NDK are the whole of it -- so unlike the one above it is not conditional on
-# an asset store, and it is staged on the A600 as well, which is the machine
-# AmiSSL cannot serve at all.
-#
-# -m68000, for the reason installdrive.c is: nothing in the probe needs 68020
-# codegen and it has to run on whatever MODEL says.
-TLSPROBE="$ROOT/build/cwb-tlsprobe-$TAG"
-if "$AMIGA_GCC" -O2 -m68000 -Wall -Wextra -I"$AMIGA_NDK" -I"$ROOT/include" \
-    -o "$TLSPROBE" "$ROOT/install/test/tlsprobe.c" \
-    > "$ROOT/build/cwb-tlsprobe-$TAG.log" 2>&1; then
-    cp "$TLSPROBE" "$HD/C/tlsprobe"
-    chmod 755 "$HD/C/tlsprobe"
-    say tls_probe "C:tlsprobe"
-    say tls_probe_bytes "$(wc -c < "$TLSPROBE" | tr -d ' ')"
-else
-    say warning "install/test/tlsprobe.c did not build; see\
- $ROOT/build/cwb-tlsprobe-$TAG.log"
-fi
 
 # The download, where a download would be: its own drawer, and not the one the
 # Installer is going to create.  install/test/installdrive.c spells this path.
@@ -994,52 +828,6 @@ C:Wait 30
 C:ShowNetStatus >>DH0:netstatus.txt
 EOF
 chmod 755 "$HD/S/AmiNetXDuo-Serve"
-
-# --------------------------------------------------------- the memory probes --
-#
-# WHAT THE TWO TLS LIBRARIES COST RESIDENT, measured in one boot with the arms
-# interleaved.  Between-run variation on this tree is several times the
-# within-run variation, so tls, amissl, tls, amissl is one measurement and four
-# separate launches would be four.
-#
-# The second round of each library is also the expunge measurement: exec
-# expunges a library only when it needs the memory, so a second opener may pay
-# nothing, and each probe's own resident_before_* lines say which happened.
-#
-# `Stack 65536` applies to the Shell running this script and therefore to the
-# commands it starts.  Both probes read the stack they were given and refuse on
-# one too small, so a missing line here is a reported refusal rather than a
-# hang.
-if [ -n "$MEMPROBE" ]; then
-    cp "$MP_STORE" "$HD/probestore"
-    say memprobe_store "$MP_STORE"
-    if [ -n "${MP_CA:-}" ] && [ -f "$MP_CA" ]; then
-        cp "$MP_CA" "$HD/probe-ca.pem"
-        say memprobe_cafile "$MP_CA"
-    fi
-
-    {
-        echo "; Written by tools/classicwb.sh."
-        echo "FailAt 9999"
-        echo "Stack 65536"
-        for round in 1 2; do
-            echo "C:tlsprobe $MP_HOST $MP_PORT $MP_ADDR STORE DH0:probestore\
- REPORT DH0:tlsprobe-r$round.txt >DH0:tlsprobe-r$round-console.txt"
-            if [ "$AMISSL_WANT" = yes ] && [ -f "$HD/C/amisslprobe" ] &&
-               [ -f "$HD/probe-ca.pem" ]; then
-                echo "C:amisslprobe HOST $MP_HOST PORT $MP_PORT ADDR $MP_ADDR\
- CAFILE DH0:probe-ca.pem REPORT DH0:amisslprobe-r$round.txt\
- >DH0:amisslprobe-r$round-console.txt"
-            fi
-        done
-        echo 'Echo >DH0:.memprobe "done"'
-    } > "$HD/S/AmiNetXDuo-MemProbe"
-    chmod 755 "$HD/S/AmiNetXDuo-MemProbe"
-
-    printf 'Execute S:AmiNetXDuo-MemProbe\n' >> "$HD/S/AmiNetXDuo-Serve"
-    rm -f "$HD/.memprobe"
-    say memprobe "$MP_HOST:$MP_PORT at $MP_ADDR"
-fi
 
 startup_with 'FailAt 9999
 Execute S:AmiNetXDuo-Serve

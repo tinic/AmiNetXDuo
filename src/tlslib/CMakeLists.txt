@@ -33,8 +33,6 @@ set(TLSLIB_SOURCES
     tls_netx.c
     tls_conn.c
     tls_store.c
-    tls_cert.c
-    tls_certfmt.c
     tls_resume.c
     tls_expiry.c
     tls_time.c
@@ -260,46 +258,6 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_tls_expiry PROPERTIES C_STANDARD 11)
 
     add_test(NAME tls_session_expiry COMMAND test_tls_expiry)
-
-    # ---------------------------------------------------------------------
-    # Certificate formatting.
-    #
-    # tls_certfmt.c is the second file here free of AmigaOS calls, and it is
-    # split out of tls_cert.c for exactly this: what a TLSA_VerifyHook shows a
-    # person is a subject line, a pair of dates and a fingerprint, and all
-    # three are decisions about bytes that come off the wire.  A date read a
-    # year out, or a subject truncated at an embedded NUL a certificate chose,
-    # is what somebody decides on, and neither shows up as a failure anywhere.
-    #
-    # c68k_sha256.c comes along so the fingerprint is checked against the
-    # published SHA-256 vectors rather than against itself.  It is the same
-    # implementation the library links (src/crypto68k), so the digest this
-    # test blesses is the digest that ships.
-    #
-    #   cc -std=c11 -Wall -Wextra -Isrc/tlslib -Isrc/crypto68k ... \
-    #      src/tlslib/test/test_tls_certfmt.c src/tlslib/tls_certfmt.c \
-    #      src/crypto68k/c68k_sha256.c -o test_tls_certfmt
-    add_executable(test_tls_certfmt
-        test/test_tls_certfmt.c
-        tls_certfmt.c
-        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c")
-
-    # The same three lines tests/crypto68k uses to build that file on a host,
-    # and for the same reason: host/shim carries the nx_crypto_port.h whose
-    # HN_UBASE is 32 bits, which is the target's.
-    target_include_directories(test_tls_certfmt PRIVATE
-        "${CMAKE_SOURCE_DIR}/tests/crypto68k/host/shim" # nx_crypto_port.h, first
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/src/crypto68k"
-        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
-
-    target_compile_definitions(test_tls_certfmt PRIVATE
-        NX_CRYPTO_STANDALONE_ENABLE)
-
-    target_compile_options(test_tls_certfmt PRIVATE -Wall -Wextra)
-    set_target_properties(test_tls_certfmt PROPERTIES C_STANDARD 11)
-
-    add_test(NAME tls_certificate_format COMMAND test_tls_certfmt)
 
     # ---------------------------------------------------------------------
     # Session resumption, the rest of it.
