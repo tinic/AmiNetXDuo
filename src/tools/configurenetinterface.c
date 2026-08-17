@@ -2,7 +2,8 @@
  * ConfigureNetInterface, re-address a running interface in place.
  *
  *     ConfigureNetInterface INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,
- *                           GATEWAY/K,MDNS/K,CONFIGURE/K,
+ *                           GATEWAY/K,ADDRESS6/K,GATEWAY6/K,MDNS/K,
+ *                           CONFIGURE/K,CONFIGURE6/K,
  *                           RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N
  *
  * Until now the only way to change what a live interface is addressed with was
@@ -177,10 +178,70 @@
  * name server is usually reached through the interface being changed. Resolving
  * here would make the command depend on the network it is repairing.
  *
- * IPv4 only. An IPv6 address on an interface is not one number that replaces
- * another, because an interface holds several, always including its link-local
- * one, so there is nothing here for this command's shape to change.
- * AddNetRoute takes the IPv6 routes.
+ * ---------------------------------------------------------------- IPv6, --
+ *
+ * An interface with only IPv6 on it is a configuration this stack brings up,
+ * so it is one this command has to answer about. It answers about all of it
+ * and does one third of it, and the division is not arbitrary: a keyword is
+ * here when the live stack can carry it out, and refused by name when it
+ * cannot. A keyword that quietly did nothing, or reported success for a
+ * change the interface never took, is the failure worth avoiding.
+ *
+ *   GATEWAY6           the machine's IPv6 default router, and the one that
+ *                      works. It is the same call AddNetRoute DEFAULTGATEWAY
+ *                      makes, NETCTRL_ROUTE6_ADD with a next hop and no
+ *                      prefix, so the path under it has been shipped since
+ *                      IPv6 landed. Given an address it replaces whatever
+ *                      router this interface had, because "the default route"
+ *                      is one thing to a person even though NetX Duo keeps a
+ *                      list; GATEWAY6 NONE removes it and adds nothing.
+ *
+ *                      A link-local next hop is the usual one and needs no
+ *                      zone here: AddNetRoute takes fe80::1%eth0 because it
+ *                      has no other way to know which link, and this command
+ *                      already has INTERFACE.
+ *
+ *                      It replaces every router on the interface, including
+ *                      one a router advertisement put there, because a router
+ *                      this machine did not choose is exactly what somebody
+ *                      naming a next hop by hand is overriding. On
+ *                      CONFIGURE6=AUTO the next advertisement puts it back --
+ *                      that is what AUTO means -- so a machine that must not
+ *                      follow the link's router wants CONFIGURE6=STATIC in
+ *                      DEVS:NetInterfaces rather than this command.
+ *
+ *   ADDRESS6           refused, and refused with the file to edit named. An
+ *                      IPv6 address cannot be changed on a running interface
+ *                      in this stack: nothing under bsdsocket.library writes
+ *                      one after bring-up, and nothing removes the one that
+ *                      is there, so a command that accepted ADDRESS6 could
+ *                      only add a second address beside the first and call
+ *                      that a change.
+ *
+ *   CONFIGURE6         refused the same way. AUTO, DHCP, STATIC, LINKLOCAL
+ *                      and OFF are the five values DEVS:NetInterfaces takes,
+ *                      and which of them an interface is on is decided when
+ *                      it is brought up: the DHCPv6 client is created once
+ *                      for the machine and picks its interface then, and
+ *                      stateless autoconfiguration is switched on or off in
+ *                      the same pass. There is no per-interface verb for
+ *                      either, so there is nothing here to ask for.
+ *
+ *                      This is not CONFIGURE's shape. CONFIGURE=DHCP is a
+ *                      request with an answer to wait for and a lease to
+ *                      report; CONFIGURE6 would be a request with no way to
+ *                      make it and no table to read the result out of.
+ *
+ * RELEASE stays IPv4. It is Roadshow's keyword for Roadshow's lease, the
+ * refusal on an interface with none is Roadshow's, and a DHCPv6 lease is
+ * given back by the stack when the interface goes down rather than by a verb
+ * a command can reach.
+ *
+ * Nothing is refused silently and nothing is refused for being IPv6: an
+ * interface with no IPv4 address takes ADDRESS, NETMASK, GATEWAY, MDNS and
+ * the DHCP half exactly as a dual-stack one does, and what it holds is
+ * reported back in whichever family it has. AddNetRoute takes the rest of the
+ * IPv6 routes, and ShowNetStatus is where an interface is looked at.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -193,7 +254,8 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ConfigureNetInterface");
 
 #define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
-                    "MDNS/K,CONFIGURE/K,RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
+                    "ADDRESS6/K,GATEWAY6/K,MDNS/K,CONFIGURE/K,CONFIGURE6/K," \
+                    "RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N"
 
 enum
 {
@@ -202,8 +264,11 @@ enum
     ARG_ADDRESS,
     ARG_NETMASK,
     ARG_GATEWAY,
+    ARG_ADDRESS6,
+    ARG_GATEWAY6,
     ARG_MDNS,
     ARG_CONFIGURE,
+    ARG_CONFIGURE6,
     ARG_RELEASE,
     ARG_TIMEOUT,
     ARG_COUNT
@@ -230,9 +295,24 @@ enum
 #define CNI_EIO             5
 #define CNI_ENXIO           6
 #define CNI_EINVAL          22
+#define CNI_ENOBUFS         55
 #define CNI_EADDRNOTAVAIL   49
 #define CNI_ENOTCONN        57
 #define CNI_ENOSYS          78
+
+/*
+ * The IPv6 tables are sized by constants that exist only in an
+ * AMINETXDUO_IPV6 build of nx_user.h, and this command is one binary for
+ * either library, so these are its own, the same numbers and the same reason
+ * as addnetroute.c: comfortably above what the shipped library can report
+ * (prefix list 4, routers 2, three addresses per interface), and a stack with
+ * more says so through nsh_Available.
+ */
+#define CNI_MAX_ROUTES6     16
+#define CNI_MAX_ADDRS6      12
+
+/* An IPv6 address written out, with room for "/128". */
+#define CNI_IP6_STRLEN      52
 
 static BOOL cni_quiet;
 
@@ -260,6 +340,17 @@ static struct
     NetStatusHeader hdr;
     NetStatusDhcp   e[NX_MAX_PHYSICAL_INTERFACES];
 } cni_dhcp;
+
+/*
+ * The IPv6 tables, in a union of their own: they are read one at a time and
+ * never across each other, and the two above are read while these are live.
+ */
+static union
+{
+    struct { NetStatusHeader hdr; NetStatusSystem   e; } system;
+    struct { NetStatusHeader hdr; NetStatusRoute6   e[CNI_MAX_ROUTES6]; } route6;
+    struct { NetStatusHeader hdr; NetStatusAddress6 e[CNI_MAX_ADDRS6]; } addr6;
+} cni_v6;
 
 static BOOL same_name(const char *a, const char *b)
 {
@@ -467,6 +558,193 @@ static LONG control(struct Library *base, ULONG op, LONG index, ULONG dest,
     return tool_netstatus_control(base, op, &ctl, err);
 }
 
+/* ------------------------------------------------------------------ IPv6, */
+
+/* TRUE when the running library has IPv6 in it at all. */
+static BOOL stack_has_ipv6(struct Library *base)
+{
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &cni_v6,
+                             sizeof(cni_v6.system), sizeof(NetStatusSystem))
+            <= 0)
+    {
+        return FALSE;
+    }
+
+    return (cni_v6.system.e.nss_Flags & NETSTATUS_SYS_IPV6) ? TRUE : FALSE;
+}
+
+/* "fe80::1%eth0", which AddNetRoute takes and this command has no use for. */
+static BOOL has_zone(const char *text)
+{
+    ULONG i;
+
+    for (i = 0; text[i] != '\0'; i++)
+    {
+        if (text[i] == '%')
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static BOOL same_address6(const ULONG a[4], const ULONG b[4])
+{
+    return (BOOL)(a[0] == b[0] && a[1] == b[1] &&
+                  a[2] == b[2] && a[3] == b[3]);
+}
+
+/* NETCTRL_ROUTE6_ADD and _DELETE, with the block filled the same way both
+   times. Only the default route is asked for here, which is a next hop, no
+   destination and no prefix. */
+static LONG control6(struct Library *base, ULONG op, LONG index,
+                     const ULONG gw6[4], LONG *err)
+{
+    NetStatusControl ctl;
+    ULONG            w;
+
+    for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
+        ((ULONG *)&ctl)[w] = 0;
+
+    ctl.nsc_Magic       = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version     = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Index       = (UWORD)index;
+    ctl.nsc_Gateway6[0] = gw6[0];
+    ctl.nsc_Gateway6[1] = gw6[1];
+    ctl.nsc_Gateway6[2] = gw6[2];
+    ctl.nsc_Gateway6[3] = gw6[3];
+
+    return tool_netstatus_control(base, op, &ctl, err);
+}
+
+/*
+ * One live IPv6 default router on `index`, chosen by whether it matches
+ * `want`: `match` TRUE finds that router, `match` FALSE finds any other one.
+ * `out` may be NULL when only the answer is wanted.
+ *
+ * Taken one at a time and re-read each time rather than collected into a list:
+ * NETSTATUS_ROUTES6 is a snapshot of a table the stack is editing, and a
+ * deletion renumbers what is left of it, so a list gathered before the first
+ * delete names rows that have moved by the second.
+ */
+static BOOL find_router6(struct Library *base, LONG index, const ULONG *want,
+                         BOOL match, ULONG out[4])
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &cni_v6,
+                             sizeof(cni_v6.route6), sizeof(NetStatusRoute6));
+
+    for (i = 0; i < n && i < (LONG)CNI_MAX_ROUTES6; i++)
+    {
+        const NetStatusRoute6 *r = &cni_v6.route6.e[i];
+        BOOL                   same;
+
+        if (!(r->nsr6_Flags & NETSTATUS_RT6_GATEWAY))
+            continue;
+
+        if ((LONG)r->nsr6_Interface != index)
+            continue;
+
+        same = (BOOL)(want != NULL && same_address6(r->nsr6_NextHop, want));
+
+        if (match ? !same : same)
+            continue;
+
+        if (out != NULL)
+        {
+            out[0] = r->nsr6_NextHop[0];
+            out[1] = r->nsr6_NextHop[1];
+            out[2] = r->nsr6_NextHop[2];
+            out[3] = r->nsr6_NextHop[3];
+        }
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* TRUE when `addr` is already a default router on this interface. */
+static BOOL has_router6(struct Library *base, LONG index, const ULONG addr[4])
+{
+    return find_router6(base, index, addr, TRUE, NULL);
+}
+
+/*
+ * Every IPv6 default router on `index` except `keep`, removed. *dropped counts
+ * them. Bounded by the table size rather than by "until there are none left",
+ * so a delete that reports success without removing anything ends the loop
+ * instead of spinning.
+ */
+static BOOL drop_routers6(struct Library *base, LONG index, const ULONG *keep,
+                          ULONG *dropped, LONG *err)
+{
+    ULONG pass;
+
+    *dropped = 0;
+
+    for (pass = 0; pass < (ULONG)CNI_MAX_ROUTES6; pass++)
+    {
+        ULONG gone[4];
+
+        if (!find_router6(base, index, keep, FALSE, gone))
+            return TRUE;
+
+        if (control6(base, NETCTRL_ROUTE6_DELETE, index, gone, err) != 0)
+            return FALSE;
+
+        (*dropped)++;
+    }
+
+    return TRUE;
+}
+
+/*
+ * What this interface holds in IPv6, said rather than assumed.
+ *
+ * An interface with no IPv4 address is not an interface with no address, and
+ * this command used to have no way to say so: every line it printed named a
+ * dotted quad, so a machine that came up on IPv6 alone read as one that had
+ * come up on nothing. Reported after a change for the same reason the IPv4
+ * line is -- what the interface has now, not what was asked for.
+ */
+static VOID say_addresses6(struct Library *base, LONG index, const char *name)
+{
+    LONG n;
+    LONG i;
+    LONG shown = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_ADDRESSES6, &cni_v6,
+                             sizeof(cni_v6.addr6), sizeof(NetStatusAddress6));
+
+    for (i = 0; i < n && i < (LONG)CNI_MAX_ADDRS6; i++)
+    {
+        const NetStatusAddress6 *a = &cni_v6.addr6.e[i];
+        char                     text[CNI_IP6_STRLEN];
+        const char              *note;
+
+        if ((LONG)a->nsn_Interface != index)
+            continue;
+
+        tool_format_ip6(a->nsn_Address, text, sizeof(text));
+
+        /* Tentative is duplicate address detection still running, which is a
+           second or two after an interface comes up and is the one state a
+           reader must not take for usable. */
+        note = (a->nsn_State == NETSTATUS_IP6_TENTATIVE) ? " (tentative)"
+             : (a->nsn_State == NETSTATUS_IP6_DEPRECATED) ? " (deprecated)"
+             : "";
+
+        say("%s: %s/%lu%s\n", (LONG)name, (LONG)text, a->nsn_PrefixLength,
+            (LONG)note);
+        shown++;
+    }
+
+    if (shown == 0)
+        say("%s: no IPv6 address\n", (LONG)name);
+}
+
 int main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
@@ -479,6 +757,9 @@ int main(int argc, char **argv)
     BOOL             have_address = FALSE;
     BOOL             have_netmask = FALSE;
     BOOL             have_gateway = FALSE;
+    ULONG            gateway6[4]  = { 0, 0, 0, 0 };
+    BOOL             have_gateway6 = FALSE;
+    BOOL             clear_gateway6 = FALSE;
     BOOL             have_mdns    = FALSE;
     BOOL             mdns_on      = FALSE;
     BOOL             want_dhcp    = FALSE;
@@ -501,8 +782,11 @@ int main(int argc, char **argv)
     args[ARG_ADDRESS]   = 0;
     args[ARG_NETMASK]   = 0;
     args[ARG_GATEWAY]   = 0;
+    args[ARG_ADDRESS6]  = 0;
+    args[ARG_GATEWAY6]  = 0;
     args[ARG_MDNS]      = 0;
     args[ARG_CONFIGURE] = 0;
+    args[ARG_CONFIGURE6] = 0;
     args[ARG_RELEASE]   = 0;
     args[ARG_TIMEOUT]   = 0;
 
@@ -511,7 +795,8 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]] [NETMASK <m>] "
-                   "[GATEWAY <g>|NONE] [MDNS YES|NO] [CONFIGURE DHCP] "
+                   "[GATEWAY <g>|NONE] [ADDRESS6 <a>] [GATEWAY6 <g>|NONE] "
+                   "[MDNS YES|NO] [CONFIGURE DHCP] [CONFIGURE6 <mode>] "
                    "[RELEASE] [TIMEOUT <secs>]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
@@ -583,6 +868,75 @@ int main(int argc, char **argv)
         {
             tool_error("\"%s\" is not an address. GATEWAY NONE clears it",
                        (LONG)g);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
+    /*
+     * The two IPv6 keywords this command cannot carry out, refused here,
+     * before the library is opened and before anything else in the call has
+     * been applied. Refused early on purpose: `ADDRESS 192.168.1.5 ADDRESS6
+     * 2001:db8::5` must not re-address the interface in one family and then
+     * fail in the other, leaving the machine half changed by a call that
+     * reported an error.
+     *
+     * Named rather than dropped from the template. A keyword that is not
+     * there at all makes ReadArgs answer "bad arguments" and the user reads a
+     * usage line, which says the spelling is wrong rather than that the thing
+     * is not supported and where it is done instead.
+     */
+    if (args[ARG_ADDRESS6] != 0)
+    {
+        tool_error("an interface's IPv6 address cannot be changed while it is "
+                   "running");
+        tool_printf("  Put  ADDRESS6 = %s  in DEVS:NetInterfaces/%s and bring "
+                    "the interface up again:\n",
+                    (LONG)args[ARG_ADDRESS6], (LONG)name);
+        tool_printf("     RemoveNetInterface %s\n     AddNetInterface %s\n",
+                    (LONG)name, (LONG)name);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (args[ARG_CONFIGURE6] != 0)
+    {
+        tool_error("CONFIGURE6 is decided when the interface comes up, so it "
+                   "cannot be changed here");
+        tool_printf("  Put  CONFIGURE6 = %s  in DEVS:NetInterfaces/%s and "
+                    "bring the interface up again:\n",
+                    (LONG)args[ARG_CONFIGURE6], (LONG)name);
+        tool_printf("     RemoveNetInterface %s\n     AddNetInterface %s\n",
+                    (LONG)name, (LONG)name);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    /*
+     * GATEWAY6 is the machine's IPv6 default router. No zone: AddNetRoute
+     * takes fe80::1%eth0 because a link-local next hop says nothing about
+     * which link, and this command was given the interface in its first
+     * argument.
+     */
+    if (args[ARG_GATEWAY6] != 0)
+    {
+        const char *g = (const char *)args[ARG_GATEWAY6];
+
+        have_gateway6 = TRUE;
+
+        if (tool_stricmp(g, "NONE") == 0)
+        {
+            clear_gateway6 = TRUE;
+        }
+        else if (!tool_parse_ip6(g, gateway6))
+        {
+            tool_error("\"%s\" is not an IPv6 address. GATEWAY6 NONE clears "
+                       "it", (LONG)g);
+
+            if (has_zone(g))
+                tool_printf("  The interface is the first argument here, so "
+                            "the %c<name> is not needed.\n", (LONG)'%');
+
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -665,11 +1019,11 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!have_address && !have_netmask && !have_gateway && !have_mdns &&
-        !want_dhcp && !want_release)
+    if (!have_address && !have_netmask && !have_gateway && !have_gateway6 &&
+        !have_mdns && !want_dhcp && !want_release)
     {
-        tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, MDNS, "
-                   "CONFIGURE or RELEASE");
+        tool_error("nothing to change: give ADDRESS, NETMASK, GATEWAY, "
+                   "GATEWAY6, MDNS, CONFIGURE or RELEASE");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -853,6 +1207,110 @@ int main(int argc, char **argv)
                 say("%s: the default gateway is %s\n", (LONG)name, (LONG)text);
             }
         }
+    }
+
+    /*
+     * The IPv6 default router, after the IPv4 half for the same reason the
+     * IPv4 gateway comes after the IPv4 address: a next hop is only reachable
+     * once the addresses around it are what they are going to be.
+     *
+     * A router is REPLACED and not added to. NetX Duo keeps a list of default
+     * routers -- one per advertising router -- but "the default route" is one
+     * thing to somebody re-addressing a machine, and a GATEWAY6 that left the
+     * old one in place would send some packets through it and report the new
+     * one. AddNetRoute DEFAULTGATEWAY is the keyword for adding a second.
+     */
+    if (have_gateway6)
+    {
+        ULONG dropped = 0;
+        BOOL  already6;
+        char  gwtext[CNI_IP6_STRLEN];
+
+        tool_format_ip6(gateway6, gwtext, sizeof(gwtext));
+
+        if (!stack_has_ipv6(base))
+        {
+            tool_error("this bsdsocket.library was built without IPv6, so "
+                       "there is no IPv6 route to change");
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        /*
+         * Asked for what it already has: the one it has is kept below and
+         * nothing is added, because removing it in order to put the same
+         * router back would take the machine's route away for the moment in
+         * between.
+         */
+        already6 = (BOOL)(!clear_gateway6 &&
+                          has_router6(base, index, gateway6));
+
+        /* Every router on this interface except the one being asked for.
+           GATEWAY6 NONE keeps none. */
+        if (!drop_routers6(base, index, clear_gateway6 ? NULL : gateway6,
+                           &dropped, &err))
+        {
+            tool_error("%s: the IPv6 default router was not removed",
+                       (LONG)name);
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        if (clear_gateway6)
+        {
+            if (dropped == 0)
+                say("%s: there was no IPv6 default router to clear\n",
+                    (LONG)name);
+            else
+                say("%s: the IPv6 default router is cleared\n", (LONG)name);
+        }
+        else if (already6)
+        {
+            say("%s: the IPv6 default router is %s\n", (LONG)name,
+                (LONG)gwtext);
+        }
+        else
+        {
+            if (control6(base, NETCTRL_ROUTE6_ADD, index, gateway6, &err) != 0)
+            {
+                if (err == CNI_ENOSYS)
+                    tool_error("this bsdsocket.library was built without "
+                               "IPv6, so there is no IPv6 route to change");
+                else if (err == CNI_ENOBUFS)
+                    tool_error("this stack holds no more default routers, so "
+                               "%s was not added", (LONG)gwtext);
+                else if (err == CNI_EINVAL)
+                    tool_error("%s was refused as a next hop for %s",
+                               (LONG)gwtext, (LONG)name);
+                else
+                    tool_error("%s: the IPv6 default router was not set to %s",
+                               (LONG)name, (LONG)gwtext);
+
+                /* Said because the removal above already happened: a machine
+                   left with no default router at all, after a call that
+                   reported an error, is a state the user has to know about. */
+                if (dropped != 0)
+                    tool_printf("  The router it had was removed first, so "
+                                "there is none now.\n");
+
+                tool_netstatus_close(base);
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+
+            say("%s: the IPv6 default router is %s\n", (LONG)name,
+                (LONG)gwtext);
+        }
+
+        /*
+         * What the interface holds, said after a change that did not touch an
+         * address, because this is the one command that can be run on an
+         * IPv6-only interface and the reader needs to see it has addresses at
+         * all. Reported from the stack rather than from the file.
+         */
+        say_addresses6(base, index, name);
     }
 
     /*

@@ -255,11 +255,17 @@ fi
 }
 
 # THE ROM AND THE MODEL ARE A PAIR, and the wrong half of it is a silent
-# failure.  tls.library needs a 68020, so a 68000 machine cannot run the part
-# of this test that matters most; and an A1200 booted on a CD32 ROM is not an
-# A1200.  So the candidates here are A1200-or-better 3.1 images ONLY, named
-# explicitly, and the one chosen is printed.  A CD32 image is never picked by
-# accident because it is not in the list.
+# failure: an A1200 booted on a CD32 ROM is not an A1200.  So the candidates
+# here are A1200-or-better 3.1 images ONLY, named explicitly, and the one
+# chosen is printed.  A CD32 image is never picked by accident because it is
+# not in the list.
+#
+# The default is an A1200 for the handshake clock rather than for the
+# instruction set.  tls.library runs on every processor, the 68000 included --
+# one binary, AMINETXDUO_CPU=any -- but the servers in the list above hold a
+# connection for a bounded time, and a 68000 takes a minute or two over a first
+# handshake.  A 68000 run of this script is a real run; it is the https arm
+# that has fewer hosts it can finish against.
 MODEL="${AMINETXDUO_MODEL:-A1200}"
 # The pairing above is enforced, not just described.  An A1200 40.68 ROM is
 # AGA and expects an A1200; booting it on quickstart=A600 crashes the guest
@@ -1203,11 +1209,12 @@ echo "============================================================"
 
 bad=0
 
-# A 68000 install carries no tls.library on purpose, so `fetch https://` there
-# MUST fail: that is the product working, and scoring it as a failure makes the
-# whole 68000 arm red for doing the right thing.  Keyed off what actually
-# landed on the drive rather than off MODEL, so it stays true if the CPU split
-# ever changes.
+# A minimal install carries no tls.library, so `fetch https://` there MUST
+# fail: that is the product working, and scoring it as a failure makes the arm
+# red for doing the right thing.  Keyed off what actually landed on the drive
+# rather than off MODEL, which is what kept this correct when the processor
+# stopped deciding it: every processor gets tls.library now, the 68000
+# included, and leaving encryption out is a feature choice.
 HAS_TLS=1
 [ -f "$HD/Libs/tls.library" ] || HAS_TLS=0
 
@@ -1280,7 +1287,8 @@ fi
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
 
-# A 68000 install carries no tls.library, so every host has to fail there.
+# An install with no tls.library on it, which is the minimal stack rather than
+# any particular processor, has to fail against every host.
 if [ "$HAS_TLS" = "0" ]; then
     if [ "$https_ok" = "1" ]; then
         printf '  %-34s rc=0 from %s  !! no tls.library here\n' \
