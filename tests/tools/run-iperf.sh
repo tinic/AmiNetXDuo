@@ -128,10 +128,19 @@ WANT_CARD=""
 DRIVER_SOURCE=""
 DRIVER_PATH=""
 
-case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
+# An absolute -b is a tree somewhere else, which is what comparing two builds
+# needs.  The case here used to leave $BUILD alone and the two lines below then
+# prefixed $ROOT anyway, so `-b /somewhere/build` reported
+# "missing /root//somewhere/build/src/tools/ToolsSmoke" and stopped -- with the
+# doubled slash the only clue.  tests/tools/run-cardsweep.sh:120-123 has always
+# resolved it this way; this file has not.
+case "$BUILD" in
+    /*) BUILDDIR="$BUILD" ;;
+    *)  BUILDDIR="$ROOT/${BUILD#./}" ;;
+esac
 
-TOOLS="$ROOT/$BUILD/src/tools"
-BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+TOOLS="$BUILDDIR/src/tools"
+BSD="$BUILDDIR/src/bsdsocket/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-iperf}"
 
@@ -276,7 +285,7 @@ IFEOF
 if [ -n "$IFACE" ]; then
     . "$ROOT/tools/sana2-stage.sh"
     if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
-        sana2_select "$BOARD" "$BUILD"
+        sana2_select "$BOARD" "$BUILDDIR"
         if [ -z "$SANA2_SEL_PATH" ]; then
             echo "-N $BOARD wants $SANA2_SEL_DRIVER and this host has not" \
                  "got it." >&2
