@@ -34,7 +34,7 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 
 | Location | Claim | Reality |
 |---|---|---|
-| `README.md:182-183` | certificates "properly checked" | overstated: revocation, critical-extension rejection, EKU and nameConstraints are all absent |
+| `README.md:165-166` | certificates "checked against the usual set of root authorities" | overstated: revocation, critical-extension rejection, EKU and nameConstraints are all absent |
 | `ami_random.c:564-577` | clock credit conditional on the seconds field being wall time | the guard at `:590` tests non-zero. On a no-RTC machine uptime is non-zero a second after boot, so 8 bits are credited in the case the comment excludes |
 | `netstack_dns.c:719` | RFC 6762 §6.7 | §6.7 is Legacy Unicast Responses; the rule is §3, which `:757` and `:929` cite correctly |
 | `sntp.c:62-63` | all RFC 4330 §5 checks present | `sntp_validate()` (`:485-530`) checks mode, version, LI, stratum, transmit and originate. §5 check 5, root delay and dispersion, is absent |
