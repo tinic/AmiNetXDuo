@@ -193,7 +193,7 @@ run_card() {
     local board=$1 model=$2 addr=$3 mactail=$4
     local tag="nc-$board"
     local mac="$MACHEAD:$mactail"
-    local hd="$ROOT/build/testhd-$tag"
+    local hd="$ROOT/build/amiberry-testhd-$tag"
     local ok=1
     local run_rc=0
     local guest_mac tail4 tail5 tail6
@@ -254,12 +254,19 @@ run_card() {
     #
     # `&` is ToolsSmoke's SYS_Asynch prefix: SystemTagList() waits, and a
     # capture that waits cannot be running while ping runs.
+    #
+    # Each background capture redirects its own summary: ToolsSmoke gives a
+    # SYS_Asynch child NIL: handles, so "anything to be kept is redirected by
+    # the line itself".  That summary is the command's OWN count of what it
+    # wrote, and it is checked against tcpdump's count of what is in the file
+    # -- a command that reports a number it did not write is the failure that
+    # a capture nobody reads back would never show.
     cat > "$stage/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 30
-&SYS:NetCapture OUT=DH0:all.pcap IFACE=eth0 SECONDS=30 SNAP=128 QUIET
-&SYS:NetCapture OUT=DH0:icmp.pcap IFACE=eth0 SECONDS=30 SNAP=128 PROTO=ICMP QUIET
-&SYS:NetCapture OUT=DH0:five.pcap IFACE=eth0 COUNT=5 SECONDS=30 SNAP=64 PROTO=ICMP QUIET
+&SYS:NetCapture OUT=DH0:all.pcap IFACE=eth0 SECONDS=30 SNAP=128 QUIET >DH0:all.txt
+&SYS:NetCapture OUT=DH0:icmp.pcap IFACE=eth0 SECONDS=30 SNAP=128 PROTO=ICMP QUIET >DH0:icmp.txt
+&SYS:NetCapture OUT=DH0:five.pcap IFACE=eth0 COUNT=5 SECONDS=30 SNAP=64 PROTO=ICMP QUIET >DH0:five.txt
 wait 4
 SYS:ping $TARGET COUNT=12
 wait 32
@@ -305,13 +312,24 @@ EOF
     # ICMP means the pings: echo request or reply, not merely IP protocol 1.
     n_echo=$(pcap_lines "$icmp" | grep -ci 'echo re')
 
-    # The frames are this machine's.
-    n_mac=$(pcap_lines "$all" | grep -ci "$guest_mac")
+    # The frames are this machine's.  Either spelling: the LANCE forces
+    # Commodore's OUI over the configured address and the other cards do not,
+    # so looking for one of the two would fail on every card of the other kind
+    # for a reason that has nothing to do with the capture.
+    n_mac=$(pcap_lines "$all" | grep -ciE "$guest_mac|$mac")
 
     # Everything the ICMP filter kept must be ICMP.  Asked as its negation, so
     # a tcpdump that printed nothing does not read as a pass.
     local n_wrong
     n_wrong=$(pcap_lines "$icmp" "not icmp and not icmp6" | grep -c . )
+
+    # What the command said it wrote, out of its own summary line, against
+    # what tcpdump found in the file.
+    local said_all said_five said_stop dropped
+    said_all=$(sed -n 's/.*written=\([0-9]*\).*/\1/p' "$hd/all.txt" 2>/dev/null | tail -1)
+    said_five=$(sed -n 's/.*written=\([0-9]*\).*/\1/p' "$hd/five.txt" 2>/dev/null | tail -1)
+    said_stop=$(sed -n 's/.*stop=\([a-z]*\).*/\1/p' "$hd/five.txt" 2>/dev/null | tail -1)
+    dropped=$(sed -n 's/.*dropped=\([0-9]*\).*/\1/p' "$hd/all.txt" 2>/dev/null | tail -1)
 
     [ "$n_all" -gt 0 ]      || { ok=0; kv "card_${board}_why" "all_empty"; }
     [ "$n_icmp" -gt 0 ]     || { ok=0; kv "card_${board}_why" "icmp_empty"; }
@@ -321,9 +339,15 @@ EOF
     [ "$n_all" -ge "$n_icmp" ] || { ok=0; kv "card_${board}_why" "icmp_exceeds_all"; }
     [ "$n_five" -eq 5 ]     || { ok=0; kv "card_${board}_why" "count_stop_gave_$n_five"; }
     [ "$n_mac" -gt 0 ]      || { ok=0; kv "card_${board}_why" "guest_mac_absent"; }
+    [ "${said_all:-x}" = "$n_all" ] ||
+        { ok=0; kv "card_${board}_why" "said_${said_all:-none}_wrote_$n_all"; }
+    [ "${said_five:-x}" = "5" ] ||
+        { ok=0; kv "card_${board}_why" "five_said_${said_five:-none}"; }
+    [ "${said_stop:-x}" = "count" ] ||
+        { ok=0; kv "card_${board}_why" "five_stopped_on_${said_stop:-none}"; }
 
     kv "card_$board" \
-       "mac=$guest_mac addr=$addr all=$n_all icmp=$n_icmp echo=$n_echo leaked=$n_wrong nonicmp=$n_noticmp count5=$n_five mine=$n_mac run_rc=$run_rc"
+       "mac=$guest_mac addr=$addr all=$n_all icmp=$n_icmp echo=$n_echo leaked=$n_wrong nonicmp=$n_noticmp count5=$n_five mine=$n_mac said=${said_all:-none} dropped=${dropped:-none} run_rc=$run_rc"
 
     if [ "$ok" = 1 ]; then
         passed=$((passed + 1))

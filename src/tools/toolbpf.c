@@ -184,6 +184,7 @@ BOOL tool_bpf_start(ToolBpfChan *c, struct Library *base, const char *iface,
     c->max_records = 0;
     c->max_filelen = 0;
     c->limit_hit   = FALSE;
+    c->expect_drained = TRUE;
     c->short_reads = 0;
     c->recv        = 0;
     c->drop        = 0;
@@ -416,14 +417,14 @@ VOID tool_bpf_stop(ToolBpfChan *c)
     tool_bpf_stats(c);
 
     /*
-     * Nothing must still be buffered after the drain above.  Anything left
-     * means the trace stops short of the last few frames -- except when a
-     * limit stopped it on purpose, which is not a defect and is not reported
-     * as one.  FIONREAD rather than bpf_data_waiting(), which the autodoc
-     * defines as a 0/1 flag.
+     * Nothing must still be buffered after the drains above.  Anything left
+     * means the trace stops short of the last few frames -- except when the
+     * capture stopped on purpose, which is not a defect and is not reported
+     * as one.  See expect_drained.  FIONREAD rather than bpf_data_waiting(),
+     * which the autodoc defines as a 0/1 flag.
      */
     c->left = 0;
-    if (!c->limit_hit)
+    if (c->expect_drained && !c->limit_hit)
         (VOID)tool_bpf_ioctl(c->base, c->channel, FIONREAD_, &c->left);
 
     tool_pcap_end(&c->out);

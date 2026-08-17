@@ -82,6 +82,19 @@ typedef struct ToolBpfChan
     ULONG           max_filelen;
     BOOL            limit_hit;
 
+    /*
+     * Is the channel expected to be EMPTY when the capture ends?
+     *
+     * TRUE for a command whose traffic has stopped by then: anything still
+     * buffered is a trace that stops short of the last few frames, and
+     * tool_bpf_warn() says so.  FALSE for one that stops on a deadline while
+     * the segment carries on, where whatever arrives in the last millisecond
+     * is by definition outside what was asked for -- reported there, it is a
+     * warning on every run and means nothing.  Set by tool_bpf_start() to
+     * TRUE; NetCapture clears it.
+     */
+    BOOL            expect_drained;
+
     ULONG           short_reads;    /* bpf_read() said no record fits       */
     ULONG           recv;           /* BIOCGSTATS bs_recv, at the last look */
     ULONG           drop;           /* BIOCGSTATS bs_drop                   */

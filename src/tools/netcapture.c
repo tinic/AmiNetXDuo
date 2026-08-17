@@ -383,6 +383,14 @@ int main(int argc, char **argv)
     nc_cap.max_records = want_count;
     nc_cap.max_filelen = (want_kb != 0) ? (want_kb * 1024UL) : 0UL;
 
+    /*
+     * A capture of somebody else's traffic ends at a moment, and the segment
+     * does not stop for it: whatever arrives between the last read and the
+     * close is outside what was asked for.  NetTrace's traffic HAS stopped by
+     * the time it closes, so there the same bytes mean a trace that is short.
+     */
+    nc_cap.expect_drained = FALSE;
+
     tool_bpf_read_timeout(&nc_cap, NC_READ_TIMEOUT);
 
     if (!quiet)
