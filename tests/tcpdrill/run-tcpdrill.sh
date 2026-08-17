@@ -87,18 +87,15 @@ if [ "$SCRIPT" = all ]; then
 
         # rto.drill measures the RFC 6298 estimator through a round trip it
         # induces with `idle 600`, and RFC 8985 7.2's tail loss probe fires
-        # inside that round trip: the probe is a retransmission, so Karn's
+        # 240 ms into that round trip: the probe is a retransmission, so Karn's
         # algorithm abandons the sample and the timeout stays on its one second
-        # floor.  A round trip that survives the probe has to be shorter than
-        # 2*SRTT + 200 ms, and one that lifts the timeout off the floor has to
-        # be longer than 333, which on this rig leaves a 67 ms window against a
-        # 100 ms timer.  The file cannot be written to fit it.  Timestamps
-        # would settle it -- the echo names the transmission and needs no Karn
-        # exception, and the stack already samples that way -- but the peer
-        # here cannot echo a TSval the stack chose.  So the estimator is
-        # measured with the probe out of the way, and this line says so rather
-        # than five cases failing every run.  Verified: 5/5 and 85 checks with
-        # -DAMINETXDUO_TCP_LOSS_PROBE=OFF, 0/5 and 15 failed without it.
+        # floor.  The window the file would have to fit in is empty -- a round
+        # trip short enough to be sampled is under 240 ms and one long enough
+        # to lift the first timeout off the floor is over 333 -- so this is not
+        # a bound anybody can widen.  The file's own header has the arithmetic
+        # and what timestamps would do about it.  Named here rather than left
+        # to fail every run.  Verified: 5 cases, 85 checks, 0 failed with
+        # -DAMINETXDUO_TCP_LOSS_PROBE=OFF; 5 of 5 failed and 15 checks with it.
         if [ "$name" = rto ] &&
            ! grep -q '^AMINETXDUO_TCP_LOSS_PROBE:BOOL=OFF' \
                  "$ROOT/$BUILD/CMakeCache.txt" 2>/dev/null; then

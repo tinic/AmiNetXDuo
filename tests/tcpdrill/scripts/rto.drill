@@ -27,25 +27,30 @@
 # cannot leak into the next case.  retransmit.drill explains why at length.
 #
 # THIS FILE NEEDS -DAMINETXDUO_TCP_LOSS_PROBE=OFF, and run-tcpdrill.sh skips it
-# by name otherwise.  RFC 8985 7.2's tail loss probe fires 2*SRTT + 200 ms
-# after a transmission, which is inside the round trip induced above, and the
-# probe is a retransmission: Karn's algorithm abandons the measurement, so the
-# 600 ms path is never sampled, the timeout stays on its one second floor, and
-# the extra copy sits in the queue until the next `tx` line matches it and
-# reports a sequence number from the previous segment.
+# by name otherwise.  RFC 8985 7.2's tail loss probe fires 240 ms after a
+# transmission, which is inside the round trip induced above, and the probe is
+# a retransmission: Karn's algorithm abandons the measurement in progress, so
+# the 600 ms path is never sampled, the timeout stays on its one second floor,
+# and the extra copy sits in the queue until the next `tx` line matches it and
+# reports a sequence number from the segment before.
 #
-# It cannot be written around.  A round trip that survives the probe has to be
-# under 2*SRTT + 200 ms and one that lifts the timeout off the floor has to be
-# over 333, which is a 67 ms window against a 100 ms fast timer.  RFC 7323
-# timestamps would settle it -- the echo names which transmission is being
-# answered and the stack samples that way already, no Karn exception needed --
-# but this peer cannot echo a TSval the stack chose, so no script here can
-# negotiate its way out.
+# THE WINDOW IT WOULD HAVE TO FIT IN IS EMPTY.  A round trip that survives the
+# probe has to be shorter than 2*SRTT + NX_TCP_LOSS_PROBE_DELACK_MS, and SRTT
+# stays at zero here precisely because every sample is abandoned, so that is
+# 240 ms.  A first sample that lifts the timeout off its 1000 ms floor has to
+# be longer than 333, because RFC 6298 2.2 makes the first timeout 3R.  There
+# is no R that is both.  Nothing can be widened into that.
+#
+# RFC 7323 timestamps would settle it -- the echo names which transmission is
+# being answered, so no Karn exception is needed, and nx_tcp_socket_state_ack_
+# check.c already samples that way when the option is in use -- but this peer
+# cannot echo a TSval the stack chose, so no script here reaches that path.
 #
 # WHAT THAT LEAVES UNMEASURED IS REAL, and belongs on the backlog rather than
-# here: without timestamps, SRTT cannot grow past 2*SRTT + 200 ms, because
-# every sample longer than that is abandoned by the probe that fires first.
-# A path that slows down keeps the estimate it had.
+# here: on a connection without timestamps, SRTT cannot grow past 240 ms at
+# all, because every sample longer than that is abandoned by the probe that
+# fires first.  A path slower than that keeps the estimate it had, and the
+# timeout that guards it stays on the floor.
 #
 # SPDX-License-Identifier: MIT
 
