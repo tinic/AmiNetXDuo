@@ -149,23 +149,53 @@ done
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || fail_setup "no_kickstart"
 
-DEVICE="${AMINETXDUO_A2065:-}"
-if [ -z "$DEVICE" ]; then
-    for c in "$ROOT/build/a2065.device" "$HOME/amiga-assets/devs/a2065.device"; do
-        [ -f "$c" ] && { DEVICE="$c"; break; }
-    done
+# -N NAMES ANY CARD IN tests/tools/cards.sh, not just the a2065, and the driver
+# comes from tools/sana2-stage.sh -- the same choice tests/tools/run-cardsweep6.sh
+# makes, so the two cannot disagree about what a board is.  DHCPv6 rides on
+# multicast the card has to accept, and one card is one driver's receive path,
+# so a second board is the cheapest way to find out whether an assertion here
+# is about the stack or about the a2065.
+#
+# The VENDOR driver by default, which is what this harness staged when it knew
+# only the a2065; `AMINETXDUO_SANA2_VENDOR= tests/ipv6/run-dhcpv6.sh ...` runs
+# the same arm through anxnet.device instead.
+: "${AMINETXDUO_SANA2_VENDOR=1}"
+export AMINETXDUO_SANA2_VENDOR
+# shellcheck source=tools/sana2-stage.sh
+. "$ROOT/tools/sana2-stage.sh"
+sana2_select "$CARD" "$BUILD"
+DRIVER="$SANA2_SEL_DRIVER"
+DEVICE="$SANA2_SEL_PATH"
+ANXCARD="$SANA2_SEL_CARD"
+
+# The a2065 is the one board with a fallback, because it is the default and
+# because two other harnesses already look for it in these places.
+if [ -z "$DEVICE" ] && [ "$DRIVER" = a2065.device ]; then
+    DEVICE="${AMINETXDUO_A2065:-}"
+    if [ -z "$DEVICE" ]; then
+        for c in "$ROOT/build/a2065.device" "$HOME/amiga-assets/devs/a2065.device"; do
+            [ -f "$c" ] && { DEVICE="$c"; break; }
+        done
+    fi
 fi
-[ -f "${DEVICE:-/nonexistent}" ] || fail_setup "no_a2065_device"
+[ -f "${DEVICE:-/nonexistent}" ] || fail_setup "no_driver_for_$CARD"
 
 command -v tcpdump > /dev/null || fail_setup "no_tcpdump"
 
-# The address the card puts on the wire, which is what the DUID is made of and
-# what the peer's server is keyed on.  The a2065's LANCE keeps the last three
-# octets and writes Commodore's 00:80:10 over the rest.
-TAIL=$(printf '%s' "$MAC" | tr 'A-Z' 'a-z' | cut -d: -f4-6)
-GUEST_MAC="00:80:10:$TAIL"
+# The address the card puts on the wire is what the DUID is made of and what
+# the peer's server is keyed on, and it is NOT always the address asked for:
+# the a2065's LANCE keeps the last three octets and writes Commodore's
+# 00:80:10 over the rest, while the NE2000 boards take the whole address
+# (tools/amiberry-run.sh:179-183).  This is the guess, printed so an
+# unanswered Solicit can be read against the server's dhcp-host lines; the
+# address the run actually used is read back off the guest below.
+case "$CARD" in
+    a2065) GUEST_MAC="00:80:10:$(printf '%s' "$MAC" |
+                                 tr 'A-Z' 'a-z' | cut -d: -f4-6)" ;;
+    *)     GUEST_MAC=$(printf '%s' "$MAC" | tr 'A-Z' 'a-z') ;;
+esac
 
-echo "arm=$ARM guest_mac=$GUEST_MAC backend=$BACKEND peer=$PEER lease=$LEASE"
+echo "arm=$ARM card=$CARD driver=$DRIVER guest_mac=$GUEST_MAC backend=$BACKEND peer=$PEER lease=$LEASE"
 
 # --------------------------------------------------------------- the peer ---
 
@@ -203,13 +233,32 @@ cleanup() {
     kill "$SRV_PID" 2>/dev/null || true
     ssh -o BatchMode=yes -o ConnectTimeout=10 "$PEER" \
         'pkill -x dnsmasq-cap' > /dev/null 2>&1 || true
-    kill "${CAP_PID:-0}" 2>/dev/null || true
+    # NOT `kill "${CAP_PID:-0}"`.  CAP_PID is set to the empty string once the
+    # capture has been reaped, and `${CAP_PID:-0}` then expands to 0, which is
+    # not "no process" but THIS PROCESS GROUP -- so the trap SIGTERMed every
+    # sibling, including whatever script was driving this one.  A sweep that
+    # called this harness in a loop died after the first arm with a complete
+    # key=value block already written, which reads as a hang and is not one.
+    [ -z "${CAP_PID:-}" ] || kill "$CAP_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
+# READINESS IS dnsmasq SAYING IT IS SERVING THIS RANGE, and nothing weaker.
+# It used to be grep "listening\|started\|dnsmasq-dhcp", and the peer wrapper's
+# own refusal -- "FATAL: something is already listening on UDP 547" -- contains
+# "listening".  So a dnsmasq left behind by a killed run kept the port, this
+# run's server exited at once, srv_up came back yes, and every assertion was
+# measured against a config this run did not write and a server it did not
+# start.  Seen: the first run of this harness reported srv_up=yes against a
+# server that had never come up.
 srv_up=no
+srv_fatal=
 for _ in $(seq 1 40); do
-    if grep -q "listening\|started\|dnsmasq-dhcp" "$SRVLOG" 2>/dev/null; then
+    if grep -q '^FATAL:' "$SRVLOG" 2>/dev/null; then
+        srv_fatal=$(sed -n 's/^FATAL: *//p' "$SRVLOG" | head -1)
+        break
+    fi
+    if grep -q 'dnsmasq-dhcp.*DHCPv6, IP range' "$SRVLOG" 2>/dev/null; then
         srv_up=yes
         break
     fi
@@ -218,7 +267,11 @@ for _ in $(seq 1 40); do
 done
 
 echo "srv_up=$srv_up srvlog=$SRVLOG"
-[ "$srv_up" = yes ] || fail_link "peer_server_did_not_start"
+if [ "$srv_up" != yes ]; then
+    [ -z "$srv_fatal" ] || echo "srv_fatal=$srv_fatal"
+    sed -n '1,6p' "$SRVLOG" >&2
+    fail_link "peer_server_did_not_start"
+fi
 
 # ------------------------------------------------------------- the capture --
 #
@@ -254,7 +307,6 @@ STAGE="$ROOT/build/$TAG-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"    "$STAGE/libs/bsdsocket.library"
-cp "$DEVICE" "$STAGE/devs/a2065.device"
 cp "$ADDIF"  "$STAGE/AddNetInterface"
 cp "$RMIF"   "$STAGE/RemoveNetInterface"
 cp "$SHOW"   "$STAGE/ShowNetStatus"
@@ -269,11 +321,19 @@ case "$ARM" in
 esac
 
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
-DEVICE=a2065.device
+DEVICE=$DRIVER
 UNIT=0
 CONFIGURE=NONE
 CONFIGURE6=$CONF6
 EOF
+
+# Copies the driver in and rewrites DEVICE= and CARD= to match it.  Says which
+# driver this run booted, out loud, because that decides what it proves.
+AMINETXDUO_SANA2_DRIVER="$DEVICE" \
+AMINETXDUO_SANA2_DRIVER_NAME="$DRIVER" \
+AMINETXDUO_SANA2_DEVICE="$DRIVER" \
+AMINETXDUO_SANA2_CARD="$ANXCARD" \
+    sana2_stage "$CARD" "$STAGE/devs"
 
 {
     echo "SYS:AddNetInterface DEVS:NetInterfaces/eth0"
@@ -320,7 +380,26 @@ fi
 # Matched on the guest's own MAC as well, so another machine's exchange on the
 # same wire cannot satisfy an assertion here.
 
-seen() { grep -qi "dhcp6 $1" "$CAP" 2>/dev/null && echo yes || echo no; }
+# THE GUEST'S OWN LINK-LOCAL, read off ShowNetStatus rather than derived from
+# the MAC, because what the card puts on the wire is the card's business and a
+# per-board rule gets a new board wrong silently.
+GUEST_LL=$(sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
+    | sed -n 's|.*address6  *\(fe80::[0-9A-Fa-f:]*\)/.*|\1|p' | head -1)
+
+# MATCHED ON THE GUEST'S OWN ADDRESS, which is one end of every message of its
+# exchange in both directions.  Without it this is a grep over a shared LAN:
+# the first run of this test reported renew_seen=yes off two OTHER machines
+# renewing their own leases, on an arm whose guest held no lease at all.  The
+# address and not the client-ID, so it keeps working at this verbosity --
+# nothing here reads an option.
+seen() {
+    if [ -z "$GUEST_LL" ]; then
+        grep -qi "dhcp6 $1" "$CAP" 2>/dev/null && echo yes || echo no
+        return
+    fi
+    { grep -i "dhcp6 $1" "$CAP" 2>/dev/null || true; } |
+        grep -qF "$GUEST_LL" && echo yes || echo no
+}
 
 solicit_seen=$(seen "solicit")
 advertise_seen=$(seen "advertise")
@@ -333,7 +412,7 @@ inforeq_seen=$(seen "inf-req")
 echo "solicit_seen=$solicit_seen advertise_seen=$advertise_seen"
 echo "request_seen=$request_seen reply_seen=$reply_seen"
 echo "renew_seen=$renew_seen release_seen=$release_seen"
-echo "inforeq_seen=$inforeq_seen run_rc=$run_rc"
+echo "inforeq_seen=$inforeq_seen run_rc=$run_rc guest_ll=${GUEST_LL:-none}"
 echo "capture=$CAP serial=$SERIAL out=$OUT"
 
 # WHO ANSWERED, AND WHO THE GUEST THEN USED.
