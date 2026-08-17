@@ -12,7 +12,10 @@
 #                   run and stopped by it
 #   solicit_seen    the guest sent a Solicit (or an Information-Request), read
 #                   out of a capture taken during THIS run
-#   reply_seen      the server answered it
+#   advertisers     how many distinct servers answered it, and
+#   chosen_server   which one the guest went on to use.  Recorded, not
+#                   asserted -- see below
+#   reply_seen      that server answered it
 #   guest_ula       the guest holds the address that server hands out, read
 #                   out of what ShowNetStatus printed.  It is a ULA, from a
 #                   prefix nothing else on this link uses, so it cannot have
@@ -32,14 +35,29 @@
 # honoured, and it fails if it is not, because the ULA can only have come from
 # the peer's server.
 #
-# THE LINK ALREADY HAS A DHCPv6 SERVER ON IT
+# THE LINK ALREADY HAS A DHCPv6 SERVER ON IT, AND THIS TEST CANNOT DECIDE WHICH
+# ONE WINS
 #
-#   The lab router is one, stateful, handing out the site's own /64.  Every
-#   Solicit therefore draws two Advertises and the client picks one.  The
-#   peer's server sends OPTION_PREFERENCE 255, which RFC 8415 18.2.1 makes
-#   decisive -- the client stops waiting and takes it -- so this test is not a
-#   race.  If the guest ends up with the site prefix and not the ULA, that is
-#   a real finding about preference handling and it fails here.
+#   The lab router is a stateful DHCPv6 server handing out the site's own /64,
+#   so every Solicit draws two Advertises and the client picks one.  RFC 8415
+#   18.2.1 settles that with OPTION_PREFERENCE 255 -- and dnsmasq 2.91 cannot
+#   send it: `dhcp-option=option6:7,255` is dropped because the option is not
+#   in the client's option-request list, and `dhcp-option-force=option6:7,255`
+#   appends a second, 8192-byte option 7 after which the Advertise never
+#   reaches the wire at all.  Both outcomes of the race have been observed.
+#
+#   So this harness does not assert which server won, because it cannot make
+#   the lab decide.  It records every advertiser it saw and which one the
+#   guest went on to Request from, and it asserts the guest chose ONE of them
+#   and completed the exchange with it.  When the winner is not the peer's
+#   server the guest holds the site's address rather than the ULA, every
+#   assertion below it is about a different exchange, and the run exits 4 --
+#   a fact about the link, not a fault in the stack.
+#
+#   Making it decide needs a server that can send the preference option; kea
+#   can.  Until there is one, preference handling is NOT tested here.  What is
+#   tested on the host, in tests/ipv6/host/test_dhcpv6_host.c, is the M and O
+#   flag mapping, which is the part of the decision that is ours.
 #
 # BRIDGED, OR IT MEASURES NOTHING
 #
@@ -82,6 +100,7 @@ RENEW=no
 # are written into ~/anxd-dhcpv6-server.sh on the peer; they are here so the
 # assertions can name them.
 ULA_PREFIX="${AMINETXDUO_DHCPV6_PREFIX:-fd00:aa5:1:}"
+PEER_NIC="${AMINETXDUO_DHCPV6_PEER_NIC:-ens18}"
 PEER_ULA="${AMINETXDUO_DHCPV6_PEER_ULA:-fd00:aa5:1::1}"
 
 while getopts "B:b:m:N:P:t:w:M:l:a:R" opt; do
@@ -161,6 +180,15 @@ PEER_SERVER='$HOME/anxd-dhcpv6-server.sh'
 ssh -o BatchMode=yes "$PEER" 'test -x "$HOME/anxd-dhcpv6-server.sh"' 2>/dev/null ||
     fail_link "peer_has_no_server"
 
+# Which MAC the peer's server answers from, so the capture can tell it from
+# the site router's own DHCPv6 server.  Read from the peer rather than
+# configured here: a second interface or a renumbered lab would make a
+# hard-coded address quietly assert about the wrong machine.
+PEER_MAC=$(ssh -o BatchMode=yes "$PEER" \
+    "cat /sys/class/net/${PEER_NIC}/address" 2>/dev/null | tr -d '\r' |
+    tr 'A-Z' 'a-z')
+[ -n "$PEER_MAC" ] || fail_link "peer_mac_unreadable"
+
 SRVLOG="$ROOT/build/dhcpv6-server.log"
 rm -f "$SRVLOG"
 
@@ -203,7 +231,11 @@ SERIAL="$ROOT/build/amiberry-serial-$TAG.log"
 OUT="$ROOT/build/$TAG.out"
 rm -f "$CAP" "$CAP.err" "$SERIAL" "$OUT"
 
-tcpdump -i "$BACKEND" -n -vv -s0 -l \
+# NOT -vv.  One line per packet is the whole reason: -vv puts a parenthetical
+# between "IP6" and the source address and wraps the options across lines, and
+# every assertion below is "which address sent which message type".  Nothing
+# here reads an option's contents; the host test does that.
+tcpdump -i "$BACKEND" -n -s0 -l \
         "udp port 546 or udp port 547" > "$CAP" 2>"$CAP.err" &
 CAP_PID=$!
 
@@ -304,6 +336,69 @@ echo "renew_seen=$renew_seen release_seen=$release_seen"
 echo "inforeq_seen=$inforeq_seen run_rc=$run_rc"
 echo "capture=$CAP serial=$SERIAL out=$OUT"
 
+# WHO ANSWERED, AND WHO THE GUEST THEN USED.
+#
+# Recorded rather than asserted; the note at the top says why.  tcpdump's -e
+# is not on, so the source is the link-local address of the server rather than
+# its MAC, and PEER_LL is the peer's derived from PEER_MAC by RFC 4291's
+# modified EUI-64 -- the same derivation the peer's own kernel does.
+peer_linklocal() {
+    local m u
+    m=$(printf '%s' "$1" | tr -d ':')
+    # Flip the universal/local bit of the first octet, then insert ff:fe.
+    u=$(printf '%02x' $(( 0x${m:0:2} ^ 0x02 )))
+    printf 'fe80::%s%s:%sff:fe%s:%s%s' \
+        "$u" "${m:2:2}" "${m:4:2}" "${m:6:2}" "${m:8:2}" "${m:10:2}"
+}
+
+# Read from the peer first: a kernel that uses RFC 7217 stable-privacy
+# addressing does not derive its link-local from the MAC at all, and deriving
+# one that the server does not answer from would assert about a host that is
+# not there.  The derivation is the fallback for a peer whose `ip` cannot run.
+PEER_LL=$(ssh -o BatchMode=yes "$PEER" \
+    "ip -6 -o addr show dev ${PEER_NIC} scope link" 2>/dev/null |
+    sed -n 's/.*inet6 \([0-9A-Fa-f:]*\)\/.*/\1/p' | head -1 |
+    tr 'A-Z' 'a-z')
+[ -n "$PEER_LL" ] || PEER_LL=$(peer_linklocal "$PEER_MAC")
+
+from_port_547() {
+    sed -n "s/^[0-9:.]* IP6 \([0-9A-Fa-f:]*\)\.547 > .*dhcp6 $1.*/\1/p" \
+        "$CAP" 2>/dev/null
+}
+
+advertiser_list=$(from_port_547 advertise | sort -u | tr '\n' ',' |
+    sed 's/,$//')
+advertisers=$(printf '%s\n' "$advertiser_list" | tr ',' '\n' | grep -c . ||
+    true)
+
+# The server the guest actually used is the one whose Reply answered its
+# Request.  A Renew or a Release goes to the same server, so any of them names
+# it; the Reply is the one that is always there.
+chosen_server=$(from_port_547 reply | head -1)
+
+echo "peer_mac=$PEER_MAC peer_linklocal=$PEER_LL"
+echo "advertisers=$advertisers advertiser_list=${advertiser_list:-none}"
+echo "chosen_server=${chosen_server:-none}"
+
+if [ "$solicit_seen" = no ] && [ "$inforeq_seen" = no ]; then
+    if [ "$ARM" = auto ]; then
+        # Neither flag on this link, so there is nothing for CONFIGURE6=AUTO
+        # to do and this arm cannot test anything.
+        fail_link "router_ra_asks_for_no_dhcpv6"
+    fi
+    echo "FAIL solicit_seen: the guest sent no Solicit"
+    echo "result=fail"
+    exit 1
+fi
+
+# Not our server, so every assertion below is about somebody else's exchange.
+# A fact about the link.  The site's own DHCPv6 server won the race, which
+# neither this harness nor this stack can currently decide -- see the top.
+if [ -n "$chosen_server" ] && [ "$chosen_server" != "$PEER_LL" ]; then
+    echo "another_server_won=yes"
+    fail_link "another_dhcpv6_server_answered_first"
+fi
+
 # ------------------------------------------------------------- the guest ----
 #
 # ShowNetStatus prints one "address6 <addr>/<len>" line per address.  The ULA
@@ -352,14 +447,8 @@ fi
 fail=0
 note() { echo "FAIL $1"; fail=1; }
 
-if [ "$ARM" = auto ] && [ "$solicit_seen" = no ] && [ "$inforeq_seen" = no ]; then
-    # Neither flag on this link, so there is nothing for CONFIGURE6=AUTO to do
-    # and this arm cannot test anything.  A link fact, not a code fault.
-    fail_link "router_ra_asks_for_no_dhcpv6"
-fi
-
-[ "$solicit_seen" = yes ] || note "solicit_seen: the guest sent no Solicit"
-[ "$reply_seen"   = yes ] || note "reply_seen: the server never answered"
+[ "$reply_seen"    = yes ] || note "reply_seen: the server never answered"
+[ "$chosen_server" = "$PEER_LL" ] || note "chosen_server: no Reply from $PEER_LL"
 [ "$guest_ula"    = yes ] || note "guest_ula: no address from ${ULA_PREFIX}"
 [ "$ipv4_none"    = yes ] || note "ipv4_none: the guest has an IPv4 address"
 [ "$reach"        = yes ] || note "reach: ping6 to $PEER_ULA did not answer"
