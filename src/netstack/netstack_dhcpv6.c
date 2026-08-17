@@ -600,13 +600,19 @@ VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns)
     if (outright)
     {
         /*
-         * CONFIGURE6=DHCP does not wait for a router to say so, and does not
-         * wait for the worker either: bring-up is already on a thread that may
-         * block, and going through the flag group would only add a context
-         * switch to a decision already made.
+         * CONFIGURE6=DHCP does not wait for a router to say so -- but it does
+         * go through the worker, and that is deliberate rather than tidy.
+         * Creating the client and moving it to SENDING_SOLICIT blocks: the
+         * bind waits, and _nx_dhcpv6_request() sleeps a tick at a time until
+         * the client's own thread has run once. Doing that here would put it
+         * on the bring-up path, which is the one thing this was asked not to
+         * cost, and the Solicit gets on the wire no sooner for having been
+         * sent by this thread.
          */
         ns->ns_Dhcpv6Asked = TRUE;
-        (VOID)ami_ns6_dhcp_begin(ns, TRUE);
+        (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, AMI_DHCPV6_EV_STATEFUL,
+                                 TX_OR);
+        AMI_INFO("netstack: DHCPv6 asked for outright by CONFIGURE6");
         return;
     }
 
