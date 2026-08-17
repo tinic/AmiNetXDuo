@@ -319,6 +319,15 @@ static UWORD           fb_band_ty0;
    a frame, so the frame counter keeps meaning screens and not messages. */
 static UBYTE           fb_band_last;
 
+/* What the last complete screen pass cost, in ticks, which is what decides
+   whether the next one is worth banding.  Zero until one has finished, so the
+   first pass of a session is whole. */
+static ULONG           fb_pass_ticks;
+
+/* And what the pass in progress has cost so far, since it is charged a band
+   at a time. */
+static ULONG           fb_pass_acc;
+
 /*
  * Tile rows in a band.
  *
@@ -331,6 +340,26 @@ static UBYTE           fb_band_last;
 #ifndef FB_BAND_ROWS
 #define FB_BAND_ROWS        4
 #endif
+
+/*
+ * How expensive a screen pass has to have been for the next one to be banded,
+ * in fiftieths.
+ *
+ * Banding is not free and it is not always worth it.  A band boundary buys a
+ * read of the socket, which is only worth having when there is a long stretch
+ * of work to interrupt; and it costs a pass that is spread over more turns of
+ * the server loop, which on a cheap screen is all cost.  Measured on the
+ * A3000 with an idle screen: worst keystroke-to-frame 42.0 ms with the frame
+ * whole against 82.5 ms banded into eight, because a change is only encoded
+ * when its own band comes round and eight bands of nothing take longer to
+ * come round than one pass over everything.
+ *
+ * So the previous pass decides.  Two ticks is 40 ms, which is about where a
+ * pass stops being something a person would not notice; a Workbench doing
+ * nothing sits far below it and is never banded, and a screen that is
+ * scrolling sits far above it and always is.
+ */
+#define FB_BAND_WHEN        2
 
 /*
  * A resync is a sequence, and asking twice must not restart it.
@@ -2512,6 +2541,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_busy_ticks = 0;
     fb_idle_given = 0;
     fb_band_ty0   = 0;
+    fb_pass_ticks = 0;
+    fb_pass_acc   = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2887,7 +2918,9 @@ BOOL http_fb_slice(ULONG now)
          * a grid shorter than one band is a single band covering all of it,
          * which is what a small screen gets.
          */
-        UWORD ty1 = (UWORD)(fb_band_ty0 + FB_BAND_ROWS);
+        UWORD rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
+                             ? FB_BAND_ROWS : fb_enc.tiles_y);
+        UWORD ty1 = (UWORD)(fb_band_ty0 + rows);
 
         if (ty1 > fb_enc.tiles_y)
             ty1 = (UWORD)fb_enc.tiles_y;
@@ -3123,6 +3156,7 @@ BOOL http_fb_write(ULONG now)
             ULONG idle;
 
             fb_busy_ticks += cost;
+            fb_pass_acc += cost;
             fb_frame_t0 = 0;
 
             /*
@@ -3144,6 +3178,11 @@ BOOL http_fb_write(ULONG now)
              */
             if (!pass_done)
                 return TRUE;
+
+            /* What the pass that just ended cost, which is what decides
+               whether the next one is banded.  See FB_BAND_WHEN. */
+            fb_pass_ticks = fb_pass_acc;
+            fb_pass_acc = 0;
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
