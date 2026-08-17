@@ -128,10 +128,19 @@ WANT_CARD=""
 DRIVER_SOURCE=""
 DRIVER_PATH=""
 
-case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
+# An absolute -b is a tree somewhere else, which is what comparing two builds
+# needs.  The case here used to leave $BUILD alone and the two lines below then
+# prefixed $ROOT anyway, so `-b /somewhere/build` reported
+# "missing /root//somewhere/build/src/tools/ToolsSmoke" and stopped -- with the
+# doubled slash the only clue.  tests/tools/run-cardsweep.sh:120-123 has always
+# resolved it this way; this file has not.
+case "$BUILD" in
+    /*) BUILDDIR="$BUILD" ;;
+    *)  BUILDDIR="$ROOT/${BUILD#./}" ;;
+esac
 
-TOOLS="$ROOT/$BUILD/src/tools"
-BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
+TOOLS="$BUILDDIR/src/tools"
+BSD="$BUILDDIR/src/bsdsocket/bsdsocket.library"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-iperf}"
 
@@ -276,7 +285,7 @@ IFEOF
 if [ -n "$IFACE" ]; then
     . "$ROOT/tools/sana2-stage.sh"
     if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
-        sana2_select "$BOARD" "$BUILD"
+        sana2_select "$BOARD" "$BUILDDIR"
         if [ -z "$SANA2_SEL_PATH" ]; then
             echo "-N $BOARD wants $SANA2_SEL_DRIVER and this host has not" \
                  "got it." >&2
@@ -409,12 +418,18 @@ start_peer() { # logname args...
 # back with the guest's end-of-test report, since a datagram sent at a guest
 # that is not listening yet is simply lost and looks like success.
 start_sender() { # logname proto port
-    local name="$1" proto="$2" port="$3"
+    local name="$1" proto="$2" port="$3" kbit=2000
+    # The UDP rate the peer offers the guest, raised from outside for a burst
+    # measurement.  2000 is what every assertion here is written against: the
+    # guest keeps up with it on every card, so a loss at 2000 is a defect.
+    # Above it the guest is meant to be overrun, and the arm becomes a
+    # frames-delivered measurement rather than a pass.
+    [ "$proto" != udp ] || kbit="${AMINETXDUO_IPERF_PEER_UDP_KBIT:-2000}"
     (
         deadline=$(( $(date +%s) + PEER_LIFE ))
         while [ "$(date +%s)" -lt "$deadline" ]; do
             if out=$(peer_cmd send "$proto" "$ADDRESS" --port "$port" \
-                        --seconds "$SECS" --kbit 2000 \
+                        --seconds "$SECS" --kbit "$kbit" \
                         2>>"$PEERLOG/$name.err"); then
                 case "$proto" in
                     udp) case "$out" in *peer_report=1*) echo "$out"; exit 0 ;; esac ;;

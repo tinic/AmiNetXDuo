@@ -588,6 +588,306 @@ static void test_verify_uses_the_carried_sum(void)
 
 #endif /* AMINETXDUO_RX_VERIFY */
 
+/* ==================================================== the read-depth plan == */
+
+/*
+ * ami_sana2_rx_plan() is arithmetic over two scalars -- the line rate
+ * S2_DEVICEQUERY reported and the size of the packet pool -- and every
+ * interesting case of it is a machine or a card that no emulator here has.
+ * A device that answers 0, one that answers nonsense, one whose rate did not
+ * fit a ULONG, a pool of ten packets: none of those can be booted, and all of
+ * them decide how many frames the stack can catch.
+ *
+ * The three rules, each checked on its own so a failure names which one:
+ *
+ *   the ladder    a faster wire earns a deeper queue, in steps
+ *   the budget    all three readers together may pin a quarter of the pool
+ *   the floors    and they are never taken below what they had before
+ */
+
+/* Enough packets that the budget never binds: the ladder alone decides. */
+#define PLAN_BIG_POOL   512UL
+
+static void plan_at(ULONG bps, ULONG pool, BOOL dual, AmiRxDepths *d)
+{
+    /* Poisoned first, so a plan that writes nothing fails rather than reading
+       as "the floors". */
+    d->ipv4 = 0xEEEE;
+    d->arp  = 0xEEEE;
+    d->ipv6 = 0xEEEE;
+    ami_sana2_rx_plan(bps, pool, dual, d);
+}
+
+static void test_plan_ladder(void)
+{
+    static const struct { ULONG bps; UWORD want; const char *what; } cases[] =
+    {
+        {           1UL,  4, "a device answering 1 bit/s"                  },
+        {      115200UL,  4, "a serial line"                               },
+        {     4000000UL,  4, "the fastest wire the reader can outrun"      },
+        {     4000001UL, 32, "one bit past it"                             },
+        {    10000000UL, 32, "ten-megabit Ethernet"                        },
+        {   100000000UL, 32, "a hundred-megabit card"                      },
+        {  1000000000UL, 32, "a gigabit wire"                              },
+        {  0xFFFFFFFFUL, 32, "a rate that did not fit a ULONG"             }
+    };
+    AmiRxDepths d;
+    unsigned    i;
+
+    printf("sana2: a wire slower than the reader caps the read depth\n");
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        plan_at(cases[i].bps, PLAN_BIG_POOL, TRUE, &d);
+        h_check(d.ipv4 == cases[i].want, cases[i].what);
+    }
+
+    /* Monotone, which is the property the table is a sample of: no faster wire
+       may earn a shallower queue than a slower one. */
+    {
+        ULONG bps;
+        UWORD prev = 0;
+
+        for (bps = 1UL; bps <= 400000000UL; bps += 1000000UL)
+        {
+            plan_at(bps, PLAN_BIG_POOL, TRUE, &d);
+            h_check(d.ipv4 >= prev, "a faster wire is never shallower");
+            prev = d.ipv4;
+        }
+    }
+}
+
+static void test_plan_degenerate_bps(void)
+{
+    AmiRxDepths zero;
+    AmiRxDepths ten;
+    AmiRxDepths slow;
+
+    printf("sana2: a device that will not say what wire it is lands at ten "
+           "megabits\n");
+
+    /*
+     * 0 is what ami_sana2_query() leaves behind for a device that does not
+     * fill BPS in, and for one that supplies a short block that stops before
+     * it: the block is zeroed before the command goes out.  It has to mean
+     * something definite, and it means the wire every board in
+     * src/netdev/netdev_cards.c but one reports.
+     */
+    plan_at(0UL, PLAN_BIG_POOL, TRUE, &zero);
+    plan_at(10000000UL, PLAN_BIG_POOL, TRUE, &ten);
+
+    h_check(zero.ipv4 == ten.ipv4, "0 bit/s is planned as ten megabits");
+    h_check(zero.arp  == ten.arp,  "for the ARP reader too");
+    h_check(zero.ipv6 == ten.ipv6, "and for the IPv6 reader");
+
+    /* And not the other thing 0 could plausibly have meant: the slowest wire
+       the table knows about, which would cap every silent device at the
+       floor and make a card that merely forgot to fill BPS in unusable. */
+    plan_at(1UL, PLAN_BIG_POOL, TRUE, &slow);
+    h_check(zero.ipv4 > slow.ipv4,
+            "and not the slowest wire, which a silent Ethernet board is not");
+}
+
+static void test_plan_budget(void)
+{
+    AmiRxDepths d;
+    ULONG       pool;
+
+    printf("sana2: the readers together pin at most a quarter of the pool\n");
+
+    /* No pool at all -- the shape a caller with nothing allocated would pass.
+       The floors, and nothing above them. */
+    plan_at(100000000UL, 0UL, TRUE, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 &&
+            d.arp  == AMI_SANA2_RX_DEPTH_ARP  &&
+            d.ipv6 == AMI_SANA2_RX_DEPTH_IPV6,
+            "an empty pool buys nothing above the floors");
+
+    /*
+     * The 1 MB machine of docs/RESEARCH.md 81: seventeen packets.  A quarter
+     * is four, which is less than the floors already cost, so the floors win
+     * and a fast card buys it nothing.  This is the case AROSTCP's floor of
+     * sixteen would have spent the whole pool on.
+     */
+    plan_at(100000000UL, 17UL, TRUE, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4,
+            "seventeen packets and a fast card still gets the floor");
+    h_check((ULONG)d.ipv4 + d.arp + d.ipv6 < 17UL,
+            "and the readers do not take the pool");
+
+    /*
+     * The memory-tight A1200 measured in the constants' comments: 2 MB of chip
+     * and no Fast RAM is a pool of 47.  The window is 5, the budget is 11 and
+     * the floors are 8, so IPv4 gets its one packet above the floor and IPv6
+     * takes what is left.  Five and not eight is the whole of that comment: a
+     * deeper IPv4 queue caught a fifth as many datagrams under a flood.
+     */
+    plan_at(10000000UL, 47UL, TRUE, &d);
+    h_check(d.ipv4 == 5, "47 packets: IPv4 gets the pool's own number, five");
+    h_check(d.arp == 2 && d.ipv6 == 4, "and the plan is 5/2/4 exactly");
+    h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 47UL / AMI_SANA2_RX_BUDGET_SHARE,
+            "and the three of them stay inside a quarter of that pool");
+
+    /*
+     * The whole plan is asserted here rather than read off a guest because the
+     * one machine where it cannot be: on a 2 MB A1200 the interface's own log
+     * line is overwritten by the tick line from another task at exactly that
+     * point, deterministically, so `ip 5 arp` is all a serial capture gets.
+     * The other five machines were read off the guest and agree with this
+     * table:
+     *
+     *      pool  47 (A1200, no Fast)      5 / 2 / 4    (ip4 observed)
+     *      pool 127 (A1200, 2 MB Fast)   15 / 2 / 8    observed
+     *      pool 207 (A1200, 4 MB Fast)   25 / 2 / 8    observed
+     *      pool 367 (A1200, 8 MB Fast)   32 / 2 / 8    observed
+     *      pool 367 (A3000, no Fast)     32 / 2 / 8    observed
+     *      pool 513 (A3000, 8 MB Fast)   32 / 2 / 8    observed
+     */
+    plan_at(10000000UL, 127UL, TRUE, &d);
+    h_check(d.ipv4 == 15 && d.arp == 2 && d.ipv6 == 8,
+            "127 packets: 15/2/8, which is what the guest printed");
+    plan_at(10000000UL, 207UL, TRUE, &d);
+    h_check(d.ipv4 == 25 && d.arp == 2 && d.ipv6 == 8,
+            "207 packets: 25/2/8, which is what the guest printed");
+    plan_at(100000000UL, 513UL, TRUE, &d);
+    h_check(d.ipv4 == 32 && d.arp == 2 && d.ipv6 == 8,
+            "513 packets: 32/2/8, which is what the A3000 printed");
+
+    /*
+     * The lab's 8 MB A1200: 368 packets, so 46 frames of window and a budget
+     * of 92 pinned packets. Both readers reach the ceiling and the pool is
+     * nowhere near paying for it, which is the case the IPv6 reader was two
+     * deep in.
+     */
+    plan_at(10000000UL, 368UL, TRUE, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+            "368 packets: IPv4 gets the ceiling");
+    h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
+            "and IPv6 gets its own cap rather than two");
+    plan_at(100000000UL, 368UL, TRUE, &d);
+    h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+            "and a hundred-megabit card on that machine asks for no more");
+
+    /*
+     * The IPv6 cap is a cap and not a share: a pool ten times bigger does not
+     * move it.  A packet pinned by a reader nothing is arriving on is one the
+     * other reader's window cannot have, and that is measured -- see the
+     * constant's own comment.
+     */
+    plan_at(10000000UL, 4096UL, TRUE, &d);
+    h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
+            "and a pool ten times that size does not move the IPv6 cap");
+
+    /* The same machine on a wire slower than it: the cap bites, and it is the
+       only configuration in which the reported line rate changes anything. */
+    plan_at(2000000UL, 368UL, TRUE, &d);
+    h_check(d.ipv4 < AMI_SANA2_RX_MAX_DEPTH,
+            "a two-megabit wire on a big pool is capped by the wire");
+
+    /* The budget is never exceeded, at any pool size, on the fastest wire
+       there is. */
+    for (pool = 0UL; pool <= 600UL; pool++)
+    {
+        ULONG total;
+        ULONG budget = pool / (ULONG)AMI_SANA2_RX_BUDGET_SHARE;
+        ULONG floors = (ULONG)AMI_SANA2_RX_DEPTH_IPV4 +
+                       (ULONG)AMI_SANA2_RX_DEPTH_ARP +
+                       (ULONG)AMI_SANA2_RX_DEPTH_IPV6;
+
+        plan_at(0xFFFFFFFFUL, pool, TRUE, &d);
+        total = (ULONG)d.ipv4 + (ULONG)d.arp + (ULONG)d.ipv6;
+
+        h_check(total <= ((budget > floors) ? budget : floors),
+                "the plan stays inside the budget, or inside the floors");
+        h_check(d.ipv4 <= AMI_SANA2_RX_MAX_DEPTH &&
+                d.arp  <= AMI_SANA2_RX_MAX_DEPTH &&
+                d.ipv6 <= AMI_SANA2_RX_MAX_DEPTH,
+                "and no reader is deeper than there are slots for it");
+    }
+
+    /* A bigger pool is never worse, which is the property the samples above
+       are points on. */
+    {
+        UWORD prev = 0;
+
+        for (pool = 0UL; pool <= 600UL; pool++)
+        {
+            plan_at(100000000UL, pool, TRUE, &d);
+            h_check(d.ipv4 >= prev, "a bigger pool is never shallower");
+            prev = d.ipv4;
+        }
+    }
+}
+
+static void test_plan_floors(void)
+{
+    AmiRxDepths d;
+    ULONG       pool;
+    ULONG       bps;
+
+    printf("sana2: no reader is ever planned below what it had\n");
+
+    for (pool = 0UL; pool <= 600UL; pool += 7UL)
+    {
+        for (bps = 0UL; bps <= 300000000UL; bps += 7000000UL)
+        {
+            plan_at(bps, pool, TRUE, &d);
+            h_check(d.ipv4 >= AMI_SANA2_RX_DEPTH_IPV4, "IPv4 keeps its floor");
+            h_check(d.arp  >= AMI_SANA2_RX_DEPTH_ARP,  "ARP keeps its floor");
+            h_check(d.ipv6 >= AMI_SANA2_RX_DEPTH_IPV6, "IPv6 keeps its floor");
+        }
+    }
+}
+
+static void test_plan_single_stack(void)
+{
+    AmiRxDepths dual;
+    AmiRxDepths single;
+
+    printf("sana2: a build with no IPv6 reader does not budget for one\n");
+
+    plan_at(100000000UL, 40UL, FALSE, &single);
+    plan_at(100000000UL, 40UL, TRUE,  &dual);
+
+    h_check(single.ipv6 == 0,
+            "no IPv6 reader is planned when none will be started");
+    h_check(single.arp == dual.arp, "the ARP reader is unmoved either way");
+
+    /*
+     * IPv4 is NOT given what the IPv6 reader would have had, and that is a
+     * property rather than an omission: its want is the pool's own eighth and
+     * the budget is the pool's quarter, so once the floors fit at all there is
+     * always enough for IPv4 to reach its want.  The IPv6 reader is spending
+     * what nothing else asked for.
+     */
+    h_check(single.ipv4 == dual.ipv4,
+            "and IPv4 is no deeper for it: its want was already affordable");
+    h_check((ULONG)single.ipv4 + single.arp <
+            (ULONG)dual.ipv4 + dual.arp + dual.ipv6,
+            "what changes is what the machine pins in total");
+}
+
+/*
+ * The ARP reader stays at its floor, and this is the assertion that says so
+ * on purpose rather than by omission.  Its frames are 60 bytes and its
+ * traffic is request-and-reply; a deeper queue buys tolerance of a broadcast
+ * storm and costs a pinned packet per slot on every machine.
+ */
+static void test_plan_arp_is_flat(void)
+{
+    AmiRxDepths d;
+    ULONG       bps;
+
+    printf("sana2: the ARP reader does not follow the line rate\n");
+
+    for (bps = 0UL; bps <= 1000000000UL; bps += 50000000UL)
+    {
+        plan_at(bps, PLAN_BIG_POOL, TRUE, &d);
+        h_check(d.arp == AMI_SANA2_RX_DEPTH_ARP,
+                "ARP is the same depth on every wire");
+    }
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -596,6 +896,13 @@ int main(void)
     test_header_strip();
     test_payload_alignment();
     test_runt();
+
+    test_plan_ladder();
+    test_plan_degenerate_bps();
+    test_plan_budget();
+    test_plan_floors();
+    test_plan_single_stack();
+    test_plan_arp_is_flat();
 
 #ifdef AMINETXDUO_RX_VERIFY
     test_verify_publishes_only_what_it_checked();
