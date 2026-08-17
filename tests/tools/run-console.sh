@@ -73,8 +73,10 @@
 #   moves a pixel, so a change after the keys and none before them is the keys
 #   having arrived.  Use it with -A idle; a screen that is already scrolling
 #   can prove nothing about what made it scroll.
-#     d<N>_guest_fbstat     the guest's own counters: frames, bytes, and the
-#                           ticks it spent grabbing and encoding
+#     d<N>_guest_*          the guest's own counters, one key each: frames,
+#                           bytes, the ticks it spent grabbing and encoding,
+#                           and the ticks charged against its share of the CPU
+#     d<N>_duty_cycle_pct   what fraction of the wall clock those came to
 #     d<N>_png              a decoded frame, to look at
 #     RESULT                PASS, FAIL or INFRA
 #
