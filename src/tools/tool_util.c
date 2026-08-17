@@ -31,6 +31,29 @@ VOID tool_printf(const char *fmt, ...)
 }
 
 /*
+ * The same, flushed.
+ *
+ * dos.library buffers Output(), so a command that runs for a minute prints its
+ * running commentary in one burst at the end, and a machine that has to be
+ * killed prints none of it at all.  Progress that arrives after the event is
+ * not progress, and a stalled run then looks exactly like a working one.
+ *
+ * The cost is one Flush() per line, which is why this is a second function and
+ * not a change to tool_printf(): a command printing a table wants the
+ * buffering.
+ */
+VOID tool_say(const char *fmt, ...)
+{
+    va_list args;
+
+    va_start(args, fmt);
+    VPrintf((CONST_STRPTR)fmt, (APTR)args);     /* (APTR): see tool_printf */
+    va_end(args);
+
+    Flush(Output());
+}
+
+/*
  * Where diagnostics go.
  *
  * Not ErrorOutput(): that is dos.library LVO -1134, which only exists from V50
