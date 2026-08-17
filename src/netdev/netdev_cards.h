@@ -46,8 +46,9 @@
  * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus.
  * That chip decodes nothing until ISA PnP assigns it an I/O base and
  * activates it.  Until then the board's window reads as a floating bus and
- * the card looks absent.  netdev_isapnp.c runs the sequence.  This structure
- * is what it needs, and it is NULL on every row that has no bridge.
+ * the card looks absent.  netdev_isapnp.c runs the sequence.  These five
+ * numbers are what it needs, and the pointer is NULL on every row that has no
+ * bridge.
  *
  * io_win + port * stride is where an ISA port lands in the board window.  The
  * window is not wide enough for the whole 12-bit port space: the X-Surf's is

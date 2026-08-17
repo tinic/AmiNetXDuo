@@ -563,8 +563,13 @@
 ;
 ; What remains is a real choice between two different stacks: the full one, and
 ; the minimal one with IPv6, .local name lookups, the packet filter, encrypted
-; connections and IPv4 multicast left out.  It is about 104 KB smaller, which is
+; connections and IPv4 multicast left out.  It is 124 KB smaller, which is
 ; worth having on a 1 MB machine and worth nothing on a larger one.
+;
+; ONE FIGURE, MEASURED, IN THREE PLACES.  This comment said 104 KB and the help
+; below said 98 KB, and both were a build ago.  Measured on the pinned toolchain
+; at 2ce0ac0c: 369,820 bytes against 243,332, both stripped, so 126,488 bytes.
+; dist/make-dist.sh carries the same number and the same two byte counts.
 ;
 ; Nothing changes for a novice install.  At NOVICE every ask... returns its
 ; (default) without showing anything, so the full stack is what goes on.
@@ -579,7 +584,7 @@
           "install the full stack.\n\n"
           "The minimal stack leaves out IPv6, .local name lookups, the packet "
           "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
-          "host and the TCP: handler. It is 98 KB smaller. On a 1 MB machine "
+          "host and the TCP: handler. It is 124 KB smaller. On a 1 MB machine "
           "that is worth having. On a larger machine it is not.\n\n"
           "With the full stack, encrypted connections work on any processor. "
           "On a 68000 a first handshake takes a minute or two. A repeat "

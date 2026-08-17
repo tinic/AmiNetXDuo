@@ -13,7 +13,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 
 | § | Conclusion | Authority | Status |
 |---|---|---|---|
-| 2 | No m68k ThreadX or NetX Duo port existed. lwip-amiga is PiStorm-only, AmiTCP_NG and AROSTCP are GPL, so an MIT SANA-II stack was the open niche. | `README.md:200` | historical |
+| 2 | No m68k ThreadX or NetX Duo port existed. lwip-amiga is PiStorm-only, AmiTCP_NG and AROSTCP are GPL, so an MIT SANA-II stack was the open niche. | `docs/DEVELOPMENT.md:188` | historical |
 | 2.6 | `bsdsocktest`, 142 tests, is the acceptance gate. | `tests/conformance/build.sh:8` | current |
 | 3.1 | `SocketBase` is per-opener and never shared: every returned struct lives in the child base, never a file static. | `src/bsdsocket/netdb.c:15` | see code |
 | 3.2 | The 121-LVO offset table comes from the Roadshow NDK `bsdsocket_pragmas.h`; four probes call vectors by raw LVO against it. `ipf_*` is out of scope. | `tools/gen_vectors.py:106` | current |
@@ -31,7 +31,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 6.6 | Roadshow's on-disk config layout rather than an invented one, `AMITCP` public port, self-start on first `OpenLibrary`. | `include/aminetxduo/config.h:4` | current; its file list is wrong, see `src/config/config_parse.c:6` |
 | 8 | Milestone-1 exit criterion: four adopted tasks contending on a mutex and a timer, clean under Enforcer. | `tests/soak/soak_test.c:4` | historical, all nine milestones shipped |
 | 9 | Decisions of 2026-07-24. Two of its shipping defaults are inverted in the tree today: TLS and IPv6 both default ON. | `CMakeLists.txt:57`, `CMakeLists.txt:107` | superseded |
-| 9 | Target floor. Now any 68000+, OS 2.04+, 1 MB, with pools computed from `AvailMem()`. | `README.md:77`, `include/aminetxduo/netstack.h:272` | superseded |
+| 9 | Target floor. Now any 68000+, OS 2.04+, 1 MB, with pools computed from `AvailMem()`. | `README.md:59`, `include/aminetxduo/netstack.h:272` | superseded |
 | 9 | Roadshow config layout, `AMITCP` port, no `ENV:`-only mode. | `include/aminetxduo/config.h:4` | current |
 | 9 | IPv6, usergroup, TLS and `mbuf_*`/`bpf_*` all in scope; `ipf_*` stubbed. | `tools/gen_vectors.py:296` | current |
 | 9 | One SHA-256 hash-DRBG entropy pool, shared not duplicated. Credited ~26 bits (8 `AvailMem` + 4 + 2 + 12), enough for nonces and ISNs, not for adversarial TLS keys. The per-source credit table exists nowhere else. | `src/common/ami_random.c`, `include/aminetxduo/tlslib.h:591` | current |
@@ -144,7 +144,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 79.11 | Every pre-bridging SLIRP throughput figure is uncomparable, and any run offering more than ~3,000 f/s was losing frames silently. | `tests/perf/run-fitzbench.sh` | current |
 | 79.6 | Means 80.3. A size check is not a check: a shim bug returned the right length and the wrong bytes, so every byte is compared. | `tests/bebboget/check.sh:8` | mis-cited |
 | 80 | On identical crypto our `fetch` is ~30% faster than bebboget and the handshake 3.5x. Our `fetch` is 2.6x faster on ChaCha20 than on CBC, which is `src/crypto68k`'s 68020 assembly. | `tests/bebbossh/run-bebbossh.sh:462` | current |
-| 81 | The memory floor is 1 MB on both builds: fixed cost 432 to 439 KB, and a 1 MB A2000 runs the shipped tools with a 17-packet pool. | `include/aminetxduo/netstack.h:272`, `README.md:77` | current; six source comments still say 4 MB |
+| 81 | The memory floor is 1 MB on both builds: fixed cost 432 to 439 KB, and a 1 MB A2000 runs the shipped tools with a 17-packet pool. | `include/aminetxduo/netstack.h:272`, `README.md:59` | current; the two source comments that said 4 MB now say the measured floor |
 | 81.3 | 512 KB refuses cleanly, but `AddNetInterface` blamed the cable. It now has an out-of-memory branch reached before the device probe. | `src/tools/addnetinterface.c:143` | current, covered by `tests/tools/run-oommsg.sh` |
 | 81.5 | The last `CloseLibrary()` on `bsdsocket.library` does not return, blamed on our close wrapper. | `tests/concurrent/concurrent_test.c:46` | superseded in cause, it is `a2065.device` 2.16 ignoring `AbortIO()` on a pending `CMD_READ` |
 | 87 | Chain `addx.l` off `movem.l` so the end-around carry rides the X flag: 201 to 138 ns/B. Register saves cost 24 to 32% on a 20-byte header, so short runs take a computed jump into unrolled pairs. | `src/net68k/n68k_checksum.S:1` | see code, the file header is the same text |

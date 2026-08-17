@@ -3,7 +3,6 @@
 # Run the AF_INET6 bsdsocket.library test, RFC 3542's whole surface.
 #
 #   tests/ipv6/run-socket.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                            [-N BOARD] [-B BACKEND]
 #
 # It was called run-socket-fsuae.sh and both halves of it drove
 # tools/amiberry-run.sh.  -A picked between two branches that ran the same
@@ -21,6 +20,17 @@
 # a2065.device, which is not ours to ship, so the whole IPv6 surface was pinned
 # to the one CI runner that had a copy.
 #
+# NO EMULATED NETWORK BOARD EITHER, and therefore no backend.  This script kept
+# -N and -B long after the driver went, defaulting the board to a2065 and the
+# backend to SLIRP with the note that SLIRP "is what the test wants: it talks
+# to ::1 and needs no LAN".  Half of that is right and the conclusion is not.
+# The test needs no LAN, so what it wants is no card: tools/amiberry-run.sh
+# writes no board lines at all when -N is left off, and a machine with no
+# ethernet board has no backend to pick.  SLIRP is not used anywhere in this
+# tree.  A board that was configured and never opened cost the run Amiberry's
+# NAT stack and a MAC, and gave it a second, real interface the library could
+# have brought up beside tap0.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -30,22 +40,14 @@ MODEL=A1200
 TIMEOUT=240
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
-BOARD=a2065
-# Both defaults are tools/amiberry-run.sh's own, repeated here only so -N and
-# -B can override them.  With AMINETXDUO_AMIBERRY_BACKEND unset this is SLIRP,
-# which is what the test wants: it talks to ::1 and needs no LAN.
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 
-while getopts "m:t:c:b:N:B:" opt; do
+while getopts "m:t:c:b:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        N) BOARD="$OPTARG" ;;
-        B) IFACE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" \
-                "[-N board] [-B backend]" >&2
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2
            exit 2 ;;
     esac
 done
@@ -91,7 +93,9 @@ CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+# No -N and no -B.  See the note at the top: the interface this test uses is
+# made in the guest, so a machine with no ethernet board is the right machine.
+"$ROOT/tools/amiberry-run.sh" -m "$MODEL" \
      -t "$TIMEOUT" "${CPUARG[@]}" "$EXE" "$STAGE/devs" "$STAGE/libs"
 RUN_RC=$?
 set -e
