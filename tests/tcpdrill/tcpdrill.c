@@ -805,6 +805,14 @@ static ULONG ticks_to_ms(ULONG a, ULONG b)     /* b - a, in milliseconds */
     return d / eclock_per_ms;
 }
 
+/*
+ * Above this, `b` came BEFORE `a` and the subtraction wrapped: the E-Clock is
+ * 32 bits at about 709 kHz, so its whole range is 6,057,710 ms and a backwards
+ * gap of one millisecond reads as all of it.  No case runs five minutes, so
+ * anything past that is the wrap and not a wait.
+ */
+#define GAP_BACKWARDS_MS    300000UL
+
 /* ------------------------------------------------------------ case state -- */
 
 typedef struct Case
@@ -960,21 +968,49 @@ static BOOL pend_pop(Seg *out)
     return TRUE;
 }
 
-/* Wait up to `ms` for one frame, servicing ARP throughout. */
-static BOOL wait_frame(Seg *out, ULONG ms)
+/*
+ * Wait up to `ms` for one frame, servicing ARP throughout, and report how long
+ * that really took.
+ *
+ * THE BUDGET IS THE E-CLOCK, NOT A COUNT OF POLLS.  It used to add 20 to a
+ * counter per Delay(1) and stop when the counter reached `ms`, which assumes
+ * one iteration costs one tick.  It does not: pump() drains the ring, decodes
+ * every frame and answers ARP, on a 14 MHz 68020, and one iteration measures
+ * 34 ms here -- so every bound ran 1.7 times its name.  tcp.drill x03's
+ * `notx 400` covered 20 iterations, 680 ms, and failed on a retransmission
+ * 681 ms out: a violation reported against a bound the harness never
+ * enforced.  Every other measurement in this file is already taken from the
+ * E-Clock; this one is now too, and the transcript prints what each `notx`
+ * really covered so the next drift is read rather than triaged.
+ */
+static BOOL wait_frame_for(Seg *out, ULONG ms, ULONG *took)
 {
+    ULONG start = tap_eclock_now();
     ULONG spent = 0;
 
     for (;;)
     {
         pump();
         if (pend_pop(out))
+        {
+            if (took != NULL)
+                *took = ticks_to_ms(start, tap_eclock_now());
             return TRUE;
+        }
+        spent = ticks_to_ms(start, tap_eclock_now());
         if (spent >= ms)
+        {
+            if (took != NULL)
+                *took = spent;
             return FALSE;
-        Delay(1);                        /* 20 ms; see the timing note */
-        spent += 20;
+        }
+        Delay(1);
     }
+}
+
+static BOOL wait_frame(Seg *out, ULONG ms)
+{
+    return wait_frame_for(out, ms, NULL);
 }
 
 /* ------------------------------------------------------------- injection -- */
@@ -1710,7 +1746,14 @@ static VOID do_tx(const char *args, const char *raw)
     e.flags = parse_flags(tok);
     (VOID)parse_keys(args, &e);
 
-    limit = e.have_within ? (ULONG)e.within + 60UL : 2000UL;
+    /*
+     * How long to keep waiting before reporting that nothing came.  Twice the
+     * bound: a frame that arrives late still fails on `within` afterwards, and
+     * "gap too long, got 1800" is a better transcript than "nothing was sent
+     * at all".  4000 is what the old default of 2000 polls came to in real
+     * time on this guest, so no line that used to fit stops fitting.
+     */
+    limit = e.have_within ? ((ULONG)e.within + 60UL) * 2UL : 4000UL;
 
     if (!wait_frame(&got, limit))
     {
@@ -1911,6 +1954,17 @@ static VOID do_tx(const char *args, const char *raw)
     {
         ULONG gap = ticks_to_ms(cs.t_last, got.stamp);
 
+        /* THE FRAME PREDATES THE EVENT IT IS MEASURED FROM.  do_rx() reads the
+           clock before it injects, on purpose, so an answer that is already
+           transmitted and stamped when a later injection resets it comes out
+           of the unsigned subtraction as 6,057,710 ms -- the E-Clock's whole
+           range.  That reads as "gap too long", which is the opposite of what
+           happened, and it cost sack.drill s14 a triage: a retransmission RFC
+           5827 had sent two injections earlier looked like one that never
+           came.  Say which way round it was. */
+        CHECK(gap < GAP_BACKWARDS_MS,
+              "sent BEFORE the previous directive, ms early", 0,
+              (LONG)ticks_to_ms(got.stamp, cs.t_last));
         if (e.have_after)
             CHECK((LONG)gap >= e.after, "gap too short, ms", e.after, gap);
         if (e.have_within)
@@ -1919,12 +1973,21 @@ static VOID do_tx(const char *args, const char *raw)
 #undef CHECK
 
     {
-        ULONG gap = ticks_to_ms(cs.t_last, got.stamp);
+        ULONG       gap  = ticks_to_ms(cs.t_last, got.stamp);
+        const char *sign = "+";
+
+        /* Same thing on a line that asserted no bound: print the direction the
+           gap really had rather than the range of the counter. */
+        if (gap >= GAP_BACKWARDS_MS)
+        {
+            gap  = ticks_to_ms(got.stamp, cs.t_last);
+            sign = "-";
+        }
 
         cs.t_last = got.stamp;
         cs.wire_bytes += (ULONG)got.dlen;
         n_pass++;
-        say("  ok   %s   [+%ums]", raw, gap);
+        say("  ok   %s   [%s%ums]", raw, sign, gap);
     }
 }
 
@@ -2515,19 +2578,23 @@ static VOID do_notx(const char *args, const char *raw)
 {
     char  tok[24];
     ULONG ms;
+    ULONG took = 0;
     Seg   got;
     char  desc[280];
 
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
 
-    if (wait_frame(&got, ms))
+    if (wait_frame_for(&got, ms, &took))
     {
         describe(&got, desc, sizeof(desc));
         fail(raw, desc);
+        say("       at        +%ums", took);
         return;
     }
-    pass(raw);
+    /* The measured length, not the asked-for one; see wait_frame_for(). */
+    say("  ok   %s   [%ums quiet]", raw, took);
+    n_pass++;
 }
 
 static VOID do_rx(const char *args, const char *raw)

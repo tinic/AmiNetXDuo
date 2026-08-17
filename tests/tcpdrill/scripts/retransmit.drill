@@ -41,6 +41,25 @@ rx R seq=0
 
 # The same rule on data.  Nothing acknowledges the segment, so every one of
 # these is a retransmission of the first.
+#
+# THE FIRST RESEND IS NOT THE TIMER'S.  RFC 8985 7.2's tail loss probe sends
+# one extra copy of what is outstanding two round trips after the transmission
+# rather than waiting the timeout out, and it deliberately leaves the ladder
+# alone: it restores the retry count and the timeout it found, so the rung
+# below still expires when it always would have.  A ladder written as if the
+# probe were the first rung would be reading the probe's clock, so the probe
+# gets a line of its own and the ladder starts on the line after it.
+#
+# WHERE THE THREE NUMBERS COME FROM (nx_user.h, and the 50 Hz IP tick):
+#   * the probe is 2*SRTT + NX_TCP_LOSS_PROBE_DELACK_MS.  SRTT here is the
+#     harness's own reaction to the SYN, one to five ticks, so the term is
+#     240 to 400 ms; the fast periodic that fires it runs every 100 ms and is
+#     not synchronised to the transmission, which puts the frame in 140..500.
+#   * the first rung is NX_TCP_RTO_MINIMUM_MS, one second, from the SEGMENT --
+#     not from the probe -- landing in 900..1250 on this guest.
+#   * so the gap the line below asserts is 900-500 = 400 at its shortest and
+#     1250-140 = 1110 at its longest.  Measured: 681, 703, 721.
+# The two rungs after it are the doubling, unchanged, and are the point.
 case rt02_data_retransmission_doubles
 socket
 connect
@@ -49,7 +68,8 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=300
-tx PA seq=1 ack=1 len=100 after=700  within=1400
+tx PA seq=1 ack=1 len=100 within=600
+tx PA seq=1 ack=1 len=100 after=400  within=1200
 tx PA seq=1 ack=1 len=100 after=1400 within=2800
 tx PA seq=1 ack=1 len=100 after=2800 within=5600
 rx R seq=1
@@ -63,3 +83,32 @@ connect
 tx S seq=0 within=200
 tx S seq=0 after=800 within=1300
 rx R seq=0
+
+# AND THE TIMER IS NOT THE ONLY THING THAT RECOVERS A SEGMENT.
+#
+# RFC 5827 section 2 lowers the fast retransmit threshold to one less than the
+# number of outstanding segments while there are fewer than four of them,
+# because three duplicate acknowledgments are three segments arriving past the
+# hole and a flight of two cannot produce them.  Two segments outstanding
+# therefore retransmit on the FIRST duplicate acknowledgment, in the round it
+# arrives in, not a second later.
+#
+# It is asserted here rather than in sack.drill because it has nothing to do
+# with SACK: the acknowledgment below carries no blocks.  sack.drill s14 used
+# to reach it by accident, with a two-segment flight and a comment describing
+# a three-segment one, and could say nothing about when the retransmission
+# happened -- it arrived between two of the injections it was counting.
+case rt04_two_segments_retransmit_on_one_dupack
+socket
+connect
+tx S seq=0
+rx SA seq=0 ack=1 win=8192 mss=100
+tx A seq=1 ack=1
+send 100
+tx PA seq=1 ack=1 len=100
+send 100
+tx PA seq=101 ack=1 len=100
+rx A seq=1 ack=1 win=8192
+tx PA seq=1 ack=1 len=100 within=400
+notx 600
+rx R seq=1
