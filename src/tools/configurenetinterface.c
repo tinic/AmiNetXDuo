@@ -201,6 +201,15 @@
  *                      has no other way to know which link, and this command
  *                      already has INTERFACE.
  *
+ *                      It replaces every router on the interface, including
+ *                      one a router advertisement put there, because a router
+ *                      this machine did not choose is exactly what somebody
+ *                      naming a next hop by hand is overriding. On
+ *                      CONFIGURE6=AUTO the next advertisement puts it back --
+ *                      that is what AUTO means -- so a machine that must not
+ *                      follow the link's router wants CONFIGURE6=STATIC in
+ *                      DEVS:NetInterfaces rather than this command.
+ *
  *   ADDRESS6           refused, and refused with the file to edit named. An
  *                      IPv6 address cannot be changed on a running interface
  *                      in this stack: nothing under bsdsocket.library writes
