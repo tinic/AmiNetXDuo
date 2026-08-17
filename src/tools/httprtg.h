@@ -23,12 +23,18 @@
  * writing VRAM directly, and no API-level hook sees it.  A hooked mirror
  * misses whatever a particular board does not accelerate.
  *
- * It serves 8-bit palette-indexed screens, and nothing else yet.  Those are
- * chunky the way the planar path is planar, a byte is an index, so the
- * encoder's tile grid, PackBits, XOR and copy-rectangle all apply unchanged
- * with the plane count set to one.  15, 16, 24 and 32-bit screens are refused
- * by name.  The encoder has no truecolour code, so those depths get a sentence
- * instead of a picture.
+ * It serves 8-bit palette-indexed screens a byte a pixel, which is chunky the
+ * way the planar path is planar: a byte is an index, so the encoder's tile
+ * grid, PackBits, XOR and copy-rectangle all apply unchanged with the plane
+ * count set to one.
+ *
+ * It serves 15, 16, 24 and 32-bit screens two bytes a pixel, big-endian
+ * R5G6B5, which is Picasso96's RGBFB_R5G6B5 on a 68k.  All four depths
+ * converge on that one format here, whatever the card holds them in, so the
+ * encoder, the wire and the browser have one truecolour path rather than four.
+ * The tile grid applies to it unchanged with the tile two bytes wider a pixel.
+ * What is still refused by name is a bitmap with no chunky pixels at all, a
+ * YUV overlay, and a pixel format the converter does not know.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -45,10 +51,13 @@ struct RastPort;
    locking the bitmap, so it can be read under LockIBase(). */
 typedef struct HttpRtgScreen
 {
-    UWORD width;
+    UWORD width;        /* pixels */
     UWORD height;
     UWORD depth;        /* bits a pixel, as the card reports it */
-    UBYTE clut8;        /* 8-bit palette indexed: the one this serves */
+    UBYTE bpp;          /* bytes a pixel in the staging buffer the caller sets
+                           up and http_rtg_read() fills: 1 for a palette
+                           screen, one byte an index, and 2 for every
+                           truecolour one, big-endian R5G6B5 */
 } HttpRtgScreen;
 
 /* Both libraries, if either is there.  TRUE when at least one opened, which
@@ -63,7 +72,7 @@ BOOL  http_rtg_present(VOID);
 BOOL  http_rtg_owns(struct BitMap *bm);
 
 /* Shape and format, or FALSE with *why set to a sentence naming what it is.
-   Only 8-bit palette-indexed comes back TRUE. */
+   Palette and truecolour both come back TRUE, told apart by `bpp`. */
 BOOL  http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why);
 
 /*
@@ -71,9 +80,13 @@ BOOL  http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why);
  * system RAM, allocate what the snapshot route needs, then time every readback
  * route this machine offers and keep the fastest.
  *
- * `stride` is the row stride of the caller's staging buffer, which is what
- * every route delivers into.  `probe` is that buffer, used as scratch here
- * because it holds nothing yet.  FALSE when no route worked at all.
+ * `stride` is the row stride of the caller's staging buffer in BYTES and
+ * `width` is in pixels, so a truecolour screen needs a stride of at least
+ * twice the width.  That buffer is what every route delivers into.  `probe` is
+ * the same buffer, used as scratch here because it holds nothing yet.  FALSE
+ * when no route worked at all, and also when the screen's pixel format is not
+ * one http_rtg_describe() accepts, which is what a screen re-resolved between
+ * the two calls looks like from here.
  */
 BOOL  http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
                       UWORD width, UWORD height, ULONG stride, UBYTE *probe);
