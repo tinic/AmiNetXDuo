@@ -3095,7 +3095,16 @@ BOOL http_fb_write(ULONG now)
         {
             ULONG done = fb_ticks();
             ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
-            ULONG idle = cost / (ULONG)FB_IDLE_DIVISOR;
+            /*
+             * Rounded UP, which is the difference between a cap that holds
+             * and one that is nearly right.  A tick is a fiftieth and most
+             * bands cost a handful of them, so truncating the division throws
+             * away most of a tick every time: measured on the A3000 that came
+             * out at 78.5% against the 75% intended.  Rounding up can only
+             * leave more idle than the share demands, never less.
+             */
+            ULONG idle = (cost + (ULONG)FB_IDLE_DIVISOR - 1UL)
+                       / (ULONG)FB_IDLE_DIVISOR;
 
             fb_busy_ticks += cost;
             fb_frame_t0 = 0;
