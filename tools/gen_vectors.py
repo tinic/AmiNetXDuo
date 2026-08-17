@@ -101,6 +101,75 @@ LONG bsd_NetStackControl(
 }
 
 # ---------------------------------------------------------------------------
+# PUBLIC vectors past the end of the NDK's table.  Same mechanism as
+# PRIVATE_VECTORS above and a different contract: these are standard names any
+# caller may use without presenting a magic, so the offsets are a promise.
+#
+# (offset, C symbol, ABI name, declaration).  No guard: an option that
+# compiled one of these out would move the ones below it.
+#
+# THIS LIST EXISTS BECAUSE THE FOUR BELOW WERE ONCE ADDED TO THE GENERATED
+# FILES BY HAND.  The generator then no longer reproduced its own output --
+# `tools/gen_vectors.py --check` said so and nothing ran it -- and the next
+# regeneration would have deleted four shipped LVOs, which is an ABI break
+# that compiles clean.  tools/ci.sh runs --check in the cross stage now.
+# ---------------------------------------------------------------------------
+EXTENSION_VECTORS = [
+    (0x372, "bsd_if_nametoindex", "if_nametoindex", """\
+ULONG bsd_if_nametoindex(
+        register const char           *ifname     __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));"""),
+    (0x378, "bsd_if_indextoname", "if_indextoname", """\
+char *bsd_if_indextoname(
+        register ULONG                 ifindex    __asm("d0"),
+        register char                 *ifname     __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));"""),
+    (0x37e, "bsd_if_nameindex", "if_nameindex", """\
+struct if_nameindex *bsd_if_nameindex(
+        register struct AmiSocketBase *SocketBase __asm("a6"));"""),
+    (0x384, "bsd_if_freenameindex", "if_freenameindex", """\
+VOID bsd_if_freenameindex(
+        register struct if_nameindex  *ptr        __asm("a0"),
+        register struct AmiSocketBase *SocketBase __asm("a6"));"""),
+]
+
+# The comment that introduces the block in each file, and the extra include
+# the declarations need.  Both are part of the generated text: a hand-edit
+# that puts them back after a regeneration is the drift this list ends.
+EXTENSION_HEADER_INCLUDE = """\
+/*
+ * struct if_nameindex, for the four RFC 3493 vectors at the bottom of this
+ * file.  The whole type, not `struct if_nameindex;`: a tag left incomplete
+ * here and completed in the .c that defines the vector makes GCC compose the
+ * two function types on redeclaration, and the composite does not carry the
+ * __asm("a0") / __asm("a6") register annotations.  The vector then reads its
+ * arguments off the stack while its callers still pass them in registers, with
+ * no diagnostic at any warning level.  if_freenameindex() freed whatever was
+ * at sp+4 that way.  tools/check-vector-abi.sh keeps every type named here
+ * complete.
+ */
+#include "aminetxduo/ifindex.h"
+
+"""
+
+EXTENSION_HEADER_COMMENT = """\
+/* -0x372..-0x384, RFC 3493 section 4, PUBLIC. The first LVO extension past
+   the end of the NDK's table; revision 3 and up. aminetxduo/ifindex.h, which
+   is included at the top of this file so struct if_nameindex is complete. */
+"""
+
+EXTENSION_SOURCE_COMMENT = """\
+    /*
+     * -0x372 [146] onward, RFC 3493 section 4, PUBLIC, revision 3 and up.
+     *
+     * The first extension past the end of the NDK's table. Deliberately not
+     * the ==reserve 6 block at -0x33c..-0x35a ([137]..[142] above): that is
+     * what a regenerated SFD fills first, and six slots do not hold an
+     * extension that will grow. docs/NDK-ADDENDUM.md.
+     */
+"""
+
+# ---------------------------------------------------------------------------
 # What is actually implemented.  Everything else gets bsd_enosys().
 #
 # Tier 1 per docs/RESEARCH.md S3.2: socket core, data transfer, WaitSelect,
@@ -361,6 +430,7 @@ HEADER_PREAMBLE = """\
 #include <sys/mbuf.h>
 #include <net/route.h>
 
+@EXTENSION_INCLUDE@
 /* Used by the private vector below. */
 #ifdef AMINETXDUO_TLS_CONTEXT
 #include "aminetxduo/nxcontext.h"
@@ -429,7 +499,8 @@ def emit(by_offset, outdir, check=False):
                          % ", ".join(sorted(unknown_impl)))
 
     # ---------------------------------------------------------------- header
-    h = [HEADER_PREAMBLE]
+    h = [HEADER_PREAMBLE.replace("@EXTENSION_INCLUDE@\n",
+                                 EXTENSION_HEADER_INCLUDE)]
     for offset in offsets:
         name, ret, args, regs = by_offset[offset]
         if name not in IMPLEMENTED:
@@ -444,6 +515,10 @@ def emit(by_offset, outdir, check=False):
         else:
             h.append("/* LVO -0x%03x, PRIVATE: %s */\n%s\n\n"
                      % (offset, what, decl))
+    h.append(EXTENSION_HEADER_COMMENT)
+    h.append("\n")
+    for _offset, _symbol, _abiname, decl in EXTENSION_VECTORS:
+        h.append("%s\n\n" % decl)
     h.append(HEADER_EPILOGUE)
     header = "".join(h)
 
@@ -498,6 +573,14 @@ def emit(by_offset, outdir, check=False):
             s.append("#endif\n")
         else:
             s.append("    (APTR)%s,\n" % symbol)
+
+    s.append("\n")
+    s.append(EXTENSION_SOURCE_COMMENT)
+    for offset, symbol, abiname, _decl in EXTENSION_VECTORS:
+        index = offset // VECTOR_STRIDE - 1
+        entry = "    (APTR)%s," % symbol
+        s.append("%s%s/* -0x%03x [%3d] %s */\n"
+                 % (entry, " " * max(1, 41 - len(entry)), offset, index, abiname))
 
     s.append("\n    (APTR)-1\n};\n")
     source = "".join(s)

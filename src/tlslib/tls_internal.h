@@ -274,17 +274,6 @@ struct TLSLibBase
 #define TLSF_EOF            (1UL << 2)
 #define TLSF_BROKEN         (1UL << 3)
 
-/* A TLSA_VerifyHook said yes.  The host-name callback nx_secure runs after the
-   verification function must then stand down: the caller has already decided,
-   and a hook that approved a certificate issued to another host meant it. */
-#define TLSF_HOOKED         (1UL << 4)
-
-/* A TLSA_VerifyHook said no.  Carried separately from the NetX status because
-   every status that stops a handshake looks the same to TLSOpen(), and
-   TLS_ERR_REFUSED exists precisely so a caller can tell a refusal from a
-   failure and not offer to retry. */
-#define TLSF_REFUSED        (1UL << 5)
-
 struct TLSConnection
 {
     struct MinNode              tc_Node;
@@ -314,25 +303,6 @@ struct TLSConnection
     NX_SECURE_X509_CERT        *tc_Remote;
     UCHAR                      *tc_RemoteDer;
     ULONG                       tc_RemoteCount;
-
-    /*
-     * The peer's chain, formatted for a person, and the one block every string
-     * in it lives in.  Built during the handshake by src/tlslib/tls_cert.c and
-     * freed at TLSClose(), which is the lifetime the public header promises.
-     * NULL on a resumed handshake, which sends no certificate at all.
-     */
-    struct TLSCertificate      *tc_Certs;
-    char                       *tc_CertText;
-    ULONG                       tc_CertCount;
-
-    /* What the chain check concluded, in TLSVerifyMsg's vocabulary.  Non-zero
-       only when a TLSA_VerifyHook overrode it, because without a hook a failed
-       check fails the handshake. */
-    LONG                        tc_VerifyReason;
-
-    /* TLSA_VerifyHook.  NULL is the whole of "no hook": every call site tests
-       it, and nothing else changes when there is none. */
-    struct Hook                *tc_Hook;
 
     NX_SECURE_X509_CERT         tc_Root[TLS_MAX_ROOTS];
     UCHAR                      *tc_RootDer;
@@ -410,31 +380,8 @@ VOID  tls_store_attach(TLSConnection *conn);
 VOID  tls_store_detach(TLSConnection *conn);
 
 /* The connection behind a session, for the callbacks nx_secure hands only a
-   session pointer to, and the same from the store, which is all the
-   verification function is given. */
+   session pointer to. */
 TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session);
-TLSConnection *tls_conn_for_store(NX_SECURE_X509_CERTIFICATE_STORE *store);
-
-/* ----------------------------------------------------------- tls_cert.c, */
-
-/*
- * Format the peer's chain into the connection, once per handshake.  Silent
- * when there is nothing to format, and never a reason to fail a handshake.
- */
-VOID tls_cert_capture(TLSConnection *conn,
-                      NX_SECURE_X509_CERTIFICATE_STORE *store);
-VOID tls_cert_release(TLSConnection *conn);
-
-/*
- * The chain has been checked and `status` is what nx_secure made of it.
- * Capture the certificates, work out what to tell a TLSA_VerifyHook, ask it if
- * there is one, and answer with the status the handshake should carry on with.
- * Called from the verification function, so a hook that says yes lets the
- * handshake continue and one that says no stops it where it stands.
- */
-UINT  tls_cert_verdict(TLSConnection *conn,
-                       NX_SECURE_X509_CERTIFICATE_STORE *store,
-                       NX_SECURE_X509_CERT *leaf, UINT status);
 
 /* ----------------------------------------------------------- tls_time.c, */
 

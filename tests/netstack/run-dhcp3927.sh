@@ -100,7 +100,11 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dhcp3927}"
 
 verdict() {
     # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    verdict_guest "dhcp3927" 1 "$1" \
+    # A FLOOR OF 1 IS NOT A FLOOR.  dhcp3927_test.c makes 52 t_check() calls
+    # and a measured run on the lab rig reports 37, so a guest that stopped
+    # after its first assertion used to clear this and pass.  30, measured
+    # 2026-08-17; tighten it to the count of a clean run when there is one.
+    verdict_guest "dhcp3927" 30 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
     exit $?

@@ -22,8 +22,8 @@
 #   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
 #   host32       the mDNS and TLS-crypto fuzz drivers, which need a 32-bit build
 #   sanitize     the whole host tier again, 64-bit and 32-bit, built under
-#                ASan+UBSan with leaks fatal.  AMINETXDUO_SANITIZE=1 runs it,
-#                the way analyze is gated; CI sets it.
+#                ASan+UBSan with leaks fatal.  Not in the default set: name
+#                it, or set AMINETXDUO_SANITIZE=1.  CI does both.
 #   cross        every build configuration, warnings fatal
 #   web          httpd's two pages, the terminal's and the console's, still
 #                match the TypeScript they are generated from, and the
@@ -214,7 +214,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=77
+HOST_TESTS_EXPECTED=76
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet and test_route, both x86_64-only for the reason in
@@ -361,6 +361,24 @@ stage_host() {
         return 1
     fi
 
+    # No harness may build a guest binary for a newer CPU than the machine it
+    # then points that binary at.  It costs a day every time: the program stops
+    # in its own C constructor, no serial, no stdout.txt, and it reads as "the
+    # stack does not work on a 68000".
+    #
+    # THE LINT EXISTED AND NOTHING RAN IT, which is the state its own three
+    # case studies were found in.  It was also red on `main`, on three scripts
+    # that hardcode -m68000 -- the SAFE direction, which runs on every machine
+    # in the matrix and is never this bug; it flags -m68020 and newer now.
+    if tools/lint-guest-arch.sh > "$BUILD/guest-arch.log" 2>&1; then
+        note "guest arch: $(sed -n 's/^guest-arch: //p' "$BUILD/guest-arch.log")"
+    else
+        cat "$BUILD/guest-arch.log"
+        fail "a harness builds a guest binary for a newer CPU than the machine\
+ it runs it on (tools/lint-guest-arch.sh)"
+        return 1
+    fi
+
     # Every drawer in the archive is a configuration this script compiles.
     # The minimal drawer is not, and says so with its reason.
     if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
@@ -477,16 +495,15 @@ stage_host32() {
 # The host tier again, both widths, built under -fsanitize=address,undefined
 # with recovery off and leaks fatal.  The target cannot run a sanitizer, so
 # this is the only place a stray write in the portable stack sources faults
-# instead of corrupting another task.  Gated like analyze: off unless
-# AMINETXDUO_SANITIZE=1, and CI sets it, so nothing lands unsanitized.
+# instead of corrupting another task.  Gated like analyze: out of the default
+# stage list, run by naming it or by AMINETXDUO_SANITIZE=1, and CI does both,
+# so nothing lands unsanitized.
 
 stage_sanitize() {
-    if [ "${AMINETXDUO_SANITIZE:-0}" != "1" ]; then
-        hr "sanitizers (host)"
-        skip "sanitize: off by default, AMINETXDUO_SANITIZE=1 runs it (CI does)"
-        return "$NOTHING"
-    fi
-
+    # Not in the default stage list, and that is all the gating there is.
+    # Naming the stage runs it; so does AMINETXDUO_SANITIZE=1, which the main
+    # loop turns into a named stage.  A second refusal in here made both forms
+    # of the ask do nothing, which is what stage_analyze's comment describes.
     hr "sanitizers (host, 64-bit)"
 
     # Leak reports fail the run wherever the runtime has a detector.  Linux
@@ -598,6 +615,22 @@ stage_cross() {
     else
         skip "cross: no sfdc, the Developer drawer headers were NOT checked\
  against developer/sfd/aminetxduo_lib.sfd"
+    fi
+
+    # Same argument one file over, and it had already gone wrong.  The LVO
+    # table is generated from the NDK pragmas, and the four RFC 3493 if_*
+    # vectors at -0x372..-0x384 had been added to the OUTPUT by hand, so the
+    # generator no longer reproduced its own files: the next regeneration
+    # would have silently deleted four shipped LVOs.  Nothing ran --check,
+    # which is why nothing said so.  This runs it.
+    if python3 tools/gen_vectors.py \
+           --ndk "$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/ndk-include" \
+           --check > "$BUILD/gen-vectors.log" 2>&1; then
+        note "LVO table reproduces: $(tail -1 "$BUILD/gen-vectors.log")"
+    else
+        cat "$BUILD/gen-vectors.log"
+        fail "src/bsdsocket/bsdsocket_vectors.[ch] do not match\
+ tools/gen_vectors.py"
     fi
 
     # AMINETXDUO_CI_CROSS=default builds just one, what the emulator tier
@@ -793,19 +826,19 @@ stage_web() {
 
 stage_analyze() {
     #
-    # Off unless AMINETXDUO_ANALYZE=1. It is 2.5 minutes, its findings have not
-    # moved in weeks, and it was being run over and over by parallel agents who
-    # had been told to "run the full set once at the end", which is the wrong
-    # instruction and was mine. A refusal here holds whatever a brief says; the
-    # release workflow sets the variable, so nothing ships unanalysed.
+    # NOT IN THE DEFAULT STAGE LIST, and that is the whole of the gating now.
+    # It is 2.5 minutes and it was being re-run by parallel agents told to
+    # "run the full set once at the end", so it costs an explicit ask: either
+    # name the stage or set AMINETXDUO_ANALYZE=1, and the main loop adds it to
+    # the default list for the second.
     #
-    if [ "${AMINETXDUO_ANALYZE:-0}" != "1" ]; then
-        hr "static analysis (cross)"
-        skip "analyze: off by default, AMINETXDUO_ANALYZE=1 runs it (the release\
- workflow does)"
-        return 0
-    fi
-
+    # IT USED TO REFUSE HERE AS WELL, and that made both forms of the ask
+    # do nothing.  `tools/ci.sh analyze` named the stage and got a skip
+    # because the variable was unset; `AMINETXDUO_ANALYZE=1 tools/ci.sh` set
+    # the variable and got a default list the stage is not in, and printed
+    # "analyze NOT RUN" and "all green" in the same summary.  A gate that
+    # answers an explicit request by doing nothing is worse than no gate.
+    #
     hr "static analysis (cross)"
 
     export AMINETXDUO_ANALYZE_BUILD="$BUILD/analyze"
@@ -1345,19 +1378,34 @@ stage_smb() {
 mkdir -p "$BUILD"
 
 #
-# analyze is NOT in the default set. It is 2.5 minutes of the roughly four a
-# default run takes, and its findings do not move between commits the way a
-# build break does, the baseline has sat at 13 for weeks. Naming it runs it:
+# analyze and sanitize are NOT in the default set. analyze is 2.5 minutes of
+# the roughly four a default run takes, and its findings do not move between
+# commits the way a build break does. THERE ARE TWO WAYS TO ASK FOR EITHER,
+# AND BOTH NOW RUN IT:
 #
-#     tools/ci.sh analyze                  just it
-#     tools/ci.sh host host32 cross web analyze conformance    the release set
+#     tools/ci.sh analyze                  name the stage
+#     AMINETXDUO_ANALYZE=1 tools/ci.sh     set the variable; the default list
+#                                          below gains the stage
 #
-# The release workflow names it, so nothing ships unanalysed. A default run
+# Both used to be refused -- the stage checked the variable as well as being
+# named -- so `tools/ci.sh analyze` skipped and `AMINETXDUO_ANALYZE=1
+# tools/ci.sh` printed "analyze NOT RUN" and "all green" together.
+#
+# The release workflow does both, so nothing ships unanalysed. A default run
 # says out loud that it skipped, because a stage that goes quiet reads as
 # coverage it is not providing.
 #
 WANT=("$@")
-[ ${#WANT[@]} -gt 0 ] || WANT=(host host32 cross web conformance)
+if [ ${#WANT[@]} -eq 0 ]; then
+    WANT=(host host32 cross web conformance)
+    # THE VARIABLE IS THE ASK.  Setting it and getting a run that prints
+    # "analyze NOT RUN" is the mechanism behind every false green report this
+    # gate has produced; the variable was necessary and not sufficient, and
+    # the stage had to be named as well.  Naming it still works and is still
+    # what CI does.  Same for sanitize, which was gated the same way.
+    if [ "${AMINETXDUO_SANITIZE:-0}" = "1" ]; then WANT+=(sanitize); fi
+    if [ "${AMINETXDUO_ANALYZE:-0}"  = "1" ]; then WANT+=(analyze);  fi
+fi
 
 stage_submodules
 
@@ -1412,11 +1460,11 @@ note "stages: ${STAGES_RUN[*]}"
 
 case " ${STAGES_RUN[*]} " in
     *" analyze "*) ;;
-    *) note "analyze NOT RUN, AMINETXDUO_ANALYZE=1 tools/ci.sh analyze" ;;
+    *) note "analyze NOT RUN, AMINETXDUO_ANALYZE=1 tools/ci.sh" ;;
 esac
 case " ${STAGES_RUN[*]} " in
     *" sanitize "*) ;;
-    *) note "sanitize NOT RUN, AMINETXDUO_SANITIZE=1 tools/ci.sh sanitize" ;;
+    *) note "sanitize NOT RUN, AMINETXDUO_SANITIZE=1 tools/ci.sh" ;;
 esac
 if [ ${#SKIPPED[@]} -ne 0 ]; then
     printf '\033[33m%d skipped:\033[0m\n' "${#SKIPPED[@]}"

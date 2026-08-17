@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 #
-# Run the shared-library load test under FS-UAE with an A2065 on SLIRP.
+# Run the shared-library load test under Amiberry with an A2065.
 #
-#   tests/libraries/run-fsuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#   tests/libraries/run-libraries.sh [-m MODEL] [-t SECONDS] [-c CPU]
+#                                    [-b BUILDDIR]
+#
+# It was called run-fsuae.sh and it drove tools/amiberry-run.sh.  fs-uae left
+# the tree on 2026-08-04 and the name outlived it.
 #
 # -b (or AMINETXDUO_BUILD) picks the build tree, so the floor build and an
 # -DAMINETXDUO_IPV6=ON build can both be run without renaming directories.

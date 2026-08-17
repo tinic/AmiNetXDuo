@@ -164,7 +164,16 @@ mkdir -p "$CLIENT_OBJ"
 echo "==> support archives ($AMIGA_CLIENT_ARCH)"
 amiga_client_prepare "$CLIENT_ROOT"
 
-OUT="$ROOT/$BUILD"
+# -b takes either form.  It used to be `OUT="$ROOT/$BUILD"` unconditionally,
+# and tools/classicwb.sh passes an always-absolute -b, so the build landed at
+# $ROOT$ROOT/... while the launcher looked where it had asked and exited
+# `no ssh at .../dbclient: the archive would carry none`.  A fresh checkout
+# could not build its own release archive; every rig run so far worked around
+# it with AMINETXDUO_SSH= pointed at the doubled path.
+case "$BUILD" in
+    /*) OUT="$BUILD" ;;
+    *)  OUT="$ROOT/$BUILD" ;;
+esac
 LOG="$OUT-configure.log"
 mkdir -p "$OUT"
 
@@ -509,9 +518,11 @@ for p in $PROGRAMS; do
     ls -l "$OUT/$p"
 done
 echo
-"$AMIGA_SIZE" $(for p in $PROGRAMS; do echo "$OUT/$p"; done) 2>/dev/null || true
+SIZE_ARGS=()
+for p in $PROGRAMS; do SIZE_ARGS+=("$OUT/$p"); done
+"$AMIGA_SIZE" "${SIZE_ARGS[@]}" 2>/dev/null || true
 echo
-echo "dbclient for AmigaOS: $BUILD/dbclient"
+echo "dbclient for AmigaOS: $OUT/dbclient"
 echo "  kex/cipher set (localoptions.h wins over default_options.h):"
 # Reporting default_options.h alone was wrong the moment -O existed: it says
 # CURVE25519 1 for a build that has none.  So the override file is read first

@@ -2,7 +2,7 @@
 #
 # Run the shipped commands against IPv6, and assert on what they print.
 #
-#   tests/ipv6/run-tools-fsuae.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-s]
+#   tests/ipv6/run-tools-amiberry.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-s]
 #
 # docs/RESEARCH.md 66 measured every command answering an IPv6 literal with
 # "cannot resolve", followed by advice to check the spelling and the name
@@ -649,13 +649,39 @@ fi
 # --------------------------------------------------------------- verdict ---
 
 echo
+
+# THE EMULATOR'S OWN STATUS IS PART OF THE VERDICT.  RUN_RC was read and then
+# used only in the "no transcript" message, so a run that timed out half way
+# through, or took an illegal instruction, or came up on a backend it did not
+# ask for, was graded on a partial transcript as if it had finished.
+# tools/amiberry-run.sh's header lists what 4, 5 and 124 mean.
+case "$RUN_RC" in
+    0) ;;
+    4)   bad "the guest is built for a CPU this machine does not have,\
+ so nothing below ran" ;;
+    5)   bad "the run did not get the network backend it asked for,\
+ so it was never on the link it was meant to be on" ;;
+    124) bad "the run TIMED OUT, so the transcript above is partial\
+ whatever it says" ;;
+    *)   bad "the run exited $RUN_RC" ;;
+esac
+
+kv() {
+    printf 'name=ipv6-tools\nverdict=%s\nreason=%s\n' "$1" "$2"
+    printf 'failed=%s\npending=%s\nstrict=%s\nrun_rc=%s\ntranscript=%s\n' \
+           "$FAILED" "$PENDING" "$STRICT" "$RUN_RC" "$REPORT"
+}
+
 if [ "$FAILED" -gt 0 ]; then
     echo "FAILED: $FAILED assertion(s), $PENDING pending"
+    kv FAIL assertions
     exit 1
 fi
 if [ "$PENDING" -gt 0 ]; then
     echo "PENDING: $PENDING assertion(s) waiting on the tools work; nothing failed"
+    kv PENDING work_not_in_yet
     exit 3
 fi
 echo "PASS: everything asserted, nothing pending"
+kv PASS ok
 exit 0

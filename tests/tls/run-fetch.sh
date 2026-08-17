@@ -178,11 +178,21 @@ echo "====================================================================="
 echo
 
 if [ -n "${AMINETXDUO_FETCH_COMMANDS:-}" ]; then
-    echo "==> AMINETXDUO_FETCH_COMMANDS was set, so only the transcript and the"
-    echo "    emulator's status are checked."
-    [ "$RUN_RC" = "0" ] || { echo "fetch: FAILED, emulator rc=$RUN_RC" >&2; exit 1; }
-    echo "fetch: PASSED (custom command list)"
-    exit 0
+    echo "==> AMINETXDUO_FETCH_COMMANDS was set: there is no command list here"
+    echo "    to score, so only the emulator's status was checked."
+    [ "$RUN_RC" = "0" ] || {
+        echo "fetch: FAILED, emulator rc=$RUN_RC" >&2
+        printf 'name=fetch\nverdict=FAIL\nreason=emulator_rc\nrun_rc=%s\n' "$RUN_RC"
+        exit 1; }
+    # 77, NOT 0.  "The emulator came back" is not a result about fetch, and
+    # printing `fetch: PASSED` for it made tests/tls/run-hangup.sh -- which
+    # has no assertions of its own and forwards this exit status -- report a
+    # pass for four rude-peer cases nothing had looked at.  77 is the skip
+    # convention tools/test-verdict.sh already uses.
+    echo "fetch: NOT SCORED (custom command list), read the transcript above"
+    printf 'name=fetch\nverdict=SKIP\nreason=custom_command_list\nrun_rc=%s\n' \
+           "$RUN_RC"
+    exit 77
 fi
 
 FAILED=0
