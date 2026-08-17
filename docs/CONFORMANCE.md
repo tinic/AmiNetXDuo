@@ -56,6 +56,14 @@ transmitting SYN-ACKs. RFC 4987 says no SYN defence addresses a packet-rate
 attack. At 100/s the state the cache protects is already exhausted many times
 over -- 2500 SYNs held 20 s each is about 2000 outstanding against 512 entries.
 
+## Implemented, and where it is not proven
+
+| RFC | What is done | Where |
+|---|---|---|
+| RFC 8415 | DHCPv6 client: stateful IA_NA with DAD on the assigned address, T1/T2 renew and rebind, and a Release when the interface goes down; Information-Request for the other configuration. The DUID is DUID-LL (11.4), because the target has no trustworthy clock and no stable place to keep a DUID-LLT's timestamp, so an LLT would be a fresh identity every boot. RFC 4861 4.2's M and O flags drive `CONFIGURE6=AUTO`, and M implies O, so one exchange and never both | `src/netstack/netstack_dhcpv6.c` |
+
+OPTION_PREFERENCE (RFC 8415 18.2.1) is implemented by the vendored client and is UNTESTED: no server in the lab can send it, so on a link with two DHCPv6 servers the choice is by arrival order. Rapid Commit, IA_TA, IA_PD and Reconfigure are not used.
+
 ## Declined, with the cost of declining
 
 | Item | Reason |
