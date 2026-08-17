@@ -68,25 +68,42 @@
 #endif
 
 /*
- * There is deliberately no minimum here above AMI_SANA2_RX_DEPTH_IPV4.
+ * THERE IS DELIBERATELY NO MINIMUM HERE ABOVE AMI_SANA2_RX_DEPTH_IPV4, AND
+ * RAISING ONE IS THE MISTAKE TO READ THIS BEFORE MAKING.
  *
- * Eight looked right: tests/curl/run-curlverify.sh -p lost fifteen SYN/ACKs of
- * forty at depth four and none at eight, so a want floored at eight was tried.
- * It is wrong on the machine it was aimed at. Under a UDP flood the memory
- * tight A1200 -- 2 MB chip, no Fast RAM, pool 47 -- caught 170 datagrams of
- * 2552 with the pool's own number, five, and 30 with eight. Five times worse,
- * three runs each, non-overlapping.
+ * Eight looked right. tests/curl/run-curlverify.sh -p loses fifteen SYN/ACKs
+ * of forty at depth four and none at eight, so a want floored at eight was
+ * tried, and it is wrong on the machine it was aimed at. Under a UDP flood the
+ * memory-tight A1200 -- 2 MB chip, no Fast RAM, pool 47 packets -- caught this
+ * many datagrams of 2552 offered at 6000 kbit/s, three runs each, arms
+ * alternating direction:
  *
- * The reason is that the read queue and the socket receive queue come out of
- * the same 47 packets. A deeper read queue hands the socket more datagrams
- * sooner, the socket queue overruns, and the reader then cannot allocate a
- * replacement to re-arm with. On a pool that size the packets are worth more
- * free than posted, and AROSTCP's floor of sixteen -- a third of this pool --
- * would be far past the point where that turns over.
+ *      plan 5/2/2, the pool's own number      168, 170, 186
+ *      plan 7/2/2, the want floored at eight   28,  30,  39
+ *      plan 5/2/4, the floor taken out again  166, 175, 184
+ *
+ * Non-overlapping, and the third row is the second row's binary with the floor
+ * removed. Two extra reads out of forty-seven packets cost four fifths of what
+ * the machine could catch.
+ *
+ * A PACKET IS WORTH MORE FREE THAN POSTED WHEN THE READ QUEUE AND THE SOCKET
+ * RECEIVE QUEUE COME OUT OF ONE POOL. A deeper read queue hands the socket
+ * more datagrams sooner, the socket queue overruns, and the reader cannot then
+ * allocate a replacement to re-arm with -- so the queue that was made deeper
+ * runs shallower in practice. That turnover is the whole reason this is a want
+ * and not a floor.
+ *
+ * AND IT IS THE MEASURED ANSWER TO AROSTCP'S FLOOR OF SIXTEEN. Sixteen is a
+ * third of this pool. Seven was already four fifths of the way down; sixteen
+ * is far past where it turns over. The reference implementation is not wrong
+ * for its own stack -- it is wrong for a stack whose reads and whose sockets
+ * are drawing on the same packets -- and nothing in the code says so, which is
+ * why this comment does.
  *
  * The curl measurement is not contradicted: it was taken on a machine whose
  * pool gives thirty-two anyway. Every machine with any Fast RAM at all is
- * already above eight from the pool alone.
+ * already above eight from the pool alone, so the floor could only ever have
+ * bitten where it did harm.
  */
 /*
  * The deepest the IPv6 reader is planned, however much the pool can spare.
