@@ -60,4 +60,13 @@
 #define LE_T1_STP       0x0200
 #define LE_T1_ENP       0x0100
 
+/* Transmit descriptor, fourth word.  BUFF and UFLO stop an Am7990's
+   transmitter; the ring must be reinitialised before another frame can go. */
+#define LE_T3_BUFF      0x8000
+#define LE_T3_UFLO      0x4000
+#define LE_T3_LCOL      0x1000
+#define LE_T3_LCAR      0x0800
+#define LE_T3_RTRY      0x0400
+#define LE_T3_TDR_MASK  0x03ff
+
 #endif /* AMINETXDUO_LANCEREG_H */

@@ -165,6 +165,23 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_el3 COMMAND test_netdev_el3)
 
+    # The A2065/Ariadne LANCE.  Its fatal transmit faults are a real-hardware
+    # distinction: BUFF/UFLO clear TXON, while emulators normally leave the
+    # engine running and never exercise recovery.  A reactive CSR mock drives
+    # that stopped state and the descriptor result which caused it.
+    add_executable(test_netdev_lance
+        test/test_netdev_lance.c)
+
+    target_include_directories(test_netdev_lance PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_lance PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_lance COMMAND test_netdev_lance)
+
     # The derived station address.  Determinism, the locally-administered and
     # unicast bits, and "two different machines get two different addresses"
     # are all properties an emulator cannot show: its card has a valid PROM,

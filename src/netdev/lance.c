@@ -103,6 +103,7 @@ static UWORD le_get16(NetdevNic *nic, ULONG off)
  * which is why netdev_bus's byte accessors are not used here: a LANCE register
  * is a word and half of one is not a register.
  */
+#ifndef LANCE_CSR_GET
 static volatile UWORD *le_rdp(NetdevNic *nic)
 {
     return (volatile UWORD *)(volatile void *)
@@ -127,13 +128,20 @@ static VOID le_csr_put(NetdevNic *nic, UWORD csr, UWORD v)
     *le_rdp(nic) = le_swap(nic, v);
 }
 
+/* A RAP/RDP pair is stateful rather than memory.  The seams let the host test
+   model its write-one-to-clear and INIT behaviour; they compile to the two
+   direct helpers above in the device. */
+#define LANCE_CSR_GET(nic, csr)       le_csr_get((nic), (csr))
+#define LANCE_CSR_PUT(nic, csr, val)  le_csr_put((nic), (csr), (val))
+#endif
+
 LONG lance_init(NetdevNic *nic);
 
 /* ---------------------------------------------------------------- stop --- */
 
 VOID lance_halt(NetdevNic *nic)
 {
-    le_csr_put(nic, LE_CSR0, LE_C0_STOP);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STOP);
     nic->running = FALSE;
 }
 
@@ -237,17 +245,17 @@ LONG lance_init(NetdevNic *nic)
     UWORD n = 1000;
     UWORD csr0;
 
-    le_csr_put(nic, LE_CSR0, LE_C0_STOP);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STOP);
 
     le_rings(nic);
     le_write_init(nic);
 
     /* Where the init block is, split across CSR1 and CSR2. */
-    le_csr_put(nic, LE_CSR1, (UWORD)(LE_INIT_OFF & 0xffff));
-    le_csr_put(nic, LE_CSR2, (UWORD)((LE_INIT_OFF >> 16) & 0xff));
-    le_csr_put(nic, LE_CSR3, 0);        /* no BSWP: the board does the lanes */
+    LANCE_CSR_PUT(nic, LE_CSR1, (UWORD)(LE_INIT_OFF & 0xffff));
+    LANCE_CSR_PUT(nic, LE_CSR2, (UWORD)((LE_INIT_OFF >> 16) & 0xff));
+    LANCE_CSR_PUT(nic, LE_CSR3, 0);     /* no BSWP: the board does the lanes */
 
-    le_csr_put(nic, LE_CSR0, LE_C0_INIT);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_INIT);
 
     /*
      * IDON says the chip has read the init block.  It is a DMA of 24 bytes
@@ -256,7 +264,7 @@ LONG lance_init(NetdevNic *nic)
      */
     do
     {
-        csr0 = le_csr_get(nic, LE_CSR0);
+        csr0 = LANCE_CSR_GET(nic, LE_CSR0);
     }
     while ((csr0 & (LE_C0_IDON | LE_C0_ERR)) == 0 && --n != 0);
 
@@ -264,11 +272,11 @@ LONG lance_init(NetdevNic *nic)
     if ((csr0 & LE_C0_IDON) == 0)
         return -1;
 
-    le_csr_put(nic, LE_CSR0, LE_C0_IDON);           /* acknowledge */
-    le_csr_put(nic, LE_CSR0, LE_C0_STRT | LE_C0_INEA);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_IDON);        /* acknowledge */
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STRT | LE_C0_INEA);
 
     nic->running = TRUE;
-    LE_TRACE("le: running ", le_csr_get(nic, LE_CSR0));
+    LE_TRACE("le: running ", LANCE_CSR_GET(nic, LE_CSR0));
 
     return 0;
 }
@@ -323,7 +331,8 @@ static VOID le_rint(NetdevNic *nic)
 
 /* ------------------------------------------------------------ transmit --- */
 
-static VOID le_tint(NetdevNic *nic)
+/* TRUE means a fatal descriptor error reset the rings. */
+static BOOL le_tint(NetdevNic *nic)
 {
     while (nic->txb_inuse != 0)
     {
@@ -331,14 +340,43 @@ static VOID le_tint(NetdevNic *nic)
         UWORD md1 = le_get16(nic, d + 2);
 
         if ((md1 & LE_T1_OWN) != 0)
-            return;                     /* still being sent */
+            return FALSE;               /* still being sent */
 
         if ((md1 & LE_T1_ERR) != 0)
+        {
+            UWORD md3 = le_get16(nic, d + 6);
+
             nic->tx_errors++;
+
+            if ((md3 & LE_T3_LCOL) != 0)
+                nic->collisions++;
+            if ((md3 & LE_T3_RTRY) != 0)
+                nic->collisions += 16;
+
+            /* Am7990 BUFF and UFLO clear CSR0.TXON.  Merely retiring this
+               descriptor leaves a unit which reports itself running but can
+               never send again.  Rebuild both rings, the chip's documented
+               recovery and the one the reference Am7990 drivers use. */
+            if ((md3 & (LE_T3_BUFF | LE_T3_UFLO)) != 0)
+            {
+                lance_reset(nic);
+                return TRUE;
+            }
+        }
+        else
+        {
+            if ((md1 & LE_T1_ONE) != 0)
+                nic->collisions++;
+            else if ((md1 & LE_T1_MORE) != 0)
+                nic->collisions += 2;   /* exact retry count is unavailable */
+            nic->tx_packets++;
+        }
 
         nic->txb_inuse--;
         nic->tx_done = (UWORD)((nic->tx_done + 1) & (LE_TX_RING - 1));
     }
+
+    return FALSE;
 }
 
 /* The buffer the next transmit will use, for the shell to frame into. */
@@ -396,7 +434,7 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     nic->tx_next = (UWORD)((nic->tx_next + 1) & (LE_TX_RING - 1));
     nic->txb_inuse++;
 
-    le_csr_put(nic, LE_CSR0, LE_C0_INEA | LE_C0_TDMD);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_INEA | LE_C0_TDMD);
 
     return 0;
 }
@@ -411,25 +449,26 @@ BOOL lance_intr(NetdevNic *nic)
     if (!nic->running)
         return FALSE;
 
-    csr0 = le_csr_get(nic, LE_CSR0);
+    csr0 = LANCE_CSR_GET(nic, LE_CSR0);
     if ((csr0 & LE_C0_INTR) == 0)
         return FALSE;
 
     do
     {
         /* The bits written back are the acknowledge.  INEA is kept set. */
-        le_csr_put(nic, LE_CSR0,
-                   (UWORD)((csr0 & (LE_C0_BABL | LE_C0_CERR | LE_C0_MISS |
-                                    LE_C0_MERR | LE_C0_RINT | LE_C0_TINT)) |
-                           LE_C0_INEA));
+        LANCE_CSR_PUT(
+            nic, LE_CSR0,
+            (UWORD)((csr0 & (LE_C0_BABL | LE_C0_CERR | LE_C0_MISS |
+                             LE_C0_MERR | LE_C0_RINT | LE_C0_TINT)) |
+                    LE_C0_INEA));
 
         if ((csr0 & LE_C0_MISS) != 0)
             nic->rx_errors++;
 
         if ((csr0 & LE_C0_RINT) != 0)
             le_rint(nic);
-        if ((csr0 & LE_C0_TINT) != 0)
-            le_tint(nic);
+        if ((csr0 & LE_C0_TINT) != 0 && le_tint(nic))
+            return TRUE;
 
         if ((csr0 & LE_C0_MERR) != 0)
         {
@@ -440,9 +479,22 @@ BOOL lance_intr(NetdevNic *nic)
             return TRUE;
         }
 
-        csr0 = le_csr_get(nic, LE_CSR0);
+        csr0 = LANCE_CSR_GET(nic, LE_CSR0);
     }
     while ((csr0 & LE_C0_INTR) != 0 && --rounds != 0);
+
+    /* Descriptor errors are not the only way either half can stop.  A real
+       Am7990 exposes the stopped state in CSR0; emulators commonly leave both
+       bits set forever, which is why checking only MERR misses this on real
+       A2065 hardware. */
+    if ((csr0 & LE_C0_RXON) == 0 || (csr0 & LE_C0_TXON) == 0)
+    {
+        if ((csr0 & LE_C0_RXON) == 0)
+            nic->rx_errors++;
+        if ((csr0 & LE_C0_TXON) == 0)
+            nic->tx_errors++;
+        lance_reset(nic);
+    }
 
     return TRUE;
 }
@@ -461,8 +513,8 @@ LONG lance_attach(NetdevNic *nic)
     if (nic->card->mem_size < LE_END)
         return -1;
 
-    le_csr_put(nic, LE_CSR0, LE_C0_STOP);
-    csr0 = le_csr_get(nic, LE_CSR0);
+    LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_STOP);
+    csr0 = LANCE_CSR_GET(nic, LE_CSR0);
     LE_TRACE("le: attach csr0 ", csr0);
     if ((csr0 & 0xff00) != 0 || (csr0 & LE_C0_STOP) == 0)
     {
