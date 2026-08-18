@@ -1654,6 +1654,46 @@ ULONG                   arrived_on = 0;
                       "and reports MSG_CTRUNC", msg.msg_flags);
     }
 
+    /* No control storage is the shortest possible truncated buffer. */
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (rc == (LONG)sizeof(datagram))
+    {
+        t_bzero(&msg, sizeof(msg));
+        iov.iov_base       = buffer;
+        iov.iov_len        = sizeof(buffer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = NULL;
+        msg.msg_controllen = 0;
+
+        rc = bsd_recvmsg(server, &msg, 0);
+        (VOID)t_check((BOOL)(rc == (LONG)sizeof(datagram)),
+                      "recvmsg without control storage still delivers", rc);
+        (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) != 0),
+                      "and reports discarded control data", msg.msg_flags);
+    }
+
+    /* A non-NULL buffer shorter than one header has the same result. */
+    rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
+                    sizeof(sa));
+    if (rc == (LONG)sizeof(datagram))
+    {
+        t_bzero(&msg, sizeof(msg));
+        iov.iov_base       = buffer;
+        iov.iov_len        = sizeof(buffer);
+        msg.msg_iov        = &iov;
+        msg.msg_iovlen     = 1;
+        msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
+        msg.msg_controllen = sizeof(struct cmsghdr) - 1;
+
+        rc = bsd_recvmsg(server, &msg, 0);
+        (VOID)t_check((BOOL)(rc == (LONG)sizeof(datagram)),
+                      "recvmsg with a sub-header control buffer delivers", rc);
+        (VOID)t_check((BOOL)((msg.msg_flags & MSG_CTRUNC) != 0),
+                      "and reports the truncated header", msg.msg_flags);
+    }
+
     (VOID)bsd_CloseSocket(server);
     (VOID)bsd_CloseSocket(client);
 }
