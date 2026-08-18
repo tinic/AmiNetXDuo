@@ -1305,6 +1305,25 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
     echo "!! the install run did not complete cleanly (status $INSTALL_STATUS)"
     echo "   the drive is left at $HD"
+
+    # THE DIAGNOSIS, NOT A HINT.  At NOVICE the script aborts outright when its
+    # detection loop found nothing and there is no configuration to keep --
+    # Install-AmiNetXDuo:633-641, "The installer found no network card driver
+    # in DEVS: or DEVS:Networks" -- and the loop only knows eight file names.
+    # A machine with this card and this driver therefore cannot install the
+    # archive at the default user level at all, and that reads from the log as
+    # an install that failed rather than as a script that refused.
+    if [ "$LEVEL" = "NOVICE" ] && [ "$INSTALLER_KNOWS_DRIVER" = "no" ]; then
+        echo
+        echo "   WHY: $SANA2_DRIVER is not one of the eight file names"
+        echo "   Install-AmiNetXDuo:524-533 detects, so DET_INDEX stayed -1,"
+        echo "   and with no existing configuration to keep the abort at"
+        echo "   Install-AmiNetXDuo:633-641 fires before anything is written."
+        echo "   At NOVICE there is no card page to answer instead.  A user"
+        echo "   with a $BOARD cannot install this archive at the default"
+        echo "   user level.  -l AVERAGE draws the page; it still defaults to"
+        echo "   the A2065, which is the other half of the same defect."
+    fi
     echo
     echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
          "card_config=$CARD_CONFIG installer_card_selected=$CARD_SELECTED" \
