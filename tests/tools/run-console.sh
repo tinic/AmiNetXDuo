@@ -909,8 +909,18 @@ EOF
     # stream of its own: the file collects Run's `[CLI 3]` line and not one
     # word from the program.  The redirection here is kept anyway, because it
     # is where Run says whether it managed to start anything at all.
+    #
+    # DEPTH 0 FIRST, and it is not a duplicate.  chipscreen at depth 0 reports
+    # the Workbench screen and RETURNS, so it is the one call here whose
+    # completion the boot can observe: a report file that never appears says
+    # the program did not run, which a Run line -- whose child is off on its
+    # own process with its own output stream -- cannot distinguish from a
+    # program that ran and refused.  It is also the answer to whether
+    # screenmode.prefs moved Workbench, read before this puts a screen of its
+    # own in front of it.
     if [ -n "$CHIP" ]; then
         cat >> "$HD/S/Startup-Sequence" <<EOF
+C:chipscreen $(arm_mode_id "$CHIP") $CHIP_W $CHIP_H 0 DH0:chipscreen-wb.txt
 Run >DH0:chipscreen-run.txt <NIL: C:chipscreen $(arm_mode_id "$CHIP") $CHIP_W $CHIP_H $depth DH0:chipscreen.txt
 C:Wait 15
 EOF
@@ -1501,6 +1511,17 @@ for arm in "${ARMS[@]}"; do
         wire_depth=${wire_depth% }
         say "${tag}_chipset_format" "${fmt:-none}"
         say "${tag}_chipset_wire_depth" "${wire_depth:-none}"
+
+        # The depth 0 pass, which ran to completion in the boot and says what
+        # Workbench itself came up on.
+        if [ -f "$HD/chipscreen-wb.txt" ]; then
+            cp "$HD/chipscreen-wb.txt" "$OUTDIR/$tag-chipscreen-wb.txt"
+            while IFS='=' read -r k v; do
+                case "$k" in wb_*) say "${tag}_$k" "$v" ;; esac
+            done < <(grep '=' "$HD/chipscreen-wb.txt" || true)
+        else
+            say "${tag}_chip_loaded" "no; C:chipscreen wrote no report at depth 0"
+        fi
 
         guest="$HD/chipscreen.txt"
         if [ -f "$guest" ]; then

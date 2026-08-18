@@ -63,7 +63,7 @@
 #include <proto/graphics.h>
 #include <proto/intuition.h>
 
-#include <stdio.h>
+#include <stdarg.h>
 
 /* Opened here, and that is not a formality: these are the globals the proto/
    inlines jump through and nothing in this executable's startup fills them
@@ -71,9 +71,44 @@
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
 
-/* Where every key=value goes.  stdout until a REPORT argument opens a file,
-   so a run started by hand from a Shell still prints. */
-static FILE *rep;
+/*
+ * Where every key=value goes: Output() until a REPORT argument opens a file,
+ * so a run started by hand from a Shell still prints.
+ *
+ * DOS AND NOT STDIO, and that is the difference between this file working and
+ * not.  This toolchain's crt0 gives a Shell command 4096 bytes of stack and
+ * exports no __stack hook to ask for more, and newlib's vfprintf does not fit
+ * in it: the first printf() jumps into low memory and takes the machine with
+ * it, before one byte of output has been written.  That is why every tool in
+ * src/tools goes through tool_printf() rather than printf(), and why the
+ * format strings below are RawDoFmt's -- %ld, %lu, %lx, every argument 32
+ * bits wide.  tests/perf/rtgscreen.c still uses stdio and dies the same way.
+ */
+static BPTR rep;
+
+static VOID say(const char *fmt, ...)
+{
+    va_list args;
+
+    va_start(args, fmt);
+    /* (APTR)args is the same cast tool_printf() makes: every vararg here is
+       32 bits, so the list is already the array RawDoFmt wants. */
+    VFPrintf(rep, (CONST_STRPTR)fmt, (APTR)args);
+    va_end(args);
+    Flush(rep);
+}
+
+/* The report is closed before the wait that never ends, so a reader on the
+   other side of the emulated drive sees a whole file rather than whatever the
+   filesystem happened to have written out. */
+static VOID report_done(VOID)
+{
+    if (rep != Output())
+    {
+        Close(rep);
+        rep = Output();
+    }
+}
 
 /* What the picture is made of, which follows the mode and the depth exactly
    as fb_planar_format() in src/tools/httpfb.c follows them.  The guest and the
@@ -364,17 +399,17 @@ static VOID report_workbench(VOID)
 
     if (wb == NULL)
     {
-        fprintf(rep, "wb_screen=none\n");
+        say("wb_screen=none\n");
         return;
     }
 
     id = GetVPModeID(&wb->ViewPort);
-    fprintf(rep, "wb_mode=%08lx\n", (unsigned long)id);
-    fprintf(rep, "wb_size=%ldx%ld\n", (long)wb->Width, (long)wb->Height);
-    fprintf(rep, "wb_depth=%d\n", (int)wb->RastPort.BitMap->Depth);
-    fprintf(rep, "wb_ham=%s\n", (id != (ULONG)INVALID_ID && (id & HAM_KEY) != 0UL)
+    say("wb_mode=%08lx\n", (unsigned long)id);
+    say("wb_size=%ldx%ld\n", (long)wb->Width, (long)wb->Height);
+    say("wb_depth=%ld\n", (long)wb->RastPort.BitMap->Depth);
+    say("wb_ham=%s\n", (id != (ULONG)INVALID_ID && (id & HAM_KEY) != 0UL)
                           ? "yes" : "no");
-    fprintf(rep, "wb_ehb=%s\n",
+    say("wb_ehb=%s\n",
            (id != (ULONG)INVALID_ID && (id & EXTRAHALFBRITE_KEY) != 0UL)
            ? "yes" : "no");
     UnlockPubScreen(NULL, wb);
@@ -429,22 +464,18 @@ int main(VOID)
     depth  = arg_word(&args, 6UL);
     report = arg_name(&args);
 
-    rep = stdout;
+    rep = Output();
     if (report != NULL)
     {
-        FILE *f = fopen(report, "w");
+        BPTR f = Open((CONST_STRPTR)report, MODE_NEWFILE);
 
-        if (f != NULL)
+        if (f != (BPTR)0)
             rep = f;
     }
 
-    /* Unbuffered: the success path never returns, so anything left in a stdio
-       buffer is output nobody ever sees. */
-    setvbuf(rep, NULL, _IONBF, 0);
-
-    fprintf(rep, "args_mode=%08lx\n", (unsigned long)id);
-    fprintf(rep, "args_size=%lux%lu\n", (unsigned long)width, (unsigned long)height);
-    fprintf(rep, "args_depth=%lu\n", (unsigned long)depth);
+    say("args_mode=%08lx\n", (unsigned long)id);
+    say("args_size=%lux%lu\n", (unsigned long)width, (unsigned long)height);
+    say("args_depth=%lu\n", (unsigned long)depth);
 
     GfxBase = (struct GfxBase *)
         OpenLibrary((CONST_STRPTR)"graphics.library", 39);
@@ -452,7 +483,8 @@ int main(VOID)
         OpenLibrary((CONST_STRPTR)"intuition.library", 39);
     if (GfxBase == NULL || IntuitionBase == NULL)
     {
-        fprintf(rep, "result=no graphics.library or intuition.library at V39\n");
+        say("result=no graphics.library or intuition.library at V39\n");
+        report_done();
         return RETURN_FAIL;
     }
 
@@ -463,15 +495,17 @@ int main(VOID)
        boot on this line with the server still further down the sequence. */
     if (depth == 0UL)
     {
-        fprintf(rep, "result=reported\n");
+        say("result=reported\n");
+        report_done();
         return RETURN_OK;
     }
 
     if (width < 16UL || width > MAX_WIDTH || height < 16UL || depth > 8UL)
     {
-        fprintf(rep, "result=%lux%lux%lu is outside what this draws\n",
+        say("result=%lux%lux%lu is outside what this draws\n",
                (unsigned long)width, (unsigned long)height,
                (unsigned long)depth);
+        report_done();
         return RETURN_FAIL;
     }
 
@@ -488,9 +522,10 @@ int main(VOID)
 
     if (sc == NULL)
     {
-        fprintf(rep, "result=OpenScreen refused mode %08lx at %lux%lu depth %lu\n",
+        say("result=OpenScreen refused mode %08lx at %lux%lu depth %lu\n",
                (unsigned long)id, (unsigned long)width,
                (unsigned long)height, (unsigned long)depth);
+        report_done();
         return RETURN_FAIL;
     }
 
@@ -514,13 +549,13 @@ int main(VOID)
     PubScreenStatus(sc, 0);
     ScreenToFront(sc);
 
-    fprintf(rep, "screen_mode=%08lx\n", (unsigned long)open_id);
-    fprintf(rep, "screen_size=%ldx%ld\n", (long)sc->Width, (long)sc->Height);
-    fprintf(rep, "screen_depth=%lu\n", (unsigned long)depth);
-    fprintf(rep, "pattern=%s\n", pattern_name[kind]);
-    fprintf(rep, "palette_entries=%lu\n", (unsigned long)colours);
-    fprintf(rep, "result=open\n");
-    fflush(rep);
+    say("screen_mode=%08lx\n", (unsigned long)open_id);
+    say("screen_size=%ldx%ld\n", (long)sc->Width, (long)sc->Height);
+    say("screen_depth=%lu\n", (unsigned long)depth);
+    say("pattern=%s\n", pattern_name[kind]);
+    say("palette_entries=%lu\n", (unsigned long)colours);
+    say("result=open\n");
+    report_done();
 
     /* And it stays.  A screen that closed when this returned would be in front
        for no part of the session it exists for. */

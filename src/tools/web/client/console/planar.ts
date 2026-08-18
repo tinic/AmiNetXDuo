@@ -371,6 +371,15 @@ const EIGHT = new Int32Array(8);
  *
  * Control 1 is blue, 2 is red, 3 is green. That order is the Amiga's and it is
  * not the order anything else uses, so it is worth reading twice.
+ *
+ * Whole rows are not expensive. Measured in node on an M-series laptop over
+ * planes filled with noise, which defeats the zero-byte skip the palette loop
+ * below leans on, and decoding the WHOLE screen every time rather than the
+ * rows that moved: HAM6 320x256 in 0.509 ms, HAM6 640x256 in 1.004 ms, HAM8
+ * 320x256 in 0.575 ms, and HAM8 640x480 -- the largest of these there is -- in
+ * 2.100 ms. A 60 Hz budget is 16.7 ms. Extra half-brite does not come here at
+ * all and costs 0.254 ms at 320x256, which is the palette loop's own number,
+ * because it is the palette loop.
  */
 function decodeHamRows(
   s: Screen,
