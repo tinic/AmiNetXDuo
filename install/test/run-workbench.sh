@@ -8,9 +8,10 @@
 #                                       [-p CHOICE]
 #                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
 #
-# -p NAMES A BUTTON ON AN askchoice PAGE, and the one that matters is
-# `-p Minimal`: the second stack in the archive, with IPv6, mDNS, the packet
-# filter, TLS, IPv4 multicast, the ARexx host and the TCP: handler compiled
+# -p NAMES AN OPTION ON AN askchoice PAGE.  It takes `minimal` or `full`, and
+# `-p minimal` is the one that matters: the second stack in the archive, with
+# IPv6, mDNS, the packet filter, TLS, IPv4 multicast, the ARexx host and the
+# TCP: handler compiled
 # out.  Until installdrive.c learned to click a choice, this harness took the
 # default of every askchoice in the script, so Libs/minimal/bsdsocket.library
 # shipped in every archive and had never been installed or booted by any
@@ -220,11 +221,21 @@ if [ "$TERMINAL" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     exit 2
 fi
 
-# -p names a button on an askchoice page -- "Minimal" for the stack question --
-# and needs a level for the same reason -H does: at NOVICE the page is never
+# -p takes a name, not a gadget number: the number is this file's business.
+# "minimal" is the second option of the two-option stack page, which is the
+# only askchoice in the script with two options -- the card question has nine.
+PICK_SPEC=""
+case "$PICK" in
+"")        ;;
+minimal)   PICK_SPEC="2:3" ;;
+full)      PICK_SPEC="2:2" ;;
+*)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
+esac
+
+# It needs a level for the same reason -H does: at NOVICE the page is never
 # drawn, the default is taken, and the run would install the FULL stack while
-# claiming to test the minimal one.  That is the vacuous pass, so it is fatal
-# here rather than a surprise in the verdict.
+# claiming to test the minimal one -- the vacuous pass this file exists not to
+# produce, so it is fatal here rather than a surprise in the verdict.
 if [ -n "$PICK" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "-p needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
     echo "questions, so \"$PICK\" could not be chosen and the default would" >&2
@@ -561,13 +572,20 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 #
 # $1 names the binary, $2 is how many times it runs the Installer, $3 is the
 # label of the yes/no button to press instead of the first one (empty: press
-# the first, which is every question's default), $4 is the label of an
-# askchoice option to select before Proceed (empty: take that page's default).
+# the first, which is every question's default), $4 names an askchoice option
+# to select before Proceed as "<options>:<gadget id>" (empty: take that page's
+# default).  See installdrive.c on why an option is named by number and not by
+# text: it carries none.
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
+    local opts=0 gid=0
+    if [ -n "$pick" ]; then
+        opts=${pick%%:*}
+        gid=${pick##*:}
+    fi
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
            -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
-           -DDRIVE_PICK_LABEL="\"$pick\"" -I"$NDK" \
+           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -584,7 +602,7 @@ fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
-build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK"
+build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 
 rm -rf "$HD"
 mkdir -p "$HD"
@@ -1006,9 +1024,8 @@ else
 fi
 
 case "$PICK" in
-"")       WANT_STACK=full ;;
-*inimal*) WANT_STACK=minimal ;;
-*)        WANT_STACK="$STACK_INSTALLED" ;;
+""|full) WANT_STACK=full ;;
+minimal) WANT_STACK=minimal ;;
 esac
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
@@ -1541,7 +1558,7 @@ if [ "$TERMINAL" = "1" ]; then
     echo "  3/3  installing again, answering the terminal question no"
     echo "============================================================"
 
-    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 "" "$PICK"
+    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 "" "$PICK_SPEC"
     cp "$ROOT/build/installdrive-$TAG-$LEVEL-no" "$HD/C/installdrive"
     chmod 755 "$HD/C/installdrive"
 

@@ -126,19 +126,43 @@
  * A CHOICE ON AN askchoice PAGE, which is a different thing from a yes/no
  * button and needed its own answer.
  *
- * askchoice draws its options as buttons and a Proceed beside them, and this
- * program clicked Proceed the moment it saw one -- so every run ever made took
- * the (default) of every askchoice in the script.  The one that matters is
+ * askchoice draws its options as the page's OWN gadgets, and this program
+ * clicked Proceed the moment it saw one -- so every run ever made took the
+ * (default) of every askchoice in the script.  The one that matters is
  * "Select the stack to install", whose default is the full stack, which is why
  * Libs/minimal/bsdsocket.library had never been installed or booted by any
- * end-to-end run: the harness could not reach the page's other answer.
+ * end-to-end run.
  *
- * So: on a page that has a Proceed, a button whose text contains this string
- * is clicked FIRST, once in the whole run, and Proceed goes on the next poll.
- * Empty means no page is picked at, which is the default.
+ * NOT BY LABEL, and this is measured rather than assumed.  A page's option
+ * gadgets are not the Installer's struct Buttons: the word past the Gadget is
+ * not a label, so there is no text on them to match.  What they do have is an
+ * id.  With DRIVE_PICK_LABEL=Minimal at -l AVERAGE, an install of 0.24.0
+ * reported (installdrive.txt, poll 4):
+ *
+ *     window "Install-AmiNetXDuo (0% done)"
+ *     gadget 0 / gadget 0 / gadget 0
+ *     gadget 3
+ *     gadget 2
+ *     gadget 91 "Abort Install"  gadget 90 "Proceed"  gadget 100 "Help..."
+ *
+ * so the options are numbered from 2 upward in the order the script lists
+ * them: 2 is "Everything" and 3 is "Minimal, no IPv6/TLS".  The card question
+ * on the same run carried nine of them, 2 through 10.
+ *
+ * A page is therefore named by HOW MANY options it has and an answer by WHICH
+ * id, both compile-time.  The count is what tells the stack question (two)
+ * from the card question (nine), and it is checked rather than counted on:
+ * run-workbench.sh asserts afterwards, by byte count, which of the archive's
+ * two libraries actually landed, so a page that changes shape fails loudly
+ * instead of quietly installing the default.
+ *
+ * 0 options means no page is picked at, which is the default.
  */
-#ifndef DRIVE_PICK_LABEL
-#define DRIVE_PICK_LABEL ""
+#ifndef DRIVE_PICK_OPTIONS
+#define DRIVE_PICK_OPTIONS 0
+#endif
+#ifndef DRIVE_PICK_ID
+#define DRIVE_PICK_ID      0
 #endif
 
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
@@ -282,6 +306,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             struct Gadget *no      = NULL;
             struct Gadget *single  = NULL;
             struct Gadget *pick    = NULL;
+            LONG           options = 0;
             BOOL           is_page = FALSE;
 
             for (gad = window->FirstGadget; gad != NULL; gad = gad->NextGadget)
@@ -297,15 +322,17 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 }
 
                 /*
-                 * The askchoice options, which are struct Buttons like the
-                 * yes/no ones and numbered below FIRSTRESV_ID like them.  The
-                 * range is what keeps button_text() off a gadget that is not
-                 * one of the Installer's buttons at all.
+                 * The page's own gadgets: numbered from 1 up, below
+                 * FIRSTRESV_ID, and carrying no label.  An askchoice's options
+                 * are these, so counting them is how the page is recognised.
                  */
-                if (picks_done == 0 && pick == NULL &&
-                    gad->GadgetID > 0 && gad->GadgetID < 87 &&
-                    label_matches(gad, DRIVE_PICK_LABEL))
-                    pick = gad;
+                if (gad->GadgetID > 0 && gad->GadgetID < 87 &&
+                    button_text(gad) == NULL)
+                {
+                    options++;
+                    if (gad->GadgetID == DRIVE_PICK_ID)
+                        pick = gad;
+                }
             }
 
             if (!is_page)
@@ -326,14 +353,18 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 choice = single;
 
             /*
-             * A named choice on an askchoice page goes first and Proceed
-             * follows on the next poll: clicking Proceed straight away is
-             * what took the default of every one of these until now.
+             * The chosen option goes first and Proceed follows on the next
+             * poll: clicking Proceed straight away is what took the default of
+             * every one of these until now.  Once per Installer run, and only
+             * on the page with the expected number of options.
              */
-            if (proceed != NULL && pick != NULL)
+            if (proceed != NULL && pick != NULL && picks_done == 0 &&
+                DRIVE_PICK_OPTIONS != 0 && options == DRIVE_PICK_OPTIONS)
             {
                 choice = pick;
                 picks_done++;
+                say("installdrive:   picking option gadget %ld\n",
+                    (LONG)pick->GadgetID);
             }
             break;
         }
