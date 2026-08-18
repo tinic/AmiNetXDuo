@@ -219,6 +219,11 @@ struct AmiNetStack
 
     AmiSana2If         *ns_Iface[AMI_CFG_MAX_INTERFACES];
 
+    /* Operations that resolved an interface name and still use its numeric
+       NetX slot.  A claimed slot cannot be removed and reused underneath the
+       operation; ami_ns_lock serialises updates to this table. */
+    UWORD               ns_IfaceClaims[AMI_CFG_MAX_INTERFACES];
+
     /* MDNS= for each interface, by NX interface index rather than by
        configuration index: ns_Iface[] is filled in open order and an
        interface that fails to open takes no slot, so the two are not

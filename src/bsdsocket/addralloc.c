@@ -465,11 +465,14 @@ VOID bsd_DeleteAddrAllocMessage(register struct AddressAllocationMessage *aam __
  * a Process and a dos.library to Delay() with.
  *
  * The worker runs code out of the library segment and holds no OpenCnt
- * reference, like the TCP: handler (see bsd_lib_expunge()). If the last opener
- * closes while a worker is between instructions, UnLoadSeg() frees the segment
- * underneath it. The count is therefore taken before CreateNewProc() and given
- * back inside Forbid() as the last thing the worker does, and expunge declines
- * while it is non-zero.
+ * reference, like the TCP: handler (see bsd_lib_expunge()). The worker count is
+ * therefore taken before CreateNewProc() and given back inside Forbid() as the
+ * last thing the worker does, and expunge declines while it is non-zero.
+ *
+ * It does hold a transient netstack reference. BeginInterfaceConfig() returns
+ * before the operation completes, so the opener that launched it may close;
+ * without this separate reference the last close can dismantle and later
+ * recreate the stack while the old worker is still polling its numeric slot.
  */
 
 /* Defined below, with the rest of BeginInterfaceConfig()'s reporting. */
@@ -496,6 +499,7 @@ typedef struct BsdAamJob
 {
     struct Message                   baj_Msg;
     struct AddressAllocationMessage *baj_Message;
+    struct AmiSocketBase            *baj_Master;
     UWORD                            baj_Index;
     volatile BOOL                    baj_Abort;
     volatile BOOL                    baj_Done;
@@ -601,12 +605,13 @@ static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
 static VOID bsd_aam_worker(VOID)
 {
     struct AddressAllocationMessage *aam;
-    struct Process *me = (struct Process *)FindTask(NULL);
-    AmiDhcpLease lease;
-    BsdAamJob   *job;
-    LONG         deadline;
-    LONG         result = AAMR_Timeout;
-    LONG         rc;
+    struct AmiSocketBase            *master;
+    struct Process                  *me = (struct Process *)FindTask(NULL);
+    AmiDhcpLease                     lease;
+    BsdAamJob                       *job;
+    LONG                             deadline;
+    LONG                             result = AAMR_Timeout;
+    LONG                             rc;
 
     /*
      * The launcher PutMsg()ed the job here, the same way tcp_ctrl_find() hands
@@ -630,6 +635,7 @@ static VOID bsd_aam_worker(VOID)
     while (job == NULL);
 
     aam = job->baj_Message;
+    master = job->baj_Master;
 
     rc = netstack_interface_dhcp_start(job->baj_Index,
                                        aam->aam_RequestedAddress);
@@ -712,9 +718,16 @@ static VOID bsd_aam_worker(VOID)
     job->baj_Done = TRUE;
     Permit();
 
+    /* The slot can be removed again as soon as no worker can touch it. This
+       must precede the transient stack release, because that release may be
+       the operation that tears the netstack down. */
+    netstack_interface_release(job->baj_Index);
+
     bsd_aam_reply(aam, result);
 
     ami_free(job);
+
+    bsd_stack_transient_release(master);
 
     /*
      * Inside Forbid() so that expunge cannot see the count reach zero, free
@@ -776,7 +789,8 @@ static VOID bsd_aam_reply(struct AddressAllocationMessage *aam, LONG result)
  * cannot be started. Everything that can fail here fails before the Process
  * exists, so there is never a worker with nothing to do.
  */
-static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
+static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index,
+                           struct AmiSocketBase *master)
 {
     struct Process *proc;
     struct TagItem  tags[6];
@@ -790,6 +804,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
      */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
     {
+        netstack_interface_release(index);
+        bsd_stack_transient_release(master);
         bsd_aam_reply(aam, AAMR_Ignored);
         return;
     }
@@ -797,11 +813,14 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     job = (BsdAamJob *)ami_alloc(sizeof(*job));
     if (job == NULL)
     {
+        netstack_interface_release(index);
+        bsd_stack_transient_release(master);
         bsd_aam_reply(aam, AAMR_NoMemory);
         return;
     }
 
     job->baj_Message = aam;
+    job->baj_Master  = master;
     job->baj_Index   = index;
     job->baj_Abort   = FALSE;
     job->baj_Done    = FALSE;
@@ -817,6 +836,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
     {
         Permit();
         ami_free(job);
+        netstack_interface_release(index);
+        bsd_stack_transient_release(master);
         bsd_aam_reply(aam, AAMR_Busy);
         return;
     }
@@ -861,6 +882,8 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
         Permit();
 
         ami_free(job);
+        netstack_interface_release(index);
+        bsd_stack_transient_release(master);
         bsd_aam_reply(aam, AAMR_NoMemory);
         return;
     }
@@ -871,11 +894,11 @@ static VOID bsd_aam_launch(struct AddressAllocationMessage *aam, UWORD index)
 VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP        *ip;
-    NX_INTERFACE *nxif;
-    LONG          index;
-
-    (VOID)SocketBase;
+    struct AmiSocketBase *master;
+    NX_IP                *ip;
+    NX_INTERFACE         *nxif;
+    UWORD                 index;
+    LONG                  rc;
 
     /* Nothing to reply through, so nothing can be reported. */
     if (aam == NULL)
@@ -893,13 +916,6 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
         return;
     }
 
-    ip = netstack_ip();
-    if (ip == NULL)
-    {
-        bsd_aam_reply(aam, AAMR_InterfaceNotKnown);
-        return;
-    }
-
     /* aam_InterfaceName is a fixed sixteen bytes and a hand-filled message
        need not terminate it, so it is bounded here. */
     if (aam->aam_InterfaceName[0] == '\0')
@@ -910,13 +926,14 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
 
     aam->aam_InterfaceName[sizeof(aam->aam_InterfaceName) - 1] = '\0';
 
-    index = bsd_if_index_of(ip, aam->aam_InterfaceName);
-    if (index < 0)
+    rc = netstack_interface_claim(aam->aam_InterfaceName, &index);
+    if (rc != AMI_NET_OK)
     {
         bsd_aam_reply(aam, AAMR_InterfaceNotKnown);
         return;
     }
 
+    ip = netstack_ip();
     nxif = &ip->nx_ip_interface[index];
 
     /*
@@ -930,6 +947,7 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
     if (nxif->nx_interface_address_mapping_needed == 0 ||
         nxif->nx_interface_additional_link_info == NULL)
     {
+        netstack_interface_release(index);
         bsd_aam_reply(aam, AAMR_InterfaceWrongType);
         return;
     }
@@ -937,6 +955,7 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
     /* "The interface already has an IP address assigned." */
     if (nxif->nx_interface_ip_address != 0)
     {
+        netstack_interface_release(index);
         bsd_aam_reply(aam, AAMR_AddressKnown);
         return;
     }
@@ -948,11 +967,23 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
      */
     if (aam->aam_Protocol != AAMP_DHCP)
     {
+        netstack_interface_release(index);
         bsd_aam_reply(aam, AAMR_Ignored);
         return;
     }
 
-    bsd_aam_launch(aam, (UWORD)index);
+    master = SocketBase;
+    if (master != NULL && master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    if (bsd_stack_transient_hold(master) != 0)
+    {
+        netstack_interface_release(index);
+        bsd_aam_reply(aam, AAMR_InterfaceNotKnown);
+        return;
+    }
+
+    bsd_aam_launch(aam, index, master);
 }
 
 VOID bsd_AbortInterfaceConfig(register struct AddressAllocationMessage *aam __asm("a0"),
