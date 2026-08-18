@@ -2570,6 +2570,8 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
     return users;
 }
 
+static BOOL ami_ns_same_name(const char *a, const char *b);
+
 static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 {
     AmiNetStack  *ns = ami_ns;
@@ -2710,6 +2712,46 @@ LONG netstack_interface_remove(UWORD index, BOOL force)
     rc = ami_ns_interface_remove_locked(index, force);
     ReleaseSemaphore(&ami_ns_lock);
 
+    return rc;
+}
+
+/* Resolve and remove as one transaction. A slot is deliberately reusable, so
+   resolving the name before taking ami_ns_lock can remove a different
+   interface that another task installed in the meantime. */
+LONG netstack_interface_remove_named(const char *name, BOOL force)
+{
+    AmiNetStack *ns;
+    LONG         rc = AMI_NET_ERR_NONAME;
+    UWORD        i;
+
+    if (name == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
+    if (ns == NULL || !ns->ns_IpCreated)
+    {
+        rc = AMI_NET_ERR_STATE;
+        goto out;
+    }
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    {
+        if (ns->ns_Iface[i] == NULL ||
+            !ns->ns_Config.interfaces[i].configured)
+            continue;
+
+        if (ami_ns_same_name(ns->ns_Config.interfaces[i].name, name))
+        {
+            rc = ami_ns_interface_remove_locked(i, force);
+            break;
+        }
+    }
+
+out:
+    ReleaseSemaphore(&ami_ns_lock);
     return rc;
 }
 

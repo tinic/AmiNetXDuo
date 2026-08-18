@@ -1491,8 +1491,6 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
                          register LONG force __asm("d0"),
                          register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP *ip = netstack_ip();
-    LONG   index;
     LONG   rc;
 
     if (name == NULL ||
@@ -1502,22 +1500,23 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
         return 0;
     }
 
-    if (ip == NULL)
+    if (netstack_ip() == NULL)
     {
         (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
         return 0;
     }
 
-    index = bsd_if_index_of(ip, (const char *)name);
-    if (index < 0)
+    /* Physical slots are reusable, so resolve and remove under one lock. */
+    rc = netstack_interface_remove_named((const char *)name,
+                                         (force != 0) ? TRUE : FALSE);
+    if (rc == AMI_NET_OK)
+        return 1;
+
+    if (rc == AMI_NET_ERR_NONAME)
     {
         (VOID)bsd_fail(SocketBase, AMI_ENXIO);
         return 0;
     }
-
-    rc = netstack_interface_remove((UWORD)index, (force != 0) ? TRUE : FALSE);
-    if (rc == AMI_NET_OK)
-        return 1;
 
     /*
      * "RemoveInterface() will refuse to remove an interface which is still in
