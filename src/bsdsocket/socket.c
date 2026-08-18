@@ -2272,11 +2272,33 @@ UINT bsd_accept_once(VOID *arg, ULONG wait)
     if (listening == NULL)
         return NX_NOT_CONNECTED;
 
-    status = nx_tcp_server_socket_accept(&listening->as_Nx.tcp, wait);
+    /*
+     * accept() is not a harmless wait primitive. A finite wait that expires
+     * runs _nx_tcp_connect_cleanup(), moves SYN_RECEIVED back to LISTEN and
+     * makes the next call send a fresh SYN+ACK with changed sequence state.
+     * Arm the passive open without suspending, then use state_wait(), whose
+     * timeout changes no TCP state, for the interruptible slice.
+     */
+    if (listening->as_Nx.tcp.nx_tcp_socket_state == NX_TCP_LISTEN_STATE)
+    {
+        status = nx_tcp_server_socket_accept(&listening->as_Nx.tcp,
+                                             NX_NO_WAIT);
+        if (status != NX_SUCCESS && status != NX_IN_PROGRESS &&
+            status != NX_NOT_CONNECTED)
+            return status;
+    }
 
-    /* "Not connected yet" and "still handshaking" both mean keep waiting, so
-       fold them onto NX_NO_PACKET, the status bsd_wait_sliced() slices on. */
-    if (status == NX_NOT_CONNECTED || status == NX_IN_PROGRESS)
+    status = nx_tcp_socket_state_wait(&listening->as_Nx.tcp,
+                                      NX_TCP_ESTABLISHED, wait);
+
+    a->ready = bsd_incoming_first_ready(a->listener);
+    if (a->ready != NULL)
+        return NX_SUCCESS;
+
+    /* state_wait() reports an ordinary timeout as NX_NOT_SUCCESSFUL. Fold it
+       onto the retry status bsd_wait_sliced() understands. */
+    if (status == NX_NOT_SUCCESSFUL || status == NX_NOT_CONNECTED ||
+        status == NX_IN_PROGRESS)
         return NX_NO_PACKET;
 
     return status;
