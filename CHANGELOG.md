@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A reader that outlives its removal no longer has its stack freed underneath it. The teardown read a gauge of how many such tasks were alive, and that number can be unchanged across the window if an older one exits as this one is created, so the check passed and the memory went back while the task was still standing on it
+- A LANCE card that reports a buffer error or an underrun starts sending again. Both clear the chip's transmit enable, so retiring the frame left a card that says it is running and never transmits another packet until the machine is rebooted
+- The transmit watchdog resets a card that is stuck, not one that is busy. It fired whenever the ring stayed full for the interval, which under a sustained transfer is a card that is keeping up, and the reset dropped what was queued
+- Adding or removing a multicast address is one transaction. The exact list and the hardware filter built from it were updated separately, so a program doing this from one task while another received could leave the card filtering on a list that no longer matched
 - Configuring an interface by name keeps hold of it for the whole call. The name was turned into a slot number once, and the slot could be freed and reused underneath, so the rest of the call could configure a different interface. Removing an interface now waits for such a call rather than pulling the slot out from under it
 - An address allocation started with `BeginInterfaceConfig()` survives the program that asked for it closing the library. The worker outlives the caller by design, and could be left polling a slot on a stack that had been taken down and rebuilt behind it
 - Removing an interface by name removes the one that was named. The name was resolved to a slot, the lock was dropped, and the slot was reused, so a program could take down a different interface than it asked for
