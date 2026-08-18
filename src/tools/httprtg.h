@@ -99,8 +99,14 @@ BOOL  http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst);
 
 /*
  * What the probe measured, as a control word: which libraries answered,
- * whether the bitmap is on the board, which route won and what every route
- * managed in KB/s.  Sent once a session and logged by the viewer.
+ * whether the bitmap is on the board, the screen's own depth and pixel format,
+ * which route won and what every route managed in KB/s.  Sent once a session
+ * and logged by the viewer.
+ *
+ * The depth and the format are here because they are nowhere else.  Every
+ * truecolour screen reaches the wire as R5G6B5, so the geometry word says
+ * depth 16 whether the card holds 15, 16, 24 or 32 bits a pixel, and a test
+ * that wants to know which of the four paths it exercised has only this line.
  */
 ULONG http_rtg_word(char *out, ULONG cap);
 
