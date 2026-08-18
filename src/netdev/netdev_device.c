@@ -887,8 +887,17 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     LONG          rc;
 
     Disable();
+    /* The command-table check is outside this critical section.  If OFFLINE
+       drained the queue between that check and here, adding the write now
+       would strand it on a stopped unit with no completion left to pump it. */
+    if (!unit->nu_Online || !unit->nu_Nic.running)
+    {
+        Enable();
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+        return;
+    }
+
     if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
-        !unit->nu_Nic.running ||
         unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
     {
         nd_queue(&unit->nu_Writes, io);
