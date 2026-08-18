@@ -360,6 +360,13 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
     if (hints != NULL)
     {
+        /* The remaining addrinfo members are outputs.  Accepting values in
+           them hides uninitialised or accidentally reused hint structures
+           and is specifically reported by this ABI as EAI_BADHINTS. */
+        if (hints->ai_addrlen != 0 || hints->ai_addr != NULL ||
+            hints->ai_canonname != NULL || hints->ai_next != NULL)
+            return EAI_BADHINTS;
+
         flags    = (LONG)hints->ai_flags;
         family   = (LONG)hints->ai_family;
         socktype = (LONG)hints->ai_socktype;

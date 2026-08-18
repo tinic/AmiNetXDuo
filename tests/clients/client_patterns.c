@@ -1284,6 +1284,28 @@ static VOID group_p(VOID)
     rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
     t_ok(rc != 0, "getaddrinfo rejects SOCK_STREAM/IPPROTO_UDP", rc);
 
+    /* Only ai_flags, ai_family, ai_socktype, and ai_protocol are inputs.
+       Roadshow exposes EAI_BADHINTS specifically for dirty output fields. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_addrlen = 1;
+    rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
+    t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_addrlen", rc);
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_addr = (struct sockaddr *)&hints;
+    rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
+    t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_addr", rc);
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_canonname = (char *)&hints;
+    rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
+    t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_canonname", rc);
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_next = &hints;
+    rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
+    t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_next", rc);
+
     /* 2. The server lookup: AI_PASSIVE, then bind and listen on the result. */
     memset(&hints, 0, sizeof(hints));
     hints.ai_family   = AF_INET;
