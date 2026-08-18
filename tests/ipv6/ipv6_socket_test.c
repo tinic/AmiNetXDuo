@@ -1926,6 +1926,35 @@ APTR                p;
                       "getnameinfo(::1, NI_NUMERICHOST)", rc);
         t_log("  getnameinfo said \"%s\"", text);
     }
+
+    /* NI_WITHSCOPEID is the NDK's opt-in for the KAME "%zone" suffix. */
+    {
+        struct t_sockaddr_in6 sa;
+        ULONG                 scope;
+
+        t_bzero(&sa, sizeof(sa));
+        sa.sin6_family = T_AF_INET6;
+        sa.sin6_addr.s6_addr[0]  = 0xfe;
+        sa.sin6_addr.s6_addr[1]  = 0x80;
+        sa.sin6_addr.s6_addr[15] = 1;
+        scope = bsd_if_nametoindex("lo0");
+        sa.sin6_scope_id = scope;
+
+        (VOID)t_check((BOOL)(scope != 0),
+                      "if_nametoindex(lo0) for getnameinfo scope", scope);
+
+        t_bzero(text, sizeof(text));
+        rc = bsd_getnameinfo(&sa, sizeof(sa), text, sizeof(text), NULL, 0,
+                             1UL /* NI_NUMERICHOST */);
+        (VOID)t_check((BOOL)(rc == 0 && t_streq(text, "fe80::1")),
+                      "getnameinfo omits scope without NI_WITHSCOPEID", rc);
+
+        t_bzero(text, sizeof(text));
+        rc = bsd_getnameinfo(&sa, sizeof(sa), text, sizeof(text), NULL, 0,
+                             1UL | 32UL /* NI_NUMERICHOST|NI_WITHSCOPEID */);
+        (VOID)t_check((BOOL)(rc == 0 && t_streq(text, "fe80::1%lo0")),
+                      "getnameinfo appends scope with NI_WITHSCOPEID", rc);
+    }
 }
 
 
