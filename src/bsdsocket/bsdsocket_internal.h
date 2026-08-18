@@ -441,6 +441,9 @@ typedef struct
 
 struct AmiSocket;
 
+/* Dup2Socket(-1, fd) reserves a descriptor without a socket object. */
+#define BSD_FD_RESERVED ((struct AmiSocket *)(ULONG)1UL)
+
 /*
  * Where our seglist is, for a profiler.
  *
@@ -922,6 +925,8 @@ LONG  bsd_fail(struct AmiSocketBase *base, LONG code);   /* set errno, ret -1 */
 /* socket.c, descriptor table */
 AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd);
 LONG       bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock);
+LONG       bsd_fd_reserve(struct AmiSocketBase *base, LONG fd);
+BOOL       bsd_fd_reserved(struct AmiSocketBase *base, LONG fd);
 VOID       bsd_fd_free(struct AmiSocketBase *base, LONG fd);
 VOID       bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock);
 

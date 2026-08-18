@@ -1138,9 +1138,42 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
                     register LONG new_socket __asm("d1"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    AmiSocket *sock = bsd_lookup(SocketBase, old_socket);
+    AmiSocket *sock;
     AmiSocket *victim;
 
+    if (old_socket == -1)
+    {
+        LONG fd;
+
+        if (new_socket < -1 || new_socket >= bsd_table_size(SocketBase))
+            return bsd_fail(SocketBase, AMI_EBADF);
+
+        if (new_socket >= 0)
+        {
+            victim = bsd_lookup(SocketBase, new_socket);
+            if (victim != NULL)
+            {
+                bsd_fd_free(SocketBase, new_socket);
+                if (bsd_nx_enter(SocketBase) == 0)
+                {
+                    bsd_socket_release(SocketBase, victim);
+                    bsd_nx_leave(SocketBase);
+                }
+            }
+            else if (bsd_fd_reserved(SocketBase, new_socket))
+            {
+                bsd_fd_free(SocketBase, new_socket);
+            }
+        }
+
+        fd = bsd_fd_reserve(SocketBase, new_socket);
+        if (fd < 0)
+            return bsd_fail(SocketBase, AMI_EMFILE);
+
+        return fd;
+    }
+
+    sock = bsd_lookup(SocketBase, old_socket);
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
@@ -1172,6 +1205,10 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
             bsd_socket_release(SocketBase, victim);
             bsd_nx_leave(SocketBase);
         }
+    }
+    else if (bsd_fd_reserved(SocketBase, new_socket))
+    {
+        bsd_fd_free(SocketBase, new_socket);
     }
 
     SocketBase->sb_Table[new_socket] = sock;

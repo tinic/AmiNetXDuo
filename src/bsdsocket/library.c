@@ -1376,7 +1376,8 @@ static UWORD bsd_base_sockets(const struct AmiSocketBase *child)
 
     for (i = 0; i < (ULONG)child->sb_TableSize; i++)
     {
-        if (child->sb_Table[i] != NULL)
+        if (child->sb_Table[i] != NULL &&
+            child->sb_Table[i] != BSD_FD_RESERVED)
             n++;
     }
 
