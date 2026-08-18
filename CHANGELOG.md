@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.24.0
+
 - An interface with only IPv6 on it comes up. `CONFIGURE=NONE` was read as "static, with no address", so such a machine waited thirty seconds for a lease nobody asked for, took an RFC 3927 169.254 address it had no use for, waited fifteen seconds more and then failed to open `bsdsocket.library` at all -- leaving it with no network of either family, while five commands reported that it had no address
 - `CONFIGURE6 = DHCP` asks a DHCPv6 server for an address, and `CONFIGURE6 = AUTO` follows the router: a router that sets the managed bit sends the machine to the server, one that sets only the other-configuration bit is asked for name servers alone. The address is renewed, and released when the interface goes down
 - The stack announces the multicast groups it listens to. A switch that snoops MLD forwards multicast only where a listener has reported, so on such a segment neighbour discovery for this machine was being pruned and the first report now goes out before the machine has finished proving its own address
