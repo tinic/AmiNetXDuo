@@ -1104,7 +1104,12 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        ULONG          wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        /* A zero-capacity datagram read consumes one queued record but does
+           not wait for a new one. This is distinct from a zero-length
+           datagram, which is still a queued record and reaches this call. */
+        ULONG          wait = (len == 0)
+                                  ? NX_NO_WAIT
+                                  : bsd_wait_option(sock, sock->as_RcvTimeout);
         BsdRecvUdpArgs args;
         BOOL           aborted;
 
@@ -1133,6 +1138,10 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_EINTR);
             if (status != NX_SUCCESS)
             {
+                if (len == 0 && (status == NX_NO_PACKET ||
+                                 status == NX_NOT_SUCCESSFUL))
+                    return 0;
+
                 /* An ICMP error the stack held for this socket comes back as
                    the status. Reporting it here consumes it, so SO_ERROR must
                    not answer with it a second time. */
@@ -1237,7 +1246,9 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        ULONG          wait = bsd_wait_option(sock, sock->as_RcvTimeout);
+        ULONG          wait = (len == 0)
+                                  ? NX_NO_WAIT
+                                  : bsd_wait_option(sock, sock->as_RcvTimeout);
         BsdRecvRawArgs args;
         BOOL           aborted;
 
@@ -1248,6 +1259,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
         (VOID)bsd_wait_sliced(base, wait, bsd_recv_raw_once, &args, &aborted);
         if (aborted)
             return bsd_fail(base, AMI_EINTR);
+        if (packet == NX_NULL && len == 0 && args.why == NX_NO_PACKET)
+            return 0;
         if (packet == NX_NULL)
             return bsd_fail(base, bsd_wait_errno(wait, args.why));
     }
@@ -1678,9 +1691,6 @@ LONG bsd_recv(register LONG sock_fd __asm("d0"),
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    if (len == 0)
-        return 0;
-
     if ((flags & MSG_OOB) != 0)
         return bsd_recv_oob(SocketBase, sock, (UBYTE *)buf, len);
 
@@ -1707,9 +1717,6 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
 
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
-
-    if ((sock->as_Flags & ASF_TCP) == 0 && len == 0)
-        return 0;
 
     if ((flags & MSG_OOB) != 0)
         return bsd_recv_oob(SocketBase, sock, (UBYTE *)buf, len);
