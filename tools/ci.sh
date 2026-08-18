@@ -218,7 +218,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=80
+HOST_TESTS_EXPECTED=81
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route and test_expunge, all x86_64-only for the reason
