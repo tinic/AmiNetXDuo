@@ -455,10 +455,21 @@ LONG bsd_table_resize(struct AmiSocketBase *base, LONG size)
 
 AmiSocket *bsd_lookup(struct AmiSocketBase *base, LONG fd)
 {
+    AmiSocket *sock;
+
     if (base->sb_Table == NULL || fd < 0 || fd >= base->sb_TableSize)
         return NULL;
 
-    return base->sb_Table[fd];
+    sock = base->sb_Table[fd];
+
+    return (sock == BSD_FD_RESERVED) ? NULL : sock;
+}
+
+BOOL bsd_fd_reserved(struct AmiSocketBase *base, LONG fd)
+{
+    return (BOOL)(base->sb_Table != NULL && fd >= 0 &&
+                  fd < base->sb_TableSize &&
+                  base->sb_Table[fd] == BSD_FD_RESERVED);
 }
 
 /*
@@ -510,6 +521,27 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
     }
 
     return -1;
+}
+
+LONG bsd_fd_reserve(struct AmiSocketBase *base, LONG fd)
+{
+    if (bsd_table_ensure(base) != 0)
+        return -1;
+
+    if (fd < 0)
+        return bsd_fd_alloc(base, BSD_FD_RESERVED);
+
+    if (fd >= base->sb_TableSize || base->sb_Table[fd] != NULL)
+        return -1;
+
+    base->sb_Table[fd] = BSD_FD_RESERVED;
+    if (bsd_fd_callback(base, fd, FDCB_ALLOC) < 0)
+    {
+        base->sb_Table[fd] = NULL;
+        return -1;
+    }
+
+    return fd;
 }
 
 VOID bsd_fd_free(struct AmiSocketBase *base, LONG fd)
@@ -1197,7 +1229,8 @@ VOID bsd_close_all(struct AmiSocketBase *base)
             continue;
 
         base->sb_Table[fd] = NULL;
-        bsd_socket_release(base, sock);
+        if (sock != BSD_FD_RESERVED)
+            bsd_socket_release(base, sock);
     }
 
     /*
@@ -3192,6 +3225,12 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     AmiSocket *sock = bsd_lookup(SocketBase, sock_fd);
+
+    if (bsd_fd_reserved(SocketBase, sock_fd))
+    {
+        bsd_fd_free(SocketBase, sock_fd);
+        return 0;
+    }
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);

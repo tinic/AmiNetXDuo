@@ -106,6 +106,7 @@ struct Library *SocketBase;
 #define LVO_inet_addr       (-180)
 #define LVO_inet_network    (-204)
 #define LVO_gethostbyname   (-210)
+#define LVO_Dup2Socket      (-264)
 #define LVO_gethostname     (-282)
 #define LVO_inet_pton       (-606)
 
@@ -258,6 +259,23 @@ register LONG            res __asm("d0");
                       : "=r" (res)
                       : "r" (a6)
                       : "d1", "a0", "a1", "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_dup2_socket(struct Library *base, LONG oldfd, LONG newfd)
+{
+
+register struct Library *a6 __asm("a6") = base;
+register LONG            d0 __asm("d0") = oldfd;
+register LONG            d1 __asm("d1") = newfd;
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+
+
+    __asm __volatile ("jsr a6@(-264:W)"
+                      : "=r" (res), "=r" (_clob_d1)
+                      : "r" (a6), "r" (d0), "r" (d1)
+                      : "a0", "a1", "cc", "memory");
     return(res);
 }
 
@@ -447,6 +465,18 @@ LONG                  fd, rc;
 
     t_log("");
     t_log("documented socket edge cases");
+
+    /* Dup2Socket(-1, fd) marks a descriptor used until CloseSocket(). */
+    rc = bsd_dup2_socket(sbase, -1L, 0L);
+    (VOID) t_check((BOOL) (rc == 0L), "Dup2Socket(-1, 0) reserves fd 0",
+                   (ULONG) rc);
+    fd = bsd_socket(sbase, T_AF_INET, T_SOCK_DGRAM, 0L);
+    (VOID) t_check((BOOL) (fd > 0L), "socket() skips a reserved descriptor",
+                   (ULONG) fd);
+    if (fd >= 0)
+        (VOID) bsd_close_socket(sbase, fd);
+    (VOID) t_check((BOOL) (bsd_close_socket(sbase, 0L) == 0L),
+                   "CloseSocket() releases a reserved descriptor", 0UL);
 
     /*
      * "[EPROTONOSUPPORT] The protocol type or the specified protocol is not
