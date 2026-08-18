@@ -193,6 +193,7 @@ static VOID h_machine_reset(BOOL can_unload)
     h_base->sb_SysBase              = &h_sysbase;
     h_base->sb_Master               = NULL;
     h_base->sb_StackRefs            = 0;
+    h_base->sb_TransientStackRefs   = 0;
 
     h_base->sb_Children.mlh_Head     = (struct MinNode *)&h_base->sb_Children.mlh_Tail;
     h_base->sb_Children.mlh_Tail     = NULL;
@@ -537,6 +538,52 @@ static VOID t_last_close_retries(VOID)
              h_teardown_ran());
 }
 
+/*
+ * An address-allocation worker is allowed to outlive the opener that launched
+ * it. Its reference must keep the stack up while that opener exists or closes,
+ * then perform the ordinary last-reference shutdown when the worker finishes.
+ */
+static VOID t_transient_stack_reference(VOID)
+{
+    LONG rc;
+
+    printf("a transient worker stack reference\n");
+
+    h_machine_reset(TRUE);
+    h_base->sb_StackRefs = 1;       /* the launching opener */
+
+    rc = bsd_stack_transient_hold(h_base);
+    CHECK(rc == 0, "the worker acquired a running stack");
+    CHECK(h_base->sb_StackRefs == 2,
+          "the worker added one stack reference");
+    CHECK(h_base->sb_TransientStackRefs == 1,
+          "and that reference is identified as transient");
+
+    bsd_stack_transient_release(h_base);
+    CHECK(h_base->sb_StackRefs == 1,
+          "release leaves the launching opener's reference");
+    CHECK(h_base->sb_TransientStackRefs == 0,
+          "release consumes the transient reference");
+    CHECK(h.shutdown_calls == 0,
+          "a remaining opener prevents netstack shutdown");
+
+    rc = bsd_stack_transient_hold(h_base);
+    CHECK(rc == 0, "a second worker reference was acquired");
+    h_base->sb_StackRefs--;         /* the opener closes before the worker */
+
+    bsd_stack_transient_release(h_base);
+    CHECK(h_base->sb_StackRefs == 0,
+          "the last worker release reaches zero references");
+    CHECK(h_base->sb_TransientStackRefs == 0,
+          "the last transient count also reaches zero");
+    CHECK(h.shutdown_calls == 1,
+          "the last worker release shuts the netstack down");
+    CHECK(h.can_unload_calls == 1,
+          "and records whether teardown made the segment unloadable");
+
+    h_report("transient", 0, 0, 0, h_teardown_ran());
+}
+
 int main(void)
 {
     printf("bsd_lib_expunge() host tests\n");
@@ -546,6 +593,7 @@ int main(void)
     t_open_count_comes_first();
     t_other_refusals();
     t_last_close_retries();
+    t_transient_stack_reference();
 
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

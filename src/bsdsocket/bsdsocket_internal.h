@@ -499,6 +499,7 @@ struct AmiSocketBase
     struct SignalSemaphore  sb_Lock;        /* guards the child list + stack */
     struct MinList          sb_Children;
     ULONG                   sb_StackRefs;   /* netstack_startup() references */
+    ULONG                   sb_TransientStackRefs; /* async workers, no base */
 
     /*
      * The library's own reference to the stack it is running, taken once and
@@ -900,6 +901,12 @@ APTR  bsd_lib_reserved(VOID);
    the running stack so the caller's open can be closed without taking the
    network down with it.  Idempotent.  0 on success, -1 if there is no stack. */
 LONG  bsd_stack_hold(struct AmiSocketBase *base);
+
+/* Short-lived stack references for library workers that can outlive the base
+   whose vector launched them. They hold no OpenCnt; the worker census keeps
+   the segment loaded until the release. */
+LONG  bsd_stack_transient_hold(struct AmiSocketBase *base);
+VOID  bsd_stack_transient_release(struct AmiSocketBase *base);
 
 /* library.c, the shutdown pair.  bsd_stack_unhold() gives that reference back.
    It returns 0 on success, -1 when the caller is the only one left holding the

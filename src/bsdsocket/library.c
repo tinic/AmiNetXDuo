@@ -514,8 +514,9 @@ static struct AmiSocketBase *bsd_lib_init(
 
     InitSemaphore(&base->sb_Lock);
     bsd_new_list(&base->sb_Children);
-    base->sb_StackRefs = 0;
-    base->sb_StackHeld = FALSE;
+    base->sb_StackRefs          = 0;
+    base->sb_TransientStackRefs = 0;
+    base->sb_StackHeld          = FALSE;
     bsd_handoff_init(base);
 
     bsd_master_base = base;
@@ -806,9 +807,10 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_Lock, sizeof(child->sb_Lock));
     bsd_bzero(&child->sb_Children, sizeof(child->sb_Children));
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
-    child->sb_StackRefs      = 0;
-    child->sb_StackHeld      = FALSE;
-    child->sb_NextHandoffId  = 0;
+    child->sb_StackRefs          = 0;
+    child->sb_TransientStackRefs = 0;
+    child->sb_StackHeld          = FALSE;
+    child->sb_NextHandoffId      = 0;
 
     /* Clear the inherited ThreadX bracket state rather than depend on the
        master never having been inside one. */
@@ -1144,7 +1146,8 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
          * live base for the ThreadX bracket the teardown runs in.
          */
         ObtainSemaphore(&master->sb_Lock);
-        if (master->sb_StackRefs <= 1)
+        if (master->sb_StackRefs >= master->sb_TransientStackRefs &&
+            master->sb_StackRefs - master->sb_TransientStackRefs <= 1)
             bsd_handoff_flush(base);
         ReleaseSemaphore(&master->sb_Lock);
 
@@ -1190,6 +1193,66 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         return bsd_lib_expunge(master);
 
     return NULL;
+}
+
+/*
+ * Keep the netstack alive for an asynchronous worker after the opener that
+ * launched it is allowed to close. The worker count, not lib_OpenCnt, keeps
+ * this segment loaded; this reference is only about the netstack lifetime.
+ */
+LONG bsd_stack_transient_hold(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base;
+    LONG                  rc = -1;
+
+    if (master == NULL)
+        return -1;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    if (master->sb_StackRefs != 0 &&
+        master->sb_StackRefs != (ULONG)-1 &&
+        master->sb_TransientStackRefs != (ULONG)-1)
+    {
+        master->sb_StackRefs++;
+        master->sb_TransientStackRefs++;
+        rc = 0;
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+    return rc;
+}
+
+VOID bsd_stack_transient_release(struct AmiSocketBase *base)
+{
+    struct AmiSocketBase *master = base;
+    BOOL                  unload_is_safe = FALSE;
+
+    if (master == NULL)
+        return;
+
+    if (master->sb_Master != NULL)
+        master = master->sb_Master;
+
+    ObtainSemaphore(&master->sb_Lock);
+
+    if (master->sb_TransientStackRefs != 0 && master->sb_StackRefs != 0)
+    {
+        master->sb_TransientStackRefs--;
+        if (--master->sb_StackRefs == 0)
+        {
+            netstack_shutdown();
+            unload_is_safe = netstack_can_unload();
+        }
+    }
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    if (unload_is_safe)
+        AMI_CENSUS_REPORT("bsd-stack-down");
 }
 
 /*
@@ -1571,10 +1634,10 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     /*
      * Same for an address allocation still running: those workers are
-     * Processes of ours running out of this segment while holding no OpenCnt
-     * reference either (see the launch in addralloc.c). Each is a bounded
-     * number of seconds from finishing, since the API it serves has a
-     * mandatory timeout.
+     * Processes of ours running out of this segment. They hold a transient
+     * netstack reference but no OpenCnt reference (see the launch in
+     * addralloc.c). Each is a bounded number of seconds from finishing, since
+     * the API it serves has a mandatory timeout.
      */
     if (bsd_aam_busy())
     {
