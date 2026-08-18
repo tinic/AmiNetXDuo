@@ -482,6 +482,100 @@ static int rfb_cmp_plane(const rfb_u8 *src, const rfb_u8 *sh,
     return 0;
 }
 
+/* Does this run of bytes differ from the shadow.  The same inner loop as
+ * rfb_cmp_plane(), over a run instead of a tile row, and it stops at the first
+ * word that disagrees. */
+static int rfb_run_differs(const rfb_u8 *src, const rfb_u8 *sh, rfb_u32 n,
+                           int word)
+{
+    if (word) {
+        const rfb_u32 *sw = (const rfb_u32 *)(const void *)src;
+        const rfb_u32 *dw = (const rfb_u32 *)(const void *)sh;
+        rfb_u32 w = n >> 2;
+        rfb_u32 tail = n & 3u;
+
+        while (w--)
+            if (*sw++ != *dw++)
+                return 1;
+
+        src = (const rfb_u8 *)(const void *)sw;
+        sh  = (const rfb_u8 *)(const void *)dw;
+        n = tail;
+    }
+
+    while (n--)
+        if (*src++ != *sh++)
+            return 1;
+
+    return 0;
+}
+
+/*
+ * Is any byte of this band different from the shadow.
+ *
+ * The tile walk answers the same question, but it asks it 32 bytes at a time:
+ * a tile row of a 800x600x16 screen is fifty tiles, each of sixteen rows of
+ * eight longwords, so it sets up an inner loop once per eight compares and
+ * carries the tile's own arithmetic -- the clipped width, the row offset, the
+ * plane mask, the scanned counter -- around every one of them.  A screen where
+ * nothing moved pays all of that to conclude nothing moved, and on a browser
+ * screen that is nearly every band of nearly every pass.
+ *
+ * So the band is asked once, flat, over whole rows.  The bytes read are
+ * exactly the bytes the tile walk would have read -- the tiles tile the band,
+ * and the clipped ones at the right edge and the bottom sum to the rows this
+ * covers -- so a band this calls clean is a band the walk would have found
+ * clean, and the walk still runs on every band it calls dirty.  Nothing is
+ * skipped and nothing goes stale; what is skipped is asking the same question
+ * badly.
+ *
+ * A dirty band pays this twice over, up to the first difference.  A band that
+ * changed is one where there is real work to do afterwards, and the compare
+ * stops at the first word that disagrees, so what it costs there is a fraction
+ * of what the tiles cost.
+ */
+static int rfb_band_clean(const rfb_encoder *e, const rfb_u8 *const *planes,
+                          rfb_u32 ty0, rfb_u32 ty1, int word)
+{
+    rfb_u32 y0 = ty0 * e->g.tile_h;
+    rfb_u32 y1 = ty1 * e->g.tile_h;
+    rfb_u32 bpr = e->g.bytes_per_row;
+    rfb_u32 rows, p;
+
+    if (y1 > e->g.height)
+        y1 = e->g.height;
+    if (y1 <= y0)
+        return 1;
+    rows = y1 - y0;
+
+    for (p = 0; p < e->nplanes; p++) {
+        const rfb_u8 *src = planes[p] + y0 * e->row_stride;
+        const rfb_u8 *sh  = e->shadow + p * e->plane_stride
+                                      + y0 * e->row_stride;
+
+        /* Whole rows with nothing between them is one run, which is the shape
+         * every buffer here has: the staging buffer and the shadow are both
+         * this file's own and are allocated at the row the tile grid uses.  A
+         * source with padding between its rows -- a card's own stride -- is
+         * walked a row at a time instead, because the padding is bytes the
+         * tile walk never looks at and they must not decide this. */
+        if (e->row_stride == bpr) {
+            if (rfb_run_differs(src, sh, rows * bpr, word))
+                return 0;
+        } else {
+            rfb_u32 r = rows;
+            do {
+                if (rfb_run_differs(src, sh, bpr, word))
+                    return 0;
+                src += e->row_stride;
+                sh  += e->row_stride;
+            } while (--r);
+        }
+    }
+
+    return 1;
+}
+
 /* Take the tile-plane.  One read of the source into raw, which is then the
  * only copy that anything uses.  The XOR is computed from it against the old
  * shadow, the shadow is written from it, and it is what goes on the wire.  The
@@ -942,7 +1036,7 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
     rfb_u32 bpr, depth, tb, tile_row;
     int keep_xor, min_run, word, chunky;
     rfb_out o;
-    rfb_u32 ty, tx, p, y0, top = 0, tile_index;
+    rfb_u32 ty, tx, p, y0, top = 0, tile_index, walk0;
     rfb_u32 dirty_tiles = 0;
     rfb_u32 dirty_plane[RFB_MAX_DEPTH];
     rfb_u8 *sh_plane[RFB_MAX_DEPTH];
@@ -1063,10 +1157,33 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
 
     /* Where the band starts, rather than where the screen does.  Each of
      * these was an accumulator that only ever counted up from zero. */
-    y0 = (rfb_u32)ty0 * tile_row;
-    top = (rfb_u32)ty0 * e->g.tile_h;
-    tile_index = (rfb_u32)ty0 * e->tiles_x;
-    for (ty = ty0; ty < ty1; ty++, y0 += tile_row) {
+    /* Ask the whole band first.  A band nobody drew on is answered by one
+     * flat compare and the tile walk below is left with nothing to do -- see
+     * rfb_band_clean(), which reads exactly the bytes the walk would have.
+     *
+     * Only when the call is a band and not a whole screen.  The saving is the
+     * same either way and the answer is the same either way, but what the
+     * saving BUYS is not: measured on an A3000 against a 640x480x8 screen,
+     * which is cheap enough that httpfb.c never bands it, the pass got
+     * cheaper -- the console's duty fell from 50% to about 24% and its frame
+     * rate rose from 25 to 36 -- and keystroke-to-frame latency got WORSE,
+     * 56.6 ms to 69.3 ms, reproducibly over six rounds.  Something in the
+     * pacing does not turn a cheaper whole-frame pass into a sooner one, and
+     * until that is understood this does not reach the path where it was
+     * measured to hurt.  On the banded path it is a clear win: the same guest
+     * on a 800x600x16 screen went from 180.3 ms to 138.2 ms. */
+    walk0 = ty0;
+    if (!(first && last) && rfb_band_clean(e, planes, ty0, ty1, word)) {
+        /* Every tile of the band was compared, just not one at a time, so the
+         * counter keeps meaning what it meant. */
+        e->st.tiles_scanned += (rfb_u32)(ty1 - ty0) * e->tiles_x;
+        walk0 = ty1;
+    }
+
+    y0 = (rfb_u32)walk0 * tile_row;
+    top = (rfb_u32)walk0 * e->g.tile_h;
+    tile_index = (rfb_u32)walk0 * e->tiles_x;
+    for (ty = walk0; ty < ty1; ty++, y0 += tile_row) {
         rfb_u32 th = e->g.height - top;
         rfb_u32 x0 = 0;
 
