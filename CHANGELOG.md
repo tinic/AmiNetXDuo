@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Removing an interface by name removes the one that was named. The name was resolved to a slot, the lock was dropped, and the slot was reused, so a program could take down a different interface than it asked for
+- The resolver's configuration is read and written one whole change at a time. A program reading the name server list or the domain name while another set them could see a half-written table or a torn string
 - A socket option passed by reference with a null pointer is refused. The pointer was written through, and on a machine with no memory protection that write lands on the interrupt vectors at address zero
 - `recvfrom()` refuses a source-address buffer that arrives without its length, before it takes a datagram off the queue rather than after
 - `recvmsg()` reports the size of the source address when the buffer given for it is too small, instead of leaving the caller with nothing
