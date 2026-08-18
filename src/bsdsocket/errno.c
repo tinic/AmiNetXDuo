@@ -937,6 +937,11 @@ LONG bsd_SocketBaseTagList(register struct TagItem *tags __asm("a0"),
         by_ref = ((tag & SBTF_REF) != 0);
         is_set = ((tag & SBTF_SET) != 0);
 
+        /* SBTF_REF makes ti_Data a pointer to the value.  A null pointer is
+           an invalid tag, not a zero value or a successful no-op. */
+        if (by_ref && item->ti_Data == 0)
+            return index;
+
         ok = is_set ? bsd_tag_set(SocketBase, item, code, by_ref)
                     : bsd_tag_get(SocketBase, item, code, by_ref);
 

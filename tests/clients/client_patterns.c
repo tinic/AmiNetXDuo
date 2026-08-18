@@ -223,6 +223,14 @@ static VOID group_a(VOID)
                         TAG_DONE);
     t_ok(rc == 0, "SocketBaseTags(HERRNOLONGPTR) accepted", rc);
 
+    /* SBTF_REF says the tag data is a pointer to the value.  Null must name
+       the first tag as invalid, rather than silently reading/writing zero. */
+    rc = SocketBaseTags(SBTM_GETREF(SBTC_BREAKMASK), 0UL, TAG_DONE);
+    t_ok(rc == 1, "SocketBaseTags rejects a null GETREF pointer", rc);
+
+    rc = SocketBaseTags(SBTM_SETREF(SBTC_BREAKMASK), 0UL, TAG_DONE);
+    t_ok(rc == 1, "SocketBaseTags rejects a null SETREF pointer", rc);
+
     /* A failing call must land in the caller's own int, not just internally. */
     c_errno = 0;
     rc = CloseSocket(4242);
