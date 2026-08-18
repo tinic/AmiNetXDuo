@@ -75,12 +75,16 @@
        "Each choice, and the driver it needs:\n\n"
        "  A2065        a2065.device\n"
        "  Ariadne      ariadne.device\n"
-       "  Ariadne II   ariadne2.device\n"
-       "  AmigaNet     amiganet.device\n"
-       "  X-Surf       xsurf.device\n"
-       "  X-Surf 100   xsurf100.device\n"
+       "  Ariadne II   ariadne_ii.device\n"
+       "  AmigaNet     hydra.device\n"
+       "  LAN Rover    eb920.device\n"
+       "  X-Surf       x-surf.device\n"
+       "  X-Surf 100   x-surf-100.device\n"
        "  PCMCIA       asked next\n"
        "  UAE          uaenet.device\n\n"
+       "The AmigaNet is Hydra Systems' card and its driver is hydra.device; "
+       "the LAN Rover is ASDG's and its driver is eb920.device.  The board "
+       "and the file are not named the same thing.\n\n"
        "The UAE driver is in the emulator, not on disk.  It cannot be "
        "detected, so select it directly.\n\n"
        "Select the card that this machine has.  If a driver was found in "
@@ -518,16 +522,33 @@
 ; whichever known driver is actually installed.  The list is in the same
 ; order as the menu below, so its index is the menu's default.
 
+; THE FILE NAMES THE DRIVERS ACTUALLY SHIP UNDER.  This list held
+; ariadne2.device, amiganet.device, xsurf.device and xsurf100.device, and had
+; no entry at all for the Hydra or the LAN Rover -- so five of the nine cards
+; this project supports could not be detected, and at NOVICE the abort below
+; fired instead: a user with an Ariadne II, an AmigaNet, a LAN Rover, an X-Surf
+; or an X-Surf 100 could not install the archive at the default user level.
+;
+; tools/sana2-stage.sh:29-41 IS THE AUTHORITY for board -> driver, and this
+; list must agree with it.  The Installer language cannot read that file, so
+; the two are kept apart by nothing but this note; sana2_driver_for() names the
+; same eight files in the same words, and a card added there needs a row here
+; and an entry in the menu below.
+;
+; The order is the menu's order, because the index found here IS the menu's
+; default.  Change one and change the other -- and the PCMCIA sub-question at
+; (= CARD 7) counts positions too.
 (set DET_INDEX -1)
 (set DET_N     0)
 
 (while (set DET_TRY (select DET_N
           "a2065.device"
           "ariadne.device"
-          "ariadne2.device"
-          "amiganet.device"
-          "xsurf.device"
-          "xsurf100.device"
+          "ariadne_ii.device"
+          "hydra.device"
+          "eb920.device"
+          "x-surf.device"
+          "x-surf-100.device"
           "cnet.device"
           "uaenet.device"
           ""))
@@ -690,11 +711,19 @@
         ; "askchoice: No choices selected".  Two columns of four fit; the
         ; full product names do not.  Keep every label under about 20
         ; characters and put the detail in the help text.
+        ; THE LABEL IS THE BOARD, THE VALUE IS THE FILE, and they are not the
+        ; same word.  Hydra Systems sell the AmigaNet and ship hydra.device;
+        ; ASDG sell the LAN Rover and ship eb920.device.  A user reads the
+        ; board on the page and the installer has to find the file on the
+        ; disk, so the two lists below are paired by position and by nothing
+        ; else -- see the detection loop above, which is the third list that
+        ; has to agree.
         (choices
           "A2065"
           "Ariadne"
           "Ariadne II"
           "AmigaNet"
+          "LAN Rover"
           "X-Surf"
           "X-Surf 100"
           "PCMCIA"
@@ -706,16 +735,23 @@
       (select CARD
         "a2065.device"
         "ariadne.device"
-        "ariadne2.device"
-        "amiganet.device"
-        "xsurf.device"
-        "xsurf100.device"
+        "ariadne_ii.device"
+        "hydra.device"
+        "eb920.device"
+        "x-surf.device"
+        "x-surf-100.device"
         "cnet.device"
         "uaenet.device"
         ""))
 
-    ; PCMCIA: one more question, because the slot takes several kinds of card
-    (if (= CARD 6)
+    ; PCMCIA: one more question, because the slot takes several kinds of card.
+    ;
+    ; SEVEN, NOT SIX.  This is an index into the (choices) above and it moved
+    ; when "LAN Rover" was added.  A literal position is the one thing in this
+    ; page that cannot be read back out of the list it indexes, so it is the
+    ; one that goes stale silently: at 6 it asked the PCMCIA question of
+    ; somebody who had selected "X-Surf".
+    (if (= CARD 7)
       (
         (set PCM
           (askchoice

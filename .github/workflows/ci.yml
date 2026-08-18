@@ -270,4 +270,9 @@ jobs:
             tests/tools/run-arpretry.sh \
             tests/tools/run-cardsweep.sh \
             tests/tools/cards.sh \
-            tests/tools/run-cardsweep6.sh
+            tests/tools/run-cardsweep6.sh \
+            tools/emu-mac.sh \
+            tools/emu-board.sh \
+            tools/sana2-stage.sh \
+            install/test/run-workbench.sh \
+            install/test/run-workbench-cards.sh

@@ -63,8 +63,16 @@ extern BOOL diag_is_resident(const char *device);
  */
 static const char *const diag_known_devices[] =
 {
-    "a2065.device", "ariadne.device", "ariadne2.device", "amiganet.device",
-    "cnet.device", "hydra.device", "x-surf.device", "xsurf100.device",
+    /*
+     * The file names the drivers really ship under, which is not what the
+     * boards are called: Village Tronic's Ariadne II is ariadne_ii.device,
+     * Hydra Systems' AmigaNet is hydra.device, ASDG's LAN Rover is
+     * eb920.device. This list held ariadne2.device, amiganet.device and
+     * xsurf100.device, none of which is a file that exists, so the three
+     * cards they stood for were never found by name.
+     */
+    "a2065.device", "ariadne.device", "ariadne_ii.device", "hydra.device",
+    "eb920.device", "cnet.device", "x-surf.device", "x-surf-100.device",
     "e3b_ax88796.device", "prism2.device", "eth3com.device", "rtl8029.device",
     "emac.device", "uaenet.device", "slip.device", "ppp.device",
 

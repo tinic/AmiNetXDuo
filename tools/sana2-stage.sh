@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+#
 # Board -> SANA-II driver, and staging that driver into a test's DEVS: tree.
 # Sourced by tests/netstack/run-winuae.sh and tests/conformance/run-winuae.sh
 # so the two agree about which driver a board wants and where it lives.
@@ -101,6 +103,7 @@ anxnet_binary() { # [builddir]
 # the vendor driver: the sweep would then report a green card for a driver it
 # was not asked to measure.  It comes back with SANA2_SEL_PATH empty and
 # SANA2_SEL_SOURCE=anxnet, which every caller already reports as a skip.
+# shellcheck disable=SC2034  # SANA2_SEL_* are read by the callers, not here
 sana2_select() { # board [builddir]
     SANA2_SEL_CARD=""
     SANA2_SEL_SOURCE=vendor
@@ -130,21 +133,74 @@ sana2_local_driver() {
     return 0
 }
 
-# Stage the driver for $1 into $2 and point DEVS:NetInterfaces/eth0 at it.
-# Echoes a warning and returns 0 when there is no driver to stage: the card is
-# then in the machine with nothing able to open it, which is a result.
-sana2_stage() {
-    _board=$1
-    _devs=$2
-    _drv_name=${AMINETXDUO_SANA2_DRIVER_NAME:-$(sana2_driver_for "$_board")}
+# The three variables every caller reads afterwards, worked out from the board
+# and the environment.  Set by both halves below so either can be used alone.
+#
+#   _drv_name  the file the driver is staged as
+#   _dir       the subdirectory of DEVS: it goes in, empty for DEVS: itself
+#   _device    what goes in DEVICE=
+# shellcheck disable=SC2034  # SANA2_* are read by the callers, not here
+_sana2_names() {
+    _drv_name=${AMINETXDUO_SANA2_DRIVER_NAME:-$(sana2_driver_for "$1")}
     _drv_path=${AMINETXDUO_SANA2_DRIVER:-}
-
-    if [ "$_board" = a2065 ]; then
+    if [ "$1" = a2065 ]; then
         _dir=${AMINETXDUO_SANA2_DIR-}
     else
         _dir=${AMINETXDUO_SANA2_DIR-Networks}
     fi
     _device=${AMINETXDUO_SANA2_DEVICE:-$_drv_name}
+
+    SANA2_DRIVER=$_drv_name
+    SANA2_DEVICE=$_device
+    SANA2_DIR=$_dir
+    SANA2_CARD=${AMINETXDUO_SANA2_CARD:-}
+}
+
+# THE DRIVER FILE ONLY, into $2, which is a DEVS: tree.  Split out of
+# sana2_stage because install/test/run-workbench.sh needs exactly this half and
+# cannot have the other: the interface file it would rewrite does not exist
+# yet, the Installer is what writes it, and creating one first would put the
+# install down the "keep the existing configuration" branch instead of the card
+# question.
+#
+# Echoes a warning and returns 0 when there is no driver to stage: the card is
+# then in the machine with nothing able to open it, which is a result.
+sana2_stage_driver() {
+    _sana2_names "$1"
+    _devs=$2
+
+    if [ -n "$_drv_path" ] && [ -f "$_drv_path" ]; then
+        if [ -n "$_dir" ]; then
+            mkdir -p "$_devs/$_dir"
+            cp "$_drv_path" "$_devs/$_dir/$_drv_name"
+        else
+            cp "$_drv_path" "$_devs/$_drv_name"
+        fi
+    elif [ "$1" != a2065 ]; then
+        echo "!! no $_drv_name staged: set AMINETXDUO_SANA2_DRIVER=<path> to one." >&2
+        echo "!! The card will be in the machine and nothing will be able to" >&2
+        echo "!! open it, which is what this run will show." >&2
+    fi
+
+    # Said out loud, once, by the one function every caller goes through.
+    # Which driver a run booted decides what the run proves, and a caller that
+    # leaves it to the reader ships a green result for a driver nobody asked
+    # about.  source= is read off the file name rather than off a variable so
+    # it cannot disagree with what was actually copied.
+    case "$_drv_name" in
+        anxnet.device) _src=anxnet ;;
+        *)             _src=vendor ;;
+    esac
+    printf 'sana2_staged board=%s driver=%s source=%s device=%s card=%s dir=%s path=%s\n' \
+           "$1" "$_drv_name" "$_src" "$_device" \
+           "${SANA2_CARD:-none}" "DEVS:${_dir:+$_dir/}" \
+           "${_drv_path:-none}"
+}
+
+# THE INTERFACE FILE ONLY: point $2/NetInterfaces/eth0 at the driver for $1.
+sana2_stage_interface() {
+    _sana2_names "$1"
+    _devs=$2
 
     sed "s|^DEVICE=.*|DEVICE=$_device|" "$_devs/NetInterfaces/eth0" \
         > "$_devs/NetInterfaces/eth0.new"
@@ -158,35 +214,10 @@ sana2_stage() {
     [ -z "${AMINETXDUO_SANA2_CARD:-}" ] ||
         echo "CARD=$AMINETXDUO_SANA2_CARD" >> "$_devs/NetInterfaces/eth0.new"
     mv "$_devs/NetInterfaces/eth0.new" "$_devs/NetInterfaces/eth0"
+}
 
-    if [ -n "$_drv_path" ] && [ -f "$_drv_path" ]; then
-        if [ -n "$_dir" ]; then
-            mkdir -p "$_devs/$_dir"
-            cp "$_drv_path" "$_devs/$_dir/$_drv_name"
-        else
-            cp "$_drv_path" "$_devs/$_drv_name"
-        fi
-    elif [ "$_board" != a2065 ]; then
-        echo "!! no $_drv_name staged: set AMINETXDUO_SANA2_DRIVER=<path> to one." >&2
-        echo "!! The card will be in the machine and nothing will be able to" >&2
-        echo "!! open it, which is what this run will show." >&2
-    fi
-
-    SANA2_DRIVER=$_drv_name
-    SANA2_DEVICE=$_device
-    SANA2_CARD=${AMINETXDUO_SANA2_CARD:-}
-
-    # Said out loud, once, by the one function every caller goes through.
-    # Which driver a run booted decides what the run proves, and a caller that
-    # leaves it to the reader ships a green result for a driver nobody asked
-    # about.  source= is read off the file name rather than off a variable so
-    # it cannot disagree with what was actually copied.
-    case "$_drv_name" in
-        anxnet.device) _src=anxnet ;;
-        *)             _src=vendor ;;
-    esac
-    printf 'sana2_staged board=%s driver=%s source=%s device=%s card=%s dir=%s path=%s\n' \
-           "$_board" "$_drv_name" "$_src" "$_device" \
-           "${SANA2_CARD:-none}" "DEVS:${_dir:+$_dir/}" \
-           "${_drv_path:-none}"
+# Stage the driver for $1 into $2 and point DEVS:NetInterfaces/eth0 at it.
+sana2_stage() {
+    sana2_stage_interface "$1" "$2"
+    sana2_stage_driver "$1" "$2"
 }
