@@ -29,9 +29,6 @@ version at the top when it merges.
 - A PCMCIA card is no longer configured and then switched back off. `CardMiscControl` writes the Gayle status register outright rather than setting bits, and the value passed one step after the configuration write cleared it, taking the socket out of I/O mode and re-enabling write protection. Every register read after that was bus noise. Emulation cannot show this: it ignores those two bits
 - `anxnet.device` recognises the 3Com EtherLink III (3c589) in the PCMCIA slot of an A600 or A1200. It has never been run on the card it is written for: if it works, or does not, that is worth reporting
 - The driver's watchdog resets the chip the unit actually has. It called the DP8390 routine for every card, so on an A2065 or an Ariadne a wedged transmitter was never freed
-
-The console:
-
 - The console serves HAM6, HAM8 and extra half-brite screens. They were the modes a picture is most likely to be on, and they were the ones it could not show
 - The console follows a screen change instead of ending on it. Opening a preferences program used to close the session, because the screen it was serving went away
 - The console gives the machine back three quarters of its time. A frame is produced a band at a time and the share is counted over the whole session rather than over one band, so a program underneath keeps running while somebody is watching it
