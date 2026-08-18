@@ -601,6 +601,25 @@ struct sockaddr_in sa;
                                         (LONG)sizeof(tv)) == 0),
                   "setsockopt SO_SNDTIMEO 1s", bsd_Errno());
 
+    tv.tv_secs  = 1;
+    tv.tv_micro = 1000000;
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                                        (LONG)sizeof(tv)) < 0 &&
+                         bsd_Errno() == T_EINVAL),
+                  "SO_SNDTIMEO rejects an unnormalised timeval", bsd_Errno());
+
+    tv.tv_secs  = 0x80000000UL;
+    tv.tv_micro = 0;
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                                        (LONG)sizeof(tv)) == 0),
+                  "SO_SNDTIMEO saturates a huge timeval", bsd_Errno());
+
+    t_bzero(&tv, sizeof(tv));
+    len = (socklen_t)sizeof(tv);
+    (VOID)bsd_getsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, &len);
+    (VOID)t_check((BOOL)((ULONG)tv.tv_secs > 1000000UL),
+                  "a huge timeout does not wrap short", (LONG)tv.tv_secs);
+
     (VOID)t_check((BOOL)(t_set_int(fd, SOL_SOCKET, SO_EVENTMASK,
                                    0x0001) == 0),
                   "setsockopt SO_EVENTMASK", bsd_Errno());
