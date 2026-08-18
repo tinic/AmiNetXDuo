@@ -222,7 +222,8 @@ static UINT bsd_oob_ip_filter(VOID *ip_header_ptr, UINT direction)
 
 /* ------------------------------------------------------------------- send, */
 
-LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
+LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
+                  LONG flags)
 {
     NX_TCP_SOCKET  *tcp    = &sock->as_Nx.tcp;
     NX_IP          *ip     = tcp->nx_tcp_socket_ip_ptr;
@@ -242,7 +243,7 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte)
     if ((sock->as_Flags & ASF_WRSHUT) != 0)
         return bsd_fail(base, AMI_EPIPE);
 
-    wait = bsd_wait_option(sock, sock->as_SndTimeout);
+    wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
     status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, wait);
     if (status != NX_SUCCESS)

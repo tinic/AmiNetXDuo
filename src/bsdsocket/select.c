@@ -417,9 +417,12 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
     }
 }
 
-ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks)
+ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
 {
-    if ((sock->as_Flags & ASF_NONBLOCK) != 0)
+    /* MSG_DONTWAIT is per operation, not a request to change the descriptor.
+       It has the same effect on this call's wait as ASF_NONBLOCK. */
+    if ((sock->as_Flags & ASF_NONBLOCK) != 0 ||
+        (flags & MSG_DONTWAIT) != 0)
         return NX_NO_WAIT;
 
     if (timeout_ticks != 0)

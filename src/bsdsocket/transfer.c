@@ -303,8 +303,6 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
      */
     UINT            why  = NX_NO_PACKET;
 
-    (VOID)flags;
-
     if (pool == NULL)
         return bsd_fail(base, AMI_ENETDOWN);
 
@@ -318,7 +316,7 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     if (mss == 0)
         mss = BSD_DEFAULT_MSS;
 
-    wait = bsd_wait_option(sock, sock->as_SndTimeout);
+    wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
     while (sent < len)
     {
@@ -583,8 +581,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 #endif
 #endif
 
-    (VOID)flags;
-
     if (pool == NULL)
         return bsd_fail(base, AMI_ENETDOWN);
 
@@ -685,7 +681,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     if (src != NULL && src->cs_HaveHops)
         sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)src->cs_Hops;
 
-    wait = bsd_wait_option(sock, sock->as_SndTimeout);
+    wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
     status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
     if (status != NX_SUCCESS)
@@ -769,8 +765,9 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
  * or not at all.
  */
 static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
-                         BsdIovCursor *cur, LONG len, const NXD_ADDRESS *addr,
-                         ULONG scope, const BsdCmsgSource *src)
+                         BsdIovCursor *cur, LONG len, LONG flags,
+                         const NXD_ADDRESS *addr, ULONG scope,
+                         const BsdCmsgSource *src)
 {
     NX_PACKET_POOL *pool   = netstack_pool();
     NX_PACKET      *packet = NX_NULL;
@@ -793,7 +790,7 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
         addr->nxd_ip_address.v4 == 0)
         return bsd_fail(base, AMI_EDESTADDRREQ);
 
-    wait = bsd_wait_option(sock, sock->as_SndTimeout);
+    wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
     status = nx_packet_allocate(pool, &packet, NX_IP_PACKET, wait);
     if (status != NX_SUCCESS)
@@ -943,7 +940,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags, BOOL *held)
 {
     LONG  copied = 0;
-    ULONG wait   = bsd_wait_option(sock, sock->as_RcvTimeout);
+    ULONG wait   = bsd_wait_option(sock, sock->as_RcvTimeout, flags);
     BOOL  peek   = ((flags & MSG_PEEK) != 0);
     BOOL  first  = TRUE;
 
@@ -1109,7 +1106,8 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
            datagram, which is still a queued record and reaches this call. */
         ULONG          wait = (len == 0)
                                   ? NX_NO_WAIT
-                                  : bsd_wait_option(sock, sock->as_RcvTimeout);
+                                  : bsd_wait_option(sock, sock->as_RcvTimeout,
+                                                    flags);
         BsdRecvUdpArgs args;
         BOOL           aborted;
 
@@ -1248,7 +1246,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     {
         ULONG          wait = (len == 0)
                                   ? NX_NO_WAIT
-                                  : bsd_wait_option(sock, sock->as_RcvTimeout);
+                                  : bsd_wait_option(sock, sock->as_RcvTimeout,
+                                                    flags);
         BsdRecvRawArgs args;
         BOOL           aborted;
 
@@ -1333,7 +1332,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENETDOWN);
 
     if ((sock->as_Flags & ASF_RAW) != 0)
-        result = bsd_send_raw(base, sock, &cur, len, addr, scope, src);
+        result = bsd_send_raw(base, sock, &cur, len, flags, addr, scope, src);
     else if ((sock->as_Flags & ASF_TCP) != 0)
         result = bsd_send_tcp(base, sock, &cur, len, flags);
     else
@@ -1457,7 +1456,7 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
  * path. Only the last needs oob.c.
  */
 static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
-                         const UBYTE *buf, LONG len)
+                         const UBYTE *buf, LONG len, LONG flags)
 {
     LONG sent = 0;
     LONG rc;
@@ -1477,7 +1476,7 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
         iov.iov_len  = (size_t)(len - 1);
         bsd_iov_init(&cur, &iov, 1);
 
-        sent = bsd_send_tcp(base, sock, &cur, len - 1, 0);
+        sent = bsd_send_tcp(base, sock, &cur, len - 1, flags);
         if (sent < len - 1)
         {
             bsd_nx_leave(base);
@@ -1485,7 +1484,7 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
         }
     }
 
-    rc = bsd_oob_send(base, sock, buf[len - 1]);
+    rc = bsd_oob_send(base, sock, buf[len - 1], flags);
 
     bsd_nx_leave(base);
 
@@ -1601,7 +1600,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
         return bsd_fail(SocketBase, AMI_EDESTADDRREQ);
 
     if ((flags & MSG_OOB) != 0)
-        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len);
+        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len, flags);
 
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
@@ -1644,7 +1643,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
     scope = 0UL;
 
     if ((flags & MSG_OOB) != 0)
-        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len);
+        return bsd_send_oob(SocketBase, sock, (const UBYTE *)buf, len, flags);
 
     /* A destination on a connected stream socket is ignored, as in BSD. */
     if ((sock->as_Flags & ASF_TCP) == 0)

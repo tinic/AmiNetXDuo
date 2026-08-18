@@ -2626,7 +2626,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         args.ready    = NULL;
 
         status = bsd_wait_sliced(SocketBase,
-                                 bsd_wait_option(sock, sock->as_RcvTimeout),
+                                 bsd_wait_option(sock, sock->as_RcvTimeout, 0),
                                  bsd_accept_once, &args, &aborted);
         if (aborted)
         {
