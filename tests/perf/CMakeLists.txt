@@ -27,16 +27,35 @@
 # collide, and the A/B it exists to run would be meaningless anyway.
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_NET68K_CHECKSUM)
 
-# The RTG screen prober: what modes the display database really holds, and a
-# public 8-bit screen of the requested shape left in front for the console to
-# serve.  A TEST TOOL and nothing ships it; see the file for why the console
-# harness could not do without it.
-add_executable(rtgscreen rtgscreen.c)
-target_include_directories(rtgscreen PRIVATE ${AMINETXDUO_CORE_INCLUDES})
-if(AMIGA_NDK_INCLUDE)
-    target_include_directories(rtgscreen PRIVATE "${AMIGA_NDK_INCLUDE}")
-endif()
-target_compile_options(rtgscreen PRIVATE -Wall -Wextra)
+# The mode lister and the colour bars, the two halves of proving a truecolour
+# readback.  rtgmodes says what the board really publishes, so a mode ID is
+# read off the machine instead of guessed at; rtgbars puts a picture with a
+# known red and a known blue in front of the console, so a readback that
+# transposes them fails instead of looking deliberate.  Neither ships.
+#
+# STARTED LIKE A COMMAND, NOT LIKE A TEST.  Both run from S:Startup-Sequence on
+# the console harness's RTG guest, and their predecessor -- rtgscreen, which
+# these two replace -- did not survive that position: linked against the
+# toolchain crt0 and printing through newlib, it died at a garbage PC in low
+# memory before its first line reached the file it was redirected into, taking
+# the boot and the server three lines below it with it.  So they link
+# src/tools/tool_startup.S under -nostartfiles and print with VPrintf(), which
+# is what every command that demonstrably runs on that guest does.
+# tool_startup.S FIRST in each list: AmigaOS enters a command at the first byte
+# of the first hunk and the linker script carries no ENTRY(), so *(.text) is
+# filled in link order.  src/tools/CMakeLists.txt says the same thing and checks
+# its map for it.
+add_executable(rtgmodes "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgmodes.c)
+add_executable(rtgbars "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtgbars.c)
+
+foreach(rtgtool rtgmodes rtgbars)
+    target_include_directories(${rtgtool} PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(${rtgtool} PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+    target_compile_options(${rtgtool} PRIVATE -Wall -Wextra)
+    target_link_options(${rtgtool} PRIVATE -nostartfiles)
+endforeach()
 
 add_executable(perf_test perf_test.c)
 
