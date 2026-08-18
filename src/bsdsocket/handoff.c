@@ -40,6 +40,7 @@ typedef struct BsdHandoff
     struct MinNode  bh_Node;
     LONG            bh_Id;
     AmiSocket      *bh_Socket;
+    BOOL            bh_Claimed;
 } BsdHandoff;
 
 /* Open-coded NewList(). amiga.lib is not available to a shared library. */
@@ -100,6 +101,9 @@ static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
     {
         BsdHandoff *entry = (BsdHandoff *)node;
         AmiSocket  *sock  = entry->bh_Socket;
+
+        if (entry->bh_Claimed)
+            continue;
 
         if (entry->bh_Id != id)
             continue;
@@ -188,8 +192,9 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EINVAL);
     }
 
-    entry->bh_Id     = id;
-    entry->bh_Socket = sock;
+    entry->bh_Id      = id;
+    entry->bh_Socket  = sock;
+    entry->bh_Claimed = FALSE;
 
     AddTail((struct List *)&master->sb_Handoffs, (struct Node *)&entry->bh_Node);
 
@@ -335,19 +340,27 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
 
     sock = entry->bh_Socket;
 
-    Remove((struct Node *)&entry->bh_Node);
+    /* Keep the node in the registry until descriptor allocation and its
+       callback succeed. A claimed node is skipped by another ObtainSocket(),
+       but still makes a unique id unavailable to ReleaseSocket(). */
+    entry->bh_Claimed = TRUE;
 
     ReleaseSemaphore(&master->sb_Lock);
-
-    ami_free(entry);
 
     fd = bsd_fd_alloc(SocketBase, sock);
     if (fd < 0)
     {
-        /* Put it back rather than lose it. */
-        (VOID)bsd_handoff_park(SocketBase, sock, id, TRUE);
+        ObtainSemaphore(&master->sb_Lock);
+        entry->bh_Claimed = FALSE;
+        ReleaseSemaphore(&master->sb_Lock);
         return bsd_fail(SocketBase, AMI_EMFILE);
     }
+
+    ObtainSemaphore(&master->sb_Lock);
+    Remove((struct Node *)&entry->bh_Node);
+    ReleaseSemaphore(&master->sb_Lock);
+
+    ami_free(entry);
 
     /*
      * The socket is ours now: events go to this task. A socket obtained from
