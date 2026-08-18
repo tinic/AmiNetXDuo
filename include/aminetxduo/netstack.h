@@ -337,6 +337,8 @@ BOOL    netstack_interface_is_up(UWORD index);
 LONG    netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_remove(UWORD index, BOOL force);
+/* Resolve the name under the same add/remove lock as the removal. */
+LONG    netstack_interface_remove_named(const char *name, BOOL force);
 
 /* ------------------------------------------- DHCP on one interface --------
  *
