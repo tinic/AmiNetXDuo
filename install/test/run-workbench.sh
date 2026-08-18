@@ -973,7 +973,7 @@ use_gui=no
 headless=true
 quickstart=$MODEL,0
 kickstart_rom_file=$KICKSTART
-fastmem_size=8
+fastmem_size=$(emu_board_fastmem "$BOARD" 8)
 floppy0type=-1
 nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
@@ -1653,6 +1653,33 @@ done
 https_bytes=0
 if [ -f "$HD/https-body.txt" ]; then
     https_bytes=$(wc -c < "$HD/https-body.txt" | tr -d ' ')
+fi
+
+# DID THE GUEST REALLY TAKE THE CARD, off the emulator's own log.
+#
+# First, because it is the one line that tells "the machine could not use this
+# card" apart from "the network is having a bad day", and the difference
+# decides whether the four rows below are worth reading at all.  ne2000_pcmcia
+# failed here with a correctly written interface file, a card the emulator
+# called inserted, and a guest that said "Network stack: not started"; the
+# cause was this script's own fastmem_size, and it took two logs side by side
+# to see it.  tools/emu-board.sh:emu_board_log_proof has the pattern and why
+# that one and not the `inserted=1` line above it.
+BOARD_PROOF=$(emu_board_log_proof "$BOARD")
+if [ -z "$BOARD_PROOF" ]; then
+    printf '  %-34s no log line means this for %s\n' \
+           "the guest configured the card" "$BOARD"
+elif grep -q "$BOARD_PROOF" "$ROOT/build/amiberry-$TAG-boot.log" 2>/dev/null; then
+    printf '  %-34s "%s"\n' "the guest configured the card" "$BOARD_PROOF"
+else
+    printf '  %-34s NO "%s" IN THE EMULATOR LOG\n' \
+           "the guest configured the card" "$BOARD_PROOF"
+    echo "     The card is in the machine and the guest never mapped it."
+    echo "     On an A1200 the first thing to check is fastmem_size: 8 MB of"
+    echo "     Zorro II Fast RAM covers 0x200000-0x9fffff and the PCMCIA"
+    echo "     windows are at 0x600000 and 0xa00000.  This run used"
+    echo "     $(emu_board_fastmem "$BOARD" 8) MB."
+    bad=1
 fi
 
 report "ShowNetStatus"                 network

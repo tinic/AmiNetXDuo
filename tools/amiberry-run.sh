@@ -338,16 +338,12 @@ EOF
 
 # ------------------------------------------------------------------- config --
 
-# 8 MB of Zorro II Fast RAM covers 0x200000-0x9fffff, and an A1200's PCMCIA
-# windows are at 0x600000 (common) and 0xa00000 (attribute).  They overlap, on
-# the real machine as well as here, which is why an A1200 with a PCMCIA card
-# cannot have 8 MB on the trapdoor bus.  Under emulation the collision does not
-# announce itself: the card is logged as inserted, the backend opens, and the
-# driver simply fails to find it, cnet.device came back with
-# `cannot open cnet.device unit 0 (-1)` and nothing else.  4 MB stops short of
-# 0x600000 and the same run works.
-FASTMEM=8
-[ "$BOARD" = ne2000_pcmcia ] && FASTMEM=4
+# The board decides the ceiling, and the reasoning is in tools/emu-board.sh
+# beside the rest of what a board needs from the machine.  It was here, where
+# install/test/run-workbench.sh could not see it, and that is how the release
+# gate came to write fastmem_size=8 under a PCMCIA card: cnet.device answered
+# `cannot open cnet.device unit 0 (-1)` and nothing else.
+FASTMEM=$(emu_board_fastmem "$BOARD" 8)
 
 # AMINETXDUO_FASTMEM=<MB> takes it away again, 0 included.  The pool and the
 # receive window come off AvailMem(), so the 1 MB machine in
