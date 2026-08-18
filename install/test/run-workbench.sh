@@ -369,7 +369,19 @@ slirp|slirp_inbound|none)
     exit 2
     ;;
 esac
-MAC="${AMINETXDUO_EMU_MAC:-52:54:00:c0:ff:ee}"
+
+# ONE MAC PER TAG, derived, not pinned.  A fixed address here put every run of
+# this harness on the bridge under 52:54:00:c0:ff:ee, beside the demo instance
+# and beside other checkouts' guests: two machines at two addresses sharing one
+# hardware address, so a peer's neighbour cache cannot tell them apart and the
+# arp step below reports whichever answered last.
+#
+# tools/emu-mac.sh is the one implementation of this, shared with
+# tools/amiberry-run.sh rather than repeated here.  AMINETXDUO_EMU_MAC still
+# wins, for a run that wants a reservation to hold.
+# shellcheck source=../../tools/emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+MAC="${AMINETXDUO_EMU_MAC:-$(emu_mac_for_tag "$TAG")}"
 
 XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
 if [ -z "$XDFTOOL" ]; then
