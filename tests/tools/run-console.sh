@@ -33,13 +33,24 @@
 #
 #   -C ham6, -C ham8 and -C ehb serve the OTHER three chipset screens, the ones
 #   whose planes are not a palette index.  Each is one boot, named by its mode
-#   rather than by its depth, and what it serves is not Workbench: the
-#   ScreenMode editor filters HAM and EHB out of the list it offers, so a
-#   Workbench asked for one through screenmode.prefs may come up PAL hires and
-#   two planes deep with nothing saying so.  C:chipscreen opens the screen
-#   itself, draws a deterministic ramp on it and leaves it in front, and the arm
-#   asserts the wire format the session then reports.  ham8 is AGA and needs an
-#   AGA model.
+#   rather than by its depth, and what it serves is not Workbench.  ham8 is AGA
+#   and needs an AGA model.
+#
+#   WORKBENCH DOES TAKE THESE MODES, which is not what this expected.  The
+#   ScreenMode editor does not offer HAM or EHB in its list, but IPrefs reads
+#   the file rather than the list: a screenmode.prefs naming 0x00021800 brings
+#   Workbench up six or eight planes deep with the HAM bit set, and 0x00021080
+#   brings it up on extra half-brite.  Measured, and every arm reports it as
+#   <mode>_wb_*.  It takes the display ID and the depth and ignores the width:
+#   a prefs file asking for 320x256 gets a 640-wide screen.
+#
+#   That is not enough to test against, which is why C:chipscreen exists.  A
+#   Workbench desktop drawn through the HAM chain is five colours of noise --
+#   nothing in it says whether the control codes were read in the right order
+#   -- so chipscreen opens a screen of its own, draws a deterministic ramp on
+#   it and leaves it in front.  The arm then asserts both halves: the wire
+#   format the session reports, and that the picture on it is the one the guest
+#   says it drew.
 #
 #   THE PICTURE IS THE POINT.  A HAM decode with its control codes permuted or
 #   its data field in the wrong place still draws a plausible image, so an arm
@@ -114,8 +125,10 @@
 #                               0 is the planar screen a failed staging falls
 #                               back to, and the arm fails on it
 #     <mode>_chipset_wire_depth and its depth, 6 or 8
-#     <mode>_chip_*             what C:chipscreen said on the guest, including
-#                               the mode Workbench itself came up on
+#     <mode>_wb_*               the screen Workbench itself came up on, read
+#                               before chipscreen put one in front of it
+#     <mode>_chip_*             what C:chipscreen said on the guest: the mode
+#                               OpenScreen gave it and the pattern it drew
 #
 #   A depth the board publishes no mode for is reported as d<N>_skipped and
 #   the arm does not run.  Which modes an emulated uaegfx offers is the

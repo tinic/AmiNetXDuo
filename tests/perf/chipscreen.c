@@ -20,11 +20,16 @@
  * A TEST TOOL, for the same reason tests/perf/rtgscreen.c is one, and then for
  * a second reason that is the whole point of this file.
  *
- * The first is staging.  The ScreenMode editor filters HAM and EHB out of the
- * list it offers, so a Workbench asked for one through screenmode.prefs may
- * simply come up PAL hires two planes deep, and every check the console
- * harness makes passes on that: it is a screen, it has colours, it changes.
- * This opens the screen itself and says what it got.
+ * The first is staging.  A screen the harness only asked for is a screen
+ * nothing has confirmed: every check the console harness makes passes on the
+ * PAL hires Workbench a failed staging leaves behind, because it is a screen,
+ * it has colours and it changes.  This opens the screen itself and says what
+ * it got, and it reports the Workbench screen on the way past.
+ *
+ * Workbench does in fact take these modes from screenmode.prefs, measured on a
+ * 3.1 A1200 -- the ScreenMode editor does not offer HAM or EHB, but IPrefs
+ * reads the file rather than the list.  It ignores the width in it, so the
+ * screen comes up 640 wide whatever the file says.
  *
  * The second is that a HAM decode which is subtly wrong still draws a
  * plausible picture.  Swap the two control bits, take the data from the wrong
