@@ -415,6 +415,9 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             node = bsd_gai_node(AF_INET6, socktype, protocol, &addr, port,
                                 NULL, NULL);
+            if (node == NULL)
+                return EAI_MEMORY;
+
             bsd_gai_append(&head, &tail, node);
         }
 #endif
@@ -425,6 +428,12 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             node = bsd_gai_node(AF_INET, socktype, protocol, &addr, port,
                                 NULL, NULL);
+            if (node == NULL)
+            {
+                bsd_freeaddrinfo(head, SocketBase);
+                return EAI_MEMORY;
+            }
+
             bsd_gai_append(&head, &tail, node);
         }
 
@@ -560,7 +569,13 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                                 ((flags & AI_CANONNAME) != 0)
                                     ? (const char *)nodename : NULL,
                                 NULL);
-            if (node != NULL && (flags & AI_CANONNAME) != 0)
+            if (node == NULL)
+            {
+                bsd_freeaddrinfo(head, SocketBase);
+                return EAI_MEMORY;
+            }
+
+            if ((flags & AI_CANONNAME) != 0)
                 canon = node->name;
 
             bsd_gai_append(&head, &tail, node);
@@ -590,6 +605,11 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                                 ((flags & AI_CANONNAME) != 0 && canon == NULL)
                                     ? (const char *)nodename : NULL,
                                 canon);
+            if (node == NULL)
+            {
+                bsd_freeaddrinfo(head, SocketBase);
+                return EAI_MEMORY;
+            }
 
             bsd_gai_append(&head, &tail, node);
         }
