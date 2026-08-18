@@ -20,7 +20,7 @@ annotated — git has the history.
 
 | Interface | Behaviour | Where |
 |---|---|---|
-| `SBTC_CAN_SHARE_LIBRARY_BASES` | read-only `FALSE`; opener signal and timer state is task-owned | `bsdsocket_internal.h`, `errno.c` |
+| `SBTC_CAN_SHARE_LIBRARY_BASES` | answers `FALSE`, and refuses a request to share. Signal masks and timer.device state belong to the opening task, so a shared base would deliver another task's completions. A SET of `FALSE` is accepted so a batched `SocketBaseTagList()` is not cut short at that tag | `errno.c:480`, `bsdsocket_internal.h:576` |
 | `SO_BROADCAST`, `SO_OOBINLINE`, and `SO_REUSEPORT`'s share-arrivals half | success, no effect. A broadcast `sendto()` without `SO_BROADCAST` succeeds where 4.4BSD returns `EACCES` | `options.c:221-228`, `:266-268` |
 | `SO_RCVBUF` on TCP | recorded and answered, never applied: the arm is inside `#ifdef NX_ENABLE_LOW_WATERMARK`, which this port does not define. The advertised window is sized from the packet pool at create time and is not settable afterwards. UDP is applied | `options.c:319-331` |
 | `DAV: 1,2` | class claim. §18.1 needs all Class 1 MUSTs (PROPFIND body gap) and §18.2 needs §6-§10 (LOCK on unmapped URL, Depth-0 collection). Advertising `DAV: 1` would be honest, but Finder reads that as read-only | `httpd.c:3449`, `:3536` |

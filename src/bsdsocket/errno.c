@@ -465,8 +465,19 @@ typedef struct
 static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS, SBT_RO, BSD_PACKET_FILTER_CHANNELS },
-    /* Signals and timer.device state belong to the task that opened us. */
-    { SBTC_CAN_SHARE_LIBRARY_BASES,     SBT_RO, FALSE                     },
+    /*
+     * Signals and timer.device state belong to the task that opened us, so
+     * the honest answer to "can this base be shared" is FALSE.
+     *
+     * SBT_RW rather than SBT_RO, and the value is what makes that safe: the
+     * SET arm above accepts a write of the value already held and refuses
+     * anything else. So a caller asking to share is told no, which is the
+     * point, and a caller passing FALSE -- or reading it -- is not. A refused
+     * SET returns that tag's index and DISCARDS EVERY TAG AFTER IT in the
+     * same call, which is how an errno link in the next slot goes missing,
+     * and Amiga callers batch these into one SocketBaseTagList().
+     */
+    { SBTC_CAN_SHARE_LIBRARY_BASES,     SBT_RW, FALSE                     },
 
     /*
      * The tunables. SocketBaseTagList() is documented to return the index of
