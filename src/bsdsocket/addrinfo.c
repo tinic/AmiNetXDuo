@@ -844,7 +844,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                  * 0 must not leave errno moved.
                  */
                 zone[0] = '\0';
-                if (scope != 0 &&
+                if ((flags & (ULONG)NI_WITHSCOPEID) != 0 && scope != 0 &&
                     (addr.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL)
                 {
                     (VOID)bsd_if_name_by_index(netstack_ip(), scope, zone,
