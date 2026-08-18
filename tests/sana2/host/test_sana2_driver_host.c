@@ -456,6 +456,58 @@ static void test_lookup_discriminates(void)
     ami_sana2_unbind(&iface);
 }
 
+/* A hole before an existing entry must not turn a reattach into two entries,
+   one current and one still reachable under the old IP/index pair. */
+static void test_reattach_updates_existing_binding(void)
+{
+    AmiSana2If  blocker;
+    NX_IP       new_ip;
+    NX_INTERFACE old_interface;
+    NX_INTERFACE new_interface;
+    ULONG       ret;
+
+    printf("sana2: reattach updates the existing binding across a table hole\n");
+
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    memset(&blocker, 0, sizeof(blocker));
+    memset(&new_ip, 0, sizeof(new_ip));
+    memset(&old_interface, 0, sizeof(old_interface));
+    memset(&new_interface, 0, sizeof(new_interface));
+
+    h_check(ami_sana2_attach(&blocker, &ip, 0) == AMI_NET_OK,
+            "a blocker occupies the first slot");
+    h_check(ami_sana2_attach(&iface, &ip, 3) == AMI_NET_OK,
+            "the interface occupies a later slot");
+    ami_sana2_unbind(&blocker);                 /* leave a hole before iface */
+    h_check(ami_sana2_attach(&iface, &new_ip, 4) == AMI_NET_OK,
+            "reattach succeeds across the hole");
+
+    old_interface.nx_interface_index = 3;
+    ret = 0xDEADBEEFUL;
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command    = NX_LINK_GET_SPEED;
+    req.nx_ip_driver_ptr        = &ip;
+    req.nx_ip_driver_interface  = &old_interface;
+    req.nx_ip_driver_return_ptr = &ret;
+    ami_sana2_driver_entry(&req);
+    h_check(req.nx_ip_driver_status == NX_INVALID_INTERFACE,
+            "the old binding was replaced, not left stale");
+    h_check(ret == 0xDEADBEEFUL, "and the old request received no answer");
+
+    new_interface.nx_interface_index = 4;
+    ret = 0xDEADBEEFUL;
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command    = NX_LINK_GET_SPEED;
+    req.nx_ip_driver_ptr        = &new_ip;
+    req.nx_ip_driver_interface  = &new_interface;
+    req.nx_ip_driver_return_ptr = &ret;
+    ami_sana2_driver_entry(&req);
+    h_check(ret == iface.bps, "the replacement binding is reachable");
+
+    ami_sana2_unbind(&iface);
+    ami_sana2_unbind(&blocker);
+}
+
 /*
  * The leak.  An interface with no binding is a state the stack can reach
  * during teardown, and NX_LINK_PACKET_SEND carries a packet the pool is owed
@@ -960,6 +1012,7 @@ int main(void)
 {
     test_lookup_and_memoise();
     test_lookup_discriminates();
+    test_reattach_updates_existing_binding();
     test_unbound_send_releases_the_packet();
     test_unbound_without_a_packet();
 
