@@ -1211,24 +1211,41 @@ case "$INSTALLER_DEVICE" in
     "$SANA2_DRIVER"|"DEVS:Networks/$SANA2_DRIVER") CARD_SELECTED=yes ;;
 esac
 
-# THE EIGHT FILE NAMES THE SCRIPT LOOKS FOR, copied from the detection loop at
-# Install-AmiNetXDuo:524-533 and in its order, because the index into this list
-# IS the card page's default.  A driver on it that was NOT selected is a
-# regression and reddens this run; a driver that is not on it could not have
-# been selected, which is a defect in the script and not in this boot, so it is
-# reported and the run carries on.
+# THE FILE NAMES THE SCRIPT LOOKS FOR, READ OUT OF THE SCRIPT THAT RAN.  A
+# driver on that list that was NOT selected is a regression and reddens this
+# run; a driver that is not on it could not have been selected, which is a
+# defect in the installer and not in this boot, so it is reported and the run
+# carries on.
 #
-# Five of the nine cards this project sweeps are in the second group, and the
-# reason is that these are not the file names the drivers ship under.  The
-# asset store has ariadne_ii.device, x-surf.device, x-surf-100.device,
-# hydra.device and eb920.device; this list has ariadne2.device, xsurf.device,
-# xsurf100.device and amiganet.device, and no Hydra or LAN Rover at all.
-INSTALLER_KNOWN_DRIVERS="a2065.device ariadne.device ariadne2.device
-amiganet.device xsurf.device xsurf100.device cnet.device uaenet.device"
+# NOT A COPY OF THE LIST.  It was one, and a copy of a list is a list that goes
+# stale the day the original is corrected -- which is the same shape as the
+# defect this measures.  It is taken from the unpacked archive rather than from
+# the tree, so what is asserted about is the script a user runs.
+INSTALLER_KNOWN_DRIVERS=$(awk '
+    /\(set DET_INDEX/     { on = 1; next }
+    /\(set CARD_DEFAULT/  { exit }
+    on {
+        line = $0
+        while (match(line, /"[A-Za-z0-9_.-]+\.device"/)) {
+            print substr(line, RSTART + 1, RLENGTH - 2)
+            line = substr(line, RSTART + RLENGTH)
+        }
+    }
+' "$HD/Unpacked/AmiNetXDuo/Install-AmiNetXDuo" 2>/dev/null)
+
 INSTALLER_KNOWS_DRIVER=no
 for _known in $INSTALLER_KNOWN_DRIVERS; do
     [ "$_known" = "$SANA2_DRIVER" ] && { INSTALLER_KNOWS_DRIVER=yes; break; }
 done
+
+# An empty list is not "the installer knows nothing", it is this awk having
+# lost the shape it reads, and it would turn every card green-by-omission.
+if [ -z "$INSTALLER_KNOWN_DRIVERS" ]; then
+    echo "!! could not read the detection list out of the archive's"
+    echo "   Install-AmiNetXDuo, so installer_knows_driver means nothing here."
+    fail=1
+fi
+echo "installer_detects=$(printf '%s' "$INSTALLER_KNOWN_DRIVERS" | tr '\n' ',')"
 
 CARD_CONFIG=installer
 if [ "$CARD_SELECTED" = "no" ] && [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
