@@ -1370,6 +1370,7 @@
       (source S_README)
       (dest   DOCDIR)
       (newname "ReadMe")
+      (infos)
       (optional "nofail")))
 
 (if (exists S_DOCS (noreq))

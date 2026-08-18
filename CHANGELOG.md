@@ -13,6 +13,7 @@ version at the top when it merges.
 
 - The installer finds the card that is in the machine. It looked for four driver names that are not files anyone ships -- `ariadne2.device`, `amiganet.device`, `xsurf.device`, `xsurf100.device` -- and had no entry at all for the Hydra or the LAN Rover, so a machine with an Ariadne II, Hydra, LAN Rover, X-Surf or X-Surf 100 could not be installed at Novice level, and at Intermediate the card list defaulted to the A2065 and `DEVICE=a2065.device` was written for whatever card was really there
 - The PCMCIA question is asked of somebody who chose PCMCIA. It was keyed on a position in the card list, and the list grew
+- The ReadMe arrives with its icon, so it is visible in the drawer on a stock Workbench. It was copied without one, while the installer's own closing text tells the reader the ReadMe in that drawer covers the rest
 
 ## 0.24.0
 
