@@ -481,12 +481,10 @@ BOOL bsd_fd_reserved(struct AmiSocketBase *base, LONG fd)
  * call that was allocating: a socket the program cannot name is a socket it
  * cannot close.
  *
- * FDCB_CHECK is not sent.  It asks the program whether a descriptor is already
- * in use on its side, and net.lib is the only description of what the answer
- * means.  Sending it with the polarity guessed would make an allocation skip
- * every free slot or none, and the failure would look like the table being
- * full.  ALLOC and FREE are unambiguous and are what keeps the two tables
- * matched.
+ * The callback returns 0 or a positive errno. FDCB_CHECK asks whether the
+ * candidate is already occupied by the link library; a refusal reserves that
+ * slot in our table and allocation continues. FDCB_ALLOC and FDCB_FREE may
+ * refuse the operation, and that errno is returned unchanged to the caller.
  */
 static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
 {
@@ -499,61 +497,79 @@ static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
 LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
 {
     LONG fd;
+    LONG error;
 
     if (bsd_table_ensure(base) != 0)
-        return -1;
+        return bsd_fail(base, AMI_EMFILE);
 
     for (fd = 0; fd < base->sb_TableSize; fd++)
     {
         if (base->sb_Table[fd] == NULL)
         {
-            base->sb_Table[fd] = sock;
-
-            /* Refused: give the slot back and report exhaustion, which is
-               what a caller can act on. */
-            if (bsd_fd_callback(base, fd, FDCB_ALLOC) < 0)
+            /* A nonzero CHECK answer means the link library owns this number.
+               Keep that fact in our descriptor bitmap and try the next one. */
+            if (bsd_fd_callback(base, fd, FDCB_CHECK) != 0)
             {
-                base->sb_Table[fd] = NULL;
-                return -1;
+                base->sb_Table[fd] = BSD_FD_RESERVED;
+                continue;
             }
+
+            error = bsd_fd_callback(base, fd, FDCB_ALLOC);
+            if (error != 0)
+                return bsd_fail(base, error);
+
+            base->sb_Table[fd] = sock;
             return fd;
         }
     }
 
-    return -1;
+    return bsd_fail(base, AMI_EMFILE);
 }
 
 LONG bsd_fd_reserve(struct AmiSocketBase *base, LONG fd)
 {
+    LONG error;
+
     if (bsd_table_ensure(base) != 0)
-        return -1;
+        return bsd_fail(base, AMI_EMFILE);
 
     if (fd < 0)
         return bsd_fd_alloc(base, BSD_FD_RESERVED);
 
     if (fd >= base->sb_TableSize || base->sb_Table[fd] != NULL)
-        return -1;
+        return bsd_fail(base, AMI_EMFILE);
+
+    error = bsd_fd_callback(base, fd, FDCB_CHECK);
+    if (error != 0)
+        return bsd_fail(base, error);
+
+    error = bsd_fd_callback(base, fd, FDCB_ALLOC);
+    if (error != 0)
+        return bsd_fail(base, error);
 
     base->sb_Table[fd] = BSD_FD_RESERVED;
-    if (bsd_fd_callback(base, fd, FDCB_ALLOC) < 0)
-    {
-        base->sb_Table[fd] = NULL;
-        return -1;
-    }
-
     return fd;
 }
 
-VOID bsd_fd_free(struct AmiSocketBase *base, LONG fd)
+LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
 {
     if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
     {
+        LONG error;
+
+        if (base->sb_Table[fd] == NULL)
+            return 0;
+
+        /* The callback can answer ENOTSOCK when the link library owns this
+           descriptor. In that case its table and ours must both stay put. */
+        error = bsd_fd_callback(base, fd, FDCB_FREE);
+        if (error != 0)
+            return bsd_fail(base, error);
+
         base->sb_Table[fd] = NULL;
-        /* After the slot is clear, so a callback that asks us about fd during
-           the call sees it already gone.  The return is not read: there is
-           nothing a program can refuse about a descriptor going away. */
-        (VOID)bsd_fd_callback(base, fd, FDCB_FREE);
     }
+
+    return 0;
 }
 
 /* ----------------------------------------------------------- socket objects */
@@ -1208,17 +1224,18 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
 VOID bsd_close_all(struct AmiSocketBase *base)
 {
     LONG fd;
+    BOOL bracketed;
 
     if (base->sb_Table == NULL)
         return;
 
     /* One bracket for the lot: this runs from CloseLibrary(), where the whole
        table goes at once and adopting per socket would be pure overhead. */
-    if (bsd_nx_enter(base) != 0)
+    bracketed = (bsd_nx_enter(base) == 0);
+    if (!bracketed)
     {
         AMI_WARN("bsdsocket: CloseLibrary with the kernel down. "
                  "Sockets are left to the stack teardown");
-        return;
     }
 
     for (fd = 0; fd < base->sb_TableSize; fd++)
@@ -1228,10 +1245,17 @@ VOID bsd_close_all(struct AmiSocketBase *base)
         if (sock == NULL)
             continue;
 
-        base->sb_Table[fd] = NULL;
-        if (sock != BSD_FD_RESERVED)
+        /* The base is going away even when a stale link-library entry refuses
+           FREE. Notify every descriptor, then force removal for teardown. */
+        if (bsd_fd_free(base, fd) != 0)
+            base->sb_Table[fd] = NULL;
+
+        if (bracketed && sock != BSD_FD_RESERVED)
             bsd_socket_release(base, sock);
     }
+
+    if (!bracketed)
+        return;
 
     /*
      * Reclaim whatever a previous program left closing. The ones this loop
@@ -1546,7 +1570,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         if (bsd_socket_destroy(sock))
             bsd_socket_dispose(sock);
         bsd_nx_leave(SocketBase);
-        return bsd_fail(SocketBase, AMI_EMFILE);
+        return -1;
     }
 
     bsd_nx_leave(SocketBase);
@@ -2777,7 +2801,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
         bsd_nx_leave(SocketBase);
 
-        return bsd_fail(SocketBase, AMI_EMFILE);
+        return -1;
     }
 
     bsd_listen_unlink(sock, incoming);
@@ -3228,14 +3252,16 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
 
     if (bsd_fd_reserved(SocketBase, sock_fd))
     {
-        bsd_fd_free(SocketBase, sock_fd);
+        if (bsd_fd_free(SocketBase, sock_fd) != 0)
+            return -1;
         return 0;
     }
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    bsd_fd_free(SocketBase, sock_fd);
+    if (bsd_fd_free(SocketBase, sock_fd) != 0)
+        return -1;
 
     /*
      * The descriptor is gone whatever happens next, so the caller always sees
