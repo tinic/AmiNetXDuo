@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- An event or an error that arrives while a program is reading them is no longer lost. Reading the pending error, the urgent-data mark and the event set each took two steps, and the network task posts between them, so a new event could be erased by the write that cleared the old one
+- `Dup2Socket()` reserves a descriptor. Asking for one without a socket did nothing, so the descriptor a program was holding for later could be handed to the next socket it opened
+- `getaddrinfo()` fails cleanly when it runs out of memory. A failed allocation was added to the list anyway, so the call could report success with a list shorter than the answer, or empty
+- `getaddrinfo()` checks the protocol it is given. `ai_protocol` was never looked at, so a request for UDP with no socket type was answered with the TCP service, and a contradictory pair such as stream over UDP was accepted
+- The source address in a message's own control data decides where a multicast datagram leaves from, ahead of the standing interface option
+- `WaitSelect()` reports a stack that went away while it was waiting, instead of returning as though the wait had simply timed out
+- `SBTC_CAN_SHARE_LIBRARY_BASES` answers FALSE and refuses a request to share, because signal masks and timer state belong to the task that opened the library. Asking is refused; passing FALSE is not, so a program setting several tags at once does not lose the ones after it
 - The library is not unloaded while a ThreadX Task can still be running code inside it. Stopping the kernel can refuse, or time out once stopping has begun, and the refusal was logged and then ignored: the segment went back to the operating system anyway, with tasks still standing on it
 - `connect()` stops trying when it gives up. On a timeout or a break it returned the failure and left the SYN retransmission running, so a reply arriving afterwards could connect a socket whose caller had already been told the connection failed
 - `accept()` no longer answers a handshake twice. A wait that expired inside it wound the connection back to listening, and the next call sent a second SYN and acknowledgment for a connection already half open, with different sequence numbers
