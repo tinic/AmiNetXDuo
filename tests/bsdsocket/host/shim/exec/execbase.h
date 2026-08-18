@@ -23,7 +23,8 @@ struct ExecBase {
     APTR            AlertData;
     APTR            MaxExtMem;
     UWORD           ChkSum;
-    UBYTE           pad0[12 * 6];
+    /* struct IntVector IntVects[16], twelve bytes each. */
+    UBYTE           pad0[12 * 16];
     struct Task    *ThisTask;
     ULONG           IdleCount;
     ULONG           DispCount;
@@ -33,6 +34,24 @@ struct ExecBase {
     BYTE            IDNestCnt;
     BYTE            TDNestCnt;
     UWORD           AttnFlags;
+    UWORD           AttnResched;
+    APTR            ResModules;
+    APTR            TaskTrapCode;
+    APTR            TaskExceptCode;
+    APTR            TaskExitCode;
+    ULONG           TaskSigAlloc;
+    UWORD           TaskTrapAlloc;
+    /* The system lists.  TaskReady and TaskWait are the two bsd_task_alive()
+       walks to decide whether an opener that closed its base is still there
+       to be protected from calling through it (src/bsdsocket/library.c). */
+    struct List     MemList;
+    struct List     ResourceList;
+    struct List     DeviceList;
+    struct List     IntrList;
+    struct List     LibList;
+    struct List     PortList;
+    struct List     TaskReady;
+    struct List     TaskWait;
 };
 
 #define AFF_68010   (1<<0)

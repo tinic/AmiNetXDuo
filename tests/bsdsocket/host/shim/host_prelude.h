@@ -102,4 +102,15 @@ struct ami_timeval {
 
 #define __asm(x)
 
+/*
+ * And bare `asm`, for the same reason and one more.  library.c opens with a
+ * file-scope asm() block holding the m68k "moveq #-1,d0 / rts" that makes the
+ * library file harmless when it is run, which no host assembler can take.
+ *
+ * Safe where __asm is: the C library's headers are included above, before this
+ * line, and they spell it __asm__ in any case.  It is defined last so nothing
+ * in this file is affected by it either.
+ */
+#define asm(x)
+
 #endif

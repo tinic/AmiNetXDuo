@@ -3,6 +3,7 @@
 #ifndef AMINETXDUO_BSD_TEST_PROTO_DOS_H
 #define AMINETXDUO_BSD_TEST_PROTO_DOS_H
 #include <exec/types.h>
+#include <utility/tagitem.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 
@@ -16,4 +17,5 @@ BPTR  Input(VOID);
 BPTR  Output(VOID);
 LONG  Delay(ULONG ticks);
 struct Process *FindTaskProcess(VOID);
+struct Process *CreateNewProc(const struct TagItem *tags);
 #endif

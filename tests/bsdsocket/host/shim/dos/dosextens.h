@@ -29,6 +29,27 @@ struct Process {
     APTR            pr_WindowPtr;
 };
 
+/* The whole of it, not only the two members bsd_opener_name() reads: a
+   partial one is a structure a later reader can be wrong about silently. */
+struct CommandLineInterface {
+    LONG   cli_Result2;
+    BSTR   cli_SetName;
+    BPTR   cli_CommandDir;
+    LONG   cli_ReturnCode;
+    BSTR   cli_CommandName;
+    LONG   cli_FailLevel;
+    BSTR   cli_Prompt;
+    BPTR   cli_StandardInput;
+    BPTR   cli_CurrentInput;
+    BSTR   cli_CommandFile;
+    LONG   cli_Interactive;
+    LONG   cli_Background;
+    BPTR   cli_CurrentOutput;
+    LONG   cli_DefaultStack;
+    BPTR   cli_StandardOutput;
+    BPTR   cli_Module;
+};
+
 struct DosPacket {
     struct Message *dp_Link;
     struct MsgPort *dp_Port;
