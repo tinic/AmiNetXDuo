@@ -1251,6 +1251,35 @@ BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst)
 
 /* ------------------------------------------------------------ the report -- */
 
+/*
+ * THE CARD'S OWN FORMAT, BY NAME, and it is the one thing the wire cannot say.
+ * A 15, 24 or 32-bit screen is downsampled to R5G6B5 before it is sent, so the
+ * geometry word reads depth 16 and format 2 for all four truecolour depths and
+ * a session on a 32-bit screen is indistinguishable from one on a 16-bit
+ * screen by anything a client can see.  That is not a small gap: the two
+ * four-byte RGBFTYPE codes whose alpha is last were transposed here until
+ * 49ef2137, and a harness that could not tell which path ran could not have
+ * told that the fix was reached either.
+ *
+ * So the depth and the format go out in the readback word, where a test reads
+ * them off one line.
+ */
+static const char *const rtg_rgbfb_name[RGBFB_N] =
+{
+    "NONE",     "CLUT",     "R8G8B8",   "B8G8R8",
+    "R5G6B5PC", "R5G5B5PC", "A8R8G8B8", "A8B8G8R8",
+    "R8G8B8A8", "B8G8R8A8", "R5G6B5",   "R5G5B5",
+    "B5G6R5PC", "B5G5R5PC", "Y4U2V2",   "Y4U1V1"
+};
+
+static const char *const rtg_pixfmt_name[PIXFMT_N] =
+{
+    "LUT8",     "RGB15",    "BGR15",    "RGB15PC",
+    "BGR15PC",  "RGB16",    "BGR16",    "RGB16PC",
+    "BGR16PC",  "RGB24",    "BGR24",    "ARGB32",
+    "BGRA32",   "RGBA32"
+};
+
 static ULONG rtg_put(char *out, ULONG cap, ULONG at, const char *s)
 {
     ULONG i;
@@ -1301,6 +1330,20 @@ ULONG http_rtg_word(char *out, ULONG cap)
     at = rtg_put(out, cap, at, " board=");
     at = rtg_put(out, cap, at,
                  rtg_on_board_known ? (rtg_on_board ? "1" : "0") : "?");
+
+    /* The screen's own depth and format, whichever library claims it.  Both
+       are what the session attached to and neither survives the downsample, so
+       this is the only place either appears. */
+    at = rtg_put(out, cap, at, " depth=");
+    at = rtg_put_num(out, cap, at, (ULONG)rtg_depth);
+
+    at = rtg_put(out, cap, at, " fmt=");
+    if (rtg_native_p96 >= 0 && (ULONG)rtg_native_p96 < RGBFB_N)
+        at = rtg_put(out, cap, at, rtg_rgbfb_name[rtg_native_p96]);
+    else if (rtg_native_cgx >= 0 && (ULONG)rtg_native_cgx < PIXFMT_N)
+        at = rtg_put(out, cap, at, rtg_pixfmt_name[rtg_native_cgx]);
+    else
+        at = rtg_put(out, cap, at, "none");
 
     at = rtg_put(out, cap, at, " best=");
     at = rtg_put(out, cap, at,

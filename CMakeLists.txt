@@ -818,6 +818,34 @@ if(NOT CMAKE_CROSSCOMPILING)
     anx_write_host_test_targets("${CMAKE_BINARY_DIR}/host-test-targets.txt")
 endif()
 
+# ------------------------------------------------------------ the stamp ----
+#
+# aminetxduo_version_stamp rewrites <aminetxduo/version_git.h> with the commit
+# actually being built (cmake/AmiNetXDuoVersion.cmake says why that cannot be
+# done at configure time).  It has to finish before anything compiles, and
+# every binary in the tree carries the string, so the dependency is added to
+# every target rather than to the ones that remembered to ask -- same reason
+# add_executable() is overridden above.  A target added next month gets it
+# without anyone thinking about it.
+#
+# Only the header's CONTENT decides what recompiles: the stamp leaves the file
+# untouched when the commit has not moved, so this edge costs a no-op build one
+# git query and nothing else.
+function(anx_stamp_all_targets dir)
+    get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        if(NOT _target STREQUAL "aminetxduo_version_stamp")
+            add_dependencies(${_target} aminetxduo_version_stamp)
+        endif()
+    endforeach()
+    get_property(_subdirs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+    foreach(_subdir IN LISTS _subdirs)
+        anx_stamp_all_targets("${_subdir}")
+    endforeach()
+endfunction()
+
+anx_stamp_all_targets("${CMAKE_CURRENT_SOURCE_DIR}")
+
 # ------------------------------------------------------------------ report --
 
 message(STATUS "AmiNetXDuo configuration:")

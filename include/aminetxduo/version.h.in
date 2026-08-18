@@ -37,17 +37,14 @@
 #define AMINETXDUO_VERSION_LONG     "@AMINETXDUO_VERSION_LONG@"
 
 /*
- * Commit count at configure time, or "" outside a git checkout.  By project
- * convention this may appear in a binary's version output and nowhere else --
- * not in a tag, not in a release name, not in an archive filename.
+ * AMINETXDUO_VERSION_HASH, _BUILD and _DATE.  In their own generated header
+ * because they are the only version values that change without cmake being
+ * re-run: everything above comes out of a file cmake watches, the commit does
+ * not.  That header is rewritten by a build step and not by configure, so an
+ * incremental build after a `git checkout` stamps the commit it just built
+ * rather than the one cmake last saw.
  */
-#define AMINETXDUO_VERSION_BUILD    "@AMINETXDUO_VERSION_BUILD@"
-
-/* d.m.yyyy, for the $VER: strings AmigaOS Version reads. */
-#define AMINETXDUO_VERSION_DATE     "@AMINETXDUO_VERSION_DATE@"
-
-/* Short commit, so two builds of the same release can be told apart. */
-#define AMINETXDUO_VERSION_HASH     "@AMINETXDUO_VERSION_HASH@"
+#include "aminetxduo/version_git.h"
 
 /*
  * The $VER: string every command and the library carries.
