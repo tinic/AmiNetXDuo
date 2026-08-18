@@ -2584,6 +2584,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
         index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
         return AMI_NET_ERR_STATE;
 
+    /* `force` overrides live TCP users, not an operation that still owns this
+       numeric slot. Reusing it while that operation runs would redirect its
+       writes to the replacement interface. */
+    if (ns->ns_IfaceClaims[index] != 0)
+        return AMI_NET_ERR_BUSY;
+
     iface = ns->ns_Iface[index];
 
     caller = ami_netstack_enter_alloc();
@@ -3181,6 +3187,72 @@ static BOOL ami_ns_same_name(const char *a, const char *b)
 }
 
 /*
+ * Turn a name into a stable numeric interface slot. Add, remove, claim and
+ * release all use ami_ns_lock, so once the count is raised the slot cannot be
+ * detached and reused until the matching release.
+ */
+LONG netstack_interface_claim(const char *name, UWORD *index_out)
+{
+    AmiNetStack *ns;
+    LONG         rc = AMI_NET_ERR_STATE;
+    UWORD        i;
+
+    if (name == NULL || name[0] == '\0' || index_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
+    if (ns != NULL && ns->ns_IpCreated)
+    {
+        for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+        {
+            UWORD cfg_index;
+
+            if (ns->ns_Iface[i] == NULL)
+                continue;
+
+            cfg_index = ns->ns_IfaceCfg[i];
+            if (cfg_index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+                !ns->ns_Config.interfaces[cfg_index].configured ||
+                !ami_ns_same_name(ns->ns_Config.interfaces[cfg_index].name,
+                                  name))
+                continue;
+
+            if (ns->ns_IfaceClaims[i] == (UWORD)-1)
+            {
+                rc = AMI_NET_ERR_BUSY;
+                break;
+            }
+
+            ns->ns_IfaceClaims[i]++;
+            *index_out = i;
+            rc = AMI_NET_OK;
+            break;
+        }
+    }
+
+    ReleaseSemaphore(&ami_ns_lock);
+    return rc;
+}
+
+VOID netstack_interface_release(UWORD index)
+{
+    AmiNetStack *ns;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
+    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+        ns->ns_IfaceClaims[index] != 0)
+        ns->ns_IfaceClaims[index]--;
+
+    ReleaseSemaphore(&ami_ns_lock);
+}
+
+/*
  * Predict the slot a new interface will land in.
  *
  * nx_ip_interface_attach() scans nx_ip_interface[] from zero and takes the
@@ -3200,7 +3272,7 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
                 i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
     {
         if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid == 0 &&
-            ns->ns_Iface[i] == NULL)
+            ns->ns_Iface[i] == NULL && ns->ns_IfaceClaims[i] == 0)
             return (LONG)i;
     }
 

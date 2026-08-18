@@ -96,9 +96,11 @@
  *     The second reverts whichever half of the pair a DHCP bind just changed.
  *     Both reads now happen inside the bracket that uses them.
  *
- * What remains is netstack.c's and is recorded in docs/BACKLOG.md: nothing
- * serialises two tasks calling AddInterfaceTagList() at once, so both can pick
- * the same free slot.
+ * ConfigureInterfaceTagList() also claims the name-to-slot mapping for its
+ * whole operation. The claim is not a ThreadX bracket: it lets unrelated
+ * interfaces continue, but makes RemoveInterface() refuse this slot instead
+ * of detaching it and letting AddInterfaceTagList() reuse the number midway
+ * through the call.
  * ---------------------------------------------------------------------------
  *
  * SPDX-License-Identifier: MIT
@@ -1117,10 +1119,12 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
                                    register struct TagItem *tags __asm("a1"),
                                    register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    NX_IP          *ip = netstack_ip();
+    NX_IP          *ip;
     BsdIfConfigReq  req;
     NX_INTERFACE   *nxif;
-    LONG            index;
+    UWORD           index;
+    LONG            rc;
+    LONG            result = 0;
     UINT            status;
 
     if (name == NULL)
@@ -1129,19 +1133,28 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
     if (bsd_strlen((const char *)name) >= (ULONG)BSD_IFNAME_SIZE)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
-    if (ip == NULL)
+    if (netstack_ip() == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    index = bsd_if_index_of(ip, (const char *)name);
-    if (index < 0)
+    rc = netstack_interface_claim((const char *)name, &index);
+    if (rc != AMI_NET_OK)
+    {
+        if (rc == AMI_NET_ERR_STATE)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
         return bsd_fail(SocketBase, AMI_ENXIO);
+    }
+
+    ip = netstack_ip();
 
     /* An empty list is a legal no-op, same as for the query. */
     if (tags == NULL)
-        return 0;
+        goto out;
 
     if (bsd_if_parse_config(SocketBase, tags, &req) != 0)
-        return -1;
+    {
+        result = -1;
+        goto out;
+    }
 
     nxif = &ip->nx_ip_interface[index];
 
@@ -1157,8 +1170,11 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
      * failure.
      */
     if (req.bcr_HaveState && req.bcr_State == SM_Online &&
-        netstack_interface_up((UWORD)index) != AMI_NET_OK)
-        return bsd_fail(SocketBase, AMI_ENXIO);
+        netstack_interface_up(index) != AMI_NET_OK)
+    {
+        result = bsd_fail(SocketBase, AMI_ENXIO);
+        goto out;
+    }
 
     if (req.bcr_HaveMTU)
     {
@@ -1181,7 +1197,10 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         ULONG       hardware;
 
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+        {
+            result = bsd_fail(SocketBase, AMI_ENETDOWN);
+            goto out;
+        }
 
         sana     = (AmiSana2If *)nxif->nx_interface_additional_link_info;
         hardware = (sana != NULL) ? ami_sana2_get_mtu(sana) : 0;
@@ -1194,7 +1213,10 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         bsd_nx_leave(SocketBase);
 
         if (status != NX_SUCCESS)
-            return bsd_fail(SocketBase, AMI_EINVAL);
+        {
+            result = bsd_fail(SocketBase, AMI_EINVAL);
+            goto out;
+        }
     }
 
     if (req.bcr_HaveAddress || req.bcr_HaveNetMask)
@@ -1202,13 +1224,14 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
         if (bsd_if_set_address(SocketBase, index,
                                req.bcr_HaveAddress, req.bcr_Address,
                                req.bcr_HaveNetMask, req.bcr_NetMask) != 0)
-            return -1;
+        {
+            result = -1;
+            goto out;
+        }
     }
 
     if (req.bcr_HaveState && req.bcr_State != SM_Online)
     {
-        LONG rc;
-
         /*
          * Last, so that {IFC_Address, IFC_State SM_Up} behaves as written.
          * netstack_interface_*() take the ThreadX bracket themselves and stop
@@ -1229,17 +1252,22 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
          * shared with Envoy or ACS stays on the wire for them.
          */
         if (req.bcr_State == SM_Up)
-            rc = netstack_interface_up((UWORD)index);
+            rc = netstack_interface_up(index);
         else if (req.bcr_State == SM_Down)
-            rc = netstack_interface_stack_down((UWORD)index);
+            rc = netstack_interface_stack_down(index);
         else
-            rc = netstack_interface_down((UWORD)index);
+            rc = netstack_interface_down(index);
 
         if (rc != AMI_NET_OK)
-            return bsd_fail(SocketBase, AMI_ENXIO);
+        {
+            result = bsd_fail(SocketBase, AMI_ENXIO);
+            goto out;
+        }
     }
 
-    return 0;
+out:
+    netstack_interface_release(index);
+    return result;
 }
 
 /* ------------------------------------------------ AddInterfaceTagList --- */

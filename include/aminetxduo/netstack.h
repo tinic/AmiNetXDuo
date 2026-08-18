@@ -333,12 +333,19 @@ BOOL    netstack_interface_is_up(UWORD index);
  * STATE=down. AddInterfaceTagList() wants the bare interface above, since its
  * caller addresses it with ConfigureInterfaceTagList(). AddNetInterface has a
  * file and wants the interface a boot would have given it.
+ *
+ * A caller that resolves a name and then performs more than one operation by
+ * numeric index must claim it. The claim prevents removal and slot reuse until
+ * release; unlike active TCP connections it cannot be overridden by `force`,
+ * because the caller is still dereferencing that slot.
  */
 LONG    netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out);
 LONG    netstack_interface_remove(UWORD index, BOOL force);
 /* Resolve the name under the same add/remove lock as the removal. */
 LONG    netstack_interface_remove_named(const char *name, BOOL force);
+LONG    netstack_interface_claim(const char *name, UWORD *index_out);
+VOID    netstack_interface_release(UWORD index);
 
 /* ------------------------------------------- DHCP on one interface --------
  *
