@@ -374,7 +374,7 @@ esac
 # this harness on the bridge under 52:54:00:c0:ff:ee, beside the demo instance
 # and beside other checkouts' guests: two machines at two addresses sharing one
 # hardware address, so a peer's neighbour cache cannot tell them apart and the
-# arp step below reports whichever answered last.
+# arp step above reports whichever answered last.
 #
 # tools/emu-mac.sh is the one implementation of this, shared with
 # tools/amiberry-run.sh rather than repeated here.  AMINETXDUO_EMU_MAC still
@@ -514,9 +514,9 @@ fi
 if [ -z "$ARCHIVE" ]; then
     echo "==> building the distribution archive"
     AMINETXDUO_DIST_NO_MINIMAL=1 \
-        "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/wb31-make-dist.log" 2>&1 || {
-        echo "dist/make-dist.sh failed, see build/wb31-make-dist.log" >&2
-        tail -20 "$ROOT/build/wb31-make-dist.log" >&2
+        "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/$TAG-make-dist.log" 2>&1 || {
+        echo "dist/make-dist.sh failed, see build/$TAG-make-dist.log" >&2
+        tail -20 "$ROOT/build/$TAG-make-dist.log" >&2
         exit 2
     }
     VERSION=$("$ROOT/tools/version.sh" --product)
@@ -556,7 +556,7 @@ if [ "$TERMINAL" = "1" ]; then
 fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"})"
-DRIVER="$ROOT/build/installdrive-wb-$LEVEL"
+DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL"
 
 rm -rf "$HD"
@@ -769,23 +769,30 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 # One boot of the machine as it stands.  $1 names the run, $2 is the timeout,
 # $3 is "net" to attach the A2065 to the bridge.  Returns the guest's own exit
 # status out of DH0:.done, or 124.
+#
+# EVERY ARTEFACT CARRIES $TAG.  These names held the literal string "wb31"
+# while AMINETXDUO_RUN_TAG renamed only the test drive, so two arms in one
+# checkout -- the default install and the minimal one, say -- wrote over each
+# other's serial log, emulator log and config, and took the same serial port
+# besides.  That is how a diagnosis gets read off the wrong run, which is the
+# one failure mode a harness must not have.
 BOOT_STATUS=0
 boot() {
     local name="$1" timeout="$2" net="${3:-}"
-    local cfg="$ROOT/build/wb31-$name.uae"
-    local serial="$ROOT/build/serial-wb31-$name.log"
+    local cfg="$ROOT/build/$TAG-$name.uae"
+    local serial="$ROOT/build/serial-$TAG-$name.log"
     local elapsed=0
     local port
 
     # One listening port per run name, so two runs never collide.  Same
     # hashing as tools/amiberry-run.sh.
-    port=$((12000 + $(printf '%s' "wb31-$name" | cksum | cut -d' ' -f1) % 900))
+    port=$((12000 + $(printf '%s' "$TAG-$name" | cksum | cut -d' ' -f1) % 900))
 
     : > "$serial"
     rm -f "$HD/.done"
 
     cat > "$cfg" <<EOF
-config_description=AmiNetXDuo wb31 $name
+config_description=AmiNetXDuo $TAG $name
 use_gui=no
 headless=true
 quickstart=$MODEL,0
@@ -816,8 +823,8 @@ EOF
     # these; they are artifacts, so the cap costs nothing but disk that was
     # never wanted.  Degrades to the plain redirect if the capper is missing,
     # because opening a FIFO for writing blocks until a reader appears.
-    local uaelog="$ROOT/build/amiberry-wb31-$name.log"
-    LOGPIPE="$ROOT/build/amiberry-wb31-$name.logpipe"
+    local uaelog="$ROOT/build/amiberry-$TAG-$name.log"
+    LOGPIPE="$ROOT/build/amiberry-$TAG-$name.logpipe"
     rm -f "$LOGPIPE"
     if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
         "$ROOT/tools/logcap.sh" < "$LOGPIPE" > "$uaelog" &
@@ -1149,9 +1156,9 @@ rm -f "$HD/usercheck.txt" "$HD/http-body.txt" "$HD/https-body.txt"
 #
 # Runs beside the boot rather than after it: httpd is gone the moment the
 # emulator is killed.
-TERM_PROBE="$ROOT/build/wb31-peer-drill.txt"
+TERM_PROBE="$ROOT/build/$TAG-peer-drill.txt"
 PROBE_PID=""
-PAYLOAD_TXT="$ROOT/build/wb31-payload.txt"
+PAYLOAD_TXT="$ROOT/build/$TAG-payload.txt"
 PAYLOAD_LHA="$ARCHIVE"
 
 if [ "$TERMINAL" = "1" ]; then
@@ -1476,8 +1483,8 @@ if [ "$TERMINAL" = "1" ]; then
     echo "  3/3  installing again, answering the terminal question no"
     echo "============================================================"
 
-    build_driver "$ROOT/build/installdrive-wb-$LEVEL-no" 1 ""
-    cp "$ROOT/build/installdrive-wb-$LEVEL-no" "$HD/C/installdrive"
+    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 ""
+    cp "$ROOT/build/installdrive-$TAG-$LEVEL-no" "$HD/C/installdrive"
     chmod 755 "$HD/C/installdrive"
 
     startup_with 'FailAt 9999
