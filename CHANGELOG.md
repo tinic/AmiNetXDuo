@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The release test installs on every card the archive supports, and boots each one. It had only ever booted the A2065, which is how an installer that could not detect five of the nine cards reached eight releases
+- A PCMCIA card is found on a machine with 8 MB of Fast RAM in the test rig. Zorro II Fast RAM covers 0x200000 to 0x9fffff and the A1200's PCMCIA windows are at 0x600000 and 0xa00000, so they collided and the driver reported no card while the slot reported one
 ## 0.24.1
 
 - The installer finds the card that is in the machine. It looked for four driver names that are not files anyone ships -- `ariadne2.device`, `amiganet.device`, `xsurf.device`, `xsurf100.device` -- and had no entry at all for the Hydra or the LAN Rover, so a machine with an Ariadne II, Hydra, LAN Rover, X-Surf or X-Surf 100 could not be installed at Novice level, and at Intermediate the card list defaulted to the A2065 and `DEVICE=a2065.device` was written for whatever card was really there
