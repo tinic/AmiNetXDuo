@@ -103,72 +103,6 @@ static UWORD cmd_addr16(const UBYTE *a)
 
 /* ------------------------------------------------------------- multicast -- */
 
-static NetdevMcast *mcast_find(NetdevUnit *unit, const UBYTE *addr)
-{
-    UWORD i;
-
-    for (i = 0; i < NETDEV_MCAST_MAX; i++)
-    {
-        NetdevMcast *m = &unit->nu_Mcast[i];
-        UWORD        j;
-        BOOL         same = TRUE;
-
-        if (m->refs == 0)
-            continue;
-        for (j = 0; j < NETDEV_ADDR_LEN; j++)
-        {
-            if (m->addr[j] != addr[j])
-            {
-                same = FALSE;
-                break;
-            }
-        }
-        if (same)
-            return m;
-    }
-
-    return NULL;
-}
-
-static BOOL mcast_add(NetdevUnit *unit, const UBYTE *addr)
-{
-    NetdevMcast *m = mcast_find(unit, addr);
-    UWORD        i;
-
-    if (m != NULL)
-    {
-        /* Saturate rather than wrap: a wrap to zero frees a row that callers
-           still hold, and the group stops being received with nothing said. */
-        if (m->refs != 0xffffu)
-            m->refs++;
-        return TRUE;
-    }
-
-    for (i = 0; i < NETDEV_MCAST_MAX; i++)
-    {
-        if (unit->nu_Mcast[i].refs == 0)
-        {
-            cmd_bytes(unit->nu_Mcast[i].addr, addr, NETDEV_ADDR_LEN);
-            unit->nu_Mcast[i].refs = 1;
-            return TRUE;
-        }
-    }
-
-    unit->nu_McastFull++;
-    return FALSE;
-}
-
-static BOOL mcast_del(NetdevUnit *unit, const UBYTE *addr)
-{
-    NetdevMcast *m = mcast_find(unit, addr);
-
-    if (m == NULL)
-        return FALSE;
-
-    m->refs--;
-    return TRUE;
-}
-
 /*
  * A range that would not fit the table becomes "accept every multicast".  The
  * test is on the range, so an add and the matching delete always take the same
@@ -188,26 +122,6 @@ static BOOL mcast_range_wide(const UBYTE *lo, const UBYTE *hi, ULONG *count)
     *count = hi32 - lo32 + 1;
 
     return (BOOL)(*count > NETDEV_MCAST_MAX);
-}
-
-static VOID mcast_range_apply(NetdevUnit *unit, const UBYTE *lo, ULONG count,
-                              BOOL add)
-{
-    UBYTE addr[NETDEV_ADDR_LEN];
-    ULONG i;
-
-    cmd_bytes(addr, lo, NETDEV_ADDR_LEN);
-
-    for (i = 0; i < count; i++)
-    {
-        if (add)
-            (VOID)mcast_add(unit, addr);
-        else
-            (VOID)mcast_del(unit, addr);
-
-        if (++addr[5] == 0 && ++addr[4] == 0 && ++addr[3] == 0)
-            addr[2]++;
-    }
 }
 
 /* ------------------------------------------------------------- statistics - */
@@ -519,6 +433,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
     case S2_ADDMULTICASTADDRESS:
     case S2_DELMULTICASTADDRESS:
+    {
+        BOOL add = (BOOL)(cmd == S2_ADDMULTICASTADDRESS);
+        BOOL applied;
+
         /*
          * Bit 0 of the first octet is the Ethernet group bit.  A unicast
          * address is not a multicast group and is refused.
@@ -529,23 +447,31 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        if (cmd == S2_ADDMULTICASTADDRESS)
+        /* BeginIO is callable from unrelated tasks.  Keep the exact table and
+           the hash programmed from it in one serialized transaction. */
+        Disable();
+        if (add)
         {
-            if (!mcast_add(unit, io->ios2_SrcAddr))
-            {
-                netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
-                return;
-            }
+            applied = netdev_mcast_add(unit->nu_Mcast, io->ios2_SrcAddr);
+            if (!applied)
+                unit->nu_McastFull++;
         }
-        else if (!mcast_del(unit, io->ios2_SrcAddr))
+        else
         {
-            netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
-            return;
+            applied = netdev_mcast_del(unit->nu_Mcast, io->ios2_SrcAddr);
         }
+        if (applied)
+            netdev_rebuild_filter(unit);
+        Enable();
 
-        netdev_rebuild_filter(unit);
-        netdev_reply(io, 0, 0);
+        if (applied)
+            netdev_reply(io, 0, 0);
+        else if (add)
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
+        else
+            netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
         return;
+    }
 
     case S2_ADDMULTICASTADDRESSES:
     case S2_DELMULTICASTADDRESSES:
@@ -553,6 +479,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         BOOL  add  = (BOOL)(cmd == S2_ADDMULTICASTADDRESSES);
         ULONG count;
         BOOL  wide;
+        BOOL  applied = TRUE;
 
         if ((io->ios2_SrcAddr[0] & 1) == 0)
         {
@@ -561,20 +488,38 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         }
 
         wide = mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr, &count);
+        Disable();
         if (wide)
         {
             if (add)
-                unit->nu_AllMulti++;
+            {
+                /* Match the exact table's saturating references. */
+                if (unit->nu_AllMulti != 0xffffu)
+                    unit->nu_AllMulti++;
+            }
             else if (unit->nu_AllMulti != 0)
                 unit->nu_AllMulti--;
+            else
+                applied = FALSE;
         }
         else
         {
-            mcast_range_apply(unit, io->ios2_SrcAddr, count, add);
+            applied = netdev_mcast_range_apply(unit->nu_Mcast,
+                                               io->ios2_SrcAddr, count, add);
+            if (!applied && add)
+                unit->nu_McastFull++;
         }
 
-        netdev_rebuild_filter(unit);
-        netdev_reply(io, 0, 0);
+        if (applied)
+            netdev_rebuild_filter(unit);
+        Enable();
+
+        if (applied)
+            netdev_reply(io, 0, 0);
+        else if (add)
+            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_MULTICAST_FULL);
+        else
+            netdev_reply(io, S2ERR_BAD_STATE, S2WERR_BAD_MULTICAST);
         return;
     }
 
