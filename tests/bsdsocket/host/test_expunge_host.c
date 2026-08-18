@@ -1,0 +1,552 @@
+/*
+ * bsd_lib_expunge() on the host: does it DECLINE while the netstack says the
+ * segment cannot be unloaded, and does it stop declining once that clears.
+ *
+ * WHAT THIS IS ABOUT
+ *
+ *   tx_amiga_kernel_stop() can refuse -- an application ThreadX thread is
+ *   still alive, or a live zombie is outstanding -- and it can time out once
+ *   stopping has begun.  Either way an Exec Task may still be executing code,
+ *   or standing on a stack, inside this library's hunk.  Until 2026-08-18 the
+ *   refusal was logged and then ignored: bsd_lib_expunge() handed the segment
+ *   to UnLoadSeg() regardless, which is executing unloaded code on a machine
+ *   with no MMU.  netstack_can_unload() now answers the question and expunge
+ *   sets LIBF_DELEXP and declines.
+ *
+ *   That fix had no test.  This is it, and it runs the shipping
+ *   bsd_lib_expunge(): src/bsdsocket/library.c is compiled whole into this
+ *   binary, not copied, so a change to the guard changes what runs here.
+ *
+ * WHICH HALF IS COVERED AND WHICH IS NOT.  Read this before believing the
+ * result, because the answer is "one of three":
+ *
+ *   the port      tx_amiga_kernel_stop() really refuses while application
+ *                 threads exist, really leaves the kernel usable afterwards,
+ *                 and really succeeds once they are gone.  COVERED, on the
+ *                 emulator, by tools/smoke/KernelStop, which creates three
+ *                 worker threads and asserts TX_THREAD_ERROR from an adopted
+ *                 caller, then stops for real after they exit.  Nothing here
+ *                 repeats it.
+ *
+ *   the library   a refusal reaches bsd_lib_expunge() and is enforced there.
+ *                 COVERED HERE, and nowhere else.
+ *
+ *   the joint     ami_ns_kernel_stop_locked() leaves ami_ns_kernel_started
+ *                 set when the stop fails, so netstack_can_unload() answers
+ *                 FALSE afterwards, and netstack_startup() retries the stop
+ *                 so a refusal can clear.  NOT COVERED, by this or by
+ *                 anything else.  src/netstack/netstack.c cannot be compiled
+ *                 on the host: it reaches NetX Duo's linux port headers,
+ *                 which type ULONG as `unsigned long` against the shim's
+ *                 `unsigned int`, and every structure it touches then has the
+ *                 wrong shape.  netstack_can_unload() is stubbed here, and
+ *                 what a stub proves about netstack.c is nothing.
+ *
+ *   NOR IS THE REFUSAL REACHABLE FROM A GUEST PROGRAM, which is why
+ *   tests/tools/cycledrill.c cannot carry this test instead.  The stop
+ *   refuses over an application TX_THREAD outliving the last close.  Inside
+ *   bsdsocket the only application threads are the caller brackets, and every
+ *   one of those is released by bsd_child_destroy() before the close reaches
+ *   the netstack, and the stack's own threads, which netstack_shutdown()
+ *   deletes before it stops the kernel.  The one path that genuinely leaves a
+ *   TX_THREAD alive is an orphaned SANA-II reader (src/sana2/sana2_rx.c,
+ *   "reader N did not stop"), and that needs a driver that ignores both
+ *   AbortIO() and S2_OFFLINE.  A guest cannot ask for one.
+ *
+ * WHAT THE STUBS ARE ALLOWED TO DO
+ *
+ *   Nothing, unless the test said so.  Every Exec call and every library
+ *   entry point outside library.c is recorded, and the ones this file has no
+ *   business reaching abort() rather than returning a plausible value: on
+ *   this path a call that happened at all is the finding.  That is the same
+ *   rule tests/bsdsocket/host/shim/proto/exec.h states for its declarations.
+ *
+ *   The assertions are therefore not only "it returned NULL".  A decline that
+ *   had already freed the netdb tables, closed the runtime or cleared the
+ *   address-change hook would return NULL too, and would leave a library that
+ *   is still loaded and still open-able with its teardown half done.  So each
+ *   refusal checks that NONE of those ran.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "bsdsocket_internal.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* --------------------------------------------------------------- reporting */
+
+static unsigned long h_checks;
+static unsigned long h_failures;
+
+#define CHECK(cond, what)                                                     \
+    do {                                                                      \
+        h_checks++;                                                           \
+        if (!(cond)) {                                                        \
+            h_failures++;                                                     \
+            printf("  FAIL %s\n", (what));                                    \
+        }                                                                     \
+    } while (0)
+
+/*
+ * key=value, not prose.  A refusal that can only be read as the absence of a
+ * crash is the state this test exists to end, so every case prints what it
+ * saw as key=value, which is what a harness can read without grepping prose.
+ *
+ * delexp is -1 where the expunge succeeded.  The base has been handed to
+ * FreeMem() by then, so there is no lib_Flags to report and a 0 would be a
+ * reading of memory that is not the library's any more.
+ */
+#define H_GONE  (-1)
+
+static VOID h_report(const char *name, LONG declined, LONG delexp,
+                     LONG seglist_back, LONG teardown_ran)
+{
+    printf("expunge case=%s declined=%ld delexp=%ld seglist_returned=%ld "
+           "teardown_ran=%ld\n",
+           name, (long)declined, (long)delexp, (long)seglist_back,
+           (long)teardown_ran);
+}
+
+/* ------------------------------------------------------- the fake machine */
+
+/*
+ * The segment the expunge is being asked to hand back.  A value, not NULL:
+ * "returned nothing" and "returned the segment" have to be different answers,
+ * and NULL is what a decline returns.
+ */
+#define H_SEGLIST   ((APTR)0x600DBEEFUL)
+
+#define H_NEG       512U
+#define H_POS       ((UWORD)sizeof(struct AmiSocketBase))
+
+static struct ExecBase   h_sysbase;
+
+/* The block the base lives in, allocated the way bsd_lib_init() does it. */
+static UBYTE                *h_block;
+static struct AmiSocketBase *h_base;
+
+/* The list Exec keeps the library on, so Remove() has something real to do
+   and "still in the list" is a question with an answer. */
+static struct List           h_liblist;
+
+/* What the stubs saw. */
+static struct
+{
+    LONG    can_unload_calls;
+    BOOL    can_unload_answer;
+
+    LONG    tcp_alive_calls;
+    BOOL    tcp_alive_answer;
+    LONG    aam_busy_calls;
+    BOOL    aam_busy_answer;
+    LONG    netmon_busy_calls;
+    BOOL    netmon_busy_answer;
+
+    LONG    netdb_free_calls;
+    LONG    runtime_close_calls;
+    LONG    hook_clears;
+
+    LONG    freemem_calls;
+    APTR    freemem_block;
+    ULONG   freemem_size;
+
+    LONG    remove_calls;
+    APTR    remove_node;
+
+    LONG    shutdown_calls;
+} h;
+
+static VOID h_machine_reset(BOOL can_unload)
+{
+    memset(&h, 0, sizeof(h));
+    h.can_unload_answer = can_unload;
+
+    memset(&h_sysbase, 0, sizeof(h_sysbase));
+
+    /* Exec's list, with the library on it. */
+    h_liblist.lh_Head     = (struct Node *)&h_liblist.lh_Tail;
+    h_liblist.lh_Tail     = NULL;
+    h_liblist.lh_TailPred = (struct Node *)&h_liblist;
+
+    if (h_block != NULL)
+        free(h_block);
+
+    h_block = (UBYTE *)calloc(1, (size_t)(H_NEG + H_POS));
+    if (h_block == NULL)
+    {
+        printf("  FAIL out of memory building the fixture\n");
+        exit(1);
+    }
+
+    h_base = (struct AmiSocketBase *)(h_block + H_NEG);
+
+    h_base->sb_Lib.lib_Node.ln_Type = NT_LIBRARY;
+    h_base->sb_Lib.lib_Node.ln_Name = (char *)"bsdsocket.library";
+    h_base->sb_Lib.lib_NegSize      = (UWORD)H_NEG;
+    h_base->sb_Lib.lib_PosSize      = H_POS;
+    h_base->sb_Lib.lib_OpenCnt      = 0;
+    h_base->sb_Lib.lib_Flags        = 0;
+    h_base->sb_SegList              = H_SEGLIST;
+    h_base->sb_SysBase              = &h_sysbase;
+    h_base->sb_Master               = NULL;
+    h_base->sb_StackRefs            = 0;
+
+    h_base->sb_Children.mlh_Head     = (struct MinNode *)&h_base->sb_Children.mlh_Tail;
+    h_base->sb_Children.mlh_Tail     = NULL;
+    h_base->sb_Children.mlh_TailPred = (struct MinNode *)&h_base->sb_Children;
+
+    /* On the list, at the tail, the way AddLibrary() would leave it. */
+    {
+        struct Node *n = (struct Node *)h_base;
+
+        n->ln_Pred            = h_liblist.lh_TailPred;
+        n->ln_Succ            = (struct Node *)&h_liblist.lh_Tail;
+        h_liblist.lh_TailPred->ln_Succ = n;
+        h_liblist.lh_TailPred = n;
+    }
+}
+
+/* Is the library still on Exec's list? */
+static BOOL h_still_listed(VOID)
+{
+    struct Node *n;
+
+    for (n = h_liblist.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        if (n == (struct Node *)h_base)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* Did any part of the teardown run?  Any one of these on a declined expunge
+   is a library left half dismantled. */
+static LONG h_teardown_ran(VOID)
+{
+    return (h.netdb_free_calls != 0 || h.runtime_close_calls != 0 ||
+            h.hook_clears != 0 || h.freemem_calls != 0 ||
+            h.remove_calls != 0) ? 1 : 0;
+}
+
+/* --------------------------------------------------------------- the stubs */
+
+/*
+ * Reached, and expected.
+ */
+BOOL netstack_can_unload(VOID)
+{
+    h.can_unload_calls++;
+    return h.can_unload_answer;
+}
+
+BOOL bsd_tcp_handler_alive(VOID)
+{
+    h.tcp_alive_calls++;
+    return h.tcp_alive_answer;
+}
+
+BOOL bsd_aam_busy(VOID)
+{
+    h.aam_busy_calls++;
+    return h.aam_busy_answer;
+}
+
+BOOL bsd_netmon_busy(VOID)
+{
+    h.netmon_busy_calls++;
+    return h.netmon_busy_answer;
+}
+
+VOID ami_netdb_free(VOID)           { h.netdb_free_calls++; }
+VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
+
+VOID ami_set_address_change_hook(VOID (*hook)(VOID))
+{
+    h.hook_clears++;
+    (VOID)hook;
+}
+
+VOID ami_set_second_hook(VOID (*hook)(VOID))
+{
+    h.hook_clears++;
+    (VOID)hook;
+}
+
+VOID ami_set_shutdown_hook(VOID (*hook)(VOID))
+{
+    h.hook_clears++;
+    (VOID)hook;
+}
+
+VOID FreeMem(APTR block, ULONG size)
+{
+    h.freemem_calls++;
+    h.freemem_block = block;
+    h.freemem_size  = size;
+    /* Not free()d: every assertion after the expunge reads the block it was
+       given, and this test is not about the allocator. */
+}
+
+VOID Remove(struct Node *node)
+{
+    h.remove_calls++;
+    h.remove_node = (APTR)node;
+
+    node->ln_Pred->ln_Succ = node->ln_Succ;
+    node->ln_Succ->ln_Pred = node->ln_Pred;
+}
+
+VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
+
+/* Harmless, and reached by bsd_lib_close() on the way past. */
+VOID ObtainSemaphore(struct SignalSemaphore *s)  { (VOID)s; }
+VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; }
+ULONG AttemptSemaphore(struct SignalSemaphore *s) { (VOID)s; return 1UL; }
+VOID InitSemaphore(struct SignalSemaphore *s)    { (VOID)s; }
+VOID Forbid(VOID)                                { }
+VOID Permit(VOID)                                { }
+VOID Disable(VOID)                               { }
+VOID Enable(VOID)                                { }
+VOID CacheClearU(VOID)                           { }
+
+/*
+ * Everything else.  Reaching one of these from an expunge or a close is the
+ * finding, so it says which and stops rather than returning something the
+ * caller can carry on with.  Nothing here is a "reasonable default".
+ */
+static VOID h_unreachable(const char *what)
+{
+    printf("  FAIL %s was called; nothing on this path may reach it\n", what);
+    exit(1);
+}
+
+APTR AllocMem(ULONG s, ULONG r)  { (VOID)s; (VOID)r; h_unreachable("AllocMem");  return NULL; }
+VOID CopyMem(const APTR s, APTR d, ULONG n) { (VOID)s; (VOID)d; (VOID)n; h_unreachable("CopyMem"); }
+VOID AddTail(struct List *l, struct Node *n) { (VOID)l; (VOID)n; h_unreachable("AddTail"); }
+struct Task *FindTask(const char *n) { (VOID)n; h_unreachable("FindTask"); return NULL; }
+VOID Signal(struct Task *t, ULONG s) { (VOID)t; (VOID)s; h_unreachable("Signal"); }
+ULONG Wait(ULONG s) { (VOID)s; h_unreachable("Wait"); return 0UL; }
+BYTE AllocSignal(LONG n) { (VOID)n; h_unreachable("AllocSignal"); return -1; }
+VOID FreeSignal(LONG n) { (VOID)n; h_unreachable("FreeSignal"); }
+VOID CloseDevice(struct IORequest *io) { (VOID)io; h_unreachable("CloseDevice"); }
+struct Process *CreateNewProc(const struct TagItem *t) { (VOID)t; h_unreachable("CreateNewProc"); return NULL; }
+
+VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
+VOID ami_mem_open_delta(LONG d) { (VOID)d; h_unreachable("ami_mem_open_delta"); }
+LONG ami_netdb_load(VOID) { h_unreachable("ami_netdb_load"); return 0; }
+BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
+VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
+VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
+VOID bsd_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_close_all"); }
+VOID bsd_handoff_flush(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_flush"); }
+VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_init"); }
+VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_release"); }
+BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
+VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
+LONG netstack_startup(VOID) { h_unreachable("netstack_startup"); return 0; }
+VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
+
+/*
+ * The vector table.  library.c names it in the romtag's init table and never
+ * calls through it; one entry is enough to define the symbol.
+ */
+const APTR BsdVectorTable[] = { (APTR)-1 };
+
+/* --------------------------------------------------------------- the tests */
+
+/*
+ * The subject.  netstack_can_unload() says no, so the segment must not go
+ * back, LIBF_DELEXP must be set so a later close retries, and NOTHING of the
+ * teardown may have run.
+ */
+static VOID t_refusal_declines(VOID)
+{
+    APTR r;
+
+    printf("a stack that cannot be unloaded\n");
+
+    h_machine_reset(FALSE);
+
+    r = bsd_lib_expunge(h_base);
+
+    CHECK(r == NULL, "expunge returned no segment");
+    CHECK(h.can_unload_calls == 1, "and it asked the netstack, once");
+    CHECK((h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+          "LIBF_DELEXP is set, so a later close retries");
+    CHECK(h_still_listed(), "the library is still on Exec's list");
+    CHECK(h.remove_calls == 0, "Remove() was not called");
+    CHECK(h.freemem_calls == 0, "the base was not freed");
+    CHECK(h.netdb_free_calls == 0, "the netdb tables were not freed");
+    CHECK(h.runtime_close_calls == 0, "the runtime was not closed");
+    CHECK(h.hook_clears == 0,
+          "the hooks the netstack calls back through were left installed");
+    CHECK(h_base->sb_SegList == H_SEGLIST, "and the base still knows its segment");
+
+    h_report("refused", r == NULL, (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+             r == H_SEGLIST, h_teardown_ran());
+}
+
+/*
+ * And it is not permanent.  The same base, asked again once the netstack says
+ * the segment may go, expunges for real.
+ */
+static VOID t_refusal_clears(VOID)
+{
+    APTR r;
+
+    printf("the same library once the stack is down\n");
+
+    h_machine_reset(FALSE);
+
+    r = bsd_lib_expunge(h_base);
+    CHECK(r == NULL, "the first expunge declined");
+
+    /* The condition clears: on a real machine this is netstack_startup()
+       retrying the stop, or the thread the stop refused over exiting and a
+       later shutdown getting TX_SUCCESS. */
+    h.can_unload_answer = TRUE;
+
+    r = bsd_lib_expunge(h_base);
+
+    CHECK(r == H_SEGLIST, "the second expunge handed the segment back");
+    CHECK(h.can_unload_calls == 2, "having asked the netstack again");
+    CHECK(!h_still_listed(), "the library came off Exec's list");
+    CHECK(h.remove_calls == 1 && h.remove_node == (APTR)h_base,
+          "Remove() took the library itself");
+    CHECK(h.freemem_calls == 1, "the base was freed, once");
+    CHECK(h.freemem_block == (APTR)h_block,
+          "from the start of the block, not from the base");
+    CHECK(h.freemem_size == (ULONG)(H_NEG + H_POS),
+          "for the whole of it, negative half included");
+    CHECK(h.netdb_free_calls == 1, "the netdb tables went with it");
+    CHECK(h.runtime_close_calls == 1, "and the runtime");
+    CHECK(h.hook_clears == 3,
+          "all three hooks were deregistered before the segment went");
+
+    h_report("cleared", r == NULL, H_GONE, r == H_SEGLIST, h_teardown_ran());
+}
+
+/*
+ * An opener outranks the netstack: OpenCnt is checked first and the netstack
+ * is not asked at all.  The order matters, an expunge that consulted a
+ * torn-down netstack before noticing it still had callers would answer the
+ * wrong question.
+ */
+static VOID t_open_count_comes_first(VOID)
+{
+    APTR r;
+
+    printf("an expunge with an opener still holding the library\n");
+
+    h_machine_reset(TRUE);
+    h_base->sb_Lib.lib_OpenCnt = 1;
+
+    r = bsd_lib_expunge(h_base);
+
+    CHECK(r == NULL, "expunge returned no segment");
+    CHECK((h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0, "LIBF_DELEXP is set");
+    CHECK(h.can_unload_calls == 0, "and the netstack was never asked");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 1, "the open count is untouched");
+    CHECK(h_teardown_ran() == 0, "nothing of the teardown ran");
+
+    h_report("opener", r == NULL, (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+             r == H_SEGLIST, h_teardown_ran());
+}
+
+/*
+ * The other three things that run out of this segment holding no open count.
+ * Each one declines on its own, and each is checked against a netstack that
+ * says yes, so a pass cannot be the netstack guard firing instead.
+ */
+static VOID t_other_refusals(VOID)
+{
+    APTR r;
+
+    printf("the refusals that are not about the netstack\n");
+
+    h_machine_reset(TRUE);
+    h.tcp_alive_answer = TRUE;
+    r = bsd_lib_expunge(h_base);
+    CHECK(r == NULL && (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+          "a live TCP: handler declines the expunge");
+    CHECK(h_teardown_ran() == 0, "and nothing of the teardown ran");
+    h_report("tcp", r == NULL, 1, r == H_SEGLIST, h_teardown_ran());
+
+    h_machine_reset(TRUE);
+    h.aam_busy_answer = TRUE;
+    r = bsd_lib_expunge(h_base);
+    CHECK(r == NULL && (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+          "a running address allocation declines the expunge");
+    CHECK(h_teardown_ran() == 0, "and nothing of the teardown ran");
+    h_report("addralloc", r == NULL, 1, r == H_SEGLIST, h_teardown_ran());
+
+    h_machine_reset(TRUE);
+    h.netmon_busy_answer = TRUE;
+    r = bsd_lib_expunge(h_base);
+    CHECK(r == NULL && (h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+          "an installed monitoring hook declines the expunge");
+    CHECK(h_teardown_ran() == 0, "and nothing of the teardown ran");
+    h_report("netmon", r == NULL, 1, r == H_SEGLIST, h_teardown_ran());
+}
+
+/*
+ * The retry itself.  LIBF_DELEXP is only worth setting if the last close acts
+ * on it, so the close is driven rather than assumed: once with the netstack
+ * refusing, which must decline again and leave the flag set, and once with it
+ * agreeing, which must expunge.
+ */
+static VOID t_last_close_retries(VOID)
+{
+    APTR r;
+
+    printf("the last close, with LIBF_DELEXP already set\n");
+
+    h_machine_reset(FALSE);
+    h_base->sb_Lib.lib_OpenCnt  = 1;
+    h_base->sb_Lib.lib_Flags   |= LIBF_DELEXP;
+
+    r = bsd_lib_close(h_base);
+
+    CHECK(r == NULL, "the close handed back no segment");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 0, "the open count reached zero");
+    CHECK(h.can_unload_calls == 1, "the close reached the expunge");
+    CHECK((h_base->sb_Lib.lib_Flags & LIBF_DELEXP) != 0,
+          "LIBF_DELEXP survives the declined retry");
+    CHECK(h_still_listed(), "and the library is still there");
+    CHECK(h_teardown_ran() == 0, "nothing of the teardown ran");
+    /* The stack is only torn down by the last CHILD close.  A master closed
+       directly must not reach netstack_shutdown(), or the last opener's
+       teardown would run a second time on a stack that is already down. */
+    CHECK(h.shutdown_calls == 0, "and the master close did not shut the stack down");
+    h_report("close-refused", r == NULL, 1, r == H_SEGLIST, h_teardown_ran());
+
+    h_machine_reset(TRUE);
+    h_base->sb_Lib.lib_OpenCnt  = 1;
+    h_base->sb_Lib.lib_Flags   |= LIBF_DELEXP;
+
+    r = bsd_lib_close(h_base);
+
+    CHECK(r == H_SEGLIST, "and with the stack down the close expunges");
+    CHECK(!h_still_listed(), "the library came off Exec's list");
+    CHECK(h.freemem_calls == 1, "the base was freed");
+    h_report("close-expunged", r == NULL, H_GONE, r == H_SEGLIST,
+             h_teardown_ran());
+}
+
+int main(void)
+{
+    printf("bsd_lib_expunge() host tests\n");
+
+    t_refusal_declines();
+    t_refusal_clears();
+    t_open_count_comes_first();
+    t_other_refusals();
+    t_last_close_retries();
+
+    printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
+    return h_failures == 0 ? 0 : 1;
+}

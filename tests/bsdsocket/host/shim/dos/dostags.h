@@ -15,6 +15,13 @@
 #define NP_CloseError (NP_Dummy + 9)
 #define NP_CurrentDir (NP_Dummy + 10)
 #define NP_StackSize  (NP_Dummy + 11)
-#define NP_Name       (NP_Dummy + 13)
-#define NP_Priority   (NP_Dummy + 14)
+/* The numbers are the NDK's.  NP_Name and NP_Priority were one too high here
+   until 2026-08-18; nothing consumed them, which is how it survived. */
+#define NP_Name       (NP_Dummy + 12)
+#define NP_Priority   (NP_Dummy + 13)
+#define NP_ConsoleTask (NP_Dummy + 14)
+#define NP_WindowPtr  (NP_Dummy + 15)
+#define NP_HomeDir    (NP_Dummy + 16)
+#define NP_CopyVars   (NP_Dummy + 17)
+#define NP_Cli        (NP_Dummy + 18)
 #endif

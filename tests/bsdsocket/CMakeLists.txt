@@ -66,4 +66,41 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(test_route PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
 
     add_test(NAME route_change COMMAND test_route)
+
+    # library.c, for the expunge refusal.  The whole translation unit is
+    # compiled, not a copy of the function, so what runs is the shipping
+    # bsd_lib_expunge(); the test defines every extern it names, including
+    # netstack_can_unload(), which is the switch the cases flip.
+    #
+    # AMINETXDUO_TCPDEVICE because the shipping library is built with it and
+    # the expunge has a decline of its own behind that #ifdef.  Compiling it
+    # out here would leave the ordering of the four refusals untested.
+    add_executable(test_expunge host/test_expunge_host.c
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c")
+
+    target_include_directories(test_expunge PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/src/net68k"        # net68k.h, n68k_cpu_select()
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_BINARY_DIR}/include"           # generated version.h
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_expunge PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    # The pointer <-> ULONG round trips in the child-base cloning and in the
+    # poisoned vector table.  Both are four bytes on m68k and eight here, and
+    # neither is on a path this binary runs; same reason test_sana2_rx carries
+    # them.
+    target_compile_options(test_expunge PRIVATE
+        -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+
+    target_compile_definitions(test_expunge PRIVATE AMINETXDUO_TCPDEVICE)
+
+    add_test(NAME expunge_refusal COMMAND test_expunge)
 endif()
