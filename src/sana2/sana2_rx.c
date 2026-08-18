@@ -1620,7 +1620,10 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              */
             tx_thread_sleep(5);
 
-            zombies = tx_amiga_zombie_tasks_live();
+            /* The total is monotonic.  The live gauge can stay unchanged if
+               an older zombie exits while this delete creates a new one,
+               which would make this code free the new zombie's live stack. */
+            zombies = tx_amiga_zombie_tasks();
 
             tx_thread_terminate(&rx->thread);
             tx_thread_delete(&rx->thread);
@@ -1631,13 +1634,12 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
              * `exited` is on its way out of its entry function with no Exec
              * call left to block in, so it always arrives. A failure leaves a
              * zombie still running on rx->stack, and this frees the memory
-             * under it. The live count is the only signal that happened
-             * (tx_amiga.h), and it falls inside the Forbid() the dying task
-             * holds until Exec removes it, so an unchanged count here means
-             * the Task is gone. Leak the stack otherwise, as the two paths
-             * above do.
+             * under it. The monotonic zombie count is the signal that this
+             * happened (tx_amiga.h); unlike the live gauge it cannot be
+             * cancelled by some older zombie exiting at the same time. Leak
+             * the stack when it moves, as the two paths above do.
              */
-            if (tx_amiga_zombie_tasks_live() != zombies)
+            if (tx_amiga_zombie_tasks() != zombies)
             {
                 AMI_ERROR("sana2: reader %ld cannot be removed. Its stack "
                           "leaks. A free here corrupts memory the reader "
