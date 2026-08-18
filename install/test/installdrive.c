@@ -151,10 +151,29 @@
  *
  * A page is therefore named by HOW MANY options it has and an answer by WHICH
  * id, both compile-time.  The count is what tells the stack question (two)
- * from the card question (nine), and it is checked rather than counted on:
- * run-workbench.sh asserts afterwards, by byte count, which of the archive's
- * two libraries actually landed, so a page that changes shape fails loudly
- * instead of quietly installing the default.
+ * from the card question (nine).
+ *
+ * AND IT IS NOT ENOUGH: POSTING GADGETUP AT AN OPTION DOES NOT ANSWER IT.
+ * Measured twice on 0.24.0, -l AVERAGE, the two-option stack page, the click
+ * landing where the transcript says it did ("picking option gadget N" at
+ * poll 4, then Proceed at poll 5):
+ *
+ *     rel024min3   gadget 3 clicked   369,820 bytes installed  (the full one)
+ *     rel024min4   gadget 2 clicked   369,820 bytes installed  (the full one)
+ *
+ * Either option leaves the page's default in place, and 369,820 is also what a
+ * run that picks nothing installs, so neither id is "the other choice": the
+ * message does not reach the answer at all.  A posted GADGETUP is enough for
+ * Proceed and for a yes/no button, both of which the Installer dispatches on
+ * from the message; the selected state of an option is not in the message.
+ * Intuition sets GFLG_SELECTED on a real click and nothing here does, so the
+ * next thing to try is setting it -- RemoveGList, the flag, AddGList,
+ * RefreshGList -- and clearing it on the sibling.  Untested; do not assume it.
+ *
+ * So the minimal stack is still not installable by this harness.  What has
+ * changed is that it cannot be installed QUIETLY: run-workbench.sh asserts by
+ * byte count which of the archive's two libraries landed, and -p minimal fails
+ * the run rather than testing the full stack under another name.
  *
  * 0 options means no page is picked at, which is the default.
  */

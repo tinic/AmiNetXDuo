@@ -11,12 +11,17 @@
 # -p NAMES AN OPTION ON AN askchoice PAGE.  It takes `minimal` or `full`, and
 # `-p minimal` is the one that matters: the second stack in the archive, with
 # IPv6, mDNS, the packet filter, TLS, IPv4 multicast, the ARexx host and the
-# TCP: handler compiled
-# out.  Until installdrive.c learned to click a choice, this harness took the
-# default of every askchoice in the script, so Libs/minimal/bsdsocket.library
-# shipped in every archive and had never been installed or booted by any
-# end-to-end run.  Needs -l AVERAGE or -l EXPERT, like -H, and the run asserts
-# by byte count which of the two libraries actually landed.
+# TCP: handler compiled out.  Needs -l AVERAGE or -l EXPERT, like -H, because
+# at NOVICE the page is never drawn.
+#
+# -p minimal DOES NOT WORK YET, and it fails rather than pretending.  The
+# harness took the default of every askchoice in the script -- so the minimal
+# stack has shipped in every archive and has never been installed or booted by
+# any end-to-end run -- and driving the option turns out to need more than a
+# posted GADGETUP: installdrive.c records both measurements and what to try
+# next.  What is fixed here is the silence: the run asserts by byte count which
+# of the two libraries landed, so an arm that asks for minimal and gets the
+# full stack is a failure and not a pass.
 #
 # -H IS THE TERMINAL ARM, and it makes the run three installs instead of one:
 #
