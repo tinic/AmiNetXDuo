@@ -4,7 +4,7 @@
 #
 #   tests/tools/run-console.sh [-a ADDRESS] [-p PORT] [-b BUILDDIR] [-m MODEL]
 #                              [-B BACKEND] [-d DEPTH]... [-t SECONDS]
-#                              [-s SECONDS] [-H CONSOLEHTML] [-o OUTDIR]
+#                              [-s SECONDS] [-H CONSOLEHTML] [-o OUTDIR] [-P]
 #
 # WHAT IT PROVES
 #
@@ -93,6 +93,50 @@
 #   the arm does not run.  Which modes an emulated uaegfx offers is the
 #   emulator's answer to give, not a defect in anything here.
 #
+# -P, AND WHY A WORKBENCH SCREEN COULD NOT PROVE THE TRUECOLOUR PATHS
+#
+#   -R serves Workbench, and nobody has a reference picture of it.  A frame
+#   decodes, holds many colours and changes over time whether or not the
+#   readback exchanged red and blue on the way, so every assertion above passes
+#   on a transposed picture.  That is not hypothetical: the two four-byte
+#   RGBFTYPE codes whose alpha is last were written down the wrong way round in
+#   src/tools/httprtg.c until 49ef2137, and the 32-bit format that uses one of
+#   them is the format this board reports.
+#
+#   So -P serves a KNOWN picture instead.  tests/perf/rtgbars.c opens a
+#   truecolour screen of the arm's depth and fills it with eight bands --
+#   black, red, green, blue, yellow, magenta, cyan, white -- and
+#   tests/tools/rtgbars-check.py reads them back off the decoded PNG.  Red at
+#   one eighth across and blue at three eighths is the pair that tells a
+#   transposition from a picture that is merely wrong, and the checker names it
+#   as one.  The guest draws through LoadRGB32 and RectFill, so the conversion
+#   into the card's format is the graphics driver's: a pattern this side packed
+#   itself would need the same table the code under test uses and would agree
+#   with a transposition instead of catching one.
+#
+#   -P also prints, per arm:
+#
+#     d<N>_rtg_card_depth   the card's own bits a pixel, off the readback word
+#     d<N>_rtg_card_fmt     and its pixel format, by name
+#     d<N>_bands_ok         how many of the eight bands came back right
+#
+#   THE FORMAT NAME IS WHAT SAYS WHICH PATH RAN.  Every truecolour screen is
+#   downsampled to R5G6B5 before it is sent, so the geom word reads depth 16
+#   for all of them; and the display database is no better, because a packed
+#   24-bit mode and a 32-bit one are both depth 24 on it -- RGBA32 carries
+#   twenty-four bits of colour in four bytes.  So a -P arm is named for the
+#   Picasso96 format it exercises, the emulated board is configured to publish
+#   that format and no other truecolour one, and the arm fails unless the
+#   readback word names it:
+#
+#     -d 15   R5G5B5PC, two bytes a pixel        -d 24   R8G8B8, three
+#     -d 16   R5G6B5PC, two bytes a pixel        -d 32   R8G8B8A8, four
+#
+#   Which modes the board publishes is read off the machine, not written down:
+#   tests/perf/rtgmodes.c lists the display database into DH0:rtglist.txt on
+#   every -P boot, and a depth with no mode at this size is reported as
+#   d<N>_skipped.
+#
 #   0 pass, 1 a failed assertion, 2 infrastructure.
 #
 # WHAT IT NEEDS
@@ -118,6 +162,7 @@ GATEWAY=192.168.1.1
 PORT=8080
 BOOT_MAX=240
 PROBE_SECONDS=10
+PROBE_SECONDS_SET=0
 OUTDIR="$ROOT/build/console-out"
 PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/src/tools/web/console.html}"
 CLIENT="${AMINETXDUO_CONSOLE_CLIENT:-}"
@@ -135,13 +180,16 @@ DEPTHS=()
 # depth the arm asked for.  8 is the palette screen; 15, 16, 24 and 32 are the
 # truecolour ones, and they all reach the wire as r5g6b5.
 RTG=0
+# -P is -R with a known picture on it instead of Workbench.  See the header.
+PATTERN=0
 P96DIR="${AMINETXDUO_P96_DIR:-$HOME/amiga-assets/p96}"
 RTG_BOARD=uaegfx
-RTGSCREEN=""
+RTGMODES=""
+RTGBARS=""
 # What Amiberry's uaegfx calls 640x480 at eight bits; see AssignModeID() in its
 # picasso96.  There is no such constant for the truecolour depths and none is
 # guessed at: rtg_mode_id() takes those off the board's own published list,
-# which C:rtgscreen 0 writes into DH0:rtglist.txt on every RTG boot.
+# which C:rtgmodes writes into DH0:rtglist.txt on every -P boot.
 RTG_MODE_ID=0x50031000
 RTG_W=640
 RTG_H=480
@@ -149,7 +197,7 @@ RTG_DEPTHS="8 15 16 24 32"
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:R" opt; do
+while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:RP" opt; do
     case "$opt" in
         a) ADDRESS="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -158,7 +206,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:R" opt; do
         B) BACKEND="$OPTARG" ;;
         d) DEPTHS+=("$OPTARG") ;;
         t) BOOT_MAX="$OPTARG" ;;
-        s) PROBE_SECONDS="$OPTARG" ;;
+        s) PROBE_SECONDS="$OPTARG"; PROBE_SECONDS_SET=1 ;;
         H) PAGE="$OPTARG" ;;
         o) OUTDIR="$OPTARG" ;;
         c) CLIENT="$OPTARG" ;;
@@ -167,6 +215,7 @@ while getopts "a:p:b:m:B:d:t:s:H:o:c:g:A:T:L:R" opt; do
         L) LATENCY="$OPTARG" ;;
         T) TYPE="$OPTARG" ;;
         R) RTG=1 ;;
+        P) RTG=1; PATTERN=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -176,7 +225,12 @@ if [ "$RTG" = 1 ]; then
     # only the depths the card can hold: a chipset depth here would ask
     # Picasso96 for a screen it cannot open and the run would come up planar,
     # which is the one failure this file works hardest to make impossible.
-    [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(8)
+    # -P alone runs the four truecolour depths, because those four are what it
+    # exists to prove and three of them had never been run at all.  -R alone is
+    # the 8-bit arm it has always been.
+    if [ ${#DEPTHS[@]} -eq 0 ]; then
+        if [ "$PATTERN" = 1 ]; then DEPTHS=(15 16 24 32); else DEPTHS=(8); fi
+    fi
     for d in "${DEPTHS[@]}"; do
         case " $RTG_DEPTHS " in
             *" $d "*) ;;
@@ -185,13 +239,34 @@ if [ "$RTG" = 1 ]; then
                exit 2 ;;
         esac
     done
-    RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
-    [ -f "$RTGSCREEN" ] || {
-        say error "no $RTGSCREEN"
-        say hint "cmake --build $BUILD --parallel --target rtgscreen"
-        say RESULT INFRA
-        exit 2
-    }
+    # A -P ARM NEEDS A WINDOW LONGER THAN ONE FRAME, and ten seconds is not
+    # one.  A 640x480 truecolour frame is 614400 bytes and this link carries
+    # about ten thousand a second, so the FIRST frame occupies most of a
+    # minute; every frame after it is a few changed tiles and costs nothing.
+    # At -s 45 the whole session was that one frame, no second frame could
+    # differ from it, and --min-changed failed an arm whose picture was
+    # perfect.  At 120 the same arm sees 114 frames and 20 of them differ.
+    if [ "$PATTERN" = 1 ] && [ "$PROBE_SECONDS_SET" = 0 ]; then
+        PROBE_SECONDS=120
+    fi
+
+    if [ "$PATTERN" = 1 ]; then
+        RTGMODES="${AMINETXDUO_RTGMODES:-$BUILD/tests/perf/rtgmodes}"
+        RTGBARS="${AMINETXDUO_RTGBARS:-$BUILD/tests/perf/rtgbars}"
+        for f in "$RTGMODES" "$RTGBARS"; do
+            [ -f "$f" ] || {
+                say error "no $f"
+                say hint "cmake --build $BUILD --parallel --target rtgmodes rtgbars"
+                say RESULT INFRA
+                exit 2
+            }
+        done
+        [ -f "$ROOT/tests/tools/rtgbars-check.py" ] || {
+            say error "no $ROOT/tests/tools/rtgbars-check.py"
+            say RESULT INFRA
+            exit 2
+        }
+    fi
     for f in Libs/Picasso96API.library Libs/Picasso96/rtg.library \
              Libs/Picasso96/uaegfx.card Devs/Monitors/Picasso96; do
         [ -f "$P96DIR/$f" ] || {
@@ -238,7 +313,68 @@ rtg_modes_mask() {
     esac
 }
 
-# Every mode the display database holds, as C:rtgscreen 0 printed it during a
+# ------------------------------------------- what the board calls a depth ---
+#
+# THE ARM'S NAME IS NOT THE DATABASE'S DEPTH, and reading `-d 32` as one is why
+# the first truecolour arm skipped itself.  Asked for its modes, this board
+# publishes three depths and no others:
+#
+#   rtgmode=50031000 640x480 depth=8  pixfmt=0  LUT8
+#   rtgmode=50031100 640x480 depth=16 pixfmt=7  RGB16PC
+#   rtgmode=50031302 640x480 depth=24 pixfmt=13 RGBA32
+#
+# There is no depth 32 in a display database.  RGBA32 is four bytes a pixel
+# with twenty-four bits of colour in them, and CyberGraphX reports the colour,
+# so the FORMAT is what separates a 32-bit screen from a packed 24-bit one --
+# both are depth 24.  The arm is therefore named for the format it exercises
+# and asserts on that; the depth is only how the mode is found.
+rtg_db_depth() {
+    case "$1" in
+        8)     printf 8 ;;
+        15)    printf 15 ;;
+        16)    printf 16 ;;
+        24|32) printf 24 ;;
+        *)     printf 0 ;;
+    esac
+}
+
+# The Picasso96 RGBFTYPE name the readback word must report for each arm.  This
+# is the assertion that says which path ran: everything downstream of the card
+# is R5G6B5 whatever this is.
+rtg_card_fmt() {
+    case "$1" in
+        8)  printf CLUT ;;
+        15) printf R5G5B5PC ;;
+        16) printf R5G6B5PC ;;
+        24) printf R8G8B8 ;;
+        32) printf R8G8B8A8 ;;
+        *)  printf none ;;
+    esac
+}
+
+# -P ONLY: CLUT for Workbench, and exactly ONE truecolour format beside it.
+#
+# A mask with two truecolour bits in it publishes two modes at the shape the
+# arm wants, and on this board two of them -- packed RGB24 and RGBA32 -- are
+# both depth 24, so asking the display database for a depth would not say which
+# one came back.  One bit at a time makes the answer unambiguous, and the arm
+# then asserts the format name rather than hoping.
+#
+# -R keeps rtg_modes_mask() above untouched: its 8 and 16-bit arms pass today
+# on a board with three formats on it and there is no reason to give them a
+# different one.
+rtg_pattern_mask() {
+    case "$1" in
+        8)  printf '0x002' ;;   # RGBFF_CLUT
+        15) printf '0x022' ;;   # + RGBFF_R5G5B5PC
+        16) printf '0x012' ;;   # + RGBFF_R5G6B5PC
+        24) printf '0x006' ;;   # + RGBFF_R8G8B8
+        32) printf '0x102' ;;   # + RGBFF_R8G8B8A8
+        *)  printf '0x112' ;;
+    esac
+}
+
+# Every mode the display database holds, as C:rtgmodes printed it during a
 # boot: `rtgmode=<id> <w>x<h> depth=<n>`.  Kept across arms and across runs so
 # that only the first RTG boot of a machine has to discover anything.
 RTG_MODES_SEEN=""
@@ -503,15 +639,25 @@ EOF
         # boot is a normal RTG boot and its listing can be read; the arm then
         # restages with the answer.  Writing nothing instead would leave
         # Workbench on the chipset and cost the same boot.
-        wb31_screenmode_prefs_id "$HD" "$depth" "${mode_id:-$RTG_MODE_ID}" \
-                                 "$RTG_W" "$RTG_H"
-        # And the prober, which is what actually puts an RTG screen in front:
-        # screenmode.prefs moves WORKBENCH, and whether that lands depends on a
-        # mode ID this harness worked out from the emulator's source.  The
-        # prober asks the display database instead, prints every mode it holds,
-        # and opens a public screen on the one the machine picked.
-        [ -f "$RTGSCREEN" ] && { cp "$RTGSCREEN" "$HD/C/rtgscreen"; \
-                                 chmod 755 "$HD/C/rtgscreen"; }
+        if [ "$PATTERN" = 1 ]; then
+            # WORKBENCH AT EIGHT BITS, and the arm's depth is nothing to do
+            # with it.  The screen under test on a -P arm is the one rtgbars
+            # opens, and it opens it on a mode the MACHINE picked; Workbench is
+            # only here so the boot is an ordinary RTG boot.  Writing a
+            # truecolour mode ID into screenmode.prefs would put a guess back
+            # on the critical path, which is the thing -P was built to remove.
+            wb31_screenmode_prefs_id "$HD" 8 "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
+        else
+            wb31_screenmode_prefs_id "$HD" "$depth" "${mode_id:-$RTG_MODE_ID}" \
+                                     "$RTG_W" "$RTG_H"
+        fi
+        # The lister and the picture.  rtgmodes opens nothing and returns, so
+        # it is safe on the boot path; rtgbars opens the screen the arm is
+        # about to be measured on.
+        if [ "$PATTERN" = 1 ]; then
+            cp "$RTGMODES" "$HD/C/rtgmodes"; chmod 755 "$HD/C/rtgmodes"
+            cp "$RTGBARS"  "$HD/C/rtgbars";  chmod 755 "$HD/C/rtgbars"
+        fi
     else
         wb31_screenmode_prefs "$HD" "$depth"
     fi
@@ -525,6 +671,10 @@ EOF
 # disk icons after LoadWB returns, and a server started at once would be
 # serving a screen that is still being drawn.
 startup_for() {
+    local depth="${1:-}"
+    local db_depth
+    db_depth=$(rtg_db_depth "${depth:-0}")
+
     sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
     cat >> "$HD/S/Startup-Sequence" <<EOF
 
@@ -549,8 +699,8 @@ EOF
     # it actually found: whether rtg.library loaded, whether it saw a board,
     # and what Intuition ended up opening.
     #
-    # AND NO SCREEN OF ITS OWN.  This ran `rtgscreen 8 640 480` as well, which
-    # put a PUBLIC, QUIET, EMPTY screen in front of Workbench -- and the front
+    # AND NO SCREEN OF ITS OWN on an -R arm.  This ran a prober that opened
+    # one, which put a PUBLIC, QUIET, EMPTY screen in front of Workbench -- and the front
     # screen is the one the console serves, so the session read a card screen
     # correctly and streamed 640x480 of colour zero.  Every RTG assertion
     # passed on it: format 1, a palette, a decoded frame, one pixel value.
@@ -558,8 +708,8 @@ EOF
     # says so per run, so there is nothing for a second screen to insure
     # against -- an -R run that comes up planar is meant to fail, not to be
     # rescued by a blank screen that hides what Workbench did.
-    # AND IT NO LONGER RUNS THE MONITOR OR THE MODE LISTER, because both took
-    # the guest down before it ever reached the httpd line below.
+    # AND IT NO LONGER RUNS THE MONITOR, because it took the guest down before
+    # it ever reached the httpd line below.
     #
     # `DEVS:Monitors/uaegfx` was here to prove the board had been found.  By
     # the time S:Startup-Sequence reaches it, LoadWB has already brought the
@@ -573,11 +723,10 @@ EOF
     # rather than as the guest having crashed on a diagnostic.  The message
     # was doubly misleading: it is a symptom of the board WORKING.
     #
-    # `C:rtgscreen 0` went with it.  Amiberry's uaegfx assigns a mode ID from
-    # the width and height alone -- AssignModeID() in its picasso96.cpp keys
-    # on nothing else -- so 640x480 is one ID at every depth and there is no
-    # per-depth list to learn.  What the lister cost was a whole boot and a
-    # second chance to wedge; what it bought was a number already known.
+    # The mode lister went with it, and has come back as C:rtgmodes on the -P
+    # arm alone: it opens nothing, always returns, and is linked and printed
+    # the way a command is rather than the way a test is.  Its predecessor was
+    # neither, and died at a garbage PC before its first line of output.
     #
     # The remaining lines are all reads.  None of them opens a board, a screen
     # or a card, so none of them can do this again.
@@ -590,6 +739,27 @@ C:List >DH0:rtg-libs.txt LIBS:Picasso96
 C:List >>DH0:rtg-libs.txt DEVS:Monitors
 C:Avail >DH0:rtg-avail.txt
 EOF
+
+    # THE MODE LISTER, AND THEN THE PICTURE.
+    #
+    # rtgmodes writes the whole display database into a file on DH0, which is a
+    # host directory, so the harness reads the board's real answer while the
+    # machine is still booting.  It opens nothing and it returns, which is the
+    # whole reason it is a separate program from rtgbars: a lister that fell
+    # into an open-and-wait path stopped a boot on this very line once, with
+    # the server below it never reached.
+    #
+    # rtgbars then opens the truecolour screen the arm measures and stays.  It
+    # is Run, so the sequence goes on; C:Wait after it, because httpd grabs the
+    # front screen and a server started before the bands were drawn would open
+    # its session on whatever was in front at the time.
+    if [ "$PATTERN" = 1 ]; then
+        cat >> "$HD/S/Startup-Sequence" <<EOF
+C:rtgmodes >DH0:rtglist.txt
+Run >NIL: <NIL: C:rtgbars $db_depth $RTG_W $RTG_H
+C:Wait 5
+EOF
+    fi
 
     cat >> "$HD/S/Startup-Sequence" <<EOF
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
@@ -636,11 +806,15 @@ supply a DISPLAY that enumerates modes"
         say RESULT INFRA
         exit 2
     }
+    # :90 to :149, and the width is not arbitrary.  Ten was enough for one
+    # person; with three checkouts on this host running RTG arms at once every
+    # slot was taken, and what that reads as from outside is RESULT=INFRA on a
+    # run that never started the emulator.  A display number costs nothing.
     XDISP=""
-    for n in $(seq 90 99); do
+    for n in $(seq 90 149); do
         [ -e "/tmp/.X11-unix/X$n" ] || { XDISP=":$n"; break; }
     done
-    [ -n "$XDISP" ] || { say error "no free X display in :90..:99"; \
+    [ -n "$XDISP" ] || { say error "no free X display in :90..:149"; \
                          say RESULT INFRA; exit 2; }
     Xvfb "$XDISP" -screen 0 1280x1024x24 >/dev/null 2>&1 &
     XVFB_PID=$!
@@ -689,6 +863,7 @@ EMULOG=""
 
 boot() {
     local depth="$1"
+    local mask=""
     local cfg="$ROOT/build/console-d$depth.uae"
 
     EMULOG="$ROOT/build/amiberry-console-d$depth.log"
@@ -724,11 +899,18 @@ EOF
     # comes up on the chipset.  Every assertion in this harness still passes on
     # that -- it is a screen, it has colours, it changes -- and the only thing
     # that says the card was never there is the depth in the geom word.
-    [ "$RTG" = 1 ] && cat >> "$cfg" <<EOF
+    if [ "$RTG" = 1 ]; then
+        if [ "$PATTERN" = 1 ]; then
+            mask=$(rtg_pattern_mask "$depth")
+        else
+            mask=$(rtg_modes_mask "$depth")
+        fi
+        cat >> "$cfg" <<EOF
 cpu_24bit_addressing=no
 gfxcard_size=8
-rtg_modes=$(rtg_modes_mask "$depth")
+rtg_modes=$mask
 EOF
+    fi
 
     # NOT --log.  It writes about a megabyte a second, playhouse3 is shared,
     # and a five-minute run left 427 MB of it here; nothing in this harness
@@ -809,18 +991,30 @@ alive() {
 
 # The board's own mode list, off the guest, while it is still booting.
 #
-# NOTHING ASKS FOR ONE ANY MORE and this waits for nothing.  The list came
-# from `C:rtgscreen 0` in the Startup-Sequence, which is gone: see the staging
-# above for why, and rtg_mode_id() for why the answer was not needed.  On this
-# board a mode ID follows the width and the height alone, so there is one ID
-# for the shape and the depth is the field beside it.
+# ONLY A -P BOOT PRODUCES ONE.  An earlier lister wrote it and was taken out of
+# the Startup-Sequence: it could fall into its own open-and-wait path and stop
+# the boot on that line.  tests/perf/rtgmodes.c is the replacement and it can
+# do neither -- it opens nothing and always returns -- so a -P boot runs it and
+# this reads what it wrote.
 #
-# Kept as a function, and kept returning failure, so that a board which does
-# number its modes some other way has an obvious place to start: fill this in,
-# and the caller already does the right thing with what it returns.  The
-# escape hatch until then is AMINETXDUO_RTG_MODE_ID_<depth>.
+# DH0 is a host directory, so the file is here the moment the guest closes it,
+# which is well before the server answers.  A plain -R boot writes no list and
+# this still returns failure for it, leaving that arm exactly as it was.
 rtg_wait_modes() {
-    : "${1:-}"
+    local limit="${1:-120}" n=0
+
+    [ "$PATTERN" = 1 ] || return 1
+
+    while [ "$n" -lt "$limit" ]; do
+        if [ -f "$HD/rtglist.txt" ] &&
+           grep -q '^result=listed' "$HD/rtglist.txt" 2>/dev/null; then
+            cp "$HD/rtglist.txt" "$RTG_MODES_SEEN"
+            return 0
+        fi
+        kill -0 "$EMU_PID" 2>/dev/null || return 1
+        sleep 1
+        n=$((n + 1))
+    done
     return 1
 }
 
@@ -835,6 +1029,9 @@ say model "$MODEL"
 say client "${CLIENT:-this host}"
 say page "$PAGE"
 say activity "$ACTIVITY"
+if [ "$PATTERN" = 1 ]; then
+    say pattern "rtgbars colour bars, checked with tests/tools/rtgbars-check.py"
+fi
 
 # NOTHING MAY ALREADY BE AT THIS ADDRESS.
 #
@@ -857,7 +1054,7 @@ for depth in "${DEPTHS[@]}"; do
 
     mode_id=$(rtg_mode_id "$depth")
     stage "$depth" "$mode_id"
-    startup_for
+    startup_for "$depth"
     started=$(date +%s)
     boot "$depth"
 
@@ -875,7 +1072,8 @@ for depth in "${DEPTHS[@]}"; do
         if rtg_wait_modes 120; then
             say "${tag}_rtg_modes_seen" \
                 "$(grep -c '^rtgmode=' "$RTG_MODES_SEEN" 2>/dev/null || true)"
-            learned=$(rtg_mode_from_list "$RTG_MODES_SEEN" "$depth")
+            learned=$(rtg_mode_from_list "$RTG_MODES_SEEN" \
+                                        "$(rtg_db_depth "$depth")")
             if [ -z "$learned" ]; then
                 # Not a failure of anything under test: Amiberry's uaegfx
                 # publishes what the RGBFF mask and the host's own display
@@ -883,16 +1081,23 @@ for depth in "${DEPTHS[@]}"; do
                 # mode is the board's answer to give.  The arm says so and
                 # does not run.
                 say "${tag}_skipped" "the board publishes no\
- ${RTG_W}x${RTG_H} mode at depth $depth; see $RTG_MODES_SEEN"
+ ${RTG_W}x${RTG_H} mode at depth $(rtg_db_depth "$depth"); see\
+ $RTG_MODES_SEEN"
                 cleanup
                 skipped=yes
+            elif [ "$PATTERN" = 1 ]; then
+                # NOTHING IS RESTAGED ON A -P ARM.  The screen it measures is
+                # the one rtgbars opens, and rtgbars asks the machine which
+                # mode to open rather than being told; the list is read here
+                # for the skip decision above and for the record below.
+                mode_id="0x$learned"
             elif [ "0x$learned" != "$mode_id" ]; then
                 say "${tag}_rtg_mode_relearned" "0x$learned, not\
  ${mode_id:-none}"
                 cleanup
                 mode_id="0x$learned"
                 stage "$depth" "$mode_id"
-                startup_for
+                startup_for "$depth"
                 started=$(date +%s)
                 boot "$depth"
             fi
@@ -963,7 +1168,11 @@ for depth in "${DEPTHS[@]}"; do
     # the 8-bit and planar arms are left exactly as they were.
     moving=()
     if [ "$RTG" = 1 ] && [ "$(rtg_wire_format "$depth")" = 2 ] &&
-       { [ "$ACTIVITY" = "scroll" ] || [ -n "$TYPE" ]; }; then
+       { [ "$PATTERN" = 1 ] || [ "$ACTIVITY" = "scroll" ] ||
+         [ -n "$TYPE" ]; }; then
+        # A -P arm may ask for this on an idle machine, which no other arm can:
+        # rtgbars blinks a square once a second precisely so that a session
+        # served one frozen grab for ever cannot pass a colour check.
         moving=(--min-changed 2)
     fi
 
@@ -1021,6 +1230,78 @@ for depth in "${DEPTHS[@]}"; do
             say "${tag}_error" "-R asked for a $depth-bit card screen, which is\
  format $want_fmt depth $want_depth on the wire, and the geom word says format\
  ${fmt:-none} depth ${wire_depth:-none}"
+            VERDICT=fail
+        fi
+    fi
+
+    #
+    # -P: WHICH TRUECOLOUR PATH RAN, AND WHETHER RED IS STILL RED.
+    #
+    # The geom check above cannot answer either question.  Every truecolour
+    # depth is downsampled to R5G6B5 before it is sent, so format 2 depth 16 is
+    # what a 15, 24 and 32-bit screen all say, and the picture behind it
+    # decodes and has colours in it whichever way round its channels are.  Two
+    # things close that: the readback word carries the card's own depth and the
+    # name of its pixel format, and the bands rtgbars drew are a picture with a
+    # known answer.
+    if [ "$PATTERN" = 1 ]; then
+        cp "$HD/rtgbars.txt" "$OUTDIR/$tag-rtgbars.txt" 2>/dev/null || true
+        cp "$HD/rtglist.txt" "$OUTDIR/$tag-rtglist.txt" 2>/dev/null || true
+
+        word=$(sed -n 's/^word_unknown=\(rtg .*\)$/\1/p' \
+               "$OUTDIR/$tag-probe.txt" 2>/dev/null | tail -1 || true)
+        card_depth=$(printf '%s' "$word" | tr ' ' '\n' \
+                     | sed -n 's/^depth=//p' | tail -1 || true)
+        card_fmt=$(printf '%s' "$word" | tr ' ' '\n' \
+                   | sed -n 's/^fmt=//p' | tail -1 || true)
+        want_db_depth=$(rtg_db_depth "$depth")
+        want_card_fmt=$(rtg_card_fmt "$depth")
+        say "${tag}_rtg_card_depth" "${card_depth:-none}"
+        say "${tag}_rtg_card_fmt" "${card_fmt:-none}"
+
+        # THE FORMAT IS THE ASSERTION.  Depth alone cannot separate a packed
+        # 24-bit screen from a 32-bit one -- this board publishes both as depth
+        # 24 -- and nothing downstream of the card can separate either from a
+        # 16-bit one, since all three leave as R5G6B5.  The name in the
+        # readback word is what says which of the converter's rows ran.
+        if [ "${card_fmt:-none}" != "$want_card_fmt" ] ||
+           [ "${card_depth:-0}" != "$want_db_depth" ]; then
+            say "${tag}_error" "-P asked for the $want_card_fmt path, which is\
+ depth $want_db_depth on this board, and the readback word says depth\
+ ${card_depth:-none} format ${card_fmt:-none}"
+            VERDICT=fail
+        fi
+
+        # The PNG is written where the probe ran, which on -c is another
+        # machine.  Fetched rather than checked there: the checker is part of
+        # this tree and the client is only required to have python3.
+        if [ -n "$CLIENT" ]; then
+            scp -q -o BatchMode=yes "$CLIENT:$OUTDIR/$tag.png" \
+                "$OUTDIR/$tag.png" 2>/dev/null || true
+        fi
+
+        if [ -f "$OUTDIR/$tag.png" ]; then
+            set +e
+            python3 "$ROOT/tests/tools/rtgbars-check.py" "$OUTDIR/$tag.png" \
+                > "$OUTDIR/$tag-bars.txt" 2>&1
+            brc=$?
+            set -e
+            say "${tag}_bands_ok" \
+                "$(sed -n 's/^bands_ok=//p' "$OUTDIR/$tag-bars.txt" \
+                   | tail -1 || true)"
+            swapped=$(sed -n 's/^red_blue_exchanged=//p' \
+                      "$OUTDIR/$tag-bars.txt" | tail -1 || true)
+            [ -z "$swapped" ] || say "${tag}_red_blue_exchanged" "$swapped"
+            say "${tag}_bars_report" "$OUTDIR/$tag-bars.txt"
+            case "$brc" in
+                0) ;;
+                2) VERDICT=infra ;;
+                *) say "${tag}_error" "the bands rtgbars drew did not come\
+ back: see $OUTDIR/$tag-bars.txt"
+                   VERDICT=fail ;;
+            esac
+        else
+            say "${tag}_error" "no decoded frame at $OUTDIR/$tag.png to check"
             VERDICT=fail
         fi
     fi
