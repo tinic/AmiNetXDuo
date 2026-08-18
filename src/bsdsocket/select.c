@@ -966,15 +966,26 @@ LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
     {
         AmiSocket *sock = bsd_lookup(SocketBase, fd);
         ULONG      events;
+        LONG       socket_error;
 
         if (sock == NULL)
             continue;
 
+        /* Event callbacks run from the IP task. Read-and-clear must be one
+           scheduler-atomic operation or a bit posted between the read and
+           the write is overwritten by the stale value below. */
+        Forbid();
         events = sock->as_Events & sock->as_EventMask;
         if (events == 0)
+        {
+            Permit();
             continue;
+        }
 
         sock->as_Events &= ~events;
+        socket_error = sock->as_SoError;
+        Permit();
+
         *event_ptr = events;
 
         /*
@@ -987,8 +998,8 @@ LONG bsd_GetSocketEvents(register ULONG *event_ptr __asm("a0"),
          * So this is a peek: as_SoError stays put, and getsockopt(SO_ERROR)
          * remains the only read that clears it.
          */
-        if ((events & FD_ERROR) != 0 && sock->as_SoError != 0)
-            bsd_set_errno(SocketBase, sock->as_SoError);
+        if ((events & FD_ERROR) != 0 && socket_error != 0)
+            bsd_set_errno(SocketBase, socket_error);
 
         return fd;
     }
