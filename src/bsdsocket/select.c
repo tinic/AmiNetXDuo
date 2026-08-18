@@ -907,6 +907,13 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             SetSignal(0, SocketBase->sb_EventSigMask);
             count = bsd_poll_sets(SocketBase, nfds, in_read, in_write,
                                   in_except, ready);
+
+            /* Match the poll at the top of the loop. If the kernel went
+               away while the timer was running, this is an error rather
+               than an ordinary timeout, and the caller's sets stay intact. */
+            if (count < 0)
+                return bsd_fail(SocketBase, AMI_ENETDOWN);
+
             break;
         }
     }
