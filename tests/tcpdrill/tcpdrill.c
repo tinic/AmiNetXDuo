@@ -18,8 +18,12 @@
  *   localport N            bind to this port             (default ephemeral)
  *   socket                 create a non-blocking TCP socket
  *   opt NAME VALUE         setsockopt: nodelay rcvbuf sndbuf oobinline
- *                          reuseaddr linger
- *   connect                connect(); EINPROGRESS is the expected answer
+ *                          reuseaddr linger keepalive sndtimeo rcvtimeo
+ *                          (the two timeouts in milliseconds)
+ *   connect [= ETIMEDOUT]  connect(); EINPROGRESS is the expected answer.
+ *                          With `= ETIMEDOUT` the call must have BLOCKED and
+ *                          come back with that errno, which needs `blocking`
+ *                          and `opt sndtimeo` before it.
  *   localaddr WHICH        the local address `listen` binds to: `any`, the
  *                          default; `iface`, the address the wire carries;
  *                          `loopback`; or `foreign`, one this machine has not
@@ -28,14 +32,21 @@
  *                          is a decision bsdsocket.library makes on its own.
  *   listen [= ERRNO]       bind localport, listen(4).  With `= ERRNO` the
  *                          bind must instead fail with that errno.
- *   accept [= none]        accept(); the accepted socket becomes the subject.
+ *   accept [= none] [wait=MS tries=N]
+ *                          accept(); the accepted socket becomes the subject.
  *                          `= none` requires the listener never to hand one
  *                          over, which is how a refused connection reads to
- *                          the application.
+ *                          the application.  `wait=` makes the listener
+ *                          blocking with SO_RCVTIMEO and calls accept() N
+ *                          times in a row with nothing in between, so what
+ *                          the stack does DURING an application's wait is
+ *                          measurable; the elapsed time is checked, because
+ *                          an accept that returns at once never waited.
  *   send N [= AGAIN]       send N bytes of a known pattern; AGAIN requires
  *                          the send to be refused, as a closed window must
  *   oob N                  send one byte, value N, with MSG_OOB
- *   recv MAX = WHAT        recv(); WHAT is a byte count, EOF, or AGAIN
+ *   recv MAX = WHAT        recv(); WHAT is a byte count, EOF, AGAIN, or
+ *                          ENOTCONN
  *   readable 0|1           WaitSelect() with a zero timeout, read set
  *   writable 0|1           the same, write set
  *   shutdown rd|wr|both
@@ -69,6 +80,11 @@
  *   notx MS                the stack must send nothing for MS
  *   txcount MIN MAX        discard everything queued, and assert how much of
  *                          it there was -- a retransmission series is a count
+ *   txsame FLAGS           discard everything queued, and assert every frame
+ *                          of it was FLAGS at the sequence number already
+ *                          latched.  A retransmission ladder of any length
+ *                          passes; a segment RE-ISSUED under a new sequence
+ *                          number does not.  At least one frame is required
  *   rx FLAGS [key=value]   inject this frame into the stack
  *   repeat N ... end       run the lines between them N times, $i counting
  *                          from zero.  N may be an expression, which is how a
@@ -219,6 +235,8 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 #define E_WOULDBLOCK    35
 #define E_INPROGRESS    36
 #define E_ADDRNOTAVAIL  49
+#define E_TIMEDOUT      60
+#define E_NOTCONN       57
 
 typedef struct SockAddrIn
 {
@@ -2730,10 +2748,36 @@ static VOID do_socket(const char *raw)
     pass(raw);
 }
 
-static VOID do_connect(const char *raw)
+/*
+ * `connect [= ETIMEDOUT]`.
+ *
+ * Plain, the socket is the non-blocking one do_socket() made and the call
+ * reports EINPROGRESS; the frames it causes are asserted by the lines after
+ * it.  With an expected errno the call has to have BLOCKED and come back with
+ * that errno, which needs `blocking` and `opt sndtimeo` before it.
+ *
+ * The elapsed time is printed because a connect that is expected to fail is
+ * one whose duration is the point: it must come back on its own timeout and
+ * not on some other.
+ */
+static VOID do_connect(const char *args, const char *raw)
 {
     SockAddrIn a;
     LONG       rc;
+    LONG       want_errno = 0;
+    ULONG      t0;
+    ULONG      took;
+
+    {
+        char tok[24];
+
+        args = token(args, tok, sizeof(tok));       /* '=' or nothing */
+        if (tok[0] == '=')
+        {
+            (VOID)token(args, tok, sizeof(tok));
+            want_errno = streq(tok, "ETIMEDOUT") ? E_TIMEDOUT : to_num(tok);
+        }
+    }
 
     zero((UBYTE *)&a, (ULONG)sizeof(a));
     a.sin_len    = (UBYTE)sizeof(a);
@@ -2741,8 +2785,40 @@ static VOID do_connect(const char *raw)
     a.sin_port   = cs.peer_port;
     a.sin_addr   = PEER_IP;
 
-    cs.t_last = tap_eclock_now();
+    t0 = tap_eclock_now();
+    cs.t_last = t0;
     rc = s_connect(cs.sock, &a);
+    took = ticks_to_ms(t0, tap_eclock_now());
+
+    if (want_errno != 0)
+    {
+        if (rc < 0 && s_errno() == want_errno)
+        {
+            /* cs.t_last stays at the moment the call went in, as it does for
+               a non-blocking connect: the SYN the next line asserts on was
+               sent then, and timing it from the return would print it as
+               having arrived before the connect started. */
+            n_pass++;
+            say("  ok   %s   [%ums]", raw, took);
+            return;
+        }
+        {
+            char  why[96];
+            char *w = why;
+            const char *t = "connect() returned ";
+
+            while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)rc, 10, 0, TRUE);
+            t = ", errno "; while (*t) *w++ = *t++;
+            fmt_num(&w, (ULONG)s_errno(), 10, 0, TRUE);
+            t = ", after "; while (*t) *w++ = *t++;
+            fmt_num(&w, took, 10, 0, FALSE);
+            t = "ms"; while (*t) *w++ = *t++;
+            *w = '\0';
+            fail(raw, why);
+        }
+        return;
+    }
 
     if (rc == 0)
     {
@@ -2841,14 +2917,32 @@ static VOID do_listen(const char *args, const char *raw)
     pass(raw);
 }
 
+/*
+ * `accept [= none] [wait=MS tries=N]`.
+ *
+ * Without `wait=` the listener is the non-blocking one do_listen() made and
+ * this polls it for a second, which is what every case that expects a
+ * connection wants.
+ *
+ * With `wait=` the listener is made BLOCKING with SO_RCVTIMEO set to that
+ * many milliseconds, and accept() is called `tries` times in a row with
+ * nothing in between -- no poll, no pump, no delay.  Every call must fail.
+ * That is the shape a server has while it is waiting for a client, and it is
+ * the only shape in which accept()'s own wait runs long enough to do anything
+ * to the connection it is waiting for: the point is what the STACK does
+ * during those waits, so the harness must not be touching the wire while they
+ * run.
+ */
 static VOID do_accept(const char *args, const char *raw)
 {
     UWORD tries;
     LONG  last = 0;
-    char  why[80];
+    char  why[96];
     char *w;
     const char *t;
     BOOL  want_none = FALSE;
+    LONG  wait_ms = 0;
+    LONG  n_wait  = 1;
 
     {
         char tok[16];
@@ -2856,9 +2950,119 @@ static VOID do_accept(const char *args, const char *raw)
         args = token(args, tok, sizeof(tok));       /* '=' or nothing */
         if (tok[0] == '=')
         {
-            (VOID)token(args, tok, sizeof(tok));
+            args = token(args, tok, sizeof(tok));
             want_none = streq(tok, "none");
         }
+    }
+
+    /* `wait=MS` and `tries=N`, in either order, after the optional `= none`.
+       Written the way every other keyed argument in a script is, with no
+       spaces, so the token has to be split on the '=' here. */
+    for (;;)
+    {
+        char  tok[24];
+        char *eq;
+
+        args = token(args, tok, sizeof(tok));
+        if (tok[0] == '\0')
+            break;
+
+        for (eq = tok; *eq != '\0' && *eq != '='; eq++)
+            ;
+        if (*eq != '=')
+            continue;
+        *eq++ = '\0';
+
+        if (streq(tok, "wait"))
+            wait_ms = to_num(eq);
+        else if (streq(tok, "tries"))
+            n_wait = to_num(eq);
+    }
+
+    if (wait_ms > 0)
+    {
+        LONG  zero_ = 0;
+        LONG  tv[2];
+        LONG  i;
+        ULONG t0;
+        ULONG took;
+
+        tv[0] = wait_ms / 1000;
+        tv[1] = (wait_ms % 1000) * 1000;
+
+        if (s_ioctl(cs.lsock, FIONBIO_, &zero_) != 0 ||
+            s_setsockopt(cs.lsock, SOL_SOCKET_, SO_RCVTIMEO_, tv,
+                         (LONG)sizeof(tv)) != 0)
+        {
+            fail(raw, "could not make the listener block with a timeout");
+            return;
+        }
+
+        t0 = tap_eclock_now();
+
+        for (i = 0; i < n_wait; i++)
+        {
+            LONG s = s_accept(cs.lsock);
+
+            if (s >= 0)
+            {
+                if (want_none)
+                {
+                    s_close(s);
+                    fail(raw, "accept() handed over a connection it had to "
+                              "refuse");
+                    return;
+                }
+                cs.sock = s;
+                sock_nonblocking(s);
+                took = ticks_to_ms(t0, tap_eclock_now());
+                cs.t_last = tap_eclock_now();
+                n_pass++;
+                say("  ok   %s   [%ums]", raw, took);
+                return;
+            }
+            last = s_errno();
+        }
+
+        took = ticks_to_ms(t0, tap_eclock_now());
+
+        if (!want_none)
+        {
+            w = why;
+            t = "accept() never produced a socket, errno ";
+            while (*t != '\0') *w++ = *t++;
+            fmt_num(&w, (ULONG)last, 10, 0, TRUE);
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+
+        /*
+         * Every wait has to have actually waited.  An accept() that answers
+         * EWOULDBLOCK immediately never enters the wait this case is about,
+         * so the case would pass without exercising anything -- which is what
+         * a listener left non-blocking by a bad `wait=` would do.
+         */
+        if (took < (ULONG)(wait_ms * n_wait) / 2UL)
+        {
+            w = why;
+            t = "the accept waits did not wait: ";
+            while (*t != '\0') *w++ = *t++;
+            fmt_num(&w, took, 10, 0, FALSE);
+            t = "ms for ";
+            while (*t != '\0') *w++ = *t++;
+            fmt_num(&w, (ULONG)n_wait, 10, 0, FALSE);
+            t = " of them";
+            while (*t != '\0') *w++ = *t++;
+            *w = '\0';
+            fail(raw, why);
+            return;
+        }
+
+        cs.t_last = tap_eclock_now();
+        n_pass++;
+        say("  ok   %s   [%ums over %d wait(s)]", raw, took, (LONG)n_wait);
+        return;
     }
 
     for (tries = 0; tries < 50; tries++)
@@ -3385,6 +3589,7 @@ static VOID do_recv(const char *args, const char *raw)
     LONG  max;
     LONG  want;
     BOOL  want_again = FALSE;
+    LONG  want_errno = 0;
     LONG  rc;
 
     args = token(args, tok, sizeof(tok));
@@ -3401,12 +3606,28 @@ static VOID do_recv(const char *args, const char *raw)
         want = -1;
         want_again = TRUE;
     }
+    /* "This socket is not connected", which is a different answer from "it is
+       connected and there is nothing to read" and the only way to tell a
+       cancelled connect from one that completed behind the caller's back. */
+    else if (streq(tok, "ENOTCONN"))
+    {
+        want = -1;
+        want_errno = E_NOTCONN;
+    }
     else
         want = to_num(tok);
 
     rc = s_recv(cs.sock, payload, max, 0);
 
-    if (want_again)
+    if (want_errno != 0)
+    {
+        if (rc < 0 && s_errno() == want_errno)
+        {
+            pass(raw);
+            return;
+        }
+    }
+    else if (want_again)
     {
         if (rc < 0 && s_errno() == E_WOULDBLOCK)
         {
@@ -3678,6 +3899,61 @@ static VOID do_close(const char *args, const char *raw)
  * would assert the intervals too, and the intervals belong to another
  * workstream.  This checks only that the stack kept retrying and then stopped.
  */
+/*
+ * `txsame <flags>` -- every frame the stack has queued is the SAME frame.
+ *
+ * Not `txcount`, which counts and says nothing about what it counted, and not
+ * a run of `tx` lines, which would have to predict how many retransmissions a
+ * timer produced.  What this asserts is that all of them carry the flags
+ * given AND the sequence number already latched, so a stack that RE-ISSUED a
+ * segment rather than retransmitting it -- a new initial sequence number for
+ * a handshake already in progress -- fails here while an honest retransmit
+ * ladder passes however long it is.
+ *
+ * At least one frame is required.  With none the sequence-number assertion is
+ * vacuous, and a case that asserted nothing would report as one that did.
+ */
+static VOID do_txsame(const char *args, const char *raw)
+{
+    char  tok[48];
+    UWORD want;
+    ULONG n = 0;
+    Seg   got;
+    char  desc[280];
+
+    (VOID)token(args, tok, sizeof(tok));
+    want = parse_flags(tok);
+
+    pump();
+
+    while (pend_pop(&got))
+    {
+        n++;
+
+        if (!got.is_tcp || got.flags != want ||
+            (cs.u_isn_known && got.seq != cs.u_isn))
+        {
+            describe(&got, desc, sizeof(desc));
+            fail(raw, desc);
+            /* Drain the rest, so the next directive is not one frame out of
+               step behind a failure this one already reported. */
+            while (pend_pop(&got))
+                ;
+            return;
+        }
+    }
+
+    if (n == 0)
+    {
+        fail(raw, "no frame was sent at all, so nothing was compared");
+        return;
+    }
+
+    cs.t_last = tap_eclock_now();
+    n_pass++;
+    say("  ok   %s   [%u identical frame(s)]", raw, n);
+}
+
 static VOID do_txcount(const char *args, const char *raw)
 {
     char  tok[24];
@@ -3964,7 +4240,7 @@ static VOID run_line(char *line)
         else say("!! unknown localaddr: %s", raw);
     }
     else if (streq(verb, "socket"))   do_socket(raw);
-    else if (streq(verb, "connect"))  do_connect(raw);
+    else if (streq(verb, "connect"))  do_connect(args, raw);
     else if (streq(verb, "listen"))   do_listen(args, raw);
     else if (streq(verb, "accept"))   do_accept(args, raw);
     else if (streq(verb, "send"))     do_send(args, raw);
@@ -3989,6 +4265,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
     else if (streq(verb, "txcount")) do_txcount(args, raw);
+    else if (streq(verb, "txsame"))  do_txsame(args, raw);
     else if (streq(verb, "wirebytes")) do_wirebytes(args, raw);
     else if (streq(verb, "rx"))       do_rx(args, raw);
     else if (streq(verb, "repeat"))

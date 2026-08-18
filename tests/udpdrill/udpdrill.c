@@ -227,6 +227,26 @@ register LONG _s_a0 __asm("a0");
     return(res);
 }
 
+/* recv(), the vector recvfrom() is not: bsd_recv() has its own zero-length
+   handling in transfer.c, so a case that only ever called recvfrom() would
+   leave half of it untested. */
+static LONG bsd_recv(LONG fd, APTR buf, LONG len, LONG flags)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register APTR            a0  __asm("a0") = buf;
+register LONG            d1  __asm("d1") = len;
+register LONG            d2  __asm("d2") = flags;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-78:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (d1), "r" (d2)
+                      : "cc", "memory");
+    return(res);
+}
+
 static LONG bsd_sendto(LONG fd, APTR buf, LONG len, LONG flags,
                        APTR to, LONG tolen)
 {
@@ -438,6 +458,45 @@ UBYTE        ph[4];
     sum = ones_partial(ph, 4UL, sum);
     sum = ones_partial(udp, 8UL + len, sum);
     wr16(&udp[6], ones_fold(sum));
+
+    return((BOOL)(tap_rx_put(f, ETH_HDR + iplen) == 0));
+}
+
+
+/*
+ * One IPv4 packet from src_ip carrying protocol `proto` and `len` payload
+ * bytes whose first byte is `tag`.  Protocol 253 is RFC 3692's "use for
+ * experimentation": nothing in the stack handles it, so every one of these
+ * reaches the raw filter in src/bsdsocket/raw.c and nowhere else.
+ */
+static BOOL t_inject_proto(ULONG src_ip, UBYTE proto, UBYTE tag, ULONG len)
+{
+static UBYTE f[TAP_FRAME_MAX];
+UBYTE       *ip  = &f[ETH_HDR];
+ULONG        iplen = 20UL + len;
+ULONG        i;
+
+    t_bzero(f, (ULONG)sizeof(f));
+
+    for (i = 0; i < 6UL; i++)
+    {
+        f[i]     = local_mac[i];
+        f[6 + i] = peer_mac[i];
+    }
+    wr16(&f[12], ETYPE_IP);
+
+    ip[0] = 0x45;
+    wr16(&ip[2], (UWORD)iplen);
+    wr16(&ip[4], 0x7000);
+    wr16(&ip[6], 0x4000);               /* DF */
+    ip[8] = 64;
+    ip[9] = proto;
+    wr32(&ip[12], src_ip);
+    wr32(&ip[16], LOCAL_IP);
+    wr16(&ip[10], ones_fold(ones_partial(ip, 20UL, 0UL)));
+
+    for (i = 0; i < len; i++)
+        ip[20 + i] = (UBYTE)(tag + (UBYTE)i);
 
     return((BOOL)(tap_rx_put(f, ETH_HDR + iplen) == 0));
 }
@@ -794,6 +853,23 @@ TTimeval tv;
     tv.tv_secs  = secs;
     tv.tv_micro = 0;
     (VOID)bsd_setsockopt(fd, T_SOL_SOCKET, T_SO_RCVTIMEO, &tv, (LONG)sizeof(tv));
+}
+
+static VOID t_rcvtimeo_ms(LONG fd, LONG ms)
+{
+TTimeval tv;
+
+    tv.tv_secs  = ms / 1000;
+    tv.tv_micro = (ms % 1000) * 1000;
+    (VOID)bsd_setsockopt(fd, T_SOL_SOCKET, T_SO_RCVTIMEO, &tv, (LONG)sizeof(tv));
+}
+
+/* Milliseconds between two tap_eclock_now() readings. */
+static ULONG t_ms_since(ULONG t0)
+{
+ULONG rate = tap_eclock_rate();
+
+    return((rate != 0UL) ? ((tap_eclock_now() - t0) / (rate / 1000UL)) : 0UL);
 }
 
 static LONG t_so_error(LONG fd)
@@ -1250,6 +1326,239 @@ LONG         n;
     (VOID)bsd_CloseSocket(fd);
 }
 
+/*
+ * u09/u10: a read with no room in it still takes a datagram off the queue.
+ *
+ * A datagram socket delivers one record per read and discards whatever did
+ * not fit.  Nothing fits in a zero-byte buffer, so recv(fd, buf, 0) reads a
+ * record and discards all of it.  The return value cannot say whether that
+ * happened -- it is 0 either way, and it is 0 again when there was nothing to
+ * read -- so THE ASSERTION IS NEVER ON THE ZERO.  It is on which datagram the
+ * next full-size read gets: the second one if the zero read consumed a
+ * record, the first one if it only looked like it did.
+ *
+ * Three separate claims, and each needs its own datagrams:
+ *
+ *   1. with a record queued, the zero read consumes exactly one;
+ *   2. with nothing queued, it returns 0 at once rather than waiting out the
+ *      receive timeout -- so the socket is BLOCKING with a two-second
+ *      SO_RCVTIMEO throughout, because "did not wait" is only a claim about a
+ *      socket that would otherwise have waited;
+ *   3. a zero-LENGTH datagram is a different thing entirely.  It is a real
+ *      record carrying no payload, and a full-size read of it returns 0 while
+ *      consuming it -- so an implementation that treats "this read returned
+ *      0" as "there was nothing there" gets caught here, and the source
+ *      address the read filled in is the proof that a record was delivered.
+ */
+
+/* Long enough that waiting it out is unmistakable in the transcript, short
+   enough that a regression costs seconds rather than a run. */
+#define T_ZERO_TIMEOUT_MS   2000
+#define T_ZERO_PROMPT_MS    500
+
+static VOID t_case_zero_read_udp(VOID)
+{
+static UBYTE buf[256];
+LONG         fd;
+SockAddrIn   a;
+SockAddrIn   from;
+LONG         fromlen;
+LONG         n;
+ULONG        t0;
+ULONG        ms;
+
+    t_log("");
+    t_log("u09. a zero-capacity read of a UDP socket consumes one queued "
+          "datagram");
+
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
+        return;
+
+    t_addr(&a, 0UL, (UWORD)LOCAL_PORT);
+    if (!t_check((BOOL)(bsd_bind(fd, &a, (LONG)sizeof(a)) == 0), "bind",
+                 bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(fd);
+        return;
+    }
+
+    /* Blocking, with a timeout that is long enough to see. */
+    t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
+
+    /* ---- recv(fd, buf, 0) with two datagrams queued. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xE1, 32UL),
+                  "inject a 32-byte datagram", 0);
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xE2, 32UL),
+                  "inject a second one behind it", 0);
+    t_settle();
+
+    t0 = tap_eclock_now();
+    n  = bsd_recv(fd, buf, 0, 0);
+    ms = t_ms_since(t0);
+    (VOID)t_check((BOOL)(n == 0), "recv(fd, buf, 0) returns 0", n);
+    (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
+                  "and it returned at once, not at the receive timeout",
+                  (LONG)ms);
+
+    buf[0] = 0;
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 32), "the next read gets a whole datagram", n);
+    (VOID)t_check((BOOL)(buf[0] == 0xE2),
+                  "and it is the SECOND one -- the zero read consumed the "
+                  "first", (LONG)buf[0]);
+
+    /* ---- and nothing is left behind it. */
+    t_rcvtimeo_ms(fd, 200);
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "the queue is empty afterwards, not one datagram deep",
+                  (n < 0) ? bsd_Errno() : n);
+
+    /* ---- an empty queue: 0, and no wait. */
+    t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
+    t0 = tap_eclock_now();
+    n  = bsd_recv(fd, buf, 0, 0);
+    ms = t_ms_since(t0);
+    (VOID)t_check((BOOL)(n == 0), "recv(fd, buf, 0) on an empty queue is 0", n);
+    (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
+                  "and it did not wait for a datagram to arrive", (LONG)ms);
+
+    /* ---- recvfrom() is the other vector and has its own zero handling. */
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xF1, 32UL),
+                  "inject a 32-byte datagram", 0);
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xF2, 32UL),
+                  "inject a second one behind it", 0);
+    t_settle();
+
+    t_bzero(&from, (ULONG)sizeof(from));
+    fromlen = (LONG)sizeof(from);
+    n = bsd_recvfrom(fd, buf, 0, 0, &from, &fromlen);
+    (VOID)t_check((BOOL)(n == 0), "recvfrom(..., 0, ...) returns 0", n);
+
+    buf[0] = 0;
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 32 && buf[0] == 0xF2),
+                  "and the read after it is the SECOND datagram",
+                  (n == 32) ? (LONG)buf[0] : n);
+
+    t_rcvtimeo_ms(fd, 200);
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "with nothing left behind it",
+                  (n < 0) ? bsd_Errno() : n);
+
+    /* ---- a zero-LENGTH datagram is a record, not an absence. */
+    t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
+    t_settle();
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0x00, 0UL),
+                  "inject a datagram carrying no payload", 0);
+    (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0x99, 16UL),
+                  "inject a 16-byte one behind it", 0);
+    t_settle();
+
+    t_bzero(&from, (ULONG)sizeof(from));
+    fromlen = (LONG)sizeof(from);
+    t0 = tap_eclock_now();
+    n  = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, &from, &fromlen);
+    ms = t_ms_since(t0);
+    (VOID)t_check((BOOL)(n == 0),
+                  "a full-size read of the empty datagram returns 0", n);
+    (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
+                  "at once -- it was queued, not awaited", (LONG)ms);
+    (VOID)t_check((BOOL)(from.sin_addr.s_addr == PEER_IP &&
+                         from.sin_port == (UWORD)PEER_PORT),
+                  "and the source address proves a record was delivered",
+                  (LONG)from.sin_port);
+
+    buf[0] = 0;
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == 16 && buf[0] == 0x99),
+                  "and the one behind it is still there, so the empty "
+                  "datagram was its own record",
+                  (n == 16) ? (LONG)buf[0] : n);
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
+/* RFC 3692 "use for experimentation": no protocol handler in the stack, so a
+   packet carrying it can only reach a raw socket. */
+#define T_RAW_PROTO     253
+#define T_RAW_PAYLOAD   24
+
+/* Where the payload starts in what a raw IPv4 read returns: 4.4BSD hands the
+   IP header over as well, and the injected header carries no options. */
+#define T_RAW_IPHDR     20
+
+static VOID t_case_zero_read_raw(VOID)
+{
+static UBYTE buf[256];
+LONG         fd;
+LONG         n;
+ULONG        t0;
+ULONG        ms;
+
+    t_log("");
+    t_log("u10. and the same on a raw socket");
+
+    fd = bsd_socket(AF_INET, SOCK_RAW, T_RAW_PROTO);
+    if (!t_check((BOOL)(fd >= 0), "socket(SOCK_RAW, 253)", bsd_Errno()))
+        return;
+
+    t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
+
+    t_settle();
+    (VOID)t_check((BOOL)t_inject_proto(PEER_IP, T_RAW_PROTO, 0xB1,
+                                       (ULONG)T_RAW_PAYLOAD),
+                  "inject a protocol-253 packet", 0);
+    (VOID)t_check((BOOL)t_inject_proto(PEER_IP, T_RAW_PROTO, 0xB2,
+                                       (ULONG)T_RAW_PAYLOAD),
+                  "inject a second one behind it", 0);
+    t_settle();
+
+    /* The control: the queue really is two deep before anything reads it. */
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), T_MSG_PEEK, NULL, NULL);
+    (VOID)t_check((BOOL)(n == T_RAW_IPHDR + T_RAW_PAYLOAD),
+                  "MSG_PEEK sees the IP header and the payload", n);
+    (VOID)t_check((BOOL)(n > T_RAW_IPHDR && buf[T_RAW_IPHDR] == 0xB1),
+                  "and the head of the queue is the first packet",
+                  (n > T_RAW_IPHDR) ? (LONG)buf[T_RAW_IPHDR] : n);
+
+    t0 = tap_eclock_now();
+    n  = bsd_recv(fd, buf, 0, 0);
+    ms = t_ms_since(t0);
+    (VOID)t_check((BOOL)(n == 0), "recv(fd, buf, 0) returns 0", n);
+    (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
+                  "and it returned at once", (LONG)ms);
+
+    buf[T_RAW_IPHDR] = 0;
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n == T_RAW_IPHDR + T_RAW_PAYLOAD),
+                  "the next read gets a whole packet", n);
+    (VOID)t_check((BOOL)(n > T_RAW_IPHDR && buf[T_RAW_IPHDR] == 0xB2),
+                  "and it is the SECOND one -- the zero read consumed the "
+                  "first",
+                  (n > T_RAW_IPHDR) ? (LONG)buf[T_RAW_IPHDR] : n);
+
+    t_rcvtimeo_ms(fd, 200);
+    n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
+    (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "with nothing left behind it",
+                  (n < 0) ? bsd_Errno() : n);
+
+    t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
+    t0 = tap_eclock_now();
+    n  = bsd_recv(fd, buf, 0, 0);
+    ms = t_ms_since(t0);
+    (VOID)t_check((BOOL)(n == 0), "recv(fd, buf, 0) on an empty queue is 0", n);
+    (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
+                  "and it did not wait for a packet to arrive", (LONG)ms);
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1279,6 +1588,8 @@ int main(void)
     t_case_bind_address();
     t_case_maxdgram();
     t_case_datagram_boundary();
+    t_case_zero_read_udp();
+    t_case_zero_read_raw();
 
     CloseLibrary(SocketBase);
     SocketBase = NULL;

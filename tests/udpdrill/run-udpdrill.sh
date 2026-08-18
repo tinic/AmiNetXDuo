@@ -80,6 +80,9 @@ echo "emulator log: build/udpdrill-$TAG.log"
 echo
 
 . "$ROOT/tools/test-verdict.sh"
-verdict_guest "udpdrill" 16 "$RUN_RC" \
+# The floor is the whole suite, not a token amount of it.  16 was the count
+# when the file had two cases; against the 108 it runs now, a boot that got
+# through a fifth of them and reported no failure would have passed.
+verdict_guest "udpdrill" 108 "$RUN_RC" \
     "$HD/stdout.txt" "$ROOT/build/amiberry-serial-$TAG.log" && exit 0
 exit $?
