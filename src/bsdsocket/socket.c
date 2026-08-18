@@ -2991,13 +2991,19 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                                         : NX_WAIT_FOREVER,
                              bsd_connect_once, &args, &aborted);
 
-        sock->as_Flags &= ~ASF_CONNECTING;
-
         if (aborted)
+        {
+            /* The wrapper wait was interrupted, not the NetX retry ladder.
+               Cancel that ladder before reporting failure or a delayed
+               SYN+ACK can connect this descriptor after EINTR. */
+            bsd_tcp_abort(&sock->as_Nx.tcp);
+            sock->as_Flags &= ~(ASF_CONNECTING | ASF_CONNECTED);
             return bsd_fail(SocketBase, AMI_EINTR);
+        }
 
         if (ws == NX_SUCCESS)
         {
+            sock->as_Flags &= ~ASF_CONNECTING;
             sock->as_Flags |= ASF_CONNECTED;
             return 0;
         }
@@ -3005,7 +3011,16 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         /* NX_NO_PACKET is the sliced-wait timeout. Anything else is a genuine
            failure the disconnect-complete callback filed in as_SoError. */
         if (ws == NX_NO_PACKET)
+        {
+            /* state_wait() has no timeout cleanup of its own. Stop the SYN
+               retransmission before returning ETIMEDOUT. */
+            bsd_tcp_abort(&sock->as_Nx.tcp);
+            sock->as_Flags &= ~(ASF_CONNECTING | ASF_CONNECTED);
+            sock->as_SoError = AMI_ETIMEDOUT;
             return bsd_fail(SocketBase, AMI_ETIMEDOUT);
+        }
+
+        sock->as_Flags &= ~ASF_CONNECTING;
 
         if (sock->as_SoError == 0)
             sock->as_SoError = AMI_ECONNREFUSED;
