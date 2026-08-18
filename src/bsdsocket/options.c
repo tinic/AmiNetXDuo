@@ -128,21 +128,49 @@ VOID bsd_opt_apply_ip(AmiSocket *sock)
     }
 }
 
-/* struct timeval -> ThreadX ticks, rounded up so a tiny timeout still waits. */
-static ULONG bsd_timeval_ticks(const struct timeval *tv)
+/*
+ * struct timeval -> ThreadX ticks, rounded up so a tiny timeout still waits.
+ * NX_WAIT_FOREVER is a sentinel rather than a finite delay, and zero is the
+ * value the socket object uses for "no timeout", so saturation stops one tick
+ * below the sentinel.
+ */
+static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
 {
+    ULONG seconds;
+    ULONG micros;
+    ULONG fraction;
     ULONG ticks;
+    const ULONG maximum = NX_WAIT_FOREVER - 1UL;
 
-    if (tv == NULL)
-        return 0;
+    if (tv == NULL || out == NULL)
+        return FALSE;
 
-    ticks = (ULONG)tv->tv_secs * (ULONG)NX_IP_PERIODIC_RATE;
-    ticks += ((ULONG)tv->tv_micro * (ULONG)NX_IP_PERIODIC_RATE + 999999UL) / 1000000UL;
+    seconds = (ULONG)tv->tv_secs;
+    micros  = (ULONG)tv->tv_micro;
 
-    if (ticks == 0 && ((ULONG)tv->tv_secs != 0 || (ULONG)tv->tv_micro != 0))
+    if (micros >= 1000000UL)
+        return FALSE;
+
+    fraction = (micros * (ULONG)NX_IP_PERIODIC_RATE + 999999UL) /
+               1000000UL;
+
+    if (seconds > maximum / (ULONG)NX_IP_PERIODIC_RATE)
+    {
+        *out = maximum;
+        return TRUE;
+    }
+
+    ticks = seconds * (ULONG)NX_IP_PERIODIC_RATE;
+    if (fraction > maximum - ticks)
+        ticks = maximum;
+    else
+        ticks += fraction;
+
+    if (ticks == 0 && (seconds != 0 || micros != 0))
         ticks = 1;
 
-    return ticks;
+    *out = ticks;
+    return TRUE;
 }
 
 /*
@@ -390,14 +418,18 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                sock->as_RcvTimeout = bsd_timeval_ticks((struct timeval *)optval);
+                if (!bsd_timeval_ticks((struct timeval *)optval,
+                                       &sock->as_RcvTimeout))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
                 return 0;
 
             case SO_SNDTIMEO:
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                sock->as_SndTimeout = bsd_timeval_ticks((struct timeval *)optval);
+                if (!bsd_timeval_ticks((struct timeval *)optval,
+                                       &sock->as_SndTimeout))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
                 return 0;
 
             case SO_EVENTMASK:
