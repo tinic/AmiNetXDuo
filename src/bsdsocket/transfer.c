@@ -1724,6 +1724,12 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
+    /* A source-address buffer without its value-result length cannot be
+       filled.  Reject it before receiving anything so a bad argument does
+       not silently consume a datagram. */
+    if (addr != NULL && addrlen == NULL)
+        return bsd_fail(SocketBase, AMI_EFAULT);
+
     if ((flags & MSG_OOB) != 0)
         return bsd_recv_oob(SocketBase, sock, (UBYTE *)buf, len);
 
@@ -1846,7 +1852,7 @@ LONG bsd_recvmsg(register LONG sock_fd        __asm("d0"),
     if (total < 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
-    if (msg->msg_name != NULL && msg->msg_namelen > 0)
+    if (msg->msg_name != NULL)
     {
         from    = (struct sockaddr *)msg->msg_name;
         fromlen = (socklen_t)msg->msg_namelen;
