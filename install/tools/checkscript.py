@@ -42,16 +42,24 @@ MAX_STRING = 512
 # long ones do not.  These limits are empirical, from watching Installer 2.17
 # fail on the real thing.
 #
-# NINE fits once the labels are short.  The card page carries nine at ten
-# characters or less ("Ariadne II", "X-Surf 100") and lays out; it did not
-# when the same page used names like "Commodore A2065" and "Not in this
+# TEN fits once the labels are short.  The card page carries ten at ten
+# characters or less ("Ariadne II", "X-Surf 100", "LAN Rover") and lays out; it
+# did not when the same page used names like "Commodore A2065" and "Not in this
 # list".  Both numbers are about ROOM, and the count alone was never the
 # whole story, which is why the length limit below matters more than this
-# one.  Raised only after install/test/run-installer-fsuae.sh -l AVERAGE
-# drove the page under Installer 2.17 and completed; if a future page dies on
-# "askchoice: No choices selected", it has too many or they are too wide, and
-# the answer is to merge entries rather than to raise this again.
-MAX_CHOICES = 9
+# one.
+#
+# Nine was the recorded figure and the note said to merge entries rather than
+# raise it.  Merging was not available: the tenth entry is the ASDG LAN Rover,
+# which has a driver of its own (eb920.device) and had no entry at all, so a
+# machine with one could not be detected and aborted the install at NOVICE.
+#
+# Raised only after install/test/run-workbench.sh -l AVERAGE drove the page
+# under Installer 2.17 on a real Workbench 3.1 and installdrive.txt reported
+# ten option gadgets on it (ids 2..11) with the run completing.  If a future
+# page dies on "askchoice: No choices selected", it has too many or they are
+# too wide, and the answer is to merge entries rather than to raise this again.
+MAX_CHOICES = 10
 MAX_CHOICE_LEN = 22
 
 # ---------------------------------------------------------------- symbols --

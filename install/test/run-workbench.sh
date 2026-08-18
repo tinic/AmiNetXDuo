@@ -376,6 +376,14 @@ sana2_select "$BOARD" "$BUILD"
 DRIVER_NAME="$SANA2_SEL_DRIVER"
 DRIVER_PATH="${AMINETXDUO_SANA2_DRIVER:-$SANA2_SEL_PATH}"
 
+# HANDED BACK, not just printed.  sana2_stage_driver copies
+# $AMINETXDUO_SANA2_DRIVER and nothing else, so a path that was resolved here
+# and left in a local variable means the card goes in the machine with no
+# driver beside it -- which this script correctly refused to run, eight cards
+# at a time, after saying it had found the file two lines earlier.
+AMINETXDUO_SANA2_DRIVER="$DRIVER_PATH"
+export AMINETXDUO_SANA2_DRIVER
+
 # A MISSING DRIVER IS AN INGREDIENT, NOT A FAILURE.  The card would be in the
 # machine with nothing able to open it, and the run would go red for a file
 # this host has never had rather than for anything in the product.  Exit 2 is

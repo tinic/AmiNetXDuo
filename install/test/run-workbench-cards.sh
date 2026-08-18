@@ -134,7 +134,10 @@ while read -r board model _addr _mac; do
         # fetched, so they arrive by somebody putting the file there.
         SKIPPED=$((SKIPPED + 1))
         SKIPPED_CARDS="$SKIPPED_CARDS $board"
-        why=$(grep -m1 '^No \|^-N ' "$log" | head -1)
+        # The first thing the run refused on.  `reason=unknown` on all eight
+        # of these is how a harness bug reads as a missing asset, so this
+        # takes the first complaint of any shape rather than two prefixes.
+        why=$(grep -m1 -e '^No ' -e '^!! ' -e '^-N ' -e 'not exist' "$log")
         printf 'card=%s model=%s rc=2 verdict=SKIP elapsed=%s reason=%s\n' \
                "$board" "$model" "$elapsed" "${why:-unknown}"
         continue
@@ -162,9 +165,20 @@ if [ "$RUN" = "0" ] || [ "$((PASSED + FAILED))" = "0" ]; then
     echo "workbench_cards=NONE"
     exit 2
 fi
-if [ "$FAILED" = "0" ]; then
-    echo "workbench_cards=PASS"
-    exit 0
+if [ "$FAILED" != "0" ]; then
+    echo "workbench_cards=FAIL"
+    exit 1
 fi
-echo "workbench_cards=FAIL"
-exit 1
+
+# A SKIP IS NOT A PASS, and this said otherwise once: one card ran, eight were
+# skipped for a driver the harness had already found and then failed to hand
+# on, and the sweep printed workbench_cards=PASS.  That is the vacuous green
+# this whole file exists to prevent -- "every card" cannot mean "the one card
+# whose ingredients happened to be in place".  The gate is only green when
+# every card in the table ran.
+if [ "$SKIPPED" != "0" ]; then
+    echo "workbench_cards=INCOMPLETE"
+    exit 1
+fi
+echo "workbench_cards=PASS"
+exit 0
