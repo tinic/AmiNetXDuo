@@ -25,6 +25,7 @@
  *   N  http server                     write a whole response, then close
  *   O  nc, ssh -L                    simultaneous listening sockets
  *   P  wget, nc, ssh                 getaddrinfo / getnameinfo
+ *   Q  UDP clients                    source-address value-result arguments
  *
  * Style follows tests/conformance/conf_probe.c: an ordinary AmigaOS program
  * that opens bsdsocket.library and calls vectors, linked against none of our
@@ -1385,6 +1386,65 @@ static VOID group_p(VOID)
 }
 
 
+/* ---- Q. datagram source-address arguments ----------------------------- */
+
+static VOID group_q(VOID)
+{
+    struct sockaddr_in local;
+    struct sockaddr_in from;
+    struct msghdr      msg;
+    struct iovec       iov;
+    socklen_t          local_len;
+    LONG               fd;
+    LONG               rc;
+    char               sent = 'q';
+    char               received = 0;
+
+    t_group("Q  UDP clients: source-address value-result arguments");
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0)
+    {
+        t_ok(FALSE, "create UDP socket for address argument checks", fd);
+        return;
+    }
+
+    addr_in(&local, INADDR_LOOPBACK, 0);
+    rc = bind(fd, (struct sockaddr *)&local, sizeof(local));
+    local_len = sizeof(local);
+    if (rc == 0)
+        rc = getsockname(fd, (struct sockaddr *)&local, &local_len);
+    t_ok(rc == 0, "bind UDP socket for address argument checks", rc);
+
+    if (rc == 0)
+        rc = sendto(fd, &sent, 1, 0, (struct sockaddr *)&local,
+                    sizeof(local));
+    t_ok(rc == 1, "queue a loopback datagram", rc);
+
+    memset(&from, 0, sizeof(from));
+    rc = recvfrom(fd, &received, 1, 0, (struct sockaddr *)&from, NULL);
+    t_ok(rc < 0 && c_errno == EFAULT,
+         "recvfrom(address, NULL length) fails without consuming data", rc);
+
+    memset(&msg, 0, sizeof(msg));
+    memset(&from, 0, sizeof(from));
+    iov.iov_base       = &received;
+    iov.iov_len        = 1;
+    msg.msg_name       = &from;
+    msg.msg_namelen    = 0;
+    msg.msg_iov        = &iov;
+    msg.msg_iovlen     = 1;
+
+    rc = recvmsg(fd, &msg, 0);
+    t_ok(rc == 1 && received == sent &&
+         msg.msg_namelen == (socklen_t)sizeof(struct sockaddr_in),
+         "recvmsg reports required source-address length at capacity zero",
+         rc);
+
+    CloseSocket(fd);
+}
+
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -1414,6 +1474,7 @@ int main(void)
     group_n();
     group_o();
     group_p();
+    group_q();
 
     Printf((STRPTR)"\n%ld checks, %ld failures\n",
            (LONG)t_checks, (LONG)t_failures);
