@@ -528,7 +528,11 @@ int main(int argc, char **argv)
     setup_chipset(320, 256, 6, GEN_FMT_EHB);
     seq_idle(dir, "idle_ehb");
     seq_scroll(dir, "scroll_ehb", 8, 20);
-    setup_chipset(640, 480, 8, GEN_FMT_HAM8);
+    /* HAM8 at the size HAM8 runs at, and not at 640x480.  Eight planes at a
+       larger size is what idle8 and scroll8 already walk, so a bigger one here
+       would be 15 MB of file and a second of round trip to test the palette
+       length again. */
+    setup_chipset(320, 256, 8, GEN_FMT_HAM8);
     seq_idle(dir, "idle_ham8");
     seq_full(dir, "full_ham8");
 
