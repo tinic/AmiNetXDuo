@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A socket option passed by reference with a null pointer is refused. The pointer was written through, and on a machine with no memory protection that write lands on the interrupt vectors at address zero
+- `recvfrom()` refuses a source-address buffer that arrives without its length, before it takes a datagram off the queue rather than after
+- `recvmsg()` reports the size of the source address when the buffer given for it is too small, instead of leaving the caller with nothing
+- `getaddrinfo()` refuses hints whose output fields are not clear, which is how a reused or partly initialised structure shows itself
+- `getnameinfo()` appends the zone to a link-local address only when asked for it with `NI_WITHSCOPEID`
 - An event or an error that arrives while a program is reading them is no longer lost. Reading the pending error, the urgent-data mark and the event set each took two steps, and the network task posts between them, so a new event could be erased by the write that cleared the old one
 - `Dup2Socket()` reserves a descriptor. Asking for one without a socket did nothing, so the descriptor a program was holding for later could be handed to the next socket it opened
 - `getaddrinfo()` fails cleanly when it runs out of memory. A failed allocation was added to the list anyway, so the call could report success with a list shorter than the answer, or empty
