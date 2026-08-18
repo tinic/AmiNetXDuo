@@ -1857,6 +1857,43 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
     *palette_moved = FALSE;
     *encoded = -1L;                     /* nothing encoded this pass */
 
+    /*
+     * A band after the first of a chunky pass never touches the screen.
+     *
+     * The fetch above took the whole frame into fb_stage once, and every band
+     * of the pass encodes that copy -- so resolving the front screen again,
+     * locking it, asking the card to describe its bitmap and reading the
+     * ColorMap buys nothing at all.  It is the same screen by construction,
+     * because the copy the bands are reading was taken from it.
+     *
+     * That work was not free.  A 800x600x16 screen is ten bands and paid ten
+     * LockPubScreen / p96 describe / display-unit / semaphore rounds a pass,
+     * which is where most of the difference between an 8-bit pass and a
+     * truecolour one had gone: the 8-bit screen is cheap enough not to be
+     * banded at all (see FB_BAND_WHEN) and so paid it once.
+     *
+     * What it did buy was catching a screen that changes shape half way
+     * through a pass, one band earlier than the next pass would.  That is no
+     * longer worth a lock a band: a changed screen is caught by the pass that
+     * follows, through FB_GEOM_UNSURE and FB_GRAB_UNREADABLE, and the geom
+     * barrier corrects the viewer.  The cost of not catching it here is the
+     * rest of one pass encoded from a copy of the screen that has gone, which
+     * is a stale picture for a fraction of a second and not a wrong one --
+     * the bands still agree with each other, because they are all the same
+     * copy.
+     *
+     * The planar path has no copy: its planes point into the screen's own
+     * bitmap, so it holds the screen for every band and is left alone.
+     */
+    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format))
+    {
+        const UBYTE *stage = fb_stage;
+
+        *now = *want;
+        *encoded = fb_encode_planes(&stage, out, out_cap, ty0, ty1);
+        return FB_GRAB_OK;
+    }
+
     sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
@@ -1935,11 +1972,11 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
              * the whole pass, which is if anything better than re-reading:
              * the bands cannot disagree with each other about what the screen
              * was.
+             *
+             * Only the first band of a pass arrives here.  The rest never
+             * reach this function -- see the top of it.
              */
-            if (ty0 != 0)
-                planes[0] = fb_stage;
-            else if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort,
-                                   fb_stage))
+            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
                 planes[0] = fb_stage;
             else
                 rc = FB_GRAB_UNREADABLE;
