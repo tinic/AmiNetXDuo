@@ -829,7 +829,7 @@
   interface that is not 0.0.0.0:
 
       Network stack:  running
-      Stack version:  bsdsocket.library 0.23.0 (AmiNetXDuo, ABI 4.6)
+      Stack version:  bsdsocket.library 0.24.0 (AmiNetXDuo, ABI 4.6)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
@@ -1221,7 +1221,7 @@
 
       1> ShowNetStatus
       Network stack:  running
-      Stack version:  bsdsocket.library 0.23.0 (AmiNetXDuo, ABI 4.6)
+      Stack version:  bsdsocket.library 0.24.0 (AmiNetXDuo, ABI 4.6)
       Host name:      amiga.localdomain (from name_resolution)
       Default route:  10.0.2.2
 
