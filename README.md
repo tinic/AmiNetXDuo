@@ -58,9 +58,9 @@ change is to resolve with `getaddrinfo()`, and to hand what it returns to
 
 Any 68000 or better, AmigaOS 2.04 or newer, and 1 MB of RAM. A SANA-II network
 card is also necessary. The installer offers these drivers by name:
-`a2065.device`, `ariadne.device`, `ariadne2.device`, `amiganet.device`,
-`xsurf.device`, `xsurf100.device`, `cnet.device`, the PCMCIA drivers, and
-`uaenet.device` for emulators. Any other driver name can be typed in.
+`a2065.device`, `ariadne.device`, `ariadne_ii.device`, `hydra.device`,
+`eb920.device`, `x-surf.device`, `x-surf-100.device`, `cnet.device` for PCMCIA,
+and `uaenet.device` for emulators. Any other driver name can be typed in.
 
 The archive also carries `anxnet.device` in `Devs/Networks/`. Install it by hand
 for IPv6 on an X-Surf or an X-Surf 100. The drivers of those two cards refuse
