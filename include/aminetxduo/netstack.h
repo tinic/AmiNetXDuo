@@ -528,6 +528,10 @@ VOID netstack_dns_absorb_ra(VOID);
 LONG netstack_dns_server_add(ULONG address);
 LONG netstack_dns_server_remove(ULONG address);
 LONG netstack_set_domain_name(const char *name);
+/* Coherent reads of the live resolver configuration. The raw AmiConfig is
+   still suitable for immutable startup fields, but not for this mutable part. */
+LONG netstack_resolver_snapshot(AmiResolverConfig *out);
+LONG netstack_domain_name_get(char *out, ULONG out_size);
 
 /*
  * Resolver. Implemented over NetX Duo addons/dns, and used by gethostbyname
