@@ -277,7 +277,7 @@ while getopts "a:p:b:m:B:d:C:t:s:H:o:c:g:A:T:L:RP" opt; do
 done
 
 if [ "$RTG" = 1 ] && [ ${#CHIPSET[@]} -gt 0 ]; then
-    say error "-R and -C are two different screens and one run serves one of them"
+    say error "-C is a chipset screen and -R and -P are a card's; one run serves one of them"
     say RESULT INFRA
     exit 2
 fi
@@ -313,13 +313,12 @@ if [ ${#CHIPSET[@]} -gt 0 ]; then
         exit 2
     }
 elif [ "$RTG" = 1 ]; then
-    # -R alone is the 8-bit arm it has always been.  -d names the others, and
-    # only the depths the card can hold: a chipset depth here would ask
-    # Picasso96 for a screen it cannot open and the run would come up planar,
-    # which is the one failure this file works hardest to make impossible.
-    # -P alone runs the four truecolour depths, because those four are what it
-    # exists to prove and three of them had never been run at all.  -R alone is
-    # the 8-bit arm it has always been.
+    # -R alone is the 8-bit arm it has always been and -P alone runs the four
+    # truecolour depths, because those four are what it exists to prove and
+    # three of them had never been run at all.  -d names any of them, and only
+    # the depths the card can hold: a chipset depth here would ask Picasso96
+    # for a screen it cannot open and the run would come up planar, which is
+    # the one failure this file works hardest to make impossible.
     if [ ${#DEPTHS[@]} -eq 0 ]; then
         if [ "$PATTERN" = 1 ]; then DEPTHS=(15 16 24 32); else DEPTHS=(8); fi
     fi
