@@ -90,6 +90,7 @@ typedef struct NetdevUnit
     UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
+    ULONG                       nu_TxProgress;/* last completion the tick saw  */
 
     NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];
     ULONG                       nu_McastFull;   /* joins the table could not hold */

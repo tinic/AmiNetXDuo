@@ -15,6 +15,7 @@
  */
 
 #include "netdev_internal.h"
+#include "netdev_watchdog.h"
 #include "netdev_macgen.h"
 #include "dp8390.h"
 
@@ -1177,6 +1178,12 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
  * Nothing else in the driver can notice, because that needs a clock the card
  * does not drive.
  *
+ * A nonempty ring is not by itself a wedge.  At line rate a completion is
+ * replaced before the next vertical blank and txb_inuse never reaches zero,
+ * especially on a LANCE with four descriptors.  Each core therefore advances
+ * tx_completed when hardware returns a frame, and only a full interval with no
+ * such progress is a stall.
+ *
  * The recovery goes through ops->reset rather than a named core.  This tick is
  * armed for every unit, so a call to dp8390_reset() here wrote DP8390 register
  * numbers into whatever chip the unit had.  On an A2065 or an Ariadne that is
@@ -1187,21 +1194,16 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
  * touch the chip alongside it.  The recovery is rare and costs a few
  * milliseconds once, against a transmitter that never comes back.
  */
-#define NETDEV_TX_STALL_BLANKS  120     /* ~2 s at 50 Hz, ~2 s at 60 Hz */
-
 static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 {
     BOOL wedged = FALSE;
 
     Disable();
 
-    if (!unit->nu_Online || unit->nu_Nic.txb_inuse == 0)
+    if (netdev_tx_watchdog_tick(&unit->nu_TxStall, &unit->nu_TxProgress,
+                               unit->nu_Online, unit->nu_Nic.txb_inuse,
+                               unit->nu_Nic.tx_completed))
     {
-        unit->nu_TxStall = 0;
-    }
-    else if (++unit->nu_TxStall >= NETDEV_TX_STALL_BLANKS)
-    {
-        unit->nu_TxStall = 0;
         unit->nu_TxWedges++;
         unit->nu_Nic.tx_errors++;
         if (unit->nu_Nic.ops->reset != NULL)

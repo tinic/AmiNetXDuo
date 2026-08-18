@@ -489,6 +489,7 @@ BOOL dp8390_intr(NetdevNic *nic)
             }
 
             nic->collisions += collisions;
+            nic->tx_completed++;
 
             if (--nic->txb_inuse != 0)
                 dp8390_xmit(nic);
