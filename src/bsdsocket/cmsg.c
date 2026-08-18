@@ -336,15 +336,17 @@ VOID bsd_cmsg_build(AmiSocket *sock, NX_PACKET *packet, struct msghdr *msg)
 
     msg->msg_controllen = 0;
 
-    if (out.co_Base == NULL || out.co_Size < (socklen_t)sizeof(struct cmsghdr))
-        return;
-
     if ((sock->as_CmsgWant & ACW_RECV_ANY) == 0)
         return;
 
+    /* Do not return early for an absent or undersized buffer. bsd_cmsg_put()
+       records truncation without writing, and doing the normal family build
+       is what distinguishes metadata this packet actually had from an option
+       that only applies to the other address family. */
+
     /* See the header note: a 32-bit store through an odd pointer is an
        address error on a 68000, and this pointer is the caller's. */
-    if ((((ULONG)out.co_Base) & 1UL) != 0UL)
+    if (out.co_Base != NULL && (((ULONG)out.co_Base) & 1UL) != 0UL)
     {
         msg->msg_flags |= MSG_CTRUNC;
         return;
