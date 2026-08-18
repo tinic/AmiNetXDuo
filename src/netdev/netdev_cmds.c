@@ -686,7 +686,13 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
         if (q == NULL || std->io_Length < 16)
         {
-            netdev_reply(io, IOERR_BADLENGTH, S2WERR_NULL_POINTER);
+            /* This is an IOStdReq, so ios2_WireError is io_Actual.  The SANA
+               reply helper would turn this error into a bogus nonzero byte
+               count in the caller's request. */
+            std->io_Actual = 0;
+            std->io_Error  = IOERR_BADLENGTH;
+            if ((std->io_Flags & IOF_QUICK) == 0)
+                ReplyMsg(&std->io_Message);
             return;
         }
 
