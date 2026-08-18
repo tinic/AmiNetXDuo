@@ -99,8 +99,6 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
                               register LONG buffer_size __asm("d0"),
                               register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg;
-
     (VOID)SocketBase;
 
     if (buffer == NULL || buffer_size <= 0)
@@ -115,18 +113,10 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
     netstack_dns_absorb_ra();
 #endif
 
-    cfg = netstack_config();
-
-    if (cfg == NULL || cfg->resolver.domain[0] == '\0')
-        return FALSE;
-
-    /* A truncated domain is not the domain, so this fails instead. */
-    if (bsd_strlen(cfg->resolver.domain) >= (ULONG)buffer_size)
-        return FALSE;
-
-    bsd_strncpy((char *)buffer, cfg->resolver.domain, (ULONG)buffer_size);
-
-    return TRUE;
+    /* The domain is live configuration. Copy it under the resolver lock so a
+       concurrent SetDefaultDomainName() cannot leave a mixed string. */
+    return (netstack_domain_name_get((char *)buffer, (ULONG)buffer_size) ==
+            AMI_NET_OK) ? TRUE : FALSE;
 }
 
 /* ------------------------------------------------------- name servers --- */
@@ -157,15 +147,15 @@ typedef struct BsdDnsList
     struct DomainNameServerNode bdl_Node[2 * AMI_CFG_MAX_NAMESERVERS];
     char                        bdl_Text[2 * AMI_CFG_MAX_NAMESERVERS]
                                         [AMI_CFG_IP6_STRLEN];
+    AmiResolverConfig           bdl_Resolver;
 } BsdDnsList;
 
 struct List *bsd_ObtainDomainNameServerList(
     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg;
-    BsdDnsList      *out;
-    UWORD            count = 0;
-    UWORD            i;
+    BsdDnsList *out;
+    UWORD       count = 0;
+    UWORD       i;
 
 #ifdef AMINETXDUO_IPV6
     /* Before the configuration is read. A router advertisement's servers are
@@ -174,14 +164,6 @@ struct List *bsd_ObtainDomainNameServerList(
     netstack_dns_absorb_ra();
 #endif
 
-    cfg = netstack_config();
-
-    if (cfg == NULL)
-    {
-        (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
-        return NULL;
-    }
-
     out = (BsdDnsList *)ami_alloc(sizeof(BsdDnsList));
     if (out == NULL)
     {
@@ -189,18 +171,25 @@ struct List *bsd_ObtainDomainNameServerList(
         return NULL;
     }
 
+    if (netstack_resolver_snapshot(&out->bdl_Resolver) != AMI_NET_OK)
+    {
+        ami_free(out);
+        (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
+        return NULL;
+    }
     /* NewList(), open-coded: amiga.lib is not available to a shared library. */
     out->bdl_List.lh_Head     = (struct Node *)&out->bdl_List.lh_Tail;
     out->bdl_List.lh_Tail     = NULL;
     out->bdl_List.lh_TailPred = (struct Node *)&out->bdl_List.lh_Head;
     out->bdl_List.lh_Type     = NT_UNKNOWN;
 
-    for (i = 0; i < cfg->resolver.nameserver_count &&
+    for (i = 0; i < out->bdl_Resolver.nameserver_count &&
                 i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
     {
         struct DomainNameServerNode *node = &out->bdl_Node[count];
 
-        ami_config_format_ip(cfg->resolver.nameserver[i], out->bdl_Text[count],
+        ami_config_format_ip(out->bdl_Resolver.nameserver[i],
+                             out->bdl_Text[count],
                              sizeof(out->bdl_Text[count]));
 
         node->dnsn_Size    = (LONG)sizeof(*node);
@@ -215,8 +204,8 @@ struct List *bsd_ObtainDomainNameServerList(
          * count. A slot in use is never 0, so that stands in for an
          * AmiResolverConfig that predates the field.
          */
-        node->dnsn_UseCount = (cfg->resolver.nameserver_use[i] != 0)
-                                  ? cfg->resolver.nameserver_use[i]
+        node->dnsn_UseCount = (out->bdl_Resolver.nameserver_use[i] != 0)
+                                  ? out->bdl_Resolver.nameserver_use[i]
                                   : -1;
 
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
@@ -226,12 +215,12 @@ struct List *bsd_ObtainDomainNameServerList(
     /* After the IPv4 ones, in the order the resolver tries them. NetX Duo's
        DNS client asks its servers in the order they were added, and the
        file's and the lease's are added before an advertisement can arrive. */
-    for (i = 0; i < cfg->resolver.nameserver6_count &&
+    for (i = 0; i < out->bdl_Resolver.nameserver6_count &&
                 i < (UWORD)AMI_CFG_MAX_NAMESERVERS; i++)
     {
         struct DomainNameServerNode *node = &out->bdl_Node[count];
 
-        ami_config_format_ip6(cfg->resolver.nameserver6[i],
+        ami_config_format_ip6(out->bdl_Resolver.nameserver6[i],
                               out->bdl_Text[count],
                               sizeof(out->bdl_Text[count]));
 

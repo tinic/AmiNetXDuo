@@ -19,6 +19,24 @@
 /* RFC 1035 2.3.4: 255 octets of domain name, plus the NUL. */
 #define AMI_DNS_NAME_MAX    256
 
+/*
+ * ns_Config.resolver is live configuration: Roadshow entry points can change
+ * it while other tasks resolve or report it. The ThreadX caller bracket
+ * serialises access to the DNS client, but an Exec task that only reads the
+ * configuration never enters that bracket. Short Forbid()/Permit() sections
+ * cover copies and mutations of the stored half. They never surround a NetX
+ * call: an Exec Wait while holding the ThreadX baton stops the stack.
+ */
+static VOID ami_ns_resolver_forbid(VOID)
+{
+    Forbid();
+}
+
+static VOID ami_ns_resolver_permit(VOID)
+{
+    Permit();
+}
+
 #ifdef AMINETXDUO_IPV6
 
 /*
@@ -235,8 +253,17 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
             continue;
         }
 
-        if (ami_config_nameserver6_offer(r, server.nxd_ip_address.v6))
-            AMI_INFO("netstack: DHCPv6 name server %s", text);
+        {
+            BOOL offered;
+
+            ami_ns_resolver_forbid();
+            offered = ami_config_nameserver6_offer(r,
+                                                    server.nxd_ip_address.v6);
+            ami_ns_resolver_permit();
+
+            if (offered)
+                AMI_INFO("netstack: DHCPv6 name server %s", text);
+        }
     }
 
     /*
@@ -261,11 +288,17 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
             {
                 const char *name = (const char *)&names[pos];
 
-                if (ami_config_search_offer(r, name))
+                BOOL offered;
+
+                ami_ns_resolver_forbid();
+                offered = ami_config_search_offer(r, name);
+                if (offered && r->domain[0] == '\0')
+                    ami_ns_copy_name(r->domain, name, sizeof(r->domain));
+                ami_ns_resolver_permit();
+
+                if (offered)
                 {
                     added++;
-                    if (r->domain[0] == '\0')
-                        ami_ns_copy_name(r->domain, name, sizeof(r->domain));
                 }
 
                 while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
@@ -313,6 +346,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         for (i = r->nameserver6_count; i-- != 0; )
         {
             ULONG gone[AMI_CFG_IP6_WORDS];
+            BOOL  withdrawn;
 
             for (j = 0; j < ns->ns_RdnssCount; j++)
                 if (ami_ns6_same(r->nameserver6[i],
@@ -332,7 +366,11 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
             gone[2] = r->nameserver6[i][2];
             gone[3] = r->nameserver6[i][3];
 
-            if (!ami_config_nameserver6_withdraw(r, gone))
+            ami_ns_resolver_forbid();
+            withdrawn = ami_config_nameserver6_withdraw(r, gone);
+            ami_ns_resolver_permit();
+
+            if (!withdrawn)
                 continue;
 
             {
@@ -372,8 +410,17 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                 continue;
             }
 
-            if (ami_config_nameserver6_offer(r, ns->ns_Rdnss[i].nxd_ip_address.v6))
-                AMI_INFO("netstack: advertised name server %s", text);
+            {
+                BOOL offered;
+
+                ami_ns_resolver_forbid();
+                offered = ami_config_nameserver6_offer(
+                    r, ns->ns_Rdnss[i].nxd_ip_address.v6);
+                ami_ns_resolver_permit();
+
+                if (offered)
+                    AMI_INFO("netstack: advertised name server %s", text);
+            }
         }
     }
 
@@ -386,16 +433,23 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         /* RFC 8106 5.2, as 5.1: zero withdraws what the option names. */
         if (ns->ns_DnsslLifetime == 0UL)
         {
+            ami_ns_resolver_forbid();
             n = ami_config_search_withdraw_rfc3397(r, ns->ns_Dnssl,
                                                    (ULONG)ns->ns_DnsslLen);
+            ami_ns_resolver_permit();
             if (n != 0)
                 AMI_INFO("netstack: advertised search list withdrawn, %ld "
                          "domain(s)", (long)n);
         }
         else
         {
+            ami_ns_resolver_forbid();
             n = ami_config_search_from_rfc3397(r, ns->ns_Dnssl,
                                                (ULONG)ns->ns_DnsslLen);
+            if (n != 0 && r->domain[0] == '\0')
+                ami_ns_copy_name(r->domain, r->search[r->search_count - n],
+                                 sizeof(r->domain));
+            ami_ns_resolver_permit();
             if (n != 0)
             {
                 AMI_INFO("netstack: advertised search list, %ld domain(s), "
@@ -407,12 +461,17 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                    same standing DHCP option 15 is given.  When a router names
                    several, only the first is used, because there is one
                    default. */
-                if (r->domain[0] == '\0')
-                    ami_ns_copy_name(r->domain, r->search[r->search_count - n],
-                                     sizeof(r->domain));
             }
         }
     }
+}
+
+/* Called with the ThreadX caller bracket held. Each stored mutation below is
+   a short Forbid section; the NetX calls between them must stay outside it. */
+static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
+{
+    ami_ns_dns_absorb_dhcpv6(ns);
+    ami_ns_dns_absorb_rdnss(ns);
 }
 
 /*
@@ -449,8 +508,7 @@ VOID netstack_dns_absorb_ra(VOID)
     /* DHCPv6 first, so its servers are ahead of the advertisement's in the
        list the resolver tries.  See the note above ami_ns_dns_absorb_dhcpv6()
        for why that is the order. */
-    ami_ns_dns_absorb_dhcpv6(ns);
-    ami_ns_dns_absorb_rdnss(ns);
+    ami_ns_dns_absorb_pending(ns);
 
     ami_netstack_leave_free(caller);
 }
@@ -778,8 +836,7 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
     }
 
 #ifdef AMINETXDUO_IPV6
-    ami_ns_dns_absorb_dhcpv6(ask->ns);
-    ami_ns_dns_absorb_rdnss(ask->ns);
+    ami_ns_dns_absorb_pending(ask->ns);
 #endif
 
     ask->status = nx_dns_host_by_name_get(&ask->ns->ns_Dns,
@@ -999,12 +1056,37 @@ static BOOL ami_ns_join_domain(char *dst, ULONG size, const char *name,
     return TRUE;
 }
 
+/* Copy one current search suffix into the qualified query while holding the
+   configuration lock. No pointer into the live list escapes the lock or is
+   kept across the network lookup that follows. `count_out` is the number of
+   suffixes in this snapshot, even when `at` is out of range. */
+static BOOL ami_ns_join_search_at(AmiNetStack *ns, const char *name, UWORD at,
+                                  char *qualified, ULONG qualified_size,
+                                  UWORD *count_out)
+{
+    const char *suffix[AMI_CFG_SEARCH_LIST_MAX];
+    UWORD       count;
+    BOOL        joined = FALSE;
+
+    ami_ns_resolver_forbid();
+    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
+                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+    if (at < count)
+        joined = ami_ns_join_domain(qualified, qualified_size, name,
+                                    suffix[at]);
+    ami_ns_resolver_permit();
+
+    if (count_out != NULL)
+        *count_out = count;
+
+    return joined;
+}
+
 LONG netstack_resolve_until(const char *name, ULONG *addr_out,
                             ULONG timeout_ticks, AmiNetGiveUpFn give_up,
                             VOID *give_up_arg)
 {
     AmiNetStack *ns = ami_netstack_raw();
-    const char  *suffix[AMI_CFG_SEARCH_LIST_MAX];
     char         qualified[AMI_DNS_NAME_MAX];
     LONG         err;
     UWORD        count;
@@ -1035,15 +1117,16 @@ LONG netstack_resolve_until(const char *name, ULONG *addr_out,
     if (ns == NULL || !ami_ns_unqualified(name))
         return err;
 
-    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
-                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+    count = 0;
+    (VOID)ami_ns_join_search_at(ns, name, 0, qualified,
+                                (ULONG)sizeof(qualified), &count);
 
     for (i = 0; i < count; i++)
     {
         LONG next;
 
-        if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
-                                suffix[i]))
+        if (!ami_ns_join_search_at(ns, name, i, qualified,
+                                   (ULONG)sizeof(qualified), NULL))
             continue;
 
         next = ami_ns_resolve_once(qualified, addr_out, timeout_ticks, give_up,
@@ -1185,8 +1268,7 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
         return AMI_NET_ASK_REFUSED;
     }
 
-    ami_ns_dns_absorb_dhcpv6(ask->ns);
-    ami_ns_dns_absorb_rdnss(ask->ns);
+    ami_ns_dns_absorb_pending(ask->ns);
 
     ask->count  = 0;
     ask->status = nxd_dns_ipv6_address_by_name_get(&ask->ns->ns_Dns,
@@ -1268,7 +1350,6 @@ LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
                              VOID *give_up_arg)
 {
     AmiNetStack *ns = ami_netstack_raw();
-    const char  *suffix[AMI_CFG_SEARCH_LIST_MAX];
     char         qualified[AMI_DNS_NAME_MAX];
     LONG         err;
     UWORD        count;
@@ -1288,15 +1369,16 @@ LONG netstack_resolve6_until(const char *name, ULONG addr_out[4],
     if (ns == NULL || !ami_ns_unqualified(name))
         return err;
 
-    count = ami_config_search_list(&ns->ns_Config.resolver, suffix,
-                                   (UWORD)AMI_CFG_SEARCH_LIST_MAX);
+    count = 0;
+    (VOID)ami_ns_join_search_at(ns, name, 0, qualified,
+                                (ULONG)sizeof(qualified), &count);
 
     for (i = 0; i < count; i++)
     {
         LONG next;
 
-        if (!ami_ns_join_domain(qualified, (ULONG)sizeof(qualified), name,
-                                suffix[i]))
+        if (!ami_ns_join_search_at(ns, name, i, qualified,
+                                   (ULONG)sizeof(qualified), NULL))
             continue;
 
         next = ami_ns_resolve6_once(qualified, addr_out, timeout_ticks, give_up,
@@ -1371,6 +1453,7 @@ LONG netstack_dns_server_add(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
     AmiNetCaller  *caller;
+    LONG          result = AMI_NET_OK;
     UINT          status;
     UWORD         i;
 
@@ -1379,32 +1462,44 @@ LONG netstack_dns_server_add(ULONG address)
     if (ns == NULL)
         return AMI_NET_ERR_STATE;
 
+    /* The caller bracket serialises writers and the DNS client. Short Forbid
+       sections make each stored mutation atomic to report-only Exec tasks. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
     /* Already known: count the reference and leave the resolver alone. */
     for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
         if (ns->ns_Config.resolver.nameserver[i] == address)
         {
+            ami_ns_resolver_forbid();
             ns->ns_Config.resolver.nameserver_use[i] =
                 ami_ns_use_deepen(ns->ns_Config.resolver.nameserver_use[i]);
-            return AMI_NET_OK;
+            ami_ns_resolver_permit();
+            goto out;
         }
 
     if (ns->ns_Config.resolver.nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
-        return AMI_NET_ERR_NOMEM;
+    {
+        result = AMI_NET_ERR_NOMEM;
+        goto out;
+    }
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-        return AMI_NET_ERR_STATE;
     status = nx_dns_server_add(&ns->ns_Dns, address);
-    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
-        return AMI_NET_ERR_CONFIG;
+    {
+        result = AMI_NET_ERR_CONFIG;
+        goto out;
+    }
 
+    ami_ns_resolver_forbid();
     ns->ns_Config.resolver.nameserver[ns->ns_Config.resolver.nameserver_count] =
         address;
     ns->ns_Config.resolver.nameserver_use[ns->ns_Config.resolver.nameserver_count] =
         1;
     ns->ns_Config.resolver.nameserver_count++;
+    ami_ns_resolver_permit();
 
     AMI_INFO("netstack: name server %lu.%lu.%lu.%lu added",
              (unsigned long)((address >> 24) & 0xFFUL),
@@ -1412,13 +1507,16 @@ LONG netstack_dns_server_add(ULONG address)
              (unsigned long)((address >>  8) & 0xFFUL),
              (unsigned long)(address & 0xFFUL));
 
-    return AMI_NET_OK;
+out:
+    ami_netstack_leave_free(caller);
+    return result;
 }
 
 LONG netstack_dns_server_remove(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
     AmiNetCaller  *caller;
+    LONG          result = AMI_NET_OK;
     UINT          status;
     UWORD         i;
     UWORD         at;
@@ -1429,6 +1527,10 @@ LONG netstack_dns_server_remove(ULONG address)
     if (ns == NULL)
         return AMI_NET_ERR_STATE;
 
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
     at = (UWORD)AMI_CFG_MAX_NAMESERVERS;
     for (i = 0; i < ns->ns_Config.resolver.nameserver_count; i++)
         if (ns->ns_Config.resolver.nameserver[i] == address)
@@ -1437,26 +1539,31 @@ LONG netstack_dns_server_remove(ULONG address)
             break;
         }
     if (at >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
-        return AMI_NET_ERR_NONAME;
+    {
+        result = AMI_NET_ERR_NONAME;
+        goto out;
+    }
 
     /* Still referenced by somebody else: drop one and stop. */
     use = ami_ns_use_shallow(ns->ns_Config.resolver.nameserver_use[at]);
     if (use != 0)
     {
+        ami_ns_resolver_forbid();
         ns->ns_Config.resolver.nameserver_use[at] = use;
-        return AMI_NET_OK;
+        ami_ns_resolver_permit();
+        goto out;
     }
 
-    caller = ami_netstack_enter_alloc();
-    if (caller == NULL)
-        return AMI_NET_ERR_STATE;
     status = nx_dns_server_remove(&ns->ns_Dns, address);
-    ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
-        return AMI_NET_ERR_CONFIG;
+    {
+        result = AMI_NET_ERR_CONFIG;
+        goto out;
+    }
 
     /* Close the gap: the order of the rest is the order they were added in. */
+    ami_ns_resolver_forbid();
     for (i = at; i + 1 < ns->ns_Config.resolver.nameserver_count; i++)
     {
         ns->ns_Config.resolver.nameserver[i] =
@@ -1469,23 +1576,33 @@ LONG netstack_dns_server_remove(ULONG address)
         0UL;
     ns->ns_Config.resolver.nameserver_use[ns->ns_Config.resolver.nameserver_count] =
         0;
+    ami_ns_resolver_permit();
 
-    return AMI_NET_OK;
+out:
+    ami_netstack_leave_free(caller);
+    return result;
 }
 
 LONG netstack_set_domain_name(const char *name)
 {
-    AmiNetStack *ns = netstack_get();
-    UWORD        i;
+    AmiNetStack  *ns = netstack_get();
+    AmiNetCaller *caller;
+    LONG          result = AMI_NET_OK;
+    UWORD         i;
 
     if (ns == NULL)
         return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+    ami_ns_resolver_forbid();
 
     /* A NULL or empty name clears it, which is how Roadshow documents it. */
     if (name == NULL || name[0] == '\0')
     {
         ns->ns_Config.resolver.domain[0] = '\0';
-        return AMI_NET_OK;
+        goto out;
     }
 
     /* Truncating a domain name silently produces wrong lookups, so the length
@@ -1495,12 +1612,63 @@ LONG netstack_set_domain_name(const char *name)
     for (i = 0; name[i] != '\0'; i++)
     {
         if (i + 1 >= (UWORD)sizeof(ns->ns_Config.resolver.domain))
-            return AMI_NET_ERR_CONFIG;
+        {
+            result = AMI_NET_ERR_CONFIG;
+            goto out;
+        }
     }
 
     for (i = 0; name[i] != '\0'; i++)
         ns->ns_Config.resolver.domain[i] = name[i];
     ns->ns_Config.resolver.domain[i] = '\0';
 
+out:
+    ami_ns_resolver_permit();
+    ami_netstack_leave_free(caller);
+    return result;
+}
+
+LONG netstack_resolver_snapshot(AmiResolverConfig *out)
+{
+    AmiNetStack *ns = netstack_get();
+
+    if (out == NULL)
+        return AMI_NET_ERR_CONFIG;
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    ami_ns_resolver_forbid();
+    *out = ns->ns_Config.resolver;
+    ami_ns_resolver_permit();
+
     return AMI_NET_OK;
+}
+
+LONG netstack_domain_name_get(char *out, ULONG out_size)
+{
+    AmiNetStack *ns = netstack_get();
+    LONG         result = AMI_NET_OK;
+    ULONG        len;
+
+    if (out == NULL || out_size == 0)
+        return AMI_NET_ERR_CONFIG;
+
+    out[0] = '\0';
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    ami_ns_resolver_forbid();
+
+    for (len = 0; ns->ns_Config.resolver.domain[len] != '\0'; len++)
+        ;
+
+    if (len == 0)
+        result = AMI_NET_ERR_NONAME;
+    else if (len >= out_size)
+        result = AMI_NET_ERR_CONFIG;
+    else
+        ami_ns_copy_name(out, ns->ns_Config.resolver.domain, out_size);
+
+    ami_ns_resolver_permit();
+    return result;
 }
