@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.24.1
+
+- The installer finds the card that is in the machine. It looked for four driver names that are not files anyone ships -- `ariadne2.device`, `amiganet.device`, `xsurf.device`, `xsurf100.device` -- and had no entry at all for the Hydra or the LAN Rover, so a machine with an Ariadne II, Hydra, LAN Rover, X-Surf or X-Surf 100 could not be installed at Novice level, and at Intermediate the card list defaulted to the A2065 and `DEVICE=a2065.device` was written for whatever card was really there
+- The PCMCIA question is asked of somebody who chose PCMCIA. It was keyed on a position in the card list, and the list grew
+
 ## 0.24.0
 
 - An interface with only IPv6 on it comes up. `CONFIGURE=NONE` was read as "static, with no address", so such a machine waited thirty seconds for a lease nobody asked for, took an RFC 3927 169.254 address it had no use for, waited fifteen seconds more and then failed to open `bsdsocket.library` at all -- leaving it with no network of either family, while five commands reported that it had no address
