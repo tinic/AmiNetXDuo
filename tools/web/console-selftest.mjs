@@ -739,6 +739,45 @@ for (const [name, format, depth, shift, colours] of
      same + " of " + CHIP_W + " pixels identical");
 }
 
+/*
+ * A chipset screen whose width is not a whole number of bytes.
+ *
+ * 634 wide has bytesPerRow 80, which holds 640 pixels: the last byte of every
+ * row carries six that are not on the display.  A decoder that draws them
+ * writes past the end of the row and into the start of the next one, and on
+ * HAM it would also carry a colour across a row boundary that the hardware
+ * resets.  The padded planar case above is here for the same reason and it is
+ * the likeliest mistake in the file.
+ */
+for (const [name, format, depth, colours] of [
+  ["HAM6", M.FMT_HAM6, 6, 16],
+  ["HAM8", M.FMT_HAM8, 8, 64],
+  ["EHB", M.FMT_EHB, 6, 32],
+]) {
+  const W = 634, H = 8, bpr = 80;
+  const screen = { width: W, height: H, depth, bytesPerRow: bpr, format };
+  const rgb = chipPalette(colours);
+
+  /* Every byte set, padding included, so anything drawn from off the display
+     is loud rather than a plausible colour. */
+  const planes = new Uint8Array(bpr * H * depth).fill(0xff);
+  const words = new Uint32Array(W * H).fill(0xdeadbeef);
+  M.decodeInto(screen, planes, 0, M.renderPalette(screen, rgb), words);
+
+  let untouched = 0;
+  for (let i = 0; i < W * H; i++) if (words[i] === 0xdeadbeef) untouched++;
+  ok(name + ": a 634-wide row draws every pixel that is on the display",
+     untouched === 0, untouched + " left untouched");
+
+  /* Row 1 must begin from what row 0 began from and not from row 0's last
+     pixel, padding or no padding. */
+  const b = new Uint8Array(words.buffer);
+  const at = (x, y) => "" + b[(y * W + x) * 4] + "," + b[(y * W + x) * 4 + 1] +
+                       "," + b[(y * W + x) * 4 + 2];
+  ok(name + ": a row starts where the row above it started",
+     at(0, 0) === at(0, 1), at(0, 0) + " then " + at(0, 1));
+}
+
 /* The palette lengths both ends size a buffer from, which is the one number
    that has to agree before a frame has gone either way. */
 for (const [name, format, depth, want] of [
