@@ -72,6 +72,7 @@
 #include "nx_packet.h"
 
 #include <netinet/in.h>
+#include <proto/exec.h>
 
 /* Byte offsets inside a TCP header, from RFC 793 figure 3. */
 #define BSD_TCP_OFF_SPORT        0
@@ -386,13 +387,22 @@ next:
 
 BOOL bsd_oob_take(AmiSocket *sock, UBYTE *out)
 {
+    /* The urgent-data callback posts from the IP task. Keep a new mark from
+       arriving between the test/copy and the flag clear. */
+    Forbid();
+
     if ((sock->as_Flags & ASF_OOBHAVE) == 0)
+    {
+        Permit();
         return FALSE;
+    }
 
     *out = sock->as_OobData;
 
     sock->as_Flags  &= ~ASF_OOBHAVE;
     sock->as_Events &= ~FD_OOB;
+
+    Permit();
 
     return TRUE;
 }

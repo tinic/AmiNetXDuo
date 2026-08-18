@@ -656,11 +656,26 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
              * has no other way to find out why it failed.
              */
             case SO_ERROR:
-                if (bsd_opt_get_long(SocketBase, optval, optlen,
-                                     sock->as_SoError) != 0)
-                    return -1;
+            {
+                LONG socket_error;
+
+                /* Validate before consuming the pending error. */
+                if (optval == NULL || optlen == NULL)
+                    return bsd_fail(SocketBase, AMI_EFAULT);
+                if (*optlen < (socklen_t)sizeof(WORD))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                /* The IP task posts asynchronous errors. Pair the read and
+                   clear so a newer error cannot land between them and be
+                   erased by this read. */
+                Forbid();
+                socket_error = sock->as_SoError;
                 sock->as_SoError = 0;
-                return 0;
+                Permit();
+
+                return bsd_opt_get_long(SocketBase, optval, optlen,
+                                        socket_error);
+            }
 
             case SO_TYPE:
                 return bsd_opt_get_long(SocketBase, optval, optlen,
