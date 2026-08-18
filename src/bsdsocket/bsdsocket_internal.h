@@ -1060,7 +1060,8 @@ LONG  bsd_cmsg_source_index(NX_IP *ip, const BsdCmsgSource *src, BOOL v6);
  * bsd_oob_take() hands the stored byte to recv(MSG_OOB) and clears the mark.
  * TRUE means there was one.
  */
-LONG  bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte);
+LONG  bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
+                   LONG flags);
 VOID  bsd_tcp_urgent_notify(NX_TCP_SOCKET *socket_ptr);
 BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
 
@@ -1169,7 +1170,7 @@ typedef UINT (*BsdSlicedCall)(VOID *arg, ULONG wait);
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted);
 
-ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks);
+ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags);
 
 /*
  * The break-signal test the resolver's retransmission ladder asks between
