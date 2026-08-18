@@ -707,11 +707,18 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
     /*
-     * Four ways to name where this leaves from, most specific first. The two
-     * multicast ones only answer for a group of their own family, the
-     * prepare calls give -1 for anything else, so in practice neither
-     * competes with the other two, or with each other.
+     * Four ways to name where this leaves from, most specific first. A
+     * per-message (or sticky) PKTINFO source overrides the standing multicast
+     * interface option. The two multicast choices only answer for a group of
+     * their own family, and the remaining source index is bind()/scope state.
      */
+    if (src != NULL && src->cs_Have && source == BSD_SOURCE_INDEX)
+    {
+        status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
+                                            (NXD_ADDRESS *)addr, port,
+                                            source_index);
+    }
+    else
 #ifdef AMINETXDUO_MULTICAST
     /* IP_MULTICAST_IF named an interface, so the route does not choose. */
     if (mcast_if >= 0)
