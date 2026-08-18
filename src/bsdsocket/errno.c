@@ -422,17 +422,9 @@ static const BsdSimpleTag bsd_simple_tags[] =
      */
     { SBTC_FDCALLBACK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_FDCallback)   },
     { SBTC_ERROR_HOOK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_ErrorHook)    },
-    /*
-     * Both of these are per-opener state a caller can set and read back. They
-     * are here rather than among the constants because a refused SET on a
-     * documented tag returns the tag's index and discards every tag after it
-     * in the same call. That is how an errno link in the next slot goes
-     * missing.
-     */
+    /* This is per-opener state a caller can set and read back. */
     { SBTC_SIG_ADDRESS_CHANGE_MASK, SBT_RW,
-      (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) },
-    { SBTC_CAN_SHARE_LIBRARY_BASES, SBT_RW,
-      (UWORD)offsetof(struct AmiSocketBase, sb_CanShareBases) }
+      (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) }
 };
 
 /*
@@ -473,6 +465,8 @@ typedef struct
 static const BsdConstTag bsd_const_tags[] =
 {
     { SBTC_NUM_PACKET_FILTER_CHANNELS, SBT_RO, BSD_PACKET_FILTER_CHANNELS },
+    /* Signals and timer.device state belong to the task that opened us. */
+    { SBTC_CAN_SHARE_LIBRARY_BASES,     SBT_RO, FALSE                     },
 
     /*
      * The tunables. SocketBaseTagList() is documented to return the index of
