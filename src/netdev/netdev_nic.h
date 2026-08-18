@@ -166,7 +166,7 @@ struct NetdevNic
     UBYTE               cr_proto;
     UBYTE               rcr_proto;
     UBYTE               dcr_reg;
-    UBYTE               pad_proto;
+    UBYTE               filter_pending; /* LANCE: apply after TX ring drains */
 
     /*
      * How the packet buffer is reached.  NE2000 fills these with its remote
