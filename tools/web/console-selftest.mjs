@@ -603,6 +603,159 @@ if (!existsSync(CONTENT)) {
   }
 }
 
+/* ------------------------------------------------- the chipset modes -- */
+
+/*
+ * HAM6, HAM8 and extra half-brite, against the picture tests/perf/chipscreen.c
+ * draws on the guest.
+ *
+ * Checked as PROPERTIES OF THE PICTURE and not against a second decoder.  A
+ * reference implementation of hold-and-modify would be a third place to make
+ * the same mistake, and the mistakes this format invites -- the control codes
+ * permuted, the data field taken from the wrong end -- all survive being
+ * decoded consistently.  What does not survive is the picture: a band written
+ * with the code that means red has to come out red, with green and blue left
+ * at what the row started from, climbing from dark to bright.
+ *
+ * chipscreen.c writes exactly these indices, so a change to either file that
+ * the other does not follow lands here.
+ */
+const CHIP_W = 320;
+const CHIP_H = 256;
+
+/* chipscreen.c base_rgb(): a lattice of 17, exact in a 4-bit colour register,
+   with 0 black so a HAM row that starts from it carries only the ramp. */
+function chipPalette(colours) {
+  const rgb = new Uint8Array(colours * 3);
+  for (let i = 0; i < colours; i++) {
+    rgb[i * 3] = 17 * (i & 15);
+    rgb[i * 3 + 1] = 17 * (15 - (i & 15));
+    rgb[i * 3 + 2] = 17 * (((i * 7) + (i >> 4)) & 15);
+  }
+  rgb[0] = 0; rgb[1] = 0; rgb[2] = 0;
+  rgb[3] = 255; rgb[4] = 255; rgb[5] = 255;
+  return rgb;
+}
+
+function chipPlanes(idxAt, depth) {
+  const bpr = ((CHIP_W + 15) >> 4) * 2;
+  const buf = new Uint8Array(bpr * CHIP_H * depth);
+  for (let y = 0; y < CHIP_H; y++) {
+    for (let x = 0; x < CHIP_W; x++) {
+      const v = idxAt(x, y);
+      for (let p = 0; p < depth; p++) {
+        if ((v >> p) & 1) buf[p * bpr * CHIP_H + y * bpr + (x >> 3)] |= 0x80 >> (x & 7);
+      }
+    }
+  }
+  return { buf, bpr };
+}
+
+function chipDecode(format, depth, colours, idxAt) {
+  const { buf, bpr } = chipPlanes(idxAt, depth);
+  const screen = { width: CHIP_W, height: CHIP_H, depth, bytesPerRow: bpr, format };
+  const rgb = chipPalette(colours);
+  const words = new Uint32Array(CHIP_W * CHIP_H);
+  M.decodeInto(screen, buf, 0, M.renderPalette(screen, rgb), words);
+  const b = new Uint8Array(words.buffer);
+  return {
+    rgb,
+    at: (x, y) => [b[(y * CHIP_W + x) * 4], b[(y * CHIP_W + x) * 4 + 1],
+                   b[(y * CHIP_W + x) * 4 + 2]],
+  };
+}
+
+/* chipscreen.c ham_row(): band 0 the base colours, then control 2 red, 3
+   green and 1 blue.  That order is the hardware's and it is the one a decoder
+   gets wrong. */
+for (const [name, format, depth, shift, colours] of
+     [["HAM6", M.FMT_HAM6, 6, 4, 16], ["HAM8", M.FMT_HAM8, 8, 6, 64]]) {
+  const n = 1 << shift;
+  const d = chipDecode(format, depth, colours, (x, y) => {
+    const band = ((y * 4) / CHIP_H) | 0;
+    const k = ((x * n) / CHIP_W) | 0;
+    if (band === 0) return k;
+    if (band === 1) return (2 << shift) | k;
+    if (band === 2) return (3 << shift) | k;
+    return (1 << shift) | k;
+  });
+  const rowOf = (band) => (((band * CHIP_H) / 4) | 0) + 4;
+
+  let wrong = 0;
+  for (let x = 0; x < CHIP_W; x++) {
+    const k = ((x * n) / CHIP_W) | 0;
+    const p = d.at(x, rowOf(0));
+    if (p[0] !== d.rgb[k * 3] || p[1] !== d.rgb[k * 3 + 1] ||
+        p[2] !== d.rgb[k * 3 + 2]) wrong++;
+  }
+  ok(name + ": a base-colour band is the palette", wrong === 0,
+     wrong + " pixels differ");
+
+  for (const [band, comp, cname] of [[1, 0, "red"], [2, 1, "green"], [3, 2, "blue"]]) {
+    const y = rowOf(band);
+    let rising = true, bled = 0, last = -1;
+    for (let x = 0; x < CHIP_W; x++) {
+      const p = d.at(x, y);
+      if (p[comp] < last) rising = false;
+      last = p[comp];
+      for (let c = 0; c < 3; c++) if (c !== comp && p[c] !== 0) bled++;
+    }
+    ok(name + ": the " + cname + " band climbs and reaches full",
+       rising && d.at(CHIP_W - 1, y)[comp] >= 250 && d.at(0, y)[comp] === 0,
+       "left " + d.at(0, y)[comp] + ", right " + d.at(CHIP_W - 1, y)[comp]);
+    /* The row started from black, so a modify of one component must leave the
+       other two at zero.  This is the check a permuted control code fails. */
+    ok(name + ": the " + cname + " band holds the other two at black",
+       bled === 0, bled + " components not zero");
+  }
+}
+
+/* chipscreen.c ehb_row(): band 0 is 0..31 and band 1 is 32..63 under it, so a
+   correct decode puts each half-bright colour directly below the colour it is
+   half of.  A viewer that never built the second half draws them identical. */
+{
+  const d = chipDecode(M.FMT_EHB, 6, 32, (x, y) => {
+    const band = ((y * 4) / CHIP_H) | 0;
+    const k32 = ((x * 32) / CHIP_W) | 0;
+    if (band === 0) return k32;
+    if (band === 1) return 32 + k32;
+    if (band === 2) return ((x * 64) / CHIP_W) | 0;
+    return (y + (((x * 64) / CHIP_W) | 0)) & 63;
+  });
+
+  const y0 = 4;
+  const y1 = ((CHIP_H / 4) | 0) + 4;
+  let wrong = 0, same = 0;
+  for (let x = 0; x < CHIP_W; x++) {
+    const a = d.at(x, y0), b = d.at(x, y1);
+    for (let c = 0; c < 3; c++) if (b[c] !== (a[c] >> 1)) wrong++;
+    if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) same++;
+  }
+  ok("EHB: 32..63 are 0..31 with every component halved", wrong === 0,
+     wrong + " components differ");
+  /* Black halves to black, so a few equal pixels are the palette and not a
+     viewer that skipped the second half. */
+  ok("EHB: the half-bright band is visibly darker", same < CHIP_W / 4,
+     same + " of " + CHIP_W + " pixels identical");
+}
+
+/* The palette lengths both ends size a buffer from, which is the one number
+   that has to agree before a frame has gone either way. */
+for (const [name, format, depth, want] of [
+  ["HAM6", M.FMT_HAM6, 6, 16],
+  ["HAM8", M.FMT_HAM8, 8, 64],
+  ["EHB", M.FMT_EHB, 6, 32],
+]) {
+  const screen = { width: CHIP_W, height: CHIP_H, depth, bytesPerRow: 40, format };
+  ok(name + ": the `pal` word carries " + want + " colours",
+     M.palColours(screen) === want, "says " + M.palColours(screen));
+  /* And the chipset modes keep the display-modulo aspect rule, which the RTG
+     formats do not: a 320x256 HAM picture drawn square is half its height. */
+  const a = M.pixelAspect(screen);
+  ok(name + ": a 320x256 screen is displayed 2:2",
+     a.x === 2 && a.y === 2, a.x + ":" + a.y);
+}
+
 /* ------------------------------------------------------------ the clock -- */
 
 /*
