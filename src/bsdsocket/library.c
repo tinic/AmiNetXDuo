@@ -1131,7 +1131,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     struct AmiSocketBase *base   = SocketBase;
     struct AmiSocketBase *master = base;
-    BOOL                  stack_went_down = FALSE;
+    BOOL                  unload_is_safe = FALSE;
 
     if (base->sb_Master != NULL)
     {
@@ -1162,7 +1162,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
         {
             netstack_shutdown();
-            stack_went_down = netstack_can_unload();
+            unload_is_safe = netstack_can_unload();
         }
         ReleaseSemaphore(&master->sb_Lock);
 
@@ -1175,7 +1175,10 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
          * shows up at.  The netdb tables are deliberately still held here and
          * are freed by the expunge, which is why there are two scopes.
          */
-        if (stack_went_down)
+        /* Only once the kernel has actually stopped. A census taken while
+           ThreadX Tasks are still alive counts memory that is still in use
+           and reads as a leak. */
+        if (unload_is_safe)
             AMI_CENSUS_REPORT("bsd-stack-down");
     }
 

@@ -1379,7 +1379,8 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
             /* RFC 3927 1.7: keep the machine reachable on the local wire
                while the DHCP client tries again. */
-            ami_ns_start_autoip(ns);
+            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+                AMI_WARN("netstack: no link-local fallback on this machine");
         }
         break;
 
@@ -1692,8 +1693,10 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
         }
     }
 
-    if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL))
-        ami_ns_start_autoip(ns);
+    if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL) &&
+        ami_ns_start_autoip(ns) != AMI_NET_OK)
+        AMI_WARN("netstack: an interface asked for a link-local address and "
+                 "did not get one");
 
 #ifdef AMINETXDUO_IPV6
     /*
@@ -1763,14 +1766,22 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                      (unsigned long)(AMI_DHCP_TIMEOUT_TICKS /
                                      (ULONG)NX_IP_PERIODIC_RATE));
 
-            /* RFC 3927: fall back to a link-local address. */
-            ami_ns_start_autoip(ns);
+            /* RFC 3927: fall back to a link-local address.  If that could
+               not be started there is nothing on the way, so do not spend the
+               fifteen seconds waiting for an address that cannot arrive. */
+            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+            {
+                AMI_WARN("netstack: no link-local fallback either, so this "
+                         "interface has no address");
+            }
+            else
+            {
+                resolved = ami_ns_wait_for_address(ns, AMI_AUTOIP_TIMEOUT_TICKS);
 
-            resolved = ami_ns_wait_for_address(ns, AMI_AUTOIP_TIMEOUT_TICKS);
-
-            if (!resolved)
-                AMI_WARN("netstack: link-local configuration did not settle "
-                         "either, is the cable in?");
+                if (!resolved)
+                    AMI_WARN("netstack: link-local configuration did not settle "
+                             "either, is the cable in?");
+            }
         }
     }
 
@@ -2194,7 +2205,19 @@ BOOL netstack_can_unload(VOID)
     BOOL safe;
 
     ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+
+    /*
+     * Attempt, not Obtain. bsd_lib_expunge() is one caller and Exec runs it
+     * under Forbid(); blocking here would Wait() and break the Forbid that
+     * protects the library list. Somebody else holding this lock is also, on
+     * its own, a reason to answer no: netstack_shutdown() can hold it for
+     * seconds around tx_amiga_kernel_stop(), which is precisely the window in
+     * which the answer is not yet known. A contended lock therefore means
+     * "cannot prove it is safe", which is the direction to fail in.
+     */
+    if (!AttemptSemaphore(&ami_ns_lock))
+        return FALSE;
+
     safe = (ami_ns == NULL && !ami_ns_kernel_started) ? TRUE : FALSE;
     ReleaseSemaphore(&ami_ns_lock);
 
