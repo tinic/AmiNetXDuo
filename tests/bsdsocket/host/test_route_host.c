@@ -170,6 +170,11 @@ UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG network_address,
 
     h_deletes++;
 
+    /* The vendored function's special case: an empty table reports success
+       without looking for the requested entry. routing.c must mask this. */
+    if (ip->nx_ip_routing_table_entry_count == 0)
+        return NX_SUCCESS;
+
     for (i = 0; i < ip->nx_ip_routing_table_entry_count; i++)
     {
         if (ip->nx_ip_routing_table[i].nx_ip_routing_dest_ip == network &&
@@ -556,6 +561,42 @@ static VOID t_absent(VOID)
           "and it did not install one");
 }
 
+/* -------------------------------------------------------------- deletion */
+
+static VOID t_delete_absent(VOID)
+{
+    struct TagItem t[2];
+    LONG           rc;
+
+    printf("DeleteRouteTagList: absent entries are always ESRCH\n");
+
+    t[0].ti_Tag  = RTA_Destination;
+    t[0].ti_Data = (uintptr_t)"192.168.99.0";
+    t[1] = (struct TagItem)T_END;
+
+    h_machine_reset();
+    h_deletes = 0;
+
+    rc = bsd_DeleteRouteTagList(t, BASE);
+    CHECK(rc == -1 && h_errno_last == AMI_ESRCH,
+          "an absent route in an empty table is ESRCH");
+    CHECK(h_deletes == 0,
+          "the empty-table NetX success path was not trusted");
+
+    h_add_fixture_route();
+    rc = bsd_DeleteRouteTagList(t, BASE);
+    CHECK(rc == -1 && h_errno_last == AMI_ESRCH,
+          "an absent route in a nonempty table is also ESRCH");
+    CHECK(h_deletes == 0,
+          "an absent route never reaches the NetX delete call");
+
+    t[0].ti_Data = (uintptr_t)"192.168.66.0";
+    rc = bsd_DeleteRouteTagList(t, BASE);
+    CHECK(rc == 0, "an existing route is deleted");
+    CHECK(h_deletes == 1 && h_ip.nx_ip_routing_table_entry_count == 0,
+          "and exactly one table entry was removed");
+}
+
 /* ------------------------------------------------------------ what changes */
 
 static VOID t_changes(VOID)
@@ -695,6 +736,7 @@ int main(void)
 
     t_refusals();
     t_absent();
+    t_delete_absent();
     t_changes();
     t_tag_walk();
 

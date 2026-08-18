@@ -137,6 +137,10 @@ static ULONG bsd_route_mask_for(ULONG addr, UWORD kind)
     return ((addr & ~classful) == 0) ? classful : 0xFFFFFFFFUL;
 }
 
+#ifdef NX_ENABLE_IP_STATIC_ROUTING
+static NX_IP_ROUTING_ENTRY *bsd_route_find(NX_IP *ip, ULONG dest, ULONG mask);
+#endif
+
 /*
  * A destination or gateway string: "a host name to be resolved or an IP
  * address in dotted-decimal notation (see RFC1700)", plus, for a destination
@@ -388,9 +392,18 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     else
     {
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
-        status = nx_ip_static_route_delete(ip, req.brr_Dest,
-                                           bsd_route_mask_for(req.brr_Dest,
-                                                              req.brr_DestKind));
+        ULONG mask = bsd_route_mask_for(req.brr_Dest, req.brr_DestKind);
+
+        /* NetX reports success without searching when its table is empty.
+           Find the exact entry first so an absent delete is ESRCH in every
+           table state, and so the check and deletion share this bracket. */
+        if (bsd_route_find(ip, req.brr_Dest, mask) == NX_NULL)
+        {
+            bsd_nx_leave(SocketBase);
+            return bsd_fail(SocketBase, AMI_ESRCH);
+        }
+
+        status = nx_ip_static_route_delete(ip, req.brr_Dest, mask);
 #else
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_ENOSYS);
@@ -402,14 +415,9 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     if (status == NX_SUCCESS)
         return 0;
 
-    /*
-     * "ESRCH if requested to delete a non-existent entry", again the -route-
-     * page. One hole is NetX Duo's and cannot be closed from here:
-     * nx_ip_static_route_delete() returns NX_SUCCESS outright when the table is
-     * empty, with no search. A delete of a route that was never added
-     * therefore fails on a machine that has other routes, and succeeds on one
-     * that has none.
-     */
+    /* "ESRCH if requested to delete a non-existent entry", again the -route-
+       page. The preflight above covers NetX's empty-table success; these are
+       the corresponding failures if the table changed under the API call. */
     if (status == NX_NOT_SUCCESSFUL || status == NX_ENTRY_NOT_FOUND)
         return bsd_fail(SocketBase, AMI_ESRCH);
 
