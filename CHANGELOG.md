@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Configuring an interface by name keeps hold of it for the whole call. The name was turned into a slot number once, and the slot could be freed and reused underneath, so the rest of the call could configure a different interface. Removing an interface now waits for such a call rather than pulling the slot out from under it
+- An address allocation started with `BeginInterfaceConfig()` survives the program that asked for it closing the library. The worker outlives the caller by design, and could be left polling a slot on a stack that had been taken down and rebuilt behind it
 - Removing an interface by name removes the one that was named. The name was resolved to a slot, the lock was dropped, and the slot was reused, so a program could take down a different interface than it asked for
 - The resolver's configuration is read and written one whole change at a time. A program reading the name server list or the domain name while another set them could see a half-written table or a torn string
 - A socket option passed by reference with a null pointer is refused. The pointer was written through, and on a machine with no memory protection that write lands on the interrupt vectors at address zero
