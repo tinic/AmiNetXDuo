@@ -6,6 +6,43 @@
 
 #include "netdev_mcast.h"
 
+static ULONG mcast_addr32(const UBYTE *a)
+{
+    return ((ULONG)a[2] << 24) | ((ULONG)a[3] << 16) |
+           ((ULONG)a[4] << 8)  | (ULONG)a[5];
+}
+
+static UWORD mcast_addr16(const UBYTE *a)
+{
+    return (UWORD)(((UWORD)a[0] << 8) | a[1]);
+}
+
+BOOL netdev_mcast_range_wide(const UBYTE *lo, const UBYTE *hi, ULONG *count)
+{
+    ULONG lo32 = mcast_addr32(lo);
+    ULONG hi32 = mcast_addr32(hi);
+    ULONG span;
+
+    if (mcast_addr16(lo) != mcast_addr16(hi) || hi32 < lo32)
+    {
+        *count = 0;
+        return TRUE;
+    }
+
+    /* Inclusive count is span + 1.  Test the span first: the full 32-bit
+       range has a span of ULONG_MAX and its count is 2^32, which does not fit
+       in ULONG and used to wrap to zero here. */
+    span = hi32 - lo32;
+    if (span >= NETDEV_MCAST_MAX)
+    {
+        *count = 0;
+        return TRUE;
+    }
+
+    *count = span + 1;
+    return FALSE;
+}
+
 static VOID mcast_copy(UBYTE *to, const UBYTE *from)
 {
     UWORD i;

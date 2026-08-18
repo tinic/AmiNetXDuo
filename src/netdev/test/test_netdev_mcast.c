@@ -53,6 +53,7 @@ int main(void)
     NetdevMcast before[NETDEV_MCAST_MAX];
     UBYTE addr[NETDEV_ADDR_LEN];
     UBYTE missing[NETDEV_ADDR_LEN];
+    ULONG count;
     UWORD i;
 
     memset(table, 0, sizeof(table));
@@ -103,6 +104,20 @@ int main(void)
            netdev_mcast_add(table, addr), TRUE);
     expect("a saturated reference does not wrap", find(table, addr)->refs,
            0xffffu);
+
+    /* The inclusive size of 00000000..ffffffff is 2^32, which cannot be
+       represented in ULONG.  It is wide, not an empty exact range. */
+    set_addr(addr, 0, 0, 0);
+    set_addr(missing, 0xff, 0xff, 0xff);
+    expect("a full 32-bit suffix range is wide",
+           netdev_mcast_range_wide(addr, missing, &count), TRUE);
+    expect("a wide range supplies no wrapped count", count, 0);
+
+    set_addr(addr, 0, 0, 0);
+    set_addr(missing, 0, 0, NETDEV_MCAST_MAX - 1);
+    expect("exactly the table capacity is not wide",
+           netdev_mcast_range_wide(addr, missing, &count), FALSE);
+    expect("the exact range count", count, NETDEV_MCAST_MAX);
 
     if (failures != 0)
     {
