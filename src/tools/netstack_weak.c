@@ -27,6 +27,11 @@ TOOL_WEAK VOID netstack_shutdown(VOID)
 {
 }
 
+TOOL_WEAK BOOL netstack_can_unload(VOID)
+{
+    return TRUE;
+}
+
 TOOL_WEAK AmiNetStack *netstack_get(VOID)
 {
     return NULL;

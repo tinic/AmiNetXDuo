@@ -58,6 +58,7 @@ static struct SignalSemaphore   ami_ns_lock;
 static volatile BOOL            ami_ns_lock_ready;
 static AmiNetStack             *ami_ns;
 static BOOL                     ami_ns_system_initialised;
+static BOOL                     ami_ns_kernel_started;
 
 static VOID ami_ns_lock_init(VOID)
 {
@@ -1021,10 +1022,48 @@ static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
     return FALSE;
 }
 
-static VOID ami_ns_start_autoip(AmiNetStack *ns)
+/* Pick the same interface for a new or restarted AutoIP object. */
+static LONG ami_ns_autoip_select(AmiNetStack *ns)
 {
     UINT  status;
     UWORD i;
+
+    /* First interface explicitly asking for link-local; failing that, the
+       first one expecting any IPv4 address (the DHCP fallback case). */
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
+            break;
+    }
+    if (i == ns->ns_IfaceCount)
+    {
+        for (i = 0; i < ns->ns_IfaceCount; i++)
+        {
+            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+                break;
+        }
+    }
+
+    /* AutoIP cannot run without an IPv4-capable interface. An IPv6-only stack
+       never calls this helper; treat reaching it as a configuration failure. */
+    if (i == ns->ns_IfaceCount)
+        return AMI_NET_ERR_CONFIG;
+
+    status = nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
+    if (status != NX_SUCCESS)
+    {
+        AMI_WARN("netstack: AutoIP could not select interface %ld (%ld)",
+                 (long)i, (long)status);
+        return AMI_NET_ERR_STATE;
+    }
+
+    return AMI_NET_OK;
+}
+
+static LONG ami_ns_start_autoip(AmiNetStack *ns)
+{
+    UINT status;
+    LONG rc;
 
     /*
      * Already built. nx_auto_ip_stop() only suspends the module's thread, so
@@ -1039,6 +1078,10 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
     {
         if (!ns->ns_AutoIpRunning)
         {
+            rc = ami_ns_autoip_select(ns);
+            if (rc != AMI_NET_OK)
+                return rc;
+
             status = nx_auto_ip_start(&ns->ns_AutoIp, 0UL);
             if (status == NX_SUCCESS)
             {
@@ -1048,16 +1091,17 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
             else
             {
                 AMI_WARN("netstack: nx_auto_ip_start failed (%ld)", (long)status);
+                return AMI_NET_ERR_STATE;
             }
         }
-        return;
+        return AMI_NET_OK;
     }
 
     ns->ns_AutoIpStack = ami_alloc_flags((ULONG)AMI_AUTOIP_STACK_SIZE, MEMF_PUBLIC);
     if (ns->ns_AutoIpStack == NULL)
     {
         AMI_WARN("netstack: no memory for the AutoIP thread");
-        return;
+        return AMI_NET_ERR_NOMEM;
     }
 
     status = nx_auto_ip_create(&ns->ns_AutoIp, (CHAR *)"AmiNetXDuo AutoIP",
@@ -1068,38 +1112,18 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
         AMI_WARN("netstack: nx_auto_ip_create failed (%ld)", (long)status);
         ami_free(ns->ns_AutoIpStack);
         ns->ns_AutoIpStack = NULL;
-        return;
+        return AMI_NET_ERR_STATE;
     }
     ns->ns_AutoIpCreated = TRUE;
 
-    /*
-     * First interface that asked for a link-local address; failing that, the
-     * first that expects an IPv4 address of any kind; failing that, interface
-     * 0, which is where this always landed.
-     *
-     * The middle rung is the IPv6-only interface: when interface 0 carries no
-     * IPv4, probing a 169.254 address on it is claiming an address on a wire
-     * for a family the operator switched off, and the DHCP interface that
-     * actually wanted the fallback is the one further up.
-     */
-    for (i = 0; i < ns->ns_IfaceCount; i++)
+    rc = ami_ns_autoip_select(ns);
+    if (rc != AMI_NET_OK)
     {
-        if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
-        {
-            (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
-            break;
-        }
-    }
-    if (i == ns->ns_IfaceCount)
-    {
-        for (i = 0; i < ns->ns_IfaceCount; i++)
-        {
-            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
-            {
-                (VOID)nx_auto_ip_set_interface(&ns->ns_AutoIp, (UINT)i);
-                break;
-            }
-        }
+        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        ns->ns_AutoIpCreated = FALSE;
+        ami_free(ns->ns_AutoIpStack);
+        ns->ns_AutoIpStack = NULL;
+        return rc;
     }
 
     status = nx_auto_ip_start(&ns->ns_AutoIp, 0UL);
@@ -1112,6 +1136,8 @@ static VOID ami_ns_start_autoip(AmiNetStack *ns)
         ns->ns_AutoIpRunning = TRUE;
         AMI_INFO("netstack: RFC 3927 link-local configuration started");
     }
+
+    return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_STATE;
 }
 
 /* --------------------------------------------------- address notifications,
@@ -1817,6 +1843,38 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
 
 /* ------------------------------------------------------------------ bring-up */
 
+/*
+ * Called with ami_ns_lock held. A failed stop is not merely a failed cleanup:
+ * one of the port's Exec Tasks may still be running on code or data in this
+ * hunk. Keep that fact separate from ami_ns, which has already been destroyed
+ * by then, so the library can refuse expunge and a later call can retry.
+ */
+static LONG ami_ns_kernel_stop_locked(VOID)
+{
+    UINT txstatus;
+
+    if (!ami_ns_kernel_started)
+        return AMI_NET_OK;
+
+    txstatus = tx_amiga_kernel_stop();
+    if (txstatus != TX_SUCCESS)
+    {
+        AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld). ThreadX "
+                  "Tasks are still running. Do not unload",
+                  (LONG)txstatus);
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    ami_ns_kernel_started = FALSE;
+
+    /* Every TX_THREAD the slot table still names died with the kernel, and
+       the table outlives the stack. Only on success: on anything else a
+       thread can still be inside a bracket. */
+    ami_netstack_baton_reset();
+
+    return AMI_NET_OK;
+}
+
 static LONG ami_ns_bring_up(VOID)
 {
     AmiNetCaller  caller;
@@ -1898,6 +1956,7 @@ static LONG ami_ns_bring_up(VOID)
         ami_ns_destroy(ns);
         return AMI_NET_ERR_KERNEL;
     }
+    ami_ns_kernel_started = TRUE;
 
     /* ---- 5. become a ThreadX thread ------------------------------------- */
 
@@ -1906,6 +1965,7 @@ static LONG ami_ns_bring_up(VOID)
     if (status != AMI_NET_OK)
     {
         ami_ns_destroy(ns);
+        (VOID)ami_ns_kernel_stop_locked();
         return status;
     }
     AMI_INFO("netstack: adopted, building NetX Duo");
@@ -1922,6 +1982,7 @@ static LONG ami_ns_bring_up(VOID)
         ami_ns = NULL;
         ami_ns_destroy(ns);
         ami_netstack_leave(&caller);
+        (VOID)ami_ns_kernel_stop_locked();
         return status;
     }
 
@@ -2032,6 +2093,17 @@ LONG netstack_startup(VOID)
         return AMI_NET_OK;
     }
 
+    /* A previous stop can have refused while an application thread was still
+       alive, or timed out after the port began stopping. Never start a second
+       kernel on top of it. A retry is useful for the refusal case: the thread
+       may have exited since the last close. */
+    status = ami_ns_kernel_stop_locked();
+    if (status != AMI_NET_OK)
+    {
+        ReleaseSemaphore(&ami_ns_lock);
+        return status;
+    }
+
     status = ami_ns_bring_up();
 
     if (status != AMI_NET_OK && ami_ns != NULL)
@@ -2057,6 +2129,7 @@ VOID netstack_shutdown(VOID)
     ns = ami_ns;
     if (ns == NULL)
     {
+        (VOID)ami_ns_kernel_stop_locked();
         ReleaseSemaphore(&ami_ns_lock);
         return;
     }
@@ -2111,25 +2184,21 @@ VOID netstack_shutdown(VOID)
      *
      * This can block for up to ~5 s in the worst case, with ami_ns_lock held.
      */
-    {
-        UINT txstatus = tx_amiga_kernel_stop();
-
-        if (txstatus != TX_SUCCESS)
-        {
-            AMI_ERROR("netstack: tx_amiga_kernel_stop failed (%ld). ThreadX "
-                      "Tasks are still running. Do not unload",
-                      (LONG)txstatus);
-        }
-        else
-        {
-            /* Every TX_THREAD the slot table still names died with the kernel,
-               and the table outlives the stack. Only on success: on anything
-               else a thread can still be inside a bracket. */
-            ami_netstack_baton_reset();
-        }
-    }
+    (VOID)ami_ns_kernel_stop_locked();
 
     ReleaseSemaphore(&ami_ns_lock);
+}
+
+BOOL netstack_can_unload(VOID)
+{
+    BOOL safe;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+    safe = (ami_ns == NULL && !ami_ns_kernel_started) ? TRUE : FALSE;
+    ReleaseSemaphore(&ami_ns_lock);
+
+    return safe;
 }
 
 AmiNetStack *netstack_get(VOID)
@@ -3294,21 +3363,32 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
  */
 LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
 {
-    AmiNetStack  *ns = ami_ns;
+    AmiNetStack  *ns;
     AmiNetCaller *caller;
-    UWORD         index   = 0;
-    ULONG         gateway = 0UL;
+    UWORD         index                  = 0;
+    ULONG         gateway                = 0UL;
+    BOOL          autoip_created_before  = FALSE;
+    BOOL          autoip_running_before  = FALSE;
+    BOOL          added                  = FALSE;
     LONG          rc;
 
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
     if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
+    {
+        ReleaseSemaphore(&ami_ns_lock);
         return AMI_NET_ERR_STATE;
+    }
 
-    rc = netstack_interface_add(cfg, &index);
+    autoip_created_before = ns->ns_AutoIpCreated;
+    autoip_running_before = ns->ns_AutoIpRunning;
+
+    rc = ami_ns_interface_add_locked(cfg, &index);
     if (rc != AMI_NET_OK)
-        return rc;
-
-    if (index_out != NULL)
-        *index_out = index;
+        goto out;
+    added = TRUE;
 
     /*
      * The static address arrived with the attach, which is given it.  The
@@ -3317,44 +3397,120 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
      * back with a subnet and no way off it. The GATEWAY in the interface file
      * first, then the one for the machine, which is where that line ends up
      * when there is one interface. A leased address brings its own gateway, so
-     * DHCP is left to put that back.
+     * DHCP is left to put that back. The gateway is installed last so a later
+     * configuration failure cannot overwrite the machine-wide route and then
+     * require a best-effort restore.
      */
     if (cfg->iptype == AMI_IPTYPE_STATIC)
         gateway = (cfg->gateway != 0UL) ? cfg->gateway
                                         : ns->ns_Config.default_gateway;
 
-    if (gateway != 0UL)
-    {
-        caller = ami_netstack_enter_alloc();
-        if (caller != NULL)
-        {
-            UINT status = nx_ip_gateway_address_set(&ns->ns_Ip, gateway);
-
-            if (status != NX_SUCCESS)
-                AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
-
-            ami_netstack_leave_free(caller);
-        }
-    }
-
     if (cfg->iptype == AMI_IPTYPE_DHCP)
     {
-        (VOID)netstack_interface_dhcp_start(index, 0UL);
+        rc = netstack_interface_dhcp_start(index, 0UL);
+        if (rc != AMI_NET_OK)
+            goto rollback;
     }
     else if (cfg->iptype == AMI_IPTYPE_LINKLOCAL)
     {
         caller = ami_netstack_enter_alloc();
-        if (caller != NULL)
+        if (caller == NULL)
         {
-            ami_ns_start_autoip(ns);
-            ami_netstack_leave_free(caller);
+            rc = AMI_NET_ERR_KERNEL;
+            goto rollback;
         }
+
+        rc = ami_ns_start_autoip(ns);
+        ami_netstack_leave_free(caller);
+        if (rc != AMI_NET_OK)
+            goto rollback;
     }
 
     /* STATE=down, honoured after the attach and the same way start-up honours
        it: the attach is what brought the link up. */
     if (!cfg->up)
-        (VOID)ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
+    {
+        rc = ami_ns_interface_disable(index, AMI_LINK_STACK_DISABLE);
+        if (rc != AMI_NET_OK)
+            goto rollback;
+    }
 
-    return AMI_NET_OK;
+    if (gateway != 0UL)
+    {
+        UINT status;
+
+        caller = ami_netstack_enter_alloc();
+        if (caller == NULL)
+        {
+            rc = AMI_NET_ERR_KERNEL;
+            goto rollback;
+        }
+
+        status = nx_ip_gateway_address_set(&ns->ns_Ip, gateway);
+        ami_netstack_leave_free(caller);
+
+        if (status != NX_SUCCESS)
+        {
+            AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
+            rc = AMI_NET_ERR_STATE;
+            goto rollback;
+        }
+    }
+
+    if (index_out != NULL)
+        *index_out = index;
+
+    rc = AMI_NET_OK;
+    goto out;
+
+rollback:
+    /* AutoIP is one machine-wide object rather than one object per interface.
+       If this transaction created or restarted it, restore the state that was
+       present before removing the interface it may currently name. */
+    if (cfg->iptype == AMI_IPTYPE_LINKLOCAL &&
+        ((!autoip_created_before && ns->ns_AutoIpCreated) ||
+         (!autoip_running_before && ns->ns_AutoIpRunning)))
+    {
+        caller = ami_netstack_enter_alloc();
+        if (caller != NULL)
+        {
+            if (!autoip_running_before && ns->ns_AutoIpRunning)
+            {
+                (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+                ns->ns_AutoIpRunning = FALSE;
+            }
+
+            if (!autoip_created_before && ns->ns_AutoIpCreated)
+            {
+                (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+                ns->ns_AutoIpCreated = FALSE;
+            }
+
+            ami_netstack_leave_free(caller);
+
+            if (!autoip_created_before && ns->ns_AutoIpStack != NULL)
+            {
+                ami_free(ns->ns_AutoIpStack);
+                ns->ns_AutoIpStack = NULL;
+            }
+        }
+        else
+        {
+            AMI_WARN("netstack: could not restore AutoIP after interface "
+                     "start failed");
+        }
+    }
+
+    if (added)
+    {
+        LONG remove_rc = ami_ns_interface_remove_locked(index, TRUE);
+
+        if (remove_rc != AMI_NET_OK)
+            AMI_ERROR("netstack: rollback of interface %ld failed (%ld)",
+                      (long)index, (long)remove_rc);
+    }
+
+out:
+    ReleaseSemaphore(&ami_ns_lock);
+    return rc;
 }

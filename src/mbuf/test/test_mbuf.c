@@ -338,6 +338,16 @@ static void test_adj(void)
     CHECK(ami_mbuf_length(m) == 0);
     ami_mbuf_freem(m);
 
+    /* LONG_MIN cannot be negated, and means trim more than any valid chain. */
+    m = ami_mbuf_gethdr();
+    CHECK(m != NULL);
+    m->m_len        = 20;
+    m->m_pkthdr.len = 20;
+    CHECK(ami_mbuf_adj(m, (LONG)(-2147483647L - 1L)) == 0);
+    CHECK(m->m_len == 0);
+    CHECK(m->m_pkthdr.len == 0);
+    ami_mbuf_freem(m);
+
     /* m_pkthdr.len follows, in both directions. */
     m = ami_mbuf_gethdr();
     ramp((UBYTE *)m->m_data, 20, 0);

@@ -74,6 +74,9 @@ LONG netstack_startup(VOID);
 /* Drop a reference. The stack goes down when the count reaches zero. */
 VOID netstack_shutdown(VOID);
 
+/* TRUE only when no stack or ThreadX Task can still execute this hunk. */
+BOOL netstack_can_unload(VOID);
+
 /* The singleton, or NULL if the stack is not up. */
 AmiNetStack   *netstack_get(VOID);
 

@@ -1162,7 +1162,7 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
         {
             netstack_shutdown();
-            stack_went_down = TRUE;
+            stack_went_down = netstack_can_unload();
         }
         ReleaseSemaphore(&master->sb_Lock);
 
@@ -1531,6 +1531,19 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         base = base->sb_Master;
 
     if (base->sb_Lib.lib_OpenCnt > 0)
+    {
+        base->sb_Lib.lib_Flags |= LIBF_DELEXP;
+        return NULL;
+    }
+
+    /*
+     * tx_amiga_kernel_stop() can refuse while an application ThreadX thread
+     * is still alive, or time out after stopping has begun. In either case an
+     * Exec Task may still be executing code or using stacks from this hunk.
+     * netstack_shutdown() logs the refusal; expunge must enforce its "do not
+     * unload" result instead of handing the segment back to UnLoadSeg().
+     */
+    if (!netstack_can_unload())
     {
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;

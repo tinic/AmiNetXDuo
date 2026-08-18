@@ -144,6 +144,20 @@ LONG ami_mbuf_adj(struct mbuf *mp, LONG req_len)
         LONG total = 0;
         LONG keep;
 
+        /* Amiga LONG is 32-bit. Negating its minimum value is undefined and
+           the requested trim is necessarily larger than any valid chain, so
+           handle that one value as the over-trim it represents. */
+        if ((ULONG)req_len == 0x80000000UL)
+        {
+            for (m = mp; m != NULL; m = m->m_next)
+                m->m_len = 0;
+
+            if ((mp->m_flags & M_PKTHDR) != 0)
+                mp->m_pkthdr.len = 0;
+
+            return 0;
+        }
+
         len = -req_len;
 
         for (m = mp; m != NULL; m = m->m_next)
