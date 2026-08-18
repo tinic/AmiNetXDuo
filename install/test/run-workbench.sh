@@ -227,8 +227,8 @@ fi
 PICK_SPEC=""
 case "$PICK" in
 "")        ;;
-minimal)   PICK_SPEC="2:3" ;;
-full)      PICK_SPEC="2:2" ;;
+minimal)   PICK_SPEC="2:2" ;;
+full)      PICK_SPEC="2:3" ;;
 *)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
