@@ -9,6 +9,17 @@ version at the top when it merges.
 
 ## Unreleased
 
+- The library is not unloaded while a ThreadX Task can still be running code inside it. Stopping the kernel can refuse, or time out once stopping has begun, and the refusal was logged and then ignored: the segment went back to the operating system anyway, with tasks still standing on it
+- `connect()` stops trying when it gives up. On a timeout or a break it returned the failure and left the SYN retransmission running, so a reply arriving afterwards could connect a socket whose caller had already been told the connection failed
+- `accept()` no longer answers a handshake twice. A wait that expired inside it wound the connection back to listening, and the next call sent a second SYN and acknowledgment for a connection already half open, with different sequence numbers
+- `MSG_DONTWAIT` works. It was accepted and discarded, so a program asking for one operation not to wait waited anyway
+- A large `SO_RCVTIMEO` or `SO_SNDTIMEO` is the timeout that was asked for. The conversion to ticks overflowed, so a long timeout became a short one, and one value landed exactly on "wait forever". Out-of-range microseconds are refused rather than rounded
+- `recvmsg()` reports ancillary data it had to discard. With no room for it, or no buffer at all, the data was dropped and `MSG_CTRUNC` was not set, so the caller was told nothing was missing
+- A read with a zero-length buffer on a datagram socket discards the datagram, which is what that read is for. It returned zero and left the datagram queued
+- `DeleteRouteTagList()` reports a route that was not there. NetX Duo answers success without looking when its table is empty, so deleting a route that never existed failed on a machine with routes and succeeded on one without
+- `ObtainSocket()` does not lose the socket when it runs out of descriptors. The registry entry was removed and freed before the descriptor was allocated, and the failure path put back a different entry
+- A link-local address is chosen for the interface that needs it, on every attempt. The interface was picked when the address object was first built and never again, though stopping it only suspends it, so after an interface came or went it probed on the wrong one
+- The wait after a DHCP timeout is skipped when there is nothing to wait for. A failed link-local fallback was followed by fifteen seconds of waiting for an address that could not arrive
 - The release test installs on every card the archive supports, and boots each one. It had only ever booted the A2065, which is how an installer that could not detect five of the nine cards reached eight releases
 - A PCMCIA card is found on a machine with 8 MB of Fast RAM in the test rig. Zorro II Fast RAM covers 0x200000 to 0x9fffff and the A1200's PCMCIA windows are at 0x600000 and 0xa00000, so they collided and the driver reported no card while the slot reported one
 ## 0.24.1
