@@ -16,6 +16,7 @@ set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
+    netdev_watchdog.c   # progress clock for a full transmit ring
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
@@ -225,6 +226,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
+
+    add_executable(test_netdev_watchdog
+        test/test_netdev_watchdog.c
+        netdev_watchdog.c)
+
+    target_include_directories(test_netdev_watchdog PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_watchdog PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_watchdog COMMAND test_netdev_watchdog)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

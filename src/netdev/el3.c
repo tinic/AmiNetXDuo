@@ -598,6 +598,7 @@ VOID el3_drain_tx_status(NetdevNic *nic)
         /* Any value pops it.  Zero is the value, so that nothing here reads
            as a bit written back into a register that has none. */
         netdev_bus_w8(&nic->bus, EL3_W1_TX_STATUS, 0);
+        nic->tx_completed++;
 
         /*
          * Any error bit disables the transmitter.  Jabber and underrun need

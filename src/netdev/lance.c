@@ -336,6 +336,7 @@ static VOID le_tint(NetdevNic *nic)
         if ((md1 & LE_T1_ERR) != 0)
             nic->tx_errors++;
 
+        nic->tx_completed++;
         nic->txb_inuse--;
         nic->tx_done = (UWORD)((nic->tx_done + 1) & (LE_TX_RING - 1));
     }

@@ -654,6 +654,7 @@ static void test_tx_status(void)
     /* A clean completion: popped, nothing counted, no recovery. */
     odd[EL3_W1_TX_STATUS - 1] = EL3_TXS_COMPLETE;
     nic.tx_errors = 0;
+    nic.tx_completed = 0;
     {
         int resets = mock_cmd_count[EL3_C_TX_RESET];
 
@@ -665,6 +666,8 @@ static void test_tx_status(void)
                    (unsigned long)mock_cmd_count[EL3_C_TX_RESET],
                    (unsigned long)resets);
     }
+    expect_u32("a popped status is hardware progress",
+               (unsigned long)nic.tx_completed, 1);
 
     /* An underrun counts, resets the transmitter and re-enables it. */
     odd[EL3_W1_TX_STATUS - 1] = (UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_UNDERRUN);

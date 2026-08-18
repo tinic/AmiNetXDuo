@@ -132,6 +132,14 @@ struct NetdevNic
     UWORD               txb_inuse;
 
     /*
+     * Hardware transmit completions, successful or not.  Unlike tx_packets,
+     * this means the same thing in every core and is never cleared by a chip
+     * reset.  The vertical-blank watchdog compares snapshots of it so a full
+     * but moving transmit ring is not mistaken for a wedged one.
+     */
+    ULONG               tx_completed;
+
+    /*
      * EtherLink III.  el3_swap is measured at attach from the window 0
      * manufacturer ID and is not a card-table knob.  el3_win is the window
      * last selected, because the part has no readable window register and an
