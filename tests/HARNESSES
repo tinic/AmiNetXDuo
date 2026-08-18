@@ -46,6 +46,7 @@
 
 install/test/run-smbmount.sh       : tools/ci.sh                    : an SMB share mounted on a real Workbench, which is what GitHub #3 and #4 are about
 install/test/run-workbench.sh      : tools/ci.sh                    : the release archive on a real Workbench 3.1
+install/test/run-workbench-cards.sh: tools/ci.sh                    : the same install and power cycle on every card in tests/tools/cards.sh, because the gate above booted the A2065 and nothing else
 tests/perf/run-lossgate.sh         : tools/ci.sh                    : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
 tests/tools/run-arpretry.sh        : tools/ci.sh                    : the guest's first ARP is lost on purpose; the connect must still complete
 tests/tools/run-cardsweep.sh       : tools/ci.sh                    : every network card, one boot each

@@ -57,6 +57,10 @@
 #                Workbench 3.1, reboots, and drives it from another
 #                machine: WebDAV, `lha x`, the browser terminal.
 #                Needs a licensed Workbench, LhA, and a peer.
+#   e2ecards     tier 2, the same install and power cycle ON EVERY CARD in
+#                tests/tools/cards.sh rather than on the A2065 alone.  Needs
+#                a licensed Workbench and the vendor drivers in the asset
+#                store; no peer, so it is not `e2e` with a loop round it.
 #
 # `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, web and
 # conformance: everything that needs neither an emulator nor a licensed ROM.
@@ -1031,6 +1035,46 @@ stage_e2e() {
     return "$rc"
 }
 
+# ------------------------------------------------------ release e2e, cards ----
+#
+# THE SAME GATE, ON EVERY CARD.  stage_e2e above boots the A2065 and nothing
+# else, and did so silently: run-workbench.sh staged the driver by name and
+# wrote two literal a2065 lines into the emulator config, so every release this
+# project has cut was gated on one network card.
+#
+# Its own stage rather than a loop inside stage_e2e, because the two prove
+# different things and need different ingredients.  `e2e` needs a peer and
+# drives the machine from outside it; this one needs the vendor drivers in the
+# asset store and asks a narrower question of nine machines: does the archive
+# install, does the power cycle bring the network up on THIS card.
+stage_e2ecards() {
+    hr "release end-to-end on every card (tier 2, needs a licensed Workbench)"
+
+    local archive="${AMINETXDUO_E2E_ARCHIVE:-}"
+    local rc=0
+
+    if [ -z "$archive" ]; then
+        local version
+        version=$("$ROOT/tools/version.sh" --product)
+        archive="$ROOT/build/dist/AmiNetXDuo-$version.lha"
+    fi
+    if [ ! -f "$archive" ]; then
+        fail "no release archive at $archive; run dist/make-dist.sh first," \
+             "or set AMINETXDUO_E2E_ARCHIVE"
+        return 1
+    fi
+    note "archive: $archive"
+
+    "$ROOT/install/test/run-workbench-cards.sh" -a "$archive" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  the shipped archive installs and boots on every card" ;;
+        2) fail "release e2e cards: no card could run on this machine" ;;
+        *) fail "release e2e cards: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ----------------------------------------------------------------- cards ----
 #
 # EVERY network card, one boot each, and each one asserted the same way: the
@@ -1472,7 +1516,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|cards|cards6|capture|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|bridged|lossgate|smb)
             stage_toolchain; break ;;
     esac
 done
@@ -1506,6 +1550,7 @@ for s in "${WANT[@]}"; do
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
         e2e)         stage_e2e || srrc=$? ;;
+        e2ecards)    stage_e2ecards || srrc=$? ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
     [ "$srrc" = "$NOTHING" ] || STAGES_TESTED=$((STAGES_TESTED + 1))

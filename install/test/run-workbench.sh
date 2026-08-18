@@ -5,8 +5,40 @@
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                       [-l NOVICE|AVERAGE|EXPERT]
-#                                       [-p CHOICE]
+#                                       [-p CHOICE] [-N BOARD]
 #                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
+#
+# -N NAMES THE NETWORK CARD, from tests/tools/cards.sh, and it defaults to
+# a2065 because that is the only card this gate has ever booted.  Every release
+# this project has cut was gated on one card: the driver was staged by name and
+# the emulator config held a2065_rom_file, with no way to ask for another.  The
+# standing rule is that every card appears in the end-to-end, and one-card
+# coverage has already let a regression reach a user once.
+#
+# The model follows the card unless AMINETXDUO_MODEL says otherwise --
+# xsurf100z3 is a Zorro III board and an A1200 has a 24-bit address space, so
+# Amiberry never maps it and the run reads as a driver that cannot find its
+# hardware.  tools/emu-board.sh refuses that pair by name instead.
+#
+# WHAT -N PROVES, AND WHAT IT DOES NOT.  The Installer asks which card the
+# machine has, and installdrive.c cannot answer an askchoice: a posted GADGETUP
+# at an option gadget leaves the page's default in place (installdrive.c, the
+# DRIVE_PICK_OPTIONS note, measured twice).  What it CAN do is arrive at a
+# machine where the answer is already right: the script's detection loop scans
+# DEVS: and DEVS:Networks for a driver it knows and makes that the page's
+# default, so staging the driver first is how the card gets selected.
+#
+# That works only for a driver whose FILE NAME is in the script's list.  When
+# it is not, the default falls back to the first entry -- the A2065 -- and the
+# installer writes DEVICE=a2065.device for whatever card is really in the
+# machine.  This run does not paper over that: it prints
+#
+#   installer_card_selected=yes|no   installer_device=<what was written>
+#
+# and, when the answer is no, rewrites the interface file after the install and
+# says so with card_config=post-install.  Such a run proves THE STACK DRIVES
+# THE CARD.  It does not prove the installer can select it, and the two are
+# never reported as one thing.
 #
 # -p NAMES AN OPTION ON AN askchoice PAGE.  It takes `minimal` or `full`, and
 # `-p minimal` is the one that matters: the second stack in the archive, with
@@ -180,7 +212,11 @@
 #                        locale,storage}.adf, or AMINETXDUO_ADF_DIR
 #   Kickstart 3.1        AMINETXDUO_KICKSTART, else the A1200 40.68 image
 #   Commodore Installer  build/Installer, or AMINETXDUO_INSTALLER
-#   a2065.device         build/a2065.device, or AMINETXDUO_A2065
+#   the card's driver    a2065.device from build/ or AMINETXDUO_A2065; every
+#                        other card's from ~/amiga-assets/devs or
+#                        AMINETXDUO_SANA2_STORE.  Most of them cannot be
+#                        fetched (docs/RESEARCH.md 77 permits two of eight), so
+#                        they arrive by somebody putting the file there.
 #   amitools' xdftool    AMINETXDUO_XDFTOOL, or on PATH (pip install amitools)
 #   lha                  to unpack the archive on the host; Lhasa will do
 #
@@ -197,20 +233,22 @@ BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
 PICK=""
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:t:T:kH" opt; do
+while getopts "b:a:l:p:N:t:T:kH" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
         l) LEVEL="$OPTARG" ;;
         p) PICK="$OPTARG" ;;
+        N) BOARD="$OPTARG" ;;
         t) INSTALL_TIMEOUT="$OPTARG" ;;
         T) BOOT_TIMEOUT="$OPTARG" ;;
         k) KEEP=1 ;;
         H) TERMINAL=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
-                "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-t seconds]" \
-                "[-T seconds] [-k] [-H]" >&2
+                "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
+                "[-t seconds] [-T seconds] [-k] [-H]" >&2
            exit 2 ;;
     esac
 done
@@ -261,6 +299,28 @@ case "$ARCHIVE" in
 esac
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
+# ------------------------------------------------------------------- the card --
+#
+# ONE TABLE, tests/tools/cards.sh, shared with the two card sweeps.  A card this
+# gate can boot that the sweeps cannot, or the other way round, is the same hole
+# one level up: "every card" has to mean the same thing everywhere.
+# shellcheck source=../../tests/tools/cards.sh
+. "$ROOT/tests/tools/cards.sh"
+# shellcheck source=../../tools/sana2-stage.sh
+. "$ROOT/tools/sana2-stage.sh"
+# shellcheck source=../../tools/emu-board.sh
+. "$ROOT/tools/emu-board.sh"
+
+BOARD_MODEL=$(cards_rows "$BOARD" | awk '{ print $2; exit }')
+if [ -z "$BOARD_MODEL" ]; then
+    echo "-N $BOARD is not a card in tests/tools/cards.sh.  The cards are:" >&2
+    cards_rows | awk '{ printf "  %-14s %s\n", $1, $2 }' >&2
+    echo >&2
+    echo "Cards this project names that no arm can reach, and why:" >&2
+    printf '%s\n' "$UNTESTABLE" | awk 'NF { printf "  %-14s %s\n", $1,
+        substr($0, index($0, $2)) }' >&2
+    exit 2
+fi
 GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
 NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}"
 
@@ -281,17 +341,51 @@ fi
     exit 2
 }
 
-A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
-    for candidate in \
-        "$ROOT/build/a2065.device" \
-        "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
-    do
-        [ -f "$candidate" ] && { A2065="$candidate"; break; }
-    done
+# THE VENDOR DRIVER, not anxnet.device, and that is a statement about what this
+# gate is for.  The installer deliberately does not install anxnet.device
+# (Install-AmiNetXDuo, the anxnet section): the archive carries it in
+# Devs/Networks/ and a user copies it there by hand.  So what a machine
+# installed from the archive opens is the driver that came with the card, and
+# that is what this run has to boot.  AMINETXDUO_SANA2_VENDOR is set here for
+# the same reason and can still be unset by a caller that wants the other one.
+AMINETXDUO_SANA2_VENDOR="${AMINETXDUO_SANA2_VENDOR:-1}"
+export AMINETXDUO_SANA2_VENDOR
+
+# The A2065 keeps its own variable and its own search: it is Commodore's, it
+# comes out of the OS sources rather than the asset store, and every existing
+# caller of this script sets AMINETXDUO_A2065 and nothing else.
+if [ "$BOARD" = a2065 ] && [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
+    A2065="${AMINETXDUO_A2065:-}"
+    if [ -z "$A2065" ]; then
+        for candidate in \
+            "$ROOT/build/a2065.device" \
+            "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
+        do
+            [ -f "$candidate" ] && { A2065="$candidate"; break; }
+        done
+    fi
+    [ -n "$A2065" ] && [ -f "$A2065" ] || {
+        echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+        exit 2
+    }
+    AMINETXDUO_SANA2_DRIVER="$A2065"
+    export AMINETXDUO_SANA2_DRIVER
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
-    echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
+
+sana2_select "$BOARD" "$BUILD"
+DRIVER_NAME="$SANA2_SEL_DRIVER"
+DRIVER_PATH="${AMINETXDUO_SANA2_DRIVER:-$SANA2_SEL_PATH}"
+
+# A MISSING DRIVER IS AN INGREDIENT, NOT A FAILURE.  The card would be in the
+# machine with nothing able to open it, and the run would go red for a file
+# this host has never had rather than for anything in the product.  Exit 2 is
+# what this script already uses for that, and the sweep above it reports it as
+# a skip.
+[ -n "$DRIVER_PATH" ] && [ -f "$DRIVER_PATH" ] || {
+    echo "No $DRIVER_NAME for -N $BOARD on this host." >&2
+    echo "Put one in \$HOME/amiga-assets/devs, or name it:" >&2
+    echo "  AMINETXDUO_SANA2_DRIVER=<path>  AMINETXDUO_SANA2_STORE=<dir>" >&2
+    echo "Most of these cannot be fetched; docs/RESEARCH.md 77 has the licences." >&2
     exit 2
 }
 
@@ -307,7 +401,13 @@ fi
 # connection for a bounded time, and a 68000 takes a minute or two over a first
 # handshake.  A 68000 run of this script is a real run; it is the https arm
 # that has fewer hosts it can finish against.
-MODEL="${AMINETXDUO_MODEL:-A1200}"
+#
+# THE CARD PICKS IT when nothing else does.  tests/tools/cards.sh names the
+# machine each board needs -- an A1200 for all but one -- and taking A1200
+# unconditionally is what would boot xsurf100z3 into a machine that cannot map
+# a Zorro III board, silently.
+MODEL="${AMINETXDUO_MODEL:-$BOARD_MODEL}"
+emu_board_model_check "$BOARD" "$MODEL" || exit 2
 # The pairing above is enforced, not just described.  An A1200 40.68 ROM is
 # AGA and expects an A1200; booting it on quickstart=A600 crashes the guest
 # before Workbench comes up, and the crash presents as a boot that never
@@ -458,6 +558,7 @@ ADFDIR="${AMINETXDUO_ADF_DIR:-$HOME/amigaos/adf}"
 PEER="${AMINETXDUO_PEER:-}"
 
 echo "==> model $MODEL on $(basename "$KICKSTART")"
+echo "==> card $BOARD, driver $DRIVER_NAME from $DRIVER_PATH"
 
 # ------------------------------------------------------ Workbench 3.1 SYS: --
 #
@@ -612,9 +713,26 @@ build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 rm -rf "$HD"
 mkdir -p "$HD"
 cp -R "$WB/." "$HD/"
-cp "$A2065" "$HD/Devs/a2065.device"
+# THE DRIVER, WHERE A USER WOULD HAVE PUT IT, and before the Installer runs.
+#
+# This is the only lever this harness has on the card question.  The script's
+# detection loop looks for a driver it knows in DEVS: and DEVS:Networks and
+# makes it the card page's default; installdrive.c clicks Proceed, which takes
+# that default.  So a driver whose file name the script recognises is selected,
+# and one whose name it does not know is not -- measured after the install
+# below rather than assumed here.
+#
+# tools/sana2-stage.sh decides where it goes: DEVS: for the A2065, which is
+# where Commodore's own tests put it, and DEVS:Networks for a third-party
+# driver, which is where one is really installed.
+sana2_stage_driver "$BOARD" "$HD/Devs"
+STAGED_AT="$HD/Devs${SANA2_DIR:+/$SANA2_DIR}/$SANA2_DRIVER"
+[ -f "$STAGED_AT" ] || {
+    echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
+    exit 2
+}
 cp "$DRIVER" "$HD/C/installdrive"
-chmod 755 "$HD/Devs/a2065.device" "$HD/C/installdrive"
+chmod 755 "$STAGED_AT" "$HD/C/installdrive"
 
 # SOMEBODY ELSE'S S:User-Startup, written before the installer ever runs.
 #
@@ -854,13 +972,13 @@ uaehf0=dir,rw,DH0:DH0:$HD,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
     if [ "$net" = "net" ]; then
-        cat >> "$cfg" <<EOF
-a2065_rom_file=:ENABLED
-a2065_rom_options=mac=$MAC,$BACKEND
-EOF
+        # tools/emu-board.sh, shared with tools/amiberry-run.sh.  These keys
+        # lived here as two literal a2065 lines, which is what made this gate
+        # a one-card gate.
+        emu_board_lines "$BOARD" "$MAC" "$BACKEND" >> "$cfg" || exit 2
     fi
 
-    echo "==> booting ($name, timeout ${timeout}s, network $([ "$net" = net ] && echo "$BACKEND" || echo off))"
+    echo "==> booting ($name, $BOARD, timeout ${timeout}s, network $([ "$net" = net ] && echo "$BACKEND" || echo off))"
     # SIGPIPE ignored for the reason tools/amiberry-run.sh ignores it: SLIRP
     # writes guest payload to host sockets without MSG_NOSIGNAL, so a peer that
     # hangs up first otherwise kills the emulator and it looks like a guru.
@@ -1060,6 +1178,92 @@ cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
 cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(none)"
 
+# ------------------------------------- did the INSTALLER pick the card? ------
+#
+# THE MEASUREMENT, not a workaround.  The card page's default is whichever
+# driver the script's detection loop found in DEVS: or DEVS:Networks, and
+# installdrive.c takes the default of every page, so a driver the script
+# recognises IS selected and one it does not is not.  Which of the two happened
+# decides what this run is allowed to claim, so it is read off the file the
+# installer wrote rather than inferred.
+#
+# When the installer got it wrong the interface file is rewritten here, before
+# the power cycle, and the run goes on -- per-card coverage of the stack is
+# worth having and is not the same claim.  card_config says which it is and
+# the two are never one line.
+INSTALLER_DEVICE=""
+IFACE_FILE=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
+if [ -n "$IFACE_FILE" ] && [ -f "$IFACE_FILE" ]; then
+    INSTALLER_DEVICE=$(sed -n 's/^DEVICE=//p' "$IFACE_FILE" | head -1 |
+                       tr -d '\r' | sed 's/[[:space:]]*$//')
+fi
+
+CARD_SELECTED=no
+case "$INSTALLER_DEVICE" in
+    "$SANA2_DRIVER"|"DEVS:Networks/$SANA2_DRIVER") CARD_SELECTED=yes ;;
+esac
+
+# THE EIGHT FILE NAMES THE SCRIPT LOOKS FOR, copied from the detection loop at
+# Install-AmiNetXDuo:524-533 and in its order, because the index into this list
+# IS the card page's default.  A driver on it that was NOT selected is a
+# regression and reddens this run; a driver that is not on it could not have
+# been selected, which is a defect in the script and not in this boot, so it is
+# reported and the run carries on.
+#
+# Five of the nine cards this project sweeps are in the second group, and the
+# reason is that these are not the file names the drivers ship under.  The
+# asset store has ariadne_ii.device, x-surf.device, x-surf-100.device,
+# hydra.device and eb920.device; this list has ariadne2.device, xsurf.device,
+# xsurf100.device and amiganet.device, and no Hydra or LAN Rover at all.
+INSTALLER_KNOWN_DRIVERS="a2065.device ariadne.device ariadne2.device
+amiganet.device xsurf.device xsurf100.device cnet.device uaenet.device"
+INSTALLER_KNOWS_DRIVER=no
+for _known in $INSTALLER_KNOWN_DRIVERS; do
+    [ "$_known" = "$SANA2_DRIVER" ] && { INSTALLER_KNOWS_DRIVER=yes; break; }
+done
+
+CARD_CONFIG=installer
+if [ "$CARD_SELECTED" = "no" ] && [ "$INSTALLER_KNOWS_DRIVER" = "yes" ]; then
+    echo
+    echo "!! $SANA2_DRIVER IS one of the eight names Install-AmiNetXDuo:524-533"
+    echo "   detects, and the installer still wrote"
+    echo "   DEVICE=${INSTALLER_DEVICE:-nothing}.  Detection is broken, or the"
+    echo "   driver was not staged where the loop looks."
+    fail=1
+fi
+if [ "$CARD_SELECTED" = "no" ]; then
+    CARD_CONFIG=post-install
+    echo
+    echo "!! THE INSTALLER DID NOT SELECT THIS CARD."
+    echo "   asked for $BOARD, whose driver is $SANA2_DRIVER, and the"
+    echo "   installer wrote DEVICE=${INSTALLER_DEVICE:-nothing}."
+    echo "   Install-AmiNetXDuo:521-542 scans DEVS: and DEVS:Networks for a"
+    echo "   driver on a list of eight file names and makes the first hit the"
+    echo "   card page's default; installdrive.c cannot answer an askchoice"
+    echo "   any other way.  A driver whose file name is not on that list"
+    echo "   leaves CARD_DEFAULT at 0, which is the A2065."
+    echo "   The interface file is rewritten now, so what follows measures"
+    echo "   whether THE STACK drives $BOARD -- not whether the installer"
+    echo "   can select it, which this run has just shown it cannot."
+    if [ -f "$HD/Devs/NetInterfaces/eth0" ]; then
+        sana2_stage_interface "$BOARD" "$HD/Devs"
+        echo "---- DEVS:NetInterfaces/eth0, after the rewrite ----"
+        cat "$HD/Devs/NetInterfaces/eth0"
+    else
+        echo "!! there is no $HD/Devs/NetInterfaces/eth0 to rewrite"
+        fail=1
+    fi
+fi
+
+echo
+echo "card_board=$BOARD"
+echo "card_driver=$SANA2_DRIVER"
+echo "card_model=$MODEL"
+echo "installer_device=${INSTALLER_DEVICE:-none}"
+echo "installer_knows_driver=$INSTALLER_KNOWS_DRIVER"
+echo "installer_card_selected=$CARD_SELECTED"
+echo "card_config=$CARD_CONFIG"
+
 # Machine-readable, one key per line, so nothing downstream has to read prose.
 TERM_LINES=0
 TERM_ASSIGNS=0
@@ -1101,6 +1305,10 @@ if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
     echo "!! the install run did not complete cleanly (status $INSTALL_STATUS)"
     echo "   the drive is left at $HD"
+    echo
+    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+         "card_config=$CARD_CONFIG installer_card_selected=$CARD_SELECTED" \
+         "stack=$STACK_INSTALLED boot_status=install-$INSTALL_STATUS"
     exit 1
 fi
 
@@ -1614,8 +1822,20 @@ Echo >DH0:.done "$RC"' nouserstartup
     fi
 fi
 
+# ONE LINE A SWEEP CAN READ.  Everything above it is for a person; this is for
+# the caller, which must never have to grep prose to find out what happened.
+# card_config is on it because a green run that configured the card after the
+# install proves something different from one the installer configured, and a
+# sweep that dropped that distinction would report nine installer passes when
+# it had four.
+WB_VERDICT=PASS
+[ "$bad" = "0" ] && [ "$USER_BOOT_STATUS" != "124" ] || WB_VERDICT=FAIL
 echo
-if [ "$bad" = "0" ] && [ "$USER_BOOT_STATUS" != "124" ]; then
+echo "workbench_e2e=$WB_VERDICT board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+     "card_config=$CARD_CONFIG installer_card_selected=$CARD_SELECTED" \
+     "stack=$STACK_INSTALLED boot_status=$USER_BOOT_STATUS"
+
+if [ "$WB_VERDICT" = "PASS" ]; then
     echo "==> PASS: a real Workbench 3.1, installed from the archive, does all four"
     [ "$KEEP" = "1" ] && echo "    (the drive is at $HD)"
     exit 0

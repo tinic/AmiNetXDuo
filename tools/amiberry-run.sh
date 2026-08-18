@@ -242,21 +242,17 @@ EOF
 }
 pcmcia_cpu_check "$BOARD"
 
+# The keys themselves are in tools/emu-board.sh, shared with
+# install/test/run-workbench.sh: the release gate writes its own config -- it
+# has to, it boots Commodore's Startup-Sequence and this script overwrites one
+# -- and a second copy of these keys is how that gate came to boot the A2065
+# and nothing else.
+# shellcheck source=emu-board.sh
+. "$ROOT/tools/emu-board.sh"
+
 board_lines() {
-    case "$1" in
-        "")            : ;;
-        a2065)         printf 'a2065_rom_file=:ENABLED\na2065_rom_options=mac=%s,%s\n' "$MAC" "$BACKEND" ;;
-        ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3)
-                       printf '%s_rom_file=:ENABLED\n%s_rom_options=mac=%s,%s%s\n' \
-                              "$1" "$1" "$MAC" "$BACKEND" \
-                              "${AMINETXDUO_AMIBERRY_BOARD_OPTIONS:+,$AMINETXDUO_AMIBERRY_BOARD_OPTIONS}" ;;
-        # inserted=true is what puts the card in the slot; without it Gayle's
-        # windows are mapped, nothing is logged, and card.resource never
-        # initialises, which reads from the guest as a driver that cannot
-        # find its hardware.  Needs a machine with a Gayle: an A600 or an A1200.
-        ne2000_pcmcia) printf 'pcmcia=true\nne2000pcmcia_rom_file=:ENABLED\nne2000pcmcia_rom_options=inserted=true,mac=%s,%s\n' "$MAC" "$BACKEND" ;;
-        *)             echo "unknown network board $1" >&2; exit 2 ;;
-    esac
+    emu_board_lines "$1" "$MAC" "$BACKEND" \
+                    "${AMINETXDUO_AMIBERRY_BOARD_OPTIONS:-}" || exit 2
 }
 
 # ------------------------------------------------------------------ staging --
