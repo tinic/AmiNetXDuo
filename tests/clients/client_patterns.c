@@ -1244,6 +1244,37 @@ static VOID group_p(VOID)
         res = NULL;
     }
 
+    /* A protocol-only hint has to synthesize the matching socket type. The
+       old STREAM/UDP result was internally inconsistent and socket() rejected
+       the supposedly usable addrinfo node. */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_protocol = IPPROTO_UDP;
+    hints.ai_flags    = AI_NUMERICHOST;
+
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"53", &hints, &res);
+    t_ok(rc == 0 && res != NULL && res->ai_socktype == SOCK_DGRAM &&
+         res->ai_protocol == IPPROTO_UDP,
+         "getaddrinfo(IPPROTO_UDP) synthesizes SOCK_DGRAM", rc);
+    if (rc == 0 && res != NULL)
+    {
+        LONG fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+        t_ok(fd >= 0, "socket() accepts the protocol-only result", fd);
+        if (fd >= 0) CloseSocket(fd);
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    hints.ai_flags    = AI_NUMERICHOST;
+
+    rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
+    t_ok(rc != 0, "getaddrinfo rejects SOCK_STREAM/IPPROTO_UDP", rc);
+
     /* 2. The server lookup: AI_PASSIVE, then bind and listen on the result. */
     memset(&hints, 0, sizeof(hints));
     hints.ai_family   = AF_INET;

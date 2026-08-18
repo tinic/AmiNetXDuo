@@ -383,16 +383,24 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
         if (socktype != 0 && socktype != SOCK_STREAM && socktype != SOCK_DGRAM)
             return EAI_SOCKTYPE;
+
+        if (protocol != 0 && protocol != IPPROTO_TCP &&
+            protocol != IPPROTO_UDP)
+            return EAI_PROTOCOL;
+
+        if ((socktype == SOCK_STREAM && protocol == IPPROTO_UDP) ||
+            (socktype == SOCK_DGRAM  && protocol == IPPROTO_TCP))
+            return EAI_SOCKTYPE;
     }
+
+    if (socktype == 0)
+        socktype = (protocol == IPPROTO_UDP) ? SOCK_DGRAM : SOCK_STREAM;
+    if (protocol == 0)
+        protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
     status = bsd_gai_service((const char *)servname, flags, socktype, &port);
     if (status != 0)
         return status;
-
-    if (socktype == 0)
-        socktype = SOCK_STREAM;
-    if (protocol == 0)
-        protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
     /* ---- no node name: the wildcard/loopback address ------------------- */
 
