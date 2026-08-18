@@ -9,9 +9,6 @@ version at the top when it merges.
 
 ## Unreleased
 
-- The console serves HAM6, HAM8 and extra half-brite screens. They were the modes a picture is most likely to be on, and they were the ones it could not show
-- The console follows a screen change instead of ending on it. Opening a preferences program used to close the session, because the screen it was serving went away
-- The console gives the machine back three quarters of its time. A frame is produced a band at a time and the share is counted over the whole session rather than over one band, so a program underneath keeps running while somebody is watching it
 - An interface with only IPv6 on it comes up. `CONFIGURE=NONE` was read as "static, with no address", so such a machine waited thirty seconds for a lease nobody asked for, took an RFC 3927 169.254 address it had no use for, waited fifteen seconds more and then failed to open `bsdsocket.library` at all -- leaving it with no network of either family, while five commands reported that it had no address
 - `CONFIGURE6 = DHCP` asks a DHCPv6 server for an address, and `CONFIGURE6 = AUTO` follows the router: a router that sets the managed bit sends the machine to the server, one that sets only the other-configuration bit is asked for name servers alone. The address is renewed, and released when the interface goes down
 - The stack announces the multicast groups it listens to. A switch that snoops MLD forwards multicast only where a listener has reported, so on such a segment neighbour discovery for this machine was being pruned and the first report now goes out before the machine has finished proving its own address
@@ -27,14 +24,20 @@ version at the top when it merges.
 - `iperf -u` says what rate it is sending at, and `-b 0` says `flat out`. It defaults to 1000 kbit/s, which read as a fault when a measurement came back at exactly that
 - `anxnet.device` drives the X-Surf. The card carries its chip on a private ISA bus, where it decodes nothing until Plug and Play has isolated it and given it an address, so the driver had been claiming a card it could not use
 - A CI arm that tested nothing no longer reports that it passed, and the emulator arm runs again. It had been failing since the toolchain changed, because the cache pointer to the current toolchain never moved and every build on that machine quietly used the old one
-- `httpd -C` serves a graphics card. An RTG screen under Picasso96 or CyberGraphX appears in the browser like a chipset one, at 8, 15, 16, 24 and 32 bits, and a mode change is carried through
-- The console measures its own readback at the start of an RTG session and reports what each route managed, because a graphics card is far slower to read than to write and how much slower has never been published for any Amiga board
 - `anxnet.device` posts the SANA-II events it accepts. `S2EVENT_ERROR`, `_TX`, `_RX`, `_BUFF` and `_HARDWARE` were taken in the mask and never sent, so a program waiting on one waited forever. `S2EVENT_SOFTWARE` is now refused rather than accepted and never sent
 - `S2_PacketFilter` filters. The hook was stored and never called, so a program that installed one believed it was filtering and was not
 - A PCMCIA card is no longer configured and then switched back off. `CardMiscControl` writes the Gayle status register outright rather than setting bits, and the value passed one step after the configuration write cleared it, taking the socket out of I/O mode and re-enabling write protection. Every register read after that was bus noise. Emulation cannot show this: it ignores those two bits
 - `anxnet.device` recognises the 3Com EtherLink III (3c589) in the PCMCIA slot of an A600 or A1200. It has never been run on the card it is written for: if it works, or does not, that is worth reporting
-- The pointer sent to the Amiga lands where it is pointed on every screen mode. It was scaled from the display's mode bits, which say SUPERHIRES and LACE for a Productivity screen that is neither, so on those modes the two pointers diverged further the further right you pointed and moved in jumps. It now asks the display database, which is what Intuition itself does
 - The driver's watchdog resets the chip the unit actually has. It called the DP8390 routine for every card, so on an A2065 or an Ariadne a wedged transmitter was never freed
+
+The console:
+
+- The console serves HAM6, HAM8 and extra half-brite screens. They were the modes a picture is most likely to be on, and they were the ones it could not show
+- The console follows a screen change instead of ending on it. Opening a preferences program used to close the session, because the screen it was serving went away
+- The console gives the machine back three quarters of its time. A frame is produced a band at a time and the share is counted over the whole session rather than over one band, so a program underneath keeps running while somebody is watching it
+- `httpd -C` serves a graphics card. An RTG screen under Picasso96 or CyberGraphX appears in the browser like a chipset one, at 8, 15, 16, 24 and 32 bits, and a mode change is carried through
+- The console measures its own readback at the start of an RTG session and reports what each route managed, because a graphics card is far slower to read than to write and how much slower has never been published for any Amiga board
+- The pointer sent to the Amiga lands where it is pointed on every screen mode. It was scaled from the display's mode bits, which say SUPERHIRES and LACE for a Productivity screen that is neither, so on those modes the two pointers diverged further the further right you pointed and moved in jumps. It now asks the display database, which is what Intuition itself does
 
 ## 0.23.0
 
