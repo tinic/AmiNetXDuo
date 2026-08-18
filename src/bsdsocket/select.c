@@ -369,8 +369,8 @@ VOID bsd_events_attach(AmiSocket *sock)
  * Not usable for nx_tcp_server_socket_accept(): a timeout there runs
  * _nx_tcp_connect_cleanup and winds the socket back to LISTEN, so the next
  * call re-enters the LISTEN block and sends a second SYN+ACK on a half-open
- * connection. docs/RESEARCH.md 32.10 and 43 have the detail. accept() waits
- * on readiness first instead.
+ * connection. docs/RESEARCH.md 32.10 and 43 have the detail. accept() arms
+ * that call with NX_NO_WAIT and slices nx_tcp_socket_state_wait() instead.
  *
  * Returns NX_SUCCESS with *aborted set when the break arrived, so the caller
  * fails with EINTR. Otherwise it returns whatever the sliced call last said.
