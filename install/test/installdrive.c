@@ -122,6 +122,25 @@
 #define DRIVE_YES_LABEL ""
 #endif
 
+/*
+ * A CHOICE ON AN askchoice PAGE, which is a different thing from a yes/no
+ * button and needed its own answer.
+ *
+ * askchoice draws its options as buttons and a Proceed beside them, and this
+ * program clicked Proceed the moment it saw one -- so every run ever made took
+ * the (default) of every askchoice in the script.  The one that matters is
+ * "Select the stack to install", whose default is the full stack, which is why
+ * Libs/minimal/bsdsocket.library had never been installed or booted by any
+ * end-to-end run: the harness could not reach the page's other answer.
+ *
+ * So: on a page that has a Proceed, a button whose text contains this string
+ * is clicked FIRST, once in the whole run, and Proceed goes on the next poll.
+ * Empty means no page is picked at, which is the default.
+ */
+#ifndef DRIVE_PICK_LABEL
+#define DRIVE_PICK_LABEL ""
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
 /*
@@ -148,6 +167,7 @@ static BPTR            report;
 static LONG clicks;
 static LONG saw_window;
 static LONG yesno_pages;
+static LONG picks_done;
 
 static VOID say(const char *fmt, LONG a)
 {
@@ -166,7 +186,7 @@ static VOID say(const char *fmt, LONG a)
 /*
  * The Installer's buttons are struct Button { struct Gadget Gadget; char
  * *Text; ... } (window.h), so the label is one pointer past the end of the
- * Gadget.  describe() below prints it; wants_label() answers with it.
+ * Gadget.  describe() below prints it; label_matches() answers with it.
  */
 struct InstButton
 {
@@ -182,11 +202,10 @@ static const char *button_text(struct Gadget *gad)
     return (text != NULL && ((ULONG)text & 1) == 0) ? text : NULL;
 }
 
-/* TRUE when this button's label contains DRIVE_YES_LABEL.  An empty label
-   matches nothing, which is what makes it off by default. */
-static BOOL wants_label(struct Gadget *gad)
+/* TRUE when this button's label contains `want`.  An empty `want` matches
+   nothing, which is what makes both label options off by default. */
+static BOOL label_matches(struct Gadget *gad, const char *want)
 {
-    const char *want = DRIVE_YES_LABEL;
     const char *text = button_text(gad);
     const char *at;
 
@@ -239,6 +258,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             struct Gadget *yes     = NULL;
             struct Gadget *no      = NULL;
             struct Gadget *single  = NULL;
+            struct Gadget *pick    = NULL;
             BOOL           is_page = FALSE;
 
             for (gad = window->FirstGadget; gad != NULL; gad = gad->NextGadget)
@@ -252,6 +272,17 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 case SINGLE_ID:   single  = gad; no = gad;       break;
                 default: break;
                 }
+
+                /*
+                 * The askchoice options, which are struct Buttons like the
+                 * yes/no ones and numbered below FIRSTRESV_ID like them.  The
+                 * range is what keeps button_text() off a gadget that is not
+                 * one of the Installer's buttons at all.
+                 */
+                if (picks_done == 0 && pick == NULL &&
+                    gad->GadgetID > 0 && gad->GadgetID < 87 &&
+                    label_matches(gad, DRIVE_PICK_LABEL))
+                    pick = gad;
             }
 
             if (!is_page)
@@ -265,11 +296,22 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 yesno_pages++;
                 choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
                              ? no : yes;
-                if (no != NULL && wants_label(no))
+                if (no != NULL && label_matches(no, DRIVE_YES_LABEL))
                     choice = no;
             }
             if (choice == NULL)
                 choice = single;
+
+            /*
+             * A named choice on an askchoice page goes first and Proceed
+             * follows on the next poll: clicking Proceed straight away is
+             * what took the default of every one of these until now.
+             */
+            if (proceed != NULL && pick != NULL)
+            {
+                choice = pick;
+                picks_done++;
+            }
             break;
         }
     }
@@ -367,6 +409,11 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     LONG gone   = 0;
     LONG seen   = 0;
     LONG settle = 0;
+
+    /* Per run, not per program: on a two-run drive the askchoice page comes
+       up again, and taking its default the second time would install the
+       full stack over the minimal one this run asked for. */
+    picks_done = 0;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 

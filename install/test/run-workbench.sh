@@ -5,7 +5,17 @@
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                       [-l NOVICE|AVERAGE|EXPERT]
+#                                       [-p CHOICE]
 #                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
+#
+# -p NAMES A BUTTON ON AN askchoice PAGE, and the one that matters is
+# `-p Minimal`: the second stack in the archive, with IPv6, mDNS, the packet
+# filter, TLS, IPv4 multicast, the ARexx host and the TCP: handler compiled
+# out.  Until installdrive.c learned to click a choice, this harness took the
+# default of every askchoice in the script, so Libs/minimal/bsdsocket.library
+# shipped in every archive and had never been installed or booted by any
+# end-to-end run.  Needs -l AVERAGE or -l EXPERT, like -H, and the run asserts
+# by byte count which of the two libraries actually landed.
 #
 # -H IS THE TERMINAL ARM, and it makes the run three installs instead of one:
 #
@@ -180,18 +190,21 @@ INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
+PICK=""
 
-while getopts "b:a:l:t:T:kH" opt; do
+while getopts "b:a:l:p:t:T:kH" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
         l) LEVEL="$OPTARG" ;;
+        p) PICK="$OPTARG" ;;
         t) INSTALL_TIMEOUT="$OPTARG" ;;
         T) BOOT_TIMEOUT="$OPTARG" ;;
         k) KEEP=1 ;;
         H) TERMINAL=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
-                "[-l NOVICE|AVERAGE|EXPERT] [-t seconds] [-T seconds] [-k] [-H]" >&2
+                "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-t seconds]" \
+                "[-T seconds] [-k] [-H]" >&2
            exit 2 ;;
     esac
 done
@@ -204,6 +217,18 @@ done
 if [ "$TERMINAL" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "-H needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
     echo "questions and the terminal one cannot be answered." >&2
+    exit 2
+fi
+
+# -p names a button on an askchoice page -- "Minimal" for the stack question --
+# and needs a level for the same reason -H does: at NOVICE the page is never
+# drawn, the default is taken, and the run would install the FULL stack while
+# claiming to test the minimal one.  That is the vacuous pass, so it is fatal
+# here rather than a surprise in the verdict.
+if [ -n "$PICK" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-p needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
+    echo "questions, so \"$PICK\" could not be chosen and the default would" >&2
+    echo "be installed instead." >&2
     exit 2
 fi
 
@@ -536,11 +561,13 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 #
 # $1 names the binary, $2 is how many times it runs the Installer, $3 is the
 # label of the yes/no button to press instead of the first one (empty: press
-# the first, which is every question's default).
+# the first, which is every question's default), $4 is the label of an
+# askchoice option to select before Proceed (empty: take that page's default).
 build_driver() {
-    local out="$1" runs="$2" label="$3"
+    local out="$1" runs="$2" label="$3" pick="${4:-}"
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
-           -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" -I"$NDK" \
+           -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
+           -DDRIVE_PICK_LABEL="\"$pick\"" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -555,9 +582,9 @@ if [ "$TERMINAL" = "1" ]; then
     DRIVE_RUNS=2
 fi
 
-echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"})"
+echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
-build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL"
+build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK"
 
 rm -rf "$HD"
 mkdir -p "$HD"
@@ -956,6 +983,37 @@ check_file() {
 
 check_file Libs/bsdsocket.library
 check_file Libs/usergroup.library
+
+# WHICH OF THE TWO STACKS LANDED, by byte count against the archive's own two
+# copies.  Without this a -p "Minimal" run whose click missed the page would
+# install the full stack and pass every check below it, which is the vacuous
+# pass this file exists not to produce -- and the harness could not reach that
+# page at all until installdrive.c learned DRIVE_PICK_LABEL, so `minimal` had
+# never been installed by any run.
+STACK_INSTALLED=unknown
+_stack_real=$(amiga_path Libs/bsdsocket.library || true)
+if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
+    _stack_bytes=$(wc -c < "$_stack_real" | tr -d ' ')
+    _full_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+                  2>/dev/null | tr -d ' ')
+    _min_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library" \
+                 2>/dev/null | tr -d ' ')
+    [ "$_stack_bytes" = "${_full_bytes:-x}" ] && STACK_INSTALLED=full
+    [ "$_stack_bytes" = "${_min_bytes:-x}" ] && STACK_INSTALLED=minimal
+    echo "stack_installed=$STACK_INSTALLED bytes=$_stack_bytes"
+else
+    echo "stack_installed=none"
+fi
+
+case "$PICK" in
+"")       WANT_STACK=full ;;
+*inimal*) WANT_STACK=minimal ;;
+*)        WANT_STACK="$STACK_INSTALLED" ;;
+esac
+if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
+    echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
+    fail=1
+fi
 for cmd in AddNetInterface Online Offline ShowNetStatus ping netstat host fetch; do
     check_file "C/$cmd"
 done
@@ -1483,7 +1541,7 @@ if [ "$TERMINAL" = "1" ]; then
     echo "  3/3  installing again, answering the terminal question no"
     echo "============================================================"
 
-    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 ""
+    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 "" "$PICK"
     cp "$ROOT/build/installdrive-$TAG-$LEVEL-no" "$HD/C/installdrive"
     chmod 755 "$HD/C/installdrive"
 
