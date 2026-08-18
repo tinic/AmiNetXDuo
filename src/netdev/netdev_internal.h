@@ -19,19 +19,13 @@
 
 #include "aminetxduo/anxnet.h"
 #include "netdev_nic.h"
+#include "netdev_mcast.h"
 #include "sana2_device.h"
 
 #define NETDEV_MAX_UNITS    4
-#define NETDEV_MCAST_MAX    32      /* the hash is 64 bits, so more is idle */
 #define NETDEV_TRACK_MAX    16
 
 struct NetdevUnit;
-
-typedef struct NetdevMcast
-{
-    UBYTE   addr[NETDEV_ADDR_LEN];
-    UWORD   refs;
-} NetdevMcast;
 
 typedef struct NetdevTrack
 {

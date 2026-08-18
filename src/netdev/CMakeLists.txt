@@ -16,6 +16,7 @@ set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
+    netdev_mcast.c      # exact multicast membership and range transactions
     netdev_bus.c        # register stride and the data port
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
@@ -120,6 +121,19 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME netdev_mcaf COMMAND test_netdev_mcaf)
+
+    add_executable(test_netdev_mcast
+        test/test_netdev_mcast.c
+        netdev_mcast.c)
+
+    target_include_directories(test_netdev_mcast PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_mcast PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_mcast COMMAND test_netdev_mcast)
 
     # ed.c is #included by the test, not listed here: read_hdr, ring_copy and
     # write_buf are static and the test would otherwise be changing the code
