@@ -1,0 +1,67 @@
+# tcpdrill, and what waiting inside accept() puts on the wire.
+#
+# READ THIS BEFORE TREATING THE FILE AS A REGRESSION TEST FOR
+# bsd_accept_once().  IT IS NOT ONE, AND IT WAS MEASURED NOT TO BE.
+#
+# The behaviour these cases were written for is the one select.c describes
+# above bsd_wait_sliced(): nx_tcp_server_socket_accept() with a finite wait
+# installs _nx_tcp_connect_cleanup() as its timeout handler, that handler
+# winds the listening socket from SYN_RECEIVED back to LISTEN, and the next
+# call re-enters the LISTEN block, takes a NEW initial sequence number and
+# sends a SECOND SYN+ACK for a handshake that is already half done.
+#
+# That cannot happen in this tree.  A SYN to a listening port never reaches
+# the listening socket at all: nx_tcp_packet_process.c hands it to
+# _nx_tcp_syncache_syn_received(), which records a half-open entry, answers it
+# itself and commits no socket until the third segment arrives.  The LISTEN
+# block in nx_tcp_server_socket_accept() only sends a SYN+ACK when the socket
+# is BOUND, and a socket the syncache has bound is past LISTEN by the time the
+# mutex is released.  So the block winds the state and bumps a sequence number
+# nothing ever puts in a header.
+#
+# MEASURED, not deduced: running these cases against a build with
+# bsd_accept_once() reverted to the finite-wait form produces the same frames,
+# with the same flags and the same sequence number, in the same order.  The
+# only difference is how long the waits take, because the fix replaced a
+# suspend with nx_tcp_socket_state_wait()'s one-tick polling loop -- 1735 ms
+# of real time for 1600 ms of asked-for accept timeout before, 3177 ms after.
+#
+# WHAT IS LEFT, and why the file is still here.  Nothing else in the tree
+# covers a BLOCKING accept() with a timeout at all, and these are the two
+# properties that would break first if the syncache stopped intercepting the
+# SYN: one initial sequence number per handshake however long the application
+# waits, and a handshake that still completes across repeated waits.  If a
+# later change puts the passive open back on the listening socket, this file
+# is where it shows up.
+#
+# SPDX-License-Identifier: MIT
+
+# Waiting on a listener nobody has connected to is silent.  The stack has a
+# parked socket and a listen request; neither is a reason to transmit.
+case aw01_waiting_on_an_idle_listener_sends_nothing
+localport 4741
+listen
+accept = none wait=400 tries=3
+notx 300
+
+# One handshake, several accept waits across it, and one initial sequence
+# number for the whole of it.
+#
+# The first pair of waits happens before the SYN, so the re-entry runs with
+# the listening socket in LISTEN, which is the branch that would have sent the
+# second SYN+ACK.  The SYN+ACK after it latches the sequence number.  The four
+# waits after that are longer than the SYN+ACK retransmission timeout, so the
+# stack does resend it -- `txsame` is there because that is correct and a bare
+# `notx` would report the stack for doing it.  What `txsame` will not accept is
+# a SYN+ACK carrying a different sequence number, which is what re-issuing
+# rather than retransmitting looks like from here.
+case aw02_one_sequence_number_per_handshake_across_accept_waits
+localport 4742
+listen
+accept = none wait=400 tries=2
+rx S seq=0 win=8192 mss=1460
+tx SA ack=1 mss=1460
+accept = none wait=400 tries=4
+txsame SA
+rx A seq=1 ack=1
+accept

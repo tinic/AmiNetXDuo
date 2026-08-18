@@ -1,0 +1,82 @@
+# tcpdrill, and what a connect() that has been told it failed leaves running.
+#
+# connect() on a blocking socket with SO_SNDTIMEO returns ETIMEDOUT when the
+# handshake does not finish in time.  Returning that errno is not the whole of
+# the operation: the SYN ladder underneath belongs to NetX Duo, not to the
+# wrapper's wait, and nothing about the wait expiring stops it.  Left running
+# it does two things that are visible from the far end of the wire --
+#
+#   * it keeps sending SYNs to a peer the application has given up on, for as
+#     long as the retry ladder allows, which on this build is another minute
+#     past the errno; and
+#   * a SYN+ACK that arrives afterwards finds a socket still in SYN_SENT, and
+#     COMPLETES THE HANDSHAKE.  The descriptor the caller was told had failed
+#     is then connected, to a peer that believes it has a connection, with
+#     nobody reading it.
+#
+# Neither is observable from the errno, which is why this file is on the wire
+# and not in a socket-surface test.
+#
+# WHY THE FIRST CASE IS HERE.  A blocking connect() is the only directive in
+# its case that runs, so nothing is draining the tap device while it does, and
+# ARP therefore cannot be answered: an unresolved peer means the SYN never
+# leaves and the case measures nothing.  cc00 is an ordinary non-blocking
+# connect whose only job is to leave 10.9.9.2 in the ARP cache, and to say so
+# out loud rather than have the file depend on some other case having run.
+#
+# SPDX-License-Identifier: MIT
+
+# The peer is reachable and the wire works.  Also: the ARP cache now holds
+# 10.9.9.2, which is what the cases below need before they block.
+case cc00_the_peer_is_reachable
+socket
+connect
+tx S seq=0 within=1000 mss=1460
+rx R seq=0
+
+# RFC 793 3.4 has no opinion here and POSIX only says connect() reports
+# ETIMEDOUT.  The requirement is the ordinary one: an operation the caller was
+# told had failed has stopped.
+#
+# 2500 ms of SO_SNDTIMEO covers the first two rungs of the ladder (0 and about
+# 1 s) and part of the third, so between one and four SYNs is the whole range
+# the timing can produce.  What is asserted is not how many went out before the
+# errno but that NONE went out after it: the next rung of an uncancelled ladder
+# is due within 2 s of the return, and 3 s of quiet is longer than that.
+case cc01_a_timed_out_connect_stops_retransmitting
+socket
+blocking
+opt sndtimeo 2500
+connect = ETIMEDOUT
+tx S seq=0 mss=1460
+txcount 0 3
+notx 3000
+
+# And the descriptor cannot be connected behind the caller's back.  The SYN+ACK
+# below is the one that was too late: a socket still in SYN_SENT answers it
+# with an ACK and is established from that moment, and the application is never
+# told, because it was told the opposite two seconds earlier.
+#
+# Two assertions, one on each side of the socket API.
+#
+#   * ON THE WIRE, nothing goes out.  An ACK here is the third segment of a
+#     handshake and it gives the peer a connection this end will never read.
+#     Measured: a cancelled connect answers a late SYN+ACK with silence, not
+#     with a reset -- there is no socket left to reset from, and the listen
+#     path in nx_tcp_packet_process.c deliberately has no answer for a
+#     SYN+ACK.  Silence is therefore what is asserted, and an ACK fails it.
+#   * AT THE DESCRIPTOR, recv() says ENOTCONN.  A socket that the late SYN+ACK
+#     connected says EWOULDBLOCK instead -- established, nothing to read --
+#     which is the same sentence a working stack would never say about a
+#     connect that reported ETIMEDOUT.
+case cc02_a_late_synack_does_not_connect_the_descriptor
+socket
+blocking
+opt sndtimeo 2500
+connect = ETIMEDOUT
+tx S seq=0 mss=1460
+txcount 0 3
+rx SA seq=0 ack=1 win=8192 mss=1460
+notx 1000
+opt rcvtimeo 300
+recv 100 = ENOTCONN
