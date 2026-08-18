@@ -571,8 +571,8 @@ struct AmiSocketBase
        notification, so an opener that never sets it sees no difference. */
     ULONG                   sb_SigAddressChangeMask;
 
-    /* SBTC_CAN_SHARE_LIBRARY_BASES. Recorded only, this library never
-       restricts a base to its opening task, so sharing already works. */
+    /* Retained in the private layout. The public capability is read-only
+       FALSE: signals and timer.device state belong to the opening task. */
     ULONG                   sb_CanShareBases;
 
     STRPTR                  sb_LogTag;      /* SBTC_LOGTAGPTR                */
