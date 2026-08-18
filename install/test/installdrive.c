@@ -194,12 +194,35 @@ struct InstButton
     char          *Text;
 };
 
-/* An odd pointer is not one: the guard describe() has always had. */
+/*
+ * The label, or NULL when this gadget is not one of the Installer's buttons.
+ *
+ * An odd pointer is not one, which is the guard describe() has always had, and
+ * it is not enough: a page's own gadgets are NOT struct Buttons, so the word at
+ * that offset is whatever the real struct keeps there.  TypeOfMem() answers
+ * whether it points into memory exec knows about at all, and the scan after it
+ * rejects anything that is not a short printable string.  Without both, a
+ * label comparison reads whatever that word points at.
+ */
 static const char *button_text(struct Gadget *gad)
 {
-    char *text = ((struct InstButton *)gad)->Text;
+    char                *text = ((struct InstButton *)gad)->Text;
+    const unsigned char *at;
+    LONG                 n;
 
-    return (text != NULL && ((ULONG)text & 1) == 0) ? text : NULL;
+    if (text == NULL || ((ULONG)text & 1) != 0)
+        return NULL;
+    if (TypeOfMem((APTR)text) == 0)
+        return NULL;
+
+    for (at = (const unsigned char *)text, n = 0; n < 64; n++, at++)
+    {
+        if (*at == '\0')
+            return (n > 0) ? text : NULL;
+        if (*at < 0x20 || *at > 0x7e)
+            return NULL;
+    }
+    return NULL;
 }
 
 /* TRUE when this button's label contains `want`.  An empty `want` matches
@@ -335,15 +358,26 @@ static VOID describe(struct Window *window)
     if (window->Title != NULL)
         say("installdrive:   window \"%s\"\n", (LONG)window->Title);
 
-    for (gad = window->FirstGadget; gad != NULL && n < 12; gad = gad->NextGadget)
+    /*
+     * EVERY gadget, with its ID, not only the three standard buttons.  The
+     * page's own gadgets -- the options of an askchoice, which is where the
+     * choice between the full and the minimal stack lives -- are numbered
+     * below FIRSTRESV_ID and were skipped here, so the transcript of a run
+     * that answered an askchoice showed no sign the options existed and
+     * there was nothing to name one by.
+     */
+    for (gad = window->FirstGadget; gad != NULL && n < 24; gad = gad->NextGadget)
     {
         const char *text = button_text(gad);
 
-        if (gad->GadgetID < 87)                 /* FIRSTRESV_ID: not a button */
-            continue;
         n++;
+        /* say() carries one argument, so the id and the label are two
+           calls on one line rather than one call with two. */
+        say("installdrive:   gadget %ld", (LONG)gad->GadgetID);
         if (text != NULL)
-            say("installdrive:   button \"%s\"\n", (LONG)text);
+            say(" \"%s\"\n", (LONG)text);
+        else
+            say("%s\n", (LONG)"");
     }
 }
 
