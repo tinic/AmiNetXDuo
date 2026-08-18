@@ -275,27 +275,17 @@ CFG="$ROOT/build/amiberry-$TAG.uae"
 # as tools/winuae-run.sh.
 PORT=$((12000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
 
-# One MAC per tag, for the reason at the board table above.  Only the last
-# three bytes survive the A2065's LANCE, and the fourth is left at 0x49 so the
-# address is still recognisably one of ours on a capture; the hash fills the
-# fifth and sixth, which is 65024 addresses rather than one.
-#
-# The fifth byte is never 0x00 and never 0x0d, which is what keeps this clear
-# of every harness that pins its own: tools/demo.sh 00:77 and the eight
-# tests/tools runs on 00:xx are all fifth-byte 0x00, and run-dnsguard.sh is the
-# only 0x0d.  So a derived address cannot collide with a pinned one, only with
-# another derived one, and that needs a hash collision on the tag.
+# One MAC per tag, for the reason at the board table above.  The derivation and
+# the reasoning behind its shape live in tools/emu-mac.sh, which is where every
+# harness that needs one reads it from: install/test/run-workbench.sh had a
+# pinned address of its own and a second copy of this would have been the next
+# one to drift.
 #
 # AMINETXDUO_AMIBERRY_MAC still wins, because those harnesses set it
 # deliberately and one of them wants a reservation to hold across runs.
-if [ -n "${AMINETXDUO_AMIBERRY_MAC:-}" ]; then
-    MAC="$AMINETXDUO_AMIBERRY_MAC"
-else
-    _machash=$(printf '%s' "$TAG" | cksum | cut -d' ' -f1)
-    _mac5=$(( (_machash / 256) % 254 + 1 ))
-    [ "$_mac5" -eq 13 ] && _mac5=255
-    MAC=$(printf '02:41:4d:49:%02x:%02x' "$_mac5" "$((_machash % 256))")
-fi
+# shellcheck source=emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
 
 rm -rf "$HD"
 mkdir -p "$HD/s" "$HD/c" "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips" "$ROOT/build"

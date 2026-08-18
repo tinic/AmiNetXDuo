@@ -61,6 +61,7 @@
 (set S_DOCS  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Docs")     "Docs"))
 (set S_EXAM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Examples") "Examples"))
 (set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
+(set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -1322,6 +1323,17 @@
                   "AmiNetXDuo.info"))
       (dest    DOCPARENT)
       (newname "AmiNetXDuo.info")
+      (optional "nofail")))
+
+(if (exists S_README (noreq))
+    (copyfiles
+      (prompt "Installing the ReadMe")
+      (help   "The ReadMe from the archive.  It lists what this installer "
+              "writes and how to remove it again, and both the ReadMe itself "
+              "and the guide tell the reader to look for it here.")
+      (source S_README)
+      (dest   DOCDIR)
+      (newname "ReadMe")
       (optional "nofail")))
 
 (if (exists S_DOCS (noreq))

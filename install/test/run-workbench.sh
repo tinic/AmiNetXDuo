@@ -5,7 +5,23 @@
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                       [-l NOVICE|AVERAGE|EXPERT]
+#                                       [-p CHOICE]
 #                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
+#
+# -p NAMES AN OPTION ON AN askchoice PAGE.  It takes `minimal` or `full`, and
+# `-p minimal` is the one that matters: the second stack in the archive, with
+# IPv6, mDNS, the packet filter, TLS, IPv4 multicast, the ARexx host and the
+# TCP: handler compiled out.  Needs -l AVERAGE or -l EXPERT, like -H, because
+# at NOVICE the page is never drawn.
+#
+# -p minimal DOES NOT WORK YET, and it fails rather than pretending.  The
+# harness took the default of every askchoice in the script -- so the minimal
+# stack has shipped in every archive and has never been installed or booted by
+# any end-to-end run -- and driving the option turns out to need more than a
+# posted GADGETUP: installdrive.c records both measurements and what to try
+# next.  What is fixed here is the silence: the run asserts by byte count which
+# of the two libraries landed, so an arm that asks for minimal and gets the
+# full stack is a failure and not a pass.
 #
 # -H IS THE TERMINAL ARM, and it makes the run three installs instead of one:
 #
@@ -180,18 +196,21 @@ INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
+PICK=""
 
-while getopts "b:a:l:t:T:kH" opt; do
+while getopts "b:a:l:p:t:T:kH" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
         l) LEVEL="$OPTARG" ;;
+        p) PICK="$OPTARG" ;;
         t) INSTALL_TIMEOUT="$OPTARG" ;;
         T) BOOT_TIMEOUT="$OPTARG" ;;
         k) KEEP=1 ;;
         H) TERMINAL=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
-                "[-l NOVICE|AVERAGE|EXPERT] [-t seconds] [-T seconds] [-k] [-H]" >&2
+                "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-t seconds]" \
+                "[-T seconds] [-k] [-H]" >&2
            exit 2 ;;
     esac
 done
@@ -204,6 +223,28 @@ done
 if [ "$TERMINAL" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "-H needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
     echo "questions and the terminal one cannot be answered." >&2
+    exit 2
+fi
+
+# -p takes a name, not a gadget number: the number is this file's business.
+# "minimal" is the second option of the two-option stack page, which is the
+# only askchoice in the script with two options -- the card question has nine.
+PICK_SPEC=""
+case "$PICK" in
+"")        ;;
+minimal)   PICK_SPEC="2:2" ;;
+full)      PICK_SPEC="2:3" ;;
+*)         echo "-p takes minimal or full, not \"$PICK\"" >&2; exit 2 ;;
+esac
+
+# It needs a level for the same reason -H does: at NOVICE the page is never
+# drawn, the default is taken, and the run would install the FULL stack while
+# claiming to test the minimal one -- the vacuous pass this file exists not to
+# produce, so it is fatal here rather than a surprise in the verdict.
+if [ -n "$PICK" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-p needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
+    echo "questions, so \"$PICK\" could not be chosen and the default would" >&2
+    echo "be installed instead." >&2
     exit 2
 fi
 
@@ -326,30 +367,62 @@ if [ -z "$AMIBERRY" ]; then
 fi
 [ -n "$AMIBERRY" ] || { echo "amiberry not found; set AMIBERRY=<path>" >&2; exit 2; }
 
-# The network backend the guest's A2065 is wired to.  A bare interface name
-# (`ens18`) puts it on the host's own LAN with its own MAC, which is what
-# makes the DHCP, DNS and http checks below real rather than NAT-shaped.
+# The network backend the guest's A2065 is wired to, and it is A BRIDGE.  A
+# bare interface name (`ens18`) puts the guest on the host's own LAN with its
+# own MAC, which is what makes the DHCP, DNS, http and TLS checks below a
+# statement about the machine a user gets.
 #
-# -H IMPLIES A BRIDGE.  The terminal arm is defined by a SECOND MACHINE
-# driving this guest, and no second machine can reach a SLIRP guest: SLIRP
-# hands out 10.0.2.15 inside the emulator and nothing outside it has a route
-# there.  Defaulted to slirp, every -H run reached the install checks, booted,
-# and then failed the whole peer half at once:
+# THERE IS NO SLIRP PATH HERE ANY MORE, and the reason is not taste.  This
+# script is the release gate: it is what decides "shipped" rather than
+# "tagged".  It defaulted to slirp for every run without -H, so the network arm
+# of every release gate ever run -- 0.23.0 included -- proved DHCP, HTTP and
+# TLS against slirp's 10.0.2.0/24 and against a gateway written in C inside the
+# emulator, and never once against a LAN, a real DHCP server, a real router or
+# a real neighbour.  A green gate that tested a different machine than the one
+# people download is worse than no gate, because it is believed.
 #
-#     guest_address=10.0.2.15
-#     httpd-drill against http://10.0.2.15:80/
-#     OSError: [Errno 101] Network is unreachable
+# So a backend that is not a bridge is refused by name, and a backend that
+# cannot be worked out is refused with what to pass.  It is never substituted
+# for: the whole failure above is a substitution nobody was told about.
 #
-# which reads as a broken httpd rather than a guest on the wrong network.  An
-# explicit AMINETXDUO_EMU_BACKEND still wins, and a run without -H is
-# unchanged: it needs nothing off this box, so SLIRP is the right default
-# there and asking for a bridge would need CAP_NET_RAW for no gain.
-if [ -z "${AMINETXDUO_EMU_BACKEND:-}" ] && [ "$TERMINAL" = "1" ]; then
-    BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
-else
-    BACKEND="${AMINETXDUO_EMU_BACKEND:-slirp}"
+# Nothing is guessed except the obvious: the interface the host's own default
+# route goes out of is the one that reaches the LAN this test needs.  On a host
+# where that is wrong, name it.
+BACKEND="${AMINETXDUO_EMU_BACKEND:-${AMINETXDUO_AMIBERRY_BACKEND:-}}"
+if [ -z "$BACKEND" ]; then
+    BACKEND=$(ip -4 route show default 2>/dev/null |
+              sed -n 's/.*[[:space:]]dev[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' |
+              head -1)
 fi
-MAC="${AMINETXDUO_EMU_MAC:-52:54:00:c0:ff:ee}"
+case "$BACKEND" in
+"")
+    echo "No network backend, and this test needs the guest ON THE LAN:" >&2
+    echo "the host has no default route naming an interface to bridge onto." >&2
+    echo "Name one:  AMINETXDUO_EMU_BACKEND=<host interface>" >&2
+    exit 2
+    ;;
+slirp|slirp_inbound|none)
+    echo "AMINETXDUO_EMU_BACKEND=$BACKEND is not a bridge, and this test" >&2
+    echo "asserts what a machine on a LAN does: a DHCP lease from the" >&2
+    echo "network's own server, a router that is a router, and a peer that" >&2
+    echo "can reach the guest.  None of that exists behind slirp." >&2
+    echo "Name a host interface instead:  AMINETXDUO_EMU_BACKEND=<interface>" >&2
+    exit 2
+    ;;
+esac
+
+# ONE MAC PER TAG, derived, not pinned.  A fixed address here put every run of
+# this harness on the bridge under 52:54:00:c0:ff:ee, beside the demo instance
+# and beside other checkouts' guests: two machines at two addresses sharing one
+# hardware address, so a peer's neighbour cache cannot tell them apart and the
+# arp step above reports whichever answered last.
+#
+# tools/emu-mac.sh is the one implementation of this, shared with
+# tools/amiberry-run.sh rather than repeated here.  AMINETXDUO_EMU_MAC still
+# wins, for a run that wants a reservation to hold.
+# shellcheck source=../../tools/emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+MAC="${AMINETXDUO_EMU_MAC:-$(emu_mac_for_tag "$TAG")}"
 
 XDFTOOL="${AMINETXDUO_XDFTOOL:-}"
 if [ -z "$XDFTOOL" ]; then
@@ -482,9 +555,9 @@ fi
 if [ -z "$ARCHIVE" ]; then
     echo "==> building the distribution archive"
     AMINETXDUO_DIST_NO_MINIMAL=1 \
-        "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/wb31-make-dist.log" 2>&1 || {
-        echo "dist/make-dist.sh failed, see build/wb31-make-dist.log" >&2
-        tail -20 "$ROOT/build/wb31-make-dist.log" >&2
+        "$ROOT/dist/make-dist.sh" -b "$BUILD" >"$ROOT/build/$TAG-make-dist.log" 2>&1 || {
+        echo "dist/make-dist.sh failed, see build/$TAG-make-dist.log" >&2
+        tail -20 "$ROOT/build/$TAG-make-dist.log" >&2
         exit 2
     }
     VERSION=$("$ROOT/tools/version.sh" --product)
@@ -504,11 +577,20 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 #
 # $1 names the binary, $2 is how many times it runs the Installer, $3 is the
 # label of the yes/no button to press instead of the first one (empty: press
-# the first, which is every question's default).
+# the first, which is every question's default), $4 names an askchoice option
+# to select before Proceed as "<options>:<gadget id>" (empty: take that page's
+# default).  See installdrive.c on why an option is named by number and not by
+# text: it carries none.
 build_driver() {
-    local out="$1" runs="$2" label="$3"
+    local out="$1" runs="$2" label="$3" pick="${4:-}"
+    local opts=0 gid=0
+    if [ -n "$pick" ]; then
+        opts=${pick%%:*}
+        gid=${pick##*:}
+    fi
     "$GCC" -O2 -m68000 -Wall -Wextra -DDRIVE_LEVEL="\"$LEVEL\"" \
-           -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" -I"$NDK" \
+           -DDRIVE_RUNS="$runs" -DDRIVE_YES_LABEL="\"$label\"" \
+           -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" -I"$NDK" \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -523,9 +605,9 @@ if [ "$TERMINAL" = "1" ]; then
     DRIVE_RUNS=2
 fi
 
-echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"})"
-DRIVER="$ROOT/build/installdrive-wb-$LEVEL"
-build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL"
+echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
+DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
+build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 
 rm -rf "$HD"
 mkdir -p "$HD"
@@ -735,25 +817,32 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true
 
 # One boot of the machine as it stands.  $1 names the run, $2 is the timeout,
-# $3 is "net" to attach the A2065 to SLIRP.  Returns the guest's own exit
+# $3 is "net" to attach the A2065 to the bridge.  Returns the guest's own exit
 # status out of DH0:.done, or 124.
+#
+# EVERY ARTEFACT CARRIES $TAG.  These names held the literal string "wb31"
+# while AMINETXDUO_RUN_TAG renamed only the test drive, so two arms in one
+# checkout -- the default install and the minimal one, say -- wrote over each
+# other's serial log, emulator log and config, and took the same serial port
+# besides.  That is how a diagnosis gets read off the wrong run, which is the
+# one failure mode a harness must not have.
 BOOT_STATUS=0
 boot() {
     local name="$1" timeout="$2" net="${3:-}"
-    local cfg="$ROOT/build/wb31-$name.uae"
-    local serial="$ROOT/build/serial-wb31-$name.log"
+    local cfg="$ROOT/build/$TAG-$name.uae"
+    local serial="$ROOT/build/serial-$TAG-$name.log"
     local elapsed=0
     local port
 
     # One listening port per run name, so two runs never collide.  Same
     # hashing as tools/amiberry-run.sh.
-    port=$((12000 + $(printf '%s' "wb31-$name" | cksum | cut -d' ' -f1) % 900))
+    port=$((12000 + $(printf '%s' "$TAG-$name" | cksum | cut -d' ' -f1) % 900))
 
     : > "$serial"
     rm -f "$HD/.done"
 
     cat > "$cfg" <<EOF
-config_description=AmiNetXDuo wb31 $name
+config_description=AmiNetXDuo $TAG $name
 use_gui=no
 headless=true
 quickstart=$MODEL,0
@@ -784,8 +873,8 @@ EOF
     # these; they are artifacts, so the cap costs nothing but disk that was
     # never wanted.  Degrades to the plain redirect if the capper is missing,
     # because opening a FIFO for writing blocks until a reader appears.
-    local uaelog="$ROOT/build/amiberry-wb31-$name.log"
-    LOGPIPE="$ROOT/build/amiberry-wb31-$name.logpipe"
+    local uaelog="$ROOT/build/amiberry-$TAG-$name.log"
+    LOGPIPE="$ROOT/build/amiberry-$TAG-$name.logpipe"
     rm -f "$LOGPIPE"
     if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
         "$ROOT/tools/logcap.sh" < "$LOGPIPE" > "$uaelog" &
@@ -917,6 +1006,36 @@ check_file() {
 
 check_file Libs/bsdsocket.library
 check_file Libs/usergroup.library
+
+# WHICH OF THE TWO STACKS LANDED, by byte count against the archive's own two
+# copies.  Without this a -p "Minimal" run whose click missed the page would
+# install the full stack and pass every check below it, which is the vacuous
+# pass this file exists not to produce -- and the harness could not reach that
+# page at all until installdrive.c learned DRIVE_PICK_LABEL, so `minimal` had
+# never been installed by any run.
+STACK_INSTALLED=unknown
+_stack_real=$(amiga_path Libs/bsdsocket.library || true)
+if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
+    _stack_bytes=$(wc -c < "$_stack_real" | tr -d ' ')
+    _full_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
+                  2>/dev/null | tr -d ' ')
+    _min_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library" \
+                 2>/dev/null | tr -d ' ')
+    [ "$_stack_bytes" = "${_full_bytes:-x}" ] && STACK_INSTALLED=full
+    [ "$_stack_bytes" = "${_min_bytes:-x}" ] && STACK_INSTALLED=minimal
+    echo "stack_installed=$STACK_INSTALLED bytes=$_stack_bytes"
+else
+    echo "stack_installed=none"
+fi
+
+case "$PICK" in
+""|full) WANT_STACK=full ;;
+minimal) WANT_STACK=minimal ;;
+esac
+if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
+    echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
+    fail=1
+fi
 for cmd in AddNetInterface Online Offline ShowNetStatus ping netstat host fetch; do
     check_file "C/$cmd"
 done
@@ -1117,9 +1236,9 @@ rm -f "$HD/usercheck.txt" "$HD/http-body.txt" "$HD/https-body.txt"
 #
 # Runs beside the boot rather than after it: httpd is gone the moment the
 # emulator is killed.
-TERM_PROBE="$ROOT/build/wb31-peer-drill.txt"
+TERM_PROBE="$ROOT/build/$TAG-peer-drill.txt"
 PROBE_PID=""
-PAYLOAD_TXT="$ROOT/build/wb31-payload.txt"
+PAYLOAD_TXT="$ROOT/build/$TAG-payload.txt"
 PAYLOAD_LHA="$ARCHIVE"
 
 if [ "$TERMINAL" = "1" ]; then
@@ -1444,8 +1563,8 @@ if [ "$TERMINAL" = "1" ]; then
     echo "  3/3  installing again, answering the terminal question no"
     echo "============================================================"
 
-    build_driver "$ROOT/build/installdrive-wb-$LEVEL-no" 1 ""
-    cp "$ROOT/build/installdrive-wb-$LEVEL-no" "$HD/C/installdrive"
+    build_driver "$ROOT/build/installdrive-$TAG-$LEVEL-no" 1 "" "$PICK_SPEC"
+    cp "$ROOT/build/installdrive-$TAG-$LEVEL-no" "$HD/C/installdrive"
     chmod 755 "$HD/C/installdrive"
 
     startup_with 'FailAt 9999

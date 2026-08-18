@@ -81,7 +81,9 @@ LISTWAIT=90
 # stands a test server up and is what CI uses; -u names a share explicitly.
 URL="${AMINETXDUO_SMB_URL:-}"
 BACKEND="${AMINETXDUO_EMU_BACKEND:-ens18}"
-MAC="${AMINETXDUO_EMU_MAC:-52:54:00:5b:2f:11}"
+# Empty here and derived from the tag below, AFTER getopts, because -T changes
+# the tag and -M names an address outright.
+MAC="${AMINETXDUO_EMU_MAC:-}"
 TAG="${AMINETXDUO_RUN_TAG:-smbmount}"
 ACTIVATE=0
 CAPTURE=0
@@ -114,6 +116,14 @@ while getopts "m:o:u:P:B:M:T:t:w:s:x:H:ACk" opt; do
         *) sed -n '5,9p' "$0" >&2; exit 2 ;;
     esac
 done
+
+# One MAC per tag, from tools/emu-mac.sh, rather than the pinned address this
+# had: a fixed one puts every run of every arm on the bridge under the same
+# hardware address, beside the demo instance and beside other checkouts'
+# guests, and a peer's neighbour cache then keeps whichever answered last.
+# shellcheck source=../../tools/emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+[ -n "$MAC" ] || MAC=$(emu_mac_for_tag "$TAG")
 
 case "$OSVER" in 31|32) ;; *) echo "-o takes 31 or 32" >&2; exit 2 ;; esac
 # WHICH CLIENT.  Two programs, two protocols, one share: smb2-handler speaks

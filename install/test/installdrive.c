@@ -122,6 +122,68 @@
 #define DRIVE_YES_LABEL ""
 #endif
 
+/*
+ * A CHOICE ON AN askchoice PAGE, which is a different thing from a yes/no
+ * button and needed its own answer.
+ *
+ * askchoice draws its options as the page's OWN gadgets, and this program
+ * clicked Proceed the moment it saw one -- so every run ever made took the
+ * (default) of every askchoice in the script.  The one that matters is
+ * "Select the stack to install", whose default is the full stack, which is why
+ * Libs/minimal/bsdsocket.library had never been installed or booted by any
+ * end-to-end run.
+ *
+ * NOT BY LABEL, and this is measured rather than assumed.  A page's option
+ * gadgets are not the Installer's struct Buttons: the word past the Gadget is
+ * not a label, so there is no text on them to match.  What they do have is an
+ * id.  With DRIVE_PICK_LABEL=Minimal at -l AVERAGE, an install of 0.24.0
+ * reported (installdrive.txt, poll 4):
+ *
+ *     window "Install-AmiNetXDuo (0% done)"
+ *     gadget 0 / gadget 0 / gadget 0
+ *     gadget 3
+ *     gadget 2
+ *     gadget 91 "Abort Install"  gadget 90 "Proceed"  gadget 100 "Help..."
+ *
+ * so the options are numbered from 2 upward in the order the script lists
+ * them: 2 is "Everything" and 3 is "Minimal, no IPv6/TLS".  The card question
+ * on the same run carried nine of them, 2 through 10.
+ *
+ * A page is therefore named by HOW MANY options it has and an answer by WHICH
+ * id, both compile-time.  The count is what tells the stack question (two)
+ * from the card question (nine).
+ *
+ * AND IT IS NOT ENOUGH: POSTING GADGETUP AT AN OPTION DOES NOT ANSWER IT.
+ * Measured twice on 0.24.0, -l AVERAGE, the two-option stack page, the click
+ * landing where the transcript says it did ("picking option gadget N" at
+ * poll 4, then Proceed at poll 5):
+ *
+ *     rel024min3   gadget 3 clicked   369,820 bytes installed  (the full one)
+ *     rel024min4   gadget 2 clicked   369,820 bytes installed  (the full one)
+ *
+ * Either option leaves the page's default in place, and 369,820 is also what a
+ * run that picks nothing installs, so neither id is "the other choice": the
+ * message does not reach the answer at all.  A posted GADGETUP is enough for
+ * Proceed and for a yes/no button, both of which the Installer dispatches on
+ * from the message; the selected state of an option is not in the message.
+ * Intuition sets GFLG_SELECTED on a real click and nothing here does, so the
+ * next thing to try is setting it -- RemoveGList, the flag, AddGList,
+ * RefreshGList -- and clearing it on the sibling.  Untested; do not assume it.
+ *
+ * So the minimal stack is still not installable by this harness.  What has
+ * changed is that it cannot be installed QUIETLY: run-workbench.sh asserts by
+ * byte count which of the archive's two libraries landed, and -p minimal fails
+ * the run rather than testing the full stack under another name.
+ *
+ * 0 options means no page is picked at, which is the default.
+ */
+#ifndef DRIVE_PICK_OPTIONS
+#define DRIVE_PICK_OPTIONS 0
+#endif
+#ifndef DRIVE_PICK_ID
+#define DRIVE_PICK_ID      0
+#endif
+
 #define POLL_TICKS      50      /* Delay() counts 1/50 s, so: one second */
 
 /*
@@ -148,6 +210,7 @@ static BPTR            report;
 static LONG clicks;
 static LONG saw_window;
 static LONG yesno_pages;
+static LONG picks_done;
 
 static VOID say(const char *fmt, LONG a)
 {
@@ -166,7 +229,7 @@ static VOID say(const char *fmt, LONG a)
 /*
  * The Installer's buttons are struct Button { struct Gadget Gadget; char
  * *Text; ... } (window.h), so the label is one pointer past the end of the
- * Gadget.  describe() below prints it; wants_label() answers with it.
+ * Gadget.  describe() below prints it; label_matches() answers with it.
  */
 struct InstButton
 {
@@ -174,19 +237,41 @@ struct InstButton
     char          *Text;
 };
 
-/* An odd pointer is not one: the guard describe() has always had. */
+/*
+ * The label, or NULL when this gadget is not one of the Installer's buttons.
+ *
+ * An odd pointer is not one, which is the guard describe() has always had, and
+ * it is not enough: a page's own gadgets are NOT struct Buttons, so the word at
+ * that offset is whatever the real struct keeps there.  TypeOfMem() answers
+ * whether it points into memory exec knows about at all, and the scan after it
+ * rejects anything that is not a short printable string.  Without both, a
+ * label comparison reads whatever that word points at.
+ */
 static const char *button_text(struct Gadget *gad)
 {
-    char *text = ((struct InstButton *)gad)->Text;
+    char                *text = ((struct InstButton *)gad)->Text;
+    const unsigned char *at;
+    LONG                 n;
 
-    return (text != NULL && ((ULONG)text & 1) == 0) ? text : NULL;
+    if (text == NULL || ((ULONG)text & 1) != 0)
+        return NULL;
+    if (TypeOfMem((APTR)text) == 0)
+        return NULL;
+
+    for (at = (const unsigned char *)text, n = 0; n < 64; n++, at++)
+    {
+        if (*at == '\0')
+            return (n > 0) ? text : NULL;
+        if (*at < 0x20 || *at > 0x7e)
+            return NULL;
+    }
+    return NULL;
 }
 
-/* TRUE when this button's label contains DRIVE_YES_LABEL.  An empty label
-   matches nothing, which is what makes it off by default. */
-static BOOL wants_label(struct Gadget *gad)
+/* TRUE when this button's label contains `want`.  An empty `want` matches
+   nothing, which is what makes both label options off by default. */
+static BOOL label_matches(struct Gadget *gad, const char *want)
 {
-    const char *want = DRIVE_YES_LABEL;
     const char *text = button_text(gad);
     const char *at;
 
@@ -239,6 +324,8 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             struct Gadget *yes     = NULL;
             struct Gadget *no      = NULL;
             struct Gadget *single  = NULL;
+            struct Gadget *pick    = NULL;
+            LONG           options = 0;
             BOOL           is_page = FALSE;
 
             for (gad = window->FirstGadget; gad != NULL; gad = gad->NextGadget)
@@ -251,6 +338,19 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 case YESNO_FIRST: yes     = gad;                 break;
                 case SINGLE_ID:   single  = gad; no = gad;       break;
                 default: break;
+                }
+
+                /*
+                 * The page's own gadgets: numbered from 1 up, below
+                 * FIRSTRESV_ID, and carrying no label.  An askchoice's options
+                 * are these, so counting them is how the page is recognised.
+                 */
+                if (gad->GadgetID > 0 && gad->GadgetID < 87 &&
+                    button_text(gad) == NULL)
+                {
+                    options++;
+                    if (gad->GadgetID == DRIVE_PICK_ID)
+                        pick = gad;
                 }
             }
 
@@ -265,11 +365,26 @@ static struct Window *find_installer_window(struct Gadget **click_out)
                 yesno_pages++;
                 choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
                              ? no : yes;
-                if (no != NULL && wants_label(no))
+                if (no != NULL && label_matches(no, DRIVE_YES_LABEL))
                     choice = no;
             }
             if (choice == NULL)
                 choice = single;
+
+            /*
+             * The chosen option goes first and Proceed follows on the next
+             * poll: clicking Proceed straight away is what took the default of
+             * every one of these until now.  Once per Installer run, and only
+             * on the page with the expected number of options.
+             */
+            if (proceed != NULL && pick != NULL && picks_done == 0 &&
+                DRIVE_PICK_OPTIONS != 0 && options == DRIVE_PICK_OPTIONS)
+            {
+                choice = pick;
+                picks_done++;
+                say("installdrive:   picking option gadget %ld\n",
+                    (LONG)pick->GadgetID);
+            }
             break;
         }
     }
@@ -293,15 +408,26 @@ static VOID describe(struct Window *window)
     if (window->Title != NULL)
         say("installdrive:   window \"%s\"\n", (LONG)window->Title);
 
-    for (gad = window->FirstGadget; gad != NULL && n < 12; gad = gad->NextGadget)
+    /*
+     * EVERY gadget, with its ID, not only the three standard buttons.  The
+     * page's own gadgets -- the options of an askchoice, which is where the
+     * choice between the full and the minimal stack lives -- are numbered
+     * below FIRSTRESV_ID and were skipped here, so the transcript of a run
+     * that answered an askchoice showed no sign the options existed and
+     * there was nothing to name one by.
+     */
+    for (gad = window->FirstGadget; gad != NULL && n < 24; gad = gad->NextGadget)
     {
         const char *text = button_text(gad);
 
-        if (gad->GadgetID < 87)                 /* FIRSTRESV_ID: not a button */
-            continue;
         n++;
+        /* say() carries one argument, so the id and the label are two
+           calls on one line rather than one call with two. */
+        say("installdrive:   gadget %ld", (LONG)gad->GadgetID);
         if (text != NULL)
-            say("installdrive:   button \"%s\"\n", (LONG)text);
+            say(" \"%s\"\n", (LONG)text);
+        else
+            say("%s\n", (LONG)"");
     }
 }
 
@@ -367,6 +493,11 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     LONG gone   = 0;
     LONG seen   = 0;
     LONG settle = 0;
+
+    /* Per run, not per program: on a two-run drive the askchoice page comes
+       up again, and taking its default the second time would install the
+       full stack over the minimal one this run asked for. */
+    picks_done = 0;
 
     say("installdrive: run %ld: starting the Installer\n", run_number);
 
