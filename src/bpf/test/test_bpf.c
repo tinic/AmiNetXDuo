@@ -1174,6 +1174,50 @@ static void test_close_owner_under_reader(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+/*
+ * A reader drops the table lock while it waits for a record. Recycle its
+ * numeric slot to another owner at that exact unlock: the old call must not
+ * copy or consume the replacement channel's data.
+ */
+static UBYTE t_reopen_frame[128];
+static ULONG t_reopen_len;
+
+static void t_reopen_mid_read(void)
+{
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OTHER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSETIF, "eth0") == 0);
+    ami_bpf_tap_rx(iface_cookie, t_reopen_frame, t_reopen_len);
+}
+
+static void test_reopen_under_reader(void)
+{
+    UBYTE out[512];
+    ULONG timeout[2] = { 0, 20000 };
+
+    printf("bpf: a waiting reader cannot consume a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSRTIMEOUT, timeout) == 0);
+
+    t_reopen_len = make_tcp(t_reopen_frame, 1234, 80, 5, 0, 6);
+    stub_unlock_after = 1;
+    stub_on_unlock    = t_reopen_mid_read;
+
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) ==
+          AMI_BPF_EPERM);
+    CHECK(stub_on_unlock == NULL);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) > 0);
+
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /* -------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
@@ -1194,6 +1238,7 @@ int main(int argc, char **argv)
     test_write_and_binding();
     test_channel_ownership();
     test_close_owner_under_reader();
+    test_reopen_under_reader();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

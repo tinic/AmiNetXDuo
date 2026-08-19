@@ -537,20 +537,33 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
 LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
 {
     LONG         status;
-    AmiBpfChan  *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan  *ch;
     const UBYTE *src;
     ULONG        pos;
     ULONG        end;
     ULONG        nbytes;
     ULONG        budget;
     ULONG        waited = 0;
+    ULONG        irq_mask;
     BOOL         pending;
 
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (buffer == NULL || len < 0)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EINVAL;
+    }
+
+    budget = ch->rtimeout_sec * AMI_BPF_TICKS_PER_SEC
+           + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
 
     /*
      * BIOCSRTIMEOUT as 4.4BSD reads it: zero is "do not wait", anything else
@@ -561,13 +574,17 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
      *
      * With no timeout set the loop runs once and returns 0, as it did before
      * the loop existed.
-     */
-    budget = ch->rtimeout_sec * AMI_BPF_TICKS_PER_SEC
-           + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
-
+    */
     for (;;)
     {
-        ami_bpf_lock();
+        /* The timeout wait drops the table lock. The owner may close this
+           slot and another base may reopen it while the task sleeps. Never
+           consume that replacement channel's buffers under the old handle. */
+        if (ami_bpf_chan_get(owner, channel, &status) != ch)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
 
         if (ch->reading)
         {
@@ -581,16 +598,19 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
         if (ch->hold_len != 0)
             break;                  /* data, and the lock is still held */
 
+        irq_mask = ch->irq_mask;
         ami_bpf_unlock();
 
         if (waited >= budget)
             return 0;
 
-        if (ami_bpf_signals_set(ch->irq_mask) != 0)
+        if (ami_bpf_signals_set(irq_mask) != 0)
             return AMI_BPF_EINTR;
 
         ami_bpf_sleep(AMI_BPF_WAIT_SLICE);
         waited += AMI_BPF_WAIT_SLICE;
+
+        ami_bpf_lock();
     }
 
     /*
