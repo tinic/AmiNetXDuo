@@ -1082,25 +1082,38 @@ static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
     return FALSE;
 }
 
-/* Pick the same interface for a new or restarted AutoIP object. */
-static LONG ami_ns_autoip_select(AmiNetStack *ns)
+/* Pick the requested interface, or the configured AutoIP default when the
+   caller has no per-interface reason for starting it. */
+static LONG ami_ns_autoip_select(AmiNetStack *ns, LONG requested_interface)
 {
     UINT  status;
     UWORD i;
 
-    /* First interface explicitly asking for link-local; failing that, the
-       first one expecting any IPv4 address (the DHCP fallback case). */
-    for (i = 0; i < ns->ns_IfaceCount; i++)
+    if (requested_interface >= 0)
     {
-        if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
-            break;
+        if ((ULONG)requested_interface >= (ULONG)ns->ns_IfaceCount ||
+            !ami_config_iface_wants_ipv4(
+                &ns->ns_Config.interfaces[requested_interface]))
+            return AMI_NET_ERR_CONFIG;
+
+        i = (UWORD)requested_interface;
     }
-    if (i == ns->ns_IfaceCount)
+    else
     {
+        /* First interface explicitly asking for link-local; failing that, the
+           first one expecting any IPv4 address (the startup fallback case). */
         for (i = 0; i < ns->ns_IfaceCount; i++)
         {
-            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
                 break;
+        }
+        if (i == ns->ns_IfaceCount)
+        {
+            for (i = 0; i < ns->ns_IfaceCount; i++)
+            {
+                if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+                    break;
+            }
         }
     }
 
@@ -1120,7 +1133,7 @@ static LONG ami_ns_autoip_select(AmiNetStack *ns)
     return AMI_NET_OK;
 }
 
-static LONG ami_ns_start_autoip(AmiNetStack *ns)
+static LONG ami_ns_start_autoip(AmiNetStack *ns, LONG requested_interface)
 {
     UINT status;
     LONG rc;
@@ -1136,9 +1149,19 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns)
      */
     if (ns->ns_AutoIpCreated)
     {
+        if (ns->ns_AutoIpRunning && requested_interface >= 0 &&
+            ns->ns_AutoIp.nx_ip_interface_index != (UINT)requested_interface)
+        {
+            AMI_WARN("netstack: link-local fallback is already serving "
+                     "interface %ld, not interface %ld",
+                     (long)ns->ns_AutoIp.nx_ip_interface_index,
+                     (long)requested_interface);
+            return AMI_NET_ERR_STATE;
+        }
+
         if (!ns->ns_AutoIpRunning)
         {
-            rc = ami_ns_autoip_select(ns);
+            rc = ami_ns_autoip_select(ns, requested_interface);
             if (rc != AMI_NET_OK)
                 return rc;
 
@@ -1176,7 +1199,7 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns)
     }
     ns->ns_AutoIpCreated = TRUE;
 
-    rc = ami_ns_autoip_select(ns);
+    rc = ami_ns_autoip_select(ns, requested_interface);
     if (rc != AMI_NET_OK)
     {
         (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
@@ -1439,7 +1462,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
 
             /* RFC 3927 1.7: keep the machine reachable on the local wire
                while the DHCP client tries again. */
-            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+            if (ami_ns_start_autoip(ns, (LONG)iface_index) != AMI_NET_OK)
                 AMI_WARN("netstack: no link-local fallback on this machine");
         }
         break;
@@ -1756,7 +1779,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     }
 
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL) &&
-        ami_ns_start_autoip(ns) != AMI_NET_OK)
+        ami_ns_start_autoip(ns, -1L) != AMI_NET_OK)
         AMI_WARN("netstack: an interface asked for a link-local address and "
                  "did not get one");
 
@@ -1831,7 +1854,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             /* RFC 3927: fall back to a link-local address.  If that could
                not be started there is nothing on the way, so do not spend the
                fifteen seconds waiting for an address that cannot arrive. */
-            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+            if (ami_ns_start_autoip(ns, -1L) != AMI_NET_OK)
             {
                 AMI_WARN("netstack: no link-local fallback either, so this "
                          "interface has no address");
@@ -3676,7 +3699,7 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
             goto rollback;
         }
 
-        rc = ami_ns_start_autoip(ns);
+        rc = ami_ns_start_autoip(ns, -1L);
         ami_netstack_leave_free(caller);
         if (rc != AMI_NET_OK)
             goto rollback;
