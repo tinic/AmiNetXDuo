@@ -1450,6 +1450,76 @@ char                  buffer[96];
     (VOID)bsd_CloseSocket(client);
 }
 
+static VOID t_test_raw_bind_after_peek(VOID)
+{
+LONG                  server, client;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     wrong[] = "raw before bind";
+static const char     right[] = "raw after bind";
+char                  buffer[96];
+
+    t_log("raw bind after MSG_PEEK");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    client = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "raw late-bind sockets",
+                 bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000001UL;
+
+    /* As in the peer-transition test, exercise both storage locations: one
+       packet parked by MSG_PEEK and one still on the semaphore-backed queue. */
+    rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)),
+                  "raw pre-bind first send", rc);
+    rc = bsd_recv(client, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw pre-bind first synchronization", rc);
+
+    rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)),
+                  "raw pre-bind second send", rc);
+    rc = bsd_recv(client, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw pre-bind second synchronization", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer),
+                  T_MSG_DONTWAIT | T_MSG_PEEK);
+    (VOID)t_check((BOOL)(rc >= 20 &&
+                         (UBYTE)buffer[16] == 127 &&
+                         (UBYTE)buffer[17] == 0 &&
+                         (UBYTE)buffer[18] == 0 &&
+                         (UBYTE)buffer[19] == 1),
+                  "peek raw packet before bind", rc);
+
+    sa.sin_addr = 0x7F000002UL;
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "late raw bind to 127.0.0.2",
+                  bsd_Errno());
+
+    rc = bsd_sendto(client, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)),
+                  "raw post-bind send", rc);
+    rc = bsd_recv(client, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw post-bind synchronization", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc >= 20 &&
+                         (UBYTE)buffer[16] == 127 &&
+                         (UBYTE)buffer[17] == 0 &&
+                         (UBYTE)buffer[18] == 0 &&
+                         (UBYTE)buffer[19] == 2),
+                  "raw bind removes packets for old local endpoint", rc);
+
+    (VOID)bsd_CloseSocket(client);
+    (VOID)bsd_CloseSocket(server);
+}
+
 static VOID t_test_raw_connect_after_peek(VOID)
 {
 LONG                  server, old_peer, new_peer;
@@ -2593,6 +2663,7 @@ int main(void)
     t_test_udp_connected_readiness();
     t_test_udp_reconnect_after_peek();
     t_test_raw_bound_address();
+    t_test_raw_bind_after_peek();
     t_test_raw_connect_after_peek();
     t_test_cmsg_macros();
     t_test_cmsg_options();

@@ -1796,7 +1796,6 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
             return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
         if (!bsd_addr_normalise(sock, &addr))
             return bsd_fail(SocketBase, AMI_EINVAL);
-        sock->as_LocalScopeId = scope;
     }
     else if (addr.nxd_ip_version == NX_IP_VERSION_V6)
     {
@@ -1840,17 +1839,28 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
             return bsd_fail(SocketBase, AMI_EADDRNOTAVAIL);
     }
 
-    sock->as_LocalAddr = addr;
-    sock->as_LocalPort = port;
-
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
         /* A raw socket has no port and NetX Duo has nothing to bind it to.
-           The address is recorded so getsockname() answers, as above. */
+           Commit the endpoint under the same scheduler lock as its global
+           receive hook, then remove packets admitted by the old wildcard. */
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+        sock->as_LocalAddr    = addr;
+        sock->as_LocalPort    = port;
+        sock->as_LocalScopeId = scope;
         sock->as_Flags |= ASF_BOUND;
+        bsd_raw_revalidate_endpoint(sock);
+
+        bsd_nx_leave(SocketBase);
 
         return 0;
     }
+
+    sock->as_LocalAddr    = addr;
+    sock->as_LocalPort    = port;
+    sock->as_LocalScopeId = scope;
 
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
@@ -3125,7 +3135,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_PeerScopeId = scope;
         sock->as_Flags   |= ASF_CONNECTED;
 
-        bsd_raw_revalidate_peer(sock);
+        bsd_raw_revalidate_endpoint(sock);
 
         return 0;
     }

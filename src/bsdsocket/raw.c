@@ -217,19 +217,6 @@ static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
                ? TRUE : FALSE;
 }
 
-static BOOL bsd_raw_packet_from_peer(const AmiSocket *sock,
-                                     const NX_PACKET *packet)
-{
-    BOOL is_v6 = FALSE;
-
-#ifdef AMINETXDUO_IPV6
-    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
-        is_v6 = TRUE;
-#endif
-
-    return bsd_raw_from_peer(sock, packet, is_v6);
-}
-
 /*
  * Does this datagram belong to the address a raw socket bound?
  *
@@ -294,6 +281,20 @@ static BOOL bsd_raw_to_local(const AmiSocket *sock, const NX_PACKET *packet,
              ((ULONG)header[18] <<  8) |
               (ULONG)header[19]) == sock->as_LocalAddr.nxd_ip_address.v4)
                ? TRUE : FALSE;
+}
+
+static BOOL bsd_raw_accepts_packet(const AmiSocket *sock,
+                                   const NX_PACKET *packet)
+{
+    BOOL is_v6 = FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
+        is_v6 = TRUE;
+#endif
+
+    return (bsd_raw_to_local(sock, packet, is_v6) &&
+            bsd_raw_from_peer(sock, packet, is_v6)) ? TRUE : FALSE;
 }
 
 /* ----------------------------------------------------------------- filter, */
@@ -1025,12 +1026,11 @@ ULONG bsd_raw_available(AmiSocket *sock)
     return length;
 }
 
-/* A raw connect changes the receive PCB as well as the default send address.
-   The IP hook filtered queued copies against the peer that was current when
-   they arrived, so discard any that the new association no longer admits.
-   Called inside the connect() ThreadX bracket, while the IP thread cannot
-   change this queue. */
-VOID bsd_raw_revalidate_peer(AmiSocket *sock)
+/* A raw bind or connect changes the receive PCB. The IP hook filtered queued
+   copies against the endpoint that was current when they arrived, so discard
+   any that the new endpoint no longer admits. Called inside a ThreadX bracket,
+   while the IP thread cannot change this queue. */
+VOID bsd_raw_revalidate_endpoint(AmiSocket *sock)
 {
     NX_PACKET *packet;
     NX_PACKET *next;
@@ -1039,7 +1039,7 @@ VOID bsd_raw_revalidate_peer(AmiSocket *sock)
     ULONG      count = 0;
 
     if (sock->as_RxPending != NX_NULL &&
-        !bsd_raw_packet_from_peer(sock, sock->as_RxPending))
+        !bsd_raw_accepts_packet(sock, sock->as_RxPending))
     {
         nx_packet_release(sock->as_RxPending);
         sock->as_RxPending = NX_NULL;
@@ -1051,7 +1051,7 @@ VOID bsd_raw_revalidate_peer(AmiSocket *sock)
         next = packet->nx_packet_queue_next;
         packet->nx_packet_queue_next = NX_NULL;
 
-        if (bsd_raw_packet_from_peer(sock, packet))
+        if (bsd_raw_accepts_packet(sock, packet))
         {
             if (tail != NX_NULL)
                 tail->nx_packet_queue_next = packet;

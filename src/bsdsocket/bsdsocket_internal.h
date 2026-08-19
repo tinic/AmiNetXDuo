@@ -1114,7 +1114,7 @@ LONG       bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why);
 VOID       bsd_raw_source(NX_PACKET *packet, NXD_ADDRESS *addr);
 ULONG      bsd_raw_available(AmiSocket *sock);
-VOID       bsd_raw_revalidate_peer(AmiSocket *sock);
+VOID       bsd_raw_revalidate_endpoint(AmiSocket *sock);
 
 #ifdef AMINETXDUO_MULTICAST
 /* mcast.c, RFC 1112 group membership and the IPPROTO_IP multicast options.
