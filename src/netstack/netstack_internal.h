@@ -26,6 +26,7 @@
 
 #include <exec/types.h>
 
+#include "netstack_dns_handoff.h"
 #ifdef AMINETXDUO_IPV6
 #include "netstack_ra.h"
 #endif
@@ -293,6 +294,11 @@ struct AmiNetStack
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
 
+    /* A BOUND notification can run on the DHCP client's own ThreadX task.
+       It records the interface here; the next caller-thread resolver
+       operation imports option 6 under the ordinary caller bracket. */
+    AmiNsDnsPending     ns_DhcpDnsPending;
+
 #ifdef AMINETXDUO_IPV6
     /*
      * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
@@ -505,6 +511,7 @@ LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
 VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD interface_index);
+VOID ami_netstack_dns_dhcp_changed(AmiNetStack *ns, UWORD interface_index);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);

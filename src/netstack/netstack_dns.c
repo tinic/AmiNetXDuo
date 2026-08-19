@@ -417,27 +417,38 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
 /* Called with the ThreadX caller bracket held. Each stored mutation below is
    a short Forbid section; the NetX calls between them must stay outside it. */
-static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
+static VOID ami_ns_dns_absorb_ipv6_pending(AmiNetStack *ns)
 {
     ami_ns_dns_absorb_dhcpv6(ns);
     ami_ns_dns_absorb_rdnss(ns);
 }
 
+#endif /* AMINETXDUO_IPV6 */
+
+/* Called with the ThreadX caller bracket held.  The DHCP callback only marks
+   an interface; option retrieval, DNS-client calls and resolver mutation all
+   happen here on the caller task. */
+static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
+{
+    ULONG pending = ami_ns_dns_pending_take(&ns->ns_DhcpDnsPending);
+    UWORD iface;
+
+    for (iface = 0; iface < ns->ns_IfaceCount; iface++)
+        if ((pending & (1UL << iface)) != 0UL)
+            ami_netstack_dns_dhcp_bound(ns, iface);
+
+#ifdef AMINETXDUO_IPV6
+    /* DHCPv6 first, so its servers are ahead of the advertisement's in the
+       list the resolver tries. */
+    ami_ns_dns_absorb_ipv6_pending(ns);
+#endif
+}
+
 /*
- * The same, for a caller that is about to report the resolver rather than use
- * it.
- *
- * Absorbing only on the way into a lookup left a machine that had not resolved
- * anything yet describing a resolver it did not have: the advertisement had
- * arrived, the servers and the search list were recorded, and ShowNetStatus
- * printed "Name servers: none configured" beside a lookup that worked.
- *
- * A caller task, not the IP thread, so the DNS client can be called from here
- * for the same reason a lookup can. The bracket is taken here rather than by
- * the caller because the published calls this serves are shared-library entry
- * points with no bracket of their own.
+ * The report-only half of the handoff.  Lookups absorb while already inside
+ * their caller bracket; a report has no such bracket, so it takes one here.
  */
-VOID netstack_dns_absorb_ra(VOID)
+VOID netstack_dns_absorb_pending(VOID)
 {
     AmiNetStack  *ns = ami_netstack_raw();
     AmiNetCaller *caller;
@@ -447,23 +458,22 @@ VOID netstack_dns_absorb_ra(VOID)
 
     /* Nothing pending is the ordinary case, and it must not cost a report a
        trip into ThreadX. */
-    if (!ns->ns_Ra.rdnss_pending && !ns->ns_Ra.dnssl_pending &&
-        !ns->ns_Dhcpv6DnsPending)
+    if (!ami_ns_dns_pending_any(&ns->ns_DhcpDnsPending)
+#ifdef AMINETXDUO_IPV6
+        && !ns->ns_Ra.rdnss_pending && !ns->ns_Ra.dnssl_pending &&
+        !ns->ns_Dhcpv6DnsPending
+#endif
+       )
         return;
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
         return;
 
-    /* DHCPv6 first, so its servers are ahead of the advertisement's in the
-       list the resolver tries.  See the note above ami_ns_dns_absorb_dhcpv6()
-       for why that is the order. */
     ami_ns_dns_absorb_pending(ns);
 
     ami_netstack_leave_free(caller);
 }
-
-#endif /* AMINETXDUO_IPV6 */
 
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 {
@@ -563,9 +573,9 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
  * Import option 6 from one bound DHCP interface.
  *
  * Called once for every interface already bound when the DNS client starts,
- * and again from the DHCP state callback. The second path matters because
- * startup returns after any interface gets an address; another DHCP exchange
- * can finish after the resolver already exists.
+ * and from a caller task after the DHCP state callback marks an interface.
+ * The second path matters because startup returns after any interface gets an
+ * address; another DHCP exchange can finish after the resolver already exists.
  */
 VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD iface)
 {
@@ -575,7 +585,7 @@ VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD iface)
 
     if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
         iface >= ns->ns_IfaceCount ||
-        ns->ns_DhcpState[iface] != (UBYTE)NX_DHCP_STATE_BOUND)
+        ns->ns_DhcpState[iface] < (UBYTE)NX_DHCP_STATE_BOUND)
         return;
 
     if (nx_dhcp_interface_user_option_retrieve(
@@ -624,6 +634,17 @@ VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD iface)
         }
         ami_ns_resolver_permit();
     }
+}
+
+/* The DHCP client invokes its state callback on its own ThreadX task and, on
+   several paths, while holding its client mutex.  Do not enter the DNS client
+   or mutate resolver configuration there. */
+VOID ami_netstack_dns_dhcp_changed(AmiNetStack *ns, UWORD iface)
+{
+    if (ns == NULL || iface >= ns->ns_IfaceCount)
+        return;
+
+    ami_ns_dns_pending_mark(&ns->ns_DhcpDnsPending, iface);
 }
 
 LONG ami_netstack_dns_start(AmiNetStack *ns)
@@ -804,9 +825,7 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
         return AMI_NET_ASK_REFUSED;
     }
 
-#ifdef AMINETXDUO_IPV6
     ami_ns_dns_absorb_pending(ask->ns);
-#endif
 
     ask->status = nx_dns_host_by_name_get(&ask->ns->ns_Dns,
                                           (UCHAR *)ask->name, &ask->address,
@@ -833,12 +852,10 @@ static AmiNetAskResult ami_ns_ask_addr(VOID *arg, ULONG wait)
         return AMI_NET_ASK_REFUSED;
     }
 
-#ifdef AMINETXDUO_IPV6
     /* A PTR lookup can be the first resolver operation after an RA.  Without
        absorbing here, an IPv6-only link has an advertised server waiting in
        ns_Ra but the DNS client still reports NX_DNS_NO_SERVER. */
     ami_ns_dns_absorb_pending(ask->ns);
-#endif
 
     ask->status = nx_dns_host_by_address_get(&ask->ns->ns_Dns, ask->address,
                                              (UCHAR *)ask->name_out,
