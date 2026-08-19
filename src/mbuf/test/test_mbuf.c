@@ -27,15 +27,22 @@
 
 #include "mbuf_internal.h"
 
+#include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------ stubs */
 
-static ULONG stub_outstanding;
+static _Atomic ULONG stub_outstanding;
 static int   stub_verbose;
+static int   stub_cluster_race;
+static int   stub_cluster_waiters;
+static pthread_mutex_t stub_alloc_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  stub_alloc_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t stub_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 
 APTR ami_alloc(ULONG size)
 {
@@ -46,7 +53,18 @@ APTR ami_alloc(ULONG size)
 
     p = calloc(1, size);
     if (p != NULL)
-        stub_outstanding++;
+        (void)atomic_fetch_add(&stub_outstanding, 1UL);
+
+    if (p != NULL && stub_cluster_race &&
+        size == (ULONG)sizeof(AmiCluster) + MCLBYTES)
+    {
+        (void)pthread_mutex_lock(&stub_alloc_lock);
+        stub_cluster_waiters++;
+        (void)pthread_cond_broadcast(&stub_alloc_cond);
+        while (stub_cluster_waiters < 2)
+            (void)pthread_cond_wait(&stub_alloc_cond, &stub_alloc_lock);
+        (void)pthread_mutex_unlock(&stub_alloc_lock);
+    }
 
     return p;
 }
@@ -63,12 +81,12 @@ VOID ami_free(APTR ptr)
         return;
 
     free(ptr);
-    stub_outstanding--;
+    (void)atomic_fetch_sub(&stub_outstanding, 1UL);
 }
 
 ULONG ami_alloc_count(VOID)
 {
-    return stub_outstanding;
+    return atomic_load(&stub_outstanding);
 }
 
 VOID ami_log(int level, const char *fmt, ...)
@@ -86,9 +104,8 @@ VOID ami_log(int level, const char *fmt, ...)
     va_end(args);
 }
 
-/* No preemption on the host. The real ones are Forbid()/Permit(). */
-VOID ami_mbuf_lock(VOID)   { }
-VOID ami_mbuf_unlock(VOID) { }
+VOID ami_mbuf_lock(VOID)   { (void)pthread_mutex_lock(&stub_pool_lock); }
+VOID ami_mbuf_unlock(VOID) { (void)pthread_mutex_unlock(&stub_pool_lock); }
 
 /* ----------------------------------------------------------- check harness */
 
@@ -644,6 +661,85 @@ static void test_clusters(void)
     expect_empty("test_clusters");
 }
 
+typedef struct ClusterRaceArg
+{
+    struct mbuf *m;
+    LONG         result;
+} ClusterRaceArg;
+
+static void *cluster_race_worker(void *arg)
+{
+    ClusterRaceArg *race = (ClusterRaceArg *)arg;
+
+    race->result = ami_mbuf_clget(race->m);
+    return NULL;
+}
+
+static void test_cluster_ceiling_race(void)
+{
+    ClusterRaceArg race[2];
+    pthread_t      threads[2];
+    struct mbstat  stats;
+    int            made[2];
+    int            successes;
+
+    printf("mbuf: concurrent cluster growth honours the pool ceiling\n");
+
+    ami_mbuf_cleanup();
+    CHECK(ami_mbuf_init(4, 1) == 0);
+
+    race[0].m = ami_mbuf_get();
+    race[1].m = ami_mbuf_get();
+    race[0].result = -1;
+    race[1].result = -1;
+    CHECK(race[0].m != NULL);
+    CHECK(race[1].m != NULL);
+    if (race[0].m == NULL || race[1].m == NULL)
+        goto done;
+
+    stub_cluster_waiters = 0;
+    stub_cluster_race = 1;
+    made[0] = pthread_create(&threads[0], NULL, cluster_race_worker, &race[0]);
+    made[1] = pthread_create(&threads[1], NULL, cluster_race_worker, &race[1]);
+    CHECK(made[0] == 0);
+    CHECK(made[1] == 0);
+
+    if (made[0] != 0 || made[1] != 0)
+    {
+        (void)pthread_mutex_lock(&stub_alloc_lock);
+        stub_cluster_waiters = 2;
+        (void)pthread_cond_broadcast(&stub_alloc_cond);
+        (void)pthread_mutex_unlock(&stub_alloc_lock);
+    }
+
+    if (made[0] == 0)
+        CHECK(pthread_join(threads[0], NULL) == 0);
+    if (made[1] == 0)
+        CHECK(pthread_join(threads[1], NULL) == 0);
+    stub_cluster_race = 0;
+
+    if (made[0] == 0 && made[1] == 0)
+    {
+        successes = (race[0].result == 0) + (race[1].result == 0);
+        CHECK(successes == 1);
+        ami_mbuf_stats(&stats);
+        CHECK(stats.m_clusters == 1);
+        CHECK(stats.m_drops == 1);
+        CHECK(ami_mbuf_clusters_outstanding() == 1);
+    }
+
+done:
+    stub_cluster_race = 0;
+    if (race[0].m != NULL)
+        (void)ami_mbuf_free(race[0].m);
+    if (race[1].m != NULL)
+        (void)ami_mbuf_free(race[1].m);
+    expect_empty("test_cluster_ceiling_race");
+
+    ami_mbuf_cleanup();
+    CHECK(ami_mbuf_init(0, 0) == 0);
+}
+
 static void test_foreign_ext(void)
 {
     static UBYTE  foreign[256];
@@ -815,6 +911,7 @@ int main(int argc, char **argv)
     test_copyback();
     test_copym();
     test_clusters();
+    test_cluster_ceiling_race();
     test_foreign_ext();
     test_prepend();
     test_pullup();
