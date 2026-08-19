@@ -233,6 +233,15 @@ static void test_text_helpers(void)
 
         CHECK(ami_cfg_parse_ulong("1500", &n) && n == 1500);
         CHECK(ami_cfg_parse_ulong("0x800", &n) && n == 2048);
+        CHECK(ami_cfg_parse_ulong("4294967295", &n) &&
+              n == (ULONG)0xFFFFFFFFUL);
+        CHECK(ami_cfg_parse_ulong("0xffffffff", &n) &&
+              n == (ULONG)0xFFFFFFFFUL);
+
+        n = 77;
+        CHECK(!ami_cfg_parse_ulong("4294967296", &n) && n == 77);
+        CHECK(!ami_cfg_parse_ulong("4294967297", &n) && n == 77);
+        CHECK(!ami_cfg_parse_ulong("0x100000000", &n) && n == 77);
         CHECK(!ami_cfg_parse_ulong("15x0", &n));
         CHECK(!ami_cfg_parse_ulong("", &n));
     }
@@ -2093,12 +2102,14 @@ static void test_netdb_garbage(void)
         "noport\n"
         "weird 80\n"                 /* no /proto */
         "bad xx/tcp\n"
+        "wrapped 4294967297/tcp\n"
         "good 90/tcp\n");
 
     CHECK(ami_netdb_load() == AMI_CFG_OK);
     CHECK(ami_netdb_host_by_name("ok") != NULL);
     CHECK(ami_netdb_host_by_name("notanaddress") == NULL);
     CHECK(ami_netdb_serv_by_name("bad", NULL) == NULL);
+    CHECK(ami_netdb_serv_by_name("wrapped", NULL) == NULL);
     CHECK(ami_netdb_serv_by_name("weird", NULL) != NULL);
     CHECK(ami_netdb_serv_by_name("good", "tcp") != NULL);
 
@@ -2171,6 +2182,7 @@ static void test_service_discovery(void)
         "_ftp._tcp\n"                /* no port                            */
         "_ftp._tcp 0\n"
         "_ftp._tcp 65536\n"
+        "_ftp._tcp 4294967297\n"    /* must not wrap to port 1             */
         "_ftp._tcp notanumber\n"
         "_ftp._tcp 21 My.Server\n"   /* a dot would become a label break   */
         "_good._tcp 22\n");
