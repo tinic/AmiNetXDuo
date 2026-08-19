@@ -48,6 +48,11 @@ static const AmiNetXDuoContext *tls_ctx;
  * include/aminetxduo/nxcontext.h and implemented in
  * src/bsdsocket/nxcontext.c.  This is the third and last place it appears.
  */
+#ifdef TLSLIB_HOST_TEST
+extern LONG tls_test_obtain_context(APTR socket_base,
+                                    const AmiNetXDuoContext **out);
+#define tls_obtain_context tls_test_obtain_context
+#else
 static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
 {
     register APTR                      a6 __asm("a6") = socket_base;
@@ -64,6 +69,7 @@ static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
                       : "a1", "cc", "memory");
     return res;
 }
+#endif
 
 /*
  * The handshake's public-key arithmetic is the longest stretch of code in
@@ -87,9 +93,6 @@ static VOID tls_crypto_yield(VOID)
 LONG tls_netx_bind(APTR socket_base)
 {
     const AmiNetXDuoContext *ctx = NULL;
-
-    if (tls_ctx != NULL)
-        return 0;
 
     if (socket_base == NULL)
         return -1;
@@ -118,6 +121,11 @@ LONG tls_netx_bind(APTR socket_base)
     if (ctx->nxc_Size != (ULONG)sizeof(AmiNetXDuoContext))
         return -1;
 
+    /* Refresh this on every TLSOpen().  tls.library can stay resident while
+       bsdsocket.library is expunged and reloaded; its context table lives in
+       the latter's segment, so keeping the first pointer forever turns the
+       next handshake into a call through unloaded memory.  A failed refresh
+       leaves the previous context intact for connections already using it. */
     tls_ctx         = ctx;
     c68k_yield_hook = tls_crypto_yield;
 

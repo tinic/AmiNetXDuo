@@ -376,4 +376,50 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_tls_close PROPERTIES C_STANDARD 11)
 
     add_test(NAME tls_close_serialization COMMAND test_tls_close)
+
+    # tls.library may remain resident across an expunge and reload of
+    # bsdsocket.library.  The borrowed context lives in bsdsocket.library's
+    # segment, so every TLSOpen() must refresh it instead of keeping the first
+    # pointer forever.
+    add_executable(test_tls_netx_bind
+        test/test_tls_netx_bind.c
+        tls_netx.c)
+
+    target_include_directories(test_tls_netx_bind PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/tls"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/ports"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_tls_netx_bind PRIVATE
+        NX_PACKET_ALIGNMENT=8
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
+        NX_SECURE_ENABLE_AEAD_CIPHER
+        NX_SECURE_KEY_CLEAR
+        NX_SECURE_TLS_DISABLE_SECURE_RENEGOTIATION
+        NX_SECURE_TLS_ENABLE_TLS_1_3
+        TLSLIB_NO_INLINE_STUBS
+        TLSLIB_HOST_TEST)
+
+    target_compile_options(test_tls_netx_bind PRIVATE
+        -Wall -Wextra -UAMINETXDUO_IPV6 -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options(test_tls_netx_bind PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_tls_netx_bind PRIVATE -Wl,--gc-sections)
+    endif()
+    set_target_properties(test_tls_netx_bind PROPERTIES C_STANDARD 11)
+
+    add_test(NAME tls_context_rebind COMMAND test_tls_netx_bind)
 endif()

@@ -353,9 +353,10 @@ typedef struct TLSConnection TLSConnection;
 /* ------------------------------------------------------------ tls_netx.c, */
 
 /*
- * The stack, borrowed from bsdsocket.library.  tls_netx_bind() is called once
- * per library open with the caller's SocketBase.  It is idempotent, and after
- * the first success tls_netx_ctx() is non-NULL for the life of the library.
+ * The stack, borrowed from bsdsocket.library.  tls_netx_bind() is called for
+ * every TLSOpen() with the caller's SocketBase.  It refreshes the context in
+ * case bsdsocket.library was expunged and reloaded while tls.library remained
+ * resident.  After a success tls_netx_ctx() is non-NULL.
  */
 LONG                     tls_netx_bind(APTR socket_base);
 const AmiNetXDuoContext *tls_netx_ctx(VOID);
