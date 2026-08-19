@@ -274,22 +274,28 @@ HttpPathResult http_path_resolve(const char *root, const char *target,
     return HTTP_PATH_OK;
 }
 
-void http_path_root(const char *given, char *out, unsigned long outlen)
+int http_path_root(const char *given, char *out, unsigned long outlen)
 {
     unsigned long n = 0;
 
     if (out == 0 || outlen == 0UL)
-        return;
+        return 0;
 
     out[0] = '\0';
 
     if (given == 0)
-        return;
+        return 0;
 
     while (given[n] != '\0' && n + 1UL < outlen)
     {
         out[n] = given[n];
         n++;
+    }
+
+    if (given[n] != '\0')
+    {
+        out[0] = '\0';
+        return 0;
     }
 
     out[n] = '\0';
@@ -298,6 +304,8 @@ void http_path_root(const char *given, char *out, unsigned long outlen)
        to, and neither does "". */
     while (n > 1UL && out[n - 1] == '/')
         out[--n] = '\0';
+
+    return 1;
 }
 
 void http_utf8_trim(char *text)

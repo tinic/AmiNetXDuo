@@ -1443,7 +1443,8 @@ ULONG http_term_sigmask(VOID)
 /*
  * A DOS file handle on one end of a pipe.  fh_Arg1 is the pipe's id and
  * fh_Type this process's port, which is all http_term_service() needs to route
- * a packet.  DOS frees the handle when it is closed, so this must not free it.
+ * a packet.  Once the handle has been handed to the runner, DOS frees it when
+ * it is closed, so that path must not free it directly.
  */
 static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
 {
@@ -1482,6 +1483,22 @@ static BPTR term_handle(TermPipe *p, LONG id, BOOL shell_reads)
         p->doswrite = 1;
 
     return MKBADDR(fh);
+}
+
+/*
+ * Dispose of a handle that has not been handed to the runner.
+ *
+ * Close() is deliberately wrong here.  fh_Type names term_port, so Close()
+ * sends ACTION_END to that port and waits for a reply.  The caller is the
+ * httpd process that services term_port, and it cannot service the packet
+ * while it is blocked inside Close().  Before CreateNewProc succeeds nobody
+ * else owns or has used the handle, so give the AllocDosObject allocation
+ * straight back instead.
+ */
+static VOID term_handle_discard(BPTR handle)
+{
+    if (handle != (BPTR)0)
+        FreeDosObject(DOS_FILEHANDLE, (APTR)BADDR(handle));
 }
 
 /* ---------------------------------------------------------- the runner --- */
@@ -1778,8 +1795,8 @@ BOOL http_term_start(VOID)
 
     if (sh_in == (BPTR)0 || sh_out == (BPTR)0)
     {
-        if (sh_in  != (BPTR)0) Close(sh_in);
-        if (sh_out != (BPTR)0) Close(sh_out);
+        term_handle_discard(sh_in);
+        term_handle_discard(sh_out);
         return FALSE;
     }
 
@@ -1799,8 +1816,8 @@ BOOL http_term_start(VOID)
     term_runner = (TermRunner *)ami_alloc(sizeof(*term_runner));
     if (term_runner == NULL)
     {
-        Close(sh_in);
-        Close(sh_out);
+        term_handle_discard(sh_in);
+        term_handle_discard(sh_out);
         tool_error("not enough memory to start a Shell");
         return FALSE;
     }
@@ -1835,8 +1852,8 @@ BOOL http_term_start(VOID)
     {
         ami_free(term_runner);
         term_runner = NULL;
-        Close(sh_in);
-        Close(sh_out);
+        term_handle_discard(sh_in);
+        term_handle_discard(sh_out);
         return FALSE;
     }
 

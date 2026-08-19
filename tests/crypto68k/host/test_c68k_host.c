@@ -494,6 +494,7 @@ static void t_edge_cases(void)
 UINT                    status;
 UINT                    i;
 c68k_limb               zero_e[1];
+c68k_limb               zero_guard;
 NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 
     printf("\n5. Edge cases:\n");
@@ -563,7 +564,18 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
         t_fail("undersized scratch accepted", 0, 0);
     }
 
-    printf("  0^e, x^0, even modulus, undersized scratch\n");
+    /* The standalone square primitive is public too.  An empty operand must
+       not turn its unsigned reverse loop into a walk through all memory. */
+    zero_guard = 0xA5A55A5AUL;
+    c68k_mont_sqr(&zero_guard, &zero_guard, &zero_guard, 0u, 0u,
+                  &zero_guard);
+    t_checks++;
+    if (zero_guard != 0xA5A55A5AUL)
+    {
+        t_fail("zero-limb Montgomery square wrote output", 0, zero_guard);
+    }
+
+    printf("  0^e, x^0, even modulus, undersized scratch, zero-limb square\n");
 }
 
 

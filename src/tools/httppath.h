@@ -100,7 +100,9 @@ const char *http_path_error(HttpPathResult why);
  * A device or assign keeps its colon: "RAM:" is not "RAM".  A root that is
  * only separators is left as one, because there is nothing to trim it to.
  */
-void http_path_root(const char *given, char *out, unsigned long outlen);
+/* Non-zero on success.  An overlong root is refused rather than truncated,
+   because a truncated root can name a different, existing drawer. */
+int http_path_root(const char *given, char *out, unsigned long outlen);
 
 /*
  * The three a writing server walks a tree with.  They are here rather than in
