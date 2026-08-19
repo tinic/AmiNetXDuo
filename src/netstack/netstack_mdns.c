@@ -481,6 +481,10 @@ LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
 VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 {
     UWORD n;
+    UWORD i;
+
+    if (ns == NULL)
+        return;
 
     for (n = 0; n < (UWORD)AMI_CFG_MAX_INTERFACES; n++)
     {
@@ -488,9 +492,7 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
         ns->ns_IfaceMdnsSvc[n] = FALSE;
     }
 
-    UWORD i;
-
-    if (ns == NULL || !ns->ns_MdnsCreated)
+    if (!ns->ns_MdnsCreated)
         return;
 
     /*
