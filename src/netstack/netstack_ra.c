@@ -16,6 +16,78 @@ static BOOL ami_ns_ra_same(const ULONG a[4], const ULONG b[4])
 }
 
 
+static char ami_ns_ra_fold(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+
+static BOOL ami_ns_ra_domain_same(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0')
+    {
+        if (ami_ns_ra_fold(*a++) != ami_ns_ra_fold(*b++))
+            return FALSE;
+    }
+
+    return (BOOL)(*a == *b);
+}
+
+
+/* One uncompressed RFC 1035 name from RFC 8106's DNSSL payload. */
+static BOOL ami_ns_ra_dnssl_name(const UCHAR *domains, UINT length, UINT *pos,
+                                 char out[AMI_CFG_NAME_LEN])
+{
+    UINT n = 0;
+
+    for (;;)
+    {
+        UINT label;
+
+        if (*pos >= length)
+            return FALSE;
+
+        label = (UINT)domains[(*pos)++];
+        if (label == 0U)
+        {
+            out[n] = '\0';
+            return (BOOL)(n != 0U);
+        }
+
+        /* RFC 8106 expressly forbids compression, and an ordinary DNS label
+           is at most 63 octets. */
+        if (label > 63U || *pos + label > length ||
+            domains[*pos] == (UCHAR)'-' ||
+            domains[*pos + label - 1U] == (UCHAR)'-')
+            return FALSE;
+
+        if (n != 0U)
+        {
+            if (n + 1U >= (UINT)AMI_CFG_NAME_LEN)
+                return FALSE;
+            out[n++] = '.';
+        }
+
+        if (n + label >= (UINT)AMI_CFG_NAME_LEN)
+            return FALSE;
+
+        while (label-- != 0U)
+        {
+            UCHAR c = domains[(*pos)++];
+
+            if (!((c >= (UCHAR)'a' && c <= (UCHAR)'z') ||
+                  (c >= (UCHAR)'A' && c <= (UCHAR)'Z') ||
+                  (c >= (UCHAR)'0' && c <= (UCHAR)'9') ||
+                  c == (UCHAR)'-'))
+                return FALSE;
+            out[n++] = (char)c;
+        }
+    }
+}
+
+
 static BOOL ami_ns_ra_expired(ULONG received, ULONG lifetime, ULONG now)
 {
     ULONG limit;
@@ -98,26 +170,68 @@ VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, UWORD interface_index,
 }
 
 
-VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, const UCHAR *domains,
-                     UINT length, ULONG lifetime)
+VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, UWORD interface_index,
+                     const UCHAR *domains, UINT length, ULONG lifetime,
+                     ULONG now)
 {
-    UWORD i;
+    char  name[AMI_CFG_NAME_LEN];
+    UINT  pos = 0;
 
     if (pending == NULL || domains == NULL || length == 0 ||
-        length > (UINT)AMI_DNSSL_MAX)
+        length > (UINT)AMI_DNSSL_MAX ||
+        interface_index >= AMI_CFG_MAX_INTERFACES)
         return;
 
-    /* A prefix of an encoded domain list is not a shorter list: it can end in
-       the middle of a label.  Preserve the preceding complete option when a
-       new one does not fit. */
+    /* RFC 8106 keeps an expiration time per domain and per interface.  Decode
+       the bounded option while producer and consumer are excluded, so two
+       options arriving before a lookup cannot overwrite one another. */
     Forbid();
 
-    for (i = 0; i < (UWORD)length; i++)
-        pending->dnssl[i] = (UBYTE)domains[i];
+    while (pos < length)
+    {
+        UWORD i;
 
-    pending->dnssl_len = (UWORD)length;
-    pending->dnssl_lifetime = lifetime;
-    pending->dnssl_pending = TRUE;
+        if (!ami_ns_ra_dnssl_name(domains, length, &pos, name))
+            break;              /* root padding, truncation, or bad encoding */
+
+        for (i = 0; i < pending->dnssl_count[interface_index]; i++)
+            if (ami_ns_ra_domain_same(
+                    pending->dnssl[interface_index][i].domain, name))
+                break;
+
+        if (lifetime == 0UL)
+        {
+            if (i < pending->dnssl_count[interface_index])
+            {
+                UWORD j;
+
+                for (j = i; (UWORD)(j + 1U) <
+                            pending->dnssl_count[interface_index]; j++)
+                    pending->dnssl[interface_index][j] =
+                        pending->dnssl[interface_index][j + 1U];
+                pending->dnssl_count[interface_index]--;
+                pending->dnssl_pending = TRUE;
+            }
+            continue;
+        }
+
+        if (i == pending->dnssl_count[interface_index])
+        {
+            UWORD j;
+
+            if (i >= (UWORD)AMI_CFG_MAX_SEARCH)
+                continue;
+
+            for (j = 0; name[j] != '\0'; j++)
+                pending->dnssl[interface_index][i].domain[j] = name[j];
+            pending->dnssl[interface_index][i].domain[j] = '\0';
+            pending->dnssl_count[interface_index] = (UWORD)(i + 1U);
+            pending->dnssl_pending = TRUE;
+        }
+
+        pending->dnssl[interface_index][i].lifetime = lifetime;
+        pending->dnssl[interface_index][i].received = now;
+    }
 
     Permit();
 }
@@ -188,10 +302,28 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
 
     if (pending->dnssl_pending)
     {
-        snapshot->dnssl_len = pending->dnssl_len;
-        for (i = 0; i < snapshot->dnssl_len; i++)
-            snapshot->dnssl[i] = pending->dnssl[i];
-        snapshot->dnssl_lifetime = pending->dnssl_lifetime;
+        snapshot->dnssl_count = 0;
+        for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+            for (i = 0; i < pending->dnssl_count[iface] &&
+                        snapshot->dnssl_count < (UWORD)AMI_CFG_MAX_SEARCH; i++)
+            {
+                UWORD known;
+                UWORD c;
+
+                for (known = 0; known < snapshot->dnssl_count; known++)
+                    if (ami_ns_ra_domain_same(snapshot->dnssl[known],
+                            pending->dnssl[iface][i].domain))
+                        break;
+
+                if (known != snapshot->dnssl_count)
+                    continue;
+
+                for (c = 0; pending->dnssl[iface][i].domain[c] != '\0'; c++)
+                    snapshot->dnssl[snapshot->dnssl_count][c] =
+                        pending->dnssl[iface][i].domain[c];
+                snapshot->dnssl[snapshot->dnssl_count][c] = '\0';
+                snapshot->dnssl_count++;
+            }
         pending->dnssl_pending = FALSE;
         snapshot->dnssl_pending = TRUE;
     }

@@ -1744,6 +1744,34 @@ static void test_ra_search_option(void)
         CHECK(ami_config_search_withdraw(&res, NULL) == FALSE);
         CHECK(ami_config_search_withdraw(NULL, "x.test") == FALSE);
     }
+
+    /* An advertised suffix is reference-counted against other network
+       sources.  Its withdrawal cannot erase the identical DHCP suffix. */
+    {
+        memset(&res, 0, sizeof(res));
+        CHECK(ami_config_search_offer(&res, "shared.test") == TRUE);
+        CHECK(res.search_use[0] == 1);
+        CHECK(ami_config_search_reference_add(&res, "SHARED.TEST") == TRUE);
+        CHECK(res.search_count == 1 && res.search_use[0] == 2);
+        CHECK(ami_config_search_reference_remove(&res, "shared.test") == TRUE);
+        CHECK(res.search_count == 1 && res.search_use[0] == 1);
+        CHECK(ami_config_search_reference_remove(&res, "shared.test") == TRUE);
+        CHECK(res.search_count == 0);
+    }
+
+    /* Static ownership is permanent even while a router independently owns
+       and then withdraws the same spelling. */
+    {
+        memset(&res, 0, sizeof(res));
+        buf = dup_text("search file.test\n");
+        ami_cfg_parse_resolver(buf, &res, NULL, 0);
+        free(buf);
+
+        CHECK(ami_config_search_reference_add(&res, "FILE.TEST") == TRUE);
+        CHECK(ami_config_search_reference_remove(&res, "file.test") == TRUE);
+        CHECK(res.search_count == 1 && res.search_static == 1);
+        CHECK_STR(res.search[0], "file.test");
+    }
 }
 
 /*
