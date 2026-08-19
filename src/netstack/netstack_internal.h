@@ -27,6 +27,7 @@
 #include <exec/types.h>
 
 #include "netstack_dns_handoff.h"
+#include "netstack_dns_lease.h"
 #ifdef AMINETXDUO_IPV6
 #include "netstack_ra.h"
 #endif
@@ -298,6 +299,7 @@ struct AmiNetStack
        It records the interface here; the next caller-thread resolver
        operation imports option 6 under the ordinary caller bracket. */
     AmiNsDnsPending     ns_DhcpDnsPending;
+    AmiNsDhcpDnsLease   ns_DhcpDnsLease;
 
 #ifdef AMINETXDUO_IPV6
     /*
@@ -510,7 +512,7 @@ LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
-VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD interface_index);
+VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD interface_index);
 VOID ami_netstack_dns_dhcp_changed(AmiNetStack *ns, UWORD interface_index);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */

@@ -435,7 +435,7 @@ static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
 
     for (iface = 0; iface < ns->ns_IfaceCount; iface++)
         if ((pending & (1UL << iface)) != 0UL)
-            ami_netstack_dns_dhcp_bound(ns, iface);
+            ami_netstack_dns_dhcp_reconcile(ns, iface);
 
 #ifdef AMINETXDUO_IPV6
     /* DHCPv6 first, so its servers are ahead of the advertisement's in the
@@ -569,70 +569,185 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
     }
 }
 
+/* Add one source's ownership of a server.  The first owner creates the DNS
+   entry; later owners only deepen the signed count in reported configuration. */
+static BOOL ami_ns_dns_reference_add(AmiNetStack *ns, ULONG server)
+{
+    AmiResolverConfig *r = &ns->ns_Config.resolver;
+    UINT               status;
+    UWORD              i;
+
+    for (i = 0; i < r->nameserver_count; i++)
+        if (r->nameserver[i] == server)
+        {
+            ami_ns_resolver_forbid();
+            r->nameserver_use[i] =
+                ami_ns_dns_use_deepen(r->nameserver_use[i]);
+            ami_ns_resolver_permit();
+            return TRUE;
+        }
+
+    if (r->nameserver_count >= AMI_CFG_MAX_NAMESERVERS)
+        return FALSE;
+
+    status = nx_dns_server_add(&ns->ns_Dns, server);
+    if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
+        return FALSE;
+
+    ami_ns_resolver_forbid();
+    r->nameserver[r->nameserver_count] = server;
+    r->nameserver_use[r->nameserver_count] = 1;
+    r->nameserver_count++;
+    ami_ns_resolver_permit();
+    return TRUE;
+}
+
+
+/* Drop one source's ownership.  Static configuration, Roadshow callers and a
+   lease on the other interface keep the entry alive until their counts go. */
+static BOOL ami_ns_dns_reference_remove(AmiNetStack *ns, ULONG server)
+{
+    AmiResolverConfig *r = &ns->ns_Config.resolver;
+    UINT               status;
+    UWORD              at;
+    UWORD              i;
+    LONG               use;
+
+    for (at = 0; at < r->nameserver_count; at++)
+        if (r->nameserver[at] == server)
+            break;
+
+    /* The stored lease and configuration should agree.  If they do not, heal
+       the lease side rather than retaining an owner of a nonexistent entry. */
+    if (at == r->nameserver_count)
+        return TRUE;
+
+    use = ami_ns_dns_use_shallow(r->nameserver_use[at]);
+    if (use != 0)
+    {
+        ami_ns_resolver_forbid();
+        r->nameserver_use[at] = use;
+        ami_ns_resolver_permit();
+        return TRUE;
+    }
+
+    status = nx_dns_server_remove(&ns->ns_Dns, server);
+    if (status != NX_SUCCESS && status != NX_DNS_SERVER_NOT_FOUND)
+        return FALSE;
+
+    ami_ns_resolver_forbid();
+    for (i = at; i + 1U < r->nameserver_count; i++)
+    {
+        r->nameserver[i] = r->nameserver[i + 1U];
+        r->nameserver_use[i] = r->nameserver_use[i + 1U];
+    }
+    r->nameserver_count--;
+    r->nameserver[r->nameserver_count] = 0UL;
+    r->nameserver_use[r->nameserver_count] = 0;
+    ami_ns_resolver_permit();
+    return TRUE;
+}
+
+
+static BOOL ami_ns_dns_array_has(const ULONG *server, UWORD count, ULONG value)
+{
+    UWORD i;
+
+    for (i = 0; i < count; i++)
+        if (server[i] == value)
+            return TRUE;
+
+    return FALSE;
+}
+
+
 /*
- * Import option 6 from one bound DHCP interface.
+ * Reconcile option 6 from one DHCP interface.
  *
  * Called once for every interface already bound when the DNS client starts,
  * and from a caller task after the DHCP state callback marks an interface.
- * The second path matters because startup returns after any interface gets an
- * address; another DHCP exchange can finish after the resolver already exists.
+ * A renewal can replace or omit option 6, and a stopped/lost lease owns no
+ * servers.  The per-interface set makes those withdrawals precise.
  */
-VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD iface)
+VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 {
-    UCHAR buffer[4 * NX_DNS_MAX_SERVERS];
-    UINT  size = (UINT)sizeof(buffer);
-    UINT  offset;
+    ULONG offered[AMI_CFG_MAX_NAMESERVERS];
+    ULONG raw[NX_DNS_MAX_SERVERS];
+    UINT  size = (UINT)sizeof(raw);
+    UINT  status;
+    UWORD offered_count = 0;
+    UWORD i;
 
     if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
-        iface >= ns->ns_IfaceCount ||
-        ns->ns_DhcpState[iface] < (UBYTE)NX_DHCP_STATE_BOUND)
+        iface >= ns->ns_IfaceCount)
         return;
 
-    if (nx_dhcp_interface_user_option_retrieve(
-            &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
-            buffer, &size) != NX_SUCCESS)
-        return;
-
-    for (offset = 0; offset + 4 <= size; offset += 4)
+    if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        AmiResolverConfig *r = &ns->ns_Config.resolver;
-        ULONG server = ((ULONG)buffer[offset]     << 24) |
-                       ((ULONG)buffer[offset + 1] << 16) |
-                       ((ULONG)buffer[offset + 2] <<  8) |
-                        (ULONG)buffer[offset + 3];
-        BOOL  known = FALSE;
-        UINT  add_status;
-        UWORD n;
+        status = nx_dhcp_interface_user_option_retrieve(
+            &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
+            (UCHAR *)raw, &size);
 
-        if (server == 0UL)
-            continue;
+        /* Not carrying option 6 is a valid empty set.  Other failures leave
+           the last coherent lease set in place. */
+        if (status != NX_SUCCESS && status != NX_DHCP_PARSE_ERROR)
+            return;
 
-        add_status = nx_dns_server_add(&ns->ns_Dns, server);
-        if (add_status != NX_SUCCESS &&
-            add_status != NX_DNS_DUPLICATE_ENTRY)
-            continue;
-
-        if (add_status == NX_SUCCESS)
-            AMI_INFO("netstack: interface %ld DHCP name server "
-                     "%lu.%lu.%lu.%lu", (long)iface,
-                     (unsigned long)((server >> 24) & 0xFFUL),
-                     (unsigned long)((server >> 16) & 0xFFUL),
-                     (unsigned long)((server >>  8) & 0xFFUL),
-                     (unsigned long)(server & 0xFFUL));
-
-        /* Keep the list reported by ShowNetStatus and the Roadshow APIs in
-           step with the one the DNS client actually uses. */
-        ami_ns_resolver_forbid();
-        for (n = 0; n < r->nameserver_count; n++)
-            if (r->nameserver[n] == server)
-                known = TRUE;
-
-        if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
+        if (status == NX_SUCCESS)
         {
-            r->nameserver_use[r->nameserver_count] = 1;
-            r->nameserver[r->nameserver_count++]   = server;
+            UWORD raw_count = (UWORD)(size / (UINT)sizeof(ULONG));
+
+            for (i = 0; i < raw_count &&
+                        offered_count < AMI_CFG_MAX_NAMESERVERS; i++)
+            {
+                if (raw[i] != 0UL &&
+                    !ami_ns_dns_array_has(offered, offered_count, raw[i]))
+                    offered[offered_count++] = raw[i];
+            }
         }
-        ami_ns_resolver_permit();
+    }
+
+    /* Withdraw backwards because each success compacts this interface's set. */
+    for (i = ami_ns_dhcp_dns_lease_count(&ns->ns_DhcpDnsLease, iface);
+         i-- != 0U; )
+    {
+        ULONG server = ami_ns_dhcp_dns_lease_at(&ns->ns_DhcpDnsLease,
+                                                iface, i);
+
+        if (ami_ns_dns_array_has(offered, offered_count, server))
+            continue;
+
+        if (ami_ns_dns_reference_remove(ns, server))
+        {
+            (VOID)ami_ns_dhcp_dns_lease_remove(&ns->ns_DhcpDnsLease,
+                                               iface, server);
+            AMI_INFO("netstack: interface %ld DHCP name server withdrawn",
+                     (long)iface);
+        }
+    }
+
+    for (i = 0; i < offered_count; i++)
+    {
+        ULONG server = offered[i];
+
+        if (ami_ns_dhcp_dns_lease_has(&ns->ns_DhcpDnsLease, iface, server))
+            continue;
+
+        if (!ami_ns_dns_reference_add(ns, server))
+        {
+            AMI_WARN("netstack: interface %ld DHCP name server rejected",
+                     (long)iface);
+            continue;
+        }
+
+        (VOID)ami_ns_dhcp_dns_lease_add(&ns->ns_DhcpDnsLease, iface, server);
+
+        AMI_INFO("netstack: interface %ld DHCP name server "
+                 "%lu.%lu.%lu.%lu", (long)iface,
+                 (unsigned long)((server >> 24) & 0xFFUL),
+                 (unsigned long)((server >> 16) & 0xFFUL),
+                 (unsigned long)((server >>  8) & 0xFFUL),
+                 (unsigned long)(server & 0xFFUL));
     }
 }
 
@@ -719,7 +834,7 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
            record. A second card can have a different reachable resolver, so
            collect option 6 from every interface holding a lease. */
         for (iface = 0; iface < ns->ns_IfaceCount; iface++)
-            ami_netstack_dns_dhcp_bound(ns, iface);
+            ami_netstack_dns_dhcp_reconcile(ns, iface);
     }
 
     return AMI_NET_OK;
@@ -1421,27 +1536,6 @@ LONG netstack_resolve6(const char *name, ULONG addr_out[4], ULONG timeout_ticks)
  * touched only on the first add and the last remove.
  */
 
-/* A slot in use never stores 0.  One that does predates the count and belongs
-   to the file, as ObtainDomainNameServerList() also reads it. */
-static LONG ami_ns_use(LONG stored)
-{
-    return (stored != 0) ? stored : -1;
-}
-
-static LONG ami_ns_use_deepen(LONG stored)
-{
-    LONG use = ami_ns_use(stored);
-
-    return (use < 0) ? (use - 1) : (use + 1);
-}
-
-static LONG ami_ns_use_shallow(LONG stored)
-{
-    LONG use = ami_ns_use(stored);
-
-    return (use < 0) ? (use + 1) : (use - 1);
-}
-
 LONG netstack_dns_server_add(ULONG address)
 {
     AmiNetStack  *ns = netstack_get();
@@ -1467,7 +1561,8 @@ LONG netstack_dns_server_add(ULONG address)
         {
             ami_ns_resolver_forbid();
             ns->ns_Config.resolver.nameserver_use[i] =
-                ami_ns_use_deepen(ns->ns_Config.resolver.nameserver_use[i]);
+                ami_ns_dns_use_deepen(
+                    ns->ns_Config.resolver.nameserver_use[i]);
             ami_ns_resolver_permit();
             goto out;
         }
@@ -1538,7 +1633,8 @@ LONG netstack_dns_server_remove(ULONG address)
     }
 
     /* Still referenced by somebody else: drop one and stop. */
-    use = ami_ns_use_shallow(ns->ns_Config.resolver.nameserver_use[at]);
+    use = ami_ns_dns_use_shallow(
+        ns->ns_Config.resolver.nameserver_use[at]);
     if (use != 0)
     {
         ami_ns_resolver_forbid();

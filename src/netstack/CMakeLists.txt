@@ -9,6 +9,7 @@ set(NETSTACK_SOURCES
     netstack_baton.c
     netstack_dns.c
     netstack_dns_handoff.c
+    netstack_dns_lease.c
     netstack_dns_status.c
     netstack_retry.c)
 
