@@ -1031,13 +1031,15 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
          * not through a struct: this layer has no sockaddr, and the
          * SIOCGIFADDR of the socket path fills the same 16 bytes.
          */
-        UBYTE *sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
+        UBYTE *sa;
         ULONG  addr;
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
         if (ch->iface == NULL)
             return AMI_BPF_EINVAL;
+
+        sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
 
         addr = ami_bpf_iface_address(ch->iface);
 

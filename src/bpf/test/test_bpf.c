@@ -709,6 +709,10 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGETIF, name) == 0);
     CHECK(strcmp(name, "eth0") == 0);
 
+    /* A null ifreq is rejected before the sockaddr member is formed. */
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, AMI_BPF_SIOCGIFADDR, NULL) ==
+          AMI_BPF_EINVAL);
+
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGDLT, &value) == 0);
     CHECK(value == DLT_EN10MB);
 
