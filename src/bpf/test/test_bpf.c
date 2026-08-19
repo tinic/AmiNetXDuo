@@ -96,7 +96,18 @@ VOID ami_log(int level, const char *fmt, ...)
     va_end(args);
 }
 
-VOID ami_bpf_lock(VOID)   { }
+static void (*stub_on_lock)(void);
+
+VOID ami_bpf_lock(VOID)
+{
+    if (stub_on_lock != NULL)
+    {
+        void (*fn)(void) = stub_on_lock;
+
+        stub_on_lock = NULL;
+        fn();
+    }
+}
 
 /*
  * Unlock is the only place inside ami_bpf_read() where another task can get
@@ -709,6 +720,10 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGETIF, name) == 0);
     CHECK(strcmp(name, "eth0") == 0);
 
+    /* A null ifreq is rejected before the sockaddr member is formed. */
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, AMI_BPF_SIOCGIFADDR, NULL) ==
+          AMI_BPF_EINVAL);
+
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCGDLT, &value) == 0);
     CHECK(value == DLT_EN10MB);
 
@@ -1034,6 +1049,48 @@ static void test_write_and_binding(void)
 }
 
 /*
+ * Reproduce the interface-removal window in ami_bpf_write(). The write has
+ * selected its injector, then its first unlock lets RemoveInterface() detach
+ * and clear the interface row before the callback starts. The callback and
+ * cookie must be local snapshots by then; the netstack callback uses that
+ * cookie only to make a locked lifetime claim and will reject it if removal
+ * won the race.
+ */
+static void t_detach_mid_write(void)
+{
+    ami_bpf_detach_interface(iface_cookie);
+}
+
+static void test_detach_under_writer(void)
+{
+    UBYTE frame[128];
+    ULONG len;
+
+    printf("bpf: detaching under a writer leaves no table pointer in flight\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    inject_cookie     = NULL;
+    inject_result     = 0;
+    stub_unlock_after = 1;
+    stub_on_unlock    = t_detach_mid_write;
+
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == (LONG)len);
+    CHECK(stub_on_unlock == NULL);
+    CHECK(inject_cookie == iface_cookie);
+
+    /* The detached channel stays open, but no later write can select it. */
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENXIO);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
  * "The packet filter channel you allocate will be associated with the library
  * base ... It will be automatically closed when the library is closed", and
  * EPERM for every call from anyone else.
@@ -1095,6 +1152,37 @@ static void test_channel_ownership(void)
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) == AMI_BPF_ENXIO);
 
     ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
+ * Two closes can validate the same numeric slot before either takes the table
+ * lock. Let the first close finish and another owner reopen the slot while the
+ * second is entering its critical section: the stale close must not retire
+ * the replacement.
+ */
+static void t_replace_mid_close(void)
+{
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OTHER, 0) == 0);
+}
+
+static void test_reopen_under_closer(void)
+{
+    ULONG value = 0;
+
+    printf("bpf: a stale close cannot retire a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+
+    stub_on_lock = t_replace_mid_close;
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == AMI_BPF_EPERM);
+    CHECK(stub_on_lock == NULL);
+
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGBLEN, &value) == 0);
+    CHECK(value == AMI_BPF_DEFAULT_BLEN);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
     CHECK(ami_alloc_count() == 0);
 }
 
@@ -1174,6 +1262,186 @@ static void test_close_owner_under_reader(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+/*
+ * A reader drops the table lock while it waits for a record. Recycle its
+ * numeric slot to another owner at that exact unlock: the old call must not
+ * copy or consume the replacement channel's data.
+ */
+static UBYTE t_reopen_frame[128];
+static ULONG t_reopen_len;
+
+static void t_reopen_mid_read(void)
+{
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OTHER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSETIF, "eth0") == 0);
+    ami_bpf_tap_rx(iface_cookie, t_reopen_frame, t_reopen_len);
+}
+
+static void test_reopen_under_reader(void)
+{
+    UBYTE out[512];
+    ULONG timeout[2] = { 0, 20000 };
+
+    printf("bpf: a waiting reader cannot consume a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSRTIMEOUT, timeout) == 0);
+
+    t_reopen_len = make_tcp(t_reopen_frame, 1234, 80, 5, 0, 6);
+    stub_unlock_after = 1;
+    stub_on_unlock    = t_reopen_mid_read;
+
+    CHECK(ami_bpf_read(T_BPF_OWNER, 0, out, (LONG)sizeof(out)) ==
+          AMI_BPF_EPERM);
+    CHECK(stub_on_unlock == NULL);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) > 0);
+
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
+ * Capture used to release the channel lock and only then read notify_task and
+ * notify_mask from the numeric slot. A close/reopen in that window made the
+ * old packet signal the replacement channel's owner. The target lock is
+ * Forbid(), so doing the non-blocking Signal() before Permit() makes the
+ * notification and the channel state one transaction.
+ */
+static char t_notify_old_task;
+static char t_notify_new_task;
+static LONG t_notify_close_status;
+static LONG t_notify_open_status;
+
+static void t_reopen_before_capture_notify(void)
+{
+    t_notify_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_notify_open_status  = ami_bpf_open(T_BPF_OTHER, 0);
+
+    stub_task = (APTR)&t_notify_new_task;
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OTHER, 0, 1UL << 9) == 0);
+}
+
+static void test_capture_notify_close_reopen(void)
+{
+    UBYTE frame[128];
+    ULONG one = 1;
+    ULONG len;
+
+    printf("bpf: capture notifies the channel that received the packet\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCIMMEDIATE, &one) == 0);
+
+    stub_task = (APTR)&t_notify_old_task;
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OWNER, 0, 1UL << 7) == 0);
+
+    stub_signalled_task    = NULL;
+    stub_signalled_mask    = 0;
+    t_notify_close_status  = -1;
+    t_notify_open_status   = -1;
+    stub_unlock_after      = 1;
+    stub_on_unlock         = t_reopen_before_capture_notify;
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    ami_bpf_tap_rx(iface_cookie, frame, len);
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_notify_close_status == 0);
+    CHECK(t_notify_open_status == 0);
+    CHECK(stub_signalled_task == (APTR)&t_notify_old_task);
+    CHECK(stub_signalled_mask == (1UL << 7));
+
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+
+    stub_task = (APTR)"task";
+}
+
+/*
+ * BIOCSETIF and BIOCSETF both allocate outside the channel lock. A close and
+ * reopen in that window used to leave their AmiBpfChan pointer aimed at the
+ * numeric slot and commit into whoever owned the replacement. Reopening with
+ * the same owner is included: only the slot generation distinguishes it.
+ */
+static APTR t_reopen_owner;
+static LONG t_reopen_close_status;
+static LONG t_reopen_open_status;
+
+static void t_close_and_reopen_channel(void)
+{
+    t_reopen_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_reopen_open_status  = ami_bpf_open(t_reopen_owner, 0);
+}
+
+static void test_ioctl_close_reopen(void)
+{
+    struct bpf_program program;
+    ULONG              before;
+    LONG               status;
+
+    printf("bpf: allocating ioctls cannot cross a close/reopen\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+
+    /* A different base takes the replacement while BIOCSETIF is between its
+       identity snapshot and its buffer allocation. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    before                = ami_alloc_count();
+    t_reopen_owner        = T_BPF_OTHER;
+    t_reopen_close_status = -1;
+    t_reopen_open_status  = -1;
+    stub_unlock_after     = 1;
+    stub_on_unlock        = t_close_and_reopen_channel;
+
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0");
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_reopen_close_status == 0);
+    CHECK(t_reopen_open_status == 0);
+    CHECK(status == AMI_BPF_EPERM);
+    CHECK(ami_alloc_count() == before);       /* abandoned buffer was freed */
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGETIF, (APTR)&program) ==
+          AMI_BPF_EINVAL);                    /* replacement stayed unbound */
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    /* The same base closes and reopens the number while BIOCSETF is copying
+       its program. Owner equality passes, so the generation must reject it. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    program.bf_len   = NELEM(prog_ip);
+    program.bf_insns = (struct bpf_insn *)(APTR)prog_ip;
+    before                = ami_alloc_count();
+    t_reopen_owner        = T_BPF_OWNER;
+    t_reopen_close_status = -1;
+    t_reopen_open_status  = -1;
+    stub_unlock_after     = 1;
+    stub_on_unlock        = t_close_and_reopen_channel;
+
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &program);
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_reopen_close_status == 0);
+    CHECK(t_reopen_open_status == 0);
+    CHECK(status == AMI_BPF_ENXIO);
+    CHECK(ami_alloc_count() == before);       /* abandoned filter was freed */
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /* -------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
@@ -1192,8 +1460,13 @@ int main(int argc, char **argv)
     test_capture_records();
     test_overflow_and_signals();
     test_write_and_binding();
+    test_detach_under_writer();
     test_channel_ownership();
+    test_reopen_under_closer();
     test_close_owner_under_reader();
+    test_capture_notify_close_reopen();
+    test_ioctl_close_reopen();
+    test_reopen_under_reader();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

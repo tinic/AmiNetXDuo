@@ -53,6 +53,7 @@ int main(void)
     NetdevMcast before[NETDEV_MCAST_MAX];
     UBYTE addr[NETDEV_ADDR_LEN];
     UBYTE missing[NETDEV_ADDR_LEN];
+    ULONG count;
     UWORD i;
 
     memset(table, 0, sizeof(table));
@@ -78,13 +79,24 @@ int main(void)
     addr[5]++;
     expect("second existing reference increments", find(table, addr)->refs, 2);
 
-    /* A missing member makes a delete fail before earlier rows are touched. */
+    /*
+     * A delete removes what it finds. A stack that joined by single address
+     * and leaves by range, or that has already dropped one member, must not
+     * be told no AND left in the rest of the groups.
+     */
     set_addr(addr, 0, 0, 0);
     set_addr(missing, 0, 0, 1);
     expect("remove setup", netdev_mcast_del(table, missing), TRUE);
+    expect("a partially missing delete removes what is there",
+           netdev_mcast_range_apply(table, addr, 2, FALSE), TRUE);
+    expect("and the member it did find was released",
+           find(table, addr) == NULL, TRUE);
+
+    /* A range naming nothing at all is still a caller error. */
     memcpy(before, table, sizeof(table));
-    expect("a partially missing delete is refused",
-           netdev_mcast_range_apply(table, addr, 2, FALSE), FALSE);
+    set_addr(missing, 9, 9, 9);
+    expect("a delete matching nothing is refused",
+           netdev_mcast_range_apply(table, missing, 2, FALSE), FALSE);
     expect("a refused delete changes no row",
            memcmp(table, before, sizeof(table)) == 0, TRUE);
 
@@ -103,6 +115,20 @@ int main(void)
            netdev_mcast_add(table, addr), TRUE);
     expect("a saturated reference does not wrap", find(table, addr)->refs,
            0xffffu);
+
+    /* The inclusive size of 00000000..ffffffff is 2^32, which cannot be
+       represented in ULONG.  It is wide, not an empty exact range. */
+    set_addr(addr, 0, 0, 0);
+    set_addr(missing, 0xff, 0xff, 0xff);
+    expect("a full 32-bit suffix range is wide",
+           netdev_mcast_range_wide(addr, missing, &count), TRUE);
+    expect("a wide range supplies no wrapped count", count, 0);
+
+    set_addr(addr, 0, 0, 0);
+    set_addr(missing, 0, 0, NETDEV_MCAST_MAX - 1);
+    expect("exactly the table capacity is not wide",
+           netdev_mcast_range_wide(addr, missing, &count), FALSE);
+    expect("the exact range count", count, NETDEV_MCAST_MAX);
 
     if (failures != 0)
     {

@@ -26,6 +26,14 @@
 
 #include <exec/types.h>
 
+#include "netstack_dns_handoff.h"
+#include "netstack_dns_lease.h"
+#include "netstack_dns_domain.h"
+#include "netstack_dhcp_hostname.h"
+#ifdef AMINETXDUO_IPV6
+#include "netstack_ra.h"
+#endif
+
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/compat.h"
@@ -55,9 +63,6 @@
 #define AMI_POOL_MEM_DIVISOR        16
 
 #ifdef AMINETXDUO_IPV6
-/* Recursive DNS servers held from router advertisements.  See ns_Rdnss. */
-#define AMI_RDNSS_MAX               4
-
 /*
  * The DHCPv6 client's own thread stack.
  *
@@ -87,14 +92,6 @@
  */
 #define AMI_DHCPV6_RELEASE_TICKS    (2UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/*
- * One advertisement of RFC 8106 5.2 search domains, as they arrive: the
- * encoded label sequences rather than the names.  AMI_CFG_MAX_SEARCH is 6 and
- * AMI_CFG_NAME_LEN is 64, so a list this buffer cannot hold is longer than the
- * list it feeds, and the decoder stops at the first name it cannot store
- * either way.
- */
-#define AMI_DNSSL_MAX               256
 #endif
 
 /*
@@ -266,6 +263,7 @@ struct AmiNetStack
      */
     UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
     ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
+    AmiNsDhcpHostnameState ns_DhcpHostname;
 
     /*
      * Another host answered an ARP for an address of this machine.  Counted
@@ -300,6 +298,14 @@ struct AmiNetStack
     NX_DNS              ns_Dns;
     BOOL                ns_DnsCreated;
 
+    /* A BOUND notification can run on the DHCP client's own ThreadX task.
+       It records the interface here; the next caller-thread resolver
+       operation imports option 6 under the ordinary caller bracket. */
+    AmiNsDnsPending     ns_DhcpDnsPending;
+    AmiNsDhcpDnsLease   ns_DhcpDnsLease;
+    AmiNsDhcpSearchLease ns_DhcpSearchLease;
+    AmiNsDhcpDomainState ns_DhcpDomain;
+
 #ifdef AMINETXDUO_IPV6
     /*
      * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
@@ -307,32 +313,26 @@ struct AmiNetStack
      * holds its mutex across a query, and a query needs the IP thread.  So it
      * only writes here, and the next lookup takes what it finds.
      *
-     * This is the set the router last described, not a log of what it has ever
-     * said: a lifetime of zero takes an entry back out (RFC 8106 5.1), and the
-     * absorb step reconciles the DNS client and the reported configuration
-     * against it rather than only adding.  Without that a withdrawn server
-     * stays in the resolver for the life of the machine.
+     * This is the set each interface's router last described, not a log of
+     * what any router has ever said.  A lifetime of zero takes that source's
+     * entry back out (RFC 8106 5.1), and a finite lifetime is pruned before
+     * the next lookup or report.  The resolver receives the union, so one
+     * interface cannot withdraw a server the other still advertises.
      *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as
      * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
      * is answering.
+     *
+     * DNSSL has the same per-entry, per-interface ownership rule.  The
+     * handoff retains that repository; ns_DnsslApplied is the union whose
+     * ownership has actually been acquired in resolver configuration.
      */
-    NXD_ADDRESS         ns_Rdnss[AMI_RDNSS_MAX];
-    UWORD               ns_RdnssCount;
-    volatile BOOL       ns_RdnssPending;    /* written by the IP thread */
-
-    /*
-     * The search domains from the same advertisement, still encoded, for the
-     * same reason: ami_ns6_dnssl() runs on the IP thread and the list it feeds
-     * is read by every resolver call.  ns_DnsslLifetime is the lifetime from
-     * the option, so the absorb step knows whether to add the names or take
-     * them back.
-     */
-    UBYTE               ns_Dnssl[AMI_DNSSL_MAX];
-    UWORD               ns_DnsslLen;
-    ULONG               ns_DnsslLifetime;
-    volatile BOOL       ns_DnsslPending;    /* written by the IP thread */
+    AmiNsRaPending      ns_Ra;
+    char                ns_DnsslApplied[AMI_CFG_MAX_SEARCH]
+                                       [AMI_CFG_NAME_LEN];
+    UWORD               ns_DnsslAppliedCount;
+    char                ns_DnsslDefault[AMI_CFG_NAME_LEN];
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the
@@ -391,16 +391,26 @@ struct AmiNetStack
      */
     volatile BOOL       ns_Dhcpv6Asked;
     /* A Reply has landed and may carry name servers.  Same two-phase rule as
-       ns_RdnssPending: the client's thread writes, a caller thread absorbs. */
+       ns_Ra: the client's thread writes, a caller thread absorbs. */
     volatile BOOL       ns_Dhcpv6DnsPending;
+    /* TRUE only while the retained NetX option buffers describe a live,
+       coherent exchange. Link-down and lease loss clear it before publishing
+       an empty replacement through ns_Dhcpv6DnsPending. */
+    volatile BOOL       ns_Dhcpv6OptionsValid;
     /*
      * The name servers the last Reply named, kept for the same reason
-     * ns_Rdnss[] is: the reconciliation has to know which of the entries in
+     * ns_Ra.rdnss[] is: reconciliation has to know which entries in
      * resolver.nameserver6[] came from which source, or each absorb would
      * withdraw the other's.  netstack_dns.c states which source wins.
      */
     NXD_ADDRESS         ns_Dhcpv6Dns[AMI_RDNSS_MAX];
     UWORD               ns_Dhcpv6DnsCount;
+    /* Search suffixes whose reference ownership was acquired from the last
+       coherent DHCPv6 Domain Search List. This is separate from the resolver
+       list so a replacement Reply can release only DHCPv6's references. */
+    char                ns_Dhcpv6SearchApplied[AMI_CFG_MAX_SEARCH]
+                                             [AMI_CFG_NAME_LEN];
+    UWORD               ns_Dhcpv6SearchAppliedCount;
     UBYTE               ns_Dhcpv6Iface;
     UBYTE               ns_Dhcpv6State;     /* NX_DHCPV6_STATE_*             */
 #endif
@@ -414,6 +424,7 @@ struct AmiNetStack
    link-local is left alone. */
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
+VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index);
 
 /*
  * netstack_dhcpv6.c.  _configure() is called from
@@ -425,6 +436,8 @@ VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
  */
 VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index);
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_address_notify(NX_IP *ip_ptr, UINT status,
                                         UINT interface_index,
@@ -464,6 +477,7 @@ VOID ami_netstack_mark(const char *event);
  */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
+BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 
 /*
  * The public anchor for the baton counters and for the tick task counters,
@@ -508,12 +522,17 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns);
 /* The same, for one interface that appeared or went away after start-up. */
 VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index);
 VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index);
+
+/* Pin the SANA-II allocation behind a BPF capture cookie while it is used. */
+LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 #endif
 
 /* ---------------------------------------------------------------- resolver */
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
+VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD interface_index);
+VOID ami_netstack_dns_dhcp_changed(AmiNetStack *ns, UWORD interface_index);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);

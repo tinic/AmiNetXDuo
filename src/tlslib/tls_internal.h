@@ -419,6 +419,11 @@ extern struct DosLibrary *DOSBase;
 
 /* ----------------------------------------------------------- tls_conn.c, */
 
+/* Copy the caller's host name into the certificate-verification and SNI
+   fields.  Returns TLS_ERR_BADHOSTNAME rather than authenticating a truncated
+   identity when the NetX X.509 representation cannot hold it. */
+LONG  tls_hostname_set(TLSConnection *conn, CONST_STRPTR hostname, ULONG length);
+
 
 /*
  * Serial-port tracing, compiled in only by -DTLS_RESUME_TRACE.  It lives in

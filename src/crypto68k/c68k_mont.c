@@ -479,6 +479,15 @@ VOID c68k_mont_sqr(c68k_limb *r,
 c68k_limb  *t = work;
 
 
+    /* c68k_sqr() doubles from 2*n-1 down to one.  For n == 0 that unsigned
+       starting index wraps, so make the public primitive's empty input a
+       no-op.  The exponentiation caller already refuses an empty modulus,
+       but direct callers should not acquire a hidden non-zero precondition. */
+    if (m_len == 0u)
+    {
+        return;
+    }
+
     c68k_sqr_n(t, x, m_len, work + (m_len << 1) + 1u);
     t[m_len << 1] = 0;
 

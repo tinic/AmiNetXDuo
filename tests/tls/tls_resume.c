@@ -220,7 +220,7 @@ static struct r_hostent *bsd_gethostbyname(struct Library *base, const char *nam
 #define R_OTHERSTORE    "DEVS:Internet/otherstore"
 #define R_TAMPERED      "DH0:tampered.sessions"
 
-/* The session-cache record stride, from src/tlslib/tls_resume.c: 164 bytes of
+/* The session-cache record stride, from src/tlslib/tls_resume.c: 168 bytes of
    fixed fields plus TLS_RESUME_TICKET_MAX.  Spelled out rather than included
    because this program links against nothing of ours. */
 #define R_RECORD        424
@@ -435,7 +435,7 @@ static ULONG r_handshake(struct Library *sbase, struct Library *tbase,
  * corrupted, so the server can neither decrypt the one nor recognise the
  * other.  The layout is the one documented in src/tlslib/tls_resume.c:
  * a 16-byte header, then fixed-size records with the session ID at offset 72
- * and the ticket at 164.
+ * and the ticket at 168.
  *
  * Both have to be corrupted.  A ticket the server rejects would still leave
  * the session ID on the wire, and a server with a working ID cache could

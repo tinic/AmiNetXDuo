@@ -326,17 +326,26 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         return AMI_NET_ERR_STATE;
     }
 
+    /* Publish the owner before adoption. tx_amiga_adopt_thread() holds
+       Forbid() while it creates the TX_THREAD, but a foreign RemTask() can run
+       immediately after that Forbid() is released and before this function's
+       next instruction. If nc_Live were set after the call, the dead-task
+       sweep would see no registration to discard while ThreadX already had
+       one. A failed adoption clears the provisional record below. */
+    caller->nc_Live = TRUE;
+    caller->nc_Task = me;
+
     status = tx_amiga_adopt_thread(&caller->nc_Thread,
                                    (CHAR *)"aminetxduo caller",
                                    AMI_CALLER_PRIORITY);
     if (status != TX_SUCCESS)
     {
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
         AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
         return AMI_NET_ERR_KERNEL;
     }
 
-    caller->nc_Live    = TRUE;
-    caller->nc_Task    = me;
     caller->nc_Adopted = TRUE;
 
     return AMI_NET_OK;
@@ -367,15 +376,20 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 
 VOID ami_netstack_release(AmiNetCaller *caller)
 {
+    struct Task *me;
+    UINT         status;
+
     if (caller == NULL || !caller->nc_Live)
         return;
+
+    me = FindTask(NULL);
 
     /*
      * Inside a bracket the thread holds the baton, so release it the ordinary
      * way first. Release is a teardown call and must not be reached from
      * inside a bracket, and a half-released base is worse than this.
      */
-    if (caller->nc_Adopted)
+    if (caller->nc_Adopted && caller->nc_Task == me)
     {
         caller->nc_Adopted = FALSE;
         (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
@@ -384,7 +398,7 @@ VOID ami_netstack_release(AmiNetCaller *caller)
         return;
     }
 
-    if (caller->nc_Task == FindTask(NULL))
+    if (caller->nc_Task == me)
     {
         /* The owner: resume so the signal can be freed by the task that
            allocated it, then orphan properly. */
@@ -395,11 +409,22 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     }
     else
     {
-        /* Another task is tearing this down. Drop the registration: the signal
-           bit belongs to a task this one must not touch. */
-        (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+        /* Another task is tearing this down, normally the heartbeat after the
+           owner was removed by Exec. It may have died while the baton was
+           released around an Exec Wait(), in which case acquire() can never
+           clear the slot. Remove that identity before deleting the ThreadX
+           registration. The signal bit belongs to the old task and must not
+           be freed from here; discard deliberately leaves it alone. */
+        (VOID)ami_netstack_baton_abandon(&caller->nc_Thread);
+        status = tx_amiga_discard_thread(&caller->nc_Thread);
+        if (status != TX_SUCCESS && status != TX_THREAD_ERROR)
+        {
+            AMI_WARN("netstack: cannot discard dead task's ThreadX context "
+                     "(%ld)", (LONG)status);
+        }
     }
 
+    caller->nc_Adopted = FALSE;
     caller->nc_Live = FALSE;
     caller->nc_Task = NULL;
 }
@@ -472,6 +497,7 @@ static VOID ami_ns_second_expired(ULONG id)
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
+    BOOL  requests_retained = FALSE;
 
     if (ns == NULL)
         return;
@@ -506,8 +532,6 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
      */
     ami_netstack_mdns_stop(ns);
 #endif
-
-    ami_netstack_dns_stop(ns);
 
     /*
      * The heartbeat first: it reaches into the child-base list of
@@ -552,6 +576,10 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_DhcpCreated = FALSE;
     }
 
+    /* DHCP's state callback imports option 6 into the DNS client. Stop and
+       delete the callback source before deleting the object it updates. */
+    ami_netstack_dns_stop(ns);
+
 #ifdef AMINETXDUO_IPV6
     /*
      * The DHCPv6 Release goes on the wire, so it happens here rather than in
@@ -575,11 +603,40 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     {
         if (ns->ns_Iface[i] != NULL)
         {
-            ami_sana2_close(ns->ns_Iface[i]);
-            ns->ns_Iface[i] = NULL;
+            if (ami_sana2_close(ns->ns_Iface[i]))
+            {
+                ns->ns_Iface[i] = NULL;
+            }
+            else
+            {
+                requests_retained = TRUE;
+            }
         }
     }
     ns->ns_IfaceCount = 0;
+
+    /*
+     * An orphaned SANA-II request reaches farther than AmiSana2If. RX slots
+     * hold NX_PACKETs and destination pointers inside ns_PoolMemory; TX slots
+     * hold packet chains there too. A reader that has not quite exited can
+     * also call nx_packet_release(), which follows the packet's pool owner
+     * back to ns_Pool. Deleting the pool and freeing either allocation after
+     * ami_sana2_close() retained the interface turns its deliberate leak into
+     * a use-after-free on the next device completion.
+     *
+     * This is already an unrecoverable driver failure: the device owns memory
+     * it refused to return, and the kernel cannot safely unload while its
+     * reader may remain. Retain the complete stack allocation set with the
+     * interface. A bounded leak on shutdown is the only safe result; freeing
+     * any subset requires proving which point the stuck request or thread has
+     * reached, which the device gives us no way to do.
+     */
+    if (requests_retained)
+    {
+        AMI_ERROR("netstack: retaining packet pool and stack memory because "
+                  "a SANA-II device still owns requests into them");
+        return;
+    }
 
     if (ns->ns_PoolMemory != NULL)
     {
@@ -628,7 +685,6 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         }
 
         ns->ns_IfaceMdns[opened] = cfg->mdns;
-        ns->ns_IfaceCfg[opened]  = i;
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
@@ -663,6 +719,12 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
          */
         if (opened != i)
             ns->ns_Config.interfaces[opened] = *cfg;
+
+        /* The configuration moved with the device, so every mapping must
+           name its compacted slot.  Keeping `i` here points at the stale
+           source entry that the cleanup below marks unconfigured; lookups
+           and interface claims then lose this otherwise live device. */
+        ns->ns_IfaceCfg[opened] = opened;
 
         opened++;
     }
@@ -1022,25 +1084,38 @@ static BOOL ami_ns_wants_ipv4(const AmiNetStack *ns)
     return FALSE;
 }
 
-/* Pick the same interface for a new or restarted AutoIP object. */
-static LONG ami_ns_autoip_select(AmiNetStack *ns)
+/* Pick the requested interface, or the configured AutoIP default when the
+   caller has no per-interface reason for starting it. */
+static LONG ami_ns_autoip_select(AmiNetStack *ns, LONG requested_interface)
 {
     UINT  status;
     UWORD i;
 
-    /* First interface explicitly asking for link-local; failing that, the
-       first one expecting any IPv4 address (the DHCP fallback case). */
-    for (i = 0; i < ns->ns_IfaceCount; i++)
+    if (requested_interface >= 0)
     {
-        if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
-            break;
+        if ((ULONG)requested_interface >= (ULONG)ns->ns_IfaceCount ||
+            !ami_config_iface_wants_ipv4(
+                &ns->ns_Config.interfaces[requested_interface]))
+            return AMI_NET_ERR_CONFIG;
+
+        i = (UWORD)requested_interface;
     }
-    if (i == ns->ns_IfaceCount)
+    else
     {
+        /* First interface explicitly asking for link-local; failing that, the
+           first one expecting any IPv4 address (the startup fallback case). */
         for (i = 0; i < ns->ns_IfaceCount; i++)
         {
-            if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+            if (ns->ns_Config.interfaces[i].iptype == AMI_IPTYPE_LINKLOCAL)
                 break;
+        }
+        if (i == ns->ns_IfaceCount)
+        {
+            for (i = 0; i < ns->ns_IfaceCount; i++)
+            {
+                if (ami_config_iface_wants_ipv4(&ns->ns_Config.interfaces[i]))
+                    break;
+            }
         }
     }
 
@@ -1060,7 +1135,7 @@ static LONG ami_ns_autoip_select(AmiNetStack *ns)
     return AMI_NET_OK;
 }
 
-static LONG ami_ns_start_autoip(AmiNetStack *ns)
+static LONG ami_ns_start_autoip(AmiNetStack *ns, LONG requested_interface)
 {
     UINT status;
     LONG rc;
@@ -1076,9 +1151,19 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns)
      */
     if (ns->ns_AutoIpCreated)
     {
+        if (ns->ns_AutoIpRunning && requested_interface >= 0 &&
+            ns->ns_AutoIp.nx_ip_interface_index != (UINT)requested_interface)
+        {
+            AMI_WARN("netstack: link-local fallback is already serving "
+                     "interface %ld, not interface %ld",
+                     (long)ns->ns_AutoIp.nx_ip_interface_index,
+                     (long)requested_interface);
+            return AMI_NET_ERR_STATE;
+        }
+
         if (!ns->ns_AutoIpRunning)
         {
-            rc = ami_ns_autoip_select(ns);
+            rc = ami_ns_autoip_select(ns, requested_interface);
             if (rc != AMI_NET_OK)
                 return rc;
 
@@ -1116,7 +1201,7 @@ static LONG ami_ns_start_autoip(AmiNetStack *ns)
     }
     ns->ns_AutoIpCreated = TRUE;
 
-    rc = ami_ns_autoip_select(ns);
+    rc = ami_ns_autoip_select(ns, requested_interface);
     if (rc != AMI_NET_OK)
     {
         (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
@@ -1273,16 +1358,20 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             ami_netstack_mark("ipv4");
 
         /*
-         * RFC 3927 1.9: a routable address supersedes a link-local one. The
-         * AutoIP thread does not watch for this itself: it sits in an
-         * indefinite wait for a conflict. So it is stopped here, and can be
-         * restarted if the lease is later lost.
+         * RFC 3927 1.9: a routable address supersedes a link-local one on the
+         * same interface. The AutoIP thread does not watch for this itself: it
+         * sits in an indefinite wait for a conflict. So it is stopped here,
+         * and can be restarted if the lease is later lost. A routable address
+         * on another card must not suspend the one machine-wide AutoIP object
+         * while it is managing this interface.
          *
          * Never from the AutoIP thread itself: nx_auto_ip_stop() is
          * tx_thread_suspend(), and calling it on the running thread suspends
          * it in the middle of its own announcement.
          */
-        if (ns->ns_AutoIpRunning && addr != 0UL && !ami_ns_is_linklocal(addr) &&
+        if (ns->ns_AutoIpRunning &&
+            (UINT)i == ns->ns_AutoIp.nx_ip_interface_index &&
+            addr != 0UL && !ami_ns_is_linklocal(addr) &&
             tx_thread_identify() != &ns->ns_AutoIp.nx_auto_ip_thread)
         {
             (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
@@ -1349,6 +1438,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     case NX_DHCP_STATE_BOUND:
         AMI_INFO("netstack: interface %ld has a DHCP lease",
                  (long)iface_index);
+        ami_netstack_dns_dhcp_changed(ns, (UWORD)iface_index);
         break;
 
     case NX_DHCP_STATE_RENEWING:
@@ -1368,18 +1458,20 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
          * ordinary part of acquiring one, and reporting a first boot as a lost
          * lease is a false alarm.
          */
-        if (previous == (UBYTE)NX_DHCP_STATE_BOUND ||
-            previous == (UBYTE)NX_DHCP_STATE_RENEWING ||
-            previous == (UBYTE)NX_DHCP_STATE_REBINDING)
+        if (previous >= (UBYTE)NX_DHCP_STATE_BOUND)
         {
             AMI_WARN("netstack: interface %ld has LOST its DHCP lease. The "
                      "address and the gateway are off it. Every open "
                      "connection through it is dead",
                      (long)iface_index);
 
+            /* The lease owns no resolver entries after this transition.  As
+               on BOUND, a caller task performs the actual reconciliation. */
+            ami_netstack_dns_dhcp_changed(ns, (UWORD)iface_index);
+
             /* RFC 3927 1.7: keep the machine reachable on the local wire
                while the DHCP client tries again. */
-            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+            if (ami_ns_start_autoip(ns, (LONG)iface_index) != AMI_NET_OK)
                 AMI_WARN("netstack: no link-local fallback on this machine");
         }
         break;
@@ -1672,10 +1764,12 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             {
                 if (ns->ns_Config.interfaces[i].iptype != AMI_IPTYPE_DHCP)
                     continue;
-                if (i == 0)
-                    continue;   /* interface 0 is enabled by nx_dhcp_create() */
 
-                (VOID)nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)i);
+                status = nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)i);
+                if (status != NX_SUCCESS &&
+                    status != NX_DHCP_INTERFACE_ALREADY_ENABLED)
+                    AMI_WARN("netstack: DHCP did not enable interface %ld "
+                             "(%ld)", (long)i, (long)status);
             }
 
             status = nx_dhcp_start(&ns->ns_Dhcp);
@@ -1694,7 +1788,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
     }
 
     if (ami_ns_wants(ns, AMI_IPTYPE_LINKLOCAL) &&
-        ami_ns_start_autoip(ns) != AMI_NET_OK)
+        ami_ns_start_autoip(ns, -1L) != AMI_NET_OK)
         AMI_WARN("netstack: an interface asked for a link-local address and "
                  "did not get one");
 
@@ -1769,7 +1863,7 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             /* RFC 3927: fall back to a link-local address.  If that could
                not be started there is nothing on the way, so do not spend the
                fifteen seconds waiting for an address that cannot arrive. */
-            if (ami_ns_start_autoip(ns) != AMI_NET_OK)
+            if (ami_ns_start_autoip(ns, -1L) != AMI_NET_OK)
             {
                 AMI_WARN("netstack: no link-local fallback either, so this "
                          "interface has no address");
@@ -2355,6 +2449,13 @@ const AmiConfig *netstack_config(VOID)
 {
     AmiNetStack *ns = ami_ns;
 
+    /* DHCP and RA callbacks only mark their interface from a NetX task. A
+       live-config reader is one of the caller tasks allowed to absorb that
+       handoff. Without this, gethostname(), NETSTATUS_SYSTEM and the ARexx
+       variables can report the old lease until an unrelated DNS lookup. */
+    if (ns != NULL)
+        netstack_dns_absorb_pending();
+
     return (ns != NULL) ? &ns->ns_Config : NULL;
 }
 
@@ -2372,17 +2473,27 @@ LONG netstack_hostname_offer(UWORD source, const char *name)
 
     /*
      * Inside the bracket, because of what else reads what it writes.
-     * ami_config_hostname_offer() does not touch NetX Duo. NX_DHCP was handed
-     * ns_Config.hostname as a pointer at create time (nx_dhcp_create above),
-     * so the DHCP thread reads this buffer while building a request. Holding
-     * the baton across the copy means that thread is not running during it,
-     * and no request can carry half of one name and half of another.
+     * ami_config_hostname_offer() does not touch NetX Duo, but reports and
+     * DHCP lease reconciliation read this buffer from the ThreadX side.
+     * Holding the baton also protects the DHCP client's stable outgoing name
+     * while it is copied below, and serialises an explicit offer with a lease
+     * transition that might otherwise restore its saved fallback.
      */
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     taken = ami_config_hostname_offer(&ns->ns_Config, source, name);
+    if (taken)
+    {
+        ami_ns_dhcp_hostname_displace(&ns->ns_DhcpHostname);
+
+        /* Only explicit offers come through this API. Server option 12 is
+           reconciled directly, so it cannot feed back into the next request. */
+        if (ns->ns_DhcpCreated)
+            ami_ns_copy_name(ns->ns_DhcpName, ns->ns_Config.hostname,
+                             sizeof(ns->ns_DhcpName));
+    }
 
     ami_netstack_leave_free(caller);
 
@@ -2417,6 +2528,17 @@ LONG netstack_interface_up(UWORD index)
 
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_ENABLE,
                                                    (UINT)index, &value);
+
+#ifdef AMINETXDUO_IPV6
+    if (status == NX_SUCCESS)
+    {
+        /* Re-arm router solicitation first: SLAAC is what a resumed DHCPv6
+           client's M and O bits come from, so asking the router again before
+           restarting the client keeps the two in the order bring-up uses. */
+        ami_netstack_ipv6_interface_up(ns, index);
+        ami_netstack_dhcpv6_resume(ns, index);
+    }
+#endif
 
     ami_netstack_leave_free(caller);
 
@@ -2474,6 +2596,7 @@ static VOID ami_ns_release_dhcpv6(UWORD index)
         return;
 
     ami_netstack_dhcpv6_release(ns);
+    ami_netstack_dhcpv6_pause(ns);
 
     ami_netstack_leave_free(caller);
 #else
@@ -2579,6 +2702,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     AmiSana2If   *iface;
     UWORD         users;
     UINT          status;
+    BOOL          autoip_removed = FALSE;
 
     if (ns == NULL || !ns->ns_IpCreated ||
         index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
@@ -2677,6 +2801,21 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
+    /* AutoIP keeps only the numeric NX_INTERFACE slot. If that slot is
+       detached and later reused, a surviving worker can configure the new
+       interface even though its configuration never requested link-local
+       addressing. Destroy it while the selected interface still exists; a
+       later link-local or DHCP fallback request creates it again. */
+    if (ns->ns_AutoIpCreated &&
+        ns->ns_AutoIp.nx_ip_interface_index == (UINT)index)
+    {
+        (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        ns->ns_AutoIpCreated = FALSE;
+        ns->ns_AutoIpRunning = FALSE;
+        autoip_removed = TRUE;
+    }
+
     /*
      * nx_ip_interface_detach() does the whole of the NetX Duo side: it resets
      * the TCP connections that went out of this interface, deletes its ARP
@@ -2688,6 +2827,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
     ami_netstack_leave_free(caller);
+
+    if (autoip_removed && ns->ns_AutoIpStack != NULL)
+    {
+        ami_free(ns->ns_AutoIpStack);
+        ns->ns_AutoIpStack = NULL;
+    }
 
     if (status != NX_SUCCESS)
     {
@@ -2789,14 +2934,17 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
     if (ns->ns_DhcpCreated)
         return AMI_NET_OK;
 
-    /* NetX Duo keeps the host name pointer rather than a copy, so it must be
-       storage that outlives the NX_DHCP, the same reason start-up hands it
-       ns_Config. The literal is reached only when no card gave
-       ami_ns_name_after_card() a hardware address to work from. */
+    /* Match the startup path: NetX Duo keeps this pointer, so give it the
+       client's stable outgoing option-12 storage rather than live resolver
+       configuration. A hostname returned by the server may rename the
+       machine, but must not rewrite what the same client asks for next. */
+    ami_ns_copy_name(ns->ns_DhcpName,
+                     (ns->ns_Config.hostname[0] != '\0')
+                         ? ns->ns_Config.hostname : "amiga",
+                     sizeof(ns->ns_DhcpName));
+
     status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
-                            (ns->ns_Config.hostname[0] != '\0')
-                                ? (CHAR *)ns->ns_Config.hostname
-                                : (CHAR *)"amiga");
+                            (CHAR *)ns->ns_DhcpName);
     if (status != NX_SUCCESS)
     {
         AMI_ERROR("netstack: nx_dhcp_create failed (%ld)", (long)status);
@@ -2867,10 +3015,18 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
 
     status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
 
-    /* Same reason as at startup: an interface brought up by hand need not sit
-       out RFC 2131's desynchronisation second either. */
+    /* This path did not call nx_dhcp_start(), but interface_start() performed
+       the same bind/timer/thread activation for the first interface. Record
+       that before its accelerated timer can report BOUND: the resolver handoff
+       rejects callbacks from a client that is not marked started. */
     if (status == NX_SUCCESS)
+    {
+        ns->ns_DhcpStarted = TRUE;
+
+        /* Same reason as at startup: an interface brought up by hand need not
+           sit out RFC 2131's desynchronisation second either. */
         ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
+    }
 
     ami_netstack_leave_free(caller);
 
@@ -3154,6 +3310,7 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
     (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
 
     ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
+    ami_netstack_dns_dhcp_changed(ns, index);
 
     ami_netstack_leave_free(caller);
 
@@ -3236,6 +3393,51 @@ LONG netstack_interface_claim(const char *name, UWORD *index_out)
     ReleaseSemaphore(&ami_ns_lock);
     return rc;
 }
+
+#ifdef AMINETXDUO_BPF
+/*
+ * The BPF interface table deliberately treats its SANA-II pointer as an
+ * opaque cookie. Resolve and claim that cookie under the runtime-interface
+ * lock before an injector turns it back into a pointer. This is the cookie
+ * counterpart of netstack_interface_claim(): once the count is raised,
+ * RemoveInterface() cannot detach or free the allocation until release.
+ */
+LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out)
+{
+    AmiNetStack *ns;
+    LONG         rc = AMI_NET_ERR_STATE;
+    UWORD        i;
+
+    if (cookie == NULL || index_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
+    if (ns != NULL && ns->ns_IpCreated)
+    {
+        for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+        {
+            if ((APTR)ns->ns_Iface[i] != cookie)
+                continue;
+
+            if (ns->ns_IfaceClaims[i] == (UWORD)-1)
+                rc = AMI_NET_ERR_BUSY;
+            else
+            {
+                ns->ns_IfaceClaims[i]++;
+                *index_out = i;
+                rc = AMI_NET_OK;
+            }
+            break;
+        }
+    }
+
+    ReleaseSemaphore(&ami_ns_lock);
+    return rc;
+}
+#endif
 
 VOID netstack_interface_release(UWORD index)
 {
@@ -3557,7 +3759,7 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
             goto rollback;
         }
 
-        rc = ami_ns_start_autoip(ns);
+        rc = ami_ns_start_autoip(ns, -1L);
         ami_netstack_leave_free(caller);
         if (rc != AMI_NET_OK)
             goto rollback;

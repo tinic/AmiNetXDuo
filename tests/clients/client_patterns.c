@@ -60,6 +60,39 @@ struct Library *SocketBase;
 static int  c_errno;
 static LONG c_h_errno;
 
+static LONG t_fdcb_busy_fd = -1;
+static LONG t_fdcb_reject_alloc;
+static LONG t_fdcb_reject_free_fd = -1;
+static LONG t_fdcb_checks;
+static LONG t_fdcb_allocs;
+static LONG t_fdcb_frees;
+
+static LONG t_fd_callback(register LONG fd     __asm("d0"),
+                          register LONG action __asm("d1"))
+{
+    switch (action)
+    {
+        case FDCB_CHECK:
+            t_fdcb_checks++;
+            return (fd == t_fdcb_busy_fd) ? EBUSY : 0;
+
+        case FDCB_ALLOC:
+            t_fdcb_allocs++;
+            if (t_fdcb_reject_alloc)
+            {
+                t_fdcb_reject_alloc = 0;
+                return EACCES;
+            }
+            return 0;
+
+        case FDCB_FREE:
+            t_fdcb_frees++;
+            return (fd == t_fdcb_reject_free_fd) ? ENOTSOCK : 0;
+    }
+
+    return EINVAL;
+}
+
 #ifndef INADDR_LOOPBACK
 #define INADDR_LOOPBACK 0x7f000001UL
 #endif
@@ -256,6 +289,48 @@ static VOID group_a(VOID)
     t_ok(fd >= 0, "socket() after SocketBaseTags", fd);
     if (fd >= 0)
         CloseSocket(fd);
+
+    /* AmiTCP's legacy link-library coordination returns positive errno
+       values. CHECK skips an externally occupied descriptor, while ALLOC and
+       FREE may refuse an operation and their exact error must reach errno. */
+    rc = SocketBaseTags(SBTM_SETVAL(SBTC_FDCALLBACK),
+                        (ULONG)t_fd_callback, TAG_DONE);
+    t_ok(rc == 0, "install SBTC_FDCALLBACK", rc);
+
+    t_fdcb_busy_fd = 0;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    t_ok(fd == 1 && t_fdcb_checks >= 2 && t_fdcb_allocs == 1,
+         "FDCB_CHECK skips a link-library descriptor before FDCB_ALLOC", fd);
+
+    rc = Dup2Socket(fd, 5);
+    t_ok(rc == 5 && t_fdcb_allocs == 2,
+         "Dup2Socket explicit target performs CHECK and ALLOC", rc);
+    if (rc >= 0)
+        CloseSocket(rc);
+
+    t_fdcb_reject_free_fd = fd;
+    rc = CloseSocket(fd);
+    t_ok(rc < 0 && c_errno == ENOTSOCK,
+         "positive FDCB_FREE errno vetoes CloseSocket", rc);
+
+    t_fdcb_reject_free_fd = -1;
+    rc = CloseSocket(fd);
+    t_ok(rc == 0 && t_fdcb_frees >= 2,
+         "descriptor remains live after a refused FDCB_FREE", rc);
+
+    t_fdcb_reject_alloc = 1;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    t_ok(fd < 0 && c_errno == EACCES,
+         "positive FDCB_ALLOC errno is preserved", fd);
+
+    /* The CHECK refusal reserved fd 0 in the socket table. Once the simulated
+       file is gone, FREE releases that reservation before removing the hook. */
+    t_fdcb_busy_fd = -1;
+    rc = CloseSocket(0);
+    t_ok(rc == 0, "release descriptor reserved by FDCB_CHECK", rc);
+
+    rc = SocketBaseTags(SBTM_SETVAL(SBTC_FDCALLBACK), 0UL, TAG_DONE);
+    t_ok(rc == 0, "remove SBTC_FDCALLBACK", rc);
 }
 
 
@@ -1305,6 +1380,38 @@ static VOID group_p(VOID)
     hints.ai_next = &hints;
     rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
     t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_next", rc);
+
+    /*
+     * A service name with NO hints at all. Naming neither a socket type nor a
+     * protocol means both are acceptable, so DEVS:Internet/services has to be
+     * searched for udp as well as tcp, and the result must describe the
+     * protocol the service actually exists for. Defaulting socktype before
+     * the lookup instead of after it made every udp-only service EAI_SERVICE.
+     */
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"tftp", NULL, &res);
+    t_ok(rc == 0 && res != NULL && res->ai_socktype == SOCK_DGRAM &&
+         res->ai_protocol == IPPROTO_UDP,
+         "getaddrinfo(no hints) resolves a udp-only service", rc);
+    if (rc == 0 && res != NULL)
+    {
+        struct sockaddr_in *sin = (struct sockaddr_in *)res->ai_addr;
+
+        t_ok(sin != NULL && ntohs(sin->sin_port) == 69,
+             "the udp-only service carries its port", rc);
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    /* The tcp half of the same rule: still tried first, still SOCK_STREAM. */
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"ftp", NULL, &res);
+    t_ok(rc == 0 && res != NULL && res->ai_socktype == SOCK_STREAM &&
+         res->ai_protocol == IPPROTO_TCP,
+         "getaddrinfo(no hints) resolves a tcp-only service", rc);
+    if (rc == 0 && res != NULL)
+    {
+        freeaddrinfo(res);
+        res = NULL;
+    }
 
     /* 2. The server lookup: AI_PASSIVE, then bind and listen on the result. */
     memset(&hints, 0, sizeof(hints));

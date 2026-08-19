@@ -72,6 +72,14 @@
 #define AMINETXDUO_HAVE_SOCKADDR_STORAGE 1
 #define AMINETXDUO_HAVE_IN_PKTINFO       1
 
+/* macOS publishes this tag unconditionally, while glibc hides it unless GNU
+ * extensions are selected. The NDK has no definition, so cmsg.h supplies the
+ * Amiga ABI shape. Rename that supplied tag after the host headers are safely
+ * parsed, just as timeval is renamed below. */
+#if defined(__APPLE__)
+#define in6_pktinfo ami_in6_pktinfo
+#endif
+
 /*
  * Two structures bsdsocket_vectors.h names in prototypes without defining:
  * the Roadshow routing message and the address-allocation message.  Declared

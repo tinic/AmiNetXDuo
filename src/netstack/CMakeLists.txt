@@ -7,7 +7,11 @@
 set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
+    netstack_dhcp_hostname.c
     netstack_dns.c
+    netstack_dns_domain.c
+    netstack_dns_handoff.c
+    netstack_dns_lease.c
     netstack_dns_status.c
     netstack_retry.c)
 
@@ -21,7 +25,7 @@ endif()
 # not even a branch on a "is IPv6 on" flag.
 if(AMINETXDUO_IPV6)
     list(APPEND NETSTACK_SOURCES netstack_ipv6.c netstack_dhcpv6.c
-                                 dhcpv6_wire.c)
+                                 dhcpv6_wire.c netstack_ra.c)
 endif()
 
 # Capture: registers the SANA-II interfaces with src/bpf/ and installs the

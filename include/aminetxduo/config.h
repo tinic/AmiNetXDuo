@@ -238,6 +238,13 @@ BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
  * outranks the network, so it goes first rather than making the network's
  * domains go away.
  *
+ * search_use[] counts independent network owners of each dynamic entry.  The
+ * ordinary offer/withdraw API remains set-like for DHCP imports and Roadshow
+ * compatibility; the reference pair is for a source such as RFC 8106 whose
+ * entries can be withdrawn without taking an identical suffix learned from
+ * another source with them.  Static entries do not need a count because
+ * search_static makes them permanent.
+ *
  * Between the two network sources there is no ranking to make -- neither is
  * more authoritative than the other -- so they are in arrival order, which is
  * the lease's and then the advertisement's: the lease is drained once at
@@ -252,6 +259,7 @@ typedef struct AmiResolverConfig {
     UWORD   nameserver6_count;
     char    domain[AMI_CFG_DOMAIN_LEN];
     char    search[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
+    UWORD   search_use[AMI_CFG_MAX_SEARCH];
     UWORD   search_count;
     UWORD   search_static;
 } AmiResolverConfig;
@@ -412,6 +420,18 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain);
  * administrator wrote. Returns TRUE if one was removed.
  */
 BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain);
+
+/*
+ * Add or remove one source's ownership of a network search suffix.  Adding an
+ * existing dynamic suffix deepens its count; removing it only erases the
+ * suffix when its last owner leaves.  A static suffix can be acquired and
+ * released, but remains the administrator's throughout.  TRUE means the
+ * requested ownership operation was accepted.
+ */
+BOOL ami_config_search_reference_add(AmiResolverConfig *res,
+                                     const char *domain);
+BOOL ami_config_search_reference_remove(AmiResolverConfig *res,
+                                        const char *domain);
 
 /*
  * The same pair for nameserver6[], the servers a router advertisement's RFC

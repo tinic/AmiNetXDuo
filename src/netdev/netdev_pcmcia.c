@@ -40,8 +40,10 @@
 #include "el3.h"        /* el3_answers(), and no EtherLink III register */
 
 #include <exec/types.h>
+#include <exec/memory.h>
 #include <exec/nodes.h>
 #include <exec/libraries.h>
+#include <exec/tasks.h>
 #include <resources/card.h>
 
 #include <proto/exec.h>
@@ -95,6 +97,20 @@ static VOID pc_release_card(struct CardHandle *h, ULONG flags)
                       : "+r" (_d0)
                       : "r" (_a6), "r" (_a1)
                       : "d1", "a0", "cc", "memory");
+}
+
+static BOOL pc_reset_card(struct CardHandle *h)
+{
+    register struct Library    *_a6 __asm("a6") = CardResource;
+    register struct CardHandle *_a1 __asm("a1") = h;
+    register LONG               res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-0x42)"
+                      : "=r" (res)
+                      : "r" (_a6), "r" (_a1)
+                      : "d1", "a0", "cc", "memory");
+
+    return (BOOL)(res != 0);
 }
 
 static UBYTE pc_misc_control(struct CardHandle *h, UBYTE bits)
@@ -182,10 +198,8 @@ static VOID pc_trace(const char *s, ULONG v)
 #define CIS_FUNCE_LAN_NODE_ID   0x04
 
 /* Configuration Option Register, offset from the configuration base the
-   CISTPL_CONFIG tuple gives.  Bit 6 is the level-mode interrupt select every
-   LAN card wants. */
+   CISTPL_CONFIG tuple gives. */
 #define PC_COR_OFF          0
-#define PC_COR_LEVEL_IRQ    0x40
 
 /*
  * Is a DP8390 decoding at the register base?
@@ -396,63 +410,321 @@ BOOL netdev_mac_cis_node_id(UBYTE *mac)
 /* One slot per machine, so the handle is here rather than threaded through
    the unit: there is nothing for a second one to point at. */
 static struct CardHandle pc_handle;
+static struct Interrupt  pc_removed;
+static struct Interrupt  pc_inserted;
+static struct Interrupt  pc_status;
 
-/*
- * A PCMCIA card is the one card in the table that can leave while the machine
- * is running.  Until this existed the driver went on driving the empty socket:
- * reads return bus noise, the chip never answers, and every request waits for
- * a timeout that means nothing.
- *
- * card.resource calls this at interrupt level with the handle in a1.  It must
- * not touch the card, because there is none, so `running` is cleared first.
- * netdev_offline() then finds ops->stop harmless and answers everything that
- * was queued with S2ERR_OUTOFSERVICE, which a caller can act on.
- */
-static NetdevUnit *pc_unit;
-static struct Interrupt pc_removed;
+/* One slot, one owner and one worker.  The callbacks only change the volatile
+   half below; the worker owns every card.resource call after OwnCard(). */
+#define PC_WORKER_STACK_SIZE  8192UL
+#define PC_WORKER_SIGNAL      SIGF_SINGLE
 
-static ULONG pc_on_removed(register struct CardHandle *h __asm("a1"))
+static NetdevDevice     *pc_dev;
+static NetdevUnit       *pc_unit;
+static const NetdevCard *pc_card;
+static struct Task      *pc_worker;
+static APTR              pc_worker_stack;
+
+static volatile UBYTE pc_present;
+static volatile UBYTE pc_owned;
+static volatile UBYTE pc_linked;
+static volatile UBYTE pc_used;
+static volatile UBYTE pc_ready;
+static volatile UBYTE pc_remove_pending;
+static volatile UBYTE pc_insert_pending;
+static volatile UBYTE pc_was_online;
+
+static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle);
+
+static VOID pc_newlist(struct List *list)
+{
+    list->lh_Head     = (struct Node *)&list->lh_Tail;
+    list->lh_Tail     = (struct Node *)0;
+    list->lh_TailPred = (struct Node *)&list->lh_Head;
+}
+
+/* ReleaseCard() is task-only.  `removed` suppresses the reset which is both
+   unnecessary and impossible once the socket has gone away. */
+static VOID pc_release_owned(ULONG flags, BOOL removed)
+{
+    if (pc_linked == 0)
+        return;
+
+    if (!removed && pc_present != 0 && pc_used != 0)
+        (VOID)pc_reset_card(&pc_handle);
+
+    /* ReleaseCard() can hand a newly inserted card to this queued handle and
+       run pc_on_inserted() before the call returns.  Clear the old ownership
+       first so that callback state wins; clearing it afterwards loses the
+       insertion and leaves the current card unconfigured until it is removed
+       a second time. */
+    pc_owned = 0;
+    pc_present = 0;
+    pc_used  = 0;
+    pc_ready = 0;
+    pc_release_card(&pc_handle, flags);
+
+    Disable();
+    if ((flags & CARDF_REMOVEHANDLE) != 0)
+    {
+        pc_remove_pending = 0;
+        pc_insert_pending = 0;
+        pc_linked = 0;
+        pc_handle.cah_CardNode.ln_Name = NULL;
+    }
+    Enable();
+}
+
+static VOID pc_reject_owned(BOOL keep_handle)
+{
+    BOOL removed = (BOOL)(pc_present == 0);
+
+    pc_release_owned(keep_handle ? 0 : CARDF_REMOVEHANDLE, removed);
+}
+
+/* CardHandle callbacks receive is_Data in A1, not the CardHandle.  These use
+   only file-static state so the structures can be installed before a unit has
+   been built, closing the claim-to-bind removal window. */
+static ULONG pc_on_removed(register APTR data __asm("a1"))
 {
     NetdevUnit *unit = pc_unit;
 
-    (VOID)h;
+    (VOID)data;
+    pc_present        = 0;
+    pc_ready          = 0;
+    pc_remove_pending = 1;
+    pc_insert_pending = 0;
 
     if (unit != NULL)
     {
+        pc_was_online       = unit->nu_Online;
+        unit->nu_Online     = 0;
         unit->nu_Nic.running = FALSE;
-        /* A card pulled out of the slot is the one unambiguous
-           S2EVENT_HARDWARE this driver has, and it is an error as well as a
-           state change: a caller waiting on any of the three learns of it. */
-        if (unit->nu_Online)
-            netdev_offline(unit,
-                           S2EVENT_OFFLINE | S2EVENT_ERROR | S2EVENT_HARDWARE);
     }
 
+    if (pc_worker != NULL)
+        Signal(pc_worker, PC_WORKER_SIGNAL);
+
     return 0;
+}
+
+static ULONG pc_on_inserted(register APTR data __asm("a1"))
+{
+    (VOID)data;
+    pc_present        = 1;
+    pc_owned          = 1;
+    pc_ready          = 0;
+    pc_insert_pending = 1;
+
+    if (pc_worker != NULL)
+        Signal(pc_worker, PC_WORKER_SIGNAL);
+
+    return 0;
+}
+
+static ULONG pc_on_status(register ULONG changes __asm("d0"),
+                          register APTR data __asm("a1"))
+{
+    NetdevUnit *unit = pc_unit;
+
+    (VOID)data;
+
+    if (CardResource != NULL && CardResource->lib_Version >= 39)
+    {
+        /* First call: preserve the change mask so card.resource clears Gayle.
+           The CARDF_POSTSTATUS call with D0 == 0 is the safe time to touch the
+           controller, after the gate-array latch has been cleared. */
+        if (changes != 0)
+            return changes;
+        if (pc_ready != 0 && pc_owned != 0 && pc_present != 0 && unit != NULL)
+            (VOID)netdev_interrupt(unit);
+        return 0;
+    }
+
+    if (pc_ready != 0 && pc_owned != 0 && pc_present != 0 && unit != NULL)
+        (VOID)netdev_interrupt(unit);
+
+    /* V37 has no post-status callback.  This is cnet.device's Gayle clear:
+       acknowledge exactly the latched changes after draining the card. */
+    *(volatile UBYTE *)0x00da9000UL =
+        (UBYTE)(((UBYTE)changes ^ 0x2cu) | 0xc0u);
+    return 0;
+}
+
+BOOL netdev_pcmcia_is_unit(const NetdevUnit *unit)
+{
+    return (BOOL)(unit != NULL && unit->nu_Nic.card != NULL &&
+                  unit->nu_Nic.card->bus == NETDEV_BUS_PCMCIA);
+}
+
+BOOL netdev_pcmcia_available(const NetdevUnit *unit)
+{
+    return (BOOL)(!netdev_pcmcia_is_unit(unit) ||
+                  (unit == pc_unit && pc_present != 0 && pc_owned != 0 &&
+                   pc_ready != 0));
+}
+
+VOID netdev_pcmcia_cancel_resume(const NetdevUnit *unit)
+{
+    if (unit != NULL && unit == pc_unit)
+        pc_was_online = 0;
+}
+
+static VOID pc_worker_entry(VOID)
+{
+    for (;;)
+    {
+        UBYTE removed;
+        UBYTE inserted;
+
+        (VOID)Wait(PC_WORKER_SIGNAL);
+
+        for (;;)
+        {
+            Disable();
+            removed  = pc_remove_pending;
+            inserted = pc_insert_pending;
+            pc_remove_pending = 0;
+            pc_insert_pending = 0;
+            Enable();
+
+            if (removed == 0 && inserted == 0)
+                break;
+            if (pc_dev == NULL)
+                continue;
+
+            ObtainSemaphore(&pc_dev->nd_PcmciaLock);
+
+            if (removed != 0)
+            {
+                if (pc_unit != NULL)
+                    netdev_pcmcia_detached(
+                        pc_unit,
+                        S2EVENT_OFFLINE | S2EVENT_ERROR | S2EVENT_HARDWARE);
+                if (pc_owned != 0)
+                    pc_release_owned(0, TRUE); /* stay queued for reinsertion */
+            }
+
+            if (inserted != 0 && pc_owned != 0 && pc_present != 0)
+            {
+                const NetdevCard *card = NULL;
+                APTR              base = pc_configure_owned(&card, TRUE);
+
+                /* pc_configure_owned() releases a card itself on every
+                   configuration failure.  Do not release again: that call
+                   may already have delivered ownership of a newer insertion
+                   to this handle. */
+                if (base == NULL)
+                {
+                    /* The next pending callback, if any, owns the retry. */
+                }
+                else if (pc_present == 0 || card != pc_card || pc_unit == NULL ||
+                         !netdev_pcmcia_reattach(pc_unit, card, base))
+                {
+                    if (pc_owned != 0)
+                        pc_reject_owned(TRUE);
+                }
+                else if (pc_present != 0)
+                {
+                    pc_ready = 1;
+                    if (pc_was_online != 0 && pc_unit->nu_Openers != 0)
+                        (VOID)netdev_online(pc_unit);
+                }
+            }
+
+            ReleaseSemaphore(&pc_dev->nd_PcmciaLock);
+        }
+    }
+}
+
+static BOOL pc_worker_start(NetdevDevice *dev)
+{
+    struct MemList *memlist;
+    struct Task    *task;
+
+    if (pc_worker != NULL)
+    {
+        pc_dev = dev;
+        return TRUE;
+    }
+
+    pc_worker_stack = AllocMem(PC_WORKER_STACK_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    if (pc_worker_stack == NULL)
+        return FALSE;
+
+    memlist = (struct MemList *)AllocMem(sizeof(struct MemList),
+                                         MEMF_PUBLIC | MEMF_CLEAR);
+    task = (struct Task *)AllocMem(sizeof(struct Task), MEMF_PUBLIC | MEMF_CLEAR);
+    if (memlist == NULL || task == NULL)
+    {
+        if (task != NULL)
+            FreeMem(task, sizeof(struct Task));
+        if (memlist != NULL)
+            FreeMem(memlist, sizeof(struct MemList));
+        FreeMem(pc_worker_stack, PC_WORKER_STACK_SIZE);
+        pc_worker_stack = NULL;
+        return FALSE;
+    }
+
+    memlist->ml_NumEntries      = 1;
+    memlist->ml_ME[0].me_Addr   = task;
+    memlist->ml_ME[0].me_Length = sizeof(struct Task);
+
+    task->tc_Node.ln_Type = NT_TASK;
+    /* ReleaseCard() is required before card.resource can notify anybody about
+       the next insertion.  A negative-priority task can be starved forever by
+       an ordinary CPU-bound application, so run at the normal task priority;
+       the worker sleeps except for removal and insertion transactions. */
+    task->tc_Node.ln_Pri  = 0;
+    task->tc_Node.ln_Name = (char *)"anxnet pcmcia";
+    task->tc_SPLower      = pc_worker_stack;
+    task->tc_SPUpper      = (APTR)((UBYTE *)pc_worker_stack +
+                                   PC_WORKER_STACK_SIZE);
+    task->tc_SPReg        = task->tc_SPUpper;
+    pc_newlist(&task->tc_MemEntry);
+    AddTail(&task->tc_MemEntry, (struct Node *)memlist);
+
+    pc_dev = dev;
+    pc_worker = task;
+    if (AddTask(task, (APTR)pc_worker_entry, (APTR)0) == NULL)
+    {
+        pc_worker = NULL;
+        pc_dev = NULL;
+        FreeMem(task, sizeof(struct Task));
+        FreeMem(memlist, sizeof(struct MemList));
+        FreeMem(pc_worker_stack, PC_WORKER_STACK_SIZE);
+        pc_worker_stack = NULL;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static VOID pc_worker_stop(VOID)
+{
+    struct Task *task;
+    APTR         stack;
+
+    Forbid();
+    task      = pc_worker;
+    stack     = pc_worker_stack;
+    pc_worker = NULL;
+    pc_worker_stack = NULL;
+    if (task != NULL)
+        RemTask(task);
+    Permit();
+
+    if (stack != NULL)
+        FreeMem(stack, PC_WORKER_STACK_SIZE);
 }
 
 /* The probe calls this once the unit the slot belongs to exists. */
 VOID netdev_pcmcia_bind(NetdevUnit *unit)
 {
     pc_unit = unit;
-}
-
-/*
- * Give the slot back, and take the handle out of the resource with it.
- *
- * ReleaseCard(handle, 0) drops ownership and leaves the handle enqueued, so
- * card.resource still holds a Node that lives in this driver's BSS.  It then
- * hands the slot back on the next insertion with nothing of ours listening,
- * and after an expunge the Node is in freed memory.  CARDF_REMOVEHANDLE takes
- * it out, and cnet.device passes it on every give-up path it has
- * (cnetdevice.asm:963-964 for the OpenDevice error, :1325-1329 for the
- * expunge).  ln_Name is this file's marker for "the resource still has it", so
- * it is cleared in the same place, once.
- */
-static VOID pc_give_up(struct CardHandle *handle)
-{
-    pc_release_card(handle, CARDF_REMOVEHANDLE);
-    handle->cah_CardNode.ln_Name = NULL;
+    pc_card = (unit != NULL) ? unit->nu_Nic.card : NULL;
+    pc_ready = (UBYTE)(unit != NULL && pc_present != 0 && pc_owned != 0);
+    if (pc_remove_pending != 0 && pc_worker != NULL)
+        Signal(pc_worker, PC_WORKER_SIGNAL);
 }
 
 /*
@@ -475,7 +747,95 @@ static VOID pc_give_up(struct CardHandle *handle)
  * recorded against the machine rather than a card, because there is no card
  * yet and a slot step filed under the wrong row misleads.
  */
-APTR netdev_pcmcia_claim(const NetdevCard **card_out)
+APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
+{
+    struct CardHandle *handle = &pc_handle;
+    struct CardHandle *owner;
+    APTR               base;
+    UWORD              ci = ANXDIAG_NOCARD;
+
+    if (CardResource == NULL)
+        CardResource = OpenResource((STRPTR)CARDRESNAME);
+
+    pc_trace("pc: resource ", (ULONG)CardResource);
+    netdev_diag_note(ANXDIAG_PC_RESOURCE, ci, (ULONG)CardResource);
+    if (CardResource == NULL || pc_linked != 0)
+        return NULL;
+
+    if (!pc_worker_start(dev))
+        return NULL;
+
+    pc_removed.is_Node.ln_Type = NT_INTERRUPT;
+    pc_removed.is_Node.ln_Pri  = 0;
+    pc_removed.is_Node.ln_Name = (char *)"anxnet.device removed";
+    pc_removed.is_Data         = NULL;
+    pc_removed.is_Code         = (VOID (*)())pc_on_removed;
+
+    pc_inserted.is_Node.ln_Type = NT_INTERRUPT;
+    pc_inserted.is_Node.ln_Pri  = 0;
+    pc_inserted.is_Node.ln_Name = (char *)"anxnet.device inserted";
+    pc_inserted.is_Data         = NULL;
+    pc_inserted.is_Code         = (VOID (*)())pc_on_inserted;
+
+    pc_status.is_Node.ln_Type = NT_INTERRUPT;
+    pc_status.is_Node.ln_Pri  = 0;
+    pc_status.is_Node.ln_Name = (char *)"anxnet.device status";
+    pc_status.is_Data         = NULL;
+    pc_status.is_Code         = (VOID (*)())pc_on_status;
+
+    /* IFAVAILABLE prevents an empty-slot probe from becoming a latent owner.
+       V39's second callback services the chip only after Gayle's latch is
+       clear; V37 is handled explicitly in pc_on_status(). */
+    handle->cah_CardNode.ln_Type = 0;
+    handle->cah_CardNode.ln_Name = (char *)"anxnet.device";
+    handle->cah_CardNode.ln_Pri  = 0;
+    handle->cah_CardFlags = (UBYTE)(CARDF_IFAVAILABLE |
+        (CardResource->lib_Version >= 39 ? CARDF_POSTSTATUS : 0));
+    handle->cah_CardRemoved  = &pc_removed;
+    handle->cah_CardInserted = &pc_inserted;
+    handle->cah_CardStatus   = &pc_status;
+
+    /* Set the expected inserted state before OwnCard().  A removal callback
+       may run after OwnCard has accepted the handle but before it returns;
+       writing `present = 1` afterwards would erase that observation. */
+    pc_present = 1;
+    pc_owned   = 0;
+    pc_used    = 0;
+    pc_ready   = 0;
+    pc_remove_pending = 0;
+    pc_insert_pending = 0;
+
+    owner = pc_own_card(handle);
+    pc_trace("pc: own ", (ULONG)owner);
+    netdev_diag_note(ANXDIAG_PC_OWN, ci, (ULONG)owner);
+    if (owner != NULL)
+    {
+        /* IFAVAILABLE enqueued nothing, so ReleaseCard() would Remove() an
+           unlinked node. */
+        handle->cah_CardNode.ln_Name = NULL;
+        pc_present = 0;
+        pc_owned = 0;
+        pc_worker_stop();
+        pc_dev = NULL;
+        return NULL;
+    }
+
+    pc_linked = 1;
+    pc_owned  = 1;
+
+    base = pc_configure_owned(card_out, FALSE);
+    if (base == NULL && pc_linked == 0)
+    {
+        pc_worker_stop();
+        pc_dev = NULL;
+    }
+    return base;
+}
+
+/* The insertion callback already owns the handle.  Reuse the same CIS and COR
+   path without trying OwnCard() a second time.  keep_handle leaves us queued
+   after a foreign or failed replacement so the next insertion is observed. */
+static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
 {
     struct CardHandle *handle = &pc_handle;
     const NetdevCard  *card;
@@ -493,71 +853,10 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     UBYTE            index;
     UWORD            ci = ANXDIAG_NOCARD;
 
-    if (CardResource == NULL)
-        CardResource = OpenResource((STRPTR)CARDRESNAME);
-
-    pc_trace("pc: resource ", (ULONG)CardResource);
-    netdev_diag_note(ANXDIAG_PC_RESOURCE, ci, (ULONG)CardResource);
-    if (CardResource == NULL)
-        return NULL;            /* no slot on this machine */
-
     /* A second claim -- a card taken out and another put in -- must not read
        the first card's CIS. */
     pc_cis_len      = 0;
     pc_have_node_id = FALSE;
-
-    pc_removed.is_Node.ln_Type = NT_INTERRUPT;
-    pc_removed.is_Node.ln_Pri  = 0;
-    pc_removed.is_Node.ln_Name = (char *)"anxnet.device";
-    pc_removed.is_Data         = NULL;
-    pc_removed.is_Code         = (VOID (*)())pc_on_removed;
-
-    /*
-     * CARDF_IFAVAILABLE matters even on a machine that never uses PCMCIA.
-     *
-     * Without it, OwnCard() does not answer "no".  It enqueues the handle and
-     * grants the slot later, when a card appears or the present owner lets go.
-     * anxnet.device is opened once on an A600 or an A1200 with an empty slot,
-     * the probe finds nothing and moves on, and the handle stays in
-     * card.resource's list for the life of the machine.  From then on the slot
-     * is claimed the moment anything is plugged into it, with cah_CardInserted
-     * NULL so nothing of ours notices.  cnet.device, the CF IDE driver and
-     * anything else are locked out until the next reboot.  With the bit set,
-     * OwnCard() returns the current owner and enqueues nothing.
-     *
-     * cnet.device sets CARDF_IFAVAILABLE (cnetdevice.asm:4655-4665) for the
-     * same reason, plus CARDF_POSTSTATUS on V39+, which is part of its
-     * interrupt path and not of this one.
-     */
-    handle->cah_CardNode.ln_Name = (char *)"anxnet.device";
-    handle->cah_CardNode.ln_Pri  = 0;
-    handle->cah_CardFlags        = CARDF_IFAVAILABLE;
-    handle->cah_CardRemoved      = &pc_removed;
-    handle->cah_CardInserted     = NULL;
-    handle->cah_CardStatus       = NULL;
-
-    {
-        struct CardHandle *owner = pc_own_card(handle);
-
-        pc_trace("pc: own ", (ULONG)owner);
-        netdev_diag_note(ANXDIAG_PC_OWN, ci, (ULONG)owner);
-        if (owner != NULL)
-        {
-            /*
-             * No ReleaseCard() here.  With CARDF_IFAVAILABLE a refused
-             * OwnCard() enqueues nothing, because card.resource jumps the
-             * Enqueue and returns the owner.  ReleaseCard(CARDF_REMOVEHANDLE)
-             * calls exec Remove() on the handle whether or not it is in a
-             * list.  That unlinked a Node still zero from BSS and wrote
-             * through its NULL ln_Pred, over address 0 and address 4.  A
-             * machine that gets here has its slot owned by another driver, so
-             * a probing driver must be harmless.  A cleared ln_Name is all
-             * that is owed, because the resource holds nothing of ours.
-             */
-            handle->cah_CardNode.ln_Name = NULL;
-            return NULL;
-        }
-    }
 
     /*
      * What is in the slot.  A card that names any function but LAN adapter is
@@ -592,7 +891,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
         if (buf[2] != CIS_FUNC_LAN)
         {
             netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, (ULONG)buf[2]);
-            pc_give_up(handle);
+            pc_reject_owned(keep_handle);
             return NULL;
         }
     }
@@ -650,7 +949,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     {
         pc_trace("pc: no config tuple ", 0);
         netdev_diag_note(ANXDIAG_PC_NOCONFIG, ci, 0);
-        pc_give_up(handle);
+        pc_reject_owned(keep_handle);
         return NULL;
     }
     {
@@ -679,7 +978,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     {
         pc_trace("pc: no cftable ", 0);
         netdev_diag_note(ANXDIAG_PC_NOCFTABLE, ci, 0);
-        pc_give_up(handle);
+        pc_reject_owned(keep_handle);
         return NULL;
     }
     index = (UBYTE)(buf[2] & 0x3f);
@@ -712,7 +1011,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
            like a claim that never ran. */
         netdev_diag_note(ANXDIAG_PC_NOROW, ci,
                          ((ULONG)manf << 16) | (ULONG)prod);
-        pc_give_up(handle);
+        pc_reject_owned(keep_handle);
         return NULL;            /* no PCMCIA row at all: nothing to drive it */
     }
     ci = netdev_diag_card(card);
@@ -782,9 +1081,15 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * pc_chip_answers() decides on.
      */
     {
-        UBYTE cor    = (UBYTE)(index | PC_COR_LEVEL_IRQ);
+        /* cnet.device and cnet16.device write the configuration index alone.
+           COR bit 6 requests a level-mode PC Card interrupt, but Gayle reports
+           the card through its latched status-change mechanism, not a PC-style
+           shared IRQ line.  Adding the bit is not vendor parity and has never
+           been validated on either of the cards this driver is meant to fix. */
+        UBYTE cor    = index;
         UWORD rounds = 0;
 
+        pc_used = 1;
         attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
         *attr = cor;
         pc_trace("pc: cor ", (ULONG)(APTR)attr);
@@ -811,7 +1116,7 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
                 netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
                 netdev_diag_note(ANXDIAG_PC_SILENT, ci,
                                  (ULONG)(card->base + card->reg_off));
-                pc_give_up(handle);
+                pc_reject_owned(keep_handle);
                 return NULL;
             }
             netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
@@ -825,8 +1130,8 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
     }
 
     /*
-     * The card's interrupt is left at card.resource's default, and there is no
-     * second CardMiscControl() call.
+     * The card IRQ uses the status-change callback installed in OwnCard().
+     * There is deliberately no second CardMiscControl() call.
      *
      * There used to be one on V39 and later, carrying
      * CARD_INTF_SETCLR|CARD_INTF_IRQ to enable the BSY/IRQ status change.
@@ -849,8 +1154,8 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
      * consult the write-protect or digital-audio bits, so none of this shows
      * there.
      */
-    pc_trace("pc: irq at resource default v ", (ULONG)CardResource->lib_Version);
-    netdev_diag_note(ANXDIAG_PC_IRQSKIP, ci,
+    pc_trace("pc: status irq v ", (ULONG)CardResource->lib_Version);
+    netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
                      (ULONG)CardResource->lib_Version);
 
     pc_trace("pc: claimed ", (ULONG)card->base);
@@ -864,16 +1169,26 @@ APTR netdev_pcmcia_claim(const NetdevCard **card_out)
 
 VOID netdev_pcmcia_release(VOID)
 {
-    struct CardHandle *handle = &pc_handle;
+    NetdevDevice *dev = pc_dev;
 
-    pc_unit = NULL;
+    if (dev != NULL)
+        ObtainSemaphore(&dev->nd_PcmciaLock);
 
-    /* No CardMiscControl() on the way out either: ReleaseCard() calls
-       ResetGayleRegs() itself once the slot is free, which puts the status,
-       change, control and interrupt registers back to their defaults.  The
-       call that was here passed CARD_INTF_IRQ alone, which the resource masks
-       to zero and writes to the status register, the same clobber as the one
-       on the claim path. */
-    if (CardResource != NULL && handle->cah_CardNode.ln_Name != NULL)
-        pc_give_up(handle);
+    /* CardResetCard() is required before handing a configured I/O card to the
+       next owner.  ReleaseCard() then restores Gayle and REMOVEHANDLE ensures
+       no callback points into an expunged device image. */
+    if (CardResource != NULL && pc_linked != 0)
+        pc_release_owned(CARDF_REMOVEHANDLE, (BOOL)(pc_present == 0));
+
+    pc_unit   = NULL;
+    pc_card   = NULL;
+    pc_present = 0;
+    pc_owned   = 0;
+    pc_used    = 0;
+    pc_ready   = 0;
+    pc_worker_stop();
+    pc_dev = NULL;
+
+    if (dev != NULL)
+        ReleaseSemaphore(&dev->nd_PcmciaLock);
 }

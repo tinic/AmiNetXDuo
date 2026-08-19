@@ -190,8 +190,10 @@ STRPTR ugl_StrError(UG_A6, register LONG err __asm("d1"))
 
 /*
  * getcredentials(NULL) and getcredentials(self) are the common cases. For any
- * other task this searches the open contexts. The pointer stays valid as long
- * as that opener holds the library open.
+ * other task this searches the open contexts.  That context can close as soon
+ * as Forbid() is released, so a pointer into it would already be stale before
+ * the caller could dereference it.  Cross-task results are copied into the
+ * querying opener while the child list is frozen.
  */
 struct ug_credentials *ugl_getcredentials(UG_A6,
                                           register struct Task *task __asm("a0"))
@@ -218,11 +220,12 @@ struct ug_credentials *ugl_getcredentials(UG_A6,
         if (other->ug_Owner == task)
         {
             /*
-             * Returned as it is: a cr_login resolution here writes into the
-             * context of another task without its knowledge, and the caller
+             * Copied as it is: resolving cr_login here would still write into
+             * another task's context without its knowledge, and the caller
              * only asked to read it.
              */
-            result = &other->ug_Cred;
+            base->ug_CredResult = other->ug_Cred;
+            result = &base->ug_CredResult;
             break;
         }
     }

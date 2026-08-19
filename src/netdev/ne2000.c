@@ -405,6 +405,24 @@ static BOOL ne2000_odd_reads_ok(ULONG seen)
 }
 
 /*
+ * The reset port is whole-file register 31, so its read is itself one of the
+ * odd-register reads that cnet16 performs as a word.  Keep the complete pulse
+ * in one function: changing getodd and merely rereading ISR asks whether a
+ * reset happened without repeating the operation whose access width was wrong.
+ */
+static VOID ne2000_probe_reset(NetdevNic *nic)
+{
+    UBYTE tmp = ASIC_GET(nic, NE2000_ASIC_RESET);
+
+    ne_delay(nic, 10000);
+    ASIC_PUT(nic, NE2000_ASIC_RESET, tmp);
+    ne_delay(nic, 5000);
+
+    NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
+    ne_delay(nic, 5000);
+}
+
+/*
  * NetBSD's ne2000_detect, minus the NE1000 arm: no card in this family has an
  * 8-bit buffer, and the byte-mode write it uses to find one is invasive.
  * TRUE means a DS8390 answered and its 16 KB of buffer reads back.
@@ -415,13 +433,7 @@ static BOOL ne2000_detect(NetdevNic *nic)
     UBYTE tmp;
     UWORD i;
 
-    tmp = ASIC_GET(nic, NE2000_ASIC_RESET);
-    ne_delay(nic, 10000);
-    ASIC_PUT(nic, NE2000_ASIC_RESET, tmp);
-    ne_delay(nic, 5000);
-
-    NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
-    ne_delay(nic, 5000);
+    ne2000_probe_reset(nic);
 
     /*
      * ED_CR_STA is not in the mask, and NetBSD's is the only version of this
@@ -458,11 +470,10 @@ static BOOL ne2000_detect(NetdevNic *nic)
      * of the two the card needs.
      *
      * CR, read just above, is register 0 and even, so it answers on such a
-     * card and cannot tell one apart.  The first odd register touched is where
-     * the question must be asked, and if it fails the word path is turned on
-     * and it is asked again.  On a card that does not need this the first call
-     * succeeds and nothing changes.  On a window with no chip behind it both
-     * calls fail and the card is rejected as before.
+     * card and cannot tell one apart.  The reset port touched before it is
+     * register 31 and odd, however.  If the byte-mode odd-register tests fail,
+     * the word path is turned on and the complete reset pulse is repeated
+     * before ISR is asked again.  That is the ordering in cnet16.device.
      *
      * Every other card keeps NetBSD's test, unchanged, byte for byte.  A Zorro
      * board's registers are adjacent bytes at a stride and cannot need any of
@@ -502,6 +513,7 @@ static BOOL ne2000_detect(NetdevNic *nic)
             }
 
             NE_TRACE("ne: trying cnet16 odd reads ", 0);
+            ne2000_probe_reset(nic);
             word = ne2000_odd_seen(nic);
             netdev_diag_note(ANXDIAG_ODD_WORD, ci, word);
 

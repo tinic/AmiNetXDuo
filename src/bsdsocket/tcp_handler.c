@@ -784,9 +784,6 @@ static BOOL tcp_session_open(TcpSession *s, struct DosPacket *pkt)
 
 static VOID tcp_session_close(TcpSession *s)
 {
-    AmiSocket *sock;
-    BOOL       shared;
-
     if (s->ts_Base == NULL)
         return;
 
@@ -794,22 +791,14 @@ static VOID tcp_session_close(TcpSession *s)
      * A socket taken through TCP:OBTAIN= can outlive this session: the program
      * that released a copy of it still holds the original descriptor. Its
      * as_Owner points at this base, which is about to be freed, so the next
-     * receive or disconnect callback would Signal() a task pointer read out of
-     * freed memory. Clearing as_Owner is what handoff.c does with a parked
-     * socket, and bsd_event_post() treats a NULL owner as "no task to wake".
-     *
-     * The refcount is read before the close because after it the block can be
-     * gone. Any base that closes while a socket it owns is still referenced
-     * elsewhere has this hazard. The general fix belongs in
-     * bsd_socket_release().
+     * receive or disconnect callback must not Signal() through freed memory.
+     * bsd_socket_release() handles that while the socket is still live: when
+     * another reference remains, it clears an owner matching the closing base.
+     * Nothing here may inspect the socket after CloseSocket(), because a
+     * concurrent close of the other reference can make this one the last and
+     * the call will free the AmiSocket.
      */
-    sock   = bsd_lookup(s->ts_Base, s->ts_Fd);
-    shared = (sock != NULL && sock->as_RefCount > 1);
-
     (VOID)bsd_CloseSocket(s->ts_Fd, s->ts_Base);
-
-    if (shared && sock->as_Owner == s->ts_Base)
-        sock->as_Owner = NULL;
 
     CloseLibrary((struct Library *)s->ts_Base);
     s->ts_Base = NULL;

@@ -9,6 +9,38 @@ version at the top when it merges.
 
 ## Unreleased
 
+- PCMCIA network interrupts now run through `card.resource`'s status-change callback, including the V39 post-status phase and the Kickstart 2.x Gayle acknowledgement, instead of registering a raw PORTS server that bypassed the socket owner
+- Removing a PCMCIA card takes the unit offline without touching the empty socket, releases ownership from task context, and keeps the handle ready for a validated reinsertion. Reinsertion reruns CIS, COR and chip attachment and restores an online unit unless the caller explicitly put it offline
+- A PCMCIA card configured for use is reset before its handle is released, and an empty or initially busy socket can be claimed on a later `OpenDevice()` instead of requiring the device resident to be reloaded
+- `cnet16` detection repeats the complete reset-port pulse after switching odd-register reads to the 16-bit path. The old retry changed the ISR read width only, after the reset read that needed the same workaround had already failed
+- Creating or resetting a ThreadX thread fails cleanly when Exec cannot allocate its native Task. The failed Task creation was invisible to ThreadX, which published and could start a thread that had nothing underneath it
+- Thread teardown still detaches the native Task and recovers the scheduler baton when the reaper has no spare signal bit. That fallback returned before recording the live zombie, so the caller could free its stack and the scheduler could remain owned by a thread that no longer existed
+- Thread stacks are rejected whenever their ranges overlap, including when the new range wholly contains an existing one. That containment passed the endpoint-only check and let two Tasks use the same memory as a stack
+- A TLS host name too long for both certificate verification and SNI is refused instead of silently shortened. Truncating the identity could verify or contact a different host from the one the program requested
+- A transmit request that finds the hardware ring full after copying is now marked asynchronous before it is requeued. It still carried `IOF_QUICK`, so its eventual completion was not replied and the caller could wait forever
+- The mbuf cluster limit remains a limit when two tasks grow the pool together. Both could observe the last slot free while allocation ran outside the lock and each add a cluster
+- `httpd` refuses a document root longer than it can hold instead of serving a shortened one, which named a different directory
+- The 68020 modular-squaring primitive is a no-op on an empty modulus rather than running its loop backwards through memory. Nothing in the stack calls it that way; a program using the routine directly had no way to know that was required
+- Asking to share the library base no longer loses the rest of the request. The answer is still no -- signals and timer state belong to the task that opened the library -- but refusing the tag discarded every tag after it in the same call, so a program that asked to share and linked its errno in one go ran without an errno for its whole life
+- Leaving a range of multicast addresses removes the ones that are there. A program that joined them one at a time, or that had already left one, was told the whole request failed and stayed in every group in the range
+- `getaddrinfo()` with no hints resolves a service that exists only over UDP again -- `tftp`, `ntp`, `syslog` and the rest. Tightening the protocol checks moved the lookup to after the socket type was defaulted, and the "try both protocols" step could then never run
+- A program killed while it was inside the stack no longer stops the network for everything else. Its claim on the stack could not be given back by a task that no longer exists, and nothing else was allowed to give it back either
+- Two programs closing encrypted connections at the same time no longer corrupt the list the encryption library keeps of its open sessions
+- Shutting the stack down no longer frees memory a stuck driver request can still reach. When a device refuses to return a request, the interface is deliberately left behind, and the packet pool it points into was deleted anyway
+- Asking for another task's credentials returns a copy. The pointer named that task's own context, which could close the moment the search released the scheduler, so the caller read it after it was gone
+- A TCP: session no longer looks at its socket after closing it. If another holder closed at the same moment, that close was the last one and the memory was already free
+- An unbound interface only releases a packet for commands that carry one. A control command's packet field is whatever was there before, and it was being freed as though it were a packet
+- A LANCE card keeps sending across a multicast filter change. Changing the filter reinitialises the chip, which threw away frames it had already accepted and reported as sent
+- Two interfaces can no longer be bound to the same slot. The search stopped at the first free entry and rebound it even when the interface already held one further along
+- An interface that survives a failed device open keeps its configuration. The map from device to configuration kept naming the pre-compaction entry, so a later lookup lost a working interface
+- `S2_ONEVENT` with an empty mask is refused instead of waiting forever, since no event can share a bit with it
+- A failed name-server query replies as the request it was made with. The reply went out through the SANA helper, which writes a byte count into the field an IOStdReq uses for something else
+- A write that raced going offline is refused rather than queued onto a stopped unit, where nothing was left to send it
+- Waiting for online or offline no longer misses a transition that lands between the state test and the queue
+- Capture channels survive being closed and reopened while another call is in flight. A read, a close, an ioctl or an arriving packet could all act on the replacement channel that took the same number
+- The random pool credits entropy without wrapping. A large credit through the public interface could carry a partly seeded pool back toward empty
+- A multicast range no longer wraps its reference count
+- The library refuses an unsolicited TLS renegotiation. There is no renegotiation API here and one connection is one handshake, but the vendored stack would accept a server's request to start a second one without asking
 - A reader that outlives its removal no longer has its stack freed underneath it. The teardown read a gauge of how many such tasks were alive, and that number can be unchanged across the window if an older one exits as this one is created, so the check passed and the memory went back while the task was still standing on it
 - A LANCE card that reports a buffer error or an underrun starts sending again. Both clear the chip's transmit enable, so retiring the frame left a card that says it is running and never transmits another packet until the machine is rebooted
 - The transmit watchdog resets a card that is stuck, not one that is busy. It fired whenever the ring stayed full for the interval, which under a sustained transfer is a card that is keeping up, and the reset dropped what was queued

@@ -375,4 +375,102 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_status COMMAND test_dns_status)
 
+    # A DHCP BOUND notification runs on the client task while resolver
+    # changes belong on a caller task. Permit() in this harness injects a
+    # second notification exactly after the first snapshot, proving that it
+    # remains pending for the next caller.
+    add_executable(test_dns_handoff
+        host/test_dns_handoff_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_handoff.c")
+
+    target_include_directories(test_dns_handoff PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # Exec declarations
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dns_handoff PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_compile_options(test_dns_handoff PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_handoff COMMAND test_dns_handoff)
+
+    # A server can be named by both DHCP interfaces, and renewal or lease loss
+    # on one must not erase the other's ownership.  Exercise the exact compact
+    # per-interface set used by the resolver reconciliation path.
+    add_executable(test_dns_lease
+        host/test_dns_lease_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_lease.c")
+
+    target_include_directories(test_dns_lease PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dns_lease PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_lease COMMAND test_dns_lease)
+
+    # A DNSSL suffix can supply the default domain only while that advertised
+    # suffix remains live, and never owns a file, DHCP, or caller override.
+    add_executable(test_dns_domain
+        host/test_dns_domain_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_domain.c")
+
+    target_include_directories(test_dns_domain PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dns_domain PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_domain COMMAND test_dns_domain)
+
+    # DHCP option 12 owns the machine name only while a lease that supplied it
+    # remains live. Renewals and multiple interfaces share one deterministic
+    # owner, and loss restores the lower-ranked name it displaced.
+    add_executable(test_dhcp_hostname
+        host/test_dhcp_hostname_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dhcp_hostname.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
+
+    target_include_directories(test_dhcp_hostname PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/config"
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dhcp_hostname PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dhcp_hostname COMMAND test_dhcp_hostname)
+
+    # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
+    # their state before entering the DNS client.  Permit() in this harness
+    # injects a second advertisement exactly after the snapshot, proving that
+    # it remains pending and cannot overwrite the snapshot being consumed.
+    add_executable(test_ra_handoff
+        host/test_ra_handoff_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ra.c")
+
+    target_include_directories(test_ra_handoff PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # Exec declarations
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ra_handoff PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_compile_options(test_ra_handoff PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME ra_handoff COMMAND test_ra_handoff)
+
 endif()

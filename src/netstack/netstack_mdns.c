@@ -51,6 +51,9 @@
    which asserts where it sits. Stack sizes are not ladder members. */
 #define AMI_MDNS_STACK_SIZE         4096
 
+/* nx_mdns_disable() schedules, rather than sends, the RFC 6762 goodbye. */
+#define AMI_MDNS_GOODBYE_WAIT_TICKS ((ULONG)NX_MDNS_GOODBYE_TIMER_COUNT + 1UL)
+
 /*
  * Every one of these is a tick count nxd_mdns.h derives as
  * milliseconds * NX_IP_PERIODIC_RATE / 1000, and this port's tick is 50 Hz, so
@@ -171,13 +174,19 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
         }
         break;
 
-    case NX_MDNS_LOCAL_SERVICE_REGISTERED_FAILURE:
+    case NX_MDNS_LOCAL_HOST_REGISTERED_FAILURE:
         ns->ns_MdnsClaimed = FALSE;
         AMI_ERROR("netstack: '%s.%s' is taken and every alternative was too, "
                   "this machine has NO mDNS name. Set HOSTNAME to something "
                   "nothing else on this network is using",
                   ns->ns_MdnsLabel,
                   (const char *)ns->ns_Mdns.nx_mdns_domain_name);
+        break;
+
+    case NX_MDNS_LOCAL_SERVICE_REGISTERED_FAILURE:
+        AMI_WARN("netstack: the service name '%s' is taken and every "
+                 "alternative was too; the host name remains valid",
+                 (name != NULL) ? (const char *)name : "?");
         break;
 
     default:
@@ -406,7 +415,7 @@ LONG ami_netstack_mdns_start(AmiNetStack *ns)
  * OFF does not delete the module even when it was the last interface. The
  * disable queues the RFC 6762 10.1 goodbye, the same records re-announced with
  * a TTL of zero so every cache on the link drops the name at once, and the
- * thread of the responder sends it over the following 750 ms. Deleting the
+ * thread of the responder sends it after 250 ms. Deleting the
  * instance here is the one way to guarantee that the goodbye never goes out.
  * What is left running is a thread that has left every multicast group and
  * receives nothing, so the per-packet cost the option exists to avoid is gone
@@ -466,7 +475,7 @@ LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
         ns->ns_IfaceMdns[index] = FALSE;
 
         if (err == AMI_NET_OK && status == NX_MDNS_SUCCESS)
-            AMI_INFO("netstack: mDNS off on interface %ld, goodbye sent",
+            AMI_INFO("netstack: mDNS off on interface %ld, goodbye queued",
                      (long)index);
         else if (err != AMI_NET_OK)
             AMI_WARN("netstack: mDNS did not stop on interface %ld (%ld)",
@@ -480,7 +489,13 @@ LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
 
 VOID ami_netstack_mdns_stop(AmiNetStack *ns)
 {
+    UINT  status;
     UWORD n;
+    UWORD i;
+    BOOL  goodbye_queued = FALSE;
+
+    if (ns == NULL)
+        return;
 
     for (n = 0; n < (UWORD)AMI_CFG_MAX_INTERFACES; n++)
     {
@@ -488,9 +503,7 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
         ns->ns_IfaceMdnsSvc[n] = FALSE;
     }
 
-    UWORD i;
-
-    if (ns == NULL || !ns->ns_MdnsCreated)
+    if (!ns->ns_MdnsCreated)
         return;
 
     /*
@@ -500,7 +513,31 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
      * than two minutes later.
      */
     for (i = 0; i < ns->ns_IfaceCount; i++)
-        (VOID)nx_mdns_disable(&ns->ns_Mdns, (UINT)i);
+    {
+        status = nx_mdns_disable(&ns->ns_Mdns, (UINT)i);
+        if (status == NX_MDNS_SUCCESS)
+            goodbye_queued = TRUE;
+    }
+
+    /*
+     * nx_mdns_disable() does not send the goodbye. It marks the records and
+     * arms the responder's timer for NX_MDNS_GOODBYE_TIMER_COUNT (250 ms).
+     * Deleting the instance immediately terminates that responder and its
+     * timer, so the packet never reaches the wire.
+     *
+     * Shutdown normally runs in an adopted ThreadX caller. Sleep through the
+     * timer plus one tick there; the mDNS and IP threads both outrank adopted
+     * callers, so the responder builds the packet and the IP thread consumes
+     * it before this caller can resume. Some early startup-failure paths call
+     * ami_ns_destroy() before adoption. No mDNS instance can normally exist
+     * on those paths, but keep this guard because tx_thread_sleep() itself is
+     * invalid from an unadopted Amiga task.
+     */
+    if (goodbye_queued &&
+        tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
+    {
+        (VOID)tx_thread_sleep(AMI_MDNS_GOODBYE_WAIT_TICKS);
+    }
 
     (VOID)nx_mdns_delete(&ns->ns_Mdns);
     ns->ns_MdnsCreated = FALSE;

@@ -6,6 +6,43 @@
 
 #include "netdev_mcast.h"
 
+static ULONG mcast_addr32(const UBYTE *a)
+{
+    return ((ULONG)a[2] << 24) | ((ULONG)a[3] << 16) |
+           ((ULONG)a[4] << 8)  | (ULONG)a[5];
+}
+
+static UWORD mcast_addr16(const UBYTE *a)
+{
+    return (UWORD)(((UWORD)a[0] << 8) | a[1]);
+}
+
+BOOL netdev_mcast_range_wide(const UBYTE *lo, const UBYTE *hi, ULONG *count)
+{
+    ULONG lo32 = mcast_addr32(lo);
+    ULONG hi32 = mcast_addr32(hi);
+    ULONG span;
+
+    if (mcast_addr16(lo) != mcast_addr16(hi) || hi32 < lo32)
+    {
+        *count = 0;
+        return TRUE;
+    }
+
+    /* Inclusive count is span + 1.  Test the span first: the full 32-bit
+       range has a span of ULONG_MAX and its count is 2^32, which does not fit
+       in ULONG and used to wrap to zero here. */
+    span = hi32 - lo32;
+    if (span >= NETDEV_MCAST_MAX)
+    {
+        *count = 0;
+        return TRUE;
+    }
+
+    *count = span + 1;
+    return FALSE;
+}
+
 static VOID mcast_copy(UBYTE *to, const UBYTE *from)
 {
     UWORD i;
@@ -90,6 +127,7 @@ BOOL netdev_mcast_range_apply(NetdevMcast *table, const UBYTE *lo,
 {
     UBYTE addr[NETDEV_ADDR_LEN];
     ULONG i;
+    ULONG removed = 0;
 
     mcast_copy(addr, lo);
 
@@ -114,26 +152,34 @@ BOOL netdev_mcast_range_apply(NetdevMcast *table, const UBYTE *lo,
         if (needed > free_rows)
             return FALSE;
     }
-    else
-    {
-        for (i = 0; i < count; i++)
-        {
-            if (mcast_find(table, addr) == NULL)
-                return FALSE;
-            mcast_next(addr);
-        }
-    }
+    /*
+     * No preflight on the delete side, deliberately. The spec's own worked
+     * example for S2_DELMULTICASTADDRESSES is a stack leaving the groups it
+     * joined, and a stack that joined by single address and leaves by range
+     * -- or that has already had one address dropped -- would otherwise get
+     * an error AND stay in every group in the range. Removing what is there
+     * and reporting success is what the command is for; a range naming
+     * nothing at all is still refused below, because that is a caller error
+     * rather than a partial match.
+     */
 
-    /* The preflight makes every operation below infallible. */
+    /* On the add side the preflight above makes every step infallible. On the
+       delete side each step reports whether it found its address. */
     mcast_copy(addr, lo);
     for (i = 0; i < count; i++)
     {
         if (add)
+        {
             (VOID)netdev_mcast_add(table, addr);
-        else
-            (VOID)netdev_mcast_del(table, addr);
+            removed++;
+        }
+        else if (netdev_mcast_del(table, addr))
+        {
+            removed++;
+        }
+
         mcast_next(addr);
     }
 
-    return TRUE;
+    return (BOOL)(removed != 0);
 }

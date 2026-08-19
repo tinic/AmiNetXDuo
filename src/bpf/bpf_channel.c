@@ -37,6 +37,11 @@
 #include "bpf_internal.h"
 
 static AmiBpfChan ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
+/* Kept outside AmiBpfChan because closing zeroes that structure.  A slot can
+   be closed and reopened by the same library base while an ioctl is outside
+   the lock allocating memory; owner equality alone cannot distinguish the
+   replacement channel from the one the ioctl started on. */
+static ULONG ami_bpf_chan_generation[AMI_BPF_MAX_CHANNELS];
 volatile UWORD ami_bpf_bound_channels;
 
 /* ---------------------------------------------------------------- helpers */
@@ -185,7 +190,10 @@ LONG ami_bpf_init(VOID)
 
     ami_bpf_lock();
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
+    {
         ami_bpf_zero_bytes(&ami_bpf_chan[i], (ULONG)sizeof(AmiBpfChan));
+        ami_bpf_chan_generation[i] = 0;
+    }
     ami_bpf_bound_channels = 0;
 
     /*
@@ -336,6 +344,10 @@ LONG ami_bpf_open(APTR owner, LONG channel)
     ch->blen  = AMI_BPF_DEFAULT_BLEN;
     ch->dlt   = DLT_EN10MB;
 
+    ami_bpf_chan_generation[channel]++;
+    if (ami_bpf_chan_generation[channel] == 0)
+        ami_bpf_chan_generation[channel] = 1;
+
     ami_bpf_unlock();
 
     return channel;
@@ -344,15 +356,42 @@ LONG ami_bpf_open(APTR owner, LONG channel)
 LONG ami_bpf_close(APTR owner, LONG channel)
 {
     LONG        status;
-    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan *ch;
+    APTR        bufbase;
+    APTR        filter;
+
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
 
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (ch->reading)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EBUSY;   /* a read is copying out of the buffer */
+    }
 
-    ami_bpf_chan_release(ch, FALSE);
+    /*
+     * Validate and retire the slot in the same critical section. If another
+     * close frees it after an unlocked lookup, a different owner can reopen
+     * the numeric channel before ami_bpf_chan_release() takes its lock, and
+     * the stale close then destroys the replacement channel.
+     */
+    if (ch->iface != NULL && ami_bpf_bound_channels > 0)
+        ami_bpf_bound_channels--;
+
+    bufbase = ch->bufbase;
+    filter  = ch->filter;
+    ami_bpf_zero_bytes(ch, (ULONG)sizeof(AmiBpfChan));
+
+    ami_bpf_unlock();
+
+    ami_free(bufbase);
+    ami_free(filter);
 
     return 0;
 }
@@ -522,13 +561,20 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
         if (ch->immediate)
             wake = TRUE;
 
-        ami_bpf_unlock();
-
         if (wake)
         {
+            /* The task and mask belong to this particular open of the
+               channel.  Keep the channel lock through Signal(): after Permit
+               a close/reopen can reuse the slot, and reading ch here would
+               either lose this wake-up or signal the replacement owner for a
+               packet it never captured.  Signal() does not block and is safe
+               under Forbid(); the woken task runs once the Permit below lets
+               it. */
             ami_bpf_notify(ch->notify_task, ch->notify_mask);
             ami_bpf_notify(ch->irq_task, ch->irq_mask);
         }
+
+        ami_bpf_unlock();
     }
 }
 
@@ -537,20 +583,33 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
 LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
 {
     LONG         status;
-    AmiBpfChan  *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan  *ch;
     const UBYTE *src;
     ULONG        pos;
     ULONG        end;
     ULONG        nbytes;
     ULONG        budget;
     ULONG        waited = 0;
+    ULONG        irq_mask;
     BOOL         pending;
 
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (buffer == NULL || len < 0)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EINVAL;
+    }
+
+    budget = ch->rtimeout_sec * AMI_BPF_TICKS_PER_SEC
+           + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
 
     /*
      * BIOCSRTIMEOUT as 4.4BSD reads it: zero is "do not wait", anything else
@@ -561,13 +620,17 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
      *
      * With no timeout set the loop runs once and returns 0, as it did before
      * the loop existed.
-     */
-    budget = ch->rtimeout_sec * AMI_BPF_TICKS_PER_SEC
-           + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
-
+    */
     for (;;)
     {
-        ami_bpf_lock();
+        /* The timeout wait drops the table lock. The owner may close this
+           slot and another base may reopen it while the task sleeps. Never
+           consume that replacement channel's buffers under the old handle. */
+        if (ami_bpf_chan_get(owner, channel, &status) != ch)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
 
         if (ch->reading)
         {
@@ -581,16 +644,19 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
         if (ch->hold_len != 0)
             break;                  /* data, and the lock is still held */
 
+        irq_mask = ch->irq_mask;
         ami_bpf_unlock();
 
         if (waited >= budget)
             return 0;
 
-        if (ami_bpf_signals_set(ch->irq_mask) != 0)
+        if (ami_bpf_signals_set(irq_mask) != 0)
             return AMI_BPF_EINTR;
 
         ami_bpf_sleep(AMI_BPF_WAIT_SLICE);
         waited += AMI_BPF_WAIT_SLICE;
+
+        ami_bpf_lock();
     }
 
     /*
@@ -691,30 +757,60 @@ LONG ami_bpf_data_waiting(APTR owner, LONG channel)
 LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
 {
     LONG         status;
-    AmiBpfChan  *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan  *ch;
     AmiBpfIf    *ifp;
+    AmiBpfInjectFn inject;
+    APTR         cookie;
+    ULONG        dlt;
+    ULONG        mtu;
     const UBYTE *frame = (const UBYTE *)buffer;
     UWORD        ether_type;
 
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (buffer == NULL || len <= 0)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EINVAL;
+    }
 
     /* The autodoc folds "not attached to an interface" into ENXIO, and an
        interface registered without an injector cannot transmit either. */
     ifp = ch->iface;
     if (ifp == NULL || ifp->inject == NULL)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_ENXIO;
+    }
 
-    if (ch->dlt != DLT_EN10MB)
+    /*
+     * Detach clears both the channel binding and the interface row under this
+     * lock. Keep no pointers into either table across the injector call: the
+     * injector can block, and runtime RemoveInterface() is allowed to run on
+     * another task while it does. The netstack injector claims `cookie`
+     * before dereferencing it, so a removal that won this race is rejected
+     * without touching the stale value.
+     */
+    inject = ifp->inject;
+    cookie = ifp->cookie;
+    dlt    = ch->dlt;
+    mtu    = ifp->mtu;
+    ami_bpf_unlock();
+
+    if (dlt != DLT_EN10MB)
     {
         /* No link header to take apart. Send the bytes as they are. */
-        if (ifp->mtu != 0 && (ULONG)len > ifp->mtu)
+        if (mtu != 0 && (ULONG)len > mtu)
             return AMI_BPF_EMSGSIZE;
 
-        status = ifp->inject(ifp->cookie, 0, NULL, frame, (ULONG)len);
+        status = inject(cookie, 0, NULL, frame, (ULONG)len);
 
         return (status < 0) ? AMI_BPF_ENOBUFS : len;
     }
@@ -731,13 +827,12 @@ LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
      */
     ether_type = (UWORD)(((UWORD)frame[12] << 8) | (UWORD)frame[13]);
 
-    if (ifp->mtu != 0 &&
-        (ULONG)(len - AMI_BPF_ETH_HDR_LEN) > ifp->mtu)
+    if (mtu != 0 && (ULONG)(len - AMI_BPF_ETH_HDR_LEN) > mtu)
         return AMI_BPF_EMSGSIZE;
 
-    status = ifp->inject(ifp->cookie, ether_type, frame,
-                         frame + AMI_BPF_ETH_HDR_LEN,
-                         (ULONG)(len - AMI_BPF_ETH_HDR_LEN));
+    status = inject(cookie, ether_type, frame,
+                    frame + AMI_BPF_ETH_HDR_LEN,
+                    (ULONG)(len - AMI_BPF_ETH_HDR_LEN));
 
     return (status < 0) ? AMI_BPF_ENOBUFS : len;
 }
@@ -786,19 +881,73 @@ LONG ami_bpf_set_interrupt_mask(APTR owner, LONG channel, ULONG signal_mask)
  */
 #define AMI_BPF_CMD(c)  ((ULONG)(c) & (IOC_DIRMASK | 0x0000FFFFUL))
 
-static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
+/*
+ * Take the identity of a channel across an allocation. The caller receives a
+ * pointer only as a convenience; the generation is the identity. Closing
+ * zeroes the channel and reopening can put the same owner back in it.
+ */
+static AmiBpfChan *ami_bpf_ioctl_snapshot(APTR owner, LONG channel,
+                                           ULONG *generation, ULONG *blen,
+                                           BOOL *has_buffer, LONG *status)
 {
+    AmiBpfChan *ch;
+
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, status);
+    if (ch != NULL)
+    {
+        *generation = ami_bpf_chan_generation[channel];
+        if (blen != NULL)
+            *blen = ch->blen;
+        if (has_buffer != NULL)
+            *has_buffer = (ch->bufbase != NULL) ? TRUE : FALSE;
+    }
+    ami_bpf_unlock();
+
+    return ch;
+}
+
+/* Called with the channel lock held. */
+static AmiBpfChan *ami_bpf_ioctl_revalidate(APTR owner, LONG channel,
+                                             ULONG generation, LONG *status)
+{
+    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, status);
+
+    if (ch != NULL && ami_bpf_chan_generation[channel] != generation)
+    {
+        *status = AMI_BPF_ENXIO;
+        return NULL;
+    }
+
+    return ch;
+}
+
+static LONG ami_bpf_ioctl_setif(APTR owner, LONG channel, const char *name)
+{
+    char      ifname[AMI_BPF_IFNAMSIZ];
+    AmiBpfChan *ch;
     AmiBpfIf *ifp;
     UBYTE    *base;
     UBYTE    *stale;
     ULONG     blen;
+    ULONG     generation = 0;
+    LONG      status;
+    BOOL      has_buffer = FALSE;
     UWORD     i;
 
-    ifp = ami_bpf_iface_by_name(name);
-    if (ifp == NULL)
-        return AMI_BPF_EINVAL;      /* the name is argp, not the handle */
+    /* struct ifreq begins with exactly IFNAMSIZ bytes. Copy them before any
+       lock is held, both to keep caller memory out of Forbid() and so a second
+       task cannot change which interface this operation commits. */
+    for (i = 0; i < AMI_BPF_IFNAMSIZ - 1 && name[i] != '\0'; i++)
+        ifname[i] = name[i];
+    for (; i < AMI_BPF_IFNAMSIZ; i++)
+        ifname[i] = '\0';
 
-    blen = ch->blen;
+    ch = ami_bpf_ioctl_snapshot(owner, channel, &generation, &blen,
+                                &has_buffer, &status);
+    if (ch == NULL)
+        return status;
+
     if (blen < (ULONG)BPF_MINBUFSIZE)
         blen = (ULONG)BPF_MINBUFSIZE;
     if (blen > (ULONG)BPF_MAXBUFSIZE)
@@ -806,7 +955,7 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
     blen = BPF_WORDALIGN(blen);
 
     base = NULL;
-    if (ch->bufbase == NULL)
+    if (!has_buffer)
     {
         base = (UBYTE *)ami_alloc(2UL * blen);
         if (base == NULL)
@@ -816,6 +965,25 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
     stale = NULL;
 
     ami_bpf_lock();
+
+    ch = ami_bpf_ioctl_revalidate(owner, channel, generation, &status);
+    if (ch == NULL)
+    {
+        ami_bpf_unlock();
+        ami_free(base);
+        return status;
+    }
+
+    /* The interface registry uses the same lock. Resolve the copied name only
+       now, so detach/reuse cannot turn an old AmiBpfIf pointer into a binding
+       to a different interface. */
+    ifp = ami_bpf_iface_by_name(ifname);
+    if (ifp == NULL)
+    {
+        ami_bpf_unlock();
+        ami_free(base);
+        return AMI_BPF_EINVAL;      /* the name is argp, not the handle */
+    }
 
     if (base != NULL)
     {
@@ -855,15 +1023,24 @@ static LONG ami_bpf_ioctl_setif(AmiBpfChan *ch, const char *name)
     return 0;
 }
 
-static LONG ami_bpf_ioctl_setf(AmiBpfChan *ch, const struct bpf_program *prog)
+static LONG ami_bpf_ioctl_setf(APTR owner, LONG channel,
+                               const struct bpf_program *prog)
 {
+    AmiBpfChan     *ch;
     struct bpf_insn *copy = NULL;
     struct bpf_insn *old;
     ULONG            count;
+    ULONG            generation = 0;
     ULONG            i;
+    LONG             status;
 
     if (prog == NULL)
         return AMI_BPF_EINVAL;
+
+    ch = ami_bpf_ioctl_snapshot(owner, channel, &generation, NULL, NULL,
+                                &status);
+    if (ch == NULL)
+        return status;
 
     count = prog->bf_len;
 
@@ -893,6 +1070,14 @@ static LONG ami_bpf_ioctl_setf(AmiBpfChan *ch, const struct bpf_program *prog)
     }
 
     ami_bpf_lock();
+    ch = ami_bpf_ioctl_revalidate(owner, channel, generation, &status);
+    if (ch == NULL)
+    {
+        ami_bpf_unlock();
+        ami_free(copy);
+        return status;
+    }
+
     old            = ch->filter;
     ch->filter     = copy;
     ch->filter_len = count;
@@ -976,7 +1161,8 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     }
 
     case AMI_BPF_CMD(BIOCSETF):
-        return ami_bpf_ioctl_setf(ch, (const struct bpf_program *)buffer);
+        return ami_bpf_ioctl_setf(owner, channel,
+                                  (const struct bpf_program *)buffer);
 
     case AMI_BPF_CMD(BIOCFLUSH):
         ami_bpf_lock();
@@ -1031,13 +1217,15 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
          * not through a struct: this layer has no sockaddr, and the
          * SIOCGIFADDR of the socket path fills the same 16 bytes.
          */
-        UBYTE *sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
+        UBYTE *sa;
         ULONG  addr;
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
         if (ch->iface == NULL)
             return AMI_BPF_EINVAL;
+
+        sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
 
         addr = ami_bpf_iface_address(ch->iface);
 
@@ -1056,7 +1244,7 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     case AMI_BPF_CMD(BIOCSETIF):
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
-        return ami_bpf_ioctl_setif(ch, (const char *)buffer);
+        return ami_bpf_ioctl_setif(owner, channel, (const char *)buffer);
 
     case AMI_BPF_CMD(BIOCSRTIMEOUT):
         if (buffer == NULL)

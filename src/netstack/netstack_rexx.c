@@ -180,7 +180,10 @@ static LONG ami_rx_kill(void)
 
     for (i = 0; i < ns->ns_IfaceCount; i++)
     {
-        if (netstack_interface_down(i) != AMI_NET_OK)
+        /* Runtime removal leaves a stable-index hole below ns_IfaceCount.
+           It is already down; only a live slot can fail this operation. */
+        if (ns->ns_Iface[i] != NULL &&
+            netstack_interface_down(i) != AMI_NET_OK)
             worst = RETURN_WARN;
     }
 

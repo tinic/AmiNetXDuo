@@ -32,6 +32,8 @@ target_compile_options(aminetxduo_mbuf PRIVATE -Wall -Wextra)
 #      -o test_mbuf
 
 if(NOT CMAKE_CROSSCOMPILING)
+    find_package(Threads REQUIRED)
+
     add_executable(test_mbuf
         test/test_mbuf.c
         mbuf_alloc.c
@@ -44,6 +46,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     target_compile_definitions(test_mbuf PRIVATE AMI_MBUF_REPLICA)
     target_compile_options(test_mbuf PRIVATE -Wall -Wextra)
+    target_link_libraries(test_mbuf PRIVATE Threads::Threads)
     set_target_properties(test_mbuf PROPERTIES C_STANDARD 11)
 
     include(CTest)

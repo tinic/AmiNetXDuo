@@ -93,18 +93,28 @@ VOID netdev_event_rescan(NetdevUnit *unit)
 }
 
 /*
- * Queue an S2_ONEVENT.  The mask has to join nu_EventMask under the same
- * Disable() as the AddTail: an interrupt between the two would see the request
- * on the list and the gate still saying nobody is waiting, and skip it.
+ * Complete a state event which is already true, or queue an S2_ONEVENT.  The
+ * state test, AddTail and nu_EventMask update are one transaction: a state
+ * transition between a separate test and queue would post to nobody, then
+ * leave a waiter behind for a state which was already reached.  The mask has
+ * to join nu_EventMask under the same Disable() for the same reason.
  */
 VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io)
 {
     NetdevOpener *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    ULONG         now;
+
+    Disable();
+    now = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
+    if ((io->ios2_WireError & now) != 0)
+    {
+        Enable();
+        netdev_reply(io, 0, io->ios2_WireError & now);
+        return;
+    }
 
     io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
     io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-
-    Disable();
     AddTail(&op->op_Events, &io->ios2_Req.io_Message.mn_Node);
     unit->nu_EventMask |= (UWORD)io->ios2_WireError;
     Enable();

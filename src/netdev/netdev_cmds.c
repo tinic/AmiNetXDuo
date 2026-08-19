@@ -89,41 +89,6 @@ static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
     return FALSE;
 }
 
-static ULONG cmd_addr48(const UBYTE *a)
-{
-    /* The low 32 bits.  The top 16 are compared separately. */
-    return ((ULONG)a[2] << 24) | ((ULONG)a[3] << 16) |
-           ((ULONG)a[4] << 8)  | (ULONG)a[5];
-}
-
-static UWORD cmd_addr16(const UBYTE *a)
-{
-    return (UWORD)(((UWORD)a[0] << 8) | a[1]);
-}
-
-/* ------------------------------------------------------------- multicast -- */
-
-/*
- * A range that would not fit the table becomes "accept every multicast".  The
- * test is on the range, so an add and the matching delete always take the same
- * branch and the accounting stays balanced.
- */
-static BOOL mcast_range_wide(const UBYTE *lo, const UBYTE *hi, ULONG *count)
-{
-    ULONG lo32 = cmd_addr48(lo);
-    ULONG hi32 = cmd_addr48(hi);
-
-    if (cmd_addr16(lo) != cmd_addr16(hi) || hi32 < lo32)
-    {
-        *count = 0;
-        return TRUE;
-    }
-
-    *count = hi32 - lo32 + 1;
-
-    return (BOOL)(*count > NETDEV_MCAST_MAX);
-}
-
 /* ------------------------------------------------------------- statistics - */
 
 static const char netdev_stat_mode[]  = "Data transfer mode";
@@ -401,6 +366,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_OFFLINE:
         if (unit->nu_Online)
             netdev_offline(unit, S2EVENT_OFFLINE);
+        else
+            netdev_pcmcia_cancel_resume(unit);
         netdev_reply(io, 0, 0);
         return;
 
@@ -487,7 +454,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        wide = mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr, &count);
+        wide = netdev_mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr,
+                                       &count);
         Disable();
         if (wide)
         {
@@ -642,7 +610,6 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_ONEVENT:
     {
         ULONG mask = io->ios2_WireError;
-        ULONG now  = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
         /*
          * S2EVENT_SOFTWARE is refused, and used to be accepted.  This driver
@@ -654,7 +621,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * S2WERR_BAD_EVENT".  cnet.device's accepted set is the seven below,
          * so no stack that works with it asks for the eighth.
          */
-        if ((mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
+        /* Zero names no condition and would otherwise queue forever: no
+           future post can share a bit with it. */
+        if (mask == 0 ||
+            (mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
                              S2EVENT_ONLINE | S2EVENT_OFFLINE |
                              S2EVENT_BUFF | S2EVENT_HARDWARE)) != 0)
         {
@@ -662,14 +632,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        /* "Types ONLINE and OFFLINE return immediately if the device is
-           already in the state to be waited for." */
-        if ((mask & now) != 0)
-        {
-            netdev_reply(io, 0, mask & now);
-            return;
-        }
-
+        /* netdev_event_wait() checks the current state and links a waiter in
+           one transaction, so a transition cannot land between them. */
         netdev_event_wait(unit, io);
         return;
     }
@@ -686,7 +650,13 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
 
         if (q == NULL || std->io_Length < 16)
         {
-            netdev_reply(io, IOERR_BADLENGTH, S2WERR_NULL_POINTER);
+            /* This is an IOStdReq, so ios2_WireError is io_Actual.  The SANA
+               reply helper would turn this error into a bogus nonzero byte
+               count in the caller's request. */
+            std->io_Actual = 0;
+            std->io_Error  = IOERR_BADLENGTH;
+            if ((std->io_Flags & IOF_QUICK) == 0)
+                ReplyMsg(&std->io_Message);
             return;
         }
 

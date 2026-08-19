@@ -482,35 +482,35 @@ static void test_root_trimmed(void)
 
     printf("the document root, trimmed\n");
 
-    http_path_root("Work:Public/", out, sizeof(out));
+    CHECK(http_path_root("Work:Public/", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "Work:Public") == 0);
 
-    http_path_root("Work:Public//", out, sizeof(out));
+    CHECK(http_path_root("Work:Public//", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "Work:Public") == 0);
 
     /* Already right, and left alone. */
-    http_path_root("Work:Public", out, sizeof(out));
+    CHECK(http_path_root("Work:Public", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "Work:Public") == 0);
 
     /* A device or assign keeps its colon.  "RAM" is not "RAM:". */
-    http_path_root("RAM:", out, sizeof(out));
+    CHECK(http_path_root("RAM:", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "RAM:") == 0);
 
-    http_path_root("RAM:/", out, sizeof(out));
+    CHECK(http_path_root("RAM:/", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "RAM:") == 0);
 
     /* Nothing to trim to, so nothing is trimmed. */
-    http_path_root("/", out, sizeof(out));
+    CHECK(http_path_root("/", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "/") == 0);
 
-    http_path_root("", out, sizeof(out));
+    CHECK(http_path_root("", out, sizeof(out)) == 1);
     CHECK(strcmp(out, "") == 0);
 
     /* And a trimmed root joins the way the resolver expects. */
     {
         HttpPath p;
 
-        http_path_root("Work:Public/", out, sizeof(out));
+        CHECK(http_path_root("Work:Public/", out, sizeof(out)) == 1);
         CHECK(http_path_resolve(out, "/a/b", &p) == HTTP_PATH_OK);
         CHECK(strcmp(p.path, "Work:Public/a/b") == 0);
 
@@ -519,12 +519,14 @@ static void test_root_trimmed(void)
         CHECK(strcmp(p.path, "Work:Public") == 0);
     }
 
-    /* It never writes past what it was given. */
+    /* It never writes past what it was given, and it does not silently turn
+       an overlong root into a different drawer. */
     {
         char small[6];
 
-        http_path_root("Work:Public/", small, sizeof(small));
-        CHECK(strlen(small) < sizeof(small));
+        strcpy(small, "stale");
+        CHECK(http_path_root("Work:Public/", small, sizeof(small)) == 0);
+        CHECK_STR(small, "");
     }
 }
 
@@ -647,6 +649,28 @@ static void test_join(void)
         strcpy(tiny, "RAM:Docs");
         CHECK(http_path_join(tiny, sizeof(tiny), "0123456789abcdef") == 0);
         CHECK_STR(tiny, "RAM:Docs");
+    }
+
+    /* PUT uses this primitive to add its private leaf.  It must either fit in
+       full or leave the drawer byte-for-byte alone; a partial suffix followed
+       by the connection number used to turn this into a sibling called `15`. */
+    {
+        char          near[HTTP_PATH_MAX];
+        char          before[HTTP_PATH_MAX];
+        unsigned long i;
+
+        for (i = 0; i < 242UL; i++)
+            near[i] = 'p';
+        near[i] = '\0';
+        strcpy(before, near);
+
+        CHECK(http_path_join(near, sizeof(near), ".httpd-put-15") == 0);
+        CHECK_STR(near, before);
+
+        near[241] = '\0';
+        CHECK(http_path_join(near, sizeof(near), ".httpd-put-15") == 1);
+        CHECK(strlen(near) == sizeof(near) - 1);
+        CHECK(strcmp(&near[242], ".httpd-put-15") == 0);
     }
 }
 

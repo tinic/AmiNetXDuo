@@ -289,6 +289,7 @@ AmiCluster *ami_mbuf_cluster_of(const void *ext_buf)
 static AmiCluster *ami_mbuf_cluster_get(VOID)
 {
     AmiCluster *cl;
+    AmiCluster *pooled;
 
     ami_mbuf_ensure_init();
 
@@ -323,6 +324,32 @@ static AmiCluster *ami_mbuf_cluster_get(VOID)
         ami_mbuf_pool.drops++;
         ami_mbuf_unlock();
         return NULL;
+    }
+
+    /* Another task may have filled the last slot while ami_alloc() ran with
+       the lock dropped.  Honour the ceiling on this second side of the
+       allocation window.  If it also returned a cluster meanwhile, use that
+       already-accounted object rather than reporting an avoidable drop. */
+    if (ami_mbuf_pool.clusters_total >= ami_mbuf_pool.max_clusters)
+    {
+        pooled = ami_mbuf_pool.clusters_free;
+        if (pooled != NULL)
+        {
+            ami_mbuf_pool.clusters_free = pooled->free_next;
+            ami_mbuf_pool.clusters_free_count--;
+            if (ami_mbuf_pool.clusters_cached > 0)
+                ami_mbuf_pool.clusters_cached--;
+            pooled->free_next = NULL;
+            pooled->refcnt    = 1;
+        }
+        else
+        {
+            ami_mbuf_pool.drops++;
+        }
+
+        ami_mbuf_unlock();
+        ami_free(cl);
+        return pooled;
     }
 
     cl->refcnt    = 1;

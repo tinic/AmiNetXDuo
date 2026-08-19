@@ -79,11 +79,11 @@
  *      nx_ip_protection across the create, which is the mutex the IP thread
  *      holds while it runs DAD; see ami_ns6_dhcp_begin().
  *
- *   3. nx_dhcpv6_client_delete() does not clear _nx_dhcpv6_DAD_ptr, so the
- *      pointer dangles at a deleted instance. Harmless here only because the
- *      client's callback is not registered after point 1 above and this
- *      module's chain checks ns_Dhcpv6Created, so nothing calls it. Left
- *      alone rather than worked around twice.
+ *   3. Upstream nx_dhcpv6_client_delete() did not clear _nx_dhcpv6_DAD_ptr,
+ *      so the pointer dangled at a deleted instance. The fork now unregisters
+ *      the callback and clears that pointer under nx_ip_protection. Besides
+ *      normal teardown, ami_ns6_dhcp_discard_partial() relies on that when a
+ *      create succeeds but DUID or IA setup cannot be completed.
  *
  *   4. A successful Information-Request leaves the client in
  *      NX_DHCPV6_STATE_INIT rather than BOUND, because the state after a
@@ -183,12 +183,13 @@ static const char *ami_ns6_dhcp_state_name(UCHAR state)
  *
  * Nothing here calls back into NetX Duo or the DNS client: a BOUND sets a
  * flag, and ami_ns_dns_absorb_dhcpv6() on a caller thread does the work, for
- * the reason stated above ns_Rdnss in netstack_internal.h.
+ * the reason stated above ns_Ra in netstack_internal.h.
  */
 static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
                                        UINT old_state, UINT new_state)
 {
     AmiNetStack *ns = ami_netstack_raw();
+    AmiDhcpv6OptionChange option_change;
 
     if (ns == NULL || dhcpv6_ptr != &ns->ns_Dhcpv6)
         return;
@@ -201,25 +202,26 @@ static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
 
     ami_netstack_mark(ami_ns6_dhcp_state_name((UCHAR)new_state));
 
-    /*
-     * A Reply has landed and may have carried name servers and a domain list.
-     *
-     * TWO transitions, not one, and the second is not obvious. A stateful
-     * exchange ends at BOUND. A successful Information-Request ends at INIT:
-     * nxd_dhcpv6_client.c:4147 restores the state "depending on its IANA
-     * address status", and an Information-Request never asks for an address,
-     * so the status is not VALID and the client goes back to INIT having
-     * succeeded. Watching only for BOUND would have meant the name servers
-     * from the stateless path were recorded by the client and never read --
-     * which is the entire purpose of that path.
-     *
-     * So the transition OUT of SENDING_INFORM_REQUEST counts as well,
-     * wherever it lands. A failed one lands in INIT too, and absorbing then
-     * costs a walk of an empty server list.
-     */
-    if (new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
-        old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST)
+    option_change = ami_dhcpv6_option_change(
+        new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS,
+        old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST,
+        new_state == NX_DHCPV6_STATE_INIT,
+        dhcpv6_ptr->nx_dhcpv6_inform_req_responses != 0UL);
+
+    if (option_change == AMI_DHCPV6_OPTIONS_REPLACE)
+    {
+        /* BOUND and a successful Information-Request both leave coherent
+           replacement option buffers in the client. */
+        ns->ns_Dhcpv6OptionsValid = TRUE;
         ns->ns_Dhcpv6DnsPending = TRUE;
+    }
+    else if (option_change == AMI_DHCPV6_OPTIONS_WITHDRAW)
+    {
+        /* Lease loss, Release, Decline and failed stateful acquisition all
+           leave INIT with no live ownership of the previous options. */
+        ns->ns_Dhcpv6OptionsValid = FALSE;
+        ns->ns_Dhcpv6DnsPending = TRUE;
+    }
 }
 
 /*
@@ -299,6 +301,21 @@ static VOID ami_ns6_ra_flags(NX_IP *ip_ptr, UINT ra_flag)
 
 /* ------------------------------------------------------------ the client, */
 
+/* A create succeeded but the object could not be fully configured. Do not
+   publish a partial client to the next worker event: delete every resource,
+   clear the publication flag, and restore this stack's chained DAD notify. */
+static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
+{
+    if (ns != NULL && ns->ns_Dhcpv6Created)
+    {
+        (VOID)nx_dhcpv6_client_delete(&ns->ns_Dhcpv6);
+        ns->ns_Dhcpv6Created = FALSE;
+        ami_netstack_ipv6_reclaim_notify(ns);
+    }
+
+    return AMI_NET_ERR_KERNEL;
+}
+
 /*
  * Build and start the client. Runs on the deferred-work thread, or on the
  * bring-up thread for CONFIGURE6=DHCP, both of which may block.
@@ -306,9 +323,6 @@ static VOID ami_ns6_ra_flags(NX_IP *ip_ptr, UINT ra_flag)
 static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
 {
     UINT status;
-
-    if (ns->ns_Dhcpv6Started)
-        return AMI_NET_OK;
 
     if (!ns->ns_Dhcpv6Created)
     {
@@ -363,8 +377,14 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
             return AMI_NET_ERR_KERNEL;
         }
 
-        (VOID)nx_dhcpv6_client_set_interface(&ns->ns_Dhcpv6,
-                                             (UINT)ns->ns_Dhcpv6Iface);
+        status = nx_dhcpv6_client_set_interface(&ns->ns_Dhcpv6,
+                                                (UINT)ns->ns_Dhcpv6Iface);
+        if (status != NX_SUCCESS)
+        {
+            AMI_ERROR("netstack: DHCPv6 interface selection failed (%ld)",
+                      (long)status);
+            return ami_ns6_dhcp_discard_partial(ns);
+        }
 
         /* The DUID. See the file header for why DUID-LL and not DUID-LLT. */
         status = nx_dhcpv6_create_client_duid(&ns->ns_Dhcpv6,
@@ -374,7 +394,7 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
         if (status != NX_SUCCESS)
         {
             AMI_ERROR("netstack: DHCPv6 DUID failed (%ld)", (long)status);
-            return AMI_NET_ERR_KERNEL;
+            return ami_ns6_dhcp_discard_partial(ns);
         }
 
         /*
@@ -403,8 +423,9 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
 
             if (ami_dhcpv6_duid_ll(mac, 6UL, want, sizeof(want)) == 0UL)
             {
-                AMI_WARN("netstack: DHCPv6 has no usable DUID, the card "
-                         "reported no hardware address");
+                AMI_ERROR("netstack: DHCPv6 has no usable DUID, the card "
+                          "reported no hardware address");
+                return ami_ns6_dhcp_discard_partial(ns);
             }
             else if (ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type
                          != (USHORT)3 ||
@@ -422,6 +443,7 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
                           (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type,
                           (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type,
                           (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length);
+                return ami_ns6_dhcp_discard_partial(ns);
             }
         }
 
@@ -440,7 +462,7 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
         if (status != NX_SUCCESS)
         {
             AMI_ERROR("netstack: DHCPv6 IA_NA failed (%ld)", (long)status);
-            return AMI_NET_ERR_KERNEL;
+            return ami_ns6_dhcp_discard_partial(ns);
         }
 
         /*
@@ -450,9 +472,25 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
          * DHCPv4. Asked for in both modes: the stateless mode exists only to
          * get them, and the stateful Reply carries them too.
          */
-        (VOID)nx_dhcpv6_request_option_DNS_server(&ns->ns_Dhcpv6, NX_TRUE);
-        (VOID)nx_dhcpv6_request_option_domain_name(&ns->ns_Dhcpv6, NX_TRUE);
+        status = nx_dhcpv6_request_option_DNS_server(&ns->ns_Dhcpv6,
+                                                     NX_TRUE);
+        if (status == NX_SUCCESS)
+            status = nx_dhcpv6_request_option_domain_name(&ns->ns_Dhcpv6,
+                                                          NX_TRUE);
+        if (status != NX_SUCCESS)
+        {
+            AMI_ERROR("netstack: DHCPv6 option request setup failed (%ld)",
+                      (long)status);
+            return ami_ns6_dhcp_discard_partial(ns);
+        }
 
+    }
+
+    /* A link-down stops, but deliberately does not delete, the client.  Its
+       DUID and IA_NA remain valid and nx_dhcpv6_start() resumes its thread,
+       socket and timers before the repeated request below. */
+    if (!ns->ns_Dhcpv6Started)
+    {
         status = nx_dhcpv6_start(&ns->ns_Dhcpv6);
         if (status != NX_SUCCESS)
         {
@@ -732,6 +770,58 @@ VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
         AMI_INFO("netstack: DHCPv6 address released, the server answered");
     else
         AMI_INFO("netstack: DHCPv6 Release sent, the server did not answer");
+}
+
+/*
+ * Quiesce the client while its selected interface is down.  Release above is
+ * only meaningful for a stateful client with a lease; stop is required in all
+ * modes so a Solicit or Information-Request does not keep retransmitting on
+ * an offline link.  The client object is retained for a restart on link-up.
+ */
+VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns)
+{
+    UINT status;
+
+    if (ns == NULL || !ns->ns_Dhcpv6Created || !ns->ns_Dhcpv6Started)
+        return;
+
+    status = nx_dhcpv6_stop(&ns->ns_Dhcpv6);
+    if (status == NX_SUCCESS)
+    {
+        ns->ns_Dhcpv6Started = FALSE;
+        ns->ns_Dhcpv6OptionsValid = FALSE;
+        ns->ns_Dhcpv6DnsPending = TRUE;
+    }
+    else
+        AMI_WARN("netstack: DHCPv6 did not stop for link-down (%ld)",
+                 (long)status);
+}
+
+/*
+ * Repeat the exchange that was active before link-down.  Only enqueue work
+ * here: callers are adopted application tasks and the request may block while
+ * the DHCPv6 thread changes state.
+ */
+VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index)
+{
+    AmiDhcpv6Action action;
+    ULONG           event;
+
+    if (ns == NULL || !ns->ns_Dhcpv6WorkReady)
+        return;
+
+    action = ami_dhcpv6_resume_action(ns->ns_Dhcpv6Created,
+                                      ns->ns_Dhcpv6Started,
+                                      ns->ns_Dhcpv6Asked,
+                                      ns->ns_Dhcpv6Stateful,
+                                      (UINT)ns->ns_Dhcpv6Iface,
+                                      (UINT)interface_index);
+    if (action == AMI_DHCPV6_ACT_NONE)
+        return;
+
+    event = (action == AMI_DHCPV6_ACT_STATEFUL)
+                ? AMI_DHCPV6_EV_STATEFUL : AMI_DHCPV6_EV_STATELESS;
+    (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, event, TX_OR);
 }
 
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)

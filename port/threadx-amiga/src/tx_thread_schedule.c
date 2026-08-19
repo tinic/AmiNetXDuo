@@ -260,8 +260,9 @@ UINT                     wake;
     else
     {
 
-        /* No spare signal: fire and forget.  The task still tears itself down,
-           but we cannot prove it finished before the caller frees the stack.  */
+        /* No spare signal: ask the task to die without a handshake, then fall
+           through to the explicit zombie bookkeeping below.  The caller still
+           cannot free the stack while a live zombie remains.  */
         sigmask =  0UL;
         ctrl -> ctrl_reaper        =  (struct Task *) 0;
         ctrl -> ctrl_reaper_signal =  0UL;
@@ -273,52 +274,49 @@ UINT                     wake;
     Signal(task, thread_ptr -> tx_thread_amiga_run_signal);
     Permit();
 
-    if (sigmask == 0UL)
+    if (sigmask != 0UL)
     {
-        _tx_amiga_reap_cleanup(tr, port, sig);
-        return;
-    }
+        TXTRACE("TXT reap wait thr=%08lx", (LONG) thread_ptr);
 
-    TXTRACE("TXT reap wait thr=%08lx", (LONG) thread_ptr);
-
-    if (tr != (struct timerequest *) 0)
-    {
-        tr -> tr_node.io_Command =  TR_ADDREQUEST;
-        tr -> tr_time.tv_secs    =  (ULONG) TX_AMIGA_REAP_TIMEOUT_SECS;
-        tr -> tr_time.tv_micro   =  0UL;
-        SendIO((struct IORequest *) tr);
-    }
-
-    for (;;)
-    {
-
-        signals =  Wait(sigmask | portsig);
-
-        if (reaped != 0UL)
+        if (tr != (struct timerequest *) 0)
         {
-            break;
+            tr -> tr_node.io_Command =  TR_ADDREQUEST;
+            tr -> tr_time.tv_secs    =  (ULONG) TX_AMIGA_REAP_TIMEOUT_SECS;
+            tr -> tr_time.tv_micro   =  0UL;
+            SendIO((struct IORequest *) tr);
         }
-        if ((portsig != 0UL) && ((signals & portsig) != 0UL))
-        {
-            break;                          /* timed out */
-        }
-        if (portsig == 0UL)
+
+        for (;;)
         {
 
-            /* No timer could be opened.  One wait is all we can offer; the
-               handshake either completed or the task is unreachable, and
-               either way going round again would just block forever.  */
-            break;
-        }
-    }
+            signals =  Wait(sigmask | portsig);
 
-    if (tr != (struct timerequest *) 0)
-    {
-        if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
-        {
-            AbortIO((struct IORequest *) tr);
+            if (reaped != 0UL)
+            {
+                break;
+            }
+            if ((portsig != 0UL) && ((signals & portsig) != 0UL))
+            {
+                break;                          /* timed out */
+            }
+            if (portsig == 0UL)
+            {
+
+                /* No timer could be opened.  One wait is all we can offer; the
+                   handshake either completed or the task is unreachable, and
+                   either way going round again would just block forever.  */
+                break;
+            }
         }
-        WaitIO((struct IORequest *) tr);
+
+        if (tr != (struct timerequest *) 0)
+        {
+            if (CheckIO((struct IORequest *) tr) == (struct IORequest *) 0)
+            {
+                AbortIO((struct IORequest *) tr);
+            }
+            WaitIO((struct IORequest *) tr);
+        }
     }
 
     /* Decide the outcome under Forbid.  While reaped is still zero the dying
@@ -327,10 +325,15 @@ UINT                     wake;
     wake =  TX_FALSE;
 
     Forbid();
-    if (reaped == 0UL)
+    if ((sigmask == 0UL) || (reaped == 0UL))
     {
 
-        ctrl =  _tx_amiga_ctrl_of(task);
+        /* With no handshake signal the task may already have destroyed
+           itself, including its control block.  Re-read the owner pointer
+           under Forbid() before dereferencing it.  */
+        task =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
+        ctrl =  (task != (struct Task *) 0) ? _tx_amiga_ctrl_of(task)
+                                            : ((struct _tx_amiga_ctrl *) 0);
         if (ctrl != (struct _tx_amiga_ctrl *) 0)
         {
 
@@ -346,6 +349,8 @@ UINT                     wake;
                tx_amiga_kernel_stop() would refuse forever after one zombie.  */
             ctrl -> ctrl_zombie        =  1U;
             _tx_amiga_zombies_live++;
+
+            _tx_amiga_zombies++;
         }
 
         thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;
@@ -358,8 +363,6 @@ UINT                     wake;
             _tx_timer_time_slice   =  ((ULONG) 0);
             wake =  TX_TRUE;
         }
-
-        _tx_amiga_zombies++;
     }
     Permit();
 

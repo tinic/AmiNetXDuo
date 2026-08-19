@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo, the two DHCPv6 decisions that are ours rather than NetX Duo's,
+ * AmiNetXDuo, the DHCPv6 decisions that are ours rather than NetX Duo's,
  * driven directly.
  *
  * WHAT IS UNDER TEST, AND WHY IT IS WORTH A HOST BINARY
@@ -21,7 +21,7 @@
  *      the point: on a machine with no battery-backed clock, a DUID-LLT is a
  *      new identity every boot.
  *
- * Both are src/netstack/dhcpv6_wire.c, compiled into this binary.  Nothing is
+ * These are src/netstack/dhcpv6_wire.c, compiled into this binary. Nothing is
  * stubbed and nothing is reimplemented here; the expected bytes are written
  * out from RFC 8415 11.4 rather than from the implementation.
  *
@@ -85,6 +85,54 @@ static void test_ra_flags(void)
     CHECK(ami_dhcpv6_action_for_ra(0x7FU) == AMI_DHCPV6_ACT_STATELESS);
     CHECK(ami_dhcpv6_action_for_ra(0xBFU) == AMI_DHCPV6_ACT_STATEFUL);
     CHECK(ami_dhcpv6_action_for_ra(0xFFU) == AMI_DHCPV6_ACT_STATEFUL);
+}
+
+/* ------------------------------------------------------ link lifecycle ---- */
+
+static void test_interface_resume(void)
+{
+    printf("dhcpv6: resuming after an interface returns\n");
+
+    CHECK(ami_dhcpv6_resume_action(1, 0, 1, 1, 1, 1) ==
+          AMI_DHCPV6_ACT_STATEFUL);
+    CHECK(ami_dhcpv6_resume_action(1, 0, 1, 0, 1, 1) ==
+          AMI_DHCPV6_ACT_STATELESS);
+
+    /* The original deferred event owns a client not created yet. */
+    CHECK(ami_dhcpv6_resume_action(0, 0, 1, 1, 1, 1) ==
+          AMI_DHCPV6_ACT_NONE);
+
+    /* Do not duplicate a request on a client that is still running. */
+    CHECK(ami_dhcpv6_resume_action(1, 1, 1, 1, 1, 1) ==
+          AMI_DHCPV6_ACT_NONE);
+
+    /* AUTO has not chosen stateful or stateless until a router asks. */
+    CHECK(ami_dhcpv6_resume_action(1, 0, 0, 1, 1, 1) ==
+          AMI_DHCPV6_ACT_NONE);
+
+    /* Raising another interface must not restart this client's exchange. */
+    CHECK(ami_dhcpv6_resume_action(1, 0, 1, 1, 1, 0) ==
+          AMI_DHCPV6_ACT_NONE);
+}
+
+static void test_option_lifecycle(void)
+{
+    printf("dhcpv6: resolver option lifecycle\n");
+
+    CHECK(ami_dhcpv6_option_change(1, 0, 0, 0) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, 1) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+
+    /* A failed Information-Request also returns to INIT, but supplies no
+       replacement and therefore cannot erase the last coherent response. */
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, 0) ==
+          AMI_DHCPV6_OPTIONS_KEEP);
+
+    CHECK(ami_dhcpv6_option_change(0, 0, 1, 0) ==
+          AMI_DHCPV6_OPTIONS_WITHDRAW);
+    CHECK(ami_dhcpv6_option_change(0, 0, 0, 0) ==
+          AMI_DHCPV6_OPTIONS_KEEP);
 }
 
 /* ------------------------------------------------------------- the DUID ---- */
@@ -190,6 +238,8 @@ static void test_duid_refusals(void)
 int main(void)
 {
     test_ra_flags();
+    test_interface_resume();
+    test_option_lifecycle();
     test_duid_matches_the_wire();
     test_duid_refusals();
 

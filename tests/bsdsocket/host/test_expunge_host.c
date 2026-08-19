@@ -303,6 +303,11 @@ VOID Remove(struct Node *node)
 
 VOID netstack_shutdown(VOID)        { h.shutdown_calls++; }
 
+/* bsd_task_sweep() discards a dead opener's ThreadX registration through
+   this. Nothing here adopts, so there is never one to discard; the stub
+   exists because library.c is compiled whole. */
+VOID ami_netstack_release(AmiNetCaller *caller) { (VOID)caller; }
+
 /* Harmless, and reached by bsd_lib_close() on the way past. */
 VOID ObtainSemaphore(struct SignalSemaphore *s)  { (VOID)s; }
 VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; }

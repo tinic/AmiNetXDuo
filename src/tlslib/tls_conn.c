@@ -230,8 +230,8 @@ static LONG tls_error_from_nx(UINT status)
     }
 }
 
-CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
-                                register struct TLSLibBase *TLSBase __asm("a6"))
+CONST_STRPTR tls_TLSErrorString(register LONG               code    TLSLIB_REG("d0"),
+                                register struct TLSLibBase *TLSBase TLSLIB_REG("a6"))
 {
     (VOID)TLSBase;
 
@@ -251,6 +251,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
     case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
+    case TLS_ERR_BADHOSTNAME: return (CONST_STRPTR)"the host name is too long for certificate verification";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
@@ -338,13 +339,37 @@ static VOID tls_conn_free(TLSConnection *conn)
     tls_free(conn);
 }
 
+/*
+ * Deleting a session resets its ThreadX mutexes and removes it from NetX
+ * Secure's process-wide created-session list. Both operations belong inside
+ * the same ThreadX serialization as send, receive and session_end(). A failed
+ * TLSOpen() reaches this helper after it has left its handshake bracket.
+ *
+ * If the bracket is unavailable (normally because the kernel is down), the
+ * fallback preserves the existing last-resort teardown rule: leaving a
+ * created-list pointer into memory about to be freed would be permanent
+ * corruption.
+ */
+static VOID tls_conn_delete_session(TLSConnection *conn)
+{
+    if (tls_conn_enter(conn) == 0)
+    {
+        (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+        tls_conn_leave(conn);
+    }
+    else
+    {
+        (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+    }
+}
+
 /* ---------------------------------------------------------- TLSOpenA --- */
 
 struct TLSConnection *tls_TLSOpenA(
-        register APTR                  socket_base __asm("a0"),
-        register const struct TagItem *tags        __asm("a1"),
-        register LONG                  sock        __asm("d0"),
-        register struct TLSLibBase    *TLSBase     __asm("a6"))
+        register APTR                  socket_base TLSLIB_REG("a0"),
+        register const struct TagItem *tags        TLSLIB_REG("a1"),
+        register LONG                  sock        TLSLIB_REG("d0"),
+        register struct TLSLibBase    *TLSBase     TLSLIB_REG("a6"))
 {
     const AmiNetXDuoContext *ctx;
     TLSConnection           *conn = NULL;
@@ -441,18 +466,9 @@ struct TLSConnection *tls_TLSOpenA(
     {
         ULONG n = tls_strlen((const char *)hostname);
 
-        if (n > (ULONG)NX_SECURE_X509_DNS_NAME_MAX)
-            n = (ULONG)NX_SECURE_X509_DNS_NAME_MAX;
-
-        for (i = 0; i < n; i++)
-        {
-            conn->tc_HostName[i]            = (UCHAR)hostname[i];
-            conn->tc_Sni.nx_secure_x509_dns_name[i] = (UCHAR)hostname[i];
-        }
-        conn->tc_HostName[n]                     = 0;
-        conn->tc_HostNameLength                  = (USHORT)n;
-        conn->tc_Sni.nx_secure_x509_dns_name_length = (USHORT)n;
-        conn->tc_Sni.nx_secure_x509_dns_name_next   = NX_NULL;
+        error = tls_hostname_set(conn, hostname, n);
+        if (error != TLS_OK)
+            goto fail;
     }
 
     if ((conn->tc_Flags & TLSF_VERIFY) != 0 && conn->tc_HostNameLength == 0)
@@ -703,7 +719,7 @@ struct TLSConnection *tls_TLSOpenA(
     return conn;
 
 fail_session:
-    (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+    tls_conn_delete_session(conn);
 
 fail:
     if (conn != NULL)
@@ -716,8 +732,8 @@ fail:
 
 /* ----------------------------------------------------------- TLSClose --- */
 
-VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
-                  register struct TLSLibBase    *TLSBase __asm("a6"))
+VOID tls_TLSClose(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                  register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     const AmiNetXDuoContext *ctx = tls_netx_ctx();
 
@@ -739,18 +755,20 @@ VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
         (VOID)_nx_secure_tls_session_end(&conn->tc_Session,
                                           5UL * NX_IP_PERIODIC_RATE);
 
+        /* session_delete() resets ThreadX mutexes and edits NetX Secure's
+           global created-session list. Keep it under the baton so two Exec
+           Tasks closing separate connections cannot do that concurrently. */
+        (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+
         tls_conn_leave(conn);
     }
-
-    /*
-     * The delete sits outside the bracket test.  A session that was created is
-     * on nx_secure's process-wide created list, and the memory it occupies is
-     * about to be freed, so a session left linked puts a dangling pointer in
-     * a global on a machine with no memory protection, worse than a delete
-     * that fails.  The bracket can only fail when the ThreadX kernel is
-     * already down, where there is nothing left for the delete to disturb.
-     */
-    (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+    else
+    {
+        /* The bracket is normally unavailable only after kernel shutdown.
+           Keep the existing last-resort rule: a session left linked would
+           point into the connection memory freed below. */
+        (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
+    }
 
     /*
      * The descriptor is not closed.  It was the caller's before TLSOpen() and
@@ -762,10 +780,10 @@ VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
 
 /* ------------------------------------------------------------ TLSRead --- */
 
-LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
-                 register APTR                  buffer  __asm("a1"),
-                 register LONG                  length  __asm("d0"),
-                 register struct TLSLibBase    *TLSBase __asm("a6"))
+LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                 register APTR                  buffer  TLSLIB_REG("a1"),
+                 register LONG                  length  TLSLIB_REG("d0"),
+                 register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     const AmiNetXDuoContext *ctx = tls_netx_ctx();
     NX_PACKET               *packet = NX_NULL;
@@ -886,10 +904,10 @@ LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
 
 /* ----------------------------------------------------------- TLSWrite --- */
 
-LONG tls_TLSWrite(register struct TLSConnection *conn    __asm("a0"),
-                  register CONST_APTR            buffer  __asm("a1"),
-                  register LONG                  length  __asm("d0"),
-                  register struct TLSLibBase    *TLSBase __asm("a6"))
+LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                  register CONST_APTR            buffer  TLSLIB_REG("a1"),
+                  register LONG                  length  TLSLIB_REG("d0"),
+                  register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     const AmiNetXDuoContext *ctx = tls_netx_ctx();
     NX_PACKET_POOL          *pool;
@@ -968,8 +986,8 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    __asm("a0"),
 
 /* --------------------------------------------------------- TLSPending --- */
 
-LONG tls_TLSPending(register struct TLSConnection *conn    __asm("a0"),
-                    register struct TLSLibBase    *TLSBase __asm("a6"))
+LONG tls_TLSPending(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                    register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     (VOID)TLSBase;
 
@@ -981,9 +999,9 @@ LONG tls_TLSPending(register struct TLSConnection *conn    __asm("a0"),
 
 /* ------------------------------------------------------------ TLSInfo --- */
 
-LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
-                 register struct TLSInfo       *info    __asm("a1"),
-                 register struct TLSLibBase    *TLSBase __asm("a6"))
+LONG tls_TLSInfo(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                 register struct TLSInfo       *info    TLSLIB_REG("a1"),
+                 register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     (VOID)TLSBase;
 
@@ -1045,8 +1063,8 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
  * either is set.  The read can still block if what is buffered is an
  * incomplete record, which is the same bound TLSA_Timeout already covers.
  */
-LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
-                     register struct TLSLibBase    *TLSBase __asm("a6"))
+LONG tls_TLSBuffered(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                     register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
     const NX_PACKET *queued;
 
@@ -1080,9 +1098,9 @@ LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
  * Returns the number of bytes written, or -1.  Never partially fills, because
  * the generator cannot fail.
  */
-LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
-                   register LONG               length  __asm("d0"),
-                   register struct TLSLibBase *TLSBase __asm("a6"))
+LONG tls_TLSRandom(register APTR               buffer  TLSLIB_REG("a0"),
+                   register LONG               length  TLSLIB_REG("d0"),
+                   register struct TLSLibBase *TLSBase TLSLIB_REG("a6"))
 {
     const AmiNetXDuoContext *ctx;
 
@@ -1121,8 +1139,8 @@ LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
  * A wrapper rather than a change to bsdsocket.library, because
  * bsdsocket.library must not know what TLS is.
  */
-LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
-                       register struct TLSLibBase *TLSBase  __asm("a6"))
+LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
+                       register struct TLSLibBase *TLSBase TLSLIB_REG("a6"))
 {
     ULONG *read_words;
     LONG   ready = 0;
@@ -1195,6 +1213,7 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
     if (sel->ts_SocketBase == NULL)
         return -1;
 
+#ifndef TLSLIB_HOST_TEST
     {
         register APTR   a6 __asm("a6") = sel->ts_SocketBase;
         register APTR   a0 __asm("a0") = sel->ts_Read;
@@ -1215,4 +1234,7 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
                           : "cc", "memory");
         return res;
     }
+#else
+    return -1;
+#endif
 }

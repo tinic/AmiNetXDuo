@@ -863,15 +863,6 @@ VOID netdev_tx_pump(NetdevUnit *unit)
     }
 }
 
-/* netdev_cmds.c's cmd_queue, which is static there.  The caller holds the
-   mask here, so this one does not take it. */
-static VOID nd_queue(struct List *list, struct IOSana2Req *io)
-{
-    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    AddTail(list, &io->ios2_Req.io_Message.mn_Node);
-}
-
 /*
  * From BeginIO at task level.  The pump runs the opener's CopyFrom under
  * Disable(), which the timing build prices at 135 us of the 219 us a transmit
@@ -887,11 +878,20 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     LONG          rc;
 
     Disable();
+    /* The command-table check is outside this critical section.  If OFFLINE
+       drained the queue between that check and here, adding the write now
+       would strand it on a stopped unit with no completion left to pump it. */
+    if (!unit->nu_Online || !unit->nu_Nic.running)
+    {
+        Enable();
+        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
+        return;
+    }
+
     if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
-        !unit->nu_Nic.running ||
         unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
     {
-        nd_queue(&unit->nu_Writes, io);
+        netdev_queue_tail(&unit->nu_Writes, io);
         netdev_tx_pump(unit);
         Enable();
         return;
@@ -913,7 +913,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     rc = netdev_tx_timed_issue(unit, io, op, total);
     if (rc == DP8390_TX_BUSY)
     {
-        AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
+        netdev_queue_head(&unit->nu_Writes, io);
         Enable();
         return;
     }
@@ -966,6 +966,12 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
 LONG netdev_online(NetdevUnit *unit)
 {
     LONG rc;
+
+    if (!netdev_pcmcia_available(unit))
+    {
+        netdev_event(unit, S2EVENT_ERROR | S2EVENT_HARDWARE);
+        return -1;
+    }
 
     Disable();
     rc = unit->nu_Nic.ops->init(&unit->nu_Nic);
@@ -1052,12 +1058,15 @@ static VOID netdev_release_unit(NetdevUnit *unit)
     netdev_mar_clear(unit->nu_Nic.mar);
 }
 
-VOID netdev_offline(NetdevUnit *unit, ULONG event)
+static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
 {
     struct Node *n;
 
     Disable();
-    unit->nu_Nic.ops->stop(&unit->nu_Nic);
+    /* The removal callback clears running before a task can close the unit.
+       In that state a PCMCIA stop is an access to an empty socket. */
+    if (stop && (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))
+        unit->nu_Nic.ops->stop(&unit->nu_Nic);
     unit->nu_Online = 0;
 
     /* Everything queued is answered now rather than left to time out. */
@@ -1084,9 +1093,22 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
         netdev_event(unit, event);
 }
 
+VOID netdev_offline(NetdevUnit *unit, ULONG event)
+{
+    netdev_set_offline(unit, event, TRUE);
+}
+
+VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event)
+{
+    /* card.resource has already reset the socket control registers.  The
+       controller is physically absent, so even a polite stop is a bus access
+       to empty space. */
+    netdev_set_offline(unit, event, FALSE);
+}
+
 /* ------------------------------------------------------ interrupt server -- */
 
-static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
+ULONG netdev_interrupt(NetdevUnit *unit)
 {
     /*
      * The chip's own ISR is the only test made.
@@ -1166,6 +1188,11 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
     return 1;
 }
 
+static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
+{
+    return netdev_interrupt(unit);
+}
+
 /*
  * NetBSD arms ifp->if_timer on every transmit and dp8390_watchdog() resets the
  * chip when it expires.  There is no callout here and no task, so the tick is
@@ -1201,7 +1228,10 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     Disable();
 
     if (netdev_tx_watchdog_tick(&unit->nu_TxStall, &unit->nu_TxProgress,
-                               unit->nu_Online, unit->nu_Nic.txb_inuse,
+                               (BOOL)(unit->nu_Online &&
+                                      (!netdev_pcmcia_is_unit(unit) ||
+                                       unit->nu_Nic.running)),
+                               unit->nu_Nic.txb_inuse,
                                unit->nu_Nic.tx_completed))
     {
         unit->nu_TxWedges++;
@@ -1469,6 +1499,26 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     return TRUE;
 }
 
+BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR board)
+{
+    if (unit == NULL || card == NULL || card->bus != NETDEV_BUS_PCMCIA ||
+        unit->nu_Nic.card != card)
+        return FALSE;
+
+    /* A replacement card starts with none of the measured bus state of the
+       previous one.  In particular getodd must be probed again. */
+    netdev_bus_setup(&unit->nu_Nic.bus,
+                     (APTR)((UBYTE *)board + card->reg_off), card->stride,
+                     card->wide_off != 0
+                         ? (APTR)((UBYTE *)board + card->wide_off) : NULL);
+    if (card->odd_off != 0)
+        netdev_bus_split(&unit->nu_Nic.bus,
+                         (APTR)((UBYTE *)board + card->odd_off + card->reg_off));
+
+    unit->nu_Nic.board = (volatile UBYTE *)board;
+    return (BOOL)(unit->nu_Nic.ops->attach(&unit->nu_Nic) == 0);
+}
+
 static VOID netdev_probe(NetdevDevice *dev)
 {
     struct ConfigDev *cd = NULL;
@@ -1597,7 +1647,10 @@ static VOID netdev_probe(NetdevDevice *dev)
         if (dev->nd_UnitCount < NETDEV_MAX_UNITS)
         {
             const NetdevCard *card = NULL;
-            APTR              base = netdev_pcmcia_claim(&card);
+            APTR              base;
+
+            ObtainSemaphore(&dev->nd_PcmciaLock);
+            base = netdev_pcmcia_claim(dev, &card);
 
             if (base != NULL)
             {
@@ -1607,6 +1660,7 @@ static VOID netdev_probe(NetdevDevice *dev)
                 else
                     netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
             }
+            ReleaseSemaphore(&dev->nd_PcmciaLock);
         }
     }
 }
@@ -1676,6 +1730,89 @@ static NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
     return NULL;
 }
 
+/*
+ * Device initialization cannot leave an IFAVAILABLE handle queued for an empty
+ * slot, so a card inserted after the romtag probe needs one task-context retry.
+ * A positional request can only mean the slot when it asks for the next unit:
+ * PCMCIA is deliberately last in probe order.  A pinned request names the row
+ * exactly and never falls through to the other PCMCIA core.
+ */
+static BOOL netdev_request_is_pcmcia(NetdevDevice *dev, ULONG unit,
+                                     const char *pin_name,
+                                     const NetdevCard **wanted)
+{
+    const NetdevCard *card = NULL;
+
+    *wanted = NULL;
+    if (pin_name != NULL)
+    {
+        card = netdev_card_by_name(pin_name);
+        if (card == NULL || card->bus != NETDEV_BUS_PCMCIA)
+            return FALSE;
+        *wanted = card;
+        return TRUE;
+    }
+
+    if (unit >= ANXNET_UNIT_PIN)
+    {
+        ULONG idx = (unit / ANXNET_UNIT_PIN) - 1;
+
+        if (idx >= (ULONG)netdev_card_count)
+            return FALSE;
+        card = &netdev_cards[idx];
+        if (card->bus != NETDEV_BUS_PCMCIA)
+            return FALSE;
+        *wanted = card;
+        return TRUE;
+    }
+
+    return (BOOL)(unit == (ULONG)dev->nd_UnitCount);
+}
+
+static NetdevUnit *netdev_try_pcmcia_open(NetdevDevice *dev, ULONG unit,
+                                          const char *pin_name,
+                                          const char **why)
+{
+    const NetdevCard *wanted;
+    const NetdevCard *card = NULL;
+    NetdevUnit       *found;
+    APTR              base;
+
+    if (dev->nd_UnitCount >= NETDEV_MAX_UNITS ||
+        !netdev_request_is_pcmcia(dev, unit, pin_name, &wanted))
+        return NULL;
+
+    ObtainSemaphore(&dev->nd_PcmciaLock);
+
+    /* Another OpenDevice() may have completed the retry while this one waited. */
+    found = netdev_find_unit(dev, unit, pin_name, why);
+    if (found == NULL)
+    {
+        base = netdev_pcmcia_claim(dev, &card);
+        if (base != NULL && (wanted == NULL || wanted == card))
+        {
+            if (netdev_add_unit(dev, card, base, 0))
+            {
+                netdev_pcmcia_bind(&dev->nd_Units[dev->nd_UnitCount - 1]);
+                netdev_diag_counts(dev->nd_UnitCount, dev->nd_UnitsDropped);
+            }
+            else
+            {
+                netdev_pcmcia_release();
+            }
+        }
+        else if (base != NULL)
+        {
+            /* The pin named the other chip family. */
+            netdev_pcmcia_release();
+        }
+        found = netdev_find_unit(dev, unit, pin_name, why);
+    }
+
+    ReleaseSemaphore(&dev->nd_PcmciaLock);
+    return found;
+}
+
 /* ---------------------------------------------------------- the tag list -- */
 
 static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
@@ -1727,6 +1864,7 @@ static NetdevDevice *netdev_init(
 
     base->nd_SegList   = seglist;
     base->nd_UnitCount = 0;
+    InitSemaphore(&base->nd_PcmciaLock);
 
     base->nd_Device.dd_Library.lib_Node.ln_Type = NT_DEVICE;
     base->nd_Device.dd_Library.lib_Node.ln_Name = netdev_name;
@@ -1795,6 +1933,14 @@ static struct Device *netdev_open(
 
     nd_tracex("anx: open unit ", unit);
     hw = netdev_find_unit(d, unit, pin, &why);
+    if (hw != NULL && netdev_pcmcia_is_unit(hw) &&
+        !netdev_pcmcia_available(hw))
+    {
+        why = "the PCMCIA card is not ready";
+        hw = NULL;
+    }
+    else if (hw == NULL)
+        hw = netdev_try_pcmcia_open(d, unit, pin, &why);
     if (hw == NULL)
     {
         (VOID)why;
@@ -1853,7 +1999,8 @@ static struct Device *netdev_open(
 
     if (first_opener && !hw->nu_IntrAdded)
     {
-        AddIntServer(INTB_PORTS, &hw->nu_Intr);
+        if (!netdev_pcmcia_is_unit(hw))
+            AddIntServer(INTB_PORTS, &hw->nu_Intr);
         AddIntServer(INTB_VERTB, &hw->nu_Tick);
         hw->nu_IntrAdded = 1;
     }
@@ -1929,7 +2076,8 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_release_unit(hw);
             if (hw->nu_IntrAdded)
             {
-                RemIntServer(INTB_PORTS, &hw->nu_Intr);
+                if (!netdev_pcmcia_is_unit(hw))
+                    RemIntServer(INTB_PORTS, &hw->nu_Intr);
                 RemIntServer(INTB_VERTB, &hw->nu_Tick);
                 hw->nu_IntrAdded = 0;
             }
@@ -1964,12 +2112,15 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
     {
         if (d->nd_Units[i].nu_IntrAdded)
         {
-            RemIntServer(INTB_PORTS, &d->nd_Units[i].nu_Intr);
+            if (!netdev_pcmcia_is_unit(&d->nd_Units[i]))
+                RemIntServer(INTB_PORTS, &d->nd_Units[i].nu_Intr);
             RemIntServer(INTB_VERTB, &d->nd_Units[i].nu_Tick);
             d->nd_Units[i].nu_IntrAdded = 0;
         }
         Disable();
-        d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
+        if (!netdev_pcmcia_is_unit(&d->nd_Units[i]) ||
+            d->nd_Units[i].nu_Nic.running)
+            d->nd_Units[i].nu_Nic.ops->stop(&d->nd_Units[i].nu_Nic);
         Enable();
     }
 

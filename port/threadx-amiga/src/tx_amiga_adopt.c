@@ -52,10 +52,11 @@
 /*      other socket user, stops behind it.  Nothing in the port can     */
 /*      detect this; the caller must adopt on entry to a stack call,       */
 /*      orphan on exit, and never hold the baton across application code.  */
-/*    - a Task terminated by Exec (or crashing) while adopted never        */
-/*      releases the baton.  A shared library can defend against the tidy  */
-/*      case (its own Close vector) but not against a Ctrl-C handler that  */
-/*      RemTask()s itself.                                                 */
+/*    - a Task terminated by Exec (or crashing) while adopted cannot       */
+/*      release the baton itself. bsdsocket.library detects dead openers   */
+/*      on its heartbeat and discards their registration, but users of the */
+/*      adoption API outside that library still need an equivalent owner   */
+/*      liveness and teardown policy.                                      */
 /*    - priority is bounded rather than closed.  A higher-priority         */
 /*      ThreadX thread made ready by the tick does not preempt the baton   */
 /*      holder asynchronously (see tx_thread_context_restore.c); it runs   */
@@ -701,8 +702,7 @@ UINT         result =  (UINT) TX_FALSE;
         UBYTE   *other_start =  (UBYTE *) thread -> tx_thread_stack_start;
         UBYTE   *other_end   =  (UBYTE *) thread -> tx_thread_stack_end;
 
-        if (((stack_start >= other_start) && (stack_start < other_end)) ||
-            ((stack_end   >= other_start) && (stack_end   < other_end)))
+        if ((stack_start <= other_end) && (stack_end >= other_start))
         {
             result =  (UINT) TX_TRUE;
             break;

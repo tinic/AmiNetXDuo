@@ -199,6 +199,17 @@ VOID lance_setfilter(NetdevNic *nic)
 {
     BOOL was = nic->running;
 
+    /* The logical filter can only be changed by INIT, which rebuilds both
+       rings.  Do not throw away descriptors the chip still owns: the shell
+       has already completed those writes to their callers.  le_tint() applies
+       the latest filter as soon as the ring is empty. */
+    if (was && nic->txb_inuse != 0)
+    {
+        nic->filter_pending = TRUE;
+        return;
+    }
+
+    nic->filter_pending = FALSE;
     lance_halt(nic);
     le_write_init(nic);
     if (was)
@@ -249,6 +260,7 @@ LONG lance_init(NetdevNic *nic)
 
     le_rings(nic);
     le_write_init(nic);
+    nic->filter_pending = FALSE;
 
     /* Where the init block is, split across CSR1 and CSR2. */
     LANCE_CSR_PUT(nic, LE_CSR1, (UWORD)(LE_INIT_OFF & 0xffff));
@@ -376,6 +388,9 @@ static BOOL le_tint(NetdevNic *nic)
         nic->txb_inuse--;
         nic->tx_done = (UWORD)((nic->tx_done + 1) & (LE_TX_RING - 1));
     }
+
+    if (nic->filter_pending)
+        lance_setfilter(nic);
 
     return FALSE;
 }

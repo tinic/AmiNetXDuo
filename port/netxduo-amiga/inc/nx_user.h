@@ -760,6 +760,19 @@
 /* ------------------------------------------------------------------ DHCP, */
 
 /*
+ * Do not let nx_dhcp_create() silently enroll interface 0.
+ *
+ * A single NX_DHCP serves both physical interfaces.  NetX Duo normally adds
+ * interface 0 during create, before the application says which interfaces
+ * use DHCP.  Consequently a static primary plus a DHCP secondary made
+ * nx_dhcp_start() run the client on both and replace the primary's configured
+ * address.  The public disable API cannot undo that safely because it also
+ * clears the interface's IP parameters.  netstack.c instead explicitly
+ * enables every interface whose configuration says DHCP.
+ */
+#define NX_DHCP_CLIENT_DISABLE_DEFAULT_INTERFACE
+
+/*
  * ARP-probe the address the server hands out, and DHCPDECLINE if somebody
  * answers (RFC 2131 4.4.1, RFC 5227 2.1).
  *

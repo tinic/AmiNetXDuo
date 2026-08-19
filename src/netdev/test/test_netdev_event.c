@@ -251,16 +251,80 @@ static void test_queue(void)
 
     printf("\n-- S2_ONEVENT queueing\n");
     reset_fixture();
-    wait_for(&opener_a, &io, S2EVENT_ONLINE | S2EVENT_OFFLINE);
+    wait_for(&opener_a, &io, S2EVENT_TX | S2EVENT_RX);
 
     expect_int("queued on the opener", queued(&opener_a.op_Events), 1);
     expect_int("IOF_QUICK cleared", (io.ios2_Req.io_Flags & IOF_QUICK) == 0, 1);
     expect_int("ln_Type is NT_MESSAGE",
                io.ios2_Req.io_Message.mn_Node.ln_Type, NT_MESSAGE);
     expect_u32("nu_EventMask", unit.nu_EventMask,
-               S2EVENT_ONLINE | S2EVENT_OFFLINE);
+               S2EVENT_TX | S2EVENT_RX);
     expect_int("nothing replied yet", replies, 0);
     expect_int("Disable() balanced", disable_depth, 0);
+}
+
+static void test_queue_head(void)
+{
+    struct IOSana2Req first;
+    struct IOSana2Req retry;
+    struct Node       *node;
+
+    printf("\n-- late-busy transmit requeue\n");
+    reset_fixture();
+    memset(&first, 0, sizeof(first));
+    memset(&retry, 0, sizeof(retry));
+    first.ios2_Req.io_Flags = IOF_QUICK;
+    retry.ios2_Req.io_Flags = IOF_QUICK;
+
+    netdev_queue_tail(&unit.nu_Writes, &first);
+    netdev_queue_head(&unit.nu_Writes, &retry);
+
+    expect_int("two writes queued", queued(&unit.nu_Writes), 2);
+    expect_ptr("busy retry returned to the head", unit.nu_Writes.lh_Head,
+               &retry.ios2_Req.io_Message.mn_Node);
+    expect_int("retry IOF_QUICK cleared",
+               (retry.ios2_Req.io_Flags & IOF_QUICK) == 0, 1);
+    expect_int("retry ln_Type is NT_MESSAGE",
+               retry.ios2_Req.io_Message.mn_Node.ln_Type, NT_MESSAGE);
+
+    node = RemHead(&unit.nu_Writes);
+    expect_ptr("retry dequeued first", node,
+               &retry.ios2_Req.io_Message.mn_Node);
+    netdev_reply(&retry, 0, 0);
+    expect_int("eventual completion was replied", replies, 1);
+}
+
+/* ONLINE/OFFLINE are level-like events: a wait completes when its requested
+   state is already true and must never be linked for a future transition. */
+static void test_current_state(void)
+{
+    struct IOSana2Req io;
+
+    printf("\n-- current ONLINE/OFFLINE state\n");
+    reset_fixture();
+    memset(&io, 0, sizeof(io));
+    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_WireError   = S2EVENT_OFFLINE;
+
+    netdev_event_wait(&unit, &io);
+
+    expect_int("OFFLINE returned immediately", replies, 1);
+    expect_int("the request was not queued", queued(&opener_a.op_Events), 0);
+    expect_u32("the returned state", io.ios2_WireError, S2EVENT_OFFLINE);
+    expect_u32("the gate stayed empty", unit.nu_EventMask, 0);
+
+    reset_fixture();
+    unit.nu_Online = 1;
+    memset(&io, 0, sizeof(io));
+    io.ios2_Req.io_Unit = &opener_a.op_Unit;
+    io.ios2_WireError   = S2EVENT_ONLINE | S2EVENT_TX;
+
+    netdev_event_wait(&unit, &io);
+
+    expect_int("ONLINE returned immediately", replies, 1);
+    expect_u32("only the current state was returned", io.ios2_WireError,
+               S2EVENT_ONLINE);
+    expect_int("ONLINE was not queued", queued(&opener_a.op_Events), 0);
 }
 
 /*
@@ -271,23 +335,23 @@ static void test_queue(void)
  */
 static void test_overlap(void)
 {
-    struct IOSana2Req err, rx, buff, off;
+    struct IOSana2Req err, rx, buff, state;
 
     printf("\n-- any bit in common is a match\n");
     reset_fixture();
     wait_for(&opener_a, &err,  S2EVENT_ERROR);
     wait_for(&opener_a, &rx,   S2EVENT_RX | S2EVENT_TX);
     wait_for(&opener_b, &buff, S2EVENT_BUFF);
-    wait_for(&opener_b, &off,  S2EVENT_OFFLINE);
+    wait_for(&opener_b, &state, S2EVENT_ONLINE);
 
     expect_u32("gate holds every queued bit", unit.nu_EventMask,
                S2EVENT_ERROR | S2EVENT_RX | S2EVENT_TX | S2EVENT_BUFF |
-               S2EVENT_OFFLINE);
+               S2EVENT_ONLINE);
 
     netdev_event(&unit, S2EVENT_ERROR | S2EVENT_RX | S2EVENT_BUFF);
 
     expect_int("three of the four returned", replies, 3);
-    expect_int("the OFFLINE waiter is still queued",
+    expect_int("the ONLINE waiter is still queued",
                queued(&opener_b.op_Events), 1);
     expect_int("opener a's list is empty", queued(&opener_a.op_Events), 0);
 
@@ -298,12 +362,12 @@ static void test_overlap(void)
     expect_u32("RX|TX waiter's WireError", rx.ios2_WireError,
                S2EVENT_ERROR | S2EVENT_RX | S2EVENT_BUFF);
     expect_int("io_Error is zero", err.ios2_Req.io_Error, 0);
-    expect_int("OFFLINE waiter untouched", off.ios2_Req.io_Error, 0);
-    expect_u32("OFFLINE waiter's mask survives", off.ios2_WireError,
-               S2EVENT_OFFLINE);
+    expect_int("ONLINE waiter untouched", state.ios2_Req.io_Error, 0);
+    expect_u32("ONLINE waiter's mask survives", state.ios2_WireError,
+               S2EVENT_ONLINE);
 
     expect_u32("gate now holds only what is left", unit.nu_EventMask,
-               S2EVENT_OFFLINE);
+               S2EVENT_ONLINE);
     expect_int("replies happened under Disable()", disable_min > 0, 1);
     expect_int("Disable() balanced", disable_depth, 0);
 }
@@ -450,6 +514,8 @@ static void test_filter(void)
 int main(void)
 {
     test_queue();
+    test_queue_head();
+    test_current_state();
     test_overlap();
     test_no_overlap();
     test_all_pending();

@@ -164,7 +164,7 @@ static LONG bsd_handoff_new_id(struct AmiSocketBase *master)
  * `sock` must already carry the reference the registry is taking over.
  */
 static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
-                             LONG id, BOOL detach)
+                             LONG id, LONG detach_fd)
 {
     struct AmiSocketBase *master = bsd_master_of(base);
     BsdHandoff           *entry;
@@ -194,9 +194,31 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
 
     entry->bh_Id      = id;
     entry->bh_Socket  = sock;
-    entry->bh_Claimed = FALSE;
+    entry->bh_Claimed = (detach_fd >= 0);
 
     AddTail((struct List *)&master->sb_Handoffs, (struct Node *)&entry->bh_Node);
+
+    ReleaseSemaphore(&master->sb_Lock);
+
+    /* Reserve the registry entry before asking caller code to free the fd.
+       Claimed entries cannot be obtained, so uniqueness stays transactional
+       without invoking an arbitrary callback under the registry lock. */
+    if (detach_fd >= 0)
+    {
+        if (bsd_fd_free(base, detach_fd) != 0)
+        {
+            ObtainSemaphore(&master->sb_Lock);
+            Remove((struct Node *)&entry->bh_Node);
+            ReleaseSemaphore(&master->sb_Lock);
+            ami_free(entry);
+            return -1;
+        }
+
+        ObtainSemaphore(&master->sb_Lock);
+        entry->bh_Claimed = FALSE;
+        sock->as_Owner = NULL;
+        ReleaseSemaphore(&master->sb_Lock);
+    }
 
     /*
      * A fully released socket belongs to nobody until it is obtained. An
@@ -206,11 +228,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
      * A copy leaves as_Owner alone: the original descriptor is still live in
      * the releasing base and is still the one to wake.
      */
-    if (detach)
-        sock->as_Owner = NULL;
-
-    ReleaseSemaphore(&master->sb_Lock);
-
     return id;
 }
 
@@ -277,12 +294,9 @@ LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),
     if ((sock->as_Flags & ASF_LISTENING) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
-    result = bsd_handoff_park(SocketBase, sock, id, TRUE);
+    result = bsd_handoff_park(SocketBase, sock, id, sock_fd);
     if (result < 0)
         return result;
-
-    /* The descriptor is gone. The registry now holds its reference. */
-    bsd_fd_free(SocketBase, sock_fd);
 
     return result;
 }
@@ -305,7 +319,7 @@ LONG bsd_ReleaseCopyOfSocket(register LONG sock_fd __asm("d0"),
        independent connection. */
     sock->as_RefCount++;
 
-    result = bsd_handoff_park(SocketBase, sock, id, FALSE);
+    result = bsd_handoff_park(SocketBase, sock, id, -1);
     if (result < 0)
     {
         sock->as_RefCount--;
@@ -353,7 +367,7 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
         ObtainSemaphore(&master->sb_Lock);
         entry->bh_Claimed = FALSE;
         ReleaseSemaphore(&master->sb_Lock);
-        return bsd_fail(SocketBase, AMI_EMFILE);
+        return -1;
     }
 
     ObtainSemaphore(&master->sb_Lock);

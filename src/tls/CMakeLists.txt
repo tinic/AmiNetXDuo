@@ -104,6 +104,16 @@ target_compile_definitions(nx_secure PUBLIC NX_SECURE_ENABLE_AEAD_CIPHER)
 target_compile_definitions(nx_secure PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 target_compile_definitions(nx_crypto PUBLIC NX_SECURE_TLS_ENABLE_TLS_1_3)
 
+# tls.library has no renegotiation API and deliberately treats one connection
+# as one handshake (see tls_resume.c).  Leaving this compiled in does not just
+# retain dead entry points: nx_secure automatically accepts a server
+# HelloRequest and starts a second TLS 1.2 handshake when the peer advertised
+# RFC 5746, without an application callback being required.  Refuse that
+# unsolicited state-machine restart and compile out the unused handshake path.
+# PUBLIC because the macro changes NX_SECURE_TLS_SESSION's layout.
+target_compile_definitions(nx_secure PUBLIC
+    NX_SECURE_TLS_DISABLE_SECURE_RENEGOTIATION)
+
 # The schoolbook inner loop in _nx_crypto_huge_number_multiply is addmul_1, and
 # src/crypto68k has that in 68020 assembly over the same limb type.  Only on a
 # cross build: crypto68k_ref supplies a C fallback on a host, but the point of
