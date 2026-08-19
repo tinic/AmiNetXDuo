@@ -38,6 +38,7 @@ static pthread_mutex_t h_start = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  h_start_cond = PTHREAD_COND_INITIALIZER;
 static int             h_start_ready;
 static int             h_start_go;
+static NX_TCP_SOCKET   h_socket;
 
 #define CHECK(expr)                                                        \
     do {                                                                   \
@@ -80,16 +81,162 @@ static VOID h_leave(AmiNetCaller *caller)
     (VOID)pthread_mutex_unlock(&h_baton);
 }
 
+static NX_TCP_SOCKET *h_tcp_socket(APTR socket_base, LONG fd)
+{
+    (VOID)socket_base;
+    (VOID)fd;
+    return &h_socket;
+}
+
 static const AmiNetXDuoContext h_context =
 {
+    .nxc_TcpSocket = h_tcp_socket,
     .nxc_Enter = h_enter,
     .nxc_Leave = h_leave
 };
+
+LONG tls_netx_bind(APTR socket_base)
+{
+    return (socket_base != NULL) ? 0 : -1;
+}
 
 const AmiNetXDuoContext *tls_netx_ctx(VOID)
 {
     return &h_context;
 }
+
+VOID ObtainSemaphore(struct SignalSemaphore *semaphore)
+{
+    (VOID)semaphore;
+}
+
+VOID ReleaseSemaphore(struct SignalSemaphore *semaphore)
+{
+    (VOID)semaphore;
+}
+
+APTR tls_alloc(ULONG size)
+{
+    return calloc(1, (size_t)size);
+}
+
+ULONG tls_strlen(const char *text)
+{
+    return (ULONG)strlen(text);
+}
+
+const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc = { 0 };
+const USHORT ami_crypto_ecc_supported_groups[] = { 0 };
+const NX_CRYPTO_METHOD *ami_crypto_ecc_curves[] = { NULL };
+const UINT ami_crypto_ecc_supported_groups_size = 1;
+const USHORT ami_crypto_ecc_offered_groups[] = { 0 };
+const NX_CRYPTO_METHOD *ami_crypto_ecc_offered_curves[] = { NULL };
+const UINT ami_crypto_ecc_offered_groups_size = 1;
+
+UINT ami_tls_crypto_initialize(VOID) { return NX_SUCCESS; }
+BOOL ami_tls_timer_open(VOID) { return TRUE; }
+ULONG ami_tls_eclock(VOID) { return 0; }
+ULONG ami_tls_eclock_micros(ULONG ticks) { return ticks; }
+
+UINT _nx_secure_tls_metadata_size_calculate(
+        const NX_SECURE_TLS_CRYPTO *crypto, ULONG *size)
+{
+    (VOID)crypto;
+    *size = 64;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_create(NX_SECURE_TLS_SESSION *session,
+                                   const NX_SECURE_TLS_CRYPTO *crypto,
+                                   VOID *metadata, ULONG metadata_size)
+{
+    (VOID)session;
+    (VOID)crypto;
+    (VOID)metadata;
+    (VOID)metadata_size;
+    CHECK(h_depth == 1);
+    return NX_INVALID_PARAMETERS;
+}
+
+UINT _nx_secure_tls_ecc_initialize(NX_SECURE_TLS_SESSION *session,
+                                   const USHORT *groups, USHORT group_count,
+                                   const NX_CRYPTO_METHOD **curves)
+{
+    (VOID)session; (VOID)groups; (VOID)group_count; (VOID)curves;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_packet_buffer_set(NX_SECURE_TLS_SESSION *session,
+                                               UCHAR *buffer, ULONG size)
+{
+    (VOID)session; (VOID)buffer; (VOID)size;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_remote_certificate_allocate(NX_SECURE_TLS_SESSION *session,
+                                                NX_SECURE_X509_CERT *certificate,
+                                                UCHAR *buffer, UINT size)
+{
+    (VOID)session; (VOID)certificate; (VOID)buffer; (VOID)size;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_sni_extension_set(NX_SECURE_TLS_SESSION *session,
+                                               NX_SECURE_X509_DNS_NAME *name)
+{
+    (VOID)session; (VOID)name;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_time_function_set(NX_SECURE_TLS_SESSION *session,
+                                               ULONG (*time_func)(void))
+{
+    (VOID)session; (VOID)time_func;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_certificate_callback_set(
+        NX_SECURE_TLS_SESSION *session,
+        ULONG (*callback)(NX_SECURE_TLS_SESSION *, NX_SECURE_X509_CERT *))
+{
+    (VOID)session; (VOID)callback;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_session_start(NX_SECURE_TLS_SESSION *session,
+                                  NX_TCP_SOCKET *socket, UINT wait_option)
+{
+    (VOID)session; (VOID)socket; (VOID)wait_option;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_x509_common_name_dns_check(NX_SECURE_X509_CERT *certificate,
+                                           const UCHAR *dns_name,
+                                           UINT dns_name_length)
+{
+    (VOID)certificate; (VOID)dns_name; (VOID)dns_name_length;
+    return NX_SUCCESS;
+}
+
+TLSConnection *tls_conn_for_session(const NX_SECURE_TLS_SESSION *session)
+{
+    (VOID)session;
+    return NULL;
+}
+
+LONG tls_store_open(TLSStore *store, const char *path)
+{
+    (VOID)store; (VOID)path;
+    return TLS_OK;
+}
+
+VOID tls_store_attach(TLSConnection *conn) { (VOID)conn; }
+VOID tls_registry_add(TLSConnection *conn) { (VOID)conn; }
+VOID tls_resume_prepare(TLSConnection *conn) { (VOID)conn; }
+VOID tls_resume_evict(TLSConnection *conn) { (VOID)conn; }
+VOID tls_resume_record(TLSConnection *conn) { (VOID)conn; }
+BOOL tls_time_is_known(VOID) { return TRUE; }
+ULONG tls_time_now(VOID) { return 1; }
 
 UINT _nx_secure_tls_session_end(NX_SECURE_TLS_SESSION *session,
                                 ULONG wait_option)
@@ -326,6 +473,28 @@ static VOID h_test_waitselect_unique_descriptors(VOID)
     CHECK(read_words[1] == (1UL << 5));
 }
 
+static VOID h_test_open_create_serialized(struct TLSLibBase *base)
+{
+    struct TagItem tags[] = {
+        { TLSA_NoVerify, 1 },
+        { TLSA_NoResume, 1 },
+        { TAG_DONE, 0 }
+    };
+    TLSConnection *conn;
+    int            enters = h_enter_calls;
+    int            leaves = h_leave_calls;
+
+    printf("tls_open: session creation stays inside ThreadX serialization\n");
+
+    base->tb_CryptoReady = TRUE;
+    conn = tls_TLSOpenA((APTR)base, tags, 3, base);
+
+    CHECK(conn == NULL);
+    CHECK(h_enter_calls == enters + 1);
+    CHECK(h_leave_calls == leaves + 1);
+    CHECK(h_depth == 0);
+}
+
 int main(void)
 {
     struct TLSLibBase *base;
@@ -356,6 +525,7 @@ int main(void)
     h_test_hostname_limit();
     h_test_path_limit();
     h_test_waitselect_unique_descriptors();
+    h_test_open_create_serialized(base);
 
     free(base);
 

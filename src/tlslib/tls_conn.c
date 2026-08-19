@@ -584,12 +584,23 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* ---- the session ---------------------------------------------------- */
 
+    /* session_create() and remote_certificate_allocate() use ThreadX
+       mutexes, and create also edits NetX Secure's process-wide session
+       list.  TLSOpenA() is entered by a plain Exec Task, so setup needs the
+       same bracket as handshake, I/O and delete. */
+    if (tls_conn_enter(conn) != 0)
+    {
+        error = TLS_ERR_NOSTACK;
+        goto fail;
+    }
+
     status = _nx_secure_tls_session_create(&conn->tc_Session,
                                             &ami_crypto_tls_ciphers_ecc,
                                             (VOID *)conn->tc_Metadata,
                                             conn->tc_MetadataSize);
     if (status != NX_SUCCESS)
     {
+        tls_conn_leave(conn);
         error = tls_error_from_nx(status);
         goto fail;
     }
@@ -669,6 +680,8 @@ struct TLSConnection *tls_TLSOpenA(
          */
         conn->tc_Session.nx_secure_remote_certificate_verify = tls_verify_none;
     }
+
+    tls_conn_leave(conn);
 
     /* ---- the handshake -------------------------------------------------- */
 
