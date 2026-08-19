@@ -472,6 +472,7 @@ static VOID ami_ns_second_expired(ULONG id)
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
+    BOOL  requests_retained = FALSE;
 
     if (ns == NULL)
         return;
@@ -575,11 +576,40 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     {
         if (ns->ns_Iface[i] != NULL)
         {
-            ami_sana2_close(ns->ns_Iface[i]);
-            ns->ns_Iface[i] = NULL;
+            if (ami_sana2_close(ns->ns_Iface[i]))
+            {
+                ns->ns_Iface[i] = NULL;
+            }
+            else
+            {
+                requests_retained = TRUE;
+            }
         }
     }
     ns->ns_IfaceCount = 0;
+
+    /*
+     * An orphaned SANA-II request reaches farther than AmiSana2If. RX slots
+     * hold NX_PACKETs and destination pointers inside ns_PoolMemory; TX slots
+     * hold packet chains there too. A reader that has not quite exited can
+     * also call nx_packet_release(), which follows the packet's pool owner
+     * back to ns_Pool. Deleting the pool and freeing either allocation after
+     * ami_sana2_close() retained the interface turns its deliberate leak into
+     * a use-after-free on the next device completion.
+     *
+     * This is already an unrecoverable driver failure: the device owns memory
+     * it refused to return, and the kernel cannot safely unload while its
+     * reader may remain. Retain the complete stack allocation set with the
+     * interface. A bounded leak on shutdown is the only safe result; freeing
+     * any subset requires proving which point the stuck request or thread has
+     * reached, which the device gives us no way to do.
+     */
+    if (requests_retained)
+    {
+        AMI_ERROR("netstack: retaining packet pool and stack memory because "
+                  "a SANA-II device still owns requests into them");
+        return;
+    }
 
     if (ns->ns_PoolMemory != NULL)
     {

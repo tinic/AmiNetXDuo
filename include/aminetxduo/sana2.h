@@ -74,7 +74,10 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
  * *err to an AMI_NET_ERR_* code.
  */
 AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err);
-VOID        ami_sana2_close(AmiSana2If *iface);
+/* TRUE when the allocation was released. FALSE means a device still owns a
+   request inside it, so the caller must retain every packet pool that request
+   can still reach. */
+BOOL        ami_sana2_close(AmiSana2If *iface);
 
 /* Register with an NX_IP as interface `index`. Sets additional_link_info. */
 LONG        ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index);
