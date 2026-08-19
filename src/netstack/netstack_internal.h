@@ -508,6 +508,9 @@ VOID ami_netstack_capture_stop(AmiNetStack *ns);
 /* The same, for one interface that appeared or went away after start-up. */
 VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index);
 VOID ami_netstack_capture_detach_one(AmiNetStack *ns, UWORD index);
+
+/* Pin the SANA-II allocation behind a BPF capture cookie while it is used. */
+LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 #endif
 
 /* ---------------------------------------------------------------- resolver */
