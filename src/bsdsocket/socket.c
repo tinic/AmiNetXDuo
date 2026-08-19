@@ -3125,6 +3125,8 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_PeerScopeId = scope;
         sock->as_Flags   |= ASF_CONNECTED;
 
+        bsd_raw_revalidate_peer(sock);
+
         return 0;
     }
 

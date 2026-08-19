@@ -217,6 +217,19 @@ static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
                ? TRUE : FALSE;
 }
 
+static BOOL bsd_raw_packet_from_peer(const AmiSocket *sock,
+                                     const NX_PACKET *packet)
+{
+    BOOL is_v6 = FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
+        is_v6 = TRUE;
+#endif
+
+    return bsd_raw_from_peer(sock, packet, is_v6);
+}
+
 /*
  * Does this datagram belong to the address a raw socket bound?
  *
@@ -1010,4 +1023,54 @@ ULONG bsd_raw_available(AmiSocket *sock)
         nx_packet_length_get(sock->as_RawHead, &length);
 
     return length;
+}
+
+/* A raw connect changes the receive PCB as well as the default send address.
+   The IP hook filtered queued copies against the peer that was current when
+   they arrived, so discard any that the new association no longer admits.
+   Called inside the connect() ThreadX bracket, while the IP thread cannot
+   change this queue. */
+VOID bsd_raw_revalidate_peer(AmiSocket *sock)
+{
+    NX_PACKET *packet;
+    NX_PACKET *next;
+    NX_PACKET *head = NX_NULL;
+    NX_PACKET *tail = NX_NULL;
+    ULONG      count = 0;
+
+    if (sock->as_RxPending != NX_NULL &&
+        !bsd_raw_packet_from_peer(sock, sock->as_RxPending))
+    {
+        nx_packet_release(sock->as_RxPending);
+        sock->as_RxPending = NX_NULL;
+        sock->as_RxOffset  = 0;
+    }
+
+    for (packet = sock->as_RawHead; packet != NX_NULL; packet = next)
+    {
+        next = packet->nx_packet_queue_next;
+        packet->nx_packet_queue_next = NX_NULL;
+
+        if (bsd_raw_packet_from_peer(sock, packet))
+        {
+            if (tail != NX_NULL)
+                tail->nx_packet_queue_next = packet;
+            else
+                head = packet;
+
+            tail = packet;
+            count++;
+        }
+        else
+        {
+            nx_packet_release(packet);
+
+            if (sock->as_RawSemOk)
+                (VOID)tx_semaphore_get(&sock->as_RawSem, TX_NO_WAIT);
+        }
+    }
+
+    sock->as_RawHead  = head;
+    sock->as_RawTail  = tail;
+    sock->as_RawCount = count;
 }

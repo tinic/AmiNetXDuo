@@ -1450,6 +1450,87 @@ char                  buffer[96];
     (VOID)bsd_CloseSocket(client);
 }
 
+static VOID t_test_raw_connect_after_peek(VOID)
+{
+LONG                  server, old_peer, new_peer;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     old_data[] = "raw old peer";
+static const char     new_data[] = "raw new peer";
+char                  buffer[96];
+
+    t_log("raw connect after MSG_PEEK");
+
+    server   = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    old_peer = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    new_peer = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    if (!t_check((BOOL)(server >= 0 && old_peer >= 0 && new_peer >= 0),
+                 "raw connect sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000002UL;
+    rc = bsd_bind(old_peer, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "raw old peer bind", bsd_Errno());
+
+    sa.sin_addr = 0x7F000001UL;
+    rc = bsd_bind(new_peer, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "raw new peer bind", bsd_Errno());
+
+    /* Leave one old-peer packet parked by MSG_PEEK and another on the raw
+       queue. The new peer's receives synchronize with the global IP hook. */
+    sa.sin_addr = 0x7F000001UL;
+    rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
+                    &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
+                  "raw old peer first send", rc);
+    rc = bsd_recv(new_peer, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw first send synchronization", rc);
+
+    rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
+                    &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
+                  "raw old peer second send", rc);
+    rc = bsd_recv(new_peer, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw second send synchronization", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer),
+                  T_MSG_DONTWAIT | T_MSG_PEEK);
+    (VOID)t_check((BOOL)(rc >= 20 &&
+                         (UBYTE)buffer[12] == 127 &&
+                         (UBYTE)buffer[13] == 0 &&
+                         (UBYTE)buffer[14] == 0 &&
+                         (UBYTE)buffer[15] == 2),
+                  "peek packet from raw old peer", rc);
+
+    sa.sin_addr = 0x7F000001UL;
+    rc = bsd_connect(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect raw socket to new peer",
+                  bsd_Errno());
+
+    rc = bsd_sendto(new_peer, (APTR)new_data, sizeof(new_data), 0,
+                    &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(new_data)),
+                  "raw new peer send", rc);
+
+    Delay(2);
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc >= 20 &&
+                         (UBYTE)buffer[12] == 127 &&
+                         (UBYTE)buffer[13] == 0 &&
+                         (UBYTE)buffer[14] == 0 &&
+                         (UBYTE)buffer[15] == 1),
+                  "raw connect removes packets from old peer", rc);
+
+    (VOID)bsd_CloseSocket(new_peer);
+    (VOID)bsd_CloseSocket(old_peer);
+    (VOID)bsd_CloseSocket(server);
+}
+
 /* --------------------------------------------------------- RFC 3542 ------ */
 
 /*
@@ -2512,6 +2593,7 @@ int main(void)
     t_test_udp_connected_readiness();
     t_test_udp_reconnect_after_peek();
     t_test_raw_bound_address();
+    t_test_raw_connect_after_peek();
     t_test_cmsg_macros();
     t_test_cmsg_options();
     t_test_cmsg_receive();
