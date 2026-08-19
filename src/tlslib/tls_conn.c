@@ -1182,7 +1182,7 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
             TLSConnection *conn = sel->ts_Connections[i];
             LONG           fd   = conn->tc_Fd;
 
-            if (fd < 0 || fd >= TLS_FD_MAX)
+            if (fd < 0 || fd >= TLS_FD_MAX || fd >= sel->ts_NFds)
                 continue;
             if (conn->tc_Pending == NX_NULL)
                 continue;

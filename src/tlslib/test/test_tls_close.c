@@ -317,6 +317,13 @@ static VOID h_test_waitselect_unique_descriptors(VOID)
     CHECK(ready == 1);
     CHECK(read_words[0] == 0UL);
     CHECK(read_words[1] == (1UL << 5));
+
+    /* select() considers [0, nfds); a set bit at exactly nfds is outside the
+       request and the TLS buffered fast path must obey the same boundary. */
+    sel.ts_NFds = 37;
+    ready = tls_TLSWaitSelect(&sel, NULL);
+    CHECK(ready == -1);
+    CHECK(read_words[1] == (1UL << 5));
 }
 
 int main(void)
