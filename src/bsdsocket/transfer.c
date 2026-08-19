@@ -692,6 +692,26 @@ BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                   sock->as_PeerAddr.nxd_ip_address.v4);
 }
 
+/* Shared by recv() and WaitSelect(): readiness must promise that recv() can
+   return this packet, not merely that NetX queued something on the port. */
+BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
+{
+    NXD_ADDRESS source;
+    ULONG       scope;
+    UINT        port = 0;
+
+    if (!bsd_udp_to_local(sock, packet))
+        return FALSE;
+
+    if (nxd_udp_source_extract((NX_PACKET *)packet, &source, &port) !=
+        NX_SUCCESS)
+        return FALSE;
+
+    scope = bsd_packet_scope_id(packet, &source);
+
+    return bsd_udp_from_peer(sock, &source, port, scope);
+}
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope,
@@ -1301,10 +1321,6 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
          */
         for (;;)
         {
-            NXD_ADDRESS from_ip;
-            ULONG       from_scope;
-            UINT        from_port = 0;
-
             status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
                                      &aborted);
             if (aborted)
@@ -1327,11 +1343,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, bsd_wait_errno(wait, status));
             }
 
-            nxd_udp_source_extract(packet, &from_ip, &from_port);
-            from_scope = bsd_packet_scope_id(packet, &from_ip);
-
-            if (bsd_udp_to_local(sock, packet) &&
-                bsd_udp_from_peer(sock, &from_ip, from_port, from_scope))
+            if (bsd_udp_accepts_packet(sock, packet))
                 break;
 
             nx_packet_release(packet);

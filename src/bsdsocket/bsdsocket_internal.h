@@ -1233,6 +1233,10 @@ BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                        UINT src_port, ULONG src_scope);
 
+/* The complete receive-side UDP endpoint predicate: local bind plus connected
+ * peer. transfer.c owns it; select.c uses it to avoid false readability. */
+BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet);
+
 /*
  * The send direction of the same question: which source must a datagram from
  * this socket leave with? socket.c owns it. transfer.c and raw.c use it to

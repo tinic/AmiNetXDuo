@@ -503,11 +503,23 @@ BOOL bsd_readable(AmiSocket *sock)
         return FALSE;
     }
 
-    if (sock->as_Nx.udp.nx_udp_socket_receive_count > 0)
-        return TRUE;
+    /* NetX queues UDP by port alone.  A specific local bind and connect()'s
+       peer are enforced by this layer, so a queued mismatch cannot make
+       WaitSelect() promise that the following recv() will return.  Scan past
+       mismatches because a matching datagram can already be behind one. */
+    {
+        const NX_PACKET *packet = sock->as_Nx.udp.nx_udp_socket_receive_head;
 
-    return (nx_udp_socket_bytes_available(&sock->as_Nx.udp, &available)
-                == NX_SUCCESS && available > 0);
+        while (packet != NX_NULL)
+        {
+            if (bsd_udp_accepts_packet(sock, packet))
+                return TRUE;
+
+            packet = packet->nx_packet_queue_next;
+        }
+    }
+
+    return FALSE;
 }
 
 BOOL bsd_writable(AmiSocket *sock)

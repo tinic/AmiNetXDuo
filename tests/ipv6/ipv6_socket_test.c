@@ -180,6 +180,17 @@ struct t_addrinfo
     struct t_addrinfo  *ai_next;
 };
 
+struct t_timeval
+{
+    ULONG tv_secs;
+    ULONG tv_micro;
+};
+
+struct t_fdset
+{
+    ULONG bits[8];
+};
+
 #define T_AF_INET           2
 #define T_AF_INET6          23
 #define T_AF_UNSPEC         0
@@ -532,6 +543,31 @@ BSD_SCRATCH;
     return(res);
 }
 
+static LONG bsd_WaitSelect(LONG nfds, APTR readfds, APTR timeout)
+{
+register struct Library *a6 __asm("a6") = SocketBase;
+register LONG            d0 __asm("d0") = nfds;
+register APTR            a0 __asm("a0") = readfds;
+register APTR            a1 __asm("a1") = NULL;
+register APTR            a2 __asm("a2") = NULL;
+register APTR            a3 __asm("a3") = timeout;
+register APTR            d1 __asm("d1") = NULL;
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+register LONG _clob_a1 __asm("a1");
+register LONG _clob_a2 __asm("a2");
+register LONG _clob_a3 __asm("a3");
+
+    __asm __volatile ("jsr a6@(-126:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1), "=r" (_clob_a2), "=r" (_clob_a3)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
+                        "r" (a3), "r" (d1)
+                      : "cc", "memory");
+    return(res);
+}
+
 static APTR bsd_inet_ntop(LONG af, APTR src, APTR dst, LONG size)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -668,6 +704,19 @@ static VOID t_make_any6(struct t_sockaddr_in6 *sa, UWORD port)
     t_bzero(sa, sizeof(*sa));
     sa->sin6_family = T_AF_INET6;
     sa->sin6_port   = port;
+}
+
+static LONG t_udp_readable(LONG fd)
+{
+struct t_fdset   set;
+struct t_timeval tv;
+
+    t_bzero(&set, sizeof(set));
+    set.bits[(ULONG)fd >> 5] = 1UL << ((ULONG)fd & 31UL);
+    tv.tv_secs  = 0;
+    tv.tv_micro = 0;
+
+    return bsd_WaitSelect(fd + 1, &set, &tv);
 }
 
 
@@ -1142,6 +1191,11 @@ char                  buffer[64];
     rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)), "sendto wrong alias", rc);
 
+    Delay(2);
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 0),
+                  "WaitSelect ignores the wrong local alias", rc);
+
     t_bzero(buffer, sizeof(buffer));
     len = sizeof(sa);
     rc = bsd_recvfrom(server, buffer, sizeof(buffer), T_MSG_DONTWAIT,
@@ -1153,6 +1207,11 @@ char                  buffer[64];
     rc = bsd_sendto(client, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)), "sendto bound alias", rc);
 
+    Delay(2);
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 1),
+                  "WaitSelect sees the bound local alias", rc);
+
     t_bzero(buffer, sizeof(buffer));
     len = sizeof(sa);
     rc = bsd_recvfrom(server, buffer, sizeof(buffer), T_MSG_DONTWAIT,
@@ -1162,6 +1221,70 @@ char                  buffer[64];
 
     (VOID)bsd_CloseSocket(server);
     (VOID)bsd_CloseSocket(client);
+}
+
+static VOID t_test_udp_connected_readiness(VOID)
+{
+LONG                  server, good, bad;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     wrong[] = "wrong UDP peer";
+static const char     right[] = "right UDP peer";
+char                  buffer[64];
+
+    t_log("connected UDP readiness");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    good   = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    bad    = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && good >= 0 && bad >= 0),
+                 "connected UDP sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000001UL;
+
+    sa.sin_port = T_PORT + 8;
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connected UDP server bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 9;
+    rc = bsd_bind(good, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "good UDP peer bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 10;
+    rc = bsd_bind(bad, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "bad UDP peer bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 9;
+    rc = bsd_connect(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect UDP server to good peer", bsd_Errno());
+
+    sa.sin_port = T_PORT + 8;
+    rc = bsd_sendto(bad, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)), "send from wrong peer", rc);
+
+    Delay(2);
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 0), "WaitSelect ignores wrong UDP peer", rc);
+
+    rc = bsd_sendto(good, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)), "send from right peer", rc);
+
+    Delay(2);
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 1), "WaitSelect sees connected UDP peer", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right) && t_streq(buffer, right)),
+                  "recv skips wrong peer and returns right one", rc);
+
+    (VOID)bsd_CloseSocket(bad);
+    (VOID)bsd_CloseSocket(good);
+    (VOID)bsd_CloseSocket(server);
 }
 
 /* A custom raw protocol avoids ICMP's echo traffic while exercising the same
@@ -2285,6 +2408,7 @@ int main(void)
     t_test_tcp_accepted_local();
     t_test_udp_loopback();
     t_test_udp_bound_address();
+    t_test_udp_connected_readiness();
     t_test_raw_bound_address();
     t_test_cmsg_macros();
     t_test_cmsg_options();
