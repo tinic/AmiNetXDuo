@@ -104,8 +104,13 @@ static BOOL bsd_gai_number(const char *s, ULONG *out)
 /*
  * Resolve the service name. Returns an EAI_* code, or 0 with *port set in host
  * order. The sockaddr writers do the conversion.
+ *
+ * *socktype is value-result. Zero on the way in means the caller named neither
+ * a socket type nor a protocol, so both are acceptable; on the way out it is
+ * the type of the entry that matched, so the defaults the caller applies after
+ * this follow the service rather than overruling it.
  */
-static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
+static LONG bsd_gai_service(const char *servname, LONG flags, LONG *socktype,
                             UINT *port)
 {
     const AmiNetdbEntry *entry;
@@ -131,9 +136,13 @@ static LONG bsd_gai_service(const char *servname, LONG flags, LONG socktype,
      * first.
      */
     entry = ami_netdb_serv_by_name(servname,
-                                   (socktype == SOCK_DGRAM) ? "udp" : "tcp");
-    if (entry == NULL && socktype == 0)
+                                   (*socktype == SOCK_DGRAM) ? "udp" : "tcp");
+    if (entry == NULL && *socktype == 0)
+    {
         entry = ami_netdb_serv_by_name(servname, "udp");
+        if (entry != NULL)
+            *socktype = SOCK_DGRAM;
+    }
 
     if (entry == NULL)
         return EAI_SERVICE;
@@ -400,14 +409,25 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             return EAI_SOCKTYPE;
     }
 
-    if (socktype == 0)
+    /*
+     * The hint validation above has to precede the lookup, but the DEFAULTS
+     * below must not. A protocol hint alone still names the service's
+     * protocol, so it is applied first; naming neither leaves socktype zero,
+     * which is what lets bsd_gai_service() try both and report which one the
+     * service exists for. Defaulting to SOCK_STREAM before the lookup made
+     * every udp-only service, tftp among them, EAI_SERVICE.
+     */
+    if (socktype == 0 && protocol != 0)
         socktype = (protocol == IPPROTO_UDP) ? SOCK_DGRAM : SOCK_STREAM;
-    if (protocol == 0)
-        protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
-    status = bsd_gai_service((const char *)servname, flags, socktype, &port);
+    status = bsd_gai_service((const char *)servname, flags, &socktype, &port);
     if (status != 0)
         return status;
+
+    if (socktype == 0)
+        socktype = SOCK_STREAM;
+    if (protocol == 0)
+        protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
     /* ---- no node name: the wildcard/loopback address ------------------- */
 
