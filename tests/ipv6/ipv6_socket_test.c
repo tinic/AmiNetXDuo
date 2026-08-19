@@ -208,6 +208,8 @@ struct t_fdset
 #define T_EWOULDBLOCK       35
 #define T_ECONNREFUSED      61
 #define T_EPIPE             32
+#define T_EDESTADDRREQ      39
+#define T_ENOTCONN          57
 
 #define T_MSG_DONTWAIT      0x80
 #define T_MSG_PEEK          0x02
@@ -1401,6 +1403,85 @@ char                  buffer[64];
 
     (VOID)bsd_CloseSocket(new_peer);
     (VOID)bsd_CloseSocket(old_peer);
+    (VOID)bsd_CloseSocket(server);
+}
+
+static VOID t_test_udp_disconnect(VOID)
+{
+LONG                  server, good, bad;
+LONG                  rc;
+LONG                  len;
+struct t_sockaddr_in  sa;
+struct t_sockaddr_in  unspec;
+static const char     data[] = "queued before UDP disconnect";
+char                  buffer[64];
+
+    t_log("UDP AF_UNSPEC disconnect");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    good   = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    bad    = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && good >= 0 && bad >= 0),
+                 "UDP disconnect sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000001UL;
+
+    sa.sin_port = T_PORT + 36;
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "UDP disconnect server bind", bsd_Errno());
+    sa.sin_port = T_PORT + 37;
+    rc = bsd_bind(good, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "UDP disconnect good-peer bind",
+                  bsd_Errno());
+    sa.sin_port = T_PORT + 38;
+    rc = bsd_bind(bad, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "UDP disconnect bad-peer bind",
+                  bsd_Errno());
+
+    sa.sin_port = T_PORT + 37;
+    rc = bsd_connect(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect before UDP disconnect",
+                  bsd_Errno());
+
+    sa.sin_port = T_PORT + 36;
+    rc = bsd_sendto(bad, (APTR)data, sizeof(data), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(data)),
+                  "queue packet from filtered UDP peer", rc);
+
+    Delay(2);
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 0),
+                  "connected UDP hides the other peer", rc);
+
+    t_bzero(&unspec, sizeof(unspec));
+    rc = bsd_connect(server, &unspec, sizeof(unspec));
+    (VOID)t_check((BOOL)(rc == 0), "disconnect UDP with AF_UNSPEC",
+                  bsd_Errno());
+
+    len = sizeof(sa);
+    rc = bsd_getpeername(server, &sa, &len);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_ENOTCONN),
+                  "disconnected UDP has no peer", bsd_Errno());
+
+    rc = t_udp_readable(server);
+    (VOID)t_check((BOOL)(rc == 1),
+                  "UDP disconnect broadens queued receive peers", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(data) && t_streq(buffer, data)),
+                  "disconnected UDP receives formerly filtered peer", rc);
+
+    rc = bsd_send(server, (APTR)data, sizeof(data), 0);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EDESTADDRREQ),
+                  "disconnected UDP send needs a destination", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(bad);
+    (VOID)bsd_CloseSocket(good);
     (VOID)bsd_CloseSocket(server);
 }
 
@@ -2871,6 +2952,7 @@ int main(void)
     t_test_udp_bound_address();
     t_test_udp_connected_readiness();
     t_test_udp_reconnect_after_peek();
+    t_test_udp_disconnect();
     t_test_udp_icmp_readiness();
     t_test_udp_so_error_consumes_icmp();
     t_test_datagram_shutdown();

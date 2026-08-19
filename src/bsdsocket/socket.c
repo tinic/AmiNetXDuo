@@ -3398,11 +3398,19 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
     {
         ULONG version = sock->as_PeerAddr.nxd_ip_version;
 
+        /* UDP's ICMP callback and raw's global receive hook inspect this
+           endpoint on the IP thread. Make dissolving the association as
+           atomic with those readers as establishing it below. */
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+
         bsd_bzero(&sock->as_PeerAddr, sizeof(sock->as_PeerAddr));
         sock->as_PeerAddr.nxd_ip_version = version;
         sock->as_PeerPort = 0;
         sock->as_PeerScopeId = 0UL;
         sock->as_Flags   &= ~ASF_CONNECTED;
+
+        bsd_nx_leave(SocketBase);
 
         return 0;
     }
