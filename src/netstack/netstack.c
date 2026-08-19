@@ -2918,14 +2918,17 @@ static LONG ami_ns_dhcp_ensure(AmiNetStack *ns)
     if (ns->ns_DhcpCreated)
         return AMI_NET_OK;
 
-    /* NetX Duo keeps the host name pointer rather than a copy, so it must be
-       storage that outlives the NX_DHCP, the same reason start-up hands it
-       ns_Config. The literal is reached only when no card gave
-       ami_ns_name_after_card() a hardware address to work from. */
+    /* Match the startup path: NetX Duo keeps this pointer, so give it the
+       client's stable outgoing option-12 storage rather than live resolver
+       configuration. A hostname returned by the server may rename the
+       machine, but must not rewrite what the same client asks for next. */
+    ami_ns_copy_name(ns->ns_DhcpName,
+                     (ns->ns_Config.hostname[0] != '\0')
+                         ? ns->ns_Config.hostname : "amiga",
+                     sizeof(ns->ns_DhcpName));
+
     status = nx_dhcp_create(&ns->ns_Dhcp, &ns->ns_Ip,
-                            (ns->ns_Config.hostname[0] != '\0')
-                                ? (CHAR *)ns->ns_Config.hostname
-                                : (CHAR *)"amiga");
+                            (CHAR *)ns->ns_DhcpName);
     if (status != NX_SUCCESS)
     {
         AMI_ERROR("netstack: nx_dhcp_create failed (%ld)", (long)status);
