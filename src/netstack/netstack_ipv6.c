@@ -274,6 +274,22 @@ static VOID ami_ns6_arm_solicitation(AmiNetStack *ns, UWORD i)
 #define ami_ns6_arm_solicitation(ns, i)  ((VOID)(ns), (VOID)(i))
 #endif /* NX_DISABLE_ICMPV6_ROUTER_SOLICITATION */
 
+/*
+ * A link cycle does not recreate the NX_INTERFACE, so NetX Duo retains the
+ * exhausted solicitation count from initial bring-up.  Re-arm an AUTO
+ * interface whenever it is explicitly raised; otherwise it can obtain a new
+ * prefix only if the router happens to send an unsolicited advertisement.
+ */
+VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index)
+{
+    if (ns == NULL || !ns->ns_Ipv6Enabled ||
+        interface_index >= ns->ns_IfaceCount ||
+        ns->ns_Config.interfaces[interface_index].ip6type != AMI_IP6TYPE_AUTO)
+        return;
+
+    ami_ns6_arm_solicitation(ns, interface_index);
+}
+
 static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 {
     const AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];

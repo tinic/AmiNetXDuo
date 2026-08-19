@@ -414,6 +414,7 @@ struct AmiNetStack
    link-local is left alone. */
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
+VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index);
 
 /*
  * netstack_dhcpv6.c.  _configure() is called from

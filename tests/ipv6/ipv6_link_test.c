@@ -28,6 +28,7 @@
 #include "tx_amiga.h"
 #include "nx_api.h"
 #include "nx_ipv6.h"
+#include "nx_icmpv6.h"
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/config.h"
@@ -364,6 +365,53 @@ LONG            rc;
     (VOID)netstack_interface_up(0);
 }
 
+/*
+ * Router solicitations are a finite startup counter in NetX Duo.  Exhaust it
+ * deliberately, cycle an AUTO interface, and verify that Online gives the
+ * interface a fresh solicitation schedule rather than leaving it dependent
+ * on an unsolicited router advertisement.
+ */
+static VOID t_reconnect_solicitation(NX_IP *ip)
+{
+const AmiIfConfig  *cfg = netstack_iface_config(0);
+NX_INTERFACE       *ifp = &ip->nx_ip_interface[0];
+LONG                rc;
+
+    if (cfg == NULL || cfg->ip6type != AMI_IP6TYPE_AUTO)
+        return;
+
+    rc = netstack_interface_down(0);
+    if (!t_check((UINT)(rc == AMI_NET_OK),
+                 "AUTO interface went down for the reconnect test", (ULONG)rc))
+        return;
+
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    ifp->nx_ipv6_rtr_solicitation_max = 0;
+    ifp->nx_ipv6_rtr_solicitation_count = 0;
+    ifp->nx_ipv6_rtr_solicitation_interval = 0;
+    ifp->nx_ipv6_rtr_solicitation_timer = 0;
+    tx_mutex_put(&ip->nx_ip_protection);
+
+    rc = netstack_interface_up(0);
+    (VOID)t_check((UINT)(rc == AMI_NET_OK),
+                  "AUTO interface came back up", (ULONG)rc);
+
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    (VOID)t_check((UINT)(ifp->nx_ipv6_rtr_solicitation_max ==
+                         NX_ICMPV6_MAX_RTR_SOLICITATIONS &&
+                         ifp->nx_ipv6_rtr_solicitation_count ==
+                         NX_ICMPV6_MAX_RTR_SOLICITATIONS),
+                  "Online re-armed router solicitations",
+                  (ULONG)ifp->nx_ipv6_rtr_solicitation_count);
+    (VOID)t_check((UINT)(ifp->nx_ipv6_rtr_solicitation_interval ==
+                         NX_ICMPV6_RTR_SOLICITATION_INTERVAL &&
+                         ifp->nx_ipv6_rtr_solicitation_timer ==
+                         NX_ICMPV6_RTR_SOLICITATION_DELAY),
+                  "Online restored the solicitation schedule",
+                  (ULONG)ifp->nx_ipv6_rtr_solicitation_timer);
+    tx_mutex_put(&ip->nx_ip_protection);
+}
+
 static VOID t_run(VOID)
 {
 
@@ -546,6 +594,8 @@ UWORD            slot;
               t_ping6(ip, t_slirp_ll6, "fe80::2"));
     t_finding("SLIRP answered fec0::2",
               t_ping6(ip, t_slirp_host6, "fec0::2"));
+
+    t_reconnect_solicitation(ip);
 
     /* ---- and the same interface, added after startup --------------------- */
 
