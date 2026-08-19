@@ -1060,6 +1060,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
 {
     AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
     NXD_ADDRESS addr;
+    BOOL        bracketed = FALSE;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -1068,6 +1069,24 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_EFAULT);
 
     addr = sock->as_LocalAddr;
+
+    /* A wildcard endpoint is resolved from live route/address tables below.
+       Adopt this Exec task before taking nx_ip_protection, and keep the
+       ThreadX scheduler still while the TCP connection interface is read. */
+    if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
+        ((addr.nxd_ip_version == NX_IP_VERSION_V4 &&
+          addr.nxd_ip_address.v4 == 0UL)
+#ifdef AMINETXDUO_IPV6
+         || (addr.nxd_ip_version == NX_IP_VERSION_V6 &&
+             (addr.nxd_ip_address.v6[0] | addr.nxd_ip_address.v6[1] |
+              addr.nxd_ip_address.v6[2] | addr.nxd_ip_address.v6[3]) == 0UL)
+#endif
+        ))
+    {
+        if (bsd_nx_enter(SocketBase) != 0)
+            return bsd_fail(SocketBase, AMI_ENETDOWN);
+        bracketed = TRUE;
+    }
 
 #ifdef AMINETXDUO_IPV6
     if (addr.nxd_ip_version == NX_IP_VERSION_V6 &&
@@ -1082,11 +1101,29 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
          * global for itself.
          */
         ULONG chosen[4];
+        LONG  interface_index = -1;
+
+        /* TCP has already selected its route, so report that established
+           endpoint rather than whatever a new route lookup would choose now.
+           A scoped datagram/raw peer makes the same interface choice through
+           its one-based socket zone. */
+        if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP &&
+            sock->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
+        {
+            interface_index = (LONG)sock->as_Nx.tcp
+                                        .nx_tcp_socket_connect_interface
+                                        ->nx_interface_index;
+        }
+        else if (sock->as_ScopeId > 0UL &&
+                 sock->as_ScopeId <= (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        {
+            interface_index = (LONG)(sock->as_ScopeId - 1UL);
+        }
 
         if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
             sock->as_PeerAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
             netstack_ipv6_source_for(sock->as_PeerAddr.nxd_ip_address.v6,
-                                     chosen))
+                                     interface_index, chosen))
         {
             addr.nxd_ip_address.v6[0] = chosen[0];
             addr.nxd_ip_address.v6[1] = chosen[1];
@@ -1116,6 +1153,9 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
             bsd_v4_source_for(sock, &chosen))
             bsd_addr_from_v4(&addr, chosen);
     }
+
+    if (bracketed)
+        bsd_nx_leave(SocketBase);
 
     bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort,
                      sock->as_ScopeId);

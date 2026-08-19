@@ -461,10 +461,13 @@ BOOL netstack_ipv6_have_global(VOID);
 
 /*
  * The best source address for talking to `dest`, which is what an AF_INET6
- * socket bound to in6addr_any reports from getsockname(). Returns FALSE when
- * the interface has no usable (non-tentative) address of the right scope.
+ * socket bound to in6addr_any reports from getsockname().  interface_index is
+ * a zero-based NetX interface, or -1 to let the route choose.  Returns FALSE
+ * when that interface has no usable (non-tentative) address of the right
+ * scope.
  */
-BOOL netstack_ipv6_source_for(const ULONG dest[4], ULONG addr_out[4]);
+BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
+                              ULONG addr_out[4]);
 
 /*
  * AAAA lookup. Same semantics as netstack_resolve(), search list included,
