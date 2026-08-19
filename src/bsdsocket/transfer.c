@@ -732,6 +732,31 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
     return bsd_udp_from_peer(sock, &source, port, scope);
 }
 
+/* The same endpoint test after nx_udp_socket_receive() has removed the UDP
+   header. nxd_udp_source_extract() is deliberately correct at this stage: it
+   reads the source port from the header immediately before prepend_ptr. The
+   queued predicate above cannot be reused here, because its header parser
+   would instead interpret the first eight payload bytes as UDP fields (and
+   reject every payload shorter than eight bytes). */
+BOOL bsd_udp_accepts_received_packet(const AmiSocket *sock,
+                                     const NX_PACKET *packet)
+{
+    NXD_ADDRESS source;
+    ULONG       scope;
+    UINT        port = 0;
+
+    if (!bsd_udp_to_local(sock, packet))
+        return FALSE;
+
+    if (nxd_udp_source_extract((NX_PACKET *)packet, &source, &port) !=
+        NX_SUCCESS)
+        return FALSE;
+
+    scope = bsd_packet_scope_id(packet, &source);
+
+    return bsd_udp_from_peer(sock, &source, port, scope);
+}
+
 /* Size of the next datagram recv() can actually return.  NetX's own query
    reports the queue head, which may be an endpoint mismatch this layer will
    discard. */
@@ -1394,7 +1419,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, bsd_wait_errno(wait, status));
             }
 
-            if (bsd_udp_accepts_packet(sock, packet))
+            if (bsd_udp_accepts_received_packet(sock, packet))
                 break;
 
             nx_packet_release(packet);

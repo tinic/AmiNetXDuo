@@ -1234,9 +1234,13 @@ BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                        UINT src_port, ULONG src_scope);
 
-/* The complete receive-side UDP endpoint predicate: local bind plus connected
- * peer. transfer.c owns it; select.c uses it to avoid false readability. */
+/* The complete receive-side UDP endpoint predicates: local bind plus connected
+ * peer. A queued packet still starts at its UDP header; nx_udp_socket_receive()
+ * has stripped that header from a received packet. transfer.c owns both;
+ * select.c uses the queued form to avoid false readability. */
 BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet);
+BOOL bsd_udp_accepts_received_packet(const AmiSocket *sock,
+                                     const NX_PACKET *packet);
 ULONG bsd_udp_available(const AmiSocket *sock);
 
 /*

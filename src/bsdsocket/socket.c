@@ -3177,7 +3177,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
            Reconnecting to the same peer keeps the packet, and therefore the
            usual MSG_PEEK promise, intact. */
         if (sock->as_RxPending != NX_NULL &&
-            !bsd_udp_accepts_packet(sock, sock->as_RxPending))
+            !bsd_udp_accepts_received_packet(sock, sock->as_RxPending))
         {
             nx_packet_release(sock->as_RxPending);
             sock->as_RxPending = NX_NULL;
