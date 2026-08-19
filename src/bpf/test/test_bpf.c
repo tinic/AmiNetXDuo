@@ -1174,6 +1174,80 @@ static void test_close_owner_under_reader(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+/*
+ * BIOCSETIF and BIOCSETF both allocate outside the channel lock. A close and
+ * reopen in that window used to leave their AmiBpfChan pointer aimed at the
+ * numeric slot and commit into whoever owned the replacement. Reopening with
+ * the same owner is included: only the slot generation distinguishes it.
+ */
+static APTR t_reopen_owner;
+static LONG t_reopen_close_status;
+static LONG t_reopen_open_status;
+
+static void t_close_and_reopen_channel(void)
+{
+    t_reopen_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_reopen_open_status  = ami_bpf_open(t_reopen_owner, 0);
+}
+
+static void test_ioctl_close_reopen(void)
+{
+    struct bpf_program program;
+    ULONG              before;
+    LONG               status;
+
+    printf("bpf: allocating ioctls cannot cross a close/reopen\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+
+    /* A different base takes the replacement while BIOCSETIF is between its
+       identity snapshot and its buffer allocation. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    before                = ami_alloc_count();
+    t_reopen_owner        = T_BPF_OTHER;
+    t_reopen_close_status = -1;
+    t_reopen_open_status  = -1;
+    stub_unlock_after     = 1;
+    stub_on_unlock        = t_close_and_reopen_channel;
+
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0");
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_reopen_close_status == 0);
+    CHECK(t_reopen_open_status == 0);
+    CHECK(status == AMI_BPF_EPERM);
+    CHECK(ami_alloc_count() == before);       /* abandoned buffer was freed */
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGETIF, (APTR)&program) ==
+          AMI_BPF_EINVAL);                    /* replacement stayed unbound */
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    /* The same base closes and reopens the number while BIOCSETF is copying
+       its program. Owner equality passes, so the generation must reject it. */
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    program.bf_len   = NELEM(prog_ip);
+    program.bf_insns = (struct bpf_insn *)(APTR)prog_ip;
+    before                = ami_alloc_count();
+    t_reopen_owner        = T_BPF_OWNER;
+    t_reopen_close_status = -1;
+    t_reopen_open_status  = -1;
+    stub_unlock_after     = 1;
+    stub_on_unlock        = t_close_and_reopen_channel;
+
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETF, &program);
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_reopen_close_status == 0);
+    CHECK(t_reopen_open_status == 0);
+    CHECK(status == AMI_BPF_ENXIO);
+    CHECK(ami_alloc_count() == before);       /* abandoned filter was freed */
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /* -------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
@@ -1194,6 +1268,7 @@ int main(int argc, char **argv)
     test_write_and_binding();
     test_channel_ownership();
     test_close_owner_under_reader();
+    test_ioctl_close_reopen();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 
