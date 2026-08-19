@@ -206,6 +206,7 @@ struct t_fdset
 #define T_ENOPROTOOPT       42
 #define T_EAFNOSUPPORT      47
 #define T_EWOULDBLOCK       35
+#define T_ECONNREFUSED      61
 
 #define T_MSG_DONTWAIT      0x80
 #define T_MSG_PEEK          0x02
@@ -1386,6 +1387,44 @@ char                  buffer[64];
     (VOID)bsd_CloseSocket(new_peer);
     (VOID)bsd_CloseSocket(old_peer);
     (VOID)bsd_CloseSocket(server);
+}
+
+static VOID t_test_udp_icmp_readiness(VOID)
+{
+LONG                  fd;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     probe[] = "closed UDP port";
+char                  buffer[16];
+
+    t_log("connected UDP ICMP readiness");
+
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "UDP ICMP socket", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 31;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_connect(fd, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect UDP to unused port", bsd_Errno());
+
+    rc = bsd_send(fd, (APTR)probe, sizeof(probe), 0);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(probe)),
+                  "send UDP unused-port probe", rc);
+
+    Delay(3);
+    rc = t_udp_readable(fd);
+    (VOID)t_check((BOOL)(rc == 1), "ICMP error makes UDP read-ready", rc);
+
+    rc = bsd_recv(fd, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_ECONNREFUSED),
+                  "read-ready UDP reports ICMP error", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(fd);
 }
 
 /* A custom raw protocol avoids ICMP's echo traffic while exercising the same
@@ -2662,6 +2701,7 @@ int main(void)
     t_test_udp_bound_address();
     t_test_udp_connected_readiness();
     t_test_udp_reconnect_after_peek();
+    t_test_udp_icmp_readiness();
     t_test_raw_bound_address();
     t_test_raw_bind_after_peek();
     t_test_raw_connect_after_peek();

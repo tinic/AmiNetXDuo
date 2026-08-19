@@ -503,6 +503,12 @@ BOOL bsd_readable(AmiSocket *sock)
         return FALSE;
     }
 
+    /* NetX reports a connected UDP ICMP error from the next receive, ahead of
+       any queued datagram. Its callback posts FD_READ for exactly that reason,
+       so the readiness predicate must make the same promise. */
+    if (sock->as_SoError != 0)
+        return TRUE;
+
     /* NetX queues UDP by port alone.  A specific local bind and connect()'s
        peer are enforced by this layer, so a queued mismatch cannot make
        WaitSelect() promise that the following recv() will return.  Scan past
