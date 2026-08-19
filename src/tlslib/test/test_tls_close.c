@@ -285,6 +285,40 @@ static VOID h_test_path_limit(VOID)
     CHECK((UBYTE)copied[0] == 0x5A);
 }
 
+static VOID h_test_waitselect_unique_descriptors(VOID)
+{
+    TLSConnection  conn;
+    TLSConnection *connections[3];
+    NX_PACKET      pending;
+    struct TLSSelect sel;
+    ULONG          read_words[8];
+    LONG           ready;
+
+    printf("tls_waitselect: duplicate connections count one descriptor\n");
+
+    memset(&conn, 0, sizeof(conn));
+    memset(&pending, 0, sizeof(pending));
+    memset(&sel, 0, sizeof(sel));
+    memset(read_words, 0, sizeof(read_words));
+
+    conn.tc_Fd = 37;
+    conn.tc_Pending = &pending;
+    connections[0] = &conn;
+    connections[1] = &conn;
+    connections[2] = NULL;
+    read_words[1] = 1UL << 5;
+
+    sel.ts_Size = (ULONG)sizeof(sel);
+    sel.ts_NFds = 38;
+    sel.ts_Read = read_words;
+    sel.ts_Connections = connections;
+
+    ready = tls_TLSWaitSelect(&sel, NULL);
+    CHECK(ready == 1);
+    CHECK(read_words[0] == 0UL);
+    CHECK(read_words[1] == (1UL << 5));
+}
+
 int main(void)
 {
     struct TLSLibBase *base;
@@ -314,6 +348,7 @@ int main(void)
     h_test_concurrent_close(base);
     h_test_hostname_limit();
     h_test_path_limit();
+    h_test_waitselect_unique_descriptors();
 
     free(base);
 

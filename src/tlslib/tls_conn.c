@@ -1188,6 +1188,8 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
                 continue;
             if ((read_words[TLS_FD_WORD(fd)] & TLS_FD_MASK(fd)) == 0)
                 continue;
+            if ((hits[TLS_FD_WORD(fd)] & TLS_FD_MASK(fd)) != 0)
+                continue;
 
             hits[TLS_FD_WORD(fd)] |= TLS_FD_MASK(fd);
             ready++;
