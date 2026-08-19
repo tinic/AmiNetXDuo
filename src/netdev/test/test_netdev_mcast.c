@@ -79,13 +79,24 @@ int main(void)
     addr[5]++;
     expect("second existing reference increments", find(table, addr)->refs, 2);
 
-    /* A missing member makes a delete fail before earlier rows are touched. */
+    /*
+     * A delete removes what it finds. A stack that joined by single address
+     * and leaves by range, or that has already dropped one member, must not
+     * be told no AND left in the rest of the groups.
+     */
     set_addr(addr, 0, 0, 0);
     set_addr(missing, 0, 0, 1);
     expect("remove setup", netdev_mcast_del(table, missing), TRUE);
+    expect("a partially missing delete removes what is there",
+           netdev_mcast_range_apply(table, addr, 2, FALSE), TRUE);
+    expect("and the member it did find was released",
+           find(table, addr) == NULL, TRUE);
+
+    /* A range naming nothing at all is still a caller error. */
     memcpy(before, table, sizeof(table));
-    expect("a partially missing delete is refused",
-           netdev_mcast_range_apply(table, addr, 2, FALSE), FALSE);
+    set_addr(missing, 9, 9, 9);
+    expect("a delete matching nothing is refused",
+           netdev_mcast_range_apply(table, missing, 2, FALSE), FALSE);
     expect("a refused delete changes no row",
            memcmp(table, before, sizeof(table)) == 0, TRUE);
 

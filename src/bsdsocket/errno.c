@@ -424,7 +424,25 @@ static const BsdSimpleTag bsd_simple_tags[] =
     { SBTC_ERROR_HOOK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_ErrorHook)    },
     /* This is per-opener state a caller can set and read back. */
     { SBTC_SIG_ADDRESS_CHANGE_MASK, SBT_RW,
-      (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) }
+      (UWORD)offsetof(struct AmiSocketBase, sb_SigAddressChangeMask) },
+
+    /*
+     * Recorded per opener and never acted on, which is the honest shape for
+     * this one. The capability is genuinely FALSE here -- signal masks and
+     * timer.device state belong to the task that opened us, so a shared base
+     * would deliver another task's completions -- and a GET of a base that
+     * never set it reads the FALSE that bsd_child_create() writes.
+     *
+     * It is not a refusable constant. A SET that this library will not service
+     * returns that tag's index and DISCARDS EVERY TAG AFTER IT in the same
+     * call (docs/RESEARCH.md 55), and Amiga callers batch these: a program
+     * asking to share and linking its errno in one SocketBaseTagList() would
+     * lose the errno pointer and run with a stale one for its whole life.
+     * Refusing the request costs more than the request does, because nothing
+     * here reads the flag to decide anything.
+     */
+    { SBTC_CAN_SHARE_LIBRARY_BASES, SBT_RW,
+      (UWORD)offsetof(struct AmiSocketBase, sb_CanShareBases) }
 };
 
 /*
@@ -477,7 +495,6 @@ static const BsdConstTag bsd_const_tags[] =
      * same call, which is how an errno link in the next slot goes missing,
      * and Amiga callers batch these into one SocketBaseTagList().
      */
-    { SBTC_CAN_SHARE_LIBRARY_BASES,     SBT_RW, FALSE                     },
 
     /*
      * The tunables. SocketBaseTagList() is documented to return the index of
