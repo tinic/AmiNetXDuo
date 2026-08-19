@@ -223,6 +223,40 @@ static VOID h_test_concurrent_close(struct TLSLibBase *base)
     h_concurrent = 0;
 }
 
+static VOID h_test_hostname_limit(VOID)
+{
+    TLSConnection conn;
+    char          accepted[NX_SECURE_X509_DNS_NAME_MAX + 1];
+    char          rejected[NX_SECURE_X509_DNS_NAME_MAX + 2];
+    ULONG         i;
+
+    printf("tls_open: an over-limit host name is rejected, not truncated\n");
+
+    memset(&conn, 0, sizeof(conn));
+    for (i = 0; i < (ULONG)NX_SECURE_X509_DNS_NAME_MAX; i++)
+        accepted[i] = (char)('a' + (i % 26UL));
+    accepted[NX_SECURE_X509_DNS_NAME_MAX] = '\0';
+
+    CHECK(tls_hostname_set(&conn, (CONST_STRPTR)accepted,
+                           (ULONG)NX_SECURE_X509_DNS_NAME_MAX) == TLS_OK);
+    CHECK(conn.tc_HostNameLength == NX_SECURE_X509_DNS_NAME_MAX);
+    CHECK(conn.tc_Sni.nx_secure_x509_dns_name_length ==
+          NX_SECURE_X509_DNS_NAME_MAX);
+    CHECK(memcmp(conn.tc_HostName, accepted,
+                 NX_SECURE_X509_DNS_NAME_MAX) == 0);
+
+    memset(&conn, 0, sizeof(conn));
+    for (i = 0; i <= (ULONG)NX_SECURE_X509_DNS_NAME_MAX; i++)
+        rejected[i] = (char)('a' + (i % 26UL));
+    rejected[NX_SECURE_X509_DNS_NAME_MAX + 1] = '\0';
+
+    CHECK(tls_hostname_set(&conn, (CONST_STRPTR)rejected,
+                           (ULONG)NX_SECURE_X509_DNS_NAME_MAX + 1UL) ==
+          TLS_ERR_BADHOSTNAME);
+    CHECK(conn.tc_HostNameLength == 0);
+    CHECK(conn.tc_Sni.nx_secure_x509_dns_name_length == 0);
+}
+
 int main(void)
 {
     struct TLSLibBase *base;
@@ -250,6 +284,7 @@ int main(void)
     CHECK(h_delete_calls == 1);
 
     h_test_concurrent_close(base);
+    h_test_hostname_limit();
 
     free(base);
 

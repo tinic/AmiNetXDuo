@@ -251,6 +251,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    TLSLIB_REG("
     case TLS_ERR_IO:        return (CONST_STRPTR)"the network connection failed";
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
     case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
+    case TLS_ERR_BADHOSTNAME: return (CONST_STRPTR)"the host name is too long for certificate verification";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
@@ -465,18 +466,9 @@ struct TLSConnection *tls_TLSOpenA(
     {
         ULONG n = tls_strlen((const char *)hostname);
 
-        if (n > (ULONG)NX_SECURE_X509_DNS_NAME_MAX)
-            n = (ULONG)NX_SECURE_X509_DNS_NAME_MAX;
-
-        for (i = 0; i < n; i++)
-        {
-            conn->tc_HostName[i]            = (UCHAR)hostname[i];
-            conn->tc_Sni.nx_secure_x509_dns_name[i] = (UCHAR)hostname[i];
-        }
-        conn->tc_HostName[n]                     = 0;
-        conn->tc_HostNameLength                  = (USHORT)n;
-        conn->tc_Sni.nx_secure_x509_dns_name_length = (USHORT)n;
-        conn->tc_Sni.nx_secure_x509_dns_name_next   = NX_NULL;
+        error = tls_hostname_set(conn, hostname, n);
+        if (error != TLS_OK)
+            goto fail;
     }
 
     if ((conn->tc_Flags & TLSF_VERIFY) != 0 && conn->tc_HostNameLength == 0)
