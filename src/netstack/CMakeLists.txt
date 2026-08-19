@@ -23,7 +23,8 @@ endif()
 # not even a branch on a "is IPv6 on" flag.
 if(AMINETXDUO_IPV6)
     list(APPEND NETSTACK_SOURCES netstack_ipv6.c netstack_dhcpv6.c
-                                 dhcpv6_wire.c netstack_ra.c)
+                                 dhcpv6_wire.c netstack_ra.c
+                                 netstack_dns_domain.c)
 endif()
 
 # Capture: registers the SANA-II interfaces with src/bpf/ and installs the

@@ -10,6 +10,7 @@
  */
 
 #include "netstack_internal.h"
+#include "netstack_dns_domain.h"
 #include "netstack_dns_status.h"
 #include "netstack_retry.h"
 
@@ -437,8 +438,6 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
             ami_ns_resolver_forbid();
             accepted = ami_config_search_reference_add(r, ra.dnssl[i]);
-            if (accepted && r->domain[0] == '\0')
-                ami_ns_copy_name(r->domain, ra.dnssl[i], sizeof(r->domain));
             ami_ns_resolver_permit();
 
             if (!accepted)
@@ -449,6 +448,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
             ns->ns_DnsslAppliedCount++;
             added++;
         }
+
+        ami_ns_resolver_forbid();
+        ami_ns_dns_ra_default_reconcile(r, ns->ns_DnsslDefault,
+                                        ns->ns_DnsslApplied,
+                                        ns->ns_DnsslAppliedCount);
+        ami_ns_resolver_permit();
 
         if (removed != 0)
             AMI_INFO("netstack: advertised search list withdrawn, %ld "
@@ -1735,6 +1740,9 @@ LONG netstack_set_domain_name(const char *name)
     if (name == NULL || name[0] == '\0')
     {
         ns->ns_Config.resolver.domain[0] = '\0';
+#ifdef AMINETXDUO_IPV6
+        ns->ns_DnsslDefault[0] = '\0';
+#endif
         goto out;
     }
 
@@ -1754,6 +1762,11 @@ LONG netstack_set_domain_name(const char *name)
     for (i = 0; name[i] != '\0'; i++)
         ns->ns_Config.resolver.domain[i] = name[i];
     ns->ns_Config.resolver.domain[i] = '\0';
+#ifdef AMINETXDUO_IPV6
+    /* The caller owns this value even when it deliberately chose the same
+       spelling as the current advertisement. */
+    ns->ns_DnsslDefault[0] = '\0';
+#endif
 
 out:
     ami_ns_resolver_permit();

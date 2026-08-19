@@ -327,6 +327,7 @@ struct AmiNetStack
     char                ns_DnsslApplied[AMI_CFG_MAX_SEARCH]
                                        [AMI_CFG_NAME_LEN];
     UWORD               ns_DnsslAppliedCount;
+    char                ns_DnsslDefault[AMI_CFG_NAME_LEN];
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the
