@@ -1425,6 +1425,7 @@ VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
     }
 #else
     (VOID)sock;
+    (VOID)scope_id;
 #endif
 
     {
@@ -1674,6 +1675,8 @@ static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr, ULONG scope)
         if (zoned->nx_interface_valid == 0)
             return BSD_BIND_FOREIGN;
     }
+#else
+    (VOID)scope;
 #endif
 
     if (bsd_addr_is_unspecified(addr) || bsd_addr_is_loopback(addr))
