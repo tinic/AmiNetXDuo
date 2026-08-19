@@ -375,4 +375,30 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_status COMMAND test_dns_status)
 
+    # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
+    # their state before entering the DNS client.  Permit() in this harness
+    # injects a second advertisement exactly after the snapshot, proving that
+    # it remains pending and cannot overwrite the snapshot being consumed.
+    add_executable(test_ra_handoff
+        host/test_ra_handoff_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ra.c")
+
+    target_include_directories(test_ra_handoff PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # Exec declarations
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_ra_handoff PRIVATE
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_compile_options(test_ra_handoff PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME ra_handoff COMMAND test_ra_handoff)
+
 endif()

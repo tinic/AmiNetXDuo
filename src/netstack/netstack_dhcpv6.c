@@ -183,7 +183,7 @@ static const char *ami_ns6_dhcp_state_name(UCHAR state)
  *
  * Nothing here calls back into NetX Duo or the DNS client: a BOUND sets a
  * flag, and ami_ns_dns_absorb_dhcpv6() on a caller thread does the work, for
- * the reason stated above ns_Rdnss in netstack_internal.h.
+ * the reason stated above ns_Ra in netstack_internal.h.
  */
 static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
                                        UINT old_state, UINT new_state)
