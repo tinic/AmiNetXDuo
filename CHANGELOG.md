@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `getaddrinfo()` with no hints resolves a service that exists only over UDP again -- `tftp`, `ntp`, `syslog` and the rest. Tightening the protocol checks moved the lookup to after the socket type was defaulted, and the "try both protocols" step could then never run
+- A program killed while it was inside the stack no longer stops the network for everything else. Its claim on the stack could not be given back by a task that no longer exists, and nothing else was allowed to give it back either
+- Two programs closing encrypted connections at the same time no longer corrupt the list the encryption library keeps of its open sessions
 - Shutting the stack down no longer frees memory a stuck driver request can still reach. When a device refuses to return a request, the interface is deliberately left behind, and the packet pool it points into was deleted anyway
 - Asking for another task's credentials returns a copy. The pointer named that task's own context, which could close the moment the search released the scheduler, so the caller read it after it was gone
 - A TCP: session no longer looks at its socket after closing it. If another holder closed at the same moment, that close was the last one and the memory was already free
