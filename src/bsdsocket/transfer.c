@@ -20,6 +20,7 @@
 #include "netmonitor.h"
 
 #include "nx_ip.h"
+#include "nx_udp.h"          /* NX_UDP_HEADER, read off a queued packet */
 #include "nx_ipv4.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
@@ -703,9 +704,33 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
     if (!bsd_udp_to_local(sock, packet))
         return FALSE;
 
+    /*
+     * The port comes out of the queued packet's own UDP header, not out of
+     * nxd_udp_source_extract().  That helper reads two longwords BEFORE
+     * nx_packet_prepend_ptr, which is the UDP header only after
+     * nx_udp_socket_receive() has stripped it (nx_udp_socket_receive.c:420).
+     * A packet still on the receive queue has prepend_ptr AT the header, so
+     * the helper reads inside the IP header and answers a port that matches
+     * no peer -- which made every connected UDP socket unreadable.
+     *
+     * The queued header is in host byte order: nx_udp_packet_receive.c:125
+     * swaps it on the way in and only the ICMP-error paths swap it back.
+     *
+     * The address half of the helper works on a queued packet, because it
+     * reads nx_packet_ip_header rather than the prepend pointer, so it is
+     * still used for that and its port answer discarded.
+     */
+    if (packet->nx_packet_prepend_ptr == NX_NULL ||
+        packet->nx_packet_length < (ULONG)sizeof(NX_UDP_HEADER))
+        return FALSE;
+
     if (nxd_udp_source_extract((NX_PACKET *)packet, &source, &port) !=
         NX_SUCCESS)
         return FALSE;
+
+    port = (UINT)(((const NX_UDP_HEADER *)(const VOID *)
+                       packet->nx_packet_prepend_ptr)->nx_udp_header_word_0 >>
+                  NX_SHIFT_BY_16);
 
     scope = bsd_packet_scope_id(packet, &source);
 
@@ -725,8 +750,16 @@ ULONG bsd_udp_available(const AmiSocket *sock)
         {
             ULONG length = 0;
 
+            /* A queued packet still carries its UDP header, and recv() will
+               not: nx_udp_socket_receive() strips it before returning. NetX's
+               own nx_udp_socket_bytes_available() subtracts the same eight
+               bytes, and so does the MSG_PEEK arm of this ioctl in options.c,
+               which measures a packet that has already been through the
+               strip. All three have to answer the same number. */
             if (nx_packet_length_get(packet, &length) == NX_SUCCESS)
-                return length;
+                return (length >= (ULONG)sizeof(NX_UDP_HEADER))
+                           ? length - (ULONG)sizeof(NX_UDP_HEADER)
+                           : 0;
 
             return 0;
         }
