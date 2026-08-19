@@ -2680,6 +2680,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     AmiSana2If   *iface;
     UWORD         users;
     UINT          status;
+    BOOL          autoip_removed = FALSE;
 
     if (ns == NULL || !ns->ns_IpCreated ||
         index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
@@ -2778,6 +2779,21 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
+    /* AutoIP keeps only the numeric NX_INTERFACE slot. If that slot is
+       detached and later reused, a surviving worker can configure the new
+       interface even though its configuration never requested link-local
+       addressing. Destroy it while the selected interface still exists; a
+       later link-local or DHCP fallback request creates it again. */
+    if (ns->ns_AutoIpCreated &&
+        ns->ns_AutoIp.nx_ip_interface_index == (UINT)index)
+    {
+        (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
+        (VOID)nx_auto_ip_delete(&ns->ns_AutoIp);
+        ns->ns_AutoIpCreated = FALSE;
+        ns->ns_AutoIpRunning = FALSE;
+        autoip_removed = TRUE;
+    }
+
     /*
      * nx_ip_interface_detach() does the whole of the NetX Duo side: it resets
      * the TCP connections that went out of this interface, deletes its ARP
@@ -2789,6 +2805,12 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 
     ami_netstack_leave_free(caller);
+
+    if (autoip_removed && ns->ns_AutoIpStack != NULL)
+    {
+        ami_free(ns->ns_AutoIpStack);
+        ns->ns_AutoIpStack = NULL;
+    }
 
     if (status != NX_SUCCESS)
     {
