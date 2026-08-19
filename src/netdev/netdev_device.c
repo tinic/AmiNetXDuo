@@ -863,15 +863,6 @@ VOID netdev_tx_pump(NetdevUnit *unit)
     }
 }
 
-/* netdev_cmds.c's cmd_queue, which is static there.  The caller holds the
-   mask here, so this one does not take it. */
-static VOID nd_queue(struct List *list, struct IOSana2Req *io)
-{
-    io->ios2_Req.io_Flags &= (UBYTE)~IOF_QUICK;
-    io->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    AddTail(list, &io->ios2_Req.io_Message.mn_Node);
-}
-
 /*
  * From BeginIO at task level.  The pump runs the opener's CopyFrom under
  * Disable(), which the timing build prices at 135 us of the 219 us a transmit
@@ -900,7 +891,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
         unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
     {
-        nd_queue(&unit->nu_Writes, io);
+        netdev_queue_tail(&unit->nu_Writes, io);
         netdev_tx_pump(unit);
         Enable();
         return;
@@ -922,7 +913,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     rc = netdev_tx_timed_issue(unit, io, op, total);
     if (rc == DP8390_TX_BUSY)
     {
-        AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
+        netdev_queue_head(&unit->nu_Writes, io);
         Enable();
         return;
     }

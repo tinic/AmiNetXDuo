@@ -158,6 +158,11 @@ BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
 
+/* Every request that stops being quick and enters a list must be prepared the
+   same way, whether it goes at the head or tail. */
+VOID netdev_queue_tail(struct List *list, struct IOSana2Req *io);
+VOID netdev_queue_head(struct List *list, struct IOSana2Req *io);
+
 /* netdev_event.c */
 VOID netdev_event(NetdevUnit *unit, ULONG mask);
 VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io);

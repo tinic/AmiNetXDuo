@@ -14,6 +14,7 @@ option(AMINETXDUO_NETDEV_LINK
 
 set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
+    netdev_queue.c      # queued IORequest invariants, host-testable
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
     netdev_watchdog.c   # progress clock for a full transmit ring
@@ -244,6 +245,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # it is built on, and the config parser's for the rest of exec/.
     add_executable(test_netdev_event
         test/test_netdev_event.c
+        netdev_queue.c
         netdev_event.c)
 
     target_include_directories(test_netdev_event PRIVATE
