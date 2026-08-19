@@ -326,17 +326,26 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
         return AMI_NET_ERR_STATE;
     }
 
+    /* Publish the owner before adoption. tx_amiga_adopt_thread() holds
+       Forbid() while it creates the TX_THREAD, but a foreign RemTask() can run
+       immediately after that Forbid() is released and before this function's
+       next instruction. If nc_Live were set after the call, the dead-task
+       sweep would see no registration to discard while ThreadX already had
+       one. A failed adoption clears the provisional record below. */
+    caller->nc_Live = TRUE;
+    caller->nc_Task = me;
+
     status = tx_amiga_adopt_thread(&caller->nc_Thread,
                                    (CHAR *)"aminetxduo caller",
                                    AMI_CALLER_PRIORITY);
     if (status != TX_SUCCESS)
     {
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
         AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
         return AMI_NET_ERR_KERNEL;
     }
 
-    caller->nc_Live    = TRUE;
-    caller->nc_Task    = me;
     caller->nc_Adopted = TRUE;
 
     return AMI_NET_OK;
@@ -367,15 +376,20 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 
 VOID ami_netstack_release(AmiNetCaller *caller)
 {
+    struct Task *me;
+    UINT         status;
+
     if (caller == NULL || !caller->nc_Live)
         return;
+
+    me = FindTask(NULL);
 
     /*
      * Inside a bracket the thread holds the baton, so release it the ordinary
      * way first. Release is a teardown call and must not be reached from
      * inside a bracket, and a half-released base is worse than this.
      */
-    if (caller->nc_Adopted)
+    if (caller->nc_Adopted && caller->nc_Task == me)
     {
         caller->nc_Adopted = FALSE;
         (VOID)tx_amiga_orphan_thread(&caller->nc_Thread);
@@ -384,7 +398,7 @@ VOID ami_netstack_release(AmiNetCaller *caller)
         return;
     }
 
-    if (caller->nc_Task == FindTask(NULL))
+    if (caller->nc_Task == me)
     {
         /* The owner: resume so the signal can be freed by the task that
            allocated it, then orphan properly. */
@@ -395,11 +409,22 @@ VOID ami_netstack_release(AmiNetCaller *caller)
     }
     else
     {
-        /* Another task is tearing this down. Drop the registration: the signal
-           bit belongs to a task this one must not touch. */
-        (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+        /* Another task is tearing this down, normally the heartbeat after the
+           owner was removed by Exec. It may have died while the baton was
+           released around an Exec Wait(), in which case acquire() can never
+           clear the slot. Remove that identity before deleting the ThreadX
+           registration. The signal bit belongs to the old task and must not
+           be freed from here; discard deliberately leaves it alone. */
+        (VOID)ami_netstack_baton_abandon(&caller->nc_Thread);
+        status = tx_amiga_discard_thread(&caller->nc_Thread);
+        if (status != TX_SUCCESS && status != TX_THREAD_ERROR)
+        {
+            AMI_WARN("netstack: cannot discard dead task's ThreadX context "
+                     "(%ld)", (LONG)status);
+        }
     }
 
+    caller->nc_Adopted = FALSE;
     caller->nc_Live = FALSE;
     caller->nc_Task = NULL;
 }

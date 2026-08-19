@@ -344,13 +344,17 @@ static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
  * netstack's one-second heartbeat, and the two call sites keep the cheap NULL
  * test they already have.  One latch covers both.
  *
- * This must latch the pointer and do nothing else.  In particular it must not
- * destroy the base: bsd_child_destroy() is only correct on the owning task.
- * bsd_nx_release() copes with a foreign caller, ami_signal_free() does not.
- * It would hand the bit back out of the calling task's tc_SigAlloc, which on
- * this sweeper is the ThreadX tick task.  So the base stays exactly where it
- * is, leaked, holding its stack reference and its open count.  What changes is
- * that nothing writes through the dead pointer any more.
+ * This must not destroy the base: bsd_child_destroy() is only correct on the
+ * owning task. ami_signal_free() would hand the bit back out of the calling
+ * task's tc_SigAlloc, which on this sweeper is the ThreadX tick task. The base
+ * therefore stays leaked, holding its stack reference and its open count.
+ *
+ * Its cached ThreadX registration is different. ami_netstack_release() has a
+ * foreign-owner path expressly for this case: it takes no semaphore, performs
+ * no allocation or Wait(), does not free the dead task's signal, and removes
+ * both a pending baton slot and the TX_THREAD registration under Forbid(). It
+ * is safe in this interrupt-level hook and necessary before the dead task's
+ * stack can be reused.
  *
  * Clearing sb_Task on a task that is alive kills that client's wakeups for the
  * rest of the session, and it would look like the network hanging.  A false
@@ -411,6 +415,8 @@ static VOID bsd_task_sweep(VOID)
                  (unsigned long)child->sb_Task,
                  (unsigned long)bsd_latched_tasks);
 
+        child->sb_NxNest = 0;
+        ami_netstack_release(&child->sb_NxCaller);
         child->sb_Task = NULL;
     }
 

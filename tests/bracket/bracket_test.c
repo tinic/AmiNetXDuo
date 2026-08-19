@@ -58,7 +58,9 @@
    wants TX_SOURCE_CODE. */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
+BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 extern volatile ULONG _tx_thread_system_state;
+extern TX_THREAD *_tx_thread_current_ptr;
 
 /* --------------------------------------------------------------- the shape -- */
 
@@ -145,6 +147,15 @@ typedef struct BtTask
 
 static BtTask bt_worker[BT_WORKERS];
 static BtTask bt_holder;
+static BtTask bt_dead_holding;
+static BtTask bt_dead_dormant;
+static BtTask bt_dead_released;
+static BtTask bt_dead_event;
+static TX_EVENT_FLAGS_GROUP bt_dead_flags;
+static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
+
+static VOID bt_wait_for(volatile UWORD *flag, const char *what);
+static VOID bt_reap(BtTask *bt);
 
 /*
  * How far the holder got. It runs as a plain Task, so it cannot print, and a
@@ -352,6 +363,149 @@ static VOID bt_worker_entry(VOID)
     bt_finish(bt);
 }
 
+/* ---------------------------------------------------- forced task death -- */
+
+/*
+ * Four points at which an Exec Task may be removed without unwinding:
+ *
+ *   holding   the adopted thread is _tx_thread_current_ptr;
+ *   dormant   its cached TX_THREAD is suspended between calls;
+ *   released  netstack_baton.c owns a slot while the Task is in Exec;
+ *   event     ThreadX has linked it into an object's suspension list.
+ *
+ * The first three remove themselves, exactly like a command killed while it
+ * is running.  The event waiter cannot execute its own RemTask(), so main
+ * removes it after observing the actual TX_EVENT_FLAG state.
+ */
+static VOID bt_die_holding_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+
+    Wait(BT_SIG_GO);
+    if (tx_amiga_adopt_thread(&bt->bt_Thread, (CHAR *)"dead holding", 20)
+        != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+    }
+    else
+    {
+        bt->bt_Ready = 1U;
+    }
+
+    bt_finish(bt);
+}
+
+static VOID bt_die_dormant_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+
+    Wait(BT_SIG_GO);
+    if (tx_amiga_adopt_thread(&bt->bt_Thread, (CHAR *)"dead dormant", 20)
+        != TX_SUCCESS ||
+        tx_amiga_adopt_suspend(&bt->bt_Thread) != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+    }
+    else
+    {
+        bt->bt_Ready = 1U;
+    }
+
+    bt_finish(bt);
+}
+
+static VOID bt_die_released_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+
+    Wait(BT_SIG_GO);
+    if (tx_amiga_adopt_thread(&bt->bt_Thread, (CHAR *)"dead released", 20)
+        != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+    }
+    else
+    {
+        ami_netstack_baton_release();
+        bt->bt_Ready = 1U;
+    }
+
+    bt_finish(bt);
+}
+
+static VOID bt_die_event_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+    ULONG        actual = 0UL;
+
+    Wait(BT_SIG_GO);
+    if (tx_amiga_adopt_thread(&bt->bt_Thread, (CHAR *)"dead event", 20)
+        != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+        bt_finish(bt);
+    }
+
+    bt->bt_Ready = 1U;
+    Signal(bt->bt_Parent, BT_SIG_GO);
+
+    /* Never set. main removes this Exec Task after ThreadX has linked the
+       TX_THREAD into bt_dead_flags' suspension list. */
+    (VOID)tx_event_flags_get(&bt_dead_flags, 1UL, TX_OR_CLEAR, &actual,
+                             TX_WAIT_FOREVER);
+
+    bt->bt_Failures++;                 /* a dead task must not come back */
+    bt_finish(bt);
+}
+
+static BOOL bt_wait_dead(BtTask *bt, const char *what)
+{
+    bt_wait_for(&bt->bt_Done, what);
+    if (bt->bt_Done == 0U)
+        return FALSE;
+
+    t_check(bt->bt_Ready != 0U, "dead Task reached its target state",
+            bt->bt_Ready);
+    t_check(bt->bt_Failures == 0, "dead Task set up without an error",
+            bt->bt_Failures);
+
+    return TRUE;
+}
+
+static VOID bt_discard_dead(BtTask *bt, BOOL expect_baton_slot,
+                            const char *what)
+{
+    BOOL had_slot;
+    BOOL still_baton;
+    UINT status;
+
+    t_check(tx_amiga_stack_in_use(bt->bt_Stack, bt->bt_StackSize) == TX_TRUE,
+            "dead Task's stack is still claimed before cleanup", 0);
+
+    had_slot = ami_netstack_baton_abandon(&bt->bt_Thread);
+    t_check(had_slot == expect_baton_slot, what, (LONG)had_slot);
+
+    status = tx_amiga_discard_thread(&bt->bt_Thread);
+    t_check(status == TX_SUCCESS, "foreign dead TX_THREAD was discarded",
+            (LONG)status);
+    t_check(bt->bt_Thread.tx_thread_id == 0UL,
+            "discard deleted the dead TX_THREAD", 0);
+    t_check(tx_amiga_stack_in_use(bt->bt_Stack, bt->bt_StackSize) == TX_FALSE,
+            "discard released the dead Task's stack range", 0);
+
+    Forbid();
+    still_baton = (_tx_thread_current_ptr == &bt->bt_Thread);
+    Permit();
+    t_check(still_baton == FALSE,
+            "dead TX_THREAD is no longer the global baton holder", 0);
+
+    bt_reap(bt);
+}
+
 /* ------------------------------------------ the shared interrupt state -- */
 
 /*
@@ -498,6 +652,8 @@ static VOID bt_baton_entry(VOID)
 VOID tx_application_define(VOID *first_unused_memory)
 {
     (VOID)first_unused_memory;
+    bt_dead_flags_status = tx_event_flags_create(&bt_dead_flags,
+                                                  (CHAR *)"dead task wait");
 }
 
 /* ------------------------------------------------------------------- the main -- */
@@ -670,6 +826,134 @@ int main(int argc, char **argv)
     /* And main is still what it was before any of that. */
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "unadopted after the churn, as before it", 0);
+
+    /* ---- a Task that exits without unwinding --------------------------- */
+
+    t_log("bracket: cleaning registrations left by dead Exec Tasks\n", 0, 0);
+
+    bt_dead_holding.bt_Parent = me;
+    t_check(bt_spawn(&bt_dead_holding, bt_die_holding_entry,
+                     "dead-holding", BT_PRI) != NULL,
+            "spawned baton-holding death", 0);
+    if (bt_dead_holding.bt_Task != NULL)
+    {
+        Signal(bt_dead_holding.bt_Task, BT_SIG_GO);
+        if (bt_wait_dead(&bt_dead_holding, "baton-holding Task to exit"))
+        {
+            bt_discard_dead(&bt_dead_holding, FALSE,
+                            "holding death has no release slot");
+        }
+    }
+
+    bt_dead_dormant.bt_Parent = me;
+    t_check(bt_spawn(&bt_dead_dormant, bt_die_dormant_entry,
+                     "dead-dormant", BT_PRI) != NULL,
+            "spawned dormant cached death", 0);
+    if (bt_dead_dormant.bt_Task != NULL)
+    {
+        Signal(bt_dead_dormant.bt_Task, BT_SIG_GO);
+        if (bt_wait_dead(&bt_dead_dormant, "dormant Task to exit"))
+        {
+            bt_discard_dead(&bt_dead_dormant, FALSE,
+                            "dormant death has no release slot");
+        }
+    }
+
+    bt_dead_released.bt_Parent = me;
+    t_check(bt_spawn(&bt_dead_released, bt_die_released_entry,
+                     "dead-released", BT_PRI) != NULL,
+            "spawned released-baton death", 0);
+    if (bt_dead_released.bt_Task != NULL)
+    {
+        ULONG live_before = ami_baton_stats.bs_Live;
+
+        Signal(bt_dead_released.bt_Task, BT_SIG_GO);
+        if (bt_wait_dead(&bt_dead_released,
+                         "released-baton Task to exit"))
+        {
+            t_check(ami_baton_stats.bs_Live == live_before + 1UL,
+                    "released death left one live baton slot",
+                    (LONG)ami_baton_stats.bs_Live);
+            t_check(ami_netstack_baton_abandon(&bt_dead_dormant.bt_Thread)
+                    == FALSE,
+                    "another TX_THREAD cannot inherit the dead Task's slot",
+                    0);
+            t_check(ami_baton_stats.bs_Live == live_before + 1UL,
+                    "a wrong-identity abandon leaves the live count alone",
+                    (LONG)ami_baton_stats.bs_Live);
+            bt_discard_dead(&bt_dead_released, TRUE,
+                            "released death owned one baton slot");
+            t_check(ami_baton_stats.bs_Live == live_before,
+                    "abandon returned the baton live count",
+                    (LONG)ami_baton_stats.bs_Live);
+            t_check(ami_netstack_baton_abandon(&bt_dead_released.bt_Thread)
+                    == FALSE,
+                    "abandon is idempotent after the slot is gone", 0);
+        }
+    }
+
+    t_check(bt_dead_flags_status == TX_SUCCESS,
+            "created the forced-death event group", (LONG)bt_dead_flags_status);
+    if (bt_dead_flags_status == TX_SUCCESS)
+    {
+        ULONG waited = 0UL;
+
+        bt_dead_event.bt_Parent = me;
+        t_check(bt_spawn(&bt_dead_event, bt_die_event_entry,
+                         "dead-event", BT_PRI) != NULL,
+                "spawned ThreadX-suspended death", 0);
+        if (bt_dead_event.bt_Task != NULL)
+        {
+            Signal(bt_dead_event.bt_Task, BT_SIG_GO);
+
+            while ((bt_dead_event.bt_Thread.tx_thread_state != TX_EVENT_FLAG ||
+                    bt_dead_flags.tx_event_flags_group_suspended_count != 1UL) &&
+                   waited < (ULONG)(30 * 50))
+            {
+                Delay(1);
+                waited++;
+            }
+
+            t_check(bt_dead_event.bt_Thread.tx_thread_state == TX_EVENT_FLAG,
+                    "victim suspended inside ThreadX",
+                    (LONG)bt_dead_event.bt_Thread.tx_thread_state);
+            t_check(bt_dead_flags.tx_event_flags_group_suspended_count == 1UL,
+                    "event group contains the victim",
+                    (LONG)bt_dead_flags.tx_event_flags_group_suspended_count);
+
+            if (bt_dead_event.bt_Thread.tx_thread_state == TX_EVENT_FLAG &&
+                bt_dead_flags.tx_event_flags_group_suspended_count == 1UL)
+            {
+                RemTask(bt_dead_event.bt_Task);
+                bt_dead_event.bt_Task = NULL;
+                bt_discard_dead(&bt_dead_event, FALSE,
+                                "ThreadX wait has no release slot");
+                t_check(bt_dead_flags.tx_event_flags_group_suspended_count == 0UL,
+                        "discard unlinked the event suspension",
+                        (LONG)bt_dead_flags.tx_event_flags_group_suspended_count);
+            }
+            else
+            {
+                /* Do not leave a live waiter behind after a diagnostic
+                   failure: that would turn shutdown into a second,
+                   misleading failure. Once woken, bt_finish() removes the
+                   Exec Task atomically; its stale TX_THREAD can be discarded
+                   through the same cleanup path. */
+                (VOID)tx_event_flags_set(&bt_dead_flags, 1UL, TX_OR);
+                bt_wait_for(&bt_dead_event.bt_Done,
+                            "failed event victim to leave after wakeup");
+                if (bt_dead_event.bt_Done != 0U)
+                {
+                    bt_dead_event.bt_Task = NULL;
+                    bt_discard_dead(&bt_dead_event, FALSE,
+                                    "woken event victim has no release slot");
+                }
+            }
+        }
+
+        t_check(tx_event_flags_delete(&bt_dead_flags) == TX_SUCCESS,
+                "deleted the forced-death event group", 0);
+    }
 
     /* ---- the bracket, watched from inside its own window ---------------- */
 
