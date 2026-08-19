@@ -202,10 +202,11 @@ const AmiConfig *netstack_config(VOID);
  * refused, either because a stronger source holds or because the name is not
  * one that source is allowed to supply.
  *
- * gethostname() reads cfg->hostname afterwards, and so does DHCP option 12:
- * NX_DHCP keeps the pointer rather than a copy, so the next request carries the
- * new name. The mDNS responder does not. It claimed its label at start-up and
- * nothing here re-claims it.
+ * gethostname() reads cfg->hostname afterwards. An existing DHCP client also
+ * copies an accepted explicit offer into its stable outgoing option-12 buffer,
+ * so its next request carries the new name without making a name returned by
+ * the server feed back into that request. The mDNS responder does not change:
+ * it claimed its label at start-up and nothing here re-claims it.
  */
 LONG netstack_hostname_offer(UWORD source, const char *name);
 

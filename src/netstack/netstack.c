@@ -2468,8 +2468,9 @@ LONG netstack_hostname_offer(UWORD source, const char *name)
      * Inside the bracket, because of what else reads what it writes.
      * ami_config_hostname_offer() does not touch NetX Duo, but reports and
      * DHCP lease reconciliation read this buffer from the ThreadX side.
-     * Holding the baton across the copy also serialises an explicit offer with
-     * a lease transition that might otherwise restore its saved fallback.
+     * Holding the baton also protects the DHCP client's stable outgoing name
+     * while it is copied below, and serialises an explicit offer with a lease
+     * transition that might otherwise restore its saved fallback.
      */
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
@@ -2477,7 +2478,15 @@ LONG netstack_hostname_offer(UWORD source, const char *name)
 
     taken = ami_config_hostname_offer(&ns->ns_Config, source, name);
     if (taken)
+    {
         ami_ns_dhcp_hostname_displace(&ns->ns_DhcpHostname);
+
+        /* Only explicit offers come through this API. Server option 12 is
+           reconciled directly, so it cannot feed back into the next request. */
+        if (ns->ns_DhcpCreated)
+            ami_ns_copy_name(ns->ns_DhcpName, ns->ns_Config.hostname,
+                             sizeof(ns->ns_DhcpName));
+    }
 
     ami_netstack_leave_free(caller);
 
