@@ -1458,14 +1458,16 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
          * ordinary part of acquiring one, and reporting a first boot as a lost
          * lease is a false alarm.
          */
-        if (previous == (UBYTE)NX_DHCP_STATE_BOUND ||
-            previous == (UBYTE)NX_DHCP_STATE_RENEWING ||
-            previous == (UBYTE)NX_DHCP_STATE_REBINDING)
+        if (previous >= (UBYTE)NX_DHCP_STATE_BOUND)
         {
             AMI_WARN("netstack: interface %ld has LOST its DHCP lease. The "
                      "address and the gateway are off it. Every open "
                      "connection through it is dead",
                      (long)iface_index);
+
+            /* The lease owns no resolver entries after this transition.  As
+               on BOUND, a caller task performs the actual reconciliation. */
+            ami_netstack_dns_dhcp_changed(ns, (UWORD)iface_index);
 
             /* RFC 3927 1.7: keep the machine reachable on the local wire
                while the DHCP client tries again. */
@@ -3280,6 +3282,7 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
     (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
 
     ns->ns_DhcpState[index] = NX_DHCP_STATE_NOT_STARTED;
+    ami_netstack_dns_dhcp_changed(ns, index);
 
     ami_netstack_leave_free(caller);
 

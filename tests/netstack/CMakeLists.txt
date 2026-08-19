@@ -396,6 +396,22 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_handoff COMMAND test_dns_handoff)
 
+    # A server can be named by both DHCP interfaces, and renewal or lease loss
+    # on one must not erase the other's ownership.  Exercise the exact compact
+    # per-interface set used by the resolver reconciliation path.
+    add_executable(test_dns_lease
+        host/test_dns_lease_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_lease.c")
+
+    target_include_directories(test_dns_lease PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dns_lease PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_lease COMMAND test_dns_lease)
+
     # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
     # their state before entering the DNS client.  Permit() in this harness
     # injects a second advertisement exactly after the snapshot, proving that
