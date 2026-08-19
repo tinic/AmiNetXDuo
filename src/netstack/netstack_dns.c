@@ -56,6 +56,24 @@ static BOOL ami_ns6_same(const ULONG a[4], const ULONG b[4])
                   a[2] == b[2] && a[3] == b[3]);
 }
 
+static BOOL ami_ns_domain_same(const char *a, const char *b)
+{
+    char ca;
+    char cb;
+
+    do
+    {
+        ca = *a++;
+        cb = *b++;
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + ('a' - 'A'));
+    } while (ca == cb && ca != '\0');
+
+    return (BOOL)(ca == cb);
+}
+
 VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
                    ULONG lifetime)
 {
@@ -85,12 +103,11 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
     AmiNetStack *ns = ami_netstack_raw();
 
     (VOID)ip_ptr;
-    (VOID)interface_index;
-
     if (ns == NULL || domains == NULL || length == 0)
         return;
 
-    ami_ns_ra_dnssl(&ns->ns_Ra, domains, length, lifetime);
+    ami_ns_ra_dnssl(&ns->ns_Ra, (UWORD)interface_index, domains, length,
+                    lifetime, tx_time_get());
 }
 
 /*
@@ -376,41 +393,69 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
     if (ra.dnssl_pending)
     {
-        UWORD n;
+        UWORD added = 0;
+        UWORD removed = 0;
 
-        /* RFC 8106 5.2, as 5.1: zero withdraws what the option names. */
-        if (ra.dnssl_lifetime == 0UL)
+        /* Out: domains no interface still advertises.  Each one releases
+           only the RA repository's reference; DHCP or static configuration
+           keeps an identical suffix alive. */
+        for (i = ns->ns_DnsslAppliedCount; i-- != 0; )
         {
-            ami_ns_resolver_forbid();
-            n = ami_config_search_withdraw_rfc3397(r, ra.dnssl,
-                                                   (ULONG)ra.dnssl_len);
-            ami_ns_resolver_permit();
-            if (n != 0)
-                AMI_INFO("netstack: advertised search list withdrawn, %ld "
-                         "domain(s)", (long)n);
-        }
-        else
-        {
-            ami_ns_resolver_forbid();
-            n = ami_config_search_from_rfc3397(r, ra.dnssl,
-                                               (ULONG)ra.dnssl_len);
-            if (n != 0 && r->domain[0] == '\0')
-                ami_ns_copy_name(r->domain, r->search[r->search_count - n],
-                                 sizeof(r->domain));
-            ami_ns_resolver_permit();
-            if (n != 0)
-            {
-                AMI_INFO("netstack: advertised search list, %ld domain(s), "
-                         "first '%s'", (long)n,
-                         r->search[r->search_count - n]);
+            for (j = 0; j < ra.dnssl_count; j++)
+                if (ami_ns_domain_same(ns->ns_DnsslApplied[i],
+                                       ra.dnssl[j]))
+                    break;
 
-                /* What GetDefaultDomainName() reports and what a name with no
-                   dot is qualified with when nothing else named a domain, the
-                   same standing DHCP option 15 is given.  When a router names
-                   several, only the first is used, because there is one
-                   default. */
-            }
+            if (j != ra.dnssl_count)
+                continue;
+
+            ami_ns_resolver_forbid();
+            if (ami_config_search_reference_remove(
+                    r, ns->ns_DnsslApplied[i]))
+                removed++;
+            ami_ns_resolver_permit();
+
+            for (j = (UWORD)(i + 1U); j < ns->ns_DnsslAppliedCount; j++)
+                ami_ns_copy_name(ns->ns_DnsslApplied[j - 1U],
+                                 ns->ns_DnsslApplied[j], AMI_CFG_NAME_LEN);
+            ns->ns_DnsslAppliedCount--;
         }
+
+        /* In: acquire one RA reference for each domain in the interface
+           union.  The handoff already folds duplicates case-insensitively. */
+        for (i = 0; i < ra.dnssl_count; i++)
+        {
+            BOOL accepted;
+
+            for (j = 0; j < ns->ns_DnsslAppliedCount; j++)
+                if (ami_ns_domain_same(ns->ns_DnsslApplied[j],
+                                       ra.dnssl[i]))
+                    break;
+
+            if (j != ns->ns_DnsslAppliedCount)
+                continue;
+
+            ami_ns_resolver_forbid();
+            accepted = ami_config_search_reference_add(r, ra.dnssl[i]);
+            if (accepted && r->domain[0] == '\0')
+                ami_ns_copy_name(r->domain, ra.dnssl[i], sizeof(r->domain));
+            ami_ns_resolver_permit();
+
+            if (!accepted)
+                continue;
+
+            ami_ns_copy_name(ns->ns_DnsslApplied[ns->ns_DnsslAppliedCount],
+                             ra.dnssl[i], AMI_CFG_NAME_LEN);
+            ns->ns_DnsslAppliedCount++;
+            added++;
+        }
+
+        if (removed != 0)
+            AMI_INFO("netstack: advertised search list withdrawn, %ld "
+                     "domain(s)", (long)removed);
+        if (added != 0)
+            AMI_INFO("netstack: advertised search list, %ld domain(s), "
+                     "first '%s'", (long)added, ra.dnssl[0]);
     }
 }
 

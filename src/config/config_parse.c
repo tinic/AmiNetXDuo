@@ -1330,8 +1330,10 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
         return FALSE;
     }
 
-    ami_cfg_copy_string(res->search[res->search_count++], AMI_CFG_NAME_LEN,
+    ami_cfg_copy_string(res->search[res->search_count], AMI_CFG_NAME_LEN,
                         domain);
+    res->search_use[res->search_count] = 1;
+    res->search_count++;
 
     return TRUE;
 }
@@ -1427,13 +1429,67 @@ BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain)
         /* Close the gap: the order of what is left is the order they are
            still tried in. */
         for (j = (UWORD)(i + 1); j < res->search_count; j++)
+        {
             ami_cfg_copy_string(res->search[j - 1], AMI_CFG_NAME_LEN,
                                 res->search[j]);
+            res->search_use[j - 1] = res->search_use[j];
+        }
 
         res->search_count--;
         res->search[res->search_count][0] = '\0';
+        res->search_use[res->search_count] = 0;
 
         return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL ami_config_search_reference_add(AmiResolverConfig *res,
+                                     const char *domain)
+{
+    UWORD i;
+
+    if (res == NULL || domain == NULL || *domain == '\0' ||
+        !ami_config_hostname_valid(domain))
+        return FALSE;
+
+    for (i = 0; i < res->search_count; i++)
+    {
+        if (ami_cfg_stricmp(res->search[i], domain) != 0)
+            continue;
+
+        if (i >= res->search_static && res->search_use[i] != (UWORD)~0U)
+            res->search_use[i]++;
+        return TRUE;
+    }
+
+    return ami_config_search_offer(res, domain);
+}
+
+BOOL ami_config_search_reference_remove(AmiResolverConfig *res,
+                                        const char *domain)
+{
+    UWORD i;
+
+    if (res == NULL || domain == NULL || *domain == '\0')
+        return FALSE;
+
+    for (i = 0; i < res->search_count; i++)
+    {
+        if (ami_cfg_stricmp(res->search[i], domain) != 0)
+            continue;
+
+        if (i < res->search_static)
+            return TRUE;
+
+        if (res->search_use[i] > 1U)
+        {
+            res->search_use[i]--;
+            return TRUE;
+        }
+
+        return ami_config_search_withdraw(res, domain);
     }
 
     return FALSE;

@@ -84,7 +84,8 @@ VOID Permit(VOID)
         ami_ns_ra_rdnss(pending, h_inject_iface, rdnss, lifetime,
                         h_inject_now);
     else
-        ami_ns_ra_dnssl(pending, dnssl, dnssl_len, lifetime);
+        ami_ns_ra_dnssl(pending, h_inject_iface, dnssl, dnssl_len, lifetime,
+                        h_inject_now);
 }
 
 
@@ -150,30 +151,30 @@ static void h_case_dnssl_arrives_after_snapshot(void)
     memset(&first, 0, sizeof(first));
     memset(&second, 0, sizeof(second));
 
-    ami_ns_ra_dnssl(&pending, old_list, (UINT)sizeof(old_list), 300UL);
+    ami_ns_ra_dnssl(&pending, 0U, old_list, (UINT)sizeof(old_list), 300UL,
+                    200UL);
 
     h_inject_pending = &pending;
     h_inject_dnssl = new_list;
     h_inject_dnssl_len = (UINT)sizeof(new_list);
     h_inject_lifetime = 900UL;
     h_inject_now = 201UL;
+    h_inject_iface = 0U;
 
     h_check(ami_ns_ra_snapshot(&pending, &first, 201UL),
             "the first DNSSL advertisement is pending");
-    h_check(first.dnssl_pending &&
-            first.dnssl_len == (UWORD)sizeof(old_list) &&
-            first.dnssl_lifetime == 300UL &&
-            memcmp(first.dnssl, old_list, sizeof(old_list)) == 0,
+    h_check(first.dnssl_pending && first.dnssl_count == 1U &&
+            strcmp(first.dnssl[0], "old") == 0,
             "the first DNSSL snapshot is internally consistent");
     h_check(pending.dnssl_pending,
             "a DNSSL option arriving after the snapshot remains pending");
 
     h_check(ami_ns_ra_snapshot(&pending, &second, 201UL),
             "the injected DNSSL option is consumed on the next pass");
-    h_check(second.dnssl_len == (UWORD)sizeof(new_list) &&
-            second.dnssl_lifetime == 900UL &&
-            memcmp(second.dnssl, new_list, sizeof(new_list)) == 0,
-            "the next snapshot contains one complete replacement list");
+    h_check(second.dnssl_count == 2U &&
+            strcmp(second.dnssl[0], "old") == 0 &&
+            strcmp(second.dnssl[1], "new") == 0,
+            "the next snapshot retains independently live domains");
 }
 
 
@@ -196,9 +197,52 @@ static void h_case_withdraw_and_limits(void)
             snapshot.rdnss_count == 0,
             "a zero lifetime publishes an empty RDNSS set");
 
-    ami_ns_ra_dnssl(&pending, too_long, (UINT)sizeof(too_long), 600UL);
+    ami_ns_ra_dnssl(&pending, 0U, too_long, (UINT)sizeof(too_long), 600UL,
+                    0UL);
     h_check(!ami_ns_ra_snapshot(&pending, &snapshot, 0UL),
             "an overlong DNSSL option is refused whole");
+}
+
+
+static void h_case_dnssl_interfaces_own_independently(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    static const UCHAR shared[] = {
+        6, 's', 'h', 'a', 'r', 'e', 'd', 4, 't', 'e', 's', 't', 0
+    };
+    static const UCHAR other[] = {
+        5, 'o', 't', 'h', 'e', 'r', 4, 't', 'e', 's', 't', 0
+    };
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_dnssl(&pending, 0U, shared, (UINT)sizeof(shared), 300UL, 1UL);
+    ami_ns_ra_dnssl(&pending, 1U, shared, (UINT)sizeof(shared), 600UL, 1UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 1UL) &&
+            snapshot.dnssl_count == 1U &&
+            strcmp(snapshot.dnssl[0], "shared.test") == 0,
+            "the same suffix on two interfaces appears once in the union");
+
+    ami_ns_ra_dnssl(&pending, 0U, shared, (UINT)sizeof(shared), 0UL, 2UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 2UL) &&
+            snapshot.dnssl_count == 1U &&
+            strcmp(snapshot.dnssl[0], "shared.test") == 0,
+            "one interface cannot withdraw another interface's suffix");
+
+    ami_ns_ra_dnssl(&pending, 0U, other, (UINT)sizeof(other), 300UL, 3UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 3UL) &&
+            snapshot.dnssl_count == 2U &&
+            strcmp(snapshot.dnssl[0], "other.test") == 0 &&
+            strcmp(snapshot.dnssl[1], "shared.test") == 0,
+            "distinct interface suffixes form one resolver union");
+
+    ami_ns_ra_dnssl(&pending, 1U, shared, (UINT)sizeof(shared), 0UL, 4UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 4UL) &&
+            snapshot.dnssl_count == 1U &&
+            strcmp(snapshot.dnssl[0], "other.test") == 0,
+            "the last owner withdrawal removes only that suffix");
 }
 
 
@@ -292,6 +336,7 @@ int main(void)
     h_case_rdnss_lifetime_expires_and_refreshes();
     h_case_infinite_and_wrapped_time();
     h_case_rdnss_interfaces_own_independently();
+    h_case_dnssl_interfaces_own_independently();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff never nests its critical section");

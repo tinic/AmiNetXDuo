@@ -319,11 +319,14 @@ struct AmiNetStack
      * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
      * is answering.
      *
-     * The same handoff holds the encoded DNSSL search list.  Its 256 bytes
-     * are enough for every suffix the resolver can retain; an option longer
-     * than that is refused whole instead of storing a meaningless prefix.
+     * DNSSL has the same per-entry, per-interface ownership rule.  The
+     * handoff retains that repository; ns_DnsslApplied is the union whose
+     * ownership has actually been acquired in resolver configuration.
      */
     AmiNsRaPending      ns_Ra;
+    char                ns_DnsslApplied[AMI_CFG_MAX_SEARCH]
+                                       [AMI_CFG_NAME_LEN];
+    UWORD               ns_DnsslAppliedCount;
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the

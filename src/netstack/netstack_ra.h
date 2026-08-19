@@ -28,15 +28,21 @@ typedef struct AmiNsRdnssEntry
     ULONG       received;
 } AmiNsRdnssEntry;
 
+typedef struct AmiNsDnsslEntry
+{
+    char  domain[AMI_CFG_NAME_LEN];
+    ULONG lifetime;
+    ULONG received;
+} AmiNsDnsslEntry;
+
 typedef struct AmiNsRaPending
 {
     AmiNsRdnssEntry rdnss[AMI_CFG_MAX_INTERFACES][AMI_RDNSS_MAX];
     UWORD         rdnss_count[AMI_CFG_MAX_INTERFACES];
     volatile BOOL rdnss_pending;
 
-    UBYTE         dnssl[AMI_DNSSL_MAX];
-    UWORD         dnssl_len;
-    ULONG         dnssl_lifetime;
+    AmiNsDnsslEntry dnssl[AMI_CFG_MAX_INTERFACES][AMI_CFG_MAX_SEARCH];
+    UWORD         dnssl_count[AMI_CFG_MAX_INTERFACES];
     volatile BOOL dnssl_pending;
 } AmiNsRaPending;
 
@@ -46,16 +52,16 @@ typedef struct AmiNsRaSnapshot
     UWORD       rdnss_count;
     BOOL        rdnss_pending;
 
-    UBYTE       dnssl[AMI_DNSSL_MAX];
-    UWORD       dnssl_len;
-    ULONG       dnssl_lifetime;
+    char        dnssl[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
+    UWORD       dnssl_count;
     BOOL        dnssl_pending;
 } AmiNsRaSnapshot;
 
 VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, UWORD interface_index,
                      const ULONG address[4], ULONG lifetime, ULONG now);
-VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, const UCHAR *domains,
-                     UINT length, ULONG lifetime);
+VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, UWORD interface_index,
+                     const UCHAR *domains, UINT length, ULONG lifetime,
+                     ULONG now);
 BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
                         ULONG now);
 BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now);
