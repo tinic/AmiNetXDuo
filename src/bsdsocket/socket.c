@@ -2917,6 +2917,54 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     incoming->as_Parent = NULL;
     incoming->as_Owner  = SocketBase;
 
+    /* The parked socket began life unbound, so promotion has to give it the
+       listener's local endpoint.  A wildcard listener needs the address the
+       completed connection actually selected; in particular an IPv4 peer on
+       a dual-stack listener must become ::ffff:a.b.c.d in getsockname(), not
+       remain ::. */
+    incoming->as_LocalAddr    = sock->as_LocalAddr;
+    incoming->as_LocalScopeId = sock->as_LocalScopeId;
+
+    if (bsd_addr_is_unspecified(&sock->as_LocalAddr))
+    {
+        if (peer.nxd_ip_version == NX_IP_VERSION_V4 &&
+            incoming->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
+        {
+            bsd_addr_from_v4(
+                &incoming->as_LocalAddr,
+                incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
+                    ->nx_interface_ip_address);
+            incoming->as_LocalScopeId = 0UL;
+        }
+#ifdef AMINETXDUO_IPV6
+        else if (peer.nxd_ip_version == NX_IP_VERSION_V6 &&
+                 incoming->as_Nx.tcp.nx_tcp_socket_ipv6_addr != NX_NULL)
+        {
+            const NXD_IPV6_ADDRESS *local =
+                incoming->as_Nx.tcp.nx_tcp_socket_ipv6_addr;
+
+            incoming->as_LocalAddr.nxd_ip_version = NX_IP_VERSION_V6;
+            incoming->as_LocalAddr.nxd_ip_address.v6[0] =
+                local->nxd_ipv6_address[0];
+            incoming->as_LocalAddr.nxd_ip_address.v6[1] =
+                local->nxd_ipv6_address[1];
+            incoming->as_LocalAddr.nxd_ip_address.v6[2] =
+                local->nxd_ipv6_address[2];
+            incoming->as_LocalAddr.nxd_ip_address.v6[3] =
+                local->nxd_ipv6_address[3];
+
+            if (!bsd_addr_is_loopback(&incoming->as_LocalAddr) &&
+                anx6_scope(incoming->as_LocalAddr.nxd_ip_address.v6) < 0xEU &&
+                incoming->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
+                incoming->as_LocalScopeId =
+                    (ULONG)incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
+                        ->nx_interface_index + 1UL;
+            else
+                incoming->as_LocalScopeId = 0UL;
+        }
+#endif
+    }
+
     incoming->as_PeerAddr  = peer;
     incoming->as_PeerPort  = (UINT)peer_port;
     incoming->as_LocalPort = sock->as_ListenPort;
@@ -2928,7 +2976,6 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
      * socket index so accept() and every later getpeername() return an address
      * the application can use to answer on a multi-interface machine.
      */
-    incoming->as_LocalScopeId = sock->as_LocalScopeId;
     incoming->as_PeerScopeId  = 0UL;
     if (peer.nxd_ip_version == NX_IP_VERSION_V6 &&
         (peer.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL &&

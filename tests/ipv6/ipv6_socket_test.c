@@ -976,6 +976,84 @@ struct t_sockaddr_in6    sa6;
     (VOID)bsd_CloseSocket(server);
 }
 
+/* A parked server socket is born with an unspecified local address.  Once a
+   dual-stack listener accepts IPv4, getsockname() must report the mapped
+   address that completed the connection rather than leaving that wildcard. */
+static VOID t_test_tcp_accepted_local(VOID)
+{
+LONG                    server, client, accepted;
+LONG                    rc;
+ULONG                   len;
+struct t_sockaddr_in     sa4;
+struct t_sockaddr_in6    sa6;
+
+    t_log("accepted TCP local endpoint");
+
+    server = bsd_socket(T_AF_INET6, T_SOCK_STREAM, 0);
+    if (!t_check((BOOL)(server >= 0), "dual-stack listener socket",
+                 bsd_Errno()))
+        return;
+
+    t_make_any6(&sa6, T_PORT + 7);
+    rc = bsd_bind(server, &sa6, sizeof(sa6));
+    if (!t_check((BOOL)(rc == 0), "dual-stack listener bind", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    rc = bsd_listen(server, 1);
+    if (!t_check((BOOL)(rc == 0), "dual-stack listen", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    client = bsd_socket(T_AF_INET, T_SOCK_STREAM, 0);
+    if (!t_check((BOOL)(client >= 0), "IPv4 client socket", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    t_bzero(&sa4, sizeof(sa4));
+    sa4.sin_len    = sizeof(sa4);
+    sa4.sin_family = T_AF_INET;
+    sa4.sin_port   = T_PORT + 7;
+    sa4.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_connect(client, &sa4, sizeof(sa4));
+    if (!t_check((BOOL)(rc == 0), "IPv4 connects to dual-stack listener", rc))
+    {
+        (VOID)bsd_CloseSocket(client);
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    accepted = bsd_accept(server, NULL, NULL);
+    if (t_check((BOOL)(accepted >= 0), "dual-stack accept IPv4", bsd_Errno()))
+    {
+        t_bzero(&sa6, sizeof(sa6));
+        len = sizeof(sa6);
+        rc = bsd_getsockname(accepted, &sa6, &len);
+        (VOID)t_check(
+            (BOOL)(rc == 0 && len == 28 &&
+                   sa6.sin6_family == T_AF_INET6 &&
+                   sa6.sin6_addr.s6_addr[10] == 0xff &&
+                   sa6.sin6_addr.s6_addr[11] == 0xff &&
+                   sa6.sin6_addr.s6_addr[12] == 127 &&
+                   sa6.sin6_addr.s6_addr[13] == 0 &&
+                   sa6.sin6_addr.s6_addr[14] == 0 &&
+                   sa6.sin6_addr.s6_addr[15] == 1),
+            "accepted getsockname reports ::ffff:127.0.0.1", rc);
+
+        (VOID)bsd_CloseSocket(accepted);
+    }
+
+    (VOID)bsd_CloseSocket(client);
+    (VOID)bsd_CloseSocket(server);
+}
+
 static VOID t_test_udp_loopback(VOID)
 {
 LONG                    server, client;
@@ -2141,6 +2219,7 @@ int main(void)
     t_test_socket_basics();
     t_test_tcp_loopback();
     t_test_tcp_listener_family();
+    t_test_tcp_accepted_local();
     t_test_udp_loopback();
     t_test_udp_bound_address();
     t_test_cmsg_macros();
