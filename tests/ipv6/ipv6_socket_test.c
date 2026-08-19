@@ -1335,6 +1335,64 @@ char                  buffer[64];
     (VOID)bsd_CloseSocket(server);
 }
 
+static VOID t_test_udp_peek_fionread(VOID)
+{
+LONG                  server, client;
+LONG                  rc;
+LONG                  available = -1;
+struct t_sockaddr_in  sa;
+static const char     first[] = "first";
+static const char     second[] = "a longer second datagram";
+char                  buffer[64];
+
+    t_log("UDP FIONREAD after MSG_PEEK");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0),
+                 "UDP peek FIONREAD sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 39;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "UDP peek FIONREAD bind", bsd_Errno());
+
+    rc = bsd_sendto(client, (APTR)first, sizeof(first), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(first)),
+                  "send first FIONREAD datagram", rc);
+    rc = bsd_sendto(client, (APTR)second, sizeof(second), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(second)),
+                  "send second FIONREAD datagram", rc);
+
+    Delay(2);
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer),
+                  T_MSG_DONTWAIT | T_MSG_PEEK);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(first) && t_streq(buffer, first)),
+                  "peek first FIONREAD datagram", rc);
+
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == (LONG)sizeof(first)),
+                  "FIONREAD stops at parked datagram boundary", available);
+
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(first)),
+                  "consume parked FIONREAD datagram", rc);
+
+    available = -1;
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == (LONG)sizeof(second)),
+                  "FIONREAD advances to second datagram", available);
+
+    (VOID)bsd_CloseSocket(client);
+    (VOID)bsd_CloseSocket(server);
+}
+
 static VOID t_test_udp_reconnect_after_peek(VOID)
 {
 LONG                  server, old_peer, new_peer;
@@ -2951,6 +3009,7 @@ int main(void)
     t_test_udp_loopback();
     t_test_udp_bound_address();
     t_test_udp_connected_readiness();
+    t_test_udp_peek_fionread();
     t_test_udp_reconnect_after_peek();
     t_test_udp_disconnect();
     t_test_udp_icmp_readiness();

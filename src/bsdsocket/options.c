@@ -933,6 +933,16 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                 nx_packet_length_get(sock->as_RxPending, &length);
                 if (length > sock->as_RxOffset)
                     available = length - sock->as_RxOffset;
+
+                /* MSG_PEEK parks one complete UDP/raw record outside its
+                   NetX queue. FIONREAD on a message socket describes that
+                   next record only; adding the queue head would cross a
+                   datagram boundary. Streams intentionally continue below. */
+                if ((sock->as_Flags & ASF_TCP) == 0)
+                {
+                    *(LONG *)argp = (LONG)available;
+                    return 0;
+                }
             }
 
             if (bsd_nx_enter(SocketBase) != 0)
