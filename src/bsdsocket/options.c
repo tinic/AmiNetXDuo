@@ -25,6 +25,9 @@
 /* For _nx_ip_route_find(): getsockname() on a socket bound to INADDR_ANY has
    to know which interface the packets leave by. */
 #include "nx_ip.h"
+#ifdef AMINETXDUO_IPV6
+#include "../ipv6/ipv6_srcsel.h"
+#endif
 
 /*
  * SO_RCVBUF and SO_SNDBUF arrive in bytes and NetX Duo counts both queues in
@@ -1060,6 +1063,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
 {
     AmiSocket  *sock = bsd_lookup(SocketBase, sock_fd);
     NXD_ADDRESS addr;
+    ULONG       scope;
     BOOL        bracketed = FALSE;
 
     if (sock == NULL)
@@ -1069,6 +1073,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_EFAULT);
 
     addr = sock->as_LocalAddr;
+    scope = sock->as_LocalScopeId;
 
     /* A wildcard endpoint is resolved from live route/address tables below.
        Adopt this Exec task before taking nx_ip_protection, and keep the
@@ -1114,10 +1119,11 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
                                         .nx_tcp_socket_connect_interface
                                         ->nx_interface_index;
         }
-        else if (sock->as_ScopeId > 0UL &&
-                 sock->as_ScopeId <= (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        else if (sock->as_PeerScopeId > 0UL &&
+                 sock->as_PeerScopeId <=
+                     (ULONG)NX_MAX_PHYSICAL_INTERFACES)
         {
-            interface_index = (LONG)(sock->as_ScopeId - 1UL);
+            interface_index = (LONG)(sock->as_PeerScopeId - 1UL);
         }
 
         if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
@@ -1129,6 +1135,13 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
             addr.nxd_ip_address.v6[1] = chosen[1];
             addr.nxd_ip_address.v6[2] = chosen[2];
             addr.nxd_ip_address.v6[3] = chosen[3];
+
+            /* An unbound socket had no local zone to retain.  Once the
+               connected route resolves its wildcard to a non-global address,
+               report the interface that address actually uses. */
+            if (scope == 0UL && interface_index >= 0 &&
+                anx6_scope(addr.nxd_ip_address.v6) < 0xEU)
+                scope = (ULONG)interface_index + 1UL;
         }
     }
     else
@@ -1158,7 +1171,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         bsd_nx_leave(SocketBase);
 
     bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort,
-                     sock->as_ScopeId);
+                     scope);
 
     return 0;
 }
@@ -1180,7 +1193,7 @@ LONG bsd_getpeername(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENOTCONN);
 
     bsd_sockaddr_put(sock, name, namelen, &sock->as_PeerAddr,
-                     sock->as_PeerPort, sock->as_ScopeId);
+                     sock->as_PeerPort, sock->as_PeerScopeId);
 
     return 0;
 }

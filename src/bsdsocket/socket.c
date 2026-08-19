@@ -1793,7 +1793,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
             return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
         if (!bsd_addr_normalise(sock, &addr))
             return bsd_fail(SocketBase, AMI_EINVAL);
-        sock->as_ScopeId = scope;
+        sock->as_LocalScopeId = scope;
     }
     else if (addr.nxd_ip_version == NX_IP_VERSION_V6)
     {
@@ -2434,13 +2434,13 @@ BOOL bsd_bind_wants_interface(const AmiSocket *listener,
        supplied one, the zone is part of the local endpoint for multicast and
        unicast alike, before the wildcard/group shortcuts below. */
     if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
-        listener->as_ScopeId != 0UL &&
+        listener->as_LocalScopeId != 0UL &&
         !bsd_addr_is_loopback(&listener->as_LocalAddr) &&
         anx6_scope(listener->as_LocalAddr.nxd_ip_address.v6) < 0xEU)
     {
         if (ip == NX_NULL ||
-            listener->as_ScopeId > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
-            nxif != &ip->nx_ip_interface[listener->as_ScopeId - 1UL])
+            listener->as_LocalScopeId > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
+            nxif != &ip->nx_ip_interface[listener->as_LocalScopeId - 1UL])
             return FALSE;
     }
 #endif
@@ -2552,7 +2552,25 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 #ifdef AMINETXDUO_IPV6
     if (dest->nxd_ip_version == NX_IP_VERSION_V6)
     {
-        NX_INTERFACE *zoned = NX_NULL;
+        NX_INTERFACE *zoned       = NX_NULL;
+        NX_INTERFACE *local_zoned = NX_NULL;
+
+        /* bind()'s zone belongs to the source endpoint.  It cannot be
+           replaced by a later destination zone: the same link-local address
+           can exist on more than one interface. */
+        if (bound && sock->as_LocalScopeId != 0UL &&
+            anx6_scope(local->nxd_ip_address.v6) < 0xEU)
+        {
+            if (sock->as_LocalScopeId >
+                (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+                return BSD_SOURCE_REFUSE;
+
+            local_zoned =
+                &ip->nx_ip_interface[sock->as_LocalScopeId - 1UL];
+
+            if (local_zoned->nx_interface_valid == 0)
+                return BSD_SOURCE_REFUSE;
+        }
 
         /*
          * RFC 4007 section 7 requires the upper layer to identify the zone
@@ -2572,6 +2590,16 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
             if (zoned->nx_interface_valid == 0)
                 return BSD_SOURCE_REFUSE;
         }
+
+        /* A bound source on one zone cannot reach a destination explicitly
+           placed in another.  This is a route failure, not a missing local
+           address. */
+        if (local_zoned != NX_NULL && zoned != NX_NULL &&
+            local_zoned != zoned)
+            return BSD_SOURCE_UNREACH;
+
+        if (zoned == NX_NULL)
+            zoned = local_zoned;
 
         if (!bound && zoned == NX_NULL)
             return BSD_SOURCE_ROUTE;
@@ -2857,12 +2885,13 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
      * socket index so accept() and every later getpeername() return an address
      * the application can use to answer on a multi-interface machine.
      */
-    incoming->as_ScopeId = 0UL;
+    incoming->as_LocalScopeId = sock->as_LocalScopeId;
+    incoming->as_PeerScopeId  = 0UL;
     if (peer.nxd_ip_version == NX_IP_VERSION_V6 &&
         (peer.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL &&
         incoming->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
     {
-        incoming->as_ScopeId =
+        incoming->as_PeerScopeId =
             (ULONG)incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
                 ->nx_interface_index + 1UL;
     }
@@ -2905,7 +2934,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     if (addr != NULL && addrlen != NULL)
         bsd_sockaddr_put(incoming, addr, addrlen, &incoming->as_PeerAddr,
-                         incoming->as_PeerPort, incoming->as_ScopeId);
+                         incoming->as_PeerPort, incoming->as_PeerScopeId);
 
     return fd;
 }
@@ -2929,7 +2958,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
  */
 static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
                                  AmiSocket *sock, const NXD_ADDRESS *addr,
-                                 UINT *index, BOOL *pinned)
+                                 ULONG scope, UINT *index, BOOL *pinned)
 {
     NX_IP *ip = netstack_ip();
 
@@ -2939,7 +2968,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    switch (bsd_source_select(sock, addr, sock->as_ScopeId, index))
+    switch (bsd_source_select(sock, addr, scope, index))
     {
         case BSD_SOURCE_ROUTE:
             return 0;
@@ -2992,7 +3021,7 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
 /* The body of connect(), run inside a ThreadX context bracket. */
 static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                AmiSocket *sock, const NXD_ADDRESS *addr,
-                               UINT port)
+                               UINT port, ULONG scope)
 {
     UINT status;
     UINT src_index  = 0;
@@ -3003,6 +3032,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         /* Same meaning as on a datagram socket: a default destination. */
         sock->as_PeerAddr = *addr;
         sock->as_PeerPort = port;
+        sock->as_PeerScopeId = scope;
         sock->as_Flags   |= ASF_CONNECTED;
 
         return 0;
@@ -3027,6 +3057,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
 
         sock->as_PeerAddr = *addr;
         sock->as_PeerPort = port;
+        sock->as_PeerScopeId = scope;
         sock->as_Flags   |= ASF_CONNECTED;
 
         return 0;
@@ -3056,7 +3087,8 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
 
     /* Before the port is claimed and before the SYN: a connect that cannot
        leave from the bound address fails without touching the wire. */
-    if (bsd_tcp_source_check(SocketBase, sock, addr, &src_index, &src_pinned) != 0)
+    if (bsd_tcp_source_check(SocketBase, sock, addr, scope,
+                             &src_index, &src_pinned) != 0)
         return -1;
 
     if ((sock->as_Flags & ASF_NXBOUND) == 0)
@@ -3086,6 +3118,7 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
      */
     sock->as_PeerAddr = *addr;
     sock->as_PeerPort = port;
+    sock->as_PeerScopeId = scope;
     sock->as_Flags   |= ASF_CONNECTING;
 
     /*
@@ -3253,7 +3286,7 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
         bsd_bzero(&sock->as_PeerAddr, sizeof(sock->as_PeerAddr));
         sock->as_PeerAddr.nxd_ip_version = version;
         sock->as_PeerPort = 0;
-        sock->as_ScopeId  = 0UL;
+        sock->as_PeerScopeId = 0UL;
         sock->as_Flags   &= ~ASF_CONNECTED;
 
         return 0;
@@ -3273,7 +3306,6 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
         if (!bsd_addr_normalise(sock, &addr))
             return bsd_fail(SocketBase, AMI_ENETUNREACH);
 
-        sock->as_ScopeId = scope;
     }
     else if (addr.nxd_ip_version == NX_IP_VERSION_V6)
     {
@@ -3284,7 +3316,7 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
     if (bsd_nx_enter(SocketBase) != 0)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
-    result = bsd_connect_locked(SocketBase, sock, &addr, port);
+    result = bsd_connect_locked(SocketBase, sock, &addr, port, scope);
 
     bsd_nx_leave(SocketBase);
 

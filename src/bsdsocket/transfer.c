@@ -518,7 +518,7 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 
 /*
  * The zone of a received link-local peer.  Unlike a connected socket's
- * as_ScopeId, this is per datagram: an unbound socket can receive the same
+ * as_PeerScopeId, this is per datagram: an unbound socket can receive the same
  * fe80:: address on two different interfaces, and recvfrom()/recvmsg() must
  * tell the caller which one it was.  NetX records the arrival interface in
  * the packet, and its interface index is zero based where sin6_scope_id is
@@ -1459,7 +1459,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
         result = bsd_recv_tcp(base, sock, &cur, len, flags, &held);
         if (result >= 0 && from != NULL && fromlen != NULL)
             bsd_sockaddr_put(sock, from, fromlen, &sock->as_PeerAddr,
-                             sock->as_PeerPort, sock->as_ScopeId);
+                             sock->as_PeerPort, sock->as_PeerScopeId);
         if (truncated != NULL)
             *truncated = FALSE;         /* a stream never truncates */
 
@@ -1690,7 +1690,7 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     /* Connected: the zone is the one connect() was given. */
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
                         &sock->as_PeerAddr, sock->as_PeerPort,
-                        sock->as_ScopeId, &sock->as_CmsgSticky);
+                        sock->as_PeerScopeId, &sock->as_CmsgSticky);
 }
 
 LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
@@ -1737,7 +1737,7 @@ LONG bsd_sendto(register LONG sock_fd        __asm("d0"),
 
             addr  = sock->as_PeerAddr;
             port  = sock->as_PeerPort;
-            scope = sock->as_ScopeId;
+            scope = sock->as_PeerScopeId;
         }
         else if (bsd_sockaddr_get(SocketBase, to, tolen, &addr, &port,
                                   &scope) != 0)
@@ -1882,7 +1882,7 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
 
             addr  = sock->as_PeerAddr;
             port  = sock->as_PeerPort;
-            scope = sock->as_ScopeId;
+            scope = sock->as_PeerScopeId;
         }
         else if (bsd_sockaddr_get(SocketBase,
                                   (const struct sockaddr *)msg->msg_name,

@@ -736,12 +736,13 @@ typedef struct AmiSocket
     UINT                    as_PeerPort;
 
     /*
-     * sin6_scope_id.  For a non-global IPv6 peer bsd_source_select() maps this
-     * one-based zone index to the matching NetX interface and pins the source
-     * address selected on that interface.  Keeping it also lets
-     * getsockname()/getpeername() report what bind()/connect() were given.
+     * sin6_scope_id is part of an endpoint, not a property of the socket.
+     * bind() and connect() can name different endpoints, so their zones must
+     * survive independently.  The one-based indices map to NetX interfaces
+     * when source selection pins a non-global address.
      */
-    ULONG                   as_ScopeId;
+    ULONG                   as_LocalScopeId;
+    ULONG                   as_PeerScopeId;
 
     /* Partially consumed receive packet (a stream read need not drain one). */
     NX_PACKET              *as_RxPending;
