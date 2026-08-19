@@ -2449,6 +2449,13 @@ const AmiConfig *netstack_config(VOID)
 {
     AmiNetStack *ns = ami_ns;
 
+    /* DHCP and RA callbacks only mark their interface from a NetX task. A
+       live-config reader is one of the caller tasks allowed to absorb that
+       handoff. Without this, gethostname(), NETSTATUS_SYSTEM and the ARexx
+       variables can report the old lease until an unrelated DNS lookup. */
+    if (ns != NULL)
+        netstack_dns_absorb_pending();
+
     return (ns != NULL) ? &ns->ns_Config : NULL;
 }
 
