@@ -1,10 +1,11 @@
 [submodule "third_party/threadx"]
 	path = third_party/threadx
 	url = https://github.com/tinic/threadx.git
+	branch = master
 [submodule "third_party/netxduo"]
 	path = third_party/netxduo
 	url = https://github.com/tinic/netxduo.git
-	branch = amiga-integration
+	branch = master
 [submodule "third_party/bsdsocktest"]
 	path = third_party/bsdsocktest
 	url = https://github.com/tbdye/bsdsocktest.git
