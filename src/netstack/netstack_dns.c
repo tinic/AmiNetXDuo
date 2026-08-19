@@ -38,6 +38,24 @@ static VOID ami_ns_resolver_permit(VOID)
     Permit();
 }
 
+static BOOL ami_ns_domain_same(const char *a, const char *b)
+{
+    char ca;
+    char cb;
+
+    do
+    {
+        ca = *a++;
+        cb = *b++;
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (char)(cb + ('a' - 'A'));
+    } while (ca == cb && ca != '\0');
+
+    return (BOOL)(ca == cb);
+}
+
 #ifdef AMINETXDUO_IPV6
 
 /*
@@ -55,24 +73,6 @@ static BOOL ami_ns6_same(const ULONG a[4], const ULONG b[4])
 {
     return (BOOL)(a[0] == b[0] && a[1] == b[1] &&
                   a[2] == b[2] && a[3] == b[3]);
-}
-
-static BOOL ami_ns_domain_same(const char *a, const char *b)
-{
-    char ca;
-    char cb;
-
-    do
-    {
-        ca = *a++;
-        cb = *b++;
-        if (ca >= 'A' && ca <= 'Z')
-            ca = (char)(ca + ('a' - 'A'));
-        if (cb >= 'A' && cb <= 'Z')
-            cb = (char)(cb + ('a' - 'A'));
-    } while (ca == cb && ca != '\0');
-
-    return (BOOL)(ca == cb);
 }
 
 VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
@@ -550,13 +550,9 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
  * outranks it, and an option 12 that is not a host name is refused (see
  * AmiHostnameSource).
  *
- * The domains from the lease are appended to the search list rather than
- * weighed against the ones in the file. A DOMAIN= somebody wrote is still the
- * default domain GetDefaultDomainName() reports and still the first suffix
- * tried, but it no longer stops the lease being used: the machine this was
- * reported from had `domain localdomain` in its file and local.tinic.net in
- * its lease, and only the file entry was ever tried, so `ssh playhouse2` did
- * not resolve on the network the lease describes.
+ * Search-list ownership is reconciled separately for every interface after
+ * the DNS client is created and on every lease transition.  This startup pass
+ * only chooses the host name and default domain from the first bound lease.
  *
  * From the first interface holding a lease, not always interface 0: a machine
  * with a static interface 0 and a DHCP interface 1 has its lease on the one
@@ -565,8 +561,6 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
 static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
 {
     char  text[AMI_CFG_NAME_LEN];
-    UCHAR raw[256];
-    UINT  size;
     UWORD index;
 
     for (index = 0; index < ns->ns_IfaceCount; index++)
@@ -581,31 +575,10 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
             AMI_INFO("netstack: DHCP names this machine '%s'",
                      ns->ns_Config.hostname);
 
-        /* Option 119 first: RFC 3397 1 calls it the list to search, and
-           option 15 the single domain to fall back on. */
-        size = (UINT)sizeof(raw);
-        if (nx_dhcp_interface_user_option_retrieve(&ns->ns_Dhcp, (UINT)index,
-                                                   AMI_DHCP_OPTION_SEARCH, raw,
-                                                   &size) == NX_SUCCESS)
-        {
-            UWORD added = ami_config_search_from_rfc3397(
-                &ns->ns_Config.resolver, (const UBYTE *)raw, (ULONG)size);
-
-            if (added != 0)
-                AMI_INFO("netstack: DHCP search list, %ld domain(s), first "
-                         "'%s'", (long)added,
-                         ns->ns_Config.resolver
-                             .search[ns->ns_Config.resolver.search_count -
-                                     added]);
-        }
-
         ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN, text,
                          sizeof(text));
         if (text[0] != '\0')
         {
-            if (ami_config_search_offer(&ns->ns_Config.resolver, text))
-                AMI_INFO("netstack: DHCP domain '%s'", text);
-
             /* Still the default domain when the file named none, which is what
                GetDefaultDomainName() reports and what SetDefaultDomainName()
                replaces. */
@@ -710,13 +683,97 @@ static BOOL ami_ns_dns_array_has(const ULONG *server, UWORD count, ULONG value)
 }
 
 
+static BOOL ami_ns_search_array_has(
+    const char domain[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN], UWORD count,
+    const char *value)
+{
+    UWORD i;
+
+    for (i = 0; i < count; i++)
+        if (ami_ns_domain_same(domain[i], value))
+            return TRUE;
+    return FALSE;
+}
+
+
+static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
+{
+    AmiResolverConfig offered = {0};
+    UCHAR             raw[256];
+    char              text[AMI_CFG_NAME_LEN];
+    UINT              size = (UINT)sizeof(raw);
+    UINT              status;
+    UWORD             i;
+
+    if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
+        return;
+
+    if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
+    {
+        status = nx_dhcp_interface_user_option_retrieve(
+            &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_SEARCH, raw, &size);
+        if (status == NX_SUCCESS)
+            (VOID)ami_config_search_from_rfc3397(&offered, raw, (ULONG)size);
+        else if (status != NX_DHCP_PARSE_ERROR)
+            return;             /* preserve the last coherent option set */
+
+        ami_ns_dhcp_text(ns, iface, AMI_DHCP_OPTION_DOMAIN, text,
+                         sizeof(text));
+        if (text[0] != '\0')
+            (VOID)ami_config_search_offer(&offered, text);
+    }
+
+    for (i = ami_ns_dhcp_search_lease_count(&ns->ns_DhcpSearchLease, iface);
+         i-- != 0U; )
+    {
+        const char *domain = ami_ns_dhcp_search_lease_at(
+            &ns->ns_DhcpSearchLease, iface, i);
+
+        if (ami_ns_search_array_has(offered.search, offered.search_count,
+                                    domain))
+            continue;
+
+        ami_ns_resolver_forbid();
+        (VOID)ami_config_search_reference_remove(&ns->ns_Config.resolver,
+                                                 domain);
+        ami_ns_resolver_permit();
+        (VOID)ami_ns_dhcp_search_lease_remove(&ns->ns_DhcpSearchLease,
+                                              iface, domain);
+        AMI_INFO("netstack: interface %ld DHCP search suffix withdrawn",
+                 (long)iface);
+    }
+
+    for (i = 0; i < offered.search_count; i++)
+    {
+        BOOL accepted;
+
+        if (ami_ns_dhcp_search_lease_has(&ns->ns_DhcpSearchLease, iface,
+                                         offered.search[i]))
+            continue;
+
+        ami_ns_resolver_forbid();
+        accepted = ami_config_search_reference_add(&ns->ns_Config.resolver,
+                                                   offered.search[i]);
+        ami_ns_resolver_permit();
+        if (!accepted)
+            continue;
+
+        (VOID)ami_ns_dhcp_search_lease_add(&ns->ns_DhcpSearchLease, iface,
+                                           offered.search[i]);
+        AMI_INFO("netstack: interface %ld DHCP search suffix '%s'",
+                 (long)iface, offered.search[i]);
+    }
+}
+
+
 /*
- * Reconcile option 6 from one DHCP interface.
+ * Reconcile resolver options from one DHCP interface.
  *
  * Called once for every interface already bound when the DNS client starts,
  * and from a caller task after the DHCP state callback marks an interface.
- * A renewal can replace or omit option 6, and a stopped/lost lease owns no
- * servers.  The per-interface set makes those withdrawals precise.
+ * A renewal can replace or omit option 6, 15, or 119, and a stopped/lost lease
+ * owns no servers or suffixes.  The per-interface sets make those withdrawals
+ * precise.
  */
 VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 {
@@ -730,6 +787,8 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
     if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
         iface >= ns->ns_IfaceCount)
         return;
+
+    ami_ns_dhcp_search_reconcile(ns, iface);
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
@@ -880,8 +939,8 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
         UWORD iface;
 
         /* The non-interface retrieve API stops at the first bound DHCP
-           record. A second card can have a different reachable resolver, so
-           collect option 6 from every interface holding a lease. */
+           record. A second card can have a different reachable resolver and
+           search list, so collect every interface holding a lease. */
         for (iface = 0; iface < ns->ns_IfaceCount; iface++)
             ami_netstack_dns_dhcp_reconcile(ns, iface);
     }
