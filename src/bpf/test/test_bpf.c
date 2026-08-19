@@ -1284,6 +1284,34 @@ static void test_reopen_under_reader(void)
     ULONG timeout[2] = { 0, 20000 };
 
     printf("bpf: a waiting reader cannot consume a recycled channel\n");
+/*
+ * Capture used to release the channel lock and only then read notify_task and
+ * notify_mask from the numeric slot. A close/reopen in that window made the
+ * old packet signal the replacement channel's owner. The target lock is
+ * Forbid(), so doing the non-blocking Signal() before Permit() makes the
+ * notification and the channel state one transaction.
+ */
+static char t_notify_old_task;
+static char t_notify_new_task;
+static LONG t_notify_close_status;
+static LONG t_notify_open_status;
+
+static void t_reopen_before_capture_notify(void)
+{
+    t_notify_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_notify_open_status  = ami_bpf_open(T_BPF_OTHER, 0);
+
+    stub_task = (APTR)&t_notify_new_task;
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OTHER, 0, 1UL << 9) == 0);
+}
+
+static void test_capture_notify_close_reopen(void)
+{
+    UBYTE frame[128];
+    ULONG one = 1;
+    ULONG len;
+
+    printf("bpf: capture notifies the channel that received the packet\n");
 
     CHECK(ami_bpf_init() == 0);
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
@@ -1300,10 +1328,32 @@ static void test_reopen_under_reader(void)
           AMI_BPF_EPERM);
     CHECK(stub_on_unlock == NULL);
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) > 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCIMMEDIATE, &one) == 0);
+
+    stub_task = (APTR)&t_notify_old_task;
+    CHECK(ami_bpf_set_notify_mask(T_BPF_OWNER, 0, 1UL << 7) == 0);
+
+    stub_signalled_task    = NULL;
+    stub_signalled_mask    = 0;
+    t_notify_close_status  = -1;
+    t_notify_open_status   = -1;
+    stub_unlock_after      = 1;
+    stub_on_unlock         = t_reopen_before_capture_notify;
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    ami_bpf_tap_rx(iface_cookie, frame, len);
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_notify_close_status == 0);
+    CHECK(t_notify_open_status == 0);
+    CHECK(stub_signalled_task == (APTR)&t_notify_old_task);
+    CHECK(stub_signalled_mask == (1UL << 7));
 
     CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_alloc_count() == 0);
+
+    stub_task = (APTR)"task";
 }
 
 /* -------------------------------------------------------------------- main */
@@ -1329,6 +1379,7 @@ int main(int argc, char **argv)
     test_reopen_under_closer();
     test_close_owner_under_reader();
     test_reopen_under_reader();
+    test_capture_notify_close_reopen();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 
