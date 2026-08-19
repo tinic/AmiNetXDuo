@@ -202,7 +202,9 @@ static UINT bsd_udp_icmp_error_notify(NX_UDP_SOCKET *socket_ptr, UINT error_code
     if (sock == NULL || (sock->as_Flags & ASF_CONNECTED) == 0)
         return NX_FALSE;
 
-    if (!bsd_udp_from_peer(sock, peer_address, peer_port))
+    /* NetX currently calls this hook only from ICMPv4 processing, where
+       there is no IPv6 zone to supply. */
+    if (!bsd_udp_from_peer(sock, peer_address, peer_port, 0UL))
         return NX_FALSE;
 
     sock->as_SoError = bsd_errno_from_nx(error_code);

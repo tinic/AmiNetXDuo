@@ -1231,7 +1231,7 @@ BOOL bsd_bind_wants_interface(const AmiSocket *sock, const NX_INTERFACE *nxif);
  * select.c asks it of an ICMP error's peer.
  */
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
-                       UINT src_port);
+                       UINT src_port, ULONG src_scope);
 
 /*
  * The send direction of the same question: which source must a datagram from

@@ -23,6 +23,7 @@
 #include "nx_ipv4.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
+#include "../ipv6/ipv6_srcsel.h"
 #endif
 
 #include <proto/exec.h>
@@ -517,7 +518,7 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 }
 
 /*
- * The zone of a received link-local peer.  Unlike a connected socket's
+ * The zone of a received non-global peer.  Unlike a connected socket's
  * as_PeerScopeId, this is per datagram: an unbound socket can receive the same
  * fe80:: address on two different interfaces, and recvfrom()/recvmsg() must
  * tell the caller which one it was.  NetX records the arrival interface in
@@ -532,7 +533,11 @@ static ULONG bsd_packet_scope_id(const NX_PACKET *packet,
 
     if (packet == NX_NULL || source == NX_NULL ||
         source->nxd_ip_version != NX_IP_VERSION_V6 ||
-        (source->nxd_ip_address.v6[0] & 0xFFC00000UL) != 0xFE800000UL)
+        anx6_scope(source->nxd_ip_address.v6) >= 0xEU ||
+        (source->nxd_ip_address.v6[0] == 0UL &&
+         source->nxd_ip_address.v6[1] == 0UL &&
+         source->nxd_ip_address.v6[2] == 0UL &&
+         source->nxd_ip_address.v6[3] == 1UL))
         return 0UL;
 
     nxif = bsd_packet_interface(packet);
@@ -569,7 +574,7 @@ static ULONG bsd_packet_scope_id(const NX_PACKET *packet,
  * is the only unambiguous way to attribute one to a UDP socket.
  */
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
-                       UINT src_port)
+                       UINT src_port, ULONG src_scope)
 {
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
         return TRUE;
@@ -583,16 +588,31 @@ BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
 #ifdef AMINETXDUO_IPV6
     if (src->nxd_ip_version == NX_IP_VERSION_V6)
     {
-        return (BOOL)(src->nxd_ip_address.v6[0] ==
-                          sock->as_PeerAddr.nxd_ip_address.v6[0] &&
-                      src->nxd_ip_address.v6[1] ==
-                          sock->as_PeerAddr.nxd_ip_address.v6[1] &&
-                      src->nxd_ip_address.v6[2] ==
-                          sock->as_PeerAddr.nxd_ip_address.v6[2] &&
-                      src->nxd_ip_address.v6[3] ==
-                          sock->as_PeerAddr.nxd_ip_address.v6[3]);
+        if (src->nxd_ip_address.v6[0] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[0] ||
+            src->nxd_ip_address.v6[1] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[1] ||
+            src->nxd_ip_address.v6[2] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[2] ||
+            src->nxd_ip_address.v6[3] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[3])
+            return FALSE;
+
+        /* The 128 address bits do not identify a non-global peer.  A connect
+           that supplied a zone accepts replies only from that same zone. */
+        if (sock->as_PeerScopeId != 0UL &&
+            anx6_scope(src->nxd_ip_address.v6) < 0xEU &&
+            !(src->nxd_ip_address.v6[0] == 0UL &&
+              src->nxd_ip_address.v6[1] == 0UL &&
+              src->nxd_ip_address.v6[2] == 0UL &&
+              src->nxd_ip_address.v6[3] == 1UL))
+            return (src_scope == sock->as_PeerScopeId) ? TRUE : FALSE;
+
+        return TRUE;
     }
 #endif
+
+    (VOID)src_scope;
 
     return (BOOL)(src->nxd_ip_address.v4 ==
                   sock->as_PeerAddr.nxd_ip_address.v4);
@@ -1208,6 +1228,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         for (;;)
         {
             NXD_ADDRESS from_ip;
+            ULONG       from_scope;
             UINT        from_port = 0;
 
             status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
@@ -1233,10 +1254,11 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
             }
 
             nxd_udp_source_extract(packet, &from_ip, &from_port);
+            from_scope = bsd_packet_scope_id(packet, &from_ip);
 
             if (bsd_bind_wants_interface(sock,
                                          bsd_packet_interface(packet)) &&
-                bsd_udp_from_peer(sock, &from_ip, from_port))
+                bsd_udp_from_peer(sock, &from_ip, from_port, from_scope))
                 break;
 
             nx_packet_release(packet);
