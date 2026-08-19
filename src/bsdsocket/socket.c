@@ -25,7 +25,7 @@
 #include "nx_ip.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
-#include "ipv6_srcsel.h"
+#include "../ipv6/ipv6_srcsel.h"
 #endif
 
 #include "aminetxduo/random.h"

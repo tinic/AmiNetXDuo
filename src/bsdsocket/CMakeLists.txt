@@ -122,8 +122,7 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         OUTPUT_NAME "bsdsocket.library")
 
     target_include_directories(bsdsocket_library PRIVATE
-        ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/src/ipv6")
+        ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(bsdsocket_library PRIVATE
         aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
         aminetxduo_common netxduo_addons netxduo threadx threadx_port)
