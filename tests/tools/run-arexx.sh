@@ -35,8 +35,12 @@
 #                          FROBNICATE on purpose: "not implemented" and "unknown
 #                          command" are different answers.
 #   ''  (empty)            AmiTCP returns RETURN_OK for an empty line, so we do.
-#   KILL                   last, because it takes the interfaces down. The most
-#                          commonly sent command in the corpus, every stopnet.
+#   KILL                   last, because it takes the interfaces down. The
+#                          interface is removed immediately before it, leaving
+#                          the stable-index hole runtime removal deliberately
+#                          keeps. KILL must not report that already-down hole
+#                          as a failed live interface. The most commonly sent
+#                          command in the corpus, every stopnet.
 #
 #   The script writes a sentinel line last. A hang is then not "some case
 #   failed", it is "the sentinel is missing", which is the assertion that would
@@ -81,7 +85,8 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
-for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$BSD"; do
+for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" \
+         "$TOOLS/RemoveNetInterface" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -155,6 +160,7 @@ cp "$REXXDIR/RexxMast"    "$STAGE/RexxMast"
 cp "$REXXDIR/RX"          "$STAGE/RX"
 cp "$REXXDIR/WaitForPort" "$STAGE/WaitForPort"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
+cp "$TOOLS/RemoveNetInterface" "$STAGE/RemoveNetInterface"
 # A live service and the command that lists it: KILL used to take the
 # interfaces down and leave every program holding a library whose network had
 # gone, and "KILL returned 0" could not tell that apart from a KILL that tells
@@ -205,6 +211,14 @@ SAY 'case browse1: QUERY SERVICES typ rc=' RC
 'QUERY SERVICES'
 SAY 'case browsex: QUERY SERVICES     rc=' RC
 
+/* Runtime removal does not renumber the interfaces above its slot, so it
+   deliberately leaves a NULL below ns_IfaceCount. KILL used to call Down on
+   that hole and return WARN even though no live interface failed. */
+ADDRESS COMMAND
+'SYS:RemoveNetInterface eth0 FORCE QUIET'
+SAY 'case hole:    RemoveNetInterface rc=' RC
+ADDRESS AMITCP
+
 'KILL'
 SAY 'case kill:    KILL               rc=' RC
 
@@ -246,7 +260,7 @@ set +e
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/RexxMast" "$STAGE/RX" \
     "$STAGE/WaitForPort" "$STAGE/amitcptest.rexx" \
-    "$STAGE/nc" "$STAGE/ShowNetStatus"
+    "$STAGE/RemoveNetInterface" "$STAGE/nc" "$STAGE/ShowNetStatus"
 RUN_RC=$?
 set -e
 
@@ -352,6 +366,13 @@ if grep -qE "case browsex:.*rc= *[1-9]" "$SCRIPTOUT"; then
     note "PASS: SERVICES with no type is a syntax error"
 else
     note "FAIL: SERVICES with no type was accepted"
+    fails=$((fails + 1))
+fi
+
+if grep -qE "case hole:.*rc= *0" "$SCRIPTOUT"; then
+    note "PASS: runtime removal created the interface-table hole"
+else
+    note "FAIL: RemoveNetInterface did not create the hole before KILL"
     fails=$((fails + 1))
 fi
 
