@@ -86,6 +86,7 @@ if(AMINETXDUO_TLSLIB_LINK)
     target_compile_definitions(tls_library PRIVATE
         NX_SECURE_ENABLE_AEAD_CIPHER
         NX_SECURE_KEY_CLEAR
+        NX_SECURE_TLS_DISABLE_SECURE_RENEGOTIATION
         NX_SECURE_TLS_ENABLE_TLS_1_3)
 
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
