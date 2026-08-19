@@ -840,10 +840,10 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     return iface;
 }
 
-VOID ami_sana2_close(AmiSana2If *iface)
+BOOL ami_sana2_close(AmiSana2If *iface)
 {
     if (iface == NULL)
-        return;
+        return TRUE;
 
     /* ami_sana2_rx_stop() takes the wire offline itself, and does so first:
        S2_OFFLINE is what returns the readers' queued CMD_READs on a device
@@ -868,7 +868,7 @@ VOID ami_sana2_close(AmiSana2If *iface)
         {
             AMI_ERROR("sana2: leaking the interface, the device still holds "
                       "requests inside it");
-            return;
+            return FALSE;
         }
 
         iface->templ.ios2_Req.io_Message.mn_ReplyPort = NULL;
@@ -879,7 +879,7 @@ VOID ami_sana2_close(AmiSana2If *iface)
     if (iface->rx_orphaned || iface->tx_orphaned)
     {
         AMI_ERROR("sana2: leaking the interface, requests unreclaimed");
-        return;
+        return FALSE;
     }
 
     if (iface->interface_ptr != NULL)
@@ -889,6 +889,8 @@ VOID ami_sana2_close(AmiSana2If *iface)
     ami_sana2_unbind(iface);
 
     ami_free(iface);
+
+    return TRUE;
 }
 
 /* ------------------------------------------------------------- accessors */
