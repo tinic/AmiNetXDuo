@@ -307,9 +307,6 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
 {
     UINT status;
 
-    if (ns->ns_Dhcpv6Started)
-        return AMI_NET_OK;
-
     if (!ns->ns_Dhcpv6Created)
     {
         /*
@@ -453,6 +450,13 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
         (VOID)nx_dhcpv6_request_option_DNS_server(&ns->ns_Dhcpv6, NX_TRUE);
         (VOID)nx_dhcpv6_request_option_domain_name(&ns->ns_Dhcpv6, NX_TRUE);
 
+    }
+
+    /* A link-down stops, but deliberately does not delete, the client.  Its
+       DUID and IA_NA remain valid and nx_dhcpv6_start() resumes its thread,
+       socket and timers before the repeated request below. */
+    if (!ns->ns_Dhcpv6Started)
+    {
         status = nx_dhcpv6_start(&ns->ns_Dhcpv6);
         if (status != NX_SUCCESS)
         {
@@ -732,6 +736,54 @@ VOID ami_netstack_dhcpv6_release(AmiNetStack *ns)
         AMI_INFO("netstack: DHCPv6 address released, the server answered");
     else
         AMI_INFO("netstack: DHCPv6 Release sent, the server did not answer");
+}
+
+/*
+ * Quiesce the client while its selected interface is down.  Release above is
+ * only meaningful for a stateful client with a lease; stop is required in all
+ * modes so a Solicit or Information-Request does not keep retransmitting on
+ * an offline link.  The client object is retained for a restart on link-up.
+ */
+VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns)
+{
+    UINT status;
+
+    if (ns == NULL || !ns->ns_Dhcpv6Created || !ns->ns_Dhcpv6Started)
+        return;
+
+    status = nx_dhcpv6_stop(&ns->ns_Dhcpv6);
+    if (status == NX_SUCCESS)
+        ns->ns_Dhcpv6Started = FALSE;
+    else
+        AMI_WARN("netstack: DHCPv6 did not stop for link-down (%ld)",
+                 (long)status);
+}
+
+/*
+ * Repeat the exchange that was active before link-down.  Only enqueue work
+ * here: callers are adopted application tasks and the request may block while
+ * the DHCPv6 thread changes state.
+ */
+VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index)
+{
+    AmiDhcpv6Action action;
+    ULONG           event;
+
+    if (ns == NULL || !ns->ns_Dhcpv6WorkReady)
+        return;
+
+    action = ami_dhcpv6_resume_action(ns->ns_Dhcpv6Created,
+                                      ns->ns_Dhcpv6Started,
+                                      ns->ns_Dhcpv6Asked,
+                                      ns->ns_Dhcpv6Stateful,
+                                      (UINT)ns->ns_Dhcpv6Iface,
+                                      (UINT)interface_index);
+    if (action == AMI_DHCPV6_ACT_NONE)
+        return;
+
+    event = (action == AMI_DHCPV6_ACT_STATEFUL)
+                ? AMI_DHCPV6_EV_STATEFUL : AMI_DHCPV6_EV_STATELESS;
+    (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, event, TX_OR);
 }
 
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
