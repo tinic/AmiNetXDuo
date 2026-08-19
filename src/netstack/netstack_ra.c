@@ -16,8 +16,24 @@ static BOOL ami_ns_ra_same(const ULONG a[4], const ULONG b[4])
 }
 
 
+static BOOL ami_ns_ra_expired(ULONG received, ULONG lifetime, ULONG now)
+{
+    ULONG limit;
+
+    /* RFC 8106 uses all ones for infinity.  A lifetime longer than the
+       ThreadX tick counter can represent is likewise not due during this
+       counter epoch.  Router lifetimes in ordinary use are minutes. */
+    if (lifetime == 0UL || lifetime == (ULONG)~0UL ||
+        lifetime > ((ULONG)~0UL / (ULONG)NX_IP_PERIODIC_RATE))
+        return FALSE;
+
+    limit = lifetime * (ULONG)NX_IP_PERIODIC_RATE;
+    return (BOOL)((ULONG)(now - received) >= limit);
+}
+
+
 VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, const ULONG address[4],
-                     ULONG lifetime)
+                     ULONG lifetime, ULONG now)
 {
     UWORD i;
 
@@ -30,7 +46,8 @@ VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, const ULONG address[4],
     Forbid();
 
     for (i = 0; i < pending->rdnss_count; i++)
-        if (ami_ns_ra_same(pending->rdnss[i].nxd_ip_address.v6, address))
+        if (ami_ns_ra_same(pending->rdnss[i].address.nxd_ip_address.v6,
+                           address))
             break;
 
     if (lifetime == 0UL)
@@ -51,14 +68,22 @@ VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, const ULONG address[4],
     if (i == pending->rdnss_count &&
         pending->rdnss_count < (UWORD)AMI_RDNSS_MAX)
     {
-        pending->rdnss[i].nxd_ip_version       = NX_IP_VERSION_V6;
-        pending->rdnss[i].nxd_ip_address.v6[0] = address[0];
-        pending->rdnss[i].nxd_ip_address.v6[1] = address[1];
-        pending->rdnss[i].nxd_ip_address.v6[2] = address[2];
-        pending->rdnss[i].nxd_ip_address.v6[3] = address[3];
+        pending->rdnss[i].address.nxd_ip_version       = NX_IP_VERSION_V6;
+        pending->rdnss[i].address.nxd_ip_address.v6[0] = address[0];
+        pending->rdnss[i].address.nxd_ip_address.v6[1] = address[1];
+        pending->rdnss[i].address.nxd_ip_address.v6[2] = address[2];
+        pending->rdnss[i].address.nxd_ip_address.v6[3] = address[3];
 
         pending->rdnss_count = (UWORD)(i + 1);
         pending->rdnss_pending = TRUE;
+    }
+
+    if (i < pending->rdnss_count)
+    {
+        /* A repeated advertisement refreshes the lifetime without changing
+           the resolver set, so it need not wake the consumer. */
+        pending->rdnss[i].lifetime = lifetime;
+        pending->rdnss[i].received = now;
     }
 
     Permit();
@@ -90,7 +115,8 @@ VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, const UCHAR *domains,
 }
 
 
-BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot)
+BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
+                        ULONG now)
 {
     UWORD i;
 
@@ -105,11 +131,30 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot)
        instead of having its notification cleared underneath it. */
     Forbid();
 
+    /* Expiry is a withdrawal even when no new packet arrived.  Compact before
+       copying so the caller reconciles against the still-valid set. */
+    i = 0;
+    while (i < pending->rdnss_count)
+    {
+        if (ami_ns_ra_expired(pending->rdnss[i].received,
+                              pending->rdnss[i].lifetime, now))
+        {
+            UWORD j;
+
+            for (j = i; (UWORD)(j + 1U) < pending->rdnss_count; j++)
+                pending->rdnss[j] = pending->rdnss[j + 1U];
+            pending->rdnss_count--;
+            pending->rdnss_pending = TRUE;
+            continue;
+        }
+        i++;
+    }
+
     if (pending->rdnss_pending)
     {
         snapshot->rdnss_count = pending->rdnss_count;
         for (i = 0; i < snapshot->rdnss_count; i++)
-            snapshot->rdnss[i] = pending->rdnss[i];
+            snapshot->rdnss[i] = pending->rdnss[i].address;
         pending->rdnss_pending = FALSE;
         snapshot->rdnss_pending = TRUE;
     }
@@ -127,4 +172,24 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot)
     Permit();
 
     return (BOOL)(snapshot->rdnss_pending || snapshot->dnssl_pending);
+}
+
+
+BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now)
+{
+    BOOL  needed = FALSE;
+    UWORD i;
+
+    if (pending == NULL)
+        return FALSE;
+
+    Forbid();
+
+    needed = (BOOL)(pending->rdnss_pending || pending->dnssl_pending);
+    for (i = 0; !needed && i < pending->rdnss_count; i++)
+        needed = ami_ns_ra_expired(pending->rdnss[i].received,
+                                   pending->rdnss[i].lifetime, now);
+
+    Permit();
+    return needed;
 }
