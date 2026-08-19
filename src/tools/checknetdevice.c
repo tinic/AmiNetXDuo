@@ -467,8 +467,15 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  The configuration option register was written at $%08lx.\n", v);
         return;
     case ANXDIAG_PC_CORVAL:
-        say("  The byte written there was $%02lx: configuration index %lu\n"
-            "  with the level-mode interrupt bit ($40) set.\n",
+        /* Bit 6 is the COR's level-mode interrupt request. It is not set:
+           Gayle reports the PC Card interrupt as an edge whatever the card
+           was asked for, so asking for level mode gains nothing and cnet
+           does not ask either. Naming the bit here anyway, because a report
+           that shows the byte without saying which bits were meant leaves
+           the reader to look it up. */
+        say("  The byte written there was $%02lx: configuration index %lu,\n"
+            "  and bit 6 clear, so the card was not asked for a level-mode\n"
+            "  interrupt.\n",
             v, v & 0x3fUL);
         return;
     case ANXDIAG_PC_SETTLE:
