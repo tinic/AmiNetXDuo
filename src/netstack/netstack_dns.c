@@ -67,7 +67,7 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
     if (ns == NULL || dns_address == NULL)
         return;
 
-    ami_ns_ra_rdnss(&ns->ns_Ra, dns_address, lifetime);
+    ami_ns_ra_rdnss(&ns->ns_Ra, dns_address, lifetime, tx_time_get());
 }
 
 /*
@@ -285,7 +285,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
 
-    if (!ami_ns_ra_snapshot(&ns->ns_Ra, &ra))
+    if (!ami_ns_ra_snapshot(&ns->ns_Ra, &ra, tx_time_get()))
         return;
 
     if (ra.rdnss_pending)
@@ -460,7 +460,7 @@ VOID netstack_dns_absorb_pending(VOID)
        trip into ThreadX. */
     if (!ami_ns_dns_pending_any(&ns->ns_DhcpDnsPending)
 #ifdef AMINETXDUO_IPV6
-        && !ns->ns_Ra.rdnss_pending && !ns->ns_Ra.dnssl_pending &&
+        && !ami_ns_ra_needs_snapshot(&ns->ns_Ra, tx_time_get()) &&
         !ns->ns_Dhcpv6DnsPending
 #endif
        )

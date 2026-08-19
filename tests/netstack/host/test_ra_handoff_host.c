@@ -29,6 +29,7 @@ static const ULONG    *h_inject_rdnss;
 static const UCHAR    *h_inject_dnssl;
 static UINT            h_inject_dnssl_len;
 static ULONG           h_inject_lifetime;
+static ULONG           h_inject_now;
 
 
 static void h_check(int ok, const char *what)
@@ -79,7 +80,7 @@ VOID Permit(VOID)
     h_inject_dnssl = NULL;
 
     if (rdnss != NULL)
-        ami_ns_ra_rdnss(pending, rdnss, lifetime);
+        ami_ns_ra_rdnss(pending, rdnss, lifetime, h_inject_now);
     else
         ami_ns_ra_dnssl(pending, dnssl, dnssl_len, lifetime);
 }
@@ -107,13 +108,14 @@ static void h_case_rdnss_arrives_after_snapshot(void)
     memset(&first, 0, sizeof(first));
     memset(&second, 0, sizeof(second));
 
-    ami_ns_ra_rdnss(&pending, one, 600UL);
+    ami_ns_ra_rdnss(&pending, one, 600UL, 100UL);
 
     h_inject_pending = &pending;
     h_inject_rdnss = two;
     h_inject_lifetime = 600UL;
+    h_inject_now = 101UL;
 
-    h_check(ami_ns_ra_snapshot(&pending, &first),
+    h_check(ami_ns_ra_snapshot(&pending, &first, 101UL),
             "the first RDNSS advertisement is pending");
     h_check(first.rdnss_pending && first.rdnss_count == 1,
             "the first snapshot has one coherent server");
@@ -122,7 +124,7 @@ static void h_case_rdnss_arrives_after_snapshot(void)
     h_check(pending.rdnss_pending,
             "an RDNSS option arriving after the snapshot remains pending");
 
-    h_check(ami_ns_ra_snapshot(&pending, &second),
+    h_check(ami_ns_ra_snapshot(&pending, &second, 101UL),
             "the injected RDNSS option is consumed on the next pass");
     h_check(second.rdnss_count == 2 &&
             h_address_is(&second.rdnss[0], 1UL) &&
@@ -151,8 +153,9 @@ static void h_case_dnssl_arrives_after_snapshot(void)
     h_inject_dnssl = new_list;
     h_inject_dnssl_len = (UINT)sizeof(new_list);
     h_inject_lifetime = 900UL;
+    h_inject_now = 201UL;
 
-    h_check(ami_ns_ra_snapshot(&pending, &first),
+    h_check(ami_ns_ra_snapshot(&pending, &first, 201UL),
             "the first DNSSL advertisement is pending");
     h_check(first.dnssl_pending &&
             first.dnssl_len == (UWORD)sizeof(old_list) &&
@@ -162,7 +165,7 @@ static void h_case_dnssl_arrives_after_snapshot(void)
     h_check(pending.dnssl_pending,
             "a DNSSL option arriving after the snapshot remains pending");
 
-    h_check(ami_ns_ra_snapshot(&pending, &second),
+    h_check(ami_ns_ra_snapshot(&pending, &second, 201UL),
             "the injected DNSSL option is consumed on the next pass");
     h_check(second.dnssl_len == (UWORD)sizeof(new_list) &&
             second.dnssl_lifetime == 900UL &&
@@ -182,17 +185,65 @@ static void h_case_withdraw_and_limits(void)
     memset(&snapshot, 0, sizeof(snapshot));
     memset(too_long, 1, sizeof(too_long));
 
-    ami_ns_ra_rdnss(&pending, one, 600UL);
-    (void)ami_ns_ra_snapshot(&pending, &snapshot);
-    ami_ns_ra_rdnss(&pending, one, 0UL);
+    ami_ns_ra_rdnss(&pending, one, 600UL, 0UL);
+    (void)ami_ns_ra_snapshot(&pending, &snapshot, 0UL);
+    ami_ns_ra_rdnss(&pending, one, 0UL, 1UL);
 
-    h_check(ami_ns_ra_snapshot(&pending, &snapshot) &&
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 1UL) &&
             snapshot.rdnss_count == 0,
             "a zero lifetime publishes an empty RDNSS set");
 
     ami_ns_ra_dnssl(&pending, too_long, (UINT)sizeof(too_long), 600UL);
-    h_check(!ami_ns_ra_snapshot(&pending, &snapshot),
+    h_check(!ami_ns_ra_snapshot(&pending, &snapshot, 0UL),
             "an overlong DNSSL option is refused whole");
+}
+
+
+static void h_case_rdnss_lifetime_expires_and_refreshes(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    const ULONG one[4] = {0x20010db8UL, 0UL, 0x53UL, 1UL};
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_rdnss(&pending, one, 10UL, 100UL);
+    (void)ami_ns_ra_snapshot(&pending, &snapshot, 100UL);
+
+    h_check(!ami_ns_ra_needs_snapshot(&pending, 599UL),
+            "RDNSS remains valid until its complete lifetime");
+
+    ami_ns_ra_rdnss(&pending, one, 10UL, 400UL);
+    h_check(!ami_ns_ra_needs_snapshot(&pending, 899UL),
+            "a repeated RDNSS advertisement refreshes its lifetime");
+    h_check(ami_ns_ra_needs_snapshot(&pending, 900UL),
+            "RDNSS expiry wakes a report even without a new packet");
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 900UL) &&
+            snapshot.rdnss_pending && snapshot.rdnss_count == 0,
+            "an expired RDNSS server is published as a withdrawal");
+
+}
+
+
+static void h_case_infinite_and_wrapped_time(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    const ULONG one[4] = {0x20010db8UL, 0UL, 0x53UL, 1UL};
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_rdnss(&pending, one, (ULONG)~0UL, 20UL);
+    (void)ami_ns_ra_snapshot(&pending, &snapshot, 20UL);
+    h_check(!ami_ns_ra_needs_snapshot(&pending, (ULONG)~0UL),
+            "the RFC infinite lifetime does not expire");
+
+    ami_ns_ra_rdnss(&pending, one, 1UL, (ULONG)~0UL - 20UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 29UL) &&
+            snapshot.rdnss_count == 0,
+            "RDNSS expiry survives the ThreadX tick counter wrapping");
 }
 
 
@@ -201,6 +252,8 @@ int main(void)
     h_case_rdnss_arrives_after_snapshot();
     h_case_dnssl_arrives_after_snapshot();
     h_case_withdraw_and_limits();
+    h_case_rdnss_lifetime_expires_and_refreshes();
+    h_case_infinite_and_wrapped_time();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff never nests its critical section");

@@ -19,9 +19,16 @@
 #define AMI_RDNSS_MAX               4
 #define AMI_DNSSL_MAX               256
 
+typedef struct AmiNsRdnssEntry
+{
+    NXD_ADDRESS address;
+    ULONG       lifetime;
+    ULONG       received;
+} AmiNsRdnssEntry;
+
 typedef struct AmiNsRaPending
 {
-    NXD_ADDRESS   rdnss[AMI_RDNSS_MAX];
+    AmiNsRdnssEntry rdnss[AMI_RDNSS_MAX];
     UWORD         rdnss_count;
     volatile BOOL rdnss_pending;
 
@@ -44,9 +51,11 @@ typedef struct AmiNsRaSnapshot
 } AmiNsRaSnapshot;
 
 VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, const ULONG address[4],
-                     ULONG lifetime);
+                     ULONG lifetime, ULONG now);
 VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, const UCHAR *domains,
                      UINT length, ULONG lifetime);
-BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot);
+BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
+                        ULONG now);
+BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now);
 
 #endif /* AMINETXDUO_NETSTACK_RA_H */

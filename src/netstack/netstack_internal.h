@@ -309,10 +309,11 @@ struct AmiNetStack
      * only writes here, and the next lookup takes what it finds.
      *
      * This is the set the router last described, not a log of what it has ever
-     * said: a lifetime of zero takes an entry back out (RFC 8106 5.1), and the
-     * absorb step reconciles the DNS client and the reported configuration
-     * against it rather than only adding.  Without that a withdrawn server
-     * stays in the resolver for the life of the machine.
+     * said: a lifetime of zero takes an entry back out (RFC 8106 5.1), and a
+     * finite lifetime is pruned before the next lookup or report.  The absorb
+     * step reconciles the DNS client and reported configuration against that
+     * set rather than only adding.  Without it a dead advertised server stays
+     * in the resolver for the life of the machine.
      *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as
