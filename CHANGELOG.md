@@ -9,6 +9,13 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A certificate that is not allowed to be used the way the connection needs is refused. A leaf's keyUsage was never checked, so a certificate marked for encryption only, or for signing only, was accepted for either; a program is now told which of those it hit rather than being told the handshake failed
+- DHCP runs on the interfaces that asked for it. The client enrolled interface 0 whichever way it was configured, so a machine with a fixed address on its first card and DHCP on its second leased for the wrong one
+- An interface that goes down and comes back gets its address again. Neither the DHCPv6 client nor the router solicitation was restarted, so the machine kept whatever it had before the cable moved, or nothing
+- Multicast name service survives being switched off and on. Disabling an interface tested whether it was enabled outside the lock that protects the answer, enabling one that then failed left records published for a service that was not running, and deleting the responder left it in its multicast groups and left callbacks pointing into freed memory
+- A network service that fails to start no longer leaves its worker running. Telnet, TFTP, MQTT, the cloud client, both DHCP servers and the mDNS responder each created threads and timers and then returned an error without stopping them, so a failed start left the machine slower and the second attempt fighting the first
+- Browsing for services stops reading at the end of the caller's array. It kept comparing against entries past the end when there were more services than room for them
+- A DHCPv6 packet whose first option is one we do not know is handled the same way every time. The unknown option left the result of the previous option's parse standing, which was whatever the compiler had put there
 - PCMCIA network interrupts now run through `card.resource`'s status-change callback, including the V39 post-status phase and the Kickstart 2.x Gayle acknowledgement, instead of registering a raw PORTS server that bypassed the socket owner
 - Removing a PCMCIA card takes the unit offline without touching the empty socket, releases ownership from task context, and keeps the handle ready for a validated reinsertion. Reinsertion reruns CIS, COR and chip attachment and restores an online unit unless the caller explicitly put it offline
 - A PCMCIA card configured for use is reset before its handle is released, and an empty or initially busy socket can be claimed on a later `OpenDevice()` instead of requiring the device resident to be reloaded
