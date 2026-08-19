@@ -101,7 +101,10 @@ VOID tls13_probe(const char *tag, ULONG v)
 #define TLS_FD_BITS         32
 #define TLS_FD_WORD(fd)     ((ULONG)(fd) / TLS_FD_BITS)
 #define TLS_FD_MASK(fd)     (1UL << ((ULONG)(fd) % TLS_FD_BITS))
-#define TLS_FD_MAX          256
+/* Must match the largest table bsdsocket.library's SBTC_DTABLESIZE accepts.
+   A caller using more than the NDK's 256-bit fd_set supplies a wider bitmap,
+   just as it does for WaitSelect(). */
+#define TLS_FD_MAX          1024
 
 /* TLS_INFO_SIZE_V1 is what keeps callers compiled against the header before
    resumption existed working.  If a field is ever inserted above ti_Resumed,
@@ -1186,8 +1189,17 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
     if (sel->ts_Connections != NULL && read_words != NULL)
     {
         ULONG hits[TLS_FD_MAX / TLS_FD_BITS];
+        ULONG words = 0;
 
-        for (i = 0; i < (ULONG)(TLS_FD_MAX / TLS_FD_BITS); i++)
+        if (sel->ts_NFds > 0)
+        {
+            words = ((ULONG)sel->ts_NFds + TLS_FD_BITS - 1UL) /
+                    TLS_FD_BITS;
+            if (words > (ULONG)(TLS_FD_MAX / TLS_FD_BITS))
+                words = (ULONG)(TLS_FD_MAX / TLS_FD_BITS);
+        }
+
+        for (i = 0; i < words; i++)
             hits[i] = 0;
 
         for (i = 0; sel->ts_Connections[i] != NULL; i++)
@@ -1218,21 +1230,21 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
              * TLS socket is not readable, is a hang, and is what this call
              * exists to remove.
              */
-            for (i = 0; i < (ULONG)(TLS_FD_MAX / TLS_FD_BITS); i++)
+            for (i = 0; i < words; i++)
                 read_words[i] = hits[i];
 
             if (sel->ts_Write != NULL)
             {
                 ULONG *w = (ULONG *)sel->ts_Write;
 
-                for (i = 0; i < (ULONG)(TLS_FD_MAX / TLS_FD_BITS); i++)
+                for (i = 0; i < words; i++)
                     w[i] = 0;
             }
             if (sel->ts_Except != NULL)
             {
                 ULONG *e = (ULONG *)sel->ts_Except;
 
-                for (i = 0; i < (ULONG)(TLS_FD_MAX / TLS_FD_BITS); i++)
+                for (i = 0; i < words; i++)
                     e[i] = 0;
             }
             if (sel->ts_SignalMask != NULL)

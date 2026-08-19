@@ -473,6 +473,54 @@ static VOID h_test_waitselect_unique_descriptors(VOID)
     CHECK(read_words[1] == (1UL << 5));
 }
 
+static VOID h_test_waitselect_wide_descriptor(VOID)
+{
+    TLSConnection   conn;
+    TLSConnection  *connections[2];
+    NX_PACKET       pending;
+    struct TLSSelect sel;
+    ULONG           read_words[32];
+    ULONG           write_words[32];
+    ULONG           except_words[32];
+    LONG            ready;
+    ULONG           i;
+
+    printf("tls_waitselect: buffered descriptors follow SBTC_DTABLESIZE\n");
+
+    memset(&conn, 0, sizeof(conn));
+    memset(&pending, 0, sizeof(pending));
+    memset(&sel, 0, sizeof(sel));
+    memset(read_words, 0, sizeof(read_words));
+    for (i = 0; i < 32; i++)
+    {
+        write_words[i] = 0xaaaaaaaaUL;
+        except_words[i] = 0x55555555UL;
+    }
+
+    conn.tc_Fd = 300;
+    conn.tc_Pending = &pending;
+    connections[0] = &conn;
+    connections[1] = NULL;
+    read_words[9] = 1UL << 12;
+    read_words[10] = 0xdeadbeefUL;
+
+    sel.ts_Size = (ULONG)sizeof(sel);
+    sel.ts_NFds = 301;
+    sel.ts_Read = read_words;
+    sel.ts_Write = write_words;
+    sel.ts_Except = except_words;
+    sel.ts_Connections = connections;
+
+    ready = tls_TLSWaitSelect(&sel, NULL);
+    CHECK(ready == 1);
+    CHECK(read_words[9] == (1UL << 12));
+    CHECK(read_words[10] == 0xdeadbeefUL);
+    CHECK(write_words[9] == 0UL);
+    CHECK(except_words[9] == 0UL);
+    CHECK(write_words[10] == 0xaaaaaaaaUL);
+    CHECK(except_words[10] == 0x55555555UL);
+}
+
 static VOID h_test_open_create_serialized(struct TLSLibBase *base)
 {
     struct TagItem tags[] = {
@@ -525,6 +573,7 @@ int main(void)
     h_test_hostname_limit();
     h_test_path_limit();
     h_test_waitselect_unique_descriptors();
+    h_test_waitselect_wide_descriptor();
     h_test_open_create_serialized(base);
 
     free(base);
