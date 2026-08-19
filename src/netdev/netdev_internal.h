@@ -15,6 +15,7 @@
 #include <exec/lists.h>
 #include <exec/nodes.h>
 #include <exec/ports.h>
+#include <exec/semaphores.h>
 #include <dos/dos.h>          /* BPTR, for the expunge seglist */
 
 #include "aminetxduo/anxnet.h"
@@ -127,6 +128,14 @@ typedef struct NetdevDevice
      */
     AnxDiagMark         nd_Diag;
 
+    /*
+     * A card can disappear while an OpenDevice() retry or the insertion worker
+     * is rebuilding its unit.  Those paths run in different tasks and both
+     * change the one CardHandle and the one PCMCIA unit, so hardware access and
+     * publication of the result are one semaphore-protected transaction.
+     */
+    struct SignalSemaphore nd_PcmciaLock;
+
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
 
@@ -181,12 +190,23 @@ VOID netdev_trace_val(const char *tag, ULONG v);
  * the row that drives that card.  *card_out is that row, set only on success.
  * Called once, not once per PCMCIA row: there is one slot and one handle.
  */
-APTR netdev_pcmcia_claim(const NetdevCard **card_out);
+APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out);
 /* The card's own CIS bytes, for the derived-address fingerprint.  0 when
    there is no slot or nothing was read from it. */
 UWORD netdev_pcmcia_fingerprint(UBYTE *buf, UWORD max);
 VOID netdev_pcmcia_release(VOID);
 VOID netdev_pcmcia_bind(NetdevUnit *unit);
+BOOL netdev_pcmcia_is_unit(const NetdevUnit *unit);
+BOOL netdev_pcmcia_available(const NetdevUnit *unit);
+/* An explicit S2_OFFLINE while the socket is empty overrides hot-plug resume. */
+VOID netdev_pcmcia_cancel_resume(const NetdevUnit *unit);
+/* The status-change callback uses the same core service as a Zorro INT2
+   server, but card.resource owns the PCMCIA interrupt latch. */
+ULONG netdev_interrupt(NetdevUnit *unit);
+/* Card removal has no hardware left to stop.  Drain the software side only. */
+VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event);
+/* Re-establish the bus and chip half of an existing hot-plugged unit. */
+BOOL netdev_pcmcia_reattach(NetdevUnit *unit, const NetdevCard *card, APTR base);
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io);
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op);
 LONG netdev_online(NetdevUnit *unit);

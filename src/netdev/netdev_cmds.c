@@ -366,6 +366,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_OFFLINE:
         if (unit->nu_Online)
             netdev_offline(unit, S2EVENT_OFFLINE);
+        else
+            netdev_pcmcia_cancel_resume(unit);
         netdev_reply(io, 0, 0);
         return;
 
