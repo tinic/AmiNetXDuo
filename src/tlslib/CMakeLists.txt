@@ -322,4 +322,54 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_tls_resume PROPERTIES C_STANDARD 11)
 
     add_test(NAME tls_session_resume COMMAND test_tls_resume)
+
+    # TLSClose() uses the ThreadX bracket as the global serialization for
+    # NetX Secure's shared session list. Compile the shipping vector itself,
+    # then discard its unrelated entry points at link time; the test records
+    # the enter/end/delete/leave order and fails if deletion escapes again.
+    add_executable(test_tls_close
+        test/test_tls_close.c
+        tls_conn.c)
+
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_tls_close PRIVATE Threads::Threads)
+
+    target_include_directories(test_tls_close PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/tls"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/inc"
+        "${AMINETXDUO_NETXDUO}/nx_secure/ports"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_tls_close PRIVATE
+        NX_PACKET_ALIGNMENT=8
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
+        NX_SECURE_ENABLE_AEAD_CIPHER
+        NX_SECURE_KEY_CLEAR
+        NX_SECURE_TLS_DISABLE_SECURE_RENEGOTIATION
+        NX_SECURE_TLS_ENABLE_TLS_1_3
+        _POSIX_C_SOURCE=200809L
+        TLSLIB_NO_INLINE_STUBS
+        TLSLIB_HOST_TEST)
+
+    target_compile_options(test_tls_close PRIVATE
+        -Wall -Wextra -Wno-int-to-pointer-cast -UAMINETXDUO_IPV6
+        -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options(test_tls_close PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_tls_close PRIVATE -Wl,--gc-sections)
+    endif()
+    set_target_properties(test_tls_close PROPERTIES C_STANDARD 11)
+
+    add_test(NAME tls_close_serialization COMMAND test_tls_close)
 endif()
