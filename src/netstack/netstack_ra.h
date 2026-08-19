@@ -16,6 +16,8 @@
 
 #include <exec/types.h>
 
+#include "aminetxduo/config.h"
+
 #define AMI_RDNSS_MAX               4
 #define AMI_DNSSL_MAX               256
 
@@ -28,8 +30,8 @@ typedef struct AmiNsRdnssEntry
 
 typedef struct AmiNsRaPending
 {
-    AmiNsRdnssEntry rdnss[AMI_RDNSS_MAX];
-    UWORD         rdnss_count;
+    AmiNsRdnssEntry rdnss[AMI_CFG_MAX_INTERFACES][AMI_RDNSS_MAX];
+    UWORD         rdnss_count[AMI_CFG_MAX_INTERFACES];
     volatile BOOL rdnss_pending;
 
     UBYTE         dnssl[AMI_DNSSL_MAX];
@@ -50,8 +52,8 @@ typedef struct AmiNsRaSnapshot
     BOOL        dnssl_pending;
 } AmiNsRaSnapshot;
 
-VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, const ULONG address[4],
-                     ULONG lifetime, ULONG now);
+VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, UWORD interface_index,
+                     const ULONG address[4], ULONG lifetime, ULONG now);
 VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, const UCHAR *domains,
                      UINT length, ULONG lifetime);
 BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
