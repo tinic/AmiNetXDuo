@@ -204,6 +204,35 @@ static void h_case_withdraw_and_limits(void)
 }
 
 
+static void h_case_rdnss_ownership_query(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    const ULONG one[4] = {0x20010db8UL, 0UL, 0x53UL, 1UL};
+    const ULONG two[4] = {0x20010db8UL, 0UL, 0x53UL, 2UL};
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_rdnss(&pending, 1U, one, 10UL, 100UL);
+    h_check(ami_ns_ra_rdnss_has(&pending, one, 599UL),
+            "a live RDNSS entry owns its address");
+    h_check(!ami_ns_ra_rdnss_has(&pending, two, 599UL),
+            "an RDNSS entry does not own another address");
+    h_check(pending.rdnss_pending,
+            "an ownership query does not consume pending RDNSS state");
+
+    h_check(!ami_ns_ra_rdnss_has(&pending, one, 600UL),
+            "an expired RDNSS entry no longer owns its address");
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 600UL) &&
+            snapshot.rdnss_count == 0U,
+            "the ordinary snapshot still publishes the expired withdrawal");
+    h_check(!ami_ns_ra_rdnss_has(NULL, one, 599UL) &&
+            !ami_ns_ra_rdnss_has(&pending, NULL, 599UL),
+            "invalid ownership queries are refused");
+}
+
+
 static void h_case_dnssl_interfaces_own_independently(void)
 {
     AmiNsRaPending pending;
@@ -386,6 +415,7 @@ int main(void)
     h_case_rdnss_arrives_after_snapshot();
     h_case_dnssl_arrives_after_snapshot();
     h_case_withdraw_and_limits();
+    h_case_rdnss_ownership_query();
     h_case_rdnss_lifetime_expires_and_refreshes();
     h_case_infinite_and_wrapped_time();
     h_case_rdnss_interfaces_own_independently();
