@@ -943,7 +943,10 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
                                           ns->ns_Mdns.nx_mdns_host_name)
                 : FALSE;
 
-        if (ami_ns_mdns_listed(out, written, row))
+        /* Only the first `max` rows exist in the caller's array. `written`
+           continues past it so `available` can report truncation, but using
+           that larger count here reads beyond `out` on the next cache row. */
+        if (ami_ns_mdns_listed(out, (written < max) ? written : max, row))
             continue;
 
         /*
