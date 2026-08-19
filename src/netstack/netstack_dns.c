@@ -675,32 +675,51 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
      */
     if (ns->ns_DhcpStarted)
     {
-        UCHAR buffer[4 * NX_DNS_MAX_SERVERS];
-        UINT  size = (UINT)sizeof(buffer);
+        UWORD iface;
 
-        if (nx_dhcp_user_option_retrieve(&ns->ns_Dhcp, NX_DHCP_OPTION_DNS_SVR,
-                                         buffer, &size) == NX_SUCCESS)
+        /* The non-interface retrieve API stops at the first bound DHCP
+           record. A second card can have a different reachable resolver, so
+           collect option 6 from every interface holding a lease. */
+        for (iface = 0; iface < ns->ns_IfaceCount; iface++)
         {
-            UINT offset;
+            UCHAR buffer[4 * NX_DNS_MAX_SERVERS];
+            UINT  size = (UINT)sizeof(buffer);
+            UINT  offset;
+
+            if (ns->ns_DhcpState[iface] != (UBYTE)NX_DHCP_STATE_BOUND)
+                continue;
+
+            if (nx_dhcp_interface_user_option_retrieve(
+                    &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
+                    buffer, &size) != NX_SUCCESS)
+                continue;
 
             for (offset = 0; offset + 4 <= size; offset += 4)
             {
+                AmiResolverConfig *r = &ns->ns_Config.resolver;
                 ULONG server = ((ULONG)buffer[offset]     << 24) |
                                ((ULONG)buffer[offset + 1] << 16) |
                                ((ULONG)buffer[offset + 2] <<  8) |
                                 (ULONG)buffer[offset + 3];
+                BOOL  known = FALSE;
+                UINT  add_status;
+                UWORD n;
 
                 if (server == 0UL)
                     continue;
 
-                if (nx_dns_server_add(&ns->ns_Dns, server) != NX_SUCCESS)
+                add_status = nx_dns_server_add(&ns->ns_Dns, server);
+                if (add_status != NX_SUCCESS &&
+                    add_status != NX_DNS_DUPLICATE_ENTRY)
                     continue;
 
-                AMI_INFO("netstack: DHCP name server %lu.%lu.%lu.%lu",
-                         (unsigned long)((server >> 24) & 0xFFUL),
-                         (unsigned long)((server >> 16) & 0xFFUL),
-                         (unsigned long)((server >>  8) & 0xFFUL),
-                         (unsigned long)(server & 0xFFUL));
+                if (add_status == NX_SUCCESS)
+                    AMI_INFO("netstack: interface %ld DHCP name server "
+                             "%lu.%lu.%lu.%lu", (long)iface,
+                             (unsigned long)((server >> 24) & 0xFFUL),
+                             (unsigned long)((server >> 16) & 0xFFUL),
+                             (unsigned long)((server >>  8) & 0xFFUL),
+                             (unsigned long)(server & 0xFFUL));
 
                 /*
                  * Record it in the configuration as well as in the DNS client.
@@ -709,24 +728,16 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
                  * servers from the file (or none) while resolving through the
                  * ones the lease supplied.
                  */
+                for (n = 0; n < r->nameserver_count; n++)
+                    if (r->nameserver[n] == server)
+                        known = TRUE;
+
+                if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
                 {
-                    AmiResolverConfig *r     = &ns->ns_Config.resolver;
-                    BOOL               known = FALSE;
-                    UWORD              n;
-
-                    for (n = 0; n < r->nameserver_count; n++)
-                    {
-                        if (r->nameserver[n] == server)
-                            known = TRUE;
-                    }
-
-                    if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
-                    {
-                        /* Positive: the lease put it here, not the file, so
-                           the count is the real one. */
-                        r->nameserver_use[r->nameserver_count] = 1;
-                        r->nameserver[r->nameserver_count++]   = server;
-                    }
+                    /* Positive: the lease put it here, not the file, so the
+                       count is the real one. */
+                    r->nameserver_use[r->nameserver_count] = 1;
+                    r->nameserver[r->nameserver_count++]   = server;
                 }
             }
         }
