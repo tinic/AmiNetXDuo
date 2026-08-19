@@ -931,12 +931,17 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                 ULONG queued = 0;
                 UINT  status;
 
-                status = ((sock->as_Flags & ASF_TCP) != 0)
-                    ? nx_tcp_socket_bytes_available(&sock->as_Nx.tcp, &queued)
-                    : nx_udp_socket_bytes_available(&sock->as_Nx.udp, &queued);
-
-                if (status == NX_SUCCESS)
-                    available += queued;
+                if ((sock->as_Flags & ASF_TCP) != 0)
+                {
+                    status = nx_tcp_socket_bytes_available(&sock->as_Nx.tcp,
+                                                           &queued);
+                    if (status == NX_SUCCESS)
+                        available += queued;
+                }
+                else
+                {
+                    available += bsd_udp_available(sock);
+                }
             }
 
             bsd_nx_leave(SocketBase);

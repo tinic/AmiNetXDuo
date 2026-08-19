@@ -712,6 +712,31 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
     return bsd_udp_from_peer(sock, &source, port, scope);
 }
 
+/* Size of the next datagram recv() can actually return.  NetX's own query
+   reports the queue head, which may be an endpoint mismatch this layer will
+   discard. */
+ULONG bsd_udp_available(const AmiSocket *sock)
+{
+    NX_PACKET *packet = sock->as_Nx.udp.nx_udp_socket_receive_head;
+
+    while (packet != NX_NULL)
+    {
+        if (bsd_udp_accepts_packet(sock, packet))
+        {
+            ULONG length = 0;
+
+            if (nx_packet_length_get(packet, &length) == NX_SUCCESS)
+                return length;
+
+            return 0;
+        }
+
+        packet = packet->nx_packet_queue_next;
+    }
+
+    return 0;
+}
+
 static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope,

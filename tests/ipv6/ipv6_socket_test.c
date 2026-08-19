@@ -209,6 +209,8 @@ struct t_fdset
 
 #define T_MSG_DONTWAIT      0x80
 
+#define T_FIONREAD          0x4004667FUL
+
 #define T_AI_PASSIVE        1
 #define T_AI_NUMERICHOST    4
 
@@ -498,6 +500,22 @@ BSD_SCRATCH;
 
     __asm __volatile ("jsr a6@(-120:W)"
                       : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0)
+                      : "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_IoctlSocket(LONG fd, ULONG req, APTR argp)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register ULONG           d1  __asm("d1") = req;
+register APTR            a0  __asm("a0") = argp;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-114:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0)
                       : "cc", "memory");
     return(res);
 }
@@ -1227,6 +1245,7 @@ static VOID t_test_udp_connected_readiness(VOID)
 {
 LONG                  server, good, bad;
 LONG                  rc;
+LONG                  available;
 struct t_sockaddr_in  sa;
 static const char     wrong[] = "wrong UDP peer";
 static const char     right[] = "right UDP peer";
@@ -1270,12 +1289,22 @@ char                  buffer[64];
     rc = t_udp_readable(server);
     (VOID)t_check((BOOL)(rc == 0), "WaitSelect ignores wrong UDP peer", rc);
 
+    available = -1;
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == 0),
+                  "FIONREAD ignores wrong UDP peer", available);
+
     rc = bsd_sendto(good, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)), "send from right peer", rc);
 
     Delay(2);
     rc = t_udp_readable(server);
     (VOID)t_check((BOOL)(rc == 1), "WaitSelect sees connected UDP peer", rc);
+
+    available = -1;
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == (LONG)sizeof(right)),
+                  "FIONREAD scans to the connected UDP peer", available);
 
     t_bzero(buffer, sizeof(buffer));
     rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
