@@ -277,6 +277,28 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
         }
     }
 
+    for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+    {
+        i = 0;
+        while (i < pending->dnssl_count[iface])
+        {
+            if (ami_ns_ra_expired(pending->dnssl[iface][i].received,
+                                  pending->dnssl[iface][i].lifetime, now))
+            {
+                UWORD j;
+
+                for (j = i; (UWORD)(j + 1U) < pending->dnssl_count[iface];
+                     j++)
+                    pending->dnssl[iface][j] =
+                        pending->dnssl[iface][j + 1U];
+                pending->dnssl_count[iface]--;
+                pending->dnssl_pending = TRUE;
+                continue;
+            }
+            i++;
+        }
+    }
+
     if (pending->rdnss_pending)
     {
         snapshot->rdnss_count = 0;
@@ -350,6 +372,11 @@ BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now)
         for (i = 0; !needed && i < pending->rdnss_count[iface]; i++)
             needed = ami_ns_ra_expired(pending->rdnss[iface][i].received,
                                        pending->rdnss[iface][i].lifetime, now);
+
+    for (iface = 0; !needed && iface < AMI_CFG_MAX_INTERFACES; iface++)
+        for (i = 0; !needed && i < pending->dnssl_count[iface]; i++)
+            needed = ami_ns_ra_expired(pending->dnssl[iface][i].received,
+                                       pending->dnssl[iface][i].lifetime, now);
 
     Permit();
     return needed;
