@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+- PCMCIA network interrupts now run through `card.resource`'s status-change callback, including the V39 post-status phase and the Kickstart 2.x Gayle acknowledgement, instead of registering a raw PORTS server that bypassed the socket owner
+- Removing a PCMCIA card takes the unit offline without touching the empty socket, releases ownership from task context, and keeps the handle ready for a validated reinsertion. Reinsertion reruns CIS, COR and chip attachment and restores an online unit unless the caller explicitly put it offline
+- A PCMCIA card configured for use is reset before its handle is released, and an empty or initially busy socket can be claimed on a later `OpenDevice()` instead of requiring the device resident to be reloaded
+- `cnet16` detection repeats the complete reset-port pulse after switching odd-register reads to the 16-bit path. The old retry changed the ISR read width only, after the reset read that needed the same workaround had already failed
 - Creating or resetting a ThreadX thread fails cleanly when Exec cannot allocate its native Task. The failed Task creation was invisible to ThreadX, which published and could start a thread that had nothing underneath it
 - Thread teardown still detaches the native Task and recovers the scheduler baton when the reaper has no spare signal bit. That fallback returned before recording the live zombie, so the caller could free its stack and the scheduler could remain owned by a thread that no longer existed
 - Thread stacks are rejected whenever their ranges overlap, including when the new range wholly contains an existing one. That containment passed the endpoint-only check and let two Tasks use the same memory as a stack
