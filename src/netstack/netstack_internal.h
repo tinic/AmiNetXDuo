@@ -28,6 +28,7 @@
 
 #include "netstack_dns_handoff.h"
 #include "netstack_dns_lease.h"
+#include "netstack_dns_domain.h"
 #ifdef AMINETXDUO_IPV6
 #include "netstack_ra.h"
 #endif
@@ -301,6 +302,7 @@ struct AmiNetStack
     AmiNsDnsPending     ns_DhcpDnsPending;
     AmiNsDhcpDnsLease   ns_DhcpDnsLease;
     AmiNsDhcpSearchLease ns_DhcpSearchLease;
+    AmiNsDhcpDomainState ns_DhcpDomain;
 
 #ifdef AMINETXDUO_IPV6
     /*
