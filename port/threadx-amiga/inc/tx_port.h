@@ -434,6 +434,8 @@ char   *execbase;
 #define TX_THREAD_CREATE_EXTENSION(thread_ptr)
 #define TX_THREAD_DELETE_EXTENSION(thread_ptr)
 #define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)
+#define TX_THREAD_STACK_BUILD_STATUS(thread_ptr)      \
+    (((thread_ptr) -> tx_thread_amiga_task != (VOID *) 0) ? TX_SUCCESS : TX_NO_MEMORY)
 #define TX_TIMER_INITIALIZE_EXTENSION(a)
 #define TX_BYTE_ALLOCATE_EXTENSION
 #define TX_BYTE_RELEASE_EXTENSION

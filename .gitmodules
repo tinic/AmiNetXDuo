@@ -1,6 +1,6 @@
 [submodule "third_party/threadx"]
 	path = third_party/threadx
-	url = https://github.com/eclipse-threadx/threadx.git
+	url = git@github.com:tinic/threadx.git
 [submodule "third_party/netxduo"]
 	path = third_party/netxduo
 	url = https://github.com/tinic/netxduo.git
