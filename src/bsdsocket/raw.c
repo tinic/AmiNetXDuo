@@ -217,6 +217,72 @@ static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
                ? TRUE : FALSE;
 }
 
+/*
+ * Does this datagram belong to the address a raw socket bound?
+ *
+ * The raw receive hook is global to the NX_IP and otherwise tees every
+ * packet of a protocol to every matching descriptor.  As with UDP, the local
+ * endpoint therefore has to be enforced above NetX.  The interface test keeps
+ * scoped addresses in their zone; the IP destination distinguishes several
+ * addresses on that interface and the whole IPv4 loopback /8.
+ */
+static BOOL bsd_raw_to_local(const AmiSocket *sock, const NX_PACKET *packet,
+                             BOOL is_v6)
+{
+    const UBYTE        *header = packet->nx_packet_ip_header;
+    const NX_INTERFACE *nxif;
+
+#ifdef AMINETXDUO_IPV6
+    if (is_v6)
+    {
+        const NXD_IPV6_ADDRESS *matched =
+            packet->nx_packet_address.nx_packet_ipv6_address_ptr;
+        ULONG destination[4];
+
+        if (sock->as_LocalAddr.nxd_ip_version != NX_IP_VERSION_V6)
+            return FALSE;
+
+        nxif = (matched != NX_NULL) ? matched->nxd_ipv6_address_attached
+                                    : NX_NULL;
+
+        if (!bsd_bind_wants_interface(sock, nxif))
+            return FALSE;
+
+        if ((sock->as_LocalAddr.nxd_ip_address.v6[0] |
+             sock->as_LocalAddr.nxd_ip_address.v6[1] |
+             sock->as_LocalAddr.nxd_ip_address.v6[2] |
+             sock->as_LocalAddr.nxd_ip_address.v6[3]) == 0UL)
+            return TRUE;
+
+        bsd_in6_to_words(&header[24], destination);
+
+        return (destination[0] == sock->as_LocalAddr.nxd_ip_address.v6[0] &&
+                destination[1] == sock->as_LocalAddr.nxd_ip_address.v6[1] &&
+                destination[2] == sock->as_LocalAddr.nxd_ip_address.v6[2] &&
+                destination[3] == sock->as_LocalAddr.nxd_ip_address.v6[3])
+                   ? TRUE : FALSE;
+    }
+#else
+    (VOID)is_v6;
+#endif
+
+    if (sock->as_LocalAddr.nxd_ip_version != NX_IP_VERSION_V4)
+        return FALSE;
+
+    nxif = packet->nx_packet_ip_interface;
+    if (!bsd_bind_wants_interface(sock, nxif))
+        return FALSE;
+
+    if (sock->as_LocalAddr.nxd_ip_address.v4 == 0UL)
+        return TRUE;
+
+    return ((((ULONG)header[16] << 24) |
+             ((ULONG)header[17] << 16) |
+             ((ULONG)header[18] <<  8) |
+              (ULONG)header[19]) == sock->as_LocalAddr.nxd_ip_address.v4)
+               ? TRUE : FALSE;
+}
+
 /* ----------------------------------------------------------------- filter, */
 
 /*
@@ -267,7 +333,7 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
     }
     else
     {
-        if (behind == 0 || behind > BSD_RAW_MAX_IPHDR)
+        if (behind < 20UL || behind > BSD_RAW_MAX_IPHDR)
             return NX_NOT_SUCCESSFUL;
 
         hdr_len = behind;
@@ -289,6 +355,9 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
 
         /* A datagram belongs to the family its socket was opened in. */
         if (((sock->as_Flags & ASF_INET6) != 0) != (is_v6 != FALSE))
+            continue;
+
+        if (!bsd_raw_to_local(sock, packet_ptr, is_v6))
             continue;
 
         if (!bsd_raw_from_peer(sock, packet_ptr, is_v6))

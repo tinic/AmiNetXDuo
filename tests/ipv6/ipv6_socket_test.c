@@ -188,6 +188,7 @@ struct t_addrinfo
 #define T_SOCK_RAW          3
 #define T_IPPROTO_TCP       6
 #define T_IPPROTO_IPV6      41
+#define T_RAW_PROTO         253
 #define T_IPV6_V6ONLY_BSD   27
 #define T_IPV6_V6ONLY_LINUX 26
 
@@ -1158,6 +1159,68 @@ char                  buffer[64];
                       &sa, &len);
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(right) && t_streq(buffer, right)),
                   "bound socket receives its own alias", rc);
+
+    (VOID)bsd_CloseSocket(server);
+    (VOID)bsd_CloseSocket(client);
+}
+
+/* A custom raw protocol avoids ICMP's echo traffic while exercising the same
+   global receive tee.  Receiving the first packet on the wildcard sender
+   synchronizes with the IP thread before the bound socket is polled. */
+static VOID t_test_raw_bound_address(VOID)
+{
+LONG                  server, client;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     wrong[] = "raw for 127.0.0.1";
+static const char     right[] = "raw for 127.0.0.2";
+char                  buffer[96];
+
+    t_log("raw exact local-address bind");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    client = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "raw alias sockets",
+                 bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000002UL;
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    if (!t_check((BOOL)(rc == 0), "raw bind 127.0.0.2", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    sa.sin_addr = 0x7F000001UL;
+    rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)), "raw send wrong alias", rc);
+
+    /* The wildcard sender sees its own looped-back packet.  Once this returns,
+       the specifically bound socket has either queued or rejected it. */
+    rc = bsd_recv(client, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20), "raw wildcard synchronization receive", rc);
+
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "raw bind rejects the wrong alias", bsd_Errno());
+
+    sa.sin_addr = 0x7F000002UL;
+    rc = bsd_sendto(client, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)), "raw send bound alias", rc);
+
+    rc = bsd_recv(server, buffer, sizeof(buffer), 0);
+    (VOID)t_check((BOOL)(rc >= 20 &&
+                         (UBYTE)buffer[16] == 127 &&
+                         (UBYTE)buffer[17] == 0 &&
+                         (UBYTE)buffer[18] == 0 &&
+                         (UBYTE)buffer[19] == 2),
+                  "raw bind receives its own alias", rc);
 
     (VOID)bsd_CloseSocket(server);
     (VOID)bsd_CloseSocket(client);
@@ -2222,6 +2285,7 @@ int main(void)
     t_test_tcp_accepted_local();
     t_test_udp_loopback();
     t_test_udp_bound_address();
+    t_test_raw_bound_address();
     t_test_cmsg_macros();
     t_test_cmsg_options();
     t_test_cmsg_receive();
