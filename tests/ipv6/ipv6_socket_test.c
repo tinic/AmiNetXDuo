@@ -905,6 +905,77 @@ char                    buffer[64];
     (VOID)bsd_CloseSocket(server);
 }
 
+/* NetX listens by port, not address family.  Reject an IPv6 handshake which
+   lands on an AF_INET listener, then make sure returning that connection did
+   not lose the listener's parked socket by accepting the IPv4 peer it wants. */
+static VOID t_test_tcp_listener_family(VOID)
+{
+LONG                    server, client, accepted;
+LONG                    rc;
+struct t_sockaddr_in     sa4;
+struct t_sockaddr_in6    sa6;
+
+    t_log("TCP listener address family");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_STREAM, 0);
+    if (!t_check((BOOL)(server >= 0), "AF_INET listener socket", bsd_Errno()))
+        return;
+
+    t_bzero(&sa4, sizeof(sa4));
+    sa4.sin_len    = sizeof(sa4);
+    sa4.sin_family = T_AF_INET;
+    sa4.sin_port   = T_PORT + 6;
+
+    rc = bsd_bind(server, &sa4, sizeof(sa4));
+    if (!t_check((BOOL)(rc == 0), "AF_INET listener bind", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    rc = bsd_listen(server, 2);
+    if (!t_check((BOOL)(rc == 0), "AF_INET listen", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    client = bsd_socket(T_AF_INET6, T_SOCK_STREAM, 0);
+    if (t_check((BOOL)(client >= 0), "wrong-family IPv6 client", bsd_Errno()))
+    {
+        t_make_loopback6(&sa6, T_PORT + 6);
+        rc = bsd_connect(client, &sa6, sizeof(sa6));
+        if (t_check((BOOL)(rc == 0), "IPv6 handshake reached the port", rc))
+        {
+            accepted = bsd_accept(server, NULL, NULL);
+            (VOID)t_check((BOOL)(accepted < 0 &&
+                                 bsd_Errno() == T_EWOULDBLOCK),
+                          "AF_INET listener rejects IPv6", bsd_Errno());
+            if (accepted >= 0)
+                (VOID)bsd_CloseSocket(accepted);
+        }
+        (VOID)bsd_CloseSocket(client);
+    }
+
+    client = bsd_socket(T_AF_INET, T_SOCK_STREAM, 0);
+    if (t_check((BOOL)(client >= 0), "right-family IPv4 client", bsd_Errno()))
+    {
+        sa4.sin_addr = 0x7F000001UL;
+        rc = bsd_connect(client, &sa4, sizeof(sa4));
+        if (t_check((BOOL)(rc == 0), "IPv4 client connects after refusal", rc))
+        {
+            accepted = bsd_accept(server, NULL, NULL);
+            (VOID)t_check((BOOL)(accepted >= 0),
+                          "AF_INET listener still accepts IPv4", bsd_Errno());
+            if (accepted >= 0)
+                (VOID)bsd_CloseSocket(accepted);
+        }
+        (VOID)bsd_CloseSocket(client);
+    }
+
+    (VOID)bsd_CloseSocket(server);
+}
+
 static VOID t_test_udp_loopback(VOID)
 {
 LONG                    server, client;
@@ -2069,6 +2140,7 @@ int main(void)
     t_test_conversions();
     t_test_socket_basics();
     t_test_tcp_loopback();
+    t_test_tcp_listener_family();
     t_test_udp_loopback();
     t_test_udp_bound_address();
     t_test_cmsg_macros();

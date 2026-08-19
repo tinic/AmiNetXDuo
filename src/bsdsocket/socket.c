@@ -2504,8 +2504,47 @@ BOOL bsd_bind_wants_interface(const AmiSocket *listener,
 
 static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
 {
-    return bsd_bind_wants_interface(listener,
-                                    conn->nx_tcp_socket_connect_interface);
+    if (!bsd_bind_wants_interface(listener,
+                                  conn->nx_tcp_socket_connect_interface))
+        return FALSE;
+
+    /* A wildcard IPv6 listener is deliberately dual-stack, but an IPv4
+       listener is not. NetX's listen table is indexed by port alone, so this
+       family check cannot be left to the stack. */
+    if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V4)
+        return (conn->nx_tcp_socket_connect_ip.nxd_ip_version ==
+                NX_IP_VERSION_V4) ? TRUE : FALSE;
+
+#ifdef AMINETXDUO_IPV6
+    if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        const NXD_IPV6_ADDRESS *local;
+
+        if (bsd_addr_is_unspecified(&listener->as_LocalAddr))
+            return TRUE;
+
+        if (conn->nx_tcp_socket_connect_ip.nxd_ip_version !=
+            NX_IP_VERSION_V6)
+            return FALSE;
+
+        /* NetX records the exact destination address selected by the SYN.
+           The interface alone is ambiguous when it owns several addresses. */
+        local = conn->nx_tcp_socket_ipv6_addr;
+
+        return (local != NX_NULL &&
+                local->nxd_ipv6_address[0] ==
+                    listener->as_LocalAddr.nxd_ip_address.v6[0] &&
+                local->nxd_ipv6_address[1] ==
+                    listener->as_LocalAddr.nxd_ip_address.v6[1] &&
+                local->nxd_ipv6_address[2] ==
+                    listener->as_LocalAddr.nxd_ip_address.v6[2] &&
+                local->nxd_ipv6_address[3] ==
+                    listener->as_LocalAddr.nxd_ip_address.v6[3])
+                   ? TRUE : FALSE;
+    }
+#endif
+
+    return FALSE;
 }
 
 /* ---------------------------------------------------- outbound source, */
