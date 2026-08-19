@@ -2807,6 +2807,24 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
     incoming->as_PeerPort  = (UINT)peer_port;
     incoming->as_LocalPort = sock->as_ListenPort;
 
+#ifdef AMINETXDUO_IPV6
+    /*
+     * A link-local peer is not identified by its 128 bits alone.  The TCP
+     * state keeps the interface the SYN arrived on; preserve its one-based
+     * socket index so accept() and every later getpeername() return an address
+     * the application can use to answer on a multi-interface machine.
+     */
+    incoming->as_ScopeId = 0UL;
+    if (peer.nxd_ip_version == NX_IP_VERSION_V6 &&
+        (peer.nxd_ip_address.v6[0] & 0xFFC00000UL) == 0xFE800000UL &&
+        incoming->as_Nx.tcp.nx_tcp_socket_connect_interface != NX_NULL)
+    {
+        incoming->as_ScopeId =
+            (ULONG)incoming->as_Nx.tcp.nx_tcp_socket_connect_interface
+                ->nx_interface_index + 1UL;
+    }
+#endif
+
     fd = bsd_fd_alloc(SocketBase, incoming);
     if (fd < 0)
     {
