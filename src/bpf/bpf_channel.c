@@ -522,13 +522,20 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
         if (ch->immediate)
             wake = TRUE;
 
-        ami_bpf_unlock();
-
         if (wake)
         {
+            /* The task and mask belong to this particular open of the
+               channel.  Keep the channel lock through Signal(): after Permit
+               a close/reopen can reuse the slot, and reading ch here would
+               either lose this wake-up or signal the replacement owner for a
+               packet it never captured.  Signal() does not block and is safe
+               under Forbid(); the woken task runs once the Permit below lets
+               it. */
             ami_bpf_notify(ch->notify_task, ch->notify_mask);
             ami_bpf_notify(ch->irq_task, ch->irq_mask);
         }
+
+        ami_bpf_unlock();
     }
 }
 
