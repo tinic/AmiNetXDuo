@@ -300,6 +300,7 @@ struct AmiNetStack
        operation imports option 6 under the ordinary caller bracket. */
     AmiNsDnsPending     ns_DhcpDnsPending;
     AmiNsDhcpDnsLease   ns_DhcpDnsLease;
+    AmiNsDhcpSearchLease ns_DhcpSearchLease;
 
 #ifdef AMINETXDUO_IPV6
     /*

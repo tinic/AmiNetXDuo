@@ -123,12 +123,37 @@ static void h_case_shared_reference_counts(void)
 }
 
 
+static void h_case_search_lease_ownership(void)
+{
+    AmiNsDhcpSearchLease lease;
+
+    memset(&lease, 0, sizeof(lease));
+    h_check(ami_ns_dhcp_search_lease_add(&lease, 0U, "one.test"),
+            "a lease owns its first search suffix");
+    h_check(ami_ns_dhcp_search_lease_add(&lease, 1U, "ONE.TEST"),
+            "another interface independently owns the same suffix");
+    h_check(!ami_ns_dhcp_search_lease_add(&lease, 0U, "ONE.TEST"),
+            "one lease cannot own a case-folded duplicate twice");
+    h_check(ami_ns_dhcp_search_lease_add(&lease, 0U, "two.test"),
+            "renewal can add another suffix");
+    h_check(ami_ns_dhcp_search_lease_remove(&lease, 0U, "ONE.TEST"),
+            "one interface can withdraw its shared suffix");
+    h_check(ami_ns_dhcp_search_lease_has(&lease, 1U, "one.test"),
+            "the other interface's suffix ownership remains");
+    h_check(ami_ns_dhcp_search_lease_count(&lease, 0U) == 1U &&
+            strcmp(ami_ns_dhcp_search_lease_at(&lease, 0U, 0U),
+                   "two.test") == 0,
+            "search withdrawal compacts the renewed lease set");
+}
+
+
 int main(void)
 {
     h_case_interfaces_own_independently();
     h_case_capacity_and_clear();
     h_case_invalid_values();
     h_case_shared_reference_counts();
+    h_case_search_lease_ownership();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;
