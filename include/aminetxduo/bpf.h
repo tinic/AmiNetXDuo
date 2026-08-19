@@ -117,7 +117,35 @@ struct bpf_version {
 #define BPF_MAJOR_VERSION   1
 #define BPF_MINOR_VERSION   1
 
-/* <sys/ioccom.h>, verbatim in effect. */
+/*
+ * <sys/ioccom.h>, verbatim in effect.
+ *
+ * Undefined first, every one of them. A host that has parsed <sys/ioctl.h>
+ * holds Linux's encoding of the same names, which is a DIFFERENT encoding
+ * from 4.4BSD's and so from the Amiga wire ABI this replica exists to
+ * reproduce; redefining without undefining is an error under -Werror. Doing
+ * only the four _IO* encoders leaves the IOC_* direction bits they are built
+ * from still Linux's, which would compile and produce silently wrong command
+ * numbers -- so the undef covers the whole block rather than the names the
+ * compiler happened to complain about. host_prelude.h does the same for
+ * htonl and IPV6_RECVPKTINFO. The NDK defines none of these, so on the Amiga
+ * the undefs do nothing.
+ */
+#undef IOCPARM_MASK
+#undef IOCPARM_LEN
+#undef IOCBASECMD
+#undef IOCGROUP
+#undef IOC_VOID
+#undef IOC_OUT
+#undef IOC_IN
+#undef IOC_INOUT
+#undef IOC_DIRMASK
+#undef _IOC
+#undef _IO
+#undef _IOR
+#undef _IOW
+#undef _IOWR
+
 #define IOCPARM_MASK        0x1fff
 #define IOCPARM_LEN(x)      (((x) >> 16) & IOCPARM_MASK)
 #define IOCBASECMD(x)       ((x) & ~(IOCPARM_MASK << 16))
