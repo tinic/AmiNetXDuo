@@ -106,12 +106,9 @@ BOOL bsd_GetDefaultDomainName(register STRPTR buffer   __asm("a0"),
 
     buffer[0] = '\0';
 
-#ifdef AMINETXDUO_IPV6
-    /* An advertisement's search list names the default domain when nothing
-       else did, and it reaches the configuration only when a caller task
-       absorbs it. */
-    netstack_dns_absorb_ra();
-#endif
+    /* DHCP and router advertisements are recorded by NetX tasks and absorbed
+       by a caller task before the live configuration is read. */
+    netstack_dns_absorb_pending();
 
     /* The domain is live configuration. Copy it under the resolver lock so a
        concurrent SetDefaultDomainName() cannot leave a mixed string. */
@@ -157,12 +154,9 @@ struct List *bsd_ObtainDomainNameServerList(
     UWORD       count = 0;
     UWORD       i;
 
-#ifdef AMINETXDUO_IPV6
-    /* Before the configuration is read. A router advertisement's servers are
-       recorded on the IP thread, and they only reach the configuration when a
-       caller task absorbs them. This is one such task. */
-    netstack_dns_absorb_ra();
-#endif
+    /* Before the configuration is read, import resolver changes which a NetX
+       callback handed off to a caller task. */
+    netstack_dns_absorb_pending();
 
     out = (BsdDnsList *)ami_alloc(sizeof(BsdDnsList));
     if (out == NULL)

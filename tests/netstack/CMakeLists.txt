@@ -375,6 +375,27 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_status COMMAND test_dns_status)
 
+    # A DHCP BOUND notification runs on the client task while resolver
+    # changes belong on a caller task. Permit() in this harness injects a
+    # second notification exactly after the first snapshot, proving that it
+    # remains pending for the next caller.
+    add_executable(test_dns_handoff
+        host/test_dns_handoff_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_handoff.c")
+
+    target_include_directories(test_dns_handoff PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # Exec declarations
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_dns_handoff PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    target_compile_options(test_dns_handoff PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_handoff COMMAND test_dns_handoff)
+
     # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
     # their state before entering the DNS client.  Permit() in this harness
     # injects a second advertisement exactly after the snapshot, proving that
