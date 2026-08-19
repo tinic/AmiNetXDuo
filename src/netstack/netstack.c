@@ -2466,17 +2466,18 @@ LONG netstack_hostname_offer(UWORD source, const char *name)
 
     /*
      * Inside the bracket, because of what else reads what it writes.
-     * ami_config_hostname_offer() does not touch NetX Duo. NX_DHCP was handed
-     * ns_Config.hostname as a pointer at create time (nx_dhcp_create above),
-     * so the DHCP thread reads this buffer while building a request. Holding
-     * the baton across the copy means that thread is not running during it,
-     * and no request can carry half of one name and half of another.
+     * ami_config_hostname_offer() does not touch NetX Duo, but reports and
+     * DHCP lease reconciliation read this buffer from the ThreadX side.
+     * Holding the baton across the copy also serialises an explicit offer with
+     * a lease transition that might otherwise restore its saved fallback.
      */
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
         return AMI_NET_ERR_KERNEL;
 
     taken = ami_config_hostname_offer(&ns->ns_Config, source, name);
+    if (taken)
+        ami_ns_dhcp_hostname_displace(&ns->ns_DhcpHostname);
 
     ami_netstack_leave_free(caller);
 

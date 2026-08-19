@@ -427,6 +427,25 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_domain COMMAND test_dns_domain)
 
+    # DHCP option 12 owns the machine name only while a lease that supplied it
+    # remains live. Renewals and multiple interfaces share one deterministic
+    # owner, and loss restores the lower-ranked name it displaced.
+    add_executable(test_dhcp_hostname
+        host/test_dhcp_hostname_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dhcp_hostname.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
+
+    target_include_directories(test_dhcp_hostname PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/config"
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dhcp_hostname PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dhcp_hostname COMMAND test_dhcp_hostname)
+
     # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
     # their state before entering the DNS client.  Permit() in this harness
     # injects a second advertisement exactly after the snapshot, proving that

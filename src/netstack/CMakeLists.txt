@@ -7,6 +7,7 @@
 set(NETSTACK_SOURCES
     netstack.c
     netstack_baton.c
+    netstack_dhcp_hostname.c
     netstack_dns.c
     netstack_dns_domain.c
     netstack_dns_handoff.c
