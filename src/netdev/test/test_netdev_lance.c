@@ -181,11 +181,43 @@ static VOID test_stopped_receiver_resets(VOID)
                LE_C0_RXON);
 }
 
+static VOID test_filter_waits_for_transmit(VOID)
+{
+    fixture_init();
+
+    nic.txb_inuse = 1;
+    nic.tx_done   = 0;
+    le_put16(&nic, LE_TXD_OFF + 2, LE_T1_OWN | LE_T1_STP | LE_T1_ENP);
+    nic.mar[0] = 0xa5;
+
+    lance_setfilter(&nic);
+
+    expect_u32("filter update is deferred", nic.filter_pending, TRUE);
+    expect_u32("owned transmit survives filter update", nic.txb_inuse, 1);
+    expect_u32("old filter remains active while TX runs",
+               le_get16(&nic, LE_INIT_OFF + 8), 0);
+
+    le_put16(&nic, LE_TXD_OFF + 2, 0);
+    mock_csr[0] = (UWORD)(LE_C0_INTR | LE_C0_TINT |
+                          LE_C0_RXON | LE_C0_TXON | LE_C0_INEA);
+
+    expect_u32("completion interrupt claimed", lance_intr(&nic), TRUE);
+    expect_u32("transmit completed before restart", nic.tx_completed, 1);
+    expect_u32("filter update was applied", nic.filter_pending, FALSE);
+    expect_u32("new logical filter is in the init block",
+               le_get16(&nic, LE_INIT_OFF + 8), 0x00a5);
+    expect_u32("receiver restarted after filter update",
+               mock_csr[0] & LE_C0_RXON, LE_C0_RXON);
+    expect_u32("transmitter restarted after filter update",
+               mock_csr[0] & LE_C0_TXON, LE_C0_TXON);
+}
+
 int main(void)
 {
     test_normal_completion();
     test_underflow_resets();
     test_stopped_receiver_resets();
+    test_filter_waits_for_transmit();
 
     if (failures != 0)
     {
