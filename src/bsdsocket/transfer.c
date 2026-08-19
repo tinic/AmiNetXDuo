@@ -1540,6 +1540,9 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
     BsdIovCursor cur;
     LONG         result;
 
+    if ((sock->as_Flags & (ASF_TCP | ASF_WRSHUT)) == ASF_WRSHUT)
+        return bsd_fail(base, AMI_EPIPE);
+
     bsd_iov_init(&cur, iov, iovcnt);
 
     if (bsd_nx_enter(base) != 0)
@@ -1567,6 +1570,19 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     BsdIovCursor cur;
     LONG         result;
     BOOL         held = FALSE;
+
+    /* A connected datagram or raw socket accepts shutdown(), and its read
+       half has the same observable EOF as a stream. It has no NetX receive
+       operation that can express that state, so answer it here. */
+    if ((sock->as_Flags & (ASF_TCP | ASF_RDSHUT)) == ASF_RDSHUT)
+    {
+        if (truncated != NULL)
+            *truncated = FALSE;
+        if (msg != NULL)
+            msg->msg_controllen = 0;
+
+        return 0;
+    }
 
     bsd_iov_init(&cur, iov, iovcnt);
 

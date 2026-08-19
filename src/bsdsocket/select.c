@@ -440,6 +440,10 @@ BOOL bsd_readable(AmiSocket *sock)
     if (sock == NULL)
         return FALSE;
 
+    /* shutdown(SHUT_RD) is an immediate EOF for every connected socket type. */
+    if ((sock->as_Flags & ASF_RDSHUT) != 0)
+        return TRUE;
+
     if (sock->as_RxPending != NULL)
         return TRUE;
 
@@ -466,7 +470,7 @@ BOOL bsd_readable(AmiSocket *sock)
         }
 
         /* A closed or half-closed connection returns end-of-file. */
-        if ((sock->as_Flags & (ASF_EOF | ASF_RDSHUT)) != 0)
+        if ((sock->as_Flags & ASF_EOF) != 0)
             return TRUE;
 
         /*

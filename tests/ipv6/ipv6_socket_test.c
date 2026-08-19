@@ -207,6 +207,7 @@ struct t_fdset
 #define T_EAFNOSUPPORT      47
 #define T_EWOULDBLOCK       35
 #define T_ECONNREFUSED      61
+#define T_EPIPE             32
 
 #define T_MSG_DONTWAIT      0x80
 #define T_MSG_PEEK          0x02
@@ -350,6 +351,20 @@ BSD_SCRATCH;
     __asm __volatile ("jsr a6@(-78:W)"
                       : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (a0), "r" (d1),
                         "r" (d2)
+                      : "cc", "memory");
+    return(res);
+}
+
+static LONG bsd_shutdown(LONG fd, LONG how)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register LONG            d0  __asm("d0") = fd;
+register LONG            d1  __asm("d1") = how;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-84:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (d0), "r" (d1)
                       : "cc", "memory");
     return(res);
 }
@@ -1470,6 +1485,59 @@ char                  buffer[16];
                   "recv does not repeat consumed UDP ICMP error", bsd_Errno());
 
     (VOID)bsd_CloseSocket(fd);
+}
+
+static VOID t_test_datagram_shutdown(VOID)
+{
+LONG                  udp, raw;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     data[] = "after shutdown";
+char                  buffer[16];
+
+    t_log("UDP and raw shutdown semantics");
+
+    udp = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    raw = bsd_socket(T_AF_INET, T_SOCK_RAW, T_RAW_PROTO);
+    if (!t_check((BOOL)(udp >= 0 && raw >= 0), "datagram shutdown sockets",
+                 bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 33;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_connect(udp, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect UDP before shutdown", bsd_Errno());
+    rc = bsd_connect(raw, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect raw before shutdown", bsd_Errno());
+
+    rc = bsd_shutdown(udp, 2);
+    (VOID)t_check((BOOL)(rc == 0), "shutdown connected UDP", bsd_Errno());
+    rc = bsd_shutdown(raw, 2);
+    (VOID)t_check((BOOL)(rc == 0), "shutdown connected raw", bsd_Errno());
+
+    rc = t_udp_readable(udp);
+    (VOID)t_check((BOOL)(rc == 1), "shutdown UDP is read-ready", rc);
+    rc = t_udp_readable(raw);
+    (VOID)t_check((BOOL)(rc == 1), "shutdown raw is read-ready", rc);
+
+    rc = bsd_recv(udp, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == 0), "shutdown UDP receive returns EOF", rc);
+    rc = bsd_recv(raw, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == 0), "shutdown raw receive returns EOF", rc);
+
+    rc = bsd_send(udp, (APTR)data, sizeof(data), 0);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EPIPE),
+                  "shutdown UDP send returns EPIPE", bsd_Errno());
+    rc = bsd_send(raw, (APTR)data, sizeof(data), 0);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EPIPE),
+                  "shutdown raw send returns EPIPE", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(raw);
+    (VOID)bsd_CloseSocket(udp);
 }
 
 /* A custom raw protocol avoids ICMP's echo traffic while exercising the same
@@ -2748,6 +2816,7 @@ int main(void)
     t_test_udp_reconnect_after_peek();
     t_test_udp_icmp_readiness();
     t_test_udp_so_error_consumes_icmp();
+    t_test_datagram_shutdown();
     t_test_raw_bound_address();
     t_test_raw_bind_after_peek();
     t_test_raw_connect_after_peek();
