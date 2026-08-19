@@ -60,7 +60,6 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
                    ULONG lifetime)
 {
     AmiNetStack *ns = ami_netstack_raw();
-    UWORD        i;
 
     (VOID)ip_ptr;
     (VOID)interface_index;
@@ -68,44 +67,7 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
     if (ns == NULL || dns_address == NULL)
         return;
 
-    for (i = 0; i < ns->ns_RdnssCount; i++)
-        if (ami_ns6_same(ns->ns_Rdnss[i].nxd_ip_address.v6, dns_address))
-            break;
-
-    /* RFC 8106 5.1: a lifetime of zero withdraws the server.  Dropping it from
-       this array is what makes the absorb step take it out of the resolver.
-       Returning here left it answering queries after the router had said to
-       stop using it, for as long as the machine stayed up. */
-    if (lifetime == 0UL)
-    {
-        if (i == ns->ns_RdnssCount)
-            return;
-
-        for (; (UWORD)(i + 1) < ns->ns_RdnssCount; i++)
-            ns->ns_Rdnss[i] = ns->ns_Rdnss[i + 1];
-
-        ns->ns_RdnssCount--;
-        ns->ns_RdnssPending = TRUE;
-
-        return;
-    }
-
-    /* Already known.  Every advertisement repeats the option, so this is the
-       ordinary case and not a change. */
-    if (i != ns->ns_RdnssCount)
-        return;
-
-    if (ns->ns_RdnssCount >= (UWORD)AMI_RDNSS_MAX)
-        return;
-
-    ns->ns_Rdnss[i].nxd_ip_version       = NX_IP_VERSION_V6;
-    ns->ns_Rdnss[i].nxd_ip_address.v6[0] = dns_address[0];
-    ns->ns_Rdnss[i].nxd_ip_address.v6[1] = dns_address[1];
-    ns->ns_Rdnss[i].nxd_ip_address.v6[2] = dns_address[2];
-    ns->ns_Rdnss[i].nxd_ip_address.v6[3] = dns_address[3];
-
-    ns->ns_RdnssCount   = (UWORD)(i + 1);
-    ns->ns_RdnssPending = TRUE;
+    ami_ns_ra_rdnss(&ns->ns_Ra, dns_address, lifetime);
 }
 
 /*
@@ -122,7 +84,6 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
                    UINT length, ULONG lifetime)
 {
     AmiNetStack *ns = ami_netstack_raw();
-    UWORD        i;
 
     (VOID)ip_ptr;
     (VOID)interface_index;
@@ -130,19 +91,7 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
     if (ns == NULL || domains == NULL || length == 0)
         return;
 
-    /* A list longer than this can hold is one no search list can hold either.
-       Taking the front of it takes an arbitrary prefix of a domain list, so it
-       is refused whole.  Whatever was already recorded stands: an option this
-       cannot read is not a reason to forget the one that came before it. */
-    if (length > (UINT)AMI_DNSSL_MAX)
-        return;
-
-    for (i = 0; i < (UWORD)length; i++)
-        ns->ns_Dnssl[i] = (UBYTE)domains[i];
-
-    ns->ns_DnsslLen      = (UWORD)length;
-    ns->ns_DnsslLifetime = lifetime;
-    ns->ns_DnsslPending  = TRUE;
+    ami_ns_ra_dnssl(&ns->ns_Ra, domains, length, lifetime);
 }
 
 /*
@@ -188,7 +137,7 @@ static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
 /*
  * A Reply has landed. Read what it carried out of the client and put it into
  * the resolver, on a caller thread and not on the client's own, for the reason
- * stated above ns_Rdnss in netstack_internal.h: the DNS client holds its mutex
+ * stated above ns_Ra in netstack_internal.h: the DNS client holds its mutex
  * across a query and that query needs the IP thread.
  */
 static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
@@ -327,6 +276,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 {
     AmiResolverConfig *r;
+    AmiNsRaSnapshot     ra;
     UWORD              i;
     UWORD              j;
 
@@ -335,11 +285,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
 
-    if (ns->ns_RdnssPending)
+    if (!ami_ns_ra_snapshot(&ns->ns_Ra, &ra))
+        return;
+
+    if (ra.rdnss_pending)
     {
         char text[AMI_CFG_IP6_STRLEN];
-
-        ns->ns_RdnssPending = FALSE;
 
         /* Out: in the configuration, not in the advertisement.  Backwards, so
            the compaction inside the withdraw does not skip an entry. */
@@ -348,12 +299,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
             ULONG gone[AMI_CFG_IP6_WORDS];
             BOOL  withdrawn;
 
-            for (j = 0; j < ns->ns_RdnssCount; j++)
+            for (j = 0; j < ra.rdnss_count; j++)
                 if (ami_ns6_same(r->nameserver6[i],
-                                 ns->ns_Rdnss[j].nxd_ip_address.v6))
+                                 ra.rdnss[j].nxd_ip_address.v6))
                     break;
 
-            if (j != ns->ns_RdnssCount)
+            if (j != ra.rdnss_count)
                 continue;
 
             /* Named by DHCPv6 as well, so it is not the advertisement's to
@@ -396,11 +347,11 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
          * DHCP path records its servers for the same reason, and this one
          * recorded none at all, which is the visible half of this defect.
          */
-        for (i = 0; i < ns->ns_RdnssCount; i++)
+        for (i = 0; i < ra.rdnss_count; i++)
         {
-            UINT status = nxd_dns_server_add(&ns->ns_Dns, &ns->ns_Rdnss[i]);
+            UINT status = nxd_dns_server_add(&ns->ns_Dns, &ra.rdnss[i]);
 
-            ami_config_format_ip6(ns->ns_Rdnss[i].nxd_ip_address.v6, text,
+            ami_config_format_ip6(ra.rdnss[i].nxd_ip_address.v6, text,
                                   sizeof(text));
 
             if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
@@ -415,7 +366,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
                 ami_ns_resolver_forbid();
                 offered = ami_config_nameserver6_offer(
-                    r, ns->ns_Rdnss[i].nxd_ip_address.v6);
+                    r, ra.rdnss[i].nxd_ip_address.v6);
                 ami_ns_resolver_permit();
 
                 if (offered)
@@ -424,18 +375,16 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         }
     }
 
-    if (ns->ns_DnsslPending)
+    if (ra.dnssl_pending)
     {
         UWORD n;
 
-        ns->ns_DnsslPending = FALSE;
-
         /* RFC 8106 5.2, as 5.1: zero withdraws what the option names. */
-        if (ns->ns_DnsslLifetime == 0UL)
+        if (ra.dnssl_lifetime == 0UL)
         {
             ami_ns_resolver_forbid();
-            n = ami_config_search_withdraw_rfc3397(r, ns->ns_Dnssl,
-                                                   (ULONG)ns->ns_DnsslLen);
+            n = ami_config_search_withdraw_rfc3397(r, ra.dnssl,
+                                                   (ULONG)ra.dnssl_len);
             ami_ns_resolver_permit();
             if (n != 0)
                 AMI_INFO("netstack: advertised search list withdrawn, %ld "
@@ -444,8 +393,8 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         else
         {
             ami_ns_resolver_forbid();
-            n = ami_config_search_from_rfc3397(r, ns->ns_Dnssl,
-                                               (ULONG)ns->ns_DnsslLen);
+            n = ami_config_search_from_rfc3397(r, ra.dnssl,
+                                               (ULONG)ra.dnssl_len);
             if (n != 0 && r->domain[0] == '\0')
                 ami_ns_copy_name(r->domain, r->search[r->search_count - n],
                                  sizeof(r->domain));
@@ -498,7 +447,8 @@ VOID netstack_dns_absorb_ra(VOID)
 
     /* Nothing pending is the ordinary case, and it must not cost a report a
        trip into ThreadX. */
-    if (!ns->ns_RdnssPending && !ns->ns_DnsslPending && !ns->ns_Dhcpv6DnsPending)
+    if (!ns->ns_Ra.rdnss_pending && !ns->ns_Ra.dnssl_pending &&
+        !ns->ns_Dhcpv6DnsPending)
         return;
 
     caller = ami_netstack_enter_alloc();

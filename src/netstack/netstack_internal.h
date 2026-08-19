@@ -26,6 +26,10 @@
 
 #include <exec/types.h>
 
+#ifdef AMINETXDUO_IPV6
+#include "netstack_ra.h"
+#endif
+
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/compat.h"
@@ -55,9 +59,6 @@
 #define AMI_POOL_MEM_DIVISOR        16
 
 #ifdef AMINETXDUO_IPV6
-/* Recursive DNS servers held from router advertisements.  See ns_Rdnss. */
-#define AMI_RDNSS_MAX               4
-
 /*
  * The DHCPv6 client's own thread stack.
  *
@@ -87,14 +88,6 @@
  */
 #define AMI_DHCPV6_RELEASE_TICKS    (2UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/*
- * One advertisement of RFC 8106 5.2 search domains, as they arrive: the
- * encoded label sequences rather than the names.  AMI_CFG_MAX_SEARCH is 6 and
- * AMI_CFG_NAME_LEN is 64, so a list this buffer cannot hold is longer than the
- * list it feeds, and the decoder stops at the first name it cannot store
- * either way.
- */
-#define AMI_DNSSL_MAX               256
 #endif
 
 /*
@@ -317,22 +310,12 @@ struct AmiNetStack
      * recommends no more than three) and is the same order as
      * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
      * is answering.
+     *
+     * The same handoff holds the encoded DNSSL search list.  Its 256 bytes
+     * are enough for every suffix the resolver can retain; an option longer
+     * than that is refused whole instead of storing a meaningless prefix.
      */
-    NXD_ADDRESS         ns_Rdnss[AMI_RDNSS_MAX];
-    UWORD               ns_RdnssCount;
-    volatile BOOL       ns_RdnssPending;    /* written by the IP thread */
-
-    /*
-     * The search domains from the same advertisement, still encoded, for the
-     * same reason: ami_ns6_dnssl() runs on the IP thread and the list it feeds
-     * is read by every resolver call.  ns_DnsslLifetime is the lifetime from
-     * the option, so the absorb step knows whether to add the names or take
-     * them back.
-     */
-    UBYTE               ns_Dnssl[AMI_DNSSL_MAX];
-    UWORD               ns_DnsslLen;
-    ULONG               ns_DnsslLifetime;
-    volatile BOOL       ns_DnsslPending;    /* written by the IP thread */
+    AmiNsRaPending      ns_Ra;
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
     /* Inline rather than separately allocated: small, same lifetime as the
@@ -391,11 +374,11 @@ struct AmiNetStack
      */
     volatile BOOL       ns_Dhcpv6Asked;
     /* A Reply has landed and may carry name servers.  Same two-phase rule as
-       ns_RdnssPending: the client's thread writes, a caller thread absorbs. */
+       ns_Ra: the client's thread writes, a caller thread absorbs. */
     volatile BOOL       ns_Dhcpv6DnsPending;
     /*
      * The name servers the last Reply named, kept for the same reason
-     * ns_Rdnss[] is: the reconciliation has to know which of the entries in
+     * ns_Ra.rdnss[] is: reconciliation has to know which entries in
      * resolver.nameserver6[] came from which source, or each absorb would
      * withdraw the other's.  netstack_dns.c states which source wins.
      */
