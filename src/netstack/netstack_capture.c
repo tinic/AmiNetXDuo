@@ -118,6 +118,7 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
                                   const UBYTE *dst, const UBYTE *payload,
                                   ULONG len)
 {
+    AmiNetStack *ns;
     UWORD index;
     LONG  rc;
 
@@ -133,7 +134,27 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
     if (ami_netstack_interface_claim_cookie(cookie, &index) != AMI_NET_OK)
         return -1;
 
-    rc = ami_sana2_inject((AmiSana2If *)cookie, ether_type, dst, payload, len);
+    ns = ami_netstack_raw();
+    if (ns == NULL || !ns->ns_IpCreated || index >= ns->ns_IfaceCount ||
+        (APTR)ns->ns_Iface[index] != cookie)
+    {
+        rc = -1;
+    }
+    else
+    {
+        /*
+         * bpf_write() does not enter through a NetX API, so it otherwise
+         * bypasses the mutex held by NX_LINK_DISABLE and
+         * AMI_LINK_STACK_DISABLE. Keep the online test, TX-slot claim and
+         * BeginIO() on the same side of that mutex as the shutdown drain.
+         * The bsdsocket vector adopted this caller before reaching the hook.
+         */
+        tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+        rc = ami_sana2_inject((AmiSana2If *)cookie, ether_type, dst, payload,
+                              len);
+        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+    }
+
     netstack_interface_release(index);
 
     return rc;

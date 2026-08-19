@@ -104,3 +104,35 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
 endif()
+
+# bpf_write() is the only BPF vector that reaches the NetX packet pool. Its
+# injector also takes nx_ip_protection so interface shutdown cannot drain a TX
+# slot between the claim and BeginIO(). Compile the shipping vector wrapper
+# with stubs that make the enter/write/leave ordering observable. Unlike the
+# larger bsdsocket host tests above, this needs no live Linux ThreadX objects,
+# so the target-width tx_port shim lets it run on arm64 hosts as well.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_bpf_write_serial
+        host/test_bpf_write_serial_host.c
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/bpf.c")
+
+    target_include_directories(test_bpf_write_serial PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_bpf_write_serial PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        $<$<OR:$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:-Wno-macro-redefined>)
+
+    target_compile_definitions(test_bpf_write_serial PRIVATE
+        AMI_BPF_REPLICA
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME bpf_write_serialization COMMAND test_bpf_write_serial)
+endif()
