@@ -2145,7 +2145,12 @@ char                  buffer[96];
     t_bzero(&sa, sizeof(sa));
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
-    sa.sin_addr   = 0x7F000002UL;
+    /* Use two addresses which the stack actually owns.  bind(127.0.0.2)
+       is useful for exercising exact local-destination filtering, but NetX
+       has one address on its loopback interface and therefore transmits any
+       127/8 socket with 127.0.0.1 as its source.  That cannot distinguish the
+       peers this test needs. */
+    sa.sin_addr   = T_TAP_ADDR;
     rc = bsd_bind(old_peer, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "raw old peer bind", bsd_Errno());
 
@@ -2155,29 +2160,29 @@ char                  buffer[96];
 
     /* Leave one old-peer packet parked by MSG_PEEK and another on the raw
        queue. The new peer's receives synchronize with the global IP hook. */
-    sa.sin_addr = 0x7F000001UL;
+    sa.sin_addr = T_TAP_ADDR;
     rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
                     &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
                   "raw old peer first send", rc);
-    rc = bsd_recv(new_peer, buffer, sizeof(buffer), 0);
+    rc = bsd_recv(old_peer, buffer, sizeof(buffer), 0);
     (VOID)t_check((BOOL)(rc >= 20), "raw first send synchronization", rc);
 
     rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
                     &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
                   "raw old peer second send", rc);
-    rc = bsd_recv(new_peer, buffer, sizeof(buffer), 0);
+    rc = bsd_recv(old_peer, buffer, sizeof(buffer), 0);
     (VOID)t_check((BOOL)(rc >= 20), "raw second send synchronization", rc);
 
     t_bzero(buffer, sizeof(buffer));
     rc = bsd_recv(server, buffer, sizeof(buffer),
                   T_MSG_DONTWAIT | T_MSG_PEEK);
     (VOID)t_check((BOOL)(rc >= 20 &&
-                         (UBYTE)buffer[12] == 127 &&
-                         (UBYTE)buffer[13] == 0 &&
-                         (UBYTE)buffer[14] == 0 &&
-                         (UBYTE)buffer[15] == 2),
+                         (UBYTE)buffer[12] == 10 &&
+                         (UBYTE)buffer[13] == 9 &&
+                         (UBYTE)buffer[14] == 9 &&
+                         (UBYTE)buffer[15] == 1),
                   "peek packet from raw old peer", rc);
 
     sa.sin_addr = 0x7F000001UL;
