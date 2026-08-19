@@ -96,7 +96,18 @@ VOID ami_log(int level, const char *fmt, ...)
     va_end(args);
 }
 
-VOID ami_bpf_lock(VOID)   { }
+static void (*stub_on_lock)(void);
+
+VOID ami_bpf_lock(VOID)
+{
+    if (stub_on_lock != NULL)
+    {
+        void (*fn)(void) = stub_on_lock;
+
+        stub_on_lock = NULL;
+        fn();
+    }
+}
 
 /*
  * Unlock is the only place inside ami_bpf_read() where another task can get
@@ -1099,6 +1110,37 @@ static void test_channel_ownership(void)
 }
 
 /*
+ * Two closes can validate the same numeric slot before either takes the table
+ * lock. Let the first close finish and another owner reopen the slot while the
+ * second is entering its critical section: the stale close must not retire
+ * the replacement.
+ */
+static void t_replace_mid_close(void)
+{
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_open(T_BPF_OTHER, 0) == 0);
+}
+
+static void test_reopen_under_closer(void)
+{
+    ULONG value = 0;
+
+    printf("bpf: a stale close cannot retire a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+
+    stub_on_lock = t_replace_mid_close;
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == AMI_BPF_EPERM);
+    CHECK(stub_on_lock == NULL);
+
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGBLEN, &value) == 0);
+    CHECK(value == AMI_BPF_DEFAULT_BLEN);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
  * The base is closed during a copy-out on one of its channels.
  *
  * ami_bpf_close() answers EBUSY for this, because a caller can be told to try
@@ -1193,6 +1235,7 @@ int main(int argc, char **argv)
     test_overflow_and_signals();
     test_write_and_binding();
     test_channel_ownership();
+    test_reopen_under_closer();
     test_close_owner_under_reader();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);

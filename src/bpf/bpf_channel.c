@@ -344,15 +344,42 @@ LONG ami_bpf_open(APTR owner, LONG channel)
 LONG ami_bpf_close(APTR owner, LONG channel)
 {
     LONG        status;
-    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan *ch;
+    APTR        bufbase;
+    APTR        filter;
+
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
 
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (ch->reading)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EBUSY;   /* a read is copying out of the buffer */
+    }
 
-    ami_bpf_chan_release(ch, FALSE);
+    /*
+     * Validate and retire the slot in the same critical section. If another
+     * close frees it after an unlocked lookup, a different owner can reopen
+     * the numeric channel before ami_bpf_chan_release() takes its lock, and
+     * the stale close then destroys the replacement channel.
+     */
+    if (ch->iface != NULL && ami_bpf_bound_channels > 0)
+        ami_bpf_bound_channels--;
+
+    bufbase = ch->bufbase;
+    filter  = ch->filter;
+    ami_bpf_zero_bytes(ch, (ULONG)sizeof(AmiBpfChan));
+
+    ami_bpf_unlock();
+
+    ami_free(bufbase);
+    ami_free(filter);
 
     return 0;
 }
