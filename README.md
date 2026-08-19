@@ -202,10 +202,13 @@ of AmiTCP's `fd/usergroup_lib.fd` with Roadshow's `sfd/usergroup_lib.sfd` and
 the NDK pragma, all three agreeing.
 
 MIT. ThreadX and NetX Duo are MIT-licensed as well (© Microsoft and the Eclipse
-ThreadX contributors). ThreadX is an unmodified submodule. **NetX Duo is not.**
-It is a fork that carries one patch per defect. Each patch sits on its own
-branch off upstream `473d1928`, and each is written as a standalone change. The
-branches are at `github.com/tinic/netxduo`, and the engineering record states
-what each one fixes. The one further exception is the CA root set in
+ThreadX contributors). **Both are maintained forks.** The ThreadX fork at
+`github.com/tinic/threadx` is pinned one commit beyond upstream `44d7c95c`; its
+standalone change makes hosted-port stack-build failure observable to generic
+thread create/reset code and fixes stack-range overlap detection. The NetX Duo
+fork carries one patch per defect. Each patch sits on its own branch off
+upstream `473d1928`, and each is written as a standalone change. Its branches
+are at `github.com/tinic/netxduo`, and the engineering record states what each
+one fixes. The one further exception is the CA root set in
 `DEVS:Internet/certificates`. It is Mozilla's, under MPL 2.0, file-scoped, and
 affects nothing else here.
