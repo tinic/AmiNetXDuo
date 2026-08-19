@@ -405,6 +405,7 @@ BOOL ami_cfg_parse_ulong(const char *s, ULONG *out)
     ULONG value = 0;
     ULONG digits = 0;
     ULONG base = 10;
+    ULONG max = (ULONG)~(ULONG)0;
 
     if (s == NULL)
         return FALSE;
@@ -430,6 +431,11 @@ BOOL ami_cfg_parse_ulong(const char *s, ULONG *out)
             digit = (ULONG)(*s - 'A') + 10;
         else
             break;
+
+        /* Reject the spelling instead of letting unsigned arithmetic turn it
+           into a different, apparently valid UNIT, MTU, port or protocol. */
+        if (value > (max - digit) / base)
+            return FALSE;
 
         value = value * base + digit;
         digits++;
