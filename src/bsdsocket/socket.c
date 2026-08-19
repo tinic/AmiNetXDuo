@@ -3150,6 +3150,19 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
         sock->as_PeerScopeId = scope;
         sock->as_Flags   |= ASF_CONNECTED;
 
+        /* recv(MSG_PEEK) removes the datagram from NetX and parks it here.
+           A later connect() may narrow the receive endpoint to a different
+           peer, so do not let that parked datagram bypass the new filter.
+           Reconnecting to the same peer keeps the packet, and therefore the
+           usual MSG_PEEK promise, intact. */
+        if (sock->as_RxPending != NX_NULL &&
+            !bsd_udp_accepts_packet(sock, sock->as_RxPending))
+        {
+            nx_packet_release(sock->as_RxPending);
+            sock->as_RxPending = NX_NULL;
+            sock->as_RxOffset  = 0;
+        }
+
         return 0;
     }
 

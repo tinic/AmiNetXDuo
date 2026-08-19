@@ -208,6 +208,7 @@ struct t_fdset
 #define T_EWOULDBLOCK       35
 
 #define T_MSG_DONTWAIT      0x80
+#define T_MSG_PEEK          0x02
 
 #define T_FIONREAD          0x4004667FUL
 
@@ -1313,6 +1314,77 @@ char                  buffer[64];
 
     (VOID)bsd_CloseSocket(bad);
     (VOID)bsd_CloseSocket(good);
+    (VOID)bsd_CloseSocket(server);
+}
+
+static VOID t_test_udp_reconnect_after_peek(VOID)
+{
+LONG                  server, old_peer, new_peer;
+LONG                  rc;
+struct t_sockaddr_in  sa;
+static const char     old_data[] = "old UDP peer";
+static const char     new_data[] = "new UDP peer";
+char                  buffer[64];
+
+    t_log("UDP reconnect after MSG_PEEK");
+
+    server   = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    old_peer = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    new_peer = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && old_peer >= 0 && new_peer >= 0),
+                 "UDP reconnect sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000001UL;
+
+    sa.sin_port = T_PORT + 11;
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "UDP reconnect server bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 12;
+    rc = bsd_bind(old_peer, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "old UDP peer bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 13;
+    rc = bsd_bind(new_peer, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "new UDP peer bind", bsd_Errno());
+
+    sa.sin_port = T_PORT + 11;
+    rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
+                    &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data)),
+                  "send before UDP peek", rc);
+
+    Delay(2);
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer),
+                  T_MSG_DONTWAIT | T_MSG_PEEK);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(old_data) &&
+                         t_streq(buffer, old_data)),
+                  "peek packet from old UDP peer", rc);
+
+    sa.sin_port = T_PORT + 13;
+    rc = bsd_connect(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "reconnect UDP to new peer", bsd_Errno());
+
+    sa.sin_port = T_PORT + 11;
+    rc = bsd_sendto(new_peer, (APTR)new_data, sizeof(new_data), 0,
+                    &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(new_data)),
+                  "send from new UDP peer", rc);
+
+    Delay(2);
+    t_bzero(buffer, sizeof(buffer));
+    rc = bsd_recv(server, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(new_data) &&
+                         t_streq(buffer, new_data)),
+                  "reconnect drops peeked packet from old UDP peer", rc);
+
+    (VOID)bsd_CloseSocket(new_peer);
+    (VOID)bsd_CloseSocket(old_peer);
     (VOID)bsd_CloseSocket(server);
 }
 
@@ -2438,6 +2510,7 @@ int main(void)
     t_test_udp_loopback();
     t_test_udp_bound_address();
     t_test_udp_connected_readiness();
+    t_test_udp_reconnect_after_peek();
     t_test_raw_bound_address();
     t_test_cmsg_macros();
     t_test_cmsg_options();
