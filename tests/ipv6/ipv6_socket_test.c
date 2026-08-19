@@ -223,6 +223,7 @@ struct t_fdset
 #define T_AI_NUMERICHOST    4
 
 #define T_PORT              9099
+#define T_TAP_ADDR          0x0A090901UL      /* tap0, 10.9.9.1 */
 
 
 /* ------------------------------------------------------------ LVO stubs --- */
@@ -1711,7 +1712,10 @@ char                  buffer[16];
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 31;
-    sa.sin_addr   = 0x7F000001UL;
+    /* NetX, following RFC 1122, does not originate an ICMP error in response
+       to a loopback-source datagram. Use the harness's real interface address
+       so this actually exercises the asynchronous UDP error path. */
+    sa.sin_addr   = T_TAP_ADDR;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP to unused port", bsd_Errno());
@@ -1751,7 +1755,7 @@ char                  buffer[16];
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 32;
-    sa.sin_addr   = 0x7F000001UL;
+    sa.sin_addr   = T_TAP_ADDR;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP SO_ERROR probe",
@@ -1795,7 +1799,7 @@ static const char     probe[] = "UDP exception probe";
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 40;
-    sa.sin_addr   = 0x7F000001UL;
+    sa.sin_addr   = T_TAP_ADDR;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect UDP exception probe",
@@ -1842,7 +1846,7 @@ static const char     probe[] = "multi-set UDP error";
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
     sa.sin_port   = T_PORT + 42;
-    sa.sin_addr   = 0x7F000001UL;
+    sa.sin_addr   = T_TAP_ADDR;
 
     rc = bsd_connect(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "connect multi-set UDP probe",
