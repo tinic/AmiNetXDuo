@@ -533,8 +533,6 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     ami_netstack_mdns_stop(ns);
 #endif
 
-    ami_netstack_dns_stop(ns);
-
     /*
      * The heartbeat first: it reaches into the child-base list of
      * bsdsocket.library, and everything below here is the stack coming apart
@@ -577,6 +575,10 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         (VOID)nx_dhcp_delete(&ns->ns_Dhcp);
         ns->ns_DhcpCreated = FALSE;
     }
+
+    /* DHCP's state callback imports option 6 into the DNS client. Stop and
+       delete the callback source before deleting the object it updates. */
+    ami_netstack_dns_stop(ns);
 
 #ifdef AMINETXDUO_IPV6
     /*
