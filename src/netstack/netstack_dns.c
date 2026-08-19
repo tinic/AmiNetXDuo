@@ -121,6 +121,27 @@ static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
     return TRUE;
 }
 
+static BOOL ami_ns_dhcp_hostname_option(AmiNetStack *ns, UWORD iface,
+                                        char out[AMI_CFG_NAME_LEN])
+{
+    UCHAR raw[AMI_CFG_NAME_LEN];
+    UINT  size = (UINT)sizeof(raw);
+    UINT  status;
+
+    out[0] = '\0';
+    status = nx_dhcp_interface_user_option_retrieve(
+        &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_HOST_NAME, raw, &size);
+    if (status == NX_DHCP_PARSE_ERROR || status == NX_DHCP_DEST_TO_SMALL)
+        return TRUE;            /* absent or too long is no usable offer */
+    if (status != NX_SUCCESS)
+        return FALSE;
+
+    /* A malformed value is a coherent empty offer: it withdraws any older
+       option-12 ownership instead of preserving or truncating it. */
+    (VOID)ami_ns_dhcp_hostname_decode(out, raw, (ULONG)size);
+    return TRUE;
+}
+
 #ifdef AMINETXDUO_IPV6
 
 /*
@@ -604,46 +625,6 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
-/*
- * What the lease said about naming, which nothing acted on until now: option
- * 12 was requested and reported per interface but never became the name of the
- * machine, and option 15 never became its domain, so a DHCP machine had no
- * default domain at all and the qualifying step in netstack_resolve() never
- * ran.
- *
- * The name is offered rather than assigned: a HOSTNAME in name_resolution
- * outranks it, and an option 12 that is not a host name is refused (see
- * AmiHostnameSource).
- *
- * Search-list and default-domain ownership are reconciled separately for every
- * interface after the DNS client is created and on every lease transition.
- * This startup pass only chooses the host name from the first bound lease.
- *
- * From the first interface holding a lease, not always interface 0: a machine
- * with a static interface 0 and a DHCP interface 1 has its lease on the one
- * that asked for it.
- */
-static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
-{
-    char  text[AMI_CFG_NAME_LEN];
-    UWORD index;
-
-    for (index = 0; index < ns->ns_IfaceCount; index++)
-    {
-        if (ns->ns_DhcpState[index] != (UBYTE)NX_DHCP_STATE_BOUND)
-            continue;
-
-        ami_ns_dhcp_text(ns, index, NX_DHCP_OPTION_HOST_NAME, text,
-                         sizeof(text));
-        if (ami_config_hostname_offer(&ns->ns_Config, (UWORD)AMI_HOSTNAME_DHCP,
-                                      text))
-            AMI_INFO("netstack: DHCP names this machine '%s'",
-                     ns->ns_Config.hostname);
-
-        break;
-    }
-}
-
 /* Add one source's ownership of a server.  The first owner creates the DNS
    entry; later owners only deepen the signed count in reported configuration. */
 static BOOL ami_ns_dns_reference_add(AmiNetStack *ns, ULONG server)
@@ -852,14 +833,33 @@ static VOID ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
 }
 
 
+static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
+{
+    char text[AMI_CFG_NAME_LEN];
+
+    text[0] = '\0';
+    if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
+    {
+        if (!ami_ns_dhcp_hostname_option(ns, iface, text))
+            return;
+    }
+
+    ami_ns_dhcp_hostname_update(&ns->ns_DhcpHostname, iface, text);
+    if (ami_ns_dhcp_hostname_reconcile(&ns->ns_Config,
+                                       &ns->ns_DhcpHostname))
+        AMI_INFO("netstack: host name is now '%s' after DHCP interface %ld",
+                 ns->ns_Config.hostname, (long)iface);
+}
+
+
 /*
  * Reconcile resolver options from one DHCP interface.
  *
  * Called once for every interface already bound when the DNS client starts,
  * and from a caller task after the DHCP state callback marks an interface.
- * A renewal can replace or omit option 6, 15, or 119, and a stopped/lost lease
- * owns no servers or suffixes.  The per-interface sets make those withdrawals
- * precise.
+ * A renewal can replace or omit option 6, 12, 15, or 119, and a stopped/lost
+ * lease owns no servers, host name, or suffixes. The per-interface sets make
+ * those withdrawals precise.
  */
 VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 {
@@ -874,6 +874,7 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
         iface >= ns->ns_IfaceCount)
         return;
 
+    ami_ns_dhcp_hostname_reconcile_iface(ns, iface);
     ami_ns_dhcp_domain_reconcile(ns, iface);
     ami_ns_dhcp_search_reconcile(ns, iface);
 
@@ -968,9 +969,12 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
     if (ns->ns_DnsCreated)
         return AMI_NET_OK;
 
-    /* Before nx_dns_create(), which is handed the domain. */
+    /* mDNS starts after this function even when nx_dns_create() fails. Import
+       the current option 12 first so the responder and gethostname() still see
+       the lease's name; the full resolver reconciliation follows creation. */
     if (ns->ns_DhcpStarted)
-        ami_ns_dhcp_naming(ns);
+        for (i = 0U; i < ns->ns_IfaceCount; i++)
+            ami_ns_dhcp_hostname_reconcile_iface(ns, i);
 
     status = nx_dns_create(&ns->ns_Dns, &ns->ns_Ip,
                            (UCHAR *)ns->ns_Config.resolver.domain);

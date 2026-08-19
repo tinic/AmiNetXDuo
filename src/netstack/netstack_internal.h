@@ -29,6 +29,7 @@
 #include "netstack_dns_handoff.h"
 #include "netstack_dns_lease.h"
 #include "netstack_dns_domain.h"
+#include "netstack_dhcp_hostname.h"
 #ifdef AMINETXDUO_IPV6
 #include "netstack_ra.h"
 #endif
@@ -262,6 +263,7 @@ struct AmiNetStack
      */
     UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
     ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
+    AmiNsDhcpHostnameState ns_DhcpHostname;
 
     /*
      * Another host answered an ARP for an address of this machine.  Counted
