@@ -16,12 +16,11 @@
  * tools/gen_vectors.py reads the order from the pragma, so the declaration in
  * bsdsocket_vectors.h follows automatically.
  *
- * No ThreadX bracket here, unlike every other vector that touches the stack.
- * Those go through bsd_nx_enter() because NetX Duo suspends the caller.
- * src/bpf/ never calls NetX Duo, never allocates from the packet pool and
- * never blocks. It guards its own table with Forbid()/Permit(), which suits a
- * structure shared with the SANA-II reader Tasks and the IP thread. An
- * adoption bracket costs more than the capture read itself.
+ * The table-only vectors need no ThreadX bracket. src/bpf/ guards its own
+ * table with Forbid()/Permit(), which suits a structure shared with the
+ * SANA-II reader Tasks and the IP thread. bpf_write() is the exception: its
+ * injector allocates from the NetX packet pool and takes nx_ip_protection, so
+ * that vector adopts the caller for the duration of the write.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -106,9 +105,16 @@ LONG bsd_bpf_write(register LONG channel __asm("d0"),
                    register LONG len __asm("d1"),
                    register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    return bsd_bpf_result(SocketBase,
-                          ami_bpf_write((APTR)SocketBase, channel, buffer,
-                                        len));
+    LONG status;
+
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+
+    status = ami_bpf_write((APTR)SocketBase, channel, buffer, len);
+
+    bsd_nx_leave(SocketBase);
+
+    return bsd_bpf_result(SocketBase, status);
 }
 
 LONG bsd_bpf_set_notify_mask(register LONG channel __asm("d1"),
