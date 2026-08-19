@@ -719,7 +719,9 @@ static VOID bt_test_no_signal_reap(VOID)
     APTR  arena;
     ULONG arena_size = BT_STACK + 200UL;
     ULONG historic_before;
+    ULONG historic_after;
     ULONG live_before;
+    ULONG live_after;
     ULONG waited;
     UWORD held_count = 0U;
     LONG  old_priority;
@@ -796,12 +798,19 @@ static VOID bt_test_no_signal_reap(VOID)
 
         if (deleted != TX_FALSE)
         {
-            t_check(tx_amiga_zombie_tasks() == historic_before + 1UL,
+            /* Snapshot both counters before reporting either assertion.
+               t_check() flushes console output and may block there, which
+               gives the dying task time to remove itself from the live count
+               between two otherwise adjacent checks. */
+            historic_after = tx_amiga_zombie_tasks();
+            live_after = tx_amiga_zombie_tasks_live();
+
+            t_check(historic_after == historic_before + 1UL,
                     "the unconfirmed task was recorded as a zombie",
-                    (LONG)tx_amiga_zombie_tasks());
-            t_check(tx_amiga_zombie_tasks_live() == live_before + 1UL,
+                    (LONG)historic_after);
+            t_check(live_after == live_before + 1UL,
                     "the native task remains live until it destroys itself",
-                    (LONG)tx_amiga_zombie_tasks_live());
+                    (LONG)live_after);
             t_check(bt_reap_target.tx_thread_amiga_task == NULL,
                     "the deleted control block no longer owns the task", 0);
             t_check(tx_amiga_stack_in_use(arena, arena_size) == TX_FALSE,
