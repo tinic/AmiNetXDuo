@@ -507,13 +507,20 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
     {
         if (base->sb_Table[fd] == NULL)
         {
-            /* A nonzero CHECK answer means the link library owns this number.
-               Keep that fact in our descriptor bitmap and try the next one. */
+            /*
+             * A nonzero CHECK answer means the link library owns this number
+             * right now.  Skip it and ask again next time: it is the link
+             * library's slot, not ours, and it never tells us when it gives
+             * one back.  Writing BSD_FD_RESERVED here instead would latch the
+             * number for the life of the base -- nothing clears it, because
+             * bsd_fd_free() only runs for descriptors the application closed
+             * and the application does not know these exist -- so a long
+             * running program would fill its own table until socket()
+             * returned EMFILE, and the callers this feature serves are
+             * exactly the ones affected.
+             */
             if (bsd_fd_callback(base, fd, FDCB_CHECK) != 0)
-            {
-                base->sb_Table[fd] = BSD_FD_RESERVED;
                 continue;
-            }
 
             error = bsd_fd_callback(base, fd, FDCB_ALLOC);
             if (error != 0)
