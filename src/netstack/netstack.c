@@ -1333,16 +1333,20 @@ static VOID ami_ns_address_changed(NX_IP *ip_ptr, VOID *info)
             ami_netstack_mark("ipv4");
 
         /*
-         * RFC 3927 1.9: a routable address supersedes a link-local one. The
-         * AutoIP thread does not watch for this itself: it sits in an
-         * indefinite wait for a conflict. So it is stopped here, and can be
-         * restarted if the lease is later lost.
+         * RFC 3927 1.9: a routable address supersedes a link-local one on the
+         * same interface. The AutoIP thread does not watch for this itself: it
+         * sits in an indefinite wait for a conflict. So it is stopped here,
+         * and can be restarted if the lease is later lost. A routable address
+         * on another card must not suspend the one machine-wide AutoIP object
+         * while it is managing this interface.
          *
          * Never from the AutoIP thread itself: nx_auto_ip_stop() is
          * tx_thread_suspend(), and calling it on the running thread suspends
          * it in the middle of its own announcement.
          */
-        if (ns->ns_AutoIpRunning && addr != 0UL && !ami_ns_is_linklocal(addr) &&
+        if (ns->ns_AutoIpRunning &&
+            (UINT)i == ns->ns_AutoIp.nx_ip_interface_index &&
+            addr != 0UL && !ami_ns_is_linklocal(addr) &&
             tx_thread_identify() != &ns->ns_AutoIp.nx_auto_ip_thread)
         {
             (VOID)nx_auto_ip_stop(&ns->ns_AutoIp);
