@@ -118,11 +118,25 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
                                   const UBYTE *dst, const UBYTE *payload,
                                   ULONG len)
 {
+    UWORD index;
+    LONG  rc;
+
     if (cookie == (APTR)&ami_ns_lo_cookie)
         return -1;      /* nothing to inject into: loopback has no device */
 
-    return ami_sana2_inject((AmiSana2If *)cookie, ether_type, dst, payload,
-                            len);
+    /*
+     * A BPF write snapshots this opaque cookie before calling us. A concurrent
+     * RemoveInterface() may already have detached its BPF row, so prove the
+     * SANA-II allocation is still live and pin it for the whole write before
+     * turning the cookie back into a pointer.
+     */
+    if (ami_netstack_interface_claim_cookie(cookie, &index) != AMI_NET_OK)
+        return -1;
+
+    rc = ami_sana2_inject((AmiSana2If *)cookie, ether_type, dst, payload, len);
+    netstack_interface_release(index);
+
+    return rc;
 }
 
 /* ------------------------------------------------------------- lifecycle */

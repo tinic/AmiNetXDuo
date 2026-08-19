@@ -1034,6 +1034,48 @@ static void test_write_and_binding(void)
 }
 
 /*
+ * Reproduce the interface-removal window in ami_bpf_write(). The write has
+ * selected its injector, then its first unlock lets RemoveInterface() detach
+ * and clear the interface row before the callback starts. The callback and
+ * cookie must be local snapshots by then; the netstack callback uses that
+ * cookie only to make a locked lifetime claim and will reject it if removal
+ * won the race.
+ */
+static void t_detach_mid_write(void)
+{
+    ami_bpf_detach_interface(iface_cookie);
+}
+
+static void test_detach_under_writer(void)
+{
+    UBYTE frame[128];
+    ULONG len;
+
+    printf("bpf: detaching under a writer leaves no table pointer in flight\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    inject_cookie     = NULL;
+    inject_result     = 0;
+    stub_unlock_after = 1;
+    stub_on_unlock    = t_detach_mid_write;
+
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == (LONG)len);
+    CHECK(stub_on_unlock == NULL);
+    CHECK(inject_cookie == iface_cookie);
+
+    /* The detached channel stays open, but no later write can select it. */
+    CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENXIO);
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
  * "The packet filter channel you allocate will be associated with the library
  * base ... It will be automatically closed when the library is closed", and
  * EPERM for every call from anyone else.
@@ -1192,6 +1234,7 @@ int main(int argc, char **argv)
     test_capture_records();
     test_overflow_and_signals();
     test_write_and_binding();
+    test_detach_under_writer();
     test_channel_ownership();
     test_close_owner_under_reader();
 

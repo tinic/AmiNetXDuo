@@ -691,30 +691,60 @@ LONG ami_bpf_data_waiting(APTR owner, LONG channel)
 LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
 {
     LONG         status;
-    AmiBpfChan  *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan  *ch;
     AmiBpfIf    *ifp;
+    AmiBpfInjectFn inject;
+    APTR         cookie;
+    ULONG        dlt;
+    ULONG        mtu;
     const UBYTE *frame = (const UBYTE *)buffer;
     UWORD        ether_type;
 
+    ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+
     if (ch == NULL)
+    {
+        ami_bpf_unlock();
         return status;
+    }
 
     if (buffer == NULL || len <= 0)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_EINVAL;
+    }
 
     /* The autodoc folds "not attached to an interface" into ENXIO, and an
        interface registered without an injector cannot transmit either. */
     ifp = ch->iface;
     if (ifp == NULL || ifp->inject == NULL)
+    {
+        ami_bpf_unlock();
         return AMI_BPF_ENXIO;
+    }
 
-    if (ch->dlt != DLT_EN10MB)
+    /*
+     * Detach clears both the channel binding and the interface row under this
+     * lock. Keep no pointers into either table across the injector call: the
+     * injector can block, and runtime RemoveInterface() is allowed to run on
+     * another task while it does. The netstack injector claims `cookie`
+     * before dereferencing it, so a removal that won this race is rejected
+     * without touching the stale value.
+     */
+    inject = ifp->inject;
+    cookie = ifp->cookie;
+    dlt    = ch->dlt;
+    mtu    = ifp->mtu;
+    ami_bpf_unlock();
+
+    if (dlt != DLT_EN10MB)
     {
         /* No link header to take apart. Send the bytes as they are. */
-        if (ifp->mtu != 0 && (ULONG)len > ifp->mtu)
+        if (mtu != 0 && (ULONG)len > mtu)
             return AMI_BPF_EMSGSIZE;
 
-        status = ifp->inject(ifp->cookie, 0, NULL, frame, (ULONG)len);
+        status = inject(cookie, 0, NULL, frame, (ULONG)len);
 
         return (status < 0) ? AMI_BPF_ENOBUFS : len;
     }
@@ -731,13 +761,12 @@ LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
      */
     ether_type = (UWORD)(((UWORD)frame[12] << 8) | (UWORD)frame[13]);
 
-    if (ifp->mtu != 0 &&
-        (ULONG)(len - AMI_BPF_ETH_HDR_LEN) > ifp->mtu)
+    if (mtu != 0 && (ULONG)(len - AMI_BPF_ETH_HDR_LEN) > mtu)
         return AMI_BPF_EMSGSIZE;
 
-    status = ifp->inject(ifp->cookie, ether_type, frame,
-                         frame + AMI_BPF_ETH_HDR_LEN,
-                         (ULONG)(len - AMI_BPF_ETH_HDR_LEN));
+    status = inject(cookie, ether_type, frame,
+                    frame + AMI_BPF_ETH_HDR_LEN,
+                    (ULONG)(len - AMI_BPF_ETH_HDR_LEN));
 
     return (status < 0) ? AMI_BPF_ENOBUFS : len;
 }

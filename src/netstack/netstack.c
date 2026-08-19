@@ -3237,6 +3237,51 @@ LONG netstack_interface_claim(const char *name, UWORD *index_out)
     return rc;
 }
 
+#ifdef AMINETXDUO_BPF
+/*
+ * The BPF interface table deliberately treats its SANA-II pointer as an
+ * opaque cookie. Resolve and claim that cookie under the runtime-interface
+ * lock before an injector turns it back into a pointer. This is the cookie
+ * counterpart of netstack_interface_claim(): once the count is raised,
+ * RemoveInterface() cannot detach or free the allocation until release.
+ */
+LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out)
+{
+    AmiNetStack *ns;
+    LONG         rc = AMI_NET_ERR_STATE;
+    UWORD        i;
+
+    if (cookie == NULL || index_out == NULL)
+        return AMI_NET_ERR_CONFIG;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+
+    ns = ami_ns;
+    if (ns != NULL && ns->ns_IpCreated)
+    {
+        for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+        {
+            if ((APTR)ns->ns_Iface[i] != cookie)
+                continue;
+
+            if (ns->ns_IfaceClaims[i] == (UWORD)-1)
+                rc = AMI_NET_ERR_BUSY;
+            else
+            {
+                ns->ns_IfaceClaims[i]++;
+                *index_out = i;
+                rc = AMI_NET_OK;
+            }
+            break;
+        }
+    }
+
+    ReleaseSemaphore(&ami_ns_lock);
+    return rc;
+}
+#endif
+
 VOID netstack_interface_release(UWORD index)
 {
     AmiNetStack *ns;
