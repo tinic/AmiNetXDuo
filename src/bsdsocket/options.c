@@ -1117,7 +1117,8 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
             bsd_addr_from_v4(&addr, chosen);
     }
 
-    bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort);
+    bsd_sockaddr_put(sock, name, namelen, &addr, sock->as_LocalPort,
+                     sock->as_ScopeId);
 
     return 0;
 }
@@ -1139,7 +1140,7 @@ LONG bsd_getpeername(register LONG sock_fd          __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENOTCONN);
 
     bsd_sockaddr_put(sock, name, namelen, &sock->as_PeerAddr,
-                     sock->as_PeerPort);
+                     sock->as_PeerPort, sock->as_ScopeId);
 
     return 0;
 }

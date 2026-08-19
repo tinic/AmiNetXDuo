@@ -976,14 +976,17 @@ VOID  bsd_handoff_flush(struct AmiSocketBase *base);
  * bsd_sockaddr_get() parses one into an NXD_ADDRESS + port (+ scope id, which
  * can be NULL). bsd_sockaddr_put() writes one back in the shape the socket's
  * family calls for, which is not always the shape of the address: an
- * AF_INET6 socket reports a v4 peer as ::ffff:a.b.c.d.
+ * AF_INET6 socket reports a v4 peer as ::ffff:a.b.c.d.  scope_id is explicit
+ * because a received datagram's zone belongs to that packet, not to the
+ * socket that received it.
  */
 LONG  bsd_sa_family(const struct sockaddr *sa, socklen_t len);
 LONG  bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
                        socklen_t len, NXD_ADDRESS *addr, UINT *port,
                        ULONG *scope_id);
 VOID  bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
-                       socklen_t *len, const NXD_ADDRESS *addr, UINT port);
+                       socklen_t *len, const NXD_ADDRESS *addr, UINT port,
+                       ULONG scope_id);
 
 /* An NXD_ADDRESS holding an IPv4 address, for the many call sites that have
    nothing but a ULONG (nx_udp_source_extract, the peer of an accepted v4

@@ -510,6 +510,38 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 }
 
 /*
+ * The zone of a received link-local peer.  Unlike a connected socket's
+ * as_ScopeId, this is per datagram: an unbound socket can receive the same
+ * fe80:: address on two different interfaces, and recvfrom()/recvmsg() must
+ * tell the caller which one it was.  NetX records the arrival interface in
+ * the packet, and its interface index is zero based where sin6_scope_id is
+ * one based.
+ */
+static ULONG bsd_packet_scope_id(const NX_PACKET *packet,
+                                 const NXD_ADDRESS *source)
+{
+#ifdef AMINETXDUO_IPV6
+    const NX_INTERFACE *nxif;
+
+    if (packet == NX_NULL || source == NX_NULL ||
+        source->nxd_ip_version != NX_IP_VERSION_V6 ||
+        (source->nxd_ip_address.v6[0] & 0xFFC00000UL) != 0xFE800000UL)
+        return 0UL;
+
+    nxif = bsd_packet_interface(packet);
+
+    if (nxif != NX_NULL &&
+        (UINT)nxif->nx_interface_index < (UINT)NX_MAX_IP_INTERFACES)
+        return (ULONG)nxif->nx_interface_index + 1UL;
+#else
+    (VOID)packet;
+    (VOID)source;
+#endif
+
+    return 0UL;
+}
+
+/*
  * Is this datagram from the peer a connected socket named?
  *
  * RFC 1122 4.1.3.5: once connect() names a peer, the socket is identified by
@@ -1204,7 +1236,8 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         *truncated = TRUE;
 
     if (from != NULL && fromlen != NULL)
-        bsd_sockaddr_put(sock, from, fromlen, &src_ip, src_port);
+        bsd_sockaddr_put(sock, from, fromlen, &src_ip, src_port,
+                         bsd_packet_scope_id(packet, &src_ip));
 
     /* Before the release below: everything it answers is in the packet. */
     bsd_cmsg_build(sock, packet, msg);
@@ -1302,7 +1335,8 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
         *truncated = TRUE;
 
     if (from != NULL && fromlen != NULL)
-        bsd_sockaddr_put(sock, from, fromlen, &src, 0);
+        bsd_sockaddr_put(sock, from, fromlen, &src, 0,
+                         bsd_packet_scope_id(packet, &src));
 
     bsd_cmsg_build(sock, packet, msg);
 
@@ -1384,7 +1418,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
         result = bsd_recv_tcp(base, sock, &cur, len, flags, &held);
         if (result >= 0 && from != NULL && fromlen != NULL)
             bsd_sockaddr_put(sock, from, fromlen, &sock->as_PeerAddr,
-                             sock->as_PeerPort);
+                             sock->as_PeerPort, sock->as_ScopeId);
         if (truncated != NULL)
             *truncated = FALSE;         /* a stream never truncates */
 

@@ -1379,7 +1379,8 @@ LONG bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
 }
 
 VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
-                      socklen_t *len, const NXD_ADDRESS *addr, UINT port)
+                      socklen_t *len, const NXD_ADDRESS *addr, UINT port,
+                      ULONG scope_id)
 {
     socklen_t copy;
 
@@ -1411,7 +1412,7 @@ VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
         sin6.sin6_family = AF_INET6;
         sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
         bsd_words_to_in6(use->nxd_ip_address.v6, sin6.sin6_addr.s6_addr);
-        sin6.sin6_scope_id = sock->as_ScopeId;
+        sin6.sin6_scope_id = scope_id;
 
         copy = *len;
         if (copy > (socklen_t)sizeof(sin6))
@@ -2843,7 +2844,7 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
 
     if (addr != NULL && addrlen != NULL)
         bsd_sockaddr_put(incoming, addr, addrlen, &incoming->as_PeerAddr,
-                         incoming->as_PeerPort);
+                         incoming->as_PeerPort, incoming->as_ScopeId);
 
     return fd;
 }
