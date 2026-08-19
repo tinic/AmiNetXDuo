@@ -1306,6 +1306,38 @@ static VOID group_p(VOID)
     rc = getaddrinfo((STRPTR)"127.0.0.1", NULL, &hints, &res);
     t_ok(rc == EAI_BADHINTS, "getaddrinfo rejects hints.ai_next", rc);
 
+    /*
+     * A service name with NO hints at all. Naming neither a socket type nor a
+     * protocol means both are acceptable, so DEVS:Internet/services has to be
+     * searched for udp as well as tcp, and the result must describe the
+     * protocol the service actually exists for. Defaulting socktype before
+     * the lookup instead of after it made every udp-only service EAI_SERVICE.
+     */
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"tftp", NULL, &res);
+    t_ok(rc == 0 && res != NULL && res->ai_socktype == SOCK_DGRAM &&
+         res->ai_protocol == IPPROTO_UDP,
+         "getaddrinfo(no hints) resolves a udp-only service", rc);
+    if (rc == 0 && res != NULL)
+    {
+        struct sockaddr_in *sin = (struct sockaddr_in *)res->ai_addr;
+
+        t_ok(sin != NULL && ntohs(sin->sin_port) == 69,
+             "the udp-only service carries its port", rc);
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
+    /* The tcp half of the same rule: still tried first, still SOCK_STREAM. */
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"ftp", NULL, &res);
+    t_ok(rc == 0 && res != NULL && res->ai_socktype == SOCK_STREAM &&
+         res->ai_protocol == IPPROTO_TCP,
+         "getaddrinfo(no hints) resolves a tcp-only service", rc);
+    if (rc == 0 && res != NULL)
+    {
+        freeaddrinfo(res);
+        res = NULL;
+    }
+
     /* 2. The server lookup: AI_PASSIVE, then bind and listen on the result. */
     memset(&hints, 0, sizeof(hints));
     hints.ai_family   = AF_INET;
