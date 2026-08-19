@@ -424,6 +424,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
         "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # Exec declarations
         "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include"
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
         "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
         "${AMINETXDUO_NETXDUO}/common/inc"

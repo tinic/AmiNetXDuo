@@ -30,6 +30,7 @@ static const UCHAR    *h_inject_dnssl;
 static UINT            h_inject_dnssl_len;
 static ULONG           h_inject_lifetime;
 static ULONG           h_inject_now;
+static UWORD           h_inject_iface;
 
 
 static void h_check(int ok, const char *what)
@@ -80,7 +81,8 @@ VOID Permit(VOID)
     h_inject_dnssl = NULL;
 
     if (rdnss != NULL)
-        ami_ns_ra_rdnss(pending, rdnss, lifetime, h_inject_now);
+        ami_ns_ra_rdnss(pending, h_inject_iface, rdnss, lifetime,
+                        h_inject_now);
     else
         ami_ns_ra_dnssl(pending, dnssl, dnssl_len, lifetime);
 }
@@ -108,12 +110,13 @@ static void h_case_rdnss_arrives_after_snapshot(void)
     memset(&first, 0, sizeof(first));
     memset(&second, 0, sizeof(second));
 
-    ami_ns_ra_rdnss(&pending, one, 600UL, 100UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 600UL, 100UL);
 
     h_inject_pending = &pending;
     h_inject_rdnss = two;
     h_inject_lifetime = 600UL;
     h_inject_now = 101UL;
+    h_inject_iface = 0U;
 
     h_check(ami_ns_ra_snapshot(&pending, &first, 101UL),
             "the first RDNSS advertisement is pending");
@@ -185,9 +188,9 @@ static void h_case_withdraw_and_limits(void)
     memset(&snapshot, 0, sizeof(snapshot));
     memset(too_long, 1, sizeof(too_long));
 
-    ami_ns_ra_rdnss(&pending, one, 600UL, 0UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 600UL, 0UL);
     (void)ami_ns_ra_snapshot(&pending, &snapshot, 0UL);
-    ami_ns_ra_rdnss(&pending, one, 0UL, 1UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 0UL, 1UL);
 
     h_check(ami_ns_ra_snapshot(&pending, &snapshot, 1UL) &&
             snapshot.rdnss_count == 0,
@@ -208,13 +211,13 @@ static void h_case_rdnss_lifetime_expires_and_refreshes(void)
     memset(&pending, 0, sizeof(pending));
     memset(&snapshot, 0, sizeof(snapshot));
 
-    ami_ns_ra_rdnss(&pending, one, 10UL, 100UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 10UL, 100UL);
     (void)ami_ns_ra_snapshot(&pending, &snapshot, 100UL);
 
     h_check(!ami_ns_ra_needs_snapshot(&pending, 599UL),
             "RDNSS remains valid until its complete lifetime");
 
-    ami_ns_ra_rdnss(&pending, one, 10UL, 400UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 10UL, 400UL);
     h_check(!ami_ns_ra_needs_snapshot(&pending, 899UL),
             "a repeated RDNSS advertisement refreshes its lifetime");
     h_check(ami_ns_ra_needs_snapshot(&pending, 900UL),
@@ -235,15 +238,49 @@ static void h_case_infinite_and_wrapped_time(void)
     memset(&pending, 0, sizeof(pending));
     memset(&snapshot, 0, sizeof(snapshot));
 
-    ami_ns_ra_rdnss(&pending, one, (ULONG)~0UL, 20UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, (ULONG)~0UL, 20UL);
     (void)ami_ns_ra_snapshot(&pending, &snapshot, 20UL);
     h_check(!ami_ns_ra_needs_snapshot(&pending, (ULONG)~0UL),
             "the RFC infinite lifetime does not expire");
 
-    ami_ns_ra_rdnss(&pending, one, 1UL, (ULONG)~0UL - 20UL);
+    ami_ns_ra_rdnss(&pending, 0U, one, 1UL, (ULONG)~0UL - 20UL);
     h_check(ami_ns_ra_snapshot(&pending, &snapshot, 29UL) &&
             snapshot.rdnss_count == 0,
             "RDNSS expiry survives the ThreadX tick counter wrapping");
+}
+
+
+static void h_case_rdnss_interfaces_own_independently(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    const ULONG one[4] = {0x20010db8UL, 0UL, 0x53UL, 1UL};
+    const ULONG two[4] = {0x20010db8UL, 0UL, 0x53UL, 2UL};
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_rdnss(&pending, 0U, one, 10UL, 0UL);
+    ami_ns_ra_rdnss(&pending, 1U, one, 20UL, 0UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 0UL) &&
+            snapshot.rdnss_count == 1 &&
+            h_address_is(&snapshot.rdnss[0], 1UL),
+            "the same server on two interfaces appears once in the resolver");
+
+    ami_ns_ra_rdnss(&pending, 0U, one, 0UL, 1UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 1UL) &&
+            snapshot.rdnss_count == 1 &&
+            h_address_is(&snapshot.rdnss[0], 1UL),
+            "withdrawal on one interface preserves the other advertisement");
+
+    ami_ns_ra_rdnss(&pending, 0U, two, 30UL, 2UL);
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 2UL) &&
+            snapshot.rdnss_count == 2,
+            "distinct interface advertisements form one resolver union");
+
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 1600UL) &&
+            snapshot.rdnss_count == 0,
+            "each interface advertisement expires on its own lifetime");
 }
 
 
@@ -254,6 +291,7 @@ int main(void)
     h_case_withdraw_and_limits();
     h_case_rdnss_lifetime_expires_and_refreshes();
     h_case_infinite_and_wrapped_time();
+    h_case_rdnss_interfaces_own_independently();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff never nests its critical section");

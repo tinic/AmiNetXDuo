@@ -62,12 +62,11 @@ VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
     AmiNetStack *ns = ami_netstack_raw();
 
     (VOID)ip_ptr;
-    (VOID)interface_index;
-
     if (ns == NULL || dns_address == NULL)
         return;
 
-    ami_ns_ra_rdnss(&ns->ns_Ra, dns_address, lifetime, tx_time_get());
+    ami_ns_ra_rdnss(&ns->ns_Ra, (UWORD)interface_index, dns_address,
+                    lifetime, tx_time_get());
 }
 
 /*

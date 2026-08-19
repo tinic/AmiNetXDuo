@@ -308,12 +308,11 @@ struct AmiNetStack
      * holds its mutex across a query, and a query needs the IP thread.  So it
      * only writes here, and the next lookup takes what it finds.
      *
-     * This is the set the router last described, not a log of what it has ever
-     * said: a lifetime of zero takes an entry back out (RFC 8106 5.1), and a
-     * finite lifetime is pruned before the next lookup or report.  The absorb
-     * step reconciles the DNS client and reported configuration against that
-     * set rather than only adding.  Without it a dead advertised server stays
-     * in the resolver for the life of the machine.
+     * This is the set each interface's router last described, not a log of
+     * what any router has ever said.  A lifetime of zero takes that source's
+     * entry back out (RFC 8106 5.1), and a finite lifetime is pruned before
+     * the next lookup or report.  The resolver receives the union, so one
+     * interface cannot withdraw a server the other still advertises.
      *
      * Four is what RFC 8106 section 5.1 expects a router to advertise (it
      * recommends no more than three) and is the same order as
