@@ -609,6 +609,73 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
     }
 }
 
+/*
+ * Import option 6 from one bound DHCP interface.
+ *
+ * Called once for every interface already bound when the DNS client starts,
+ * and again from the DHCP state callback. The second path matters because
+ * startup returns after any interface gets an address; another DHCP exchange
+ * can finish after the resolver already exists.
+ */
+VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD iface)
+{
+    UCHAR buffer[4 * NX_DNS_MAX_SERVERS];
+    UINT  size = (UINT)sizeof(buffer);
+    UINT  offset;
+
+    if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
+        iface >= ns->ns_IfaceCount ||
+        ns->ns_DhcpState[iface] != (UBYTE)NX_DHCP_STATE_BOUND)
+        return;
+
+    if (nx_dhcp_interface_user_option_retrieve(
+            &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
+            buffer, &size) != NX_SUCCESS)
+        return;
+
+    for (offset = 0; offset + 4 <= size; offset += 4)
+    {
+        AmiResolverConfig *r = &ns->ns_Config.resolver;
+        ULONG server = ((ULONG)buffer[offset]     << 24) |
+                       ((ULONG)buffer[offset + 1] << 16) |
+                       ((ULONG)buffer[offset + 2] <<  8) |
+                        (ULONG)buffer[offset + 3];
+        BOOL  known = FALSE;
+        UINT  add_status;
+        UWORD n;
+
+        if (server == 0UL)
+            continue;
+
+        add_status = nx_dns_server_add(&ns->ns_Dns, server);
+        if (add_status != NX_SUCCESS &&
+            add_status != NX_DNS_DUPLICATE_ENTRY)
+            continue;
+
+        if (add_status == NX_SUCCESS)
+            AMI_INFO("netstack: interface %ld DHCP name server "
+                     "%lu.%lu.%lu.%lu", (long)iface,
+                     (unsigned long)((server >> 24) & 0xFFUL),
+                     (unsigned long)((server >> 16) & 0xFFUL),
+                     (unsigned long)((server >>  8) & 0xFFUL),
+                     (unsigned long)(server & 0xFFUL));
+
+        /* Keep the list reported by ShowNetStatus and the Roadshow APIs in
+           step with the one the DNS client actually uses. */
+        ami_ns_resolver_forbid();
+        for (n = 0; n < r->nameserver_count; n++)
+            if (r->nameserver[n] == server)
+                known = TRUE;
+
+        if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
+        {
+            r->nameserver_use[r->nameserver_count] = 1;
+            r->nameserver[r->nameserver_count++]   = server;
+        }
+        ami_ns_resolver_permit();
+    }
+}
+
 LONG ami_netstack_dns_start(AmiNetStack *ns)
 {
     UINT  status;
@@ -681,66 +748,7 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
            record. A second card can have a different reachable resolver, so
            collect option 6 from every interface holding a lease. */
         for (iface = 0; iface < ns->ns_IfaceCount; iface++)
-        {
-            UCHAR buffer[4 * NX_DNS_MAX_SERVERS];
-            UINT  size = (UINT)sizeof(buffer);
-            UINT  offset;
-
-            if (ns->ns_DhcpState[iface] != (UBYTE)NX_DHCP_STATE_BOUND)
-                continue;
-
-            if (nx_dhcp_interface_user_option_retrieve(
-                    &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
-                    buffer, &size) != NX_SUCCESS)
-                continue;
-
-            for (offset = 0; offset + 4 <= size; offset += 4)
-            {
-                AmiResolverConfig *r = &ns->ns_Config.resolver;
-                ULONG server = ((ULONG)buffer[offset]     << 24) |
-                               ((ULONG)buffer[offset + 1] << 16) |
-                               ((ULONG)buffer[offset + 2] <<  8) |
-                                (ULONG)buffer[offset + 3];
-                BOOL  known = FALSE;
-                UINT  add_status;
-                UWORD n;
-
-                if (server == 0UL)
-                    continue;
-
-                add_status = nx_dns_server_add(&ns->ns_Dns, server);
-                if (add_status != NX_SUCCESS &&
-                    add_status != NX_DNS_DUPLICATE_ENTRY)
-                    continue;
-
-                if (add_status == NX_SUCCESS)
-                    AMI_INFO("netstack: interface %ld DHCP name server "
-                             "%lu.%lu.%lu.%lu", (long)iface,
-                             (unsigned long)((server >> 24) & 0xFFUL),
-                             (unsigned long)((server >> 16) & 0xFFUL),
-                             (unsigned long)((server >>  8) & 0xFFUL),
-                             (unsigned long)(server & 0xFFUL));
-
-                /*
-                 * Record it in the configuration as well as in the DNS client.
-                 * ShowNetStatus and ObtainDomainNameServerList() report from
-                 * the configuration, so without this a DHCP machine lists the
-                 * servers from the file (or none) while resolving through the
-                 * ones the lease supplied.
-                 */
-                for (n = 0; n < r->nameserver_count; n++)
-                    if (r->nameserver[n] == server)
-                        known = TRUE;
-
-                if (!known && r->nameserver_count < AMI_CFG_MAX_NAMESERVERS)
-                {
-                    /* Positive: the lease put it here, not the file, so the
-                       count is the real one. */
-                    r->nameserver_use[r->nameserver_count] = 1;
-                    r->nameserver[r->nameserver_count++]   = server;
-                }
-            }
-        }
+            ami_netstack_dns_dhcp_bound(ns, iface);
     }
 
     return AMI_NET_OK;

@@ -1409,6 +1409,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     case NX_DHCP_STATE_BOUND:
         AMI_INFO("netstack: interface %ld has a DHCP lease",
                  (long)iface_index);
+        ami_netstack_dns_dhcp_bound(ns, (UWORD)iface_index);
         break;
 
     case NX_DHCP_STATE_RENEWING:

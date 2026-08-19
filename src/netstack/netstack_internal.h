@@ -521,6 +521,7 @@ LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
+VOID ami_netstack_dns_dhcp_bound(AmiNetStack *ns, UWORD interface_index);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */
 VOID ami_ns_copy_name(char *dst, const char *src, ULONG size);
