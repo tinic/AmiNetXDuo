@@ -654,7 +654,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          * S2WERR_BAD_EVENT".  cnet.device's accepted set is the seven below,
          * so no stack that works with it asks for the eighth.
          */
-        if ((mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
+        /* Zero names no condition and would otherwise queue forever: no
+           future post can share a bit with it. */
+        if (mask == 0 ||
+            (mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
                              S2EVENT_ONLINE | S2EVENT_OFFLINE |
                              S2EVENT_BUFF | S2EVENT_HARDWARE)) != 0)
         {
