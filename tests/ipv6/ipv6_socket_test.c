@@ -605,6 +605,31 @@ register LONG _clob_a3 __asm("a3");
     return(res);
 }
 
+static LONG bsd_WaitSelectExcept(LONG nfds, APTR exceptfds, APTR timeout)
+{
+register struct Library *a6 __asm("a6") = SocketBase;
+register LONG            d0 __asm("d0") = nfds;
+register APTR            a0 __asm("a0") = NULL;
+register APTR            a1 __asm("a1") = NULL;
+register APTR            a2 __asm("a2") = exceptfds;
+register APTR            a3 __asm("a3") = timeout;
+register APTR            d1 __asm("d1") = NULL;
+register LONG            res __asm("d0");
+register LONG _clob_d1 __asm("d1");
+register LONG _clob_a0 __asm("a0");
+register LONG _clob_a1 __asm("a1");
+register LONG _clob_a2 __asm("a2");
+register LONG _clob_a3 __asm("a3");
+
+    __asm __volatile ("jsr a6@(-126:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1), "=r" (_clob_a2), "=r" (_clob_a3)
+                      : "r" (a6), "r" (d0), "r" (a0), "r" (a1), "r" (a2),
+                        "r" (a3), "r" (d1)
+                      : "cc", "memory");
+    return(res);
+}
+
 static APTR bsd_inet_ntop(LONG af, APTR src, APTR dst, LONG size)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -754,6 +779,19 @@ struct t_timeval tv;
     tv.tv_micro = 0;
 
     return bsd_WaitSelect(fd + 1, &set, &tv);
+}
+
+static LONG t_socket_exception(LONG fd)
+{
+struct t_fdset   set;
+struct t_timeval tv;
+
+    t_bzero(&set, sizeof(set));
+    set.bits[(ULONG)fd >> 5] = 1UL << ((ULONG)fd & 31UL);
+    tv.tv_secs  = 0;
+    tv.tv_micro = 0;
+
+    return bsd_WaitSelectExcept(fd + 1, &set, &tv);
 }
 
 
@@ -1622,6 +1660,49 @@ char                  buffer[16];
     rc = bsd_recv(fd, buffer, sizeof(buffer), T_MSG_DONTWAIT);
     (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EWOULDBLOCK),
                   "recv does not repeat consumed UDP ICMP error", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
+static VOID t_test_udp_so_error_clears_exception(VOID)
+{
+LONG                  fd;
+LONG                  rc;
+LONG                  error = 0;
+LONG                  error_len = sizeof(error);
+struct t_sockaddr_in  sa;
+static const char     probe[] = "UDP exception probe";
+
+    t_log("UDP SO_ERROR clears select exception");
+
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "UDP exception socket", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 40;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_connect(fd, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect UDP exception probe",
+                  bsd_Errno());
+    rc = bsd_send(fd, (APTR)probe, sizeof(probe), 0);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(probe)),
+                  "send UDP exception probe", rc);
+
+    Delay(3);
+    rc = t_socket_exception(fd);
+    (VOID)t_check((BOOL)(rc == 1), "UDP ICMP error sets exceptfds", rc);
+
+    rc = bsd_getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len);
+    (VOID)t_check((BOOL)(rc == 0 && error == T_ECONNREFUSED),
+                  "consume UDP exception through SO_ERROR", error);
+
+    rc = t_socket_exception(fd);
+    (VOID)t_check((BOOL)(rc == 0),
+                  "consumed SO_ERROR clears exceptfds", rc);
 
     (VOID)bsd_CloseSocket(fd);
 }
@@ -3014,6 +3095,7 @@ int main(void)
     t_test_udp_disconnect();
     t_test_udp_icmp_readiness();
     t_test_udp_so_error_consumes_icmp();
+    t_test_udp_so_error_clears_exception();
     t_test_datagram_shutdown();
     t_test_shutdown_fionread();
     t_test_raw_bound_address();
