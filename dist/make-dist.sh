@@ -142,6 +142,14 @@ case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 WANT_MINIMAL=1
 [ -z "${AMINETXDUO_DIST_NO_MINIMAL:-}" ] || WANT_MINIMAL=0
 
+# The seven the release workflow turns off for the floor drawer.  Kept here so
+# a hand-run of this script produces the same minimal library CI does; the
+# workflow's own copy at .github/workflows/release.yml is the other one, and
+# they have to agree.
+MINIMAL_OPTIONS="-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
+-DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF \
+-DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
+
 BUILDS=("$BUILD")
 [ "$WANT_MINIMAL" = "0" ] || BUILDS+=("$MINIMAL_BUILD")
 
@@ -156,14 +164,33 @@ cpu_of() {
     sed -n 's/^AMINETXDUO_CPU:STRING=//p' "$1/CMakeCache.txt" 2>/dev/null
 }
 
+# A missing build is built, not reported.  This script's job is to produce the
+# archive, and printing the two commands that would produce it and exiting 2 is
+# the same work with a person in the middle of it.  AMINETXDUO_DIST_NO_BUILD=1
+# restores the old behaviour for a caller that wants to be told rather than
+# served -- CI sets it, because there a missing tree means the build stage did
+# not run and building it here would hide that.
 for b in "${BUILDS[@]}"; do
-    [ -d "$b" ] || {
-        echo "missing build: $b" >&2
-        echo "  cmake -S . -B $b -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\" >&2
-        echo "        -DCMAKE_BUILD_TYPE=Release" >&2
-        echo "  cmake --build $b --parallel" >&2
-        exit 2
-    }
+    if [ ! -d "$b" ]; then
+        if [ -n "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+            echo "missing build: $b" >&2
+            echo "  cmake -S . -B $b -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\" >&2
+            echo "        -DCMAKE_BUILD_TYPE=Release" >&2
+            echo "  cmake --build $b --parallel" >&2
+            exit 2
+        fi
+
+        cpu_flag=-DAMINETXDUO_CPU=any
+        min_flags=
+        [ "$b" != "$MINIMAL_BUILD" ] || min_flags="$MINIMAL_OPTIONS"
+
+        echo "==> building $b" >&2
+        # shellcheck disable=SC2086
+        cmake -S "$ROOT" -B "$b" \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+              -DCMAKE_BUILD_TYPE=Release $cpu_flag $min_flags >&2 || exit 2
+        cmake --build "$b" --parallel >&2 || exit 2
+    fi
     got=$(cpu_of "$b")
     [ "$got" = "any" ] || {
         echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2

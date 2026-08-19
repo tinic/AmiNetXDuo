@@ -288,6 +288,10 @@ jobs:
       - name: Build the distribution archive
         env:
           AMINETXDUO_SSH: build/ssh/dbclient
+          # Report a missing build rather than making one: here it means the
+          # build step above did not run, and building it inside the packer
+          # would hide that.
+          AMINETXDUO_DIST_NO_BUILD: 1
         run: dist/make-dist.sh -b build/release
 
       # A release that silently lost ssh or the bundled Installer would look
