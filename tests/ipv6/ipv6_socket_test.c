@@ -193,6 +193,9 @@ struct t_addrinfo
 
 #define T_ENOPROTOOPT       42
 #define T_EAFNOSUPPORT      47
+#define T_EWOULDBLOCK       35
+
+#define T_MSG_DONTWAIT      0x80
 
 #define T_AI_PASSIVE        1
 #define T_AI_NUMERICHOST    4
@@ -945,6 +948,67 @@ char                    buffer[64];
                          sa.sin6_addr.s6_addr[15] == 1),
                   "recvfrom reported the ::1 source as sockaddr_in6",
                   (LONG)sa.sin6_family);
+
+    (VOID)bsd_CloseSocket(server);
+    (VOID)bsd_CloseSocket(client);
+}
+
+/* NetX queues UDP by port.  A socket bound to one address must still reject
+   a datagram for another address on the same interface; 127/8 makes that
+   distinction testable without configuring a second interface address. */
+static VOID t_test_udp_bound_address(VOID)
+{
+LONG                  server, client;
+LONG                  rc;
+ULONG                 len;
+struct t_sockaddr_in  sa;
+static const char     wrong[] = "for 127.0.0.1";
+static const char     right[] = "for 127.0.0.2";
+char                  buffer[64];
+
+    t_log("UDP exact local-address bind");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "udp4 alias sockets",
+                 bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len         = sizeof(sa);
+    sa.sin_family      = T_AF_INET;
+    sa.sin_port        = T_PORT + 5;
+    sa.sin_addr        = 0x7F000002UL;          /* 127.0.0.2 */
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    if (!t_check((BOOL)(rc == 0), "bind 127.0.0.2", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(server);
+        (VOID)bsd_CloseSocket(client);
+        return;
+    }
+
+    sa.sin_addr = 0x7F000001UL;                 /* 127.0.0.1 */
+    rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)), "sendto wrong alias", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    len = sizeof(sa);
+    rc = bsd_recvfrom(server, buffer, sizeof(buffer), T_MSG_DONTWAIT,
+                      &sa, &len);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "bound socket rejects the wrong alias", bsd_Errno());
+
+    sa.sin_addr = 0x7F000002UL;
+    rc = bsd_sendto(client, (APTR)right, sizeof(right), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right)), "sendto bound alias", rc);
+
+    t_bzero(buffer, sizeof(buffer));
+    len = sizeof(sa);
+    rc = bsd_recvfrom(server, buffer, sizeof(buffer), T_MSG_DONTWAIT,
+                      &sa, &len);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(right) && t_streq(buffer, right)),
+                  "bound socket receives its own alias", rc);
 
     (VOID)bsd_CloseSocket(server);
     (VOID)bsd_CloseSocket(client);
@@ -2006,6 +2070,7 @@ int main(void)
     t_test_socket_basics();
     t_test_tcp_loopback();
     t_test_udp_loopback();
+    t_test_udp_bound_address();
     t_test_cmsg_macros();
     t_test_cmsg_options();
     t_test_cmsg_receive();

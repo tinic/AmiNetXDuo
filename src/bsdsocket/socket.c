@@ -1828,8 +1828,9 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
              * for the others if nothing stopped it. Two things do:
              * bsd_bind_accepts() resets a completed TCP connection that came
              * in on another interface, and bsd_recv_udp() releases a datagram
-             * that did. Both go through bsd_bind_wants_interface(), so there
-             * is one rule and not two.
+             * whose IP destination is not this address. Both share the
+             * bsd_bind_wants_interface() gate; UDP adds the exact destination
+             * comparison needed for several addresses on one interface.
              */
             break;
 

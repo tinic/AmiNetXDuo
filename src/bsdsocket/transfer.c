@@ -518,6 +518,80 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 }
 
 /*
+ * Does this datagram belong to the local address the socket named?
+ *
+ * NetX demultiplexes UDP on the port alone.  The interface gate shared with
+ * TCP is enough when an interface owns one address, but not for IPv6's many
+ * addresses per interface or IPv4 loopback's whole 127/8.  Compare the
+ * destination in the IP header as well, leaving a wildcard bind deliberately
+ * able to receive either family on a dual-stack socket.
+ */
+static BOOL bsd_udp_to_local(const AmiSocket *sock, const NX_PACKET *packet)
+{
+    const UBYTE *header;
+    ULONG        available;
+
+    if (packet == NX_NULL ||
+        !bsd_bind_wants_interface(sock, bsd_packet_interface(packet)))
+        return FALSE;
+
+    if (sock->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V4 &&
+        sock->as_LocalAddr.nxd_ip_address.v4 == 0UL)
+        return TRUE;
+
+#ifdef AMINETXDUO_IPV6
+    if (sock->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
+        (sock->as_LocalAddr.nxd_ip_address.v6[0] |
+         sock->as_LocalAddr.nxd_ip_address.v6[1] |
+         sock->as_LocalAddr.nxd_ip_address.v6[2] |
+         sock->as_LocalAddr.nxd_ip_address.v6[3]) == 0UL)
+        return TRUE;
+#endif
+
+    if (packet->nx_packet_ip_header == NX_NULL)
+        return FALSE;
+
+    header = (const UBYTE *)packet->nx_packet_ip_header;
+    if (packet->nx_packet_append_ptr < header)
+        return FALSE;
+
+    available = (ULONG)(packet->nx_packet_append_ptr - header);
+
+#ifdef AMINETXDUO_IPV6
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V6)
+    {
+        ULONG destination[4];
+
+        if (sock->as_LocalAddr.nxd_ip_version != NX_IP_VERSION_V6 ||
+            available < 40UL)
+            return FALSE;
+
+        bsd_in6_to_words(&header[24], destination);
+
+        return (destination[0] == sock->as_LocalAddr.nxd_ip_address.v6[0] &&
+                destination[1] == sock->as_LocalAddr.nxd_ip_address.v6[1] &&
+                destination[2] == sock->as_LocalAddr.nxd_ip_address.v6[2] &&
+                destination[3] == sock->as_LocalAddr.nxd_ip_address.v6[3])
+                   ? TRUE : FALSE;
+    }
+#endif
+
+    if (packet->nx_packet_ip_version == NX_IP_VERSION_V4 && available >= 20UL)
+    {
+        ULONG destination = ((ULONG)header[16] << 24) |
+                            ((ULONG)header[17] << 16) |
+                            ((ULONG)header[18] <<  8) |
+                             (ULONG)header[19];
+
+        return (sock->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V4 &&
+                destination == sock->as_LocalAddr.nxd_ip_address.v4)
+                   ? TRUE : FALSE;
+    }
+
+    return FALSE;
+}
+
+/*
  * The zone of a received non-global peer.  Unlike a connected socket's
  * as_PeerScopeId, this is per datagram: an unbound socket can receive the same
  * fe80:: address on two different interfaces, and recvfrom()/recvmsg() must
@@ -1256,8 +1330,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
             nxd_udp_source_extract(packet, &from_ip, &from_port);
             from_scope = bsd_packet_scope_id(packet, &from_ip);
 
-            if (bsd_bind_wants_interface(sock,
-                                         bsd_packet_interface(packet)) &&
+            if (bsd_udp_to_local(sock, packet) &&
                 bsd_udp_from_peer(sock, &from_ip, from_port, from_scope))
                 break;
 
