@@ -75,6 +75,7 @@
 #ifdef AMINETXDUO_IPV6
 #include "nx_ip.h"
 #include "nx_ipv6.h"
+#include "../ipv6/ipv6_srcsel.h"
 #endif
 
 #include <proto/exec.h>
@@ -141,6 +142,79 @@ static VOID bsd_raw_flush(AmiSocket *sock)
 
     sock->as_RawTail  = NX_NULL;
     sock->as_RawCount = 0;
+}
+
+/*
+ * Does an inbound datagram belong to a connected raw socket?
+ *
+ * A raw connect is more than a default send destination: BSD's raw PCB input
+ * match also compares the foreign address.  NetX's one IP-level hook has no
+ * PCB to do that for us, so reject the packet before it costs a copy or a
+ * queue slot.  The caller has already validated nx_packet_ip_header and the
+ * fixed header length.
+ */
+static BOOL bsd_raw_from_peer(const AmiSocket *sock, const NX_PACKET *packet,
+                              BOOL is_v6)
+{
+    const UBYTE *header = packet->nx_packet_ip_header;
+
+    if ((sock->as_Flags & ASF_CONNECTED) == 0)
+        return TRUE;
+
+#ifdef AMINETXDUO_IPV6
+    if (is_v6)
+    {
+        NXD_ADDRESS source;
+
+        if (sock->as_PeerAddr.nxd_ip_version != NX_IP_VERSION_V6)
+            return FALSE;
+
+        source.nxd_ip_version = NX_IP_VERSION_V6;
+        bsd_in6_to_words(&header[8], source.nxd_ip_address.v6);
+
+        if (source.nxd_ip_address.v6[0] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[0] ||
+            source.nxd_ip_address.v6[1] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[1] ||
+            source.nxd_ip_address.v6[2] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[2] ||
+            source.nxd_ip_address.v6[3] !=
+                sock->as_PeerAddr.nxd_ip_address.v6[3])
+            return FALSE;
+
+        if (sock->as_PeerScopeId != 0UL &&
+            anx6_scope(source.nxd_ip_address.v6) < 0xEU &&
+            !(source.nxd_ip_address.v6[0] == 0UL &&
+              source.nxd_ip_address.v6[1] == 0UL &&
+              source.nxd_ip_address.v6[2] == 0UL &&
+              source.nxd_ip_address.v6[3] == 1UL))
+        {
+            const NXD_IPV6_ADDRESS *matched =
+                packet->nx_packet_address.nx_packet_ipv6_address_ptr;
+            const NX_INTERFACE *nxif =
+                (matched != NX_NULL)
+                    ? matched->nxd_ipv6_address_attached : NX_NULL;
+
+            if (nxif == NX_NULL ||
+                (ULONG)nxif->nx_interface_index + 1UL !=
+                    sock->as_PeerScopeId)
+                return FALSE;
+        }
+
+        return TRUE;
+    }
+#else
+    (VOID)is_v6;
+#endif
+
+    if (sock->as_PeerAddr.nxd_ip_version != NX_IP_VERSION_V4)
+        return FALSE;
+
+    return (((ULONG)header[12] << 24) |
+            ((ULONG)header[13] << 16) |
+            ((ULONG)header[14] <<  8) |
+             (ULONG)header[15]) == sock->as_PeerAddr.nxd_ip_address.v4
+               ? TRUE : FALSE;
 }
 
 /* ----------------------------------------------------------------- filter, */
@@ -215,6 +289,9 @@ static UINT bsd_raw_filter(NX_IP *ip_ptr, ULONG protocol, NX_PACKET *packet_ptr)
 
         /* A datagram belongs to the family its socket was opened in. */
         if (((sock->as_Flags & ASF_INET6) != 0) != (is_v6 != FALSE))
+            continue;
+
+        if (!bsd_raw_from_peer(sock, packet_ptr, is_v6))
             continue;
 
         if (sock->as_RawCount >= sock->as_RawMax)
