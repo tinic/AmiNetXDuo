@@ -24,6 +24,9 @@
 #                   that matters: the interface file says CONFIGURE=NONE and
 #                   the machine is on the network anyway
 #   reach           ping6 reached the peer over that address
+#   resumed_ula     Offline released the address, Online acquired one again,
+#                   and the second ShowNetStatus saw it
+#   resumed_reach   the second ping6, after Online, reached the peer
 #   renew_seen      with -R, a Renew went out before the lease expired and the
 #                   address did not move
 #   release_seen    RemoveNetInterface sent a Release, so the server can give
@@ -142,8 +145,11 @@ ADDIF="$BUILD/src/tools/AddNetInterface"
 RMIF="$BUILD/src/tools/RemoveNetInterface"
 SHOW="$BUILD/src/tools/ShowNetStatus"
 PING="$BUILD/src/tools/ping"
+ONLINE="$BUILD/src/tools/Online"
+OFFLINE="$BUILD/src/tools/Offline"
 SMOKE="$BUILD/src/tools/ToolsSmoke"
-for f in "$BSD" "$ADDIF" "$RMIF" "$SHOW" "$PING" "$SMOKE"; do
+for f in "$BSD" "$ADDIF" "$RMIF" "$SHOW" "$PING" "$ONLINE" "$OFFLINE" \
+         "$SMOKE"; do
     [ -f "$f" ] || { echo "result=badinvocation reason=nobuild missing=$f"; exit 2; }
 done
 
@@ -311,6 +317,8 @@ cp "$ADDIF"  "$STAGE/AddNetInterface"
 cp "$RMIF"   "$STAGE/RemoveNetInterface"
 cp "$SHOW"   "$STAGE/ShowNetStatus"
 cp "$PING"   "$STAGE/ping"
+cp "$ONLINE" "$STAGE/Online"
+cp "$OFFLINE" "$STAGE/Offline"
 
 # NO IPv4 AT ALL, which is the configuration under test.  Nothing in
 # DEVS:Internet either, so there is no name server and no route written down:
@@ -346,8 +354,16 @@ AMINETXDUO_SANA2_CARD="$ANXCARD" \
         echo "wait $(( LEASE / 2 + 20 ))"
         echo "SYS:ShowNetStatus INTERFACE eth0"
     fi
-    # The Release: RemoveNetInterface takes the interface down, and taking it
-    # down is what sends it.
+    # A temporary link-down gives the lease back and stops the client.  Online
+    # must restart the same stateful/stateless exchange and acquire an address
+    # again; the second status and ping are the regression for that lifecycle.
+    echo "SYS:Offline eth0"
+    echo "wait 5"
+    echo "SYS:Online eth0"
+    echo "wait $SETTLE"
+    echo "SYS:ShowNetStatus INTERFACE eth0"
+    echo "SYS:ping -c 3 $PEER_ULA"
+    # RemoveNetInterface sends the final Release before detaching the card.
     echo "SYS:RemoveNetInterface eth0"
     echo "wait 5"
 } > "$STAGE/commands.txt"
@@ -513,8 +529,26 @@ reach=no
 sed -n "/^===== SYS:ping/,/^----- rc/p" "$OUT" 2>/dev/null \
     | grep -qE "bytes from|[1-3] (packets )?received" && reach=yes
 
+# At least two ULA reports: one before Offline and one after Online.  A single
+# report followed by no second address is the defect this arm was added for.
+ula_reports=$(sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
+    | grep -c "address6  *${ULA_PREFIX}" || true)
+resumed_ula=no
+[ "$ula_reports" -ge 2 ] && resumed_ula=yes
+
+# Select the last ping block rather than accepting the successful one before
+# Offline.  ToolsSmoke brackets every command with these two marker lines.
+resumed_reach=no
+awk '
+    /^===== SYS:ping/ { block = ""; inside = 1 }
+    inside { block = block $0 "\n" }
+    inside && /^----- rc/ { last = block; inside = 0 }
+    END { printf "%s", last }
+' "$OUT" 2>/dev/null | grep -qE "bytes from|[1-3] (packets )?received" &&
+    resumed_reach=yes
+
 echo "guest_ula=$guest_ula guest_addr=${guest_addr:-none} ipv4_none=$ipv4_none"
-echo "reach=$reach"
+echo "reach=$reach resumed_ula=$resumed_ula resumed_reach=$resumed_reach"
 
 # The address did not move across the renewal.  Two ShowNetStatus runs, the
 # second after T1; both must name the same address.
@@ -540,6 +574,8 @@ note() { echo "FAIL $1"; fail=1; }
 [ "$guest_ula"    = yes ] || note "guest_ula: no address from ${ULA_PREFIX}"
 [ "$ipv4_none"    = yes ] || note "ipv4_none: the guest has an IPv4 address"
 [ "$reach"        = yes ] || note "reach: ping6 to $PEER_ULA did not answer"
+[ "$resumed_ula"  = yes ] || note "resumed_ula: Online acquired no new address"
+[ "$resumed_reach" = yes ] || note "resumed_reach: ping6 failed after Online"
 [ "$release_seen" = yes ] || note "release_seen: no Release when the interface went down"
 
 if [ "$RENEW" = yes ]; then

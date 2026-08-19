@@ -426,6 +426,8 @@ VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index);
  */
 VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns);
+VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index);
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_address_notify(NX_IP *ip_ptr, UINT status,
                                         UINT interface_index,

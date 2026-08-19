@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo, the two DHCPv6 decisions that are ours. See dhcpv6_wire.h.
+ * AmiNetXDuo, the DHCPv6 decisions that are ours. See dhcpv6_wire.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -25,6 +25,20 @@ AmiDhcpv6Action ami_dhcpv6_action_for_ra(unsigned int ra_flag)
         return AMI_DHCPV6_ACT_STATELESS;
 
     return AMI_DHCPV6_ACT_NONE;
+}
+
+AmiDhcpv6Action ami_dhcpv6_resume_action(unsigned int created,
+                                         unsigned int started,
+                                         unsigned int asked,
+                                         unsigned int stateful,
+                                         unsigned int selected_interface,
+                                         unsigned int raised_interface)
+{
+    if (!created || started || !asked ||
+        selected_interface != raised_interface)
+        return AMI_DHCPV6_ACT_NONE;
+
+    return stateful ? AMI_DHCPV6_ACT_STATEFUL : AMI_DHCPV6_ACT_STATELESS;
 }
 
 unsigned long ami_dhcpv6_duid_ll(const unsigned char *mac, unsigned long maclen,

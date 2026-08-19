@@ -120,8 +120,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME ipv6_ra COMMAND test_ipv6_ra)
 
-    # The two DHCPv6 decisions that are ours: what the router advertisement's
-    # M and O flags ask for, and the DUID this machine identifies itself by.
+    # The DHCPv6 decisions that are ours: what the router advertisement's M
+    # and O flags ask for, whether a stopped client resumes on link-up, and
+    # the DUID this machine identifies itself by.
     # No NetX Duo and no shim -- src/netstack/dhcpv6_wire.c is plain C with no
     # includes, precisely so that the stack and this binary compile the same
     # bytes.  The lab router sets M and O together and cannot be told not to,

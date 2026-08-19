@@ -2482,7 +2482,13 @@ LONG netstack_interface_up(UWORD index)
 
 #ifdef AMINETXDUO_IPV6
     if (status == NX_SUCCESS)
+    {
+        /* Re-arm router solicitation first: SLAAC is what a resumed DHCPv6
+           client's M and O bits come from, so asking the router again before
+           restarting the client keeps the two in the order bring-up uses. */
         ami_netstack_ipv6_interface_up(ns, index);
+        ami_netstack_dhcpv6_resume(ns, index);
+    }
 #endif
 
     ami_netstack_leave_free(caller);
@@ -2541,6 +2547,7 @@ static VOID ami_ns_release_dhcpv6(UWORD index)
         return;
 
     ami_netstack_dhcpv6_release(ns);
+    ami_netstack_dhcpv6_pause(ns);
 
     ami_netstack_leave_free(caller);
 #else
