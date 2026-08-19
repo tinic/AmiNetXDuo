@@ -313,6 +313,19 @@ static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
         ami_netstack_ipv6_reclaim_notify(ns);
     }
 
+    /*
+     * The half-built client is gone, so the next advertisement has to be
+     * allowed to build another one.  ns_Dhcpv6Asked exists to stop a router
+     * that re-advertises every few minutes from restarting an exchange that
+     * is already running -- and after this there is nothing running.  Leaving
+     * it latched turned every reason to discard into "no DHCPv6 for the life
+     * of this machine", and the most reachable of those reasons is a card
+     * that has not answered S2_GETSTATIONADDRESS by the time the deferred
+     * worker reads its hardware address.
+     */
+    if (ns != NULL)
+        ns->ns_Dhcpv6Asked = FALSE;
+
     return AMI_NET_ERR_KERNEL;
 }
 
@@ -427,6 +440,13 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
                           "reported no hardware address");
                 return ami_ns6_dhcp_discard_partial(ns);
             }
+            /*
+             * A self-check on the vendored client's own fields, so a NetX Duo
+             * update that changes how it stores a DUID is noticed here rather
+             * than on the wire.  It warns: the client built something, and a
+             * DUID this stack did not predict is still a stable identity, so
+             * refusing to configure at all is the worse of the two answers.
+             */
             else if (ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type
                          != (USHORT)3 ||
                      ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type
@@ -438,12 +458,11 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
                      ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_link_layer_address_lsw
                          != lsw)
             {
-                AMI_ERROR("netstack: the DHCPv6 client built a DUID this "
-                          "stack did not ask for (type %ld, hw %ld, len %ld)",
-                          (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type,
-                          (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type,
-                          (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length);
-                return ami_ns6_dhcp_discard_partial(ns);
+                AMI_WARN("netstack: the DHCPv6 client built a DUID this "
+                         "stack did not ask for (type %ld, hw %ld, len %ld)",
+                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type,
+                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type,
+                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length);
             }
         }
 
