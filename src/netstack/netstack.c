@@ -2996,10 +2996,18 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
 
     status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
 
-    /* Same reason as at startup: an interface brought up by hand need not sit
-       out RFC 2131's desynchronisation second either. */
+    /* This path did not call nx_dhcp_start(), but interface_start() performed
+       the same bind/timer/thread activation for the first interface. Record
+       that before its accelerated timer can report BOUND: the resolver handoff
+       rejects callbacks from a client that is not marked started. */
     if (status == NX_SUCCESS)
+    {
+        ns->ns_DhcpStarted = TRUE;
+
+        /* Same reason as at startup: an interface brought up by hand need not
+           sit out RFC 2131's desynchronisation second either. */
         ami_ns_dhcp_discover_now(&ns->ns_Dhcp);
+    }
 
     ami_netstack_leave_free(caller);
 
