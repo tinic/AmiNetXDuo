@@ -917,6 +917,15 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
             if (argp == NULL)
                 return bsd_fail(SocketBase, AMI_EFAULT);
 
+            /* shutdown(SHUT_RD) makes every later receive an EOF even if
+               packets were queued beforehand. Report what recv() can return,
+               not bytes that are now intentionally hidden. */
+            if ((sock->as_Flags & ASF_RDSHUT) != 0)
+            {
+                *(LONG *)argp = 0;
+                return 0;
+            }
+
             if (sock->as_RxPending != NULL)
             {
                 ULONG length = 0;

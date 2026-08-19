@@ -1540,6 +1540,63 @@ char                  buffer[16];
     (VOID)bsd_CloseSocket(udp);
 }
 
+static VOID t_test_shutdown_fionread(VOID)
+{
+LONG                  server, client;
+LONG                  rc;
+LONG                  available = -1;
+struct t_sockaddr_in  sa;
+static const char     data[] = "queued before shutdown";
+
+    t_log("FIONREAD after read shutdown");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0),
+                 "shutdown FIONREAD sockets", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_addr   = 0x7F000001UL;
+
+    sa.sin_port = T_PORT + 34;
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "shutdown FIONREAD server bind",
+                  bsd_Errno());
+
+    sa.sin_port = T_PORT + 35;
+    rc = bsd_bind(client, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "shutdown FIONREAD client bind",
+                  bsd_Errno());
+
+    rc = bsd_connect(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect shutdown FIONREAD server",
+                  bsd_Errno());
+
+    sa.sin_port = T_PORT + 34;
+    rc = bsd_sendto(client, (APTR)data, sizeof(data), 0, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(data)),
+                  "queue datagram before read shutdown", rc);
+
+    Delay(2);
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == (LONG)sizeof(data)),
+                  "FIONREAD sees datagram before shutdown", available);
+
+    rc = bsd_shutdown(server, 0);
+    (VOID)t_check((BOOL)(rc == 0), "shutdown UDP read half", bsd_Errno());
+
+    available = -1;
+    rc = bsd_IoctlSocket(server, T_FIONREAD, &available);
+    (VOID)t_check((BOOL)(rc == 0 && available == 0),
+                  "FIONREAD is zero after read shutdown", available);
+
+    (VOID)bsd_CloseSocket(client);
+    (VOID)bsd_CloseSocket(server);
+}
+
 /* A custom raw protocol avoids ICMP's echo traffic while exercising the same
    global receive tee.  Receiving the first packet on the wildcard sender
    synchronizes with the IP thread before the bound socket is polled. */
@@ -2817,6 +2874,7 @@ int main(void)
     t_test_udp_icmp_readiness();
     t_test_udp_so_error_consumes_icmp();
     t_test_datagram_shutdown();
+    t_test_shutdown_fionread();
     t_test_raw_bound_address();
     t_test_raw_bind_after_peek();
     t_test_raw_connect_after_peek();
