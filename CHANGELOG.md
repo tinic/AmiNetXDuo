@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `httpd` refuses a document root longer than it can hold instead of serving a shortened one, which named a different directory
+- The 68020 modular-squaring primitive is a no-op on an empty modulus rather than running its loop backwards through memory. Nothing in the stack calls it that way; a program using the routine directly had no way to know that was required
 - Asking to share the library base no longer loses the rest of the request. The answer is still no -- signals and timer state belong to the task that opened the library -- but refusing the tag discarded every tag after it in the same call, so a program that asked to share and linked its errno in one go ran without an errno for its whole life
 - Leaving a range of multicast addresses removes the ones that are there. A program that joined them one at a time, or that had already left one, was told the whole request failed and stayed in every group in the range
 - `getaddrinfo()` with no hints resolves a service that exists only over UDP again -- `tftp`, `ntp`, `syslog` and the rest. Tightening the protocol checks moved the lookup to after the socket type was defaulted, and the "try both protocols" step could then never run
