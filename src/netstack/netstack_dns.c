@@ -689,8 +689,23 @@ static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
     UWORD iface;
 
     for (iface = 0; iface < ns->ns_IfaceCount; iface++)
-        if ((pending & (1UL << iface)) != 0UL)
-            ami_netstack_dns_dhcp_reconcile(ns, iface);
+    {
+        if ((pending & (1UL << iface)) == 0UL)
+            continue;
+
+        /*
+         * The reconcile has several returns that keep the last coherent
+         * option set rather than acting on a partial read -- a server whose
+         * option 6 does not fit our buffer, an option 119 or 15 that will not
+         * retrieve.  Those want the interface looked at again, and the mark
+         * was taken above, so re-mark on the way out.  Without this the "try
+         * again next time" the comments promise never happens: for a stable
+         * lease the next mark is T1, and until then that interface has no DNS
+         * servers, no domain and no search list.
+         */
+        if (!ami_netstack_dns_dhcp_reconcile(ns, iface))
+            ami_ns_dns_pending_mark(&ns->ns_DhcpDnsPending, iface);
+    }
 
 #ifdef AMINETXDUO_IPV6
     /* DHCPv6 first, so its servers are ahead of the advertisement's in the
@@ -981,7 +996,7 @@ static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
  * lease owns no servers, host name, or suffixes. The per-interface sets make
  * those withdrawals precise.
  */
-VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
+BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 {
     ULONG offered[AMI_CFG_MAX_NAMESERVERS];
     ULONG raw[NX_DNS_MAX_SERVERS];
@@ -992,7 +1007,7 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 
     if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
         iface >= ns->ns_IfaceCount)
-        return;
+        return TRUE;    /* nothing to do, not "try again" */
 
     ami_ns_dhcp_hostname_reconcile_iface(ns, iface);
     ami_ns_dhcp_domain_reconcile(ns, iface);
@@ -1005,9 +1020,11 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
             (UCHAR *)raw, &size);
 
         /* Not carrying option 6 is a valid empty set.  Other failures leave
-           the last coherent lease set in place. */
+           the last coherent lease set in place and ask to be retried: the
+           caller re-marks the interface, because a lease that sits at BOUND
+           produces no further state change until T1. */
         if (status != NX_SUCCESS && status != NX_DHCP_PARSE_ERROR)
-            return;
+            return FALSE;
 
         if (status == NX_SUCCESS)
         {
@@ -1065,6 +1082,8 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
                  (unsigned long)((server >>  8) & 0xFFUL),
                  (unsigned long)(server & 0xFFUL));
     }
+
+    return TRUE;
 }
 
 /* The DHCP client invokes its state callback on its own ThreadX task and, on
@@ -1153,7 +1172,8 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
            record. A second card can have a different reachable resolver and
            search list, so collect every interface holding a lease. */
         for (iface = 0; iface < ns->ns_IfaceCount; iface++)
-            ami_netstack_dns_dhcp_reconcile(ns, iface);
+            if (!ami_netstack_dns_dhcp_reconcile(ns, iface))
+                ami_ns_dns_pending_mark(&ns->ns_DhcpDnsPending, iface);
     }
 
     return AMI_NET_OK;

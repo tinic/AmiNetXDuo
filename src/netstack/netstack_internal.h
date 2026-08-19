@@ -531,7 +531,9 @@ LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out);
 
 LONG ami_netstack_dns_start(AmiNetStack *ns);
 VOID ami_netstack_dns_stop(AmiNetStack *ns);
-VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD interface_index);
+/* FALSE when it kept the last coherent option set rather than acting on a
+   partial read: the caller re-marks the interface so it is tried again. */
+BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD interface_index);
 VOID ami_netstack_dns_dhcp_changed(AmiNetStack *ns, UWORD interface_index);
 
 /* Bounded string copy, always NUL-terminating. netstack_dns.c. */
