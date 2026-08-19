@@ -215,8 +215,9 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
  * empty string when none is given), so txt= chooses its content rather than
  * its existence.
  */
-static VOID ami_ns_mdns_services(AmiNetStack *ns, UINT index)
+static BOOL ami_ns_mdns_services(AmiNetStack *ns, UINT index)
 {
+    BOOL  complete = TRUE;
     UWORD i;
 
     for (i = 0; i < ns->ns_Config.sd_service_count; i++)
@@ -232,16 +233,27 @@ static VOID ami_ns_mdns_services(AmiNetStack *ns, UINT index)
                                      (UCHAR *)svc->type, NX_NULL, txt,
                                      0UL, 0, 0, svc->port,
                                      NX_MDNS_RR_SET_UNIQUE, index);
+        if (status == NX_MDNS_EXIST_SAME_SERVICE)
+        {
+            /* A previous pass installed this record before a later service
+               failed.  It is already part of the publication; continue with
+               the entries which still need to be retried. */
+            continue;
+        }
+
         if (status != NX_SUCCESS)
         {
             AMI_WARN("netstack: '%s' on port %ld is not advertised (%ld)",
                      svc->type, (long)svc->port, (long)status);
+            complete = FALSE;
             continue;
         }
 
         AMI_INFO("netstack: advertising %s port %ld as '%s'",
                  svc->type, (long)svc->port, name);
     }
+
+    return complete;
 }
 
 /* ------------------------------------------------------------- lifecycle */
@@ -345,8 +357,10 @@ static LONG ami_ns_mdns_enable_one(AmiNetStack *ns, UWORD index)
      */
     if (!ns->ns_IfaceMdnsSvc[index])
     {
-        ami_ns_mdns_services(ns, (UINT)index);
-        ns->ns_IfaceMdnsSvc[index] = TRUE;
+        /* Keep this false after any failed add.  A later MDNS=YES or start
+           pass can then retry the missing records; successful records are
+           recognized as already present by ami_ns_mdns_services(). */
+        ns->ns_IfaceMdnsSvc[index] = ami_ns_mdns_services(ns, (UINT)index);
     }
 
     return AMI_NET_OK;
