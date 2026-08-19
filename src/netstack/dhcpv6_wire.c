@@ -41,6 +41,25 @@ AmiDhcpv6Action ami_dhcpv6_resume_action(unsigned int created,
     return stateful ? AMI_DHCPV6_ACT_STATEFUL : AMI_DHCPV6_ACT_STATELESS;
 }
 
+AmiDhcpv6OptionChange ami_dhcpv6_option_change(
+    unsigned int reached_bound, unsigned int left_information_request,
+    unsigned int reached_init, unsigned int information_reply_seen)
+{
+    if (reached_bound)
+        return AMI_DHCPV6_OPTIONS_REPLACE;
+
+    /* A successful stateless exchange returns to INIT by design. A failed
+       one must preserve the last coherent response, if any. */
+    if (left_information_request)
+        return information_reply_seen ? AMI_DHCPV6_OPTIONS_REPLACE
+                                      : AMI_DHCPV6_OPTIONS_KEEP;
+
+    if (reached_init)
+        return AMI_DHCPV6_OPTIONS_WITHDRAW;
+
+    return AMI_DHCPV6_OPTIONS_KEEP;
+}
+
 unsigned long ami_dhcpv6_duid_ll(const unsigned char *mac, unsigned long maclen,
                                  unsigned char *out, unsigned long size)
 {

@@ -115,6 +115,26 @@ static void test_interface_resume(void)
           AMI_DHCPV6_ACT_NONE);
 }
 
+static void test_option_lifecycle(void)
+{
+    printf("dhcpv6: resolver option lifecycle\n");
+
+    CHECK(ami_dhcpv6_option_change(1, 0, 0, 0) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, 1) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+
+    /* A failed Information-Request also returns to INIT, but supplies no
+       replacement and therefore cannot erase the last coherent response. */
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, 0) ==
+          AMI_DHCPV6_OPTIONS_KEEP);
+
+    CHECK(ami_dhcpv6_option_change(0, 0, 1, 0) ==
+          AMI_DHCPV6_OPTIONS_WITHDRAW);
+    CHECK(ami_dhcpv6_option_change(0, 0, 0, 0) ==
+          AMI_DHCPV6_OPTIONS_KEEP);
+}
+
 /* ------------------------------------------------------------- the DUID ---- */
 
 static void test_duid_matches_the_wire(void)
@@ -219,6 +239,7 @@ int main(void)
 {
     test_ra_flags();
     test_interface_resume();
+    test_option_lifecycle();
     test_duid_matches_the_wire();
     test_duid_refusals();
 

@@ -189,6 +189,7 @@ static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
                                        UINT old_state, UINT new_state)
 {
     AmiNetStack *ns = ami_netstack_raw();
+    AmiDhcpv6OptionChange option_change;
 
     if (ns == NULL || dhcpv6_ptr != &ns->ns_Dhcpv6)
         return;
@@ -201,25 +202,26 @@ static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
 
     ami_netstack_mark(ami_ns6_dhcp_state_name((UCHAR)new_state));
 
-    /*
-     * A Reply has landed and may have carried name servers and a domain list.
-     *
-     * TWO transitions, not one, and the second is not obvious. A stateful
-     * exchange ends at BOUND. A successful Information-Request ends at INIT:
-     * nxd_dhcpv6_client.c:4147 restores the state "depending on its IANA
-     * address status", and an Information-Request never asks for an address,
-     * so the status is not VALID and the client goes back to INIT having
-     * succeeded. Watching only for BOUND would have meant the name servers
-     * from the stateless path were recorded by the client and never read --
-     * which is the entire purpose of that path.
-     *
-     * So the transition OUT of SENDING_INFORM_REQUEST counts as well,
-     * wherever it lands. A failed one lands in INIT too, and absorbing then
-     * costs a walk of an empty server list.
-     */
-    if (new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS ||
-        old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST)
+    option_change = ami_dhcpv6_option_change(
+        new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS,
+        old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST,
+        new_state == NX_DHCPV6_STATE_INIT,
+        dhcpv6_ptr->nx_dhcpv6_inform_req_responses != 0UL);
+
+    if (option_change == AMI_DHCPV6_OPTIONS_REPLACE)
+    {
+        /* BOUND and a successful Information-Request both leave coherent
+           replacement option buffers in the client. */
+        ns->ns_Dhcpv6OptionsValid = TRUE;
         ns->ns_Dhcpv6DnsPending = TRUE;
+    }
+    else if (option_change == AMI_DHCPV6_OPTIONS_WITHDRAW)
+    {
+        /* Lease loss, Release, Decline and failed stateful acquisition all
+           leave INIT with no live ownership of the previous options. */
+        ns->ns_Dhcpv6OptionsValid = FALSE;
+        ns->ns_Dhcpv6DnsPending = TRUE;
+    }
 }
 
 /*
@@ -753,7 +755,11 @@ VOID ami_netstack_dhcpv6_pause(AmiNetStack *ns)
 
     status = nx_dhcpv6_stop(&ns->ns_Dhcpv6);
     if (status == NX_SUCCESS)
+    {
         ns->ns_Dhcpv6Started = FALSE;
+        ns->ns_Dhcpv6OptionsValid = FALSE;
+        ns->ns_Dhcpv6DnsPending = TRUE;
+    }
     else
         AMI_WARN("netstack: DHCPv6 did not stop for link-down (%ld)",
                  (long)status);

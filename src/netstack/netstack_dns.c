@@ -262,37 +262,39 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
     char               text[AMI_CFG_IP6_STRLEN];
     UINT               index;
     ULONG              now;
+    BOOL               options_valid;
 
     if (!ns->ns_Dhcpv6DnsPending)
         return;
 
     ns->ns_Dhcpv6DnsPending = FALSE;
-
-    if (!ns->ns_Dhcpv6Started)
-        return;
+    options_valid = ns->ns_Dhcpv6OptionsValid;
 
     r = &ns->ns_Config.resolver;
     now = tx_time_get();
 
     /* Read the replacement set before changing the applied set: the old one
        is the ownership record needed to identify withdrawals. */
-    for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; index++)
-    {
-        NXD_ADDRESS server;
+    if (options_valid)
+        for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; index++)
+        {
+            NXD_ADDRESS server;
 
-        if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, index, &server)
-                != NX_SUCCESS)
-            continue;
+            if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, index,
+                                                  &server) != NX_SUCCESS)
+                continue;
 
-        if ((server.nxd_ip_address.v6[0] | server.nxd_ip_address.v6[1] |
-             server.nxd_ip_address.v6[2] | server.nxd_ip_address.v6[3]) == 0UL)
-            continue;
+            if ((server.nxd_ip_address.v6[0] |
+                 server.nxd_ip_address.v6[1] |
+                 server.nxd_ip_address.v6[2] |
+                 server.nxd_ip_address.v6[3]) == 0UL)
+                continue;
 
-        if (offered_count < (UWORD)AMI_RDNSS_MAX &&
-            !ami_ns_dns_v6_list_names(offered, offered_count,
-                                       server.nxd_ip_address.v6))
-            offered[offered_count++] = server;
-    }
+            if (offered_count < (UWORD)AMI_RDNSS_MAX &&
+                !ami_ns_dns_v6_list_names(offered, offered_count,
+                                           server.nxd_ip_address.v6))
+                offered[offered_count++] = server;
+        }
 
     /* Out: a later valid Reply may shorten the list or omit the option. A
        server still owned by RDNSS remains in both resolver views. */
@@ -379,11 +381,16 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
         UWORD             removed = 0;
         UWORD             i;
 
-        if (nx_dhcpv6_get_other_option_data(&ns->ns_Dhcpv6,
-                                            NX_DHCPV6_DOMAIN_NAME_OPTION,
-                                            names, sizeof(names))
-                != NX_SUCCESS)
-            return;             /* preserve the last coherent option set */
+        if (options_valid)
+        {
+            if (nx_dhcpv6_get_other_option_data(&ns->ns_Dhcpv6,
+                                                NX_DHCPV6_DOMAIN_NAME_OPTION,
+                                                names, sizeof(names))
+                    != NX_SUCCESS)
+                return;         /* preserve the last coherent option set */
+        }
+        else
+            memset(names, 0, sizeof(names));
 
         while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
         {
