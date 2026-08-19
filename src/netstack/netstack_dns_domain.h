@@ -11,7 +11,10 @@
 
 typedef struct AmiNsDhcpDomainState
 {
-    char lease[AMI_CFG_MAX_INTERFACES][AMI_CFG_DOMAIN_LEN];
+    /* IPv4 leases occupy their interface slot. The one DHCPv6 client uses
+       the final slot, after every interface, so both families share one
+       ordered default-domain owner without colliding on an interface. */
+    char lease[AMI_CFG_MAX_INTERFACES + 1U][AMI_CFG_DOMAIN_LEN];
     char owner[AMI_CFG_DOMAIN_LEN];
 } AmiNsDhcpDomainState;
 
@@ -24,6 +27,8 @@ VOID ami_ns_dns_ra_default_reconcile(
 VOID ami_ns_dns_dhcp_default_update(AmiNsDhcpDomainState *state,
                                     UWORD interface_index,
                                     const char *domain);
+VOID ami_ns_dns_dhcpv6_default_update(AmiNsDhcpDomainState *state,
+                                      const char *domain);
 VOID ami_ns_dns_dhcp_default_reconcile(
     AmiResolverConfig *resolver,
     AmiNsDhcpDomainState *dhcp,

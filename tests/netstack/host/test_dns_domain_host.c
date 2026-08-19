@@ -122,6 +122,37 @@ int main(void)
             strcmp(dhcp.owner, "dhcp.test") == 0 && owner[0] == '\0',
             "DHCP takes precedence over an RA-owned default");
 
+    /* DHCPv6's search list supplies the final DHCP candidate. IPv4 option 15
+       takes the earlier interface slots, and withdrawal falls through both
+       families before it reaches RA. */
+    memset(&resolver, 0, sizeof(resolver));
+    memset(&dhcp, 0, sizeof(dhcp));
+    memset(owner, 0, sizeof(owner));
+    h_set(applied[0], "ra.test", sizeof(applied[0]));
+    ami_ns_dns_dhcpv6_default_update(&dhcp, "v6.test");
+    ami_ns_dns_dhcp_default_reconcile(&resolver, &dhcp, owner, applied, 1U);
+    h_check(strcmp(resolver.domain, "v6.test") == 0 &&
+            strcmp(dhcp.owner, "v6.test") == 0,
+            "DHCPv6 supplies a default when IPv4 DHCP is absent");
+
+    ami_ns_dns_dhcp_default_update(&dhcp, 1U, "v4.test");
+    ami_ns_dns_dhcp_default_reconcile(&resolver, &dhcp, owner, applied, 1U);
+    h_check(strcmp(resolver.domain, "v4.test") == 0 &&
+            strcmp(dhcp.owner, "v4.test") == 0,
+            "IPv4 DHCP precedes the DHCPv6 fallback slot");
+
+    ami_ns_dns_dhcp_default_update(&dhcp, 1U, NULL);
+    ami_ns_dns_dhcp_default_reconcile(&resolver, &dhcp, owner, applied, 1U);
+    h_check(strcmp(resolver.domain, "v6.test") == 0 &&
+            strcmp(dhcp.owner, "v6.test") == 0,
+            "IPv4 lease loss falls through to DHCPv6");
+
+    ami_ns_dns_dhcpv6_default_update(&dhcp, NULL);
+    ami_ns_dns_dhcp_default_reconcile(&resolver, &dhcp, owner, applied, 1U);
+    h_check(strcmp(resolver.domain, "ra.test") == 0 &&
+            strcmp(owner, "ra.test") == 0 && dhcp.owner[0] == '\0',
+            "DHCPv6 withdrawal falls through to a live RA suffix");
+
     h_set(resolver.domain, "file.test", sizeof(resolver.domain));
     dhcp.owner[0] = '\0';
     ami_ns_dns_dhcp_default_reconcile(&resolver, &dhcp, owner, applied, 1U);
