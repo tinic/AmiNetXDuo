@@ -1417,7 +1417,10 @@ static LONG parse_operand(const char **pp)
         name[n] = '\0';
 
         if (!var_value(name, &v))
+        {
             say("!! unknown variable $%s", name);
+            n_fail++;
+        }
     }
     else
     {
@@ -4202,6 +4205,7 @@ static VOID run_line(char *line)
     if (cs.name[0] == '\0')
     {
         say("!! directive before any `case`: %s", raw);
+        n_fail++;
         return;
     }
 
@@ -4237,7 +4241,11 @@ static VOID run_line(char *line)
         else if (streq(tok, "iface"))    cs.local_addr = LOCAL_IP;
         else if (streq(tok, "loopback")) cs.local_addr = LOOPBACK_IP;
         else if (streq(tok, "foreign"))  cs.local_addr = FOREIGN_IP;
-        else say("!! unknown localaddr: %s", raw);
+        else
+        {
+            say("!! unknown localaddr: %s", raw);
+            n_fail++;
+        }
     }
     else if (streq(verb, "socket"))   do_socket(raw);
     else if (streq(verb, "connect"))  do_connect(args, raw);
@@ -4276,6 +4284,7 @@ static VOID run_line(char *line)
         if (rep_collecting)
         {
             say("!! nested `repeat`: %s", raw);
+            n_fail++;
             return;
         }
         rep_count      = to_num(tok);
@@ -4284,10 +4293,16 @@ static VOID run_line(char *line)
         say("  -- repeat %d", rep_count);
     }
     else if (streq(verb, "end"))
+    {
         say("!! `end` without `repeat`: %s", raw);
+        n_fail++;
+    }
     else if (streq(verb, "icmp"))     do_icmp(args, raw);
     else
+    {
         say("!! unknown directive: %s", raw);
+        n_fail++;
+    }
 }
 
 static LONG run_script(const char *path)
@@ -4326,10 +4341,20 @@ static LONG run_script(const char *path)
             {
                 say("!! `repeat` body over %d lines: %s", REPEAT_MAX_LINES,
                     line);
+                n_fail++;
                 continue;
             }
             for (n = 0; n + 1 < sizeof(rep_body[0]) && line[n] != '\0'; n++)
                 rep_body[rep_n][n] = line[n];
+
+            if (line[n] != '\0')
+            {
+                say("!! `repeat` line is longer than %u bytes: %s",
+                    (ULONG)sizeof(rep_body[0]) - 1UL, line);
+                n_fail++;
+                continue;
+            }
+
             rep_body[rep_n][n] = '\0';
             rep_n++;
             continue;

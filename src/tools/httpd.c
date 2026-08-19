@@ -4303,6 +4303,7 @@ static BOOL httpd_may_write(HttpConn *c)
  */
 static BOOL httpd_begin_put(HttpConn *c)
 {
+    char  leaf[16];
     ULONG used;
 
     if (!httpd_may_write(c))
@@ -4354,16 +4355,23 @@ static BOOL httpd_begin_put(HttpConn *c)
 
     /* One name per connection slot, so two uploads into one drawer cannot
        collide, and short enough for a filesystem that stops at 30
-       characters. */
-    used = hs_len(c->put_temp);
+       characters.  Build the leaf separately and join it atomically.  A
+       failed hs_append() leaves `used` unchanged after copying a prefix, so
+       ignoring its result here used to turn a long path into a sibling named
+       after the connection slot and MODE_NEWFILE then truncated that file. */
+    used    = 0;
+    leaf[0] = '\0';
 
-    if (used > 0UL && c->put_temp[used - 1] != ':' &&
-        c->put_temp[used - 1] != '/')
-        (VOID)hs_append(c->put_temp, sizeof(c->put_temp), &used, "/");
-
-    (VOID)hs_append(c->put_temp, sizeof(c->put_temp), &used, ".httpd-put-");
-    (VOID)hs_append_num(c->put_temp, sizeof(c->put_temp), &used,
-                        (ULONG)(c - httpd_conn));
+    if (!hs_append(leaf, sizeof(leaf), &used, ".httpd-put-") ||
+        !hs_append_num(leaf, sizeof(leaf), &used,
+                       (ULONG)(c - httpd_conn)) ||
+        !http_path_join(c->put_temp, sizeof(c->put_temp), leaf))
+    {
+        c->put_temp[0] = '\0';
+        httpd_error(c, 414, "that address leaves no room for an upload "
+                            "temporary");
+        return FALSE;
+    }
 
     c->put = Open((CONST_STRPTR)c->put_temp, MODE_NEWFILE);
     if (c->put == (BPTR)0)
@@ -7597,8 +7605,13 @@ int main(int argc, char **argv)
     /* Trimmed before anything is resolved under it.  The root is the one path
        here that does not go through http_path_resolve(), which is where every
        other doubled slash is prevented. */
-    http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
-                   sizeof(httpd_root_buf));
+    if (!http_path_root((const char *)args[ARG_ROOT], httpd_root_buf,
+                        sizeof(httpd_root_buf)))
+    {
+        tool_error("the drawer path is longer than this server carries");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
     httpd_root    = httpd_root_buf;
     httpd_verbose = (args[ARG_VERBOSE] != 0) ? TRUE : FALSE;
     httpd_trace   = (args[ARG_TRACE]   != 0) ? TRUE : FALSE;
