@@ -247,6 +247,17 @@ int main(void)
     AMI_ERROR(" ,   ami_random_is_seeded(): %s",
               (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
 
+    /* A TLS setup calls ami_random_init() again. These samples still improve
+       the mixed state, but they are repeated views of the same weak source
+       classes and must not manufacture enough accounting credit to claim the
+       pool is seeded. */
+    for (i = 0; i < 4UL; i++)
+        ami_random_init();
+
+    check("repeated internal collection stays below the seeded threshold",
+          ami_random_entropy_bits() <= AMI_RANDOM_INTERNAL_MAX_BITS &&
+          !ami_random_is_seeded());
+
     probe_jitter();
 
     /* ---- structural checks ----------------------------------------------- */

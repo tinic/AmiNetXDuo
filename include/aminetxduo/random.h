@@ -45,6 +45,10 @@ extern "C" {
  */
 #define AMI_RANDOM_MIN_BITS     64UL
 
+/* The most the built-in clock, Exec-state, task-list and jitter sources can
+   contribute in total, however many times they are sampled. */
+#define AMI_RANDOM_INTERNAL_MAX_BITS  26UL
+
 /*
  * Gather from every source we have and mix into the pool.  Safe to call
  * repeatedly; each call only ever adds.  Costs 21-22 ms on an emulated 68020,

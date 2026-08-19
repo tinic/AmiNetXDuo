@@ -240,6 +240,7 @@ static UBYTE  pool_out[AMI_RANDOM_KEY_BYTES];
 static ULONG  pool_out_used = AMI_RANDOM_KEY_BYTES;   /* forces a first block */
 static ULONG  pool_counter;
 static ULONG  pool_bits;
+static ULONG  pool_internal_bits;
 static BOOL   pool_started;
 static volatile BOOL pool_gathering;   /* one random_gather() at a time */
 
@@ -611,6 +612,7 @@ static VOID random_gather(VOID)
 {
     EntropySample   *s = &random_sample;
     ULONG            credit = 0;
+    ULONG            new_credit = 0;
     struct EClockVal ev;
     UBYTE           *p = (UBYTE *)s;
     ULONG            i;
@@ -636,7 +638,22 @@ static VOID random_gather(VOID)
     credit += gather_tasks(s);
     credit += gather_jitter(s);
 
-    pool_mix(s, sizeof(*s), credit);
+    /* These are repeated views of the same small set of machine properties,
+       not independent sources on every call. Keep mixing every sample, but
+       only raise the trusted estimate when a collection demonstrates more
+       variation than any earlier one. Otherwise three calls to
+       ami_random_init() can cross AMI_RANDOM_MIN_BITS without one bit of
+       caller-supplied entropy. */
+    if (credit > AMI_RANDOM_INTERNAL_MAX_BITS)
+        credit = AMI_RANDOM_INTERNAL_MAX_BITS;
+
+    if (credit > pool_internal_bits)
+    {
+        new_credit = credit - pool_internal_bits;
+        pool_internal_bits = credit;
+    }
+
+    pool_mix(s, sizeof(*s), new_credit);
 
     /* Nothing else reads it, and a machine fingerprint left in the library BSS
        costs nothing to remove. */
