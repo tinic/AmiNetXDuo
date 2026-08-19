@@ -879,8 +879,9 @@ static BOOL ami_ns_mdns_listed(const AmiMdnsIdentity *rows, UWORD count,
  * share a target, so they cost one query between them, and a target that was
  * asked about and did not answer is not asked about again.
  *
- * `budget` is decremented by what was spent, because
- * nx_mdns_host_address_get() repeats the wait per enabled interface.
+ * `budget` is decremented by what was spent. nx_mdns_host_address_get() keeps
+ * one deadline across all enabled interfaces, and the outer budget covers all
+ * distinct targets chased during this collection.
  */
 static ULONG ami_ns_mdns_chase(AmiNetStack *ns, const AmiMdnsService *rows,
                                UWORD count, const char *host,
