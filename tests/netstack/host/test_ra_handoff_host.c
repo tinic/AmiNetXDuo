@@ -246,6 +246,59 @@ static void h_case_dnssl_interfaces_own_independently(void)
 }
 
 
+static void h_case_dnssl_lifetime_expires_and_refreshes(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    static const UCHAR finite[] = {
+        6, 'f', 'i', 'n', 'i', 't', 'e', 4, 't', 'e', 's', 't', 0
+    };
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_dnssl(&pending, 0U, finite, (UINT)sizeof(finite), 10UL, 100UL);
+    (void)ami_ns_ra_snapshot(&pending, &snapshot, 100UL);
+    h_check(!ami_ns_ra_needs_snapshot(&pending, 599UL),
+            "DNSSL remains valid until its complete lifetime");
+
+    ami_ns_ra_dnssl(&pending, 0U, finite, (UINT)sizeof(finite), 10UL, 400UL);
+    h_check(!ami_ns_ra_needs_snapshot(&pending, 899UL),
+            "a repeated DNSSL advertisement refreshes its lifetime");
+    h_check(ami_ns_ra_needs_snapshot(&pending, 900UL),
+            "DNSSL expiry wakes a report without a new packet");
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 900UL) &&
+            snapshot.dnssl_pending && snapshot.dnssl_count == 0U,
+            "an expired DNSSL suffix is published as a withdrawal");
+}
+
+
+static void h_case_dnssl_expiry_preserves_other_interface(void)
+{
+    AmiNsRaPending pending;
+    AmiNsRaSnapshot snapshot;
+    static const UCHAR shared[] = {
+        6, 's', 'h', 'a', 'r', 'e', 'd', 4, 't', 'e', 's', 't', 0
+    };
+
+    memset(&pending, 0, sizeof(pending));
+    memset(&snapshot, 0, sizeof(snapshot));
+
+    ami_ns_ra_dnssl(&pending, 0U, shared, (UINT)sizeof(shared), 1UL,
+                    (ULONG)~0UL - 20UL);
+    ami_ns_ra_dnssl(&pending, 1U, shared, (UINT)sizeof(shared), (ULONG)~0UL,
+                    10UL);
+    (void)ami_ns_ra_snapshot(&pending, &snapshot, (ULONG)~0UL - 20UL);
+
+    h_check(ami_ns_ra_snapshot(&pending, &snapshot, 29UL) &&
+            snapshot.dnssl_count == 1U &&
+            strcmp(snapshot.dnssl[0], "shared.test") == 0,
+            "wrapped expiry on one interface preserves an infinite owner");
+    h_check(!ami_ns_ra_needs_snapshot(&pending, (ULONG)~0UL),
+            "the RFC infinite DNSSL lifetime does not expire");
+}
+
+
 static void h_case_rdnss_lifetime_expires_and_refreshes(void)
 {
     AmiNsRaPending pending;
@@ -337,6 +390,8 @@ int main(void)
     h_case_infinite_and_wrapped_time();
     h_case_rdnss_interfaces_own_independently();
     h_case_dnssl_interfaces_own_independently();
+    h_case_dnssl_lifetime_expires_and_refreshes();
+    h_case_dnssl_expiry_preserves_other_interface();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff never nests its critical section");
