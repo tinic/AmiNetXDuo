@@ -180,6 +180,7 @@ struct UserGroupBase {
     ULONG                  ug_IntrMask;
     LONG                   ug_Err;
     struct ug_credentials  ug_Cred;
+    struct ug_credentials  ug_CredResult;  /* cross-task query snapshot */
     UWORD                  ug_PwCursor;
     UWORD                  ug_GrCursor;
     struct ug_passwd       ug_PwResult;
