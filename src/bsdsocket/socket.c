@@ -1650,12 +1650,31 @@ static BOOL bsd_addr_is_multicast(const NXD_ADDRESS *addr)
 }
 #endif
 
-static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr)
+static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr, ULONG scope)
 {
     NX_IP *ip = netstack_ip();
+#ifdef AMINETXDUO_IPV6
+    const NX_INTERFACE *zoned = NX_NULL;
+#endif
     UWORD  matches = 0;
     UWORD  addressed = 0;
     UINT   i;
+
+#ifdef AMINETXDUO_IPV6
+    /* Validate a supplied non-global zone even for a multicast bind, which
+       returns through the group shortcut below instead of the address walk. */
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6 && scope != 0UL &&
+        !bsd_addr_is_loopback(addr) &&
+        anx6_scope(addr->nxd_ip_address.v6) < 0xEU)
+    {
+        if (ip == NULL || scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+            return BSD_BIND_FOREIGN;
+
+        zoned = &ip->nx_ip_interface[scope - 1UL];
+        if (zoned->nx_interface_valid == 0)
+            return BSD_BIND_FOREIGN;
+    }
+#endif
 
     if (bsd_addr_is_unspecified(addr) || bsd_addr_is_loopback(addr))
         return BSD_BIND_ANY;
@@ -1682,7 +1701,8 @@ static BsdBindKind bsd_bind_kind(const NXD_ADDRESS *addr)
             if (a->nxd_ipv6_address[0] == addr->nxd_ip_address.v6[0] &&
                 a->nxd_ipv6_address[1] == addr->nxd_ip_address.v6[1] &&
                 a->nxd_ipv6_address[2] == addr->nxd_ip_address.v6[2] &&
-                a->nxd_ipv6_address[3] == addr->nxd_ip_address.v6[3])
+                a->nxd_ipv6_address[3] == addr->nxd_ip_address.v6[3] &&
+                (zoned == NX_NULL || a->nxd_ipv6_address_attached == zoned))
                 matches++;
         }
     }
@@ -1722,6 +1742,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     ULONG       scope = 0;
     UINT        port = 0;
     UINT        status;
+    BsdBindKind kind;
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
@@ -1786,7 +1807,13 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
      * getsockname reports it) but does not restrict what the socket receives.
      * A real gap, and the same one the IPv4 path has always had.
      */
-    switch (bsd_bind_kind(&addr))
+    /* bsd_bind_kind() reads the live interface and IPv6 address tables. */
+    if (bsd_nx_enter(SocketBase) != 0)
+        return bsd_fail(SocketBase, AMI_ENETDOWN);
+    kind = bsd_bind_kind(&addr, scope);
+    bsd_nx_leave(SocketBase);
+
+    switch (kind)
     {
         case BSD_BIND_ANY:
         case BSD_BIND_SOLE:
@@ -2401,6 +2428,22 @@ BOOL bsd_bind_wants_interface(const AmiSocket *listener,
                               const NX_INTERFACE *nxif)
 {
     NX_IP *ip = netstack_ip();
+
+#ifdef AMINETXDUO_IPV6
+    /* A non-global address can be reused in different zones.  When bind()
+       supplied one, the zone is part of the local endpoint for multicast and
+       unicast alike, before the wildcard/group shortcuts below. */
+    if (listener->as_LocalAddr.nxd_ip_version == NX_IP_VERSION_V6 &&
+        listener->as_ScopeId != 0UL &&
+        !bsd_addr_is_loopback(&listener->as_LocalAddr) &&
+        anx6_scope(listener->as_LocalAddr.nxd_ip_address.v6) < 0xEU)
+    {
+        if (ip == NX_NULL ||
+            listener->as_ScopeId > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
+            nxif != &ip->nx_ip_interface[listener->as_ScopeId - 1UL])
+            return FALSE;
+    }
+#endif
 
     /* The wildcard takes everything, which is what it is for. */
     if (bsd_addr_is_unspecified(&listener->as_LocalAddr))
