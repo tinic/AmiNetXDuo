@@ -259,8 +259,10 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
     AmiResolverConfig *r;
     NXD_ADDRESS        offered[AMI_RDNSS_MAX];
     UWORD              offered_count = 0;
+    UCHAR              names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
     char               text[AMI_CFG_IP6_STRLEN];
     UINT               index;
+    UINT               option_status = NX_SUCCESS;
     ULONG              now;
     BOOL               options_valid;
 
@@ -272,29 +274,52 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
     now = tx_time_get();
+    memset(names, 0, sizeof(names));
 
-    /* Read the replacement set before changing the applied set: the old one
-       is the ownership record needed to identify withdrawals. */
+    /* The public getters do not lock the client, and reconciliation below
+       calls into the DNS client before it reaches the search list. Snapshot
+       both option families under one client lock so a renewal cannot splice
+       the servers from one Reply to the domains from another. */
     if (options_valid)
-        for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; index++)
+    {
+        if (tx_mutex_get(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex,
+                         TX_WAIT_FOREVER) != TX_SUCCESS)
+            return;
+
+        options_valid = ns->ns_Dhcpv6OptionsValid;
+        if (options_valid)
         {
-            NXD_ADDRESS server;
+            for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS;
+                 index++)
+            {
+                NXD_ADDRESS server;
 
-            if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, index,
-                                                  &server) != NX_SUCCESS)
-                continue;
+                if (nx_dhcpv6_get_DNS_server_address(
+                        &ns->ns_Dhcpv6, index, &server) != NX_SUCCESS)
+                    continue;
 
-            if ((server.nxd_ip_address.v6[0] |
-                 server.nxd_ip_address.v6[1] |
-                 server.nxd_ip_address.v6[2] |
-                 server.nxd_ip_address.v6[3]) == 0UL)
-                continue;
+                if ((server.nxd_ip_address.v6[0] |
+                     server.nxd_ip_address.v6[1] |
+                     server.nxd_ip_address.v6[2] |
+                     server.nxd_ip_address.v6[3]) == 0UL)
+                    continue;
 
-            if (offered_count < (UWORD)AMI_RDNSS_MAX &&
-                !ami_ns_dns_v6_list_names(offered, offered_count,
-                                           server.nxd_ip_address.v6))
-                offered[offered_count++] = server;
+                if (offered_count < (UWORD)AMI_RDNSS_MAX &&
+                    !ami_ns_dns_v6_list_names(offered, offered_count,
+                                               server.nxd_ip_address.v6))
+                    offered[offered_count++] = server;
+            }
+
+            option_status = nx_dhcpv6_get_other_option_data(
+                &ns->ns_Dhcpv6, NX_DHCPV6_DOMAIN_NAME_OPTION,
+                names, sizeof(names));
         }
+
+        (VOID)tx_mutex_put(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex);
+
+        if (option_status != NX_SUCCESS)
+            return;             /* preserve the last coherent option set */
+    }
 
     /* Out: a later valid Reply may shorten the list or omit the option. A
        server still owned by RDNSS remains in both resolver views. */
@@ -375,22 +400,10 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
      */
     {
         AmiResolverConfig offered = {0};
-        UCHAR             names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
         ULONG             pos = 0;
         UWORD             added = 0;
         UWORD             removed = 0;
         UWORD             i;
-
-        if (options_valid)
-        {
-            if (nx_dhcpv6_get_other_option_data(&ns->ns_Dhcpv6,
-                                                NX_DHCPV6_DOMAIN_NAME_OPTION,
-                                                names, sizeof(names))
-                    != NX_SUCCESS)
-                return;         /* preserve the last coherent option set */
-        }
-        else
-            memset(names, 0, sizeof(names));
 
         while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
         {
