@@ -821,6 +821,8 @@ VOID tls_resume_prepare(TLSConnection *conn)
         tls_r_copy(conn->tc_OfferSid, entry->re_Sid, TLS_RESUME_SID_MAX);
         conn->tc_OfferSidLength = entry->re_SidLength;
         tls_r_copy(conn->tc_Master, entry->re_Master, TLS_MASTER_SECRET_SIZE);
+        conn->tc_CipherSuite = (ULONG)entry->re_CipherSuite;
+        conn->tc_Protocol    = (ULONG)entry->re_Protocol;
 
         conn->tc_TicketLength = entry->re_TicketLength;
         if (conn->tc_TicketLength > 0 && conn->tc_Ticket != NULL)
@@ -1249,11 +1251,16 @@ static UINT tls_resume_accept(TLSConnection *conn, NX_SECURE_TLS_SESSION *s)
      * TLSOpenA drops the cache entry on failure, so the retry is a clean full
      * handshake rather than the same failure forever.
      */
-    if (conn->tc_CipherSuite != 0 &&
-        (ULONG)ciphersuite->nx_secure_tls_ciphersuite != conn->tc_CipherSuite)
+    if ((ULONG)ciphersuite->nx_secure_tls_ciphersuite != conn->tc_CipherSuite)
     {
         return NX_SECURE_TLS_UNKNOWN_CIPHERSUITE;
     }
+
+    /* The negotiated version is part of the cached session too.  Accepting
+       the echoed ID under a different version would restore a master secret
+       using parameters from a session the server did not actually resume. */
+    if ((ULONG)s->nx_secure_tls_protocol_version != conn->tc_Protocol)
+        return NX_SECURE_TLS_UNSUPPORTED_TLS_VERSION;
 
     /*
      * RFC 7627 5.3: the cached session used the extended master secret,

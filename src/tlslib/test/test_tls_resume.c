@@ -309,6 +309,12 @@ UINT __real__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
         tls_session->nx_secure_tls_session_id_length = h_echo_sid_length;
         memcpy(tls_session->nx_secure_tls_session_id, h_echo_sid,
                sizeof(h_echo_sid));
+
+        if (data_length >= 6)
+        {
+            tls_session->nx_secure_tls_protocol_version =
+                (USHORT)(((USHORT)packet_buffer[4] << 8) | packet_buffer[5]);
+        }
     }
 
     return h_real_handshake_status;
@@ -680,6 +686,8 @@ static void test_mirror_round_trip(void)
     CHECK(memcmp(h_conn.tc_Master, h_master, TLS_MASTER_SECRET_SIZE) == 0);
     CHECK(h_conn.tc_OfferSidLength == TLS_RESUME_SID_MAX);
     CHECK(memcmp(h_conn.tc_OfferSid, h_sid, TLS_RESUME_SID_MAX) == 0);
+    CHECK(h_conn.tc_CipherSuite == 0xC02F);
+    CHECK(h_conn.tc_Protocol == 0x0303);
 
     e = &h_base.tb_Sessions[0];
     CHECK(e->re_Port == 443);
@@ -999,6 +1007,7 @@ static void offer_init(void)
 
     conn_init("example.com", 443, "", 0xCAFEBABEUL);
     h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    h_conn.tc_CipherSuite = 0xC02F;     /* as tls_conn.c leaves it */
     conn_take_ticket(192, 3600);
     tls_resume_record(&h_conn);
 
@@ -1084,13 +1093,35 @@ static void test_serverhello_changing_ciphersuite(void)
     other.nx_secure_tls_ciphersuite = 0x009C;
     other.nx_secure_tls_prf         = &h_prf;
     h_conn.tc_Session.nx_secure_tls_session_ciphersuite = &other;
-    h_conn.tc_CipherSuite = 0xC02F;
 
     status = __wrap__nx_secure_tls_client_handshake(&h_conn.tc_Session,
                                                     h_serverhello,
                                                     sizeof(h_serverhello), 0);
 
     CHECK(status == NX_SECURE_TLS_UNKNOWN_CIPHERSUITE);
+    CHECK((h_conn.tc_ResumeFlags & TLSR_RESUMED) == 0);
+    CHECK(h_keys_generated == 0);
+}
+
+/* The protocol version is as much a part of a TLS session as its cipher
+   suite.  An echoed ID cannot authorize restoring the secret under another
+   version. */
+static void test_serverhello_changing_protocol(void)
+{
+    UINT status;
+
+    printf("tls_resume: a resumption that changes protocol fails\n");
+
+    serverhello_init();
+    offer_init();
+
+    h_serverhello[5] = 0x02;
+
+    status = __wrap__nx_secure_tls_client_handshake(&h_conn.tc_Session,
+                                                    h_serverhello,
+                                                    sizeof(h_serverhello), 0);
+
+    CHECK(status == NX_SECURE_TLS_UNSUPPORTED_TLS_VERSION);
     CHECK((h_conn.tc_ResumeFlags & TLSR_RESUMED) == 0);
     CHECK(h_keys_generated == 0);
 }
@@ -1827,6 +1858,7 @@ int main(void)
     test_serverhello_resumes();
     test_serverhello_without_ems_is_refused();
     test_serverhello_changing_ciphersuite();
+    test_serverhello_changing_protocol();
     test_serverhello_declines();
     test_serverhello_empty_echo();
 
