@@ -282,9 +282,12 @@ static VOID pool_mix(const void *data, ULONG length, ULONG credit_bits)
         sha256_update(&ctx, digest, sizeof(digest));
     sha256_final(&ctx, pool_key);
 
-    pool_bits += credit_bits;
-    if (pool_bits > 256UL)
+    /* Saturate before adding.  credit_bits is supplied through a public API,
+       so ULONG_MAX must not wrap a partially seeded pool back toward zero. */
+    if (credit_bits >= 256UL - pool_bits)
         pool_bits = 256UL;
+    else
+        pool_bits += credit_bits;
 
     /* A reseed invalidates any buffered output. */
     pool_out_used = AMI_RANDOM_KEY_BYTES;
