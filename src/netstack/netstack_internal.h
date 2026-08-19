@@ -464,6 +464,7 @@ VOID ami_netstack_mark(const char *event);
  */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
+BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 
 /*
  * The public anchor for the baton counters and for the tick task counters,

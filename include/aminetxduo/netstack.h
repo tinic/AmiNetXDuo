@@ -108,7 +108,7 @@ typedef struct AmiNetCaller
 {
     TX_THREAD    nc_Thread;
     BOOL         nc_Adopted;    /* inside a bracket right now                */
-    BOOL         nc_Live;       /* nc_Thread exists and is dormant (cached)  */
+    BOOL         nc_Live;       /* cached thread exists, or adoption started */
     struct Task *nc_Task;       /* whose it is; only that task may use it    */
 } AmiNetCaller;
 

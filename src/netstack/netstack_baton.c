@@ -171,6 +171,52 @@ static AmiBatonSlot *ami_baton_claim(struct Task *task)
 }
 
 /*
+ * Forget a release/acquire bracket whose Exec Task cannot return.
+ *
+ * The TX_THREAD is the identity, not bs_Task. Exec can reuse a freed Task
+ * address, while the cached TX_THREAD lives in its opener's retained library
+ * base and is not reused. Matching the task would let a new task inherit the
+ * dead one's slot; matching the thread can only remove the intended bracket.
+ *
+ * This only removes the netstack's record. The caller must follow it with
+ * tx_amiga_discard_thread(), which unlinks the TX_THREAD from ThreadX's
+ * created, ready and object-suspension lists. Keeping the operations separate
+ * leaves this file independent of how the adopted thread's storage is owned.
+ */
+BOOL ami_netstack_baton_abandon(TX_THREAD *thread)
+{
+    BOOL  found = FALSE;
+    UWORD i;
+
+    if (thread == TX_NULL)
+        return FALSE;
+
+    Forbid();
+
+    for (i = 0; i < AMI_BATON_SLOTS; i++)
+    {
+        AmiBatonSlot *slot = &ami_baton_slot[i];
+
+        if (slot->bs_Thread != thread)
+            continue;
+
+        slot->bs_Task    = NULL;
+        slot->bs_Thread  = NULL;
+        slot->bs_Nesting = 0;
+
+        if (ami_baton_stats.bs_Live > 0)
+            ami_baton_stats.bs_Live--;
+
+        found = TRUE;
+        break;
+    }
+
+    Permit();
+
+    return found;
+}
+
+/*
  * The table is a file static, so it outlives the stack it describes. Every
  * bs_Thread in it points into the NX_IP that ami_ns_destroy() has just freed.
  * A slot left behind by a Task that died mid-bracket keeps that pointer: the
