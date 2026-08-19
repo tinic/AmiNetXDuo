@@ -89,41 +89,6 @@ static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
     return FALSE;
 }
 
-static ULONG cmd_addr48(const UBYTE *a)
-{
-    /* The low 32 bits.  The top 16 are compared separately. */
-    return ((ULONG)a[2] << 24) | ((ULONG)a[3] << 16) |
-           ((ULONG)a[4] << 8)  | (ULONG)a[5];
-}
-
-static UWORD cmd_addr16(const UBYTE *a)
-{
-    return (UWORD)(((UWORD)a[0] << 8) | a[1]);
-}
-
-/* ------------------------------------------------------------- multicast -- */
-
-/*
- * A range that would not fit the table becomes "accept every multicast".  The
- * test is on the range, so an add and the matching delete always take the same
- * branch and the accounting stays balanced.
- */
-static BOOL mcast_range_wide(const UBYTE *lo, const UBYTE *hi, ULONG *count)
-{
-    ULONG lo32 = cmd_addr48(lo);
-    ULONG hi32 = cmd_addr48(hi);
-
-    if (cmd_addr16(lo) != cmd_addr16(hi) || hi32 < lo32)
-    {
-        *count = 0;
-        return TRUE;
-    }
-
-    *count = hi32 - lo32 + 1;
-
-    return (BOOL)(*count > NETDEV_MCAST_MAX);
-}
-
 /* ------------------------------------------------------------- statistics - */
 
 static const char netdev_stat_mode[]  = "Data transfer mode";
@@ -487,7 +452,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        wide = mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr, &count);
+        wide = netdev_mcast_range_wide(io->ios2_SrcAddr, io->ios2_DstAddr,
+                                       &count);
         Disable();
         if (wide)
         {
