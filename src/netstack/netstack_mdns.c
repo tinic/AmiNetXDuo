@@ -174,13 +174,19 @@ static VOID ami_ns_mdns_probing(NX_MDNS *mdns_ptr, UCHAR *name, UINT state)
         }
         break;
 
-    case NX_MDNS_LOCAL_SERVICE_REGISTERED_FAILURE:
+    case NX_MDNS_LOCAL_HOST_REGISTERED_FAILURE:
         ns->ns_MdnsClaimed = FALSE;
         AMI_ERROR("netstack: '%s.%s' is taken and every alternative was too, "
                   "this machine has NO mDNS name. Set HOSTNAME to something "
                   "nothing else on this network is using",
                   ns->ns_MdnsLabel,
                   (const char *)ns->ns_Mdns.nx_mdns_domain_name);
+        break;
+
+    case NX_MDNS_LOCAL_SERVICE_REGISTERED_FAILURE:
+        AMI_WARN("netstack: the service name '%s' is taken and every "
+                 "alternative was too; the host name remains valid",
+                 (name != NULL) ? (const char *)name : "?");
         break;
 
     default:
