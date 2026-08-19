@@ -424,16 +424,22 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
  *      IPv6 extension headers go on a UDP send, so both are exact.
  *
  * That is 1472 and 1452 on a 1500-byte Ethernet interface, 65507 on NetX Duo's
- * loopback. The interface is found the way _nxd_udp_socket_send() finds it, so
- * the MTU measured is the one the datagram meets. -1 means no interface was
- * found, and the send then reports the routing error itself.
+ * loopback.  source_interface is the interface already named by bind(), a
+ * scope, PKTINFO or a multicast-interface option; when it is null the route is
+ * found the way _nxd_udp_socket_send() finds it.  The MTU measured is therefore
+ * the one the datagram meets. -1 means no interface was found, and the send
+ * then reports the routing error itself.
  */
-LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr)
+LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
+                   const NX_INTERFACE *source_interface)
 {
     NX_INTERFACE *iface = NX_NULL;
 
     if (ip == NULL || addr == NULL)
         return -1;
+
+    if (source_interface != NX_NULL)
+        return (LONG)source_interface->nx_interface_ip_mtu_size;
 
 #ifdef AMINETXDUO_IPV6
     if (addr->nxd_ip_version == NX_IP_VERSION_V6)
@@ -465,9 +471,10 @@ LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr)
     return (LONG)iface->nx_interface_ip_mtu_size;
 }
 
-static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr)
+static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr,
+                            const NX_INTERFACE *source_interface)
 {
-    LONG  mtu = bsd_route_mtu(ip, addr);
+    LONG  mtu = bsd_route_mtu(ip, addr, source_interface);
     ULONG overhead;
 
 #ifdef AMINETXDUO_IPV6
@@ -601,6 +608,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     NX_PACKET      *packet = NX_NULL;
     BsdSourceKind   source;
     UINT            source_index = 0;
+    NX_INTERFACE   *source_interface = NX_NULL;
     LONG            maxdgram;
     ULONG           wait;
     LONG            filled;
@@ -651,6 +659,39 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_fail(base, AMI_ENETUNREACH);
     }
 
+    if (source == BSD_SOURCE_INDEX)
+    {
+#ifdef AMINETXDUO_IPV6
+        if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+            source_interface = ip->nx_ipv6_address[source_index]
+                                     .nxd_ipv6_address_attached;
+        else
+#endif
+            source_interface = &ip->nx_ip_interface[source_index];
+    }
+
+#ifdef AMINETXDUO_MULTICAST
+    /* A per-message PKTINFO is the only source choice above the standing
+       multicast-interface option.  Account for that same precedence here so
+       the MTU preflight and the send below cannot choose different cards. */
+    if ((src == NULL || !src->cs_Have) &&
+        addr->nxd_ip_version == NX_IP_VERSION_V4 &&
+        (addr->nxd_ip_address.v4 & 0xF0000000UL) == 0xE0000000UL &&
+        sock->as_McastIf >= 0)
+    {
+        source_interface = &ip->nx_ip_interface[sock->as_McastIf];
+    }
+#ifdef AMINETXDUO_IPV6
+    else if ((src == NULL || !src->cs_Have) &&
+             addr->nxd_ip_version == NX_IP_VERSION_V6 &&
+             (addr->nxd_ip_address.v6[0] & 0xFF000000UL) == 0xFF000000UL &&
+             sock->as_Mcast6If >= 0)
+    {
+        source_interface = &ip->nx_ip_interface[sock->as_Mcast6If];
+    }
+#endif
+#endif
+
     /*
      * "If the message is too long to pass atomically through the underlying
      * protocol, the error EMSGSIZE is returned, and the message is not
@@ -659,7 +700,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * in the driver send path with NX_SUCCESS already returned, or to run the
      * pool dry first and come back as ENOBUFS.
      */
-    maxdgram = bsd_udp_maxdgram(ip, addr);
+    maxdgram = bsd_udp_maxdgram(ip, addr, source_interface);
     if (maxdgram >= 0 && len > maxdgram)
         return bsd_fail(base, AMI_EMSGSIZE);
 

@@ -680,8 +680,23 @@ LONG bsd_raw_send_packet(struct AmiSocketBase *base, AmiSocket *sock,
      * for. IP options are not carried on this path, so 20 and 40 are exact.
      */
     {
-        LONG  mtu      = bsd_route_mtu(ip, &dest);
-        ULONG overhead = (dest.nxd_ip_version == NX_IP_VERSION_V6) ? 40UL : 20UL;
+        const NX_INTERFACE *source_interface = NX_NULL;
+        LONG                mtu;
+        ULONG overhead = (dest.nxd_ip_version == NX_IP_VERSION_V6)
+                             ? 40UL : 20UL;
+
+        if (source == BSD_SOURCE_INDEX)
+        {
+#ifdef AMINETXDUO_IPV6
+            if (dest.nxd_ip_version == NX_IP_VERSION_V6)
+                source_interface = ip->nx_ipv6_address[src_index]
+                                         .nxd_ipv6_address_attached;
+            else
+#endif
+                source_interface = &ip->nx_ip_interface[src_index];
+        }
+
+        mtu = bsd_route_mtu(ip, &dest, source_interface);
 
         if (mtu >= 0 && handed->nx_packet_length + overhead > (ULONG)mtu)
         {

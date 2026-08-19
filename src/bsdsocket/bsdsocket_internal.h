@@ -1102,7 +1102,8 @@ BOOL  bsd_oob_take(AmiSocket *sock, UBYTE *out);
  * an oversize datagram with EMSGSIZE rather than let transmit fragmentation
  * handle it. bsd_udp_maxdgram() in transfer.c says why.
  */
-LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr);
+LONG       bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
+                         const NX_INTERFACE *source_interface);
 
 LONG       bsd_raw_open(struct AmiSocketBase *base, AmiSocket *sock);
 VOID       bsd_raw_close(AmiSocket *sock);
