@@ -42,6 +42,7 @@ static AmiSana2Binding ami_sana2_bindings[AMI_CFG_MAX_INTERFACES];
 
 LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
 {
+    LONG  free_slot = -1;
     UWORD i;
 
     if (iface == NULL || ip == NULL)
@@ -50,8 +51,7 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
     Forbid();
     for (i = 0; i < AMI_CFG_MAX_INTERFACES; i++)
     {
-        if (ami_sana2_bindings[i].iface == iface ||
-            ami_sana2_bindings[i].iface == NULL)
+        if (ami_sana2_bindings[i].iface == iface)
         {
             ami_sana2_bindings[i].ip    = ip;
             ami_sana2_bindings[i].index = index;
@@ -62,6 +62,23 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
             iface->index = index;
             return AMI_NET_OK;
         }
+
+        if (free_slot < 0 && ami_sana2_bindings[i].iface == NULL)
+            free_slot = (LONG)i;
+    }
+
+    if (free_slot >= 0)
+    {
+        AmiSana2Binding *binding = &ami_sana2_bindings[free_slot];
+
+        binding->ip    = ip;
+        binding->index = index;
+        binding->iface = iface;
+        Permit();
+
+        iface->ip    = ip;
+        iface->index = index;
+        return AMI_NET_OK;
     }
     Permit();
 
