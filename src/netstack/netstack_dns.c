@@ -833,6 +833,13 @@ static AmiNetAskResult ami_ns_ask_addr(VOID *arg, ULONG wait)
         return AMI_NET_ASK_REFUSED;
     }
 
+#ifdef AMINETXDUO_IPV6
+    /* A PTR lookup can be the first resolver operation after an RA.  Without
+       absorbing here, an IPv6-only link has an advertised server waiting in
+       ns_Ra but the DNS client still reports NX_DNS_NO_SERVER. */
+    ami_ns_dns_absorb_pending(ask->ns);
+#endif
+
     ask->status = nx_dns_host_by_address_get(&ask->ns->ns_Dns, ask->address,
                                              (UCHAR *)ask->name_out,
                                              (UINT)ask->name_len, wait);
