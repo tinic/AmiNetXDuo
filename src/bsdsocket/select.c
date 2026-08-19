@@ -573,7 +573,9 @@ BOOL bsd_exception(AmiSocket *sock)
        own latch. WaitSelect() is level-triggered: once SO_ERROR is read there
        is no exceptional error condition left, even if the event API has not
        also been polled. FD_OOB remains until recv(MSG_OOB) handles the mark. */
-    return ((sock->as_Events & FD_OOB) != 0 || sock->as_SoError != 0);
+    return ((sock->as_Events & FD_OOB) != 0 ||
+            (sock->as_Flags & ASF_OOBHAVE) != 0 ||
+            sock->as_SoError != 0);
 }
 
 /* --------------------------------------------------------------- timeout, */

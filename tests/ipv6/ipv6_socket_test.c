@@ -213,8 +213,11 @@ struct t_fdset
 
 #define T_MSG_DONTWAIT      0x80
 #define T_MSG_PEEK          0x02
+#define T_MSG_OOB           0x01
 
 #define T_FIONREAD          0x4004667FUL
+#define T_SO_EVENTMASK      0x2001
+#define T_FD_OOB            0x04
 
 #define T_AI_PASSIVE        1
 #define T_AI_NUMERICHOST    4
@@ -630,6 +633,19 @@ register LONG _clob_a3 __asm("a3");
     return(res);
 }
 
+static LONG bsd_GetSocketEvents(ULONG *events)
+{
+register struct Library *a6  __asm("a6") = SocketBase;
+register ULONG          *a0  __asm("a0") = events;
+register LONG            res __asm("d0");
+BSD_SCRATCH;
+
+    __asm __volatile ("jsr a6@(-300:W)"
+                      : BSD_SCRATCH_OUT, "=r" (res) : "r" (a6), "r" (a0)
+                      : "cc", "memory");
+    return(res);
+}
+
 static APTR bsd_inet_ntop(LONG af, APTR src, APTR dst, LONG size)
 {
 register struct Library *a6  __asm("a6") = SocketBase;
@@ -1024,6 +1040,76 @@ char                    buffer[64];
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(message) &&
                          t_streq(buffer, message)),
                   "client received the echo", rc);
+
+    (VOID)bsd_CloseSocket(accepted);
+    (VOID)bsd_CloseSocket(client);
+    (VOID)bsd_CloseSocket(server);
+}
+
+static VOID t_test_tcp_oob_event_consumption(VOID)
+{
+LONG                  server, client, accepted;
+LONG                  rc;
+LONG                  event_mask = T_FD_OOB;
+ULONG                 events = 0;
+struct t_sockaddr_in  sa;
+UBYTE                 sent = 0xA5;
+UBYTE                 received = 0;
+
+    t_log("TCP OOB select after GetSocketEvents");
+
+    server = bsd_socket(T_AF_INET, T_SOCK_STREAM, 0);
+    client = bsd_socket(T_AF_INET, T_SOCK_STREAM, 0);
+    if (!t_check((BOOL)(server >= 0 && client >= 0), "TCP OOB sockets",
+                 bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 41;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_bind(server, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "TCP OOB listener bind", bsd_Errno());
+    rc = bsd_listen(server, 1);
+    (VOID)t_check((BOOL)(rc == 0), "TCP OOB listener listen", bsd_Errno());
+    rc = bsd_connect(client, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "TCP OOB client connect", bsd_Errno());
+
+    accepted = bsd_accept(server, NULL, NULL);
+    if (!t_check((BOOL)(accepted >= 0), "TCP OOB accept", bsd_Errno()))
+    {
+        (VOID)bsd_CloseSocket(client);
+        (VOID)bsd_CloseSocket(server);
+        return;
+    }
+
+    rc = bsd_setsockopt(accepted, SOL_SOCKET, T_SO_EVENTMASK, &event_mask,
+                        sizeof(event_mask));
+    (VOID)t_check((BOOL)(rc == 0), "enable TCP OOB event mask", bsd_Errno());
+
+    rc = bsd_send(client, &sent, 1, T_MSG_OOB);
+    (VOID)t_check((BOOL)(rc == 1), "send TCP urgent byte", rc);
+
+    Delay(2);
+    rc = t_socket_exception(accepted);
+    (VOID)t_check((BOOL)(rc == 1), "urgent byte sets exceptfds", rc);
+
+    rc = bsd_GetSocketEvents(&events);
+    (VOID)t_check((BOOL)(rc == accepted && (events & T_FD_OOB) != 0),
+                  "GetSocketEvents consumes its OOB latch", rc);
+
+    rc = t_socket_exception(accepted);
+    (VOID)t_check((BOOL)(rc == 1),
+                  "unread urgent byte remains in exceptfds", rc);
+
+    rc = bsd_recv(accepted, &received, 1, T_MSG_OOB);
+    (VOID)t_check((BOOL)(rc == 1 && received == sent),
+                  "recv(MSG_OOB) consumes urgent byte", rc);
+
+    rc = t_socket_exception(accepted);
+    (VOID)t_check((BOOL)(rc == 0), "consumed urgent byte clears exceptfds", rc);
 
     (VOID)bsd_CloseSocket(accepted);
     (VOID)bsd_CloseSocket(client);
@@ -3085,6 +3171,7 @@ int main(void)
     t_test_conversions();
     t_test_socket_basics();
     t_test_tcp_loopback();
+    t_test_tcp_oob_event_consumption();
     t_test_tcp_listener_family();
     t_test_tcp_accepted_local();
     t_test_udp_loopback();
