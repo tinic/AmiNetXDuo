@@ -9,6 +9,8 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Asking to share the library base no longer loses the rest of the request. The answer is still no -- signals and timer state belong to the task that opened the library -- but refusing the tag discarded every tag after it in the same call, so a program that asked to share and linked its errno in one go ran without an errno for its whole life
+- Leaving a range of multicast addresses removes the ones that are there. A program that joined them one at a time, or that had already left one, was told the whole request failed and stayed in every group in the range
 - `getaddrinfo()` with no hints resolves a service that exists only over UDP again -- `tftp`, `ntp`, `syslog` and the rest. Tightening the protocol checks moved the lookup to after the socket type was defaulted, and the "try both protocols" step could then never run
 - A program killed while it was inside the stack no longer stops the network for everything else. Its claim on the stack could not be given back by a task that no longer exists, and nothing else was allowed to give it back either
 - Two programs closing encrypted connections at the same time no longer corrupt the list the encryption library keeps of its open sessions
