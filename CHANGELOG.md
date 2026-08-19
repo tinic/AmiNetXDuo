@@ -9,6 +9,21 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Shutting the stack down no longer frees memory a stuck driver request can still reach. When a device refuses to return a request, the interface is deliberately left behind, and the packet pool it points into was deleted anyway
+- Asking for another task's credentials returns a copy. The pointer named that task's own context, which could close the moment the search released the scheduler, so the caller read it after it was gone
+- A TCP: session no longer looks at its socket after closing it. If another holder closed at the same moment, that close was the last one and the memory was already free
+- An unbound interface only releases a packet for commands that carry one. A control command's packet field is whatever was there before, and it was being freed as though it were a packet
+- A LANCE card keeps sending across a multicast filter change. Changing the filter reinitialises the chip, which threw away frames it had already accepted and reported as sent
+- Two interfaces can no longer be bound to the same slot. The search stopped at the first free entry and rebound it even when the interface already held one further along
+- An interface that survives a failed device open keeps its configuration. The map from device to configuration kept naming the pre-compaction entry, so a later lookup lost a working interface
+- `S2_ONEVENT` with an empty mask is refused instead of waiting forever, since no event can share a bit with it
+- A failed name-server query replies as the request it was made with. The reply went out through the SANA helper, which writes a byte count into the field an IOStdReq uses for something else
+- A write that raced going offline is refused rather than queued onto a stopped unit, where nothing was left to send it
+- Waiting for online or offline no longer misses a transition that lands between the state test and the queue
+- Capture channels survive being closed and reopened while another call is in flight. A read, a close, an ioctl or an arriving packet could all act on the replacement channel that took the same number
+- The random pool credits entropy without wrapping. A large credit through the public interface could carry a partly seeded pool back toward empty
+- A multicast range no longer wraps its reference count
+- The library refuses an unsolicited TLS renegotiation. There is no renegotiation API here and one connection is one handshake, but the vendored stack would accept a server's request to start a second one without asking
 - A reader that outlives its removal no longer has its stack freed underneath it. The teardown read a gauge of how many such tasks were alive, and that number can be unchanged across the window if an older one exits as this one is created, so the check passed and the memory went back while the task was still standing on it
 - A LANCE card that reports a buffer error or an underrun starts sending again. Both clear the chip's transmit enable, so retiring the frame left a card that says it is running and never transmits another packet until the machine is rebooted
 - The transmit watchdog resets a card that is stuck, not one that is busy. It fired whenever the ring stayed full for the interval, which under a sustained transfer is a card that is keeping up, and the reset dropped what was queued
