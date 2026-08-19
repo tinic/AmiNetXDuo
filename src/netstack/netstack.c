@@ -628,7 +628,6 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         }
 
         ns->ns_IfaceMdns[opened] = cfg->mdns;
-        ns->ns_IfaceCfg[opened]  = i;
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
         if (ns->ns_Iface[opened] == NULL)
         {
@@ -663,6 +662,12 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
          */
         if (opened != i)
             ns->ns_Config.interfaces[opened] = *cfg;
+
+        /* The configuration moved with the device, so every mapping must
+           name its compacted slot.  Keeping `i` here points at the stale
+           source entry that the cleanup below marks unconfigured; lookups
+           and interface claims then lose this otherwise live device. */
+        ns->ns_IfaceCfg[opened] = opened;
 
         opened++;
     }
