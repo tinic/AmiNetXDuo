@@ -2168,6 +2168,33 @@ VOID http_term_shutdown(VOID)
         term_active = 0;
     }
 
+    /* Two ACTION_END packets can mark the session reaped a few instructions
+       before the runner publishes rn_Done. Do not delete its message port or
+       let the parent task exit in that window: the runner still owns this
+       record and will signal rn_Parent as its last act. */
+    while (term_runner != NULL && term_runner->rn_Done == 0 &&
+           waited < TERM_STOP_TICKS)
+    {
+        http_term_service();
+        Delay(1);
+        waited++;
+    }
+
+    if (term_runner != NULL && term_runner->rn_Done == 0)
+    {
+        tool_error("the terminal runner is still active. Its memory and port "
+                   "are not given back");
+        return;
+    }
+
+    /* Starting another session reaps the previous runner record, but a
+       server that shuts down after its last session has no next start. */
+    if (term_runner != NULL)
+    {
+        ami_free(term_runner);
+        term_runner = NULL;
+    }
+
     DeleteMsgPort(term_port);
     term_port = NULL;
 
