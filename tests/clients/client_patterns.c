@@ -323,11 +323,15 @@ static VOID group_a(VOID)
     t_ok(fd < 0 && c_errno == EACCES,
          "positive FDCB_ALLOC errno is preserved", fd);
 
-    /* The CHECK refusal reserved fd 0 in the socket table. Once the simulated
-       file is gone, FREE releases that reservation before removing the hook. */
+    /* CHECK is the link library's only way to say whether a number is still
+       occupied.  Once its simulated file is gone, the next allocation must
+       ask again and reclaim fd 0; retaining the first refusal would leak one
+       table entry per transient collision until socket() reported EMFILE. */
     t_fdcb_busy_fd = -1;
-    rc = CloseSocket(0);
-    t_ok(rc == 0, "release descriptor reserved by FDCB_CHECK", rc);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    t_ok(fd == 0, "FDCB_CHECK refusal is not retained as a reservation", fd);
+    if (fd >= 0)
+        CloseSocket(fd);
 
     rc = SocketBaseTags(SBTM_SETVAL(SBTC_FDCALLBACK), 0UL, TAG_DONE);
     t_ok(rc == 0, "remove SBTC_FDCALLBACK", rc);

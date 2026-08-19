@@ -483,9 +483,11 @@ BOOL bsd_fd_reserved(struct AmiSocketBase *base, LONG fd)
  * cannot close.
  *
  * The callback returns 0 or a positive errno. FDCB_CHECK asks whether the
- * candidate is already occupied by the link library; a refusal reserves that
- * slot in our table and allocation continues. FDCB_ALLOC and FDCB_FREE may
- * refuse the operation, and that errno is returned unchanged to the caller.
+ * candidate is already occupied by the link library; a refusal skips that
+ * candidate for this allocation.  CHECK is the only notification available
+ * when the link library later releases the number, so it must not leave a
+ * reservation in our table. FDCB_ALLOC and FDCB_FREE may refuse the operation,
+ * and that errno is returned unchanged to the caller.
  */
 static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
 {
