@@ -1168,7 +1168,8 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
             victim = bsd_lookup(SocketBase, new_socket);
             if (victim != NULL)
             {
-                bsd_fd_free(SocketBase, new_socket);
+                if (bsd_fd_free(SocketBase, new_socket) != 0)
+                    return -1;
                 if (bsd_nx_enter(SocketBase) == 0)
                 {
                     bsd_socket_release(SocketBase, victim);
@@ -1177,13 +1178,14 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
             }
             else if (bsd_fd_reserved(SocketBase, new_socket))
             {
-                bsd_fd_free(SocketBase, new_socket);
+                if (bsd_fd_free(SocketBase, new_socket) != 0)
+                    return -1;
             }
         }
 
         fd = bsd_fd_reserve(SocketBase, new_socket);
         if (fd < 0)
-            return bsd_fail(SocketBase, AMI_EMFILE);
+            return -1;
 
         return fd;
     }
@@ -1197,7 +1199,7 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
         LONG fd = bsd_fd_alloc(SocketBase, sock);
 
         if (fd < 0)
-            return bsd_fail(SocketBase, AMI_EMFILE);
+            return -1;
 
         sock->as_RefCount++;
 
@@ -1213,7 +1215,8 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
     victim = bsd_lookup(SocketBase, new_socket);
     if (victim != NULL)
     {
-        bsd_fd_free(SocketBase, new_socket);
+        if (bsd_fd_free(SocketBase, new_socket) != 0)
+            return -1;
 
         if (bsd_nx_enter(SocketBase) == 0)
         {
@@ -1223,8 +1226,12 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
     }
     else if (bsd_fd_reserved(SocketBase, new_socket))
     {
-        bsd_fd_free(SocketBase, new_socket);
+        if (bsd_fd_free(SocketBase, new_socket) != 0)
+            return -1;
     }
+
+    if (bsd_fd_reserve(SocketBase, new_socket) < 0)
+        return -1;
 
     SocketBase->sb_Table[new_socket] = sock;
     sock->as_RefCount++;

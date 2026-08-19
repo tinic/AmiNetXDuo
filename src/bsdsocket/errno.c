@@ -408,18 +408,8 @@ static const BsdSimpleTag bsd_simple_tags[] =
     { SBTC_LOGSTAT,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogStat)      },
     { SBTC_LOGFACILITY,  SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogFacility)  },
     { SBTC_LOGMASK,      SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_LogMask)      },
-    /*
-     * Stored and read back, never called. The NDK deprecates it in place,
-     * "Link library fd allocation callback; don't use this in new code!", and
-     * the same again over FDCB_FREE/ALLOC/CHECK. It is the AmiTCP 3 mechanism
-     * by which a link library kept its own descriptor table in step with the
-     * socket library's. A call to it means bsd_fd_alloc() and bsd_fd_free()
-     * reach into caller code while they hold library state, for a facility
-     * whose own header says not to use it. There is no SBTC_HAVE_ tag that
-     * covers it, and a refused SET here costs more than it gains (see the note
-     * below on what an unserviced tag discards). The decision is therefore
-     * recorded here rather than signalled to the caller.
-     */
+    /* Legacy link-library descriptor coordination. socket.c performs the
+       documented CHECK/ALLOC/FREE callbacks and propagates their errno. */
     { SBTC_FDCALLBACK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_FDCallback)   },
     { SBTC_ERROR_HOOK,   SBT_RW, (UWORD)offsetof(struct AmiSocketBase, sb_ErrorHook)    },
     /* This is per-opener state a caller can set and read back. */

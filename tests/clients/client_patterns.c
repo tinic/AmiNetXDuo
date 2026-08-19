@@ -60,6 +60,39 @@ struct Library *SocketBase;
 static int  c_errno;
 static LONG c_h_errno;
 
+static LONG t_fdcb_busy_fd = -1;
+static LONG t_fdcb_reject_alloc;
+static LONG t_fdcb_reject_free_fd = -1;
+static LONG t_fdcb_checks;
+static LONG t_fdcb_allocs;
+static LONG t_fdcb_frees;
+
+static LONG t_fd_callback(register LONG fd     __asm("d0"),
+                          register LONG action __asm("d1"))
+{
+    switch (action)
+    {
+        case FDCB_CHECK:
+            t_fdcb_checks++;
+            return (fd == t_fdcb_busy_fd) ? EBUSY : 0;
+
+        case FDCB_ALLOC:
+            t_fdcb_allocs++;
+            if (t_fdcb_reject_alloc)
+            {
+                t_fdcb_reject_alloc = 0;
+                return EACCES;
+            }
+            return 0;
+
+        case FDCB_FREE:
+            t_fdcb_frees++;
+            return (fd == t_fdcb_reject_free_fd) ? ENOTSOCK : 0;
+    }
+
+    return EINVAL;
+}
+
 #ifndef INADDR_LOOPBACK
 #define INADDR_LOOPBACK 0x7f000001UL
 #endif
@@ -256,6 +289,48 @@ static VOID group_a(VOID)
     t_ok(fd >= 0, "socket() after SocketBaseTags", fd);
     if (fd >= 0)
         CloseSocket(fd);
+
+    /* AmiTCP's legacy link-library coordination returns positive errno
+       values. CHECK skips an externally occupied descriptor, while ALLOC and
+       FREE may refuse an operation and their exact error must reach errno. */
+    rc = SocketBaseTags(SBTM_SETVAL(SBTC_FDCALLBACK),
+                        (ULONG)t_fd_callback, TAG_DONE);
+    t_ok(rc == 0, "install SBTC_FDCALLBACK", rc);
+
+    t_fdcb_busy_fd = 0;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    t_ok(fd == 1 && t_fdcb_checks >= 2 && t_fdcb_allocs == 1,
+         "FDCB_CHECK skips a link-library descriptor before FDCB_ALLOC", fd);
+
+    rc = Dup2Socket(fd, 5);
+    t_ok(rc == 5 && t_fdcb_allocs == 2,
+         "Dup2Socket explicit target performs CHECK and ALLOC", rc);
+    if (rc >= 0)
+        CloseSocket(rc);
+
+    t_fdcb_reject_free_fd = fd;
+    rc = CloseSocket(fd);
+    t_ok(rc < 0 && c_errno == ENOTSOCK,
+         "positive FDCB_FREE errno vetoes CloseSocket", rc);
+
+    t_fdcb_reject_free_fd = -1;
+    rc = CloseSocket(fd);
+    t_ok(rc == 0 && t_fdcb_frees >= 2,
+         "descriptor remains live after a refused FDCB_FREE", rc);
+
+    t_fdcb_reject_alloc = 1;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    t_ok(fd < 0 && c_errno == EACCES,
+         "positive FDCB_ALLOC errno is preserved", fd);
+
+    /* The CHECK refusal reserved fd 0 in the socket table. Once the simulated
+       file is gone, FREE releases that reservation before removing the hook. */
+    t_fdcb_busy_fd = -1;
+    rc = CloseSocket(0);
+    t_ok(rc == 0, "release descriptor reserved by FDCB_CHECK", rc);
+
+    rc = SocketBaseTags(SBTM_SETVAL(SBTC_FDCALLBACK), 0UL, TAG_DONE);
+    t_ok(rc == 0, "remove SBTC_FDCALLBACK", rc);
 }
 
 
