@@ -674,6 +674,14 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 Forbid();
                 socket_error = sock->as_SoError;
                 sock->as_SoError = 0;
+
+                /* The UDP ICMP callback records the BSD errno above, then
+                   NetX records the same error for its next receive. SO_ERROR
+                   consumes a pending socket error, so clear both copies or
+                   recv() reports one ICMP message twice. */
+                if ((sock->as_Flags & ASF_UDP) != 0)
+                    sock->as_Nx.udp.nx_udp_socket_icmp_error = NX_SUCCESS;
+
                 Permit();
 
                 return bsd_opt_get_long(SocketBase, optval, optlen,

@@ -1427,6 +1427,51 @@ char                  buffer[16];
     (VOID)bsd_CloseSocket(fd);
 }
 
+static VOID t_test_udp_so_error_consumes_icmp(VOID)
+{
+LONG                  fd;
+LONG                  rc;
+LONG                  error = 0;
+LONG                  error_len = sizeof(error);
+struct t_sockaddr_in  sa;
+static const char     probe[] = "consume UDP error";
+char                  buffer[16];
+
+    t_log("UDP SO_ERROR consumes ICMP error");
+
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (!t_check((BOOL)(fd >= 0), "UDP SO_ERROR socket", bsd_Errno()))
+        return;
+
+    t_bzero(&sa, sizeof(sa));
+    sa.sin_len    = sizeof(sa);
+    sa.sin_family = T_AF_INET;
+    sa.sin_port   = T_PORT + 32;
+    sa.sin_addr   = 0x7F000001UL;
+
+    rc = bsd_connect(fd, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc == 0), "connect UDP SO_ERROR probe",
+                  bsd_Errno());
+
+    rc = bsd_send(fd, (APTR)probe, sizeof(probe), 0);
+    (VOID)t_check((BOOL)(rc == (LONG)sizeof(probe)),
+                  "send UDP SO_ERROR probe", rc);
+
+    Delay(3);
+    rc = t_udp_readable(fd);
+    (VOID)t_check((BOOL)(rc == 1), "UDP SO_ERROR probe becomes ready", rc);
+
+    rc = bsd_getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len);
+    (VOID)t_check((BOOL)(rc == 0 && error == T_ECONNREFUSED),
+                  "SO_ERROR returns UDP ICMP error", error);
+
+    rc = bsd_recv(fd, buffer, sizeof(buffer), T_MSG_DONTWAIT);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EWOULDBLOCK),
+                  "recv does not repeat consumed UDP ICMP error", bsd_Errno());
+
+    (VOID)bsd_CloseSocket(fd);
+}
+
 /* A custom raw protocol avoids ICMP's echo traffic while exercising the same
    global receive tee.  Receiving the first packet on the wildcard sender
    synchronizes with the IP thread before the bound socket is polled. */
@@ -2702,6 +2747,7 @@ int main(void)
     t_test_udp_connected_readiness();
     t_test_udp_reconnect_after_peek();
     t_test_udp_icmp_readiness();
+    t_test_udp_so_error_consumes_icmp();
     t_test_raw_bound_address();
     t_test_raw_bind_after_peek();
     t_test_raw_connect_after_peek();
