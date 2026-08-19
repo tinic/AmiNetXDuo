@@ -9,6 +9,12 @@ version at the top when it merges.
 
 ## Unreleased
 
+- Creating or resetting a ThreadX thread fails cleanly when Exec cannot allocate its native Task. The failed Task creation was invisible to ThreadX, which published and could start a thread that had nothing underneath it
+- Thread teardown still detaches the native Task and recovers the scheduler baton when the reaper has no spare signal bit. That fallback returned before recording the live zombie, so the caller could free its stack and the scheduler could remain owned by a thread that no longer existed
+- Thread stacks are rejected whenever their ranges overlap, including when the new range wholly contains an existing one. That containment passed the endpoint-only check and let two Tasks use the same memory as a stack
+- A TLS host name too long for both certificate verification and SNI is refused instead of silently shortened. Truncating the identity could verify or contact a different host from the one the program requested
+- A transmit request that finds the hardware ring full after copying is now marked asynchronous before it is requeued. It still carried `IOF_QUICK`, so its eventual completion was not replied and the caller could wait forever
+- The mbuf cluster limit remains a limit when two tasks grow the pool together. Both could observe the last slot free while allocation ran outside the lock and each add a cluster
 - `getaddrinfo()` with no hints resolves a service that exists only over UDP again -- `tftp`, `ntp`, `syslog` and the rest. Tightening the protocol checks moved the lookup to after the socket type was defaulted, and the "try both protocols" step could then never run
 - A program killed while it was inside the stack no longer stops the network for everything else. Its claim on the stack could not be given back by a task that no longer exists, and nothing else was allowed to give it back either
 - Two programs closing encrypted connections at the same time no longer corrupt the list the encryption library keeps of its open sessions
