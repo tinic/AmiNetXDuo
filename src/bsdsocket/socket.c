@@ -25,6 +25,7 @@
 #include "nx_ip.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
+#include "ipv6_srcsel.h"
 #endif
 
 #include "aminetxduo/random.h"
@@ -2461,14 +2462,6 @@ static BOOL bsd_bind_accepts(const AmiSocket *listener, NX_TCP_SOCKET *conn)
 
 /* ---------------------------------------------------- outbound source, */
 
-#ifdef AMINETXDUO_IPV6
-/* fe80::/10, the only scope the zone notation qualifies (RFC 4007 11.1). */
-static BOOL bsd_v6_is_linklocal(const ULONG v6[4])
-{
-    return ((v6[0] & 0xFFC00000UL) == 0xFE800000UL) ? TRUE : FALSE;
-}
-#endif
-
 /*
  * Which source a send from this socket has to use.
  *
@@ -2515,18 +2508,55 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
 #ifdef AMINETXDUO_IPV6
     if (dest->nxd_ip_version == NX_IP_VERSION_V6)
     {
-        const NX_INTERFACE *zoned = NX_NULL;
+        NX_INTERFACE *zoned = NX_NULL;
 
-        if (scope != 0UL && bsd_v6_is_linklocal(dest->nxd_ip_address.v6))
+        /*
+         * RFC 4007 section 7 requires the upper layer to identify the zone
+         * for every non-global destination when more than one is present.
+         * That includes every non-global multicast scope, not only fe80::/10.
+         * The sockaddr index is one based; NetX's interface table is not.
+         * Global addresses have a single zone, so their scope_id is ignored.
+         */
+        if (scope != 0UL &&
+            anx6_scope(dest->nxd_ip_address.v6) < 0xEU)
         {
             if (scope > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
                 return BSD_SOURCE_REFUSE;
 
             zoned = &ip->nx_ip_interface[scope - 1UL];
+
+            if (zoned->nx_interface_valid == 0)
+                return BSD_SOURCE_REFUSE;
         }
 
         if (!bound && zoned == NX_NULL)
             return BSD_SOURCE_ROUTE;
+
+        /*
+         * A zone without a bound address asks RFC 6724 to choose among the
+         * usable addresses on that interface.  The old link-local-only walk
+         * happened to work for fe80::/10 and ff02::/16, but would choose a
+         * link-local source for a wider multicast scope even when a global
+         * address was required.  The shipping selector already answers both
+         * questions when its interface argument is non-null.
+         */
+        if (!bound)
+        {
+            NXD_IPV6_ADDRESS *chosen = NX_NULL;
+            UINT              status;
+
+            tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+            status = _nxd_ipv6_interface_find(ip,
+                                               (ULONG *)dest->nxd_ip_address.v6,
+                                               &chosen, zoned);
+            tx_mutex_put(&ip->nx_ip_protection);
+
+            if (status != NX_SUCCESS || chosen == NX_NULL)
+                return BSD_SOURCE_REFUSE;
+
+            *index = (UINT)chosen->nxd_ipv6_address_index;
+            return BSD_SOURCE_INDEX;
+        }
 
         /* One past NX_MAX_IPV6_ADDRESSES is where nxd_ipv6_enable() puts ::1,
            so a bind to it is found here and needs no special case. */
@@ -2544,11 +2574,6 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
             {
                 if (a->nxd_ipv6_address_attached != zoned)
                     continue;
-
-                /* A zone names a link, so an unbound socket's source is the
-                   address that shares the destination's scope. */
-                if (!bound && !bsd_v6_is_linklocal(a->nxd_ipv6_address))
-                    continue;
             }
 
             if (bound &&
@@ -2562,8 +2587,7 @@ BsdSourceKind bsd_source_select(const AmiSocket *sock, const NXD_ADDRESS *dest,
             return BSD_SOURCE_INDEX;
         }
 
-        /* Bound to an address that is gone, or zoned to an interface with no
-           usable link-local address, DAD still running, say. */
+        /* Bound to an address that is gone or belongs to another zone. */
         return BSD_SOURCE_REFUSE;
     }
 #else

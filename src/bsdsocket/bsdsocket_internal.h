@@ -736,12 +736,10 @@ typedef struct AmiSocket
     UINT                    as_PeerPort;
 
     /*
-     * sin6_scope_id, kept so that getsockname()/getpeername() report back what
-     * bind()/connect() were given. It does not select an outgoing interface:
-     * NetX Duo's dual-stack connect and send entry points take no interface
-     * parameter and pick the source themselves through
-     * _nxd_ipv6_interface_find(). With one Ethernet interface, which is all
-     * this runs on today, the two answers are the same.
+     * sin6_scope_id.  For a non-global IPv6 peer bsd_source_select() maps this
+     * one-based zone index to the matching NetX interface and pins the source
+     * address selected on that interface.  Keeping it also lets
+     * getsockname()/getpeername() report what bind()/connect() were given.
      */
     ULONG                   as_ScopeId;
 

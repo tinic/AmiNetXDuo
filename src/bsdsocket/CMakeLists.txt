@@ -46,6 +46,7 @@ if(AMINETXDUO_IPV6)
     list(APPEND BSDSOCKET_SOURCES in6.c)
 endif()
 
+
 # tcp_handler.c is the TCP: DOS handler: a socket reachable as a file handle,
 # so `Type TCP:host/port` works and a program that speaks DOS files can speak
 # the network. Nothing in the library depends on it, library.c starts it and
@@ -121,7 +122,8 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         OUTPUT_NAME "bsdsocket.library")
 
     target_include_directories(bsdsocket_library PRIVATE
-        ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
+        ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/ipv6")
     target_link_libraries(bsdsocket_library PRIVATE
         aminetxduo_netstack aminetxduo_sana2 aminetxduo_config
         aminetxduo_common netxduo_addons netxduo threadx threadx_port)
@@ -175,4 +177,3 @@ if(AMINETXDUO_BSDSOCKET_LINK)
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
         VERBATIM)
 endif()
-

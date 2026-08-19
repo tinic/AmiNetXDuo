@@ -612,6 +612,21 @@ ULONG dest[4];
 
     h_check(h_select(dest, NX_NULL) == H_SLOT1,
             "a joined group leaves by the interface it was joined on");
+
+    /* A socket zone reaches the selector as an interface constraint.  For a
+       scope wider than link, the source on that interface still has to be
+       wide enough: pinning the interface must not mean blindly taking its
+       link-local address. */
+    h_reset();
+    h_addr(H_SLOT0, H_ETH1, 0xFE800000UL, 0, 0, 2, 64,
+           NX_IPV6_ADDR_STATE_VALID);
+    h_addr(H_SLOT1, H_ETH1, 0x20010DB8UL, 0x00000002UL, 0, 1, 64,
+           NX_IPV6_ADDR_STATE_VALID);
+
+    h_set(dest, 0xFF050000UL, 0, 0, 0xFB);
+
+    h_check(h_select(dest, h_if(H_ETH1)) == H_SLOT1,
+            "a zoned site-scope group takes a wide-enough source");
 }
 #endif /* NX_ENABLE_IPV6_MULTICAST */
 
