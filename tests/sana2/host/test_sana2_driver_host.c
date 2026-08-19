@@ -495,6 +495,28 @@ static void test_unbound_without_a_packet(void)
     h_check(h_log[0] == '\0', "and the device was never touched");
 }
 
+/* NX_IP_DRIVER is an automatic object in NetX Duo and its control-command
+   call sites initialise only the fields that command owns.  A stale packet
+   value therefore belongs to no one and must not be released. */
+static void test_unbound_control_ignores_stale_packet(void)
+{
+    printf("sana2: an unbound control command ignores its stale packet field\n");
+
+    fixture_init(AMI_ETH_ADDR_SIZE);
+
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command   = NX_LINK_ENABLE;
+    req.nx_ip_driver_ptr       = &ip;
+    req.nx_ip_driver_interface = &interface_obj;
+    req.nx_ip_driver_packet    = &packet; /* left over from an earlier send */
+
+    ami_sana2_driver_entry(&req);
+
+    h_check(req.nx_ip_driver_status == NX_INVALID_INTERFACE,
+            "the control command is refused");
+    h_check(h_releases == 0, "and the stale packet pointer is not released");
+}
+
 /* =================================================== the EtherType ======= */
 
 /*
@@ -962,6 +984,7 @@ int main(void)
     test_lookup_discriminates();
     test_unbound_send_releases_the_packet();
     test_unbound_without_a_packet();
+    test_unbound_control_ignores_stale_packet();
 
     test_ether_type();
     test_send_without_a_packet();

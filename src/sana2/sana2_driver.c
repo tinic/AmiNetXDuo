@@ -170,10 +170,25 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     iface = ami_sana2_lookup(driver_req);
     if (iface == NULL)
     {
-        /* An unbound interface can still fail cleanly. A packet it was asked
-           to send must not leak. */
-        if (driver_req->nx_ip_driver_packet != NULL)
-            nx_packet_transmit_release(driver_req->nx_ip_driver_packet);
+        /* NetX does not zero NX_IP_DRIVER before control commands, so their
+           packet field is indeterminate.  Only send commands own that field;
+           an unbound send must return its packet, while an unbound control
+           command must not release whatever stale pointer happens to be
+           there. */
+        switch (driver_req->nx_ip_driver_command)
+        {
+        case NX_LINK_PACKET_SEND:
+        case NX_LINK_PACKET_BROADCAST:
+        case NX_LINK_ARP_SEND:
+        case NX_LINK_ARP_RESPONSE_SEND:
+        case NX_LINK_RARP_SEND:
+            if (driver_req->nx_ip_driver_packet != NULL)
+                nx_packet_transmit_release(driver_req->nx_ip_driver_packet);
+            break;
+
+        default:
+            break;
+        }
 
         driver_req->nx_ip_driver_status = NX_INVALID_INTERFACE;
         return;
