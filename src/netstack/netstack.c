@@ -2480,6 +2480,11 @@ LONG netstack_interface_up(UWORD index)
     status = nx_ip_driver_interface_direct_command(&ns->ns_Ip, NX_LINK_ENABLE,
                                                    (UINT)index, &value);
 
+#ifdef AMINETXDUO_IPV6
+    if (status == NX_SUCCESS)
+        ami_netstack_ipv6_interface_up(ns, index);
+#endif
+
     ami_netstack_leave_free(caller);
 
     return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
