@@ -33,6 +33,7 @@ set(TLSLIB_SOURCES
     tls_netx.c
     tls_conn.c
     tls_hostname.c
+    tls_path.c
     tls_store.c
     tls_resume.c
     tls_expiry.c
@@ -331,7 +332,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_tls_close
         test/test_tls_close.c
         tls_conn.c
-        tls_hostname.c)
+        tls_hostname.c
+        tls_path.c)
 
     find_package(Threads REQUIRED)
     target_link_libraries(test_tls_close PRIVATE Threads::Threads)

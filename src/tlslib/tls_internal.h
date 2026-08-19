@@ -424,6 +424,9 @@ extern struct DosLibrary *DOSBase;
    identity when the NetX X.509 representation cannot hold it. */
 LONG  tls_hostname_set(TLSConnection *conn, CONST_STRPTR hostname, ULONG length);
 
+/* Copy a caller-supplied filesystem identity whole or reject it. */
+LONG  tls_path_set(char *dst, ULONG size, CONST_STRPTR path);
+
 
 /*
  * Serial-port tracing, compiled in only by -DTLS_RESUME_TRACE.  It lives in

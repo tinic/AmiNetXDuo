@@ -260,6 +260,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    TLSLIB_REG("
     case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
     case TLS_ERR_BADHOSTNAME: return (CONST_STRPTR)"the host name is too long for certificate verification";
     case TLS_ERR_KEYUSAGE:  return (CONST_STRPTR)"the certificate is not allowed to be used this way";
+    case TLS_ERR_BADPATH:    return (CONST_STRPTR)"the trust store or session file path is too long";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
@@ -485,10 +486,15 @@ struct TLSConnection *tls_TLSOpenA(
         goto fail;
     }
 
-    tls_strncpy(conn->tc_StorePath,
-                (store_path != NULL) ? (const char *)store_path
-                                     : TLS_DEFAULT_STORE,
-                sizeof(conn->tc_StorePath));
+    if ((conn->tc_Flags & TLSF_VERIFY) != 0)
+    {
+        error = tls_path_set(conn->tc_StorePath, sizeof(conn->tc_StorePath),
+                             (store_path != NULL)
+                                 ? store_path
+                                 : (CONST_STRPTR)TLS_DEFAULT_STORE);
+        if (error != TLS_OK)
+            goto fail;
+    }
 
     /* ---- resumption ----------------------------------------------------- */
 
@@ -503,10 +509,13 @@ struct TLSConnection *tls_TLSOpenA(
     {
         conn->tc_ResumeFlags |= TLSR_ENABLED;
 
-        tls_strncpy(conn->tc_SessionPath,
-                    (session_path != NULL) ? (const char *)session_path
-                                           : TLS_DEFAULT_SESSIONS,
-                    sizeof(conn->tc_SessionPath));
+        error = tls_path_set(conn->tc_SessionPath,
+                             sizeof(conn->tc_SessionPath),
+                             (session_path != NULL)
+                                 ? session_path
+                                 : (CONST_STRPTR)TLS_DEFAULT_SESSIONS);
+        if (error != TLS_OK)
+            goto fail;
 
         if (conn->tc_SessionPath[0] != '\0')
             conn->tc_ResumeFlags |= TLSR_PERSIST;

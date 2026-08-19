@@ -206,7 +206,9 @@ struct TLSConnection;
 
 /*
  * STRPTR.  Trust store to use instead of DEVS:Internet/certificates.  For a
- * program with its own pinned set, and for testing.
+ * program with its own pinned set, and for testing.  Paths longer than 159
+ * bytes are rejected with TLS_ERR_BADPATH; they are never truncated into a
+ * different file name.
  */
 #define TLSA_TrustStore     (TLSA_Dummy + 3)
 
@@ -255,7 +257,8 @@ struct TLSConnection;
  * DEVS:Internet/tlssessions.  An empty string means nowhere: the cache stays in
  * the library, so a second connection from the same or another program still
  * resumes, but nothing survives a reboot and no master secret is written to
- * disk.
+ * disk.  Paths longer than 159 bytes are rejected with TLS_ERR_BADPATH; they
+ * are never truncated into a different file name.
  */
 #define TLSA_SessionFile    (TLSA_Dummy + 9)
 
@@ -278,6 +281,7 @@ struct TLSConnection;
 #define TLS_ERR_ALERT       14  /* the peer sent a fatal alert; data is short */
 #define TLS_ERR_BADHOSTNAME 15  /* host name exceeds the verifier/SNI limit   */
 #define TLS_ERR_KEYUSAGE    16  /* leaf keyUsage forbids the negotiated use   */
+#define TLS_ERR_BADPATH     17  /* trust/session path exceeds internal limit  */
 
 /* ----------------------------------------------------------------- info --- */
 

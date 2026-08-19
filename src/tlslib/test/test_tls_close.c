@@ -257,6 +257,34 @@ static VOID h_test_hostname_limit(VOID)
     CHECK(conn.tc_Sni.nx_secure_x509_dns_name_length == 0);
 }
 
+static VOID h_test_path_limit(VOID)
+{
+    char  accepted[TLS_STORE_PATH_MAX];
+    char  rejected[TLS_STORE_PATH_MAX + 1];
+    char  copied[TLS_STORE_PATH_MAX];
+    ULONG i;
+
+    printf("tls_open: over-limit file paths are rejected, not truncated\n");
+
+    for (i = 0; i + 1 < sizeof(accepted); i++)
+        accepted[i] = (char)('a' + (i % 26UL));
+    accepted[sizeof(accepted) - 1] = '\0';
+
+    memset(copied, 0x5A, sizeof(copied));
+    CHECK(tls_path_set(copied, sizeof(copied),
+                       (CONST_STRPTR)accepted) == TLS_OK);
+    CHECK(strcmp(copied, accepted) == 0);
+
+    for (i = 0; i < TLS_STORE_PATH_MAX; i++)
+        rejected[i] = (char)('a' + (i % 26UL));
+    rejected[TLS_STORE_PATH_MAX] = '\0';
+
+    memset(copied, 0x5A, sizeof(copied));
+    CHECK(tls_path_set(copied, sizeof(copied),
+                       (CONST_STRPTR)rejected) == TLS_ERR_BADPATH);
+    CHECK((UBYTE)copied[0] == 0x5A);
+}
+
 int main(void)
 {
     struct TLSLibBase *base;
@@ -285,6 +313,7 @@ int main(void)
 
     h_test_concurrent_close(base);
     h_test_hostname_limit();
+    h_test_path_limit();
 
     free(base);
 
