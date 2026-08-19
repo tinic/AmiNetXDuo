@@ -381,3 +381,31 @@ BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now)
     Permit();
     return needed;
 }
+
+
+BOOL ami_ns_ra_rdnss_has(AmiNsRaPending *pending,
+                         const ULONG address[AMI_CFG_IP6_WORDS], ULONG now)
+{
+    BOOL  found = FALSE;
+    UWORD i;
+    UWORD iface;
+
+    if (pending == NULL || address == NULL)
+        return FALSE;
+
+    /* This is an ownership query, not a consumer pass: do not clear pending
+       state or compact the repository. Expired entries simply no longer own
+       the address and the ordinary snapshot path will publish their removal. */
+    Forbid();
+    for (iface = 0; !found && iface < AMI_CFG_MAX_INTERFACES; iface++)
+        for (i = 0; !found && i < pending->rdnss_count[iface]; i++)
+            if (!ami_ns_ra_expired(pending->rdnss[iface][i].received,
+                                   pending->rdnss[iface][i].lifetime, now) &&
+                ami_ns_ra_same(
+                    pending->rdnss[iface][i].address.nxd_ip_address.v6,
+                    address))
+                found = TRUE;
+    Permit();
+
+    return found;
+}

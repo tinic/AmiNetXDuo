@@ -65,5 +65,7 @@ VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, UWORD interface_index,
 BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
                         ULONG now);
 BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now);
+BOOL ami_ns_ra_rdnss_has(AmiNsRaPending *pending,
+                         const ULONG address[AMI_CFG_IP6_WORDS], ULONG now);
 
 #endif /* AMINETXDUO_NETSTACK_RA_H */

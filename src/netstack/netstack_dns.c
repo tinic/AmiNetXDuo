@@ -223,18 +223,25 @@ VOID ami_ns6_dnssl(NX_IP *ip_ptr, UINT interface_index, UCHAR *domains,
  * shorter list would take away one the router still advertises.  That is what
  * the ns_Dhcpv6Dns[] cross-check in each loop is for.
  */
-static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
-                                    const ULONG addr[AMI_CFG_IP6_WORDS])
+static BOOL ami_ns_dns_v6_list_names(const NXD_ADDRESS *servers, UWORD count,
+                                     const ULONG addr[AMI_CFG_IP6_WORDS])
 {
     UWORD i;
 
-    for (i = 0; i < ns->ns_Dhcpv6DnsCount; i++)
+    for (i = 0; i < count; i++)
     {
-        if (ami_ns6_same(addr, ns->ns_Dhcpv6Dns[i].nxd_ip_address.v6))
+        if (ami_ns6_same(addr, servers[i].nxd_ip_address.v6))
             return TRUE;
     }
 
     return FALSE;
+}
+
+static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
+                                    const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    return ami_ns_dns_v6_list_names(ns->ns_Dhcpv6Dns,
+                                    ns->ns_Dhcpv6DnsCount, addr);
 }
 
 /*
@@ -246,8 +253,11 @@ static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
 static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 {
     AmiResolverConfig *r;
+    NXD_ADDRESS        offered[AMI_RDNSS_MAX];
+    UWORD              offered_count = 0;
     char               text[AMI_CFG_IP6_STRLEN];
     UINT               index;
+    ULONG              now;
 
     if (!ns->ns_Dhcpv6DnsPending)
         return;
@@ -258,30 +268,13 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
         return;
 
     r = &ns->ns_Config.resolver;
+    now = tx_time_get();
 
-    /*
-     * There is no withdrawal here, and that is a fact about the client rather
-     * than an omission.  _nx_dhcpv6_process_DNS_server() writes into
-     * nx_dhcpv6_DNS_name_server_address[] and nothing ever clears it
-     * (nxd_dhcpv6_client.c:4697), so a Reply naming fewer servers than the one
-     * before leaves the older entries in place and there is no "no longer
-     * named" signal to act on.  Written down because a withdrawal loop here
-     * would have looked like it worked and never removed anything.
-     *
-     * The advertisement's side does withdraw, because RFC 8106 5.1's lifetime
-     * of zero is an explicit retraction and ami_ns6_rdnss() acts on it; what
-     * that loop must not do is take away an entry this one put there, which is
-     * what the ns_Dhcpv6Dns[] cross-check in it is for.
-     */
-
-    /* In: the DNS client first, the configuration only if that worked -- the
-       invariant the advertisement path below states. */
-    ns->ns_Dhcpv6DnsCount = 0;
-
+    /* Read the replacement set before changing the applied set: the old one
+       is the ownership record needed to identify withdrawals. */
     for (index = 0; index < (UINT)NX_DHCPV6_NUM_DNS_SERVERS; index++)
     {
         NXD_ADDRESS server;
-        UINT        status;
 
         if (nx_dhcpv6_get_DNS_server_address(&ns->ns_Dhcpv6, index, &server)
                 != NX_SUCCESS)
@@ -291,8 +284,56 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
              server.nxd_ip_address.v6[2] | server.nxd_ip_address.v6[3]) == 0UL)
             continue;
 
-        if (ns->ns_Dhcpv6DnsCount < (UWORD)AMI_RDNSS_MAX)
-            ns->ns_Dhcpv6Dns[ns->ns_Dhcpv6DnsCount++] = server;
+        if (offered_count < (UWORD)AMI_RDNSS_MAX &&
+            !ami_ns_dns_v6_list_names(offered, offered_count,
+                                       server.nxd_ip_address.v6))
+            offered[offered_count++] = server;
+    }
+
+    /* Out: a later valid Reply may shorten the list or omit the option. A
+       server still owned by RDNSS remains in both resolver views. */
+    for (index = ns->ns_Dhcpv6DnsCount; index-- != 0U; )
+    {
+        NXD_ADDRESS server = ns->ns_Dhcpv6Dns[index];
+        UINT        status;
+
+        if (ami_ns_dns_v6_list_names(offered, offered_count,
+                                     server.nxd_ip_address.v6) ||
+            ami_ns_ra_rdnss_has(&ns->ns_Ra, server.nxd_ip_address.v6, now))
+            continue;
+
+        status = nxd_dns_server_remove(&ns->ns_Dns, &server);
+        ami_config_format_ip6(server.nxd_ip_address.v6, text, sizeof(text));
+
+        if (status != NX_SUCCESS && status != NX_DNS_SERVER_NOT_FOUND)
+        {
+            AMI_WARN("netstack: DHCPv6 name server %s withdrawal failed "
+                     "(%ld)", text, (long)status);
+            /* Keep the applied ownership record and try again on the next
+               caller pass; otherwise RDNSS could withdraw this still-live
+               DNS-client entry as though DHCPv6 no longer owned it. */
+            ns->ns_Dhcpv6DnsPending = TRUE;
+            return;
+        }
+
+        ami_ns_resolver_forbid();
+        (VOID)ami_config_nameserver6_withdraw(r,
+                                              server.nxd_ip_address.v6);
+        ami_ns_resolver_permit();
+        AMI_INFO("netstack: DHCPv6 name server %s withdrawn", text);
+    }
+
+    memset(ns->ns_Dhcpv6Dns, 0, sizeof(ns->ns_Dhcpv6Dns));
+    for (index = 0; index < offered_count; index++)
+        ns->ns_Dhcpv6Dns[index] = offered[index];
+    ns->ns_Dhcpv6DnsCount = offered_count;
+
+    /* In: the DNS client first, the configuration only if that worked -- the
+       invariant the advertisement path below states. */
+    for (index = 0; index < offered_count; index++)
+    {
+        NXD_ADDRESS server = offered[index];
+        UINT        status;
 
         status = nxd_dns_server_add(&ns->ns_Dns, &server);
 
