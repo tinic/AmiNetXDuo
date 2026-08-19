@@ -676,6 +676,7 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         BOOL       want_read   = (in_read   != NULL && (in_read[word]   & mask) != 0);
         BOOL       want_write  = (in_write  != NULL && (in_write[word]  & mask) != 0);
         BOOL       want_except = (in_except != NULL && (in_except[word] & mask) != 0);
+        BOOL       ready       = FALSE;
 
         if (!want_read && !want_write && !want_except)
             continue;
@@ -687,20 +688,25 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         if (want_read && bsd_readable(sock))
         {
             out->read[word] |= mask;
-            count++;
+            ready = TRUE;
         }
 
         if (want_write && bsd_writable(sock))
         {
             out->write[word] |= mask;
-            count++;
+            ready = TRUE;
         }
 
         if (want_except && bsd_exception(sock))
         {
             out->except[word] |= mask;
-            count++;
+            ready = TRUE;
         }
+
+        /* select() returns the number of ready descriptors, not the number
+           of bits set across its three result sets. */
+        if (ready)
+            count++;
     }
 
     bsd_nx_leave(base);
