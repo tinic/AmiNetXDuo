@@ -412,6 +412,21 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_lease COMMAND test_dns_lease)
 
+    # A DNSSL suffix can supply the default domain only while that advertised
+    # suffix remains live, and never owns a file, DHCP, or caller override.
+    add_executable(test_dns_domain
+        host/test_dns_domain_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_dns_domain.c")
+
+    target_include_directories(test_dns_domain PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_dns_domain PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME dns_domain COMMAND test_dns_domain)
+
     # The RFC 8106 callbacks run on the IP thread, while a caller task absorbs
     # their state before entering the DNS client.  Permit() in this harness
     # injects a second advertisement exactly after the snapshot, proving that
