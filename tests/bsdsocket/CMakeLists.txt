@@ -112,6 +112,27 @@ endif()
 # larger bsdsocket host tests above, this needs no live Linux ThreadX objects,
 # so the target-width tx_port shim lets it run on arm64 hosts as well.
 if(NOT CMAKE_CROSSCOMPILING)
+    # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
+    # before nx_udp_socket_receive() removes the UDP header.  This compiles the
+    # same small parser the library uses, so those layout assumptions run in
+    # ordinary host CTest rather than only in the guest IPv6 socket suite.
+    add_executable(test_udp_queue
+        host/test_udp_queue_host.c
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/udp_queue.c")
+
+    target_include_directories(test_udp_queue PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_definitions(test_udp_queue PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME udp_queue_layout COMMAND test_udp_queue)
+
     add_executable(test_bpf_write_serial
         host/test_bpf_write_serial_host.c
         "${CMAKE_SOURCE_DIR}/src/bsdsocket/bpf.c")

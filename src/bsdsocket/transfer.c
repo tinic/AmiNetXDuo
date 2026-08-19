@@ -18,9 +18,9 @@
 
 #include "bsdsocket_vectors.h"
 #include "netmonitor.h"
+#include "udp_queue.h"
 
 #include "nx_ip.h"
-#include "nx_udp.h"          /* NX_UDP_HEADER, read off a queued packet */
 #include "nx_ipv4.h"
 #ifdef AMINETXDUO_IPV6
 #include "nx_ipv6.h"
@@ -720,17 +720,12 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
      * reads nx_packet_ip_header rather than the prepend pointer, so it is
      * still used for that and its port answer discarded.
      */
-    if (packet->nx_packet_prepend_ptr == NX_NULL ||
-        packet->nx_packet_length < (ULONG)sizeof(NX_UDP_HEADER))
-        return FALSE;
-
     if (nxd_udp_source_extract((NX_PACKET *)packet, &source, &port) !=
         NX_SUCCESS)
         return FALSE;
 
-    port = (UINT)(((const NX_UDP_HEADER *)(const VOID *)
-                       packet->nx_packet_prepend_ptr)->nx_udp_header_word_0 >>
-                  NX_SHIFT_BY_16);
+    if (bsd_udp_queue_info(packet, &port, NX_NULL) != NX_SUCCESS)
+        return FALSE;
 
     scope = bsd_packet_scope_id(packet, &source);
 
@@ -756,10 +751,8 @@ ULONG bsd_udp_available(const AmiSocket *sock)
                bytes, and so does the MSG_PEEK arm of this ioctl in options.c,
                which measures a packet that has already been through the
                strip. All three have to answer the same number. */
-            if (nx_packet_length_get(packet, &length) == NX_SUCCESS)
-                return (length >= (ULONG)sizeof(NX_UDP_HEADER))
-                           ? length - (ULONG)sizeof(NX_UDP_HEADER)
-                           : 0;
+            if (bsd_udp_queue_info(packet, NX_NULL, &length) == NX_SUCCESS)
+                return length;
 
             return 0;
         }
