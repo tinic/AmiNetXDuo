@@ -1732,10 +1732,12 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
             {
                 if (ns->ns_Config.interfaces[i].iptype != AMI_IPTYPE_DHCP)
                     continue;
-                if (i == 0)
-                    continue;   /* interface 0 is enabled by nx_dhcp_create() */
 
-                (VOID)nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)i);
+                status = nx_dhcp_interface_enable(&ns->ns_Dhcp, (UINT)i);
+                if (status != NX_SUCCESS &&
+                    status != NX_DHCP_INTERFACE_ALREADY_ENABLED)
+                    AMI_WARN("netstack: DHCP did not enable interface %ld "
+                             "(%ld)", (long)i, (long)status);
             }
 
             status = nx_dhcp_start(&ns->ns_Dhcp);
