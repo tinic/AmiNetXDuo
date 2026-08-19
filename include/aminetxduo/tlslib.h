@@ -277,6 +277,7 @@ struct TLSConnection;
 #define TLS_ERR_INTERNAL    13  /* a bug on our side                          */
 #define TLS_ERR_ALERT       14  /* the peer sent a fatal alert; data is short */
 #define TLS_ERR_BADHOSTNAME 15  /* host name exceeds the verifier/SNI limit   */
+#define TLS_ERR_KEYUSAGE    16  /* leaf keyUsage forbids the negotiated use   */
 
 /* ----------------------------------------------------------------- info --- */
 

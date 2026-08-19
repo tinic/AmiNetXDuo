@@ -212,6 +212,13 @@ static LONG tls_error_from_nx(UINT status)
     case NX_SECURE_X509_CERTIFICATE_DNS_MISMATCH:
         return TLS_ERR_HOSTNAME;
 
+    /* The leaf's keyUsage forbids what the handshake negotiated. Without this
+       it falls to TLS_ERR_HANDSHAKE, where a refused certificate and a server
+       that hung up are the same message -- and this is the one refusal a site
+       operator can act on, so it has to be nameable in a bug report. */
+    case NX_SECURE_X509_KEY_USAGE_ERROR:
+        return TLS_ERR_KEYUSAGE;
+
     case NX_NO_PACKET:
     case NX_WAIT_ABORTED:
         return TLS_ERR_TIMEOUT;
@@ -252,6 +259,7 @@ CONST_STRPTR tls_TLSErrorString(register LONG               code    TLSLIB_REG("
     case TLS_ERR_NOHOSTNAME:return (CONST_STRPTR)"no host name was given to check the certificate against";
     case TLS_ERR_ALERT:     return (CONST_STRPTR)"the server broke off the connection, so the data is incomplete";
     case TLS_ERR_BADHOSTNAME: return (CONST_STRPTR)"the host name is too long for certificate verification";
+    case TLS_ERR_KEYUSAGE:  return (CONST_STRPTR)"the certificate is not allowed to be used this way";
     default:                return (CONST_STRPTR)"internal error";
     }
 }
