@@ -56,6 +56,71 @@ static BOOL ami_ns_domain_same(const char *a, const char *b)
     return (BOOL)(ca == cb);
 }
 
+static BOOL ami_ns_domain_valid(const char *name)
+{
+    ULONG start = 0;
+    ULONG i;
+
+    if (name == NULL || name[0] == '\0')
+        return FALSE;
+
+    for (i = 0; ; i++)
+    {
+        ULONG j;
+
+        if (i >= (ULONG)AMI_CFG_DOMAIN_LEN)
+            return FALSE;
+        if (name[i] != '.' && name[i] != '\0')
+            continue;
+        if (i == start || i - start > 63UL || name[start] == '-' ||
+            name[i - 1UL] == '-')
+            return FALSE;
+
+        for (j = start; j < i; j++)
+            if (!((name[j] >= 'a' && name[j] <= 'z') ||
+                  (name[j] >= 'A' && name[j] <= 'Z') ||
+                  (name[j] >= '0' && name[j] <= '9') || name[j] == '-'))
+                return FALSE;
+
+        if (name[i] == '\0')
+            return TRUE;
+        start = i + 1UL;
+    }
+}
+
+static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
+                                      char out[AMI_CFG_DOMAIN_LEN])
+{
+    UCHAR raw[AMI_CFG_DOMAIN_LEN];
+    UINT  size = (UINT)sizeof(raw);
+    UINT  status;
+    UINT  i;
+
+    out[0] = '\0';
+    status = nx_dhcp_interface_user_option_retrieve(
+        &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_DOMAIN, raw, &size);
+    if (status == NX_DHCP_PARSE_ERROR)
+        return TRUE;            /* this lease carries no option 15 */
+    if (status != NX_SUCCESS)
+        return FALSE;
+    if (size == 0U || size >= (UINT)AMI_CFG_DOMAIN_LEN)
+        return TRUE;            /* invalid means no usable offer */
+
+    for (i = 0; i < size; i++)
+    {
+        if (raw[i] == 0U)
+        {
+            out[0] = '\0';
+            return TRUE;        /* embedded NUL is not option-15 text */
+        }
+        out[i] = (char)raw[i];
+    }
+    out[size] = '\0';
+    if (!ami_ns_domain_valid(out))
+        out[0] = '\0';
+    return TRUE;
+}
+
 #ifdef AMINETXDUO_IPV6
 
 /*
@@ -550,9 +615,9 @@ VOID ami_ns_copy_name(char *dst, const char *src, ULONG size)
  * outranks it, and an option 12 that is not a host name is refused (see
  * AmiHostnameSource).
  *
- * Search-list ownership is reconciled separately for every interface after
- * the DNS client is created and on every lease transition.  This startup pass
- * only chooses the host name and default domain from the first bound lease.
+ * Search-list and default-domain ownership are reconciled separately for every
+ * interface after the DNS client is created and on every lease transition.
+ * This startup pass only chooses the host name from the first bound lease.
  *
  * From the first interface holding a lease, not always interface 0: a machine
  * with a static interface 0 and a DHCP interface 1 has its lease on the one
@@ -574,18 +639,6 @@ static VOID ami_ns_dhcp_naming(AmiNetStack *ns)
                                       text))
             AMI_INFO("netstack: DHCP names this machine '%s'",
                      ns->ns_Config.hostname);
-
-        ami_ns_dhcp_text(ns, index, AMI_DHCP_OPTION_DOMAIN, text,
-                         sizeof(text));
-        if (text[0] != '\0')
-        {
-            /* Still the default domain when the file named none, which is what
-               GetDefaultDomainName() reports and what SetDefaultDomainName()
-               replaces. */
-            if (ns->ns_Config.resolver.domain[0] == '\0')
-                ami_ns_copy_name(ns->ns_Config.resolver.domain, text,
-                                 sizeof(ns->ns_Config.resolver.domain));
-        }
 
         break;
     }
@@ -700,7 +753,7 @@ static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
 {
     AmiResolverConfig offered = {0};
     UCHAR             raw[256];
-    char              text[AMI_CFG_NAME_LEN];
+    char              text[AMI_CFG_DOMAIN_LEN] = {0};
     UINT              size = (UINT)sizeof(raw);
     UINT              status;
     UWORD             i;
@@ -717,9 +770,10 @@ static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
         else if (status != NX_DHCP_PARSE_ERROR)
             return;             /* preserve the last coherent option set */
 
-        ami_ns_dhcp_text(ns, iface, AMI_DHCP_OPTION_DOMAIN, text,
-                         sizeof(text));
-        if (text[0] != '\0')
+        if (!ami_ns_dhcp_domain_option(ns, iface, text))
+            return;
+        if (text[0] != '\0' &&
+            text[AMI_CFG_NAME_LEN - 1U] == '\0')
             (VOID)ami_config_search_offer(&offered, text);
     }
 
@@ -766,6 +820,38 @@ static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
 }
 
 
+static VOID ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
+{
+    char text[AMI_CFG_DOMAIN_LEN];
+
+    if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
+        return;
+
+    text[0] = '\0';
+    if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
+    {
+        if (!ami_ns_dhcp_domain_option(ns, iface, text))
+            return;
+    }
+
+    ami_ns_dns_dhcp_default_update(&ns->ns_DhcpDomain, iface, text);
+
+    ami_ns_resolver_forbid();
+#ifdef AMINETXDUO_IPV6
+    ami_ns_dns_dhcp_default_reconcile(&ns->ns_Config.resolver,
+                                      &ns->ns_DhcpDomain,
+                                      ns->ns_DnsslDefault,
+                                      ns->ns_DnsslApplied,
+                                      ns->ns_DnsslAppliedCount);
+#else
+    ami_ns_dns_dhcp_default_reconcile(&ns->ns_Config.resolver,
+                                      &ns->ns_DhcpDomain,
+                                      NULL, NULL, 0U);
+#endif
+    ami_ns_resolver_permit();
+}
+
+
 /*
  * Reconcile resolver options from one DHCP interface.
  *
@@ -788,6 +874,7 @@ VOID ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
         iface >= ns->ns_IfaceCount)
         return;
 
+    ami_ns_dhcp_domain_reconcile(ns, iface);
     ami_ns_dhcp_search_reconcile(ns, iface);
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
@@ -1799,6 +1886,7 @@ LONG netstack_set_domain_name(const char *name)
     if (name == NULL || name[0] == '\0')
     {
         ns->ns_Config.resolver.domain[0] = '\0';
+        ns->ns_DhcpDomain.owner[0] = '\0';
 #ifdef AMINETXDUO_IPV6
         ns->ns_DnsslDefault[0] = '\0';
 #endif
@@ -1821,6 +1909,7 @@ LONG netstack_set_domain_name(const char *name)
     for (i = 0; name[i] != '\0'; i++)
         ns->ns_Config.resolver.domain[i] = name[i];
     ns->ns_Config.resolver.domain[i] = '\0';
+    ns->ns_DhcpDomain.owner[0] = '\0';
 #ifdef AMINETXDUO_IPV6
     /* The caller owns this value even when it deliberately chose the same
        spelling as the current advertisement. */
