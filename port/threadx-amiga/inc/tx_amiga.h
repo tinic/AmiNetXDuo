@@ -384,10 +384,11 @@ TX_THREAD *tx_amiga_adopted_thread(VOID);
 UINT    tx_amiga_caller_is_thread(VOID);
 
 /*
- * TX_TRUE if [start, start+size) lies inside the stack of a thread ThreadX
- * still has on its created list, which tx_thread_create() refuses with
- * TX_PTR_ERROR.  A caller allocating a stack at run time asks first and takes
- * another block rather than failing.
+ * TX_TRUE if [start, start+size) overlaps the stack of a thread ThreadX still
+ * has on its created list, which tx_thread_create() refuses with TX_PTR_ERROR.
+ * This includes either range wholly containing the other and ranges that meet
+ * at an endpoint.  A caller allocating a stack at run time asks first and
+ * takes another block rather than failing.
  *
  * The case that makes this necessary is the one tx_amiga_adopt_resume() warns
  * about: an adopted thread's stack is its Exec Task's own, so a Task that

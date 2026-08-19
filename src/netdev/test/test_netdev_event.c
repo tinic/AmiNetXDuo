@@ -263,6 +263,37 @@ static void test_queue(void)
     expect_int("Disable() balanced", disable_depth, 0);
 }
 
+static void test_queue_head(void)
+{
+    struct IOSana2Req first;
+    struct IOSana2Req retry;
+    struct Node       *node;
+
+    printf("\n-- late-busy transmit requeue\n");
+    reset_fixture();
+    memset(&first, 0, sizeof(first));
+    memset(&retry, 0, sizeof(retry));
+    first.ios2_Req.io_Flags = IOF_QUICK;
+    retry.ios2_Req.io_Flags = IOF_QUICK;
+
+    netdev_queue_tail(&unit.nu_Writes, &first);
+    netdev_queue_head(&unit.nu_Writes, &retry);
+
+    expect_int("two writes queued", queued(&unit.nu_Writes), 2);
+    expect_ptr("busy retry returned to the head", unit.nu_Writes.lh_Head,
+               &retry.ios2_Req.io_Message.mn_Node);
+    expect_int("retry IOF_QUICK cleared",
+               (retry.ios2_Req.io_Flags & IOF_QUICK) == 0, 1);
+    expect_int("retry ln_Type is NT_MESSAGE",
+               retry.ios2_Req.io_Message.mn_Node.ln_Type, NT_MESSAGE);
+
+    node = RemHead(&unit.nu_Writes);
+    expect_ptr("retry dequeued first", node,
+               &retry.ios2_Req.io_Message.mn_Node);
+    netdev_reply(&retry, 0, 0);
+    expect_int("eventual completion was replied", replies, 1);
+}
+
 /* ONLINE/OFFLINE are level-like events: a wait completes when its requested
    state is already true and must never be linked for a future transition. */
 static void test_current_state(void)
@@ -483,6 +514,7 @@ static void test_filter(void)
 int main(void)
 {
     test_queue();
+    test_queue_head();
     test_current_state();
     test_overlap();
     test_no_overlap();

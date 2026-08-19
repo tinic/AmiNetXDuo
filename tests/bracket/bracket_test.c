@@ -153,9 +153,19 @@ static BtTask bt_dead_released;
 static BtTask bt_dead_event;
 static TX_EVENT_FLAGS_GROUP bt_dead_flags;
 static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
+static TX_THREAD bt_reap_owner;
+static TX_THREAD bt_reap_target;
+static TX_THREAD bt_overlap_probe;
+static volatile ULONG bt_reap_entry_calls;
 
 static VOID bt_wait_for(volatile UWORD *flag, const char *what);
 static VOID bt_reap(BtTask *bt);
+
+static VOID bt_reap_target_entry(ULONG input)
+{
+    (VOID)input;
+    bt_reap_entry_calls++;
+}
 
 /*
  * How far the holder got. It runs as a plain Task, so it cannot print, and a
@@ -691,6 +701,147 @@ static VOID bt_reap(BtTask *bt)
     }
 }
 
+/*
+ * Exercise the branch where _tx_amiga_reap() cannot allocate a handshake
+ * signal.  Keeping this Task above the native target's Exec priority makes the
+ * ordering deterministic: delete has to detach and record the still-live task
+ * before it can run.  Only after the live-zombie count returns to its baseline
+ * is the target's stack safe to release.
+ *
+ * The target lives in the middle of its allocation so the same fixture can
+ * ask both overlap checkers about a new range that wholly contains it.  That
+ * is the shape endpoint-only comparisons used to miss.
+ */
+static VOID bt_test_no_signal_reap(VOID)
+{
+    BYTE  held[32];
+    BYTE  sig = -1;
+    APTR  arena;
+    ULONG arena_size = BT_STACK + 200UL;
+    ULONG historic_before;
+    ULONG live_before;
+    ULONG waited;
+    UWORD held_count = 0U;
+    LONG  old_priority;
+    UINT  status;
+    UINT  created = TX_FALSE;
+    UINT  deleted = TX_FALSE;
+
+    t_log("bracket: no-signal native-thread reaper fallback\n", 0, 0);
+
+    arena = AllocMem(arena_size, MEMF_PUBLIC | MEMF_CLEAR);
+    t_check(arena != NULL, "allocated the contained-stack arena", 0);
+    if (arena == NULL)
+        return;
+
+    status = tx_amiga_adopt_thread(&bt_reap_owner,
+                                   (CHAR *)"reaper test owner", 20);
+    t_check(status == TX_SUCCESS, "adopted the reaper test owner",
+            (LONG)status);
+    if (status != TX_SUCCESS)
+    {
+        FreeMem(arena, arena_size);
+        return;
+    }
+
+    bt_reap_entry_calls = 0UL;
+    status = tx_thread_create(&bt_reap_target, (CHAR *)"reaper target",
+                              bt_reap_target_entry, 0UL,
+                              (APTR)((UBYTE *)arena + 100UL), BT_STACK,
+                              20U, 20U, TX_NO_TIME_SLICE, TX_DONT_START);
+    t_check(status == TX_SUCCESS, "created a dormant native-backed thread",
+            (LONG)status);
+    if (status == TX_SUCCESS)
+        created = TX_TRUE;
+
+    if (created != TX_FALSE)
+    {
+        t_check(tx_amiga_stack_in_use(arena, arena_size) == TX_TRUE,
+                "an enclosing range overlaps the target stack", 0);
+
+        status = tx_thread_create(&bt_overlap_probe,
+                                  (CHAR *)"overlap probe",
+                                  bt_reap_target_entry, 0UL,
+                                  arena, arena_size,
+                                  20U, 20U, TX_NO_TIME_SLICE,
+                                  TX_DONT_START);
+        t_check(status == TX_PTR_ERROR,
+                "ThreadX rejects a stack containing an existing stack",
+                (LONG)status);
+
+        historic_before = tx_amiga_zombie_tasks();
+        live_before = tx_amiga_zombie_tasks_live();
+
+        old_priority = (LONG)SetTaskPri(FindTask(NULL), 10);
+        while ((held_count < 32U) &&
+               ((sig = AllocSignal(-1L)) >= (BYTE)0))
+        {
+            held[held_count++] = sig;
+        }
+        t_check(sig < (BYTE)0, "exhausted every spare signal bit",
+                (LONG)held_count);
+
+        status = tx_thread_terminate(&bt_reap_target);
+        t_check(status == TX_SUCCESS, "terminated the dormant target",
+                (LONG)status);
+        if (status == TX_SUCCESS)
+        {
+            status = tx_thread_delete(&bt_reap_target);
+            t_check(status == TX_SUCCESS,
+                    "deleted without a reaper handshake signal",
+                    (LONG)status);
+            if (status == TX_SUCCESS)
+                deleted = TX_TRUE;
+        }
+
+        if (deleted != TX_FALSE)
+        {
+            t_check(tx_amiga_zombie_tasks() == historic_before + 1UL,
+                    "the unconfirmed task was recorded as a zombie",
+                    (LONG)tx_amiga_zombie_tasks());
+            t_check(tx_amiga_zombie_tasks_live() == live_before + 1UL,
+                    "the native task remains live until it destroys itself",
+                    (LONG)tx_amiga_zombie_tasks_live());
+            t_check(bt_reap_target.tx_thread_amiga_task == NULL,
+                    "the deleted control block no longer owns the task", 0);
+            t_check(tx_amiga_stack_in_use(arena, arena_size) == TX_FALSE,
+                    "delete removed the target from the created list", 0);
+        }
+
+        while (held_count != 0U)
+            FreeSignal((LONG)held[--held_count]);
+        (VOID)SetTaskPri(FindTask(NULL), old_priority);
+    }
+
+    status = tx_amiga_orphan_thread(&bt_reap_owner);
+    t_check(status == TX_SUCCESS, "orphaned the reaper test owner",
+            (LONG)status);
+
+    if (deleted != TX_FALSE)
+    {
+        waited = 0UL;
+        while ((tx_amiga_zombie_tasks_live() != live_before) &&
+               (waited < (ULONG)(30 * 50)))
+        {
+            Delay(1);
+            waited++;
+        }
+        t_check(tx_amiga_zombie_tasks_live() == live_before,
+                "the detached native task eventually destroyed itself",
+                (LONG)tx_amiga_zombie_tasks_live());
+        t_check(bt_reap_entry_calls == 0UL,
+                "a terminated dormant thread never entered user code",
+                (LONG)bt_reap_entry_calls);
+    }
+
+    if ((created == TX_FALSE) ||
+        ((deleted != TX_FALSE) &&
+         (tx_amiga_zombie_tasks_live() == live_before)))
+    {
+        FreeMem(arena, arena_size);
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct Task *me = FindTask(NULL);
@@ -716,6 +867,8 @@ int main(int argc, char **argv)
     /* main() has adopted nothing, and nothing else is running yet. */
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "an unadopted Task is not the baton holder", 0);
+
+    bt_test_no_signal_reap();
 
     /* ---- the regression case, on its own and deterministic -------------- */
 

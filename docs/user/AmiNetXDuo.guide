@@ -2656,7 +2656,10 @@
 
   It is built on Eclipse ThreadX NetX Duo, an industrial embedded
   TCP/IP stack, also MIT licensed, copyright Microsoft and the Eclipse
-  ThreadX contributors. NetX Duo and ThreadX are used unmodified.
+  ThreadX contributors. AmiNetXDuo pins maintained ThreadX and NetX Duo
+  forks at github.com/tinic/threadx and github.com/tinic/netxduo. Their
+  changes retain the upstream MIT licence and are kept as standalone
+  defect fixes for review and upstreaming.
 
   AmiNetXDuo is an independent implementation of a published
   programming interface. No code from AmiTCP, AROSTCP, Miami or

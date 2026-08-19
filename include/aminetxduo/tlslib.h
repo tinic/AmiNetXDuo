@@ -191,7 +191,9 @@ struct TLSConnection;
  * host answers with the wrong certificate or refuses outright) and checked
  * against the certificate's subject alternative names.  Required unless
  * TLSA_NoVerify is set: verifying a chain without checking who it is for
- * proves only that somebody has a valid certificate.
+ * proves only that somebody has a valid certificate.  Names longer than 100
+ * bytes are rejected with TLS_ERR_BADHOSTNAME; they are never truncated into
+ * a different identity.
  */
 #define TLSA_HostName       (TLSA_Dummy + 1)
 
@@ -274,6 +276,7 @@ struct TLSConnection;
 #define TLS_ERR_NOHOSTNAME  12  /* verification asked for, no TLSA_HostName   */
 #define TLS_ERR_INTERNAL    13  /* a bug on our side                          */
 #define TLS_ERR_ALERT       14  /* the peer sent a fatal alert; data is short */
+#define TLS_ERR_BADHOSTNAME 15  /* host name exceeds the verifier/SNI limit   */
 
 /* ----------------------------------------------------------------- info --- */
 

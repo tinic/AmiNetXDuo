@@ -32,6 +32,7 @@ set(TLSLIB_SOURCES
     tls_vectors.c
     tls_netx.c
     tls_conn.c
+    tls_hostname.c
     tls_store.c
     tls_resume.c
     tls_expiry.c
@@ -329,7 +330,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # the enter/end/delete/leave order and fails if deletion escapes again.
     add_executable(test_tls_close
         test/test_tls_close.c
-        tls_conn.c)
+        tls_conn.c
+        tls_hostname.c)
 
     find_package(Threads REQUIRED)
     target_link_libraries(test_tls_close PRIVATE Threads::Threads)

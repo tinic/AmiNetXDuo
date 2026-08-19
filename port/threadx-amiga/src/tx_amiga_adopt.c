@@ -702,8 +702,7 @@ UINT         result =  (UINT) TX_FALSE;
         UBYTE   *other_start =  (UBYTE *) thread -> tx_thread_stack_start;
         UBYTE   *other_end   =  (UBYTE *) thread -> tx_thread_stack_end;
 
-        if (((stack_start >= other_start) && (stack_start < other_end)) ||
-            ((stack_end   >= other_start) && (stack_end   < other_end)))
+        if ((stack_start <= other_end) && (stack_end >= other_start))
         {
             result =  (UINT) TX_TRUE;
             break;
