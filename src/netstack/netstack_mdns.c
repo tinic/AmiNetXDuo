@@ -825,13 +825,23 @@ LONG netstack_mdns_browse_stop(const char *type)
  * this can wait.  AMI_MDNS_CHASE_BUDGET is the ceiling on how long.
  */
 
-/* Both scratch buffers in one block: an NX_MDNS_SERVICE is 600-odd bytes and
-   the row it is unpacked into is another 350, which is most of the stack of an
-   ARexx host between them. */
+typedef struct AmiMdnsIdentity
+{
+    char ami_Name[AMI_MDNS_SVC_NAME_LEN];
+    char ami_Type[AMI_MDNS_SVC_TYPE_LEN];
+} AmiMdnsIdentity;
+
+/* Both scratch buffers and the identities seen during the complete cache walk
+   are in one block. An NX_MDNS_SERVICE is 600-odd bytes and the row it is
+   unpacked into is another 350, which is most of the stack of an ARexx host
+   between them. The identities must cover the walk rather than just the
+   caller's output array: otherwise duplicate cache records beyond that array
+   inflate the `available` count. */
 typedef struct AmiMdnsScratch
 {
     NX_MDNS_SERVICE ams_Raw;
     AmiMdnsService  ams_Row;
+    AmiMdnsIdentity ams_Seen[AMI_MDNS_BROWSE_MAX];
 } AmiMdnsScratch;
 
 /*
@@ -844,16 +854,16 @@ typedef struct AmiMdnsScratch
  * three of them the same camera. nx_mdns_service_lookup() only merges
  * duplicates for the meta-query, and not for a named type.
  */
-static BOOL ami_ns_mdns_listed(const AmiMdnsService *rows, UWORD count,
+static BOOL ami_ns_mdns_listed(const AmiMdnsIdentity *rows, UWORD count,
                                const AmiMdnsService *row)
 {
     UWORD i;
 
     for (i = 0; i < count; i++)
     {
-        if (ami_ns_mdns_differs(rows[i].ams_Name, row->ams_Name))
+        if (ami_ns_mdns_differs(rows[i].ami_Name, row->ams_Name))
             continue;
-        if (ami_ns_mdns_differs(rows[i].ams_Type, row->ams_Type))
+        if (ami_ns_mdns_differs(rows[i].ami_Type, row->ams_Type))
             continue;
 
         return TRUE;
@@ -994,11 +1004,15 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
                                           ns->ns_Mdns.nx_mdns_host_name)
                 : FALSE;
 
-        /* Only the first `max` rows exist in the caller's array. `written`
-           continues past it so `available` can report truncation, but using
-           that larger count here reads beyond `out` on the next cache row. */
-        if (ami_ns_mdns_listed(out, (written < max) ? written : max, row))
+        if (ami_ns_mdns_listed(scratch->ams_Seen, written, row))
             continue;
+
+        ami_ns_mdns_copy(scratch->ams_Seen[written].ami_Name,
+                         (ULONG)sizeof(scratch->ams_Seen[written].ami_Name),
+                         (const UCHAR *)row->ams_Name, NULL);
+        ami_ns_mdns_copy(scratch->ams_Seen[written].ami_Type,
+                         (ULONG)sizeof(scratch->ams_Seen[written].ami_Type),
+                         (const UCHAR *)row->ams_Type, NULL);
 
         /*
          * The PTR and the SRV arrived, the A did not. A host name cut short to
@@ -1012,11 +1026,8 @@ UWORD netstack_mdns_browse_collect(const char *type, AmiMdnsService *out,
                                   row->ams_Host, svc->service_host, &budget);
         }
 
-        /*
-         * Past the array of the caller the row is still counted, so a list
-         * that had to stop can say so. It cannot be compared against for the
-         * duplicate test, so the count past `max` is a lower bound.
-         */
+        /* Past the array of the caller the identity is still retained and the
+           row is counted, so a list that had to stop reports an exact count. */
         if (written < max)
             out[written] = *row;
 
