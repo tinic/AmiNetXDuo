@@ -590,6 +590,128 @@ UINT status;
           "a name inside excludedSubtrees is refused");
 }
 
+/* ----------------------------------------------------- TLS key usage ------ */
+
+static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
+                        NX_SECURE_X509_CERT *certificate, ULONG current_time)
+{
+    (void)store;
+    (void)certificate;
+    (void)current_time;
+    return NX_SECURE_X509_SUCCESS;
+}
+
+/*
+ * Exercise the TLS endpoint check independently of signature verification.
+ * The fixed leaf is copied and only the keyUsage payload byte is changed:
+ * 0x80 is digitalSignature and 0x20 is keyEncipherment. Its signature no
+ * longer matches after that change, so ku_chain_ok deliberately stands in for
+ * the already-separate chain tests above.
+ */
+static UINT ku_verify(UCHAR usage, UINT algorithm, USHORT protocol,
+                      UINT socket_type)
+{
+    static const UCHAR key_usage_prefix[] = {
+        0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01,
+        0xff, 0x04, 0x04, 0x03, 0x02, 0x05
+    };
+    UCHAR                           leaf[sizeof(x509_ext_leaf_ok)];
+    NX_SECURE_X509_CERT             certificate;
+    NX_SECURE_TLS_SESSION           session;
+    NX_SECURE_TLS_CIPHERSUITE_INFO  ciphersuite;
+    NX_CRYPTO_METHOD                public_cipher;
+    UINT                            status;
+    unsigned                        i;
+
+    memcpy(leaf, x509_ext_leaf_ok, sizeof(leaf));
+    for (i = 0; i + sizeof(key_usage_prefix) < sizeof(leaf); i++)
+    {
+        if (memcmp(&leaf[i], key_usage_prefix, sizeof(key_usage_prefix)) == 0)
+        {
+            leaf[i + sizeof(key_usage_prefix)] = usage;
+            break;
+        }
+    }
+    if (i + sizeof(key_usage_prefix) >= sizeof(leaf))
+    {
+        return NX_SECURE_X509_EXTENSION_NOT_FOUND;
+    }
+
+    memset(&certificate, 0, sizeof(certificate));
+    memset(&session, 0, sizeof(session));
+    memset(&ciphersuite, 0, sizeof(ciphersuite));
+    memset(&public_cipher, 0, sizeof(public_cipher));
+
+    status = _nx_secure_x509_certificate_initialize(&certificate,
+                                                     leaf, (USHORT)sizeof(leaf),
+                                                     NX_CRYPTO_NULL, 0,
+                                                     NX_CRYPTO_NULL, 0,
+                                                     NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return status;
+    }
+
+    status = _nx_secure_x509_store_certificate_add(
+        &certificate,
+        &session.nx_secure_tls_credentials.nx_secure_tls_certificate_store,
+        NX_SECURE_X509_CERT_LOCATION_REMOTE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return status;
+    }
+
+    public_cipher.nx_crypto_algorithm = algorithm;
+    ciphersuite.nx_secure_tls_public_cipher = &public_cipher;
+    session.nx_secure_tls_session_ciphersuite = &ciphersuite;
+    session.nx_secure_tls_protocol_version = protocol;
+    session.nx_secure_tls_socket_type = socket_type;
+    session.nx_secure_remote_certificate_verify = ku_chain_ok;
+
+    return _nx_secure_tls_remote_certificate_verify(&session);
+}
+
+static void test_tls_key_usage(void)
+{
+    printf("tls keyUsage\n");
+
+    check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
+          "TLS 1.2 static RSA permits keyEncipherment");
+    check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
+          "TLS 1.2 static RSA refuses signing-only key");
+
+    check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_ECDHE,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
+          "TLS 1.2 ECDHE permits digitalSignature");
+    check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_ECDHE,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
+          "TLS 1.2 ECDHE refuses encryption-only key");
+
+    check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_3,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
+          "TLS 1.3 requires a signing key");
+    check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_3,
+                    NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
+          "TLS 1.3 refuses encryption-only key");
+
+    check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_SERVER) == NX_SECURE_X509_SUCCESS,
+          "a client certificate permits digitalSignature");
+    check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
+                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    NX_SECURE_TLS_SESSION_TYPE_SERVER) == NX_SECURE_X509_KEY_USAGE_ERROR,
+          "a client certificate refuses encryption-only key");
+}
+
 /* -------------------------------------------------------------- main ------ */
 
 int main(void)
@@ -602,6 +724,7 @@ int main(void)
     test_modulus();
     test_chain();
     test_extensions();
+    test_tls_key_usage();
 
     if (failures != 0)
     {
