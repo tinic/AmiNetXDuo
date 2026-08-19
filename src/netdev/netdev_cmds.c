@@ -642,7 +642,6 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
     case S2_ONEVENT:
     {
         ULONG mask = io->ios2_WireError;
-        ULONG now  = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
         /*
          * S2EVENT_SOFTWARE is refused, and used to be accepted.  This driver
@@ -665,14 +664,8 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
 
-        /* "Types ONLINE and OFFLINE return immediately if the device is
-           already in the state to be waited for." */
-        if ((mask & now) != 0)
-        {
-            netdev_reply(io, 0, mask & now);
-            return;
-        }
-
+        /* netdev_event_wait() checks the current state and links a waiter in
+           one transaction, so a transition cannot land between them. */
         netdev_event_wait(unit, io);
         return;
     }
