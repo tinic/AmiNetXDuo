@@ -19,61 +19,70 @@
 
 #include "tls_internal.h"
 
+/* Register arguments are part of the m68k library ABI. A host regression
+   compiles the shipping TLSClose() body, where those register names do not
+   exist, so only that explicitly marked build erases the annotations. */
+#ifdef TLSLIB_HOST_TEST
+#  define TLSLIB_REG(name)
+#else
+#  define TLSLIB_REG(name) __asm(name)
+#endif
+
 /* -6 / -12 / -18 / -24 */
-struct TLSLibBase *tls_lib_open(register ULONG version __asm("d0"),
-                                register struct TLSLibBase *TLSBase __asm("a6"));
-APTR tls_lib_close(register struct TLSLibBase *TLSBase __asm("a6"));
-APTR tls_lib_expunge(register struct TLSLibBase *TLSBase __asm("a6"));
+struct TLSLibBase *tls_lib_open(register ULONG version TLSLIB_REG("d0"),
+                                register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
+APTR tls_lib_close(register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
+APTR tls_lib_expunge(register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
 APTR tls_lib_reserved(VOID);
 
 /* -30 */
 struct TLSConnection *tls_TLSOpenA(
-        register APTR                  socket_base __asm("a0"),
-        register const struct TagItem *tags        __asm("a1"),
-        register LONG                  sock        __asm("d0"),
-        register struct TLSLibBase    *TLSBase     __asm("a6"));
+        register APTR                  socket_base TLSLIB_REG("a0"),
+        register const struct TagItem *tags        TLSLIB_REG("a1"),
+        register LONG                  sock        TLSLIB_REG("d0"),
+        register struct TLSLibBase    *TLSBase     TLSLIB_REG("a6"));
 
 /* -36 */
-VOID tls_TLSClose(register struct TLSConnection *conn    __asm("a0"),
-                  register struct TLSLibBase    *TLSBase __asm("a6"));
+VOID tls_TLSClose(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                  register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 /* -42 */
-LONG tls_TLSRead(register struct TLSConnection *conn    __asm("a0"),
-                 register APTR                  buffer  __asm("a1"),
-                 register LONG                  length  __asm("d0"),
-                 register struct TLSLibBase    *TLSBase __asm("a6"));
+LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                 register APTR                  buffer  TLSLIB_REG("a1"),
+                 register LONG                  length  TLSLIB_REG("d0"),
+                 register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 /* -48 */
-LONG tls_TLSWrite(register struct TLSConnection *conn    __asm("a0"),
-                  register CONST_APTR            buffer  __asm("a1"),
-                  register LONG                  length  __asm("d0"),
-                  register struct TLSLibBase    *TLSBase __asm("a6"));
+LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                  register CONST_APTR            buffer  TLSLIB_REG("a1"),
+                  register LONG                  length  TLSLIB_REG("d0"),
+                  register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 /* -54 */
-LONG tls_TLSPending(register struct TLSConnection *conn    __asm("a0"),
-                    register struct TLSLibBase    *TLSBase __asm("a6"));
+LONG tls_TLSPending(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                    register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 /* -60 */
-LONG tls_TLSInfo(register struct TLSConnection *conn    __asm("a0"),
-                 register struct TLSInfo       *info    __asm("a1"),
-                 register struct TLSLibBase    *TLSBase __asm("a6"));
+LONG tls_TLSInfo(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                 register struct TLSInfo       *info    TLSLIB_REG("a1"),
+                 register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 /* -66 */
-CONST_STRPTR tls_TLSErrorString(register LONG               code    __asm("d0"),
-                                register struct TLSLibBase *TLSBase __asm("a6"));
+CONST_STRPTR tls_TLSErrorString(register LONG               code    TLSLIB_REG("d0"),
+                                register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
 
 /* -72 */
-LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     __asm("a0"),
-                       register struct TLSLibBase *TLSBase  __asm("a6"));
+LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
+                       register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
 
 /* -78 */
-LONG tls_TLSRandom(register APTR               buffer  __asm("a0"),
-                   register LONG               length  __asm("d0"),
-                   register struct TLSLibBase *TLSBase __asm("a6"));
+LONG tls_TLSRandom(register APTR               buffer  TLSLIB_REG("a0"),
+                   register LONG               length  TLSLIB_REG("d0"),
+                   register struct TLSLibBase *TLSBase TLSLIB_REG("a6"));
 
 /* -84 */
-LONG tls_TLSBuffered(register struct TLSConnection *conn    __asm("a0"),
-                     register struct TLSLibBase    *TLSBase __asm("a6"));
+LONG tls_TLSBuffered(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                     register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
 extern const APTR TlsVectorTable[];
 
