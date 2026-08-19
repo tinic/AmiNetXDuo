@@ -703,7 +703,7 @@ static VOID bt_reap(BtTask *bt)
 
 /*
  * Exercise the branch where _tx_amiga_reap() cannot allocate a handshake
- * signal.  Keeping this Task above the native target's Exec priority makes the
+ * signal.  An outer Forbid() around delete and the counter snapshots makes the
  * ordering deterministic: delete has to detach and record the still-live task
  * before it can run.  Only after the live-zombie count returns to its baseline
  * is the target's stack safe to release.
@@ -724,7 +724,6 @@ static VOID bt_test_no_signal_reap(VOID)
     ULONG live_after;
     ULONG waited;
     UWORD held_count = 0U;
-    LONG  old_priority;
     UINT  status;
     UINT  created = TX_FALSE;
     UINT  deleted = TX_FALSE;
@@ -774,7 +773,6 @@ static VOID bt_test_no_signal_reap(VOID)
         historic_before = tx_amiga_zombie_tasks();
         live_before = tx_amiga_zombie_tasks_live();
 
-        old_priority = (LONG)SetTaskPri(FindTask(NULL), 10);
         while ((held_count < 32U) &&
                ((sig = AllocSignal(-1L)) >= (BYTE)0))
         {
@@ -788,23 +786,28 @@ static VOID bt_test_no_signal_reap(VOID)
                 (LONG)status);
         if (status == TX_SUCCESS)
         {
+            /* Keep the target from consuming the reaper's wakeup until both
+               counters have been sampled.  Raising this Task's priority is
+               not sufficient: tx_thread_delete() may reschedule internally
+               before it returns.  The port's own Forbid()/Permit() pairs
+               nest inside this outer one. */
+            Forbid();
             status = tx_thread_delete(&bt_reap_target);
+            if (status == TX_SUCCESS)
+            {
+                deleted = TX_TRUE;
+                historic_after = tx_amiga_zombie_tasks();
+                live_after = tx_amiga_zombie_tasks_live();
+            }
+            Permit();
+
             t_check(status == TX_SUCCESS,
                     "deleted without a reaper handshake signal",
                     (LONG)status);
-            if (status == TX_SUCCESS)
-                deleted = TX_TRUE;
         }
 
         if (deleted != TX_FALSE)
         {
-            /* Snapshot both counters before reporting either assertion.
-               t_check() flushes console output and may block there, which
-               gives the dying task time to remove itself from the live count
-               between two otherwise adjacent checks. */
-            historic_after = tx_amiga_zombie_tasks();
-            live_after = tx_amiga_zombie_tasks_live();
-
             t_check(historic_after == historic_before + 1UL,
                     "the unconfirmed task was recorded as a zombie",
                     (LONG)historic_after);
@@ -819,7 +822,6 @@ static VOID bt_test_no_signal_reap(VOID)
 
         while (held_count != 0U)
             FreeSignal((LONG)held[--held_count]);
-        (VOID)SetTaskPri(FindTask(NULL), old_priority);
     }
 
     status = tx_amiga_orphan_thread(&bt_reap_owner);
