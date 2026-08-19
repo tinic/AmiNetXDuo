@@ -24,6 +24,14 @@ typedef enum {
     AMI_DHCPV6_ACT_STATELESS    /* O without M: Information-Request only    */
 } AmiDhcpv6Action;
 
+/* What a completed client state transition means for the DNS and search
+   options retained from the last coherent DHCPv6 response. */
+typedef enum {
+    AMI_DHCPV6_OPTIONS_KEEP = 0,
+    AMI_DHCPV6_OPTIONS_REPLACE,
+    AMI_DHCPV6_OPTIONS_WITHDRAW
+} AmiDhcpv6OptionChange;
+
 /*
  * RFC 4861 4.2's M and O flags, from the flags octet of the advertisement as
  * NetX Duo hands it over.
@@ -51,6 +59,12 @@ AmiDhcpv6Action ami_dhcpv6_resume_action(unsigned int created,
                                          unsigned int stateful,
                                          unsigned int selected_interface,
                                          unsigned int raised_interface);
+
+/* NetX state constants stay at the call site; these booleans describe the
+   meaningful transitions in plain C so host tests exercise the policy. */
+AmiDhcpv6OptionChange ami_dhcpv6_option_change(
+    unsigned int reached_bound, unsigned int left_information_request,
+    unsigned int reached_init, unsigned int information_reply_seen);
 
 /*
  * The DUID-LL of RFC 8415 11.4, on the wire: two octets of DUID type (3), two

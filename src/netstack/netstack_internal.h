@@ -393,6 +393,10 @@ struct AmiNetStack
     /* A Reply has landed and may carry name servers.  Same two-phase rule as
        ns_Ra: the client's thread writes, a caller thread absorbs. */
     volatile BOOL       ns_Dhcpv6DnsPending;
+    /* TRUE only while the retained NetX option buffers describe a live,
+       coherent exchange. Link-down and lease loss clear it before publishing
+       an empty replacement through ns_Dhcpv6DnsPending. */
+    volatile BOOL       ns_Dhcpv6OptionsValid;
     /*
      * The name servers the last Reply named, kept for the same reason
      * ns_Ra.rdnss[] is: reconciliation has to know which entries in
