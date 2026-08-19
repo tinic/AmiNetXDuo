@@ -401,6 +401,12 @@ struct AmiNetStack
      */
     NXD_ADDRESS         ns_Dhcpv6Dns[AMI_RDNSS_MAX];
     UWORD               ns_Dhcpv6DnsCount;
+    /* Search suffixes whose reference ownership was acquired from the last
+       coherent DHCPv6 Domain Search List. This is separate from the resolver
+       list so a replacement Reply can release only DHCPv6's references. */
+    char                ns_Dhcpv6SearchApplied[AMI_CFG_MAX_SEARCH]
+                                             [AMI_CFG_NAME_LEN];
+    UWORD               ns_Dhcpv6SearchAppliedCount;
     UBYTE               ns_Dhcpv6Iface;
     UBYTE               ns_Dhcpv6State;     /* NX_DHCPV6_STATE_*             */
 #endif

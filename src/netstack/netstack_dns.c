@@ -142,6 +142,10 @@ static BOOL ami_ns_dhcp_hostname_option(AmiNetStack *ns, UWORD iface,
     return TRUE;
 }
 
+static BOOL ami_ns_search_array_has(
+    const char domain[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN], UWORD count,
+    const char *value);
+
 #ifdef AMINETXDUO_IPV6
 
 /*
@@ -368,38 +372,93 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
      * pasted onto a query.
      */
     {
-        UCHAR  names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
-        ULONG  pos = 0;
-        UWORD  added = 0;
+        AmiResolverConfig offered = {0};
+        UCHAR             names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
+        ULONG             pos = 0;
+        UWORD             added = 0;
+        UWORD             removed = 0;
+        UWORD             i;
 
         if (nx_dhcpv6_get_other_option_data(&ns->ns_Dhcpv6,
                                             NX_DHCPV6_DOMAIN_NAME_OPTION,
                                             names, sizeof(names))
-                == NX_SUCCESS)
+                != NX_SUCCESS)
+            return;             /* preserve the last coherent option set */
+
+        while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
         {
+            (VOID)ami_config_search_offer(&offered,
+                                          (const char *)&names[pos]);
             while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
-            {
-                const char *name = (const char *)&names[pos];
-
-                BOOL offered;
-
-                ami_ns_resolver_forbid();
-                offered = ami_config_search_offer(r, name);
-                if (offered && r->domain[0] == '\0')
-                    ami_ns_copy_name(r->domain, name, sizeof(r->domain));
-                ami_ns_resolver_permit();
-
-                if (offered)
-                {
-                    added++;
-                }
-
-                while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
-                    pos++;
                 pos++;
-            }
+            pos++;
         }
 
+        /* Out: release only DHCPv6's reference. An identical static, DHCPv4
+           or RA suffix remains live through its own reference. */
+        for (i = ns->ns_Dhcpv6SearchAppliedCount; i-- != 0U; )
+        {
+            UWORD j;
+
+            if (ami_ns_search_array_has(offered.search,
+                                        offered.search_count,
+                                        ns->ns_Dhcpv6SearchApplied[i]))
+                continue;
+
+            ami_ns_resolver_forbid();
+            if (ami_config_search_reference_remove(
+                    r, ns->ns_Dhcpv6SearchApplied[i]))
+                removed++;
+            ami_ns_resolver_permit();
+
+            for (j = (UWORD)(i + 1U);
+                 j < ns->ns_Dhcpv6SearchAppliedCount; j++)
+                ami_ns_copy_name(ns->ns_Dhcpv6SearchApplied[j - 1U],
+                                 ns->ns_Dhcpv6SearchApplied[j],
+                                 AMI_CFG_NAME_LEN);
+            ns->ns_Dhcpv6SearchAppliedCount--;
+            ns->ns_Dhcpv6SearchApplied
+                [ns->ns_Dhcpv6SearchAppliedCount][0] = '\0';
+        }
+
+        /* In: acquire one reference for each suffix in the replacement set. */
+        for (i = 0; i < offered.search_count; i++)
+        {
+            BOOL accepted;
+
+            if (ami_ns_search_array_has(ns->ns_Dhcpv6SearchApplied,
+                                        ns->ns_Dhcpv6SearchAppliedCount,
+                                        offered.search[i]))
+                continue;
+
+            ami_ns_resolver_forbid();
+            accepted = ami_config_search_reference_add(r,
+                                                       offered.search[i]);
+            ami_ns_resolver_permit();
+            if (!accepted)
+                continue;
+
+            ami_ns_copy_name(
+                ns->ns_Dhcpv6SearchApplied
+                    [ns->ns_Dhcpv6SearchAppliedCount],
+                offered.search[i], AMI_CFG_NAME_LEN);
+            ns->ns_Dhcpv6SearchAppliedCount++;
+            added++;
+        }
+
+        ami_ns_dns_dhcpv6_default_update(
+            &ns->ns_DhcpDomain,
+            ns->ns_Dhcpv6SearchAppliedCount != 0U
+                ? ns->ns_Dhcpv6SearchApplied[0] : NULL);
+        ami_ns_resolver_forbid();
+        ami_ns_dns_dhcp_default_reconcile(
+            r, &ns->ns_DhcpDomain, ns->ns_DnsslDefault,
+            ns->ns_DnsslApplied, ns->ns_DnsslAppliedCount);
+        ami_ns_resolver_permit();
+
+        if (removed != 0)
+            AMI_INFO("netstack: DHCPv6 search list withdrawn, %ld domain(s)",
+                     (long)removed);
         if (added != 0)
             AMI_INFO("netstack: DHCPv6 search list, %ld domain(s)",
                      (long)added);
