@@ -308,29 +308,29 @@ static VOID group_a(VOID)
     if (rc >= 0)
         CloseSocket(rc);
 
-    /* A descriptor going away is not refusable: acting on an FDCB_FREE errno
-       made CloseSocket() answer -1 with the socket still allocated and the
-       number still taken, and an application told its close failed does not
-       call it again.  The callback is told, and the close proceeds. */
     t_fdcb_reject_free_fd = fd;
     rc = CloseSocket(fd);
-    t_ok(rc == 0 && t_fdcb_frees >= 1,
-         "a refused FDCB_FREE does not veto CloseSocket", rc);
+    t_ok(rc < 0 && c_errno == ENOTSOCK,
+         "positive FDCB_FREE errno vetoes CloseSocket", rc);
 
     t_fdcb_reject_free_fd = -1;
+    rc = CloseSocket(fd);
+    t_ok(rc == 0 && t_fdcb_frees >= 2,
+         "descriptor remains live after a refused FDCB_FREE", rc);
 
     t_fdcb_reject_alloc = 1;
     fd = socket(AF_INET, SOCK_STREAM, 0);
     t_ok(fd < 0 && c_errno == EACCES,
          "positive FDCB_ALLOC errno is preserved", fd);
 
-    /* CHECK is the link library's only way to say whether a number is still
-       occupied.  Once its simulated file is gone, the next allocation must
-       ask again and reclaim fd 0; retaining the first refusal would leak one
-       table entry per transient collision until socket() reported EMFILE. */
+    /* A number CHECK claimed stays claimed, even after the link library has
+       given it back: AmiTCP marks it used in its descriptor bitmap and only
+       the free path ever clears that, which cannot run for a descriptor the
+       application never received. fd 0 was taken by the CHECK above and is
+       not handed out again. */
     t_fdcb_busy_fd = -1;
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    t_ok(fd == 0, "FDCB_CHECK refusal is not retained as a reservation", fd);
+    t_ok(fd > 0, "a number FDCB_CHECK claimed is not handed out later", fd);
     if (fd >= 0)
         CloseSocket(fd);
 

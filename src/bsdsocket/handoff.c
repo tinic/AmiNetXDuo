@@ -205,7 +205,14 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
        without invoking an arbitrary callback under the registry lock. */
     if (detach_fd >= 0)
     {
-        bsd_fd_free(base, detach_fd);
+        if (bsd_fd_free(base, detach_fd) != 0)
+        {
+            ObtainSemaphore(&master->sb_Lock);
+            Remove((struct Node *)&entry->bh_Node);
+            ReleaseSemaphore(&master->sb_Lock);
+            ami_free(entry);
+            return -1;
+        }
 
         ObtainSemaphore(&master->sb_Lock);
         entry->bh_Claimed = FALSE;

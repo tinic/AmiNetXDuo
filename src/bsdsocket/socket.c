@@ -510,19 +510,23 @@ LONG bsd_fd_alloc(struct AmiSocketBase *base, AmiSocket *sock)
         if (base->sb_Table[fd] == NULL)
         {
             /*
-             * A nonzero CHECK answer means the link library owns this number
-             * right now.  Skip it and ask again next time: it is the link
-             * library's slot, not ours, and it never tells us when it gives
-             * one back.  Writing BSD_FD_RESERVED here instead would latch the
-             * number for the life of the base -- nothing clears it, because
-             * bsd_fd_free() only runs for descriptors the application closed
-             * and the application does not know these exist -- so a long
-             * running program would fill its own table until socket()
-             * returned EMFILE, and the callers this feature serves are
-             * exactly the ones affected.
+             * A nonzero CHECK answer means the link library owns this number.
+             * Keep that fact in our descriptor bitmap and try the next one.
+             *
+             * This is AmiTCP's behaviour exactly -- AROSTCP
+             * bsdsocket/api/amiga_syscalls.c, in the free-descriptor search:
+             * a nonzero FDCB_CHECK does "*smaskp |= cmask" to mark the number
+             * used, then continues to the next bit. The mark is as permanent
+             * there as it is here, since only the free path clears it and the
+             * application never learns the number existed. Skipping without
+             * marking would be the friendlier design and it is not what
+             * programs written against net.lib expect.
              */
             if (bsd_fd_callback(base, fd, FDCB_CHECK) != 0)
+            {
+                base->sb_Table[fd] = BSD_FD_RESERVED;
                 continue;
+            }
 
             error = bsd_fd_callback(base, fd, FDCB_ALLOC);
             if (error != 0)
@@ -561,29 +565,35 @@ LONG bsd_fd_reserve(struct AmiSocketBase *base, LONG fd)
     return fd;
 }
 
-VOID bsd_fd_free(struct AmiSocketBase *base, LONG fd)
+LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
 {
     if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
     {
-        if (base->sb_Table[fd] == NULL)
-            return;
+        LONG error;
 
-        base->sb_Table[fd] = NULL;
+        if (base->sb_Table[fd] == NULL)
+            return 0;
 
         /*
-         * After the slot is clear, so a callback that asks us about fd during
-         * the call sees it already gone, and the answer is not read: there is
-         * nothing a program can refuse about a descriptor going away.
+         * A refusal stops the close. AmiTCP does the same and says why in as
+         * many words -- AROSTCP bsdsocket/api/amiga_generic.c, in the release
+         * path: "If the link library cannot free the fd, then we cannot do it
+         * either", and its goto skips both the FD_CLR and the soclose(). So
+         * the callback runs first and its answer decides, rather than running
+         * afterwards for information.
          *
-         * Acting on a refusal here made CloseSocket() return -1 with the
-         * socket still allocated and the descriptor still taken -- and the
-         * application, having been told the close failed, does not call it
-         * again. A leaked socket per close is worse than any answer the
-         * callback could be giving us, and nothing in the NDK describes an
-         * FDCB_FREE that may refuse.
+         * The NDK does not document this, which is why it reads as invented.
+         * The reference implementation is the contract here; a link library
+         * written against net.lib is entitled to it.
          */
-        (VOID)bsd_fd_callback(base, fd, FDCB_FREE);
+        error = bsd_fd_callback(base, fd, FDCB_FREE);
+        if (error != 0)
+            return bsd_fail(base, error);
+
+        base->sb_Table[fd] = NULL;
     }
+
+    return 0;
 }
 
 /* ----------------------------------------------------------- socket objects */
@@ -1284,9 +1294,10 @@ VOID bsd_close_all(struct AmiSocketBase *base)
         if (sock == NULL)
             continue;
 
-        /* Notify every descriptor on the way out.  The base is going away
-           whatever the callback thinks. */
-        bsd_fd_free(base, fd);
+        /* The base is going away even when a stale link-library entry refuses
+           FREE. Notify every descriptor, then force removal for teardown. */
+        if (bsd_fd_free(base, fd) != 0)
+            base->sb_Table[fd] = NULL;
 
         if (bracketed && sock != BSD_FD_RESERVED)
             bsd_socket_release(base, sock);
@@ -3531,14 +3542,16 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
 
     if (bsd_fd_reserved(SocketBase, sock_fd))
     {
-        bsd_fd_free(SocketBase, sock_fd);
+        if (bsd_fd_free(SocketBase, sock_fd) != 0)
+            return -1;
         return 0;
     }
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    bsd_fd_free(SocketBase, sock_fd);
+    if (bsd_fd_free(SocketBase, sock_fd) != 0)
+        return -1;
 
     /*
      * The descriptor is gone whatever happens next, so the caller always sees
