@@ -149,6 +149,23 @@ static void test_field_names(void)
     CHECK(!http_frame_field_name(NULL, 0, &colon));
 }
 
+static void test_etags(void)
+{
+    printf("entity-tag lists\n");
+
+    CHECK(http_frame_etag_listed("\"1-2\"", "\"1-2\"", 0));
+    CHECK(http_frame_etag_listed("\"wrong\", \"1-2\"", "\"1-2\"", 0));
+    CHECK(!http_frame_etag_listed("\"1-2\"junk", "\"1-2\"", 0));
+    CHECK(!http_frame_etag_listed("\"1-20\"", "\"1-2\"", 0));
+    CHECK(!http_frame_etag_listed("\"ABC\"", "\"abc\"", 0));
+
+    /* If-Match is strong; If-None-Match is weak. */
+    CHECK(!http_frame_etag_listed("W/\"1-2\"", "\"1-2\"", 0));
+    CHECK(http_frame_etag_listed("W/\"1-2\"", "\"1-2\"", 1));
+    CHECK(http_frame_etag_listed("\"1-2\"", "W/\"1-2\"", 1));
+    CHECK(!http_frame_etag_listed(NULL, "\"1-2\"", 1));
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -320,6 +337,7 @@ int main(void)
     test_coding();
     test_tokens();
     test_field_names();
+    test_etags();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

@@ -168,6 +168,67 @@ int http_frame_field_name(const char *line, unsigned long len,
     return 1;
 }
 
+static int hf_is_weak(const char *start, const char *end)
+{
+    return (end - start >= 2 && (start[0] == 'W' || start[0] == 'w') &&
+            start[1] == '/') ? 1 : 0;
+}
+
+int http_frame_etag_listed(const char *list, const char *etag, int weak)
+{
+    const char *etag_end;
+
+    if (list == 0 || etag == 0 || *etag == '\0')
+        return 0;
+
+    etag_end = etag;
+    while (*etag_end != '\0')
+        etag_end++;
+
+    if (weak && hf_is_weak(etag, etag_end))
+        etag += 2;
+
+    for (;;)
+    {
+        const char *start;
+        const char *end;
+        const char *a;
+        const char *b;
+
+        while (*list == ' ' || *list == '\t' || *list == ',')
+            list++;
+
+        if (*list == '\0')
+            return 0;
+
+        start = list;
+        while (*list != '\0' && *list != ',')
+            list++;
+
+        end = list;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+
+        if (hf_is_weak(start, end))
+        {
+            if (!weak)
+                continue;
+            start += 2;
+        }
+
+        a = start;
+        b = etag;
+        while (a < end && b < etag_end && *a == *b)
+        {
+            a++;
+            b++;
+        }
+
+        if (a == end && b == etag_end)
+            return 1;
+    }
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;

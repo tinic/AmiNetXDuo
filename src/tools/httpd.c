@@ -1634,10 +1634,6 @@ static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
         out[0] = '\0';
 }
 
-/* Is this entity tag one of the ones an If-None-Match listed?  Defined with
-   the rest of the precondition machinery, used up here by the terminal. */
-static BOOL httpd_etag_listed(const char *list, const char *etag);
-
 /* The same, for a path nothing has looked at yet.  "" when there is nothing
    there, or when it is a drawer. */
 static VOID httpd_etag_of(const char *path, char *out, ULONG outlen)
@@ -3891,7 +3887,7 @@ static VOID httpd_app_page_get(HttpConn *c, const char *plain, const char *gz,
     httpd_etag_of(path, etag, sizeof(etag));
 
     if (etag[0] != '\0' && c->ifnone[0] != '\0' &&
-        httpd_etag_listed(c->ifnone, etag))
+        http_frame_etag_listed(c->ifnone, etag, TRUE))
     {
         (VOID)Close(c->file);
         c->file = (BPTR)0;
@@ -6016,36 +6012,6 @@ static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
  *
  * FALSE when it has answered.
  */
-static BOOL httpd_etag_listed(const char *list, const char *etag)
-{
-    ULONG n = hs_len(etag);
-
-    if (n == 0UL)
-        return FALSE;
-
-    while (*list != '\0')
-    {
-        while (*list == ' ' || *list == '\t' || *list == ',')
-            list++;
-
-        /* A weak validator compares equal to a strong one for everything
-           except a byte-range request, which this never is. */
-        if (list[0] == 'W' && list[1] == '/')
-            list += 2;
-
-        if (*list == '\0')
-            break;
-
-        if (hs_nicmp(list, etag, n) == 0)
-            return TRUE;
-
-        while (*list != '\0' && *list != ',')
-            list++;
-    }
-
-    return FALSE;
-}
-
 static BOOL httpd_preconditions(HttpConn *c)
 {
     char  etag[HTTPD_ETAG_MAX];
@@ -6071,7 +6037,7 @@ static BOOL httpd_preconditions(HttpConn *c)
         {
             httpd_etag_of(c->path.path, etag, sizeof(etag));
 
-            if (httpd_etag_listed(c->ifnone, etag))
+            if (http_frame_etag_listed(c->ifnone, etag, TRUE))
             {
                 httpd_error(c, 412, "that is the version already there");
                 return FALSE;
@@ -6091,7 +6057,7 @@ static BOOL httpd_preconditions(HttpConn *c)
         {
             httpd_etag_of(c->path.path, etag, sizeof(etag));
 
-            if (!httpd_etag_listed(c->ifmatch, etag))
+            if (!http_frame_etag_listed(c->ifmatch, etag, FALSE))
             {
                 httpd_error(c, 412, "that is not the version that is there");
                 return FALSE;

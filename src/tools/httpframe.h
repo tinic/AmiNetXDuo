@@ -59,6 +59,13 @@ int http_frame_has_token(const char *value, const char *want);
 int http_frame_field_name(const char *line, unsigned long len,
                           unsigned long *colon);
 
+/*
+ * Whether an entity-tag is one member of a comma-separated validator list.
+ * With `weak` nonzero, W/ and strong forms compare equal (If-None-Match).
+ * With it zero, a weak member never matches a strong tag (If-Match).
+ */
+int http_frame_etag_listed(const char *list, const char *etag, int weak);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding
