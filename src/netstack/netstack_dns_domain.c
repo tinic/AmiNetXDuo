@@ -7,6 +7,54 @@
 #include "netstack_dns_domain.h"
 
 
+/*
+ * What a DHCP server may reasonably offer as option 15, which is wider than
+ * a host name. Underscores appear in the default domain of a great many
+ * consumer routers, and a fully qualified form with the root's trailing dot
+ * is legal; refusing either cost the machine its default domain AND its
+ * search suffix, since both are taken from this one option.
+ */
+BOOL ami_ns_domain_valid(const char *name)
+{
+    ULONG start = 0;
+    ULONG len;
+    ULONG i;
+
+    if (name == NULL || name[0] == '\0')
+        return FALSE;
+
+    for (len = 0; name[len] != '\0'; len++)
+        if (len >= (ULONG)AMI_CFG_DOMAIN_LEN)
+            return FALSE;
+
+    /* One trailing dot names the root and is not an empty label. */
+    if (len > 1UL && name[len - 1UL] == '.')
+        len--;
+
+    for (i = 0; i <= len; i++)
+    {
+        ULONG j;
+
+        if (i != len && name[i] != '.')
+            continue;
+        if (i == start || i - start > 63UL || name[start] == '-' ||
+            name[i - 1UL] == '-')
+            return FALSE;
+
+        for (j = start; j < i; j++)
+            if (!((name[j] >= 'a' && name[j] <= 'z') ||
+                  (name[j] >= 'A' && name[j] <= 'Z') ||
+                  (name[j] >= '0' && name[j] <= '9') || name[j] == '-' ||
+                  name[j] == '_'))
+                return FALSE;
+
+        start = i + 1UL;
+    }
+
+    return TRUE;
+}
+
+
 static char ami_ns_domain_fold(char c)
 {
     if (c >= 'A' && c <= 'Z')

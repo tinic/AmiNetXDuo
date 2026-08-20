@@ -56,38 +56,6 @@ static BOOL ami_ns_domain_same(const char *a, const char *b)
     return (BOOL)(ca == cb);
 }
 
-static BOOL ami_ns_domain_valid(const char *name)
-{
-    ULONG start = 0;
-    ULONG i;
-
-    if (name == NULL || name[0] == '\0')
-        return FALSE;
-
-    for (i = 0; ; i++)
-    {
-        ULONG j;
-
-        if (i >= (ULONG)AMI_CFG_DOMAIN_LEN)
-            return FALSE;
-        if (name[i] != '.' && name[i] != '\0')
-            continue;
-        if (i == start || i - start > 63UL || name[start] == '-' ||
-            name[i - 1UL] == '-')
-            return FALSE;
-
-        for (j = start; j < i; j++)
-            if (!((name[j] >= 'a' && name[j] <= 'z') ||
-                  (name[j] >= 'A' && name[j] <= 'Z') ||
-                  (name[j] >= '0' && name[j] <= '9') || name[j] == '-'))
-                return FALSE;
-
-        if (name[i] == '\0')
-            return TRUE;
-        start = i + 1UL;
-    }
-}
-
 static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
                                       char out[AMI_CFG_DOMAIN_LEN])
 {

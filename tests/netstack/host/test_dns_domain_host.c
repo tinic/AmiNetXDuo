@@ -170,6 +170,27 @@ int main(void)
             strcmp(dhcp.owner, long_domain) == 0,
             "a valid long option 15 is retained without truncation");
 
+    /* What a DHCP server may actually put in option 15. Refusing any of the
+       first four blanked the default domain and the search suffix together,
+       because both are taken from this one option. */
+    h_check(ami_ns_domain_valid("example.com"), "a plain domain is accepted");
+    h_check(ami_ns_domain_valid("example.com."),
+            "a trailing root dot is not an empty label");
+    h_check(ami_ns_domain_valid("home_network"),
+            "an underscore is accepted, as consumer routers offer it");
+    h_check(ami_ns_domain_valid("lan"), "a single label is accepted");
+    h_check(!ami_ns_domain_valid(""), "an empty option is refused");
+    h_check(!ami_ns_domain_valid("."), "a bare dot is refused");
+    h_check(!ami_ns_domain_valid("a..b"), "an empty inner label is refused");
+    h_check(!ami_ns_domain_valid("example.."),
+            "only one trailing dot is allowed");
+    h_check(!ami_ns_domain_valid("-lead.test"),
+            "a label may not start with a hyphen");
+    h_check(!ami_ns_domain_valid("trail-.test"),
+            "a label may not end with a hyphen");
+    h_check(!ami_ns_domain_valid("bad space.test"),
+            "a space is refused");
+
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;
 }

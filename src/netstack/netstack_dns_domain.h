@@ -18,6 +18,8 @@ typedef struct AmiNsDhcpDomainState
     char owner[AMI_CFG_DOMAIN_LEN];
 } AmiNsDhcpDomainState;
 
+BOOL ami_ns_domain_valid(const char *name);
+
 VOID ami_ns_dns_ra_default_reconcile(
     AmiResolverConfig *resolver,
     char owner[AMI_CFG_NAME_LEN],
