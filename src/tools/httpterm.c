@@ -1077,6 +1077,16 @@ VOID http_term_service(VOID)
             term_reaped = 1;
         }
 
+        /* The session stays active while its last output drains, but the
+           Process that owned these pointers is gone once it is reaped.  A
+           late `break` from the page, or http_term_stop() during that drain,
+           must not signal through a freed MsgPort or Task. */
+        if (term_reaped)
+        {
+            term_shell_task = NULL;
+            term_break_port = NULL;
+        }
+
         /* Not `term_active = 0` yet.  Output the Shell wrote before it exited
            is still in the ring and is the answer to the last command.
            http_term_running() is what tells the two apart. */
