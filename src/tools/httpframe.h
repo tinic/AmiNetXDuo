@@ -43,6 +43,14 @@ HttpFrameResult http_frame_length(const char *value, unsigned long *out);
 /* A sentence for the log.  Never NULL. */
 const char *http_frame_error(HttpFrameResult why);
 
+/*
+ * Whether a comma-separated HTTP token list contains `want`.  Tokens are
+ * compared case-insensitively and as whole tokens, with optional whitespace
+ * ignored at either end.  Connection is one such list: `close` has exactly
+ * the same meaning in "keep-alive, close" as it has on its own.
+ */
+int http_frame_has_token(const char *value, const char *want);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding

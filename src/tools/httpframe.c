@@ -98,6 +98,35 @@ static int hf_token_is(const char *start, const char *end, const char *want)
     return (start == end && *want == '\0') ? 1 : 0;
 }
 
+int http_frame_has_token(const char *value, const char *want)
+{
+    if (value == 0 || want == 0 || *want == '\0')
+        return 0;
+
+    for (;;)
+    {
+        const char *start;
+        const char *end;
+
+        while (*value == ' ' || *value == '\t' || *value == ',')
+            value++;
+
+        if (*value == '\0')
+            return 0;
+
+        start = value;
+        while (*value != '\0' && *value != ',')
+            value++;
+
+        end = value;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+
+        if (hf_token_is(start, end, want))
+            return 1;
+    }
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;

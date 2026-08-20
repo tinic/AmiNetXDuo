@@ -116,6 +116,23 @@ static void test_coding(void)
     CHECK(http_frame_coding("chunked;q=1") == HTTP_TE_UNSUPPORTED);
 }
 
+/* ------------------------------------------------------------- the lists --- */
+
+static void test_tokens(void)
+{
+    printf("HTTP token lists\n");
+
+    CHECK(http_frame_has_token("close", "close"));
+    CHECK(http_frame_has_token("keep-alive, close", "close"));
+    CHECK(http_frame_has_token(" close , Upgrade ", "upgrade"));
+    CHECK(http_frame_has_token("Keep-Alive, UpGrAdE", "upgrade"));
+    CHECK(!http_frame_has_token("keep-alive", "close"));
+    CHECK(!http_frame_has_token("disclose", "close"));
+    CHECK(!http_frame_has_token("upgrade-more", "upgrade"));
+    CHECK(!http_frame_has_token("", "close"));
+    CHECK(!http_frame_has_token(NULL, "close"));
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -285,6 +302,7 @@ int main(void)
 {
     test_length();
     test_coding();
+    test_tokens();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

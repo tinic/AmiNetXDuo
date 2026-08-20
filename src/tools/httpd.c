@@ -5439,6 +5439,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     ULONG  headers = 0;
     BOOL   seen_len = FALSE;
     BOOL   seen_te  = FALSE;
+    BOOL   seen_close = FALSE;
     HttpPathResult why;
 
     /* ---- the request line ------------------------------------------- */
@@ -5599,41 +5600,21 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Connection"))
         {
-            if (hs_nicmp(httpd_value, "close", 5) == 0)
+            /* Connection is a comma-separated token list, and several field
+               lines are one combined list.  In particular, `close` wins
+               wherever it appears and cannot be undone by a later
+               `keep-alive` line. */
+            if (http_frame_has_token(httpd_value, "close"))
+            {
+                seen_close = TRUE;
                 c->keepalive = 0;
-            else if (hs_nicmp(httpd_value, "keep-alive", 10) == 0)
+            }
+            else if (!seen_close &&
+                     http_frame_has_token(httpd_value, "keep-alive"))
                 c->keepalive = 1;
 
-            /*
-             * And, separately, whether "upgrade" is in the list.  RFC 6455 4.1
-             * requires the token and not the whole value, and every browser
-             * sends "keep-alive, Upgrade", so this looks through the list
-             * rather than at the front of it.  The two tests above look only at
-             * the front, which is why they are not enough.
-             */
-            {
-                const char *p = httpd_value;
-
-                while (*p != '\0')
-                {
-                    if (hs_nicmp(p, "upgrade", 7) == 0)
-                    {
-                        char after = p[7];
-
-                        if (after == '\0' || after == ',' || after == ' ' ||
-                            after == '\t')
-                        {
-                            c->ws_connection = 1;
-                            break;
-                        }
-                    }
-
-                    while (*p != '\0' && *p != ',')
-                        p++;
-                    while (*p == ',' || *p == ' ' || *p == '\t')
-                        p++;
-                }
-            }
+            if (http_frame_has_token(httpd_value, "upgrade"))
+                c->ws_connection = 1;
         }
         else if (hs_equal(name, "Upgrade"))
         {
