@@ -317,12 +317,16 @@ LONG bsd_ReleaseCopyOfSocket(register LONG sock_fd __asm("d0"),
     /* The copy is a second reference to the same NX socket: NetX Duo cannot
        duplicate one, and BSD semantics are a shared file entry rather than an
        independent connection. */
-    sock->as_RefCount++;
+    bsd_socket_retain(sock);
 
     result = bsd_handoff_park(SocketBase, sock, id, -1);
     if (result < 0)
     {
+        /* Undo the reference reserved above. The caller's descriptor still
+           owns the other one, so this cannot destroy the socket. */
+        Forbid();
         sock->as_RefCount--;
+        Permit();
         return result;
     }
 

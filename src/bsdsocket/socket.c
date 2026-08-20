@@ -1150,15 +1150,43 @@ static BOOL bsd_socket_destroy(AmiSocket *sock)
     return TRUE;
 }
 
-VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
+/*
+ * A handed-off socket can have descriptors in two tasks.  Forbid() makes the
+ * read-modify-write indivisible on AmigaOS without taking the master's
+ * semaphore (the last-close handoff flush already holds that semaphore) or
+ * carrying a lock across an fd callback.  NetX callbacks run in tasks, not at
+ * interrupt level, so this is the complete set of concurrent users.
+ */
+VOID bsd_socket_retain(AmiSocket *sock)
 {
     if (sock == NULL)
         return;
 
+    Forbid();
+    sock->as_RefCount++;
+    Permit();
+}
+
+VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
+{
+    ULONG remaining;
+
+    if (sock == NULL)
+        return;
+
+    Forbid();
     if (sock->as_RefCount > 0)
         sock->as_RefCount--;
+    remaining = sock->as_RefCount;
 
-    if (sock->as_RefCount > 0)
+    /* Keep the owner comparison and store in the same indivisible region as
+       the count. ObtainSocket() may be assigning a different live owner in
+       another task at the same time. */
+    if (remaining > 0 && sock->as_Owner == base)
+        sock->as_Owner = NULL;
+    Permit();
+
+    if (remaining > 0)
     {
         /*
          * The socket outlives this base, so as_Owner must not keep pointing
@@ -1182,9 +1210,6 @@ VOID bsd_socket_release(struct AmiSocketBase *base, AmiSocket *sock)
          * Events are still recorded in as_Events, so a poll sees them. Only
          * the asynchronous wakeup is lost, to a base that no longer exists.
          */
-        if (sock->as_Owner == base)
-            sock->as_Owner = NULL;
-
         return;
     }
 

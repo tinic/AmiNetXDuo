@@ -1326,7 +1326,7 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
         if (fd < 0)
             return -1;
 
-        sock->as_RefCount++;
+        bsd_socket_retain(sock);
 
         return fd;
     }
@@ -1359,7 +1359,7 @@ LONG bsd_Dup2Socket(register LONG old_socket __asm("d0"),
         return -1;
 
     SocketBase->sb_Table[new_socket] = sock;
-    sock->as_RefCount++;
+    bsd_socket_retain(sock);
 
     return new_socket;
 }
