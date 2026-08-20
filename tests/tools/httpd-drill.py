@@ -812,7 +812,8 @@ def ws_frame(opcode, payload, fin=True, mask=b"\x37\xfa\x21\x3d", masked=True):
 class WsConn(Conn):
     """A connection that has been upgraded, and the frame reader for it."""
 
-    def __init__(self, key=RFC_KEY, timeout=None, path=TERM, headers=None):
+    def __init__(self, key=RFC_KEY, timeout=None, path=TERM, headers=None,
+                 first=b""):
         Conn.__init__(self, timeout=(timeout or WS_WAIT))
         lines = ["GET %s HTTP/1.1" % path,
                  "Host: %s:%d" % (ADDR, PORT)]
@@ -825,7 +826,7 @@ class WsConn(Conn):
         for k, v in h.items():
             if v is not None:
                 lines.append("%s: %s" % (k, v))
-        self.send("\r\n".join(lines).encode("latin-1") + b"\r\n\r\n")
+        self.send("\r\n".join(lines).encode("latin-1") + b"\r\n\r\n" + first)
 
         self.status = None
         self.headers = {}
@@ -1230,6 +1231,21 @@ def test_ws_shell():
     c.close()
     check(ws_wait_free() is not None,
           "and the Shell is free again after a clean close")
+
+    # More than the terminal's 512-byte decoder hold, in the same send as the
+    # upgrade.  The HTTP request buffer can hand almost 2 KB across here; none
+    # of it may disappear merely because normal WebSocket reads are smaller.
+    commands = b"".join(
+        ("Echo PIPE%03d\n" % i).encode("ascii") for i in range(48))
+    c = WsConn(first=ws_frame(0x2, commands))
+    check(c.status == 101, "an upgrade with pipelined input succeeds")
+    said, _ = c.gather(WS_WAIT, want="PIPE047")
+    check(b"PIPE047" in said,
+          "pipelined input beyond 512 bytes reaches the Shell (got %r)"
+          % said[-120:])
+    c.close()
+    check(ws_wait_free() is not None,
+          "and the pipelined session gives the Shell back")
 
 
 def test_ws_one_session():

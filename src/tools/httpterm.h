@@ -280,6 +280,13 @@ typedef struct HttpTermSock
     UWORD           pend_n;
     UWORD           pend_at;
 
+    /* Bytes already read behind the HTTP upgrade.  The caller's request
+       buffer is idle for the rest of this connection, so keep a cursor into
+       it and decode only as fast as pend[] and the Shell can drain. */
+    const UBYTE    *first;
+    ULONG           first_len;
+    ULONG           first_at;
+
     UBYTE           ctl[HTTP_TERM_CTL];
     UWORD           ctl_n;
     UWORD           ctl_at;
@@ -304,7 +311,8 @@ typedef struct HttpTermSock
  * Begin.  `first` is whatever the client pipelined behind the request head,
  * which is already the first frames.  A browser that opens the socket and
  * types in the same segment is ordinary, and dropping that would drop the
- * first thing said.
+ * first thing said.  The storage remains borrowed until the session ends;
+ * the caller's request buffer is otherwise idle after the upgrade.
  */
 VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
                           UBYTE *out, ULONG out_size,

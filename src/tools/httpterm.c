@@ -2464,6 +2464,59 @@ static VOID sock_feed_shell(HttpTermSock *t)
     t->pend_at = 0;
 }
 
+/*
+ * Decode bytes that arrived behind the HTTP upgrade without outrunning the
+ * Shell.  That handoff can be almost the whole 2 KB request buffer, unlike a
+ * normal socket read, which is capped at the 512 bytes pend[] can hold.  The
+ * decoder's sink cannot refuse a byte, so each feed is capped at the pending
+ * buffer and another one is not made until the last one has drained.
+ */
+static VOID sock_feed_first(HttpTermSock *t)
+{
+    sock_feed_shell(t);
+
+    while (t->pend_at >= t->pend_n && t->first_at < t->first_len &&
+           !t->closing)
+    {
+        ULONG left = t->first_len - t->first_at;
+        LONG  take = (left > (ULONG)HTTP_TERM_READ)
+                         ? (LONG)HTTP_TERM_READ : (LONG)left;
+        LONG  used;
+
+        used = http_ws_feed(&t->in, &t->first[t->first_at], take,
+                            sock_sink, t);
+        if (used > 0)
+            t->first_at += (ULONG)used;
+
+        if (t->in.failed != 0)
+        {
+            sock_close(t, (UWORD)t->in.failed);
+            t->pend_n   = 0;
+            t->pend_at  = 0;
+            t->first_at = t->first_len;
+            break;
+        }
+
+        sock_feed_shell(t);
+
+        /* A live decoder consumes input.  Fail closed rather than spinning
+           the server if that contract changes underneath this pump. */
+        if (used <= 0)
+        {
+            sock_close(t, HTTP_WS_CLOSE_PROTOCOL);
+            t->first_at = t->first_len;
+            break;
+        }
+    }
+
+    if (t->first_at >= t->first_len || t->closing)
+    {
+        t->first     = NULL;
+        t->first_len = 0;
+        t->first_at  = 0;
+    }
+}
+
 VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
                           UBYTE *out, ULONG out_size,
                           const UBYTE *first, ULONG first_len, ULONG now)
@@ -2476,6 +2529,9 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
     t->out_sent = 0;
     t->pend_n   = 0;
     t->pend_at  = 0;
+    t->first    = first;
+    t->first_len = first_len;
+    t->first_at = 0;
     t->ctl_n    = 0;
     t->ctl_at   = 0;
     t->word_n   = 0;
@@ -2486,8 +2542,7 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
 
     http_ws_reset(&t->in);
 
-    if (first_len > 0UL)
-        (VOID)http_ws_feed(&t->in, first, (long)first_len, sock_sink, t);
+    sock_feed_first(t);
 }
 
 BOOL http_term_sock_wants_write(const HttpTermSock *t)
@@ -2501,6 +2556,13 @@ BOOL http_term_sock_wants_write(const HttpTermSock *t)
     if (http_term_pending() > 0UL)
         return TRUE;
 
+    /* A writable wake is also the local pump for bytes retained from the
+       upgrade.  Ask only when it can make progress, or a full input ring
+       would turn this into a spin while the Shell is not reading. */
+    if ((t->pend_at < t->pend_n && ring_free(&term_in) > 0UL) ||
+        (t->pend_at >= t->pend_n && t->first_at < t->first_len))
+        return TRUE;
+
     /* The Shell has gone and the close has not been sent yet. */
     return http_term_running() ? FALSE : TRUE;
 }
@@ -2510,12 +2572,12 @@ BOOL http_term_sock_read(HttpTermSock *t, ULONG now)
     UBYTE scratch[HTTP_TERM_READ];
     LONG  got;
 
-    sock_feed_shell(t);
+    sock_feed_first(t);
 
     /* Not read at all while the Shell has not taken what came last.  This is
        the whole of the flow control in this direction, and the alternative is
        a buffer that grows with whatever a browser pastes. */
-    if (t->pend_at < t->pend_n)
+    if (t->pend_at < t->pend_n || t->first_at < t->first_len)
         return TRUE;
 
     got = tool_sock_recv(t->sb, t->sock, scratch, (LONG)sizeof(scratch));
@@ -2553,6 +2615,11 @@ BOOL http_term_sock_read(HttpTermSock *t, ULONG now)
 
 BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
 {
+    /* The event loop reaches this after a terminal-port wake as well as a
+       socket wake.  That is when a Shell read may have made room for retained
+       upgrade bytes, even if the peer has sent nothing new. */
+    sock_feed_first(t);
+
     for (;;)
     {
         /* Whatever is already framed goes first. */
