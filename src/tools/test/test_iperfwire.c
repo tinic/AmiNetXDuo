@@ -71,6 +71,7 @@ static void test_datagram(void)
 {
     unsigned char buf[64];
     int           i;
+    long          id;
 
     printf("datagram header\n");
 
@@ -95,6 +96,9 @@ static void test_datagram(void)
         CHECK(buf[i] == 0);
 
     CHECK(iperf_dg_id(buf) == 1);
+    CHECK(iperf_dg_get(buf, IPERF_DG_LEN - 1, &id) != 0);
+    CHECK(iperf_dg_get(buf, IPERF_DG_LEN, &id) == 0);
+    CHECK(id == 1);
 
     /* The end-of-test marker is the last id, negated. */
     iperf_dg_put(buf, -359, 0, 0);

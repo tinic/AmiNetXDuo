@@ -78,6 +78,15 @@ long iperf_dg_id(const unsigned char *buf)
     return (long)raw;
 }
 
+int iperf_dg_get(const unsigned char *buf, unsigned long len, long *id)
+{
+    if (len < IPERF_DG_LEN || id == NULL)
+        return -1;
+
+    *id = iperf_dg_id(buf);
+    return 0;
+}
+
 /* ----------------------------------------------------------------- report - */
 
 void iperf_report_put(unsigned char *buf, const IperfWireReport *rep)

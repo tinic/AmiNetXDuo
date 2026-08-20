@@ -97,6 +97,9 @@ void iperf_dg_put(unsigned char *buf, long id,
 /* The id out of a received datagram.  Negative means end of test. */
 long iperf_dg_id(const unsigned char *buf);
 
+/* Read that id only when the complete datagram header is present. */
+int iperf_dg_get(const unsigned char *buf, unsigned long len, long *id);
+
 /* Build the server's end-of-test report.  `buf` needs IPERF_REPORT_LEN bytes. */
 void iperf_report_put(unsigned char *buf, const IperfWireReport *rep);
 

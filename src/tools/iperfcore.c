@@ -596,6 +596,12 @@ static VOID iperf_slice_recv(IperfRun *run)
             {
                 long id;
 
+                /* A short datagram has no iperf identity.  In particular it
+                   must not claim an idle server, start its clock, or become
+                   part of the measurement. */
+                if (iperf_dg_get(iperf_buf, (ULONG)n, &id) != 0)
+                    continue;
+
                 if (run->have_from
                     && !tool_sock_addr_same(&from, &run->from))
                 {
@@ -617,8 +623,6 @@ static VOID iperf_slice_recv(IperfRun *run)
 
                 iperf_clock_start(run);
                 iperf_count(run, n);
-
-                id = (n >= IPERF_DG_LEN) ? iperf_dg_id(iperf_buf) : 0;
 
                 if (id < 0)
                 {
