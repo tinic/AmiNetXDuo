@@ -2785,7 +2785,16 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_live = TRUE;
 
     if (first_len > 0UL)
+    {
         (VOID)http_ws_feed(&fb_in, first, (long)first_len, fb_sink, NULL);
+
+        /* The bytes behind the upgrade are already WebSocket input and can
+           fail framing just like a later recv().  Without this check a bad
+           first frame leaves the decoder dead, but the screen producer keeps
+           running because no second read is needed to discover the failure. */
+        if (fb_in.failed != 0)
+            fb_close_session((UWORD)fb_in.failed);
+    }
 
     return TRUE;
 }
