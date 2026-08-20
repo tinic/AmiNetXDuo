@@ -547,6 +547,20 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (args[ARG_UNIT] != 0 && *(const LONG *)args[ARG_UNIT] < 0)
+    {
+        tool_error("UNIT cannot be negative");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (args[ARG_TIMEOUT] != 0 && *(const LONG *)args[ARG_TIMEOUT] < 0)
+    {
+        tool_error("TIMEOUT cannot be negative");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     given    = tool_basename((const char *)args[ARG_NAME]);
     had_unit = (args[ARG_UNIT] != 0) ? TRUE : FALSE;
     unit     = had_unit ? (ULONG)*(const LONG *)args[ARG_UNIT] : 0UL;
