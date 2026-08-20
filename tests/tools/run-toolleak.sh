@@ -227,7 +227,8 @@ cold|sntp|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:sntp 10.0.2.2 TIMEOU
 cold|host|family-both|5|re:-4 and -6 cannot both be given|-|SYS:host v4only.test -4 -6
 cold|nslookup|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:nslookup plain.test TIMEOUT=-1
 cold|nc|family-both|5|re:-4 and -6 cannot both be given|-|SYS:nc -z 10.0.2.2 7301 -w 3 -4 -6
-cold|nc|bad-timeout|5|re:a timeout cannot be negative|-|SYS:nc -l 7099 TIMEOUT=-1
+cold|nc|bad-timeout|5|re:a timeout must be between 0 and|-|SYS:nc -l 7099 TIMEOUT=-1
+cold|nc|overflow-timeout|5|re:a timeout must be between 0 and|-|SYS:nc -l 7099 TIMEOUT=4294968
 cold|nc|bad-local-port|5|re:-1 is not a local port|-|SYS:nc -l LOCALPORT=-1
 cold|iperf|family-both|5|re:-4 and -6 cannot both be given|-|SYS:iperf 10.0.2.2 -p 7385 -t 2 -q -4 -6
 # ------------------------------------------------------------ live ------

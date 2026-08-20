@@ -78,6 +78,11 @@ static UBYTE nc_staged[NC_CHUNK * 2];   /* CRLF expansion can double it */
 /* How often the socket is polled when there is a keyboard to watch too. */
 #define NC_TICK_MICROS  50000UL
 
+/* ami_millis() is a 32-bit clock. Longer idle deadlines cannot be measured
+   without ambiguity after it wraps, and converting one to milliseconds would
+   wrap before the comparison began. */
+#define NC_TIMEOUT_MAX  4294967L
+
 
 /* ------------------------------------------------------------- options --- */
 
@@ -194,7 +199,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
     BOOL        wrote_eof = FALSE;
     LONG        rc = RETURN_OK;
 
-    idle_limit = (opt->timeout > 0) ? (opt->timeout * 1000UL / 50UL) : 0;
+    idle_limit = (opt->timeout > 0) ? (opt->timeout * 20UL) : 0;
 
     tool_input_open(&in, TRUE);
 
@@ -698,9 +703,10 @@ int main(int argc, char **argv)
     {
         LONG seconds = *(LONG *)args[ARG_TIMEOUT];
 
-        if (seconds < 0)
+        if (seconds < 0 || seconds > NC_TIMEOUT_MAX)
         {
-            tool_error("a timeout cannot be negative");
+            tool_error("a timeout must be between 0 and %ld seconds",
+                       (LONG)NC_TIMEOUT_MAX);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
