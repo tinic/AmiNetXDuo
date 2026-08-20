@@ -4389,6 +4389,42 @@ static BOOL httpd_may_write(HttpConn *c)
     return httpd_lock_allows(c, c->path.path);
 }
 
+/* A short unused leaf in the target's drawer.  PUT uses one for the incoming
+   bytes and, while replacing, one for the old file until the new name is in
+   place.  MODE_NEWFILE is never called until this has proved the name free. */
+static BOOL httpd_spare_name(HttpConn *c, const char *stem,
+                             char *out, ULONG outlen)
+{
+    char  leaf[20];
+    ULONG attempt;
+
+    if (!httpd_parent(c->path.path, httpd_probe, sizeof(httpd_probe)))
+        return FALSE;
+
+    for (attempt = 0; attempt < (ULONG)HTTPD_CONN_MAX * 2UL; attempt++)
+    {
+        ULONG used = 0;
+
+        leaf[0] = '\0';
+        if (!hs_append(leaf, sizeof(leaf), &used, stem) ||
+            !hs_append_num(leaf, sizeof(leaf), &used,
+                           (ULONG)(c - httpd_conn)) ||
+            !hs_append(leaf, sizeof(leaf), &used, "-") ||
+            !hs_append_num(leaf, sizeof(leaf), &used, attempt))
+            return FALSE;
+
+        hs_copy(out, outlen, httpd_probe);
+
+        if (!http_path_join(out, outlen, leaf))
+            return FALSE;
+
+        if (!hs_equal(out, c->path.path) && httpd_kind(out) < 0)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 /*
  * The temporary a PUT is written to.  It goes in the destination drawer and not
  * in T:, because a rename between volumes is a copy, and the point of the
@@ -4400,11 +4436,6 @@ static BOOL httpd_may_write(HttpConn *c)
  */
 static BOOL httpd_begin_put(HttpConn *c)
 {
-    char  leaf[20];
-    ULONG used;
-    ULONG attempt;
-    BOOL  found = FALSE;
-
     if (!httpd_may_write(c))
         return FALSE;
 
@@ -4452,37 +4483,10 @@ static BOOL httpd_begin_put(HttpConn *c)
         }
     }
 
-    /* Keep the parent while candidates are tried.  MODE_NEWFILE truncates an
-       existing file, so a fixed hidden name is not a temporary at all when a
-       user already owns that name. */
-    hs_copy(httpd_probe, sizeof(httpd_probe), c->put_temp);
-
-    for (attempt = 0; attempt < (ULONG)HTTPD_CONN_MAX * 2UL; attempt++)
-    {
-        used    = 0;
-        leaf[0] = '\0';
-
-        if (!hs_append(leaf, sizeof(leaf), &used, ".httpd-put-") ||
-            !hs_append_num(leaf, sizeof(leaf), &used,
-                           (ULONG)(c - httpd_conn)) ||
-            !hs_append(leaf, sizeof(leaf), &used, "-") ||
-            !hs_append_num(leaf, sizeof(leaf), &used, attempt))
-            break;
-
-        hs_copy(c->put_temp, sizeof(c->put_temp), httpd_probe);
-
-        if (!http_path_join(c->put_temp, sizeof(c->put_temp), leaf))
-            break;
-
-        if (!hs_equal(c->put_temp, c->path.path) &&
-            httpd_kind(c->put_temp) < 0)
-        {
-            found = TRUE;
-            break;
-        }
-    }
-
-    if (!found)
+    /* MODE_NEWFILE truncates an existing file, so the hidden name has to be
+       proved unused rather than merely be unlikely. */
+    if (!httpd_spare_name(c, ".httpd-put-", c->put_temp,
+                          sizeof(c->put_temp)))
     {
         c->put_temp[0] = '\0';
         httpd_error(c, 503, "there is no free temporary name for that upload");
@@ -4521,6 +4525,7 @@ static VOID httpd_sink_put(HttpConn *c, const UBYTE *data, LONG len)
 static VOID httpd_do_put(HttpConn *c)
 {
     BOOL existed;
+    BOOL kept_old = FALSE;
     LONG close_err = 0;
 
     if (c->put == (BPTR)0)
@@ -4558,32 +4563,66 @@ static VOID httpd_do_put(HttpConn *c)
 
     existed = (httpd_kind(c->path.path) >= 0) ? TRUE : FALSE;
 
-    /*
-     * The rename is the transfer, as far as everything else on this machine is
-     * concerned: until it happens the old file is untouched, and after it the
-     * new one is whole.  AmigaDOS will not rename onto a name that exists, so
-     * an overwrite is a delete and a rename, and the delete happens after the
-     * last byte has landed, so an upload that failed has cost nothing.
-     */
-    if (existed && !DeleteFile((CONST_STRPTR)c->path.path))
+    /* AmigaDOS cannot rename over an existing name.  Keep the old file under a
+       spare name until the completed temporary has taken its place; deleting
+       first made a failed final rename destroy the old version too. */
+    if (existed)
     {
-        ULONG why = httpd_dos_status(IoErr());
+        LONG err;
 
-        httpd_put_abandon(c);
-        httpd_error(c, why, "the file already there will not go");
-        return;
+        if (!httpd_spare_name(c, ".httpd-old-", c->walk_dst,
+                              sizeof(c->walk_dst)))
+        {
+            httpd_put_abandon(c);
+            httpd_error(c, 503, "there is no free recovery name for the old "
+                                "file");
+            return;
+        }
+
+        if (!Rename((CONST_STRPTR)c->path.path,
+                    (CONST_STRPTR)c->walk_dst))
+        {
+            err = IoErr();
+            httpd_put_abandon(c);
+            httpd_error(c, httpd_dos_status(err),
+                        "the file already there cannot be kept for rollback");
+            return;
+        }
+
+        kept_old = TRUE;
     }
 
     if (!Rename((CONST_STRPTR)c->put_temp, (CONST_STRPTR)c->path.path))
     {
-        ULONG why = httpd_dos_status(IoErr());
+        LONG err = IoErr();
+
+        if (kept_old &&
+            !Rename((CONST_STRPTR)c->walk_dst,
+                    (CONST_STRPTR)c->path.path))
+        {
+            /* The bytes are still present under the recovery name.  This log
+               is the only way to name it if the filesystem also refused the
+               rollback. */
+            httpd_log(c, "PUT rollback kept the old file at %s",
+                      (LONG)c->walk_dst, 0);
+        }
 
         httpd_put_abandon(c);
-        httpd_error(c, why, "that file cannot be put in place");
+        httpd_error(c, httpd_dos_status(err),
+                    "that file cannot be put in place");
         return;
     }
 
     c->put_temp[0] = '\0';
+
+    if (kept_old && !DeleteFile((CONST_STRPTR)c->walk_dst))
+    {
+        /* The requested name now holds the complete new file.  Do not turn a
+           cleanup failure into a retry that writes it again; retain and name
+           the old bytes for the operator instead. */
+        httpd_log(c, "PUT left the old file at %s",
+                  (LONG)c->walk_dst, 0);
+    }
 
     /*
      * What landed can carry a different name to the one asked for.  The check
