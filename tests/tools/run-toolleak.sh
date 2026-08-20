@@ -190,6 +190,7 @@ cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNet
 cold|hostname|no-name|5|re:This machine has no name|-|SYS:hostname
 cold|hostname|bad-name|5|re:is not a host name|-|SYS:hostname not_a_name
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
+cold|NetSetup|bad-unit|5|re:UNIT cannot be negative|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=-1 DHCP NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
 cold|NetTrace|bad-snap|5|re:SNAP must be between 14 and 65535 bytes|-|SYS:NetTrace SNAP=-1 NOCAPTURE
 cold|NetTrace|bad-blen|5|re:BLEN must be between 32 and 32768 bytes|-|SYS:NetTrace BLEN=-1 NOCAPTURE

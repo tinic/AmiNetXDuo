@@ -987,7 +987,18 @@ int main(int argc, char **argv)
         tool_copy_string(plan.name, sizeof(plan.name),
                          tool_basename((const char *)args[ARG_NAME]));
     if (args[ARG_UNIT] != 0)
-        plan.unit = *(ULONG *)args[ARG_UNIT];
+    {
+        LONG unit = *(LONG *)args[ARG_UNIT];
+
+        if (unit < 0)
+        {
+            tool_error("UNIT cannot be negative");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        plan.unit = (ULONG)unit;
+    }
 
     if (args[ARG_ADDRESS] != 0 &&
         !ami_config_parse_ip((const char *)args[ARG_ADDRESS], &plan.address))
