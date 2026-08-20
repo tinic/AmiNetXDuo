@@ -484,6 +484,13 @@ int main(int argc, char **argv)
     bytes   = (args[ARG_BYTES] != 0) ? (ULONG)(*(LONG *)args[ARG_BYTES])
                                      : 1048576UL;
 
+    if (args[ARG_BYTES] != 0 && *(LONG *)args[ARG_BYTES] < 1)
+    {
+        tool_error("BYTES must be at least 1");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     if (snaplen < NT_SNAP_MIN || snaplen > NT_SNAP_MAX)
     {
         tool_error("SNAP must be between %lu and %lu bytes",

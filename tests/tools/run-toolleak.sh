@@ -190,6 +190,7 @@ cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz 
 cold|NetTrace|bad-snap|5|re:SNAP must be between 14 and 65535 bytes|-|SYS:NetTrace SNAP=-1 NOCAPTURE
 cold|NetTrace|bad-blen|5|re:BLEN must be between 32 and 32768 bytes|-|SYS:NetTrace BLEN=-1 NOCAPTURE
 cold|NetTrace|short-buffer|5|re:BLEN 64 is too small for a snap length of 96|-|SYS:NetTrace BLEN=64 NOCAPTURE
+cold|NetTrace|bad-bytes|5|re:BYTES must be at least 1|-|SYS:NetTrace BYTES=-1 NOCAPTURE
 cold|NetTrace|bad-port|5|re:-1 is not a port|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT=-1 NOCAPTURE
 # -4 and -6 together, for every command that carries the pair.  A cold row
 # because each one refuses BEFORE tool_socket_open(), which is the whole point
