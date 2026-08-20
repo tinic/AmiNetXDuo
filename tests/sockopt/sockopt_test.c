@@ -964,6 +964,13 @@ UBYTE           buf[512];
      * passed and says nothing about which, and answer out of interfaces.c.
      */
     t_bzero(&ifc, sizeof(ifc));
+    ifc.ifc_len = 1;
+    ifc.ifc_buf = buf;
+    (VOID)t_check((BOOL)(bsd_IoctlSocket(fd, SIOCGIFCONF, &ifc) == 0 &&
+                         ifc.ifc_len == 0),
+                  "SIOCGIFCONF reports only entries that fitted", ifc.ifc_len);
+
+    t_bzero(&ifc, sizeof(ifc));
     ifc.ifc_len = (LONG)sizeof(buf);
     ifc.ifc_buf = buf;
     (VOID)t_check((BOOL)(bsd_IoctlSocket(fd, SIOCGIFCONF, &ifc) == 0 &&

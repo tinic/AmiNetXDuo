@@ -1675,17 +1675,15 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
     {
         struct ifconf *ifc    = (struct ifconf *)argp;
         struct ifreq  *out    = ifc->ifc_req;
-        LONG           room   = ifc->ifc_len;
-        LONG           used   = 0;
+        LONG           room     = ifc->ifc_len;
+        LONG           required = 0;
+        LONG           written  = 0;
 
         /*
          * A NULL buffer asks how much room is needed. fad-gifc does not do
          * this, but other callers of this ioctl can. The count costs one pass
          * and removes a way to crash.
          */
-        if (out == NULL)
-            room = 0;
-
         if (bsd_nx_enter(SocketBase) != 0)
             return bsd_fail(SocketBase, AMI_ENETDOWN);
 
@@ -1696,27 +1694,30 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
             if (!bsd_if_name_of(ip, i, name, sizeof(name)))
                 continue;
 
-            if (used + (LONG)sizeof(struct ifreq) <= room)
+            if (out != NULL &&
+                written + (LONG)sizeof(struct ifreq) <= room)
             {
-                struct ifreq *ifr = (struct ifreq *)((UBYTE *)out + used);
+                struct ifreq *ifr =
+                    (struct ifreq *)((UBYTE *)out + written);
 
                 bsd_bzero(ifr, sizeof(*ifr));
                 bsd_strncpy((char *)ifr->ifr_name, name,
                             sizeof(ifr->ifr_name));
                 bsd_if_put_addr(&ifr->ifr_addr,
                                 ip->nx_ip_interface[i].nx_interface_ip_address);
+                written += (LONG)sizeof(struct ifreq);
             }
 
-            /*
-             * Counted whether or not it fitted, so that the grow-and-retry
-             * loop callers of this ioctl write can terminate.
-             */
-            used += (LONG)sizeof(struct ifreq);
+            required += (LONG)sizeof(struct ifreq);
         }
 
         bsd_nx_leave(SocketBase);
 
-        ifc->ifc_len = used;
+        /* With a real buffer, ifc_len is the amount actually written. A
+           caller walks exactly that many bytes, so reporting `required` here
+           would send it beyond a short buffer. A NULL buffer is the sizing
+           query and reports the full requirement instead. */
+        ifc->ifc_len = (out == NULL) ? required : written;
         return 0;
     }
 
