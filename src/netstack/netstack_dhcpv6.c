@@ -301,9 +301,29 @@ static VOID ami_ns6_ra_flags(NX_IP *ip_ptr, UINT ra_flag)
 
 /* ------------------------------------------------------------ the client, */
 
-/* A create succeeded but the object could not be fully configured. Do not
-   publish a partial client to the next worker event: delete every resource,
-   clear the publication flag, and restore this stack's chained DAD notify. */
+/*
+ * A create succeeded but the object could not be fully configured. Do not
+ * publish a partial client to the next worker event: delete every resource,
+ * clear the publication flag, and restore this stack's chained DAD notify.
+ *
+ * ns_Dhcpv6Asked STAYS LATCHED, and that is the decision rather than an
+ * omission.  Every call site below is one of the vendored client's
+ * configuration calls, and each of those fails only on a check of its own
+ * arguments: nx_dhcpv6_client_set_interface() on the interface index,
+ * nx_dhcpv6_create_client_duid() on the DUID and hardware type constants,
+ * nx_dhcpv6_create_client_iana() on T1 against T2, and the two option
+ * requests on a pointer that cannot be null.  Every one of those arguments is
+ * a constant or a configuration value that does not change while the stack
+ * runs, so a call that refused once refuses identically every time.
+ *
+ * Clearing the latch here would let the next advertisement build the whole
+ * client again -- socket, thread, two timers, a mutex and an event group --
+ * to reach the same refusal and delete it again, every few minutes, for the
+ * life of the machine.  A refusal that cannot change keeps what it has and
+ * says so once; the one failure in this file that CAN read differently later
+ * is nx_dhcpv6_client_create() itself, and that one clears the latch at its
+ * own call site.
+ */
 static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
 {
     if (ns != NULL && ns->ns_Dhcpv6Created)
@@ -313,20 +333,39 @@ static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
         ami_netstack_ipv6_reclaim_notify(ns);
     }
 
-    /*
-     * The half-built client is gone, so the next advertisement has to be
-     * allowed to build another one.  ns_Dhcpv6Asked exists to stop a router
-     * that re-advertises every few minutes from restarting an exchange that
-     * is already running -- and after this there is nothing running.  Leaving
-     * it latched turned every reason to discard into "no DHCPv6 for the life
-     * of this machine", and the most reachable of those reasons is a card
-     * that has not answered S2_GETSTATIONADDRESS by the time the deferred
-     * worker reads its hardware address.
-     */
-    if (ns != NULL)
-        ns->ns_Dhcpv6Asked = FALSE;
-
     return AMI_NET_ERR_KERNEL;
+}
+
+/*
+ * The link-layer address the DUID will be built from, and whether there is
+ * one at all.
+ *
+ * Read before the client is created rather than after.  An interface that
+ * cannot name a DUID-LL -- an addressless SANA-II wire, which reports
+ * AddrFieldSize 0 and leaves the interface address all zeroes -- cannot run
+ * DHCPv6 at all, and that does not change while the interface stays attached:
+ * nx_ip_interface_physical_address_set() is called once, from the driver's
+ * NX_LINK_INITIALIZE.  So there is nothing to be gained by building a client
+ * first and tearing it down after.
+ */
+static BOOL ami_ns6_dhcp_link_address(const AmiNetStack *ns, ULONG *msw,
+                                      ULONG *lsw)
+{
+    const NX_INTERFACE *ifp = &ns->ns_Ip.nx_ip_interface[ns->ns_Dhcpv6Iface];
+    UBYTE               want[AMI_DHCPV6_DUID_LL_LEN];
+    UBYTE               mac[6];
+
+    *msw = ifp->nx_interface_physical_address_msw;
+    *lsw = ifp->nx_interface_physical_address_lsw;
+
+    mac[0] = (UBYTE)((*msw >> 8) & 0xFFUL);
+    mac[1] = (UBYTE)(*msw & 0xFFUL);
+    mac[2] = (UBYTE)((*lsw >> 24) & 0xFFUL);
+    mac[3] = (UBYTE)((*lsw >> 16) & 0xFFUL);
+    mac[4] = (UBYTE)((*lsw >> 8) & 0xFFUL);
+    mac[5] = (UBYTE)(*lsw & 0xFFUL);
+
+    return (BOOL)(ami_dhcpv6_duid_ll(mac, 6UL, want, sizeof(want)) != 0UL);
 }
 
 /*
@@ -335,10 +374,26 @@ static LONG ami_ns6_dhcp_discard_partial(AmiNetStack *ns)
  */
 static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
 {
-    UINT status;
+    UINT  status;
+    ULONG msw = 0UL;
+    ULONG lsw = 0UL;
 
     if (!ns->ns_Dhcpv6Created)
     {
+        /*
+         * Nothing is built for an interface that cannot name itself.  This
+         * refusal does not clear ns_Dhcpv6Asked either: the address is fixed
+         * for as long as the interface is attached, so a router that
+         * re-advertises every few minutes would reach this same line every
+         * few minutes for the life of the machine.
+         */
+        if (!ami_ns6_dhcp_link_address(ns, &msw, &lsw))
+        {
+            AMI_ERROR("netstack: DHCPv6 has no usable DUID, the card "
+                      "reported no hardware address");
+            return AMI_NET_ERR_NODEV;
+        }
+
         /*
          * UNDER THE IP PROTECTION MUTEX, and this is the whole of the fix for
          * point 2 in the file header.
@@ -387,6 +442,16 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
         {
             AMI_ERROR("netstack: nx_dhcpv6_client_create failed (%ld)",
                       (long)status);
+
+            /*
+             * The one failure here that may not be a failure next time.  This
+             * call takes a socket, a thread, two timers, a mutex and an event
+             * group, and the reason it comes back is a resource this machine
+             * does not have at this instant rather than an argument that will
+             * be the same argument on every pass.  Nothing was created, so
+             * unlatch and let the next advertisement try again.
+             */
+            ns->ns_Dhcpv6Asked = FALSE;
             return AMI_NET_ERR_KERNEL;
         }
 
@@ -419,51 +484,27 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
          * nx_dhcpv6_create_client_duid() actually stored against it, so a
          * vendored client that changed its mind about the type, the hardware
          * type or the length says so here rather than on somebody's network.
+         *
+         * It warns: the client built something, and a DUID this stack did not
+         * predict is still a stable identity, so refusing to configure at all
+         * is the worse of the two answers.  msw and lsw are the ones
+         * ami_ns6_dhcp_link_address() read before the client existed, so this
+         * is the client's stored DUID against the address it was asked for.
          */
+        if (ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type != (USHORT)3 ||
+            ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type != (USHORT)1 ||
+            ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length
+                != (USHORT)AMI_DHCPV6_DUID_LL_LEN ||
+            ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_link_layer_address_msw
+                != msw ||
+            ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_link_layer_address_lsw
+                != lsw)
         {
-            UBYTE         want[AMI_DHCPV6_DUID_LL_LEN];
-            UBYTE         mac[6];
-            NX_INTERFACE *ifp = &ns->ns_Ip.nx_ip_interface[ns->ns_Dhcpv6Iface];
-            ULONG         msw = ifp->nx_interface_physical_address_msw;
-            ULONG         lsw = ifp->nx_interface_physical_address_lsw;
-
-            mac[0] = (UBYTE)((msw >> 8) & 0xFFUL);
-            mac[1] = (UBYTE)(msw & 0xFFUL);
-            mac[2] = (UBYTE)((lsw >> 24) & 0xFFUL);
-            mac[3] = (UBYTE)((lsw >> 16) & 0xFFUL);
-            mac[4] = (UBYTE)((lsw >> 8) & 0xFFUL);
-            mac[5] = (UBYTE)(lsw & 0xFFUL);
-
-            if (ami_dhcpv6_duid_ll(mac, 6UL, want, sizeof(want)) == 0UL)
-            {
-                AMI_ERROR("netstack: DHCPv6 has no usable DUID, the card "
-                          "reported no hardware address");
-                return ami_ns6_dhcp_discard_partial(ns);
-            }
-            /*
-             * A self-check on the vendored client's own fields, so a NetX Duo
-             * update that changes how it stores a DUID is noticed here rather
-             * than on the wire.  It warns: the client built something, and a
-             * DUID this stack did not predict is still a stable identity, so
-             * refusing to configure at all is the worse of the two answers.
-             */
-            else if (ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type
-                         != (USHORT)3 ||
-                     ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type
-                         != (USHORT)1 ||
-                     ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length
-                         != (USHORT)AMI_DHCPV6_DUID_LL_LEN ||
-                     ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_link_layer_address_msw
-                         != msw ||
-                     ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_link_layer_address_lsw
-                         != lsw)
-            {
-                AMI_WARN("netstack: the DHCPv6 client built a DUID this "
-                         "stack did not ask for (type %ld, hw %ld, len %ld)",
-                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type,
-                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type,
-                         (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length);
-            }
+            AMI_WARN("netstack: the DHCPv6 client built a DUID this "
+                     "stack did not ask for (type %ld, hw %ld, len %ld)",
+                     (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_duid_type,
+                     (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_hardware_type,
+                     (long)ns->ns_Dhcpv6.nx_dhcpv6_client_duid.nx_option_length);
         }
 
         /*
