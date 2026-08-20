@@ -185,6 +185,24 @@ static void test_versions(void)
     CHECK(http_frame_version(NULL, 0) == HTTP_VERSION_BAD);
 }
 
+static void test_combined_lists(void)
+{
+    char list[24];
+
+    printf("combined field lines\n");
+
+    list[0] = '\0';
+    CHECK(http_frame_list_add(list, sizeof(list), "\"one\""));
+    CHECK(strcmp(list, "\"one\"") == 0);
+    CHECK(http_frame_list_add(list, sizeof(list), "\"two\""));
+    CHECK(strcmp(list, "\"one\", \"two\"") == 0);
+
+    /* A value that does not fit leaves the complete old condition intact. */
+    CHECK(!http_frame_list_add(list, sizeof(list), "\"far-too-long\""));
+    CHECK(strcmp(list, "\"one\", \"two\"") == 0);
+    CHECK(!http_frame_list_add(NULL, 0, "x"));
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -358,6 +376,7 @@ int main(void)
     test_field_names();
     test_etags();
     test_versions();
+    test_combined_lists();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

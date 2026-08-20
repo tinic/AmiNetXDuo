@@ -79,6 +79,9 @@ typedef enum HttpFrameVersion
 /* An exact request-line HTTP-version token. */
 HttpFrameVersion http_frame_version(const char *value, unsigned long len);
 
+/* Append one field-line value to a combined comma-separated field value. */
+int http_frame_list_add(char *out, unsigned long outlen, const char *value);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding

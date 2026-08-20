@@ -5718,11 +5718,26 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "If-None-Match"))
         {
-            hs_copy(c->ifnone, sizeof(c->ifnone), httpd_value);
+            /* Repeated field lines are one comma-separated list.  Replacing
+               the first with the second, or keeping only the prefix that fit,
+               can erase the validator that says a write must not happen. */
+            if (cut || !http_frame_list_add(c->ifnone, sizeof(c->ifnone),
+                                            httpd_value))
+            {
+                httpd_error(c, 431, "that If-None-Match list is longer than "
+                                    "this server reads");
+                return FALSE;
+            }
         }
         else if (hs_equal(name, "If-Match"))
         {
-            hs_copy(c->ifmatch, sizeof(c->ifmatch), httpd_value);
+            if (cut || !http_frame_list_add(c->ifmatch, sizeof(c->ifmatch),
+                                            httpd_value))
+            {
+                httpd_error(c, 431, "that If-Match list is longer than this "
+                                    "server reads");
+                return FALSE;
+            }
         }
         else if (hs_equal(name, "Host"))
         {

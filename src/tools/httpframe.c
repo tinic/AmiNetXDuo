@@ -268,6 +268,39 @@ HttpFrameVersion http_frame_version(const char *value, unsigned long len)
     return HTTP_VERSION_BAD;
 }
 
+int http_frame_list_add(char *out, unsigned long outlen, const char *value)
+{
+    unsigned long used = 0;
+    unsigned long add = 0;
+    unsigned long i;
+
+    if (out == 0 || outlen == 0UL || value == 0)
+        return 0;
+
+    while (used < outlen && out[used] != '\0')
+        used++;
+    if (used >= outlen)
+        return 0;
+
+    while (value[add] != '\0')
+        add++;
+
+    if (used + ((used > 0UL) ? 2UL : 0UL) + add + 1UL > outlen)
+        return 0;
+
+    if (used > 0UL)
+    {
+        out[used++] = ',';
+        out[used++] = ' ';
+    }
+
+    for (i = 0; i < add; i++)
+        out[used++] = value[i];
+    out[used] = '\0';
+
+    return 1;
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;
