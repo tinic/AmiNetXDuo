@@ -950,17 +950,16 @@ VOID tls_resume_record(TLSConnection *conn)
     if ((conn->tc_ResumeFlags & TLSR_RESUMED) != 0)
     {
         /*
-         * The session was resumed.  Its master secret is unchanged and its
-         * session ID is the one offered, so the only things to write back are
-         * a ticket the server chose to replace the old one with, and the
-         * timestamp, so that a session still in use is still offered.
+         * The session was resumed.  Its master secret and issuance time are
+         * unchanged.  A successful use must not restart the server's ticket
+         * lifetime (or our own maximum age); only a newly issued replacement
+         * ticket gets a new timestamp.
          */
         entry = tls_resume_find(table, (const char *)conn->tc_HostName,
                                 conn->tc_Port, tls_resume_flags(conn),
                                 tls_resume_trust_key(conn));
         if (entry != NULL)
         {
-            entry->re_Stamp  = tls_time_monotonic();
             entry->re_Serial = ++base->tb_SessionSerial;
 
             if ((conn->tc_ResumeFlags & TLSR_TICKET_NEW) != 0 &&
@@ -970,6 +969,7 @@ VOID tls_resume_record(TLSConnection *conn)
                            conn->tc_TicketLength);
                 entry->re_TicketLength = conn->tc_TicketLength;
                 entry->re_Lifetime     = conn->tc_TicketLifetime;
+                entry->re_Stamp        = tls_time_monotonic();
                 changed = TRUE;
             }
         }

@@ -1294,6 +1294,40 @@ static void test_expired_entry_is_wiped(void)
     h_now -= 301;
 }
 
+/* A ticket's lifetime starts when the server issues it, not whenever the
+   client succeeds in reusing it.  Otherwise a busy client can keep the same
+   master secret alive forever despite both the server hint and our cap. */
+static void test_resumption_does_not_extend_lifetime(void)
+{
+    printf("tls_resume: reuse does not restart a ticket lifetime\n");
+
+    base_reset();
+
+    conn_init("example.com", 443, "", 0xAAAA0001UL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    conn_take_ticket(192, 300);
+    tls_resume_record(&h_conn);
+
+    h_now += 200;
+
+    conn_init("example.com", 443, "", 0xAAAA0001UL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    tls_resume_prepare(&h_conn);
+    CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) != 0);
+    h_conn.tc_ResumeFlags |= TLSR_RESUMED;
+    tls_resume_record(&h_conn);
+
+    h_now += 101;
+
+    conn_init("example.com", 443, "", 0xAAAA0001UL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    tls_resume_prepare(&h_conn);
+    CHECK((h_conn.tc_ResumeFlags & TLSR_OFFERED) == 0);
+    CHECK(tls_resume_count(&h_base) == 0);
+
+    h_now -= 301;
+}
+
 /*
  * Nine hosts into eight slots.  The victim is the least recently used, not
  * the least recently stored, so a session that is still offered keeps its slot
@@ -1866,6 +1900,7 @@ int main(void)
     test_no_host_name();
 
     test_expired_entry_is_wiped();
+    test_resumption_does_not_extend_lifetime();
     test_lru_eviction();
     test_restore_reuses_the_slot();
     test_evict();
