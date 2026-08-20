@@ -156,7 +156,11 @@ static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
     if (tv == NULL || out == NULL)
         return FALSE;
 
-    if (tv->tv_secs < 0 || tv->tv_micro < 0)
+    /* devices/timer.h spells these fields ULONG even though the socket ABI
+       treats a value with the sign bit set as a negative timeout.  Test the
+       ABI value explicitly; comparing the fields themselves with zero is
+       dead code and a -Wtype-limits error in the shipping cross build. */
+    if ((LONG)tv->tv_secs < 0 || (LONG)tv->tv_micro < 0)
         return FALSE;
 
     seconds = (ULONG)tv->tv_secs;
