@@ -1,6 +1,7 @@
 /*
  * Regression for the layout of a UDP packet before nx_udp_socket_receive()
- * strips its header.  WaitSelect() and FIONREAD inspect packets at this stage.
+ * strips its header.  WaitSelect(), FIONREAD and GetNetworkStatistics()
+ * inspect packets at this stage.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -27,12 +28,14 @@ int main(void)
         UCHAR bytes[32];
     } storage;
     NX_PACKET     packet;
+    NX_PACKET     second;
     NX_UDP_HEADER *header;
     UINT          port = 0;
     ULONG         length = 0;
 
     memset(&storage, 0, sizeof(storage));
     memset(&packet, 0, sizeof(packet));
+    memset(&second, 0, sizeof(second));
 
     /* Deliberately put another value where nxd_udp_source_extract() looks:
        two longwords before prepend_ptr.  That location is inside the IP
@@ -47,6 +50,22 @@ int main(void)
     CHECK(bsd_udp_queue_info(&packet, &port, &length) == NX_SUCCESS);
     CHECK(port == 5353U);
     CHECK(length == 19UL);
+
+    /* Queue statistics add payloads, not one private header per datagram. */
+    second.nx_packet_prepend_ptr = (UCHAR *)(void *)header;
+    second.nx_packet_length = (ULONG)sizeof(*header) + 7UL;
+    packet.nx_packet_queue_next = &second;
+    CHECK(bsd_udp_queue_payload_bytes(&packet, 2UL) == 26UL);
+    CHECK(bsd_udp_queue_payload_bytes(&packet, 1UL) == 19UL);
+
+    /* The count is only an upper bound on a walk whose chain can end. */
+    CHECK(bsd_udp_queue_payload_bytes(&packet, 3UL) == 26UL);
+
+    /* A malformed entry contributes no bytes and does not hide its tail. */
+    packet.nx_packet_length = (ULONG)sizeof(*header) - 1UL;
+    CHECK(bsd_udp_queue_payload_bytes(&packet, 2UL) == 7UL);
+
+    packet.nx_packet_length = (ULONG)sizeof(*header) + 19UL;
 
     packet.nx_packet_length = (ULONG)sizeof(*header);
     CHECK(bsd_udp_queue_info(&packet, &port, &length) == NX_SUCCESS);

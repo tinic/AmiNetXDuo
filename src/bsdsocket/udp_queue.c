@@ -30,3 +30,28 @@ UINT bsd_udp_queue_info(const NX_PACKET *packet, UINT *source_port,
 
     return NX_SUCCESS;
 }
+
+ULONG bsd_udp_queue_payload_bytes(const NX_PACKET *head, ULONG count)
+{
+    const ULONG maximum = (ULONG)-1;
+    ULONG       bytes   = 0;
+    ULONG       n;
+
+    for (n = 0; n < count && head != NX_NULL; n++)
+    {
+        ULONG payload = 0;
+
+        /* A malformed queued packet offers no application data.  Still
+           follow the queue so one bad entry does not hide later datagrams. */
+        if (bsd_udp_queue_info(head, NX_NULL, &payload) == NX_SUCCESS)
+        {
+            if (payload > maximum - bytes)
+                return maximum;
+            bytes += payload;
+        }
+
+        head = head->nx_packet_queue_next;
+    }
+
+    return bytes;
+}

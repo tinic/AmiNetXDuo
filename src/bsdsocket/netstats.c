@@ -38,6 +38,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "udp_queue.h"
 
 #include <netinet/ip_var.h>
 #include <netinet/icmp_var.h>
@@ -256,7 +257,7 @@ static LONG bsd_tcp_state(ULONG nx_state)
  * by the socket's window) and the walk happens inside the bracket, where
  * nothing else can add to them.
  */
-static ULONG bsd_queue_bytes(NX_PACKET *head, ULONG count)
+static ULONG bsd_tcp_queue_bytes(NX_PACKET *head, ULONG count)
 {
     ULONG bytes = 0;
     ULONG n;
@@ -390,14 +391,14 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                     sock->nx_tcp_socket_connect_interface->nx_interface_ip_address);
 
             out->pcd_receive_queue_size =
-                bsd_queue_bytes(sock->nx_tcp_socket_receive_queue_head,
-                                sock->nx_tcp_socket_receive_queue_count);
+                bsd_tcp_queue_bytes(sock->nx_tcp_socket_receive_queue_head,
+                                    sock->nx_tcp_socket_receive_queue_count);
 
             /* Send-Q is the data sent and not yet acknowledged, which is what
                NetX Duo's transmit_sent queue holds. */
             out->pcd_send_queue_size =
-                bsd_queue_bytes(sock->nx_tcp_socket_transmit_sent_head,
-                                sock->nx_tcp_socket_transmit_sent_count);
+                bsd_tcp_queue_bytes(sock->nx_tcp_socket_transmit_sent_head,
+                                    sock->nx_tcp_socket_transmit_sent_count);
         }
 
         sock = sock->nx_tcp_socket_created_next;
@@ -421,9 +422,14 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
                information is valid only for TCP." */
             out->pcd_tcp_state = -1;
 
-            out->pcd_receive_queue_size =
-                bsd_queue_bytes(sock->nx_udp_socket_receive_head,
-                                sock->nx_udp_socket_receive_count);
+            /* NetX leaves an eight-byte UDP header on every packet until
+               nx_udp_socket_receive() returns it.  The Roadshow field is the
+               socket's receive queue, so count what recv() can deliver rather
+               than those private headers.  NetX's own
+               nx_udp_socket_bytes_available() applies the same subtraction. */
+            out->pcd_receive_queue_size = bsd_udp_queue_payload_bytes(
+                sock->nx_udp_socket_receive_head,
+                sock->nx_udp_socket_receive_count);
 
             /* A datagram socket has no peer and nothing queued for output.
                sendto() hands the packet to the IP thread and returns. The
