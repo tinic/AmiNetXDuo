@@ -91,10 +91,12 @@ BOOL netdev_mcast_add(NetdevMcast *table, const UBYTE *addr)
 
     if (m != NULL)
     {
-        /* Saturate rather than wrap: a wrap to zero frees a row that callers
-           still hold, and the group stops being received with nothing said. */
-        if (m->refs != 0xffffu)
-            m->refs++;
+        /* A successful join must own a reference.  Silently saturating here
+           loses that ownership: after 65535 deletes the group is removed even
+           though the extra caller was told its join succeeded. */
+        if (m->refs == 0xffffu)
+            return FALSE;
+        m->refs++;
         return TRUE;
     }
 
@@ -144,7 +146,14 @@ BOOL netdev_mcast_range_apply(NetdevMcast *table, const UBYTE *lo,
 
         for (i = 0; i < count; i++)
         {
-            if (mcast_find(table, addr) == NULL)
+            NetdevMcast *m = mcast_find(table, addr);
+
+            /* Preserve the transaction guarantee for reference exhaustion as
+               well as row exhaustion: no earlier member may be incremented
+               before a later saturated member refuses the range. */
+            if (m != NULL && m->refs == 0xffffu)
+                return FALSE;
+            if (m == NULL)
                 needed++;
             mcast_next(addr);
         }

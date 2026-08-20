@@ -109,12 +109,25 @@ int main(void)
     expect("the carried address was installed", find(table, missing) != NULL,
            TRUE);
 
-    /* A held row cannot wrap its reference count back to free. */
+    /* An unrepresentable join is refused rather than accepted without owning
+       the reference it promises. */
     find(table, addr)->refs = 0xffffu;
-    expect("a saturated duplicate is accepted",
-           netdev_mcast_add(table, addr), TRUE);
-    expect("a saturated reference does not wrap", find(table, addr)->refs,
+    expect("a saturated duplicate is refused",
+           netdev_mcast_add(table, addr), FALSE);
+    expect("a refused duplicate does not wrap", find(table, addr)->refs,
            0xffffu);
+
+    /* A saturated member later in a range must not leave an earlier member
+       incremented before the operation reports failure. */
+    set_addr(addr, 0, 0, 0xff);
+    find(table, addr)->refs = 7;
+    set_addr(missing, 0, 1, 0);
+    find(table, missing)->refs = 0xffffu;
+    memcpy(before, table, sizeof(table));
+    expect("a range containing a saturated member is refused",
+           netdev_mcast_range_apply(table, addr, 2, TRUE), FALSE);
+    expect("a saturated range changes no reference",
+           memcmp(table, before, sizeof(table)) == 0, TRUE);
 
     /* The inclusive size of 00000000..ffffffff is 2^32, which cannot be
        represented in ULONG.  It is wide, not an empty exact range. */

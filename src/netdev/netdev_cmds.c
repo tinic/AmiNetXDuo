@@ -461,8 +461,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         {
             if (add)
             {
-                /* Match the exact table's saturating references. */
-                if (unit->nu_AllMulti != 0xffffu)
+                /* A successful join must own a reference. */
+                if (unit->nu_AllMulti == 0xffffu)
+                    applied = FALSE;
+                else
                     unit->nu_AllMulti++;
             }
             else if (unit->nu_AllMulti != 0)
@@ -474,9 +476,10 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
         {
             applied = netdev_mcast_range_apply(unit->nu_Mcast,
                                                io->ios2_SrcAddr, count, add);
-            if (!applied && add)
-                unit->nu_McastFull++;
         }
+
+        if (!applied && add)
+            unit->nu_McastFull++;
 
         if (applied)
             netdev_rebuild_filter(unit);
