@@ -934,8 +934,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
 
         if (ami_sana2_attach(ns->ns_Iface[i], &ns->ns_Ip, i) != AMI_NET_OK)
         {
-            AMI_WARN("netstack: cannot bind interface %ld", (long)i);
-            continue;
+            AMI_ERROR("netstack: cannot bind interface %ld", (long)i);
+            return AMI_NET_ERR_STATE;
         }
 
         addr = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->address : 0UL;
@@ -944,8 +944,16 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)cfg->name,
                                         addr, mask, ami_sana2_driver_entry);
         if (status != NX_SUCCESS)
-            AMI_WARN("netstack: interface '%s' attach failed (%ld)",
-                     cfg->name, (long)status);
+        {
+            /* Everything after this loop addresses ns_Iface[], ns_Config and
+               NX_INTERFACE by the same index.  Continuing with a hole makes
+               a later static address look resolved even though NetX Duo
+               rejected its slot, and DHCP/IPv6 then operate on that invalid
+               entry.  The caller tears the whole partial stack down. */
+            AMI_ERROR("netstack: interface '%s' attach failed (%ld)",
+                      cfg->name, (long)status);
+            return AMI_NET_ERR_STATE;
+        }
     }
 
     /*
