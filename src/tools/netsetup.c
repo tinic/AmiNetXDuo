@@ -988,6 +988,14 @@ int main(int argc, char **argv)
     plan.dns         = 0;
     plan.have_gateway = FALSE;
     plan.have_dns     = FALSE;
+    /*
+     * Both of these are only assigned when IPV6= is given, and the writer
+     * decides whether to emit a CONFIGURE6 line on configure6[0] alone. Left
+     * uninitialised, a call without IPV6= wrote whatever was on the stack
+     * into the interface file, which the stack then reads back.
+     */
+    plan.configure6[0] = '\0';
+    plan.ipv6_only     = FALSE;
 
     if (args[ARG_DEVICE] != 0)
         tool_copy_string(plan.device, sizeof(plan.device),
