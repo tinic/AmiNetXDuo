@@ -347,6 +347,20 @@ static void test_frames(void)
                "3: ", 0);
     }
 
+    /* RFC 6455 5.5.1: receiving Close ends input.  A client can concatenate
+       another frame in the same TCP segment, but none of that later frame may
+       be delivered.  For the terminal, the binary payload would otherwise be
+       a command run after the client had closed the session. */
+    {
+        static const unsigned char after_close[] = {
+            0x88, 0x80, 0, 0, 0, 0,
+            0x82, 0x85, 0, 0, 0, 0, 'E', 'x', 'i', 't', '\n'
+        };
+
+        expect("data after a close is discarded", after_close,
+               (long)sizeof(after_close), "3: ", 0);
+    }
+
     /* 126 bytes, so the two-byte extended length is exercised.  The payload
        is 'x' repeated, masked with a mask that is not zero, which is what
        catches an offset that resets at a buffer boundary. */

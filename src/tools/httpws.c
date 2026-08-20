@@ -180,7 +180,7 @@ enum
     WS_HEAD = 0,        /* collecting the frame header                     */
     WS_PAYLOAD,         /* the payload of a data frame, streamed out       */
     WS_CONTROL,         /* the payload of a control frame, held whole      */
-    WS_DEAD             /* the framing failed, nothing more is read        */
+    WS_DEAD             /* the peer closed or framing failed; read no more */
 };
 
 void http_ws_reset(HttpWsIn *in)
@@ -348,9 +348,16 @@ static void ws_finish_empty(HttpWsIn *in, HttpWsSink sink, void *ctx)
 {
     if (in->state == WS_CONTROL && in->left == 0UL)
     {
+        HttpWsEvent ev = ws_event_of(in->opcode);
+
         if (sink != 0)
-            sink(ctx, ws_event_of(in->opcode), in->ctl, 0, 1);
-        in->state = WS_HEAD;
+            sink(ctx, ev, in->ctl, 0, 1);
+
+        /* RFC 6455 5.5.1: after receiving Close, an endpoint discards any
+           further data.  The rest of this receive buffer is already further
+           data, and parsing it would let a terminal command placed after the
+           close reach the Shell before the close reply is written. */
+        in->state = (ev == HTTP_WS_EV_CLOSE) ? WS_DEAD : WS_HEAD;
         return;
     }
 
@@ -437,7 +444,10 @@ long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                     if (sink != 0)
                         sink(ctx, ev, in->ctl, (long)in->ctl_n, 1);
 
-                    in->state = WS_HEAD;
+                    /* Close is the last frame this endpoint consumes.  In
+                       particular, do not deliver a data frame concatenated
+                       behind it in the same socket read. */
+                    in->state = (ev == HTTP_WS_EV_CLOSE) ? WS_DEAD : WS_HEAD;
                 }
                 continue;
             }
