@@ -2129,6 +2129,7 @@ static void test_netdb_garbage(void)
     set_fixture(AMI_CFG_FILE_SERVICES,
         "noport\n"
         "weird 80\n"                 /* no /proto */
+        "empty 81/\n"                /* empty protocol */
         "bad xx/tcp\n"
         "wrapped 4294967297/tcp\n"
         "narrowed 65557/tcp\n"
@@ -2146,7 +2147,8 @@ static void test_netdb_garbage(void)
     CHECK(ami_netdb_serv_by_name("wrapped", NULL) == NULL);
     CHECK(ami_netdb_serv_by_name("narrowed", NULL) == NULL);
     CHECK(ami_netdb_serv_by_name("maximum", "tcp") != NULL);
-    CHECK(ami_netdb_serv_by_name("weird", NULL) != NULL);
+    CHECK(ami_netdb_serv_by_name("weird", NULL) == NULL);
+    CHECK(ami_netdb_serv_by_name("empty", NULL) == NULL);
     CHECK(ami_netdb_serv_by_name("good", "tcp") != NULL);
     CHECK(ami_netdb_proto_by_name("maximum") != NULL);
     CHECK(ami_netdb_proto_by_name("oversized") == NULL);

@@ -268,11 +268,14 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             while (*slash != '\0' && *slash != '/')
                 slash++;
 
-            if (*slash == '/')
-            {
-                *slash      = '\0';
-                entry->proto = slash + 1;
-            }
+            /* /etc/services requires port/protocol.  Accepting a bare port
+               publishes a successful struct servent with s_proto == NULL;
+               accepting a trailing slash publishes an empty protocol. */
+            if (*slash != '/' || slash[1] == '\0')
+                continue;
+
+            *slash       = '\0';
+            entry->proto = slash + 1;
 
             if (!ami_cfg_parse_ulong(tokens[1], &entry->value) ||
                 entry->value > 65535UL)
