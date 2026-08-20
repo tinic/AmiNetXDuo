@@ -7387,7 +7387,17 @@ static VOID httpd_accept(LONG lsock)
      * has stopped reading would stop the whole server, which is the failure
      * this design exists to avoid.
      */
-    (VOID)tool_sock_ioctl(httpd_sb, sock, TOOL_FIONBIO, &nonblock);
+    if (tool_sock_ioctl(httpd_sb, sock, TOOL_FIONBIO, &nonblock) != 0)
+    {
+        /* Every send and receive below relies on this.  Keeping a socket when
+           the conversion failed lets one client block the single event-loop
+           task and therefore every other connection. */
+        if (httpd_verbose || httpd_trace)
+            tool_error("cannot make an accepted connection non-blocking: %s",
+                       (LONG)tool_sock_errstr(tool_sock_errno(httpd_sb)));
+        (VOID)tool_sock_close(httpd_sb, sock);
+        return;
+    }
 
     httpd_conn[i].sock      = sock;
     httpd_conn[i].file      = (BPTR)0;
