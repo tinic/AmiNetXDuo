@@ -67,6 +67,7 @@ UINT __wrap__nx_secure_tls_client_handshake(NX_SECURE_TLS_SESSION *tls_session,
 
 static int checks;
 static int failures;
+static int h_packet_releases;
 
 #define CHECK(cond)                                                          \
     do {                                                                     \
@@ -258,6 +259,7 @@ UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
 UINT _nx_packet_release(NX_PACKET *packet_ptr)
 {
     (VOID)packet_ptr;
+    h_packet_releases++;
     return NX_SUCCESS;
 }
 
@@ -420,13 +422,15 @@ UINT _nx_secure_tls_session_keys_set(NX_SECURE_TLS_SESSION *tls_session,
     return NX_SUCCESS;
 }
 
+static UINT h_send_finished_status = NX_SUCCESS;
+
 UINT _nx_secure_tls_send_finished(NX_SECURE_TLS_SESSION *tls_session,
                                   NX_PACKET *send_packet)
 {
     (VOID)tls_session;
     (VOID)send_packet;
     h_finish_note("finished");
-    return NX_SUCCESS;
+    return h_send_finished_status;
 }
 
 UINT _nx_secure_tls_send_handshake_record(NX_SECURE_TLS_SESSION *tls_session,
@@ -612,6 +616,7 @@ static void conn_init(const char *host, UWORD port, const char *path,
     h_real_handshake_calls = 0;
     h_hashed_count         = 0;
     h_finish_log[0]        = '\0';
+    h_send_finished_status = NX_SUCCESS;
 }
 
 /* Everything the library base forgets when it is expunged. */
@@ -1172,6 +1177,34 @@ static void test_serverhello_empty_echo(void)
 
     CHECK(status == NX_SUCCESS);
     CHECK((h_conn.tc_ResumeFlags & TLSR_RESUMED) == 0);
+}
+
+/* The abbreviated handshake allocates its own client Finished packet and
+   returns directly on a generation error.  That packet is still owned by the
+   wrapper: no send routine has seen it and no outer state machine can free it. */
+static void test_resumed_finished_failure_releases_packet(void)
+{
+    UCHAR finished[4 + NX_SECURE_TLS_FINISHED_HASH_SIZE] = { 0 };
+    UINT  status;
+    int   releases;
+
+    printf("tls_resume: a failed client Finished releases its packet\n");
+
+    conn_init("example.com", 443, "", 0xCAFEBABEUL);
+    h_conn.tc_ResumeFlags &= ~TLSR_PERSIST;
+    h_conn.tc_ResumeFlags |= TLSR_RESUMED;
+
+    finished[0] = NX_SECURE_TLS_FINISHED;
+    finished[3] = NX_SECURE_TLS_FINISHED_HASH_SIZE;
+
+    releases = h_packet_releases;
+    h_send_finished_status = NX_NOT_SUCCESSFUL;
+    status = __wrap__nx_secure_tls_client_handshake(&h_conn.tc_Session,
+                                                    finished,
+                                                    (UINT)sizeof(finished), 0);
+
+    CHECK(status == NX_NOT_SUCCESSFUL);
+    CHECK(h_packet_releases == releases + 1);
 }
 
 /* ====================================================== the trust key ==== */
@@ -1895,6 +1928,7 @@ int main(void)
     test_serverhello_changing_protocol();
     test_serverhello_declines();
     test_serverhello_empty_echo();
+    test_resumed_finished_failure_releases_packet();
 
     test_trust_key_discriminates();
     test_no_host_name();

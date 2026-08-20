@@ -1408,7 +1408,10 @@ static UINT tls_resume_finish(NX_SECURE_TLS_SESSION *s, UCHAR *packet_start,
 
     status = _nx_secure_tls_send_finished(s, send_packet);
     if (status != NX_SUCCESS)
+    {
+        (VOID)_nx_packet_release(send_packet);
         return status;
+    }
 
     status = _nx_secure_tls_send_handshake_record(s, send_packet,
                                                   NX_SECURE_TLS_FINISHED,
