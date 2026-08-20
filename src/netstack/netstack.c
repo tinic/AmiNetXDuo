@@ -3750,15 +3750,35 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
             goto rollback;
         }
 
-        /* This transaction is for the interface just added.  Passing the
-           unqualified selector can accept an AutoIP object already serving a
-           different slot and report success while this interface receives no
-           address.  The explicit index makes that conflict fail and lets the
-           rollback below remove the half-started interface. */
+        /* This transaction is for the interface just added, so the index is
+           named: the unqualified selector accepts an AutoIP object already
+           serving a different slot and reports success while this interface
+           receives no address. */
         rc = ami_ns_start_autoip(ns, (LONG)index);
         ami_netstack_leave_free(caller);
+
+        /*
+         * Not having a link-local address does not stop the interface.
+         *
+         * AutoIP is one machine-wide object serving one slot, so the second
+         * interface to ask for it is refused -- and it does not take a second
+         * LINKLOCAL card to get there: DHCP timing out on interface 0 starts
+         * AutoIP as the RFC 3927 fallback, and then the first AddNetInterface
+         * of a LINKLOCAL card meets a running object with another slot's
+         * index.  Rolling back removed that card, so a working interface --
+         * carrying its static address or its lease, its routes and its IPv6
+         * configuration -- was destroyed over one address it could not have.
+         *
+         * Start-up warns for exactly this condition and carries on.  This is
+         * the same condition, so it gets the same answer; a card that is
+         * present at boot and a card added afterwards must not come up
+         * differently.
+         */
         if (rc != AMI_NET_OK)
-            goto rollback;
+            AMI_WARN("netstack: interface '%s' asked for a link-local "
+                     "address and did not get one", cfg->name);
+
+        rc = AMI_NET_OK;
     }
 
     /* STATE=down, honoured after the attach and the same way start-up honours
