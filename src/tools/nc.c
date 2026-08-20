@@ -672,8 +672,22 @@ int main(int argc, char **argv)
        a successfully parsed no-op in the common `nc -l -6 PORT` form. */
     tool_addr_any(&address, opt.family);
 
-    opt.timeout   = (args[ARG_TIMEOUT] != 0)
-                        ? (ULONG)(*(LONG *)args[ARG_TIMEOUT]) : 0UL;
+    opt.timeout = 0;
+
+    if (args[ARG_TIMEOUT] != 0)
+    {
+        LONG seconds = *(LONG *)args[ARG_TIMEOUT];
+
+        if (seconds < 0)
+        {
+            tool_error("a timeout cannot be negative");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        opt.timeout = (ULONG)seconds;
+    }
+
     opt.localport = 0;
 
     if (args[ARG_LOCALPORT] != 0)
