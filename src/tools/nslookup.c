@@ -440,12 +440,13 @@ static UWORD nsl_id(VOID)
 /* One record of the answer section, formatted for the type it turned out to
    be, which is not always the type asked for: an A question is answered with
    the CNAME chain in front of it. */
-static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
-                             ULONG rdata, ULONG rdlen)
+static VOID nsl_print_record(const UBYTE *msg, UWORD type, ULONG rdata,
+                             ULONG rdlen)
 {
     char addr[TOOL_ADDR_STRLEN];
     LONG e1;
     LONG e2;
+    ULONG rend = rdata + rdlen;
 
     switch (type)
     {
@@ -481,22 +482,25 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
         }
 
         case NSL_T_PTR:
-            if (nsl_decode_name(msg, len, rdata, nsl_text,
-                                sizeof(nsl_text)) < 0)
+            e1 = nsl_decode_name(msg, rend, rdata, nsl_text,
+                                 sizeof(nsl_text));
+            if (e1 < 0 || (ULONG)e1 != rend)
                 break;
             tool_printf("  name       %s\n", (LONG)nsl_text);
             break;
 
         case NSL_T_CNAME:
-            if (nsl_decode_name(msg, len, rdata, nsl_text,
-                                sizeof(nsl_text)) < 0)
+            e1 = nsl_decode_name(msg, rend, rdata, nsl_text,
+                                 sizeof(nsl_text));
+            if (e1 < 0 || (ULONG)e1 != rend)
                 break;
             tool_printf("  canonical  %s\n", (LONG)nsl_text);
             break;
 
         case NSL_T_NS:
-            if (nsl_decode_name(msg, len, rdata, nsl_text,
-                                sizeof(nsl_text)) < 0)
+            e1 = nsl_decode_name(msg, rend, rdata, nsl_text,
+                                 sizeof(nsl_text));
+            if (e1 < 0 || (ULONG)e1 != rend)
                 break;
             tool_printf("  server     %s\n", (LONG)nsl_text);
             break;
@@ -504,8 +508,9 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
         case NSL_T_MX:
             if (rdlen < 3)
                 break;
-            if (nsl_decode_name(msg, len, rdata + 2, nsl_text,
-                                sizeof(nsl_text)) < 0)
+            e1 = nsl_decode_name(msg, rend, rdata + 2, nsl_text,
+                                 sizeof(nsl_text));
+            if (e1 < 0 || (ULONG)e1 != rend)
                 break;
             tool_printf("  mail       %-32s preference %lu\n",
                         (LONG)nsl_text, (LONG)nsl_get16(&msg[rdata]));
@@ -514,8 +519,9 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
         case NSL_T_SRV:
             if (rdlen < 7)
                 break;
-            if (nsl_decode_name(msg, len, rdata + 6, nsl_text,
-                                sizeof(nsl_text)) < 0)
+            e1 = nsl_decode_name(msg, rend, rdata + 6, nsl_text,
+                                 sizeof(nsl_text));
+            if (e1 < 0 || (ULONG)e1 != rend)
                 break;
             tool_printf("  service    %-32s port %lu, priority %lu, "
                         "weight %lu\n",
@@ -555,12 +561,13 @@ static VOID nsl_print_record(const UBYTE *msg, ULONG len, UWORD type,
         }
 
         case NSL_T_SOA:
-            e1 = nsl_decode_name(msg, len, rdata, nsl_text, sizeof(nsl_text));
+            e1 = nsl_decode_name(msg, rend, rdata, nsl_text,
+                                 sizeof(nsl_text));
             if (e1 < 0)
                 break;
-            e2 = nsl_decode_name(msg, len, (ULONG)e1, nsl_text2,
+            e2 = nsl_decode_name(msg, rend, (ULONG)e1, nsl_text2,
                                  sizeof(nsl_text2));
-            if (e2 < 0 || (ULONG)e2 + 20UL > len)
+            if (e2 < 0 || (ULONG)e2 + 20UL != rend)
                 break;
 
             tool_printf("  authority  %s\n", (LONG)nsl_text);
@@ -620,7 +627,7 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
         if (rdata + (ULONG)rdlen > len)
             return -1;
 
-        nsl_print_record(msg, len, type, rdata, (ULONG)rdlen);
+        nsl_print_record(msg, type, rdata, (ULONG)rdlen);
         printed++;
 
         pos = (LONG)(rdata + (ULONG)rdlen);
