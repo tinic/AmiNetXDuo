@@ -695,8 +695,13 @@ static VOID tcp_session_write(TcpSession *s, struct DosPacket *pkt)
 static VOID tcp_session_wait_char(TcpSession *s, struct DosPacket *pkt)
 {
     struct timeval tv;
-    ULONG          micros = (ULONG)pkt->dp_Arg1;
+    ULONG          micros;
     LONG           ready;
+
+    /* WaitForChar() takes a signed LONG. A nonpositive timeout is a poll,
+       matching the console handler; casting -1 first instead waited for
+       4294 seconds and made an invalid timeout look like a hung TCP: file. */
+    micros = (pkt->dp_Arg1 > 0) ? (ULONG)pkt->dp_Arg1 : 0;
 
     tv.tv_secs  = (LONG)(micros / 1000000UL);
     tv.tv_micro = (LONG)(micros % 1000000UL);
