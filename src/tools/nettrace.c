@@ -328,7 +328,7 @@ static VOID nt_wire(struct Library *base, ToolBpfChan *cap, const ToolAddr *addr
             req[len++] = *p;
     }
 
-    if (tool_sock_send(base, s, req, (LONG)len) != (LONG)len)
+    if (tool_sock_send_full(base, s, req, (LONG)len) != (LONG)len)
     {
         tool_error("cannot send the request: %s",
                    (LONG)tool_sock_errstr(tool_sock_errno(base)));
