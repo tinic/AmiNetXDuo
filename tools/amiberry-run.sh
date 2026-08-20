@@ -336,8 +336,16 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # entered _nx_secure_tls_session_start() and never came back -- no crash, no
 # output, a wedge that survived a 900 s ceiling -- while the same handshake
 # through tls.library completed in 100.4 s from a Shell that had more.
-# 200000 is what tools/demo.sh and the ported clients already use.
-STACK_BYTES="${AMINETXDUO_GUEST_STACK:-200000}"
+# 8192, and it is a CEILING rather than a size to grow when something does not
+# fit. A Shell hands a command 4096 by default and a considerate Shell-Startup
+# raises it to about this; past that the harness is no longer running the
+# program the way a user runs it, and a shipped command that outgrows a real
+# stack would pass every test here and crash for them.
+#
+# A guest program that needs more brings its own, the way src/tools/fetch.c
+# does with StackSwap() at :1028 -- which is exactly why fetch was immune to
+# the overrun that wedged the TLS test on 4096.
+STACK_BYTES="${AMINETXDUO_GUEST_STACK:-8192}"
 
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999

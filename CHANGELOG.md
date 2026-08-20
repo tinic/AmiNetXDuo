@@ -9,6 +9,22 @@ version at the top when it merges.
 
 ## Unreleased
 
+- An encrypted connection is three to five times faster and no longer takes the machine off the network while it runs. A 4096-bit certificate -- which is what every Let's Encrypt chain ends at -- was handed to the reference arithmetic instead of the 68k routines, one silent block of about ninety seconds per handshake, and the routines that did run gave the rest of the machine a turn only seventeen times in an operation. `fetch https://www.gnu.org/` goes from 100 seconds to twenty or thirty, and a machine that used to stop answering for its own address for a minute at a time now answers throughout
+- `NetSetup` no longer writes uninitialised memory into the interface file. A call that did not pass `IPV6=` emitted a `CONFIGURE6` line holding whatever was on the stack, into a file the stack reads on the next boot
+- A DHCP server's domain is accepted in the forms servers actually send it: an underscore, which a great many consumer routers use, and the fully qualified form ending in a dot, which is stored without it. Refusing either left the machine with no default domain and no search suffix at all, because both come from that one option
+- A malformed DHCPv6 option no longer costs the client the configuration it already had. The DNS servers and the search list are now replaced only after the whole message has parsed, so one bad option in a Reply cannot leave the machine with neither
+- A DHCPv6 exchange that fails on a new network no longer republishes the previous network's DNS servers, and a setup that fails once no longer disables DHCPv6 for the life of the machine
+- A DHCP option that could not be read asks to be read again on the next pass, for the host name, the domain and the search list as well as the servers. One that can never succeed keeps what it has and says so once, rather than retrying forever
+- A router's advertised DNS servers and search domains expire when their lifetime runs out, and belong to the interface and the source that advertised them, so one card's advertisement no longer withdraws another's
+- Multicast name service clears its cache when asked, keeps a browse alive while more than one program is using it, retries a publication that failed, and gets its goodbye onto the wire at shutdown. A lookup across two cards no longer spends the whole timeout on the first
+- A second network card that cannot attach is dropped rather than taking the whole stack down, and `AddNetInterface` keeps a card that could not get a link-local address instead of removing it
+- `telnet` to a name whose first address does not answer no longer takes three minutes. The retry now draws from the timeout the caller asked for rather than starting a fresh one
+- `nslookup` reports a record it cannot read and carries on, rather than abandoning the answer
+- `httpd` serves a drawer containing a name too long to list, minus that entry, instead of dropping the connection for every client that asks
+- The WebSocket console refuses malformed control frames, oversized control words and invalid UTF-8, and keeps pipelined input under backpressure
+- `getnameinfo()` no longer fails when the port has no name in `DEVS:Internet/services`. The flag that requires a name is about the host, and the peer's port on an accepted connection never has one
+- The release archive contains `C:ssh` again. The packer only copied a client somebody else had built, so an archive made any other way was simply missing it
+
 - A connected UDP socket becomes readable again. The readability test and `FIONREAD` read the source port from a packet still on the receive queue, where the UDP header has not yet been stripped, so the port never matched the peer and the socket looked permanently empty; `sntp` timed out on every attempt and `iperf` in UDP mode burned each slice
 - `FIONREAD` on a datagram socket reports the payload without its UDP header, and agrees with what a peeking read returns
 - A UDP socket reports an ICMP error as readable and clears it through `SO_ERROR`, instead of leaving a program waiting for a datagram that will never arrive
