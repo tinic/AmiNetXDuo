@@ -270,6 +270,7 @@ static void test_ip(void)
 
     CHECK(!ami_config_parse_ip("192.168.1", &addr));
     CHECK(!ami_config_parse_ip("192.168.1.256", &addr));
+    CHECK(!ami_config_parse_ip("192.168.1.4294967296", &addr));
     CHECK(!ami_config_parse_ip("192.168.1.1.1", &addr));
     CHECK(!ami_config_parse_ip("dhcp", &addr));
     CHECK(!ami_config_parse_ip("", &addr));

@@ -550,9 +550,14 @@ static ULONG split_dotted(const char *s, ULONG *parts)
 
         while (*s >= '0' && *s <= '9')
         {
-            value = value * 10 + (ULONG)(*s - '0');
-            if (value > 255)
+            ULONG digit = (ULONG)(*s - '0');
+
+            /* Bound the accumulator before it wraps.  Checking the result
+               alone accepted a long octet when its ULONG residue was <=255. */
+            if (value > (255UL - digit) / 10UL)
                 return 0;
+
+            value = value * 10UL + digit;
             digits++;
             s++;
         }
@@ -647,4 +652,3 @@ VOID ami_config_format_ip(ULONG addr, char *buf, ULONG buflen)
 
     ami_cfg_copy_string(buf, buflen, tmp);
 }
-
