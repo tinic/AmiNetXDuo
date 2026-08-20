@@ -2390,11 +2390,27 @@ static VOID httpd_walk_slice(HttpConn *c)
             case WALK_SHUT:
             {
                 BPTR lock;
+                LONG err = 0;
 
-                (VOID)Close(c->put);
+                if (Close(c->put) == 0)
+                {
+                    err = IoErr();
+                    if (err == 0)
+                        err = ERROR_DISK_FULL;
+                }
                 c->put = (BPTR)0;
                 (VOID)Close(c->file);
                 c->file = (BPTR)0;
+
+                if (err != 0)
+                {
+                    c->walk_status = httpd_dos_status(err);
+                    httpd_walk_failed(c, c->walk_dst, c->walk_status);
+                    httpd_put_abandon(c);
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
                 c->put_temp[0] = '\0';
 
                 /* The date and the protection bits follow the file: a copy
@@ -4437,12 +4453,21 @@ static VOID httpd_sink_put(HttpConn *c, const UBYTE *data, LONG len)
 static VOID httpd_do_put(HttpConn *c)
 {
     BOOL existed;
+    LONG close_err = 0;
 
     if (c->put == (BPTR)0)
         return;                     /* begin() answered already            */
 
-    (VOID)Close(c->put);
+    if (Close(c->put) == 0)
+    {
+        close_err = IoErr();
+        if (close_err == 0)
+            close_err = ERROR_DISK_FULL;
+    }
     c->put = (BPTR)0;
+
+    if (c->put_err == 0)
+        c->put_err = close_err;
 
     if (c->put_err != 0)
     {
