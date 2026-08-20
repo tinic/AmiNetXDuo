@@ -170,6 +170,23 @@ cpu_of() {
 # restores the old behaviour for a caller that wants to be told rather than
 # served -- CI sets it, because there a missing tree means the build stage did
 # not run and building it here would hide that.
+#
+# AN EXISTING TREE IS BUILT TOO, and that is the whole of the second cmake call
+# below rather than a nicety.  Until 2026-08-20 the build ran only when the
+# directory was absent, so a checkout that had ever been built packed whatever
+# was in build/ regardless of what the source now said.  It shipped:
+# AmiNetXDuo-rel.lha, packed 20:11 UTC from a HEAD containing acd18077, carried
+# the tls.library linked at 07:59 UTC that morning -- twelve hours and one
+# crypto fix behind its own source tree, md5 identical to the stale object
+# still sitting in that build directory.  Nothing said a word, because the
+# `need` checks below assert that a library EXISTS and its CPU cache entry
+# matches, and both were true of the old one.
+#
+# It cost a release gate: install/test/run-workbench.sh went red four times
+# against a stack whose defect had already been fixed, and read as "the fix did
+# not take" rather than "the fix was not in the archive".  `cmake --build` on an
+# up-to-date tree is a few seconds; an archive that does not correspond to the
+# source it was built from is not a thing this script may produce.
 for b in "${BUILDS[@]}"; do
     if [ ! -d "$b" ]; then
         if [ -n "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
@@ -184,13 +201,21 @@ for b in "${BUILDS[@]}"; do
         min_flags=
         [ "$b" != "$MINIMAL_BUILD" ] || min_flags="$MINIMAL_OPTIONS"
 
-        echo "==> building $b" >&2
+        echo "==> configuring $b" >&2
         # shellcheck disable=SC2086
         cmake -S "$ROOT" -B "$b" \
               -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
               -DCMAKE_BUILD_TYPE=Release $cpu_flag $min_flags >&2 || exit 2
+    fi
+
+    # NO_BUILD means "do not build", not "do not build a tree that is missing":
+    # CI has already run its build stage and a second one here would hide a
+    # stage that did not.
+    if [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+        echo "==> building $b" >&2
         cmake --build "$b" --parallel >&2 || exit 2
     fi
+
     got=$(cpu_of "$b")
     [ "$got" = "any" ] || {
         echo "!! $b was configured with AMINETXDUO_CPU=${got:-unset}." >&2
@@ -384,19 +409,23 @@ chmod 755 "$TREE"/C/*
 # said so. AMINETXDUO_DIST_NO_BUILD=1 still reports instead of building, which
 # is what the release workflow wants -- there the client is built in its own
 # step and AMINETXDUO_SSH names it, so building here would be the second copy.
+#
+# UNCONDITIONALLY, for the reason the CMake loop above is unconditional: a
+# dbclient left in build/ssh from an earlier checkout is packed as readily as a
+# current one and looks the same in the archive listing.  clients/dropbear/
+# build.sh reconfigures only when the flags change and otherwise runs `make`,
+# so an up-to-date tree costs one make invocation.
 CLIENT_SSH="${AMINETXDUO_SSH:-}"
 if [ -z "$CLIENT_SSH" ] && [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
     CLIENT_SSH="$ROOT/build/ssh/dbclient"
-    if [ ! -x "$CLIENT_SSH" ]; then
-        echo "==> building the ssh client (no AMINETXDUO_SSH given)" >&2
-        # The same two settings the release workflow uses: ONE binary for the
-        # whole 68k family, picking its X25519 field multiply from AttnFlags at
-        # the first handshake rather than being built per CPU.
-        AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
-            "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh" >&2 || {
-            echo "ssh client build failed; the archive would carry none" >&2
-            exit 2; }
-    fi
+    echo "==> building the ssh client (no AMINETXDUO_SSH given)" >&2
+    # The same two settings the release workflow uses: ONE binary for the
+    # whole 68k family, picking its X25519 field multiply from AttnFlags at
+    # the first handshake rather than being built per CPU.
+    AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
+        "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh" >&2 || {
+        echo "ssh client build failed; the archive would carry none" >&2
+        exit 2; }
 fi
 if [ -n "$CLIENT_SSH" ] && [ -x "$CLIENT_SSH" ]; then
     cp "$CLIENT_SSH" "$TREE/C/ssh"
