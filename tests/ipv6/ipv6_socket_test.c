@@ -3195,6 +3195,11 @@ APTR                p;
                              text, sizeof(text), 8UL /* NI_NAMEREQD */);
         (VOID)t_check((BOOL)(rc == -2),
                       "NI_NAMEREQD requires a service name", rc);
+
+        rc = bsd_getnameinfo(&sa, sizeof(sa), text, sizeof(text), NULL, 0,
+                             0x80000000UL);
+        (VOID)t_check((BOOL)(rc == -1),
+                      "getnameinfo rejects undefined flags", rc);
     }
 
     /* NI_WITHSCOPEID is the NDK's opt-in for the KAME "%zone" suffix. */

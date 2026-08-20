@@ -1515,6 +1515,11 @@ static VOID group_p(VOID)
                          NULL, 0, (STRPTR)sbuf, sizeof(sbuf), NI_NAMEREQD);
         t_ok(rc == EAI_NONAME,
              "getnameinfo(NI_NAMEREQD) requires a service name", rc);
+
+        rc = getnameinfo((struct sockaddr *)&sa, sizeof(sa),
+                         (STRPTR)hbuf, sizeof(hbuf), NULL, 0, 0x80000000UL);
+        t_ok(rc == EAI_BADFLAGS,
+             "getnameinfo() rejects undefined flag bits", rc);
     }
 
     /* 5. A name that cannot resolve must fail, not hang, and gai_strerror

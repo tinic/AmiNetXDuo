@@ -745,6 +745,10 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
     if ((host == NULL || hostlen == 0) && (serv == NULL || servlen == 0))
         return EAI_NONAME;
 
+    if ((flags & ~(ULONG)(NI_NUMERICHOST | NI_NUMERICSERV | NI_NOFQDN |
+                          NI_NAMEREQD | NI_DGRAM | NI_WITHSCOPEID)) != 0)
+        return EAI_BADFLAGS;
+
     family = bsd_sa_family(sa, (socklen_t)salen);
     if (family != AF_INET
 #ifdef AMINETXDUO_IPV6
