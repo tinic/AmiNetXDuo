@@ -164,6 +164,21 @@ static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
     return (o > 0 && out[0] != '\0') ? TRUE : FALSE;
 }
 
+static VOID whois_finish_line(ULONG *fill, BOOL *referred)
+{
+    if (*fill == 0)
+        return;
+
+    whois_line[*fill] = '\0';
+
+    if (!*referred &&
+        whois_referral_from(whois_line, whois_referral,
+                            sizeof(whois_referral)))
+        *referred = TRUE;
+
+    *fill = 0;
+}
+
 /* ------------------------------------------------------------ the exchange */
 
 /*
@@ -282,16 +297,7 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
 
             if (c == '\n' || c == '\r')
             {
-                if (fill > 0)
-                {
-                    whois_line[fill] = '\0';
-
-                    if (!*referred &&
-                        whois_referral_from(whois_line, whois_referral,
-                                            sizeof(whois_referral)))
-                        *referred = TRUE;
-                }
-                fill = 0;
+                whois_finish_line(&fill, referred);
             }
             else if (fill + 1 < (ULONG)sizeof(whois_line))
             {
@@ -299,6 +305,9 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
             }
         }
     }
+
+    /* A close terminates the final line just as surely as CR or LF. */
+    whois_finish_line(&fill, referred);
 
     (VOID)tool_sock_close(sb, sock);
 
