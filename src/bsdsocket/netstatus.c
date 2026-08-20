@@ -142,6 +142,20 @@ static VOID ns_copy_name(char *dst, ULONG dstlen, const char *src)
     dst[i] = '\0';
 }
 
+/* A text field carried inline in a caller's fixed-size control block. */
+static BOOL ns_terminated(const char *text, ULONG size)
+{
+    ULONG i;
+
+    for (i = 0; i < size; i++)
+    {
+        if (text[i] == '\0')
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static VOID ns_mac_from_words(ULONG msw, ULONG lsw, UBYTE *mac)
 {
     mac[0] = (UBYTE)((msw >> 8) & 0xff);
@@ -1658,7 +1672,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             AmiIfConfig cfg;
             LONG        err;
 
-            if (ctl->nsc_Name[0] == '\0')
+            if (!ns_terminated(ctl->nsc_Name, sizeof(ctl->nsc_Name)) ||
+                ctl->nsc_Name[0] == '\0')
                 return bsd_fail(SocketBase, AMI_EINVAL);
 
             if (ami_config_load_interface(ctl->nsc_Name, &cfg) != AMI_CFG_OK)
@@ -1802,7 +1817,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         {
             LONG err;
 
-            if (ctl->nsc_HostName[0] == '\0')
+            if (!ns_terminated(ctl->nsc_HostName,
+                               sizeof(ctl->nsc_HostName)) ||
+                ctl->nsc_HostName[0] == '\0')
                 return bsd_fail(SocketBase, AMI_EINVAL);
 
             err = netstack_hostname_offer((UWORD)AMI_HOSTNAME_ENV,
