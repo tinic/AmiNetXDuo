@@ -700,6 +700,14 @@ int main(int argc, char **argv)
     }
 
     server  = (const char *)args[ARG_SERVER];
+
+    if (args[ARG_TIMEOUT] != 0 && *(LONG *)args[ARG_TIMEOUT] < 0)
+    {
+        tool_error("TIMEOUT cannot be negative");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     timeout = (ULONG)arg_or(args, ARG_TIMEOUT, (LONG)SNTP_DEFAULT_TIMEOUT);
     show    = (args[ARG_SHOW] != 0) ? TRUE : FALSE;
     quiet   = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
