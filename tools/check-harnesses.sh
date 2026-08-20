@@ -143,6 +143,110 @@ for path in "${!ROW_RUNNER[@]}"; do
     esac
 done
 say harnesses_wired "$wired"
+
+# ------------------------------------------- every guest TEST BINARY too --
+#
+# THE HOLE THE ROWS ABOVE CANNOT SEE.  Everything above is about run-*.sh: a
+# harness with no row fails, a row naming a deleted file fails.  A test
+# BINARY with no harness at all has no row to go stale, so it is invisible
+# from inside tests/HARNESSES -- and four were in exactly that state on
+# 2026-08-20: tests/atf, and three programs under tests/crypto68k, and
+# tests/ipv6/ipv6_test.c.  Every one had been compiled by every cross
+# configuration since it was written and executed by nothing, and every one
+# carried an amiberry-run.sh command line in its CMakeLists comment.  A
+# command line in a comment is not a gate, and crypto68k_25519_test proved
+# what that is worth: it had never reached its first check on a guest, so
+# nobody had seen it die on a missing mathieeedoubbas.library.
+#
+# THE RULE, AND WHY IT NEEDS NO LIST OF WHAT IS A TEST.  A target registered
+# with add_test() is a host test and ctest runs it.  Every OTHER
+# add_executable() under tests/ is a guest binary, and something has to name
+# it: a run-*.sh, tools/ci.sh, a workflow, or a row below saying it is an
+# instrument rather than a gate.  Resolved through OUTPUT_NAME, because that
+# is what the harnesses spell.
+#
+# The exemptions are held to the same rule the `manual` rows are: one that
+# something DOES run is an error, so the list cannot go stale in the quiet
+# direction either.
+
+# Instruments, not gates.  A benchmark, a probe or a calibration has no pass
+# to go red, and putting one in a runner buys a number nobody reads.
+INSTRUMENTS="
+bracket_test        prices the ThreadX/Exec bracket; tests/bracket says whether it is correct
+cpucal              what the emulator charges for an instruction, which every other number here rests on
+crypto68k_bench     a reference RSA-2048 private operation, minutes of it
+crypto68k_bulk      AES and SHA-256 instruction cost, 68020 only
+crypto68k_ec_bench  P-256 against reference elliptic curve operations
+crypto68k_amissl    ours against AmiSSL; needs an SDK this tree does not vendor
+n68kmv              times every multiversioned inner loop against the others
+perf_test           where a megabyte of TCP goes, per primitive
+profverify          whether the SAMPLER reports the PC it thinks it does; it verifies the instrument, not the stack
+rfbil               RFB interleave measurement
+rfbprof             RFB encode profile
+tcpprof             the sampling profiler itself
+tls_bench           handshake and record timings
+test_ptrprobe       where an injected IECLASS_POINTERPOS lands, per display mode; a measured table
+test_ifnames        a Developer drawer example, staged by dist/make-dist.sh
+test_v6only         a Developer drawer example, staged by dist/make-dist.sh
+"
+
+declare -A INSTRUMENT_WHY
+while read -r t why; do
+    [ -n "$t" ] || continue
+    INSTRUMENT_WHY[$t]="$why"
+done <<< "$INSTRUMENTS"
+
+cmakes=$(find tests -name CMakeLists.txt | sort)
+
+# Targets ctest runs: the word after COMMAND, and anything named through
+# $<TARGET_FILE:>, which is how a test names a helper it is not itself.
+#
+# The word after COMMAND ANYWHERE, not `add_test(NAME ... COMMAND x` on one
+# line: half of tests/fuzz puts COMMAND on the next line, and reading only the
+# first form reported eight fuzz drivers as run by nothing while ctest was
+# running each of them twice.  Over-approximating here only suppresses a
+# report, so a stray COMMAND costs nothing; missing one costs a false alarm,
+# which is the failure this whole script exists to avoid.
+hosttests=$( { awk '{ for (i = 1; i < NF; i++) if ($i == "COMMAND") print $(i + 1) }' \
+                   $cmakes
+               grep -ho '\$<TARGET_FILE:[A-Za-z0-9_.+-]*>' $cmakes |
+                   sed 's/.*://; s/>//'; } | tr -d ')' | sort -u)
+
+binaries=0 unrun=0 instruments=0
+while read -r target; do
+    case "$target" in ''|'${'*) continue ;; esac
+    printf '%s\n' "$hosttests" | grep -qx "$target" && continue
+
+    binaries=$((binaries + 1))
+
+    out=$(grep -h "set_target_properties($target PROPERTIES OUTPUT_NAME" $cmakes |
+              sed 's/.*OUTPUT_NAME "//; s/").*//' | head -1)
+    [ -n "$out" ] || out="$target"
+
+    named=""
+    while IFS= read -r f; do
+        invokes "$f" "$out" && { named="$f"; break; }
+    done < <(find tests install/test -name 'run-*.sh'; printf '%s\n' "${RUNNERS[@]}")
+
+    if [ -n "${INSTRUMENT_WHY[$target]+set}" ]; then
+        instruments=$((instruments + 1))
+        # The same direction the `manual` rows are held to: an instrument
+        # something runs is not an instrument, it is a gate with a stale
+        # exemption in front of it.
+        [ -n "$named" ] &&
+            err "instrument_but_$named-runs_it:$target"
+        continue
+    fi
+
+    [ -n "$named" ] && continue
+    err "no_runner_for_guest_test:$target(${out})"
+    unrun=$((unrun + 1))
+done < <(grep -h 'add_executable' $cmakes |
+         sed 's/.*add_executable(//' | awk '{print $1}' | tr -d '()' | sort -u)
+
+say guest_binaries "$binaries"
+say guest_instruments "$instruments"
+say guest_unrun "$unrun"
 say harnesses_manual "$manual"
 say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
 

@@ -20,16 +20,23 @@
 # and a reference implementation of the same arithmetic and compares them, so a
 # ROM is the whole requirement and this runs wherever tier 2 runs.
 #
-# WHICH MACHINES, AND WHY NOT ALL OF THEM ON ALL OF THEM
+# WHICH MACHINES, AND WHAT IT COSTS
 #
-#   68000 (A600)  the four-MULU.W path, which is the one nothing else runs.
-#                 25519 and P-256 only.
-#   68020 (A1200) the MULU.L path.  All three.
+# Measured on Kickstart 3.1 under Amiberry, 2026-08-20, host wall clock:
 #
-# crypto68k_test is the wide modexp pass and is 331 s of host wall clock on
-# the 68020 arm, measured 2026-08-20; a 68000 is roughly four times that, and
-# twenty minutes of nightly for a fourth witness of the same helpers the other
-# two already exercise on that part is not the trade.  It runs on the 68020.
+#   crypto68k_25519_test    16636 checks    133 s on the 68020
+#   crypto68k_ec_test        1730 checks    306 s on the 68020
+#   crypto68k_test           4965 checks    331 s on the 68020
+#
+# A 68000 is roughly four times a 68020 here, so the arms are not symmetric
+# and the reason is arithmetic rather than coverage:
+#
+#   68020 (A1200)  all three, about thirteen minutes.
+#   68000 (A600)   crypto68k_25519_test alone, about nine.  It is the fe_mul
+#                  four-MULU.W path, which nothing else in tier 2 runs at all.
+#                  The other two on that part would be half an hour of nightly
+#                  for a second witness of helpers the 68020 arm already
+#                  covers.
 #
 # Output is key=value plus one RESULT= line.  Exit: 0 pass, 1 a program
 # failed, 2 refused before starting.
@@ -102,13 +109,20 @@ for arm in "${ARMS[@]}"; do
     model="${arm%%:*}"
     tag="${arm##*:}"
 
-    # The floors are under the counts a whole run reports, not at them:
-    # 25519 is 12630 checks and P-256 is 1620 as of 2026-08-20.  Raise them
-    # when the tests grow, never lower them.
-    one "$model" "$tag" crypto68k_25519_test 12000 "$SHORT"
-    one "$model" "$tag" crypto68k_ec_test     1500 "$SHORT"
+    # The floors are under the counts a whole run reports and not at them, so
+    # a test that grows does not turn the gate red; a test that stops halfway
+    # still does.  Measured 2026-08-20: 16636, 1730, 4965.  Raise them when
+    # the tests grow, never lower them.
+    #
+    # The ceilings are the measured times with room, not round numbers picked
+    # to be safe: 133 s and 306 s on the 68020, four times that on the 68000.
+    if [ "$tag" = "68000" ]; then
+        one "$model" "$tag" crypto68k_25519_test 16000 "$((SHORT * 3))"
+        continue
+    fi
 
-    [ "$tag" = "68020" ] || continue
+    one "$model" "$tag" crypto68k_25519_test 16000 "$SHORT"
+    one "$model" "$tag" crypto68k_ec_test     1500 "$WIDE"
     one "$model" "$tag" crypto68k_test        4900 "$WIDE"
 done
 
