@@ -3599,10 +3599,6 @@ static BOOL httpd_produce(HttpConn *c)
                                       name, is_dir,
                                       (ULONG)c->fib->fib_Size);
 
-                        /* One entry that does not fit the scratch is skipped
-                           rather than truncating the answer. */
-                        if (len == 0UL)
-                            continue;
                         break;
                     }
 
@@ -3629,11 +3625,21 @@ static BOOL httpd_produce(HttpConn *c)
                         return (c->out_len > 0UL) ? TRUE : FALSE;
                 }
 
-                if (len > 0UL)
+                if (len == 0UL)
                 {
-                    httpd_emit_chunk(c, len);
-                    return TRUE;
+                    /* A response element cannot be omitted: that turns a
+                       complete-looking listing into a false one.  It also
+                       must not immediately scan for another oversized entry,
+                       or a directory full of them holds this event-loop pass
+                       without bound.  No final chunk makes the partial answer
+                       an error at the client. */
+                    c->keepalive = 0;
+                    c->producer  = PROD_NONE;
+                    return FALSE;
                 }
+
+                httpd_emit_chunk(c, len);
+                return TRUE;
             }
         }
 
