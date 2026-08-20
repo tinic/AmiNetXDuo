@@ -451,6 +451,27 @@ static void test_frames(void)
                (long)sizeof(stub), "", HTTP_WS_CLOSE_PROTOCOL);
     }
 
+    /* RFC 6455 7.4: these values cannot appear on the wire.  In particular,
+       echoing 1005 back would make this endpoint send an invalid frame too. */
+    {
+        static const unsigned char low[] = {
+            0x88, 0x82, 0, 0, 0, 0, 0x03, 0xe7
+        };
+        static const unsigned char pseudo[] = {
+            0x88, 0x82, 0, 0, 0, 0, 0x03, 0xed
+        };
+        static const unsigned char high[] = {
+            0x88, 0x82, 0, 0, 0, 0, 0x13, 0x88
+        };
+
+        expect("a close code below 1000 is refused", low,
+               (long)sizeof(low), "", HTTP_WS_CLOSE_PROTOCOL);
+        expect("a pseudo close code is refused", pseudo,
+               (long)sizeof(pseudo), "", HTTP_WS_CLOSE_PROTOCOL);
+        expect("a close code at 5000 is refused", high,
+               (long)sizeof(high), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
     /* A continuation with nothing to continue. */
     {
         static const unsigned char orphan[] = {

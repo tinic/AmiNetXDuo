@@ -221,6 +221,21 @@ static HttpWsEvent ws_event_of(unsigned char opcode)
     }
 }
 
+/* Whether a two-byte status is allowed to appear in a Close frame.
+
+   RFC 6455 7.4 reserves values below 1000 and at or above 5000.  1004 is
+   reserved, while 1005, 1006 and 1015 are local pseudo-statuses which must
+   never be put on the wire.  Extension and application ranges remain valid;
+   this decoder cannot know which private meanings a peer assigned there. */
+static int ws_close_code_valid(unsigned short code)
+{
+    if (code < 1000 || code >= 5000)
+        return 0;
+
+    return (code == 1004 || code == 1005 || code == 1006 || code == 1015)
+               ? 0 : 1;
+}
+
 /*
  * The header is complete.  Everything RFC 6455 says a server must refuse is
  * decided here, once, rather than being spread over the payload path where
@@ -439,6 +454,19 @@ long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                     {
                         ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
                         break;
+                    }
+
+                    if (ev == HTTP_WS_EV_CLOSE && in->ctl_n >= 2)
+                    {
+                        unsigned short code =
+                            (unsigned short)(((unsigned short)in->ctl[0] << 8) |
+                                             (unsigned short)in->ctl[1]);
+
+                        if (!ws_close_code_valid(code))
+                        {
+                            ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
+                            break;
+                        }
                     }
 
                     if (sink != 0)
