@@ -3599,6 +3599,38 @@ static BOOL httpd_produce(HttpConn *c)
                                       name, is_dir,
                                       (ULONG)c->fib->fib_Size);
 
+                        /*
+                         * One entry that does not fit the scratch is skipped
+                         * and the listing carries on.
+                         *
+                         * Whether it fits is a property of the NAME, and any
+                         * client can choose one: an href is percent-escaped,
+                         * three bytes per byte, and a displayname is XML
+                         * escaped, five for '&', so about a hundred '&' in a
+                         * file name is already past HTTPD_CHUNK_MAX.  There
+                         * is no authentication, so failing the whole answer
+                         * here lets anyone who can reach the port PUT one
+                         * file that makes the drawer holding it permanently
+                         * unlistable, for every client, over PROPFIND and
+                         * over plain GET alike.  One row missing from a
+                         * listing is a smaller lie than a drawer that cannot
+                         * be read at all, and it is the row nobody can name
+                         * anyway.
+                         *
+                         * The scan is bounded by the number of entries in the
+                         * drawer, which is the bound the listing already had.
+                         *
+                         * It is logged because a WebDAV client treats an
+                         * absent member as a deleted one, so the operator has
+                         * to be able to see that the server dropped it.
+                         */
+                        if (len == 0UL)
+                        {
+                            httpd_log(c, "listing entry does not fit and was "
+                                         "skipped: %s", (LONG)name, 0);
+                            continue;
+                        }
+
                         break;
                     }
 
@@ -3625,14 +3657,22 @@ static BOOL httpd_produce(HttpConn *c)
                         return (c->out_len > 0UL) ? TRUE : FALSE;
                 }
 
+                /*
+                 * Only DIR_SELF and DIR_TRAILER reach here with nothing to
+                 * say, and neither is a row that can be left out.  DIR_SELF
+                 * is the resource the request named, so an answer without it
+                 * is not an answer to this request; DIR_TRAILER closes the
+                 * document, and a body that cannot be closed has no truthful
+                 * end.  Omitting the final chunk makes the client reject
+                 * what it has rather than believe a truncated listing.
+                 *
+                 * The damage is confined to the resource named: a drawer
+                 * whose own name cannot be formatted cannot be listed, while
+                 * the drawer above it still lists it as a skipped child.
+                 * That is what keeps one pathological name from spreading.
+                 */
                 if (len == 0UL)
                 {
-                    /* A response element cannot be omitted: that turns a
-                       complete-looking listing into a false one.  It also
-                       must not immediately scan for another oversized entry,
-                       or a directory full of them holds this event-loop pass
-                       without bound.  No final chunk makes the partial answer
-                       an error at the client. */
                     c->keepalive = 0;
                     c->producer  = PROD_NONE;
                     return FALSE;
