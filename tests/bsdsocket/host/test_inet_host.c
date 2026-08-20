@@ -185,6 +185,20 @@ static void test_aton_reports_broadcast(void)
           "and the caller's buffer is left alone");
 }
 
+/* --------------------------------------------------------- inet_network -- */
+
+static void test_network_parts(void)
+{
+    printf("inet_network packs one byte per component\n");
+
+    CHECK(bsd_inet_network((STRPTR)"192.168.1", BASE) == 0x00C0A801UL,
+          "three components are packed");
+    CHECK(bsd_inet_network((STRPTR)"256", BASE) == INADDR_NONE,
+          "an oversized single component is refused");
+    CHECK(bsd_inet_network((STRPTR)"10.511", BASE) == INADDR_NONE,
+          "an oversized trailing component is refused");
+}
+
 /* ------------------------------------------------------------ Inet_NtoA -- */
 
 static void test_ntoa(void)
@@ -290,6 +304,7 @@ int main(void)
     test_short_forms();
     test_radix();
     test_aton_reports_broadcast();
+    test_network_parts();
     test_ntoa();
     test_classful();
     test_pton_v4();

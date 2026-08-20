@@ -307,7 +307,15 @@ in_addr_t bsd_inet_network(register STRPTR cp __asm("a0"),
      * ami_cfg_parse_net_number(), which reads DEVS:Internet/networks.
      */
     for (i = 0; i < n; i++)
+    {
+        /* inet_network() packs components, not an address's widened final
+           component.  Every one is one byte; masking an oversized value made
+           "256" name network 0 and "10.511" name 10.255. */
+        if (parts[i] > 0xFFUL)
+            return (in_addr_t)INADDR_NONE;
+
         net = (net << 8) | (parts[i] & 0xff);
+    }
 
     return (in_addr_t)net;
 }
