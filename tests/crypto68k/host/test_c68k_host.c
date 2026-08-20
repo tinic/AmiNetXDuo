@@ -511,6 +511,19 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
         t_fail("0^5 mod (2^32-1)", status, t_mine[0]);
     }
 
+    /* The zero-exponent identity still has to be reduced.  Modulo one, the
+       only residue is zero rather than the literal one. */
+    t_m[0] = 1u;
+    t_x[0] = 0xDEADBEEFu;
+    zero_e[0] = 0u;
+    status = c68k_mont_power_modulus(t_mine, t_x, 1u, zero_e, 1u, t_m, 1u,
+                                     t_scratch, T_POWM_SCRATCH);
+    t_checks++;
+    if ((status != NX_CRYPTO_SUCCESS) || (t_mine[0] != 0u))
+    {
+        t_fail("x^0 mod 1", status, t_mine[0]);
+    }
+
     /* e = 0 -> 1, checked against the vendored routine. */
     t_rand_limbs(t_m, 8u);
     t_m[0] |= 1u;
@@ -575,7 +588,8 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
         t_fail("zero-limb Montgomery square wrote output", 0, zero_guard);
     }
 
-    printf("  0^e, x^0, even modulus, undersized scratch, zero-limb square\n");
+    printf("  0^e, x^0, x^0 mod 1, even modulus, undersized scratch, "
+           "zero-limb square\n");
 }
 
 

@@ -288,8 +288,16 @@ UINT        started;
 
     if (bits == 0)
     {
-        /* x^0 == 1. */
-        c68k_copy(result, one, m_len);
+        /* x^0 == 1 mod m.  Usually that is the literal one, but m == 1 is a
+           valid odd modulus and its only residue is zero. */
+        if (c68k_cmp(one, m, m_len) >= 0)
+        {
+            c68k_zero(result, m_len);
+        }
+        else
+        {
+            c68k_copy(result, one, m_len);
+        }
         return(NX_CRYPTO_SUCCESS);
     }
 
