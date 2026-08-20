@@ -462,6 +462,7 @@ static LONG tftp_get(TftpXfer *x, const char *remote, const char *local)
             tool_error("the server stopped answering after %lu bytes",
                        x->total);
             Close(out);
+            DeleteFile((CONST_STRPTR)local);
             return RETURN_ERROR;
         }
 
@@ -472,6 +473,7 @@ static LONG tftp_get(TftpXfer *x, const char *remote, const char *local)
             tool_error("cannot write \"%s\"", (LONG)local);
             tool_fault(IoErr());
             Close(out);
+            DeleteFile((CONST_STRPTR)local);
             return RETURN_FAIL;
         }
 
@@ -496,6 +498,7 @@ static LONG tftp_get(TftpXfer *x, const char *remote, const char *local)
     {
         tool_error("cannot finish writing \"%s\"", (LONG)local);
         tool_fault(IoErr());
+        DeleteFile((CONST_STRPTR)local);
         return RETURN_FAIL;
     }
 
