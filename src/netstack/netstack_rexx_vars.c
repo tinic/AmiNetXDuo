@@ -786,7 +786,7 @@ typedef struct AmiRxRoute
     ULONG   rr_Dest;
     ULONG   rr_Gateway;
     UWORD   rr_Flags;
-    UWORD   rr_Iface;       /* index into nx_ip_interface, or 0xFFFF */
+    char    rr_Name[AMI_CFG_NAME_LEN];
 } AmiRxRoute;
 
 #define RX_RT_UP        0x0001
@@ -809,6 +809,22 @@ typedef struct AmiRxRoute
    flag field and their separators. */
 #define RX_ROUTELEN     (45 + AMI_CFG_NAME_LEN + 1)
 
+static VOID ami_rx_route_name(AmiRxRoute *route, const char *name)
+{
+    UWORD i = 0;
+
+    if (name == NULL || name[0] == '\0')
+        name = "none";
+
+    while (name[i] != '\0' && i + 1 < (UWORD)sizeof(route->rr_Name))
+    {
+        route->rr_Name[i] = name[i];
+        i++;
+    }
+
+    route->rr_Name[i] = '\0';
+}
+
 static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
 {
     UWORD used = 0;
@@ -830,7 +846,11 @@ static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
                         nxif->nx_interface_ip_network_mask;
         e->rr_Gateway = 0;
         e->rr_Flags   = RX_RT_UP;
-        e->rr_Iface   = (UWORD)i;
+        /* The interface row is reusable.  Carry its name across the mutex
+           boundary with the route rather than dereferencing the numeric slot
+           while formatting, after RemoveInterface() may have zeroed it or
+           AddInterface() may have installed a different device there. */
+        ami_rx_route_name(e, (const char *)nxif->nx_interface_name);
 
         if (nxif->nx_interface_ip_network_mask == 0xFFFFFFFFUL)
             e->rr_Flags |= RX_RT_HOST;
@@ -845,7 +865,7 @@ static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
         e->rr_Dest    = src->nx_ip_routing_dest_ip;
         e->rr_Gateway = src->nx_ip_routing_next_hop_address;
         e->rr_Flags   = RX_RT_UP | RX_RT_GATEWAY;
-        e->rr_Iface   = 0xFFFF;
+        ami_rx_route_name(e, "none");
 
         if (src->nx_ip_routing_net_mask == 0xFFFFFFFFUL)
             e->rr_Flags |= RX_RT_HOST;
@@ -862,7 +882,7 @@ static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
         e->rr_Dest    = 0;
         e->rr_Gateway = gateway;
         e->rr_Flags   = RX_RT_UP | RX_RT_GATEWAY;
-        e->rr_Iface   = 0xFFFF;
+        ami_rx_route_name(e, "none");
     }
 
     return used;
@@ -966,16 +986,7 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
              && ami_rx_put(r, " ", 1);
 
         if (ok)
-        {
-            if (e->rr_Iface == 0xFFFF)
-                ok = ami_rx_put_str(r, "none");
-            else
-                ok = ami_rx_put_str(
-                    r, (const char *)
-                           ip->nx_ip_interface[e->rr_Iface].nx_interface_name);
-
-            ok = ok && ami_rx_put(r, " ", 1);
-        }
+            ok = ami_rx_put_str(r, e->rr_Name) && ami_rx_put(r, " ", 1);
 
         if (!ok)
         {
