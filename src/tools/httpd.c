@@ -1996,7 +1996,12 @@ static VOID httpd_walk_end(HttpConn *c)
             break;
 
         case WALK_FOR_COPY:
-            if (c->walk_status != 0)
+            /* A per-entry failure is nonfatal to an ordinary COPY, which can
+               report a 207 for what did and did not land.  It is fatal to the
+               second half of a MOVE: deleting the source after even one link,
+               deep drawer, or long path was skipped turns a partial copy into
+               data loss. */
+            if (c->walk_status != 0 || c->fails != 0)
             {
                 httpd_walk_answer(c, 500);
                 break;
