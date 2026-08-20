@@ -2555,6 +2555,20 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
     sock_feed_first(t);
 }
 
+BOOL http_term_sock_wants_read(const HttpTermSock *t)
+{
+    if (t->closing)
+        return FALSE;
+
+    /* The decoder's sink cannot refuse payload.  Do not ask the kernel for
+       another byte until everything already decoded, or borrowed from the
+       HTTP upgrade, has reached the Shell.  Otherwise queued socket data
+       keeps WaitSelect() returning while http_term_sock_read() deliberately
+       takes none of it. */
+    return (t->pend_at >= t->pend_n && t->first_at >= t->first_len)
+               ? TRUE : FALSE;
+}
+
 BOOL http_term_sock_wants_write(const HttpTermSock *t)
 {
     if (t->out_sent < t->out_len || t->ctl_at < t->ctl_n || t->closing)

@@ -318,6 +318,12 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
                           UBYTE *out, ULONG out_size,
                           const UBYTE *first, ULONG first_len, ULONG now);
 
+/* Whether this socket can take another read.  Bytes retained from either the
+   upgrade or the last socket read have to reach the Shell first.  Leaving a
+   socket with more queued bytes in the read set while they cannot be taken
+   turns the server's wait into a spin instead of TCP back pressure. */
+BOOL http_term_sock_wants_read(const HttpTermSock *t);
+
 /* Whether this socket wants to be offered as writable.  Asked rather than
    assumed, because a socket offered with nothing to write turns the server's
    wait into a spin. */

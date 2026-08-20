@@ -7492,7 +7492,8 @@ static VOID httpd_serve(LONG lsock)
                  * does both at once, and a session where the person types while
                  * a command prints is the ordinary case.
                  */
-                tool_fd_add(&readfds, c->sock);
+                if (http_term_sock_wants_read(&c->ws))
+                    tool_fd_add(&readfds, c->sock);
 
                 if (http_term_sock_wants_write(&c->ws))
                     tool_fd_add(&writefds, c->sock);
