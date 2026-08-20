@@ -1090,6 +1090,47 @@ static void test_detach_under_writer(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+static APTR t_replacement_cookie = (APTR)"replacement-iface";
+static LONG t_replacement_attach_status;
+
+static void t_replace_interface_mid_detach(void)
+{
+    ami_bpf_detach_interface(iface_cookie);
+    t_replacement_attach_status =
+        ami_bpf_attach_interface("eth0", t_replacement_cookie, DLT_EN10MB,
+                                 1500, test_inject);
+}
+
+static void test_interface_replace_under_detach(void)
+{
+    UBYTE frame[128];
+    ULONG len;
+
+    printf("bpf: a stale detach cannot clear a replacement interface\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    t_replacement_attach_status = -1;
+    stub_unlock_after = 1;
+    stub_on_unlock = t_replace_interface_mid_detach;
+    ami_bpf_detach_interface(iface_cookie);
+
+    CHECK(stub_on_unlock == NULL);
+    CHECK(t_replacement_attach_status == 0);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    ami_bpf_tap_rx(t_replacement_cookie, frame, len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    ami_bpf_detach_interface(t_replacement_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /*
  * "The packet filter channel you allocate will be associated with the library
  * base ... It will be automatically closed when the library is closed", and
@@ -1711,6 +1752,7 @@ int main(int argc, char **argv)
     test_overflow_and_signals();
     test_write_and_binding();
     test_detach_under_writer();
+    test_interface_replace_under_detach();
     test_channel_ownership();
     test_reopen_under_closer();
     test_close_owner_under_reader();

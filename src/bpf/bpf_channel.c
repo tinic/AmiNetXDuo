@@ -398,11 +398,11 @@ LONG ami_bpf_close(APTR owner, LONG channel)
 
 /* ------------------------------------------------------- interface binding */
 
-VOID ami_bpf_chan_unbind(AmiBpfIf *ifp)
+/* Interface registration and its channel bindings are one table transaction.
+   Both helpers are called with the shared BPF lock already held. */
+VOID ami_bpf_chan_unbind_locked(AmiBpfIf *ifp)
 {
     UWORD i;
-
-    ami_bpf_lock();
 
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
     {
@@ -416,15 +416,12 @@ VOID ami_bpf_chan_unbind(AmiBpfIf *ifp)
         }
     }
 
-    ami_bpf_unlock();
 }
 
-VOID ami_bpf_chan_rebind(AmiBpfIf *ifp)
+VOID ami_bpf_chan_rebind_locked(AmiBpfIf *ifp)
 {
     UWORD i;
     UWORD n;
-
-    ami_bpf_lock();
 
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
     {
@@ -451,7 +448,6 @@ VOID ami_bpf_chan_rebind(AmiBpfIf *ifp)
         }
     }
 
-    ami_bpf_unlock();
 }
 
 /* --------------------------------------------------------------- the tap */

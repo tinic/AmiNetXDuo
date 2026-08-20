@@ -127,10 +127,10 @@ LONG ami_bpf_attach_interface(const char *name, APTR cookie, ULONG dlt,
     for (; i < AMI_BPF_IFNAMSIZ; i++)
         ifp->name[i] = '\0';
 
-    ami_bpf_unlock();
-
     /* A channel that asked for this name before it existed now gets it. */
-    ami_bpf_chan_rebind(ifp);
+    ami_bpf_chan_rebind_locked(ifp);
+
+    ami_bpf_unlock();
 
     return 0;
 }
@@ -141,15 +141,15 @@ VOID ami_bpf_detach_interface(APTR cookie)
 
     ami_bpf_lock();
     ifp = ami_bpf_iface_by_cookie(cookie);
-    ami_bpf_unlock();
-
     if (ifp == NULL)
+    {
+        ami_bpf_unlock();
         return;
+    }
 
-    /* Unbind first: after this no tap can reach the slot. */
-    ami_bpf_chan_unbind(ifp);
-
-    ami_bpf_lock();
+    /* A registry row is reusable. Unbind and clear it before releasing the
+       table lock, so a stale detach cannot act on a replacement row. */
+    ami_bpf_chan_unbind_locked(ifp);
     ami_bpf_zero_bytes(ifp, (ULONG)sizeof(AmiBpfIf));
     ami_bpf_unlock();
 }
