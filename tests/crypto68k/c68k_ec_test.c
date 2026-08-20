@@ -693,15 +693,14 @@ UINT    status;
     t_ecdsa();
     t_ecdh_test();
 
+    /* ONE TRAILER, IN THE SHAPE tools/test-verdict.sh READS.  The failing
+       branch used to print "%lu checks, %lu FAILURES", which its regex
+       ([0-9]+ checks, [0-9]+ failures) does not match, so a run with failures
+       in it was graded no_summary -- a failure either way, but one that names
+       the transcript rather than the checks. */
     c68k_log("");
-    if (t_failures == 0)
-    {
-        c68k_log("%lu checks, 0 failures", t_checks);
-    }
-    else
-    {
-        c68k_log("%lu checks, %lu FAILURES", t_checks, t_failures);
-    }
+    c68k_log("%lu checks, %lu failures, %s", t_checks, t_failures,
+             (LONG)((t_failures == 0) ? "PASS" : "FAIL"));
 
     c68k_flush();
     ami_crash_remove();

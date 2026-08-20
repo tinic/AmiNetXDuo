@@ -38,17 +38,6 @@ endif()
 target_compile_options(test_ifprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_ifprobe PROPERTIES OUTPUT_NAME "IfProbe")
 
-# IdxProbe calls the same four RFC 3493 vectors IfProbe's last phase calls, but
-# flushes after every one, so a transcript that stops names the call that hung
-# rather than the offset DOS's buffer happened to fill at.
-add_executable(test_idxprobe idxprobe.c)
-target_include_directories(test_idxprobe PRIVATE ${AMINETXDUO_CORE_INCLUDES})
-if(AMIGA_NDK_INCLUDE)
-    target_include_directories(test_idxprobe PRIVATE "${AMIGA_NDK_INCLUDE}")
-endif()
-target_compile_options(test_idxprobe PRIVATE -Wall -Wextra)
-set_target_properties(test_idxprobe PROPERTIES OUTPUT_NAME "IdxProbe")
-
 # RtProbe drives AddRouteTagList/DeleteRouteTagList/GetRouteInfo/FreeRouteInfo
 # through the published LVOs.  It walks the returned table the way the routing
 # socket convention requires, advance by rtm_msglen, read the sockaddrs by

@@ -248,6 +248,16 @@ EMULATOR_TESTS=(
     "tests/ram_driver/ram_driver_test:120"
     "tests/mbuf_bpf/mbuf_bpf_test:180"
     "tests/soak/soak_test:240"
+    # The dual stack over the same simulated wire ram_driver_test uses: two
+    # NX_IP instances, both ends inside the emulator, so it needs no card, no
+    # driver and nothing outside the guest.  85 checks in 18 s on the 68020
+    # arm, measured 2026-08-20.
+    #
+    # It had been built by the `default` cross configuration since milestone 8
+    # and executed by nothing: its CMakeLists names an amiberry-run.sh command
+    # line to type by hand, and a command line in a comment is not a gate.
+    # Only built with IPv6 on, which `default` is.
+    "tests/ipv6/ipv6_test:120"
 )
 
 FAILED=()

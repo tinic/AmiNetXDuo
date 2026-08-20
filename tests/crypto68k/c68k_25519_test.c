@@ -22,14 +22,23 @@
  *      needs no published constant: a*(b*G) and b*(a*G) have to be equal, and
  *      a carry bug anywhere below will separate them.
  *
+ * IT REPORTS THROUGH c68k_log, NOT printf, and that is not a style choice.
+ * The C library's printf drags in the double formatting path, so the linked
+ * binary opened mathieeedoubbas.library and every run ended at
+ * `mathieeedoubbas.library failed to load` before a single check ran -- a
+ * library nothing in this tree stages, and Commodore's rather than ours.  It
+ * had never been run on a guest, so nothing had ever said so.  c68k_log is
+ * RawDoFmt and needs no library at all; the arguments are longword sized for
+ * the reason include/aminetxduo/compat.h gives.
+ *
  * SPDX-License-Identifier: MIT
  */
 
-#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 
 #include "c68k_25519.h"
+#include "c68k_support.h"
 
 extern void c68k_25519_fe_mul(uint32_t r[8], const uint32_t a[8],
                               const uint32_t b[8]);
@@ -47,7 +56,8 @@ extern void c68k_25519_fe_sub(uint32_t r[8], const uint32_t a[8],
 extern void c68k_25519_fe_sub_ref(uint32_t r[8], const uint32_t a[8],
                                   const uint32_t b[8]);
 
-static int failures;
+static ULONG failures;
+static ULONG checks;
 
 /* xorshift32; the inputs only have to cover the carry space, not be secure. */
 static uint32_t rng_state = 0x2545f491u;
@@ -62,9 +72,10 @@ static uint32_t rnd(void)
 
 static void ck(const char *what, int ok)
 {
+    checks++;
     if (!ok) {
         failures++;
-        printf("FAIL %s\n", what);
+        c68k_log("FAIL %s", (LONG)what);
     }
 }
 
@@ -80,12 +91,10 @@ static int fe_eq(const uint32_t a[8], const uint32_t b[8])
 
 static void show(const char *tag, const uint32_t v[8])
 {
-    int i;
-
-    printf("  %s", tag);
-    for (i = 7; i >= 0; i--)
-        printf(" %08lx", (unsigned long)v[i]);
-    printf("\n");
+    c68k_log("  %s %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx",
+             (LONG)tag,
+             (ULONG)v[7], (ULONG)v[6], (ULONG)v[5], (ULONG)v[4],
+             (ULONG)v[3], (ULONG)v[2], (ULONG)v[1], (ULONG)v[0]);
 }
 
 /*
@@ -134,8 +143,8 @@ int main(void)
     unsigned char ska[32], skb[32], pka[32], pkb[32], s1[32], s2[32];
     int i, j, n;
 
-    printf("fe_mul: %s\n",
-           c68k_25519_fe_mul_is_asm() ? "ASSEMBLY" : "portable C");
+    c68k_log("fe_mul: %s",
+             (LONG)(c68k_25519_fe_mul_is_asm() ? "ASSEMBLY" : "portable C"));
 
     /* Every combination of the named edge cases, then a lot of random. */
     for (i = 0; i < 6; i++) {
@@ -144,9 +153,10 @@ int main(void)
             fill(b, j);
             c68k_25519_fe_mul(got, a, b);
             c68k_25519_fe_mul_ref(want, a, b);
+            checks++;
             if (!fe_eq(got, want)) {
                 failures++;
-                printf("FAIL fe_mul edge %d x %d\n", i, j);
+                c68k_log("FAIL fe_mul edge %ld x %ld", (LONG)i, (LONG)j);
                 show("a   ", a);
                 show("b   ", b);
                 show("got ", got);
@@ -165,9 +175,10 @@ int main(void)
             fill(b, 1 + (i % 4));
         c68k_25519_fe_mul(got, a, b);
         c68k_25519_fe_mul_ref(want, a, b);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_mul random %d\n", i);
+            c68k_log("FAIL fe_mul random %ld", (LONG)i);
             show("a   ", a);
             show("b   ", b);
             show("got ", got);
@@ -175,7 +186,7 @@ int main(void)
             break;
         }
     }
-    printf("fe_mul vs reference: %d edge + %d random\n", 36, n);
+    c68k_log("fe_mul vs reference: %ld edge + %ld random", (LONG)36, (LONG)n);
 
     /* The squaring, the same way.  It is 36 products against the multiply
        64, and a different routine end to end, so a passing fe_mul says
@@ -184,9 +195,10 @@ int main(void)
         fill(a, i);
         c68k_25519_fe_sqr(got, a);
         c68k_25519_fe_sqr_ref(want, a);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_sqr edge %d\n", i);
+            c68k_log("FAIL fe_sqr edge %ld", (LONG)i);
             show("a   ", a);
             show("got ", got);
             show("want", want);
@@ -198,16 +210,17 @@ int main(void)
             fill(a, 1 + (i % 4));
         c68k_25519_fe_sqr(got, a);
         c68k_25519_fe_sqr_ref(want, a);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_sqr random %d\n", i);
+            c68k_log("FAIL fe_sqr random %ld", (LONG)i);
             show("a   ", a);
             show("got ", got);
             show("want", want);
             break;
         }
     }
-    printf("fe_sqr vs reference: %d edge + %d random\n", 6, n);
+    c68k_log("fe_sqr vs reference: %ld edge + %ld random", (LONG)6, (LONG)n);
 
     /* And against the multiply.  Checking fe_sqr against fe_mul on random
        inputs is what found the original fe_fold carry bug, because two
@@ -217,16 +230,17 @@ int main(void)
         fill(a, 99);
         c68k_25519_fe_sqr(got, a);
         c68k_25519_fe_mul(want, a, a);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_sqr vs fe_mul %d\n", i);
+            c68k_log("FAIL fe_sqr vs fe_mul %ld", (LONG)i);
             show("a   ", a);
             show("got ", got);
             show("want", want);
             break;
         }
     }
-    printf("fe_sqr vs fe_mul: 512 random\n");
+    c68k_log("fe_sqr vs fe_mul: 512 random");
 
     /* fe_sqr(t, t) is all over the ladder, so alias that too. */
     fill(a, 99);
@@ -258,17 +272,19 @@ int main(void)
             fill(b, j);
             c68k_25519_fe_add(got, a, b);
             c68k_25519_fe_add_ref(want, a, b);
+            checks++;
             if (!fe_eq(got, want)) {
                 failures++;
-                printf("FAIL fe_add edge %d x %d\n", i, j);
+                c68k_log("FAIL fe_add edge %ld x %ld", (LONG)i, (LONG)j);
                 show("a   ", a); show("b   ", b);
                 show("got ", got); show("want", want);
             }
             c68k_25519_fe_sub(got, a, b);
             c68k_25519_fe_sub_ref(want, a, b);
+            checks++;
             if (!fe_eq(got, want)) {
                 failures++;
-                printf("FAIL fe_sub edge %d x %d\n", i, j);
+                c68k_log("FAIL fe_sub edge %ld x %ld", (LONG)i, (LONG)j);
                 show("a   ", a); show("b   ", b);
                 show("got ", got); show("want", want);
             }
@@ -281,24 +297,27 @@ int main(void)
             fill(b, 1 + (i % 4));
         c68k_25519_fe_add(got, a, b);
         c68k_25519_fe_add_ref(want, a, b);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_add random %d\n", i);
+            c68k_log("FAIL fe_add random %ld", (LONG)i);
             show("a   ", a); show("b   ", b);
             show("got ", got); show("want", want);
             break;
         }
         c68k_25519_fe_sub(got, a, b);
         c68k_25519_fe_sub_ref(want, a, b);
+        checks++;
         if (!fe_eq(got, want)) {
             failures++;
-            printf("FAIL fe_sub random %d\n", i);
+            c68k_log("FAIL fe_sub random %ld", (LONG)i);
             show("a   ", a); show("b   ", b);
             show("got ", got); show("want", want);
             break;
         }
     }
-    printf("fe_add/fe_sub vs reference: %d edge + %d random\n", 36, n);
+    c68k_log("fe_add/fe_sub vs reference: %ld edge + %ld random",
+             (LONG)36, (LONG)n);
 
     /* Aliasing for both; the ladder does fe_add(a, x2, z2) style calls with
        the destination overlapping a source constantly. */
@@ -323,9 +342,12 @@ int main(void)
     ck("x25519 b*A",    c68k_x25519(s2, skb, pka) == 0);
     ck("DH agreement",  memcmp(s1, s2, 32) == 0);
 
-    if (failures == 0)
-        printf("PASS\n");
-    else
-        printf("FAILED %d\n", failures);
+    /* The trailer tools/test-verdict.sh reads.  It used to print "PASS" and
+       nothing else, so no harness could put a floor under the run: a binary
+       that reached main() and stopped after two checks said the same word as
+       a whole pass. */
+    c68k_log("%lu checks, %lu failures, %s", checks, failures,
+             (LONG)(failures ? "FAIL" : "PASS"));
+    c68k_flush();
     return failures ? 20 : 0;
 }

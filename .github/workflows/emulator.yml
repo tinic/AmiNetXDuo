@@ -200,6 +200,60 @@ jobs:
           tools/ci-arm.sh -n "socket options, getsockopt/setsockopt/IoctlSocket" --
           tests/sockopt/run-sockopt.sh -b build/ci/default
 
+      # FreeBSD's own tests/sys/netinet, adopted unmodified.  tests/atf has
+      # been compiled by every cross configuration since it was written and
+      # executed by nothing at all: it had no harness, so tests/HARNESSES had
+      # nothing to record and could not report the hole.
+      #
+      # Same requirements as the two steps above and for the same reason --
+      # tests/tcpdrill/tapdev.c is the interface and INADDR_LOOPBACK is the
+      # wire -- so a ROM is the whole of it.
+      - name: FreeBSD's adopted TCP socket cases
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "FreeBSD tests/sys/netinet, adopted" --
+          tests/atf/run-atf.sh -b build/ci/default
+
+      # src/crypto68k's assembly against the portable C it also compiles, on
+      # the machine.  The host tier runs the same vectors every push and cannot
+      # reach the assembly at all: it is m68k, and it is DIFFERENT code per
+      # part -- MULU.L on a 68020, four MULU.W on a 68000 -- so a green host
+      # run says nothing about either.  All three programs had been built by
+      # every cross configuration and run by nothing.
+      #
+      # No library, no driver, no card, no peer: each links its own reference
+      # and compares.  The harness picks its machines; see its header for why
+      # the wide modexp pass runs on one arm and not two.
+      - name: crypto68k, on the machine
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "crypto68k assembly vs its reference" --
+          tests/crypto68k/run-crypto.sh -b build/ci/default
+
+      # The sequences a ported client issues, as against the vectors it calls:
+      # non-blocking connect then writable then SO_ERROR, a wide sparse select
+      # set, FIONREAD before a read, half-close both ways.  1651 lines and 100
+      # assertions, copied from curl, wget and nc, and run by nothing until
+      # now.
+      #
+      # A2065-GATED, unlike the three steps above.  client_patterns.c reaches
+      # bsdsocket.library through its LVOs and does not install an interface of
+      # its own, so the library needs a real driver to bring the stack up on --
+      # even though every byte the test moves is over 127.0.0.1.  Giving it
+      # tapdev.c the way sockopt_test and ipv6_socket_test have it is what
+      # would drop this gate.
+      #
+      # tests/clients/build.sh first: it is compiled against the Roadshow NDK
+      # with tests/conformance/compat ahead of it, not by the CMake tree, which
+      # is the same reason the conformance step above is two commands.
+      - name: The access patterns real clients use
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "client access patterns (curl, wget, nc)"
+          -r AMINETXDUO_A2065 -- sh -c
+          'tests/clients/build.sh &&
+          tests/clients/run-clients.sh -b build/ci/default'
+
       # One binary for every 68k means the compiler runtime picks its MULU.L
       # and DIVU.L paths from AttnFlags at run time, and a green run on one
       # machine says nothing about the others.  Five boots, no NIC and no peer,
