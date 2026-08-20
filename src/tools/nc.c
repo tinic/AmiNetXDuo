@@ -674,8 +674,21 @@ int main(int argc, char **argv)
 
     opt.timeout   = (args[ARG_TIMEOUT] != 0)
                         ? (ULONG)(*(LONG *)args[ARG_TIMEOUT]) : 0UL;
-    opt.localport = (args[ARG_LOCALPORT] != 0)
-                        ? (UWORD)(*(LONG *)args[ARG_LOCALPORT]) : 0;
+    opt.localport = 0;
+
+    if (args[ARG_LOCALPORT] != 0)
+    {
+        LONG p = *(LONG *)args[ARG_LOCALPORT];
+
+        if (p < 1 || p > 65535)
+        {
+            tool_error("%ld is not a local port", p);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        opt.localport = (UWORD)p;
+    }
 
     host     = (const char *)args[ARG_HOST];
     portspec = (const char *)args[ARG_PORT];
