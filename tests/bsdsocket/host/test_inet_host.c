@@ -134,6 +134,12 @@ static void test_short_forms(void)
     /* The widened part still has a ceiling: in a.b it holds 24 bits. */
     CHECK(addr_of("10.16777216") == INADDR_NONE, "24 bits and one over");
     CHECK(addr_of("1.2.65536")   == INADDR_NONE, "16 bits and one over");
+
+    /* Accumulation itself has to be bounded.  Checking only the completed
+       part lets these wrap through zero before the part-width check sees them. */
+    CHECK(addr_of("4294967296") == INADDR_NONE, "decimal ULONG overflow");
+    CHECK(addr_of("0x100000000") == INADDR_NONE, "hexadecimal ULONG overflow");
+    CHECK(addr_of("040000000000") == INADDR_NONE, "octal ULONG overflow");
 }
 
 /*

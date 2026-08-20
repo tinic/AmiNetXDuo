@@ -85,6 +85,13 @@ static BOOL bsd_inet_parse(const char *cp, ULONG *result, LONG *nparts,
             if (digit >= base)
                 break;
 
+            /* A one-part address may use the whole ULONG, but it may not wrap
+               around it.  The narrower multi-part ceilings below cannot catch
+               this after the wrap: 4294967296 used to become 0 and succeed as
+               0.0.0.0, and the corresponding hex/octal forms did the same. */
+            if (value > (0xFFFFFFFFUL - digit) / base)
+                return FALSE;
+
             value = value * base + digit;
             digits++;
             cp++;
