@@ -56,21 +56,58 @@ static BOOL ami_ns_domain_same(const char *a, const char *b)
     return (BOOL)(ca == cb);
 }
 
+/*
+ * Every DHCPv4 option this file reads goes through the same three outcomes.
+ *
+ * nx_dhcp_interface_user_option_retrieve() answers NX_DHCP_PARSE_ERROR when
+ * the lease does not carry the option at all, NX_DHCP_DEST_TO_SMALL when the
+ * option's own length byte exceeds the buffer handed in, and NX_DHCP_NOT_BOUND
+ * or NX_DHCP_INTERFACE_NOT_ENABLED when the client's view of the interface no
+ * longer matches ours.  Only the last group can read differently on a later
+ * pass; the buffer and the option size do not change within a lease.
+ */
+static AmiNsDnsOptionRead ami_ns_dhcp_option_read(UINT status)
+{
+    if (status == NX_SUCCESS)
+        return AMI_NS_DNS_OPTION_READ;
+    if (status == NX_DHCP_PARSE_ERROR)
+        return AMI_NS_DNS_OPTION_ABSENT;
+    if (status == NX_DHCP_DEST_TO_SMALL)
+        return AMI_NS_DNS_OPTION_REFUSED;
+
+    return AMI_NS_DNS_OPTION_FAILED;
+}
+
+/*
+ * Option 15.  TRUE means out[] is this lease's coherent answer, empty or not;
+ * FALSE means nothing was read and the interface wants another pass.
+ *
+ * A name too long for the buffer is a refusal, not a failure: it lands here as
+ * NX_DHCP_DEST_TO_SMALL and it would land here as NX_DHCP_DEST_TO_SMALL on
+ * every later retrieve of the same lease.  It is the same condition the length
+ * check below already treats as no usable offer -- a 64-octet name arrives and
+ * is discarded, and a 65-octet one is refused by the retrieve -- so both give
+ * the empty offer that withdraws any older option-15 ownership, and both are
+ * as silent as each other.
+ */
 static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
                                       char out[AMI_CFG_DOMAIN_LEN])
 {
-    UCHAR raw[AMI_CFG_DOMAIN_LEN];
-    UINT  size = (UINT)sizeof(raw);
-    UINT  status;
-    UINT  i;
+    UCHAR              raw[AMI_CFG_DOMAIN_LEN];
+    UINT               size = (UINT)sizeof(raw);
+    AmiNsDnsOptionRead read;
+    UINT               i;
 
     out[0] = '\0';
-    status = nx_dhcp_interface_user_option_retrieve(
-        &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_DOMAIN, raw, &size);
-    if (status == NX_DHCP_PARSE_ERROR)
-        return TRUE;            /* this lease carries no option 15 */
-    if (status != NX_SUCCESS)
+    read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
+        &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_DOMAIN, raw, &size));
+
+    if (read == AMI_NS_DNS_OPTION_REFUSED)
+        return TRUE;            /* longer than a name we would use */
+    if (!ami_ns_dns_option_usable(read))
         return FALSE;
+    if (read == AMI_NS_DNS_OPTION_ABSENT)
+        return TRUE;            /* this lease carries no option 15 */
     if (size == 0U || size >= (UINT)AMI_CFG_DOMAIN_LEN)
         return TRUE;            /* invalid means no usable offer */
 
@@ -89,20 +126,23 @@ static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
     return TRUE;
 }
 
+/* Option 12, with the same contract as the option 15 reader above. */
 static BOOL ami_ns_dhcp_hostname_option(AmiNetStack *ns, UWORD iface,
                                         char out[AMI_CFG_NAME_LEN])
 {
-    UCHAR raw[AMI_CFG_NAME_LEN];
-    UINT  size = (UINT)sizeof(raw);
-    UINT  status;
+    UCHAR              raw[AMI_CFG_NAME_LEN];
+    UINT               size = (UINT)sizeof(raw);
+    AmiNsDnsOptionRead read;
 
     out[0] = '\0';
-    status = nx_dhcp_interface_user_option_retrieve(
-        &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_HOST_NAME, raw, &size);
-    if (status == NX_DHCP_PARSE_ERROR || status == NX_DHCP_DEST_TO_SMALL)
-        return TRUE;            /* absent or too long is no usable offer */
-    if (status != NX_SUCCESS)
+    read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
+        &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_HOST_NAME, raw, &size));
+    if (read == AMI_NS_DNS_OPTION_REFUSED)
+        return TRUE;            /* too long for a host name is no offer */
+    if (!ami_ns_dns_option_usable(read))
         return FALSE;
+    if (read == AMI_NS_DNS_OPTION_ABSENT)
+        return TRUE;            /* this lease carries no option 12 */
 
     /* A malformed value is a coherent empty offer: it withdraws any older
        option-12 ownership instead of preserving or truncating it. */
@@ -664,13 +704,15 @@ static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
         /*
          * The reconcile keeps the last coherent option set rather than acting
          * on a partial read, and says whether that decision wants another
-         * look.  A transient retrieve failure does; a buffer that will never
-         * be big enough does not, and answers TRUE so this does not spin.
+         * look.  A retrieve failure that may read differently does; one the
+         * buffer and the option size decide between them does not, and
+         * answers TRUE so this does not spin.  All four option families
+         * report -- see ami_ns_dns_option_retry() for the distinction.
          *
-         * Only the option 6 path reports.  The domain and search reconciles
-         * are still VOID and still return silently on a failed retrieve, so
-         * those two are not retried -- recorded in BACKLOG.md rather than
-         * claimed here.
+         * The mark was taken above, so without the re-mark the "try again
+         * next time" never happens: for a lease that sits at BOUND the next
+         * mark is T1, and until then that interface has no DNS servers, no
+         * host name, no domain and no search list.
          */
         if (!ami_netstack_dns_dhcp_reconcile(ns, iface))
             ami_ns_dns_pending_mark(&ns->ns_DhcpDnsPending, iface);
@@ -834,29 +876,34 @@ static BOOL ami_ns_search_array_has(
 }
 
 
-static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
+/* TRUE when this interface's search list is now what the lease says.  FALSE
+   when nothing could be read, which keeps the last coherent list and asks the
+   caller for another pass. */
+static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
 {
-    AmiResolverConfig offered = {0};
-    UCHAR             raw[256];
-    char              text[AMI_CFG_DOMAIN_LEN] = {0};
-    UINT              size = (UINT)sizeof(raw);
-    UINT              status;
-    UWORD             i;
+    AmiResolverConfig  offered = {0};
+    UCHAR              raw[256];
+    char               text[AMI_CFG_DOMAIN_LEN] = {0};
+    UINT               size = (UINT)sizeof(raw);
+    AmiNsDnsOptionRead read;
+    UWORD              i;
 
     if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
-        return;
+        return TRUE;            /* nothing to do, not "try again" */
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        status = nx_dhcp_interface_user_option_retrieve(
-            &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_SEARCH, raw, &size);
-        if (status == NX_SUCCESS)
+        /* raw[] is 256 and an option's length is one octet, so option 119
+           cannot answer AMI_NS_DNS_OPTION_REFUSED here. */
+        read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
+            &ns->ns_Dhcp, (UINT)iface, AMI_DHCP_OPTION_SEARCH, raw, &size));
+        if (!ami_ns_dns_option_usable(read))
+            return (BOOL)(!ami_ns_dns_option_retry(read));
+        if (read == AMI_NS_DNS_OPTION_READ)
             (VOID)ami_config_search_from_rfc3397(&offered, raw, (ULONG)size);
-        else if (status != NX_DHCP_PARSE_ERROR)
-            return;             /* preserve the last coherent option set */
 
         if (!ami_ns_dhcp_domain_option(ns, iface, text))
-            return;
+            return FALSE;
         if (text[0] != '\0' &&
             text[AMI_CFG_NAME_LEN - 1U] == '\0')
             (VOID)ami_config_search_offer(&offered, text);
@@ -902,21 +949,24 @@ static VOID ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
         AMI_INFO("netstack: interface %ld DHCP search suffix '%s'",
                  (long)iface, offered.search[i]);
     }
+
+    return TRUE;
 }
 
 
-static VOID ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
+/* Same contract as the search reconcile above. */
+static BOOL ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
 {
     char text[AMI_CFG_DOMAIN_LEN];
 
     if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
-        return;
+        return TRUE;            /* nothing to do, not "try again" */
 
     text[0] = '\0';
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
         if (!ami_ns_dhcp_domain_option(ns, iface, text))
-            return;
+            return FALSE;
     }
 
     ami_ns_dns_dhcp_default_update(&ns->ns_DhcpDomain, iface, text);
@@ -934,10 +984,13 @@ static VOID ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
                                       NULL, NULL, 0U);
 #endif
     ami_ns_resolver_permit();
+
+    return TRUE;
 }
 
 
-static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
+/* Same contract as the two reconciles above. */
+static BOOL ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
 {
     char text[AMI_CFG_NAME_LEN];
 
@@ -945,7 +998,7 @@ static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
         if (!ami_ns_dhcp_hostname_option(ns, iface, text))
-            return;
+            return FALSE;
     }
 
     ami_ns_dhcp_hostname_update(&ns->ns_DhcpHostname, iface, text);
@@ -953,6 +1006,8 @@ static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
                                        &ns->ns_DhcpHostname))
         AMI_INFO("netstack: host name is now '%s' after DHCP interface %ld",
                  ns->ns_Config.hostname, (long)iface);
+
+    return TRUE;
 }
 
 
@@ -967,54 +1022,55 @@ static VOID ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
  */
 BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
 {
-    ULONG offered[AMI_CFG_MAX_NAMESERVERS];
-    ULONG raw[NX_DNS_MAX_SERVERS];
-    UINT  size = (UINT)sizeof(raw);
-    UINT  status;
-    UWORD offered_count = 0;
-    UWORD i;
+    ULONG              offered[AMI_CFG_MAX_NAMESERVERS];
+    ULONG              raw[NX_DNS_MAX_SERVERS];
+    UINT               size = (UINT)sizeof(raw);
+    AmiNsDnsOptionRead read;
+    BOOL               done = TRUE;
+    UWORD              offered_count = 0;
+    UWORD              i;
 
     if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
         iface >= ns->ns_IfaceCount)
         return TRUE;    /* nothing to do, not "try again" */
 
-    ami_ns_dhcp_hostname_reconcile_iface(ns, iface);
-    ami_ns_dhcp_domain_reconcile(ns, iface);
-    ami_ns_dhcp_search_reconcile(ns, iface);
+    /*
+     * All four option families, and then one answer for the interface.
+     *
+     * None of these is skipped because an earlier one wants another pass:
+     * they are independent, each one reconciles against its own applied set,
+     * and running the ones that can be done now is what stops one unreadable
+     * option from holding the other three back.  Every one of them is
+     * idempotent, so the pass that FALSE asks for repeats them harmlessly.
+     */
+    if (!ami_ns_dhcp_hostname_reconcile_iface(ns, iface))
+        done = FALSE;
+    if (!ami_ns_dhcp_domain_reconcile(ns, iface))
+        done = FALSE;
+    if (!ami_ns_dhcp_search_reconcile(ns, iface))
+        done = FALSE;
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        status = nx_dhcp_interface_user_option_retrieve(
+        read = ami_ns_dhcp_option_read(nx_dhcp_interface_user_option_retrieve(
             &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
-            (UCHAR *)raw, &size);
+            (UCHAR *)raw, &size));
 
         /*
-         * Not carrying option 6 is a valid empty set.
-         *
-         * A buffer too small is deterministic: raw[] holds NX_DNS_MAX_SERVERS
-         * addresses and a server offering more answers NX_DHCP_DEST_TO_SMALL
-         * on every retrieve for the life of the lease.  Retrying it would
-         * re-mark the interface on every pass and pay a bracket, three
-         * reconciles and an option retrieve under the client mutex for each
-         * one, forever, without ever installing a server.  Keep the servers
-         * we have and say so once.
-         *
-         * Anything else may be transient, so it asks to be retried: the
-         * caller re-marks the interface, because a lease that sits at BOUND
-         * produces no further state change until T1.
+         * raw[] holds NX_DNS_MAX_SERVERS addresses, so a server offering more
+         * is refused on every retrieve for the life of the lease.  Keep the
+         * servers already installed and say so once rather than asking for a
+         * pass that would be refused the same way.
          */
-        if (status == NX_DHCP_DEST_TO_SMALL)
-        {
+        if (read == AMI_NS_DNS_OPTION_REFUSED)
             AMI_WARN("netstack: interface %ld offers more than %ld DNS "
                      "servers, keeping the ones already known",
                      (long)iface, (long)NX_DNS_MAX_SERVERS);
-            return TRUE;
-        }
 
-        if (status != NX_SUCCESS && status != NX_DHCP_PARSE_ERROR)
-            return FALSE;
+        if (!ami_ns_dns_option_usable(read))
+            return (BOOL)(done && !ami_ns_dns_option_retry(read));
 
-        if (status == NX_SUCCESS)
+        if (read == AMI_NS_DNS_OPTION_READ)
         {
             UWORD raw_count = (UWORD)(size / (UINT)sizeof(ULONG));
 
@@ -1071,7 +1127,7 @@ BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
                  (unsigned long)(server & 0xFFUL));
     }
 
-    return TRUE;
+    return done;
 }
 
 /* The DHCP client invokes its state callback on its own ThreadX task and, on
@@ -1098,10 +1154,12 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
 
     /* mDNS starts after this function even when nx_dns_create() fails. Import
        the current option 12 first so the responder and gethostname() still see
-       the lease's name; the full resolver reconciliation follows creation. */
+       the lease's name; the full resolver reconciliation follows creation.
+       An unreadable option 12 is not marked here -- the reconcile loop below
+       covers every interface and marks the ones that want another pass. */
     if (ns->ns_DhcpStarted)
         for (i = 0U; i < ns->ns_IfaceCount; i++)
-            ami_ns_dhcp_hostname_reconcile_iface(ns, i);
+            (VOID)ami_ns_dhcp_hostname_reconcile_iface(ns, i);
 
     status = nx_dns_create(&ns->ns_Dns, &ns->ns_Ip,
                            (UCHAR *)ns->ns_Config.resolver.domain);

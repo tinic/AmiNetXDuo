@@ -119,11 +119,77 @@ static void h_case_invalid_interface(void)
 }
 
 
+/*
+ * The reconcile takes the mark before it does the work, so a reconcile that
+ * gives up without re-marking has no next pass until T1.  Re-marking a
+ * decision that cannot change is the opposite defect: the mark is taken on
+ * every lookup, so it becomes a bracket, three reconciles and an option
+ * retrieve under the client mutex on every lookup, forever.
+ */
+static void h_case_option_policy(void)
+{
+    h_check(ami_ns_dns_option_usable(AMI_NS_DNS_OPTION_READ),
+            "an option that was read is acted on");
+    h_check(!ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_READ),
+            "an option that was read does not ask for another pass");
+
+    h_check(ami_ns_dns_option_usable(AMI_NS_DNS_OPTION_ABSENT),
+            "an option this lease does not carry is a coherent empty set");
+    h_check(!ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_ABSENT),
+            "an absent option does not ask for another pass");
+
+    h_check(!ami_ns_dns_option_usable(AMI_NS_DNS_OPTION_REFUSED),
+            "a refused option is not acted on");
+    h_check(!ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_REFUSED),
+            "a refusal the buffer decides is not retried");
+
+    h_check(!ami_ns_dns_option_usable(AMI_NS_DNS_OPTION_FAILED),
+            "a failed retrieve is not acted on");
+    h_check(ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_FAILED),
+            "a failed retrieve asks for another pass");
+}
+
+
+/*
+ * What the re-mark is for, end to end: a caller takes the snapshot, its
+ * reconcile cannot read one option, and the interface has to be in the next
+ * snapshot rather than waiting for a DHCP state change that will not come
+ * until T1.
+ */
+static void h_case_failed_reconcile_is_retried(void)
+{
+    AmiNsDnsPending pending;
+    ULONG           first;
+    ULONG           second;
+
+    memset(&pending, 0, sizeof(pending));
+    ami_ns_dns_pending_mark(&pending, 2U);
+
+    first = ami_ns_dns_pending_take(&pending);
+    h_check(first == 4UL, "the marked interface is in the first snapshot");
+
+    if (ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_FAILED))
+        ami_ns_dns_pending_mark(&pending, 2U);
+
+    second = ami_ns_dns_pending_take(&pending);
+    h_check(second == 4UL,
+            "an interface whose reconcile failed is in the next snapshot");
+
+    if (ami_ns_dns_option_retry(AMI_NS_DNS_OPTION_REFUSED))
+        ami_ns_dns_pending_mark(&pending, 2U);
+
+    h_check(!ami_ns_dns_pending_any(&pending),
+            "an interface whose option was refused is not marked again");
+}
+
+
 int main(void)
 {
     h_case_interfaces_coalesce();
     h_case_change_after_snapshot();
     h_case_invalid_interface();
+    h_case_option_policy();
+    h_case_failed_reconcile_is_retried();
 
     h_check(h_forbid_depth == 0, "all handoff critical sections are balanced");
     h_check(h_forbid_max == 1, "the handoff does not nest a critical section");
