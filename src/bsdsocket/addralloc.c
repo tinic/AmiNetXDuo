@@ -537,7 +537,7 @@ static BsdAamJob *bsd_aam_find(const struct AddressAllocationMessage *aam)
 static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
                                 const AmiDhcpLease *lease)
 {
-    UWORD i;
+    ULONG i;
 
     aam->aam_Address       = lease->adl_Address;
     aam->aam_SubnetMask    = lease->adl_NetMask;
@@ -547,24 +547,26 @@ static VOID bsd_aam_store_lease(struct AddressAllocationMessage *aam,
        zero." */
     aam->aam_RequestedAddress = 0;
 
-    if (aam->aam_RouterTable != NULL)
+    if (aam->aam_RouterTable != NULL && aam->aam_RouterTableSize > 0)
     {
-        for (i = 0; i < (UWORD)aam->aam_RouterTableSize; i++)
-            aam->aam_RouterTable[i] = (i < lease->adl_RouterCount)
+        for (i = 0; i < (ULONG)aam->aam_RouterTableSize; i++)
+            aam->aam_RouterTable[i] = (i < (ULONG)lease->adl_RouterCount)
                                           ? lease->adl_Router[i] : 0;
     }
 
-    if (aam->aam_DNSTable != NULL)
+    if (aam->aam_DNSTable != NULL && aam->aam_DNSTableSize > 0)
     {
-        for (i = 0; i < (UWORD)aam->aam_DNSTableSize; i++)
-            aam->aam_DNSTable[i] = (i < lease->adl_DnsCount)
+        for (i = 0; i < (ULONG)aam->aam_DNSTableSize; i++)
+            aam->aam_DNSTable[i] = (i < (ULONG)lease->adl_DnsCount)
                                        ? lease->adl_Dns[i] : 0;
     }
 
-    if (aam->aam_StaticRouteTable != NULL)
+    if (aam->aam_StaticRouteTable != NULL &&
+        aam->aam_StaticRouteTableSize > 0)
     {
-        for (i = 0; i < (UWORD)aam->aam_StaticRouteTableSize; i++)
-            aam->aam_StaticRouteTable[i] = (i < lease->adl_StaticRouteCount)
+        for (i = 0; i < (ULONG)aam->aam_StaticRouteTableSize; i++)
+            aam->aam_StaticRouteTable[i] =
+                (i < (ULONG)lease->adl_StaticRouteCount)
                                                ? lease->adl_StaticRoute[i] : 0;
     }
 
