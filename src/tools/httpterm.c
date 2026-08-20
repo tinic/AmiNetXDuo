@@ -17,6 +17,7 @@
 
 #include <dos/dostags.h>
 #include <dos/dosasl.h>
+#include <exec/execbase.h>          /* task lists, for runner lifetime      */
 #include <exec/io.h>                /* struct IOStdReq, for ACTION_DISK_INFO */
 
 /*
@@ -79,11 +80,10 @@
  */
 #define TERM_SHELL_SETUP    "prompt \"%N.%S> \""
 
-/* How long http_term_shutdown() waits for a Shell to notice end of file.  Ten
-   seconds is far longer than the exit path takes and short enough that a
-   Ctrl-C on the server does not look like a hang.  See where it is used for
-   what happens when it runs out, which is deliberately not a free anyway. */
-#define TERM_STOP_TICKS     500     /* of 1/50 s                            */
+/* When http_term_shutdown() reports that it is still waiting.  It cannot
+   safely stop waiting: every runner executes out of this command's load
+   segment, which DOS unloads when the parent returns. */
+#define TERM_STOP_WARN_TICKS 500    /* of 1/50 s                            */
 
 /*
  * How many passes of the server's loop a Shell gets to notice its end of file
@@ -108,7 +108,7 @@
  * So after this long the old session is abandoned rather than waited for.  Its
  * generation stops being routed (see term_gen), every packet it sends is
  * refused, and the next visitor gets a Shell.  What is left behind is one
- * Process, its stack, and the twenty-four bytes of its runner record, holding
+ * Process, its stack, and the small runner record, holding
  * two file handles that fail everything, which is the state most commands do
  * eventually exit from.
  *
@@ -270,8 +270,10 @@ static ULONG ring_get(TermPipe *p, UBYTE *dst, ULONG n)
  * CreateNewProc() returns and a plain global would race it.  The child waits
  * before it looks.
  */
-typedef struct
+typedef struct TermRunner
 {
+    struct TermRunner *rn_Next;     /* every runner whose code is still live */
+    struct Task  *rn_Task;          /* CreateNewProc(), until Exec removes it */
     struct Task  *rn_Parent;
     BPTR          rn_In;            /* the Shell's stdin                    */
     BPTR          rn_Out;           /* the Shell's stdout                   */
@@ -291,11 +293,13 @@ typedef struct
  * writing rn_Done into it whenever it finally returns.  One static shared with
  * the next session would mean the old runner's last act reaps the new session.
  *
- * Twenty-four bytes, lost only when a Shell never exits at all, which is what
- * a recoverable terminal costs.  The archived branch allocated one per command
- * and missing the free cost 576 bytes a command.
+ * Kept on a list even while abandoned, because shutdown must know whether code
+ * from this command's load segment is still executing.  A completed record is
+ * reclaimed at the next start; one whose Shell never exits remains the small
+ * fixed bookkeeping cost of making the terminal recoverable.
  */
-static TermRunner *term_runner;
+static TermRunner *term_runner;     /* the current session's record        */
+static TermRunner *term_runners;    /* including abandoned live runners    */
 static UBYTE      term_active;      /* a Shell has been started             */
 static UBYTE      term_reaped;      /* and its exit code has been collected */
 static UBYTE      term_stopping;    /* it has been asked to go              */
@@ -1682,6 +1686,77 @@ static VOID term_runner_main(VOID)
     Signal(parent, SIGBREAKF_CTRL_E);
 }
 
+/* Whether Exec can still schedule this runner.  The running task and the two
+   scheduler lists are the complete live set for this port.  Disable(), not
+   Forbid(): interrupts move tasks between the lists.  The pointer is compared
+   only and never dereferenced after CreateNewProc() may have freed it. */
+static BOOL term_task_on_list(struct List *list, struct Task *task)
+{
+    struct Node *node;
+
+    for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
+    {
+        if ((struct Task *)node == task)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static BOOL term_task_alive(struct Task *task)
+{
+    BOOL alive;
+
+    if (task == NULL)
+        return FALSE;
+
+    Disable();
+    alive = (SysBase->ThisTask == task ||
+             term_task_on_list(&SysBase->TaskReady, task) ||
+             term_task_on_list(&SysBase->TaskWait, task));
+    Enable();
+
+    return alive;
+}
+
+/* Reclaim runners which have made their final publication.  The current
+   record stays until it is replaced or shutdown has finished reading its
+   result.  rn_Done is last, so a true value means the runner will never touch
+   the record again. */
+static VOID term_runners_collect(VOID)
+{
+    TermRunner **link = &term_runners;
+
+    while (*link != NULL)
+    {
+        TermRunner *r = *link;
+
+        if (r != term_runner && r->rn_Done != 0 &&
+            !term_task_alive(r->rn_Task))
+        {
+            *link = r->rn_Next;
+            ami_free(r);
+        }
+        else
+        {
+            link = &r->rn_Next;
+        }
+    }
+}
+
+static BOOL term_runners_done(VOID)
+{
+    TermRunner *r;
+
+    for (r = term_runners; r != NULL; r = r->rn_Next)
+    {
+        if (r->rn_Done == 0 || term_task_alive(r->rn_Task))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 /* ------------------------------------------------------------- the shell --- */
 
 BOOL http_term_init(VOID)
@@ -1861,18 +1936,12 @@ BOOL http_term_start(VOID)
         return FALSE;
     }
 
-    /*
-     * The last session's record.  Freed when its runner has finished with it,
-     * and disowned when it has not, because an abandoned runner goes on
-     * writing rn_Done into it whenever it returns.  Freeing that one would be
-     * a write into whatever is allocated next.
-     */
-    if (term_runner != NULL)
-    {
-        if (term_runner->rn_Done != 0)
-            ami_free(term_runner);
-        term_runner = NULL;
-    }
+    /* The previous record is no longer current, but it remains on the runner
+       list until rn_Done says its process has returned.  In particular an
+       abandoned runner must remain visible to shutdown, because it still
+       executes code from this command's load segment. */
+    term_runner = NULL;
+    term_runners_collect();
 
     term_runner = (TermRunner *)ami_alloc(sizeof(*term_runner));
     if (term_runner == NULL)
@@ -1884,6 +1953,8 @@ BOOL http_term_start(VOID)
     }
 
     term_runner->rn_Parent = FindTask(NULL);
+    term_runner->rn_Next   = NULL;
+    term_runner->rn_Task   = NULL;
     term_runner->rn_In     = sh_in;
     term_runner->rn_Out    = sh_out;
     term_runner->rn_Rc     = 0;
@@ -1917,6 +1988,10 @@ BOOL http_term_start(VOID)
         term_handle_discard(sh_out);
         return FALSE;
     }
+
+    term_runner->rn_Task = (struct Task *)proc;
+    term_runner->rn_Next = term_runners;
+    term_runners         = term_runner;
 
     /* The runner is in Wait(SIGF_SINGLE) until this pair happens. */
     proc->pr_Task.tc_UserData = (APTR)term_runner;
@@ -2182,6 +2257,7 @@ VOID http_term_stop(VOID)
 VOID http_term_shutdown(VOID)
 {
     LONG waited = 0;
+    BOOL warned = FALSE;
 
     if (term_port == NULL)
         return;
@@ -2199,7 +2275,7 @@ VOID http_term_shutdown(VOID)
          * because a Shell blocked in Write() cannot notice that its input has
          * ended.
          */
-        while (!term_reaped && waited < TERM_STOP_TICKS)
+        while (!term_reaped)
         {
             UBYTE scratch[256];
 
@@ -2210,52 +2286,46 @@ VOID http_term_shutdown(VOID)
 
             Delay(1);
             waited++;
-        }
 
-        if (!term_reaped)
-        {
-            /*
-             * Deliberately not freed.  The runner's Process is still alive and
-             * both FileHandles still name term_port, so giving any of it back
-             * would hand a live pointer to whatever allocates next.  On
-             * AmigaOS a process that exits reclaims nothing anyway, so the
-             * choice is between a leak this program is about to end with and a
-             * write into somebody else's memory.
-             */
-            tool_error("the terminal's Shell is still running. Its memory is "
-                       "not given back");
-            return;
+            if (!warned && waited >= TERM_STOP_WARN_TICKS)
+            {
+                warned = TRUE;
+                tool_error("the terminal's Shell is still running; waiting "
+                           "because its runner still uses httpd's code");
+            }
         }
 
         term_active = 0;
     }
 
-    /* Two ACTION_END packets can mark the session reaped a few instructions
-       before the runner publishes rn_Done. Do not delete its message port or
-       let the parent task exit in that window: the runner still owns this
-       record and will signal rn_Parent as its last act. */
-    while (term_runner != NULL && term_runner->rn_Done == 0 &&
-           waited < TERM_STOP_TICKS)
+    /* This includes runners from sessions abandoned earlier.  Their handles
+       are generation-isolated, but their Process still returns through
+       term_runner_main().  Returning from httpd while any one remains would
+       let DOS unload the code beneath it.  There is no safe bounded version
+       of this wait; keep servicing the shared port so stale handles can close
+       and make their runners finish. */
+    while (!term_runners_done())
     {
         http_term_service();
         Delay(1);
         waited++;
+
+        if (!warned && waited >= TERM_STOP_WARN_TICKS)
+        {
+            warned = TRUE;
+            tool_error("a terminal runner is still active; waiting because "
+                       "httpd cannot unload live runner code");
+        }
     }
 
-    if (term_runner != NULL && term_runner->rn_Done == 0)
+    while (term_runners != NULL)
     {
-        tool_error("the terminal runner is still active. Its memory and port "
-                   "are not given back");
-        return;
-    }
+        TermRunner *next = term_runners->rn_Next;
 
-    /* Starting another session reaps the previous runner record, but a
-       server that shuts down after its last session has no next start. */
-    if (term_runner != NULL)
-    {
-        ami_free(term_runner);
-        term_runner = NULL;
+        ami_free(term_runners);
+        term_runners = next;
     }
+    term_runner = NULL;
 
     DeleteMsgPort(term_port);
     term_port = NULL;

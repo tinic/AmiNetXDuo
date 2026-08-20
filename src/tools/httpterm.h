@@ -70,7 +70,8 @@
  */
 BOOL  http_term_init(VOID);
 
-/* Give them back.  Waits, bounded, for a Shell that is still running. */
+/* Give them back.  Waits for every runner still executing from httpd's load
+   segment; unloading live code cannot be made into a safe bounded wait. */
 VOID  http_term_shutdown(VOID);
 
 /*
