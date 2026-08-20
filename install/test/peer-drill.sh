@@ -27,7 +27,9 @@ python3 - "$ADDR" "$PORT" "$TXT" "$LHA" "$DIR" <<'PY'
 import hashlib
 import http.client
 import os
+import socket
 import sys
+import time
 
 addr, port = sys.argv[1], int(sys.argv[2])
 txt, lha, drilldir = sys.argv[3], sys.argv[4], sys.argv[5]
@@ -41,6 +43,38 @@ def conn():
     return http.client.HTTPConnection(addr, port, timeout=60)
 
 
+def wait_up(seconds=90):
+    """Wait for the guest to answer at all before asserting anything about it.
+
+    The caller starts this the moment the guest writes its address into
+    DH0:usercheck.txt, which is the first thing S:User-Startup does -- the
+    machine has an address by then, but it is not yet answering ARP and httpd
+    has not yet been reached in the startup. Every request below, and both
+    drill scripts, connect exactly once and raise, so the first one landed in
+    that window and took the whole arm down with
+
+        OSError: [Errno 113] No route to host
+
+    That is a race the harness owns, not a defect in the machine: nothing had
+    said the guest was up. It is deliberately NOT a retry around each request
+    -- once the machine answers, a later refusal is a real result and must
+    stay one.
+    """
+    deadline = time.time() + seconds
+    last = ""
+    while time.time() < deadline:
+        try:
+            c = socket.create_connection((addr, port), timeout=5)
+            c.close()
+            say("guest_up_after_s", int(seconds - (deadline - time.time())))
+            return True
+        except OSError as exc:
+            last = type(exc).__name__ + ": " + str(exc)
+            time.sleep(2)
+    say("guest_never_answered", last)
+    return False
+
+
 def request(method, path, body=None, headers=None):
     """One request on its own connection.  Returns (status, headers, body)."""
     c = conn()
@@ -51,6 +85,14 @@ def request(method, path, body=None, headers=None):
         return r.status, dict(r.getheaders()), data
     finally:
         c.close()
+
+
+if not wait_up():
+    # Not a pass and not a silent skip: the arm asserts what a machine on a
+    # LAN does, and this one never got there.
+    say("httpd_drill_rc", "unreachable")
+    say("wsterm_console_rc", "unreachable")
+    sys.exit(1)
 
 
 # ---- 1. the terminal is served, from the -T the installer's line carries ----
