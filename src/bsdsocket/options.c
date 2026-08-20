@@ -193,7 +193,18 @@ static ULONG bsd_ms_ticks(ULONG ms)
 
 static ULONG bsd_ticks_ms(ULONG ticks)
 {
-    return (ticks * 1000UL) / (ULONG)NX_IP_PERIODIC_RATE;
+    const ULONG rate = (ULONG)NX_IP_PERIODIC_RATE;
+    const ULONG max  = (ULONG)-1;
+    ULONG       whole;
+    ULONG       fraction;
+
+    if (ticks / rate > max / 1000UL)
+        return max;
+
+    whole    = (ticks / rate) * 1000UL;
+    fraction = ((ticks % rate) * 1000UL) / rate;
+
+    return (fraction > max - whole) ? max : whole + fraction;
 }
 
 static VOID bsd_ticks_timeval(ULONG ticks, struct timeval *tv)
