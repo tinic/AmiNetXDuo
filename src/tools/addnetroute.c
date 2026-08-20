@@ -690,9 +690,15 @@ static BOOL zone_matches(const NetStatusInterface *nsi, const char *zone)
 
     for (i = 0; zone[i] != '\0'; i++)
     {
+        ULONG digit;
+
         if (zone[i] < '0' || zone[i] > '9')
             return FALSE;
-        value = value * 10UL + (ULONG)(zone[i] - '0');
+
+        digit = (ULONG)(zone[i] - '0');
+        if (value > (0xFFFFFFFFUL - digit) / 10UL)
+            return FALSE;
+        value = value * 10UL + digit;
     }
 
     return (BOOL)(i != 0 && value == (ULONG)nsi->nsi_Index);
