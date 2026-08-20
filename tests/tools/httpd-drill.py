@@ -689,6 +689,51 @@ def test_name_truncation():
     once(req("DELETE", a))
 
 
+# --------------------------------------------- oversized listing members --
+
+def test_listing_omission_yields():
+    """An unrepresentable child does not turn enumeration into a busy loop.
+
+    A row containing this many ampersands expands once in its href and again
+    in its XML display name, past the server's one-chunk scratch on filesystems
+    that retain long Amiga names.  Each omitted row is represented by its own
+    harmless comment chunk.  That detail is intentional: one chunk means one
+    return from the producer, and therefore one scheduling point for the
+    server's other connections.  Merely completing the listing would not catch
+    the old `continue`, which completed too after monopolising the event loop.
+    """
+    print("oversized listing members yield between directory entries")
+
+    paths = [BASE + "/" + ("&" * 96) + ("%02d" % i) for i in range(4)]
+    made = []
+
+    for path in paths:
+        answer = once(req("PUT", path, body="x"))
+        if answer is not None and answer[0] in (200, 201, 204):
+            made.append(path)
+
+    if len(made) != len(paths):
+        print("  (this filesystem cannot retain names long enough to expand "
+              "past one listing chunk; not applicable)")
+        for path in made:
+            once(req("DELETE", path))
+        return
+
+    try:
+        answer = once(req("PROPFIND", BASE, {"Depth": "1"}))
+        marker = b"<!-- listing entry omitted: representation too large -->"
+        check(answer is not None and answer[0] == 207,
+              "the drawer remains listable with oversized members")
+        if answer is not None:
+            check(answer[2].count(marker) == len(paths),
+                  "each omitted member consumes its own producer pass")
+            check(b"keepme.txt" in answer[2],
+                  "ordinary members remain in the same listing")
+    finally:
+        for path in paths:
+            once(req("DELETE", path))
+
+
 # ------------------------------------------------------- propfind bodies ---
 
 def test_propfind_body():
@@ -1413,6 +1458,7 @@ def main():
         test_overlapping_moves()
         test_destination_contains_source()
         test_name_truncation()
+        test_listing_omission_yields()
         test_propfind_body()
         test_depth0_collection_lock()
 

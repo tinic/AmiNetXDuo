@@ -3617,8 +3617,15 @@ static BOOL httpd_produce(HttpConn *c)
                          * be read at all, and it is the row nobody can name
                          * anyway.
                          *
-                         * The scan is bounded by the number of entries in the
-                         * drawer, which is the bound the listing already had.
+                         * A skipped entry still has to consume one producer
+                         * pass.  This server services every connection from
+                         * one task; looping straight to ExNext() would let a
+                         * drawer full of oversized names monopolise that task
+                         * until the entire drawer had been scanned.  A small
+                         * HTML/XML comment is therefore emitted for the
+                         * omitted member.  It is invisible to both kinds of
+                         * client, but returning its chunk gives the event loop
+                         * the same scheduling point a normal row provides.
                          *
                          * It is logged because a WebDAV client treats an
                          * absent member as a deleted one, so the operator has
@@ -3626,6 +3633,8 @@ static BOOL httpd_produce(HttpConn *c)
                          */
                         if (len == 0UL)
                         {
+                            ULONG used = 0;
+
                             /* Escaped rather than raw.  This is the one name
                                in the drawer that somebody chose to be
                                awkward, AmigaOS allows 0x9B in a file name,
@@ -3639,7 +3648,16 @@ static BOOL httpd_produce(HttpConn *c)
                                                   sizeof(httpd_escape));
                             httpd_log(c, "listing entry does not fit and was "
                                          "skipped: %s", (LONG)httpd_escape, 0);
-                            continue;
+
+                            /* Valid between elements in both the HTML index
+                               and the XML multistatus.  The text contains no
+                               attacker-controlled bytes, including the rule
+                               that XML comments may not contain "--". */
+                            (VOID)hs_append(httpd_scratch,
+                                            sizeof(httpd_scratch), &used,
+                                            "<!-- listing entry omitted: "
+                                            "representation too large -->\n");
+                            len = used;
                         }
 
                         break;
