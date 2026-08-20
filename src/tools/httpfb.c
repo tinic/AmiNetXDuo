@@ -2552,8 +2552,18 @@ static VOID fb_sink(void *ctx, HttpWsEvent ev, const unsigned char *data,
         break;
 
     case HTTP_WS_EV_CLOSE:
-        fb_close_session(HTTP_WS_CLOSE_NORMAL);
+    {
+        UWORD code = HTTP_WS_CLOSE_NORMAL;
+
+        /* The decoder has already validated a status that is present.  Echo
+           it the way the terminal endpoint does, so a clean 1001 or an
+           application close does not come back as an unrelated 1000. */
+        if (len >= 2)
+            code = (UWORD)(((UWORD)data[0] << 8) | (UWORD)data[1]);
+
+        fb_close_session(code);
         break;
+    }
 
     default:
         break;
