@@ -679,9 +679,14 @@ static LONG bsd_cmsg_flag(struct AmiSocketBase *base, AmiSocket *sock,
     if (set)
     {
         if (*optlen >= (socklen_t)sizeof(LONG))
-            value = *(LONG *)optval;
+            bsd_bcopy(optval, &value, sizeof(value));
         else if (*optlen >= (socklen_t)sizeof(WORD))
-            value = *(WORD *)optval;
+        {
+            WORD short_value;
+
+            bsd_bcopy(optval, &short_value, sizeof(short_value));
+            value = short_value;
+        }
         else
             return bsd_fail(base, AMI_EINVAL);
 
@@ -697,12 +702,14 @@ static LONG bsd_cmsg_flag(struct AmiSocketBase *base, AmiSocket *sock,
 
     if (*optlen >= (socklen_t)sizeof(LONG))
     {
-        *(LONG *)optval = value;
+        bsd_bcopy(&value, optval, sizeof(value));
         *optlen = (socklen_t)sizeof(LONG);
     }
     else if (*optlen >= (socklen_t)sizeof(WORD))
     {
-        *(WORD *)optval = (WORD)value;
+        WORD short_value = (WORD)value;
+
+        bsd_bcopy(&short_value, optval, sizeof(short_value));
         *optlen = (socklen_t)sizeof(WORD);
     }
     else

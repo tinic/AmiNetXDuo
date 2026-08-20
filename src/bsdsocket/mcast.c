@@ -315,9 +315,14 @@ static LONG bsd_mcast_get_byte_or_long(struct AmiSocketBase *base, APTR optval,
         return bsd_fail(base, AMI_EFAULT);
 
     if (optlen >= (socklen_t)sizeof(LONG))
-        *value = *(LONG *)optval;
+        bsd_bcopy(optval, value, sizeof(*value));
     else if (optlen >= (socklen_t)sizeof(WORD))
-        *value = (LONG)*(WORD *)optval;
+    {
+        WORD short_value;
+
+        bsd_bcopy(optval, &short_value, sizeof(short_value));
+        *value = (LONG)short_value;
+    }
     else if (optlen >= (socklen_t)sizeof(UBYTE))
         *value = (LONG)*(UBYTE *)optval;
     else
@@ -334,12 +339,14 @@ static LONG bsd_mcast_put_byte_or_long(struct AmiSocketBase *base, APTR optval,
 
     if (*optlen >= (socklen_t)sizeof(LONG))
     {
-        *(LONG *)optval = value;
+        bsd_bcopy(&value, optval, sizeof(value));
         *optlen = (socklen_t)sizeof(LONG);
     }
     else if (*optlen >= (socklen_t)sizeof(WORD))
     {
-        *(WORD *)optval = (WORD)value;
+        WORD short_value = (WORD)value;
+
+        bsd_bcopy(&short_value, optval, sizeof(short_value));
         *optlen = (socklen_t)sizeof(WORD);
     }
     else if (*optlen >= (socklen_t)sizeof(UBYTE))
@@ -874,9 +881,14 @@ static LONG bsd_mcast6_get_int(struct AmiSocketBase *base, APTR optval,
         return bsd_fail(base, AMI_EFAULT);
 
     if (optlen >= (socklen_t)sizeof(LONG))
-        *value = *(LONG *)optval;
+        bsd_bcopy(optval, value, sizeof(*value));
     else if (optlen >= (socklen_t)sizeof(WORD))
-        *value = (LONG)*(WORD *)optval;
+    {
+        WORD short_value;
+
+        bsd_bcopy(optval, &short_value, sizeof(short_value));
+        *value = (LONG)short_value;
+    }
     else
         return bsd_fail(base, AMI_EINVAL);
 
@@ -891,12 +903,14 @@ static LONG bsd_mcast6_put_int(struct AmiSocketBase *base, APTR optval,
 
     if (*optlen >= (socklen_t)sizeof(LONG))
     {
-        *(LONG *)optval = value;
+        bsd_bcopy(&value, optval, sizeof(value));
         *optlen = (socklen_t)sizeof(LONG);
     }
     else if (*optlen >= (socklen_t)sizeof(WORD))
     {
-        *(WORD *)optval = (WORD)value;
+        WORD short_value = (WORD)value;
+
+        bsd_bcopy(&short_value, optval, sizeof(short_value));
         *optlen = (socklen_t)sizeof(WORD);
     }
     else

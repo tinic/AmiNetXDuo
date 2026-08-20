@@ -60,12 +60,14 @@ static LONG bsd_opt_get_long(struct AmiSocketBase *base, APTR optval,
     len = *optlen;
     if (len >= (socklen_t)sizeof(LONG))
     {
-        *(LONG *)optval = value;
+        bsd_bcopy(&value, optval, sizeof(value));
         *optlen = (socklen_t)sizeof(LONG);
     }
     else if (len >= (socklen_t)sizeof(WORD))
     {
-        *(WORD *)optval = (WORD)value;
+        WORD short_value = (WORD)value;
+
+        bsd_bcopy(&short_value, optval, sizeof(short_value));
         *optlen = (socklen_t)sizeof(WORD);
     }
     else
@@ -83,9 +85,14 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
         return bsd_fail(base, AMI_EFAULT);
 
     if (optlen >= (socklen_t)sizeof(LONG))
-        *value = *(LONG *)optval;
+        bsd_bcopy(optval, value, sizeof(*value));
     else if (optlen >= (socklen_t)sizeof(WORD))
-        *value = *(WORD *)optval;
+    {
+        WORD short_value;
+
+        bsd_bcopy(optval, &short_value, sizeof(short_value));
+        *value = short_value;
+    }
     else
         return bsd_fail(base, AMI_EINVAL);
 
@@ -429,22 +436,30 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
 
             case SO_RCVTIMEO:
+            {
+                struct timeval tv;
+
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                if (!bsd_timeval_ticks((struct timeval *)optval,
-                                       &sock->as_RcvTimeout))
+                bsd_bcopy(optval, &tv, sizeof(tv));
+                if (!bsd_timeval_ticks(&tv, &sock->as_RcvTimeout))
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 return 0;
+            }
 
             case SO_SNDTIMEO:
+            {
+                struct timeval tv;
+
                 if (optval == NULL ||
                     optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                if (!bsd_timeval_ticks((struct timeval *)optval,
-                                       &sock->as_SndTimeout))
+                bsd_bcopy(optval, &tv, sizeof(tv));
+                if (!bsd_timeval_ticks(&tv, &sock->as_SndTimeout))
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 return 0;
+            }
 
             case SO_EVENTMASK:
                 /* The AmiTCP V4 async event API: which FD_* bits to report. */
@@ -757,25 +772,35 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                                             : BSD_TCP_WINDOW);
 
             case SO_LINGER:
+            {
+                struct linger lin;
+
                 if (optval == NULL || optlen == NULL ||
                     *optlen < (socklen_t)sizeof(struct linger))
                     return bsd_fail(SocketBase, AMI_EINVAL);
-                ((struct linger *)optval)->l_onoff  = sock->as_LingerOn;
-                ((struct linger *)optval)->l_linger = sock->as_LingerTime;
+                lin.l_onoff  = sock->as_LingerOn;
+                lin.l_linger = sock->as_LingerTime;
+                bsd_bcopy(&lin, optval, sizeof(lin));
                 *optlen = (socklen_t)sizeof(struct linger);
                 return 0;
+            }
 
             case SO_RCVTIMEO:
             case SO_SNDTIMEO:
+            {
+                struct timeval tv;
+
                 if (optval == NULL || optlen == NULL ||
                     *optlen < (socklen_t)sizeof(struct timeval))
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 bsd_ticks_timeval((optname == SO_RCVTIMEO)
                                       ? sock->as_RcvTimeout
                                       : sock->as_SndTimeout,
-                                  (struct timeval *)optval);
+                                  &tv);
+                bsd_bcopy(&tv, optval, sizeof(tv));
                 *optlen = (socklen_t)sizeof(struct timeval);
                 return 0;
+            }
 
             default:
                 return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
@@ -842,7 +867,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
                 info.tsi_UserTimeout = sock->as_UserTimeout;
 
-                *(struct TcpStallInfo *)optval = info;
+                bsd_bcopy(&info, optval, sizeof(info));
                 *optlen = (socklen_t)sizeof(struct TcpStallInfo);
                 return 0;
             }

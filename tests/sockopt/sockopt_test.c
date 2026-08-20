@@ -118,6 +118,17 @@ UBYTE *b = (UBYTE *)p;
     }
 }
 
+static VOID t_bcopy(const APTR src, APTR dst, ULONG len)
+{
+const UBYTE *s = (const UBYTE *)src;
+UBYTE       *d = (UBYTE *)dst;
+
+    while (len-- > 0UL)
+    {
+        *d++ = *s++;
+    }
+}
+
 
 /* -------------------------------------------------------------- the ABI -- */
 
@@ -349,6 +360,9 @@ static VOID t_test_accepted_and_ignored(VOID)
 {
 LONG fd;
 LONG value;
+UBYTE odd_space[sizeof(LONG) + 2];
+UBYTE *odd;
+socklen_t odd_len;
 
     t_log("options accepted and deliberately not honoured");
 
@@ -361,6 +375,25 @@ LONG value;
                   "setsockopt SO_REUSEADDR=1", bsd_Errno());
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
     (VOID)t_check((BOOL)(value == 1), "SO_REUSEADDR reads back 1", value);
+
+    /* optval is a void pointer, not a LONG pointer. A packed caller can hand
+       the library an odd address, which a 68000 cannot dereference as a word
+       or long. */
+    odd = ((((ULONG)odd_space) & 1UL) == 0UL) ? &odd_space[1] : &odd_space[0];
+    value = 0;
+    t_bcopy(&value, odd, sizeof(value));
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, odd,
+                                       (LONG)sizeof(value)) == 0),
+                  "setsockopt accepts an odd optval", bsd_Errno());
+
+    value = -1;
+    t_bcopy(&value, odd, sizeof(value));
+    odd_len = (socklen_t)sizeof(value);
+    (VOID)t_check((BOOL)(bsd_getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, odd,
+                                       &odd_len) == 0),
+                  "getsockopt accepts an odd optval", bsd_Errno());
+    t_bcopy(odd, &value, sizeof(value));
+    (VOID)t_check((BOOL)(value == 0), "odd optval preserves the value", value);
 
     (VOID)t_set_int(fd, SOL_SOCKET, SO_REUSEADDR, 0);
     (VOID)t_get_int(fd, SOL_SOCKET, SO_REUSEADDR, &value);
