@@ -2411,8 +2411,14 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             break;
 
         case HTTP_WS_EV_PING:
-            /* RFC 6455 5.5.3: a pong carries the ping's payload back. */
-            sock_control(t, HTTP_WS_EV_PONG, data, (ULONG)len);
+            /* RFC 6455 5.5.3: a pong carries the ping's payload back.  A
+               close already queued is more important, though.  Reads are
+               serviced before writes, so a ping can arrive while that close
+               is waiting for a full socket to drain.  Replacing it with a
+               pong would make the writer see `closing` after the pong and
+               drop the socket without ever sending the close frame. */
+            if (!t->closing)
+                sock_control(t, HTTP_WS_EV_PONG, data, (ULONG)len);
             break;
 
         case HTTP_WS_EV_PONG:
