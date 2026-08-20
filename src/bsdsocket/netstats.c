@@ -38,6 +38,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "tcp_queue.h"
 #include "udp_queue.h"
 
 #include <netinet/ip_var.h>
@@ -257,7 +258,7 @@ static LONG bsd_tcp_state(ULONG nx_state)
  * by the socket's window) and the walk happens inside the bracket, where
  * nothing else can add to them.
  */
-static ULONG bsd_tcp_queue_bytes(NX_PACKET *head, ULONG count)
+static ULONG bsd_tcp_receive_queue_bytes(NX_PACKET *head, ULONG count)
 {
     ULONG bytes = 0;
     ULONG n;
@@ -391,14 +392,15 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                     sock->nx_tcp_socket_connect_interface->nx_interface_ip_address);
 
             out->pcd_receive_queue_size =
-                bsd_tcp_queue_bytes(sock->nx_tcp_socket_receive_queue_head,
-                                    sock->nx_tcp_socket_receive_queue_count);
+                bsd_tcp_receive_queue_bytes(
+                    sock->nx_tcp_socket_receive_queue_head,
+                    sock->nx_tcp_socket_receive_queue_count);
 
-            /* Send-Q is the data sent and not yet acknowledged, which is what
-               NetX Duo's transmit_sent queue holds. */
-            out->pcd_send_queue_size =
-                bsd_tcp_queue_bytes(sock->nx_tcp_socket_transmit_sent_head,
-                                    sock->nx_tcp_socket_transmit_sent_count);
+            /* Send-Q is application data sent and not yet acknowledged.
+               NetX keeps that exact byte count: its packet list uses a
+               different link from a normal queue and still carries TCP
+               headers, so summing it is neither safe nor the right unit. */
+            out->pcd_send_queue_size = bsd_tcp_send_queue_bytes(sock);
         }
 
         sock = sock->nx_tcp_socket_created_next;

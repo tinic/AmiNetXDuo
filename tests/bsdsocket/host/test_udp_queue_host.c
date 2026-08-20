@@ -1,12 +1,14 @@
 /*
  * Regression for the layout of a UDP packet before nx_udp_socket_receive()
  * strips its header.  WaitSelect(), FIONREAD and GetNetworkStatistics()
- * inspect packets at this stage.
+ * inspect packets at this stage.  The last assertion covers TCP's separate
+ * sent-list accounting, which the same statistics table reports.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "udp_queue.h"
+#include "tcp_queue.h"
 
 #include "nx_udp.h"
 
@@ -29,6 +31,7 @@ int main(void)
     } storage;
     NX_PACKET     packet;
     NX_PACKET     second;
+    NX_TCP_SOCKET tcp;
     NX_UDP_HEADER *header;
     UINT          port = 0;
     ULONG         length = 0;
@@ -36,6 +39,7 @@ int main(void)
     memset(&storage, 0, sizeof(storage));
     memset(&packet, 0, sizeof(packet));
     memset(&second, 0, sizeof(second));
+    memset(&tcp, 0, sizeof(tcp));
 
     /* Deliberately put another value where nxd_udp_source_extract() looks:
        two longwords before prepend_ptr.  That location is inside the IP
@@ -78,6 +82,17 @@ int main(void)
     CHECK(bsd_udp_queue_info(&packet, &port, &length) == NX_INVALID_PACKET);
     CHECK(bsd_udp_queue_info(NX_NULL, &port, &length) == NX_INVALID_PACKET);
 
-    puts("udp_queue: queued source port and payload length");
+    /* TCP's Send-Q is the payload flight counter, not a sum through the
+       generic packet link (the sent list does not use that link at all). */
+    tcp.nx_tcp_socket_tx_outstanding_bytes = 37UL;
+    tcp.nx_tcp_socket_transmit_sent_head = &packet;
+    tcp.nx_tcp_socket_transmit_sent_count = 2UL;
+    packet.nx_packet_length = 39UL;
+    packet.nx_packet_queue_next = NX_NULL;
+    packet.nx_packet_union_next.nx_packet_tcp_queue_next = &second;
+    second.nx_packet_length = 38UL;
+    CHECK(bsd_tcp_send_queue_bytes(&tcp) == 37UL);
+
+    puts("socket queues: application-visible byte counts");
     return 0;
 }

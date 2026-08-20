@@ -113,9 +113,10 @@ endif()
 # so the target-width tx_port shim lets it run on arm64 hosts as well.
 if(NOT CMAKE_CROSSCOMPILING)
     # transfer.c's connected-UDP readiness and FIONREAD paths inspect packets
-    # before nx_udp_socket_receive() removes the UDP header.  This compiles the
-    # same small parser the library uses, so those layout assumptions run in
-    # ordinary host CTest rather than only in the guest IPv6 socket suite.
+    # before nx_udp_socket_receive() removes the UDP header.  netstats.c also
+    # reads UDP queue payloads and TCP's distinct sent-list accounting.  This
+    # compiles the same small helpers the library uses, so those layout
+    # assumptions run in ordinary host CTest rather than only in guest tests.
     add_executable(test_udp_queue
         host/test_udp_queue_host.c
         "${CMAKE_SOURCE_DIR}/src/bsdsocket/udp_queue.c")
