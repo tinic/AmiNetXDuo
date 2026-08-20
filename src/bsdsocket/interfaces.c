@@ -1311,6 +1311,14 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                 cfg->down_goes_offline = (item->ti_Data != 0) ? TRUE : FALSE;
                 break;
 
+            case IFA_RequiresInitDelay:
+                /* Passed through to ami_sana2_open(), which applies the
+                   documented one-second delay after configuring the device
+                   and before starting readers or sending the first packet. */
+                cfg->requires_init_delay =
+                    (item->ti_Data != 0) ? TRUE : FALSE;
+                break;
+
             case IFA_SetDebugMode:
                 /* Behavioural, BOOL: there is no debug mode, so a request to
                    switch it off succeeds and one to switch it on does not. */
@@ -1389,18 +1397,12 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
              *   IFA_CopyMode                CM_FastWordCopy is "the faster data
              *                               copying code". The bytes that come
              *                               out are the same either way.
-             *   IFA_RequiresInitDelay       a settle delay for devices that
-             *                               lose the first frame. Defaults to
-             *                               TRUE and is not implemented here,
-             *                               so a refusal of TRUE refuses the
-             *                               documented default.
              * -----------------------------------------------------------
              */
             case IFA_NumReadRequests:
             case IFA_NumWriteRequests:
             case IFA_NumARPRequests:
             case IFA_CopyMode:
-            case IFA_RequiresInitDelay:
                 break;
 
             default:
