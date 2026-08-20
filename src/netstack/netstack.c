@@ -809,6 +809,33 @@ static VOID ami_ns_name_after_card(AmiNetStack *ns)
 
 /* ---------------------------------------------------------- NetX Duo build */
 
+/*
+ * Take one interface out of the stack's tables and give its device back.
+ *
+ * FALSE means the device still owns SANA-II requests written into this
+ * stack's memory, which is the one condition that is genuinely unrecoverable:
+ * ami_sana2_close() keeps the allocation rather than let the next completion
+ * be written over whatever took its place, and the caller must then tear the
+ * whole stack down rather than carry on with a slot it cannot account for.
+ * Nothing can be orphaned on an interface that never attached -- no driver
+ * command ran for it, so no CMD_READ was ever issued -- so this is a guard
+ * against the state changing, not an expected answer.
+ */
+static BOOL ami_ns_drop_iface(AmiNetStack *ns, UWORD slot)
+{
+    AmiSana2If *iface = ns->ns_Iface[slot];
+
+    if (iface == NULL)
+        return TRUE;
+
+    if (!ami_sana2_close(iface))
+        return FALSE;
+
+    ns->ns_Iface[slot] = NULL;
+
+    return TRUE;
+}
+
 static LONG ami_ns_create_ip(AmiNetStack *ns)
 {
     const AmiIfConfig *cfg0 = &ns->ns_Config.interfaces[0];
@@ -817,6 +844,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     ULONG              actual;
     UINT               status;
     UWORD              i;
+    UWORD              kept;
 
     if (!ami_ns_system_initialised)
     {
@@ -924,18 +952,56 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (status != NX_SUCCESS)
         AMI_WARN("netstack: nx_ip_fragment_enable failed (%ld)", (long)status);
 
-    /* Secondary interfaces. nx_ip_interface_attach() drives the driver from
-       this context, so the binding must exist first here too. */
+    /*
+     * Secondary interfaces. nx_ip_interface_attach() drives the driver from
+     * this context, so the binding must exist first here too.
+     *
+     * A secondary that does not attach is dropped, not left in place and not
+     * fatal.
+     *
+     * Left in place it is a hole: ns_Iface[], ns_Config.interfaces[] and
+     * NX_INTERFACE are one interface by one index everywhere after this loop,
+     * so a slot NetX Duo rejected still reports a static address, and DHCP
+     * and the IPv6 configuration walk into it.
+     *
+     * Fatal, it is a two-card machine with no networking at all because of
+     * one card, and the way there is ordinary: nx_ip_interface_attach()
+     * refuses NX_DUPLICATED_ENTRY for a non-zero address another interface
+     * already carries, so two interface files that name the same ADDRESS --
+     * one copied from the other -- take the whole stack down instead of the
+     * second card.
+     *
+     * So the interface is moved out and the ones behind it move down over it,
+     * which is what ami_ns_open_devices() already does for a device that does
+     * not open.  The machine comes up on the cards that attached.
+     */
+    kept = 1;
+
     for (i = 1; i < ns->ns_IfaceCount; i++)
     {
-        const AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];
+        const AmiIfConfig *cfg;
         ULONG              addr;
         ULONG              mask;
 
-        if (ami_sana2_attach(ns->ns_Iface[i], &ns->ns_Ip, i) != AMI_NET_OK)
+        if (kept != i)
         {
-            AMI_ERROR("netstack: cannot bind interface %ld", (long)i);
-            return AMI_NET_ERR_STATE;
+            ns->ns_Config.interfaces[kept] = ns->ns_Config.interfaces[i];
+            ns->ns_Iface[kept]             = ns->ns_Iface[i];
+            ns->ns_IfaceMdns[kept]         = ns->ns_IfaceMdns[i];
+            ns->ns_IfaceCfg[kept]          = kept;
+            ns->ns_Iface[i]                = NULL;
+        }
+
+        cfg = &ns->ns_Config.interfaces[kept];
+
+        if (ami_sana2_attach(ns->ns_Iface[kept], &ns->ns_Ip, kept)
+                != AMI_NET_OK)
+        {
+            AMI_ERROR("netstack: interface '%s' did not bind, it is not "
+                      "part of this stack", cfg->name);
+            if (!ami_ns_drop_iface(ns, kept))
+                return AMI_NET_ERR_STATE;
+            continue;
         }
 
         addr = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->address : 0UL;
@@ -945,15 +1011,34 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
                                         addr, mask, ami_sana2_driver_entry);
         if (status != NX_SUCCESS)
         {
-            /* Everything after this loop addresses ns_Iface[], ns_Config and
-               NX_INTERFACE by the same index.  Continuing with a hole makes
-               a later static address look resolved even though NetX Duo
-               rejected its slot, and DHCP/IPv6 then operate on that invalid
-               entry.  The caller tears the whole partial stack down. */
-            AMI_ERROR("netstack: interface '%s' attach failed (%ld)",
-                      cfg->name, (long)status);
-            return AMI_NET_ERR_STATE;
+            /* The status is printed because it is the difference between a
+               card fault and a configuration mistake: NX_DUPLICATED_ENTRY
+               means another interface in this stack already carries the
+               address this one was given. */
+            AMI_ERROR("netstack: interface '%s' attach failed (%ld), it is "
+                      "not part of this stack", cfg->name, (long)status);
+            if (!ami_ns_drop_iface(ns, kept))
+                return AMI_NET_ERR_STATE;
+            continue;
         }
+
+        kept++;
+    }
+
+    if (kept < ns->ns_IfaceCount)
+    {
+        /* An interface that is not attached is not an interface.  Leaving it
+           counted shows a card that is not carrying traffic, and leaves the
+           stale copy of a moved entry behind the last live one. */
+        for (i = kept; i < ns->ns_IfaceCount; i++)
+        {
+            if (!ami_ns_drop_iface(ns, i))
+                return AMI_NET_ERR_STATE;
+            ns->ns_Config.interfaces[i].configured = FALSE;
+        }
+
+        ns->ns_IfaceCount             = kept;
+        ns->ns_Config.interface_count = kept;
     }
 
     /*
