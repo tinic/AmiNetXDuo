@@ -19,11 +19,13 @@
 #include <stdint.h>
 
 #include <exec/types.h>
+#include <exec/execbase.h>
 #include <exec/libraries.h>
 #include <dos/dos.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/bsdsocket.h>
+#include <inline/macros.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -83,10 +85,46 @@ static int           atfc_in_case;
 /*
  * Output() rather than stdout: a guest test's stdout is what the run script
  * captures, and Write() to it needs no flush at a point the test may not reach.
+ *
+ * AND THE SERIAL PORT, which is the half that was missing.  Output() is a file
+ * on the emulated drive: a run that never returns leaves it whatever length
+ * the handler last committed, which for this binary is zero, and a harness
+ * cannot tell that from a program that never started.  RawPutChar goes out a
+ * byte at a time as it happens and survives a hang, a Guru and a reset, which
+ * is what every other harness here reads.  It is also what showed that this
+ * binary crashes before main() rather than hanging: see tests/HARNESSES.
  */
+#ifndef RawPutChar
+#  define RawPutChar(c) \
+      LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
+#endif
+
+static void atfc_serial(const char *s)
+{
+    while (*s != '\0')
+    {
+        RawPutChar((UBYTE)*s++);
+    }
+}
+
+/*
+ * Before main(), to tell a crash in the C startup from a crash in a case.
+ * AtfTcpSocket prints neither this nor the first line of atfc_run(), which is
+ * what puts its Address Error ahead of every line of code in this file.
+ */
+static void atfc_ctor(void) __attribute__((constructor));
+static void atfc_ctor(void)
+{
+    atfc_serial("atf: ctor\n");
+}
+
 static void atfc_emit(const char *s)
 {
-    BPTR out = Output();
+    BPTR out;
+
+    atfc_serial(s);
+
+    out = Output();
 
     if (out != (BPTR)0)
         (void)Write(out, (APTR)s, (LONG)strlen(s));
@@ -330,14 +368,20 @@ int atfc_run(int (*add_tcs)(atf_tp_t *), const char *progname)
     static const UBYTE tap_mac[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x09 };
     int i;
 
+    atfc_serial("atf: entered\n");
+
     atfc_line("AmiNetXDuo -- %s, adopted from FreeBSD tests/sys/netinet",
               progname);
+
+    atfc_serial("atf: tap_install\n");
 
     if (tap_install(tap_mac) != 0)
     {
         atfc_line("cannot install the test interface");
         return 20;
     }
+
+    atfc_serial("atf: OpenLibrary\n");
 
     SocketBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
     if (SocketBase == NULL)
@@ -362,6 +406,8 @@ int atfc_run(int (*add_tcs)(atf_tp_t *), const char *progname)
         tap_remove();
         return 20;
     }
+
+    atfc_serial("atf: cases\n");
 
     for (i = 0; i < atfc_tp.tp_count; i++)
         (void)atfc_run_case(&atfc_tp.tp_cases[i]);
