@@ -135,6 +135,9 @@ static void h_reply(void)
     }
 }
 
+static ULONG h_sleeps;
+static ULONG h_reply_on_sleep;
+
 
 /* ------------------------------------------------------------------ stubs -- */
 
@@ -220,6 +223,9 @@ UINT _nxe_packet_release(NX_PACKET **packet_ptr_ptr)
 UINT _tx_thread_sleep(ULONG ticks)
 {
     (VOID)ticks;
+    h_sleeps++;
+    if (h_reply_on_sleep != 0 && h_sleeps == h_reply_on_sleep)
+        h_reply();
     return TX_SUCCESS;
 }
 
@@ -268,6 +274,8 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_sent     = NULL;
     h_sends    = 0;
     h_releases = 0;
+    h_sleeps   = 0;
+    h_reply_on_sleep = 0;
 }
 
 /*
@@ -648,6 +656,30 @@ static void test_no_pad_off_ethernet(void)
             "and its length is the frame's, unpadded");
 }
 
+/* A reply arriving during the final permitted sleep is still inside the
+   drain deadline.  It must be reaped before the interface is declared unsafe
+   to free. */
+static void test_drain_reaps_final_sleep(void)
+{
+    printf("sana2: transmit drain reaps the final deadline window\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS,
+            "the write is posted");
+
+    h_reply_on_sleep = 64;
+    ami_sana2_tx_drain(&iface);
+
+    h_check(h_sleeps == 64, "the device replied in the final sleep");
+    h_check(iface.tx_orphaned == FALSE,
+            "and the returned write is not declared orphaned");
+    h_check(iface.tx[0].busy == FALSE, "and its slot is reusable");
+    h_check(h_releases == 1, "and its packet was released");
+}
+
 
 /* ------------------------------------------------------------------ main -- */
 
@@ -664,6 +696,7 @@ int main(void)
     test_raw_refused_falls_back_to_cooked();
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
+    test_drain_reaps_final_sleep();
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");

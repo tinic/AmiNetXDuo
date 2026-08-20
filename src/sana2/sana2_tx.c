@@ -288,7 +288,8 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
             AbortIO((struct IORequest *)&iface->tx[i].req);
     }
 
-    for (spins = 0; spins < 64; spins++)
+    spins = 0;
+    for (;;)
     {
         ami_sana2_tx_reap(iface);
 
@@ -299,9 +300,10 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
                 busy++;
         }
 
-        if (busy == 0)
+        if (busy == 0 || spins >= 64)
             break;
 
+        spins++;
         tx_thread_sleep(1);
     }
 
