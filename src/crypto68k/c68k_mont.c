@@ -409,6 +409,13 @@ UINT        total;
 c68k_limb  *t = work;
 
 
+    /* Match c68k_mont_sqr(): the public empty-input primitive is a no-op.
+       Without this guard the empty multiply still writes work[0]. */
+    if (m_len == 0u)
+    {
+        return;
+    }
+
     total = m_len << 1;
 
     c68k_mul_n(t, x, y, m_len, work + total + 1u);

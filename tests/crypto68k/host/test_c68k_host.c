@@ -577,9 +577,18 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
         t_fail("undersized scratch accepted", 0, 0);
     }
 
-    /* The standalone square primitive is public too.  An empty operand must
-       not turn its unsigned reverse loop into a walk through all memory. */
+    /* The standalone primitives are public too.  An empty operand must not
+       write their shared output/scratch guard; square also has an unsigned
+       reverse loop which must not become a walk through all memory. */
     zero_guard = 0xA5A55A5AUL;
+    c68k_mont_mul(&zero_guard, &zero_guard, &zero_guard, &zero_guard, 0u, 0u,
+                  &zero_guard);
+    t_checks++;
+    if (zero_guard != 0xA5A55A5AUL)
+    {
+        t_fail("zero-limb Montgomery multiply wrote output", 0, zero_guard);
+    }
+
     c68k_mont_sqr(&zero_guard, &zero_guard, &zero_guard, 0u, 0u,
                   &zero_guard);
     t_checks++;
@@ -589,7 +598,7 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
     }
 
     printf("  0^e, x^0, x^0 mod 1, even modulus, undersized scratch, "
-           "zero-limb square\n");
+           "zero-limb multiply/square\n");
 }
 
 
