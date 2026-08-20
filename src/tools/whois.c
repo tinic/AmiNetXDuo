@@ -346,14 +346,20 @@ int main(int argc, char **argv)
     server = (args[ARG_SERVER] != 0) ? (const char *)args[ARG_SERVER]
                                      : WHOIS_DEFAULT;
     follow = (args[ARG_FOLLOW] != 0) ? TRUE : FALSE;
-    port   = (args[ARG_PORT] != 0)
-                 ? (UWORD)(*(LONG *)args[ARG_PORT]) : (UWORD)WHOIS_PORT;
+    port   = (UWORD)WHOIS_PORT;
 
-    if (port == 0)
+    if (args[ARG_PORT] != 0)
     {
-        tool_error("port 0 is not a port");
-        FreeArgs(rda);
-        return RETURN_ERROR;
+        LONG p = *(LONG *)args[ARG_PORT];
+
+        if (p < 1 || p > 65535)
+        {
+            tool_error("%ld is not a port", p);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        port = (UWORD)p;
     }
 
     if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &family))
