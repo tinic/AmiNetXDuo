@@ -375,7 +375,29 @@ chmod 755 "$TREE"/C/*
 #
 # AMINETXDUO_SSH names the built binary outright; the release workflow sets it,
 # so the path it builds into and the path packed here cannot drift.
+#
+# AND WHEN NOBODY NAMES ONE, BUILD IT. A release archive without C:ssh is not
+# the release: the same reasoning that makes this script build a missing CMake
+# tree rather than print the command applies here, and the half that was left
+# out is the one that silently produces a SHORTER archive rather than an error.
+# An e2e run against a hand-built archive staged `C/ssh ABSENT` and nothing
+# said so. AMINETXDUO_DIST_NO_BUILD=1 still reports instead of building, which
+# is what the release workflow wants -- there the client is built in its own
+# step and AMINETXDUO_SSH names it, so building here would be the second copy.
 CLIENT_SSH="${AMINETXDUO_SSH:-}"
+if [ -z "$CLIENT_SSH" ] && [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+    CLIENT_SSH="$ROOT/build/ssh/dbclient"
+    if [ ! -x "$CLIENT_SSH" ]; then
+        echo "==> building the ssh client (no AMINETXDUO_SSH given)" >&2
+        # The same two settings the release workflow uses: ONE binary for the
+        # whole 68k family, picking its X25519 field multiply from AttnFlags at
+        # the first handshake rather than being built per CPU.
+        AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
+            "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh" >&2 || {
+            echo "ssh client build failed; the archive would carry none" >&2
+            exit 2; }
+    fi
+fi
 if [ -n "$CLIENT_SSH" ] && [ -x "$CLIENT_SSH" ]; then
     cp "$CLIENT_SSH" "$TREE/C/ssh"
     chmod 755 "$TREE/C/ssh"
