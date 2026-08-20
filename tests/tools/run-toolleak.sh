@@ -212,6 +212,7 @@ cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10
 cold|fetch|bad-timeout|5|re:TIMEOUT must be between 0 and|-|SYS:fetch http://10.0.2.2/ TIMEOUT=-1
 cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 23 -4 -6
 cold|tftp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:tftp 10.0.2.2 GET x TIMEOUT 1 -4 -6
+cold|tftp|bad-timeout|5|re:TIMEOUT must be between 0 and|-|SYS:tftp 10.0.2.2 GET x TIMEOUT=-1
 cold|whois|family-both|5|re:-4 and -6 cannot both be given|-|SYS:whois plain.test -4 -6
 cold|whois|bad-port|5|re:-1 is not a port|-|SYS:whois plain.test PORT=-1
 cold|sntp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:sntp 10.0.2.2 TIMEOUT 2 -4 -6

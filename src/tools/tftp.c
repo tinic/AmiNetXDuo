@@ -62,6 +62,7 @@ enum
 #define TFTP_PORT               69
 #define TFTP_BLOCK              512
 #define TFTP_DEFAULT_TIMEOUT    5UL     /* seconds per attempt              */
+#define TFTP_TIMEOUT_MAX        858993459L /* five 200 ms slices still fit  */
 #define TFTP_RETRIES            5       /* attempts before giving up        */
 
 /* Opcodes. */
@@ -216,7 +217,7 @@ static ULONG tftp_build_request(UWORD opcode, const char *name)
 static LONG tftp_wait(struct Library *sb, LONG sock, ULONG secs,
                       ToolSockAddrAny *from)
 {
-    ULONG slices = (secs * 1000UL) / 200UL;
+    ULONG slices = secs * 5UL;
     ULONG i;
 
     if (slices == 0)
@@ -667,9 +668,23 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    x.timeout = (args[ARG_TIMEOUT] != 0)
-                    ? (ULONG)(*(LONG *)args[ARG_TIMEOUT])
-                    : TFTP_DEFAULT_TIMEOUT;
+    x.timeout = TFTP_DEFAULT_TIMEOUT;
+
+    if (args[ARG_TIMEOUT] != 0)
+    {
+        LONG seconds = *(LONG *)args[ARG_TIMEOUT];
+
+        if (seconds < 0 || seconds > TFTP_TIMEOUT_MAX)
+        {
+            tool_error("TIMEOUT must be between 0 and %ld seconds",
+                       (LONG)TFTP_TIMEOUT_MAX);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        x.timeout = (ULONG)seconds;
+    }
+
     if (x.timeout == 0)
         x.timeout = TFTP_DEFAULT_TIMEOUT;
 
