@@ -252,27 +252,6 @@ static LONG bsd_tcp_state(ULONG nx_state)
 }
 
 /*
- * The bytes in a packet queue. NetX Duo queues whole NX_PACKETs and keeps a
- * packet count, but pcd_receive_queue_size is a byte size, so nx_packet_length
- * is summed over the queue. The queues are short (the receive one is bounded
- * by the socket's window) and the walk happens inside the bracket, where
- * nothing else can add to them.
- */
-static ULONG bsd_tcp_receive_queue_bytes(NX_PACKET *head, ULONG count)
-{
-    ULONG bytes = 0;
-    ULONG n;
-
-    for (n = 0; n < count && head != NX_NULL; n++)
-    {
-        bytes += head->nx_packet_length;
-        head   = head->nx_packet_queue_next;
-    }
-
-    return bytes;
-}
-
-/*
  * How many entries the caller's buffer holds, and where the next one goes.
  * `size` can be smaller than the whole answer. "size, Number of bytes to
  * copy" is the caller's limit, not the total, so this is bounded both ways.
@@ -392,9 +371,7 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                     sock->nx_tcp_socket_connect_interface->nx_interface_ip_address);
 
             out->pcd_receive_queue_size =
-                bsd_tcp_receive_queue_bytes(
-                    sock->nx_tcp_socket_receive_queue_head,
-                    sock->nx_tcp_socket_receive_queue_count);
+                bsd_tcp_receive_queue_bytes(sock);
 
             /* Send-Q is application data sent and not yet acknowledged.
                NetX keeps that exact byte count: its packet list uses a

@@ -1,8 +1,8 @@
 /*
  * Regression for the layout of a UDP packet before nx_udp_socket_receive()
  * strips its header.  WaitSelect(), FIONREAD and GetNetworkStatistics()
- * inspect packets at this stage.  The last assertion covers TCP's separate
- * sent-list accounting, which the same statistics table reports.
+ * inspect packets at this stage.  The TCP assertions cover the distinct sent
+ * and receive-list accounting which the same statistics table reports.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -29,6 +29,10 @@ int main(void)
         ULONG words[8];
         UCHAR bytes[32];
     } storage;
+    union {
+        ULONG words[16];
+        UCHAR bytes[64];
+    } tcp_storage[2];
     NX_PACKET     packet;
     NX_PACKET     second;
     NX_TCP_SOCKET tcp;
@@ -37,6 +41,7 @@ int main(void)
     ULONG         length = 0;
 
     memset(&storage, 0, sizeof(storage));
+    memset(tcp_storage, 0, sizeof(tcp_storage));
     memset(&packet, 0, sizeof(packet));
     memset(&second, 0, sizeof(second));
     memset(&tcp, 0, sizeof(tcp));
@@ -92,6 +97,31 @@ int main(void)
     packet.nx_packet_union_next.nx_packet_tcp_queue_next = &second;
     second.nx_packet_length = 38UL;
     CHECK(bsd_tcp_send_queue_bytes(&tcp) == 37UL);
+
+    /* Receive packets retain their TCP headers and use the TCP-specific link;
+       nx_packet_queue_next is a readiness sentinel, not a list pointer. */
+    packet.nx_packet_prepend_ptr = tcp_storage[0].bytes;
+    packet.nx_packet_length = 39UL;
+    packet.nx_packet_queue_next = (NX_PACKET *)NX_PACKET_READY;
+    packet.nx_packet_union_next.nx_packet_tcp_queue_next = &second;
+    ((NX_TCP_HEADER *)packet.nx_packet_prepend_ptr)->nx_tcp_header_word_3 =
+        5UL << NX_TCP_HEADER_SHIFT;
+
+    second.nx_packet_prepend_ptr = tcp_storage[1].bytes;
+    second.nx_packet_length = 38UL;
+    second.nx_packet_queue_next = (NX_PACKET *)NX_PACKET_READY;
+    second.nx_packet_union_next.nx_packet_tcp_queue_next =
+        (NX_PACKET *)NX_PACKET_ENQUEUED;
+    ((NX_TCP_HEADER *)second.nx_packet_prepend_ptr)->nx_tcp_header_word_3 =
+        5UL << NX_TCP_HEADER_SHIFT;
+
+    tcp.nx_tcp_socket_receive_queue_head = &packet;
+    tcp.nx_tcp_socket_receive_queue_tail = &second;
+    tcp.nx_tcp_socket_receive_queue_count = 2UL;
+    CHECK(bsd_tcp_receive_queue_bytes(&tcp) == 37UL);
+
+    packet.nx_packet_queue_next = NX_NULL;
+    CHECK(bsd_tcp_receive_queue_bytes(&tcp) == 0UL);
 
     puts("socket queues: application-visible byte counts");
     return 0;
