@@ -1794,10 +1794,16 @@ BOOL http_term_start(VOID)
     if (!http_term_available())
         return FALSE;
 
+    /* Every session gets a generation of its own, not only one that replaces
+       an abandoned Shell.  A command started asynchronously can retain a `*`
+       handle after an otherwise clean Shell exit.  Reusing that generation
+       would let the old handle enter the next session's rings directly. */
+    term_gen++;
+
     /*
      * Cut the last session loose, if it is still there.
      *
-     * The generation moves first, so nothing the old Shell sends from here on
+     * The generation moved above, so nothing the old Shell sends from here on
      * finds a ring.  Then anything it had held is answered, because a packet
      * held on a pipe that no longer belongs to it leaves a process asleep for
      * ever.  A read gets end of file and a write gets an error, which between
@@ -1805,8 +1811,6 @@ BOOL http_term_start(VOID)
      */
     if (term_active)
     {
-        term_gen++;
-
         if (term_in.held != NULL)
         {
             struct DosPacket *held = term_in.held;
