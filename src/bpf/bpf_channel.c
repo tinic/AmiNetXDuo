@@ -737,13 +737,17 @@ static ULONG ami_bpf_buffered(const AmiBpfChan *ch)
 LONG ami_bpf_data_waiting(APTR owner, LONG channel)
 {
     LONG        status;
-    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, &status);
+    AmiBpfChan *ch;
     ULONG       n;
 
-    if (ch == NULL)
-        return status;
-
     ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+    if (ch == NULL)
+    {
+        ami_bpf_unlock();
+        return status;
+    }
+
     n = ami_bpf_buffered(ch);
     ami_bpf_unlock();
 
@@ -1132,12 +1136,25 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     switch (AMI_BPF_CMD(command))
     {
     case AMI_BPF_CMD(AMI_BPF_FIONREAD):
+    {
+        ULONG n;
+
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
+
         ami_bpf_lock();
-        *(ULONG *)buffer = ami_bpf_buffered(ch);
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        n = ami_bpf_buffered(ch);
         ami_bpf_unlock();
+
+        *(ULONG *)buffer = n;
         return 0;
+    }
 
     case AMI_BPF_CMD(BIOCGBLEN):
         if (buffer == NULL)

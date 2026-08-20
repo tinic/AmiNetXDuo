@@ -1278,6 +1278,39 @@ static void t_reopen_mid_read(void)
     ami_bpf_tap_rx(iface_cookie, t_reopen_frame, t_reopen_len);
 }
 
+static void test_readiness_close_reopen(void)
+{
+    ULONG bytes;
+    LONG  status;
+
+    printf("bpf: readiness queries cannot inspect a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    t_reopen_len = make_tcp(t_reopen_frame, 1234, 80, 5, 0, 6);
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    stub_on_lock = t_reopen_mid_read;
+    status = ami_bpf_data_waiting(T_BPF_OWNER, 0);
+    CHECK(stub_on_lock == NULL);
+    CHECK(status == AMI_BPF_EPERM);
+    CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 0) > 0);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    bytes        = 0xA5A5A5A5UL;
+    stub_on_lock = t_reopen_mid_read;
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, AMI_BPF_FIONREAD, &bytes);
+    CHECK(stub_on_lock == NULL);
+    CHECK(status == AMI_BPF_EPERM);
+    CHECK(bytes == 0xA5A5A5A5UL);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 static void test_reopen_under_reader(void)
 {
     UBYTE out[512];
@@ -1592,6 +1625,7 @@ int main(int argc, char **argv)
     test_signal_mask_close_reopen();
     test_blen_close_reopen();
     test_ioctl_close_reopen();
+    test_readiness_close_reopen();
     test_reopen_under_reader();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
