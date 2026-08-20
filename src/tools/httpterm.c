@@ -2799,16 +2799,43 @@ VOID http_term_sock_evict(HttpTermSock *t, UWORD code)
 {
     UBYTE         frame[HTTP_TERM_CTL];
     unsigned long n;
+    unsigned long at = 0;
 
     if (t->closing)
         return;
 
+    t->closing = 1;
+    t->why     = code;
+
+    /* A close can only begin at a frame boundary.  Takeover closes the socket
+       on the caller's next line, so there is no later pass to finish whatever
+       Shell frame is already partly out.  Push its remainder without waiting;
+       if the socket will not take all of it, omit the close rather than splice
+       a control-frame header into the middle of a data payload. */
+    while (t->out_sent < t->out_len)
+    {
+        LONG sent = tool_sock_send(t->sb, t->sock, &t->out[t->out_sent],
+                                   (LONG)(t->out_len - t->out_sent));
+
+        if (sent <= 0)
+            return;
+
+        t->out_sent += (ULONG)sent;
+    }
+
     n = http_ws_close_frame(frame, sizeof(frame), code,
                             "the terminal was taken over from another browser");
 
-    if (n > 0UL)
-        (VOID)tool_sock_send(t->sb, t->sock, frame, (LONG)n);
+    /* Best effort, still without waiting.  Positive short writes can make
+       progress immediately, while zero or an error means the FIN is the only
+       truthful ending this peer can be given now. */
+    while (at < n)
+    {
+        LONG sent = tool_sock_send(t->sb, t->sock, &frame[at], (LONG)(n - at));
 
-    t->closing = 1;
-    t->why     = code;
+        if (sent <= 0)
+            break;
+
+        at += (unsigned long)sent;
+    }
 }
