@@ -9,6 +9,9 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.25.0 -- 2026-08-20
+
+- A DHCPv6 lease is renewed once, when it is due, rather than rebound twenty-five times a second forever. A server that answers with T1 and T2 of zero is telling the client to pick its own renewal times; the client read zero as "renew now" and re-entered the rebind state on every pass, which also meant a renewal never actually reached the wire and the address's lifetime shrank each time. On the lab's network that was 2544 rebinds in five minutes, and is now none
 - The remote desktop shows the screen and not the memory beside it. A graphics card rounds a screen's bitmap up to the board's own pitch, and the console took its width from the bitmap, so a 1368-pixel-wide screen was served as 1600: two hundred and thirty-two columns of whatever the card had off the right-hand edge, on every frame, and seventeen per cent more data to send than the screen contains. A planar screen had the same, rounded up to sixteen
 - An encrypted connection is three to five times faster and no longer takes the machine off the network while it runs. A 4096-bit certificate -- which is what every Let's Encrypt chain ends at -- was handed to the reference arithmetic instead of the 68k routines, one silent block of about ninety seconds per handshake, and the routines that did run gave the rest of the machine a turn only seventeen times in an operation. `fetch https://www.gnu.org/` goes from 100 seconds to twenty or thirty, and a machine that used to stop answering for its own address for a minute at a time now answers throughout
 - `NetSetup` no longer writes uninitialised memory into the interface file. A call that did not pass `IPV6=` emitted a `CONFIGURE6` line holding whatever was on the stack, into a file the stack reads on the next boot
