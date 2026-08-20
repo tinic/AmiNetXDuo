@@ -236,6 +236,60 @@ static int ws_close_code_valid(unsigned short code)
                ? 0 : 1;
 }
 
+/* Strict UTF-8 for the reason bytes of a Close frame.  Control payloads are
+   held whole, so no decoder state has to survive a socket-read boundary here.
+   The lead-byte ranges reject overlong forms, surrogate code points and
+   values beyond U+10FFFF as required by RFC 3629. */
+static int ws_utf8_valid(const unsigned char *s, unsigned long n)
+{
+    unsigned long i = 0;
+
+    while (i < n)
+    {
+        unsigned char c = s[i++];
+
+        if (c <= 0x7f)
+            continue;
+
+        if (c >= 0xc2 && c <= 0xdf)
+        {
+            if (i >= n || s[i] < 0x80 || s[i] > 0xbf)
+                return 0;
+            i++;
+            continue;
+        }
+
+        if (c >= 0xe0 && c <= 0xef)
+        {
+            unsigned char lo = (c == 0xe0) ? 0xa0 : 0x80;
+            unsigned char hi = (c == 0xed) ? 0x9f : 0xbf;
+
+            if (i + 1UL >= n || s[i] < lo || s[i] > hi ||
+                s[i + 1UL] < 0x80 || s[i + 1UL] > 0xbf)
+                return 0;
+            i += 2UL;
+            continue;
+        }
+
+        if (c >= 0xf0 && c <= 0xf4)
+        {
+            unsigned char lo = (c == 0xf0) ? 0x90 : 0x80;
+            unsigned char hi = (c == 0xf4) ? 0x8f : 0xbf;
+
+            if (i + 2UL >= n || s[i] < lo || s[i] > hi ||
+                s[i + 1UL] < 0x80 || s[i + 1UL] > 0xbf ||
+                s[i + 2UL] < 0x80 || s[i + 2UL] > 0xbf)
+                return 0;
+            i += 3UL;
+            continue;
+        }
+
+        return 0;
+    }
+
+    return 1;
+}
+
 /*
  * The header is complete.  Everything RFC 6455 says a server must refuse is
  * decided here, once, rather than being spread over the payload path where
@@ -467,6 +521,13 @@ long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                             ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
                             break;
                         }
+
+                        if (!ws_utf8_valid(&in->ctl[2],
+                                           (unsigned long)in->ctl_n - 2UL))
+                        {
+                            ws_fail(in, HTTP_WS_CLOSE_DATA);
+                            break;
+                        }
                     }
 
                     if (sink != 0)
@@ -528,6 +589,7 @@ const char *http_ws_close_reason(unsigned short code)
         case HTTP_WS_CLOSE_GOING:    return "the server is going away";
         case HTTP_WS_CLOSE_PROTOCOL: return "that is not a frame this server "
                                             "can read";
+        case HTTP_WS_CLOSE_DATA:     return "that frame contains invalid text";
         case HTTP_WS_CLOSE_TOOBIG:   return "that message is larger than this "
                                             "server will read";
         default:                     return "the connection ended";

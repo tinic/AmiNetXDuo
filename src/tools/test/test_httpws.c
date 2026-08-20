@@ -472,6 +472,23 @@ static void test_frames(void)
                (long)sizeof(high), "", HTTP_WS_CLOSE_PROTOCOL);
     }
 
+    /* RFC 6455 5.5.1: the bytes after the status are UTF-8.  Both are forms a
+       byte-copying decoder accepts: an overlong slash and a truncated Euro
+       sign. */
+    {
+        static const unsigned char overlong[] = {
+            0x88, 0x84, 0, 0, 0, 0, 0x03, 0xe8, 0xc0, 0xaf
+        };
+        static const unsigned char truncated[] = {
+            0x88, 0x84, 0, 0, 0, 0, 0x03, 0xe8, 0xe2, 0x82
+        };
+
+        expect("an overlong close reason is refused", overlong,
+               (long)sizeof(overlong), "", HTTP_WS_CLOSE_DATA);
+        expect("a truncated close reason is refused", truncated,
+               (long)sizeof(truncated), "", HTTP_WS_CLOSE_DATA);
+    }
+
     /* A continuation with nothing to continue. */
     {
         static const unsigned char orphan[] = {
@@ -604,6 +621,7 @@ static void test_reasons(void)
     printf("what a close code is called\n");
 
     CHECK(http_ws_close_reason(HTTP_WS_CLOSE_PROTOCOL) != 0);
+    CHECK(http_ws_close_reason(HTTP_WS_CLOSE_DATA) != 0);
     CHECK(http_ws_close_reason(HTTP_WS_CLOSE_TOOBIG) != 0);
     CHECK(http_ws_close_reason(4999) != 0);
 }

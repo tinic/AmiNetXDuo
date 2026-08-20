@@ -82,6 +82,7 @@ typedef enum HttpWsEvent
 #define HTTP_WS_CLOSE_NORMAL    1000
 #define HTTP_WS_CLOSE_GOING     1001
 #define HTTP_WS_CLOSE_PROTOCOL  1002
+#define HTTP_WS_CLOSE_DATA      1007
 #define HTTP_WS_CLOSE_TOOBIG    1009
 
 /* The longest control frame payload there is, RFC 6455 5.5.  A control frame
