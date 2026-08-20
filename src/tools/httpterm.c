@@ -442,6 +442,27 @@ static VOID term_reply(struct DosPacket *pkt, LONG res1, LONG res2)
     PutMsg(reply, pkt->dp_Link);
 }
 
+/* Whether an untagged console packet came from the process dos.library most
+   recently named with ACTION_CHANGE_SIGNAL.
+
+   SetMode(), WaitForChar() and Open("*") do not carry the originating
+   handle's fh_Arg1, so their generation cannot be checked directly.  Their
+   dp_Port is the sender's reply port, though, and cli_init.c/execute.c first
+   give that same port to ACTION_CHANGE_SIGNAL on the tagged input handle.
+   This is what keeps a process left behind by an abandoned generation from
+   operating the replacement session through packets with no handle argument. */
+static BOOL term_packet_current(const struct DosPacket *pkt)
+{
+    if (!term_active || pkt->dp_Port == NULL)
+        return FALSE;
+
+    if (term_break_port != NULL)
+        return (pkt->dp_Port == term_break_port) ? TRUE : FALSE;
+
+    return (term_shell_task != NULL &&
+            pkt->dp_Port->mp_SigTask == term_shell_task) ? TRUE : FALSE;
+}
+
 /* ------------------------------------------------- the write, scanned --- */
 
 /*
@@ -1157,6 +1178,12 @@ VOID http_term_service(VOID)
             {
                 UBYTE want = (pkt->dp_Arg1 != 0) ? 1 : 0;
 
+                if (!term_packet_current(pkt))
+                {
+                    term_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
+                    continue;
+                }
+
                 if (want != term_raw)
                 {
                     term_raw          = want;
@@ -1296,6 +1323,12 @@ VOID http_term_service(VOID)
              * time, the same invariant the held READ relies on.
              */
             case ACTION_WAIT_CHAR:
+                if (!term_packet_current(pkt))
+                {
+                    term_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
+                    continue;
+                }
+
                 if (term_char_ready())
                 {
                     term_reply(pkt, DOSTRUE, 0);
@@ -1341,7 +1374,7 @@ VOID http_term_service(VOID)
                 struct FileHandle *fh =
                     (struct FileHandle *)BADDR(pkt->dp_Arg1);
 
-                if (fh == NULL || !term_active)
+                if (fh == NULL || !term_packet_current(pkt))
                 {
                     term_reply(pkt, DOSFALSE, ERROR_OBJECT_NOT_FOUND);
                     continue;
@@ -1904,6 +1937,7 @@ BOOL http_term_start(VOID)
     term_raw          = 0;
     term_mode_pending = 1;
     term_in_urgent    = 0;
+    term_shell_task   = NULL;
     term_break_port   = NULL;
     term_cols         = 80;
     term_rows         = 25;
