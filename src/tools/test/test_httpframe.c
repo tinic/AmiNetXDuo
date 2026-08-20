@@ -94,8 +94,9 @@ static void test_coding(void)
     CHECK(http_frame_coding(" chunked ") == HTTP_TE_CHUNKED);
     CHECK(http_frame_coding("\tchunked") == HTTP_TE_CHUNKED);
 
-    CHECK(http_frame_coding("") == HTTP_TE_IDENTITY);
-    CHECK(http_frame_coding("identity") == HTTP_TE_IDENTITY);
+    CHECK(http_frame_coding(NULL) == HTTP_TE_IDENTITY);
+    CHECK(http_frame_coding("") == HTTP_TE_UNSUPPORTED);
+    CHECK(http_frame_coding("identity") == HTTP_TE_UNSUPPORTED);
 
     /* The two halves of the seven-character prefix test.  "chunkedX" used to
        match and "gzip, chunked" used to be missed entirely, so a chunked body

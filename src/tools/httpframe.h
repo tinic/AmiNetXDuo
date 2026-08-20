@@ -90,19 +90,20 @@ int http_frame_range(const char *value, unsigned long *from,
 
 typedef enum HttpFrameCoding
 {
-    HTTP_TE_IDENTITY = 0,       /* the list was empty or said "identity"   */
+    HTTP_TE_IDENTITY = 0,       /* no Transfer-Encoding field was present  */
     HTTP_TE_CHUNKED,            /* chunked, and chunked alone              */
     HTTP_TE_UNSUPPORTED         /* a coding this server cannot decode      */
 } HttpFrameCoding;
 
 /*
- * A Transfer-Encoding value, which is a comma-separated list.  Only a list
- * that is exactly "chunked" is chunked: RFC 7230 3.3.1 puts chunked last and
- * this server can undo nothing that would come before it, so "gzip, chunked"
- * is a body it cannot read and is refused rather than handed on half-decoded.
+ * A present Transfer-Encoding value, which is a comma-separated list.  Only a
+ * list that is exactly "chunked" is accepted: RFC 7230 3.3.3 makes a request
+ * whose final coding is not chunked impossible to delimit without closing,
+ * and this server can undo nothing that would come before chunked.
  *
  * The match is on the whole token.  A seven-character prefix test called
- * "chunkedX" chunked and missed "gzip, chunked" entirely.
+ * "chunkedX" chunked and missed "gzip, chunked" entirely.  NULL represents
+ * an absent field; an empty field and the obsolete "identity" token do not.
  */
 HttpFrameCoding http_frame_coding(const char *value);
 

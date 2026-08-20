@@ -369,7 +369,7 @@ int http_frame_range(const char *value, unsigned long *from,
 
 HttpFrameCoding http_frame_coding(const char *value)
 {
-    HttpFrameCoding last = HTTP_TE_IDENTITY;
+    HttpFrameCoding last = HTTP_TE_UNSUPPORTED;
     int             seen = 0;
 
     if (value == 0)
@@ -398,8 +398,6 @@ HttpFrameCoding http_frame_coding(const char *value)
            server takes has any, so a token with one is not one of them. */
         if (hf_token_is(start, end, "chunked"))
             last = HTTP_TE_CHUNKED;
-        else if (hf_token_is(start, end, "identity"))
-            last = HTTP_TE_IDENTITY;
         else
             return HTTP_TE_UNSUPPORTED;
 
@@ -409,7 +407,7 @@ HttpFrameCoding http_frame_coding(const char *value)
     /* "chunked, chunked" is a list this server cannot apply twice, and
        "chunked, identity" puts the framing somewhere it is not.  Exactly one
        coding, or none. */
-    if (seen > 1)
+    if (seen != 1)
         return HTTP_TE_UNSUPPORTED;
 
     return last;
