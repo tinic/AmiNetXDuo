@@ -9,7 +9,7 @@ version at the top when it merges.
 
 ## Unreleased
 
-## 0.25.0 -- 2026-08-20
+## 0.25.0
 
 - A DHCPv6 lease is renewed once, when it is due, rather than rebound twenty-five times a second forever. A server that answers with T1 and T2 of zero is telling the client to pick its own renewal times; the client read zero as "renew now" and re-entered the rebind state on every pass, which also meant a renewal never actually reached the wire and the address's lifetime shrank each time. On the lab's network that was 2544 rebinds in five minutes, and is now none
 - The remote desktop shows the screen and not the memory beside it. A graphics card rounds a screen's bitmap up to the board's own pitch, and the console took its width from the bitmap, so a 1368-pixel-wide screen was served as 1600: two hundred and thirty-two columns of whatever the card had off the right-hand edge, on every frame, and seventeen per cent more data to send than the screen contains. A planar screen had the same, rounded up to sixteen
