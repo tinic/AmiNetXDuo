@@ -585,6 +585,38 @@ static void test_frames(void)
         expect("a message past the ceiling is 1009", big, (long)sizeof(big),
                "", HTTP_WS_CLOSE_TOOBIG);
     }
+
+    /* The same ceiling spans every fragment.  Each frame here is only 32769
+       bytes, but the second header takes their message two bytes over 64 KiB;
+       rejection is possible before any payload for that continuation arrives. */
+    {
+        static unsigned char fragmented_big[8 + 32769 + 8];
+        long i;
+        long at = 0;
+
+        fragmented_big[at++] = 0x02; /* non-final binary */
+        fragmented_big[at++] = (unsigned char)(0x80 | 126);
+        fragmented_big[at++] = 0x80;
+        fragmented_big[at++] = 0x01;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+        for (i = 0; i < 32769; i++)
+            fragmented_big[at++] = 0;
+
+        fragmented_big[at++] = 0x80; /* final continuation */
+        fragmented_big[at++] = (unsigned char)(0x80 | 126);
+        fragmented_big[at++] = 0x80;
+        fragmented_big[at++] = 0x01;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+        fragmented_big[at++] = 0;
+
+        expect("fragmentation cannot reset the message ceiling",
+               fragmented_big, at, "", HTTP_WS_CLOSE_TOOBIG);
+    }
 }
 
 /* ---------------------------------------------------------- the encoder --- */

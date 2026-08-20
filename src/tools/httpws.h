@@ -119,6 +119,7 @@ typedef struct HttpWsIn
     unsigned char   maskpos;
 
     unsigned char   msg;            /* HttpWsEvent of the message in flight */
+    unsigned long   msg_len;        /* bytes across all of its fragments    */
     unsigned char   utf8_need;      /* continuation bytes still required    */
     unsigned char   utf8_lo;        /* bounds for the next continuation     */
     unsigned char   utf8_hi;

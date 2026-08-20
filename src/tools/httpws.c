@@ -195,6 +195,7 @@ void http_ws_reset(HttpWsIn *in)
     in->left     = 0;
     in->maskpos  = 0;
     in->msg      = HTTP_WS_EV_NONE;
+    in->msg_len  = 0;
     in->utf8_need = 0;
     in->utf8_lo   = 0x80;
     in->utf8_hi   = 0xbf;
@@ -467,6 +468,7 @@ static void ws_header_done(HttpWsIn *in)
         }
 
         in->msg = (unsigned char)ws_event_of(in->opcode);
+        in->msg_len = 0;
         if (in->msg == HTTP_WS_EV_TEXT)
         {
             in->utf8_need = 0;
@@ -475,11 +477,15 @@ static void ws_header_done(HttpWsIn *in)
         }
     }
 
-    if (in->left > HTTP_WS_MSG_MAX)
+    /* The ceiling is on a message, not one frame.  Fragmentation must not turn
+       it into a ceiling the client can reset with every continuation. */
+    if (in->msg_len > HTTP_WS_MSG_MAX ||
+        in->left > HTTP_WS_MSG_MAX - in->msg_len)
     {
         ws_fail(in, HTTP_WS_CLOSE_TOOBIG);
         return;
     }
+    in->msg_len += in->left;
 
     in->state = WS_PAYLOAD;
 }
@@ -522,7 +528,10 @@ static void ws_finish_empty(HttpWsIn *in, HttpWsSink sink, void *ctx)
         if (sink != 0)
             sink(ctx, ev, in->ctl, 0, last);
         if (last)
+        {
             in->msg = HTTP_WS_EV_NONE;
+            in->msg_len = 0;
+        }
         in->state = WS_HEAD;
     }
 }
@@ -661,7 +670,10 @@ long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                     if (in->left == 0UL)
                     {
                         if (last)
+                        {
                             in->msg = HTTP_WS_EV_NONE;
+                            in->msg_len = 0;
+                        }
                         in->state = WS_HEAD;
                     }
                 }
