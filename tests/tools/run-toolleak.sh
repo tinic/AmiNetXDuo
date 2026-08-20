@@ -209,6 +209,7 @@ cold|ping|negative-number|5|re:cannot be negative|-|SYS:ping 10.0.2.2 LOAD=-1
 cold|traceroute|family-both|5|re:-4 and -6 cannot both be given|-|SYS:traceroute 10.0.2.2 -m 1 -q 1 -w 2 -n -4 -6
 cold|traceroute|negative-number|5|re:cannot be negative|-|SYS:traceroute 10.0.2.2 QUERIES=-1
 cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10.0.2.2/ TIMEOUT 5 -4 -6
+cold|fetch|bad-timeout|5|re:TIMEOUT must be between 0 and|-|SYS:fetch http://10.0.2.2/ TIMEOUT=-1
 cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 23 -4 -6
 cold|tftp|family-both|5|re:-4 and -6 cannot both be given|-|SYS:tftp 10.0.2.2 GET x TIMEOUT 1 -4 -6
 cold|whois|family-both|5|re:-4 and -6 cannot both be given|-|SYS:whois plain.test -4 -6

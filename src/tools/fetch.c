@@ -78,6 +78,7 @@ enum
 };
 
 #define FETCH_DEFAULT_TIMEOUT   120UL       /* seconds */
+#define FETCH_TIMEOUT_MAX       2147483L    /* signed milliseconds fit */
 #define FETCH_MAX_HOPS          5
 
 #define FETCH_CHUNK             4096
@@ -1089,9 +1090,23 @@ int main(int argc, char **argv)
     if (fetch_init_state.to == NULL)
         fetch_init_state.quiet = TRUE;
 
-    timeout = (args[ARG_TIMEOUT] != 0)
-                  ? (ULONG)(*(LONG *)args[ARG_TIMEOUT])
-                  : FETCH_DEFAULT_TIMEOUT;
+    timeout = FETCH_DEFAULT_TIMEOUT;
+
+    if (args[ARG_TIMEOUT] != 0)
+    {
+        LONG seconds = *(LONG *)args[ARG_TIMEOUT];
+
+        if (seconds < 0 || seconds > FETCH_TIMEOUT_MAX)
+        {
+            tool_error("TIMEOUT must be between 0 and %ld seconds",
+                       (LONG)FETCH_TIMEOUT_MAX);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        timeout = (ULONG)seconds;
+    }
+
     if (timeout == 0)
         timeout = FETCH_DEFAULT_TIMEOUT;
     fetch_init_timeout = timeout;
