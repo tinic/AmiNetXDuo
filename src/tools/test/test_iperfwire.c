@@ -378,7 +378,14 @@ static void test_slice_budget(void)
     /* A byte target is bounded by sends rather than by seconds, and still
        gets a budget rather than none. */
     CHECK(iperf_slice_budget(0, 64, 4096) >= 20000UL);
-    CHECK(iperf_slice_budget(0, 4UL * 1024UL * 1024UL, 4096) > 100000UL);
+    CHECK(iperf_slice_budget(0, 4UL * 1024UL * 1024UL, 4096)
+          == 104857700UL);
+
+    /* The largest accepted transfer with the smallest buffer needs more
+       slices than ULONG can count. Saturating preserves the fail-safe instead
+       of wrapping it into an early abort. */
+    CHECK(iperf_slice_budget(0, 4UL * 1024UL * 1024UL, IPERF_BUF_MIN)
+          == 0xffffffffUL);
 
     /* Never zero, whatever it is asked, because zero would fire at once. */
     CHECK(iperf_slice_budget(0, 0, 0) > 0);

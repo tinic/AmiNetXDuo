@@ -187,9 +187,22 @@ unsigned long iperf_slice_budget(unsigned long seconds, unsigned long kbytes,
     else
     {
         /* A byte target: one slice per send, plus the same headroom. */
-        unsigned long sends = (buflen != 0)
-                                  ? ((kbytes * 1024UL) / buflen) + 1UL : 1UL;
-        budget = sends * 100UL;
+        unsigned long sends;
+
+        if (buflen != 0)
+        {
+            /* Split before multiplying: the accepted 4 GB ceiling is
+               4194304 KB, whose byte count is exactly one past ULONG on the
+               target.  The remainder product is at most 8191 * 1024. */
+            sends = (kbytes / buflen) * 1024UL;
+            sends += ((kbytes % buflen) * 1024UL) / buflen;
+            sends++;
+        }
+        else
+            sends = 1UL;
+
+        budget = (sends > 0xFFFFFFFFUL / 100UL)
+                     ? 0xFFFFFFFFUL : sends * 100UL;
     }
 
     /* A floor, so that a one-second run still has room for a handshake and a
