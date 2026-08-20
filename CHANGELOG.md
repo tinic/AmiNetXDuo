@@ -9,6 +9,48 @@ version at the top when it merges.
 
 ## Unreleased
 
+- A connected UDP socket becomes readable again. The readability test and `FIONREAD` read the source port from a packet still on the receive queue, where the UDP header has not yet been stripped, so the port never matched the peer and the socket looked permanently empty; `sntp` timed out on every attempt and `iperf` in UDP mode burned each slice
+- `FIONREAD` on a datagram socket reports the payload without its UDP header, and agrees with what a peeking read returns
+- A UDP socket reports an ICMP error as readable and clears it through `SO_ERROR`, instead of leaving a program waiting for a datagram that will never arrive
+- A datagram socket honours `shutdown()`: a socket shut down for reading reports no bytes, and the disconnected state is consistent between two tasks looking at it
+- A UDP or raw socket only accepts what its bind and its connect name. Datagrams from other peers, and to other local addresses, were delivered to a socket that had asked for one endpoint
+- An IPv6 link-local address keeps its zone through bind, connect, accept and receive, and a local zone is no longer confused with the peer's. An address on a machine with two cards named whichever interface the stack looked at first
+- IPv6 multicast honours the scope zone of the address, and a UDP disconnect clears the zone it was using
+- The path MTU is measured on the interface actually selected for the destination, not the first one
+- `getnameinfo()` with `NI_NAMEREQD` returns the numeric port when the service has no name. The flag is about the host half -- the peer port on an accepted connection is ephemeral and is never in `DEVS:Internet/services`, so the whole call failed and the caller lost the host name that had in fact resolved
+- Undefined flags to `getnameinfo()` are refused rather than ignored
+- A TCP socket reports its queue depths correctly. The receive walk followed a field that holds a sentinel on a ready packet -- an odd address, so a `NetStatus` query on a socket with two or more queued segments took an address error -- and Send-Q counted headers as application data
+- Encrypted connections work above descriptor 255, no longer race two tasks creating a session at once, and honour `nfds` when waiting on buffered data
+- A resumed encrypted session is bound to the parameters that were cached with it, so it cannot come back with different ones
+- The router-advertised DNS servers and search domains expire when their lifetime runs out, and are owned per interface and per source, so one card's advertisement no longer withdraws another's
+- A DHCP lease's DNS servers, host name, default domain and search suffix are reconciled against what the lease actually offers, and a server withdrawn from a renewed lease is withdrawn from the resolver
+- A statically configured DNS server survives a lease withdrawal
+- Multicast service discovery retries a publication that failed, reports every publication failure rather than the first, keeps a shared browse alive while more than one program is using it, and gets its goodbye onto the wire at shutdown
+- A multicast name lookup across two cards no longer spends the whole timeout on the first one
+- `httpd` conditional requests compare entity tags exactly, distinguish weak from strong, and keep a complete tag list rather than the last entry
+- `httpd` parses byte ranges without guessing, and refuses a malformed request version, a malformed header field name, an unsupported expectation, an undelimited transfer coding and an invalid WebDAV `Overwrite` directive
+- `httpd` keeps the old file until its replacement is complete, never truncates an existing file to hold a temporary, and reports a failure on the final write instead of returning success
+- `httpd` refuses a `MOVE` or `COPY` whose destination is inside its source, never deletes the source after a partial copy, and refuses a name it would have to truncate anywhere in the tree
+- `httpd` aborts a directory listing when the scan fails, rather than serving the part it managed to read as though it were complete
+- `httpd` matches a WebSocket negotiation token exactly and requires an exact takeover query
+- The WebSocket console rejects a non-minimal frame length, a prohibited or malformed close code, invalid UTF-8 in a text message or close reason, and enforces the message ceiling across a fragmented message
+- The WebSocket console keeps pipelined input under backpressure, evicts only at a frame boundary, preserves a queued close over a ping, and stops polling an input socket that is blocked
+- `telnet`, `whois` and `nettrace` finish a write that the stack accepted only in part, instead of sending a truncated request
+- `telnet` renders a bare carriage return as the NVT defines it
+- `nslookup` confines a name to its own RDATA field, so a malformed record cannot read past it
+- `tftp` removes a partial download when the local write fails, and accepts the transfer port only from the server it asked
+- `nc` and `iperf` honour IPv6 for a wildcard listener and in server mode; `iperf` ignores a truncated UDP datagram and pins a UDP run to its first peer
+- `nc` times out a UDP listener that never receives a first datagram
+- Every command-line tool refuses a negative or overflowing numeric argument -- timeouts, units, ports, scope indices, port ranges, capture geometry and workloads -- rather than narrowing it into something else
+- A service entry without a protocol, an oversized protocol number and an oversized service port are refused by the name database
+- `SIOCGIFCONF` reports the bytes written when given a buffer, so a caller cannot walk past the end of a short one
+- Socket option buffers that are not aligned are tolerated rather than read as though they were
+- A socket timeout of a full day no longer wraps, and a finite wait is charged the time it has already spent
+- A raw or packet-filter channel is safe to use from two tasks at once: interface replacement is transactional, and property, readiness, sizing and signal-mask queries are taken under the lock
+- The SANA-II layer bounds a receive to the data actually copied, and reaps writes after the final drain
+- The `AddNetInterface` and `ConfigureNetInterface` tools honour a hardware address and an initialisation delay supplied at run time
+- `make-dist.sh` builds what is missing instead of describing the commands and stopping
+
 - A certificate that is not allowed to be used the way the connection needs is refused. A leaf's keyUsage was never checked, so a certificate marked for encryption only, or for signing only, was accepted for either; a program is now told which of those it hit rather than being told the handshake failed
 - DHCP runs on the interfaces that asked for it. The client enrolled interface 0 whichever way it was configured, so a machine with a fixed address on its first card and DHCP on its second leased for the wrong one
 - An interface that goes down and comes back gets its address again. Neither the DHCPv6 client nor the router solicitation was restarted, so the machine kept whatever it had before the cable moved, or nothing
