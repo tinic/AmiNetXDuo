@@ -170,8 +170,10 @@ static BOOL bsd_route_parse(const char *text, BOOL allow_network, ULONG *out)
                 *out = number << 24;
             else if (number < 65536)
                 *out = number << 16;
-            else
+            else if (number < 16777216UL)
                 *out = number << 8;
+            else
+                *out = number;
 
             return TRUE;
         }

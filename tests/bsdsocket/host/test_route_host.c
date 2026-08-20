@@ -329,11 +329,21 @@ BOOL ami_config_parse_ip(const char *text, ULONG *out)
     return TRUE;
 }
 
-/* No DEVS:Internet/networks and no resolver here.  A name is therefore never
-   an address, which is what makes the "unparseable" cases below refusals. */
+/* The two network-number shapes exercise routing.c's inet_makeaddr() rule.
+   Everything else remains unresolved, which makes the malformed-name cases
+   below refusals. */
 const AmiNetdbEntry *ami_netdb_net_by_name(const char *name)
 {
-    (VOID)name;
+    static const AmiNetdbEntry three_octet =
+        { "three-octet", NULL, 0x00C0A801UL, NULL };
+    static const AmiNetdbEntry four_octet =
+        { "four-octet", NULL, 0xC0A80100UL, NULL };
+
+    if (strcmp(name, three_octet.name) == 0)
+        return &three_octet;
+    if (strcmp(name, four_octet.name) == 0)
+        return &four_octet;
+
     return NULL;
 }
 
@@ -597,6 +607,36 @@ static VOID t_delete_absent(VOID)
           "and exactly one table entry was removed");
 }
 
+/* --------------------------------------------------- symbolic networks */
+
+static VOID t_symbolic_networks(VOID)
+{
+    struct TagItem t[3];
+    LONG           rc;
+    int            found;
+
+    printf("AddRouteTagList: BSD network-number expansion\n");
+
+    t[0].ti_Tag  = RTA_DestinationNet;
+    t[1].ti_Tag  = RTA_Gateway;
+    t[1].ti_Data = (uintptr_t)"10.0.2.2";
+    t[2] = (struct TagItem)T_END;
+
+    h_machine_reset();
+    t[0].ti_Data = (uintptr_t)"three-octet";
+    rc = bsd_AddRouteTagList(t, BASE);
+    CHECK(rc == 0, "a three-octet network name is accepted");
+    (VOID)h_route_next_hop(0xC0A80100UL, 0xFFFFFF00UL, &found);
+    CHECK(found, "and 192.168.1 expands to 192.168.1.0");
+
+    h_machine_reset();
+    t[0].ti_Data = (uintptr_t)"four-octet";
+    rc = bsd_AddRouteTagList(t, BASE);
+    CHECK(rc == 0, "a four-octet network name is accepted");
+    (VOID)h_route_next_hop(0xC0A80100UL, 0xFFFFFF00UL, &found);
+    CHECK(found, "and 192.168.1.0 is not shifted to 168.1.0.0");
+}
+
 /* ------------------------------------------------------------ what changes */
 
 static VOID t_changes(VOID)
@@ -737,6 +777,7 @@ int main(void)
     t_refusals();
     t_absent();
     t_delete_absent();
+    t_symbolic_networks();
     t_changes();
     t_tag_walk();
 
