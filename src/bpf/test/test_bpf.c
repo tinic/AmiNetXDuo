@@ -1437,6 +1437,62 @@ static void test_signal_mask_close_reopen(void)
 }
 
 /*
+ * BIOCSBLEN used its AmiBpfChan pointer without locking. A replacement could
+ * therefore allocate its buffers and then have their declared size enlarged
+ * by the stale call. Capture trusts blen, so the mismatch became an
+ * out-of-bounds write into the replacement's allocation.
+ */
+static LONG t_blen_close_status;
+static LONG t_blen_open_status;
+static LONG t_blen_set_status;
+static LONG t_blen_bind_status;
+
+static void t_reopen_and_bind_before_blen_lock(void)
+{
+    ULONG small = 128;
+
+    t_blen_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_blen_open_status  = ami_bpf_open(T_BPF_OTHER, 0);
+    t_blen_set_status   = ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSBLEN, &small);
+    t_blen_bind_status  = ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSETIF, "eth0");
+}
+
+static void test_blen_close_reopen(void)
+{
+    ULONG large = BPF_MAXBUFSIZE;
+    ULONG actual = 0;
+    LONG  status;
+
+    printf("bpf: buffer sizing cannot cross a close/reopen\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+
+    t_blen_close_status = -1;
+    t_blen_open_status  = -1;
+    t_blen_set_status   = -1;
+    t_blen_bind_status  = -1;
+    stub_on_lock        = t_reopen_and_bind_before_blen_lock;
+
+    status = ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSBLEN, &large);
+
+    CHECK(stub_on_lock == NULL);
+    CHECK(t_blen_close_status == 0);
+    CHECK(t_blen_open_status == 0);
+    CHECK(t_blen_set_status == 0);
+    CHECK(t_blen_bind_status == 0);
+    CHECK(status == AMI_BPF_EPERM);
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGBLEN, &actual) == 0);
+    CHECK(actual == 128);              /* still matches its allocation */
+
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
+/*
  * BIOCSETIF and BIOCSETF both allocate outside the channel lock. A close and
  * reopen in that window used to leave their AmiBpfChan pointer aimed at the
  * numeric slot and commit into whoever owned the replacement. Reopening with
@@ -1534,6 +1590,7 @@ int main(int argc, char **argv)
     test_close_owner_under_reader();
     test_capture_notify_close_reopen();
     test_signal_mask_close_reopen();
+    test_blen_close_reopen();
     test_ioctl_close_reopen();
     test_reopen_under_reader();
 

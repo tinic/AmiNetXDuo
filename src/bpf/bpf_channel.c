@@ -1152,19 +1152,35 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
 
-        /* When the interface is set, real BPF refuses this, because the
-           buffers are already allocated. So does this. */
-        if (ch->bufbase != NULL)
-            return AMI_BPF_EINVAL;
-
         want = *(ULONG *)buffer;
         if (want < (ULONG)BPF_MINBUFSIZE)
             want = (ULONG)BPF_MINBUFSIZE;
         if (want > (ULONG)BPF_MAXBUFSIZE)
             want = (ULONG)BPF_MAXBUFSIZE;
+        want = BPF_WORDALIGN(want);
 
-        ch->blen         = BPF_WORDALIGN(want);
-        *(ULONG *)buffer = ch->blen;    /* report what was set */
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+
+        /* When the interface is set, real BPF refuses this, because the
+           buffers are already allocated. Check under the same lock as the
+           update: otherwise close/reopen can make `ch` name a replacement
+           whose allocation was sized from a different blen. */
+        if (ch->bufbase != NULL)
+        {
+            ami_bpf_unlock();
+            return AMI_BPF_EINVAL;
+        }
+
+        ch->blen = want;
+        ami_bpf_unlock();
+
+        *(ULONG *)buffer = want;        /* report what was set */
         return 0;
     }
 
