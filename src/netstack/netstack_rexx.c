@@ -195,8 +195,8 @@ static LONG ami_rx_kill(void)
  * error, an unreadable one is a syntax error, an unrecognised keyword is
  * "Unknown command", and anything else dispatches on the keyword index.
  */
-static LONG ami_rx_execute(const char *line, const char **errstr,
-                           AmiRxReply *reply)
+static LONG ami_rx_execute(const char *line, ULONG line_size,
+                           const char **errstr, AmiRxReply *reply)
 {
     char           cmd[RX_CMDLEN + 2];
     struct CSource cs;
@@ -207,15 +207,16 @@ static LONG ami_rx_execute(const char *line, const char **errstr,
 
     *errstr = NULL;
 
-    while (line[len] != '\0' && len < RX_CMDLEN)
-    {
-        cmd[len] = line[len];
-        len++;
-    }
-    if (line[len] != '\0')
+    if (line_size > RX_CMDLEN)
     {
         *errstr = ami_rx_err_syntax;
         return RETURN_WARN;
+    }
+
+    while (len < line_size && line[len] != '\0')
+    {
+        cmd[len] = line[len];
+        len++;
     }
 
     /* ReadItem() wants a sentinel it can stop on. AmiTCP uses '\n' as well, but
@@ -296,18 +297,30 @@ static VOID ami_rx_service(struct RexxMsg *rmsg)
     AmiRxReply  reply;
     const char *errstr = NULL;
     const char *line;
+    ULONG       line_size;
     LONG        rc;
 
     line = (const char *)ARG0(rmsg);
     if (line == NULL)
+    {
         line = "";
+        line_size = 0;
+    }
+    else
+    {
+        /* An ARexx argstring carries its length in the allocation in front of
+           the returned pointer.  Use that bound instead of searching beyond
+           RX_CMDLEN for a terminator: a 1024-byte command has no byte 1024 we
+           are entitled to read before deciding whether it fits. */
+        line_size = LengthArgstring((UBYTE *)line);
+    }
 
     rmsg->rm_Result1 = 0;
     rmsg->rm_Result2 = 0;
 
     ami_rx_reply_init(&reply, (STRPTR)buffer, RX_REPLYBUFLEN);
 
-    rc = ami_rx_execute(line, &errstr, &reply);
+    rc = ami_rx_execute(line, line_size, &errstr, &reply);
 
     if (rc != RETURN_OK)
     {
