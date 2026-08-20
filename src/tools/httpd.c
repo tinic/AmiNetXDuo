@@ -2094,7 +2094,25 @@ static VOID httpd_walk_slice(HttpConn *c)
 
             case WALK_MKDIR:
             {
-                BPTR made = CreateDir((CONST_STRPTR)c->walk_dst);
+                const char *name = (c->walk_depth == 0U)
+                                       ? c->dest.name
+                                       : (const char *)c->fib->fib_FileName;
+                BPTR made;
+
+                /* The root was checked before the walk, but every child can
+                   cross onto a filesystem with a shorter name limit too.  A
+                   successful CreateDir() there can mean a different, cut
+                   name, and the rest of the walk would then fill it and
+                   answer success. */
+                if (!httpd_name_survives(c->walk_dst, name))
+                {
+                    c->walk_status = 400;
+                    httpd_walk_failed(c, c->walk_dst, 400);
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                made = CreateDir((CONST_STRPTR)c->walk_dst);
 
                 if (made == (BPTR)0)
                 {
@@ -2254,6 +2272,8 @@ static VOID httpd_walk_slice(HttpConn *c)
 
                 if (c->walk_copy)
                 {
+                    LONG dst_kind;
+
                     if (!http_path_join(c->walk_dst, sizeof(c->walk_dst),
                                         (const char *)c->fib->fib_FileName))
                     {
@@ -2264,13 +2284,37 @@ static VOID httpd_walk_slice(HttpConn *c)
                         break;
                     }
 
+                    dst_kind = httpd_kind(c->walk_dst);
+
                     /* A drawer is read again once per subdrawer, so a file
                        that is already at the far end was copied on an earlier
-                       pass over this level. */
-                    if (httpd_kind(c->walk_dst) >= 0)
+                       pass over this level.  It still has to be there under
+                       this exact name: a cut-name collision is somebody
+                       else's file, not a completed copy. */
+                    if (dst_kind >= 0)
                     {
+                        if (httpd_name_cut(
+                                c->walk_dst,
+                                (const char *)c->fib->fib_FileName))
+                        {
+                            c->walk_status = 400;
+                            httpd_walk_failed(c, c->walk_dst, 400);
+                            c->walk = WALK_DONE;
+                            break;
+                        }
+
                         http_path_up(c->walk_src);
                         http_path_up(c->walk_dst);
+                        break;
+                    }
+
+                    if (!httpd_name_survives(
+                            c->walk_dst,
+                            (const char *)c->fib->fib_FileName))
+                    {
+                        c->walk_status = 400;
+                        httpd_walk_failed(c, c->walk_dst, 400);
+                        c->walk = WALK_DONE;
                         break;
                     }
 
