@@ -592,6 +592,18 @@ int main(int argc, char **argv)
     quiet        = (BOOL)(args[ARG_QUIET] != 0);
     address_text = (const char *)args[ARG_ADDRESS];
 
+    if (args[ARG_UNIT] != 0)
+    {
+        LONG unit = *(LONG *)args[ARG_UNIT];
+
+        if (unit < 0 || unit > 65535)
+        {
+            tool_error("UNIT must be between 0 and 65535");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
     if (address_text != NULL && is_written_as_ip6(address_text))
     {
         struct Library *pb;
