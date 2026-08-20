@@ -2532,13 +2532,17 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             {
                 if (t->word_n < (UBYTE)sizeof(t->word) - 1)
                     t->word[t->word_n++] = (char)data[i];
+                else
+                    t->word_over = 1;
             }
 
             if (final)
             {
                 t->word[t->word_n] = '\0';
-                sock_word(t->word);
+                if (!t->word_over)
+                    sock_word(t->word);
                 t->word_n = 0;
+                t->word_over = 0;
             }
             break;
 
@@ -2667,6 +2671,7 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
     t->ctl_n    = 0;
     t->ctl_at   = 0;
     t->word_n   = 0;
+    t->word_over = 0;
     t->pinged   = 0;
     t->closing  = 0;
     t->why      = 0;

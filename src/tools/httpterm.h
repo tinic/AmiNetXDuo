@@ -294,6 +294,7 @@ typedef struct HttpTermSock
 
     char            word[24];       /* a text frame, see the vocabulary     */
     UBYTE           word_n;
+    UBYTE           word_over;      /* it did not fit and must be ignored   */
 
     UBYTE           pinged;         /* a ping is out and unanswered         */
     UBYTE           closing;        /* a close has been sent                */
