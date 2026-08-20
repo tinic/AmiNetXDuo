@@ -269,7 +269,8 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
                 entry->proto = slash + 1;
             }
 
-            if (!ami_cfg_parse_ulong(tokens[1], &entry->value))
+            if (!ami_cfg_parse_ulong(tokens[1], &entry->value) ||
+                entry->value > 65535UL)
                 continue;
             break;
         }

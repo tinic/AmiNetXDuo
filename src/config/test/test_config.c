@@ -2131,6 +2131,8 @@ static void test_netdb_garbage(void)
         "weird 80\n"                 /* no /proto */
         "bad xx/tcp\n"
         "wrapped 4294967297/tcp\n"
+        "narrowed 65557/tcp\n"
+        "maximum 65535/tcp\n"
         "good 90/tcp\n");
 
     CHECK(ami_netdb_load() == AMI_CFG_OK);
@@ -2138,6 +2140,8 @@ static void test_netdb_garbage(void)
     CHECK(ami_netdb_host_by_name("notanaddress") == NULL);
     CHECK(ami_netdb_serv_by_name("bad", NULL) == NULL);
     CHECK(ami_netdb_serv_by_name("wrapped", NULL) == NULL);
+    CHECK(ami_netdb_serv_by_name("narrowed", NULL) == NULL);
+    CHECK(ami_netdb_serv_by_name("maximum", "tcp") != NULL);
     CHECK(ami_netdb_serv_by_name("weird", NULL) != NULL);
     CHECK(ami_netdb_serv_by_name("good", "tcp") != NULL);
 
