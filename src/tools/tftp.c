@@ -263,6 +263,7 @@ typedef struct TftpXfer
 {
     struct Library *sb;
     LONG            sock;
+    ToolAddr        server;             /* address named on the command line */
     ToolSockAddrAny peer;               /* server:69 until the first reply  */
     BOOL            have_peer;
     ULONG           timeout;
@@ -337,6 +338,26 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
                 return TFTP_BROKEN;
 
             continue;
+        }
+
+        /*
+         * A server chooses a new port for the transfer, not a new host.
+         * Before the first valid reply fixes that port, reject a datagram
+         * from any other address.  Otherwise the first machine to guess this
+         * socket's ephemeral port can become the peer: a forged DATA packet
+         * is then written to the GET destination, and a forged ACK makes a
+         * PUT send the local file to the attacker.
+         */
+        if (!x->have_peer)
+        {
+            ToolAddr from_addr;
+
+            if (!tool_sock_addr_get(&from, &from_addr) ||
+                !tool_addr_same(&from_addr, &x->server))
+            {
+                tftp_stray(x->sb, x->sock, &from);
+                continue;
+            }
         }
 
         /* Somebody else's transfer, or a stray from an old one. */
@@ -705,8 +726,9 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    x.sb   = sb;
-    x.sock = sock;
+    x.sb     = sb;
+    x.sock   = sock;
+    x.server = address;
     (VOID)tool_sock_addr(&x.peer, &address, (UWORD)port);
 
     tool_addr_text(sb, &address, dotted, sizeof(dotted));
