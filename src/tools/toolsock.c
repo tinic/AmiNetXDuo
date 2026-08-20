@@ -1146,14 +1146,68 @@ static BOOL tool_bind_local(struct Library *base, LONG sock,
     return (BOOL)(tool_sock_bind(base, sock, &local) == 0);
 }
 
+/* One address and one time budget.  The caller owns the order and retries. */
+static LONG tool_connect_one(struct Library *base, const ToolConnect *how,
+                             const ToolAddr *address, ULONG budget,
+                             ToolAddr *chosen, LONG *why)
+{
+    ToolSockAddrAny sa;
+    LONG            sock;
+    LONG            result;
+
+    *chosen = *address;
+
+    if (how->announce)
+    {
+        char dotted[TOOL_ADDR_STRLEN];
+
+        tool_addr_text(base, address, dotted, sizeof(dotted));
+        tool_printf("Trying %s port %ld...\n", (LONG)dotted,
+                    (LONG)how->port);
+    }
+
+    sock = tool_sock_socket(base, (LONG)address->ta_Family,
+                            how->socktype, 0);
+    if (sock < 0)
+    {
+        *why = tool_sock_errno(base);
+        return TOOL_CONNECT_NOSOCKET;
+    }
+
+    if (how->localport != 0 &&
+        !tool_bind_local(base, sock, address, how->localport))
+    {
+        *why = tool_sock_errno(base);
+        (VOID)tool_sock_close(base, sock);
+        return TOOL_CONNECT_NOBIND;
+    }
+
+    (VOID)tool_sock_addr(&sa, address, how->port);
+
+    result = tool_sock_connect_timed(base, sock, &sa, budget, why);
+    if (result == 0)
+        return sock;
+
+    (VOID)tool_sock_close(base, sock);
+
+    if (result == TOOL_CONNECT_TIMEDOUT)
+    {
+        /* So a caller that prints only the errno still says something true. */
+        *why = TOOL_ETIMEDOUT;
+        return TOOL_CONNECT_TIMEDOUT;
+    }
+
+    return TOOL_CONNECT_FAILED;
+}
+
 LONG tool_sock_connect_host(struct Library *base, const char *host,
                             const ToolConnect *how, ToolAddr *chosen,
                             LONG *why)
 {
-    ToolAddrList    list;
-    ToolSockAddrAny sa;
-    ULONG           i;
-    LONG            rc = TOOL_CONNECT_FAILED;
+    ToolAddrList list;
+    ULONG        deferred = 0;
+    ULONG        i;
+    LONG         rc = TOOL_CONNECT_FAILED;
 
     *why = 0;
     tool_addr_v4(chosen, 0);            /* printable even if nothing resolved */
@@ -1164,64 +1218,51 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
     for (i = 0; i < list.count; i++)
     {
         ULONG budget;
-        LONG  sock;
         LONG  result;
+        BOOL  shortened;
 
-        *chosen = list.addr[i];
+        shortened = (BOOL)(i + 1 < list.count &&
+                           (how->timeout == 0 ||
+                            how->timeout > TOOL_CONNECT_TRY_SECS));
+        budget = shortened ? TOOL_CONNECT_TRY_SECS : how->timeout;
 
-        if (how->announce)
-        {
-            char dotted[TOOL_ADDR_STRLEN];
+        result = tool_connect_one(base, how, &list.addr[i], budget,
+                                  chosen, why);
+        if (result >= 0)
+            return result;
+        if (result == TOOL_CONNECT_NOBIND)
+            return result;
 
-            tool_addr_text(base, &list.addr[i], dotted, sizeof(dotted));
-            tool_printf("Trying %s port %ld...\n", (LONG)dotted,
-                        (LONG)how->port);
-        }
+        rc = result;
 
-        sock = tool_sock_socket(base, (LONG)list.addr[i].ta_Family,
-                                how->socktype, 0);
-        if (sock < 0)
-        {
-            /* A machine with no IPv6 fails here on the AAAA and reaches the
-               A on the next pass, rather than reporting the name as dead. */
-            *why = tool_sock_errno(base);
-            rc   = TOOL_CONNECT_NOSOCKET;
+        /* Only a trial that was deliberately cut short deserves another
+           attempt.  A caller whose whole timeout elapsed already got exactly
+           the limit it requested. */
+        if (shortened && result == TOOL_CONNECT_TIMEDOUT)
+            deferred |= 1UL << i;
+    }
+
+    /*
+     * A fast failure on the later address must not turn a merely slow earlier
+     * address into a permanent failure.  Retry only the trials that hit the
+     * ten-second ceiling, now with the caller's complete budget (zero means
+     * the stack's own SYN ceiling).
+     */
+    for (i = 0; i < list.count; i++)
+    {
+        LONG result;
+
+        if ((deferred & (1UL << i)) == 0)
             continue;
-        }
 
-        if (how->localport != 0 &&
-            !tool_bind_local(base, sock, &list.addr[i], how->localport))
-        {
-            /* A local port that is already taken is not the address's fault
-               and the next one would fail the same way. */
-            *why = tool_sock_errno(base);
-            (VOID)tool_sock_close(base, sock);
-            return TOOL_CONNECT_NOBIND;
-        }
+        result = tool_connect_one(base, how, &list.addr[i], how->timeout,
+                                  chosen, why);
+        if (result >= 0)
+            return result;
+        if (result == TOOL_CONNECT_NOBIND)
+            return result;
 
-        (VOID)tool_sock_addr(&sa, &list.addr[i], how->port);
-
-        budget = (i + 1 < list.count) ? TOOL_CONNECT_TRY_SECS : how->timeout;
-        if (how->timeout != 0 && budget > how->timeout)
-            budget = how->timeout;
-
-        result = tool_sock_connect_timed(base, sock, &sa, budget, why);
-        if (result == 0)
-            return sock;
-
-        (VOID)tool_sock_close(base, sock);
-
-        if (result == TOOL_CONNECT_TIMEDOUT)
-        {
-            /* So a caller that prints only the errno still says something
-               true.  The code is what a caller with its own wording reads. */
-            *why = TOOL_ETIMEDOUT;
-            rc   = TOOL_CONNECT_TIMEDOUT;
-        }
-        else
-        {
-            rc = TOOL_CONNECT_FAILED;
-        }
+        rc = result;
     }
 
     return rc;
