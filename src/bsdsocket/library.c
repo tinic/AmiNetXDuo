@@ -963,6 +963,22 @@ typedef struct
 
 static BsdNetBoot *bsd_net_boot;
 
+/*
+ * Take the startup reference only when an opener can inherit it.  This is
+ * shared by the normal child and both caller-stack fallbacks: a failed
+ * startup can still leave a live, unaddressed stack behind with ns_Refs == 1,
+ * and returning that error without shutdown gives the reference to nobody.
+ */
+static LONG bsd_netstack_start_owned(VOID)
+{
+    LONG result = netstack_startup();
+
+    if (result != AMI_NET_OK)
+        netstack_shutdown();
+
+    return result;
+}
+
 static VOID bsd_netstack_boot_main(VOID)
 {
     BsdNetBoot *b = bsd_net_boot;
@@ -970,7 +986,7 @@ static VOID bsd_netstack_boot_main(VOID)
     /* netstack_startup() blocks until NX_IP has initialised, so signal only
        after it returns, the parent Wait()s the whole time and `boot` lives
        on its stack until then. */
-    b->nb_Result = netstack_startup();
+    b->nb_Result = bsd_netstack_start_owned();
 
     /*
      * A failed startup can still leave a stack standing: netstack_startup()
@@ -991,15 +1007,14 @@ static VOID bsd_netstack_boot_main(VOID)
      * and the thread stacks. On the supported 1 MB floor that is most of the
      * machine, held by a command that printed an error and exited.
      *
-     * Given back here rather than in bsd_lib_open() because nx_ip_delete()
-     * waits for the IP thread, and this Process has 64 KB where the opener can
-     * be a Shell command with 4 KB. netstack_shutdown() returns at once when
-     * there is no stack, so the case where bring-up failed before allocating
-     * anything costs nothing.
+     * Given back by bsd_netstack_start_owned() rather than in bsd_lib_open().
+     * In this normal path the helper runs on this 64 KB Process, because
+     * nx_ip_delete() waits for the IP thread and the opener can be a Shell
+     * command with 4 KB. The two emergency fallbacks have no larger stack to
+     * use, but they still must not leak the reference. netstack_shutdown()
+     * returns at once when there is no stack, so the case where bring-up
+     * failed before allocating anything costs nothing.
      */
-    if (b->nb_Result != AMI_NET_OK)
-        netstack_shutdown();
-
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 
@@ -1019,7 +1034,7 @@ static LONG bsd_netstack_bringup(VOID)
        near-null PC). */
     sig = (BYTE)AllocSignal(-1);
     if (sig < 0)
-        return netstack_startup();      /* no signal: caller-stack fallback */
+        return bsd_netstack_start_owned(); /* no signal: caller-stack fallback */
 
     boot.nb_Parent  = FindTask(NULL);
     boot.nb_SigMask = 1UL << sig;
@@ -1039,7 +1054,7 @@ static LONG bsd_netstack_bringup(VOID)
            with enough stack still works. One that did not is no worse off. */
         bsd_net_boot = NULL;
         FreeSignal(sig);
-        return netstack_startup();
+        return bsd_netstack_start_owned();
     }
 
     Wait(boot.nb_SigMask);
