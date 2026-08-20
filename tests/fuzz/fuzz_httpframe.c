@@ -701,7 +701,7 @@ static int fz_seeds(void)
         { "chunked",       HTTP_TE_CHUNKED },
         { "chunkedX",      HTTP_TE_UNSUPPORTED },
         { "gzip, chunked", HTTP_TE_UNSUPPORTED },
-        { "",              HTTP_TE_IDENTITY },
+        { "",              HTTP_TE_UNSUPPORTED },
         { NULL,            HTTP_TE_IDENTITY }
     };
 
