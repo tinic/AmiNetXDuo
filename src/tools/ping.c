@@ -317,6 +317,17 @@ static int ping_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if ((args[ARG_COUNT]    != 0 && *(LONG *)args[ARG_COUNT]    < 0) ||
+        (args[ARG_INTERVAL] != 0 && *(LONG *)args[ARG_INTERVAL] < 0) ||
+        (args[ARG_LOAD]     != 0 && *(LONG *)args[ARG_LOAD]     < 0) ||
+        (args[ARG_SIZE]     != 0 && *(LONG *)args[ARG_SIZE]     < 0) ||
+        (args[ARG_TIMEOUT]  != 0 && *(LONG *)args[ARG_TIMEOUT]  < 0))
+    {
+        tool_error("COUNT, INTERVAL, LOAD, SIZE and TIMEOUT cannot be negative");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     host     = (const char *)args[ARG_HOST];
     count    = (ULONG)arg_or(args, ARG_COUNT,    (LONG)PING_DEFAULT_COUNT);
     interval = (ULONG)arg_or(args, ARG_INTERVAL, (LONG)PING_DEFAULT_INTERVAL);

@@ -205,6 +205,7 @@ cold|NetTrace|bad-port|5|re:-1 is not a port|-|SYS:NetTrace WIRE HOST 10.0.2.2 P
 # has to come back red, and a boot that burnt its ceiling is not red, it is
 # infrastructure.
 cold|ping|family-both|5|re:-4 and -6 cannot both be given|-|SYS:ping 10.0.2.2 -c 1 -t 3 -4 -6
+cold|ping|negative-number|5|re:cannot be negative|-|SYS:ping 10.0.2.2 LOAD=-1
 cold|traceroute|family-both|5|re:-4 and -6 cannot both be given|-|SYS:traceroute 10.0.2.2 -m 1 -q 1 -w 2 -n -4 -6
 cold|fetch|family-both|5|re:-4 and -6 cannot both be given|-|SYS:fetch http://10.0.2.2/ TIMEOUT 5 -4 -6
 cold|telnet|family-both|5|re:-4 and -6 cannot both be given|-|SYS:telnet 10.0.2.2 23 -4 -6
