@@ -231,6 +231,31 @@ LONG tool_sock_send(struct Library *base, LONG s, const void *buf, LONG len)
     return res;
 }
 
+LONG tool_sock_send_full(struct Library *base, LONG s, const void *buf,
+                         LONG len)
+{
+    const UBYTE *p = (const UBYTE *)buf;
+    LONG         sent = 0;
+
+    while (sent < len)
+    {
+        LONG n = tool_sock_send(base, s, &p[sent], len - sent);
+
+        if (n > 0)
+        {
+            sent += n;
+            continue;
+        }
+
+        if (n < 0 && tool_sock_errno(base) == TOOL_EINTR)
+            continue;
+
+        return -1;
+    }
+
+    return sent;
+}
+
 /* LVO -0x048 */
 LONG tool_sock_recvfrom(struct Library *base, LONG s, void *buf, LONG len,
                         ToolSockAddrAny *from)

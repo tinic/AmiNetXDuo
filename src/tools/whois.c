@@ -243,7 +243,7 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
         return RETURN_ERROR;
     }
 
-    if (tool_sock_send(sb, sock, whois_request, len) != len)
+    if (tool_sock_send_full(sb, sock, whois_request, len) != len)
     {
         tool_error("cannot send the query: %s",
                    (LONG)tool_sock_errstr(tool_sock_errno(sb)));

@@ -204,6 +204,8 @@ LONG  tool_sock_listen(struct Library *base, LONG s, LONG backlog);
 LONG  tool_sock_accept(struct Library *base, LONG s, ToolSockAddrAny *from);
 LONG  tool_sock_connect(struct Library *base, LONG s, const ToolSockAddrAny *sa);
 LONG  tool_sock_send(struct Library *base, LONG s, const void *buf, LONG len);
+LONG  tool_sock_send_full(struct Library *base, LONG s, const void *buf,
+                          LONG len);
 LONG  tool_sock_sendto(struct Library *base, LONG s, const void *buf, LONG len,
                        const ToolSockAddrAny *to);
 LONG  tool_sock_recv(struct Library *base, LONG s, void *buf, LONG len);
