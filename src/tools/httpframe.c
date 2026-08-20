@@ -98,6 +98,25 @@ static int hf_token_is(const char *start, const char *end, const char *want)
     return (start == end && *want == '\0') ? 1 : 0;
 }
 
+int http_frame_token_is(const char *value, const char *want)
+{
+    const char *end;
+
+    if (value == 0 || want == 0 || *want == '\0')
+        return 0;
+
+    while (*value == ' ' || *value == '\t')
+        value++;
+
+    end = value;
+    while (*end != '\0')
+        end++;
+    while (end > value && (end[-1] == ' ' || end[-1] == '\t'))
+        end--;
+
+    return hf_token_is(value, end, want);
+}
+
 int http_frame_has_token(const char *value, const char *want)
 {
     if (value == 0 || want == 0 || *want == '\0')

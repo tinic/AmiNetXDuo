@@ -51,6 +51,9 @@ const char *http_frame_error(HttpFrameResult why);
  */
 int http_frame_has_token(const char *value, const char *want);
 
+/* One whole token, allowing only optional whitespace around it. */
+int http_frame_token_is(const char *value, const char *want);
+
 /*
  * Validate the field-name at the start of one header line and return the
  * colon's offset.  Whitespace before the colon, a folded continuation, and a

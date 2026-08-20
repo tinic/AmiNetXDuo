@@ -122,6 +122,12 @@ static void test_tokens(void)
 {
     printf("HTTP token lists\n");
 
+    CHECK(http_frame_token_is("100-continue", "100-continue"));
+    CHECK(http_frame_token_is(" 100-continue\t", "100-continue"));
+    CHECK(!http_frame_token_is("100-continue-more", "100-continue"));
+    CHECK(!http_frame_token_is("100-continue, other", "100-continue"));
+    CHECK(!http_frame_token_is(NULL, "100-continue"));
+
     CHECK(http_frame_has_token("close", "close"));
     CHECK(http_frame_has_token("keep-alive, close", "close"));
     CHECK(http_frame_has_token(" close , Upgrade ", "upgrade"));

@@ -1077,6 +1077,7 @@ static const char *httpd_reason(ULONG status)
         case 414: return "URI Too Long";
         case 415: return "Unsupported Media Type";
         case 416: return "Range Not Satisfiable";
+        case 417: return "Expectation Failed";
         case 423: return "Locked";
         case 424: return "Failed Dependency";
         case 431: return "Request Header Fields Too Large";
@@ -5696,8 +5697,14 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         {
             /* curl sends this on every PUT over a certain size and waits a
                second for the answer.  The Windows redirector waits too. */
-            if (hs_nicmp(httpd_value, "100-continue", 12) == 0)
-                c->expect = 1;
+            if (cut || !http_frame_token_is(httpd_value, "100-continue"))
+            {
+                httpd_error(c, 417, "that is not an expectation this server "
+                                    "can meet");
+                return FALSE;
+            }
+
+            c->expect = 1;
         }
         else if (hs_equal(name, "Accept-Encoding"))
         {
