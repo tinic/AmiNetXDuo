@@ -111,8 +111,8 @@ case_red contract src/tools/sntp.c \
     'a slot left uncleared before ReadArgs'
 
 case_red contract src/tools/whois.c \
-    '? (UWORD)(*(LONG *)args[ARG_PORT]) : (UWORD)WHOIS_PORT;' \
-    '? (UWORD)args[ARG_PORT] : (UWORD)WHOIS_PORT;' \
+    'LONG p = *(LONG *)args[ARG_PORT];' \
+    'LONG p = (LONG)args[ARG_PORT];' \
     'a /N slot read as the number instead of the pointer'
 
 case_red contract src/tools/netshutdown.c \
