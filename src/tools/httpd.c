@@ -3548,11 +3548,29 @@ static BOOL httpd_produce(HttpConn *c)
                         BOOL is_dir;
                         const char *name;
 
-                        if (c->dirlock == (BPTR)0 || c->fib == NULL ||
-                            !ExNext(c->dirlock, c->fib))
+                        if (c->dirlock == (BPTR)0 || c->fib == NULL)
                         {
-                            c->dir_stage = DIR_TRAILER;
-                            continue;
+                            c->keepalive = 0;
+                            c->producer  = PROD_NONE;
+                            return FALSE;
+                        }
+
+                        if (!ExNext(c->dirlock, c->fib))
+                        {
+                            if (IoErr() == ERROR_NO_MORE_ENTRIES)
+                            {
+                                c->dir_stage = DIR_TRAILER;
+                                continue;
+                            }
+
+                            /* The status and the chunked response have already
+                               started, so no second HTTP error can be sent.
+                               Omitting the terminating chunk makes the client
+                               reject the incomplete listing instead of
+                               believing an I/O error was end-of-directory. */
+                            c->keepalive = 0;
+                            c->producer  = PROD_NONE;
+                            return FALSE;
                         }
 
                         name   = (const char *)c->fib->fib_FileName;
