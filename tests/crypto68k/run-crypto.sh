@@ -97,9 +97,9 @@ one() { # model tag program floor timeout
     if verdict_guest "$prog/$tag" "$floor" "$rc" \
             "$(verdict_hd_amiberry)/stdout.txt" \
             "$(verdict_serial_amiberry)"; then
-        echo "crypto68k_$prog-$tag=PASS"
+        echo "$prog-$tag=PASS"
     else
-        echo "crypto68k_$prog-$tag=FAIL rc=$rc log=$log"
+        echo "$prog-$tag=FAIL rc=$rc log=$log"
         tail -25 "$log" >&2
         fails=$((fails + 1))
     fi
