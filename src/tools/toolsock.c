@@ -583,6 +583,14 @@ VOID tool_addr_v4(ToolAddr *addr, ULONG v4)
         addr->ta_V6[i] = 0;
 }
 
+VOID tool_addr_any(ToolAddr *addr, LONG family)
+{
+    tool_addr_v4(addr, 0);
+
+    if (family == TOOL_AF_INET6)
+        addr->ta_Family = (UWORD)TOOL_AF_INET6;
+}
+
 LONG tool_sock_addr(ToolSockAddrAny *sa, const ToolAddr *addr, UWORD port)
 {
     ULONG i;

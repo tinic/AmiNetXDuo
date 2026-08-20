@@ -356,7 +356,10 @@ int main(int argc, char **argv)
     }
     else
     {
-        tool_addr_v4(&plan.peer, 0);
+        /* With no flag, retain the command's historical IPv4 listener.
+           Explicit -6 must bind IPv6-any rather than being parsed and then
+           silently discarded. */
+        tool_addr_any(&plan.peer, family);
     }
 
     if (!quiet)

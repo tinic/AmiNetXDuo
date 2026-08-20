@@ -470,6 +470,10 @@ static void check_family(const char *name)
     CHECK(strstr(src, "tool_arg_family(") != NULL,
           "%s: does not read the pair through tool_arg_family()", name);
 
+    if (strcmp(name, "iperf") == 0)
+        CHECK(strstr(src, "tool_addr_any(&plan.peer, family)") != NULL,
+              "iperf: server mode does not apply the selected family");
+
     free(src);
 }
 

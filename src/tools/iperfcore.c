@@ -224,7 +224,7 @@ static LONG iperf_open_server(IperfRun *run, LONG type)
     LONG            nonblock = 1;
     LONG            s;
 
-    s = tool_sock_socket(run->sb, TOOL_AF_INET, type, 0);
+    s = tool_sock_socket(run->sb, (LONG)run->plan.peer.ta_Family, type, 0);
     if (s < 0)
     {
         iperf_fail(run, "socket", tool_sock_errno(run->sb));
@@ -234,7 +234,7 @@ static LONG iperf_open_server(IperfRun *run, LONG type)
     (VOID)tool_sock_setsockopt(run->sb, s, TOOL_SOL_SOCKET, TOOL_SO_REUSEADDR,
                                &on, (LONG)sizeof(on));
 
-    (VOID)tool_sock_addr_v4(&sa, 0, run->plan.port);
+    (VOID)tool_sock_addr(&sa, &run->plan.peer, run->plan.port);
 
     if (tool_sock_bind(run->sb, s, &sa) != 0)
     {

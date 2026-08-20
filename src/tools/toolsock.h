@@ -286,6 +286,7 @@ typedef struct ToolAddr
 #define TOOL_ADDR_IS6(a)    ((a)->ta_Family == (UWORD)TOOL_AF_INET6)
 
 VOID tool_addr_v4(ToolAddr *addr, ULONG v4);
+VOID tool_addr_any(ToolAddr *addr, LONG family);
 
 /*
  * Fill in a sockaddr and return the length to hand the library, which is 16
