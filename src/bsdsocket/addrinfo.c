@@ -922,6 +922,14 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
             bsd_strncpy((char *)serv, entry->name, servlen);
         }
+        else if ((flags & (ULONG)NI_NUMERICSERV) == 0 &&
+                 (flags & (ULONG)NI_NAMEREQD) != 0)
+        {
+            /* This NDK defines NI_NAMEREQD for either half of the result.
+               Falling back to the decimal port here reported success even
+               though the caller explicitly required a service name. */
+            return EAI_NONAME;
+        }
         else
         {
             ULONG value = (ULONG)port;

@@ -3185,6 +3185,16 @@ APTR                p;
         (VOID)t_check((BOOL)(rc == 0 && t_streq(text, "::1")),
                       "getnameinfo(::1, NI_NUMERICHOST)", rc);
         t_log("  getnameinfo said \"%s\"", text);
+
+        /* This NDK's NI_NAMEREQD applies to the service half too. 65000 is
+           absent from the test system's services file, so returning "65000"
+           would be a silent numeric fallback. */
+        t_make_loopback6(&sa, 65000);
+        t_bzero(text, sizeof(text));
+        rc = bsd_getnameinfo(&sa, sizeof(sa), NULL, 0,
+                             text, sizeof(text), 8UL /* NI_NAMEREQD */);
+        (VOID)t_check((BOOL)(rc == -2),
+                      "NI_NAMEREQD requires a service name", rc);
     }
 
     /* NI_WITHSCOPEID is the NDK's opt-in for the KAME "%zone" suffix. */

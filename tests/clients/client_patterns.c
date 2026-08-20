@@ -1505,6 +1505,16 @@ static VOID group_p(VOID)
         if (rc != 0 || strcmp(hbuf, "127.0.0.1") != 0)
             Printf((STRPTR)"    host=\"%s\" serv=\"%s\"\n",
                    (LONG)hbuf, (LONG)sbuf);
+
+        /* The NDK's NI_NAMEREQD covers both host and service. Port 65000 is
+           deliberately absent from the staged services file: a decimal
+           fallback here violates the flag. */
+        addr_in(&sa, INADDR_LOOPBACK, 65000);
+        memset(sbuf, 0, sizeof(sbuf));
+        rc = getnameinfo((struct sockaddr *)&sa, sizeof(sa),
+                         NULL, 0, (STRPTR)sbuf, sizeof(sbuf), NI_NAMEREQD);
+        t_ok(rc == EAI_NONAME,
+             "getnameinfo(NI_NAMEREQD) requires a service name", rc);
     }
 
     /* 5. A name that cannot resolve must fail, not hang, and gai_strerror
