@@ -650,7 +650,9 @@ static LONG nsl_exchange(struct Library *sb, LONG sock,
 
     for (tries = 0; tries < (ULONG)NSL_ATTEMPTS; tries++)
     {
-        ULONG slices = (per * 1000UL) / 200UL;
+        /* Five 200 ms slices per second.  Multiplying by 1000 first can
+           overflow even though the final slice count still fits. */
+        ULONG slices = per * 5UL;
         ULONG i;
 
         if (slices == 0)
@@ -864,9 +866,22 @@ int main(int argc, char **argv)
     }
 
     name    = (const char *)args[ARG_NAME];
-    timeout = (args[ARG_TIMEOUT] != 0)
-                  ? (ULONG)(*(LONG *)args[ARG_TIMEOUT])
-                  : NSL_DEFAULT_TIMEOUT;
+    timeout = NSL_DEFAULT_TIMEOUT;
+
+    if (args[ARG_TIMEOUT] != 0)
+    {
+        LONG seconds = *(LONG *)args[ARG_TIMEOUT];
+
+        if (seconds < 0)
+        {
+            tool_error("TIMEOUT cannot be negative");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        timeout = (ULONG)seconds;
+    }
+
     if (timeout == 0)
         timeout = NSL_DEFAULT_TIMEOUT;
 
