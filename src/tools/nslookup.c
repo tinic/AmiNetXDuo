@@ -439,7 +439,12 @@ static UWORD nsl_id(VOID)
 
 /* One record of the answer section, formatted for the type it turned out to
    be, which is not always the type asked for: an A question is answered with
-   the CNAME chain in front of it. */
+   the CNAME chain in front of it.
+
+   FALSE when the payload does not match the type -- a four-byte A, a name
+   that runs past RDLENGTH -- and then nothing was printed for it.  It is not
+   a verdict on the reply, only on this record: the caller says so in place
+   and goes on to the next. */
 static BOOL nsl_print_record(const UBYTE *msg, UWORD type, ULONG rdata,
                              ULONG rdlen)
 {
@@ -592,9 +597,12 @@ static BOOL nsl_print_record(const UBYTE *msg, UWORD type, ULONG rdata,
 }
 
 /*
- * Walk the answer section. Returns records printed, or -1 for a malformed
- * reply (not the same as an empty one). The question section is walked first
- * to find where the answers start, and its name can itself be compressed.
+ * Walk the answer section. Returns records printed, or -1 when the reply
+ * cannot be walked at all (not the same as an empty one): a name that does
+ * not decode, a header that runs off the end, an RDLENGTH past the datagram.
+ * A record whose contents are wrong for its type is not that -- it is counted
+ * and reported like any other. The question section is walked first to find
+ * where the answers start, and its name can itself be compressed.
  */
 static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 {
@@ -629,8 +637,26 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
         if (rdata + (ULONG)rdlen > len)
             return -1;
 
+        /*
+         * A record whose payload does not match its type is reported where it
+         * stands and the walk goes on.
+         *
+         * The framing is what decides whether the reply can be read at all,
+         * and it was checked above: the name decoded, the ten fixed bytes are
+         * there, and RDLENGTH is inside the datagram.  So the next record
+         * starts at a known offset whatever this one contains, and abandoning
+         * the answer here would throw away records that are perfectly well
+         * formed because an earlier one is not.
+         *
+         * This is the command whose whole job is looking at DNS that is
+         * broken.  Refusing the reply prints part of it, then an error, then
+         * exits non-zero -- three statements about a reply that differs from
+         * a clean one by one record.  The line below is the finding.
+         */
         if (!nsl_print_record(msg, type, rdata, (ULONG)rdlen))
-            return -1;
+            tool_printf("  malformed  type %lu, %lu bytes\n",
+                        (LONG)type, (LONG)rdlen);
+
         printed++;
 
         pos = (LONG)(rdata + (ULONG)rdlen);
