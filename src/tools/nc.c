@@ -637,9 +637,6 @@ int main(int argc, char **argv)
 
     tool_break_arm();
 
-    /* No host in listen mode means every address, which is IPv4's wildcard. */
-    tool_addr_v4(&address, 0);
-
     for (i = 0; i < (ULONG)ARG_COUNT; i++)
         args[i] = 0;
 
@@ -669,6 +666,11 @@ int main(int argc, char **argv)
         FreeArgs(rda);
         return RETURN_ERROR;
     }
+
+    /* A listener with no host binds the wildcard address.  Its family still
+       comes from -4/-6; leaving the early IPv4 initializer in place made -6
+       a successfully parsed no-op in the common `nc -l -6 PORT` form. */
+    tool_addr_any(&address, opt.family);
 
     opt.timeout   = (args[ARG_TIMEOUT] != 0)
                         ? (ULONG)(*(LONG *)args[ARG_TIMEOUT]) : 0UL;

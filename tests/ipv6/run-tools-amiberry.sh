@@ -159,7 +159,7 @@ SYS:ping ::1 -c 2 -t 20
 SYS:ping fd00::10 -c 2 -t 20
 SYS:ping fe80::2 -c 2 -t 20
 SYS:ping 2001:db8::1 -c 1 -t 5
-&SYS:nc -l 7099 -v -w 25 -N >DH0:nc-v6srv.txt
+&SYS:nc -l -6 7099 -v -w 25 -N >DH0:nc-v6srv.txt
 wait 4
 SYS:nc ::1 7099 -v -w 10 -N <DH0:greeting.txt
 wait 4

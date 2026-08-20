@@ -474,6 +474,10 @@ static void check_family(const char *name)
         CHECK(strstr(src, "tool_addr_any(&plan.peer, family)") != NULL,
               "iperf: server mode does not apply the selected family");
 
+    if (strcmp(name, "nc") == 0)
+        CHECK(strstr(src, "tool_addr_any(&address, opt.family)") != NULL,
+              "nc: listener mode does not apply the selected family");
+
     free(src);
 }
 
