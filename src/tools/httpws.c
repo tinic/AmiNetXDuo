@@ -195,6 +195,9 @@ void http_ws_reset(HttpWsIn *in)
     in->left     = 0;
     in->maskpos  = 0;
     in->msg      = HTTP_WS_EV_NONE;
+    in->utf8_need = 0;
+    in->utf8_lo   = 0x80;
+    in->utf8_hi   = 0xbf;
     in->ctl_n    = 0;
     in->failed   = 0;
 
@@ -288,6 +291,59 @@ static int ws_utf8_valid(const unsigned char *s, unsigned long n)
     }
 
     return 1;
+}
+
+/* Strict UTF-8 for a streamed text message.  Unlike a Close reason, a data
+   message can split one code point across frames and socket reads, so the
+   number and permitted range of its remaining continuation bytes live in the
+   decoder.  `final` makes an unfinished code point an error only at the end of
+   the message, not at an arbitrary transport boundary. */
+static int ws_utf8_piece(HttpWsIn *in, const unsigned char *s,
+                         unsigned long n, int final)
+{
+    unsigned long i;
+
+    for (i = 0; i < n; i++)
+    {
+        unsigned char c = s[i];
+
+        if (in->utf8_need != 0)
+        {
+            if (c < in->utf8_lo || c > in->utf8_hi)
+                return 0;
+
+            in->utf8_need--;
+            in->utf8_lo = 0x80;
+            in->utf8_hi = 0xbf;
+            continue;
+        }
+
+        if (c <= 0x7f)
+            continue;
+
+        if (c >= 0xc2 && c <= 0xdf)
+        {
+            in->utf8_need = 1;
+        }
+        else if (c >= 0xe0 && c <= 0xef)
+        {
+            in->utf8_need = 2;
+            in->utf8_lo = (c == 0xe0) ? 0xa0 : 0x80;
+            in->utf8_hi = (c == 0xed) ? 0x9f : 0xbf;
+        }
+        else if (c >= 0xf0 && c <= 0xf4)
+        {
+            in->utf8_need = 3;
+            in->utf8_lo = (c == 0xf0) ? 0x90 : 0x80;
+            in->utf8_hi = (c == 0xf4) ? 0x8f : 0xbf;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    return (!final || in->utf8_need == 0) ? 1 : 0;
 }
 
 /*
@@ -396,6 +452,12 @@ static void ws_header_done(HttpWsIn *in)
         }
 
         in->msg = (unsigned char)ws_event_of(in->opcode);
+        if (in->msg == HTTP_WS_EV_TEXT)
+        {
+            in->utf8_need = 0;
+            in->utf8_lo   = 0x80;
+            in->utf8_hi   = 0xbf;
+        }
     }
 
     if (in->left > HTTP_WS_MSG_MAX)
@@ -434,6 +496,13 @@ static void ws_finish_empty(HttpWsIn *in, HttpWsSink sink, void *ctx)
     {
         HttpWsEvent ev   = (HttpWsEvent)in->msg;
         int         last = (in->fin != 0) ? 1 : 0;
+
+        if (ev == HTTP_WS_EV_TEXT &&
+            !ws_utf8_piece(in, in->ctl, 0UL, last))
+        {
+            ws_fail(in, HTTP_WS_CLOSE_DATA);
+            return;
+        }
 
         if (sink != 0)
             sink(ctx, ev, in->ctl, 0, last);
@@ -563,6 +632,13 @@ long http_ws_feed(HttpWsIn *in, const unsigned char *data, long len,
                 {
                     int         last = (in->left == 0UL && in->fin != 0) ? 1 : 0;
                     HttpWsEvent ev   = (HttpWsEvent)in->msg;
+
+                    if (ev == HTTP_WS_EV_TEXT &&
+                        !ws_utf8_piece(in, piece, (unsigned long)take, last))
+                    {
+                        ws_fail(in, HTTP_WS_CLOSE_DATA);
+                        break;
+                    }
 
                     if (sink != 0 && (take > 0 || last))
                         sink(ctx, ev, piece, take, last);

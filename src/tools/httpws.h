@@ -27,10 +27,11 @@
  * rather than ignored, because ignoring one produces frames whose payload is
  * not what it says it is.
  *
- * No UTF-8 validation of text payloads.  The terminal behind this carries
- * AmigaDOS output, which is Latin-1 and not UTF-8, so the browser is sent
- * binary frames and the question does not arise.  Latin-1 in a text frame
- * would not be the UTF-8 that a text frame promises.
+ * Text payloads are UTF-8, including when one code point crosses a frame or
+ * socket-read boundary.  The terminal behind this carries AmigaDOS output,
+ * which is Latin-1 and not UTF-8, so the browser is sent binary frames in the
+ * other direction.  Latin-1 in a text frame would not be the UTF-8 that a
+ * text frame promises.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -118,6 +119,9 @@ typedef struct HttpWsIn
     unsigned char   maskpos;
 
     unsigned char   msg;            /* HttpWsEvent of the message in flight */
+    unsigned char   utf8_need;      /* continuation bytes still required    */
+    unsigned char   utf8_lo;        /* bounds for the next continuation     */
+    unsigned char   utf8_hi;
     unsigned char   ctl_n;
     unsigned char   ctl[HTTP_WS_CTL_MAX];
 

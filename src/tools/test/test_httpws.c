@@ -318,6 +318,19 @@ static void test_frames(void)
                (long)sizeof(mixed), "4:hi 1:Hello ", 0);
     }
 
+    /* Text is UTF-8 over the whole message, not independently per frame.  A
+       Euro sign split after its lead byte is valid and exercises both the
+       fragmented-message state and the one-byte-at-a-time feed. */
+    {
+        static const unsigned char utf8_split[] = {
+            0x01, 0x81, 0, 0, 0, 0, 0xe2,
+            0x80, 0x82, 0, 0, 0, 0, 0x82, 0xac
+        };
+
+        expect("UTF-8 may cross a fragmented-frame boundary", utf8_split,
+               (long)sizeof(utf8_split), "1:... ", 0);
+    }
+
     /* An empty ping, whose whole frame is its header.  Nothing follows it, so
        a decoder that only delivered from the payload loop would hold it for
        ever. */
@@ -487,6 +500,25 @@ static void test_frames(void)
                (long)sizeof(overlong), "", HTTP_WS_CLOSE_DATA);
         expect("a truncated close reason is refused", truncated,
                (long)sizeof(truncated), "", HTTP_WS_CLOSE_DATA);
+    }
+
+    /* RFC 6455 8.1 applies the same rule to ordinary text messages.  The
+       incomplete case ends in an empty final continuation so the decoder has
+       to check message completion even when that frame has no payload. */
+    {
+        static const unsigned char overlong_text[] = {
+            0x81, 0x82, 0, 0, 0, 0, 0xc0, 0xaf
+        };
+        static const unsigned char incomplete_text[] = {
+            0x01, 0x81, 0, 0, 0, 0, 0xe2,
+            0x80, 0x80, 0, 0, 0, 0
+        };
+
+        expect("overlong UTF-8 in text is refused", overlong_text,
+               (long)sizeof(overlong_text), "", HTTP_WS_CLOSE_DATA);
+        expect("unfinished UTF-8 at the message end is refused",
+               incomplete_text, (long)sizeof(incomplete_text), "",
+               HTTP_WS_CLOSE_DATA);
     }
 
     /* A continuation with nothing to continue. */
