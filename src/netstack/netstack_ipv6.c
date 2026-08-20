@@ -45,6 +45,8 @@
 static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
                                     UINT interface_index, UINT address_index,
                                     ULONG *address);
+static UINT ami_ns6_route_add(const ULONG dest[4], ULONG prefix_len,
+                              const ULONG next_hop[4], UWORD interface_index);
 
 /* -------------------------------------------------------------- bring-up, */
 
@@ -412,7 +414,11 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     {
         static const ULONG any[4] = { 0, 0, 0, 0 };
 
-        status = netstack_ipv6_route_add(any, 0, cfg->gateway6, i);
+        /* This configuration path already holds the ThreadX bracket.  Calling
+           the public wrapper here would allocate and adopt a second caller
+           merely to discover that it is nested, and could lose GATEWAY6 at
+           the memory floor while the rest of the interface reported success. */
+        status = ami_ns6_route_add(any, 0, cfg->gateway6, i);
         if (status != NX_SUCCESS)
             AMI_WARN("netstack: %s: GATEWAY6 rejected (%ld)",
                      cfg->name, (long)status);

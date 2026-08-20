@@ -3605,6 +3605,15 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ns->ns_Ip.nx_ip_interface[slot].nx_interface_valid == 0)
         status = NX_INVALID_INTERFACE;
 
+#ifdef AMINETXDUO_IPV6
+    /* Use the bracket that attached the interface.  Allocating a second one
+       after the attach could fail at the memory floor and used to publish a
+       successful interface with no link-local address, no solicited-node
+       membership and therefore no working neighbour discovery. */
+    if (status == NX_SUCCESS)
+        ami_netstack_ipv6_configure_one(ns, (UWORD)slot);
+#endif
+
     ami_netstack_leave_free(caller);
 
     if (status != NX_SUCCESS)
@@ -3641,32 +3650,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
 #ifdef AMINETXDUO_BPF
     ami_netstack_capture_attach_one(ns, (UWORD)slot);
-#endif
-
-#ifdef AMINETXDUO_IPV6
-    /*
-     * IPv6, which startup does once in ami_ns_configure_addresses() for the
-     * interfaces the file named. Without this an interface added here has no
-     * link-local address at all, which RFC 4291 requires, and no
-     * solicited-node multicast membership, so neighbour discovery cannot reach
-     * it. nx_ip_interface_detach() zeroes the whole IPv6 address list of the
-     * interface, so a remove/add pair loses it and nothing else puts it back.
-     *
-     * After the capture attach, for the reason startup starts capture before
-     * addressing: the duplicate address detection this sends belongs inside
-     * the trace.
-     *
-     * The bracket is the third and last one here. What happens inside it is
-     * configuration only: duplicate address detection runs afterwards, on the
-     * IP thread, and is reported by ami_ns6_address_changed() rather than
-     * waited for here.
-     */
-    caller = ami_netstack_enter_alloc();
-    if (caller != NULL)
-    {
-        ami_netstack_ipv6_configure_one(ns, (UWORD)slot);
-        ami_netstack_leave_free(caller);
-    }
 #endif
 
     if (index_out != NULL)
