@@ -347,6 +347,63 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 /* --------------------------------------------------------------- listen --- */
 
 /*
+ * A listener's first caller, a connection for TCP and a datagram for UDP.
+ * Neither accept() nor recvfrom() gives the command a place to enforce -w or
+ * notice Ctrl-C, so both wait here first.  The elapsed-time comparison avoids
+ * multiplying an arbitrary /N argument by 1000 and wrapping it.
+ */
+static BOOL nc_wait_listener(struct Library *sb, LONG sock,
+                             const NcOptions *opt)
+{
+    ULONG started = ami_millis();
+
+    for (;;)
+    {
+        ToolFdSet   readfds;
+        ToolTimeval tv;
+        LONG        ready;
+
+        if (tool_break())
+        {
+            tool_fault(ERROR_BREAK);
+            return FALSE;
+        }
+
+        tool_fd_zero(&readfds);
+        tool_fd_add(&readfds, sock);
+
+        tv.tv_secs  = 0;
+        tv.tv_micro = 200000;
+
+        ready = tool_sock_select(sb, sock + 1, &readfds, NULL, &tv);
+
+        if (ready < 0)
+        {
+            if (tool_sock_errno(sb) == TOOL_EINTR)
+                continue;
+
+            tool_error("cannot wait for a %s: %s",
+                       (LONG)(opt->udp ? "datagram" : "connection"),
+                       (LONG)tool_sock_errstr(tool_sock_errno(sb)));
+            return FALSE;
+        }
+
+        if (ready > 0)
+            return TRUE;
+
+        if (opt->timeout != 0 &&
+            (ami_millis() - started) / 1000UL >= opt->timeout)
+        {
+            tool_error(opt->udp
+                           ? "no datagram arrived within %lu seconds"
+                           : "nobody connected within %lu seconds",
+                       opt->timeout);
+            return FALSE;
+        }
+    }
+}
+
+/*
  * bind(), listen(), accept(), the half of the ABI a client never reaches.
  *
  * SO_REUSEADDR goes on first: a listener that has just exited leaves the port
@@ -360,7 +417,6 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
     ToolSockAddrAny from;
     LONG            lsock;
     LONG            one = 1;
-    ULONG           waited;
     char            dotted[TOOL_ADDR_STRLEN];
 
     lsock = tool_sock_socket(sb, (LONG)bindaddr->ta_Family,
@@ -398,6 +454,12 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
 
         if (opt->verbose)
             tool_printf("listening on UDP port %ld\n", (LONG)port);
+
+        if (!nc_wait_listener(sb, lsock, opt))
+        {
+            (VOID)tool_sock_close(sb, lsock);
+            return -1;
+        }
 
         n = tool_sock_recvfrom(sb, lsock, nc_from_net,
                                (LONG)sizeof(nc_from_net), &from);
@@ -453,49 +515,10 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
      * when there is a connection to take, which gives the break a place to be
      * noticed and TIMEOUT somewhere to apply.
      */
-    waited = 0;
-    for (;;)
+    if (!nc_wait_listener(sb, lsock, opt))
     {
-        ToolFdSet   readfds;
-        ToolTimeval tv;
-        LONG        ready;
-
-        if (tool_break())
-        {
-            tool_fault(ERROR_BREAK);
-            (VOID)tool_sock_close(sb, lsock);
-            return -1;
-        }
-
-        tool_fd_zero(&readfds);
-        tool_fd_add(&readfds, lsock);
-
-        tv.tv_secs  = 0;
-        tv.tv_micro = 200000;
-
-        ready = tool_sock_select(sb, lsock + 1, &readfds, NULL, &tv);
-
-        if (ready < 0)
-        {
-            if (tool_sock_errno(sb) == TOOL_EINTR)
-                continue;
-
-            tool_error("cannot wait for a connection: %s",
-                       (LONG)tool_sock_errstr(tool_sock_errno(sb)));
-            (VOID)tool_sock_close(sb, lsock);
-            return -1;
-        }
-
-        if (ready > 0)
-            break;
-
-        waited++;
-        if (opt->timeout != 0 && waited * 200UL >= opt->timeout * 1000UL)
-        {
-            tool_error("nobody connected within %lu seconds", opt->timeout);
-            (VOID)tool_sock_close(sb, lsock);
-            return -1;
-        }
+        (VOID)tool_sock_close(sb, lsock);
+        return -1;
     }
 
     *accepted = tool_sock_accept(sb, lsock, &from);
