@@ -473,7 +473,13 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         }
 
         if (head == NULL)
-            return EAI_MEMORY;
+        {
+            /* The only way here without an allocation failure already
+               returned above is an AF_INET6 request while IPv6 is not
+               running. No address of the requested family exists; reporting
+               EAI_MEMORY falsely blamed the allocator. */
+            return EAI_ADDRFAMILY;
+        }
 
         *res = head;
 
