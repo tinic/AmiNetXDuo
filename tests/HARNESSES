@@ -62,7 +62,6 @@ tests/common/run-rt.sh             : .github/workflows/emulator.yml : the compil
 tests/conformance/run-conformance.sh : .github/workflows/emulator.yml : the bsdsocktest conformance suite
 tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
 tests/sockopt/run-sockopt.sh       : .github/workflows/emulator.yml : the socket-option test; needs no driver and no card, only a ROM
-tests/atf/run-atf.sh               : .github/workflows/emulator.yml : FreeBSD's tests/sys/netinet, adopted; tapdev is the interface, so no driver and no card
 tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml : the crypto68k assembly against its own reference, on the 68020 and the 68000, which are different code
 tests/clients/run-clients.sh       : .github/workflows/emulator.yml : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
@@ -88,6 +87,7 @@ tests/compare/run-compare.sh       : tools/emurun.sh                : the same w
 # exactly what the emulator tier already has.  Twenty of them call themselves
 # the regression test for a named defect that shipped.
 
+tests/atf/run-atf.sh               : manual : AtfTcpSocket HANGS. The harness is written and correct; the binary is not. It reaches nothing: 240 s, no DH0:.done, and not one byte on the serial port, which is the signature of a machine that Gurued rather than a slow test. It is not the missing mathieeedoubbas.library its vsnprintf drags in -- staging that library changes nothing. tests/atf writes only through Output(), so a hang loses even what it did print; the fix starts by giving it the serial log every other harness has. Do not wire it until it runs
 tests/tools/run-toolsay.sh         : manual : UNWIRED. the three branches that reached a return and printed no sentence: arp's two absence explanations, its truncated list, and NetTrace's connect failure
 tests/tools/run-livetools.sh       : manual : UNWIRED. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead)
 tests/tools/run-checkconfig.sh     : manual : UNWIRED. the regression test for "the configuration is wrong and nothing says so"

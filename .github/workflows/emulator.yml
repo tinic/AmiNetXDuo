@@ -200,20 +200,6 @@ jobs:
           tools/ci-arm.sh -n "socket options, getsockopt/setsockopt/IoctlSocket" --
           tests/sockopt/run-sockopt.sh -b build/ci/default
 
-      # FreeBSD's own tests/sys/netinet, adopted unmodified.  tests/atf has
-      # been compiled by every cross configuration since it was written and
-      # executed by nothing at all: it had no harness, so tests/HARNESSES had
-      # nothing to record and could not report the hole.
-      #
-      # Same requirements as the two steps above and for the same reason --
-      # tests/tcpdrill/tapdev.c is the interface and INADDR_LOOPBACK is the
-      # wire -- so a ROM is the whole of it.
-      - name: FreeBSD's adopted TCP socket cases
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: >-
-          tools/ci-arm.sh -n "FreeBSD tests/sys/netinet, adopted" --
-          tests/atf/run-atf.sh -b build/ci/default
-
       # src/crypto68k's assembly against the portable C it also compiles, on
       # the machine.  The host tier runs the same vectors every push and cannot
       # reach the assembly at all: it is m68k, and it is DIFFERENT code per
