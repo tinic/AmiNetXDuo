@@ -92,7 +92,7 @@ static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
 /*
  * One byte bigger than the read. tn_demux() emits at most one byte per byte
  * consumed, except at the start: a CR held back from the previous segment
- * (st->saw_cr survives between calls) resolves into a '\n' and then the byte
+ * (st->saw_cr survives between calls) resolves into one byte and then the byte
  * that decided it is emitted as well. A segment ending on a bare CR followed
  * by a full 4096-byte segment with no CR and no IAC therefore produces 4097
  * bytes, a server-controlled one-byte write past the end of a static, which
@@ -318,7 +318,7 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                 /*
                  * NVT line endings: CR LF is a new line, CR NUL a bare
                  * carriage return.  The Amiga console wants a single LF for
-                 * the first and nothing for the second, so the CR is held
+                 * the first and a single CR for the second, so the CR is held
                  * back one byte and decided when the next one arrives.
                  */
                 if (st->saw_cr)
@@ -326,7 +326,7 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                     st->saw_cr = FALSE;
                     if (c == '\0')
                     {
-                        tn_clean[out++] = '\n';
+                        tn_clean[out++] = '\r';
                         break;
                     }
                     if (c == '\n')
@@ -334,7 +334,7 @@ static LONG tn_demux(TnState *st, const UBYTE *buf, LONG len)
                         tn_clean[out++] = '\n';
                         break;
                     }
-                    tn_clean[out++] = '\n';
+                    tn_clean[out++] = '\r';
                     /* and fall through to emit c as itself */
                 }
 
