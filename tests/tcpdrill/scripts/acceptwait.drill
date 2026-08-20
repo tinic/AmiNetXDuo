@@ -22,9 +22,12 @@
 # MEASURED, not deduced: running these cases against a build with
 # bsd_accept_once() reverted to the finite-wait form produces the same frames,
 # with the same flags and the same sequence number, in the same order.  The
-# only difference is how long the waits take, because the fix replaced a
+# only difference was how long the waits took, because the fix replaced a
 # suspend with nx_tcp_socket_state_wait()'s one-tick polling loop -- 1735 ms
 # of real time for 1600 ms of asked-for accept timeout before, 3177 ms after.
+# bsd_wait_sliced() now charges the clock ticks that actually passed instead
+# of the ticks the state waiter was asked for; the max= bounds below keep that
+# correction part of the verdict rather than merely printing the duration.
 #
 # WHAT IS LEFT, and why the file is still here.  Nothing else in the tree
 # covers a BLOCKING accept() with a timeout at all, and these are the two
@@ -41,7 +44,7 @@
 case aw01_waiting_on_an_idle_listener_sends_nothing
 localport 4741
 listen
-accept = none wait=400 tries=3
+accept = none wait=400 tries=3 min=800 max=1900
 notx 300
 
 # One handshake, several accept waits across it, and one initial sequence
@@ -58,10 +61,10 @@ notx 300
 case aw02_one_sequence_number_per_handshake_across_accept_waits
 localport 4742
 listen
-accept = none wait=400 tries=2
+accept = none wait=400 tries=2 min=500 max=1300
 rx S seq=0 win=8192 mss=1460
 tx SA ack=1 mss=1460
-accept = none wait=400 tries=4
+accept = none wait=400 tries=4 min=1000 max=2400
 txsame SA
 rx A seq=1 ack=1
 accept

@@ -2752,7 +2752,7 @@ static VOID do_socket(const char *raw)
 }
 
 /*
- * `connect [= ETIMEDOUT]`.
+ * `connect [= ETIMEDOUT] [min=MS max=MS]`.
  *
  * Plain, the socket is the non-blocking one do_socket() made and the call
  * reports EINPROGRESS; the frames it causes are asserted by the lines after
@@ -2768,6 +2768,8 @@ static VOID do_connect(const char *args, const char *raw)
     SockAddrIn a;
     LONG       rc;
     LONG       want_errno = 0;
+    LONG       min_ms = 0;
+    LONG       max_ms = 0;
     ULONG      t0;
     ULONG      took;
 
@@ -2777,9 +2779,30 @@ static VOID do_connect(const char *args, const char *raw)
         args = token(args, tok, sizeof(tok));       /* '=' or nothing */
         if (tok[0] == '=')
         {
-            (VOID)token(args, tok, sizeof(tok));
+            args = token(args, tok, sizeof(tok));
             want_errno = streq(tok, "ETIMEDOUT") ? E_TIMEDOUT : to_num(tok);
         }
+    }
+
+    for (;;)
+    {
+        char  tok[24];
+        char *eq;
+
+        args = token(args, tok, sizeof(tok));
+        if (tok[0] == '\0')
+            break;
+
+        for (eq = tok; *eq != '\0' && *eq != '='; eq++)
+            ;
+        if (*eq != '=')
+            continue;
+        *eq++ = '\0';
+
+        if (streq(tok, "min"))
+            min_ms = to_num(eq);
+        else if (streq(tok, "max"))
+            max_ms = to_num(eq);
     }
 
     zero((UBYTE *)&a, (ULONG)sizeof(a));
@@ -2797,6 +2820,25 @@ static VOID do_connect(const char *args, const char *raw)
     {
         if (rc < 0 && s_errno() == want_errno)
         {
+            if ((min_ms > 0 && took < (ULONG)min_ms) ||
+                (max_ms > 0 && took > (ULONG)max_ms))
+            {
+                char        why[112];
+                char       *w = why;
+                const char *t = "connect() took ";
+
+                while (*t) *w++ = *t++;
+                fmt_num(&w, took, 10, 0, FALSE);
+                t = "ms, wanted "; while (*t) *w++ = *t++;
+                fmt_num(&w, (ULONG)min_ms, 10, 0, FALSE);
+                t = ".."; while (*t) *w++ = *t++;
+                fmt_num(&w, (ULONG)max_ms, 10, 0, FALSE);
+                t = "ms"; while (*t) *w++ = *t++;
+                *w = '\0';
+                fail(raw, why);
+                return;
+            }
+
             /* cs.t_last stays at the moment the call went in, as it does for
                a non-blocking connect: the SYN the next line asserts on was
                sent then, and timing it from the return would print it as
@@ -2921,7 +2963,7 @@ static VOID do_listen(const char *args, const char *raw)
 }
 
 /*
- * `accept [= none] [wait=MS tries=N]`.
+ * `accept [= none] [wait=MS tries=N min=MS max=MS]`.
  *
  * Without `wait=` the listener is the non-blocking one do_listen() made and
  * this polls it for a second, which is what every case that expects a
@@ -2946,6 +2988,8 @@ static VOID do_accept(const char *args, const char *raw)
     BOOL  want_none = FALSE;
     LONG  wait_ms = 0;
     LONG  n_wait  = 1;
+    LONG  min_ms  = 0;
+    LONG  max_ms  = 0;
 
     {
         char tok[16];
@@ -2980,6 +3024,10 @@ static VOID do_accept(const char *args, const char *raw)
             wait_ms = to_num(eq);
         else if (streq(tok, "tries"))
             n_wait = to_num(eq);
+        else if (streq(tok, "min"))
+            min_ms = to_num(eq);
+        else if (streq(tok, "max"))
+            max_ms = to_num(eq);
     }
 
     if (wait_ms > 0)
@@ -3046,16 +3094,23 @@ static VOID do_accept(const char *args, const char *raw)
          * so the case would pass without exercising anything -- which is what
          * a listener left non-blocking by a bad `wait=` would do.
          */
-        if (took < (ULONG)(wait_ms * n_wait) / 2UL)
+        if (min_ms == 0)
+            min_ms = (wait_ms * n_wait) / 2;
+
+        if (took < (ULONG)min_ms ||
+            (max_ms > 0 && took > (ULONG)max_ms))
         {
             w = why;
-            t = "the accept waits did not wait: ";
+            t = "the accept waits took ";
             while (*t != '\0') *w++ = *t++;
             fmt_num(&w, took, 10, 0, FALSE);
-            t = "ms for ";
+            t = "ms, wanted ";
             while (*t != '\0') *w++ = *t++;
-            fmt_num(&w, (ULONG)n_wait, 10, 0, FALSE);
-            t = " of them";
+            fmt_num(&w, (ULONG)min_ms, 10, 0, FALSE);
+            t = "..";
+            while (*t != '\0') *w++ = *t++;
+            fmt_num(&w, (ULONG)max_ms, 10, 0, FALSE);
+            t = "ms";
             while (*t != '\0') *w++ = *t++;
             *w = '\0';
             fail(raw, why);

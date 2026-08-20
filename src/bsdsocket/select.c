@@ -394,6 +394,7 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
     for (;;)
     {
         ULONG slice;
+        ULONG started = 0;
 
         if ((SetSignal(0UL, 0UL) & break_mask) != 0)
         {
@@ -409,13 +410,33 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
             slice = (remaining < BSD_BREAK_SLICE_TICKS) ? remaining
                                                         : BSD_BREAK_SLICE_TICKS;
 
+        if (wait != NX_WAIT_FOREVER)
+            started = tx_time_get();
+
         status = call(arg, slice);
         if (status != NX_NO_PACKET && status != NX_TX_QUEUE_DEPTH &&
             status != NX_WINDOW_OVERFLOW)
             return status;
 
         if (wait != NX_WAIT_FOREVER)
-            remaining -= slice;
+        {
+            ULONG elapsed = tx_time_get() - started;
+
+            /* Most NetX waits suspend once for `slice`, and elapsed is the
+               same number. nx_tcp_socket_state_wait() is different: it
+               spells a wait as `slice` separate tx_thread_sleep(1) calls.
+               On an adopted Exec task each one crosses the scheduler and can
+               consume two timer ticks, so subtracting only `slice` made
+               connect()/accept() timeouts last about twice what was asked.
+
+               Charge the clock, not the request. Keep `slice` as the floor:
+               a retry status returned before the clock advances must still
+               consume its advertised wait or this loop can spin forever. */
+            if (elapsed < slice)
+                elapsed = slice;
+
+            remaining = (elapsed >= remaining) ? 0 : remaining - elapsed;
+        }
     }
 }
 
