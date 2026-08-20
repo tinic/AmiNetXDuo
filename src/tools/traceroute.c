@@ -496,6 +496,16 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if ((args[ARG_MAXTTL]     != 0 && *(LONG *)args[ARG_MAXTTL]     < 0) ||
+        (args[ARG_QUERIES]    != 0 && *(LONG *)args[ARG_QUERIES]    < 0) ||
+        (args[ARG_WAIT]       != 0 && *(LONG *)args[ARG_WAIT]       < 0) ||
+        (args[ARG_PACKETSIZE] != 0 && *(LONG *)args[ARG_PACKETSIZE] < 0))
+    {
+        tool_error("MAXTTL, QUERIES, WAIT and PACKETSIZE cannot be negative");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     host       = (const char *)args[ARG_HOST];
     maxttl     = (ULONG)arg_or(args, ARG_MAXTTL,  (LONG)TR_DEFAULT_MAXTTL);
     queries    = (ULONG)arg_or(args, ARG_QUERIES, (LONG)TR_DEFAULT_QUERIES);
