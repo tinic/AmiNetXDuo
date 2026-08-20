@@ -4351,8 +4351,10 @@ static BOOL httpd_may_write(HttpConn *c)
  */
 static BOOL httpd_begin_put(HttpConn *c)
 {
-    char  leaf[16];
+    char  leaf[20];
     ULONG used;
+    ULONG attempt;
+    BOOL  found = FALSE;
 
     if (!httpd_may_write(c))
         return FALSE;
@@ -4401,23 +4403,40 @@ static BOOL httpd_begin_put(HttpConn *c)
         }
     }
 
-    /* One name per connection slot, so two uploads into one drawer cannot
-       collide, and short enough for a filesystem that stops at 30
-       characters.  Build the leaf separately and join it atomically.  A
-       failed hs_append() leaves `used` unchanged after copying a prefix, so
-       ignoring its result here used to turn a long path into a sibling named
-       after the connection slot and MODE_NEWFILE then truncated that file. */
-    used    = 0;
-    leaf[0] = '\0';
+    /* Keep the parent while candidates are tried.  MODE_NEWFILE truncates an
+       existing file, so a fixed hidden name is not a temporary at all when a
+       user already owns that name. */
+    hs_copy(httpd_probe, sizeof(httpd_probe), c->put_temp);
 
-    if (!hs_append(leaf, sizeof(leaf), &used, ".httpd-put-") ||
-        !hs_append_num(leaf, sizeof(leaf), &used,
-                       (ULONG)(c - httpd_conn)) ||
-        !http_path_join(c->put_temp, sizeof(c->put_temp), leaf))
+    for (attempt = 0; attempt < (ULONG)HTTPD_CONN_MAX * 2UL; attempt++)
+    {
+        used    = 0;
+        leaf[0] = '\0';
+
+        if (!hs_append(leaf, sizeof(leaf), &used, ".httpd-put-") ||
+            !hs_append_num(leaf, sizeof(leaf), &used,
+                           (ULONG)(c - httpd_conn)) ||
+            !hs_append(leaf, sizeof(leaf), &used, "-") ||
+            !hs_append_num(leaf, sizeof(leaf), &used, attempt))
+            break;
+
+        hs_copy(c->put_temp, sizeof(c->put_temp), httpd_probe);
+
+        if (!http_path_join(c->put_temp, sizeof(c->put_temp), leaf))
+            break;
+
+        if (!hs_equal(c->put_temp, c->path.path) &&
+            httpd_kind(c->put_temp) < 0)
+        {
+            found = TRUE;
+            break;
+        }
+    }
+
+    if (!found)
     {
         c->put_temp[0] = '\0';
-        httpd_error(c, 414, "that address leaves no room for an upload "
-                            "temporary");
+        httpd_error(c, 503, "there is no free temporary name for that upload");
         return FALSE;
     }
 
@@ -4485,15 +4504,6 @@ static VOID httpd_do_put(HttpConn *c)
         httpd_put_abandon(c);
         httpd_error(c, 400,
                     "that name is longer than this filesystem keeps");
-        return;
-    }
-
-    /* A client is free to PUT a file called ".httpd-put-0", and then the
-       temporary is the target and the rename below would delete it. */
-    if (hs_equal(c->put_temp, c->path.path))
-    {
-        c->put_temp[0] = '\0';
-        httpd_empty(c, 201);
         return;
     }
 
