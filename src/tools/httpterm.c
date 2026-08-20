@@ -1187,6 +1187,20 @@ VOID http_term_service(VOID)
             case ACTION_CHANGE_SIGNAL:
             {
                 struct MsgPort *was = term_break_port;
+                LONG            id  = pkt->dp_Arg1 & 0xFF;
+
+                /* Unlike SetMode() and WaitForChar(), dos.library does pass
+                   fh_Arg1 here: cli_init.c and execute.c both send it as the
+                   first argument.  Honour its generation.  Without this, a
+                   Shell abandoned on the old generation can later redirect
+                   Ctrl-C in the replacement session to one of its own tasks,
+                   defeating the isolation the generated handles provide. */
+                if (((ULONG)pkt->dp_Arg1 >> 8) != (ULONG)term_gen ||
+                    (id != TERM_ID_IN && id != TERM_ID_CON))
+                {
+                    term_reply(pkt, DOSFALSE, ERROR_INVALID_LOCK);
+                    continue;
+                }
 
                 term_break_port = (struct MsgPort *)pkt->dp_Arg2;
                 term_reply(pkt, (LONG)was, 0);
