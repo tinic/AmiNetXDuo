@@ -468,48 +468,11 @@ BOOL netstack_ipv6_enabled(VOID)
     return (ns != NULL && ns->ns_IpCreated && ns->ns_Ipv6Enabled) ? TRUE : FALSE;
 }
 
-BOOL netstack_ipv6_have_global(VOID)
+/* The caller holds the ThreadX bracket. */
+static BOOL ami_ns6_address_get(AmiNetStack *ns, UWORD interface_index,
+                                UWORD slot, ULONG addr_out[4],
+                                ULONG *prefix_out, ULONG *state_out)
 {
-    UWORD i;
-    UWORD slot;
-
-    if (!netstack_ipv6_enabled())
-        return FALSE;
-
-    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES; i++)
-    {
-        for (slot = 0; ; slot++)
-        {
-            ULONG addr[4];
-            ULONG state = 0;
-
-            if (!netstack_ipv6_address_get(i, slot, addr, NULL, &state))
-                break;
-
-            /* 2000::/3.  A link-local is not a source for the internet, and
-               neither is fc00::/7: nobody routes a unique-local address off
-               the site that made it up. */
-            if ((addr[0] & 0xE0000000UL) != 0x20000000UL)
-                continue;
-
-            /* RFC 4862 5.4: TENTATIVE is still under duplicate address
-               detection and must not be a source. */
-            if (state == (ULONG)NX_IPV6_ADDR_STATE_TENTATIVE ||
-                state == (ULONG)NX_IPV6_ADDR_STATE_UNKNOWN)
-                continue;
-
-            return TRUE;
-        }
-    }
-
-    return FALSE;
-}
-
-BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
-                               ULONG addr_out[4], ULONG *prefix_out,
-                               ULONG *state_out)
-{
-    AmiNetStack      *ns = ami_netstack_raw();
     NXD_IPV6_ADDRESS *entry;
     UWORD             seen = 0;
 
@@ -557,6 +520,75 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
     }
 
     return FALSE;
+}
+
+BOOL netstack_ipv6_have_global(VOID)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UWORD         i;
+    UWORD         slot;
+    BOOL          found = FALSE;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return FALSE;
+
+    /* getaddrinfo(AF_UNSPEC) reaches this before its resolver bracket. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return FALSE;
+
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES && !found; i++)
+    {
+        for (slot = 0; ; slot++)
+        {
+            ULONG addr[4];
+            ULONG state = 0;
+
+            if (!ami_ns6_address_get(ns, i, slot, addr, NULL, &state))
+                break;
+
+            /* 2000::/3.  A link-local is not a source for the internet, and
+               neither is fc00::/7: nobody routes a unique-local address off
+               the site that made it up. */
+            if ((addr[0] & 0xE0000000UL) != 0x20000000UL)
+                continue;
+
+            /* RFC 4862 5.4: TENTATIVE is still under duplicate address
+               detection and must not be a source. */
+            if (state == (ULONG)NX_IPV6_ADDR_STATE_TENTATIVE ||
+                state == (ULONG)NX_IPV6_ADDR_STATE_UNKNOWN)
+                continue;
+
+            found = TRUE;
+            break;
+        }
+    }
+
+    ami_netstack_leave_free(caller);
+    return found;
+}
+
+BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
+                               ULONG addr_out[4], ULONG *prefix_out,
+                               ULONG *state_out)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    BOOL          found;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return FALSE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return FALSE;
+
+    found = ami_ns6_address_get(ns, interface_index, slot, addr_out,
+                                prefix_out, state_out);
+
+    ami_netstack_leave_free(caller);
+    return found;
 }
 
 /* ---------------------------------------------------------------- routes, */
@@ -644,8 +676,9 @@ static VOID ami_ns6_mask(ULONG addr[4], ULONG prefix_len)
     }
 }
 
-UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
-                             const ULONG next_hop[4], UWORD interface_index)
+/* The caller holds the ThreadX bracket. */
+static UINT ami_ns6_route_add(const ULONG dest[4], ULONG prefix_len,
+                              const ULONG next_hop[4], UWORD interface_index)
 {
     AmiNetStack *ns = ami_netstack_raw();
     ULONG        prefix[4];
@@ -713,8 +746,32 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
     return status;
 }
 
-UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
-                                const ULONG next_hop[4])
+UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
+                             const ULONG next_hop[4], UWORD interface_index)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return NX_NOT_ENABLED;
+
+    if (dest == NULL || prefix_len > 128UL)
+        return NX_IP_ADDRESS_ERROR;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return NX_CALLER_ERROR;
+
+    status = ami_ns6_route_add(dest, prefix_len, next_hop, interface_index);
+
+    ami_netstack_leave_free(caller);
+    return status;
+}
+
+/* The caller holds the ThreadX bracket. */
+static UINT ami_ns6_route_delete(const ULONG dest[4], ULONG prefix_len,
+                                 const ULONG next_hop[4])
 {
     AmiNetStack *ns = ami_netstack_raw();
     ULONG        prefix[4];
@@ -768,8 +825,32 @@ UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
     return status;
 }
 
-BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
-                              ULONG addr_out[4])
+UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
+                                const ULONG next_hop[4])
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UINT          status;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return NX_NOT_ENABLED;
+
+    if (dest == NULL || prefix_len > 128UL)
+        return NX_IP_ADDRESS_ERROR;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return NX_CALLER_ERROR;
+
+    status = ami_ns6_route_delete(dest, prefix_len, next_hop);
+
+    ami_netstack_leave_free(caller);
+    return status;
+}
+
+/* The caller holds the ThreadX bracket. */
+static BOOL ami_ns6_source_for(const ULONG dest[4], LONG interface_index,
+                               ULONG addr_out[4])
 {
     AmiNetStack      *ns = ami_netstack_raw();
     NXD_IPV6_ADDRESS *source = NX_NULL;
@@ -813,4 +894,19 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
     tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
 
     return (status == NX_SUCCESS && source != NX_NULL) ? TRUE : FALSE;
+}
+
+BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
+                              ULONG addr_out[4])
+{
+    AmiNetCaller *caller = ami_netstack_enter_alloc();
+    BOOL          found;
+
+    if (caller == NULL)
+        return FALSE;
+
+    found = ami_ns6_source_for(dest, interface_index, addr_out);
+
+    ami_netstack_leave_free(caller);
+    return found;
 }
