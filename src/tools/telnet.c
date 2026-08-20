@@ -173,7 +173,7 @@ static VOID tn_send_raw(TnState *st, const UBYTE *buf, LONG len)
     if (st->failed)
         return;
 
-    if (tool_sock_send(st->sb, st->sock, buf, len) != len)
+    if (tool_sock_send_full(st->sb, st->sock, buf, len) != len)
     {
         tool_error("cannot send: %s",
                    (LONG)tool_sock_errstr(tool_sock_errno(st->sb)));
