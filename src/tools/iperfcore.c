@@ -596,6 +596,17 @@ static VOID iperf_slice_recv(IperfRun *run)
             {
                 long id;
 
+                if (run->have_from
+                    && !tool_sock_addr_same(&from, &run->from))
+                {
+                    /* One UDP run belongs to the endpoint whose first
+                       datagram opened it.  Counting another sender here
+                       corrupts that peer's figures, and a forged negative
+                       id would end its run and make us report the result to
+                       the original endpoint. */
+                    continue;
+                }
+
                 if (!run->have_from)
                 {
                     run->from      = from;
