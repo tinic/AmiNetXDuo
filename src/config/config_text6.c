@@ -206,9 +206,14 @@ static BOOL ami_cfg_parse_ip6_inner(const char *text,
         s++;
         while (*s >= '0' && *s <= '9')
         {
-            prefix = prefix * 10UL + (ULONG)(*s - '0');
-            if (prefix > 128UL)
+            ULONG digit = (ULONG)(*s - '0');
+
+            /* Check before the multiply.  A long decimal string can wrap an
+               ULONG back below 128; /42949672960 used to be accepted as /0. */
+            if (prefix > (128UL - digit) / 10UL)
                 return FALSE;
+
+            prefix = prefix * 10UL + digit;
             digits++;
             s++;
         }

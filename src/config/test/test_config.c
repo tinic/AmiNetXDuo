@@ -401,6 +401,7 @@ static void test_ip6(void)
 
     prefix = 64;
     CHECK(!ami_config_parse_ip6("2001:db8::1/129", addr, &prefix));
+    CHECK(!ami_config_parse_ip6("2001:db8::1/42949672960", addr, &prefix));
     CHECK(!ami_config_parse_ip6("2001:db8::1/", addr, &prefix));
 
     /* ---- RFC 5952 output ----------------------------------------------- */
@@ -589,6 +590,13 @@ static void test_interface_ipv6(void)
     strcpy(buf, "device=a2065.device\nconfigure6=static\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
     CHECK(cfg.ip6type == AMI_IP6TYPE_LINKLOCAL);
+
+    /* An overflowing prefix is a bad ADDRESS6, not /0 after ULONG wrap. */
+    strcpy(buf, "device=a2065.device\nconfigure6=static\n"
+                "address6=2001:db8::5/42949672960\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_LINKLOCAL);
+    CHECK(cfg.prefix6 == 64);
 }
 
 #endif /* AMINETXDUO_IPV6 */
