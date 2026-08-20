@@ -178,6 +178,7 @@ cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:Configu
 cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
 cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing else|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
 cold|ConfigureNetInterface|bad-mdns|5|re:MDNS is YES or NO|-|SYS:ConfigureNetInterface eth0 MDNS=MAYBE
+cold|ConfigureNetInterface|bad-timeout|5|re:a TIMEOUT of less than 10 seconds|-|SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT=-1
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
 # hostname reads the whole configuration into a static AmiConfig to answer with
 # the stack down, and ami_config_load() loads the netdb behind it, which is

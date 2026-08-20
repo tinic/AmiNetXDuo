@@ -1000,7 +1000,7 @@ int main(int argc, char **argv)
 
     if (args[ARG_TIMEOUT] != 0)
     {
-        timeout = (ULONG)(*(LONG *)args[ARG_TIMEOUT]);
+        LONG seconds = *(LONG *)args[ARG_TIMEOUT];
 
         if (!want_dhcp)
         {
@@ -1009,7 +1009,7 @@ int main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
-        if (timeout < (ULONG)CNI_DHCP_TIMEOUT_MIN)
+        if (seconds < CNI_DHCP_TIMEOUT_MIN)
         {
             tool_error("a TIMEOUT of less than %ld seconds is too short to "
                        "tell anything about the network",
@@ -1017,6 +1017,8 @@ int main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
+
+        timeout = (ULONG)seconds;
     }
 
     if (!have_address && !have_netmask && !have_gateway && !have_gateway6 &&
