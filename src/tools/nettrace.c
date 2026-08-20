@@ -70,6 +70,8 @@ enum
 /* ---------------------------------------------------------- the workloads */
 
 #define NT_CHUNK    4096
+#define NT_SNAP_MIN 14UL
+#define NT_SNAP_MAX 65535UL
 
 static UBYTE nt_buf[NT_CHUNK];
 
@@ -481,6 +483,30 @@ int main(int argc, char **argv)
     blen    = (args[ARG_BLEN] != 0) ? (ULONG)(*(LONG *)args[ARG_BLEN]) : 32768UL;
     bytes   = (args[ARG_BYTES] != 0) ? (ULONG)(*(LONG *)args[ARG_BYTES])
                                      : 1048576UL;
+
+    if (snaplen < NT_SNAP_MIN || snaplen > NT_SNAP_MAX)
+    {
+        tool_error("SNAP must be between %lu and %lu bytes",
+                   (LONG)NT_SNAP_MIN, (LONG)NT_SNAP_MAX);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (blen < TOOL_BPF_MIN_BLEN || blen > TOOL_BPF_MAX_BLEN)
+    {
+        tool_error("BLEN must be between %lu and %lu bytes",
+                   (LONG)TOOL_BPF_MIN_BLEN, (LONG)TOOL_BPF_MAX_BLEN);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (blen < snaplen + 32UL)
+    {
+        tool_error("BLEN %lu is too small for a snap length of %lu",
+                   (LONG)blen, (LONG)snaplen);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
     if (args[ARG_PORT] != 0)
     {
