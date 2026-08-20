@@ -2117,12 +2117,47 @@ static VOID httpd_walk_slice(HttpConn *c)
 
             case WALK_SCAN:
             {
-                if (c->walk_lock == (BPTR)0 || !ExNext(c->walk_lock, c->fib))
+                if (c->walk_lock == (BPTR)0)
                 {
-                    /* Nothing left, and no subdrawer this pass was going to
-                       take, so this level is finished with. */
+                    httpd_walk_failed(c, c->walk_src, 500);
+                    httpd_walk_mark(c);
+                    c->walk_status = 500;
+                    c->walk = WALK_DONE;
+                    break;
+                }
+
+                if (!ExNext(c->walk_lock, c->fib))
+                {
+                    LONG err = IoErr();
+
                     UnLock(c->walk_lock);
                     c->walk_lock = (BPTR)0;
+
+                    /* False means both ordinary end-of-directory and a read
+                       failure.  Treating both as the former made a COPY omit
+                       the unread tail and still answer success. */
+                    if (err != ERROR_NO_MORE_ENTRIES)
+                    {
+                        httpd_walk_failed(c, c->walk_src, 500);
+                        httpd_walk_mark(c);
+
+                        if (c->walk_copy)
+                        {
+                            c->walk_status = 500;
+                            c->walk = WALK_DONE;
+                        }
+                        else
+                        {
+                            /* Do not remove a drawer whose contents could not
+                               be enumerated.  The entries already removed are
+                               reported as a partial DELETE through the 207. */
+                            c->walk = WALK_UP;
+                        }
+                        break;
+                    }
+
+                    /* Nothing left, and no subdrawer this pass was going to
+                       take, so this level is finished with. */
                     c->walk = c->walk_copy ? WALK_UP : WALK_RMDIR;
                     break;
                 }
