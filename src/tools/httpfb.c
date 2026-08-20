@@ -1935,11 +1935,19 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
             RFB_FMT_IS_CHUNKY(want->format) && !pub)
             rc = FB_GRAB_UNREADABLE;
 
-        /* Attach on the first frame of a geometry rather than in
+        /* Equal wire geometry does not make two RTG bitmaps interchangeable.
+           The chosen readback route and the snapshot offscreen belong to the
+           bitmap that was probed; a same-sized screen can use another native
+           format or another board.  Make that screen change an attach barrier
+           even though it does not require new encoder buffers. */
+        if (rc == FB_GRAB_OK && !*palette_moved &&
+            RFB_FMT_IS_CHUNKY(want->format) && fb_rtg_ready &&
+            !http_rtg_attached_to(sc->RastPort.BitMap))
+            fb_rtg_ready = 0;
+
+        /* Attach on the first frame of a bitmap rather than in
            fb_take_buffers(), because the probe is library calls against a
-           screen and this is where one is held.  It also has to happen again
-           after a screen change, which is what fb_rtg_ready being cleared with
-           the buffers arranges. */
+           screen and this is where one is held. */
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format) &&
             !fb_rtg_ready)

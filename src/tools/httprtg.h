@@ -92,6 +92,11 @@ BOOL  http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
                       UWORD width, UWORD height, ULONG stride, UBYTE *probe);
 VOID  http_rtg_detach(VOID);
 
+/* Whether the measured routes and any snapshot bitmap belong to `bm`.
+   Equal wire geometry is not enough: two same-sized screens can have
+   different native formats or live on different boards. */
+BOOL  http_rtg_attached_to(struct BitMap *bm);
+
 /* One whole frame into `dst`, contiguous full rows at the attach stride.
    Rows and not tiles: adjacent reads coalesce and a loop of small rectangles
    is the shape that does not. */

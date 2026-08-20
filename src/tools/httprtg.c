@@ -432,6 +432,7 @@ static const char *const rtg_route_name[RTG_N_ROUTE] =
 /* -------------------------------------------------------------- session --- */
 
 static struct RastPort *rtg_rp;         /* the screen's, for the driver reads */
+static struct BitMap   *rtg_bm;         /* the bitmap whose routes were probed */
 static UWORD           rtg_w;           /* pixels a row                       */
 static UWORD           rtg_h;
 static ULONG           rtg_stride;      /* the caller's staging row stride    */
@@ -1143,6 +1144,7 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
         return FALSE;
 
     rtg_rp         = rp;
+    rtg_bm         = bm;
     rtg_w          = width;
     rtg_h          = height;
     rtg_stride     = stride;
@@ -1207,6 +1209,7 @@ VOID http_rtg_detach(VOID)
 {
     rtg_off_free();
     rtg_rp = NULL;
+    rtg_bm = NULL;
     rtg_w = 0;
     rtg_h = 0;
     rtg_stride = 0;
@@ -1220,17 +1223,21 @@ VOID http_rtg_detach(VOID)
     rtg_on_board_known = 0;
 }
 
+BOOL http_rtg_attached_to(struct BitMap *bm)
+{
+    return (BOOL)(bm != NULL && bm == rtg_bm && rtg_route >= 0);
+}
+
 /* ------------------------------------------------------------ the fetch --- */
 
 BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst)
 {
     UWORD y;
 
-    if (rtg_route < 0 || bm == NULL || rp == NULL || dst == NULL)
+    if (!http_rtg_attached_to(bm) || rp == NULL || dst == NULL)
         return FALSE;
 
-    /* The screen can have been re-resolved since attach.  The geometry is the
-       caller's to check, and the RastPort here is whatever it just locked. */
+    /* The RastPort here is the one the caller just locked. */
     rtg_rp = rp;
 
     for (y = 0; y < rtg_h; )
