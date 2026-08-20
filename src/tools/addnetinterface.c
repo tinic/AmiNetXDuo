@@ -517,6 +517,13 @@ int main(int argc, char **argv)
     {
         LONG given = *(const LONG *)args[ARG_TIMEOUT];
 
+        if (given < 0)
+        {
+            tool_error("TIMEOUT cannot be negative");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
         timeout = (given > (LONG)ADDIF_TIMEOUT) ? (ULONG)given : ADDIF_TIMEOUT;
     }
 

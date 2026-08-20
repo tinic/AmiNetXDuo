@@ -184,6 +184,7 @@ cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE takes DHCP and nothing e
 cold|ConfigureNetInterface|bad-mdns|5|re:MDNS is YES or NO|-|SYS:ConfigureNetInterface eth0 MDNS=MAYBE
 cold|ConfigureNetInterface|bad-timeout|5|re:a TIMEOUT of less than 10 seconds|-|SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT=-1
 cold|AddNetInterface|unknown-name|5|re:there is no interface called|-|SYS:AddNetInterface nosuchinterface
+cold|AddNetInterface|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:AddNetInterface eth0 TIMEOUT=-1
 # hostname reads the whole configuration into a static AmiConfig to answer with
 # the stack down, and ami_config_load() loads the netdb behind it, which is
 # where addnetroute.c found 12,616 bytes a run going missing.  The refusal arm
