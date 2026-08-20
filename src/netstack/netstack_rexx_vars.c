@@ -43,6 +43,8 @@
 #include "netstack_internal.h"
 #include "netstack_rexx.h"
 
+#include "aminetxduo/nx_queue.h"
+
 #include <dos/dos.h>
 
 #include <proto/dos.h>
@@ -591,20 +593,6 @@ static LONG ami_rx_tcp_state(ULONG nx_state)
     return 0;
 }
 
-static ULONG ami_rx_queue_bytes(NX_PACKET *head, ULONG count)
-{
-    ULONG bytes = 0;
-    ULONG n;
-
-    for (n = 0; n < count && head != NX_NULL; n++)
-    {
-        bytes += head->nx_packet_length;
-        head   = head->nx_packet_queue_next;
-    }
-
-    return bytes;
-}
-
 static NX_TCP_SOCKET *ami_rx_listen_spare(NX_IP *ip, UINT port)
 {
     NX_TCP_LISTEN *listen_ptr = ip->nx_ip_tcp_active_listen_requests;
@@ -676,12 +664,8 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
                              tcp->nx_tcp_socket_state == NX_TCP_CLOSED)
                                 ? 1     /* TCPS_LISTEN */
                                 : ami_rx_tcp_state(tcp->nx_tcp_socket_state);
-        e->rs_RecvQ =
-            ami_rx_queue_bytes(tcp->nx_tcp_socket_receive_queue_head,
-                               tcp->nx_tcp_socket_receive_queue_count);
-        e->rs_SendQ =
-            ami_rx_queue_bytes(tcp->nx_tcp_socket_transmit_sent_head,
-                               tcp->nx_tcp_socket_transmit_sent_count);
+        e->rs_RecvQ = ami_nx_tcp_receive_bytes(tcp);
+        e->rs_SendQ = ami_nx_tcp_send_bytes(tcp);
 
         tcp = tcp->nx_tcp_socket_created_next;
     }
@@ -702,9 +686,7 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
         e->rs_Local       = 0;
         e->rs_SendQ       = 0;
         e->rs_State       = 0;      /* AmiTCP: "NO state for UDP" */
-        e->rs_RecvQ =
-            ami_rx_queue_bytes(udp->nx_udp_socket_receive_head,
-                               udp->nx_udp_socket_receive_count);
+        e->rs_RecvQ = ami_nx_udp_receive_bytes(udp);
 
         udp = udp->nx_udp_socket_created_next;
     }

@@ -8,7 +8,7 @@
  */
 
 #include "udp_queue.h"
-#include "tcp_queue.h"
+#include "aminetxduo/nx_queue.h"
 
 #include "nx_udp.h"
 
@@ -36,6 +36,7 @@ int main(void)
     NX_PACKET     packet;
     NX_PACKET     second;
     NX_TCP_SOCKET tcp;
+    NX_UDP_SOCKET udp;
     NX_UDP_HEADER *header;
     UINT          port = 0;
     ULONG         length = 0;
@@ -45,6 +46,7 @@ int main(void)
     memset(&packet, 0, sizeof(packet));
     memset(&second, 0, sizeof(second));
     memset(&tcp, 0, sizeof(tcp));
+    memset(&udp, 0, sizeof(udp));
 
     /* Deliberately put another value where nxd_udp_source_extract() looks:
        two longwords before prepend_ptr.  That location is inside the IP
@@ -64,15 +66,20 @@ int main(void)
     second.nx_packet_prepend_ptr = (UCHAR *)(void *)header;
     second.nx_packet_length = (ULONG)sizeof(*header) + 7UL;
     packet.nx_packet_queue_next = &second;
-    CHECK(bsd_udp_queue_payload_bytes(&packet, 2UL) == 26UL);
-    CHECK(bsd_udp_queue_payload_bytes(&packet, 1UL) == 19UL);
+    udp.nx_udp_socket_receive_head = &packet;
+    udp.nx_udp_socket_receive_count = 2UL;
+    CHECK(ami_nx_udp_receive_bytes(&udp) == 26UL);
+    udp.nx_udp_socket_receive_count = 1UL;
+    CHECK(ami_nx_udp_receive_bytes(&udp) == 19UL);
 
     /* The count is only an upper bound on a walk whose chain can end. */
-    CHECK(bsd_udp_queue_payload_bytes(&packet, 3UL) == 26UL);
+    udp.nx_udp_socket_receive_count = 3UL;
+    CHECK(ami_nx_udp_receive_bytes(&udp) == 26UL);
 
     /* A malformed entry contributes no bytes and does not hide its tail. */
     packet.nx_packet_length = (ULONG)sizeof(*header) - 1UL;
-    CHECK(bsd_udp_queue_payload_bytes(&packet, 2UL) == 7UL);
+    udp.nx_udp_socket_receive_count = 2UL;
+    CHECK(ami_nx_udp_receive_bytes(&udp) == 7UL);
 
     packet.nx_packet_length = (ULONG)sizeof(*header) + 19UL;
 
@@ -96,7 +103,7 @@ int main(void)
     packet.nx_packet_queue_next = NX_NULL;
     packet.nx_packet_union_next.nx_packet_tcp_queue_next = &second;
     second.nx_packet_length = 38UL;
-    CHECK(bsd_tcp_send_queue_bytes(&tcp) == 37UL);
+    CHECK(ami_nx_tcp_send_bytes(&tcp) == 37UL);
 
     /* Receive packets retain their TCP headers and use the TCP-specific link;
        nx_packet_queue_next is a readiness sentinel, not a list pointer. */
@@ -118,10 +125,10 @@ int main(void)
     tcp.nx_tcp_socket_receive_queue_head = &packet;
     tcp.nx_tcp_socket_receive_queue_tail = &second;
     tcp.nx_tcp_socket_receive_queue_count = 2UL;
-    CHECK(bsd_tcp_receive_queue_bytes(&tcp) == 37UL);
+    CHECK(ami_nx_tcp_receive_bytes(&tcp) == 37UL);
 
     packet.nx_packet_queue_next = NX_NULL;
-    CHECK(bsd_tcp_receive_queue_bytes(&tcp) == 0UL);
+    CHECK(ami_nx_tcp_receive_bytes(&tcp) == 0UL);
 
     puts("socket queues: application-visible byte counts");
     return 0;

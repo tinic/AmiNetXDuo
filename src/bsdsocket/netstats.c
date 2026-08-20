@@ -38,8 +38,9 @@
  */
 
 #include "bsdsocket_vectors.h"
-#include "tcp_queue.h"
 #include "udp_queue.h"
+
+#include "aminetxduo/nx_queue.h"
 
 #include <netinet/ip_var.h>
 #include <netinet/icmp_var.h>
@@ -371,13 +372,13 @@ static VOID bsd_pcd_tcp(NX_IP *ip, BsdPcdWriter *w)
                     sock->nx_tcp_socket_connect_interface->nx_interface_ip_address);
 
             out->pcd_receive_queue_size =
-                bsd_tcp_receive_queue_bytes(sock);
+                ami_nx_tcp_receive_bytes(sock);
 
             /* Send-Q is application data sent and not yet acknowledged.
                NetX keeps that exact byte count: its packet list uses a
                different link from a normal queue and still carries TCP
                headers, so summing it is neither safe nor the right unit. */
-            out->pcd_send_queue_size = bsd_tcp_send_queue_bytes(sock);
+            out->pcd_send_queue_size = ami_nx_tcp_send_bytes(sock);
         }
 
         sock = sock->nx_tcp_socket_created_next;
@@ -406,9 +407,7 @@ static VOID bsd_pcd_udp(NX_IP *ip, BsdPcdWriter *w)
                socket's receive queue, so count what recv() can deliver rather
                than those private headers.  NetX's own
                nx_udp_socket_bytes_available() applies the same subtraction. */
-            out->pcd_receive_queue_size = bsd_udp_queue_payload_bytes(
-                sock->nx_udp_socket_receive_head,
-                sock->nx_udp_socket_receive_count);
+            out->pcd_receive_queue_size = ami_nx_udp_receive_bytes(sock);
 
             /* A datagram socket has no peer and nothing queued for output.
                sendto() hands the packet to the IP thread and returns. The

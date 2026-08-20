@@ -13,7 +13,4 @@
 UINT bsd_udp_queue_info(const NX_PACKET *packet, UINT *source_port,
                         ULONG *payload_length);
 
-/* Application-visible bytes in up to `count` queued datagrams. */
-ULONG bsd_udp_queue_payload_bytes(const NX_PACKET *head, ULONG count);
-
 #endif /* AMINETXDUO_BSDSOCKET_UDP_QUEUE_H */

@@ -124,6 +124,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_udp_queue PRIVATE
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
         "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
         "${AMINETXDUO_THREADX}/common/inc"
         "${AMINETXDUO_NETXDUO}/common/inc"
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
