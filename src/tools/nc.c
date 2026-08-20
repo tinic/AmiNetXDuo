@@ -112,7 +112,17 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
     }
 
     while (text[i] >= '0' && text[i] <= '9')
-        a = (a * 10UL) + (ULONG)(text[i++] - '0');
+    {
+        ULONG digit = (ULONG)(text[i++] - '0');
+
+        if (a > (65535UL - digit) / 10UL)
+        {
+            tool_error("\"%s\" is not a port range this machine can reach",
+                       (LONG)text);
+            return FALSE;
+        }
+        a = (a * 10UL) + digit;
+    }
 
     if (text[i] == '\0')
     {
@@ -123,7 +133,17 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
         b = 0;
         i++;
         while (text[i] >= '0' && text[i] <= '9')
-            b = (b * 10UL) + (ULONG)(text[i++] - '0');
+        {
+            ULONG digit = (ULONG)(text[i++] - '0');
+
+            if (b > (65535UL - digit) / 10UL)
+            {
+                tool_error("\"%s\" is not a port range this machine can reach",
+                           (LONG)text);
+                return FALSE;
+            }
+            b = (b * 10UL) + digit;
+        }
 
         if (text[i] != '\0')
         {
