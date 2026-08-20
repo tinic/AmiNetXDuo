@@ -397,6 +397,11 @@ struct AmiNetStack
        coherent exchange. Link-down and lease loss clear it before publishing
        an empty replacement through ns_Dhcpv6DnsPending. */
     volatile BOOL       ns_Dhcpv6OptionsValid;
+    /* nx_dhcpv6_inform_req_responses as it stood at the last state change.
+       See ami_dhcpv6_inform_reply_seen(): the client's own counter is
+       cumulative and never reset, so only the difference is about the
+       exchange that just ended.  The client's thread owns this. */
+    ULONG               ns_Dhcpv6InformSeen;
     /*
      * The name servers the last Reply named, kept for the same reason
      * ns_Ra.rdnss[] is: reconciliation has to know which entries in

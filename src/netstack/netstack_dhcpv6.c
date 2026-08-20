@@ -202,11 +202,22 @@ static VOID ami_ns6_dhcp_state_changed(struct NX_DHCPV6_STRUCT *dhcpv6_ptr,
 
     ami_netstack_mark(ami_ns6_dhcp_state_name((UCHAR)new_state));
 
+    /*
+     * The reply count is consumed on every transition, not only on the ones
+     * that leave SENDING_INFORM_REQUEST, because it is a watermark: see
+     * ami_dhcpv6_inform_reply_seen().  Asking the client's cumulative counter
+     * whether it is nonzero answered "yes" for every exchange after the first
+     * successful one, so a stateless client that succeeded on one network and
+     * then failed on another republished the first network's name servers and
+     * search list onto the second.
+     */
     option_change = ami_dhcpv6_option_change(
         new_state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS,
         old_state == NX_DHCPV6_STATE_SENDING_INFORM_REQUEST,
         new_state == NX_DHCPV6_STATE_INIT,
-        dhcpv6_ptr->nx_dhcpv6_inform_req_responses != 0UL);
+        ami_dhcpv6_inform_reply_seen(
+            dhcpv6_ptr->nx_dhcpv6_inform_req_responses,
+            &ns->ns_Dhcpv6InformSeen));
 
     if (option_change == AMI_DHCPV6_OPTIONS_REPLACE)
     {
@@ -427,6 +438,11 @@ static LONG ami_ns6_dhcp_begin(AmiNetStack *ns, BOOL stateful)
         if (status == NX_SUCCESS)
         {
             ns->ns_Dhcpv6Created = TRUE;
+
+            /* The create memsets the whole NX_DHCPV6, so the reply counter
+               ami_dhcpv6_inform_reply_seen() watches restarts at zero and the
+               watermark has to restart with it. */
+            ns->ns_Dhcpv6InformSeen = 0UL;
 
             /*
              * Take the address-change slot back. The create above pointed it

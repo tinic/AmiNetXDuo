@@ -67,6 +67,25 @@ AmiDhcpv6OptionChange ami_dhcpv6_option_change(
     unsigned int reached_init, unsigned int information_reply_seen);
 
 /*
+ * Whether the Information-Request that just ended got a reply -- which is the
+ * `information_reply_seen` above, and is not what the client's counter says.
+ *
+ * nx_dhcpv6_inform_req_responses is written in exactly one place in the whole
+ * of NetX Duo and that place is a ++.  Nothing resets it: not
+ * nx_dhcpv6_stop(), not nx_dhcpv6_start().  So "the counter is nonzero" means
+ * "some exchange since this client was created got a reply", and once one
+ * has, every later exchange reads as answered including the ones that were
+ * not.
+ *
+ * `watermark` is the value this saw last.  A reply counted for one exchange
+ * therefore cannot be read again by the next, whatever the total is.  It is
+ * updated on every call, so it must be called on every transition rather than
+ * only on the ones that look interesting.
+ */
+unsigned int ami_dhcpv6_inform_reply_seen(unsigned long responses,
+                                          unsigned long *watermark);
+
+/*
  * The DUID-LL of RFC 8415 11.4, on the wire: two octets of DUID type (3), two
  * of hardware type (1 for Ethernet, RFC 826), then the link-layer address.
  * Network byte order, which for these fields is written out here rather than

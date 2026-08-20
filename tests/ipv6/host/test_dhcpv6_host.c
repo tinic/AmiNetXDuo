@@ -135,6 +135,68 @@ static void test_option_lifecycle(void)
           AMI_DHCPV6_OPTIONS_KEEP);
 }
 
+/*
+ * The same lifecycle again, but with the fourth argument coming from the
+ * counter the stack actually has rather than from a literal.
+ *
+ * nx_dhcpv6_inform_req_responses is cumulative and is never reset, so the
+ * KEEP branch above was unreachable in the built stack the moment one
+ * stateless exchange succeeded: every later exchange, successful or not, read
+ * as answered.  This drives the sequence that produced it -- a success, a
+ * link flap, then a failure on a network with no DHCPv6 server -- so the KEEP
+ * arm is asserted through the mechanism instead of past it.
+ */
+static void test_inform_reply_is_about_this_exchange(void)
+{
+    unsigned long responses = 0;    /* the client's own field */
+    unsigned long seen = 0;         /* ns_Dhcpv6InformSeen */
+    unsigned int  reply;
+
+    printf("dhcpv6: an Information-Request reply counts once\n");
+
+    /* Network A: the exchange is answered, so the options are replaced. */
+    responses++;
+    reply = ami_dhcpv6_inform_reply_seen(responses, &seen);
+    CHECK(reply == 1);
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, reply) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+
+    /* Link down.  The transition is classified like any other, which is what
+       keeps the watermark level with the counter. */
+    reply = ami_dhcpv6_inform_reply_seen(responses, &seen);
+    CHECK(reply == 0);
+
+    /*
+     * Network B has no DHCPv6 server.  The retransmissions are exhausted and
+     * the client returns to INIT without incrementing, so this exchange was
+     * not answered even though the lifetime total is still 1.
+     */
+    reply = ami_dhcpv6_inform_reply_seen(responses, &seen);
+    CHECK(reply == 0);
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, reply) ==
+          AMI_DHCPV6_OPTIONS_KEEP);
+
+    /* And a later success on network B is still seen as one. */
+    responses++;
+    reply = ami_dhcpv6_inform_reply_seen(responses, &seen);
+    CHECK(reply == 1);
+    CHECK(ami_dhcpv6_option_change(0, 1, 1, reply) ==
+          AMI_DHCPV6_OPTIONS_REPLACE);
+
+    /*
+     * A discard and rebuild memsets the whole client, so the counter restarts
+     * at zero.  The watermark restarts with it at the create; without that
+     * reset the first transition after a rebuild would read 0 against a
+     * stale 2 and answer "replied" for an exchange that had not happened.
+     */
+    responses = 0;
+    seen = 0;
+    reply = ami_dhcpv6_inform_reply_seen(responses, &seen);
+    CHECK(reply == 0);
+
+    CHECK(ami_dhcpv6_inform_reply_seen(1, NULL) == 0);
+}
+
 /* ------------------------------------------------------------- the DUID ---- */
 
 static void test_duid_matches_the_wire(void)
@@ -240,6 +302,7 @@ int main(void)
     test_ra_flags();
     test_interface_resume();
     test_option_lifecycle();
+    test_inform_reply_is_about_this_exchange();
     test_duid_matches_the_wire();
     test_duid_refusals();
 

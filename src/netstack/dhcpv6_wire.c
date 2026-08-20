@@ -41,6 +41,20 @@ AmiDhcpv6Action ami_dhcpv6_resume_action(unsigned int created,
     return stateful ? AMI_DHCPV6_ACT_STATEFUL : AMI_DHCPV6_ACT_STATELESS;
 }
 
+unsigned int ami_dhcpv6_inform_reply_seen(unsigned long responses,
+                                          unsigned long *watermark)
+{
+    unsigned int seen;
+
+    if (watermark == 0)
+        return 0;
+
+    seen = (responses != *watermark) ? 1U : 0U;
+    *watermark = responses;
+
+    return seen;
+}
+
 AmiDhcpv6OptionChange ami_dhcpv6_option_change(
     unsigned int reached_bound, unsigned int left_information_request,
     unsigned int reached_init, unsigned int information_reply_seen)
