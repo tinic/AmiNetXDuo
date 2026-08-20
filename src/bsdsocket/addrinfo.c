@@ -938,16 +938,16 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
 
             bsd_strncpy((char *)serv, entry->name, servlen);
         }
-        else if ((flags & (ULONG)NI_NUMERICSERV) == 0 &&
-                 (flags & (ULONG)NI_NAMEREQD) != 0)
-        {
-            /* This NDK defines NI_NAMEREQD for either half of the result.
-               Falling back to the decimal port here reported success even
-               though the caller explicitly required a service name. */
-            return EAI_NONAME;
-        }
         else
         {
+            /* NI_NAMEREQD is about the host half only -- RFC 3493 6.2 says
+               "an error is returned if the hostname cannot be located", and
+               no BSD, glibc or musl applies it to the service. The NDK
+               header's "either" is inherited from KAME, where the code does
+               not do it either. Applying it here would fail the standard
+               resolve-the-peer-or-fail call for every ephemeral port, since
+               DEVS:Internet/services never names one, and the caller would
+               lose the host name it did resolve. */
             ULONG value = (ULONG)port;
             ULONG n     = 0;
             char  digits[8];

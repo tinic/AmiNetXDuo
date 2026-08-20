@@ -1515,15 +1515,16 @@ static VOID group_p(VOID)
             Printf((STRPTR)"    host=\"%s\" serv=\"%s\"\n",
                    (LONG)hbuf, (LONG)sbuf);
 
-        /* The NDK's NI_NAMEREQD covers both host and service. Port 65000 is
-           deliberately absent from the staged services file: a decimal
-           fallback here violates the flag. */
+        /* NI_NAMEREQD asks about the host, not the service. Port 65000 is
+           absent from the staged services file, and the decimal fallback is
+           the correct answer: failing here would break the ordinary
+           resolve-the-peer call, whose port is always ephemeral. */
         addr_in(&sa, INADDR_LOOPBACK, 65000);
         memset(sbuf, 0, sizeof(sbuf));
         rc = getnameinfo((struct sockaddr *)&sa, sizeof(sa),
                          NULL, 0, (STRPTR)sbuf, sizeof(sbuf), NI_NAMEREQD);
-        t_ok(rc == EAI_NONAME,
-             "getnameinfo(NI_NAMEREQD) requires a service name", rc);
+        t_ok(rc == 0 && strcmp(sbuf, "65000") == 0,
+             "NI_NAMEREQD does not require a service name", rc);
 
         rc = getnameinfo((struct sockaddr *)&sa, sizeof(sa),
                          (STRPTR)hbuf, sizeof(hbuf), NULL, 0, 0x80000000UL);
