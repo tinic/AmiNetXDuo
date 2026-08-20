@@ -123,6 +123,7 @@ static VOID h_report(const char *name, LONG declined, LONG delexp,
 #define H_POS       ((UWORD)sizeof(struct AmiSocketBase))
 
 static struct ExecBase   h_sysbase;
+static struct Task       h_task;
 
 /* The block the base lives in, allocated the way bsd_lib_init() does it. */
 static UBYTE                *h_block;
@@ -157,6 +158,12 @@ static struct
     APTR    remove_node;
 
     LONG    shutdown_calls;
+    LONG    startup_calls;
+    LONG    startup_result;
+    LONG    alloc_signal_calls;
+    BYTE    alloc_signal_result;
+    LONG    free_signal_calls;
+    LONG    create_proc_calls;
 } h;
 
 static VOID h_machine_reset(BOOL can_unload)
@@ -333,17 +340,17 @@ static VOID h_unreachable(const char *what)
 APTR AllocMem(ULONG s, ULONG r)  { (VOID)s; (VOID)r; h_unreachable("AllocMem");  return NULL; }
 VOID CopyMem(const APTR s, APTR d, ULONG n) { (VOID)s; (VOID)d; (VOID)n; h_unreachable("CopyMem"); }
 VOID AddTail(struct List *l, struct Node *n) { (VOID)l; (VOID)n; h_unreachable("AddTail"); }
-struct Task *FindTask(const char *n) { (VOID)n; h_unreachable("FindTask"); return NULL; }
+struct Task *FindTask(const char *n) { (VOID)n; return &h_task; }
 VOID Signal(struct Task *t, ULONG s) { (VOID)t; (VOID)s; h_unreachable("Signal"); }
 ULONG Wait(ULONG s) { (VOID)s; h_unreachable("Wait"); return 0UL; }
-BYTE AllocSignal(LONG n) { (VOID)n; h_unreachable("AllocSignal"); return -1; }
-VOID FreeSignal(LONG n) { (VOID)n; h_unreachable("FreeSignal"); }
+BYTE AllocSignal(LONG n) { (VOID)n; h.alloc_signal_calls++; return h.alloc_signal_result; }
+VOID FreeSignal(LONG n) { (VOID)n; h.free_signal_calls++; }
 VOID CloseDevice(struct IORequest *io) { (VOID)io; h_unreachable("CloseDevice"); }
-struct Process *CreateNewProc(const struct TagItem *t) { (VOID)t; h_unreachable("CreateNewProc"); return NULL; }
+struct Process *CreateNewProc(const struct TagItem *t) { (VOID)t; h.create_proc_calls++; return NULL; }
 
 VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
 VOID ami_mem_open_delta(LONG d) { (VOID)d; h_unreachable("ami_mem_open_delta"); }
-LONG ami_netdb_load(VOID) { h_unreachable("ami_netdb_load"); return 0; }
+LONG ami_netdb_load(VOID) { return 0; }
 BYTE ami_signal_alloc(VOID) { h_unreachable("ami_signal_alloc"); return -1; }
 VOID ami_signal_free(BYTE s) { (VOID)s; h_unreachable("ami_signal_free"); }
 VOID bsd_bpf_close_all(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_bpf_close_all"); }
@@ -353,7 +360,7 @@ VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_han
 VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_nx_release"); }
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
 VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
-LONG netstack_startup(VOID) { h_unreachable("netstack_startup"); return 0; }
+LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }
 VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
 
 /*
@@ -589,6 +596,47 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
+/*
+ * Both caller-stack fallbacks must give back the reference that a failed
+ * netstack_startup() can leave standing.  The normal child path has always
+ * done this; signal exhaustion and CreateNewProc() failure used to return the
+ * error directly and leak the live stack to an opener that received NULL.
+ */
+static VOID t_startup_fallback_ownership(VOID)
+{
+    struct AmiSocketBase *opened;
+
+    printf("failed startup without a child Process\n");
+
+    h_machine_reset(TRUE);
+    h.startup_result = AMI_NET_ERR_CONFIG;
+    h.alloc_signal_result = (BYTE)-1;
+
+    opened = bsd_lib_open(0UL, h_base);
+
+    CHECK(opened == NULL, "signal-exhausted startup refused the open");
+    CHECK(h.startup_calls == 1, "signal fallback attempted startup once");
+    CHECK(h.shutdown_calls == 1,
+          "signal fallback released the failed startup reference");
+    CHECK(h_base->sb_StackRefs == 0, "signal fallback published no stack reference");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 0, "signal fallback restored the open count");
+
+    h_machine_reset(TRUE);
+    h.startup_result = AMI_NET_ERR_CONFIG;
+    h.alloc_signal_result = 5;
+
+    opened = bsd_lib_open(0UL, h_base);
+
+    CHECK(opened == NULL, "process-creation failure refused the open");
+    CHECK(h.create_proc_calls == 1, "the child Process was attempted once");
+    CHECK(h.free_signal_calls == 1, "the unused startup signal was freed");
+    CHECK(h.startup_calls == 1, "process fallback attempted startup once");
+    CHECK(h.shutdown_calls == 1,
+          "process fallback released the failed startup reference");
+    CHECK(h_base->sb_StackRefs == 0, "process fallback published no stack reference");
+    CHECK(h_base->sb_Lib.lib_OpenCnt == 0, "process fallback restored the open count");
+}
+
 int main(void)
 {
     printf("bsd_lib_expunge() host tests\n");
@@ -599,6 +647,7 @@ int main(void)
     t_other_refusals();
     t_last_close_retries();
     t_transient_stack_reference();
+    t_startup_fallback_ownership();
 
     printf("expunge_refusal checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
