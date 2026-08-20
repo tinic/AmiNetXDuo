@@ -254,6 +254,39 @@ char                        line[96];
                                            ami_crypto_ecc_curves);
     (VOID) W_OK(status, "ecc curves registered");
 
+    /*
+     * WHAT THE CLIENTHELLO OFFERS IS NOT THE SAME LIST, and this offered all
+     * three.
+     *
+     * nx_secure_tls_ecc_initialize() writes the session's TLS list and the
+     * process-wide X.509 list from one call, so it is given the complete set
+     * for the sake of certificate chains -- a chain carries P-384 keys that
+     * still have to be checked -- and the session's own list is then narrowed
+     * to what is worth offering.  Without the narrowing,
+     * _nx_secure_tls_1_3_crypto_init() generates a key pair for every group
+     * the session lists, inside nx_secure_tls_session_start() and before the
+     * ClientHello leaves.  Measured here, A1200 68020 at 13.08 MHz:
+     *
+     *     P-256   1.1 s      P-384   4.5 s      P-521   8.9 s
+     *
+     * Fourteen and a half seconds of arithmetic between the TCP connect and
+     * the first byte of the handshake, for two groups no server in reach
+     * picks.  tls-v1-2.badssl.com closed the connection inside that window and
+     * nx_secure_tls_session_start() returned NX_NOT_CONNECTED at 14.8 s.  The
+     * peer was not at fault: this test was holding a connection open through
+     * fourteen seconds of work it had no reason to do.  Narrowed, the same
+     * step is 1.1 s and the ServerHello arrives 0.2 s later.
+     *
+     * tls.library does the same narrowing at src/tlslib/tls_conn.c:624, which
+     * is the difference between the shipping path and this one.
+     */
+    w_session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups =
+        ami_crypto_ecc_offered_groups;
+    w_session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups_count =
+        (USHORT)ami_crypto_ecc_offered_groups_size;
+    w_session.nx_secure_tls_ecc.nx_secure_tls_ecc_curves =
+        ami_crypto_ecc_offered_curves;
+
     status =  nx_secure_tls_session_packet_buffer_set(&w_session,
                                                       (UCHAR *)w_packet_buffer,
                                                       (ULONG)sizeof(w_packet_buffer));
