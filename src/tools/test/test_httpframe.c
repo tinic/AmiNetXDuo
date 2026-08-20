@@ -136,9 +136,12 @@ static void test_tokens(void)
     CHECK(http_frame_has_token("keep-alive, close", "close"));
     CHECK(http_frame_has_token(" close , Upgrade ", "upgrade"));
     CHECK(http_frame_has_token("Keep-Alive, UpGrAdE", "upgrade"));
+    CHECK(http_frame_has_token("h2c, WebSocket", "websocket"));
     CHECK(!http_frame_has_token("keep-alive", "close"));
     CHECK(!http_frame_has_token("disclose", "close"));
     CHECK(!http_frame_has_token("upgrade-more", "upgrade"));
+    CHECK(!http_frame_has_token("websocketX", "websocket"));
+    CHECK(!http_frame_has_token("13junk", "13"));
     CHECK(!http_frame_has_token("", "close"));
     CHECK(!http_frame_has_token(NULL, "close"));
 }

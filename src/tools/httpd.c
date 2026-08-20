@@ -5809,8 +5809,11 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Upgrade"))
         {
-            c->ws_upgrade = (hs_nicmp(httpd_value, "websocket", 9) == 0)
-                                ? 1 : 0;
+            /* Upgrade is a protocol list.  `websocketX` is not websocket, and
+               a second field line that offers something else does not erase a
+               valid offer in the first. */
+            if (!cut && http_frame_has_token(httpd_value, "websocket"))
+                c->ws_upgrade = 1;
         }
         else if (hs_equal(name, "Sec-WebSocket-Key"))
         {
@@ -5821,15 +5824,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Sec-WebSocket-Version"))
         {
-            const char *p = httpd_value;
-            ULONG       v = 0;
-
-            while (*p == ' ')
-                p++;
-            while (*p >= '0' && *p <= '9' && v < 1000UL)
-                v = (v * 10UL) + (ULONG)(*p++ - '0');
-
-            c->ws_version = (UWORD)v;
+            if (!cut && http_frame_has_token(httpd_value, "13"))
+                c->ws_version = HTTPD_WS_VERSION;
         }
         else if (hs_equal(name, "Range"))
         {
