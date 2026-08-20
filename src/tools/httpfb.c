@@ -3501,6 +3501,7 @@ VOID http_fb_evict(UWORD code)
 {
     UBYTE         frame[HTTP_FB_CTL];
     unsigned long n;
+    unsigned long at = 0;
 
     if (!fb_live || fb_closing)
         return;
@@ -3522,6 +3523,16 @@ VOID http_fb_evict(UWORD code)
     n = http_ws_close_frame(frame, sizeof(frame), code,
                             "the console was taken over from another browser");
 
-    if (n > 0UL)
-        (VOID)tool_sock_send(fb_sb, fb_sock, frame, (LONG)n);
+    /* Best effort, still without waiting.  Keep consuming positive short
+       writes: the caller closes the socket as soon as this returns, so there
+       is no later write pass that can finish this control frame. */
+    while (at < n)
+    {
+        LONG sent = tool_sock_send(fb_sb, fb_sock, &frame[at], (LONG)(n - at));
+
+        if (sent <= 0)
+            break;
+
+        at += (unsigned long)sent;
+    }
 }
