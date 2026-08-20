@@ -3767,7 +3767,12 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
             goto rollback;
         }
 
-        rc = ami_ns_start_autoip(ns, -1L);
+        /* This transaction is for the interface just added.  Passing the
+           unqualified selector can accept an AutoIP object already serving a
+           different slot and report success while this interface receives no
+           address.  The explicit index makes that conflict fail and lets the
+           rollback below remove the half-started interface. */
+        rc = ami_ns_start_autoip(ns, (LONG)index);
         ami_netstack_leave_free(caller);
         if (rc != AMI_NET_OK)
             goto rollback;
