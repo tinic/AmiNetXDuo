@@ -80,10 +80,10 @@
  *   Do not call WaitSelect() on a descriptor you have given to TLSOpen().  Call
  *   TLSWaitSelect(), which takes the same arguments plus the list of TLS
  *   connections involved.  It reports a connection readable if the library is
- *   already holding plaintext for it, returning at once without waiting, and
- *   otherwise passes the whole thing to bsdsocket.library's WaitSelect().
- *   TLSPending() is the same test on its own, if you would rather build the
- *   loop yourself.
+ *   already holding plaintext or an encrypted record for it, returning at once
+ *   without waiting, and otherwise passes the whole thing to
+ *   bsdsocket.library's WaitSelect().  A loop built by hand must test both
+ *   TLSPending() and TLSBuffered() before waiting.
  *
  *   The second case, a readable socket that yields no plaintext yet, is not
  *   removable without a non-blocking record layer, and it is bounded: the rest

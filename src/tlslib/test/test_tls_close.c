@@ -473,6 +473,38 @@ static VOID h_test_waitselect_unique_descriptors(VOID)
     CHECK(read_words[1] == (1UL << 5));
 }
 
+static VOID h_test_waitselect_encrypted_queue(VOID)
+{
+    TLSConnection   conn;
+    TLSConnection  *connections[2];
+    NX_PACKET       queued;
+    struct TLSSelect sel;
+    ULONG           read_words[8];
+    LONG            ready;
+
+    printf("tls_waitselect: queued encrypted records are readable\n");
+
+    memset(&conn, 0, sizeof(conn));
+    memset(&queued, 0, sizeof(queued));
+    memset(&sel, 0, sizeof(sel));
+    memset(read_words, 0, sizeof(read_words));
+
+    conn.tc_Fd = 19;
+    conn.tc_Session.nx_secure_record_queue_header = &queued;
+    connections[0] = &conn;
+    connections[1] = NULL;
+    read_words[0] = 1UL << 19;
+
+    sel.ts_Size = (ULONG)sizeof(sel);
+    sel.ts_NFds = 20;
+    sel.ts_Read = read_words;
+    sel.ts_Connections = connections;
+
+    ready = tls_TLSWaitSelect(&sel, NULL);
+    CHECK(ready == 1);
+    CHECK(read_words[0] == (1UL << 19));
+}
+
 static VOID h_test_waitselect_wide_descriptor(VOID)
 {
     TLSConnection   conn;
@@ -573,6 +605,7 @@ int main(void)
     h_test_hostname_limit();
     h_test_path_limit();
     h_test_waitselect_unique_descriptors();
+    h_test_waitselect_encrypted_queue();
     h_test_waitselect_wide_descriptor();
     h_test_open_create_serialized(base);
 

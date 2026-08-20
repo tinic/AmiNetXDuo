@@ -1209,7 +1209,13 @@ LONG tls_TLSWaitSelect(register struct TLSSelect   *sel     TLSLIB_REG("a0"),
 
             if (fd < 0 || fd >= TLS_FD_MAX || fd >= sel->ts_NFds)
                 continue;
-            if (conn->tc_Pending == NX_NULL)
+            /* Plaintext and encrypted records are both private to the TLS
+               layer and therefore invisible to WaitSelect().  The latter may
+               be only part of a record, but that is no different from a
+               readable socket containing the first fragment: TLSA_Timeout
+               bounds the read while the rest arrives. */
+            if (conn->tc_Pending == NX_NULL &&
+                conn->tc_Session.nx_secure_record_queue_header == NX_NULL)
                 continue;
             if ((read_words[TLS_FD_WORD(fd)] & TLS_FD_MASK(fd)) == 0)
                 continue;
