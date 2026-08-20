@@ -43,14 +43,21 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
     AmiBpfView  view;
     NX_PACKET  *p;
     UBYTE       eth[AMI_BPF_ETH_HDR_LEN];
+    ULONG       dlt;
     ULONG       wirelen;
 
     if (ami_bpf_bound_channels == 0 || packet == NX_NULL)
         return;
 
+    ami_bpf_lock();
     ifp = ami_bpf_iface_by_cookie(cookie);
     if (ifp == NULL)
+    {
+        ami_bpf_unlock();
         return;
+    }
+    dlt = ifp->dlt;
+    ami_bpf_unlock();
 
     view.wirelen = 0;
     view.caplen  = 0;
@@ -58,7 +65,7 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
 
     wirelen = packet->nx_packet_length;
 
-    if (!has_link_header && ifp->dlt == DLT_EN10MB)
+    if (!has_link_header && dlt == DLT_EN10MB)
     {
         /* msw carries the top two address bytes, lsw the bottom four, the
            same split nx_ip_driver_physical_address_msw/lsw uses. */
@@ -106,5 +113,5 @@ VOID ami_bpf_tap_tx(APTR cookie, NX_PACKET *packet, BOOL has_link_header,
        BPF_LEN and bh_datalen stay correct. */
     view.wirelen = wirelen;
 
-    ami_bpf_capture(ifp, &view);
+    ami_bpf_capture(cookie, &view);
 }

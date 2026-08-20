@@ -158,16 +158,10 @@ VOID ami_bpf_detach_interface(APTR cookie)
 
 VOID ami_bpf_tap_view(APTR cookie, const AmiBpfView *view)
 {
-    AmiBpfIf *ifp;
-
     if (ami_bpf_bound_channels == 0 || view == NULL)
         return;
 
-    ifp = ami_bpf_iface_by_cookie(cookie);
-    if (ifp == NULL)
-        return;
-
-    ami_bpf_capture(ifp, view);
+    ami_bpf_capture(cookie, view);
 }
 
 VOID ami_bpf_tap_rx(APTR cookie, const UBYTE *frame, ULONG len)

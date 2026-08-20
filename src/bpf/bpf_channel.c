@@ -464,13 +464,14 @@ static VOID ami_bpf_rotate(AmiBpfChan *ch)
     ch->store_len = 0;
 }
 
-VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
+VOID ami_bpf_capture(APTR cookie, const AmiBpfView *view)
 {
     UWORD i;
 
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
     {
         AmiBpfChan *ch = &ami_bpf_chan[i];
+        AmiBpfIf   *ifp;
         ULONG       slen;
         ULONG       caplen;
         ULONG       totlen;
@@ -481,10 +482,20 @@ VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view)
         BOOL        wake = FALSE;
 
         /* Unlocked screen: the common answer by far is "not this one". */
-        if (!ch->open || ch->iface != ifp || ch->store == NULL)
+        if (!ch->open || ch->store == NULL)
             continue;
 
         ami_bpf_lock();
+
+        /* Resolve the opaque interface identity under the registry lock. A
+           pointer obtained before this lock can name a detached table row
+           that has since been reused by an unrelated interface. */
+        ifp = ami_bpf_iface_by_cookie(cookie);
+        if (ifp == NULL)
+        {
+            ami_bpf_unlock();
+            return;
+        }
 
         /* Re-check under the lock: BIOCSETIF or bpf_close can have run. */
         if (!ch->open || ch->iface != ifp || ch->store == NULL ||

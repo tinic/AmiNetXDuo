@@ -101,7 +101,7 @@ extern volatile UWORD ami_bpf_bound_channels;
 /* ------------------------------------------------------- shared internals */
 
 /* bpf_channel.c */
-VOID ami_bpf_capture(AmiBpfIf *ifp, const AmiBpfView *view);
+VOID ami_bpf_capture(APTR cookie, const AmiBpfView *view);
 VOID ami_bpf_chan_unbind_locked(AmiBpfIf *ifp);
 VOID ami_bpf_chan_rebind_locked(AmiBpfIf *ifp);
 

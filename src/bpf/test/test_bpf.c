@@ -1131,6 +1131,44 @@ static void test_interface_replace_under_detach(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+static void t_replace_interface_before_capture(void)
+{
+    ami_bpf_detach_interface(iface_cookie);
+    t_replacement_attach_status =
+        ami_bpf_attach_interface("eth0", t_replacement_cookie, DLT_EN10MB,
+                                 1500, test_inject);
+}
+
+static void test_interface_replace_under_tap(void)
+{
+    UBYTE frame[128];
+    ULONG len;
+
+    printf("bpf: a tap cannot cross an interface-row replacement\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+    CHECK(ami_bpf_ioctl(T_BPF_OWNER, 0, BIOCSETIF, "eth0") == 0);
+
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+    t_replacement_attach_status = -1;
+    stub_on_lock = t_replace_interface_before_capture;
+    ami_bpf_tap_rx(iface_cookie, frame, len);
+
+    CHECK(stub_on_lock == NULL);
+    CHECK(t_replacement_attach_status == 0);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == 0);
+
+    ami_bpf_tap_rx(t_replacement_cookie, frame, len);
+    CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
+
+    CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
+    ami_bpf_detach_interface(t_replacement_cookie);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /*
  * "The packet filter channel you allocate will be associated with the library
  * base ... It will be automatically closed when the library is closed", and
@@ -1753,6 +1791,7 @@ int main(int argc, char **argv)
     test_write_and_binding();
     test_detach_under_writer();
     test_interface_replace_under_detach();
+    test_interface_replace_under_tap();
     test_channel_ownership();
     test_reopen_under_closer();
     test_close_owner_under_reader();
