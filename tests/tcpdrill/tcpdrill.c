@@ -20,7 +20,8 @@
  *   opt NAME VALUE         setsockopt: nodelay rcvbuf sndbuf oobinline
  *                          reuseaddr linger keepalive sndtimeo rcvtimeo
  *                          (the two timeouts in milliseconds)
- *   connect [= ETIMEDOUT]  connect(); EINPROGRESS is the expected answer.
+ *   connect [= ETIMEDOUT] [min=MS max=MS break=0]
+ *                          connect(); EINPROGRESS is the expected answer.
  *                          With `= ETIMEDOUT` the call must have BLOCKED and
  *                          come back with that errno, which needs `blocking`
  *                          and `opt sndtimeo` before it.
@@ -420,6 +421,19 @@ static LONG s_close(LONG s)
                       : "r"(a6), "r"(d0)
                       : "a0", "a1", "cc", "memory");
     return r;
+}
+
+static VOID s_set_socket_signals(ULONG break_mask)
+{
+    LVO_CALL_HEAD;
+    register ULONG d0 __asm("d0") = break_mask;
+    register ULONG d1 __asm("d1") = 0;
+    register ULONG d2 __asm("d2") = 0;
+
+    __asm __volatile ("jsr a6@(-132:W)"
+                      : "+r"(d0), "+r"(d1), "+r"(d2)
+                      : "r"(a6)
+                      : "a0", "a1", "cc", "memory");
 }
 
 typedef struct DrillTimeval { LONG tv_sec; LONG tv_usec; } DrillTimeval;
@@ -2752,7 +2766,7 @@ static VOID do_socket(const char *raw)
 }
 
 /*
- * `connect [= ETIMEDOUT] [min=MS max=MS]`.
+ * `connect [= ETIMEDOUT] [min=MS max=MS break=0]`.
  *
  * Plain, the socket is the non-blocking one do_socket() made and the call
  * reports EINPROGRESS; the frames it causes are asserted by the lines after
@@ -2770,6 +2784,7 @@ static VOID do_connect(const char *args, const char *raw)
     LONG       want_errno = 0;
     LONG       min_ms = 0;
     LONG       max_ms = 0;
+    BOOL       no_break = FALSE;
     ULONG      t0;
     ULONG      took;
 
@@ -2803,6 +2818,8 @@ static VOID do_connect(const char *args, const char *raw)
             min_ms = to_num(eq);
         else if (streq(tok, "max"))
             max_ms = to_num(eq);
+        else if (streq(tok, "break"))
+            no_break = (to_num(eq) == 0) ? TRUE : FALSE;
     }
 
     zero((UBYTE *)&a, (ULONG)sizeof(a));
@@ -2813,7 +2830,11 @@ static VOID do_connect(const char *args, const char *raw)
 
     t0 = tap_eclock_now();
     cs.t_last = t0;
+    if (no_break)
+        s_set_socket_signals(0);
     rc = s_connect(cs.sock, &a);
+    if (no_break)
+        s_set_socket_signals(SIGBREAKF_CTRL_C);
     took = ticks_to_ms(t0, tap_eclock_now());
 
     if (want_errno != 0)

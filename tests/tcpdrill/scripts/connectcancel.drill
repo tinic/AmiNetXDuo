@@ -52,7 +52,9 @@ tx S seq=0 mss=1460
 txcount 0 3
 notx 3000
 
-# And the descriptor cannot be connected behind the caller's back.  The SYN+ACK
+# And the descriptor cannot be connected behind the caller's back. This arm
+# also disables the socket break signal: a finite timeout still has to keep
+# time accurately when there is no signal to interleave. The SYN+ACK
 # below is the one that was too late: a socket still in SYN_SENT answers it
 # with an ACK and is established from that moment, and the application is never
 # told, because it was told the opposite two seconds earlier.
@@ -73,7 +75,7 @@ case cc02_a_late_synack_does_not_connect_the_descriptor
 socket
 blocking
 opt sndtimeo 2500
-connect = ETIMEDOUT min=2000 max=3500
+connect = ETIMEDOUT min=2000 max=3500 break=0
 tx S seq=0 mss=1460
 txcount 0 3
 rx SA seq=0 ack=1 win=8192 mss=1460

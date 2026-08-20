@@ -386,9 +386,12 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
 
     *aborted = FALSE;
 
-    /* A caller that asked not to block, or a base with no break signal, gets
-       the plain call. There is nothing to interleave. */
-    if (wait == NX_NO_WAIT || break_mask == 0)
+    /* A caller that asked not to block gets the plain call. So does an
+       infinite wait with no break signal: there is nothing to interleave.
+       A FINITE no-break wait still uses the loop, because its clock accounting
+       is what keeps a polling primitive from stretching the timeout. */
+    if (wait == NX_NO_WAIT ||
+        (wait == NX_WAIT_FOREVER && break_mask == 0))
         return call(arg, wait);
 
     for (;;)
