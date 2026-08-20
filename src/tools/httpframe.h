@@ -66,6 +66,16 @@ int http_frame_field_name(const char *line, unsigned long len,
  */
 int http_frame_etag_listed(const char *list, const char *etag, int weak);
 
+typedef enum HttpFrameVersion
+{
+    HTTP_VERSION_BAD = 0,
+    HTTP_VERSION_10,
+    HTTP_VERSION_11
+} HttpFrameVersion;
+
+/* An exact request-line HTTP-version token. */
+HttpFrameVersion http_frame_version(const char *value, unsigned long len);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding

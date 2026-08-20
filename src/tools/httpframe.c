@@ -229,6 +229,26 @@ int http_frame_etag_listed(const char *list, const char *etag, int weak)
     }
 }
 
+HttpFrameVersion http_frame_version(const char *value, unsigned long len)
+{
+    static const char prefix[] = "HTTP/1.";
+    unsigned long     i;
+
+    if (value == 0 || len != 8UL)
+        return HTTP_VERSION_BAD;
+
+    for (i = 0; i < 7UL; i++)
+        if (value[i] != prefix[i])
+            return HTTP_VERSION_BAD;
+
+    if (value[7] == '0')
+        return HTTP_VERSION_10;
+    if (value[7] == '1')
+        return HTTP_VERSION_11;
+
+    return HTTP_VERSION_BAD;
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;

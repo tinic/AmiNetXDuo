@@ -166,6 +166,19 @@ static void test_etags(void)
     CHECK(!http_frame_etag_listed(NULL, "\"1-2\"", 1));
 }
 
+static void test_versions(void)
+{
+    printf("HTTP versions\n");
+
+    CHECK(http_frame_version("HTTP/1.0", 8) == HTTP_VERSION_10);
+    CHECK(http_frame_version("HTTP/1.1", 8) == HTTP_VERSION_11);
+    CHECK(http_frame_version("HTTP/1.2", 8) == HTTP_VERSION_BAD);
+    CHECK(http_frame_version("HTTP/1.10", 9) == HTTP_VERSION_BAD);
+    CHECK(http_frame_version("HTTP/1.1 junk", 13) == HTTP_VERSION_BAD);
+    CHECK(http_frame_version("", 0) == HTTP_VERSION_BAD);
+    CHECK(http_frame_version(NULL, 0) == HTTP_VERSION_BAD);
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -338,6 +351,7 @@ int main(void)
     test_tokens();
     test_field_names();
     test_etags();
+    test_versions();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

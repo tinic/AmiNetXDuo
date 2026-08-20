@@ -5472,12 +5472,26 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     while (i < headlen && c->in[i] == ' ')
         i++;
 
-    /* HTTP/1.1 keeps the connection open unless told otherwise and 1.0 is the
-       other way round.  Anything unrecognised is treated as 1.0, which is the
-       conservative half of the two. */
-    c->http11    = (headlen - i >= 8UL &&
-                    hs_nicmp((const char *)&c->in[i], "HTTP/1.1", 8) == 0)
-                       ? 1 : 0;
+    /* The version is part of the framing, not a prefix hint.  A missing one or
+       `HTTP/1.1anything` used to be accepted and kept alive, leaving this end
+       and a stricter intermediary with different ideas about the stream. */
+    {
+        ULONG            start = i;
+        HttpFrameVersion version;
+
+        while (i < headlen && c->in[i] != '\r' && c->in[i] != '\n')
+            i++;
+
+        version = http_frame_version((const char *)&c->in[start], i - start);
+        if (version == HTTP_VERSION_BAD)
+        {
+            httpd_error(c, 400, "that is not an HTTP version this server reads");
+            return FALSE;
+        }
+
+        c->http11 = (version == HTTP_VERSION_11) ? 1 : 0;
+    }
+
     c->keepalive = c->http11;
 
     while (i < headlen && c->in[i] != '\n')
