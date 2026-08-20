@@ -637,6 +637,32 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 
 /* ------------------------------------------------------------ completion */
 
+/* Reconcile the device's documented ios2_DataLength answer with the number of
+   bytes its CopyToBuff call actually initialized.  A smaller reported length
+   is safe, but its carried checksum covered the longer copy and cannot be
+   reused.  A larger reported length would expose stale packet-pool bytes. */
+BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
+{
+    if (slot == NULL || length == NULL)
+        return FALSE;
+
+    if (slot->copied == 0)
+        return FALSE;
+
+    if (*length == 0)
+        *length = slot->copied;
+
+    if (*length > slot->capacity || *length > slot->copied)
+        return FALSE;
+
+#ifdef AMINETXDUO_RX_VERIFY
+    if (*length != slot->copied)
+        slot->summed = FALSE;
+#endif
+
+    return TRUE;
+}
+
 static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 {
     AmiSana2If *iface  = rx->iface;
@@ -648,11 +674,9 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         return;
 
     /* ios2_DataLength is the documented answer. Fall back to what the copy
-       hook took, for devices that fill only one of the two. */
-    if (length == 0)
-        length = slot->copied;
-
-    if (length == 0 || length > slot->capacity)
+       hook took, for devices that fill only one of the two, but never extend
+       the packet past the bytes the hook initialized. */
+    if (!ami_sana2_rx_resolve_length(slot, &length))
     {
         /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;

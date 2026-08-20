@@ -539,6 +539,7 @@ VOID ami_sana2_unbind(AmiSana2If *iface);
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);
 VOID ami_sana2_rx_stop(AmiSana2If *iface);
+BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 /*
  * `slot` is the request the frame arrived on, or NULL when there is none.  It
  * carries the sum the copy hook computed, so the check below does not walk the

@@ -472,6 +472,44 @@ static void test_runt(void)
     h_check(iface.stats.rx_err_runt == 0, "and is not counted as one");
 }
 
+/* The device supplies a length in the request and independently tells the
+   copy hook how many bytes to initialize.  The request may shorten that copy,
+   but it may never extend the packet into stale pool storage. */
+static void test_completion_length_consistency(void)
+{
+    ULONG length;
+
+    printf("sana2: receive length never exceeds initialized bytes\n");
+
+    memset(&slot, 0, sizeof(slot));
+    slot.capacity = 100;
+    slot.copied   = 40;
+    length        = 60;
+    h_check(ami_sana2_rx_resolve_length(&slot, &length) == FALSE,
+            "a device cannot report more bytes than it copied");
+
+    slot.copied = 0;
+    length = 40;
+    h_check(ami_sana2_rx_resolve_length(&slot, &length) == FALSE,
+            "a length without a successful copy is refused");
+
+    slot.copied = 40;
+    length = 0;
+    h_check(ami_sana2_rx_resolve_length(&slot, &length) == TRUE && length == 40,
+            "a missing report falls back to the copy-hook length");
+
+    length = 32;
+#ifdef AMINETXDUO_RX_VERIFY
+    slot.summed = TRUE;
+#endif
+    h_check(ami_sana2_rx_resolve_length(&slot, &length) == TRUE && length == 32,
+            "a shorter reported frame remains valid");
+#ifdef AMINETXDUO_RX_VERIFY
+    h_check(slot.summed == FALSE,
+            "and a checksum over the longer copy is not reused");
+#endif
+}
+
 /* ============================================ the receive checksum fork == */
 
 #ifdef AMINETXDUO_RX_VERIFY
@@ -896,6 +934,7 @@ int main(void)
     test_header_strip();
     test_payload_alignment();
     test_runt();
+    test_completion_length_consistency();
 
     test_plan_ladder();
     test_plan_degenerate_bps();
