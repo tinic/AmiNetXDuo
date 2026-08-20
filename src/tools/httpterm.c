@@ -2437,13 +2437,15 @@ static VOID sock_word(const char *w)
 {
     const char *rest;
 
-    if (sock_after(w, "break") != NULL)
+    rest = sock_after(w, "break");
+    if (rest != NULL && *rest == '\0')
     {
         http_term_break();
         return;
     }
 
-    if (sock_after(w, "eof") != NULL)
+    rest = sock_after(w, "eof");
+    if (rest != NULL && *rest == '\0')
     {
         http_term_eof();
         return;
@@ -2455,16 +2457,24 @@ static VOID sock_word(const char *w)
      * cannot be answered from the far end of the socket, and is the first
      * question to ask when this is slow.
      */
-    if (sock_after(w, "stats") != NULL)
+    rest = sock_after(w, "stats");
+    if (rest != NULL)
     {
-        if (sock_after(w, "stats reset") != NULL)
+        if (*rest == '\0')
+        {
+            term_st_pending = 1;
+            return;
+        }
+
+        rest = sock_after(rest, "reset");
+        if (rest != NULL && *rest == '\0')
         {
             term_st_writes = 0;
             term_st_wbytes = 0;
             term_st_frames = 0;
             term_st_fbytes = 0;
+            term_st_pending = 1;
         }
-        term_st_pending = 1;
         return;
     }
 
@@ -2483,6 +2493,11 @@ static VOID sock_word(const char *w)
 
         rest = sock_number(rest, &rows);
         if (rest == NULL)
+            return;
+
+        while (*rest == ' ')
+            rest++;
+        if (*rest != '\0')
             return;
 
         http_term_resize(cols, rows);
