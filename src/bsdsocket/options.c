@@ -155,6 +155,9 @@ static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
     if (tv == NULL || out == NULL)
         return FALSE;
 
+    if (tv->tv_secs < 0 || tv->tv_micro < 0)
+        return FALSE;
+
     seconds = (ULONG)tv->tv_secs;
     micros  = (ULONG)tv->tv_micro;
 

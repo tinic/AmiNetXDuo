@@ -641,7 +641,21 @@ struct sockaddr_in sa;
                          bsd_Errno() == T_EINVAL),
                   "SO_SNDTIMEO rejects an unnormalised timeval", bsd_Errno());
 
-    tv.tv_secs  = 0x80000000UL;
+    tv.tv_secs  = -1;
+    tv.tv_micro = 0;
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                                        (LONG)sizeof(tv)) < 0 &&
+                         bsd_Errno() == T_EINVAL),
+                  "SO_SNDTIMEO rejects negative seconds", bsd_Errno());
+
+    tv.tv_secs  = 0;
+    tv.tv_micro = -1;
+    (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                                        (LONG)sizeof(tv)) < 0 &&
+                         bsd_Errno() == T_EINVAL),
+                  "SO_SNDTIMEO rejects negative microseconds", bsd_Errno());
+
+    tv.tv_secs  = 0x7fffffffL;
     tv.tv_micro = 0;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
                                         (LONG)sizeof(tv)) == 0),
