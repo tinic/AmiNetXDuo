@@ -10,6 +10,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "interfaces.h"
+#include "opt_time.h"
 
 #include <sys/sockio.h>
 
@@ -192,14 +193,11 @@ static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
  * value that means "no deadline", so a caller asking for the shortest
  * deadline it can name gets no deadline at all.
  *
- * The caller's ceiling keeps the multiply inside a ULONG.
+ * Splitting whole seconds from the remainder keeps the intermediate multiply
+ * inside a ULONG.  The accepted one-day maximum is beyond the point where
+ * ms * NX_IP_PERIODIC_RATE wraps at the Amiga's 50 Hz tick.
  */
 #define BSD_OPT_MAX_MS      86400000UL      /* a day */
-
-static ULONG bsd_ms_ticks(ULONG ms)
-{
-    return (ms * (ULONG)NX_IP_PERIODIC_RATE + 999UL) / 1000UL;
-}
 
 static ULONG bsd_ticks_ms(ULONG ticks)
 {
@@ -572,7 +570,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return bsd_fail(SocketBase, AMI_ENETDOWN);
                 sock->as_UserTimeout = (ULONG)value;
                 sock->as_Nx.tcp.nx_tcp_socket_user_timeout =
-                    bsd_ms_ticks((ULONG)value);
+                    bsd_ms_ticks((ULONG)value,
+                                 (ULONG)NX_IP_PERIODIC_RATE);
                 bsd_nx_leave(SocketBase);
                 return 0;
 

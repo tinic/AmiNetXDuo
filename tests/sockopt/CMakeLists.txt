@@ -17,11 +17,18 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_executable(test_sockopt_numbers host/test_optnum_host.c)
 
+    add_executable(test_sockopt_time host/test_opt_time_host.c)
+
+    target_include_directories(test_sockopt_time PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket")            # opt_time.h
+
     target_compile_definitions(test_sockopt_numbers PRIVATE
         AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
     include(CTest)
     add_test(NAME sockopt_numbers COMMAND test_sockopt_numbers)
+    add_test(NAME sockopt_time COMMAND test_sockopt_time)
 
     return()
 endif()
