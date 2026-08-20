@@ -257,14 +257,14 @@ aminetxduo_add_tool(tool_hostname hostname SOURCES hostname.c)
 # host resolves through bsdsocket.library like every other client command,
 # and toolsock.c is where tool_socket_open() lives, opening the library is
 # what starts the stack, which host used to refuse to do.
-aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c)
+aminetxduo_add_tool(tool_host    host     SOURCES host.c toolsock.c toolbudget.c)
 
 # nslookup asks for the record types host cannot: MX, TXT, NS, SRV, SOA and
 # CNAME.  It is config-only in the same sense as tftp, one datagram socket
 # through the published vectors, and toolsock.c for them, because there is no
 # published call that asks for an MX and it therefore writes the RFC 1035 query
 # itself.  See the header of nslookup.c for why that is the right shape.
-aminetxduo_add_tool(tool_nslookup nslookup SOURCES nslookup.c toolsock.c)
+aminetxduo_add_tool(tool_nslookup nslookup SOURCES nslookup.c toolsock.c toolbudget.c)
 
 # arp reads NETSTATUS_ARP and writes through NETCTRL_ARP_ADD/DELETE, both
 # already existed with nothing driving them.  Status-only, so it must never
@@ -276,14 +276,14 @@ aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
 # at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
 # the https: path opens LIBS:tls.library and says something legible when there
 # is none.  Nothing here is conditional on the build option, deliberately.
-aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c)
+aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c toolbudget.c)
 
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
 # bind/listen/accept half that no client-only command reaches.  Neither needs
 # TLS, and neither needs a libc porting shim, which is what makes them
 # writable natively rather than ported.
-aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
+aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c toolbudget.c)
 
 # NetTrace and NetCapture are config-only in exactly the same sense, and
 # deliberately so: they reach the capture path through the eight published
@@ -302,21 +302,21 @@ aminetxduo_add_tool(tool_nc      nc       SOURCES nc.c     toolsock.c)
 # programs are doing.  Neither is the other with a flag: NetTrace's arguments
 # are its workload's and NetCapture's are the stop conditions and the filter.
 aminetxduo_add_tool(tool_nettrace NetTrace
-    SOURCES nettrace.c toolsock.c toolbpf.c toolpcap.c bpffilter.c)
+    SOURCES nettrace.c toolsock.c toolbudget.c toolbpf.c toolpcap.c bpffilter.c)
 aminetxduo_add_tool(tool_netcapture NetCapture
-    SOURCES netcapture.c toolsock.c toolbpf.c toolpcap.c bpffilter.c)
-aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c)
+    SOURCES netcapture.c toolsock.c toolbudget.c toolbpf.c toolpcap.c bpffilter.c)
+aminetxduo_add_tool(tool_telnet  telnet   SOURCES telnet.c toolsock.c toolbudget.c)
 
 # traceroute is config-only too, and is the first command here to open a
 # SOCK_RAW descriptor, so it reaches the raw half of the ABI the same way it
 # reaches every other part of it, through the published vectors.
-aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c)
+aminetxduo_add_tool(tool_traceroute traceroute SOURCES traceroute.c toolsock.c toolbudget.c)
 
 # tftp and whois are clients and nothing more, so they are config-only in the
 # plainest sense: one datagram socket and one stream socket respectively,
 # through the published vectors, and no part of the stack linked in.
-aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c)
-aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c)
+aminetxduo_add_tool(tool_tftp    tftp     SOURCES tftp.c  toolsock.c toolbudget.c)
+aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c toolbudget.c)
 
 # wbgrab is the grab half of a remote framebuffer, and touches no part of the
 # network: intuition, graphics and layers, opened at run time like every other
@@ -331,7 +331,7 @@ aminetxduo_add_tool(tool_wbgrab wbgrab SOURCES wbgrab.c)
 # nothing else in the tree reaches.  src/tools/censusprobe.c says why.
 if(AMINETXDUO_ALLOCCENSUS)
     aminetxduo_add_tool(tool_censusprobe CensusProbe
-        SOURCES censusprobe.c toolsock.c)
+        SOURCES censusprobe.c toolsock.c toolbudget.c)
 endif()
 
 # httpd is the first SERVER here, and config-only in the same sense as the
@@ -373,7 +373,7 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httpframe.c httplock.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c
                                           httprtg.c
-                                          toolsock.c
+                                          toolsock.c toolbudget.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
 
@@ -481,7 +481,7 @@ set_source_files_properties(
 # the part that must not be wrong, and keeping it free of AmigaDOS lets the
 # host test below compile it.
 aminetxduo_add_tool(tool_iperf   iperf    SOURCES iperf.c iperfcore.c
-                                          iperfwire.c toolsock.c)
+                                          iperfwire.c toolsock.c toolbudget.c)
 
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
@@ -489,7 +489,7 @@ aminetxduo_add_tool(tool_iperf   iperf    SOURCES iperf.c iperfcore.c
 # SNTP add-on, and the comment at the top of sntp.c says why, the short
 # version is that the add-on wants a running ThreadX, and a Shell command's
 # copy of ThreadX is not the one the stack is using.
-aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c)
+aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c toolbudget.c)
 
 # ShowNetServices browses for mDNS services.  Config-only: it starts and stops
 # the browse through NETCTRL_MDNS_BROWSE and reads the answers through
@@ -505,7 +505,7 @@ aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
 # to link its own ThreadX and NetX Duo and call nx_icmp_ping() on an NX_IP that
 # no shipped build ever had.  It sends its own ICMP echo over a SOCK_RAW
 # descriptor through the published vectors, exactly as traceroute does.
-aminetxduo_add_tool(tool_ping          ping          SOURCES ping.c toolsock.c)
+aminetxduo_add_tool(tool_ping          ping          SOURCES ping.c toolsock.c toolbudget.c)
 
 # ---------------------------------------------------------------- smoke ---
 #
@@ -659,6 +659,20 @@ if(NOT CMAKE_CROSSCOMPILING)
         test/test_fetchurl.c
         fetchurl.c)
 
+    # How a connect timeout is divided over the addresses of one name.  Its
+    # own source for the same reason fetchurl.c is: nothing about a schedule
+    # of seconds shows up on the wire, so the ceilings have to be asserted
+    # somewhere rather than reasoned about in review.
+    add_executable(test_toolbudget
+        test/test_toolbudget.c
+        toolbudget.c)
+
+    target_include_directories(test_toolbudget PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_toolbudget PRIVATE -Wall -Wextra)
+    set_target_properties(test_toolbudget PROPERTIES C_STANDARD 11)
+
     target_include_directories(test_fetchurl PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -753,6 +767,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httppath_escapes COMMAND test_httppath)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
+    add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)

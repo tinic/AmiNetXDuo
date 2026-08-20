@@ -443,8 +443,13 @@ typedef struct ToolConnect
  *
  * A name with an AAAA and an A gets both tried, so a machine on a network
  * whose IPv6 goes nowhere still reaches the service.  Every address but the
- * last is given a short trial first.  The last keeps the caller's whole
- * timeout, so a slow path is not abandoned for a fast failure.
+ * last is given a short trial first; the last gets what remains.
+ *
+ * `timeout` bounds the call and not each address in it: what the short trials
+ * did not use goes to the last address, and if the list then still has budget
+ * to spare, the addresses that were cut short are tried again out of it, so a
+ * slow path is not abandoned because a later address failed fast.  A caller
+ * that set no timeout has nothing to divide and gets no second round.
  *
  * The socket on success, else one of the negative codes above, with *chosen
  * the address that failed and *why its errno.  Only the resolver prints.

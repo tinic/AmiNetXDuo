@@ -33,6 +33,8 @@
 
 #include "toolsock.h"
 
+#include "toolbudget.h"
+
 /* ------------------------------------------------------------- fd_set ---- */
 
 VOID tool_fd_zero(ToolFdSet *set)
@@ -1148,15 +1150,14 @@ LONG tool_sock_connect_timed(struct Library *base, LONG s,
 }
 
 /*
- * How long one address gets while another is still untried.
+ * Seconds since `t0`.
  *
- * Ten seconds spans four SYNs on this stack -- 0, 1, 3 and 7 s -- so three
- * lost in a row are ridden out before the next address is tried, which is well
- * past what a slow link costs a handshake.  It is not a race delay.  A path
- * that needs longer than this is not abandoned, it is retried at the end of
- * the list with the caller's whole timeout.
+ * ami_millis() is monotonic and wraps at 2^32, so the unsigned difference is
+ * right across the wrap.  It answers 0 throughout on a machine where
+ * timer.device did not open, which is the case ToolBudget keeps its own floor
+ * under the clock for.
  */
-#define TOOL_CONNECT_TRY_SECS   10UL
+#define TOOL_ELAPSED(t0)    ((ULONG)((ami_millis() - (t0)) / 1000UL))
 
 /* -p on nc: the wildcard of the family being connected to, plus a port. */
 static BOOL tool_bind_local(struct Library *base, LONG sock,
@@ -1182,7 +1183,7 @@ static BOOL tool_bind_local(struct Library *base, LONG sock,
 /* One address and one time budget.  The caller owns the order and retries. */
 static LONG tool_connect_one(struct Library *base, const ToolConnect *how,
                              const ToolAddr *address, ULONG budget,
-                             ToolAddr *chosen, LONG *why)
+                             BOOL again, ToolAddr *chosen, LONG *why)
 {
     ToolSockAddrAny sa;
     LONG            sock;
@@ -1195,8 +1196,13 @@ static LONG tool_connect_one(struct Library *base, const ToolConnect *how,
         char dotted[TOOL_ADDR_STRLEN];
 
         tool_addr_text(base, address, dotted, sizeof(dotted));
-        tool_printf("Trying %s port %ld...\n", (LONG)dotted,
-                    (LONG)how->port);
+
+        /* Worded apart from the first line.  The same "Trying <address>"
+           printed twice for one address reads as the list being walked
+           twice. */
+        tool_printf(again ? "Retrying %s port %ld...\n"
+                          : "Trying %s port %ld...\n",
+                    (LONG)dotted, (LONG)how->port);
     }
 
     sock = tool_sock_socket(base, (LONG)address->ta_Family,
@@ -1238,7 +1244,8 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
                             LONG *why)
 {
     ToolAddrList list;
-    ULONG        deferred = 0;
+    ToolBudget   budget;
+    ULONG        started;
     ULONG        i;
     LONG         rc = TOOL_CONNECT_FAILED;
 
@@ -1248,18 +1255,23 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
     if (!tool_sock_resolve_list(base, host, how->family, &list))
         return TOOL_CONNECT_NORESOLVE;
 
+    /* Opens timer.device before anything is timed, as ping.c does. */
+    started = ami_millis();
+
+    tool_budget_init(&budget, how->timeout, list.count);
+
+    /* First pass, in the resolver's order.  toolbudget.h has the rules that
+       decide what each address is given; nothing here re-decides them. */
     for (i = 0; i < list.count; i++)
     {
-        ULONG budget;
+        ULONG secs;
         LONG  result;
-        BOOL  shortened;
+        int   cut;
 
-        shortened = (BOOL)(i + 1 < list.count &&
-                           (how->timeout == 0 ||
-                            how->timeout > TOOL_CONNECT_TRY_SECS));
-        budget = shortened ? TOOL_CONNECT_TRY_SECS : how->timeout;
+        if (!tool_budget_first(&budget, i, TOOL_ELAPSED(started), &secs, &cut))
+            break;
 
-        result = tool_connect_one(base, how, &list.addr[i], budget,
+        result = tool_connect_one(base, how, &list.addr[i], secs, FALSE,
                                   chosen, why);
         if (result >= 0)
             return result;
@@ -1268,27 +1280,21 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
 
         rc = result;
 
-        /* Only a trial that was deliberately cut short deserves another
-           attempt.  A caller whose whole timeout elapsed already got exactly
-           the limit it requested. */
-        if (shortened && result == TOOL_CONNECT_TIMEDOUT)
-            deferred |= 1UL << i;
+        tool_budget_done(&budget, i, secs,
+                         (result == TOOL_CONNECT_TIMEDOUT) ? 1 : 0, cut);
     }
 
-    /*
-     * A fast failure on the later address must not turn a merely slow earlier
-     * address into a permanent failure.  Retry only the trials that hit the
-     * ten-second ceiling, now with the caller's complete budget (zero means
-     * the stack's own SYN ceiling).
-     */
+    /* Second pass: the addresses that were cut short, out of whatever the
+       rest of the list left behind. */
     for (i = 0; i < list.count; i++)
     {
-        LONG result;
+        ULONG secs = tool_budget_again(&budget, i, TOOL_ELAPSED(started));
+        LONG  result;
 
-        if ((deferred & (1UL << i)) == 0)
+        if (secs == 0UL)
             continue;
 
-        result = tool_connect_one(base, how, &list.addr[i], how->timeout,
+        result = tool_connect_one(base, how, &list.addr[i], secs, TRUE,
                                   chosen, why);
         if (result >= 0)
             return result;
@@ -1296,6 +1302,9 @@ LONG tool_sock_connect_host(struct Library *base, const char *host,
             return result;
 
         rc = result;
+
+        tool_budget_done(&budget, i, secs,
+                         (result == TOOL_CONNECT_TIMEDOUT) ? 1 : 0, 0);
     }
 
     return rc;
