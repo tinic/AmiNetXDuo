@@ -669,6 +669,14 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
                           const ULONG *in_read, const ULONG *in_write,
                           const ULONG *in_except, BsdFdSets *out)
 {
+    /* The count is bits set across the three result sets, not descriptors:
+       one socket ready to read and to write counts twice. POSIX says "the
+       total number of bits set in the bit masks", 4.4BSD selscan() does
+       n++ per bit, and AmiTCP -- the implementation this library is
+       bug-compatible with -- puts its n++ inside the three-set loop. The
+       standard consumption idiom decrements once per FD_ISSET it acts on,
+       so a per-descriptor count makes it stop early and silently skip the
+       higher-numbered descriptors. */
     LONG fd, count = 0;
     LONG words = (nfds + BSD_FD_BITS - 1) / BSD_FD_BITS;
 
@@ -700,7 +708,6 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         BOOL       want_read   = (in_read   != NULL && (in_read[word]   & mask) != 0);
         BOOL       want_write  = (in_write  != NULL && (in_write[word]  & mask) != 0);
         BOOL       want_except = (in_except != NULL && (in_except[word] & mask) != 0);
-        BOOL       ready       = FALSE;
 
         if (!want_read && !want_write && !want_except)
             continue;
@@ -712,25 +719,20 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
         if (want_read && bsd_readable(sock))
         {
             out->read[word] |= mask;
-            ready = TRUE;
+            count++;
         }
 
         if (want_write && bsd_writable(sock))
         {
             out->write[word] |= mask;
-            ready = TRUE;
+            count++;
         }
 
         if (want_except && bsd_exception(sock))
         {
             out->except[word] |= mask;
-            ready = TRUE;
-        }
-
-        /* select() returns the number of ready descriptors, not the number
-           of bits set across its three result sets. */
-        if (ready)
             count++;
+        }
     }
 
     bsd_nx_leave(base);

@@ -1823,7 +1823,7 @@ static const char     probe[] = "UDP exception probe";
     (VOID)bsd_CloseSocket(fd);
 }
 
-static VOID t_test_waitselect_counts_descriptors(VOID)
+static VOID t_test_waitselect_counts_ready_bits(VOID)
 {
 LONG                  fd;
 LONG                  rc;
@@ -1836,7 +1836,7 @@ struct t_timeval      tv;
 struct t_sockaddr_in  sa;
 static const char     probe[] = "multi-set UDP error";
 
-    t_log("WaitSelect counts descriptors, not ready sets");
+    t_log("WaitSelect counts ready bits, not descriptors");
 
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "multi-set UDP socket", bsd_Errno()))
@@ -1868,8 +1868,12 @@ static const char     probe[] = "multi-set UDP error";
     tv.tv_micro = 0;
 
     rc = bsd_WaitSelectAll(fd + 1, &read_set, &write_set, &except_set, &tv);
-    (VOID)t_check((BOOL)(rc == 1),
-                  "one descriptor ready in three sets counts once", rc);
+    /* POSIX returns "the total number of bits set in the bit masks", and
+       AmiTCP's selscan() increments once per set per descriptor. Callers
+       decrement the count once per FD_ISSET they act on, so one descriptor
+       ready in three sets must answer 3 or the loop stops early. */
+    (VOID)t_check((BOOL)(rc == 3),
+                  "one descriptor ready in three sets counts three", rc);
     (VOID)t_check((BOOL)((read_set.bits[word] & mask) != 0 &&
                          (write_set.bits[word] & mask) != 0 &&
                          (except_set.bits[word] & mask) != 0),
@@ -3298,7 +3302,7 @@ int main(void)
     t_test_udp_icmp_readiness();
     t_test_udp_so_error_consumes_icmp();
     t_test_udp_so_error_clears_exception();
-    t_test_waitselect_counts_descriptors();
+    t_test_waitselect_counts_ready_bits();
     t_test_datagram_shutdown();
     t_test_shutdown_fionread();
     t_test_raw_bound_address();
