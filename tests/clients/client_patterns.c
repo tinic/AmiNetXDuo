@@ -1332,6 +1332,14 @@ static VOID group_p(VOID)
         res = NULL;
     }
 
+    /* An overlong decimal service must not wrap modulo ULONG and select an
+       unrelated valid port (4294967376 is 80 modulo 2^32). */
+    hints.ai_flags |= AI_NUMERICSERV;
+    rc = getaddrinfo((STRPTR)"127.0.0.1", (STRPTR)"4294967376",
+                     &hints, &res);
+    t_ok(rc == EAI_NONAME && res == NULL,
+         "getaddrinfo rejects an overflowing numeric service", rc);
+
     /* A protocol-only hint has to synthesize the matching socket type. The
        old STREAM/UDP result was internally inconsistent and socket() rejected
        the supposedly usable addrinfo node. */

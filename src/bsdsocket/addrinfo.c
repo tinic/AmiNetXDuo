@@ -86,9 +86,11 @@ static BOOL bsd_gai_number(const char *s, ULONG *out)
 
     while (*s >= '0' && *s <= '9')
     {
-        value = value * 10UL + (ULONG)(*s - '0');
-        if (value > 0xFFFFUL)
+        ULONG digit = (ULONG)(*s - '0');
+
+        if (value > (0xFFFFUL - digit) / 10UL)
             return FALSE;
+        value = value * 10UL + digit;
         digits++;
         s++;
     }
