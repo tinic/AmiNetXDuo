@@ -5519,10 +5519,20 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
 
         {
-            ULONG j = start;
+            ULONG j;
+            ULONG colon;
+
+            if (!http_frame_field_name((const char *)&c->in[start],
+                                       i - start, &colon))
+            {
+                httpd_error(c, 400, "that is not an HTTP header");
+                return FALSE;
+            }
+
+            j = start;
 
             n = 0;
-            while (j < i && c->in[j] != ':')
+            while (j < start + colon)
             {
                 if (n + 1UL < sizeof(name))
                     name[n++] = (char)c->in[j];
@@ -5530,8 +5540,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             }
             name[n] = '\0';
 
-            if (j < i)
-                j++;                        /* the colon                  */
+            j++;                            /* the colon                  */
             while (j < i && (c->in[j] == ' ' || c->in[j] == '\t'))
                 j++;
 

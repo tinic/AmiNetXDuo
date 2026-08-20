@@ -51,6 +51,14 @@ const char *http_frame_error(HttpFrameResult why);
  */
 int http_frame_has_token(const char *value, const char *want);
 
+/*
+ * Validate the field-name at the start of one header line and return the
+ * colon's offset.  Whitespace before the colon, a folded continuation, and a
+ * line with no colon are malformed rather than headers the server can ignore.
+ */
+int http_frame_field_name(const char *line, unsigned long len,
+                          unsigned long *colon);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding

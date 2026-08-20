@@ -133,6 +133,22 @@ static void test_tokens(void)
     CHECK(!http_frame_has_token(NULL, "close"));
 }
 
+static void test_field_names(void)
+{
+    unsigned long colon;
+
+    printf("HTTP field names\n");
+
+    CHECK(http_frame_field_name("Host: example", 13, &colon) && colon == 4UL);
+    CHECK(http_frame_field_name("X_a-1: yes", 10, &colon) && colon == 5UL);
+    CHECK(!http_frame_field_name("Content-Length : 5", 18, &colon));
+    CHECK(!http_frame_field_name(" Content-Length: 5", 18, &colon));
+    CHECK(!http_frame_field_name("Content Length: 5", 17, &colon));
+    CHECK(!http_frame_field_name("Content-Length", 14, &colon));
+    CHECK(!http_frame_field_name(": value", 7, &colon));
+    CHECK(!http_frame_field_name(NULL, 0, &colon));
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -303,6 +319,7 @@ int main(void)
     test_length();
     test_coding();
     test_tokens();
+    test_field_names();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

@@ -127,6 +127,47 @@ int http_frame_has_token(const char *value, const char *want)
     }
 }
 
+static int hf_field_char(int ch)
+{
+    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        (ch >= '0' && ch <= '9'))
+        return 1;
+
+    switch (ch)
+    {
+        case '!': case '#': case '$': case '%': case '&': case '\'':
+        case '*': case '+': case '-': case '.': case '^': case '_':
+        case '`': case '|': case '~':
+            return 1;
+    }
+
+    return 0;
+}
+
+int http_frame_field_name(const char *line, unsigned long len,
+                          unsigned long *colon)
+{
+    unsigned long i;
+
+    if (colon != 0)
+        *colon = 0;
+
+    if (line == 0 || len == 0)
+        return 0;
+
+    for (i = 0; i < len && line[i] != ':'; i++)
+        if (!hf_field_char((unsigned char)line[i]))
+            return 0;
+
+    if (i == 0 || i >= len)
+        return 0;
+
+    if (colon != 0)
+        *colon = i;
+
+    return 1;
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;
