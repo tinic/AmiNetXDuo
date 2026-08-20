@@ -561,25 +561,29 @@ LONG bsd_fd_reserve(struct AmiSocketBase *base, LONG fd)
     return fd;
 }
 
-LONG bsd_fd_free(struct AmiSocketBase *base, LONG fd)
+VOID bsd_fd_free(struct AmiSocketBase *base, LONG fd)
 {
     if (base->sb_Table != NULL && fd >= 0 && fd < base->sb_TableSize)
     {
-        LONG error;
-
         if (base->sb_Table[fd] == NULL)
-            return 0;
-
-        /* The callback can answer ENOTSOCK when the link library owns this
-           descriptor. In that case its table and ours must both stay put. */
-        error = bsd_fd_callback(base, fd, FDCB_FREE);
-        if (error != 0)
-            return bsd_fail(base, error);
+            return;
 
         base->sb_Table[fd] = NULL;
-    }
 
-    return 0;
+        /*
+         * After the slot is clear, so a callback that asks us about fd during
+         * the call sees it already gone, and the answer is not read: there is
+         * nothing a program can refuse about a descriptor going away.
+         *
+         * Acting on a refusal here made CloseSocket() return -1 with the
+         * socket still allocated and the descriptor still taken -- and the
+         * application, having been told the close failed, does not call it
+         * again. A leaked socket per close is worse than any answer the
+         * callback could be giving us, and nothing in the NDK describes an
+         * FDCB_FREE that may refuse.
+         */
+        (VOID)bsd_fd_callback(base, fd, FDCB_FREE);
+    }
 }
 
 /* ----------------------------------------------------------- socket objects */
@@ -1280,10 +1284,9 @@ VOID bsd_close_all(struct AmiSocketBase *base)
         if (sock == NULL)
             continue;
 
-        /* The base is going away even when a stale link-library entry refuses
-           FREE. Notify every descriptor, then force removal for teardown. */
-        if (bsd_fd_free(base, fd) != 0)
-            base->sb_Table[fd] = NULL;
+        /* Notify every descriptor on the way out.  The base is going away
+           whatever the callback thinks. */
+        bsd_fd_free(base, fd);
 
         if (bracketed && sock != BSD_FD_RESERVED)
             bsd_socket_release(base, sock);
@@ -3528,16 +3531,14 @@ LONG bsd_CloseSocket(register LONG sock_fd __asm("d0"),
 
     if (bsd_fd_reserved(SocketBase, sock_fd))
     {
-        if (bsd_fd_free(SocketBase, sock_fd) != 0)
-            return -1;
+        bsd_fd_free(SocketBase, sock_fd);
         return 0;
     }
 
     if (sock == NULL)
         return bsd_fail(SocketBase, AMI_EBADF);
 
-    if (bsd_fd_free(SocketBase, sock_fd) != 0)
-        return -1;
+    bsd_fd_free(SocketBase, sock_fd);
 
     /*
      * The descriptor is gone whatever happens next, so the caller always sees

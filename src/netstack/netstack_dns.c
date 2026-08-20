@@ -694,14 +694,15 @@ static VOID ami_ns_dns_absorb_pending(AmiNetStack *ns)
             continue;
 
         /*
-         * The reconcile has several returns that keep the last coherent
-         * option set rather than acting on a partial read -- a server whose
-         * option 6 does not fit our buffer, an option 119 or 15 that will not
-         * retrieve.  Those want the interface looked at again, and the mark
-         * was taken above, so re-mark on the way out.  Without this the "try
-         * again next time" the comments promise never happens: for a stable
-         * lease the next mark is T1, and until then that interface has no DNS
-         * servers, no domain and no search list.
+         * The reconcile keeps the last coherent option set rather than acting
+         * on a partial read, and says whether that decision wants another
+         * look.  A transient retrieve failure does; a buffer that will never
+         * be big enough does not, and answers TRUE so this does not spin.
+         *
+         * Only the option 6 path reports.  The domain and search reconciles
+         * are still VOID and still return silently on a failed retrieve, so
+         * those two are not retried -- recorded in BACKLOG.md rather than
+         * claimed here.
          */
         if (!ami_netstack_dns_dhcp_reconcile(ns, iface))
             ami_ns_dns_pending_mark(&ns->ns_DhcpDnsPending, iface);
@@ -1019,10 +1020,29 @@ BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
             &ns->ns_Dhcp, (UINT)iface, NX_DHCP_OPTION_DNS_SVR,
             (UCHAR *)raw, &size);
 
-        /* Not carrying option 6 is a valid empty set.  Other failures leave
-           the last coherent lease set in place and ask to be retried: the
-           caller re-marks the interface, because a lease that sits at BOUND
-           produces no further state change until T1. */
+        /*
+         * Not carrying option 6 is a valid empty set.
+         *
+         * A buffer too small is deterministic: raw[] holds NX_DNS_MAX_SERVERS
+         * addresses and a server offering more answers NX_DHCP_DEST_TO_SMALL
+         * on every retrieve for the life of the lease.  Retrying it would
+         * re-mark the interface on every pass and pay a bracket, three
+         * reconciles and an option retrieve under the client mutex for each
+         * one, forever, without ever installing a server.  Keep the servers
+         * we have and say so once.
+         *
+         * Anything else may be transient, so it asks to be retried: the
+         * caller re-marks the interface, because a lease that sits at BOUND
+         * produces no further state change until T1.
+         */
+        if (status == NX_DHCP_DEST_TO_SMALL)
+        {
+            AMI_WARN("netstack: interface %ld offers more than %ld DNS "
+                     "servers, keeping the ones already known",
+                     (long)iface, (long)NX_DNS_MAX_SERVERS);
+            return TRUE;
+        }
+
         if (status != NX_SUCCESS && status != NX_DHCP_PARSE_ERROR)
             return FALSE;
 

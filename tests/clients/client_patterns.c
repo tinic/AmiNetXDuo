@@ -308,15 +308,16 @@ static VOID group_a(VOID)
     if (rc >= 0)
         CloseSocket(rc);
 
+    /* A descriptor going away is not refusable: acting on an FDCB_FREE errno
+       made CloseSocket() answer -1 with the socket still allocated and the
+       number still taken, and an application told its close failed does not
+       call it again.  The callback is told, and the close proceeds. */
     t_fdcb_reject_free_fd = fd;
     rc = CloseSocket(fd);
-    t_ok(rc < 0 && c_errno == ENOTSOCK,
-         "positive FDCB_FREE errno vetoes CloseSocket", rc);
+    t_ok(rc == 0 && t_fdcb_frees >= 1,
+         "a refused FDCB_FREE does not veto CloseSocket", rc);
 
     t_fdcb_reject_free_fd = -1;
-    rc = CloseSocket(fd);
-    t_ok(rc == 0 && t_fdcb_frees >= 2,
-         "descriptor remains live after a refused FDCB_FREE", rc);
 
     t_fdcb_reject_alloc = 1;
     fd = socket(AF_INET, SOCK_STREAM, 0);
