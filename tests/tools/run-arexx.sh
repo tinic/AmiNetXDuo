@@ -28,6 +28,12 @@
 #                          command, so this is not our idea of what waiting for
 #                          the port means.
 #   QUERY HOSTNAME         a command we implement: RC 0 and a result string.
+#   QUERY CONNECTIONS      snapshots live TCP/UDP lists from the otherwise
+#                          plain Exec Process that runs this host.
+#   QUERY ROUTES ALL       takes nx_ip_protection and calls a NetX getter.
+#   QUERY ICMP ... UDP ... calls all four NetX information APIs. These three
+#                          prove every live-state query adopts the Process for
+#                          only the snapshot and returns to format the result.
 #   FROBNICATE             a command nobody implements. RC must be non-zero and
 #                          the script must continue, that is the whole fix.
 #   QUERY NOSUCHVARIABLE   a keyword we know with a variable we do not.
@@ -196,6 +202,18 @@ SAY 'case empty:                      rc=' RC
 'Q HOSTNAME'
 SAY 'case abbrev:  Q HOSTNAME         rc=' RC ' result=' RESULT
 
+RESULT = 'NONE'
+'QUERY CONNECTIONS'
+SAY 'case conns:   QUERY CONNECTIONS  rc=' RC ' bytes=' LENGTH(RESULT)
+
+RESULT = 'NONE'
+'QUERY ROUTES ALL'
+SAY 'case routes:  QUERY ROUTES ALL   rc=' RC ' bytes=' LENGTH(RESULT)
+
+RESULT = 'NONE'
+'QUERY ICMP CHKSUM IP TOTAL TCP CONNECT UDP ITOTAL'
+SAY 'case stats:   QUERY live stats   rc=' RC ' result=' RESULT
+
 /* SERVICES blocks for its collection window, which is the one command here
    that can wedge the host rather than answer it. One second, because what is
    being asserted is that it comes back and the script continues, nothing on
@@ -346,6 +364,18 @@ else
     note "FAIL: the AmiTCP abbreviation 'Q' was not accepted"
     fails=$((fails + 1))
 fi
+
+# These are the live NetX snapshots.  The host itself is an Exec Process, so
+# rc=0 here also proves that each path successfully adopted it before taking a
+# ThreadX mutex or entering a NetX information service.
+for case_name in conns routes stats; do
+    if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then
+        note "PASS: $case_name returned from a live NetX snapshot"
+    else
+        note "FAIL: $case_name did not return rc=0"
+        fails=$((fails + 1))
+    fi
+done
 
 # SERVICES is the only command that blocks. The assertion is that it comes
 # back at all, what it found is a property of the network the emulator is on,

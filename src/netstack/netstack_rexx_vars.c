@@ -381,6 +381,14 @@ static VOID ami_rx_error_named(AmiRxReply *r, const char **errstr,
 
 /* ------------------------------------------------------------- counters --- */
 
+/*
+ * The ARexx host is a plain CreateNewProc() Process, not a ThreadX thread.
+ * Every live NetX snapshot below is therefore enclosed by
+ * ami_netstack_enter_alloc()/leave_free().  Keep those brackets around the
+ * snapshot only: reply growth and SERVICES' Delay() are Exec work and must
+ * not hold the ThreadX baton.
+ */
+
 static VOID ami_rx_zero(ULONG *out, UWORD count)
 {
     while (count-- > 0)
@@ -514,6 +522,7 @@ static VOID ami_rx_udp(NX_IP *ip, ULONG *out)
  */
 static LONG ami_rx_icmphist(NX_IP *ip, const char **errstr, AmiRxReply *r)
 {
+    AmiNetCaller *caller;
     ULONG hist[2 * RX_ICMP_HIST];
     ULONG sent = 0, timeouts = 0, suspended = 0, responses = 0;
     ULONG checksum = 0, unhandled = 0;
@@ -522,12 +531,22 @@ static LONG ami_rx_icmphist(NX_IP *ip, const char **errstr, AmiRxReply *r)
     for (i = 0; i < 2 * RX_ICMP_HIST; i++)
         hist[i] = 0;
 
+    /* nx_icmp_info_get() takes live NetX state; format after leaving. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        *errstr = ami_rx_err_state;
+        return RETURN_ERROR;
+    }
+
     if (nx_icmp_info_get(ip, &sent, &timeouts, &suspended, &responses,
                          &checksum, &unhandled) == NX_SUCCESS)
     {
         hist[RX_ICMP_ECHO]                    = sent;
         hist[RX_ICMP_HIST + RX_ICMP_ECHOREPLY] = responses;
     }
+
+    ami_netstack_leave_free(caller);
 
     for (i = 0; i < 2 * RX_ICMP_HIST; i++)
     {
@@ -706,6 +725,7 @@ static UWORD ami_rx_collect_sockets(NX_IP *ip, AmiRxSocket *out, UWORD room)
 
 static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
 {
+    AmiNetCaller *caller;
     AmiRxSocket *mem;
     UWORD        count;
     UWORD        i;
@@ -718,7 +738,18 @@ static LONG ami_rx_connections(NX_IP *ip, const char **errstr, AmiRxReply *r)
         return RETURN_FAIL;
     }
 
+    /* ami_rx_collect_sockets() takes nx_ip_protection directly. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        FreeVec(mem);
+        *errstr = ami_rx_err_state;
+        return RETURN_ERROR;
+    }
+
     count = ami_rx_collect_sockets(ip, mem, RX_MAX_SOCKETS);
+
+    ami_netstack_leave_free(caller);
 
     if (count != 0 &&
         !ami_rx_reply_room(r, r->rr_Used + (LONG)count * RX_STATLEN + 1))
@@ -920,6 +951,7 @@ static BOOL ami_rx_put_rtflags(AmiRxReply *r, UWORD flags)
 static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
                           AmiRxReply *r)
 {
+    AmiNetCaller *caller;
     char        buf[RX_KEYWORDLEN];
     AmiRxRoute *mem;
     LONG        af;
@@ -958,7 +990,18 @@ static LONG ami_rx_routes(NX_IP *ip, struct CSource *args, const char **errstr,
         return RETURN_FAIL;
     }
 
+    /* ami_rx_collect_routes() takes nx_ip_protection and calls NetX. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        FreeVec(mem);
+        *errstr = ami_rx_err_state;
+        return RETURN_ERROR;
+    }
+
     count = ami_rx_collect_routes(ip, mem, RX_MAX_ROUTES);
+
+    ami_netstack_leave_free(caller);
 
     if (count != 0
         && !ami_rx_reply_room(r, r->rr_Used + (LONG)count * RX_ROUTELEN + 1))
@@ -1397,6 +1440,16 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
 
         if (def->rvd_Index != NULL)
         {
+            /* The four info getters are NetX APIs.  The ARexx Process must
+               be adopted for the call, but not for decimal formatting. */
+            AmiNetCaller *caller = ami_netstack_enter_alloc();
+
+            if (caller == NULL)
+            {
+                *errstr = ami_rx_err_state;
+                return RETURN_ERROR;
+            }
+
             switch (var)
             {
                 case RXV_ICMP: ami_rx_icmp(ip, counters); break;
@@ -1408,6 +1461,8 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
                    rvd_Read. */
                 default:       ami_rx_zero(counters, RX_TCP_COUNT); break;
             }
+
+            ami_netstack_leave_free(caller);
 
             if (!ami_rx_put_dec(r, counters[index]))
             {
