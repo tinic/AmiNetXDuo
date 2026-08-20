@@ -3626,8 +3626,19 @@ static BOOL httpd_produce(HttpConn *c)
                          */
                         if (len == 0UL)
                         {
+                            /* Escaped rather than raw.  This is the one name
+                               in the drawer that somebody chose to be
+                               awkward, AmigaOS allows 0x9B in a file name,
+                               and 0x9B is the console's CSI: logging it as it
+                               stands hands the operator's Shell to whoever
+                               created the file.  Percent-encoding leaves
+                               nothing outside the unreserved set.
+                               httpd_escape held the href, which this entry no
+                               longer needs, and the next one rewrites. */
+                            (VOID)http_url_escape(name, httpd_escape,
+                                                  sizeof(httpd_escape));
                             httpd_log(c, "listing entry does not fit and was "
-                                         "skipped: %s", (LONG)name, 0);
+                                         "skipped: %s", (LONG)httpd_escape, 0);
                             continue;
                         }
 
