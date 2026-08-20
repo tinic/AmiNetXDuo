@@ -604,6 +604,31 @@ def test_overlapping_moves():
         once(req("DELETE", "%s/dst%d" % (BASE, n)))
 
 
+def test_destination_contains_source():
+    """Overwrite must not erase the source before COPY/MOVE reads it."""
+    print("a destination containing its source is refused intact")
+
+    root = BASE + "/ancestor"
+    source = root + "/source"
+    keep = source + "/keep.txt"
+
+    once(req("MKCOL", root))
+    once(req("MKCOL", source))
+    once(req("PUT", keep, body="must survive\n"))
+
+    dest = {"Destination": "http://%s:%d%s" % (ADDR, PORT, root)}
+    a = once(req("COPY", source, dest))
+    check(a is not None and a[0] == 409,
+          "COPY onto its ancestor is 409, not %s"
+          % (a[0] if a else "nothing"))
+
+    a = once(req("GET", keep))
+    check(a is not None and a[0] == 200 and b"must survive" in a[2],
+          "and refusing it left the source bytes intact")
+
+    once(req("DELETE", root))
+
+
 # ------------------------------------------------------ names that collide --
 
 def test_name_truncation():
@@ -1386,6 +1411,7 @@ def main():
         test_lock_below_stops_delete()
         test_proppatch_atomic()
         test_overlapping_moves()
+        test_destination_contains_source()
         test_name_truncation()
         test_propfind_body()
         test_depth0_collection_lock()

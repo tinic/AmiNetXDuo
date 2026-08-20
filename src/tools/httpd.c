@@ -4848,6 +4848,15 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
+    /* Overwrite clears an existing destination before the copy starts.  If
+       the source is below it, that clear deletes the source itself and the
+       later copy can only report that it has gone. */
+    if (http_path_within(c->dest.path, c->path.path))
+    {
+        httpd_error(c, 409, "the source is inside that destination");
+        return FALSE;
+    }
+
     return httpd_lock_allows(c, c->dest.path);
 }
 
