@@ -329,9 +329,20 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting, which
 # is what a command with a ReadArgs template wants.  Empty by default, and then
 # the line is the one this script always wrote.
+# STACK, because the default is 4 KB and nothing here ever raised it.
+# AmigaOS gives a Startup-Sequence command whatever the Shell's default is,
+# 4096 bytes on 3.1, and there is no MMU: a program that runs past the end of
+# it corrupts whatever is below rather than trapping. tests/tls/tls_https
+# entered _nx_secure_tls_session_start() and never came back -- no crash, no
+# output, a wedge that survived a 900 s ceiling -- while the same handshake
+# through tls.library completed in 100.4 s from a Shell that had more.
+# 200000 is what tools/demo.sh and the ported clients already use.
+STACK_BYTES="${AMINETXDUO_GUEST_STACK:-200000}"
+
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
 c:envsetup
+stack $STACK_BYTES
 $EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"
 EOF
