@@ -2134,6 +2134,10 @@ static void test_netdb_garbage(void)
         "narrowed 65557/tcp\n"
         "maximum 65535/tcp\n"
         "good 90/tcp\n");
+    set_fixture(AMI_CFG_FILE_PROTOCOLS,
+        "maximum 255 MAXIMUM\n"
+        "oversized 256 OVERSIZED\n"
+        "negative-looking 4294967295 NEGATIVE-LOOKING\n");
 
     CHECK(ami_netdb_load() == AMI_CFG_OK);
     CHECK(ami_netdb_host_by_name("ok") != NULL);
@@ -2144,6 +2148,9 @@ static void test_netdb_garbage(void)
     CHECK(ami_netdb_serv_by_name("maximum", "tcp") != NULL);
     CHECK(ami_netdb_serv_by_name("weird", NULL) != NULL);
     CHECK(ami_netdb_serv_by_name("good", "tcp") != NULL);
+    CHECK(ami_netdb_proto_by_name("maximum") != NULL);
+    CHECK(ami_netdb_proto_by_name("oversized") == NULL);
+    CHECK(ami_netdb_proto_by_name("negative-looking") == NULL);
 
     ami_netdb_free();
     CHECK(ami_alloc_count() == 0);

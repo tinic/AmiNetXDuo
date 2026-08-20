@@ -252,7 +252,12 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             break;
 
         case NETDB_PROTOCOLS:
-            if (!ami_cfg_parse_ulong(tokens[1], &entry->value))
+            /* The field is the 8-bit IPv4/IPv6 next-header number. Keeping
+               larger values makes getprotobyname() return a protocol that no
+               socket or packet can carry (and values above LONG_MAX emerge
+               through struct protoent as negative numbers). */
+            if (!ami_cfg_parse_ulong(tokens[1], &entry->value) ||
+                entry->value > 255UL)
                 continue;
             break;
 
