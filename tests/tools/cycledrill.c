@@ -537,6 +537,32 @@ static VOID sample(struct Library *base, Sample *out)
     out->pool_empty    = q_health.e.nsl_PoolEmpty;
 }
 
+/* A header-only query is the documented sizing pass. Every interface has a
+   DHCP row, including one whose DHCP client is off, so the two available
+   counts must agree even though neither query has room to copy a row. */
+static VOID phase_query_counts(struct Library *base)
+{
+    NetStatusHeader interfaces;
+    NetStatusHeader dhcp;
+
+    zero(&interfaces, sizeof(interfaces));
+    interfaces.nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    interfaces.nsh_Version = AMI_NETSTATUS_VERSION;
+
+    zero(&dhcp, sizeof(dhcp));
+    dhcp.nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    dhcp.nsh_Version = AMI_NETSTATUS_VERSION;
+
+    (VOID)p_query(base, NETSTATUS_INTERFACES, &interfaces,
+                  (ULONG)sizeof(interfaces));
+    (VOID)p_query(base, NETSTATUS_DHCP, &dhcp, (ULONG)sizeof(dhcp));
+
+    check(interfaces.nsh_Available != 0 &&
+          dhcp.nsh_Available == interfaces.nsh_Available,
+          "a header-only DHCP query counts every interface",
+          (LONG)dhcp.nsh_Available, (LONG)interfaces.nsh_Available);
+}
+
 /* One fixed shape, so the shell can read any of these lines the same way. */
 static VOID show(const char *label, LONG n, const Sample *s)
 {
@@ -1305,6 +1331,7 @@ int main(VOID)
         IfInfo info;
 
         sample(anchor, &baseline);
+        phase_query_counts(anchor);
         if_look(anchor, iface, &info);
         dotted(info.address, addr_text);
 

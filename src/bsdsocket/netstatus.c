@@ -341,7 +341,7 @@ static VOID ns_fill_dhcp(NsWriter *w)
 
         out = (NetStatusDhcp *)ns_writer_next(w);
         if (out == NULL)
-            break;                      /* the caller's buffer is full */
+            continue;                   /* still count every interface */
 
         out->nsd_Index = index;
 
