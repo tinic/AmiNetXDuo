@@ -149,11 +149,13 @@ say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
 # --------------------------------------------------- references that dangle --
 #
 # A harness that runs a script which is not there is not a harness, and the
-# manifest cannot see it: install/test/run-all.sh names five installer
-# scenarios and calls install/test/run-installer-fsuae.sh for each, which was
-# deleted with the rest of the fs-uae harnesses.  It runs `set -uo pipefail`
-# with no -e, so all five score 127 and it exits 5.  Nothing invoked it, so
-# nothing ever saw that.
+# manifest cannot see it.  install/test/run-all.sh was the case that motivated
+# this check: it called install/test/run-installer-fsuae.sh once per scenario
+# after that file was deleted with the rest of the fs-uae harnesses, and with
+# `set -uo pipefail` and no -e all five scored 127 while it exited 5.  Nothing
+# invoked it, so nothing ever saw that.  It has since been repaired onto
+# run-workbench.sh; the check stays, because the next one will not announce
+# itself either.
 # An INVOCATION is separated from a MENTION, because both exist and they are
 # not the same defect.  A mention is a stale sentence in an error message,
 # worth fixing and not worth failing a build over; an invocation is a script

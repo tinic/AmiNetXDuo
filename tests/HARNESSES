@@ -76,7 +76,7 @@ tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml : NetSetup w
 tests/tools/run-onoff.sh           : .github/workflows/emulator.yml : Online and Offline
 tests/tools/run-quiet.sh           : .github/workflows/emulator.yml : what QUIET means, everywhere
 tests/tools/run-shownetservices.sh : .github/workflows/emulator.yml : ShowNetServices and its window
-install/test/run-all.sh            : manual : BROKEN. it runs install/test/run-installer-fsuae.sh once per scenario and that file is gone; `set -uo pipefail` with no -e means all five score 127 and it exits 5. NOVICE, AVERAGE, EXPERT, STATIC and RERUN have no runner. tools/lint-guest-arch.sh:49 only exempts it from a lint, which is not an invocation
+install/test/run-all.sh            : manual : every installer scenario on a real Workbench 3.1, about fifteen minutes. Repaired onto run-workbench.sh; it no longer names the deleted fs-uae harness, reports key=value counts and exits 77 when nothing reached a verdict, so a box with no licensed Workbench can no longer read as a full sweep. Manual because it needs that Workbench, the ADFs and a peer. STATIC always skips: it needs a no on the DHCP question and installdrive.c:103 DRIVE_NO_ON_YESNO is set by nothing
 tests/compare/run-compare.sh       : tools/emurun.sh                : the same workload on another stack
 
 # ------------------------------------------------- nothing invokes these --
