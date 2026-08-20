@@ -301,6 +301,72 @@ int http_frame_list_add(char *out, unsigned long outlen, const char *value)
     return 1;
 }
 
+static int hf_decimal(const char **text, unsigned long *out)
+{
+    const char   *p = *text;
+    unsigned long n = 0;
+    int           digits = 0;
+
+    while (*p >= '0' && *p <= '9')
+    {
+        unsigned long d = (unsigned long)(*p - '0');
+
+        if (n > HF_LIMIT || (n == HF_LIMIT && d > HF_LAST))
+            return 0;
+
+        n = n * 10UL + d;
+        digits++;
+        p++;
+    }
+
+    if (digits == 0)
+        return 0;
+
+    *text = p;
+    *out  = n;
+    return 1;
+}
+
+int http_frame_range(const char *value, unsigned long *from,
+                     unsigned long *to)
+{
+    const char   *p = value;
+    unsigned long first;
+    unsigned long last = HF_ULONG_MAX;
+
+    if (from != 0)
+        *from = 0;
+    if (to != 0)
+        *to = 0;
+
+    if (p == 0 || !((p[0] == 'b' || p[0] == 'B') &&
+                    (p[1] == 'y' || p[1] == 'Y') &&
+                    (p[2] == 't' || p[2] == 'T') &&
+                    (p[3] == 'e' || p[3] == 'E') &&
+                    (p[4] == 's' || p[4] == 'S') && p[5] == '='))
+        return 0;
+
+    p += 6;
+    if (!hf_decimal(&p, &first) || *p++ != '-')
+        return 0;
+
+    if (*p >= '0' && *p <= '9' && !hf_decimal(&p, &last))
+        return 0;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+
+    if (*p != '\0')
+        return 0;
+
+    if (from != 0)
+        *from = first;
+    if (to != 0)
+        *to = last;
+
+    return 1;
+}
+
 HttpFrameCoding http_frame_coding(const char *value)
 {
     HttpFrameCoding last = HTTP_TE_IDENTITY;

@@ -206,6 +206,26 @@ static void test_combined_lists(void)
     CHECK(!http_frame_list_add(NULL, 0, "x"));
 }
 
+static void test_ranges(void)
+{
+    unsigned long from;
+    unsigned long to;
+
+    printf("byte ranges\n");
+
+    CHECK(http_frame_range("bytes=0-1023", &from, &to) &&
+          from == 0UL && to == 1023UL);
+    CHECK(http_frame_range("Bytes=1024-", &from, &to) &&
+          from == 1024UL && to == 4294967295UL);
+    CHECK(http_frame_range("bytes=1-2\t", &from, &to));
+    CHECK(!http_frame_range("bytes=-512", &from, &to));
+    CHECK(!http_frame_range("bytes=5", &from, &to));
+    CHECK(!http_frame_range("bytes=0-1,2-3", &from, &to));
+    CHECK(!http_frame_range("bytes=0-1junk", &from, &to));
+    CHECK(!http_frame_range("bytes=4294967296-", &from, &to));
+    CHECK(!http_frame_range("bytes=0-4294967296", &from, &to));
+}
+
 /* ------------------------------------------------------------- the chunks --- */
 
 static char  sunk[512];
@@ -380,6 +400,7 @@ int main(void)
     test_etags();
     test_versions();
     test_combined_lists();
+    test_ranges();
     test_chunks();
 
     printf("%d checks, %d failures\n", checks, failures);

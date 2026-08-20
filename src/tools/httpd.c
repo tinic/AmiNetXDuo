@@ -5240,52 +5240,14 @@ static const HttpMethod *httpd_lookup(const char *name)
    answer is a different framing and no client needs it to open a file. */
 static BOOL httpd_parse_range(HttpConn *c, const char *value)
 {
-    ULONG from = 0;
-    ULONG to   = 0xffffffffUL;
-    BOOL  have_from = FALSE;
-    BOOL  suffix = FALSE;
+    ULONG from;
+    ULONG to;
 
-    if (hs_nicmp(value, "bytes=", 6) != 0)
+    /* Suffix and multipart ranges are deliberately ignored: sending the whole
+       representation is legal.  Reinterpreting malformed text as a different
+       single range is not. */
+    if (!http_frame_range(value, &from, &to))
         return FALSE;
-
-    value += 6;
-
-    if (*value == '-')
-    {
-        suffix = TRUE;
-        value++;
-    }
-
-    while (*value >= '0' && *value <= '9')
-    {
-        from = (from * 10UL) + (ULONG)(*value++ - '0');
-        have_from = TRUE;
-    }
-
-    if (!have_from)
-        return FALSE;
-
-    /*
-     * "bytes=-500" is the last 500 bytes, which cannot be turned into a start
-     * without the size.  Ignoring the header is a legal answer, the client gets
-     * the whole file with a 200 and reads what it wanted.  No client that mounts
-     * a drive asks this way, the ones that do are media players reading a
-     * trailer.
-     */
-    if (suffix)
-        return FALSE;
-
-    if (*value == '-')
-    {
-        value++;
-
-        if (*value >= '0' && *value <= '9')
-        {
-            to = 0;
-            while (*value >= '0' && *value <= '9')
-                to = (to * 10UL) + (ULONG)(*value++ - '0');
-        }
-    }
 
     c->has_range  = 1;
     c->range_from = from;

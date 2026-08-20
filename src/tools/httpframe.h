@@ -82,6 +82,10 @@ HttpFrameVersion http_frame_version(const char *value, unsigned long len);
 /* Append one field-line value to a combined comma-separated field value. */
 int http_frame_list_add(char *out, unsigned long outlen, const char *value);
 
+/* One byte range: N-M or N-.  Suffix and multipart ranges are not selected. */
+int http_frame_range(const char *value, unsigned long *from,
+                     unsigned long *to);
+
 /* ---------------------------------------------------------- the encoding --- */
 
 typedef enum HttpFrameCoding
