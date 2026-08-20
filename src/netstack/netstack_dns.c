@@ -121,7 +121,7 @@ static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
         out[i] = (char)raw[i];
     }
     out[size] = '\0';
-    if (!ami_ns_domain_valid(out))
+    if (!ami_ns_domain_canonicalize(out))
         out[0] = '\0';
     return TRUE;
 }

@@ -43,6 +43,9 @@ int main(void)
     char owner[AMI_CFG_NAME_LEN];
     char applied[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];
     char long_domain[201];
+    char rooted_domain[AMI_CFG_DOMAIN_LEN];
+    char underscored_domain[AMI_CFG_DOMAIN_LEN];
+    char malformed_domain[AMI_CFG_DOMAIN_LEN];
     size_t i;
 
     memset(&resolver, 0, sizeof(resolver));
@@ -190,6 +193,24 @@ int main(void)
             "a label may not end with a hyphen");
     h_check(!ami_ns_domain_valid("bad space.test"),
             "a space is refused");
+
+    /* The option reader stores this canonical form.  Validation by itself is
+       insufficient: the resolver's unqualified-name joiner cannot consume a
+       suffix that still carries the root marker. */
+    h_set(rooted_domain, "example.com.", sizeof(rooted_domain));
+    h_check(ami_ns_domain_canonicalize(rooted_domain) &&
+            strcmp(rooted_domain, "example.com") == 0,
+            "a DHCP root marker is removed before resolver storage");
+
+    h_set(underscored_domain, "home_network", sizeof(underscored_domain));
+    h_check(ami_ns_domain_canonicalize(underscored_domain) &&
+            strcmp(underscored_domain, "home_network") == 0,
+            "canonicalization preserves an accepted router domain");
+
+    h_set(malformed_domain, "bad..domain.", sizeof(malformed_domain));
+    h_check(!ami_ns_domain_canonicalize(malformed_domain) &&
+            strcmp(malformed_domain, "bad..domain.") == 0,
+            "canonicalization does not repair malformed option text");
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;

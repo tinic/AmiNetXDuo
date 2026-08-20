@@ -55,6 +55,33 @@ BOOL ami_ns_domain_valid(const char *name)
 }
 
 
+/*
+ * Store the presentation form used by the resolver.  DHCP option 15 may
+ * legally carry the DNS root's trailing dot, but the resolver later appends
+ * this value to an unqualified name.  Keeping the root marker would turn
+ * "host" + "example.com." into a usable query only if every consumer
+ * understood that rooted representation; the current joiner deliberately
+ * accepts only the resolver's canonical suffix form.  Remove exactly the root
+ * marker after validating the complete wire value, so malformed input is
+ * never repaired into a name that appears valid.
+ */
+BOOL ami_ns_domain_canonicalize(char *name)
+{
+    ULONG len;
+
+    if (!ami_ns_domain_valid(name))
+        return FALSE;
+
+    for (len = 0; name[len] != '\0'; len++)
+        ;
+
+    if (len > 1UL && name[len - 1UL] == '.')
+        name[len - 1UL] = '\0';
+
+    return TRUE;
+}
+
+
 static char ami_ns_domain_fold(char c)
 {
     if (c >= 'A' && c <= 'Z')

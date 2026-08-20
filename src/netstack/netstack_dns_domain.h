@@ -19,6 +19,7 @@ typedef struct AmiNsDhcpDomainState
 } AmiNsDhcpDomainState;
 
 BOOL ami_ns_domain_valid(const char *name);
+BOOL ami_ns_domain_canonicalize(char *name);
 
 VOID ami_ns_dns_ra_default_reconcile(
     AmiResolverConfig *resolver,
