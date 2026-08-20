@@ -717,12 +717,21 @@ static BOOL ask_unit(Plan *plan)
 
             while (answer[i] != '\0')
             {
+                ULONG digit;
+
                 if (answer[i] < '0' || answer[i] > '9')
                 {
                     ok = FALSE;
                     break;
                 }
-                value = value * 10UL + (ULONG)(answer[i] - '0');
+
+                digit = (ULONG)(answer[i] - '0');
+                if (value > (0xFFFFFFFFUL - digit) / 10UL)
+                {
+                    ok = FALSE;
+                    break;
+                }
+                value = value * 10UL + digit;
                 i++;
             }
 
