@@ -1265,6 +1265,25 @@ static void test_reopen_under_closer(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+static void test_reopen_under_owner_close(void)
+{
+    ULONG value = 0;
+
+    printf("bpf: owner close cannot retire a recycled channel\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+
+    stub_on_lock = t_replace_mid_close;
+    ami_bpf_close_owner(T_BPF_OWNER);
+    CHECK(stub_on_lock == NULL);
+
+    CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCGBLEN, &value) == 0);
+    CHECK(value == AMI_BPF_DEFAULT_BLEN);
+    CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    CHECK(ami_alloc_count() == 0);
+}
+
 /*
  * The base is closed during a copy-out on one of its channels.
  *
@@ -1794,6 +1813,7 @@ int main(int argc, char **argv)
     test_interface_replace_under_tap();
     test_channel_ownership();
     test_reopen_under_closer();
+    test_reopen_under_owner_close();
     test_close_owner_under_reader();
     test_capture_notify_close_reopen();
     test_signal_mask_close_reopen();

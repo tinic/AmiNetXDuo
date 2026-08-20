@@ -220,12 +220,24 @@ LONG ami_bpf_init(VOID)
  * frees are deferred. `release_pending` marks the buffers as the ones for the
  * reader to release when it finishes with them.
  */
-static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force)
+static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
+                                 APTR expected_owner)
 {
     APTR bufbase;
     APTR filter;
 
     ami_bpf_lock();
+
+    /* close_owner() screens the table before reaching this lock. An ordinary
+       close/reopen can replace the numeric slot in that window, so retire it
+       only if it still belongs to the base being destroyed. NULL is the
+       unconditional form used by final stack cleanup and deferred release. */
+    if (expected_owner != NULL &&
+        (!ch->open || ch->owner != expected_owner))
+    {
+        ami_bpf_unlock();
+        return;
+    }
 
     if (ch->iface != NULL && ami_bpf_bound_channels > 0)
         ami_bpf_bound_channels--;
@@ -269,7 +281,7 @@ VOID ami_bpf_close_owner(APTR owner)
         AmiBpfChan *ch = &ami_bpf_chan[i];
 
         if (ch->open && ch->owner == owner)
-            ami_bpf_chan_release(ch, FALSE);
+            ami_bpf_chan_release(ch, FALSE, owner);
     }
 }
 
@@ -286,7 +298,7 @@ VOID ami_bpf_cleanup(VOID)
     for (i = 0; i < AMI_BPF_MAX_CHANNELS; i++)
     {
         if (ami_bpf_chan[i].open)
-            ami_bpf_chan_release(&ami_bpf_chan[i], TRUE);
+            ami_bpf_chan_release(&ami_bpf_chan[i], TRUE, NULL);
     }
 }
 
@@ -723,7 +735,7 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
        left for this task to free. The caller still gets the bytes it asked
        for, copied out of memory that was still valid. */
     if (pending)
-        ami_bpf_chan_release(ch, FALSE);
+        ami_bpf_chan_release(ch, FALSE, NULL);
 
     return (LONG)nbytes;
 }
