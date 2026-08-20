@@ -127,6 +127,9 @@ static void test_tokens(void)
     CHECK(!http_frame_token_is("100-continue-more", "100-continue"));
     CHECK(!http_frame_token_is("100-continue, other", "100-continue"));
     CHECK(!http_frame_token_is(NULL, "100-continue"));
+    CHECK(http_frame_token_is("T", "t"));
+    CHECK(http_frame_token_is(" f ", "f"));
+    CHECK(!http_frame_token_is("false", "f"));
 
     CHECK(http_frame_has_token("close", "close"));
     CHECK(http_frame_has_token("keep-alive, close", "close"));

@@ -5437,6 +5437,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     BOOL   seen_len = FALSE;
     BOOL   seen_te  = FALSE;
     BOOL   seen_close = FALSE;
+    BOOL   seen_overwrite = FALSE;
     HttpPathResult why;
 
     /* ---- the request line ------------------------------------------- */
@@ -5765,8 +5766,26 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Overwrite"))
         {
-            c->overwrite = (httpd_value[0] == 'F' || httpd_value[0] == 'f')
-                               ? 0 : 1;
+            if (seen_overwrite)
+            {
+                httpd_error(c, 400, "two Overwrite directives");
+                return FALSE;
+            }
+
+            if (http_frame_token_is(httpd_value, "t"))
+                c->overwrite = 1;
+            else if (http_frame_token_is(httpd_value, "f"))
+                c->overwrite = 0;
+            else
+            {
+                /* The default is T only when the field is absent.  Guessing T
+                   for an invalid value turns a typo into deletion of the
+                   destination the client meant to preserve. */
+                httpd_error(c, 400, "Overwrite must be T or F");
+                return FALSE;
+            }
+
+            seen_overwrite = TRUE;
         }
         else if (hs_equal(name, "If"))
         {
