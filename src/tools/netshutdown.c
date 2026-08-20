@@ -231,7 +231,14 @@ int main(int argc, char **argv)
     {
         LONG given = *(const LONG *)args[ARG_TIMEOUT];
 
-        timeout = (given > 0) ? (ULONG)given : 0UL;
+        if (given < 0)
+        {
+            tool_error("TIMEOUT cannot be negative");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        timeout = (ULONG)given;
     }
 
     /* Nothing to stop. tool_netstatus_open() does not start the stack. */

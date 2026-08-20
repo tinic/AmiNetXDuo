@@ -174,6 +174,7 @@ cold|arp|bad-unit|5|re:UNIT must be between 0 and 65535|-|SYS:arp 192.0.2.1 SET=
 cold|AddNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:AddNetRoute DST=192.0.2.0 VIA=10.0.2.2
 cold|DeleteNetRoute|no-stack|5|re:not running, so it has no routes|-|SYS:DeleteNetRoute DST=198.51.100.0
 cold|NetShutdown|no-stack|5|re:nothing to stop|-|SYS:NetShutdown
+cold|NetShutdown|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:NetShutdown TIMEOUT=-1
 cold|Online|bad-unit|5|re:UNIT cannot be negative|-|SYS:Online eth0 UNIT=-1
 cold|Offline|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:Offline eth0 TIMEOUT=-1
 cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
