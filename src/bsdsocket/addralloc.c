@@ -611,7 +611,6 @@ static VOID bsd_aam_worker(VOID)
     struct Process                  *me = (struct Process *)FindTask(NULL);
     AmiDhcpLease                     lease;
     BsdAamJob                       *job;
-    LONG                             deadline;
     LONG                             result = AAMR_Timeout;
     LONG                             rc;
 
@@ -648,21 +647,25 @@ static VOID bsd_aam_worker(VOID)
     else
     {
         /*
-         * The deadline, in Delay() ticks. aam_Timeout is in seconds and was
-         * floored at ten when the message was built. Floored again here,
-         * because a hand-filled message never went through
-         * CreateAddrAllocMessageA().
+         * aam_Timeout is in seconds and was floored at ten when the message
+         * was built. Floored again here, because a hand-filled message never
+         * went through CreateAddrAllocMessageA(). Keep seconds and the ticks
+         * within one second separate: a LONG timeout multiplied by 50 ticks
+         * does not fit in a LONG for the full range the ABI permits.
          */
-        LONG seconds = aam->aam_Timeout;
+        LONG  seconds = aam->aam_Timeout;
+        ULONG seconds_left;
+        ULONG ticks_left = (ULONG)TICKS_PER_SECOND;
 
         if (seconds < AAM_TIMEOUT_MIN)
             seconds = AAM_TIMEOUT_MIN;
 
-        deadline = seconds * (LONG)TICKS_PER_SECOND;
+        seconds_left = (ULONG)seconds;
 
-        while (deadline > 0)
+        while (seconds_left > 0)
         {
             LONG state;
+            ULONG delay_ticks;
 
             if (job->baj_Abort)
             {
@@ -684,8 +687,16 @@ static VOID bsd_aam_worker(VOID)
                 break;
             }
 
-            Delay(BSD_AAM_POLL_TICKS);
-            deadline -= BSD_AAM_POLL_TICKS;
+            delay_ticks = (ticks_left < (ULONG)BSD_AAM_POLL_TICKS)
+                              ? ticks_left : (ULONG)BSD_AAM_POLL_TICKS;
+            Delay((LONG)delay_ticks);
+
+            ticks_left -= delay_ticks;
+            if (ticks_left == 0)
+            {
+                seconds_left--;
+                ticks_left = (ULONG)TICKS_PER_SECOND;
+            }
         }
 
         if (result == AAMR_Success)
