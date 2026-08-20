@@ -73,7 +73,12 @@ BOOL  http_rtg_owns(struct BitMap *bm);
 
 /* Shape and format, or FALSE with *why set to a sentence naming what it is.
    Palette and truecolour both come back TRUE, told apart by `bpp`. */
-BOOL  http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why);
+/* `visible_w` is the screen's own width, which is NOT the bitmap's: an RTG
+   board rounds an allocation up to its pitch, so a 1368-pixel screen can sit
+   in a 1600-pixel bitmap and the 232 columns past the edge hold whatever was
+   last there. Pass 0 when there is no screen to ask. */
+BOOL  http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
+                        const char **why);
 
 /*
  * Take the session: work out whether the bitmap is in card memory or in

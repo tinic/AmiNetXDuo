@@ -848,7 +848,8 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
         HttpRtgScreen rs;
         const char   *why = NULL;
 
-        if (!http_rtg_describe(bm, &rs, &why))
+        if (!http_rtg_describe(bm, (UWORD)(vp != NULL ? vp->DWidth : 0),
+                               &rs, &why))
         {
             fb_refuse((why != NULL) ? why
                                     : "the front screen is an RTG screen this "
@@ -998,6 +999,14 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
             return FB_GEOM_NO;
         }
     }
+
+    /* Same rule as the RTG path: BMA_WIDTH answers for the allocation, which
+       a planar screen rounds up to 16, so a 1368-wide screen sits in a
+       1376-wide bitmap and the last 8 columns are not the screen's. Every
+       resolution in the lab is a multiple of 16, which is why this never
+       showed here. */
+    if (vp != NULL && vp->DWidth > 0 && (ULONG)vp->DWidth < width)
+        width = (ULONG)vp->DWidth;
 
     g->width       = (UWORD)width;
     g->height      = (UWORD)height;

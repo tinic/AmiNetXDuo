@@ -534,7 +534,8 @@ BOOL http_rtg_owns(struct BitMap *bm)
     return FALSE;
 }
 
-BOOL http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why)
+BOOL http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
+                       const char **why)
 {
     RtgSrcFmt fmt = { 0, 0, 0, 0, 0, 0 };
     ULONG     w = 0, h = 0, depth = 0, native = 0;
@@ -604,6 +605,21 @@ BOOL http_rtg_describe(struct BitMap *bm, HttpRtgScreen *s, const char **why)
         }
         return FALSE;
     }
+
+    /*
+     * THE BITMAP IS NOT THE SCREEN. P96BMA_WIDTH and CYBRMATTR_WIDTH answer
+     * for the allocation, which a board rounds up to its own pitch: a
+     * CyberGraphX 1368x768x8 screen reported 1600 here, and the console served
+     * 1600 columns, so every frame carried 232 columns of whatever the board
+     * had off the right-hand edge and cost 17% more bytes to send. It never
+     * showed in the lab because every resolution we test is pitch-aligned --
+     * 1024/8 is exactly 128 bytes and has nothing to pad.
+     *
+     * The screen's own width wins whenever it is smaller. Larger is not
+     * honoured: the bitmap is what can actually be read.
+     */
+    if (visible_w != 0 && (ULONG)visible_w < w)
+        w = (ULONG)visible_w;
 
     s->width  = (UWORD)w;
     s->height = (UWORD)h;
