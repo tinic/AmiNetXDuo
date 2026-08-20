@@ -1157,10 +1157,25 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     }
 
     case AMI_BPF_CMD(BIOCGBLEN):
+    {
+        ULONG blen;
+
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
-        *(ULONG *)buffer = ch->blen;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        blen = ch->blen;
+        ami_bpf_unlock();
+
+        *(ULONG *)buffer = blen;
         return 0;
+    }
 
     case AMI_BPF_CMD(BIOCSBLEN):
     {
@@ -1241,26 +1256,57 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         return 0;
 
     case AMI_BPF_CMD(BIOCGDLT):
+    {
+        ULONG dlt;
+
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
-        *(ULONG *)buffer = ch->dlt;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        dlt = ch->dlt;
+        ami_bpf_unlock();
+
+        *(ULONG *)buffer = dlt;
         return 0;
+    }
 
     case AMI_BPF_CMD(BIOCGETIF):
     {
         char *name = (char *)buffer;
+        char  ifname[AMI_BPF_IFNAMSIZ];
         UWORD i;
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
         if (ch->iface == NULL)
+        {
+            ami_bpf_unlock();
             return AMI_BPF_EINVAL;  /* "the filter is not attached to an
                                        interface" */
+        }
+
+        for (i = 0; i < AMI_BPF_IFNAMSIZ; i++)
+            ifname[i] = ch->ifname[i];
+        ami_bpf_unlock();
 
         /* Only ifr_name is touched: it is the first IFNAMSIZ bytes of
            struct ifreq, and the rest is meaningless for a capture channel. */
         for (i = 0; i < AMI_BPF_IFNAMSIZ; i++)
-            name[i] = ch->ifname[i];
+            name[i] = ifname[i];
         return 0;
     }
 
@@ -1273,16 +1319,33 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
          * SIOCGIFADDR of the socket path fills the same 16 bytes.
          */
         UBYTE *sa;
+        APTR   cookie;
         ULONG  addr;
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
         if (ch->iface == NULL)
+        {
+            ami_bpf_unlock();
             return AMI_BPF_EINVAL;
+        }
+
+        /* Keep no interface-table pointer after the registry lock drops: a
+           detach can clear and reuse its row while the address hook runs. */
+        cookie = ch->iface->cookie;
+        ami_bpf_unlock();
 
         sa = (UBYTE *)buffer + AMI_BPF_IFNAMSIZ;
 
-        addr = ami_bpf_iface_address(ch->iface);
+        addr = ami_bpf_cookie_address(cookie);
 
         sa[0] = 16;                         /* sin_len                      */
         sa[1] = 2;                          /* sin_family = AF_INET         */
@@ -1328,23 +1391,51 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     }
 
     case AMI_BPF_CMD(BIOCGRTIMEOUT):
-        if (buffer == NULL)
-            return AMI_BPF_EINVAL;
-        ((ULONG *)buffer)[0] = ch->rtimeout_sec;
-        ((ULONG *)buffer)[1] = ch->rtimeout_usec;
-        return 0;
-
-    case AMI_BPF_CMD(BIOCGSTATS):
     {
-        struct bpf_stat *st = (struct bpf_stat *)buffer;
+        ULONG sec;
+        ULONG usec;
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
 
         ami_bpf_lock();
-        st->bs_recv = ch->recv_count;
-        st->bs_drop = ch->drop_count;
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        sec  = ch->rtimeout_sec;
+        usec = ch->rtimeout_usec;
         ami_bpf_unlock();
+
+        ((ULONG *)buffer)[0] = sec;
+        ((ULONG *)buffer)[1] = usec;
+        return 0;
+    }
+
+    case AMI_BPF_CMD(BIOCGSTATS):
+    {
+        struct bpf_stat *st = (struct bpf_stat *)buffer;
+        ULONG recv;
+        ULONG drop;
+
+        if (buffer == NULL)
+            return AMI_BPF_EINVAL;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        recv = ch->recv_count;
+        drop = ch->drop_count;
+        ami_bpf_unlock();
+
+        st->bs_recv = recv;
+        st->bs_drop = drop;
         return 0;
     }
 
@@ -1375,6 +1466,12 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
 
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        ami_bpf_unlock();
+        if (ch == NULL)
+            return status;
 
         v->bv_major = BPF_MAJOR_VERSION;
         v->bv_minor = BPF_MINOR_VERSION;

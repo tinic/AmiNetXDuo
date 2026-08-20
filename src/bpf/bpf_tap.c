@@ -75,12 +75,14 @@ VOID ami_bpf_set_address_hook(AmiBpfAddrFn fn)
     ami_bpf_addr_hook = fn;
 }
 
-ULONG ami_bpf_iface_address(const AmiBpfIf *ifp)
+ULONG ami_bpf_cookie_address(APTR cookie)
 {
-    if (ifp == NULL || ami_bpf_addr_hook == NULL || ifp->cookie == NULL)
+    AmiBpfAddrFn fn = ami_bpf_addr_hook;
+
+    if (fn == NULL || cookie == NULL)
         return 0;
 
-    return ami_bpf_addr_hook(ifp->cookie);
+    return fn(cookie);
 }
 
 LONG ami_bpf_attach_interface(const char *name, APTR cookie, ULONG dlt,

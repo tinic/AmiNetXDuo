@@ -108,7 +108,7 @@ VOID ami_bpf_chan_rebind(AmiBpfIf *ifp);
 /* bpf_tap.c */
 AmiBpfIf *ami_bpf_iface_by_cookie(APTR cookie);
 AmiBpfIf *ami_bpf_iface_by_name(const char *name);
-ULONG     ami_bpf_iface_address(const AmiBpfIf *ifp);
+ULONG     ami_bpf_cookie_address(APTR cookie);
 
 /* bpf_filter.c, byte count for a BPF_SIZE field, 0 if the encoding is bad. */
 UWORD ami_bpf_size_bytes(UWORD code);
