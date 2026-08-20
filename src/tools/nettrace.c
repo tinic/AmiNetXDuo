@@ -483,7 +483,18 @@ int main(int argc, char **argv)
                                      : 1048576UL;
 
     if (args[ARG_PORT] != 0)
-        port = (UWORD)(*(LONG *)args[ARG_PORT]);
+    {
+        LONG p = *(LONG *)args[ARG_PORT];
+
+        if (p < 1 || p > 65535)
+        {
+            tool_error("%ld is not a port", p);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        port = (UWORD)p;
+    }
 
     tool_say("NetTrace: opening bsdsocket.library\n");
 

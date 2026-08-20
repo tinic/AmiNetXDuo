@@ -187,6 +187,7 @@ cold|hostname|no-name|5|re:This machine has no name|-|SYS:hostname
 cold|hostname|bad-name|5|re:is not a host name|-|SYS:hostname not_a_name
 cold|NetSetup|bad-address|5|re:is not an address|-|SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE
 cold|NetSetup|writes-config|5|re:set up a network interface|-|SYS:NetSetup ethz DEVICE=a2065.device UNIT=0 DHCP NOONLINE FORCE
+cold|NetTrace|bad-port|5|re:-1 is not a port|-|SYS:NetTrace WIRE HOST 10.0.2.2 PORT=-1 NOCAPTURE
 # -4 and -6 together, for every command that carries the pair.  A cold row
 # because each one refuses BEFORE tool_socket_open(), which is the whole point
 # of parsing the pair where it is parsed: an argument error must not start the
