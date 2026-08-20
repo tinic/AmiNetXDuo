@@ -1376,10 +1376,22 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                 break;
 
             case IFA_HardwareAddress:
-                /* Behavioural, and the most visible kind: the station address
-                   is what every other host on the segment sees. The shim reads
-                   it from S2_DEVICEQUERY and does not set one. */
-                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+            {
+                const UBYTE *address = (const UBYTE *)item->ti_Data;
+                UWORD        i;
+
+                /* Every interface supported here is Ethernet-shaped.  The
+                   SANA-II open path applies these six bytes before
+                   S2_CONFIGINTERFACE, exactly as HARDWAREADDRESS in an
+                   interface file does. */
+                if (address == NULL)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                for (i = 0; i < (UWORD)AMI_CFG_MAC_SIZE; i++)
+                    cfg->hw_address[i] = address[i];
+                cfg->have_hw_address = TRUE;
+                break;
+            }
 
             /*
              * -----------------------------------------------------------
