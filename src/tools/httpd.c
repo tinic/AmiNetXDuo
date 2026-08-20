@@ -5419,6 +5419,29 @@ static const HttpMethod *httpd_lookup(const char *name)
     return NULL;
 }
 
+/* The one query parameter the two interactive endpoints act on. */
+static BOOL httpd_query_take(const char *target, ULONG question)
+{
+    ULONG i = question + 1UL;
+
+    while (target[i] != '\0')
+    {
+        ULONG start = i;
+
+        while (target[i] != '\0' && target[i] != '&')
+            i++;
+
+        if (i - start == 6UL &&
+            hs_nicmp(&target[start], "take=1", 6) == 0)
+            return TRUE;
+
+        if (target[i] == '&')
+            i++;
+    }
+
+    return FALSE;
+}
+
 /* --------------------------------------------------------------- parsing --- */
 
 /* "bytes=0-1023", "bytes=1024-", "bytes=-512".  One range only: a multipart
@@ -6082,20 +6105,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
              * else can be got wrong, because no other parameter is read.
              */
             if (httpd_target[n] == '?')
-            {
-                ULONG i;
-
-                for (i = n + 1UL; httpd_target[i] != '\0'; i++)
-                {
-                    if (hs_nicmp(&httpd_target[i], "take=1", 6) == 0 &&
-                        (i == n + 1UL || httpd_target[i - 1] == '?' ||
-                         httpd_target[i - 1] == '&'))
-                    {
-                        c->ws_take = 1;
-                        break;
-                    }
-                }
-            }
+                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
 
             return TRUE;
         }
@@ -6119,20 +6129,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             c->path.name[0] = '\0';
 
             if (httpd_target[n] == '?')
-            {
-                ULONG i;
-
-                for (i = n + 1UL; httpd_target[i] != '\0'; i++)
-                {
-                    if (hs_nicmp(&httpd_target[i], "take=1", 6) == 0 &&
-                        (i == n + 1UL || httpd_target[i - 1] == '?' ||
-                         httpd_target[i - 1] == '&'))
-                    {
-                        c->ws_take = 1;
-                        break;
-                    }
-                }
-            }
+                c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
 
             return TRUE;
         }
