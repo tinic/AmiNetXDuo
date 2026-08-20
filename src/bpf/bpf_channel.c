@@ -1207,6 +1207,12 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
 
     case AMI_BPF_CMD(BIOCFLUSH):
         ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
         ch->store_len  = 0;
         ch->hold_len   = 0;
         ch->hold_pos   = 0;
@@ -1223,7 +1229,15 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
          * fails, and a partial capture is better than no capture. See the
          * coverage note in include/aminetxduo/bpf.h.
          */
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
         ch->promisc = TRUE;
+        ami_bpf_unlock();
         return 0;
 
     case AMI_BPF_CMD(BIOCGDLT):
@@ -1288,13 +1302,30 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         return ami_bpf_ioctl_setif(owner, channel, (const char *)buffer);
 
     case AMI_BPF_CMD(BIOCSRTIMEOUT):
+    {
+        ULONG sec;
+        ULONG usec;
+
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
+
         /* How long bpf_read() waits for the first record. 0 is "do not wait".
            Two ULONGs, whichever timeval the caller compiled against. */
-        ch->rtimeout_sec  = ((const ULONG *)buffer)[0];
-        ch->rtimeout_usec = ((const ULONG *)buffer)[1];
+        sec  = ((const ULONG *)buffer)[0];
+        usec = ((const ULONG *)buffer)[1];
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        ch->rtimeout_sec  = sec;
+        ch->rtimeout_usec = usec;
+        ami_bpf_unlock();
         return 0;
+    }
 
     case AMI_BPF_CMD(BIOCGRTIMEOUT):
         if (buffer == NULL)
@@ -1318,10 +1349,25 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     }
 
     case AMI_BPF_CMD(BIOCIMMEDIATE):
+    {
+        BOOL immediate;
+
         if (buffer == NULL)
             return AMI_BPF_EINVAL;
-        ch->immediate = (*(const ULONG *)buffer != 0) ? TRUE : FALSE;
+
+        immediate = (*(const ULONG *)buffer != 0) ? TRUE : FALSE;
+
+        ami_bpf_lock();
+        ch = ami_bpf_chan_get(owner, channel, &status);
+        if (ch == NULL)
+        {
+            ami_bpf_unlock();
+            return status;
+        }
+        ch->immediate = immediate;
+        ami_bpf_unlock();
         return 0;
+    }
 
     case AMI_BPF_CMD(BIOCVERSION):
     {
