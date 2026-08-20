@@ -131,6 +131,8 @@ static VOID c68k_mont_reduce(c68k_limb *t, const c68k_limb *m, UINT m_len,
 UINT        i;
 UINT        j;
 UINT        top;
+UINT        stride;
+UINT        left;
 c68k_limb   u;
 c68k_limb   carry;
 c68k_limb   sum;
@@ -138,8 +140,22 @@ c68k_limb   sum;
 
     top = m_len << 1;
 
+    /*
+     * The dominant loop of the whole module: s rows of s limb products, where
+     * every other phase of a Montgomery step is s^2/2 or less.  If anything
+     * here yields, this must.
+     */
+    stride = c68k_yield_stride(m_len);
+    left   = stride;
+
     for (i = 0; i < m_len; i++)
     {
+        if (--left == 0u)
+        {
+            left = stride;
+            C68K_YIELD();
+        }
+
         /* u * m zeroes t[i] and adds a multiple of m, preserving the residue. */
         u = (c68k_limb)(t[i] * n0inv);
 
@@ -233,9 +249,16 @@ static VOID c68k_mul_school(c68k_limb *t, const c68k_limb *x,
 {
 
 UINT    i;
+UINT    stride;
+UINT    left;
 
 
     c68k_zero_n(t, n);
+
+    /* The base case of c68k_mul_n(), so this is where the product half of a
+       Montgomery multiply spends its time, one level down from the split. */
+    stride = c68k_yield_stride(n);
+    left   = stride;
 
     /*
      * The carry out of row i lands in t[i+n], which no earlier row has
@@ -244,6 +267,12 @@ UINT    i;
      */
     for (i = 0; i < n; i++)
     {
+        if (--left == 0u)
+        {
+            left = stride;
+            C68K_YIELD();
+        }
+
         t[i + n] = C68K_ADDMUL_1(&t[i], y, n, x[i]);
     }
 }
@@ -441,6 +470,8 @@ static VOID c68k_sqr(c68k_limb *t, const c68k_limb *x, UINT n)
 
 UINT        i;
 UINT        total;
+UINT        stride;
+UINT        left;
 HN_UBASE2   product;
 
 
@@ -451,8 +482,19 @@ HN_UBASE2   product;
         t[i] = 0;
     }
 
+    /* Row i is n-i-1 products, so n/2 on average: the stride is sized from
+       that rather than from n, or the interval would be half what it says. */
+    stride = c68k_yield_stride(n >> 1);
+    left   = stride;
+
     for (i = 0; i < n; i++)
     {
+        if (--left == 0u)
+        {
+            left = stride;
+            C68K_YIELD();
+        }
+
         t[i + n] = C68K_ADDMUL_1(&t[(i << 1) + 1], &x[i + 1], n - i - 1, x[i]);
     }
 

@@ -432,6 +432,46 @@ extern VOID (*c68k_yield_hook)(VOID);
         }                                                       \
     } while (0)
 
+/*
+ * HOW OFTEN.  A yield per exponent bit, which is all c68k_powm did, is 17 of
+ * them for e = 65537, and the individual Montgomery operations between them
+ * run for seconds.  Long enough that the peer's neighbour entry goes
+ * REACHABLE -> STALE -> DELAY -> PROBE -> FAILED: Linux gives up after three
+ * unanswered probes a second apart, so anything over about three seconds of
+ * arithmetic takes the machine off the network for the rest of the handshake.
+ *
+ * A yield per limb would be the other extreme.  The pair suspends a ThreadX
+ * thread, hands the machine over and parks until the scheduler comes back, and
+ * that is not free.
+ *
+ * The unit in between is the limb product: the one piece of work every routine
+ * here is built out of, and the thing their loop bounds are stated in.  So the
+ * loops yield on a stride sized in limb products rather than in iterations,
+ * which makes the interval the same whether the modulus is 2048 bits or 4096
+ * and whether the loop body is a 64-limb row or a 32-limb one.
+ *
+ * The number, measured: tests/crypto68k counts 469 yields in an RSA-2048
+ * public operation at this setting, and tests/tls/tls_bench times that
+ * operation at 22.9 s on an A1200 68020, so the machine is off the air for
+ * about 50 ms at a stretch.  Sizing it in limb products rather than in
+ * milliseconds is what keeps that ratio when the machine changes: a 68060
+ * does the work between two yields faster and the yield itself faster, so the
+ * overhead stays where it was measured and the interval only shortens.
+ */
+#define C68K_YIELD_PRODUCTS     256u
+
+/*
+ * Iterations of a loop whose body is `products` limb products that fit in one
+ * yield interval.  Never zero.
+ *
+ * With nothing hooked this returns a count no loop in this module can reach,
+ * so the whole thing costs a decrement and a branch that is never taken --
+ * cheaper than the load and test C68K_YIELD() is on its own.  That is the
+ * path every caller outside tls.library takes: tls_bench, tls_handshake and
+ * the crypto68k guest tests all link this arithmetic and hook nothing.
+ */
+UINT c68k_yield_stride(UINT products);
+
 #ifdef __cplusplus
 }
 #endif

@@ -410,27 +410,38 @@ UINT    i;
  *
  * c68k_mont_power_modulus() picks the largest sliding window that fits what it
  * is given, C68K_POWM_SCRATCH_LIMBS(m_len, w) = (20 + 2^(w-1)) * m_len + 16,
- * and 2048 limbs buys:
+ * and 2704 limbs buys:
  *
  *     CRT half of a 2048-bit key (m_len 32)   w = 6   the case that matters
- *     full-width 2048-bit        (m_len 64)   w = 4   ~4% off w = 6
- *     full-width 4096-bit        (m_len 128)  does not fit at all
+ *     full-width 2048-bit        (m_len 64)   w = 5
+ *     full-width 4096-bit        (m_len 128)  w = 1
  *
- * The w = 4 line only runs when a private key's primes are unknown.  w = 6 is
+ * The middle line only runs when a private key's primes are unknown.  w = 6 is
  * also C68K_POWM_MAX_WINDOW, so the first line is not short of scratch.
  *
- * 8 KB per RSA context, HN_UBASE being a ULONG here, and a session pays for
- * exactly one of them: nx_secure_tls_metadata_size_calculate() came out
- * 6,144 bytes over the vendored table when the area was 1536 limbs, which is
- * one area and not two, so 2048 limbs puts the ECC table at 18,320 (see
- * tls_conn.c).
+ * THE LAST LINE IS THE WHOLE REASON FOR THE NUMBER, and w = 1 is not a
+ * compromise there.  A client raises a 4096-bit modulus to one exponent and
+ * one only: e = 65537, seventeen bits, of which two are set.  Square and
+ * multiply costs sixteen squarings and one multiply for that, and no window
+ * can improve on it -- a table of odd powers would be built and used once.
+ * So the smallest area that admits the width is also the fastest for the
+ * operation the width is for, and 2704 = C68K_POWM_SCRATCH_LIMBS(128, 1).
  *
- * An undersized area is safe, which is what the 4096-bit line means:
- * c68k_mont_power_modulus() answers NX_CRYPTO_SIZE_ERROR when not even w = 1
- * fits and c68k_huge_number_mont_power_modulus() then falls back to the
- * vendored routine.  A 4096-bit key still verifies, at the vendored speed.
+ * At 2048 limbs a 4096-bit key did not fit at all and
+ * c68k_huge_number_mont_power_modulus() handed it to the vendored routine.
+ * That is safe and it is what an ordinary https: fetch spends its time in:
+ * a Let's Encrypt chain is rooted in ISRG Root X1, whose key is 4096 bits, so
+ * verifying the intermediate is that exponentiation on every connection.
+ * Measured, A1200 68020, `fetch https://www.gnu.org/`, two runs each: the
+ * whole command took 100.5 s and 100.4 s with that link in the vendored
+ * routine, 30.6 s and 20.1 s with it here.  The vendored routine also calls
+ * nothing that yields, so the time it took was dead network as well as slow.
+ *
+ * 10.8 KB per RSA context, HN_UBASE being a ULONG here, and a session pays
+ * for exactly one of them: 2.6 KB more than the 2048-limb area cost, on a
+ * machine whose floor is 4 MB.
  */
-#define AMI_TLS_POWM_SCRATCH_LIMBS  2048u
+#define AMI_TLS_POWM_SCRATCH_LIMBS  2704u
 
 typedef struct AMI_CRYPTO_RSA_STRUCT
 {

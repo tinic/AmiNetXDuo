@@ -48,9 +48,15 @@
 
 /* ------------------------------------------------------------- buffers --- */
 
-#define T_MAX_LIMBS         64u             /* RSA-2048 */
+/*
+ * 128 limbs, not 64: ami_tls_crypto.c gives an RSA context enough scratch for
+ * a 4096-bit modulus, so that width reaches this module instead of the
+ * vendored fallback, and section 7 is the only thing that checks it.  Every
+ * sweep below still runs at the widths it always did.
+ */
+#define T_MAX_LIMBS         128u            /* RSA-4096 */
 #define T_POWM_SCRATCH      4096u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
-#define T_HN_SCRATCH        2048u
+#define T_HN_SCRATCH        8192u
 
 static c68k_limb    t_m[T_MAX_LIMBS];
 
@@ -599,6 +605,146 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 
     printf("  0^e, x^0, x^0 mod 1, even modulus, undersized scratch, "
            "zero-limb multiply/square\n");
+}
+
+
+/* ---------------------------------------------------------- 6. yields ---- */
+
+static unsigned long    t_yields;
+
+static VOID t_count_yield(VOID)
+{
+    t_yields++;
+}
+
+/*
+ * The yield hook is what keeps the machine on the network while a handshake's
+ * arithmetic runs, and it has two properties this checks, because neither is
+ * visible from any other test here:
+ *
+ *   it does not change the answer.  A yield is a suspend and a resume and
+ *   touches none of the operands, so the same exponentiation with a hook
+ *   installed must produce the same limbs, and the KAT in section 1 is the
+ *   reference.
+ *
+ *   it fires often enough to matter.  Counting it is the only way to say how
+ *   long the machine is off the air between two of them: an RSA-2048 public
+ *   operation is 22.9 s on an A1200 (tests/tls/tls_bench), so the count here
+ *   divides that into the interval, and the floor below is what keeps the
+ *   interval inside Linux's three-probe ARP window.  Before the yields went
+ *   into the Montgomery loops the count for this operation was 17, one per
+ *   exponent bit, which is 1.3 s of silence apiece.
+ */
+static void t_yield_granularity(void)
+{
+UINT            status;
+unsigned long   with_hook;
+
+    printf("\n6. Yield granularity (RSA-2048 public, e=65537):\n");
+
+    t_yields        = 0;
+    c68k_yield_hook = t_count_yield;
+
+    status = c68k_mont_power_modulus(t_mine, t_msg, 64u, t_e, 1u, t_n, 64u,
+                                     t_scratch, T_POWM_SCRATCH);
+
+    with_hook       = t_yields;
+    c68k_yield_hook = (VOID (*)(VOID))0;
+
+    t_checks++;
+    if ((status != NX_CRYPTO_SUCCESS) ||
+        (c68k_cmp(t_mine, t_msg_pub, 64u) != 0))
+    {
+        t_fail("RSA-2048 public with a yield hook installed", status, 0);
+    }
+
+    /*
+     * A floor, not an equality: the exact count is a function of the window
+     * width and of C68K_YIELD_PRODUCTS, and pinning it would make every
+     * tuning change a test edit.  The measured count is 469; 200 is well
+     * under it and an order above the 17 this had when only c68k_powm
+     * yielded.
+     */
+    t_checks++;
+    if (with_hook < 200uL)
+    {
+        t_fail("too few yields in an RSA-2048 public operation", with_hook, 0);
+    }
+
+    printf("  %lu yields, %u limb products apart\n",
+           with_hook, (UINT)C68K_YIELD_PRODUCTS);
+}
+
+
+/* ------------------------------------------------------- 7. RSA-4096 ----- */
+
+/*
+ * 128 limbs against the vendored routine.
+ *
+ * Nothing else here is that wide, and the width is not academic: the root of
+ * a Let's Encrypt chain is ISRG Root X1, whose key is 4096 bits, so verifying
+ * the intermediate is a 128-limb modular exponentiation on every ordinary
+ * https: fetch.  It also takes one more level of the Karatsuba split than an
+ * RSA-2048 operation does, 128 -> 64 -> 32, and the recombination carries are
+ * where that code goes wrong.
+ *
+ * e = 65537 rather than a random exponent, because that is the only exponent
+ * a client ever raises to at this width.
+ */
+static void t_powm_wide(void)
+{
+UINT                    trial;
+UINT                    i;
+UINT                    status;
+UINT                    bad = 0;
+c68k_limb               wide_e[1];
+NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
+
+    printf("\n7. 128-limb (RSA-4096) modexp vs "
+           "_nx_crypto_huge_number_mont_power_modulus:\n");
+
+    wide_e[0] = 65537u;
+
+    for (trial = 0; trial < 4u; trial++)
+    {
+        t_rand_limbs(t_m, 128u);
+        t_m[0]   |= 1u;
+        t_m[127] |= 0x80000000UL;       /* full width, and above every x */
+
+        t_rand_limbs(t_x, 128u);
+        t_x[127] &= 0x7FFFFFFFUL;       /* so x < m with no reduction step */
+
+        for (i = 0; i < 128u; i++)
+        {
+            t_tmp[i] = t_x[i];
+        }
+
+        t_hn_set(&x_hn, t_tmp,  128u, T_MAX_LIMBS);
+        t_hn_set(&e_hn, wide_e, 1u,   1u);
+        t_hn_set(&r_hn, t_ref_result, 0, T_MAX_LIMBS * 2);
+        t_hn_set(&m_hn, t_m,    128u, 128u);
+        _nx_crypto_huge_number_mont_power_modulus(&x_hn, &e_hn, &m_hn, &r_hn,
+                                                  t_hn_scratch);
+
+        status = c68k_mont_power_modulus(t_mine, t_x, 128u, wide_e, 1u,
+                                         t_m, 128u,
+                                         t_scratch, T_POWM_SCRATCH);
+
+        t_checks++;
+        if (status != NX_CRYPTO_SUCCESS)
+        {
+            bad++;
+            t_fail("wide powm status", trial, status);
+            continue;
+        }
+        if (!t_hn_equals(&r_hn, t_mine, 128u))
+        {
+            bad++;
+            t_fail("wide powm value", trial, 0);
+        }
+    }
+
+    printf("  %u trials at 128 limbs: %u mismatches\n", trial, bad);
 }
 
 
@@ -1408,6 +1554,8 @@ int main(void)
     t_mont_differential(400u);
     t_powm_differential(150u);
     t_edge_cases();
+    t_yield_granularity();
+    t_powm_wide();
     t_bulk();
 
     if (t_failures == 0)

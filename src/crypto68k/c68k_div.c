@@ -135,6 +135,8 @@ c68k_limb  *vn;
 UINT        n = m_len;
 UINT        s;
 UINT        i;
+UINT        stride;
+UINT        left;
 INT         j;
 c68k_limb   qhat;
 c68k_limb   rhat;
@@ -175,9 +177,24 @@ HN_UBASE2   num;
     (VOID) d_shl(vn, m, n, s);
     un[u_len] = d_shl(un, u, u_len, s);
 
+    /*
+     * R^2 mod m is one call to this with a 2s-limb numerator, so it is s rows
+     * of s limb products in the c68k_submul_1 below: the same size as a
+     * Montgomery reduction, once per exponentiation, and it used to be the
+     * longest silent stretch left after the Montgomery loops were covered.
+     */
+    stride = c68k_yield_stride(n);
+    left   = stride;
+
     for (j = (INT)(u_len - n); j >= 0; j--)
     {
         c68k_limb top = un[(UINT)j + n];
+
+        if (--left == 0u)
+        {
+            left = stride;
+            C68K_YIELD();
+        }
 
         /*
          * The estimate.  top <= vn[n-1] always, because the running remainder

@@ -20,6 +20,32 @@
 /* Declared in crypto68k.h, see the note there. */
 VOID (*c68k_yield_hook)(VOID);
 
+UINT c68k_yield_stride(UINT products)
+{
+
+UINT    stride;
+
+
+    /*
+     * Nothing hooked.  A count no loop here can reach: 4 billion iterations of
+     * a row of limb products is longer than this machine has, so the counter
+     * never reaches zero and C68K_YIELD() is never even loaded.
+     */
+    if (c68k_yield_hook == (VOID (*)(VOID))0)
+    {
+        return(0xFFFFFFFFu);
+    }
+
+    if (products == 0u)
+    {
+        products = 1u;
+    }
+
+    stride = (C68K_YIELD_PRODUCTS + products - 1u) / products;
+
+    return((stride != 0u) ? stride : 1u);
+}
+
 /*
  * Always compiled, under its own name, even in an assembly build: the
  * benchmark measures the two against each other in the same run, the only
