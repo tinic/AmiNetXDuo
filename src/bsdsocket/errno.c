@@ -691,17 +691,27 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
         case SBTC_GET_BYTES_RECEIVED:
         case SBTC_GET_BYTES_SENT:
         {
-            NX_IP *ip = netstack_ip();
+            NX_IP *ip;
             ULONG  sent = 0, sent_bytes = 0, received = 0, received_bytes = 0;
             ULONG *quad;
+            UINT   nx_status = NX_NOT_ENABLED;
 
             if (!by_ref || item->ti_Data == 0)
                 return FALSE;
-            if (ip == NULL)
+
+            /* SocketBaseTagList() has no vector-level ThreadX bracket. */
+            if (bsd_nx_enter(base) != 0)
                 return FALSE;
-            if (nx_ip_info_get(ip, &sent, &sent_bytes, &received,
-                               &received_bytes, NULL, NULL, NULL, NULL,
-                               NULL, NULL) != NX_SUCCESS)
+
+            ip = netstack_ip();
+            if (ip != NULL)
+                nx_status = nx_ip_info_get(
+                    ip, &sent, &sent_bytes, &received, &received_bytes,
+                    NULL, NULL, NULL, NULL, NULL, NULL);
+
+            bsd_nx_leave(base);
+
+            if (nx_status != NX_SUCCESS)
                 return FALSE;
 
             quad = (ULONG *)item->ti_Data;
@@ -725,59 +735,71 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
          */
         case SBTC_SYSTEM_STATUS:
         {
-            const AmiConfig *cfg    = netstack_config();
-            ULONG            status = 0UL;
+            ULONG status = 0UL;
 
-            if (netstack_get() != NULL && cfg != NULL)
+            /* The interface flags are live NetX fields and the gateway getter
+               takes nx_ip_protection.  Snapshot both while this application
+               task is adopted; formatting the tag itself needs no bracket. */
+            if (bsd_nx_enter(base) == 0)
             {
-                UWORD i;
+                const AmiConfig *cfg = netstack_config();
 
-                for (i = 0; i < cfg->interface_count; i++)
+                if (netstack_get() != NULL && cfg != NULL)
                 {
-                    if (!cfg->interfaces[i].configured)
-                        continue;
+                    UWORD i;
 
-                    status |= SBSYSSTAT_Interfaces;
-
-                    /*
-                     * Every SANA-II interface we can drive is Ethernet, so it
-                     * carries broadcast. Keyed on an interface that is up
-                     * rather than only configured: a down interface cannot
-                     * carry a broadcast.
-                     */
-                    if (netstack_interface_is_up(i))
+                    for (i = 0; i < cfg->interface_count; i++)
                     {
-                        status |= SBSYSSTAT_BCast_Interfaces;
+                        if (!cfg->interfaces[i].configured)
+                            continue;
 
-                        /* An interface that is up has a route to its own
-                           network, whether or not one was added by hand. */
-                        status |= SBSYSSTAT_Routes;
+                        status |= SBSYSSTAT_Interfaces;
+
+                        /*
+                         * Every SANA-II interface we can drive is Ethernet,
+                         * so it carries broadcast. Keyed on an interface that
+                         * is up rather than only configured: a down interface
+                         * cannot carry a broadcast.
+                         */
+                        if (netstack_interface_is_up(i))
+                        {
+                            status |= SBSYSSTAT_BCast_Interfaces;
+
+                            /* An interface that is up has a route to its own
+                               network, whether or not one was added by hand. */
+                            status |= SBSYSSTAT_Routes;
+                        }
+                    }
+
+                    if (cfg->resolver.nameserver_count > 0)
+                        status |= SBSYSSTAT_Resolver;
+
+                    {
+                        NX_IP *ip = netstack_ip();
+                        ULONG  gateway = 0UL;
+
+                        /*
+                         * The running gateway, not the configured one. A DHCP
+                         * machine has default_gateway 0 in AmiConfig and a
+                         * good default route that arrived in the lease. A read
+                         * of the configuration therefore made GetNetStatus
+                         * say "the default route is not configured" on a
+                         * machine where ShowNetStatus printed "Default gateway
+                         * address = 10.0.2.2". routing.c and netstatus.c ask
+                         * NetX Duo too.
+                         */
+                        if (ip != NULL &&
+                            nx_ip_gateway_address_get(ip, &gateway)
+                                == NX_SUCCESS &&
+                            gateway != 0UL)
+                        {
+                            status |= (SBSYSSTAT_DefaultRoute |
+                                       SBSYSSTAT_Routes);
+                        }
                     }
                 }
 
-                if (cfg->resolver.nameserver_count > 0)
-                    status |= SBSYSSTAT_Resolver;
-
-                /*
-                 * The running gateway, not the configured one. A DHCP machine
-                 * has default_gateway 0 in AmiConfig and a good default route
-                 * that arrived in the lease. A read of the configuration
-                 * therefore made GetNetStatus say "the default route is not
-                 * configured" on a machine where ShowNetStatus printed
-                 * "Default gateway address = 10.0.2.2". routing.c and
-                 * netstatus.c ask NetX Duo too.
-                 */
-                {
-                    NX_IP *ip = netstack_ip();
-                    ULONG  gateway = 0UL;
-
-                    if (ip != NULL &&
-                        nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS &&
-                        gateway != 0UL)
-                    {
-                        status |= (SBSYSSTAT_DefaultRoute | SBSYSSTAT_Routes);
-                    }
-                }
+                bsd_nx_leave(base);
             }
 
             bsd_tag_store(item, by_ref, status);
