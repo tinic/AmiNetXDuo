@@ -3124,6 +3124,12 @@ APTR                p;
         res = NULL;
     }
 
+    /* 4294967297 is 1 modulo 2^32. It is not interface index 1 and must not
+       be silently accepted as that scope on 32-bit AmigaOS. */
+    rc = bsd_getaddrinfo((APTR)"fe80::1%4294967297", NULL, &hints, &res);
+    (VOID)t_check((BOOL)(rc == -2 && res == NULL),
+                  "getaddrinfo rejects an overflowing numeric scope", rc);
+
     /*
      * AF_UNSPEC with AI_PASSIVE: the documented order is IPv6 first, then
      * IPv4, and both are the wildcard address.

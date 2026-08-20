@@ -174,15 +174,19 @@ static ULONG bsd_gai_zone_index(const char *zone)
 
     for (i = 0; zone[i] != '\0'; i++)
     {
+        ULONG digit;
+
         if (zone[i] < '0' || zone[i] > '9')
         {
             digits = FALSE;
             break;
         }
 
-        value = value * 10UL + (ULONG)(zone[i] - '0');
-        if (value > (ULONG)NX_MAX_PHYSICAL_INTERFACES)
+        digit = (ULONG)(zone[i] - '0');
+        if (digit > (ULONG)NX_MAX_PHYSICAL_INTERFACES ||
+            value > ((ULONG)NX_MAX_PHYSICAL_INTERFACES - digit) / 10UL)
             return 0;
+        value = value * 10UL + digit;
     }
 
     if (digits)
