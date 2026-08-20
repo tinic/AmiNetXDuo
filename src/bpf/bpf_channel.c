@@ -842,12 +842,16 @@ LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
 LONG ami_bpf_set_notify_mask(APTR owner, LONG channel, ULONG signal_mask)
 {
     LONG        status;
-    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, &status);
-
-    if (ch == NULL)
-        return status;
+    AmiBpfChan *ch;
 
     ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+    if (ch == NULL)
+    {
+        ami_bpf_unlock();
+        return status;
+    }
+
     ch->notify_mask = signal_mask;
     ch->notify_task = (signal_mask != 0) ? ami_bpf_current_task() : NULL;
     ami_bpf_unlock();
@@ -858,12 +862,16 @@ LONG ami_bpf_set_notify_mask(APTR owner, LONG channel, ULONG signal_mask)
 LONG ami_bpf_set_interrupt_mask(APTR owner, LONG channel, ULONG signal_mask)
 {
     LONG        status;
-    AmiBpfChan *ch = ami_bpf_chan_get(owner, channel, &status);
-
-    if (ch == NULL)
-        return status;
+    AmiBpfChan *ch;
 
     ami_bpf_lock();
+    ch = ami_bpf_chan_get(owner, channel, &status);
+    if (ch == NULL)
+    {
+        ami_bpf_unlock();
+        return status;
+    }
+
     ch->irq_mask = signal_mask;
     ch->irq_task = (signal_mask != 0) ? ami_bpf_current_task() : NULL;
     ami_bpf_unlock();

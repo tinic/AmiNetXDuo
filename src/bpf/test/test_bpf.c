@@ -1369,6 +1369,74 @@ static void test_capture_notify_close_reopen(void)
 }
 
 /*
+ * The mask setters used to validate the owner before taking the channel
+ * lock. Recycle the slot at the lock boundary: the old call must not install
+ * its task and mask in the replacement channel. Both notification fields are
+ * used by the capture path, so exercise the ordinary and interrupt masks.
+ */
+static LONG t_mask_close_status;
+static LONG t_mask_open_status;
+
+static void t_reopen_before_mask_lock(void)
+{
+    t_mask_close_status = ami_bpf_close(T_BPF_OWNER, 0);
+    t_mask_open_status  = ami_bpf_open(T_BPF_OTHER, 0);
+}
+
+static void test_signal_mask_close_reopen(void)
+{
+    UBYTE frame[128];
+    ULONG one = 1;
+    ULONG len;
+    LONG  status;
+    int   interrupt;
+
+    printf("bpf: signal-mask setters cannot cross a close/reopen\n");
+
+    CHECK(ami_bpf_init() == 0);
+    CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
+                                   test_inject) == 0);
+    len = make_tcp(frame, 1234, 80, 5, 0, 6);
+
+    for (interrupt = 0; interrupt < 2; interrupt++)
+    {
+        CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
+
+        stub_task             = (APTR)&t_notify_old_task;
+        stub_signalled_task   = NULL;
+        stub_signalled_mask   = 0;
+        t_mask_close_status   = -1;
+        t_mask_open_status    = -1;
+        stub_on_lock          = t_reopen_before_mask_lock;
+
+        if (interrupt)
+            status = ami_bpf_set_interrupt_mask(T_BPF_OWNER, 0, 1UL << 8);
+        else
+            status = ami_bpf_set_notify_mask(T_BPF_OWNER, 0, 1UL << 7);
+
+        CHECK(stub_on_lock == NULL);
+        CHECK(t_mask_close_status == 0);
+        CHECK(t_mask_open_status == 0);
+        CHECK(status == AMI_BPF_EPERM);
+
+        /* If the stale call contaminated the replacement, immediate capture
+           signals the old task through one of the two mask fields. */
+        CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSETIF, "eth0") == 0);
+        CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCIMMEDIATE, &one) == 0);
+        ami_bpf_tap_rx(iface_cookie, frame, len);
+        CHECK(stub_signalled_task == NULL);
+        CHECK(stub_signalled_mask == 0);
+
+        CHECK(ami_bpf_close(T_BPF_OTHER, 0) == 0);
+    }
+
+    ami_bpf_detach_interface(iface_cookie);
+    CHECK(ami_alloc_count() == 0);
+
+    stub_task = (APTR)"task";
+}
+
+/*
  * BIOCSETIF and BIOCSETF both allocate outside the channel lock. A close and
  * reopen in that window used to leave their AmiBpfChan pointer aimed at the
  * numeric slot and commit into whoever owned the replacement. Reopening with
@@ -1465,6 +1533,7 @@ int main(int argc, char **argv)
     test_reopen_under_closer();
     test_close_owner_under_reader();
     test_capture_notify_close_reopen();
+    test_signal_mask_close_reopen();
     test_ioctl_close_reopen();
     test_reopen_under_reader();
 
