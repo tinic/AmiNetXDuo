@@ -186,6 +186,26 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
     *referred = FALSE;
     whois_referral[0] = '\0';
 
+    /*
+     * Build the request before opening the connection, and reject a key that
+     * does not fit.  Truncating it asks the registry about a different name,
+     * address or handle and presents that unrelated record as the answer to
+     * what the user typed.
+     */
+    for (i = 0; query[i] != '\0'; i++)
+    {
+        if (len >= (LONG)sizeof(whois_request) - 2)
+        {
+            tool_error("the query is too long (at most %lu characters)",
+                       (LONG)sizeof(whois_request) - 2);
+            return RETURN_ERROR;
+        }
+
+        whois_request[len++] = query[i];
+    }
+    whois_request[len++] = '\r';
+    whois_request[len++] = '\n';
+
     how.family    = family;
     how.socktype  = TOOL_SOCK_STREAM;
     how.port      = port;
@@ -207,12 +227,6 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
 
         return RETURN_ERROR;
     }
-
-    /* The request is the query and a CRLF. That is the entire protocol. */
-    for (i = 0; query[i] != '\0' && len < (LONG)sizeof(whois_request) - 3; i++)
-        whois_request[len++] = query[i];
-    whois_request[len++] = '\r';
-    whois_request[len++] = '\n';
 
     if (tool_sock_send(sb, sock, whois_request, len) != len)
     {
