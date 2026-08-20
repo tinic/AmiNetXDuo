@@ -556,6 +556,24 @@ static void test_frames(void)
                (long)sizeof(huge), "", HTTP_WS_CLOSE_TOOBIG);
     }
 
+    /* RFC 6455 5.2: the shortest possible length encoding is mandatory.  No
+       payload is needed here because both failures are known from the header. */
+    {
+        static const unsigned char short16[] = {
+            0x82, (unsigned char)(0x80 | 126), 0x00, 0x7d, 0, 0, 0, 0
+        };
+        static const unsigned char short64[] = {
+            0x82, (unsigned char)(0x80 | 127),
+            0, 0, 0, 0, 0, 0, 0xff, 0xff,
+            0, 0, 0, 0
+        };
+
+        expect("a non-minimal 16-bit length is refused", short16,
+               (long)sizeof(short16), "", HTTP_WS_CLOSE_PROTOCOL);
+        expect("a non-minimal 64-bit length is refused", short64,
+               (long)sizeof(short64), "", HTTP_WS_CLOSE_PROTOCOL);
+    }
+
     /* And one inside 32 bits but past what this server will assemble. */
     {
         static const unsigned char big[] = {

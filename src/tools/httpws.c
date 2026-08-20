@@ -388,6 +388,15 @@ static void ws_header_done(HttpWsIn *in)
     {
         extra = 2;
         in->left = ((unsigned long)in->hdr[2] << 8) | (unsigned long)in->hdr[3];
+
+        /* RFC 6455 5.2 requires the shortest length encoding.  Accepting this
+           form below 126 gives one frame two different byte representations,
+           which is exactly what the canonical-length rule excludes. */
+        if (in->left < 126UL)
+        {
+            ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
+            return;
+        }
     }
     else if (len7 == 127)
     {
@@ -407,6 +416,12 @@ static void ws_header_done(HttpWsIn *in)
                    ((unsigned long)in->hdr[7] << 16) |
                    ((unsigned long)in->hdr[8] <<  8) |
                    ((unsigned long)in->hdr[9]);
+
+        if (in->left < 65536UL)
+        {
+            ws_fail(in, HTTP_WS_CLOSE_PROTOCOL);
+            return;
+        }
     }
     else
     {
