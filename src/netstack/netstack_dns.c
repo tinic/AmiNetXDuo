@@ -273,12 +273,18 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
     UINT               option_status = NX_SUCCESS;
     ULONG              now;
     BOOL               options_valid;
+    BOOL               names_valid = TRUE;
 
     if (!ns->ns_Dhcpv6DnsPending)
         return;
 
     ns->ns_Dhcpv6DnsPending = FALSE;
-    options_valid = ns->ns_Dhcpv6OptionsValid;
+
+    /* ns_Dhcpv6Created as well as the options flag, because the mutex below
+       belongs to the client object: absorbing after a delete would wait on a
+       mutex that is not there, and re-marking that would be a permanent
+       retry. */
+    options_valid = (BOOL)(ns->ns_Dhcpv6OptionsValid && ns->ns_Dhcpv6Created);
 
     r = &ns->ns_Config.resolver;
     now = tx_time_get();
@@ -292,7 +298,17 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
     {
         if (tx_mutex_get(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex,
                          TX_WAIT_FOREVER) != TX_SUCCESS)
+        {
+            /*
+             * TX_WAIT_ABORTED: another thread abandoned this wait, which says
+             * nothing about the next one.  Nothing has been read and nothing
+             * has been changed, so the whole absorb is asked for again -- and
+             * the mark was taken above, so without this there is no next
+             * absorb until the client's next Reply.
+             */
+            ns->ns_Dhcpv6DnsPending = TRUE;
             return;
+        }
 
         options_valid = ns->ns_Dhcpv6OptionsValid;
         if (options_valid)
@@ -325,8 +341,29 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
         (VOID)tx_mutex_put(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex);
 
+        /*
+         * The domain list is the only thing this can have lost, so it is the
+         * only thing skipped.  The name servers were read under the same lock
+         * and are still coherent; abandoning them here as well was a
+         * regression from the arrangement this replaced, where a failed
+         * domain-name read stopped the search-list block and nothing else.
+         *
+         * names[] stays as memset() left it on this path.  It is not fed to
+         * the search reconcile as an empty list, because an empty list is a
+         * withdrawal and nothing here said the suffixes were withdrawn.
+         *
+         * No re-mark.  nx_dhcpv6_get_other_option_data() is handed a buffer
+         * of exactly NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE and a constant option
+         * code, so the only answers it has left are its own argument checks,
+         * and those are the same arguments on every pass.
+         */
         if (option_status != NX_SUCCESS)
-            return;             /* preserve the last coherent option set */
+        {
+            names_valid = FALSE;
+            AMI_WARN("netstack: DHCPv6 domain list not readable (%ld), "
+                     "keeping the search list already in use",
+                     (long)option_status);
+        }
     }
 
     /* Out: a later valid Reply may shorten the list or omit the option. A
@@ -405,7 +442,12 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
      * 119 share -- each name goes to ami_config_search_offer() as it stands,
      * which is where it is checked against RFC 1123 2.1 before anything is
      * pasted onto a query.
+     *
+     * Skipped whole when the list could not be read, which keeps the applied
+     * set: the loops below are the withdrawal as well as the offer, so
+     * running them on a list nothing filled would withdraw every suffix.
      */
+    if (names_valid)
     {
         AmiResolverConfig offered = {0};
         ULONG             pos = 0;
