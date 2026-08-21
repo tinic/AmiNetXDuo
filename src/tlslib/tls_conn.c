@@ -1051,7 +1051,22 @@ LONG tls_TLSInfo(register struct TLSConnection *conn    TLSLIB_REG("a0"),
     if (info->ti_Size < (ULONG)TLS_INFO_SIZE_V1)
         return -1;
 
+    /*
+     * NOT conn->tc_Protocol, which is nx_secure_tls_protocol_version and is
+     * the LEGACY RECORD VERSION.  RFC 8446 5.1 fixes that at 0x0303 for the
+     * whole of a TLS 1.3 connection -- _nx_secure_tls_send_record() writes it
+     * into every record header -- so nx_secure never advances it and a 1.3
+     * session used to report "TLS 0x303, ciphersuite 0x1301", a suite that
+     * exists in no version below 1.3.  tc_Protocol keeps the raw value
+     * because tls_resume.c compares it against the same field on the session;
+     * the caller is told the version that was actually negotiated.
+     */
+#if (NX_SECURE_TLS_TLS_1_3_ENABLED)
+    info->ti_Version         = (conn->tc_Session.nx_secure_tls_1_3 != 0)
+                                   ? 0x0304UL : conn->tc_Protocol;
+#else
     info->ti_Version         = conn->tc_Protocol;
+#endif
     info->ti_CipherSuite     = conn->tc_CipherSuite;
     info->ti_ChainDepth      = conn->tc_ChainDepth;
     info->ti_HandshakeMillis = conn->tc_HandshakeMillis;

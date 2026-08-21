@@ -43,10 +43,12 @@ add_library(test_x509_nx_crypto STATIC ${_x509_crypto_all})
 # tests/tls is on the path for the sample leaf, the sample CA and ISRG Root X1
 # the certificates that have to keep parsing.
 #
-# NX_SECURE_ENABLE_AEAD_CIPHER matches src/tls/CMakeLists.txt, where it is set
-# PUBLIC on nx_secure: it changes structure layouts in nx_secure_tls.h, so
-# without it this would be testing a different NX_SECURE_TLS_SESSION than the
-# one that ships.
+# NX_SECURE_ENABLE_AEAD_CIPHER and NX_SECURE_TLS_ENABLE_TLS_1_3 match
+# src/tls/CMakeLists.txt, where both are set PUBLIC on nx_secure: each changes
+# structure layouts in nx_secure_tls.h, so without them this would be testing a
+# different NX_SECURE_TLS_SESSION than the one that ships.  TLS 1.3 was the one
+# that had drifted, and the leaf keyUsage test below is exactly the code that
+# reads nx_secure_tls_1_3.
 foreach(lib test_x509_nx_secure test_x509_nx_crypto)
     target_include_directories(${lib} PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -68,7 +70,8 @@ foreach(lib test_x509_nx_secure test_x509_nx_crypto)
         TX_DISABLE_ERROR_CHECKING
         NX_SECURE_KEY_CLEAR
         NX_SECURE_ENABLE_ECC_CIPHERSUITE
-        NX_SECURE_ENABLE_AEAD_CIPHER)
+        NX_SECURE_ENABLE_AEAD_CIPHER
+        NX_SECURE_TLS_ENABLE_TLS_1_3)
 
     target_compile_options(${lib} PRIVATE -UAMINETXDUO_IPV6)
 endforeach()

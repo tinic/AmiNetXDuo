@@ -300,7 +300,7 @@ struct TLSInfo
      */
     ULONG   ti_Size;
 
-    ULONG   ti_Version;         /* 0x0303 == TLS 1.2                          */
+    ULONG   ti_Version;         /* 0x0303 == TLS 1.2, 0x0304 == TLS 1.3       */
     ULONG   ti_CipherSuite;     /* the negotiated suite, IANA number          */
     ULONG   ti_ChainDepth;      /* certificates the server sent               */
     ULONG   ti_HandshakeMillis; /* how long TLSOpen() spent shaking hands     */

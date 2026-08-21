@@ -608,7 +608,7 @@ static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
  * longer matches after that change, so ku_chain_ok deliberately stands in for
  * the already-separate chain tests above.
  */
-static UINT ku_verify(UCHAR usage, UINT algorithm, USHORT protocol,
+static UINT ku_verify(UCHAR usage, UINT algorithm, UINT tls_1_3,
                       UINT socket_type)
 {
     static const UCHAR key_usage_prefix[] = {
@@ -664,7 +664,16 @@ static UINT ku_verify(UCHAR usage, UINT algorithm, USHORT protocol,
     public_cipher.nx_crypto_algorithm = algorithm;
     ciphersuite.nx_secure_tls_public_cipher = &public_cipher;
     session.nx_secure_tls_session_ciphersuite = &ciphersuite;
-    session.nx_secure_tls_protocol_version = protocol;
+    /*
+     * A TLS 1.3 session is one whose nx_secure_tls_1_3 flag is set.  Its
+     * nx_secure_tls_protocol_version is 0x0303 like everything else: that
+     * field is the legacy record version, RFC 8446 5.1 pins it there, and
+     * nx_secure never advances it.  This used to set it to 0x0304 to mean
+     * "1.3", which is a session state the library cannot produce, so the
+     * TLS 1.3 rows below were asserting against a fiction.
+     */
+    session.nx_secure_tls_protocol_version = NX_SECURE_TLS_VERSION_TLS_1_2;
+    session.nx_secure_tls_1_3 = (UCHAR)(tls_1_3 ? 1u : 0u);
     session.nx_secure_tls_socket_type = socket_type;
     session.nx_secure_remote_certificate_verify = ku_chain_ok;
 
@@ -676,38 +685,38 @@ static void test_tls_key_usage(void)
     printf("tls keyUsage\n");
 
     check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
           "TLS 1.2 static RSA permits keyEncipherment");
     check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
           "TLS 1.2 static RSA refuses signing-only key");
 
     check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_ECDHE,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
           "TLS 1.2 ECDHE permits digitalSignature");
     check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_ECDHE,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
           "TLS 1.2 ECDHE refuses encryption-only key");
 
     check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_3,
+                    1 /* TLS 1.3 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_SUCCESS,
           "TLS 1.3 requires a signing key");
     check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_3,
+                    1 /* TLS 1.3 */,
                     NX_SECURE_TLS_SESSION_TYPE_CLIENT) == NX_SECURE_X509_KEY_USAGE_ERROR,
           "TLS 1.3 refuses encryption-only key");
 
     check(ku_verify(0x80, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_SERVER) == NX_SECURE_X509_SUCCESS,
           "a client certificate permits digitalSignature");
     check(ku_verify(0x20, NX_CRYPTO_KEY_EXCHANGE_RSA,
-                    NX_SECURE_TLS_VERSION_TLS_1_2,
+                    0 /* TLS 1.2 */,
                     NX_SECURE_TLS_SESSION_TYPE_SERVER) == NX_SECURE_X509_KEY_USAGE_ERROR,
           "a client certificate refuses encryption-only key");
 }
