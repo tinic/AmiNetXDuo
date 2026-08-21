@@ -227,6 +227,13 @@ VOID bsd_runtime_close(VOID)
         bsd_usergroup_base = NULL;
     }
 
+    /* Both of these are zero on a fresh load -- AmigaDOS clears HUNK_BSS -- so
+       this matters only on the path where expunge runs and UnLoadSeg() does
+       not, and the segment is opened again with its statics still set. Resetting
+       here rather than trusting the loader keeps the flag paired with the thing
+       it guards. */
+    bsd_amitcp_tried = FALSE;
+
     if (DOSBase != NULL)
     {
         CloseLibrary((struct Library *)DOSBase);
