@@ -125,7 +125,12 @@ VOID ami_crash_format(char *buf, ULONG len)
     buf[i] = '\0';
 }
 
-/* Runs in user mode, on the stack of the crashed task, directly after the RTE. */
+/* Runs in user mode, on the stack of the crashed task, directly after the RTE.
+   `used' because the only reference is the `move.l #_ami_crash_bailout,2(%sp)'
+   in the trap handler's asm() above, which the compiler does not parse. It
+   also carries the five ami_crash_saved_* objects: this is their only C
+   reader, so if it goes they go, and the asm block loses six names at once. */
+VOID ami_crash_bailout(VOID) __attribute__((used));
 VOID ami_crash_bailout(VOID)
 {
     int i;
@@ -299,6 +304,10 @@ const char *ami_crash_alert_name(ULONG num)
     return "see exec/alerts.h";
 }
 
+/* `used': the only caller is the `jsr _ami_alert_report' in the trampoline's
+   asm() above. Not static, which is not protection -- a whole-program view is
+   entitled to privatise and then drop it. */
+VOID ami_alert_report(ULONG num) __attribute__((used));
 VOID ami_alert_report(ULONG num)
 {
     struct Task *task = FindTask(NULL);

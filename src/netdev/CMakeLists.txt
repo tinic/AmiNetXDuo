@@ -88,6 +88,15 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
         VERBATIM)
 
+    # The $VER: string, checked the way every command in src/tools is.  Found
+    # by AmigaDOS scanning the file, so no reference exists for the linker to
+    # see, and this target links --gc-sections.
+    add_custom_command(TARGET anxnet_device POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DTOOL_BINARY=$<TARGET_FILE:anxnet_device>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
+        VERBATIM)
+
     if(AMIGA_SIZE)
         add_custom_command(TARGET anxnet_device POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:anxnet_device>"

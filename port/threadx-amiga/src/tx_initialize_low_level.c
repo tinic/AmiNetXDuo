@@ -599,7 +599,11 @@ __asm__(
 
 extern VOID _tx_amiga_vblank_entry(VOID);
 
-/* Not static: the assembly entry above refers to it by name. */
+/* Not static: the assembly entry above refers to it by name -- and that alone
+   is not enough. Under -flto the whole-program view sees no reference at all,
+   because nothing parses the asm() string, and is entitled to privatise a
+   non-static symbol and then drop it. `used' is what actually holds it. */
+ULONG _tx_amiga_vblank_server(VOID) __attribute__((used));
 ULONG _tx_amiga_vblank_server(VOID)
 {
 

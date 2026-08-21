@@ -49,6 +49,16 @@ if(AMINETXDUO_USERGROUP_LINK)
     # succeeds.  See the -flto note in the top-level CMakeLists.txt.
     if(CMAKE_CROSSCOMPILING)
         target_link_options(usergroup_library PRIVATE "-Wl,-u,_ug_romtag")
+
+        # Entry stub at offset 0 of hunk 0, checked the way bsdsocket.library
+        # and anxnet.device always have been and this one never was.  The stub
+        # is a top-level asm() so LTO cannot delete it, but its PLACEMENT is
+        # now GCC's choice rather than the source order's.
+        add_custom_command(TARGET usergroup_library POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DLIBRARY_BINARY=$<TARGET_FILE:usergroup_library>"
+                    -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
+            VERBATIM)
     endif()
 
     target_include_directories(usergroup_library PRIVATE

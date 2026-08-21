@@ -186,4 +186,16 @@ if(AMINETXDUO_BSDSOCKET_LINK)
                 "-DLIBRARY_BINARY=$<TARGET_FILE:bsdsocket_library>"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
         VERBATIM)
+
+    # The $VER: string, checked the way every command in src/tools is.  It is
+    # found by AmigaDOS scanning the file, so no reference to it exists that
+    # the linker can see, and this target links --gc-sections.  `used' on
+    # bsd_lib_ver keeps it in the IR and says nothing about whether it
+    # survives to the file.  Nothing else would notice its absence: `version
+    # full file LIBS:bsdsocket.library' would simply report nothing.
+    add_custom_command(TARGET bsdsocket_library POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+                "-DTOOL_BINARY=$<TARGET_FILE:bsdsocket_library>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/check-version-tag.cmake"
+        VERBATIM)
 endif()

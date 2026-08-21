@@ -79,6 +79,19 @@ if(AMINETXDUO_TLSLIB_LINK)
     # succeeds.  See the -flto note in the top-level CMakeLists.txt.
     if(CMAKE_CROSSCOMPILING)
         target_link_options(tls_library PRIVATE "-Wl,-u,_tls_romtag")
+
+        # bsdsocket.library and anxnet.device have always checked that their
+        # "moveq #-1,d0 / rts" is at offset 0 of hunk 0; this one and
+        # usergroup.library never did.  The stub is a top-level asm() block,
+        # so LTO cannot delete it -- but WHICH ltrans unit it lands in, and
+        # where inside it, is now GCC's choice rather than the source order's.
+        # A library whose first instruction is something else is one the OS
+        # runs as a program when a user double-clicks it.
+        add_custom_command(TARGET tls_library POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DLIBRARY_BINARY=$<TARGET_FILE:tls_library>"
+                    -P "${CMAKE_SOURCE_DIR}/cmake/check-library-entry.cmake"
+            VERBATIM)
     endif()
 
     target_include_directories(tls_library PRIVATE ${TLSLIB_INCLUDES})
