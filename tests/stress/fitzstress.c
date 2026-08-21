@@ -411,6 +411,10 @@ typedef struct
 static StressWorker g_worker[4];
 static volatile ULONG g_stop;
 static volatile ULONG g_secs;
+/* comparetree runs that did not come back 0: a tree on the server that does
+   not match the tree that was written to it.  Counted rather than only
+   logged, because this is what main() returns on. */
+static ULONG g_dirty;
 
 static VOID fs_event(ULONG role, const char *what, LONG a, LONG b)
 {
@@ -1251,17 +1255,33 @@ static VOID fs_compare(ULONG t)
     fs_append(COMPARE_PATH, "----- rc %ld -----\n", args);
 
     if (args[0] != 0)
+    {
+        /* A tree that does not compare is the finding, so it is counted here
+           and not only written down.  The count is what main() returns on. */
+        g_dirty++;
         fs_event(4UL, "comparetree", args[0], (LONG)(ready - 1UL));
+    }
 }
 
 static VOID fs_summary(ULONG t, ULONG stuck)
 {
     LONG args[8];
     LONG i;
+    ULONG bad = 0UL;
+
+    for (i = 0; i < 4; i++)
+        bad += g_worker[i].w_Bad;
 
     args[0] = (LONG)t;
     args[1] = (LONG)stuck;
     fs_append(SUMMARY_PATH, "seconds %lu\nstuck_workers %lu\n", args);
+
+    /* The two totals the verdict is taken on, on their own lines, so the
+       harness reads a number rather than adding up four per-worker rows.
+       tests/stress/fitzstress-verdict.sh is the reader. */
+    args[0] = (LONG)bad;
+    args[1] = (LONG)g_dirty;
+    fs_append(SUMMARY_PATH, "bad_total %lu\ndirty_total %lu\n", args);
 
     for (i = 0; i < 4; i++)
     {
@@ -1458,6 +1478,46 @@ int main(int argc, char **argv)
             g_secs += 30UL;
             fs_heartbeat(g_secs);
             fs_health(g_secs);
+        }
+    }
+
+    /*
+     * WHAT THIS RETURN CODE IS ABOUT.
+     *
+     * It used to be RETURN_OK whatever the four workers measured, and
+     * tests/stress/run-fitzstress.sh forwards it, so a run that copied a tree
+     * to the server and read back bytes that did not match exited 0.  It
+     * printed the count and gated on nothing.
+     *
+     * Content is not a matter of degree.  w_Bad is a buffer that came back
+     * different from the one that went out, and g_dirty is Fitz's own
+     * comparetree disagreeing about a whole tree; either one is the finding
+     * this program exists to make, and neither is a load-dependent number
+     * that could be tuned into a threshold.
+     *
+     * A transfer that FAILED is a different thing and is deliberately not
+     * here: w_Errs counts refused connections and short reads, which is what
+     * a stress test on a saturated link is expected to produce, and the
+     * timeline and the events file are where those are read.
+     */
+    {
+        ULONG bad = 0UL;
+
+        for (i = 0; i < 4; i++)
+            bad += g_worker[i].w_Bad;
+
+        if (bad != 0UL || g_dirty != 0UL)
+        {
+            args[0] = (LONG)bad;
+            args[1] = (LONG)g_dirty;
+            args[2] = 0;
+            args[3] = 0;
+            fs_append(EVENTS_PATH,
+                      "verdict corrupt bad %lu dirty %lu\n", args);
+            Printf((CONST_STRPTR)"FitzStress: %lu buffers came back wrong, "
+                                 "%lu trees did not compare\n",
+                   (LONG)bad, (LONG)g_dirty);
+            return RETURN_ERROR;
         }
     }
 

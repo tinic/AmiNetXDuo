@@ -492,4 +492,23 @@ echo "==> artefacts: $HD  $SER  $PEERLOG"
 
 [ "$KEEP" = "1" ] || cleanup_peer
 
-exit "$RUN_RC"
+# --------------------------------------------------------- the verdict ---
+#
+# THIS FILE USED TO END `exit "$RUN_RC"`, and fitzstress.c returned RETURN_OK
+# whatever it measured.  So the DIRTY count printed under "was the data
+# correct?" above was gated on by nothing: a run with confirmed corruption on
+# the share exited 0, and the number was on the screen for whoever happened to
+# read it.
+echo
+echo "---- the verdict ----"
+# shellcheck source=tests/stress/fitzstress-verdict.sh
+. "$ROOT/tests/stress/fitzstress-verdict.sh"
+
+V_RC=0
+fitzstress_verdict "$HD/stress-summary.txt" "$HD/compare.log" "$RUN_RC" || V_RC=$?
+case "$V_RC" in
+    0) echo "RESULT=pass" ;;
+    1) echo "RESULT=fail" ;;
+    *) echo "RESULT=broken" ;;
+esac
+exit "$V_RC"

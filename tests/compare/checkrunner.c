@@ -144,6 +144,9 @@ int main(int argc, char **argv)
 {
     BPTR  in;
     ULONG ran = 0;
+    /* Commands SystemTagList() could not start at all: a staging fault, and
+       not a measurement of the stack under test.  See the return below. */
+    ULONG unstarted = 0;
 
     (VOID)argc;
     (VOID)argv;
@@ -260,17 +263,47 @@ int main(int argc, char **argv)
         emit(REPORT, "--- rc %ld, %ld.%02ld s, %ld bytes free\n", args);
 
         ran++;
+        if (rc == -1L)
+            unstarted++;
     }
 
     Close(in);
 
     {
-        LONG args[1];
+        LONG args[2];
 
         args[0] = (LONG)ran;
-        emit(REPORT, "\n=== CheckRunner ran %ld commands\n", args);
-        Printf((CONST_STRPTR)"CheckRunner ran %ld commands\n", (LONG)ran);
+        args[1] = (LONG)unstarted;
+        emit(REPORT, "\n=== CheckRunner ran %ld commands, %ld would not start\n",
+             args);
+        Printf((CONST_STRPTR)"CheckRunner ran %ld commands, %ld would not "
+                             "start\n", (LONG)ran, (LONG)unstarted);
     }
+
+    /*
+     * WHAT THIS RETURN CODE IS ABOUT.
+     *
+     * Not the stack under test: a command that failed is a RESULT, it is in
+     * results.txt, and the expectations for it live on the host, which is the
+     * whole design above.  A driver that exited 20 because a transfer failed
+     * could not be told from one that exited 20 because it could not start,
+     * and tests/compare/run-compare.sh forwards this status.
+     *
+     * It is about whether this program did its job.  It used to be RETURN_OK
+     * unconditionally, so a checks.txt whose every line was a comment, or a
+     * SystemTagList() that could not load one single binary, produced an empty
+     * results.txt and a green run.  Those are the two cases here: nothing was
+     * measured, or a command never started, which is a staging fault and not a
+     * measurement of anything.
+     */
+    if (ran == 0)
+    {
+        emit(REPORT, "CheckRunner: no command in " CHECKS " ran, so nothing "
+                     "was measured\n", (LONG *)0);
+        return RETURN_ERROR;
+    }
+    if (unstarted != 0)
+        return RETURN_ERROR;
 
     return RETURN_OK;
 }

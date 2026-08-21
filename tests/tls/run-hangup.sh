@@ -106,8 +106,10 @@ echo "==> rude peer up on 127.0.0.1:4443-4446"
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
+TAG="${AMINETXDUO_RUN_TAG:-hangup}"
+
 set +e
-AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-hangup}" \
+AMINETXDUO_RUN_TAG="$TAG" \
 AMINETXDUO_FETCH_COMMANDS="$COMMANDS" \
 AMINETXDUO_BUILD="$BUILD" \
     "$ROOT/tests/tls/run-fetch.sh" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" "${CPUARG[@]}"
@@ -117,4 +119,37 @@ set -e
 echo "---- what the rude peer saw ----"
 cat "$SERVER_LOG"
 
-exit "$rc"
+# ---------------------------------------------------------- the verdict ---
+#
+# THIS FILE USED TO END `exit "$rc"`.
+#
+# run-fetch.sh does not score a custom command list -- it says so and returns
+# 77 -- so the status forwarded here was a skip, and before that it was a 0
+# that meant "ToolsSmoke's last command returned 0".  Neither is a fact about
+# any of the four cases this harness exists for, and its row in
+# tests/HARNESSES said as much: IT ASSERTS NOTHING TODAY.
+#
+# So the transcript is read instead.  run-fetch.sh's own status still matters
+# for one thing -- whether the emulator came back at all -- and is reported
+# beside the verdict rather than being it.
+echo
+echo "---- the verdict ----"
+# shellcheck source=tests/tls/hangup-verdict.sh
+. "$ROOT/tests/tls/hangup-verdict.sh"
+
+REPORT="$ROOT/build/amiberry-testhd-$TAG/tools.txt"
+
+printf 'run_rc=%s\n' "$rc"
+case "$rc" in
+    0|77) ;;
+    *) printf 'reason=%s\n' "the emulator did not come back cleanly"
+       printf 'RESULT=broken\n'
+       exit 3 ;;
+esac
+
+if hangup_verdict "$REPORT" 15 "$SERVER_LOG"; then
+    printf 'RESULT=pass\n'
+    exit 0
+fi
+printf 'RESULT=fail\n'
+exit 1

@@ -254,6 +254,13 @@ echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT," \
 #
 # Inbound.  Without this the guest can call out and nothing can call in,
 # which is exactly the half `nc -l` exists to test.
+# Whether anything outside can reach the guest, written by the probe below and
+# read by the verdict: `uae_slirp_redir` is FS-UAE's option and Amiberry
+# ignores it, so on that runner the inbound case cannot happen and must be
+# named as a hole rather than scored as a failed command.
+INBOUND_FLAG="$ROOT/build/nettools-inbound.flag"
+echo unknown > "$INBOUND_FLAG"
+
 REDIR="uae_slirp_redir = tcp:$NC_INBOUND_PORT:$NC_INBOUND_PORT"
 [ -z "$EXTRA_CONFIG" ] || REDIR="$REDIR;$EXTRA_CONFIG"
 
@@ -280,9 +287,11 @@ CPUARG=()
     sleep 25
     if lsof -nP -iTCP:"$NC_INBOUND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
         echo "==> slirp_redir: host port $NC_INBOUND_PORT is LISTENING"
+        echo yes > "$INBOUND_FLAG"
     else
         echo "!! slirp_redir: host port $NC_INBOUND_PORT is NOT listening;" \
              "nothing outside can reach the guest"
+        echo no > "$INBOUND_FLAG"
     fi
 ) &
 
@@ -299,4 +308,44 @@ echo
 echo "================ what the host servers saw ================"
 cat "$PEERLOG" 2>/dev/null || true
 
-exit "$RC"
+# --------------------------------------------------------- the verdict ---
+#
+# THIS FILE USED TO END `RC=$?` / `exit "$RC"`, and nothing else.  No grep, no
+# counter, no check of any kind: the verdict was ToolsSmoke's return code,
+# which is the return code of the LAST LINE of the command list, so a run in
+# which nc connected to nothing, telnet negotiated nothing and every tftp
+# transfer arrived empty exited 0 and read as coverage for five commands.
+#
+# The emulator's own status still matters -- it is the difference between a
+# failed assertion and a machine that never booted -- and it is reported
+# beside the verdict rather than being it.
+echo
+echo "---- the verdict ----"
+# shellcheck source=tests/tools/nettools-verdict.sh
+. "$ROOT/tests/tools/nettools-verdict.sh"
+
+HD="$ROOT/build/amiberry-testhd-${AMINETXDUO_RUN_TAG:-nettools}"
+
+printf 'run_rc=%s\n' "$RC"
+if [ "$RC" != 0 ]; then
+    printf 'reason=%s\n' "the guest did not come back (124 is the timeout)"
+    printf 'RESULT=broken\n'
+    exit 3
+fi
+
+# A custom list is a different run and nothing here knows what it asked for,
+# so it is a SKIP rather than a pass -- the same convention run-fetch.sh uses,
+# for the same reason.
+if [ -n "${AMINETXDUO_NETTOOLS_COMMANDS:-}" ]; then
+    printf 'reason=%s\n' "custom_command_list"
+    printf 'RESULT=skip\n'
+    exit 77
+fi
+
+if nettools_verdict "$HD/tools.txt" "$HD" "$PEERLOG" 10.0.2.2 \
+                    "$(cat "$INBOUND_FLAG" 2>/dev/null || echo unknown)"; then
+    printf 'RESULT=pass\n'
+    exit 0
+fi
+printf 'RESULT=fail\n'
+exit 1

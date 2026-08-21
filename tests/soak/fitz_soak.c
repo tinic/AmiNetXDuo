@@ -1492,6 +1492,7 @@ int main(void)
     ULONG           t, next_sample;
     UWORD           stall_reported[ARM_COUNT * S_MAX_FILERS];
     ULONG           last_phase;
+    ULONG           wedged;         /* workers still inside a call at the end */
 
     s_t0 = 0UL;
     s_t0 = s_ticks();
@@ -1716,18 +1717,18 @@ int main(void)
         Delay(50UL);
     }
 
+    wedged = 0UL;
     {
-        ULONG stuck = 0UL;
         ULONG k;
 
         for (k = 0UL; k < (ULONG)SS->ss_FilerCount; k++)
         {
             if (SS->ss_F[k].f_Done == 0U)
-                stuck++;
+                wedged++;
         }
 
-        if (stuck != 0UL || SS->ss_ChurnDone == 0U)
-            s_note("workers-still-in-a-call", (LONG)stuck);
+        if (wedged != 0UL || SS->ss_ChurnDone == 0U)
+            s_note("workers-still-in-a-call", (LONG)wedged);
     }
 
     s_summary(base, s_secs());
@@ -1742,9 +1743,35 @@ int main(void)
 
     /*
      * Nonzero only for a failure of the harness itself.  A drop is a result,
-     * not a broken run, and the caller reads soak-events.txt for it, a
+     * not a broken run, and the caller reads soak-events.txt for it: a
      * harness that exits 20 because the stack misbehaved cannot be told from
      * one that exits 20 because it could not start.
+     *
+     * That reasoning stands, and it was being used to return RETURN_OK for
+     * three things that are not results at all.  A soak whose workers are
+     * still inside a DOS call ten minutes after being asked to stop is a
+     * machine that did not come back, not a machine that dropped something.
+     * A soak that spawned no filer, or that completed no query in either arm,
+     * measured nothing whatever and exited 0 saying so to nobody.  Those are
+     * failures OF THE HARNESS, which is exactly what the paragraph above
+     * reserves a nonzero code for.
      */
+    if (wedged != 0UL || SS->ss_ChurnDone == 0U)
+    {
+        PutStr((CONST_STRPTR)"FitzSoak: workers are still inside a call\n");
+        return RETURN_ERROR;
+    }
+    if (SS->ss_FilerCount == 0U)
+    {
+        PutStr((CONST_STRPTR)"FitzSoak: no filer ever started\n");
+        return RETURN_ERROR;
+    }
+    if ((SS->ss_Queries[0] + SS->ss_Queries[1]) == 0UL)
+    {
+        PutStr((CONST_STRPTR)"FitzSoak: no query completed in either arm, so "
+                             "nothing was measured\n");
+        return RETURN_ERROR;
+    }
+
     return RETURN_OK;
 }
