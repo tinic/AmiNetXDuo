@@ -31,9 +31,21 @@ project(AmiNetXDuo VERSION 0.25.1 LANGUAGES C ASM)
 set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
-# -flto, for the cross build only.  bsdsocket.library goes from 395,000 bytes
-# to 351,640, which is 11% and worth more on a 2 MB A1200 than anything else
-# on the table.
+# -flto, for the cross build only.  Measured at dcb5d9d8, same commit both
+# ways, with src/crypto68k excluded as described below:
+#
+#     bsdsocket.library   352,960   was 395,328    -10.7%
+#     tls.library         195,204   was 242,840    -19.6%
+#     usergroup.library     7,172   was   7,684     -6.7%
+#     anxnet.device        51,620   was  48,632     +6.1%
+#
+# anxnet.device GROWS, and that is not a typo. It is the one image that does,
+# it has never been explained, and it is recorded here rather than left out of
+# a table that would otherwise read as uniformly good news.
+#
+# tls.library would be 181,540 with crypto68k included, so the exclusion hands
+# back 13,664 bytes of the 61,300. bsdsocket.library pays nothing for it --
+# crypto68k is not linked into that one.
 #
 # THIS NEEDS A TOOLCHAIN THAT CAN DO IT, and until 2026-08 none existed. The
 # published asset was built with --disable-plugins, so its ld answers
