@@ -63,7 +63,25 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # have gone quiet rather than red. What actually failed CI was an unrelated
 # accident -- `cat | grep -Wanalyzer` returning 1 on an empty result under
 # pipefail -- and without it this would have read as green.
-option(AMINETXDUO_LTO "Build with -flto (cross builds only)" ON)
+# OFF UNTIL THE tls.library MISCOMPILE IS UNDERSTOOD.
+#
+# With -flto, tls.library produces a TLS 1.3 client key share the far end
+# rejects as BAD_ECPOINT, so no handshake completes and every https: URL fails.
+# Reproduced against three real hosts and against the lab peer, on the RSA-cert
+# and EC-cert arms alike, so it is the key-exchange group and not the
+# certificate path. Bisected four ways at one commit: LTO fails, LTO with
+# -DAMINETXDUO_CRYPTO68K_ASM=OFF still fails, non-LTO passes, and an LTO build
+# with a non-LTO tls.library swapped in passes. So the wrong code is inside
+# that binary and it is not the hand-written assembly.
+#
+#     AMINETXDUO_TLS13_PEER=<peer> tools/tlsgate.sh build/ci/default 68020 1 fast
+#
+# Everything else about the LTO build is sound: 15/15 CI jobs, nine cards pass
+# the sweep with counts matching the peer both ways, and A1200+a2065 reads
+# 620 KB/s against a ~480 baseline. The size win it is holding back is real --
+# bsdsocket.library 352,960 against 395,328, tls.library 181,540 against
+# 242,840 -- so this switch goes back ON as soon as the miscompile is placed.
+option(AMINETXDUO_LTO "Build with -flto (cross builds only)" OFF)
 
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     string(APPEND CMAKE_C_FLAGS_RELEASE " -flto")
