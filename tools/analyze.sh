@@ -287,6 +287,18 @@ bailed_only() {
 }
 
 if [ "$UPDATE" = 1 ]; then
+    #
+    # RUN --update ON LINUX, NOT ON A MAC.  The bailed/set-aside machinery
+    # above covers a unit that gave up, which is the coverage case.  It does
+    # NOT cover a unit that is analysed on both hosts and reports differently
+    # on each, and that happens: src/netstack/netstack.c yields a
+    # use-of-uninitialized-value on the Linux runner and nothing at all on
+    # darwin-arm64, with the same pinned GCC -- the analyser is built by a
+    # different host compiler on each, and its state limits do not land in the
+    # same place. Updating from a Mac silently drops that entry, and CI then
+    # fails it as NEW. It cost a red build to learn; Linux is where CI runs, so
+    # Linux is what the baseline has to describe.
+    #
     # Carry forward the baseline entries for units that bailed on THIS run.
     # Dropping them would make the next host that manages to analyse one fail
     # on findings that were triaged long ago.

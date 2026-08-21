@@ -11,6 +11,7 @@
 1	src/crypto68k/c68k_crt.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	src/crypto68k/c68k_sha256.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	src/net68k/n68k_cpu.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
+1	src/netstack/netstack.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 1	src/sana2/sana2_copy.c	-Wanalyzer-out-of-bounds	stack-based buffer overflow
 1	src/tools/httpd.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '*ds.ds_Days'
 1	src/tools/httpd.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value 'ds.ds_Days'
