@@ -878,6 +878,7 @@ typedef struct AmiSocket
 /* library_runtime.c, what a shared library has to supply for itself. */
 BOOL  bsd_runtime_open(VOID);
 VOID  bsd_runtime_close(VOID);
+VOID  bsd_usergroup_open(VOID);
 
 /* netx_call.c, ThreadX context. Every call to a NetX Duo THREADS_ONLY
  * vector must be inside a successful bsd_nx_enter()/bsd_nx_leave() bracket.

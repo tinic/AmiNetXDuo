@@ -272,6 +272,11 @@ BOOL bsd_netmon_busy(VOID)
 VOID ami_netdb_free(VOID)           { h.netdb_free_calls++; }
 VOID bsd_runtime_close(VOID)        { h.runtime_close_calls++; }
 
+/* bsd_lib_open() calls this on every open, to hold usergroup.library resident
+   for ixemul clients.  Nothing here depends on it, and the real one only opens
+   a library, so it is a no-op rather than an h_unreachable(). */
+VOID bsd_usergroup_open(VOID)       { }
+
 VOID ami_set_address_change_hook(VOID (*hook)(VOID))
 {
     h.hook_clears++;

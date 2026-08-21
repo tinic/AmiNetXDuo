@@ -1101,6 +1101,18 @@ struct AmiSocketBase *bsd_lib_open(
      */
     (VOID)ami_netdb_load();
 
+    /*
+     * usergroup.library, held for the life of this library so that its node
+     * is in Exec's library list. That residency is what an ixemul.library
+     * client needs to reach a socket at all; the whole reason is over
+     * bsd_usergroup_open() in library_runtime.c. Here rather than in
+     * bsd_lib_init(), which Exec runs from inside RamLib while RamLib is
+     * loading this file: opening a second disk-based library from there
+     * re-enters it. This runs in the opener's own Process, under the
+     * semaphore that already serialises ami_netdb_load() above.
+     */
+    bsd_usergroup_open();
+
     if (master->sb_StackRefs == 0)
     {
         /* Bring the stack up on our own big-stack Process, not the opener's
