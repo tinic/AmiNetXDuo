@@ -57,6 +57,16 @@
 #   AMINETXDUO_PEERCAP_MAX    seconds either collector may live (default 1800)
 #   AMINETXDUO_LOSSRATE_ARGS  extra arguments for lossrate.py, so a gate it
 #                             grows later needs no new letter here
+#   AMINETXDUO_PEERCAP_FILTER the pcap filter, when a port is not what selects
+#                             the traffic.  tests/perf/run-ackscope.sh selects
+#                             by the guest's ADDRESS instead, because the
+#                             machine under test keeps its address across
+#                             workloads and does not keep a port.  Default is
+#                             the port filter every other caller wants.
+#   AMINETXDUO_PEERCAP_SNAPLEN  bytes kept per frame (default 128).  Raise it
+#                             to read TCP OPTIONS: 20 LINUX_SLL2 + 60 IP + 60
+#                             TCP is 140, and a truncated option is a window
+#                             scale that silently reads as absent.
 #
 # SPDX-License-Identifier: MIT
 
@@ -147,6 +157,8 @@ peercap_start() {
     [ -n "$peer" ] || { echo "peercap: no peer, not capturing" >&2; return 1; }
     peercap_resolve_tcpdump "$peer" || return 1
     mkdir -p "$outdir"
+    local filter="${AMINETXDUO_PEERCAP_FILTER:-tcp port $port}"
+    local snap="${AMINETXDUO_PEERCAP_SNAPLEN:-128}"
     # The port the capture filter was set to, so peercap_report can tell
     # lossrate.py which connection to read.  Without it the report defaults to
     # 17712 and a run on any other port gets "no TCP on port 17712" -- a full
@@ -155,18 +167,27 @@ peercap_start() {
     # The poll interval is 50 ms.  It is not a sampling rate for anything
     # timed, the capture carries the timing, it just has to be short
     # enough that the read phases contain samples at all.
-    ssh "$peer" "
-        rm -f $PEERCAP_TMP/peercap-$tag.pcap $PEERCAP_TMP/peercap-$tag.ss
-        nohup timeout $PEERCAP_MAX $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s 128 -w \
-            $PEERCAP_TMP/peercap-$tag.pcap 'tcp port $port' \
-            > $PEERCAP_TMP/peercap-$tag.tcpdump.log 2>&1 &
-        echo \$! > $PEERCAP_TMP/peercap-$tag.tcpdump.pid
-        nohup timeout $PEERCAP_MAX sh -c 'while :; do
+    #
+    # The `ss` poll needs a listening port to watch and there is not always
+    # one: a capture selected by address covers whatever the machine does,
+    # and `sport = :0` matches nothing while still writing a file every 50 ms
+    # for the length of the run.  A port of 0 or none skips that collector,
+    # and peercap_stop and lossrate.py both already treat the .ss file as
+    # optional.
+    local sscmd="true"
+    [ -z "$port" ] || [ "$port" = 0 ] || sscmd="nohup timeout $PEERCAP_MAX sh -c 'while :; do
                          date +\"T %s.%N\"
                          $PEERCAP_SS -tim \"sport = :$port\"
                          sleep 0.05
                      done' > $PEERCAP_TMP/peercap-$tag.ss 2>/dev/null &
-        echo \$! > $PEERCAP_TMP/peercap-$tag.ss.pid
+        echo \$! > $PEERCAP_TMP/peercap-$tag.ss.pid"
+    ssh "$peer" "
+        rm -f $PEERCAP_TMP/peercap-$tag.pcap $PEERCAP_TMP/peercap-$tag.ss
+        nohup timeout $PEERCAP_MAX $PEERCAP_TCPDUMP -i $PEERCAP_IFACE -s $snap -w \
+            $PEERCAP_TMP/peercap-$tag.pcap '$filter' \
+            > $PEERCAP_TMP/peercap-$tag.tcpdump.log 2>&1 &
+        echo \$! > $PEERCAP_TMP/peercap-$tag.tcpdump.pid
+        $sscmd
         sleep 1
     " >/dev/null 2>&1 || { echo "peercap: could not start on $peer" >&2; return 1; }
     # tcpdump is nohup'd, so ssh returns 0 whatever became of it, and the one
@@ -196,7 +217,7 @@ peercap_start() {
         echo "  /usr/sbin/setcap cap_net_raw,cap_net_admin+eip ~/tcpdump-cap" >&2
         return 1
     fi
-    echo "==> capturing at the peer into $PEERCAP_TMP/peercap-$tag.{pcap,ss}"
+    echo "==> capturing '$filter' at the peer into $PEERCAP_TMP/peercap-$tag.pcap"
     return 0
 }
 
