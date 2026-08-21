@@ -199,11 +199,20 @@ Darwin)
 
     # libnix installs with `rsync --exclude`, and macOS's openrsync gets those
     # patterns wrong: the build succeeds and the library is short some objects.
-    if ! rsync --version 2>/dev/null | head -1 | grep -qi 'rsync.*version.*protocol'; then
-        echo "!! rsync on PATH is not GNU rsync (macOS ships openrsync)." >&2
-        echo "   brew install rsync, and make sure $BREW/bin comes first." >&2
-        exit 2
-    fi
+    # Capture the banner, then match it.  `rsync --version | head -1 | grep -q`
+    # is a race: grep -q exits on the match, head exits with it, and rsync dies
+    # of SIGPIPE before it has finished writing -- which under `set -o pipefail`
+    # reads as "not GNU rsync".  It fires perhaps one run in three with GNU
+    # rsync 3.5.0 installed and first on PATH, and it is the only thing standing
+    # between a Mac and a toolchain build.
+    RSYNC_BANNER=$( { rsync --version 2>/dev/null || true; } | sed -n 1p )
+    case "$RSYNC_BANNER" in
+        *rsync*version*protocol*) ;;
+        *)
+            echo "!! rsync on PATH is not GNU rsync (macOS ships openrsync)." >&2
+            echo "   brew install rsync, and make sure $BREW/bin comes first." >&2
+            exit 2 ;;
+    esac
     for t in lha makeinfo; do need "$t"; done
     ;;
 Linux)
@@ -396,6 +405,27 @@ if [ -f "$HERE/fix-toolchain-inline-const.py" ]; then
     echo "==> NDK inline register ABI"
     python3 "$HERE/fix-toolchain-inline-const.py" "$PREFIX"
 fi
+
+# Make plain ar, ranlib and nm plugin-aware.  binutils auto-loads whatever it
+# finds in <prefix>/lib/bfd-plugins; GCC installs liblto_plugin.so under
+# libexec/gcc/<target>/<version>/ and nothing links the two, so out of the box
+# `ar` writes an archive index whose only entry is ___gnu_lto_slim and the LTO
+# link fails on the first symbol that lives in a static library:
+#
+#   ld: ...ltrans0.ltrans.o: undefined reference to `ami_rt_cpu_select'
+#
+# Setting CMAKE_AR to gcc-ar fixes our CMake builds and nothing else; the
+# conformance suite and the dropbear client call the bare tools.  Every
+# distribution ships this symlink, and it is what makes the bare tools work.
+LTO_PLUGIN=$(ls "$PREFIX"/libexec/gcc/m68k-amigaos/*/liblto_plugin.so 2>/dev/null | head -1)
+if [ -z "$LTO_PLUGIN" ]; then
+    echo "!! no liblto_plugin.so under $PREFIX/libexec; -flto cannot work" >&2
+    exit 1
+fi
+LTO_PLUGIN_REL="../../libexec/gcc/m68k-amigaos/$(basename "$(dirname "$LTO_PLUGIN")")/liblto_plugin.so"
+mkdir -p "$PREFIX/lib/bfd-plugins"
+ln -sf "$LTO_PLUGIN_REL" "$PREFIX/lib/bfd-plugins/liblto_plugin.so"
+echo "==> lib/bfd-plugins/liblto_plugin.so -> $LTO_PLUGIN_REL"
 
 VER=$("$PREFIX/bin/m68k-amigaos-gcc" -dumpversion 2>/dev/null || echo "")
 if [ "$VER" != "$EXPECT_GCC_VERSION" ]; then
