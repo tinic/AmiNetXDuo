@@ -1462,14 +1462,27 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
         UWORD ci = netdev_diag_card(card);
 
         netdev_diag_note(ANXDIAG_ATTACH_OK, ci, (ULONG)unit->nu_Nic.bus.dmode);
+        /*
+         * factory[], not mac[].  mac[] is the OPERATING address and nothing
+         * has set it yet: it arrives with S2_CONFIGINTERFACE when an
+         * interface is configured, which is long after a probe.  A tool that
+         * only probes -- CheckNetDevice is the one that exists -- therefore
+         * read six zeroes and printed them under a card that works, beside a
+         * source line correctly naming where the address had been read from.
+         * A diagnostic that reports a working card as having no address is
+         * worse than one that reports nothing.
+         *
+         * factory[] is what the card itself answered, every driver fills it
+         * at attach, and it is the thing the source line is about.
+         */
         netdev_diag_note(ANXDIAG_MAC_HI, ci,
-                         ((ULONG)unit->nu_Nic.mac[0] << 8) |
-                         (ULONG)unit->nu_Nic.mac[1]);
+                         ((ULONG)unit->nu_Nic.factory[0] << 8) |
+                         (ULONG)unit->nu_Nic.factory[1]);
         netdev_diag_note(ANXDIAG_MAC_LO, ci,
-                         ((ULONG)unit->nu_Nic.mac[2] << 24) |
-                         ((ULONG)unit->nu_Nic.mac[3] << 16) |
-                         ((ULONG)unit->nu_Nic.mac[4] << 8) |
-                         (ULONG)unit->nu_Nic.mac[5]);
+                         ((ULONG)unit->nu_Nic.factory[2] << 24) |
+                         ((ULONG)unit->nu_Nic.factory[3] << 16) |
+                         ((ULONG)unit->nu_Nic.factory[4] << 8) |
+                         (ULONG)unit->nu_Nic.factory[5]);
         netdev_diag_note(ANXDIAG_MAC_SOURCE, ci,
                          (ULONG)unit->nu_Nic.mac_source);
         /* No ANXDIAG_GETODD here.  ne2000_detect() records it where the mode
