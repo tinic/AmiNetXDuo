@@ -943,18 +943,10 @@ static NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_128 =
     ami_crypto_method_aes_cbc_operation
 };
 
-static NX_CRYPTO_METHOD ami_crypto_method_aes_cbc_256 =
-{
-    NX_CRYPTO_ENCRYPTION_AES_CBC,
-    NX_CRYPTO_AES_256_KEY_LEN_IN_BITS,
-    NX_CRYPTO_AES_IV_LEN_IN_BITS,
-    0,
-    (NX_CRYPTO_AES_BLOCK_SIZE_IN_BITS >> 3),
-    sizeof(AMI_CRYPTO_AES_CTX),
-    ami_crypto_method_aes_init,
-    ami_crypto_method_aes_cleanup,
-    ami_crypto_method_aes_cbc_operation
-};
+/* There is no AES-256 method here.  The only suite that asked for one was
+   TLS_RSA_WITH_AES_256_CBC_SHA256, and static RSA is gone from the table
+   below; ami_crypto_method_aes_cbc_operation handles either key length, so
+   the row is all that would need to come back. */
 
 
 /* --------------------------------------------- ChaCha20-Poly1305 (AEAD), */
@@ -1498,12 +1490,10 @@ static NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
  */
 #ifdef AMINETXDUO_TLS_STOCK_BULK
 #define AMI_BULK_AES128     crypto_method_aes_cbc_128
-#define AMI_BULK_AES256     crypto_method_aes_cbc_256
 #define AMI_BULK_SHA256     crypto_method_sha256
 #define AMI_BULK_HMAC256    crypto_method_hmac_sha256
 #else
 #define AMI_BULK_AES128     ami_crypto_method_aes_cbc_128
-#define AMI_BULK_AES256     ami_crypto_method_aes_cbc_256
 #define AMI_BULK_SHA256     ami_crypto_method_sha256
 #define AMI_BULK_HMAC256    ami_crypto_method_hmac_sha256
 #endif
@@ -1515,7 +1505,6 @@ static NX_CRYPTO_METHOD ami_crypto_method_hmac_sha256 =
 extern NX_CRYPTO_METHOD crypto_method_none;
 extern NX_CRYPTO_METHOD crypto_method_null;
 extern NX_CRYPTO_METHOD crypto_method_aes_cbc_128;
-extern NX_CRYPTO_METHOD crypto_method_aes_cbc_256;
 extern NX_CRYPTO_METHOD crypto_method_aes_ccm_8;
 extern NX_CRYPTO_METHOD crypto_method_aes_ccm_16;
 extern NX_CRYPTO_METHOD crypto_method_aes_128_gcm_16;
