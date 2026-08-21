@@ -208,6 +208,16 @@
        "that command by hand, or run any network program: "
        "bsdsocket.library starts the stack when a program first opens "
        "it.\n\n"
+       "One more line goes in beside it, and stays there even when the "
+       "answer is no:"
+       "\n\n\tAssign >NIL: AmiTCP: SYS:\n\n"
+       "Programs built with ixemul, which is most of the GeekGadgets "
+       "collection, look for usergroup.library at the literal path "
+       "AmiTCP:libs/usergroup.library and report that there is no network "
+       "at all when they do not find it.  LIBS: is SYS:Libs on a stock "
+       "Workbench, so that assign points the path at the library this "
+       "installer put there.  It is left out on a machine that already has "
+       "a real AmiTCP installed, which owns the name.\n\n"
        "The installer changes only its own lines.  Everything else in "
        "S:User-Startup stays as it is, so it is safe to run this installer "
        "again."))
@@ -1039,6 +1049,43 @@
   (confirm)
   (optional "force"))
 
+; --- AmiTCP: -------------------------------------------------------------
+;
+; LIBS: is where usergroup.library belongs and where every caller that asks
+; for it by name alone finds it.  A few do not ask by name alone.  ixnet.
+; library, which every ixemul program goes through, opens the literal path
+; AmiTCP:libs/usergroup.library, and on failing that lookup it CLOSES the
+; bsdsocket.library it had already opened -- so socket() answers ENOSYS and a
+; GeekGadgets binary reports no network at all.  That is how wget broke.
+;
+; bsdsocket.library holds usergroup.library open for the life of the stack,
+; which satisfies that lookup on its own: exec resolves a path-qualified
+; OpenLibrary by file part against the already-open list.  This assign is the
+; second half, for the caller that Locks or Opens the path rather than
+; OpenLibrary'ing it.
+;
+; SYS: is the target.  LIBS: is SYS:Libs on a stock Workbench, so
+; AmiTCP:libs/usergroup.library resolves to the copy installed above with no
+; second copy on disk.
+;
+; NOT DONE IF SOMETHING ELSE ALREADY OWNS THE NAME.  A machine with a real
+; AmiTCP on it has an AmiTCP: pointing at that installation, holding its db
+; drawer and its own libs, and claiming the name would break it.  Roadshow,
+; for comparison, makes no such assign at all and relies on LIBS: alone.
+;
+; The test is for AmiTCP:db or AmiTCP:bin, and NOT for AmiTCP: itself, which
+; on the second run of this installer is the assign the first run made.  Both
+; of those drawers hold a real AmiTCP's own files, and neither is in a stock
+; SYS:, so their absence is what says the name is free.
+
+(set HAVE_AMITCP
+  (if (exists "AmiTCP:db" (noreq))
+      1
+      (if (exists "AmiTCP:bin" (noreq)) 1 0)))
+
+(if (NOT HAVE_AMITCP)
+    (makeassign "AmiTCP" "SYS:" (safe)))
+
 ; --- anxnet.device -------------------------------------------------------
 ;
 ; NOT INSTALLED HERE, DELIBERATELY.  The archive carries it in Devs/Networks/
@@ -1442,18 +1489,56 @@
 ; installer put the page in is wherever the user said, so the assign is the
 ; only stable name for it.
 
-(set BOOT_CMD ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF))
+; The AmiTCP: line goes FIRST, and is there whether or not the network starts
+; by itself: it costs nothing, and the program it is for -- an ixemul binary
+; opening a socket -- is the kind that gets run by hand on a machine that was
+; installed with the automatic start turned off.  A plain assign and not ADD:
+; if a real AmiTCP is installed later, its own installer appends its line to
+; S:User-Startup after this one, so the real one wins.  See the note beside
+; the makeassign above.
 
-(if DO_HTTPD
+; DO_BOOT counts the lines rather than testing BOOT_CMD itself: (if) wants a
+; number, and a string that does not begin with a digit is 0 to it, so an (if
+; BOOT_CMD) would be false however much was in it.
+(set BOOT_CMD "")
+(set DO_BOOT 0)
+
+(if (NOT HAVE_AMITCP)
+  (
+    (set BOOT_CMD ("Assign >NIL: AmiTCP: SYS:\n"))
+    (set DO_BOOT 1)
+  ))
+
+(if DO_STARTUP (set DO_BOOT 1))
+
+(if DO_STARTUP
+    (set BOOT_CMD
+      (cat BOOT_CMD
+           ("C:AddNetInterface DEVS:NetInterfaces/%s QUIET\n" START_IF))))
+
+(if (AND DO_STARTUP DO_HTTPD)
     (set BOOT_CMD
       (cat BOOT_CMD
            ("Assign AmiNetXDuo: \"%s\"\n" DOCDIR)
            ("Run >NIL: <NIL: C:httpd \"%s\" %ld -T\n" HTTPD_ROOT HTTPD_PORT))))
 
+; Three cases, and (startup) covers all of them because it writes the block
+; whole: the network lines and the assign, the assign on its own, or no block
+; at all on the machine that already has an AmiTCP and does not want the
+; automatic start either.
+(set P_BOOT
+  (cat "Adding one line to S:User-Startup: the AmiTCP: assign that ixemul "
+       "programs need in order to find usergroup.library.  The network does "
+       "not start by itself."))
+
 (if DO_STARTUP
+    (set P_BOOT
+      (cat "Adding AmiNetXDuo to S:User-Startup, so that the network starts "
+           "when the Amiga boots.")))
+
+(if DO_BOOT
     (startup APPNAME
-      (prompt "Adding AmiNetXDuo to S:User-Startup, so that the network "
-              "starts when the Amiga boots.")
+      (prompt P_BOOT)
       (help   H_STARTUP)
       (command BOOT_CMD))
     (startup APPNAME
