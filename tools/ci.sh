@@ -9,6 +9,7 @@
 #   tools/ci.sh cards                # tier 2: every network card, one boot each
 #   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
 #   tools/ci.sh capture              # tier 2: NetCapture, every card
+#   tools/ci.sh wirequiet            # tier 2: what an idle machine emits
 #   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
 #   tools/ci.sh host cross emulator  # pick and choose
 #
@@ -42,6 +43,13 @@
 #                against an unfiltered capture of the same seconds, and
 #                tcpdump on another machine reads the files.  Needs a bridge;
 #                a peer makes the last claim stronger.
+#   wirequiet    tier 2, boots EVERY card and asks what the machine puts on
+#                the wire when nobody asked it to: a settle, then a window of
+#                idle counted off this host's own NIC with tcpdump.  Nothing
+#                else in this tree asserts on what the guest EMITS, which is
+#                how a DHCPv6 client rebinding eight times a second passed
+#                every stage for as long as it did.  Needs a bridge and an
+#                unprivileged tcpdump; no peer.
 #   bridged      tier 2, the two pass/fail harnesses that need a real link:
 #                NetShutdown against live services, and TCP: driven by
 #                Commodore's own Type and Copy.  Needs a bridge, and a peer
@@ -1186,6 +1194,38 @@ stage_capture() {
     return "$rc"
 }
 
+# ------------------------------------------------------------- wirequiet ----
+#
+# What the machine EMITS.  Every other stage in this file reads the guest's
+# own transcript, and a guest shouting at a router says nothing about it in
+# its transcript: a DHCPv6 client that rebound its lease every 120 ms for
+# 305 s straight passed all of them, and was found by a person running tcpdump
+# by hand.
+#
+# NOT in the default set, for the reason `capture` is not: it needs a BRIDGE.
+# SLIRP has no segment, no DHCPv6 server and nothing for an idle machine to be
+# noisy at, so the whole measurement would be of an empty NAT.
+stage_wirequiet() {
+    hr "the wire, when the machine is idle (tier 2, needs a bridge)"
+
+    local rc=0
+
+    "$ROOT/tests/tools/run-wirequiet.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  every card went quiet after bring-up and was still" \
+                "answering when the window closed" ;;
+        1) fail "wirequiet: a card kept talking with nothing asked of it --" \
+                "the card_ line above has the count and the breakdown" ;;
+        2) fail "wirequiet: the rig refused it before any card was booted" ;;
+        3) fail "wirequiet: a card produced no capture or no transcript, so" \
+                "the window is not a measurement of anything" ;;
+        *) fail "wirequiet: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -1527,7 +1567,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|bridged|lossgate|smb)
             stage_toolchain; break ;;
     esac
 done
@@ -1557,6 +1597,7 @@ for s in "${WANT[@]}"; do
         cards)       stage_cards || srrc=$? ;;
         cards6)      stage_cards6 || srrc=$? ;;
         capture)     stage_capture || srrc=$? ;;
+        wirequiet)   stage_wirequiet || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
