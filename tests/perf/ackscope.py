@@ -130,6 +130,7 @@ import collections
 import os
 import struct
 import sys
+import time
 
 # The pcap reader, the link layers and the sequence comparison come from
 # lossrate.py rather than being written again: LINUX_SLL2 versus LINUX_SLL
@@ -631,6 +632,16 @@ def main():
     kv("conns_seen", nconn)
     kv("segments", len(segs))
     kv("wall_s", "%.3f" % wall)
+    # WALL CLOCK, from the capture's own timestamps.  This box is shared, and
+    # an arm that was killed from outside -- a stray pattern kill, a reboot,
+    # somebody else's cleanup -- looks exactly like catastrophic packet loss
+    # in every counter below.  The only thing that separates them afterwards
+    # is when it happened, and a figure with no time on it cannot be matched
+    # against anybody's record of what else was running.
+    kv("started_utc", time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                    time.gmtime(segs[0].t)))
+    kv("ended_utc", time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                  time.gmtime(segs[-1].t)))
     kv("handshake_seen", 1 if (g.syn and p.syn) else 0)
     kv("wscale_known", 1 if scaled else 0)
     kv("guest_wscale", g.wscale if g.wscale is not None else -1)
