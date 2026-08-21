@@ -351,8 +351,14 @@ fi
 # shape.  tools/fix-toolchain-crt0.py says what the bug is and why this is the
 # seam; it is idempotent and it leaves an already-correct toolchain alone, so a
 # future image that has been fixed upstream needs no change here.
+# Both repairs print their progress to stdout, and under --export stdout is a
+# shell script being eval'd by the caller.  `== frame skew' then reaches the
+# shell as a command and tools/ci.sh dies with `==: command not found' before
+# it builds anything.  First run only -- the second finds a warm cache and
+# skips both repairs -- which is why CI never sees it and a fresh machine
+# always does.  Their output is progress, so stderr is where it belonged.
 say "==> repairing the newlib crt0 frame skew"
-if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR"; then
+if ! python3 "$(dirname "$0")/fix-toolchain-crt0.py" "$TMP/x/$TC_PREFIX_IN_TAR" >&2; then
     echo "!! crt0 repair failed, refusing to install a toolchain that" >&2
     echo "!! builds commands which crash on return to the Shell." >&2
     exit 1
@@ -366,7 +372,7 @@ fi
 # no diagnostic.  Idempotent, and it leaves a clean tree alone.
 say "==> repairing the NDK inline register ABI"
 if ! python3 "$(dirname "$0")/fix-toolchain-inline-const.py" \
-     "$TMP/x/$TC_PREFIX_IN_TAR"; then
+     "$TMP/x/$TC_PREFIX_IN_TAR" >&2; then
     echo "!! inline repair failed, refusing to install a toolchain whose" >&2
     echo "!! library calls pass arguments in the wrong registers." >&2
     exit 1
