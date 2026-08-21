@@ -64,9 +64,31 @@ case "$EMU" in
     amiberry)
         ARGS=()
         # -n is "attach the card"; on Amiberry that is the board and the
-        # backend, and SLIRP is the backend every harness here assumes.
-        [ "$NETWORK" = "1" ] && ARGS+=(-N "${AMINETXDUO_EMU_BOARD:-a2065}"
-                                       -B "${AMINETXDUO_EMU_BACKEND:-slirp}")
+        # backend.
+        #
+        # NO SILENT SLIRP DEFAULT.  This used to read
+        # "${AMINETXDUO_EMU_BACKEND:-slirp}", so a caller that set only
+        # AMINETXDUO_AMIBERRY_BACKEND -- which is the name tools/amiberry-run.sh
+        # uses, and therefore the one people reach for -- was overridden without
+        # a word and measured a SLIRP link.  Two separate investigations lost
+        # runs to it in one day, and a SLIRP number is not a number: it is not
+        # the wire, it is not the driver, and nothing measured on it transfers.
+        #
+        # Both spellings are honoured, and with neither set this stops rather
+        # than choosing for you.  A harness that cannot say which backend it
+        # wants has a bug in it, and finding that out now is cheaper than
+        # finding it out from a result that looks plausible.
+        if [ "$NETWORK" = "1" ]; then
+            BACKEND="${AMINETXDUO_EMU_BACKEND:-${AMINETXDUO_AMIBERRY_BACKEND:-}}"
+            if [ -z "$BACKEND" ]; then
+                echo "!! no network backend set, and there is no default." >&2
+                echo "   Set AMINETXDUO_EMU_BACKEND (or AMINETXDUO_AMIBERRY_BACKEND)" >&2
+                echo "   to a bridge interface, e.g. ens18.  SLIRP is not a" >&2
+                echo "   fallback: it measures neither the wire nor the driver." >&2
+                exit 2
+            fi
+            ARGS+=(-N "${AMINETXDUO_EMU_BOARD:-a2065}" -B "$BACKEND")
+        fi
         [ -n "$MODEL" ]      && ARGS+=(-m "$MODEL")
         [ -n "$TIMEOUT" ]    && ARGS+=(-t "$TIMEOUT")
         [ -n "$CPU" ]        && ARGS+=(-c "$CPU")
