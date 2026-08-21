@@ -6,10 +6,11 @@
 # ports that answer the first two.  host_prelude.h is force-included and its
 # comment says why the order in it matters.
 #
-# NOT every file compiles this way.  options.c, select.c and tcp_handler.c read
-# tv_secs and tv_micro out of the Amiga's struct timeval, which collides with
-# the POSIX one the C library has already defined; host/shim/devices/timer.h
-# records that boundary.
+# NOT every file compiles this way.  tcp_handler.c is the one still outside:
+# it is a DOS handler as well as a socket, and needs the whole ACTION_* and
+# ERROR_* vocabulary plus struct FileHandle, which is a shim of its own rather
+# than a constant or two.  The struct timeval collision that used to exclude
+# options.c and select.c with it is gone; host/shim/devices/timer.h says how.
 #
 # SPDX-License-Identifier: MIT
 
@@ -103,6 +104,67 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(test_expunge PRIVATE AMINETXDUO_TCPDEVICE)
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
+
+    # select.c, the readiness predicates and WaitSelect()'s return.
+    #
+    # WHY THIS ONE IS ON THE PUSH GATE.  Two regressions have shipped from
+    # select.c, both green on the push that carried them: a connected UDP
+    # socket reported readable by another peer's datagram (d3ccab5d), and
+    # WaitSelect() counting ready descriptors where AmiTCP counts ready bits
+    # (e6c76f5e, undone by 8aa5a3a7).  tests/ipv6/ipv6_socket_test.c covers
+    # both, on the emulator, which .github/workflows/emulator.yml runs on a
+    # nightly cron and on a tag.  This tier is what a push runs, so the same
+    # claims are asserted here against the shipping translation unit.
+    add_executable(test_select host/test_select_host.c
+                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/select.c")
+
+    target_include_directories(test_select PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_select PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    # Same reason as test_route: without it the Linux nx_port.h skips
+    # port/netxduo-amiga/inc/nx_user.h, and select.c compiles against a
+    # different NX_TCP_SOCKET and a different retransmission ladder than the
+    # one that ships.
+    target_compile_definitions(test_select PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
+
+    add_test(NAME select_readiness COMMAND test_select)
+
+    # options.c, the other file the struct timeval collision used to keep out.
+    # SO_RCVTIMEO and SO_SNDTIMEO are the conversions that were unreachable
+    # here, and every option in the file was provable only on the emulator.
+    #
+    # The four files options.c delegates to -- src/ipv6's option handlers,
+    # mcast.c and cmsg.c -- are stubbed; the test's header says what that does
+    # and does not prove.
+    add_executable(test_sockopt host/test_sockopt_host.c
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/options.c")
+
+    target_include_directories(test_sockopt PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_sockopt PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_sockopt PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
+
+    add_test(NAME socket_options COMMAND test_sockopt)
 endif()
 
 # bpf_write() is the only BPF vector that reaches the NetX packet pool. Its

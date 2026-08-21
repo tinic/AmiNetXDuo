@@ -8,11 +8,10 @@
  * has already brought in, and defining neither is not an option because
  * netinet/in.h needs the POSIX one.
  *
- * So the host keeps its own, and tr_time is spelled out in two ULONGs to hold
- * the size of AmiSocketBase steady.  The consequence is the boundary of what
- * this shim supports: options.c, select.c and tcp_handler.c read tv_secs and
- * tv_micro and will not compile against it.  Nothing else in src/bsdsocket
- * touches either name.
+ * host_prelude.h resolves it by renaming the tag once the C library's headers
+ * are parsed, so tr_time below is the Amiga's two ULONGs and the C library
+ * keeps its own.  tv_secs and tv_micro are therefore readable here, which is
+ * what lets options.c and select.c compile in this tier.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -27,6 +26,7 @@ struct timerequest {
     struct timeval   tr_time;      /* host_prelude.h renamed the tag */
 };
 
+#define TIMERNAME      "timer.device"
 #define UNIT_VBLANK    1
 #define UNIT_MICROHZ   0
 #define TR_ADDREQUEST  9

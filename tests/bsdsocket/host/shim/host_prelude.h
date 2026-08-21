@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <netdb.h>
 
 #undef htonl
@@ -67,6 +68,23 @@
 #undef ICMP6_FILTER
 #undef IP_PKTINFO
 #undef IP_RECVDSTADDR
+
+/*
+ * And the one TCP-level option in the same position.  <netinet/tcp.h> is
+ * included above for it: options.c reaches that header for TCP_NODELAY, and
+ * glibc's TCP_USER_TIMEOUT is 18 where aminetxduo/tcp.h publishes 0x1001,
+ * which is what the library answers to.
+ */
+#undef TCP_USER_TIMEOUT
+
+/*
+ * The one SOL_SOCKET option that is AmiTCP's and not POSIX's, so glibc has no
+ * name for it and nothing undefines anything here.  NDK 3.2
+ * SANA+RoadshowTCP-IP/netinclude/sys/socket.h:152; doc/bsdsocket.doc under
+ * setsockopt describes it as the mask of FD_* events GetSocketEvents()
+ * reports.  options.c is the only reader.
+ */
+#define SO_EVENTMASK 0x2001
 
 #define AMINETXDUO_HAVE_IPV6_MREQ        1
 #define AMINETXDUO_HAVE_SOCKADDR_STORAGE 1

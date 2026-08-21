@@ -26,4 +26,9 @@ struct Message
     UWORD           mn_Length;
 };
 
+/* mp_Flags arrival actions, NDK exec/ports.h:40-42. */
+#define PA_SIGNAL    0
+#define PA_SOFTINT   1
+#define PA_IGNORE    2
+
 #endif

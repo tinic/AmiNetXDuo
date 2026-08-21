@@ -27,4 +27,22 @@
 #define RTA_DestinationHost     (RTA_BASE + 4)
 #define RTA_DestinationNet      (RTA_BASE + 5)
 
+/*
+ * The seven event bits, the vocabulary of the AmiTCP event API.  NDK 3.2
+ * SANA+RoadshowTCP-IP/netinclude/libraries/bsdsocket.h:344-350; the meanings
+ * are in doc/bsdsocket.doc under SetSocketSignals, GetSocketEvents and
+ * setsockopt(SO_EVENTMASK).
+ *
+ * select.c posts them from the NetX Duo callbacks and options.c is where
+ * SO_EVENTMASK reads and writes one.  They are values, not merely names, so
+ * a host test can assert which bit a callback set.
+ */
+#define FD_ACCEPT               0x01    /* there is a connection to accept() */
+#define FD_CONNECT              0x02    /* connect() completed               */
+#define FD_OOB                  0x04    /* socket has out-of-band data       */
+#define FD_READ                 0x08    /* socket is readable                */
+#define FD_WRITE                0x10    /* socket is writeable               */
+#define FD_ERROR                0x20    /* asynchronous error on socket      */
+#define FD_CLOSE                0x40    /* connection closed                 */
+
 #endif

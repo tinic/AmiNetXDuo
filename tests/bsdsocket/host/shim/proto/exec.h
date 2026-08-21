@@ -53,7 +53,10 @@ struct Message *GetMsg(struct MsgPort *port);
 struct MsgPort *WaitPort(struct MsgPort *port);
 VOID  ReplyMsg(struct Message *message);
 
-BYTE  OpenDevice(const char *devName, ULONG unit,
+/* CONST_STRPTR, as clib/exec_protos.h:115 spells it, and not `const char *`:
+   the callers cast to STRPTR, which is unsigned, and the two differ under
+   -Werror=pointer-sign. */
+BYTE  OpenDevice(const UBYTE *devName, ULONG unit,
                  struct IORequest *ioRequest, ULONG flags);
 VOID  CloseDevice(struct IORequest *ioRequest);
 VOID  SendIO(struct IORequest *ioRequest);
