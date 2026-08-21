@@ -48,6 +48,8 @@
 #include "aminetxduo/bpf.h"
 #endif
 
+#include "aminetxduo/random.h"
+
 #include <proto/exec.h>
 /* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
 #include <inline/alib.h>
@@ -725,6 +727,15 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 
     packet->nx_packet_length     = length;
     packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + length;
+
+    /*
+     * When this frame arrived is the only thing this machine knows that is
+     * not in its own boot image, and the entropy pool cannot clear
+     * AMI_RANDOM_MIN_BITS without it -- see the arrival section of
+     * src/common/ami_random.c.  A load and a branch once the pool is over the
+     * bar, which is within seconds of the interface carrying traffic.
+     */
+    ami_random_arrival();
 
     slot->packet = NULL;     /* ownership passes to NetX Duo */
     ami_sana2_rx_deliver(iface, packet, slot);

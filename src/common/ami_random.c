@@ -722,6 +722,176 @@ BOOL ami_random_is_seeded(VOID)
     return (BOOL)(pool_bits >= AMI_RANDOM_MIN_BITS);
 }
 
+/* ========================================================== arrival timing
+ *
+ * The one source on this machine that is not a property of the machine.
+ *
+ * Everything gathered above describes the Amiga: its memory map, its task
+ * list, its clock, the phase relationship between the CPU and the display.
+ * On a fixed boot image most of it repeats to the byte, which is why the
+ * credits total 26 bits against a bar of 64 and why ami_random_is_seeded()
+ * could not be TRUE on a shipping machine however many times it was called.
+ * A pool that can never clear its own bar makes the bar meaningless, and
+ * src/tls/tls.h tells an external caller to treat a value below it as a
+ * refusal to generate a key.  So the machine gets a source worth crediting
+ * rather than the contract getting softened.
+ *
+ * WHY A FRAME ARRIVAL.  When a frame reaches ami_sana2_rx_complete() is
+ * decided by a remote sender's clock, the wire, the card's interrupt latency,
+ * Exec's signal delivery and when the receive thread was next dispatched.
+ * None of that is in the boot image.  It is the same source Linux credits
+ * from interrupt timing, and on a TCP/IP stack it is free: the frames are
+ * arriving anyway.
+ *
+ * WHAT IS KEPT.  The low eight bits of the E-Clock delta between one arrival
+ * and the last, which at ~1.4 us a tick spans 357 us.  The high bits are the
+ * inter-arrival gap, which anybody watching the wire can also see; the low
+ * bits are the local scheduling and DMA jitter on top of it, which they
+ * cannot.  Keeping only those is what makes this defensible against a peer
+ * that paces its own traffic.
+ *
+ * WHAT IT IS CREDITED.  gather_jitter()'s rule, unchanged: count how many bit
+ * positions varied across the batch and credit one bit each.  A machine where
+ * every delta is identical is credited nothing.  Sixteen arrivals can
+ * therefore contribute at most 8 bits, so the 64-bit cap needs at least 128
+ * frames, and 0.5 bits per sample is well under the one bit per interrupt
+ * that Linux takes.
+ *
+ * WHAT IT COSTS.  One load and a branch per frame once the pool is over the
+ * bar, which on a machine doing DHCP, ARP and a DNS lookup is within the
+ * first seconds of the interface being up.  Before that, a ReadEClock() per
+ * frame and two SHA-256 compressions per sixteen.  It never restarts.
+ */
+
+/* Deltas per mix.  Small, because the point is to reach the bar early in the
+   life of the interface rather than to collect efficiently. */
+#define ARRIVAL_BATCH               16
+
+/* How many of the delta's low bits are the local jitter rather than the
+   sender's spacing.  Also the ceiling on one batch's credit. */
+#define ARRIVAL_BITS_KEPT           8
+
+static UBYTE  arrival_delta[ARRIVAL_BATCH];
+static UWORD  arrival_n;
+static ULONG  arrival_prev;
+static BOOL   arrival_have_prev;
+static ULONG  arrival_bits;             /* credited from this source so far */
+static BOOL   arrival_done;             /* the gate on the receive path     */
+
+/*
+ * A full batch: credit what moved and mix all of it.  Its own function so
+ * that nothing it needs -- the copy of the batch above all -- is on the path
+ * a gated call takes.
+ */
+static VOID arrival_flush(const UBYTE *batch)
+{
+    ULONG varying = 0;
+    UBYTE changed = 0;
+    UWORD i;
+
+    /* Which bit positions moved across the batch.  A machine whose arrivals
+       are as deterministic as its memory map moves none, and is credited what
+       that is worth. */
+    for (i = 1; i < ARRIVAL_BATCH; i++)
+        changed |= (UBYTE)(batch[i] ^ batch[0]);
+
+    for (i = 0; i < ARRIVAL_BITS_KEPT; i++)
+    {
+        if ((changed & (UBYTE)(1U << i)) != 0)
+            varying++;
+    }
+
+    if (varying > (AMI_RANDOM_ARRIVAL_MAX_BITS - arrival_bits))
+        varying = AMI_RANDOM_ARRIVAL_MAX_BITS - arrival_bits;
+
+    arrival_bits += varying;
+
+    /* The whole batch is mixed whatever the credit came to, for the same
+       reason the sources credited zero above are mixed. */
+    pool_mix(batch, (ULONG)ARRIVAL_BATCH, varying);
+
+    /* Per batch, so a logging build can be asked what this machine's arrivals
+       are actually worth rather than being taken on the estimate. */
+    AMI_DEBUG("random: arrival batch varied %lu of %lu bit(s), %lu credited",
+              (LONG)varying, (LONG)ARRIVAL_BITS_KEPT, (LONG)arrival_bits);
+
+    if (arrival_bits >= AMI_RANDOM_ARRIVAL_MAX_BITS ||
+        pool_bits >= AMI_RANDOM_MIN_BITS)
+    {
+        arrival_done = TRUE;
+
+        /* Once per machine, and the answer to "is this pool seeded".  INFO
+           rather than DEBUG because it fires exactly once and nothing else
+           reports it. */
+        AMI_INFO("random: arrivals credited %lu bits, pool %lu, seeded=%s",
+                 (LONG)arrival_bits, (LONG)pool_bits,
+                 (LONG)(ami_random_is_seeded() ? "TRUE" : "FALSE"));
+    }
+}
+
+VOID ami_random_arrival(VOID)
+{
+    struct EClockVal ev;
+    UBYTE            batch[ARRIVAL_BATCH];
+    ULONG            now;
+    UWORD            i;
+    BOOL             full = FALSE;
+
+    /* The whole steady-state cost.  Deliberately one plain load: this is on
+       the receive path of every frame the machine ever takes in. */
+    if (arrival_done)
+        return;
+
+    if (TimerBase == NULL)
+        return;
+
+    /*
+     * Never ami_random_add_entropy(), which seeds the pool on first use: that
+     * is a 22 ms machine collection, and a receive thread is the last place
+     * to run one.  In the shipped library bsd_runtime_open() has already
+     * seeded from InitResident(), before any interface exists.
+     */
+    if (!pool_started)
+        return;
+
+    ReadEClock(&ev);
+    now = ev.ev_lo;
+
+    /*
+     * One receive thread per interface, so the accumulator has more than one
+     * writer.  A lost or duplicated sample would not matter -- it is an
+     * entropy pool -- but a raced index writing past the array would, so the
+     * few instructions that touch it are bracketed.  The mixing is not:
+     * pool_mix() takes its own Forbid() and holds it for two compressions.
+     */
+    Forbid();
+
+    if (!arrival_have_prev)
+    {
+        arrival_prev      = now;
+        arrival_have_prev = TRUE;
+    }
+    else
+    {
+        arrival_delta[arrival_n++] = (UBYTE)(now - arrival_prev);
+        arrival_prev               = now;
+
+        if (arrival_n >= ARRIVAL_BATCH)
+        {
+            for (i = 0; i < ARRIVAL_BATCH; i++)
+                batch[i] = arrival_delta[i];
+
+            arrival_n = 0;
+            full      = TRUE;
+        }
+    }
+
+    Permit();
+
+    if (full)
+        arrival_flush(batch);
+}
+
 /* ================================================================ generation
  *
  * out  <- SHA-256(DOMAIN_GENERATE || key || counter++)

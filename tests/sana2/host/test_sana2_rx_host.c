@@ -108,6 +108,12 @@ VOID ami_free(APTR ptr) { (VOID)ptr; }
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
+/* The entropy pool's arrival sampler, which the receive path feeds one call
+   per delivered frame.  It reads timer.device and hashes, neither of which
+   exists here, and this test is about what the slots and the packet lengths
+   do; ami_random.c has its own coverage. */
+VOID ami_random_arrival(VOID) { }
+
 UINT tx_amiga_stack_in_use(APTR base, ULONG size)
 {
     (VOID)base;

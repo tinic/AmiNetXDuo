@@ -16,9 +16,11 @@
  * assuming it carries over.
  *
  * ami_random_is_seeded() reports whether the pool reached AMI_RANDOM_MIN_BITS
- * from sources this module will count.  Left to itself it is FALSE, because the
- * internal sources cap below that bar.  Nothing refuses to run because of it and
- * TLS does not check it; a caller with real entropy feeds it in through
+ * from sources this module will count.  The internal sources cap at 26 bits,
+ * below that bar, because they describe the machine and a fixed boot image
+ * repeats most of them.  What clears the bar is ami_random_arrival(), fed from
+ * the receive path: when a frame lands is not a property of the boot image.
+ * A caller with better entropy still feeds it in through
  * ami_random_add_entropy().
  *
  * For what the stack uses it for, IP ids, TCP initial sequence numbers,
@@ -39,15 +41,21 @@ extern "C" {
 
 /*
  * The bar ami_random_is_seeded() has to clear.  The internal sources cap at
- * 8 + 4 + 2 + 12 = 26 bits and measure ~21, so it is FALSE unless a caller
- * supplies entropy via ami_random_add_entropy().  That is expected on a
- * vintage machine with no hardware RNG; it is reported, not enforced.
+ * 8 + 4 + 2 + 12 = 26 bits and measure ~21, so nothing that only describes
+ * the machine can reach it however many times it is sampled.  Frame arrival
+ * timing is what takes the pool over it, within seconds of an interface
+ * carrying traffic; before that, and on a machine with no interface up, it
+ * stays FALSE and is reported, not enforced.
  */
 #define AMI_RANDOM_MIN_BITS     64UL
 
 /* The most the built-in clock, Exec-state, task-list and jitter sources can
    contribute in total, however many times they are sampled. */
 #define AMI_RANDOM_INTERNAL_MAX_BITS  26UL
+
+/* And the most frame arrival timing may contribute, after which the sampling
+   switches itself off for the life of the machine. */
+#define AMI_RANDOM_ARRIVAL_MAX_BITS   64UL
 
 /*
  * Gather from every source we have and mix into the pool.  Safe to call
@@ -71,6 +79,23 @@ VOID ami_random_init(VOID);
  * something bad, only fail to make it better.
  */
 VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits);
+
+/*
+ * One frame has arrived.  Called from the SANA-II receive path, once per
+ * delivered frame, and from nowhere else.
+ *
+ * When a frame lands is decided by a remote clock, the wire, the card's
+ * interrupt latency and Exec's dispatcher, none of which is in the boot image,
+ * so this is the only source on the machine worth real credit.  Only the low
+ * bits of the interval are kept -- the part a peer pacing its own traffic
+ * cannot set -- and the credit is measured the way gather_jitter() measures
+ * its own, one bit per bit position that varied across a batch of sixteen.
+ *
+ * Costs one load and a branch once AMI_RANDOM_ARRIVAL_MAX_BITS is reached or
+ * the pool is over AMI_RANDOM_MIN_BITS, whichever comes first, and never
+ * restarts.  Not interrupt-callable, for pool_mix()'s reasons.
+ */
+VOID ami_random_arrival(VOID);
 
 /* Fill a buffer.  Seeds on first use if ami_random_init() was never called. */
 VOID ami_random_bytes(APTR buffer, ULONG length);
