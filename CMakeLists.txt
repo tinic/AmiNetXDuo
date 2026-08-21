@@ -56,7 +56,16 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 #
 # The same blindness applies to any symbol whose only reference is in a
 # top-level asm() string; src/common/crashguard.c has one, marked `used'.
-if(CMAKE_CROSSCOMPILING)
+# AMINETXDUO_LTO exists for ONE caller, tools/analyze.sh, and is ON everywhere
+# else. -flto SILENTLY DISABLES -fanalyzer: the same translation unit that
+# reports a use-of-uninitialised-value on its own reports nothing at all with
+# -flto added, no note and no warning. The whole static-analysis stage would
+# have gone quiet rather than red. What actually failed CI was an unrelated
+# accident -- `cat | grep -Wanalyzer` returning 1 on an empty result under
+# pipefail -- and without it this would have read as green.
+option(AMINETXDUO_LTO "Build with -flto (cross builds only)" ON)
+
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     string(APPEND CMAKE_C_FLAGS_RELEASE " -flto")
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}"
         CACHE STRING "C flags for Release builds" FORCE)

@@ -91,8 +91,16 @@ cmake -S . -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DAMINETXDUO_LTO=OFF \
     -DCMAKE_C_FLAGS=-fanalyzer > "$BUILD-configure.log" 2>&1 || {
         tail -30 "$BUILD-configure.log"; exit 1; }
+# AMINETXDUO_LTO=OFF because -flto SILENTLY DISABLES -fanalyzer.  A unit that
+# reports a use-of-uninitialised-value on its own reports nothing with -flto
+# added -- no note, no warning, no diagnostic of any kind.  This stage would
+# have kept running, found zero of everything, and said so in a way that reads
+# like good news.  It is not enough to leave -flto off the command line here:
+# it arrives through CMAKE_C_FLAGS_RELEASE, which is FORCEd, so the switch has
+# to be the one the top-level CMakeLists.txt tests.
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -234,9 +242,15 @@ export LC_ALL=C
 # sort -u BEFORE the line number is dropped: the tools share sources between
 # targets, so the same warning arrives once per target and only the file:line
 # distinguishes a genuine second site from a rebuild of the first.
+# `|| true' on the first grep: with no matches it exits 1, and under pipefail
+# that killed the script here, silently, with status 1 and not a word printed.
+# It happened for real -- -flto had turned every finding off and the stage died
+# at this line looking like an unrelated tooling fault.  An empty result is a
+# legitimate answer and belongs in the comparison below, where it shows up as
+# every baseline entry being GONE, which is loud and says what happened.
 cat "$WORK"/log.* |
-    grep -E 'warning: .*\[-Wanalyzer' |
-    grep -v -- '-Wanalyzer-too-complex' |
+    { grep -E 'warning: .*\[-Wanalyzer' || true; } |
+    { grep -v -- '-Wanalyzer-too-complex' || true; } |
     sed -e "s|$ROOT/||" |
     sort -u |
     sed -E -e 's| \[CWE-[0-9]+\]||' \
