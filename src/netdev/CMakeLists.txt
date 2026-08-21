@@ -68,10 +68,27 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     # pulls the logging macros, and this image defines SysBase itself.
     target_link_options(anxnet_device PRIVATE -nostartfiles -Wl,--gc-sections)
 
-    # -O2 over the tree's -Os, the same trade AMINETXDUO_HOT_O2 makes for the
-    # eight profiled NetX Duo files: this is interrupt-path code and the
-    # receive service is the whole throughput figure.  Appended, so it wins.
-    target_compile_options(anxnet_device PRIVATE -O2)
+    # -Os, and this used to be -O2 for the whole target -- "interrupt-path code
+    # and the receive service is the whole throughput figure".
+    #
+    # -O2 costs 15-21 KB here, which is far more than it looked. Built four
+    # ways at one commit:
+    #
+    #                    -O2       -Os
+    #     LTO          51,628    30,544
+    #     non-LTO      48,636    33,236
+    #
+    # It is also the whole reason anxnet.device was the one image that GREW
+    # under -flto while the other three shrank: at -O2 the LTO inliner is
+    # aggressive rather than size-constrained, so it added 3,652 bytes of code
+    # (relocations shrank ~670, netting +2,992). At -Os it behaves like
+    # everywhere else and comes out 8.1% smaller than non-LTO. LTO was never
+    # the anomaly; -O2 on a whole target was.
+    #
+    # 21 KB is a lot on a 2 MB A1200, but this is a driver and read throughput
+    # is the field metric, so the size alone does not decide it. Measured
+    # interleaved on the A1200 + a2065 reference before this landed.
+    target_compile_options(anxnet_device PRIVATE -Os)
 
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
         add_custom_command(TARGET anxnet_device POST_BUILD
