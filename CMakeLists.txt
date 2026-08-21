@@ -35,7 +35,7 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # shipping strip settings on the pinned toolchain:
 #
 #     bsdsocket.library   352,960   was 395,328    -10.7%
-#     tls.library         185,720   was 242,312    -23.4%
+#     tls.library         197,188   was 242,312    -18.6%
 #     usergroup.library     7,172   was   7,684     -6.7%
 #     anxnet.device        30,540   was  33,228     -8.1%
 #
@@ -45,10 +45,10 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # At -Os it behaves like the other three. src/netdev/CMakeLists.txt carries the
 # measurement that decided the switch.
 #
-# The tls.library number includes crypto68k in LTO and the live compiler-runtime
-# helpers protected below.  The former crypto exclusion produced 195,204
-# bytes, so removing it still saves 9,484 bytes after restoring those helpers.
-# bsdsocket.library pays nothing for crypto68k; it is not linked there.
+# The tls.library number has crypto68k held OUT of LTO, which is where it is
+# again -- see that module's CMakeLists.txt. With crypto68k in, it is 185,720,
+# and that is the 11,468 bytes the second defect is currently costing.
+# bsdsocket.library pays nothing either way; crypto68k is not linked there.
 #
 # THIS NEEDS A TOOLCHAIN THAT CAN DO IT, and until 2026-08 none existed. The
 # published asset was built with --disable-plugins, so its ld answers
@@ -80,9 +80,13 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 #    actually failed CI was an accident: `cat | grep -Wanalyzer` returning 1 on
 #    an empty result under pipefail. Without that, it would have read green.
 #
-# crypto68k participates in LTO too.  Its former exclusion masked a late
-# compiler-libcall reachability bug in src/common/ami_udivdi3.c; the minimized
-# reproducer and the full tls.library regression probe live under tests/.
+# crypto68k is held OUT of LTO again, for a SECOND defect, not the first one.
+# The late compiler-libcall bug in src/common/ami_udivdi3.c is fixed and the
+# release gate proves it -- every surviving helper has its own address and a
+# real size. But with crypto68k under -flto, tls.library completes zero TLS
+# 1.3 handshakes and https: fails with UNEXPECTED_EOF_WHILE_READING, which is
+# a different signature from the old BAD_ECPOINT. src/crypto68k/CMakeLists.txt
+# carries the evidence and the probe to chase it with.
 option(AMINETXDUO_LTO "Build with -flto (cross builds only)" ON)
 
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
