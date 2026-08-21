@@ -47,13 +47,26 @@ target_link_libraries(netxduo PUBLIC aminetxduo_common)
 if(CMAKE_CROSSCOMPILING)
     add_library(aminetxduo_m68k_rt STATIC ami_udivdi3.c)
 
-    # -fno-lto, and it is not optional.  These are libcall targets: nothing
-    # calls __udivdi3 in any source, GCC synthesises the call during RTL
-    # expansion, which happens at LTRANS -- AFTER the plugin has decided what
-    # to keep.  At decision time the IR holds zero references to them, so a
-    # whole-program build drops the lot and the link fails on ___udivdi3 with
-    # no libgcc.a to fall back on.  Compiling this one file the ordinary way
-    # gives it a real symbol table the linker can resolve against at the end,
-    # which is exactly what GCC does for libgcc itself.
-    set_source_files_properties(ami_udivdi3.c PROPERTIES COMPILE_OPTIONS -fno-lto)
+    # DO NOT put -fno-lto on this file.  It was tried and reverted, and the
+    # reasoning that led to it was wrong in a way worth writing down.
+    #
+    # The argument was that these are libcall targets -- nothing calls
+    # __udivdi3 in any source, GCC synthesises the call at RTL expansion, which
+    # is LTRANS, after the plugin has chosen what to keep -- so a whole-program
+    # build would drop them and the link would fail with no libgcc.a to fall
+    # back on.  That does not happen.  The plugin resolves the libcall against
+    # the archive member at the end, and the whole tree links: 147 targets,
+    # zero failures.
+    #
+    # -fno-lto turns this member from a slim object, whose index holds only
+    # ___gnu_lto_slim, into a real one that exports every symbol here --
+    # including __mulsi3, __divsi3, __udivsi3, __umodsi3 and __modsi3, which
+    # are 68000-only and which newlib's libc.a also defines.  Two real
+    # definitions is a multiple-definition error, and crypto68k_test and
+    # crypto68k_bench stop linking.  Being last on the link line does not save
+    # it: the linker names libc's copy as the first definition, so under LTO
+    # the effective pull order is not the command-line order.
+    #
+    # The 64-bit helpers are ours alone and collide with nothing.  Only the
+    # 32-bit five are duplicated, and only because -fno-lto made them visible.
 endif()
