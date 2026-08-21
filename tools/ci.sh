@@ -10,6 +10,7 @@
 #   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
 #   tools/ci.sh capture              # tier 2: NetCapture, every card
 #   tools/ci.sh wirequiet            # tier 2: what an idle machine emits
+#   tools/ci.sh reachability         # tier 2: still answering during a handshake
 #   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
 #   tools/ci.sh host cross emulator  # pick and choose
 #
@@ -50,6 +51,10 @@
 #                how a DHCPv6 client rebinding eight times a second passed
 #                every stage for as long as it did.  Needs a bridge and an
 #                unprivileged tcpdump; no peer.
+#   reachability tier 2, does the machine still answer while it is doing a
+#                TLS handshake.  A peer probes it every two seconds through a
+#                real https fetch, and the gate is the longest stretch with no
+#                answer.  Needs a bridge and a peer that is not this host.
 #   bridged      tier 2, the two pass/fail harnesses that need a real link:
 #                NetShutdown against live services, and TCP: driven by
 #                Commodore's own Type and Copy.  Needs a bridge, and a peer
@@ -1226,6 +1231,46 @@ stage_wirequiet() {
     return "$rc"
 }
 
+# ---------------------------------------------------------- reachability ----
+#
+# The machine is inside a certificate chain for a minute and a half.  Is it
+# still on the network while it is?  It was not: the peer's neighbour entry
+# went FAILED and stayed there about 44 s, and everything that wanted to reach
+# the guest got EHOSTUNREACH.  What fixes it is the stride of a yield hook,
+# which is a number somebody will change.
+#
+# Needs a SECOND MACHINE.  Amiberry injects with pcap and injected frames
+# never enter this host's own receive path, so a probe from here would report
+# the guest unreachable with the fix in or out.
+stage_reachability() {
+    hr "reachable during a TLS handshake (tier 2, needs a bridge and a peer)"
+
+    local rc=0
+    local peer="${AMINETXDUO_REACH_PEER:-${AMINETXDUO_PEER:-}}"
+
+    if [ -z "$peer" ]; then
+        skip "reachability: neither AMINETXDUO_REACH_PEER nor AMINETXDUO_PEER" \
+             "is set, so there is no machine that can see the guest answer." \
+             "Whether a handshake takes it off the network is untested here."
+        return "$NOTHING"
+    fi
+
+    "$ROOT/tests/tls/run-reachability.sh" -b "$BUILD/default" -P "$peer" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  the machine answered throughout the handshake and the" \
+                "peer's neighbour entry never failed" ;;
+        1) fail "reachability: the machine stopped answering while it was" \
+                "doing crypto -- max_gap_s above is how long for" ;;
+        2) fail "reachability: the rig refused it, or the guest was already" \
+                "unreachable before the handshake started" ;;
+        3) fail "reachability: the run produced no handshake to measure" ;;
+        *) fail "reachability: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -1567,7 +1612,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb)
             stage_toolchain; break ;;
     esac
 done
@@ -1598,6 +1643,7 @@ for s in "${WANT[@]}"; do
         cards6)      stage_cards6 || srrc=$? ;;
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;
+        reachability) stage_reachability || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
