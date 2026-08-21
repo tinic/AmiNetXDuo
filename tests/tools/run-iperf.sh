@@ -839,6 +839,13 @@ if [ "$SERVER_ARMS" = yes ]; then
     # difference the five do not account for is a frame that vanished between
     # the wire and the driver, which no counter on the guest can see and which
     # is the answer that would need a capture.
+    #
+    # Buffer failures are printed and NOT added into that sum. A reader that
+    # could not get a packet is a read that was not posted, and the frame it
+    # would have caught is then counted as an unknown type when it arrives:
+    # summing both would count one frame twice. It is reported beside them
+    # because it says which of the two the machine ran out of.
+    #
     # One counter out of the nth `netstat -s`.  Named by the label netstat
     # prints beside it, because the two of them move together: a column that
     # is renamed there stops matching here rather than reporting the wrong
