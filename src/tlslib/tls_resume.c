@@ -70,7 +70,12 @@
  *   one of those lines must then be re-merged by hand at the next submodule
  *   bump.
  *
- *   So this uses --wrap instead.
+ *   So this uses --wrap instead.  The wrapper translation unit is deliberately
+ *   compiled without LTO: GNU ld only redirects undefined references, and
+ *   GCC's WPA otherwise binds and internalizes this pair before ld sees it.
+ *   That exact failure made every TLS 1.3 ClientHello return UINT_MAX without
+ *   ever calling the vendored builder.
+ *
  *   `-Wl,--wrap=_nx_secure_tls_client_handshake` sends every call from every
  *   other object to __wrap__nx_secure_tls_client_handshake() here, and leaves
  *   __real__nx_secure_tls_client_handshake() pointing at the vendored
@@ -86,10 +91,6 @@
  *         behaviour the vendored state machine does not have.  Everything else
  *         is handed to the vendored function byte for byte, in the same record
  *         boundaries it sees today.
- *
- *   Checked on this toolchain before anything was written: a three-object test
- *   with the caller in a separate archive member disassembles to
- *   `jsr ___wrap_vendored`.
  *
  *   ServerHello.  Handed to the vendored function.  Afterwards its echoed
  *   session ID is compared against the one offered.  Equal and non-empty

@@ -297,41 +297,6 @@ if(AMINETXDUO_CRYPTO68K_LTO_PROBE)
     endif()
 endif()
 
-# -fno-lto ON EVERY C FILE HERE, AGAIN, FOR A SECOND AND DIFFERENT DEFECT.
-#
-# The first one was the late compiler-libcall reachability bug in
-# src/common/ami_udivdi3.c, and that IS fixed: `used' holds the helpers, and
-# the release gate confirms each of the five survivors sits at its own address
-# with a real size in its own .text.<name> section -- __muldi3 is 100 bytes at
-# 0x2a79c with a real body, and __divdi3/__moddi3 are properly --gc-sections
-# discarded. That check passes. This one is not that.
-#
-# With crypto68k under -flto at 727b5677, tls.library completes ZERO TLS 1.3
-# handshakes, three gate runs for three, and `fetch https://' returns rc=10
-# against www.gnu.org, www.amiga-news.de and www.pouet.net from a real
-# installed Workbench 3.1. Three controls in one checkout, one peer, twenty
-# minutes apart: -DAMINETXDUO_LTO=OFF passes 2/2; the same tree with only
-# tls.library replaced by the crypto68k-excluded build passes 2/2; the
-# shipping default fails 3/3.
-#
-# THE SIGNATURE CHANGED, which is why this is a second thing and not a
-# regression of the first. The old failure was BAD_ECPOINT -- a well-formed
-# key share carrying a point that is not on the curve. This one is
-# UNEXPECTED_EOF_WHILE_READING at 0.5s: the far end sees the connection go
-# away mid-handshake. Nothing is off-curve because nothing gets that far.
-#
-# src/crypto68k/CMakeLists.txt:288 has the instrument for it:
-# -DAMINETXDUO_CRYPTO68K_LTO_PROBE=ON runs the P-256 known answers at
-# tls.library load, with no peer and no network, and reports through
-# lib_Revision. Use that rather than the handshake gate -- the last time this
-# was bisected by rebuild-and-handshake it cost hours per arm.
-foreach(_c68k_src IN LISTS CRYPTO68K_SOURCES)
-    if(_c68k_src MATCHES "\\.c$")
-        set_source_files_properties("${_c68k_src}"
-            PROPERTIES COMPILE_OPTIONS -fno-lto)
-    endif()
-endforeach()
-
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
 target_include_directories(crypto68k PUBLIC ${CRYPTO68K_INCLUDES})
 target_link_libraries(crypto68k PUBLIC crypto68k_ref)

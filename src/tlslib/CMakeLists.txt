@@ -46,6 +46,15 @@ set(TLSLIB_SOURCES
 # why --wrap was chosen over defining the symbols outright (450 lines of state
 # machine that would have to be re-merged at every submodule bump).
 #
+# GNU ld redirects only undefined references.  If tls_resume.c enters LTO,
+# GCC's WPA binds and internalizes the __wrap__/__real__ pair before ld sees
+# it: the wrapper is discarded and ClientHello returns UINT_MAX without ever
+# calling the vendored builder.  Keep this one linker-boundary translation
+# unit native.  The crypto and the other ten tls.library sources remain in LTO.
+if(AMINETXDUO_LTO)
+    set_source_files_properties(tls_resume.c PROPERTIES COMPILE_OPTIONS -fno-lto)
+endif()
+
 # These belong to tls.library ONLY.  tls_handshake, tls_https and tls_bench
 # link the same archives without them, so their behaviour and their baselines
 # are untouched by construction.
@@ -141,9 +150,7 @@ if(AMINETXDUO_TLSLIB_LINK)
     #
     # --gc-sections is only 308 bytes here -- src/tls/ and nx_crypto are already
     # close to one function per file -- but it costs nothing and keeps the three
-    # libraries linking the same way.  It composes with --wrap: the wrap target
-    # is a reference like any other, so the wrapper is a root and the wrapped
-    # symbol is reached through it.
+    # libraries linking the same way.
     # A link map so tools/profiler/profreport.py --lib can name functions
     # INSIDE tls.library; without it the whole library is one bar.
     target_link_options(tls_library PRIVATE -nostartfiles -Wl,--gc-sections
