@@ -461,12 +461,19 @@ int bsd_gethostname(register char *name     __asm("a0"),
                     register size_t namelen __asm("d0"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    const AmiConfig *cfg = netstack_config();
+    const AmiConfig *cfg;
     char             derived[256];       /* MAXHOSTNAMELEN, per BUGS */
     ULONG            address;
 
     if (name == NULL || namelen == 0)
         return (int)bsd_fail(SocketBase, AMI_EFAULT);
+
+    /* Option 12 arrives on a NetX task, which cannot apply it. Absorb before
+       reading cfg->hostname, or this reports the name from before the lease
+       until some unrelated lookup happens to do it. */
+    netstack_dns_absorb_pending();
+
+    cfg = netstack_config();
 
     if (cfg != NULL && cfg->hostname[0] != '\0')
     {

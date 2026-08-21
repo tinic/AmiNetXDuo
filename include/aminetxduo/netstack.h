@@ -186,7 +186,16 @@ typedef struct AmiBatonStats
 
 extern AmiBatonStats ami_baton_stats;
 
-/* Accessors, all return NULL when the stack is down. */
+/*
+ * Accessors, all return NULL when the stack is down, and all three are plain
+ * field loads: cheap enough to call per interface inside an enumeration.
+ *
+ * netstack_config() is a pointer to the LIVE configuration, so a reader of
+ * cfg->hostname or cfg->resolver is reading whatever the last absorb put
+ * there.  A caller reporting either to an application calls
+ * netstack_dns_absorb_pending() once first; a caller reading an interface
+ * name, device or unit, or a switch that came off disk, does not need to.
+ */
 NX_IP          *netstack_ip(VOID);
 NX_PACKET_POOL *netstack_pool(VOID);
 const AmiConfig *netstack_config(VOID);

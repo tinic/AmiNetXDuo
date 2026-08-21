@@ -1369,6 +1369,12 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     if (!ns_header_ok(hdr, size))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
+    /* Every walk below reports live configuration, and NETSTATUS_SYSTEM reports
+       the host name a lease can rename.  DHCP and router advertisements record
+       that on NetX tasks and hand it to a caller task; this is one.  Once per
+       query, ahead of the walk, rather than inside every netstack_config(). */
+    netstack_dns_absorb_pending();
+
     /*
      * The one-entry answers are written straight into the caller's buffer, so
      * the size check happens before the walk rather than inside it.

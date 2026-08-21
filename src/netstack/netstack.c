@@ -2538,16 +2538,27 @@ LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable)
 #endif
 }
 
+/*
+ * A pointer to the running configuration, and nothing else.
+ *
+ * It used to absorb the DHCP/RA handoff on the way past, so that
+ * gethostname(), NETSTATUS_SYSTEM and the ARexx variables could not report a
+ * superseded lease.  That put an AllocMem, a ThreadX bracket, a walk of every
+ * interface calling nx_dhcp_interface_user_option_retrieve() and
+ * nx_dns_server_add(), and a DHCPv6 mutex taken TX_WAIT_FOREVER, behind what
+ * reads like a field load -- and the callers that read it in a loop, one per
+ * interface, paid for it once per iteration.  See bsd_if_config().
+ *
+ * The absorb now sits at the entry points that report live resolver state, one
+ * call per request rather than one per read: bsd_gethostname(),
+ * bsd_NetStackQuery(), the SBTC_SYSTEM_STATUS tag and the ARexx variable
+ * reader, beside the two in roadshow.c that already had it.  Anything reading
+ * a field the handoff cannot change -- an interface name, device or unit, the
+ * tcp_handler switch -- needs nothing and now pays nothing.
+ */
 const AmiConfig *netstack_config(VOID)
 {
     AmiNetStack *ns = ami_ns;
-
-    /* DHCP and RA callbacks only mark their interface from a NetX task. A
-       live-config reader is one of the caller tasks allowed to absorb that
-       handoff. Without this, gethostname(), NETSTATUS_SYSTEM and the ARexx
-       variables can report the old lease until an unrelated DNS lookup. */
-    if (ns != NULL)
-        netstack_dns_absorb_pending();
 
     return (ns != NULL) ? &ns->ns_Config : NULL;
 }

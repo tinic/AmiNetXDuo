@@ -1340,6 +1340,12 @@ LONG ami_rx_getvalue(struct CSource *args, const char **errstr, AmiRxReply *r)
         return RETURN_ERROR;
     }
 
+    /* HOSTNAME and the resolver variables read the live configuration, which
+       DHCP and router advertisements update from NetX tasks that cannot apply
+       the change themselves.  Once per GETVALUE, not once per variable named
+       on it: a script asking for six of them absorbed six times. */
+    netstack_dns_absorb_pending();
+
     for (;;)
     {
         char  buf[RX_KEYWORDLEN];

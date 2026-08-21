@@ -737,6 +737,11 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
         {
             ULONG status = 0UL;
 
+            /* SBSYSSTAT_Resolver comes off cfg->resolver, which a lease or a
+               router advertisement changes from a NetX task that cannot apply
+               it.  Outside the bracket below: this takes one of its own. */
+            netstack_dns_absorb_pending();
+
             /* The interface flags are live NetX fields and the gateway getter
                takes nx_ip_protection.  Snapshot both while this application
                task is adopted; formatting the tag itself needs no bracket. */
