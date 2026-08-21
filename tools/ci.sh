@@ -389,6 +389,21 @@ stage_host() {
         return 1
     fi
 
+    # And that the backlog still points at the tree it describes.  A row whose
+    # file has moved sends a reader to a directory that does not have it --
+    # `rfbbench` cannot price the banded path named tests/perf/rfbbench.c for
+    # months after it became src/rfb/host/rfbbench.c, while the defect it
+    # describes stayed real.  This cannot tell you a row was FIXED and never
+    # retired, which is the more common rot and the more expensive one; it
+    # catches the half a script can.
+    if tools/check-backlog.sh > "$BUILD/check-backlog.log" 2>&1; then
+        note "backlog: $(sed -n 's/^backlog_rows=/rows /p' "$BUILD/check-backlog.log")"
+    else
+        cat "$BUILD/check-backlog.log"
+        fail "docs/BACKLOG.md cites something that is not there (tools/check-backlog.sh)"
+        return 1
+    fi
+
     # No harness may build a guest binary for a newer CPU than the machine it
     # then points that binary at.  It costs a day every time: the program stops
     # in its own C constructor, no serial, no stdout.txt, and it reads as "the
