@@ -159,6 +159,12 @@ static UINT w_check(UINT ok, const char *what, ULONG detail)
 #ifndef W_PORT
 #define W_PORT          443
 #endif
+/* The check names carry the port, so -DW_PORT=1012 has to reach them too:
+   a transcript that says 443 while the connection went somewhere else is a
+   record of the wrong run. */
+#define W_STRINGIFY2(x) #x
+#define W_STRINGIFY(x)  W_STRINGIFY2(x)
+#define W_PORT_TEXT     W_STRINGIFY(W_PORT)
 #define W_DNS_TIMEOUT   (20UL * NX_IP_PERIODIC_RATE)
 
 #define W_METADATA_SIZE         32768
@@ -234,7 +240,7 @@ char                        line[96];
 
     status =  nx_tcp_client_socket_connect(&w_socket, address, W_PORT,
                                            30UL * NX_IP_PERIODIC_RATE);
-    if (!W_OK(status, "tcp connect to port 443"))
+    if (!W_OK(status, "tcp connect to port " W_PORT_TEXT))
     {
         return(0u);
     }
@@ -360,10 +366,15 @@ char                        line[96];
         return(0u);
     }
 
+    /* nx_secure_tls_protocol_version is the legacy record version and stays
+       0x0303 on a TLS 1.3 connection (RFC 8446 5.1), so it is not the answer
+       to "which version did this negotiate".  Same translation TLSInfo()
+       does. */
     w_log("  negotiated ciphersuite 0x%lx, TLS version 0x%lx",
           (ULONG)w_session.nx_secure_tls_session_ciphersuite ->
               nx_secure_tls_ciphersuite,
-          (ULONG)w_session.nx_secure_tls_protocol_version);
+          (w_session.nx_secure_tls_1_3 != 0) ? 0x304UL :
+              (ULONG)w_session.nx_secure_tls_protocol_version);
     w_log("  handshake, connect to Finished  : %lu.%lu s",
           W_SEC(handshake_us), W_TENTH(handshake_us));
     w_log("  of which public-key arithmetic  : %lu.%lu s",

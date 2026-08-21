@@ -1592,6 +1592,24 @@ static NX_SECURE_X509_CRYPTO ami_x509_cipher_table[] =
  * multiply to build it from.  An offer of it lets some servers negotiate a
  * download nobody waits for, and no server takes GCM but neither
  * ChaCha20-Poly1305 nor CBC.
+ *
+ * TLS_RSA_WITH_AES_256_CBC_SHA256 and TLS_RSA_WITH_AES_128_CBC_SHA256 are
+ * gone.  Both used RSA key transport: the client encrypts the premaster
+ * secret to the server's certificate key, so anyone who records the traffic
+ * and later obtains that key -- a disk, a backup, a subpoena, Heartbleed --
+ * decrypts every session they recorded.  Nothing in the exchange is
+ * ephemeral.  They were last in the list, which decides nothing, because the
+ * order is the client's preference and the SERVER picks: measured against
+ * tls-v1-2.badssl.com:1012, this ClientHello's ECDHE suites were on offer
+ * and the server took TLS_RSA_WITH_AES_256_CBC_SHA256 anyway.  An offer is
+ * a permission.
+ *
+ * The cost is reach, and it is the same shape as the MD5 and SHA-1 removal
+ * above: a TLS 1.2 server that offers no ECDHE suite at all no longer
+ * connects.  On the public internet that is nothing -- TLS 1.3 removed
+ * static RSA outright and every current server does ECDHE -- but a piece of
+ * old kit on a private network can still be RSA-only, and that connection
+ * now fails where it used to work.
  */
 static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
 {
@@ -1607,9 +1625,6 @@ static NX_SECURE_TLS_CIPHERSUITE_INFO ami_ciphersuite_table[] =
 
     {TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, &crypto_method_ecdhe,     &crypto_method_ecdsa,     &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
     {TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,   &crypto_method_ecdhe,     &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
-
-    {TLS_RSA_WITH_AES_256_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES256,     16, 32,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
-    {TLS_RSA_WITH_AES_128_CBC_SHA256,         &ami_crypto_method_rsa,   &ami_crypto_method_rsa,   &AMI_BULK_AES128,     16, 16,  &AMI_BULK_HMAC256, 32,        &crypto_method_tls_prf_sha256},
 };
 
 const NX_SECURE_TLS_CRYPTO ami_crypto_tls_ciphers_ecc =
