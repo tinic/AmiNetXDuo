@@ -281,6 +281,35 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     unset(C68K_MV_SRC)
 endif()
 
+# -fno-lto ON EVERY C FILE IN THIS MODULE.  -flto miscompiles it: the P-256
+# scalar multiplication returns a point that is not on the curve, so the TLS
+# 1.3 client key share is rejected as BAD_ECPOINT and no handshake completes.
+# The bytes on the wire are structurally perfect -- group secp256r1, length
+# 65, leading 0x04, both coordinates < p -- and the point is simply wrong.
+# It is not a corrupted curve constant (the implied b differs run to run), not
+# an unconverted Montgomery residue, and not an unnormalised projective point;
+# all three were tested against the captured coordinates and rejected.
+#
+# Bisected per file on an otherwise -flto tree.  Excluding all thirteen .c
+# files here fixes it; excluding c68k_p256.c alone does NOT, and neither does
+# any single one of the other twelve, though subsets get roughly half the
+# handshakes through.  That shape says inlining and partitioning rather than
+# one bad line, and no undefined behaviour was found in the field arithmetic.
+# Ours or the compiler's is UNDECIDED -- the honest answer, not a placeholder.
+#
+# The reproducer to use is NOT the handshake gate.  Build with
+# -DAMINETXDUO_TLS_CRYPTO68K_SELFCHECK: c68k_p256_self_check() in
+# src/tls/ami_tls_crypto.c recomputes two comb-table entries at library init
+# and fails under -flto, with no peer and no network, in seconds.
+#
+# Everything OUTSIDE this module keeps -flto, which is where the size is.
+foreach(_c68k_src IN LISTS CRYPTO68K_SOURCES)
+    if(_c68k_src MATCHES "\\.c$")
+        set_source_files_properties("${_c68k_src}"
+            PROPERTIES COMPILE_OPTIONS -fno-lto)
+    endif()
+endforeach()
+
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
 target_include_directories(crypto68k PUBLIC ${CRYPTO68K_INCLUDES})
 target_link_libraries(crypto68k PUBLIC crypto68k_ref)
