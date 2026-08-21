@@ -588,13 +588,17 @@ int main(void)
 
     /*
      * Six datagrams and no probe, even in a build that has one.  This socket
-     * has never had a round trip measured, and RFC 8985 section 7.2's PTO is
-     * a multiple of SRTT, so there is nothing to compute one from.  The probe
-     * used to be armed off the tick the sample would have been floored at,
-     * 240 ms, which is what stopped the sample ever being taken: a probe is a
-     * retransmission and Karn's algorithm abandons the measurement in
+     * has never had a round trip measured, so RFC 8985 section 7.2 gives it a
+     * PTO of one second -- "This conservative value corresponds to the RTO
+     * value when no SRTT is available, per [RFC6298]" -- and a one second PTO
+     * cannot land before this port's one second timeout, so nothing is sent.
+     *
+     * The probe used to be armed off the tick a sample would have been floored
+     * at, 240 ms, which is what stopped the sample ever being taken: a probe
+     * is a retransmission and Karn's algorithm abandons the measurement in
      * progress, so no path slower than 240 ms could ever produce a first
-     * sample.  See the arm below for what a socket that HAS one gets.
+     * sample.  3c below is what distinguishes section 7.2's one second from a
+     * rule of "never probe without a sample"; 3b is a socket that has one.
      */
     h_check(h_r.sent == 6, "wrong number of retransmissions before giving up");
     h_check(h_r.reset == 1, "the retransmission limit never reset the connection");
@@ -602,8 +606,15 @@ int main(void)
     h_check(h_sock.nx_tcp_socket_state == NX_TCP_CLOSED,
             "the socket did not end up closed");
 
+
+    /* ---- 3. the caller has to be told --------------------------------- */
+    h_check(h_r.disconnect_complete == 1,
+            "a retransmission-timeout reset did not run disconnect_complete_notify");
+    h_check(h_r.disconnected == 1,
+            "a retransmission-timeout reset did not run the disconnect callback");
+
 #ifdef NX_ENABLE_TCP_LOSS_PROBE
-    /* ---- 2b. the same ladder on a socket that has been measured -------- */
+    /* ---- 3b. the same ladder on a socket that has been measured -------- */
     /*
      * Seven datagrams, and the first of them is not a retry.  SRTT is held in
      * eighths of a tick, so 80 is ten ticks, a 200 ms path; PTO is twice that
@@ -629,13 +640,40 @@ int main(void)
             "the tail loss probe did not come before the first rung");
     h_check(h_r.reset_at == 127,
             "the tail loss probe moved when the connection was abandoned");
-#endif
 
-    /* ---- 3. the caller has to be told --------------------------------- */
-    h_check(h_r.disconnect_complete == 1,
-            "a retransmission-timeout reset did not run disconnect_complete_notify");
-    h_check(h_r.disconnected == 1,
-            "a retransmission-timeout reset did not run the disconnect callback");
+    /* ---- 3c. the one second PTO, where it is not the timeout ----------- */
+    /*
+     * Case 2 sees no probe, and there are two different rules that produce
+     * that, indistinguishable at this port's shipping numbers: section 7.2's
+     * "if SRTT is unavailable, the PTO SHOULD be 1 second", suppressed here
+     * because NX_TCP_RTO_MINIMUM_MS is also one second and a probe that would
+     * land at or after the timeout is not sent -- or a rule of "no probe until
+     * a sample exists", which is NOT what the section says and which would go
+     * on suppressing the probe on a port that lowered its floor.
+     *
+     * Separating them takes a socket with no SRTT and a timeout further out
+     * than a second, which is why this arm sets nx_tcp_socket_timeout_rate by
+     * hand: the combination does not arise on this port, because the estimator
+     * only moves the rate once it has the sample this arm is withholding.
+     * With the timeout at two seconds the one second PTO is inside it, so the
+     * probe is sent at one second and the first rung follows at two.
+     *
+     * If this arm sees six datagrams the PTO has become a rule about samples;
+     * if it sees the probe at 0 s rather than 1 s, the 240 ms floor is back.
+     */
+    h_fixture();
+    h_sock.nx_tcp_socket_timeout_rate = 2 * NX_IP_PERIODIC_RATE;
+    h_sock.nx_tcp_socket_timeout      = h_sock.nx_tcp_socket_timeout_rate;
+    h_run_timer(600, 0);
+    h_print_ladder("unmeasured socket, two second timeout");
+
+    h_check(h_r.sent == 7,
+            "section 7.2's one second PTO did not probe inside a longer timeout");
+    h_check(h_r.sent_at[0] == 1,
+            "the one second PTO did not fire at one second");
+    h_check(h_r.sent_at[1] == 2,
+            "the first rung did not follow the probe at the timeout");
+#endif
 
     /* ---- 4. one send that cannot be queued ----------------------------- */
     /*
