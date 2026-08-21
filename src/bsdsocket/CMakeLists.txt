@@ -122,6 +122,16 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     set_target_properties(bsdsocket_library PROPERTIES
         OUTPUT_NAME "bsdsocket.library")
 
+    # Listing the sources directly, above, is what stops the ARCHIVE dropping
+    # the romtag.  Under -flto that is not enough: the whole-program view sees
+    # nothing referencing bsd_romtag either and removes it, the autoinit table,
+    # the vector table and every vector, and the link still succeeds.  Naming
+    # it holds the whole chain.  See the -flto note in the top-level
+    # CMakeLists.txt.
+    if(CMAKE_CROSSCOMPILING)
+        target_link_options(bsdsocket_library PRIVATE "-Wl,-u,_bsd_romtag")
+    endif()
+
     target_include_directories(bsdsocket_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(bsdsocket_library PRIVATE

@@ -31,6 +31,38 @@ project(AmiNetXDuo VERSION 0.25.1 LANGUAGES C ASM)
 set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
+# -flto, for the cross build only.  bsdsocket.library goes from 395,000 bytes
+# to 351,640, which is 11% and worth more on a 2 MB A1200 than anything else
+# on the table.
+#
+# THIS NEEDS A TOOLCHAIN THAT CAN DO IT, and until 2026-08 none existed. The
+# published asset was built with --disable-plugins, so its ld answers
+# `-plugin PLUGIN (ignored)' and -flto silently does nothing useful; and even
+# with plugins on, five defects in bfd made it unusable -- ld segfaulting on
+# any LTO object, the plugin's IR dummy contributing no symbols at all, an
+# archive member never being pulled in, --gc-sections purging the whole link,
+# and the LTO section length being guessed by stripping trailing zeros. All
+# five are fixed in the pinned toolchain; tools/fetch-toolchain.sh is what
+# guarantees you have it. A toolchain from anywhere else will fail loudly on
+# the first one and silently on the fourth.
+#
+# THE TRAP, and the reason every shipped binary carries a -u below: nothing
+# references an AmigaOS romtag. Exec finds it by scanning the loaded segment,
+# so a whole-program build removes the romtag, the autoinit table, the LVO
+# vector table and every vector -- and the link still succeeds, exit 0, no
+# diagnostic. A 964-byte test library came out at 20 bytes that way. Naming
+# the romtag with -Wl,-u, holds the entire chain, and each of the four
+# targets does that in its own CMakeLists.txt beside the target it protects.
+#
+# The same blindness applies to any symbol whose only reference is in a
+# top-level asm() string; src/common/crashguard.c has one, marked `used'.
+if(CMAKE_CROSSCOMPILING)
+    string(APPEND CMAKE_C_FLAGS_RELEASE " -flto")
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}"
+        CACHE STRING "C flags for Release builds" FORCE)
+    add_link_options(-flto)
+endif()
+
 # No CMAKE_BUILD_TYPE means no -O at all, and that is a 45% throughput cliff.
 #
 # CMake adds nothing to CMAKE_C_FLAGS when the build type is empty, so a

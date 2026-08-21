@@ -43,6 +43,11 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     set_target_properties(anxnet_device PROPERTIES
         OUTPUT_NAME "anxnet.device")
 
+    # Nothing references a romtag; -flto removes it and the link still
+    # succeeds.  See the -flto note in the top-level CMakeLists.txt.  The
+    # guard above already means cross-only, so this needs no second one.
+    target_link_options(anxnet_device PRIVATE "-Wl,-u,_netdev_romtag")
+
     target_include_directories(anxnet_device PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
         "${CMAKE_CURRENT_SOURCE_DIR}"

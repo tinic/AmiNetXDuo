@@ -75,6 +75,12 @@ if(AMINETXDUO_TLSLIB_LINK)
     add_executable(tls_library ${TLSLIB_SOURCES})
     set_target_properties(tls_library PROPERTIES OUTPUT_NAME "tls.library")
 
+    # Nothing references a romtag; -flto removes it and the link still
+    # succeeds.  See the -flto note in the top-level CMakeLists.txt.
+    if(CMAKE_CROSSCOMPILING)
+        target_link_options(tls_library PRIVATE "-Wl,-u,_tls_romtag")
+    endif()
+
     target_include_directories(tls_library PRIVATE ${TLSLIB_INCLUDES})
     target_compile_options(tls_library PRIVATE -Wall -Wextra ${TLSLIB_TRACE_DEFS})
 

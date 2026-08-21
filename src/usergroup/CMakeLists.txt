@@ -45,6 +45,12 @@ if(AMINETXDUO_USERGROUP_LINK)
     set_target_properties(usergroup_library PROPERTIES
         OUTPUT_NAME "usergroup.library")
 
+    # Nothing references a romtag; -flto removes it and the link still
+    # succeeds.  See the -flto note in the top-level CMakeLists.txt.
+    if(CMAKE_CROSSCOMPILING)
+        target_link_options(usergroup_library PRIVATE "-Wl,-u,_ug_romtag")
+    endif()
+
     target_include_directories(usergroup_library PRIVATE
         ${AMINETXDUO_CORE_INCLUDES} "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(usergroup_library PRIVATE aminetxduo_common)
