@@ -3,6 +3,7 @@
 # THE REGRESSION TEST FOR THE IPv4 ROUTING TABLE.
 #
 #   tests/tools/run-routes.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                             [-N BOARD] [-B IFACE]
 #
 # WHAT IT IS PROVING
 #
@@ -25,9 +26,9 @@
 #                             straight out with no ARP at all.
 #
 #   That ARP request therefore appears if and only if the routing table was
-#   consulted.  It is read off the host NIC, which needs a bridged run: -A -B
-#   <iface>.  Under SLIRP the frames touch no NIC and there is nothing to read,
-#   which is why the wire assertions skip there rather than pass.
+#   consulted.  It is read off the host NIC, which is why this harness is
+#   bridged only: under SLIRP the frames touch no NIC and there is nothing to
+#   read at all.  -B names the NIC and the string `slirp` is refused outright.
 #
 # WHAT ELSE IT ASSERTS
 #
@@ -44,15 +45,17 @@
 #     destination goes to the NEW one.  Same shape of evidence as above and for
 #     the same reason: "the table reads back differently" is what a vector that
 #     wrote to the wrong table would also produce.  This half needs a host NIC
-#     to capture on, so it runs under -A -B <iface> and skips otherwise.
+#     to capture on, so it needs an unprivileged tcpdump and skips without one.
 #
 # The route is added through NETCTRL_ROUTE_ADD by tests/tools/routeprobe.c
 # rather than by AddNetRoute: what is under test is the stack, and a test that
 # went through a command's ReadArgs template would fail whenever the template
 # changed.
 #
+# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# or drop a copy in build/a2065.device.  Every other board's driver comes out
+# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
 #
 # SPDX-License-Identifier: MIT
 
@@ -64,23 +67,27 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
-# guest boots, so -A picks Amiberry, which runs genuinely headless.
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
-BOARD=a2065
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 
-while getopts "m:t:b:AN:B:" opt; do
+while getopts "m:t:b:N:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B backend]" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "routes_backend=refused:$IFACE" >&2
+        echo "This harness is bridged only.  -B names a host interface." >&2
+        exit 2
+        ;;
+esac
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -121,6 +128,20 @@ done
 cp "$PROBE" "$STAGE/RouteProbe"
 cp "$RTPROBE" "$STAGE/RtProbe"
 
+# -N puts a board in the machine; this puts its driver in DEVS: and its name in
+# DEVICE=.  Without it the interface file copied in above keeps
+# DEVICE=a2065.device whatever -N asked for, so every other board opens
+# a2065.device against hardware that is not there and the run reports a stack
+# failure that is really a staging one.
+. "$ROOT/tools/sana2-stage.sh"
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+    _want=$(sana2_driver_for "$BOARD")
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] && [ -f "$_have" ] &&
+        export AMINETXDUO_SANA2_DRIVER="$_have"
+fi
+sana2_stage "$BOARD" "$STAGE/devs"
+
 # The order is the experiment.  RouteProbe prints the table before, with and
 # after the route, so the transcript shows it changing rather than only its
 # final state; netstat -r is run either side to prove the shipped command sees
@@ -136,6 +157,8 @@ EOF
 # ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
+# A MAC of its own, so two guests on this bridge cannot answer for each other.
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_ROUTES_MAC:-02:41:4d:49:00:c7}"
 
 # ---- the wire, when there is one to watch --------------------------------
 #
@@ -146,8 +169,7 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
 # it; ARP only, which is all the assertions look at and keeps the file small.
 WIRE=""
 WIRE_PID=""
-if [ "$RUNNER" = "amiberry" ] && [ "$IFACE" != "slirp" ] &&
-   command -v tcpdump >/dev/null 2>&1; then
+if command -v tcpdump >/dev/null 2>&1; then
     WIRE="$STAGE/wire.pcap"
     tcpdump -i "$IFACE" -n -s0 -U -w "$WIRE" arp >/dev/null 2>&1 &
     WIRE_PID=$!
@@ -163,22 +185,13 @@ if [ "$RUNNER" = "amiberry" ] && [ "$IFACE" != "slirp" ] &&
 fi
 
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
-        "$STAGE/RtProbe"
-else
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
-        "$STAGE/RtProbe"
-fi
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+    -t "$TIMEOUT" \
+    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/AddNetInterface" "$STAGE/netstat" "$STAGE/RouteProbe" \
+    "$STAGE/RtProbe"
 RUN_RC=$?
 set -e
 
@@ -322,16 +335,16 @@ if [ -n "$PCAP" ] && [ -n "$RP_HOP" ]; then
     fi
 else
     # a2065pcap.py decoded the capture out of FS-UAE's own log, and FS-UAE is
-    # gone: Amiberry writes no equivalent, on either branch.  Bridged onto a
-    # host NIC there is a real capture instead, which is why this arm is now
-    # reached only on SLIRP, where the frames never touch a NIC at all.
+    # gone: Amiberry writes no equivalent.  Bridged onto a host NIC there is a
+    # real capture instead, which is why this arm is now reached only when
+    # tcpdump could not open the NIC.
     #
     # And skipped is not zero.  "ARP for the next hop appears if and only if
     # the routing table was consulted" is the whole claim of this file; every
     # other assertion here reads what a command PRINTED, which a build with no
     # routing table at all can print correctly.  The verdict at the end exits
     # 77 for it.
-    skip "no wire to read: run with -A -B <iface> on a bridged host, where the
+    skip "no wire to read: this host has no tcpdump that can open $IFACE, where the
        frames are on a real NIC and this script captures them"
 fi
 
@@ -375,7 +388,7 @@ if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" 
 elif [ -n "$WIRE" ]; then
     skip "the capture on $IFACE is empty, so nothing was read off the wire"
 else
-    skip "no host NIC to capture on (SLIRP is not one): the change was checked
+    skip "no capture on $IFACE (tcpdump could not open it): the change was checked
        against the table only, not against what left the card.  Run with
        -A -B <iface> on a bridged host for the wire half"
 fi

@@ -22,7 +22,8 @@
 #   * DEVS:Internet/name_resolution names no server, so every resolver refusal
 #     (gethostbyname of a name that is not there, getaddrinfo of one, the two
 #     _r forms) is answered out of the local files and returns at once.  With a
-#     server configured the same rows would be timing SLIRP.
+#     server configured the same rows would be timing a DNS round trip, 64
+#     times over, inside a measurement of the library.
 #   * hosts/networks/protocols/services come from tests/netstack/devs, so the
 #     get*by*() success paths have something to find.
 #
@@ -58,8 +59,16 @@
 #   AMINETXDUO_APIDRILL_ITERS     override the guest's default iteration count
 #   AMINETXDUO_APIDRILL_MINCOVER  rows that must have been called (default 145)
 #
+# BRIDGED, NEVER SLIRP.  -B names the host NIC to bridge onto and the string
+# `slirp` is refused outright.  Nothing on the LAN has to answer -- every
+# assertion is on what the guest prints -- but a board that came up on NAT is
+# not a board, and the counters this drill reads are the library's behaviour on
+# a real driver or they are nothing.
+#
+# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# or drop a copy in build/a2065.device.  Every other board's driver comes out
+# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
 #
 # SPDX-License-Identifier: MIT
 
@@ -73,8 +82,8 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-BOARD=a2065
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 NEGATIVE=0
 
 while getopts "m:t:b:N:B:n" opt; do
@@ -88,6 +97,14 @@ while getopts "m:t:b:N:B:n" opt; do
         *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B backend] [-n]" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "apidrill_backend=refused:$IFACE" >&2
+        echo "This harness is bridged only.  -B names a host interface." >&2
+        exit 2
+        ;;
+esac
 
 # 150 rows, most of them two variants, is 240 measured brackets.  Measured on
 # the A1200 profile: the drill itself takes 5.8 s and the whole run, boot
@@ -152,6 +169,19 @@ ADDRESS=10.0.2.15
 NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
+
+# -N puts a board in the machine; this puts its driver in DEVS: and its name in
+# DEVICE=.  Without it the line above stands whatever -N asked for, so every
+# board but the A2065 opens a2065.device against hardware that is not there and
+# the run reports a stack failure that is really a staging one.
+. "$ROOT/tools/sana2-stage.sh"
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+    _want=$(sana2_driver_for "$BOARD")
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] && [ -f "$_have" ] &&
+        export AMINETXDUO_SANA2_DRIVER="$_have"
+fi
+sana2_stage "$BOARD" "$STAGE/devs"
 
 # No name server, on purpose.  See the header: it is what makes every resolver
 # refusal local and immediate instead of a SLIRP round trip inside a 64-call

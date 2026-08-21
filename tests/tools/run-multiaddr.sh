@@ -91,6 +91,14 @@ while getopts "b:B:m:t:N:d:V" opt; do
     esac
 done
 
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "error=backend_refused:$IFACE"
+        echo "result=infra"
+        exit 2
+        ;;
+esac
+
 TOOLS="$BUILD/src/tools"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 STAGE="$ROOT/build/multiaddr-stage-$AMINETXDUO_RUN_TAG"
@@ -205,6 +213,20 @@ UNIT=0
 CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
+
+    # -N puts a board in the machine; this puts its driver in DEVS: and its
+    # name in DEVICE=.  Without it the line above stands whatever -N asked
+    # for, so every board but the A2065 opens a2065.device against hardware
+    # that is not there and the run reports a stack failure that is really a
+    # staging one.
+    . "$ROOT/tools/sana2-stage.sh"
+    if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+        _want=$(sana2_driver_for "$BOARD")
+        _have=$(sana2_local_driver "$_want")
+        [ -n "$_have" ] && [ -f "$_have" ] &&
+            export AMINETXDUO_SANA2_DRIVER="$_have"
+    fi
+    sana2_stage "$BOARD" "$STAGE/devs"
 
     # The shared file names SLIRP's forwarder, which does not exist here and
     # would be asked first on every lookup.  The lease carries a name server.

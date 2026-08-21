@@ -6,9 +6,10 @@
  * stack, config file, SANA-II shim, 0x86DD reader, neighbour discovery,
  * against whatever is on the wire, and reports what it found.
  *
- * FS-UAE's SLIRP user-mode NAT is the only network an emulated Amiga has
- * here, and whether it carries IPv6 varies. The checks are limited to the
- * ones that hold with nothing else on the link:
+ * The link is a real one: tests/ipv6/run-link.sh bridges the guest onto a host
+ * NIC and refuses SLIRP. What is on that segment is still not ours to depend
+ * on, so the checks are limited to the ones that hold with nothing else on the
+ * link:
  *
  *   - IPv6 came up;
  *   - the interface configured its fe80::/64 address from the MAC and it
@@ -196,14 +197,6 @@ UINT         status;
     return(TX_FALSE);
 }
 
-/*
- * The addresses libslirp hands out on its IPv6 side, if it has one enabled:
- * fec0::/64 with the host at fec0::2 and the name server at fec0::3, plus the
- * link-local fe80::2 it answers neighbour solicitations for. Probing them
- * establishes whether FS-UAE's SLIRP carries IPv6 at all.
- */
-static const ULONG t_slirp_host6[4]   = { 0xFEC00000UL, 0, 0, 2UL };
-static const ULONG t_slirp_ll6[4]     = { 0xFE800000UL, 0, 0, 2UL };
 static const ULONG t_loopback6[4]     = { 0, 0, 0, 1UL };
 static const ULONG t_allrouters6[4]   = { 0xFF020000UL, 0, 0, 2UL };
 
@@ -583,17 +576,18 @@ UWORD            slot;
     }
 
     /*
-     * The direct probes. ff02::2 is all-routers, which any IPv6 router on the
-     * link answers; fe80::2 and fec0::2 are libslirp's own addresses. If none
-     * of the three answers, the link has no IPv6 on it; that is a finding,
-     * not a failure of the stack.
+     * The direct probe. ff02::2 is all-routers, which any IPv6 router on the
+     * link answers. If it does not, the link has no IPv6 on it; that is a
+     * finding, not a failure of the stack.
+     *
+     * There were two more here, fe80::2 and fec0::2, which are libslirp's own
+     * addresses. run-link.sh refuses SLIRP now, so both could only ever report
+     * "no" -- and a finding whose answer is fixed reads in the transcript as
+     * something that failed. The router this run really does find is printed
+     * and pinged a few lines above.
      */
     t_finding("something answered all-routers ff02::2",
               t_ping6(ip, t_allrouters6, "ff02::2"));
-    t_finding("SLIRP answered fe80::2",
-              t_ping6(ip, t_slirp_ll6, "fe80::2"));
-    t_finding("SLIRP answered fec0::2",
-              t_ping6(ip, t_slirp_host6, "fec0::2"));
 
     t_reconnect_solicitation(ip);
 

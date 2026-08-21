@@ -2,7 +2,8 @@
 #
 # Run the shipped commands against IPv6, and assert on what they print.
 #
-#   tests/ipv6/run-tools-amiberry.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-s]
+#   tests/ipv6/run-tools-amiberry.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                                    [-N BOARD] [-B IFACE] [-s]
 #
 # docs/RESEARCH.md 66 measured every command answering an IPv6 literal with
 # "cannot resolve", followed by advice to check the spelling and the name
@@ -53,12 +54,26 @@
 # agents queued on the emulator lock a Python server's lifetime can expire
 # before the guest boots, and every case then fails with "connection refused",
 # which looks exactly like a broken command.  Everything here is either inside
-# the guest (::1, and nc listening on itself) or answered by SLIRP, which is
-# alive for exactly as long as the emulator.  fe80::2 is SLIRP's own router
-# and tests/ipv6/ipv6_link_test proves it answers ICMPv6.
+# the guest (::1, and nc listening on itself) or answered by the LAN's own
+# router, which is not a process anybody started for this run.
 #
+# BRIDGED, NEVER SLIRP.  This file used to be written around SLIRP's numbers:
+# it pinged fe80::2, asserted `arp` listed it as a router, leased 10.0.2.15 and
+# reasoned about 10.0.2.3 as a name server.  Every one of those is now READ OFF
+# THIS HOST at run time -- the default route on -B's interface for both
+# families, and the guest's own address out of the transcript -- so the
+# assertions are about a real segment and there is no address in this file that
+# a NAT stub has to invent.  -B names the NIC; `slirp` is refused outright.
+#
+# THE ROUTER IS REQUIRED, and named in the output.  A run on a segment whose
+# IPv6 router is not advertising would fail the neighbour assertions and read
+# as a defect in `arp`; this script stops before booting instead and says which
+# of the two is missing.
+#
+# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# or drop a copy in build/a2065.device.  Every other board's driver comes out
+# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
 #
 # SPDX-License-Identifier: MIT
 
@@ -73,16 +88,65 @@ MODEL=A1200
 TIMEOUT=540
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
 STRICT=0
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 
-while getopts "m:t:b:s" opt; do
+while getopts "m:t:b:N:B:s" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
+        N) BOARD="$OPTARG" ;;
+        B) IFACE="$OPTARG" ;;
         s) STRICT=1 ;;
-        *) sed -n '3,5p' "$0" >&2; exit 2 ;;
+        *) sed -n '3,6p' "$0" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "ipv6-tools_backend=refused:$IFACE" >&2
+        echo "This harness is bridged only.  -B names a host interface." >&2
+        exit 2
+        ;;
+esac
+
+# ------------------------------------------------- what is on this segment ---
+#
+# Read, never assumed.  Both routers are what the guest will see, because the
+# guest is bridged onto the same wire this host is on.
+
+GW4="${AMINETXDUO_V6TOOLS_GW4:-$(ip -o -4 route show default dev "$IFACE" 2>/dev/null |
+      awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i+1); exit } }')}"
+NET4="${AMINETXDUO_V6TOOLS_NET4:-$(ip -o -4 route show dev "$IFACE" scope link 2>/dev/null |
+      awk '{ sub(/\/.*/, "", $1); print $1; exit }')}"
+ROUTER6="${AMINETXDUO_V6TOOLS_ROUTER6:-$(ip -o -6 route show default dev "$IFACE" 2>/dev/null |
+      awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i+1); exit } }')}"
+
+case "$GW4" in
+    "" ) echo "ipv6-tools_segment=no-ipv4-router on $IFACE" >&2
+         echo "This harness pings the LAN's own router; -B names the NIC the" >&2
+         echo "guest bridges onto and that NIC has no default route." >&2
+         exit 2 ;;
+esac
+case "$ROUTER6" in
+    fe80:*) ;;
+    "" ) echo "ipv6-tools_segment=no-ipv6-router on $IFACE" >&2
+         echo "The neighbour-cache assertions are about a real router that" >&2
+         echo "advertises itself, and this segment has none advertising now." >&2
+         echo "That is the segment, not the stack: nothing is booted." >&2
+         exit 2 ;;
+    *)   echo "ipv6-tools_segment=router6-not-link-local:$ROUTER6" >&2
+         echo "The default route on $IFACE goes via a global address; the" >&2
+         echo "neighbour assertions want the router's fe80:: one." >&2
+         exit 2 ;;
+esac
+[ -n "$NET4" ] || NET4="${GW4%.*}.0"
+
+echo "ipv6-tools_iface=$IFACE"
+echo "ipv6-tools_router4=$GW4"
+echo "ipv6-tools_net4=$NET4"
+echo "ipv6-tools_router6=$ROUTER6"
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -144,20 +208,40 @@ CONFIGURE6=STATIC
 ADDRESS6=fd00::10/64
 EOF
 
+# The shared fixture names SLIRP's forwarder, 10.0.2.3, which is nothing on
+# this segment: the resolver waits out its whole failover before falling back
+# on the server the lease carried, and this run makes a name lookup that is
+# MEANT to fail.  The lease is the only source here.
+cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
+# No nameserver line: the DHCP lease on the bridge carries one.
+domain localdomain
+NREOF
+
+# -N puts a board in the machine; this puts its driver in DEVS: and its name
+# in DEVICE=.  Without it the line above stands whatever -N asked for.
+. "$ROOT/tools/sana2-stage.sh"
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+    _want=$(sana2_driver_for "$BOARD")
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] && [ -f "$_have" ] &&
+        export AMINETXDUO_SANA2_DRIVER="$_have"
+fi
+sana2_stage "$BOARD" "$STAGE/devs"
+
 printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
 
 # A background listener's output must be redirected by its own line: a
 # detached process shares no console and its Output() is NIL: (toolssmoke.c).
 if [ "$MODE" = ipv6 ]; then
-cat > "$STAGE/commands.txt" <<'EOF'
+cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus INTERFACES
 SYS:ShowNetStatus ALL
 SYS:netstat -i
-SYS:ping 10.0.2.2 -c 2 -t 20
+SYS:ping $GW4 -c 2 -t 20
 SYS:ping ::1 -c 2 -t 20
 SYS:ping fd00::10 -c 2 -t 20
-SYS:ping fe80::2 -c 2 -t 20
+SYS:ping $ROUTER6 -c 2 -t 20
 SYS:ping 2001:db8::1 -c 1 -t 5
 &SYS:nc -l -6 7099 -v -w 25 -N >DH0:nc-v6srv.txt
 wait 4
@@ -186,7 +270,7 @@ wait 3
 SYS:netstat -r
 SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99
 SYS:arp
-SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY fe80::2
+SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY $ROUTER6
 SYS:AddNetRoute DESTINATION 2001:db8::/64
 SYS:ShowNetStatus ROUTES
 &SYS:nc 2001:db8::1 80 -v -w 14 >DH0:nc-onlink.txt
@@ -202,18 +286,18 @@ else
 # transport for, plus the four that read or write the stack's own tables.
 # Nothing here waits on a peer: an address that cannot be reached is refused
 # before a socket is made, so the whole run is as fast as its two IPv4 cases.
-cat > "$STAGE/commands.txt" <<'EOF'
+cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus INTERFACES
 SYS:ShowNetStatus ALL
 SYS:netstat -i
-SYS:ping 10.0.2.2 -c 2 -t 20
+SYS:ping $GW4 -c 2 -t 20
 &SYS:nc -l 7098 -v -w 25 -N >DH0:nc-v4srv.txt
 wait 4
 SYS:nc 127.0.0.1 7098 -v -w 10 -N <DH0:greeting.txt
 wait 4
 SYS:ping ::1 -c 2 -t 20
-SYS:ping fe80::2 -c 2 -t 20
+SYS:ping $ROUTER6 -c 2 -t 20
 SYS:traceroute ::1 -m 2 -q 1 -w 3 -n
 SYS:nc ::1 7099 -v -w 10 -N
 SYS:telnet ::1 7097 QUIET
@@ -223,19 +307,19 @@ SYS:sntp fd00::10 TIMEOUT 5
 SYS:fetch http://[::1]/index.html
 SYS:host ::1
 SYS:nslookup ::1
-SYS:nslookup 10.0.2.3
+SYS:nslookup $GW4
 SYS:nc no.such.host.invalid 80
 SYS:arp
 SYS:arp ::1
 SYS:arp fe80::zz
-SYS:arp 10.0.2.2
+SYS:arp $GW4
 SYS:AddNetRoute DEFAULTGATEWAY fd00::99
 SYS:AddNetRoute DESTINATION fd00:9::/64
 SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99
-SYS:AddNetRoute DESTINATION 192.168.77.0/24 GATEWAY 10.0.2.2
+SYS:AddNetRoute DESTINATION 10.77.0.0/24 GATEWAY $GW4
 SYS:netstat -r
 SYS:ShowNetStatus ROUTES
-SYS:DeleteNetRoute DESTINATION 192.168.77.0/24
+SYS:DeleteNetRoute DESTINATION 10.77.0.0/24
 EOF
 fi
 
@@ -244,9 +328,9 @@ fi
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-${TAG}tools}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> $BUILD ($MODE) on $MODEL, A2065 on SLIRP, eth0 with ADDRESS6=fd00::10/64"
+echo "==> $BUILD ($MODE) on $MODEL, $BOARD on $IFACE, eth0 with ADDRESS6=fd00::10/64"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/greeting.txt" \
     $(for t in $STAGED_TOOLS; do echo "$STAGE/$t"; done)
@@ -337,8 +421,27 @@ else
 fi
 
 # ---- control: IPv4 still works, in both modes ----------------------------
-want "SYS:AddNetInterface eth0" "10.0.2.15"       "the interface leased 10.0.2.15"
-want "SYS:ping 10.0.2.2 -c 2 -t 20" "2 received"  "ping 10.0.2.2 got both replies"
+#
+# THE GUEST'S OWN ADDRESS IS READ, not named.  This file used to assert
+# 10.0.2.15, which is what SLIRP's DHCP server hands out first and no server
+# on a real segment does.  What the lease was is now taken off the line
+# AddNetInterface printed, and every later assertion about "the address this
+# machine has" is against that.  An empty one is a failure of its own: it is
+# what a run with no lease looks like, and matching an empty string would make
+# every assertion below pass.
+GUEST4=$(block "SYS:AddNetInterface eth0" |
+         sed -n 's/.*online, address \([0-9][0-9.]*\).*/\1/p' | head -1)
+echo "ipv6-tools_guest4=${GUEST4:-none}"
+if [ -n "$GUEST4" ]; then
+    ok "eth0 took a lease on the bridge: $GUEST4"
+else
+    bad "eth0 never reported an address, so nothing below about the IPv4 half
+           of this machine can be read"
+    GUEST4="__no_lease__"
+fi
+
+want "SYS:ping $GW4 -c 2 -t 20" "2 received" \
+     "ping $GW4, this segment's router, got both replies"
 if [ -f "$HD/nc-v4srv.txt" ] &&
    tr -d '\r' < "$HD/nc-v4srv.txt" | grep -qF "hello from the amiga"; then
     ok "nc over 127.0.0.1 delivered the greeting"
@@ -393,7 +496,7 @@ want "SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536" "65536" \
 # nothing here should mention names, spelling or name servers.
 for c in "SYS:ping ::1 -c 2 -t 20" \
          "SYS:ping fd00::10 -c 2 -t 20" \
-         "SYS:ping fe80::2 -c 2 -t 20" \
+         "SYS:ping $ROUTER6 -c 2 -t 20" \
          "SYS:ping 2001:db8::1 -c 1 -t 5" \
          "SYS:nc ::1 7099 -v -w 10 -N <DH0:greeting.txt" \
          "SYS:telnet ::1 7097 QUIET <DH0:greeting.txt" \
@@ -425,8 +528,8 @@ want "SYS:tftp ::1 GET nosuchfile PORT 7095 TIMEOUT 5" "from ::1" \
 want "SYS:ping ::1 -c 2 -t 20"        "2 received" "ping ::1 got both replies"
 want "SYS:ping fd00::10 -c 2 -t 20"   "2 received" \
      "ping fd00::10 answered, the configured ADDRESS6 is live"
-want "SYS:ping fe80::2 -c 2 -t 20"    "2 received" \
-     "ping fe80::2 crossed the wire to SLIRP's router"
+want "SYS:ping $ROUTER6 -c 2 -t 20"   "2 received" \
+     "ping $ROUTER6 crossed the wire to this segment's IPv6 router"
 
 want "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n" " ms" \
      "traceroute ::1 timed a hop"
@@ -468,12 +571,12 @@ want "SYS:netstat -r" "::/0" \
      "netstat -r writes an IPv6 default route as ::/0"
 want "SYS:netstat -r" "fd00::/64" \
      "netstat -r shows the on-link IPv6 prefix"
-want "SYS:netstat -r" "10.0.2.0" \
+want "SYS:netstat -r" "$NET4" \
      "netstat -r still shows the IPv4 table beside it"
 want "SYS:DeleteNetRoute DEFAULTGATEWAY fd00::99" "is gone" \
      "DeleteNetRoute removed the IPv6 default router"
 
-want "SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY fe80::2" \
+want "SYS:AddNetRoute DESTINATION fd00:9::/64 GATEWAY $ROUTER6" \
      "no table that maps a prefix to a next hop" \
      "AddNetRoute says why a per-prefix IPv6 next hop cannot be stored"
 
@@ -511,7 +614,7 @@ want "SYS:arp 2001:db8::1" "no reply" \
 
 # ---- arp: the neighbour cache -------------------------------------------
 want "SYS:arp" "Neighbour" "arp has a neighbour section"
-want "SYS:arp" "fe80::2"   "arp lists SLIRP's router as a neighbour"
+want "SYS:arp" "$ROUTER6"  "arp lists this segment's router as a neighbour"
 want "SYS:arp" "router"    "arp says which neighbour is a router"
 want_re "SYS:arp" "(INCOMPLETE|REACHABLE|STALE|DELAY|PROBE|CREATED)" \
      "arp names the neighbour discovery state"
@@ -519,7 +622,7 @@ want_re "SYS:arp" "^  (INCOMPLETE|REACHABLE|STALE|DELAY|PROBE|CREATED) +[a-z]" \
      "arp spells out what that state means"
 want "SYS:arp" "Address          Hardware address" \
      "arp still prints the ARP cache above it"
-want "SYS:arp" "10.0.2.2"  "arp still lists the IPv4 entries"
+want "SYS:arp" "$GW4"      "arp still lists the IPv4 entries"
 want "SYS:arp 2001:db8::2" "reached through a router" \
      "arp explains an address neighbour discovery can never reach"
 
@@ -541,7 +644,7 @@ degrades() {
 
 # ---- every command that takes a host ------------------------------------
 degrades "SYS:ping ::1 -c 2 -t 20"                       "ping ::1"
-degrades "SYS:ping fe80::2 -c 2 -t 20"                   "ping fe80::2"
+degrades "SYS:ping $ROUTER6 -c 2 -t 20"                  "ping $ROUTER6"
 degrades "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n"          "traceroute ::1"
 degrades "SYS:nc ::1 7099 -v -w 10 -N"                   "nc ::1"
 degrades "SYS:telnet ::1 7097 QUIET"                     "telnet ::1"
@@ -562,12 +665,13 @@ want "SYS:ping ::1 -c 2 -t 20" "this machine's network has no IPv6" \
 # the assertions above are shared with it.  Asserted here as well: it fails
 # for a wholly different reason than the commands above, and that is the point.
 # The dotted quad beside it, so the two reverse forms are asserted together.
-# Whether the server has a PTR for 10.0.2.3 is SLIRP's business and not this
-# test's: what is asserted is the question, which the command builds itself.
-want "SYS:nslookup 10.0.2.3" "in-addr.arpa" \
-     "nslookup asked in-addr.arpa for 10.0.2.3"
-deny "SYS:nslookup 10.0.2.3" "is not a name the DNS can be asked about" \
-     "nslookup read 10.0.2.3 as an address too"
+# Whether the server has a PTR for the router is the segment's business and
+# not this test's: what is asserted is the question, which the command builds
+# itself.
+want "SYS:nslookup $GW4" "in-addr.arpa" \
+     "nslookup asked in-addr.arpa for $GW4"
+deny "SYS:nslookup $GW4" "is not a name the DNS can be asked about" \
+     "nslookup read $GW4 as an address too"
 
 # ---- arp: a valid address the stack has no cache for ---------------------
 failed "SYS:arp ::1" "arp ::1 refuses"
@@ -587,22 +691,22 @@ want "SYS:arp fe80::zz" "is not an address" \
 deny "SYS:arp fe80::zz" "the running stack has no IPv6" \
      "arp does not blame the build for a malformed address"
 
-worked "SYS:arp 10.0.2.2" "arp still answers about an IPv4 address"
+worked "SYS:arp $GW4" "arp still answers about an IPv4 address"
 want "SYS:arp" "Address          Hardware address" \
      "arp prints the ARP cache"
-want "SYS:arp" "10.0.2.3" "arp lists the IPv4 entries"
+want "SYS:arp" "$GW4" "arp lists the IPv4 entries"
 deny "SYS:arp" "Neighbour" \
      "arp prints no empty neighbour section on a machine with no neighbours"
 
 # ---- the tables: IPv4 alone, with no hole where IPv6 would be ------------
-want "SYS:netstat -i" "10.0.2.15" "netstat -i shows the leased address"
+want "SYS:netstat -i" "$GUEST4" "netstat -i shows the leased address"
 deny "SYS:netstat -i" "fd00::"    "netstat -i shows no IPv6 address"
 deny "SYS:netstat -i" "fe80::"    "netstat -i shows no link-local address"
-want "SYS:netstat -r" "10.0.2.0"  "netstat -r shows the IPv4 table"
+want "SYS:netstat -r" "$NET4"  "netstat -r shows the IPv4 table"
 deny "SYS:netstat -r" "::/0"      "netstat -r shows no IPv6 default route"
 deny "SYS:netstat -r" "fd00::/64" "netstat -r shows no IPv6 prefix"
 
-want "SYS:ShowNetStatus ALL" "10.0.2.15" \
+want "SYS:ShowNetStatus ALL" "$GUEST4" \
      "ShowNetStatus ALL shows the leased address"
 want "SYS:ShowNetStatus ALL" "No problems found" \
      "ShowNetStatus ALL still finds nothing wrong"
@@ -635,13 +739,13 @@ do
 done
 
 # ---- control: the IPv4 half of the same commands still works ------------
-worked "SYS:AddNetRoute DESTINATION 192.168.77.0/24 GATEWAY 10.0.2.2" \
+worked "SYS:AddNetRoute DESTINATION 10.77.0.0/24 GATEWAY $GW4" \
        "AddNetRoute still adds an IPv4 route"
-want "SYS:netstat -r" "192.168.77.0" \
+want "SYS:netstat -r" "10.77.0.0" \
      "netstat -r shows the IPv4 route that was added"
-want "SYS:ShowNetStatus ROUTES" "192.168.77.0" \
+want "SYS:ShowNetStatus ROUTES" "10.77.0.0" \
      "ShowNetStatus ROUTES shows it too"
-want "SYS:DeleteNetRoute DESTINATION 192.168.77.0/24" "is gone" \
+want "SYS:DeleteNetRoute DESTINATION 10.77.0.0/24" "is gone" \
      "DeleteNetRoute removed the IPv4 route"
 
 fi

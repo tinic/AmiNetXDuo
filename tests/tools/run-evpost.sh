@@ -48,8 +48,11 @@
 # another guest on the bridge.  Override with AMINETXDUO_EVPOST_MAC and
 # AMINETXDUO_EVPOST_NAME.
 #
+# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# or drop a copy in build/a2065.device.  Every other board's driver comes out
+# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.  Bridged only; the string
+# `slirp` is refused outright.
 #
 # SPDX-License-Identifier: MIT
 
@@ -63,7 +66,7 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-BOARD=a2065
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 UNFIXED=0
 
@@ -78,6 +81,14 @@ while getopts "m:t:b:N:B:u" opt; do
         *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B backend] [-u]" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "evpost_backend=refused:$IFACE" >&2
+        echo "This harness is bridged only.  -B names a host interface." >&2
+        exit 2
+        ;;
+esac
 
 # The probe's own ceilings add up to about 110 s of guest time in the worst
 # case, of which the 60 s soak is more than half, and a boot is 15 s.  This is
@@ -134,6 +145,19 @@ DEVICE=a2065.device
 UNIT=0
 CONFIGURE=DHCP
 IFEOF
+
+# -N puts a board in the machine; this puts its driver in DEVS: and its name in
+# DEVICE=.  Without it the line above stands whatever -N asked for, so every
+# board but the A2065 opens a2065.device against hardware that is not there and
+# the run reports a stack failure that is really a staging one.
+. "$ROOT/tools/sana2-stage.sh"
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+    _want=$(sana2_driver_for "$BOARD")
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] && [ -f "$_have" ] &&
+        export AMINETXDUO_SANA2_DRIVER="$_have"
+fi
+sana2_stage "$BOARD" "$STAGE/devs"
 
 printf 'hostname %s\n' "$HOST" > "$STAGE/devs/Internet/name_resolution"
 

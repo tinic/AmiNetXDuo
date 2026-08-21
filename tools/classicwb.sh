@@ -852,16 +852,20 @@ if [ "$VARIANT" = rtg ]; then
     say xvfb "$XDISP pid $XVFB_PID"
 fi
 
-# One MAC per combination, so two of these on one wire are two machines.  The
-# demo already on the segment keeps 02:41:4d:49:00:77 and its own name.
-case "$MODEL:$VARIANT" in
-    A600:plain)  MACTAIL=61 ;;
-    A1200:plain) MACTAIL=62 ;;
-    A1200:rtg)   MACTAIL=63 ;;
-    A3000:plain) MACTAIL=64 ;;
-    A3000:rtg)   MACTAIL=65 ;;
-esac
-MAC="${AMINETXDUO_CWB_MAC:-02:41:4d:49:c0:$MACTAIL}"
+# One MAC per combination AND PER CHECKOUT, so two of these on one wire are
+# two machines.  The model and the variant alone are not enough and it has
+# already cost a run: two agents each booting an A3000/rtg guest out of their
+# own tree derived the same address, the second came up on the first's, and
+# what failed was an assertion somewhere else -- a neighbour cache keeps
+# whichever answered last and nothing reports the collision.
+#
+# $ROOT is what tells the two trees apart, and it is stable, so one tree keeps
+# one address across runs.  The derivation is emu-mac.sh's, the same one every
+# other bridged harness uses, which also keeps this clear of the demo instance
+# on 02:41:4d:49:00:77: a derived address is never fifth-byte 0x00.
+. "$ROOT/tools/emu-mac.sh"
+MAC="${AMINETXDUO_CWB_MAC:-$(emu_mac_for_tag "cwb:$MODEL:$VARIANT:$ROOT")}"
+say mac "$MAC"
 
 CFG="$ROOT/build/$TAG.uae"
 cat > "$CFG" <<EOF

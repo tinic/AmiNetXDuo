@@ -3,7 +3,7 @@
 # TWO OPENERS RACING FOR ONE ROW OF THE MULTICAST TABLE.
 #
 #   tests/tools/run-mcastrace.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                [-A [-N board] [-B backend]] [-n]
+#                                [-N BOARD] [-B IFACE] [-n]
 #
 # WHAT THIS IS FOR
 #
@@ -48,8 +48,15 @@
 #   holding.  A longer run of the broken build stops finishing at all: at 400
 #   shots the guest never reached its summary and the harness timed out.
 #
+# BRIDGED, NEVER SLIRP.  -B names the host NIC to bridge onto and the string
+# `slirp` is refused outright.  Nothing on the LAN has to answer -- the race is
+# between two openers inside the guest -- but a board that came up on NAT is
+# not a board.
+#
+# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# or drop a copy in build/a2065.device.  Every other board's driver comes out
+# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
 #
 # ENVIRONMENT
 #
@@ -70,11 +77,8 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
-# guest boots, so -A picks Amiberry, which runs genuinely headless.
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
-BOARD=a2065
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 NEGATIVE=0
 
 ROUNDS="${AMINETXDUO_RACE_ROUNDS:-60000}"
@@ -89,18 +93,25 @@ MIN_SNIPER="${AMINETXDUO_RACE_MIN_SNIPER:-150}"
 GUEST_ROUNDS=""
 GUEST_SHOTS=""
 
-while getopts "m:t:b:AN:B:n" opt; do
+while getopts "m:t:b:N:B:n" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
         n) NEGATIVE=1 ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]] [-n]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B backend] [-n]" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound|none)
+        echo "mcastrace_backend=refused:$IFACE" >&2
+        echo "This harness is bridged only.  -B names a host interface." >&2
+        exit 2
+        ;;
+esac
 
 if [ "$NEGATIVE" = 1 ]; then
     # One round and one shot, and the gates below are NOT lowered to match.
@@ -154,7 +165,8 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 
 # STATIC, not DHCP: the run wants the interface up and unchanging for its whole
 # length, and a lease renewal in the middle would reconfigure the interface the
-# memberships are on.  10.0.2.15 and 10.0.2.2 are SLIRP's own numbers.
+# memberships are on.  A /24 of its own, on a bridge whose LAN is somebody
+# else's numbers, so nothing here is claimed or answered for.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -163,6 +175,19 @@ ADDRESS=10.0.2.15
 NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
+
+# -N puts a board in the machine; this puts its driver in DEVS: and its name in
+# DEVICE=.  Without it the line above stands whatever -N asked for, so every
+# board but the A2065 opens a2065.device against hardware that is not there and
+# the run reports a stack failure that is really a staging one.
+. "$ROOT/tools/sana2-stage.sh"
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
+    _want=$(sana2_driver_for "$BOARD")
+    _have=$(sana2_local_driver "$_want")
+    [ -n "$_have" ] && [ -f "$_have" ] &&
+        export AMINETXDUO_SANA2_DRIVER="$_have"
+fi
+sana2_stage "$BOARD" "$STAGE/devs"
 
 cp "$BSD"                   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
@@ -185,22 +210,13 @@ EOF
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-mcastrace}"
 
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/McastRace" "$STAGE/netstat" \
-        "$STAGE/NetShutdown"
-else
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/McastRace" "$STAGE/netstat" \
-        "$STAGE/NetShutdown"
-fi
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+    -t "$TIMEOUT" \
+    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/AddNetInterface" "$STAGE/McastRace" "$STAGE/netstat" \
+    "$STAGE/NetShutdown"
 RUN_RC=$?
 set -e
 

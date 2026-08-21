@@ -1213,8 +1213,51 @@ int main(int argc, char **argv)
     p_release_interface_list(base, list);
     list = NULL;
 
+    /*
+     * THE DRIVER IS READ OFF THE INTERFACE, not assumed.  This call named
+     * "a2065.device" outright, so on any other board the re-add below was
+     * refused with errno 6 and every assertion after it read a poisoned
+     * buffer -- a run that looked like AddInterfaceTagList() handing back a
+     * broken interface, on a rig that had simply asked for the wrong device.
+     * IFQ_DeviceName and IFQ_DeviceUnit are what the interface itself says,
+     * and they are the pair that has to go back in.
+     */
     if (first[0] != '\0')
-        p_addremove_phase(base, first, "a2065.device", 0);
+    {
+        char           device[64];
+        STRPTR         device_p = (STRPTR)POISON_LONG;
+        LONG           device_unit = (LONG)POISON_LONG;
+        struct TagItem dev_tags[3];
+        ULONG          i;
+
+        dev_tags[0].ti_Tag  = IFQ_DeviceName;
+        dev_tags[0].ti_Data = (ULONG)&device_p;
+        dev_tags[1].ti_Tag  = IFQ_DeviceUnit;
+        dev_tags[1].ti_Data = (ULONG)&device_unit;
+        dev_tags[2].ti_Tag  = TAG_DONE;
+        dev_tags[2].ti_Data = 0;
+
+        device[0] = '\0';
+        if (p_query_interface(base, first, dev_tags) == 0 &&
+            (ULONG)device_p != POISON_LONG && device_p != NULL)
+        {
+            for (i = 0; i + 1 < sizeof(device) && device_p[i] != '\0'; i++)
+                device[i] = (char)device_p[i];
+            device[i] = '\0';
+        }
+        if ((ULONG)device_unit == POISON_LONG)
+            device_unit = 0;
+
+        if (device[0] == '\0')
+        {
+            Printf((CONST_STRPTR)"addremove: the interface would not say "
+                                 "which device it opened, SKIPPED\n");
+        }
+        else
+        {
+            p_addremove_phase(base, first, device, device_unit);
+        }
+    }
 
     Printf((CONST_STRPTR)"ReleaseInterfaceList: returned\n");
 

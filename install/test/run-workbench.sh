@@ -232,10 +232,11 @@ INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
+STATIC=0
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 
-while getopts "b:a:l:p:N:t:T:kH" opt; do
+while getopts "b:a:l:p:N:t:T:kHS" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -246,12 +247,22 @@ while getopts "b:a:l:p:N:t:T:kH" opt; do
         T) BOOT_TIMEOUT="$OPTARG" ;;
         k) KEEP=1 ;;
         H) TERMINAL=1 ;;
+        S) STATIC=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
-                "[-t seconds] [-T seconds] [-k] [-H]" >&2
+                "[-t seconds] [-T seconds] [-k] [-H] [-S]" >&2
            exit 2 ;;
     esac
 done
+
+# -S and -H both drive a yes/no page, and installdrive.c carries ONE label.
+# Asking for both would silently answer only one of the two questions and pass
+# every check that does not look for the other.
+if [ "$STATIC" = "1" ] && [ "$TERMINAL" = "1" ]; then
+    echo "-S and -H both answer a yes/no question and installdrive.c can be" >&2
+    echo "given only one label per build.  Run them as two scenarios." >&2
+    exit 2
+fi
 
 # -H needs a level where the questions are drawn at all.  At NOVICE every
 # ask... returns its default without showing anything, so a run that asked for
@@ -261,6 +272,18 @@ done
 if [ "$TERMINAL" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     echo "-H needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
     echo "questions and the terminal one cannot be answered." >&2
+    exit 2
+fi
+
+# -S has the same requirement and a second one on top of it.  At NOVICE the
+# DHCP page is never drawn, so the run installs a DHCP machine and every check
+# below that does not look at CONFIGURE= reads as a pass; and P_ask_ip's
+# `(= @user-level 0)` term accepts the default unvalidated at that level, so
+# the four address prompts this scenario exists to reach would not be prompts.
+if [ "$STATIC" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-S needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no" >&2
+    echo "questions, so the DHCP one cannot be answered no and P_ask_ip takes" >&2
+    echo "its default without validating it." >&2
     exit 2
 fi
 
@@ -712,6 +735,25 @@ DRIVE_RUNS=1
 if [ "$TERMINAL" = "1" ]; then
     YES_LABEL="Yes, serve them"
     DRIVE_RUNS=2
+fi
+
+# -S: the second choice of "Does the network hand out addresses
+# automatically?" (Install-AmiNetXDuo:838-844).  That answer is the ONLY way
+# into the four P_ask_ip prompts and into P_ip_parse, which is a hand-written
+# dotted-quad parser with five rejection paths and had no coverage at all.
+#
+# BY LABEL, not by installdrive.c's DRIVE_NO_ON_YESNO page counter: that is a
+# page INDEX, it is set by nothing anywhere in the tree, and an index is wrong
+# the moment a question is added or one that only appears in some state does.
+# The label says in the transcript which question was answered.
+#
+# Each of the four prompts carries a valid default -- 192.168.1.10, the /24
+# mask, the network's .1 for the router and the same for the name server --
+# so clicking Proceed accepts them and the install completes.  What this run
+# measures is the branch, the four prompts being drawn, and CONFIGURE=STATIC
+# with those four values reaching DEVS:.
+if [ "$STATIC" = "1" ]; then
+    YES_LABEL="No, I will type them"
 fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
@@ -1185,6 +1227,65 @@ echo "---- S:User-Startup ----"
 cat "$(amiga_path S/User-Startup 2>/dev/null)" 2>/dev/null || echo "(none)"
 echo "---- DEVS:NetInterfaces/eth0 ----"
 cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(none)"
+
+# ---------------------------------------- did the STATIC branch run? ------
+#
+# -S answered the DHCP question no, so the four P_ask_ip prompts were drawn and
+# their defaults accepted.  Asserted rather than assumed: a run whose label
+# never matched takes the (default 1) of that page, installs a DHCP machine,
+# and passes every other check in this file.  That is the vacuous pass the
+# scenario was reported as a permanent SKIP to avoid, and it would come back
+# the first time the question's wording changed.
+if [ "$STATIC" = "1" ]; then
+    _if=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
+    _res=$(amiga_path Devs/Internet/name_resolution 2>/dev/null || true)
+    _get() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1 | tr -d '\r' |
+             sed 's/[[:space:]]*$//'; }
+
+    STATIC_CONFIGURE=$(_get CONFIGURE "$_if")
+    STATIC_ADDRESS=$(_get ADDRESS "$_if")
+    STATIC_NETMASK=$(_get NETMASK "$_if")
+    STATIC_GATEWAY=$(_get GATEWAY "$_if")
+    STATIC_DNS=$(sed -n 's/^nameserver[[:space:]][[:space:]]*//p' "$_res" \
+                 2>/dev/null | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+
+    echo "static_configure=${STATIC_CONFIGURE:-none}"
+    echo "static_address=${STATIC_ADDRESS:-none}"
+    echo "static_netmask=${STATIC_NETMASK:-none}"
+    echo "static_gateway=${STATIC_GATEWAY:-none}"
+    echo "static_nameserver=${STATIC_DNS:-none}"
+
+    if [ "$STATIC_CONFIGURE" = "STATIC" ]; then
+        echo "static_branch=taken"
+    else
+        echo "static_branch=NOT-TAKEN"
+        echo "!! -S asked for the static branch and the installer wrote"
+        echo "   CONFIGURE=${STATIC_CONFIGURE:-nothing}.  installdrive.c matches"
+        echo "   the SECOND button of a yes/no page against DRIVE_YES_LABEL;"
+        echo "   if Install-AmiNetXDuo's DHCP question was reworded, that"
+        echo "   string in run-workbench.sh is what has to follow it."
+        fail=1
+    fi
+
+    # The four values the prompts defaulted to.  Checked as a set, because the
+    # gateway and the name server are DERIVED from the address inside
+    # P_ask_ip's caller and a wrong derivation is what an unvalidated pass
+    # through those pages looks like.
+    for _pair in "address:$STATIC_ADDRESS:192.168.1.10" \
+                 "netmask:$STATIC_NETMASK:255.255.255.0" \
+                 "gateway:$STATIC_GATEWAY:192.168.1.1" \
+                 "nameserver:$STATIC_DNS:192.168.1.1"; do
+        _what=${_pair%%:*}; _rest=${_pair#*:}
+        _got=${_rest%%:*}; _want=${_rest#*:}
+        if [ "$_got" = "$_want" ]; then
+            printf '  ok      static %-11s %s\n' "$_what" "$_got"
+        else
+            printf '  WRONG   static %-11s %s, wanted %s\n' \
+                   "$_what" "${_got:-nothing}" "$_want"
+            fail=1
+        fi
+    done
+fi
 
 # ------------------------------------- did the INSTALLER pick the card? ------
 #

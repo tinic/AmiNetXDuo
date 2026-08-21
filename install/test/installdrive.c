@@ -93,27 +93,19 @@
 #endif
 
 /*
- * Which yes/no page to answer with the SECOND choice instead of the first.
- * 0 means "always take the first", which is the default in every askbool
- * this script has.  Set to 1 to answer "No, I will type them" to the
- * "does your network hand out addresses automatically?" question, which is
- * the only way to reach the static-address branch and its four validated
- * address prompts.
- */
-#ifndef DRIVE_NO_ON_YESNO
-#define DRIVE_NO_ON_YESNO 0
-#endif
-
-/*
- * The other way to answer a yes/no page, and the one to prefer: name the
- * BUTTON rather than count the pages.
+ * How a yes/no page is answered with its SECOND choice: name the BUTTON.
  *
- * A page number is wrong the moment a question is added, or the moment a
- * question that only appears on a machine in some state does appear -- the
- * "keep the existing settings" page shows up on the second run of a
- * DRIVE_RUNS=2 install and shifts every index after it by one.  A label
- * cannot drift like that, and it says in the transcript which question was
- * answered rather than which position it was in.
+ * There was a second knob here, DRIVE_NO_ON_YESNO, which named a page by its
+ * INDEX among the yes/no pages seen so far.  Nothing in the tree ever set it,
+ * so the one scenario that needed it -- install/test/run-all.sh's STATIC, the
+ * only way into P_ask_ip's four prompts and P_ip_parse -- was reported as a
+ * permanent SKIP.  It is gone rather than wired up, because an index is wrong
+ * the moment a question is added, or the moment a question that only appears
+ * on a machine in some state does appear -- the "keep the existing settings"
+ * page shows up on the second run of a DRIVE_RUNS=2 install and shifts every
+ * index after it by one.  A label cannot drift like that, and it says in the
+ * transcript which question was answered rather than which position it was
+ * in.
  *
  * A yes/no page whose SECOND button's text contains this string is answered
  * with that button.  Empty means no page is, which is the default.
@@ -363,8 +355,7 @@ static struct Window *find_installer_window(struct Gadget **click_out)
             {
                 /* a yes/no page: ID 2 is the first (choices) string */
                 yesno_pages++;
-                choice = (yesno_pages == DRIVE_NO_ON_YESNO && no != NULL)
-                             ? no : yes;
+                choice = yes;
                 if (no != NULL && label_matches(no, DRIVE_YES_LABEL))
                     choice = no;
             }
@@ -682,6 +673,12 @@ int main(void)
     }
 
     say("installdrive: %ld pages driven in total\n", clicks);
+    /*
+     * How many yes/no pages went past.  It is what tells "DRIVE_YES_LABEL did
+     * not match" apart from "the page it names was never drawn" -- at NOVICE
+     * this is 0, because the Installer draws none of them.
+     */
+    say("installdrive: %ld yes/no page(s) seen\n", yesno_pages);
 
 done:
     if (reply_port != NULL)

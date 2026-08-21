@@ -18,12 +18,14 @@
 #   EXPERT    the same plus the unit number, the interface name and the
 #             confirmation page for every copy and every file written
 #   STATIC    "no" to the DHCP question, which is the only way into the four
-#             validated address prompts.  NOT RUNNABLE: installdrive.c clicks
-#             the default on every askbool and its DRIVE_NO_ON_YESNO
-#             (installdrive.c:103) is set by nothing, so the static branch and
-#             P_ip_parse's five rejections have no way in.  Reported as a skip
-#             rather than dropped from the list, because a scenario that
-#             quietly stops being named stops being missed.
+#             P_ask_ip prompts and into P_ip_parse.  run-workbench.sh -S,
+#             which answers that page by the LABEL of its second button --
+#             installdrive.c already had that mechanism for -H, and the
+#             DRIVE_NO_ON_YESNO page counter this scenario used to wait on is
+#             set by nothing and is an index, so it would drift the first time
+#             a question moved.  The four prompts are answered with their own
+#             defaults; the run asserts CONFIGURE=STATIC and all four values
+#             reached DEVS:.
 #   RERUN     installs over itself; the second pass has to notice the existing
 #             configuration and keep it.  This is run-workbench.sh -H, which
 #             installs three times.
@@ -61,8 +63,9 @@ skipped=0
 # HOW MANY SCENARIOS REACHED A VERDICT.  Without it, `exit "$failures"` at the
 # end reports 0 for a box where every scenario skipped -- no licensed
 # Workbench, no ADFs, no peer -- and prints "everything that could run passed"
-# over a run that installed nothing.  STATIC always skips, so "any skip" is the
-# wrong gate; the gate is whether a single scenario reached a verdict.
+# over a run that installed nothing.  A skip can still be honest -- no ADFs, no
+# peer -- so "any skip" is the wrong gate; the gate is whether a single
+# scenario reached a verdict.
 #
 # SCENARIOS ONLY.  ICONS is a preamble -- it hands the generated .info files to
 # the real icon.library and needs no Workbench -- and counting it here would
@@ -101,17 +104,12 @@ for scenario in "${SCENARIOS[@]}"; do
 
     # What each scenario becomes now that run-workbench.sh is the harness.
     # STATIC and RERUN are not levels: RERUN is what -H already does, three
-    # installs over one another; STATIC has no way in at all, because it needs
-    # a "no" on the DHCP question and installdrive.c can only click the
-    # default (its DRIVE_NO_ON_YESNO, installdrive.c:103, is set by nothing).
+    # installs over one another, and STATIC is -S, which answers the DHCP
+    # question no.  Both need a level where the questions are drawn at all.
     case "$scenario" in
         NOVICE|AVERAGE|EXPERT) opts=(-l "$scenario") ;;
         RERUN)                 opts=(-l AVERAGE -H) ;;
-        STATIC)
-            RESULTS+=("  SKIP  $scenario -- no way to answer the DHCP question no;\
- installdrive.c:103 DRIVE_NO_ON_YESNO is set by nothing")
-            skipped=$((skipped + 1))
-            continue ;;
+        STATIC)                opts=(-l AVERAGE -S) ;;
     esac
 
     "$HERE/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
