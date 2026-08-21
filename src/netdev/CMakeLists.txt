@@ -86,8 +86,24 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     # the anomaly; -O2 on a whole target was.
     #
     # 21 KB is a lot on a 2 MB A1200, but this is a driver and read throughput
-    # is the field metric, so the size alone does not decide it. Measured
-    # interleaved on the A1200 + a2065 reference before this landed.
+    # is the field metric, so size alone did not decide it. Measured on the
+    # A1200 + a2065 reference, 18 runs interleaved ABABAB/BABABA/ABABAB, nine
+    # per arm, loadavg recorded before each:
+    #
+    #     read    -O2 592.8 KB/s   -Os 586.2 KB/s   -1.12%, 95% CI -2.5..+0.2
+    #     write   -O2 346.7 KB/s   -Os 330.2 KB/s   -4.73%, t=16.8
+    #
+    # READ DOES NOT SEPARATE. The distributions overlap almost completely --
+    # the best -Os run beats seven of the nine -O2 runs, the worst -O2 run is
+    # below five of the nine -Os runs -- and the interval on the difference
+    # includes zero. The load asymmetry ran AGAINST -O2 (mean 2.54 against
+    # 1.98), so it cannot be what produced -O2's edge.
+    #
+    # WRITE REGRESSES 4.7% AND THAT ONE IS REAL: the two TX ranges do not
+    # overlap at all across nine runs each, and the 64 KB size-bounded arm
+    # shows the same 5.5%. Recorded rather than hidden. Read is the field
+    # metric and a write regression alone does not block a change, so this
+    # landed on 21,080 bytes for no measurable read cost.
     target_compile_options(anxnet_device PRIVATE -Os)
 
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
