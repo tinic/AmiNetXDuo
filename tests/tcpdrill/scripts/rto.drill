@@ -26,31 +26,30 @@
 # EVERY CASE ENDS WITH A RESET from the peer, so a socket left retransmitting
 # cannot leak into the next case.  retransmit.drill explains why at length.
 #
-# THIS FILE NEEDS -DAMINETXDUO_TCP_LOSS_PROBE=OFF, and run-tcpdrill.sh skips it
-# by name otherwise.  RFC 8985 7.2's tail loss probe fires 240 ms after a
-# transmission, which is inside the round trip induced above, and the probe is
-# a retransmission: Karn's algorithm abandons the measurement in progress, so
-# the 600 ms path is never sampled, the timeout stays on its one second floor,
-# and the extra copy sits in the queue until the next `tx` line matches it and
-# reports a sequence number from the segment before.
+# THIS FILE RUNS WITH THE TAIL LOSS PROBE ON, and it did not used to.
 #
-# THE WINDOW IT WOULD HAVE TO FIT IN IS EMPTY.  A round trip that survives the
-# probe has to be shorter than 2*SRTT + NX_TCP_LOSS_PROBE_DELACK_MS, and SRTT
-# stays at zero here precisely because every sample is abandoned, so that is
-# 240 ms.  A first sample that lifts the timeout off its 1000 ms floor has to
-# be longer than 333, because RFC 6298 2.2 makes the first timeout 3R.  There
-# is no R that is both.  Nothing can be widened into that.
+# RFC 8985 7.2's probe was armed off the tick a sample would have been floored
+# at, 240 ms, whenever there was no SRTT.  A probe is a retransmission, so
+# Karn's algorithm abandons the measurement in flight, and the 600 ms path
+# induced above was therefore never sampled: the timeout stayed on its one
+# second floor and the extra copy sat in the queue until the next `tx` line
+# matched it and reported a sequence number from the segment before.  The
+# window this file would have had to fit in was empty -- a round trip short
+# enough to survive the probe is under 240 ms, one long enough to lift the
+# first timeout off its 1000 ms floor is over 333 -- so it was skipped by name
+# and could not be widened into passing.
 #
-# RFC 7323 timestamps would settle it -- the echo names which transmission is
-# being answered, so no Karn exception is needed, and nx_tcp_socket_state_ack_
-# check.c already samples that way when the option is in use -- but this peer
-# cannot echo a TSval the stack chose, so no script here reaches that path.
+# An unmeasured connection is not probed at all now (nx_tcp_fast_periodic_
+# processing.c), which is what makes the first sample obtainable.  Every case
+# below therefore takes its sample cleanly, and the probe appears afterwards,
+# on the schedule 7.2 sets: 2*SRTT + NX_TCP_LOSS_PROBE_DELACK_MS, suppressed
+# when that would land at or after the timeout.  Each case that sees one has a
+# line for it, marked, and the rung after it is measured from the SEGMENT and
+# not from the probe, which is the property the probe's restore exists for.
 #
-# WHAT THAT LEAVES UNMEASURED IS REAL, and belongs on the backlog rather than
-# here: on a connection without timestamps, SRTT cannot grow past 240 ms at
-# all, because every sample longer than that is abandoned by the probe that
-# fires first.  A path slower than that keeps the estimate it had, and the
-# timeout that guards it stays on the floor.
+# rto05 sees none, and that is not an omission: six samples of the same 600 ms
+# path leave 2*SRTT + 200 at 1400 ms against a timeout floored at 1000, and a
+# probe that would land at or after the timeout is not sent.
 #
 # SPDX-License-Identifier: MIT
 
@@ -69,7 +68,10 @@ idle 600
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-tx PA seq=101 ack=1 len=100 after=1400 within=2600
+# The probe: 2*SRTT + 200 ms, about 1.4 s.  Measured 1377.
+tx PA seq=101 ack=1 len=100 after=900 within=1900
+# And the rung, 3R from the SEGMENT, about 1.8 s.  Measured 387 after the probe.
+tx PA seq=101 ack=1 len=100 after=200 within=900
 rx R seq=101
 
 # RFC 6298 3, Karn's algorithm.  The segment is retransmitted before it is
@@ -106,7 +108,11 @@ tx PA seq=1 ack=1 len=100 within=300
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-tx PA seq=101 ack=1 len=100 after=700 within=1400
+# The sample is a tick or two, so the probe is 200 ms and lands on the fast
+# timer's next-but-one pass.  Measured 276.
+tx PA seq=101 ack=1 len=100 after=150 within=600
+# The floor, one second from the SEGMENT.  Measured 724 after the probe.
+tx PA seq=101 ack=1 len=100 after=400 within=1300
 rx R seq=101
 
 # RFC 6298 5.5 on top of section 2: the ladder is unchanged, it merely starts
@@ -124,8 +130,12 @@ idle 600
 rx A seq=1 ack=101 win=8192
 send 100
 tx PA seq=101 ack=1 len=100 within=300
-tx PA seq=101 ack=1 len=100 after=1400 within=2600
-tx PA seq=101 ack=1 len=100 after=2800 within=5200
+# The probe.  Measured 1439.
+tx PA seq=101 ack=1 len=100 after=900 within=1900
+# The first rung, 3R from the segment.  Measured 521 after the probe.
+tx PA seq=101 ack=1 len=100 after=200 within=1100
+# And the second, twice the first.  About 3.9 s.
+tx PA seq=101 ack=1 len=100 after=2600 within=5400
 rx R seq=101
 
 # RFC 6298 2.3.  The first sample is deliberately pessimistic, RTTVAR is set
