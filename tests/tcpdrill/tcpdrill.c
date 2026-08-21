@@ -4073,6 +4073,41 @@ static VOID do_txcount(const char *args, const char *raw)
     say("  ok   %s   [%u frame(s)]", raw, n);
 }
 
+/*
+ * `rxorder fifo|lifo`.  Which queued CMD_READ the synthetic device completes
+ * when a frame arrives.
+ *
+ * SANA-II promises nothing about the order, and every driver in the test
+ * matrix happens to answer the oldest read first, so a receive path that
+ * depends on it fails on a card and nowhere else.  ZZ9000Net is the card:
+ * its firmware owns the RX slots and a separate process drains them.
+ *
+ * tapdev.c has had tap_set_rx_lifo() since the mode was written; what was
+ * missing was this line, so rxorder.drill's five directives fell to the
+ * catch-all in run_line().  Each one counted a failure -- which is why the
+ * script could not pass -- while every case still printed PASS, because the
+ * reordering it was asserting about never happened.  The file tested in-order
+ * delivery twice and called it LIFO.
+ */
+static VOID do_rxorder(const char *args, const char *raw)
+{
+    char tok[16];
+
+    (VOID)token(args, tok, sizeof(tok));
+
+    if (streq(tok, "lifo"))
+        tap_set_rx_lifo(TRUE);
+    else if (streq(tok, "fifo"))
+        tap_set_rx_lifo(FALSE);
+    else
+    {
+        fail(raw, "rxorder takes fifo or lifo");
+        return;
+    }
+
+    pass(raw);
+}
+
 static VOID do_idle(const char *args, const char *raw)
 {
     char  tok[24];
@@ -4182,6 +4217,12 @@ static VOID case_begin(const char *name)
     zero((UBYTE *)&cs, (ULONG)sizeof(cs));
     for (i = 0; i + 1 < sizeof(cs.name) && name[i] != '\0'; i++)
         cs.name[i] = name[i];
+
+    /* The device is shared by every case in the file, so `rxorder` is reset
+       here for the same reason `cs` is zeroed: a case that says nothing about
+       completion order gets the ordinary one, whatever the case before it
+       asked for and however early it stopped. */
+    tap_set_rx_lifo(FALSE);
 
     cs.sock       = -1;
     cs.lsock      = -1;
@@ -4346,6 +4387,7 @@ static VOID run_line(char *line)
     else if (streq(verb, "opt"))      do_opt(args, raw);
     else if (streq(verb, "close"))    do_close(args, raw);
     else if (streq(verb, "idle"))     do_idle(args, raw);
+    else if (streq(verb, "rxorder"))  do_rxorder(args, raw);
     else if (streq(verb, "tx"))       do_tx(args, raw);
     else if (streq(verb, "notx"))     do_notx(args, raw);
     else if (streq(verb, "txcount")) do_txcount(args, raw);
