@@ -110,8 +110,38 @@ static struct Library *bsd_usergroup_base;
 
 VOID bsd_usergroup_open(VOID)
 {
-    if (bsd_usergroup_base == NULL)
-        bsd_usergroup_base = OpenLibrary((STRPTR)"usergroup.library", 0);
+    struct Process *me;
+    APTR            saved;
+
+    if (bsd_usergroup_base != NULL)
+        return;
+
+    /* LIBS: is where our own installer puts it, so this is the usual answer. */
+    bsd_usergroup_base = OpenLibrary((STRPTR)"usergroup.library", 0);
+    if (bsd_usergroup_base != NULL)
+        return;
+
+    /*
+     * Not in LIBS:. A machine with AmiTCP installed keeps one in AmiTCP:libs/
+     * -- which is the very path ixnet asks for -- so try it before giving up.
+     * A hand-installed library on such a machine then works with nothing for
+     * the user to do and nothing for them to be told.
+     *
+     * Requesters off across the attempt. Without an AmiTCP: assign this open
+     * is a lock on a volume that is not there, and DOS would put "Please
+     * insert volume AmiTCP:" in front of somebody who merely opened a socket.
+     * pr_WindowPtr is the caller's, so it is saved and put back; and only a
+     * Process has one, which a library opened from a Task does not.
+     */
+    me = (struct Process *)FindTask(NULL);
+    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return;
+
+    saved = me->pr_WindowPtr;
+    me->pr_WindowPtr = (APTR)-1L;
+    bsd_usergroup_base =
+        OpenLibrary((STRPTR)"AmiTCP:libs/usergroup.library", 0);
+    me->pr_WindowPtr = saved;
 }
 
 VOID bsd_runtime_close(VOID)
