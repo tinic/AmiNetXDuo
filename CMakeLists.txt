@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # plain vX.Y.Z.
 #
 # 0.x on purpose: nothing has run on real hardware yet.
-project(AmiNetXDuo VERSION 0.25.1 LANGUAGES C ASM)
+project(AmiNetXDuo VERSION 0.25.2 LANGUAGES C ASM)
 
 # -Os, AFTER project(), because nothing earlier can make it stick.
 #
@@ -35,13 +35,15 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # shipping strip settings on the pinned toolchain:
 #
 #     bsdsocket.library   352,960   was 395,328    -10.7%
-#     tls.library         185,720   was 242,840    -23.5%
+#     tls.library         185,720   was 242,312    -23.4%
 #     usergroup.library     7,172   was   7,684     -6.7%
-#     anxnet.device        51,620   was  48,632     +6.1%
+#     anxnet.device        30,540   was  33,228     -8.1%
 #
-# anxnet.device GROWS, and that is not a typo. It is the one image that does,
-# it has never been explained, and it is recorded here rather than left out of
-# a table that would otherwise read as uniformly good news.
+# anxnet.device used to be the one image that GREW under -flto, by 6.1%, and
+# that was never an LTO effect: it was the only target built -O2 for the whole
+# image, where at -O2 the inliner is aggressive rather than size-constrained.
+# At -Os it behaves like the other three. src/netdev/CMakeLists.txt carries the
+# measurement that decided the switch.
 #
 # The tls.library number includes crypto68k in LTO and the live compiler-runtime
 # helpers protected below.  The former crypto exclusion produced 195,204

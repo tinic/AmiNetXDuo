@@ -7,10 +7,10 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
-## Unreleased
+## 0.25.2
 
 - `AmiTCP:` is assigned, so a program that opens `AmiTCP:libs/usergroup.library` as a file finds one. 0.25.1 made ixemul clients work by holding `usergroup.library` open, which satisfies a path-qualified `OpenLibrary` because Exec falls back to matching the file part; that does nothing for a program which `Lock`s or `Open`s the path instead. The installer makes the assign and writes it into `S:User-Startup`, and the library makes it on first open if nothing else owns the name -- so a hand-installed library works too. A machine with a real AmiTCP on it keeps its own
-- Every shipped binary is smaller. `bsdsocket.library` 395,328 to 352,960, `tls.library` 242,840 to 195,204, `usergroup.library` 7,684 to 7,172, and `anxnet.device` 48,632 to 30,540. Nothing about the code changed; the toolchain can now do link-time optimisation, and `anxnet.device` was additionally being built `-O2` for the whole image where the rest of the tree is `-Os` -- measured on the A1200 with an A2065, that cost 21 KB for no read-throughput difference that survives interleaving
+- Every shipped binary is smaller. `bsdsocket.library` 395,328 to 352,960, `tls.library` 242,312 to 185,720, `usergroup.library` 7,684 to 7,172, and `anxnet.device` 33,228 to 30,540. Nothing about the code changed; the toolchain can now do link-time optimisation, and `anxnet.device` was additionally being built `-O2` for the whole image where the rest of the tree is `-Os` -- measured on the A1200 with an A2065, that cost 21 KB for no read-throughput difference that survives interleaving
 - Building from source needs the toolchain that `tools/fetch-toolchain.sh` installs, and refuses an older one rather than producing something subtly wrong. The previous pin cannot do link-time optimisation at all -- its `ld` answers `-plugin PLUGIN (ignored)` -- and its own gcc revision no longer exists upstream, so `tools/build-toolchain.sh` could not fetch it either
 
 ## 0.25.1
