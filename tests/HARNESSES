@@ -63,6 +63,7 @@ tests/conformance/run-conformance.sh : .github/workflows/emulator.yml : the bsds
 tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
 tests/sockopt/run-sockopt.sh       : .github/workflows/emulator.yml : the socket-option test; needs no driver and no card, only a ROM
 tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml : the crypto68k assembly against its own reference, on the 68020 and the 68000, which are different code
+tests/crypto68k/run-lto-probe.sh   : manual : UNWIRED. fast full-tls.library-link regression for late LTO libcalls and P-256; no network, card or peer
 tests/clients/run-clients.sh       : .github/workflows/emulator.yml : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
 tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server

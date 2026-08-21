@@ -306,6 +306,16 @@ VOID c68k_p256_ec_multiple(NX_CRYPTO_EC *curve,
  */
 UINT c68k_p256_self_check(VOID);
 
+/* Diagnostic-only return values used by run-lto-probe.sh.  Normal builds
+   preserve the public success/not-successful contract above. */
+#define C68K_P256_CHECK_GENERIC_X    0x201u
+#define C68K_P256_CHECK_GENERIC_Y    0x202u
+#define C68K_P256_CHECK_COMB_X       0x203u
+#define C68K_P256_CHECK_COMB_Y       0x204u
+#define C68K_P256_CHECK_FIELD_MUL    0x211u
+#define C68K_P256_CHECK_FIELD_SQR    0x212u
+#define C68K_P256_CHECK_FIELD_INV    0x213u
+
 #ifdef __cplusplus
 }
 #endif

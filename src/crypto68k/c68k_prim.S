@@ -187,8 +187,8 @@ Lac_done:
 |   (hi:lo) / d.  Quotient returned, remainder stored through rem.
 |
 | One instruction, and the reason this file grew a division at all: the
-| portable form is a 64-bit divide, which on this toolchain reaches __udivdi3
-| in src/common/ami_udivdi3.c because libgcc.a is empty here.
+| portable form is a 64-bit divide, which AmiNetXDuo resolves to __udivdi3 in
+| src/common/ami_udivdi3.c.
 |
 | The caller must check that hi < d.  DIVU.L traps on quotient overflow rather
 | than saturating, and Knuth's algorithm D produces exactly one case that

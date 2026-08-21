@@ -1,5 +1,5 @@
 /*
- * AmiNetXDuo, the compiler runtime this toolchain does not ship.
+ * AmiNetXDuo, CPU-dispatched compiler runtime helpers.
  *
  * The set depends on the target, and grew when the 68000 and 68060 builds were
  * added (docs/RESEARCH.md 45):
@@ -13,10 +13,13 @@
  * 32-bit multiply.  Both new targets linked with one undefined symbol,
  * __muldi3, and nothing else.
  *
- *   $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is a zero-byte
- *   file in this toolchain, and nothing else in the tree exports __udivdi3
- *   (checked: libc.a, libm020/libc.a, libnix*.a, libamiga.a).  So the moment
- *   any translation unit divides a 64-bit value the link fails with
+ *   The 15.2.0 toolchain in use when this file was introduced shipped a
+ *   zero-byte libgcc.a, and nothing else in the tree exported __udivdi3
+ *   (checked: libc.a, libm020/libc.a, libnix*.a, libamiga.a).  The current
+ *   pinned 16.2.0b toolchain has normal libgcc fallbacks; these implementations
+ *   remain the deliberately selected, CPU-dispatched versions used by every
+ *   AmiNetXDuo image.  With the original toolchain, the first 64-bit division
+ *   failed the link with
  *
  *       undefined reference to `__udivdi3'
  *
@@ -101,6 +104,12 @@ typedef unsigned short      u16;
 #define AMI_CHIP_HOME   "\n\t.chip 68000"
 #endif
 #define AMI_CHIP_020    ".chip 68020\n\t"
+
+/* Compiler-generated libcalls do not exist in GIMPLE.  When this LTO object
+   is pulled for ami_rt_cpu_select(), WPA can therefore delete their bodies
+   before LTRANS creates the references.  Keep each entry point until the
+   native linker can garbage-collect the genuinely unreferenced sections. */
+#define AMI_LATE_LIBCALL __attribute__((used))
 
 static int ami_rt_020;
 static int ami_rt_mulul;
@@ -206,7 +215,8 @@ s64 __moddi3(s64 numerator, s64 denominator);
  * libgcc spells this one __udivmoddi4, and it is a public entry point: GCC
  * calls it directly when it needs both halves.
  */
-u64 __udivmoddi4(u64 numerator, u64 denominator, u64 *remainder)
+AMI_LATE_LIBCALL u64 __udivmoddi4(u64 numerator, u64 denominator,
+                                   u64 *remainder)
 {
 
 u32     n_hi = (u32)(numerator >> 32);
@@ -292,13 +302,13 @@ u32     rem;
     }
 }
 
-u64 __udivdi3(u64 numerator, u64 denominator)
+AMI_LATE_LIBCALL u64 __udivdi3(u64 numerator, u64 denominator)
 {
 
     return __udivmoddi4(numerator, denominator, 0);
 }
 
-u64 __umoddi3(u64 numerator, u64 denominator)
+AMI_LATE_LIBCALL u64 __umoddi3(u64 numerator, u64 denominator)
 {
 
 u64     remainder;
@@ -314,7 +324,7 @@ u64     remainder;
  * suite needs them.  Truncating division, as C99 requires: the quotient rounds
  * toward zero and the remainder takes the sign of the numerator.
  */
-s64 __divdi3(s64 numerator, s64 denominator)
+AMI_LATE_LIBCALL s64 __divdi3(s64 numerator, s64 denominator)
 {
 
 int     negate = 0;
@@ -337,7 +347,7 @@ u64     quotient;
     return(negate ? -(s64)quotient : (s64)quotient);
 }
 
-s64 __moddi3(s64 numerator, s64 denominator)
+AMI_LATE_LIBCALL s64 __moddi3(s64 numerator, s64 denominator)
 {
 
 int     negate = 0;
@@ -453,7 +463,7 @@ u32     mid;
 
 u64 __muldi3(u64 a, u64 b);
 
-u64 __muldi3(u64 a, u64 b)
+AMI_LATE_LIBCALL u64 __muldi3(u64 a, u64 b)
 {
 
 u32     a_lo = (u32)a;
@@ -477,9 +487,9 @@ u64     product = ami_umul32_wide(a_lo, b_lo);
 /* ------------------------------------------------ the 68000 32-bit set,
  *
  * mulu.l, divu.l and divs.l do not exist before the 68020, so on a plain
- * 68000 every 32-bit `*`, `/` and `%` in C becomes a libgcc call, into the
- * zero-byte libgcc described at the top of this file.  Compiled away on every
- * other target, where GCC emits the instruction.
+ * 68000 every 32-bit `*`, `/` and `%` in C becomes a compiler-runtime call.
+ * These definitions are compiled away on every other target, where GCC emits
+ * the instruction.
  *
  * The newlib `.` multilib was built for a 68000 and has the same references,
  * so without all five the 68000 build of anything that calls printf does not
@@ -495,7 +505,7 @@ long __divsi3(long numerator, long denominator);
 long __modsi3(long numerator, long denominator);
 
 
-u32 __mulsi3(u32 a, u32 b)
+AMI_LATE_LIBCALL u32 __mulsi3(u32 a, u32 b)
 {
 
     if (ami_rt_020 != 0)
@@ -590,7 +600,7 @@ int     bit;
     return(quotient);
 }
 
-u32 __udivsi3(u32 numerator, u32 denominator)
+AMI_LATE_LIBCALL u32 __udivsi3(u32 numerator, u32 denominator)
 {
 
     if (ami_rt_020 != 0 && denominator != 0)
@@ -603,7 +613,7 @@ u32 __udivsi3(u32 numerator, u32 denominator)
     return(ami_udivmodsi(numerator, denominator, 0));
 }
 
-u32 __umodsi3(u32 numerator, u32 denominator)
+AMI_LATE_LIBCALL u32 __umodsi3(u32 numerator, u32 denominator)
 {
 
 u32     remainder;
@@ -628,7 +638,7 @@ u32     remainder;
 
 /* Truncating, as C99 requires: quotient toward zero, remainder takes the sign
  * of the numerator. */
-long __divsi3(long numerator, long denominator)
+AMI_LATE_LIBCALL long __divsi3(long numerator, long denominator)
 {
 
 int     negate = 0;
@@ -662,7 +672,7 @@ u32     quotient;
     return(negate ? -(long)quotient : (long)quotient);
 }
 
-long __modsi3(long numerator, long denominator)
+AMI_LATE_LIBCALL long __modsi3(long numerator, long denominator)
 {
 
 int     negate = 0;
@@ -702,10 +712,10 @@ u32     remainder = 0;
 /*
  * These appeared when the tree moved to -Os (docs/RESEARCH.md 57).
  *
- * At -O3 GCC expands 64-bit shifts inline. At -Os it calls out to libgcc,
- * which is the zero-byte file described at the top of this file. The 68020
- * build linked until the optimisation level changed and then failed on one
- * symbol, __lshrdi3, from ami_udivdi3.c itself.
+ * At -O3 GCC expands 64-bit shifts inline. At -Os it calls a compiler-runtime
+ * helper.  With the original zero-byte libgcc, the 68020 build linked until
+ * the optimisation level changed and then failed on one symbol, __lshrdi3,
+ * from ami_udivdi3.c itself.
  *
  * All three are provided, not only the one that was missing, because which of
  * them a given -Os build calls for depends on the code the optimiser sees.
@@ -735,7 +745,7 @@ u64 __lshrdi3(u64 value, int count);
 u64 __ashldi3(u64 value, int count);
 s64 __ashrdi3(s64 value, int count);
 
-u64 __lshrdi3(u64 value, int count)
+AMI_LATE_LIBCALL u64 __lshrdi3(u64 value, int count)
 {
 
 u32     hi = (u32)(value >> 32);
@@ -755,7 +765,7 @@ u32     lo = (u32)value;
             (u64)((lo >> count) | (hi << (32 - count))));
 }
 
-u64 __ashldi3(u64 value, int count)
+AMI_LATE_LIBCALL u64 __ashldi3(u64 value, int count)
 {
 
 u32     hi = (u32)(value >> 32);
@@ -773,7 +783,7 @@ u32     lo = (u32)value;
             (u64)(lo << count));
 }
 
-s64 __ashrdi3(s64 value, int count)
+AMI_LATE_LIBCALL s64 __ashrdi3(s64 value, int count)
 {
 
 long    hi = (long)(u32)((u64)value >> 32);

@@ -38,10 +38,10 @@
 /* ------------------------------------------------- 64-bit division ------- */
 
 /*
- * `__udivdi3` and `__umoddi3` are absent from this toolchain's libgcc.a,
- * checked with `nm`, which finds neither in any archive it ships.  Fitz's
- * `ds_to_unix()` (src/amiga-common.c) needs one: it composes a Unix timestamp
- * in `uint64_t` and divides the tick field by 50 there.
+ * The 15.2.0 toolchain used when this harness was introduced had neither
+ * `__udivdi3` nor `__umoddi3` in libgcc.a.  Fitz's `ds_to_unix()`
+ * (src/amiga-common.c) needs one: it composes a Unix timestamp in `uint64_t`
+ * and divides the tick field by 50 there.
  *
  * Supplied here rather than by editing Fitz, so the harness tests the released
  * program unmodified.
@@ -56,8 +56,8 @@ unsigned long long __umoddi3(unsigned long long n, unsigned long long d);
 /*
  * Written on 32-bit limbs rather than on `unsigned long long` directly,
  * because a variable-count 64-bit shift compiles to `__lshrdi3`/`__ashldi3`
- * which this libgcc.a does not have either, so the obvious version of this
- * function fails to link for the same reason it exists.
+ * which the original libgcc.a did not have either, so the obvious version of
+ * this function failed to link for the same reason it existed.
  */
 typedef struct
 {

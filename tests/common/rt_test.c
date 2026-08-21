@@ -1,10 +1,10 @@
 /*
  * AmiNetXDuo, the compiler runtime, checked on the machine that runs it.
  *
- * src/common/ami_udivdi3.c is this toolchain's libgcc: __mulsi3, __udivsi3,
+ * src/common/ami_udivdi3.c supplies AmiNetXDuo's compiler runtime:
+ * __mulsi3, __udivsi3,
  * __umodsi3, __divsi3, __modsi3, __muldi3, __udivdi3 and friends, plus the
- * three 64-bit shifts, because the shipped libgcc.a is a zero-byte file.  Most
- * of them now have two forms -- the portable one a 68000 needs and a
+ * three 64-bit shifts.  Most of them have two forms -- the portable one a 68000 needs and a
  * one-instruction one for the parts that have MULU.L and DIVU.L -- chosen from
  * AttnFlags at library or client startup.
  *

@@ -57,8 +57,9 @@
 #
 #   libamigaclient.a    clients/compat/*.c plus src/common/ami_udivdi3.c --
 #                       stat/mkdir/isatty/gettimeofday over dos.library, and
-#                       the libgcc helpers the zero-byte libgcc.a lacks.  See
-#                       those files; each says what it is faithful about.
+#                       AmiNetXDuo's CPU-dispatched compiler helpers and the
+#                       client-only helpers.  See those files; each says what
+#                       it is faithful about.
 #
 #   libnet.a, libatomic.a
 #                       Named, not chosen: curl's CMakeLists.txt hardcodes

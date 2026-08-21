@@ -37,7 +37,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 9 | One SHA-256 hash-DRBG entropy pool, shared not duplicated. Credited ~26 bits (8 `AvailMem` + 4 + 2 + 12), enough for nonces and ISNs, not for adversarial TLS keys. The per-source credit table exists nowhere else. | `src/common/ami_random.c`, `include/aminetxduo/tlslib.h:591` | current |
 | 9 | Karatsuba rejected at 32 limbs, ~5%, because Montgomery reduction is not Karatsuba-able so only half the work is eligible. | `tests/crypto68k/c68k_amissl_bench.c:692` | see code |
 | 9 | TLS budget: ~7 s RSA, ~23 s ECDSA at 14 MHz, ~40 KB Fast RAM per open connection. | `include/aminetxduo/tlslib.h:43` | see code |
-| 9 | This toolchain ships a zero-byte `libgcc.a` with no `__udivdi3`; `src/common/ami_udivdi3.c` is the single copy. | `src/common/ami_udivdi3.c` | see code |
+| 9 | The then-pinned 15.2.0 toolchain shipped a zero-byte `libgcc.a`; 16.2.0b has normal fallbacks, while `src/common/ami_udivdi3.c` remains AmiNetXDuo's CPU-dispatched implementation. | `src/common/ami_udivdi3.c` | historical origin; current implementation |
 | 11 | Loopback is the fastest path and the source of every throughput figure, so it needs its own tap via `NX_ENABLE_IP_PACKET_FILTER`. | `port/netxduo-amiga/inc/nx_user.h:505` | see code |
 | 11.2 | Kickstart 3.1 ROM has `mathieeesingbas` only, so a doubles-using port must stage the IEEE math libraries or hang silently. | `tools/amissl-run.sh:101` | see code |
 | 11.3 | The pinned toolchain's `crt0.o` pushes `&__argv`, so `main()` gets a garbage `argv`. Patch a copy in the build dir, never the toolchain. | `clients/compat/fix-crt0.py`, `tools/fix-toolchain-crt0.py:267` | current |

@@ -31,11 +31,11 @@ project(AmiNetXDuo VERSION 0.25.1 LANGUAGES C ASM)
 set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
-# -flto, for the cross build only.  Measured at dcb5d9d8, same commit both
-# ways, with src/crypto68k excluded as described below:
+# -flto, for the cross build only.  Measured against the same sources and
+# shipping strip settings on the pinned toolchain:
 #
 #     bsdsocket.library   352,960   was 395,328    -10.7%
-#     tls.library         195,204   was 242,840    -19.6%
+#     tls.library         185,720   was 242,840    -23.5%
 #     usergroup.library     7,172   was   7,684     -6.7%
 #     anxnet.device        51,620   was  48,632     +6.1%
 #
@@ -43,9 +43,10 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # it has never been explained, and it is recorded here rather than left out of
 # a table that would otherwise read as uniformly good news.
 #
-# tls.library would be 181,540 with crypto68k included, so the exclusion hands
-# back 13,664 bytes of the 61,300. bsdsocket.library pays nothing for it --
-# crypto68k is not linked into that one.
+# The tls.library number includes crypto68k in LTO and the live compiler-runtime
+# helpers protected below.  The former crypto exclusion produced 195,204
+# bytes, so removing it still saves 9,484 bytes after restoring those helpers.
+# bsdsocket.library pays nothing for crypto68k; it is not linked there.
 #
 # THIS NEEDS A TOOLCHAIN THAT CAN DO IT, and until 2026-08 none existed. The
 # published asset was built with --disable-plugins, so its ld answers
@@ -68,30 +69,18 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 #
 # The same blindness applies to any symbol whose only reference is in a
 # top-level asm() string; src/common/crashguard.c has one, marked `used'.
-# AMINETXDUO_LTO IS ON, AND HAS TWO CALLERS THAT TURN IT OFF.
 #
-# 1. tools/analyze.sh, because -flto SILENTLY DISABLES -fanalyzer. The same
+# tools/analyze.sh turns AMINETXDUO_LTO off because -flto SILENTLY DISABLES
+# -fanalyzer. The same
 #    translation unit that reports a use-of-uninitialised-value on its own
 #    reports nothing at all with -flto added -- no note, no warning. The
 #    static-analysis stage would have gone quiet rather than red, and what
 #    actually failed CI was an accident: `cat | grep -Wanalyzer` returning 1 on
 #    an empty result under pipefail. Without that, it would have read green.
 #
-# 2. src/crypto68k, per file, in that module's own CMakeLists.txt, because
-#    -flto miscompiles its P-256 scalar multiplication into an off-curve point.
-#    tls.library then sends a TLS 1.3 key share the far end rejects as
-#    BAD_ECPOINT, no handshake completes, and every https: URL fails -- against
-#    three real hosts and against the lab peer, on the RSA-cert and EC-cert
-#    arms alike. Excluding those thirteen .c files fixes it and keeps -flto
-#    everywhere else, which is where the size is. The reproducer and what was
-#    ruled out are written up beside the exclusion.
-#
-#     AMINETXDUO_TLS13_PEER=<peer> tools/tlsgate.sh build/ci/default 68020 1 fast
-#
-# Nothing else in the tree is implicated: 15/15 CI jobs, nine cards pass the
-# sweep with guest counts matching the peer in both directions, and A1200+a2065
-# reads 620 KB/s against a ~480 baseline -- the AMINETXDUO_HOT_O2 drift this was
-# expected to cost did not happen.
+# crypto68k participates in LTO too.  Its former exclusion masked a late
+# compiler-libcall reachability bug in src/common/ami_udivdi3.c; the minimized
+# reproducer and the full tls.library regression probe live under tests/.
 option(AMINETXDUO_LTO "Build with -flto (cross builds only)" ON)
 
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)

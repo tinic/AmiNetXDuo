@@ -1,8 +1,11 @@
 /*
- * clients/compat, the libgcc helpers this toolchain's zero-byte libgcc.a
- * does not supply, beyond the 64-bit division already in src/common.
+ * clients/compat, compiler-runtime helpers needed by the ported clients beyond
+ * the 64-bit arithmetic already in src/common.
  *
- * $AMIGA_TOOLCHAIN_ROOT/lib/gcc/m68k-amigaos/15.2.0/libgcc.a is 0 bytes.
+ * The 15.2.0 toolchain used when this file was introduced had a zero-byte
+ * libgcc.a.  The current pinned toolchain has fallbacks, but keeping these
+ * local definitions makes client builds independent of that historical
+ * toolchain difference and retains the implementations already tested here.
  * src/common/ami_udivdi3.c covers __udivdi3 / __umoddi3 / __divdi3 / __moddi3
  * / __udivmoddi4, which is everything the stack itself and newlib's printf
  * need.  A ported Unix client reaches further:

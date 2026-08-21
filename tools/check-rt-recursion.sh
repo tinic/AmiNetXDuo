@@ -4,10 +4,10 @@
 #
 #   tools/check-rt-recursion.sh <build-dir>
 #
-# src/common/ami_udivdi3.c is this toolchain's libgcc, because the shipped one
-# is a zero-byte file.  Every routine in it is a helper GCC calls when it has
-# no instruction for an operation -- and if the C for one of them performs that
-# same operation, GCC lowers it to a call, to the function it is compiling.
+# src/common/ami_udivdi3.c supplies the compiler-runtime helpers AmiNetXDuo
+# selects ahead of libgcc.  GCC calls each one when it has no instruction for
+# an operation -- and if the C for one of them performs that same operation,
+# GCC lowers it to a call, to the function it is compiling.
 # The result links, exports the right symbol, and recurses until the stack is
 # gone.  On a 4 KB Shell stack that is a few thousand frames and a dead machine.
 #

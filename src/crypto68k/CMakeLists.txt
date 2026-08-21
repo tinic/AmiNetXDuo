@@ -97,11 +97,10 @@ set(CRYPTO68K_INCLUDES
 
 # --------------------------------------------------- vendored reference ---
 
-# nx_crypto_huge_number.c divides 64-bit values, and this toolchain ships a
-# zero-byte libgcc.a.  src/common/ami_udivdi3.c is the single copy of the
-# helpers for the whole tree; src/common is configured unconditionally and
-# before this directory, so the target is simply there on a cross build.  On a
-# host build libgcc supplies the real ones.
+# nx_crypto_huge_number.c divides 64-bit values.  src/common/ami_udivdi3.c is
+# the single CPU-dispatched copy of the helpers for the whole tree; src/common
+# is configured unconditionally and before this directory, so the target is
+# simply there on a cross build.  On a host build libgcc supplies them.
 if(TARGET aminetxduo_m68k_rt)
     set(CRYPTO68K_RT aminetxduo_m68k_rt)
 else()
@@ -281,38 +280,31 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
     unset(C68K_MV_SRC)
 endif()
 
-# -fno-lto ON EVERY C FILE IN THIS MODULE.  -flto miscompiles it: the P-256
-# scalar multiplication returns a point that is not on the curve, so the TLS
-# 1.3 client key share is rejected as BAD_ECPOINT and no handshake completes.
-# The bytes on the wire are structurally perfect -- group secp256r1, length
-# 65, leading 0x04, both coordinates < p -- and the point is simply wrong.
-# It is not a corrupted curve constant (the implied b differs run to run), not
-# an unconverted Montgomery residue, and not an unnormalised projective point;
-# all three were tested against the captured coordinates and rejected.
-#
-# Bisected per file on an otherwise -flto tree.  Excluding all thirteen .c
-# files here fixes it; excluding c68k_p256.c alone does NOT, and neither does
-# any single one of the other twelve, though subsets get roughly half the
-# handshakes through.  That shape says inlining and partitioning rather than
-# one bad line, and no undefined behaviour was found in the field arithmetic.
-# Ours or the compiler's is UNDECIDED -- the honest answer, not a placeholder.
-#
-# The reproducer to use is NOT the handshake gate.  Build with
-# -DAMINETXDUO_TLS_CRYPTO68K_SELFCHECK: c68k_p256_self_check() in
-# src/tls/ami_tls_crypto.c recomputes two comb-table entries at library init
-# and fails under -flto, with no peer and no network, in seconds.
-#
-# Everything OUTSIDE this module keeps -flto, which is where the size is.
-foreach(_c68k_src IN LISTS CRYPTO68K_SOURCES)
-    if(_c68k_src MATCHES "\\.c$")
-        set_source_files_properties("${_c68k_src}"
-            PROPERTIES COMPILE_OPTIONS -fno-lto)
+# The full-link regression for the LTO failure which originally looked like a
+# P-256 miscompile.  The arithmetic was correct; WPA deleted compiler-runtime
+# helpers whose calls appear only during LTRANS.  src/common/ami_udivdi3.c now
+# keeps those entry points.  This probe runs field known answers and both
+# scalar-multiply paths from the real tls.library link in about fifteen seconds.
+option(AMINETXDUO_CRYPTO68K_LTO_PROBE
+       "Run the P-256 LTO regression check while loading tls.library"
+       OFF)
+
+if(AMINETXDUO_CRYPTO68K_LTO_PROBE)
+    if(NOT CMAKE_CROSSCOMPILING OR NOT AMINETXDUO_TLS OR NOT AMINETXDUO_LTO)
+        message(FATAL_ERROR
+            "AMINETXDUO_CRYPTO68K_LTO_PROBE needs a cross build with both "
+            "AMINETXDUO_TLS=ON and AMINETXDUO_LTO=ON.")
     endif()
-endforeach()
+endif()
 
 add_library(crypto68k STATIC ${CRYPTO68K_SOURCES})
 target_include_directories(crypto68k PUBLIC ${CRYPTO68K_INCLUDES})
 target_link_libraries(crypto68k PUBLIC crypto68k_ref)
+
+if(AMINETXDUO_CRYPTO68K_LTO_PROBE)
+    target_compile_definitions(crypto68k PRIVATE
+        AMINETXDUO_CRYPTO68K_LTO_PROBE=1)
+endif()
 
 if(AMINETXDUO_CRYPTO68K_ASM)
     # The .S needs the define too, it is #ifdef'd end to end so that an

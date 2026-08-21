@@ -14,10 +14,10 @@
 #
 # WHY IT NEEDS FIVE BOOTS AND NOT ONE
 #
-#   Because the routines differ per machine.  src/common/ami_udivdi3.c is this
-#   toolchain's libgcc -- the shipped libgcc.a is a zero-byte file -- and one
-#   binary for every 68k means it is compiled -m68000 and picks its MULU.L and
-#   DIVU.L paths from AttnFlags at run time.  A green run on an A1200 says
+#   Because the routines differ per machine.  src/common/ami_udivdi3.c is the
+#   CPU-dispatched runtime AmiNetXDuo selects ahead of the toolchain fallback,
+#   and one binary for every 68k means it is compiled -m68000 and picks its
+#   MULU.L and DIVU.L paths from AttnFlags at run time.  A green run on an A1200 says
 #   nothing about the A600 arm, and the 68000 form is the one nothing else in
 #   tier 2 exercises: it is what a 68000 runs and it has no other witness.
 #

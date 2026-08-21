@@ -17,6 +17,9 @@
 #include "tls_vectors.h"
 
 #include "crypto68k.h"       /* c68k_cpu_select() */
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+#include "c68k_p256.h"
+#endif
 #include "aminetxduo/compat.h"   /* ami_rt_cpu_select() */
 
 /* Included explicitly, not transitively.  NDK 3.2 reaches <exec/resident.h>
@@ -79,6 +82,10 @@ static struct TLSLibBase *tls_lib_init(
     register APTR               seglist __asm("a0"),
     register struct ExecBase   *sysbase __asm("a6"))
 {
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+UINT probe_status;
+#endif
+
     SysBase = sysbase;
 
     /* Which crypto primitives this machine wants, before any of them runs.
@@ -93,6 +100,12 @@ static struct TLSLibBase *tls_lib_init(
     ami_rt_cpu_select(((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL,
                       ((ULONG)sysbase->AttnFlags & AFF_68020) != 0UL &&
                       ((ULONG)sysbase->AttnFlags & AFF_68060) == 0UL);
+
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+    /* Diagnostic only: preserve the product's initialization order, then run
+       the known-answer check without a socket, interface, card or peer. */
+    probe_status = c68k_p256_self_check();
+#endif
 
     if (!tls_runtime_open())
         return NULL;
@@ -115,6 +128,12 @@ static struct TLSLibBase *tls_lib_init(
     base->tb_Lib.lib_Version      = TLS_LIB_VERSION;
     base->tb_Lib.lib_Revision     = TLS_LIB_REVISION;
     base->tb_Lib.lib_IdString     = tls_lib_id;
+
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+    /* The loader only sees struct Library.  Revision is a harmless channel
+       for the diagnostic result in a build which is explicitly unshippable. */
+    base->tb_Lib.lib_Revision = (UWORD)probe_status;
+#endif
 
     InitSemaphore(&base->tb_Lock);
 

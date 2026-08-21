@@ -113,9 +113,9 @@ VOID ami_log(int level, const char *fmt, ...);
 
 /*
  * The compiler runtime's own CPU choice.  src/common/ami_udivdi3.c supplies
- * __mulsi3, __udivsi3, __umodsi3, __divsi3 and __modsi3, because this
- * toolchain ships a zero-byte libgcc and a -m68000 build calls all five; each
- * has a one-instruction form from the 68020 up, and this is what turns it on.
+ * __mulsi3, __udivsi3, __umodsi3, __divsi3 and __modsi3 because a -m68000
+ * build calls all five; each has a one-instruction form from the 68020 up,
+ * and this is what turns it on.
  * Pass non-zero when SysBase->AttnFlags has AFF_68020.  Never calling it means
  * the 68000 routines, which are correct everywhere.
  */

@@ -63,6 +63,22 @@ add_executable(crypto68k_25519_test c68k_25519_test.c)
 add_executable(crypto68k_ec_test  c68k_ec_test.c)
 add_executable(crypto68k_ec_bench c68k_ec_bench.c)
 
+# The fast regression for the former crypto68k LTO failure is a loader, not a
+# second static link: only the full tls.library link reproduced the late-libcall
+# reachability bug.  Library init runs field known answers and both P-256
+# scalar-multiply paths, so this needs no socket, card or peer.
+if(AMINETXDUO_CRYPTO68K_LTO_PROBE)
+    if(NOT TARGET tls_library)
+        message(FATAL_ERROR
+            "AMINETXDUO_CRYPTO68K_LTO_PROBE needs "
+            "AMINETXDUO_TLSLIB_LINK=ON.")
+    endif()
+    add_executable(crypto68k_lto_probe c68k_lto_probe.c)
+    add_dependencies(crypto68k_lto_probe tls_library)
+    set_target_properties(crypto68k_lto_probe PROPERTIES
+        OUTPUT_NAME "crypto68k_lto_probe")
+endif()
+
 # The bulk path: AES-128-CBC and SHA-256, every variant timed and checked in
 # one run, with the instruction-cost kernels the design decisions rest on.
 #

@@ -30,11 +30,11 @@ set(AMINETXDUO_TLS_INCLUDES
 
 # ------------------------------------------------- compiler runtime shim ---
 
-# This toolchain ships a ZERO BYTE libgcc.a, so `unsigned long long` division
-# does not link.  nx_crypto's huge-number long division needs it.  The single
-# copy lives in src/common (aminetxduo_m68k_rt); see the header comment in
-# src/common/ami_udivdi3.c for why we supply the helper rather than dropping
-# the huge-number radix to 16 bits.
+# The original 15.2.0 toolchain had no libgcc implementation of `unsigned long
+# long` division.  The current toolchain has a fallback, but nx_crypto still
+# uses AmiNetXDuo's faster CPU-dispatched implementation.  The single copy
+# lives in src/common (aminetxduo_m68k_rt); see its header comment for why we
+# retain it rather than dropping the huge-number radix to 16 bits.
 #
 # src/common is configured unconditionally and before this directory, so on a
 # cross build the target is simply there.  On a host build it is absent and

@@ -110,6 +110,11 @@ if(AMINETXDUO_TLSLIB_LINK)
         NX_SECURE_TLS_DISABLE_SECURE_RENEGOTIATION
         NX_SECURE_TLS_ENABLE_TLS_1_3)
 
+    if(AMINETXDUO_CRYPTO68K_LTO_PROBE)
+        target_compile_definitions(tls_library PRIVATE
+            AMINETXDUO_CRYPTO68K_LTO_PROBE=1)
+    endif()
+
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
 
     # Listed twice rather than wrapped in --start-group: nx_secure and
@@ -125,8 +130,10 @@ if(AMINETXDUO_TLSLIB_LINK)
         ${TLSLIB_ARCHIVES} ${TLSLIB_ARCHIVES})
 
     if(TARGET aminetxduo_m68k_rt)
-        add_dependencies(tls_library aminetxduo_m68k_rt)
-        target_link_libraries(tls_library PRIVATE $<TARGET_FILE:aminetxduo_m68k_rt>)
+        # Use the target, not its raw archive path: its -ffunction-sections
+        # link usage requirement must reach LTRANS so --gc-sections can drop
+        # protected compiler helpers which this image never calls.
+        target_link_libraries(tls_library PRIVATE aminetxduo_m68k_rt)
     endif()
 
     # -nostartfiles, not -nostdlib: no crt0 in a shared library, but nx_crypto

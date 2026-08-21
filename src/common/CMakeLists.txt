@@ -34,8 +34,9 @@ target_link_libraries(netxduo PUBLIC aminetxduo_common)
 
 # ------------------------------------------------- compiler runtime shim ---
 #
-# This toolchain ships a ZERO BYTE libgcc.a, so 64-bit division does not link.
-# ami_udivdi3.c is the single copy for the whole tree, nx_crypto's
+# The original 15.2.0 toolchain shipped a zero-byte libgcc.a.  The current
+# toolchain has fallbacks, but ami_udivdi3.c remains the single deliberately
+# selected, CPU-dispatched copy for the whole tree: nx_crypto's
 # huge-number long division (src/tls, src/crypto68k), newlib's printf
 # (tests/conformance/build.sh compiles this same file), and the E-Clock
 # microsecond conversions.  See the header comment in that file.
@@ -93,4 +94,11 @@ if(CMAKE_CROSSCOMPILING)
     #
     # The 64-bit helpers are ours alone and collide with nothing.  Only the
     # 32-bit five are duplicated, and only because -fno-lto made them visible.
+
+    # `used' forces every possible late-libcall definition through WPA.  The
+    # compile option covers non-LTO links; the interface link option reaches
+    # LTRANS, where native sections are actually emitted in an LTO link.  That
+    # lets --gc-sections discard helpers the completed image does not call.
+    target_compile_options(aminetxduo_m68k_rt PRIVATE -ffunction-sections)
+    target_link_options(aminetxduo_m68k_rt INTERFACE -ffunction-sections)
 endif()

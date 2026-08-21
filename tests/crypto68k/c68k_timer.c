@@ -129,10 +129,10 @@ ULONG c68k_eclock_millis(ULONG ticks)
      * CRT runs for minutes on the floor target, and microseconds overflow a
      * ULONG after 4,295 seconds.  Everything measured here is >= 1 ms.
      *
-     * The 64-bit divide is a __udivdi3 call, resolved out of
-     * src/common/ami_udivdi3.c (this toolchain's libgcc.a is empty).  Fine on
-     * a report path, not inside a timed region: every measurement accumulates
-     * raw ticks and converts exactly once.
+     * The 64-bit divide is a __udivdi3 call, resolved to AmiNetXDuo's
+     * CPU-dispatched helper in src/common/ami_udivdi3.c.  Fine on a report
+     * path, not inside a timed region: every measurement accumulates raw ticks
+     * and converts exactly once.
      */
     return((ULONG)(((unsigned long long)ticks * 1000ULL) /
                    (unsigned long long)c68k_hz));

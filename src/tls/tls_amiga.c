@@ -195,9 +195,9 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
      * 64-bit intermediate: at ~709 kHz a one-second measurement is ~709,000
      * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
      * This is a report path, so the __udivdi3 call is acceptable here.  It
-     * comes out of src/common/ami_udivdi3.c, because this toolchain's
-     * libgcc.a is empty.  It is not acceptable inside a timed region, so
-     * every measurement there accumulates raw ticks and converts once.
+     * resolves to AmiNetXDuo's CPU-dispatched implementation in
+     * src/common/ami_udivdi3.c.  It is not acceptable inside a timed region,
+     * so every measurement there accumulates raw ticks and converts once.
      */
     return (ULONG)(((unsigned long long)ticks * 1000000ULL) /
                    (unsigned long long)ami_tls_hz);

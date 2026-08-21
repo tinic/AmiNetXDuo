@@ -1131,6 +1131,23 @@ UINT c68k_p256_self_check(VOID)
 {
 
 static c68k_p256_work   check_work;
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+static const c68k_p256_fe check_mul =
+{
+    0xFACE98BEUL, 0xF713EBBBUL, 0xC6A08622UL, 0xD183E554UL,
+    0x513A6B2BUL, 0x33565064UL, 0x6DD3C719UL, 0x823CD15FUL
+};
+static const c68k_p256_fe check_sqr =
+{
+    0x426B3F8CUL, 0x002AE56CUL, 0x5D694DD1UL, 0x33B69949UL,
+    0x0E3690D8UL, 0x81819A5EUL, 0x29BEF2B2UL, 0x98F6B84DUL
+};
+static const c68k_p256_fe check_inv =
+{
+    0x77F35238UL, 0x664C49E5UL, 0x73744B65UL, 0x707D6562UL,
+    0xB69B16ABUL, 0x24936933UL, 0x88706D5DUL, 0xE060CBB0UL
+};
+#endif
 c68k_p256_aff           g;
 c68k_p256_aff           got;
 c68k_limb               k[C68K_P256_LIMBS];
@@ -1141,6 +1158,24 @@ UINT                    i;
     fe_copy(g.x, &c68k_p256_comb[0][0]);
     fe_copy(g.y, &c68k_p256_comb[0][8]);
 
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+    c68k_p256_fe_mul(got.x, g.x, g.y);
+    if (fe_cmp(got.x, check_mul) != 0)
+    {
+        return(C68K_P256_CHECK_FIELD_MUL);
+    }
+    c68k_p256_fe_sqr(got.x, g.x);
+    if (fe_cmp(got.x, check_sqr) != 0)
+    {
+        return(C68K_P256_CHECK_FIELD_SQR);
+    }
+    c68k_p256_fe_inv(got.x, g.x);
+    if (fe_cmp(got.x, check_inv) != 0)
+    {
+        return(C68K_P256_CHECK_FIELD_INV);
+    }
+#endif
+
     /* T2[0] must be 2^e * G.  Recompute it the slow way and compare. */
     for (i = 0; i < C68K_P256_LIMBS; i++)
     {
@@ -1150,19 +1185,41 @@ UINT                    i;
 
     c68k_p256_mul_point(&got, &g, k, &check_work);
 
-    if ((fe_cmp(got.x, &c68k_p256_comb[C68K_P256_COMB_HALF][0]) != 0) ||
-        (fe_cmp(got.y, &c68k_p256_comb[C68K_P256_COMB_HALF][8]) != 0))
+    if (fe_cmp(got.x, &c68k_p256_comb[C68K_P256_COMB_HALF][0]) != 0)
     {
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+        return(C68K_P256_CHECK_GENERIC_X);
+#else
         return(NX_CRYPTO_NOT_SUCCESSFUL);
+#endif
+    }
+    if (fe_cmp(got.y, &c68k_p256_comb[C68K_P256_COMB_HALF][8]) != 0)
+    {
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+        return(C68K_P256_CHECK_GENERIC_Y);
+#else
+        return(NX_CRYPTO_NOT_SUCCESSFUL);
+#endif
     }
 
     /* And the comb itself must agree with the generic routine on 2^e. */
     c68k_p256_mul_g(&got, k);
 
-    if ((fe_cmp(got.x, &c68k_p256_comb[C68K_P256_COMB_HALF][0]) != 0) ||
-        (fe_cmp(got.y, &c68k_p256_comb[C68K_P256_COMB_HALF][8]) != 0))
+    if (fe_cmp(got.x, &c68k_p256_comb[C68K_P256_COMB_HALF][0]) != 0)
     {
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+        return(C68K_P256_CHECK_COMB_X);
+#else
         return(NX_CRYPTO_NOT_SUCCESSFUL);
+#endif
+    }
+    if (fe_cmp(got.y, &c68k_p256_comb[C68K_P256_COMB_HALF][8]) != 0)
+    {
+#ifdef AMINETXDUO_CRYPTO68K_LTO_PROBE
+        return(C68K_P256_CHECK_COMB_Y);
+#else
+        return(NX_CRYPTO_NOT_SUCCESSFUL);
+#endif
     }
 
     return(NX_CRYPTO_SUCCESS);

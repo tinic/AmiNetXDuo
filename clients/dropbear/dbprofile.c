@@ -127,9 +127,8 @@ static void p_add(int slot, ULONG t0)
 }
 
 /* ticks -> milliseconds, outside every timed region: the divide is a
-   __udivdi3 call (this toolchain's libgcc.a is empty and
-   src/common/ami_udivdi3.c supplies it), which is fine on a report path and
-   would not be fine inside a measurement. */
+   __udivdi3 call supplied by src/common/ami_udivdi3.c, which is fine on a
+   report path and would not be fine inside a measurement. */
 static ULONG p_ms(ULONG ticks)
 {
     if (p_hz == 0)
