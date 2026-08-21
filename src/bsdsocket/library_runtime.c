@@ -27,7 +27,9 @@
 
 #include "aminetxduo/random.h"
 
+#include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <proto/dos.h>
 #include <proto/exec.h>
 
 __attribute__((weak)) struct DosLibrary *DOSBase;
@@ -107,11 +109,80 @@ BOOL bsd_runtime_open(VOID)
  * exactly as before.
  */
 static struct Library *bsd_usergroup_base;
+static BOOL            bsd_amitcp_tried;
+
+/*
+ * AmiTCP: -> SYS:, if nothing else has claimed the name.
+ *
+ * The residency trick above is what makes ixnet's lookup succeed, and it is a
+ * trick: it works because Exec falls back to matching the file part, not
+ * because the path means anything here. This makes the path mean something.
+ * AmiTCP kept usergroup.library in AmiTCP:libs/ and nowhere else, which is why
+ * ixnet asks for it there; LIBS: is SYS:Libs on a stock Workbench, so pointing
+ * AmiTCP: at SYS: makes that same path reach the copy in LIBS: as a file.
+ *
+ * The installer makes this assign too, and this is not a substitute for it: a
+ * machine that ran the installer has it from boot, before anything opens this
+ * library. This is for the machine that did not -- a hand-installed library, a
+ * library dropped into LIBS: by another package -- so that it works with
+ * nothing for the user to do.
+ *
+ * NOT DONE IF AmiTCP: ALREADY RESOLVES. A real AmiTCP installation owns the
+ * name and keeps its db, bin and libs drawers under it; taking it would break
+ * every one of those paths. The installer distinguishes its own previous
+ * assign from a real AmiTCP by looking for AmiTCP:db and AmiTCP:bin, and does
+ * not need to here: existing at all is reason enough to leave it alone.
+ *
+ * It is not removed on expunge. An ixemul program that is still running holds
+ * usergroup.library open through this very path, and it is a global name that
+ * anything may have started using in the meantime. A dangling assign would be
+ * the harm; an assign to SYS:, which is always there, is not.
+ */
+static VOID bsd_amitcp_assign(VOID)
+{
+    struct Process *me;
+    APTR            saved;
+    BPTR            lock;
+
+    /* Requesters off across the probe, for the same reason as below: without
+       an assign this is a lock on a volume that is not there. */
+    me = (struct Process *)FindTask(NULL);
+    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return;
+
+    saved              = me->pr_WindowPtr;
+    me->pr_WindowPtr   = (APTR)-1L;
+    lock               = Lock((STRPTR)"AmiTCP:", SHARED_LOCK);
+    me->pr_WindowPtr   = saved;
+
+    if (lock != 0)
+    {
+        UnLock(lock);
+        return;
+    }
+
+    lock = Lock((STRPTR)"SYS:", SHARED_LOCK);
+    if (lock == 0)
+        return;
+
+    /* AssignLock() takes the lock on success and leaves it on failure. */
+    if (AssignLock((STRPTR)"AmiTCP", lock) == DOSFALSE)
+        UnLock(lock);
+}
 
 VOID bsd_usergroup_open(VOID)
 {
     struct Process *me;
     APTR            saved;
+
+    /* Once per load, and before anything else here: it is the reason the
+       AmiTCP:libs/ fallback below can work, and bsd_lib_open() reaches this
+       function on every OpenLibrary() while two Locks are worth doing once. */
+    if (!bsd_amitcp_tried)
+    {
+        bsd_amitcp_tried = TRUE;
+        bsd_amitcp_assign();
+    }
 
     if (bsd_usergroup_base != NULL)
         return;

@@ -1105,7 +1105,9 @@ struct AmiSocketBase *bsd_lib_open(
      * usergroup.library, held for the life of this library so that its node
      * is in Exec's library list. That residency is what an ixemul.library
      * client needs to reach a socket at all; the whole reason is over
-     * bsd_usergroup_open() in library_runtime.c. Here rather than in
+     * bsd_usergroup_open() in library_runtime.c, which also makes the AmiTCP:
+     * assign those clients look under, on the first call and once. Here
+     * rather than in
      * bsd_lib_init(), which Exec runs from inside RamLib while RamLib is
      * loading this file: opening a second disk-based library from there
      * re-enters it. This runs in the opener's own Process, under the
