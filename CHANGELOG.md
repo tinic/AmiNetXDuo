@@ -9,6 +9,10 @@ version at the top when it merges.
 
 ## Unreleased
 
+## 0.25.1
+
+- Programs built against ixemul.library work. `wget` and every other GeekGadgets client reaches the network through `ixnet.library`, which opens `bsdsocket.library` and then looks for `usergroup.library`; not finding one, it closed the stack it had just opened and reported no network at all, so every socket call in that program answered "Function not implemented" while the interface was up and `ping` worked. The library now holds `usergroup.library` open for as long as it is loaded, which is what the other stacks do
+
 ## 0.25.0
 
 - A DHCPv6 lease is renewed once, when it is due, rather than rebound twenty-five times a second forever. A server that answers with T1 and T2 of zero is telling the client to pick its own renewal times; the client read zero as "renew now" and re-entered the rebind state on every pass, which also meant a renewal never actually reached the wire and the address's lifetime shrank each time. On the lab's network that was 2544 rebinds in five minutes, and is now none
