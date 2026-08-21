@@ -116,7 +116,7 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="eabb6789378f954f487a3db3dd2648b52b3932cc6fc69a858f105bb3b6761462"
+        TC_SHA256="3869b4427396fe2037b901f5082ff85b7ae0208cadfc8762ee447020e7888820"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
