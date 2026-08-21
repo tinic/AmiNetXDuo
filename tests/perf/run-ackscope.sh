@@ -158,7 +158,12 @@ fi
 echo "target_name=$TARGET"
 echo "target_addr=$ADDR"
 echo "capture_host=$CAPHOST"
-echo "peer=${PEER:-none}"
+# driver_peer, NOT peer.  ackscope.py prints `peer=` for the address at the
+# other end of the connection it read, which is the one that means something;
+# a second `peer=` here with a different value -- an ssh target, or `none`
+# when -H was not given -- puts two answers under one key in a stream whose
+# whole contract is that a key has one.
+echo "driver_peer=${PEER:-none}"
 
 # A TARGET THAT IS THE CAPTURE HOST'S OWN ADDRESS IS A MISTAKE, not a run.
 # It captures a loopback conversation and reports the host's own Linux stack
