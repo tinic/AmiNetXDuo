@@ -95,7 +95,12 @@ set -euo pipefail
 # ------------------------------------------------------------------- pin ----
 
 TC_GCC_VERSION="16.2.0b"
-TC_ASSET_VERSION="16.2.0"
+# 16.2.1 rather than a rebuilt 16.2.0: the content is different -- gcc moved to
+# 60f21496, binutils carries the two bfd LTO patches and is configured
+# --enable-plugins, and lib/bfd-plugins links the plugin -- and serving
+# different bytes from a URL somebody has already fetched is how a sha256 check
+# stops meaning anything. Old commits keep resolving to the old tag.
+TC_ASSET_VERSION="16.2.1"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 TC_MIRROR_REPO="tinic/AmiNetXDuo"
@@ -115,7 +120,7 @@ case "$OS/$ARCH" in
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="0549bac96463155a8f46fff3e4f7d54a1f6a473652317fd11fcc99f6652b24d1"
+        TC_SHA256="fd202a65e616485526a35a966732008e9e62a447435e5853b3c705e32da3d732"
         ;;
     *)
         TC_PLATFORM=""
