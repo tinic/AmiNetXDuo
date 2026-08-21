@@ -491,8 +491,15 @@ static VOID p_hostname_phase(struct Library *base, const char *self_name,
         p_hostname_size(base, i);
 
     /* The two lengths that matter: exactly the name, where the terminator is
-       what has to go, and one more, where it fits. */
-    for (i = 0; self_name[i] != '\0'; i++)
+       what has to go, and one more, where it fits.
+       MEASURED OFF THE ANSWER ABOVE, not off self_name.  The two are not the
+       same string: src/bsdsocket/resolver.c:460 answers the machine's
+       configured name, which config_hostname.c cuts from the card's hardware
+       address on a machine nothing else names, and self_name is the hosts
+       entry the h_name assertions below use.  Sized from self_name these two
+       lines asked for lengths that had nothing to do with the name being
+       truncated, and the caller could not read them. */
+    for (i = 0; i < (LONG)sizeof(buf) && buf[i] != '\0'; i++)
         ;
     p_hostname_size(base, i);
     p_hostname_size(base, i + 1);

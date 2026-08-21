@@ -1183,15 +1183,33 @@ check_file Libs/usergroup.library
 # never been installed by any run.
 STACK_INSTALLED=unknown
 _stack_real=$(amiga_path Libs/bsdsocket.library || true)
+
+# EITHER COPY MAY BE ABSENT.  Libs/minimal/ is not in the archive this script
+# builds for itself -- it passes AMINETXDUO_DIST_NO_MINIMAL=1 to make-dist.sh
+# -- so `wc -c < <that path>` failed, and a redirect that cannot open its file
+# fails in the SHELL, before wc runs and before its 2>/dev/null applies.  Under
+# `set -euo pipefail` that took the whole run out at this line, three checks
+# in, on every invocation that did not pass -a.  Tested for rather than
+# silenced, so a comparison against a file that is not there is not made at
+# all instead of being made against an empty string.
+_bytes_of() { # path -> its size, or nothing
+    [ -f "$1" ] || return 0
+    wc -c < "$1" | tr -d ' '
+}
+
 if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
-    _stack_bytes=$(wc -c < "$_stack_real" | tr -d ' ')
-    _full_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library" \
-                  2>/dev/null | tr -d ' ')
-    _min_bytes=$(wc -c < "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library" \
-                 2>/dev/null | tr -d ' ')
-    [ "$_stack_bytes" = "${_full_bytes:-x}" ] && STACK_INSTALLED=full
-    [ "$_stack_bytes" = "${_min_bytes:-x}" ] && STACK_INSTALLED=minimal
+    _stack_bytes=$(_bytes_of "$_stack_real")
+    _full_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/bsdsocket.library")
+    _min_bytes=$(_bytes_of "$HD/Unpacked/AmiNetXDuo/Libs/minimal/bsdsocket.library")
+    if [ -n "$_full_bytes" ] && [ "$_stack_bytes" = "$_full_bytes" ]; then
+        STACK_INSTALLED=full
+    fi
+    if [ -n "$_min_bytes" ] && [ "$_stack_bytes" = "$_min_bytes" ]; then
+        STACK_INSTALLED=minimal
+    fi
     echo "stack_installed=$STACK_INSTALLED bytes=$_stack_bytes"
+    echo "stack_archive_full=${_full_bytes:-absent}"
+    echo "stack_archive_minimal=${_min_bytes:-absent}"
 else
     echo "stack_installed=none"
 fi
@@ -1239,20 +1257,25 @@ cat "$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null)" 2>/dev/null || echo "(no
 if [ "$STATIC" = "1" ]; then
     _if=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
     _res=$(amiga_path Devs/Internet/name_resolution 2>/dev/null || true)
+    # The router goes in DEVS:Internet/routes as DEFAULT=, not in the
+    # interface file as GATEWAY=: Install-AmiNetXDuo:1244-1255 writes it
+    # there, and P_ask_ip's third prompt is what fills it.  Asserted where the
+    # installer puts it, not where an interface file could also carry it.
+    _rt=$(amiga_path Devs/Internet/routes 2>/dev/null || true)
     _get() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1 | tr -d '\r' |
              sed 's/[[:space:]]*$//'; }
 
     STATIC_CONFIGURE=$(_get CONFIGURE "$_if")
     STATIC_ADDRESS=$(_get ADDRESS "$_if")
     STATIC_NETMASK=$(_get NETMASK "$_if")
-    STATIC_GATEWAY=$(_get GATEWAY "$_if")
+    STATIC_GATEWAY=$(_get DEFAULT "$_rt")
     STATIC_DNS=$(sed -n 's/^nameserver[[:space:]][[:space:]]*//p' "$_res" \
                  2>/dev/null | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')
 
     echo "static_configure=${STATIC_CONFIGURE:-none}"
     echo "static_address=${STATIC_ADDRESS:-none}"
     echo "static_netmask=${STATIC_NETMASK:-none}"
-    echo "static_gateway=${STATIC_GATEWAY:-none}"
+    echo "static_default_route=${STATIC_GATEWAY:-none}"
     echo "static_nameserver=${STATIC_DNS:-none}"
 
     if [ "$STATIC_CONFIGURE" = "STATIC" ]; then
@@ -1273,7 +1296,7 @@ if [ "$STATIC" = "1" ]; then
     # through those pages looks like.
     for _pair in "address:$STATIC_ADDRESS:192.168.1.10" \
                  "netmask:$STATIC_NETMASK:255.255.255.0" \
-                 "gateway:$STATIC_GATEWAY:192.168.1.1" \
+                 "default route:$STATIC_GATEWAY:192.168.1.1" \
                  "nameserver:$STATIC_DNS:192.168.1.1"; do
         _what=${_pair%%:*}; _rest=${_pair#*:}
         _got=${_rest%%:*}; _want=${_rest#*:}
