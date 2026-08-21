@@ -70,8 +70,8 @@ enum
 /* ---------------------------------------------------------- the workloads */
 
 #define NT_CHUNK    4096
-#define NT_SNAP_MIN 14UL
-#define NT_SNAP_MAX 65535UL
+#define NT_SNAP_MIN TOOL_BPF_MIN_SNAP
+#define NT_SNAP_MAX TOOL_BPF_MAX_SNAP
 
 static UBYTE nt_buf[NT_CHUNK];
 
@@ -507,7 +507,7 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (blen < snaplen + 32UL)
+    if (blen < snaplen + TOOL_BPF_SNAP_SLACK)
     {
         tool_error("BLEN %lu is too small for a snap length of %lu",
                    (LONG)blen, (LONG)snaplen);

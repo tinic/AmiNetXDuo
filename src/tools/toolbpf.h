@@ -60,6 +60,21 @@ extern "C" {
 #define TOOL_BPF_MIN_BLEN       32UL
 #define TOOL_BPF_MAX_BLEN       0x8000UL
 
+/*
+ * A record is its bpf_hdr plus the snapshot, so a buffer has to hold both or
+ * bpf_read() never returns a whole one.  Both capture commands require
+ * BLEN >= SNAP + TOOL_BPF_SNAP_SLACK for that reason.
+ *
+ * Which fixes the ceiling on SNAP: the largest BLEN is TOOL_BPF_MAX_BLEN, so
+ * a snapshot above TOOL_BPF_MAX_SNAP cannot be paired with any legal BLEN.
+ * Offering 65535, the largest count a BPF filter can return, and then
+ * rejecting every BLEN that could carry it sent the user to fix an argument
+ * that has no working value.
+ */
+#define TOOL_BPF_SNAP_SLACK     32UL
+#define TOOL_BPF_MIN_SNAP       14UL    /* below the Ethernet header */
+#define TOOL_BPF_MAX_SNAP       (TOOL_BPF_MAX_BLEN - TOOL_BPF_SNAP_SLACK)
+
 typedef struct ToolBpfChan
 {
     struct Library *base;

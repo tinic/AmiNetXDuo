@@ -82,8 +82,8 @@ enum
  * to, and the two commands spell every size the same way on purpose.
  */
 #define NC_SNAP_DEFAULT     96UL
-#define NC_SNAP_MIN         14UL        /* below the Ethernet header       */
-#define NC_SNAP_MAX         65535UL     /* a BPF return is a byte count    */
+#define NC_SNAP_MIN         TOOL_BPF_MIN_SNAP
+#define NC_SNAP_MAX         TOOL_BPF_MAX_SNAP
 
 /*
  * Half of NetTrace's, and deliberately: NetTrace runs for as long as one
@@ -290,7 +290,7 @@ int main(int argc, char **argv)
      * A buffer that cannot hold one record captures nothing at all, and the
      * only sign of it is an empty file.  Refuse the combination instead.
      */
-    if (blen < snaplen + 32UL)
+    if (blen < snaplen + TOOL_BPF_SNAP_SLACK)
     {
         tool_error("BLEN %lu is too small for a snap length of %lu",
                    (LONG)blen, (LONG)snaplen);
