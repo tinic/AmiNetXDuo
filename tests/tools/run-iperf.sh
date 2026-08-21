@@ -335,6 +335,9 @@ printf 'driver_board=%s driver_device=%s driver_card=%s driver_source=%s driver_
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/iperf"           "$STAGE/iperf"
+# netstat -s is what makes a lost datagram say where it was lost.  See the
+# decomposition after the guest-as-server UDP arm.
+cp "$TOOLS/netstat"         "$STAGE/netstat"
 
 # The commands, in order.  Every assertion below indexes by position, so this
 # list and the checks move together.
@@ -351,7 +354,13 @@ cp "$TOOLS/iperf"           "$STAGE/iperf"
     echo "SYS:iperf -s $PEERADDR"
     if [ "$SERVER_ARMS" = yes ]; then
         echo "SYS:iperf -s -p $PORT_SRV_TCP -t $SRV_WINDOW"
+        # These two bracket the ONE arm in this script where the guest receives
+        # at whatever rate the peer chooses, so they are the only pair whose
+        # difference is a single arm's.  Everything else here is either flow
+        # controlled or outbound.
+        echo "SYS:netstat -s"
         echo "SYS:iperf -s -u -p $PORT_SRV_UDP -t $SRV_WINDOW"
+        echo "SYS:netstat -s"
     fi
 } > "$STAGE/commands.txt"
 
@@ -470,12 +479,12 @@ if [ -n "$IFACE" ]; then
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
-        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf"
+        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
-        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf"
+        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat"
 fi
 RUN_RC=$?
 set -e
@@ -801,6 +810,83 @@ if [ "$SERVER_ARMS" = yes ]; then
              "counted"
     else
         fail "the guest counted $UR_BYTES bytes and told the peer $U_FAR"
+    fi
+
+    # ---- and where the ones that did not arrive were counted -------------
+    #
+    # A UDP receive can lose datagrams and that is not a failure here: the
+    # peer sends at a rate it chose and a slow machine cannot be made to keep
+    # up by asserting that it does.  What IS worth having is WHERE.  A loss
+    # figure with no location kept `the DP8390 PIO cards lose a third of a UDP
+    # stream with no Fast RAM` open with `nobody has looked at where the frames
+    # go` as its last sentence, and answering it needed nothing this script did
+    # not already boot -- only two `netstat -s` either side of the arm.
+    #
+    # The five places a received datagram can be counted, outermost first:
+    #
+    #   overruns          the chip's receive ring or FIFO filled while the CPU
+    #                     was copying the frame before it
+    #   receive errors    the frame reached the driver damaged or unusable
+    #   unknown types     the frame reached anxnet.device and no CMD_READ was
+    #                     outstanding for its EtherType, so nothing took it
+    #   buffer failures   a reader could not get an NX_PACKET to re-arm with,
+    #                     which is the packet pool starving
+    #   udp dropped       the datagram reached UDP and the socket's receive
+    #                     queue was full, or nothing was bound to the port
+    #
+    # Only the last one means the machine did all the work and then threw the
+    # result away, and it is the one every arm measured so far lands on.  A
+    # difference the five do not account for is a frame that vanished between
+    # the wire and the driver, which no counter on the guest can see and which
+    # is the answer that would need a capture.
+    # One counter out of the nth `netstat -s`.  Named by the label netstat
+    # prints beside it, because the two of them move together: a column that
+    # is renamed there stops matching here rather than reporting the wrong
+    # number.  `netstat -s` prints "buffer failures" only when a driver is
+    # attached, so a missing line reads as 0 and not as an empty string.
+    ns_val() { # nth sed-expression
+        # `|| true` because `set -o pipefail` is on and head -1 can close the
+        # pipe under sed.
+        _v=$(block "SYS:netstat -s" "$1" | sed -n "$2" | head -1 || true)
+        printf '%s' "${_v:-0}"
+    }
+    ns_delta() { # nth-before nth-after sed-expression
+        printf '%s' "$(( $(ns_val "$2" "$3") - $(ns_val "$1" "$3") ))"
+    }
+
+    NS_OVR='s/.*overruns  *\([0-9][0-9]*\).*/\1/p'
+    NS_ERR='s/^  receive errors  *\([0-9][0-9]*\).*/\1/p'
+    NS_UNK='s/^  unknown types  *\([0-9][0-9]*\).*/\1/p'
+    NS_BUF='s/^  buffer failures  *\([0-9][0-9]*\).*/\1/p'
+    NS_UDP='s/.*bad datagrams, .*, \([0-9][0-9]*\) dropped.*/\1/p'
+
+    U_OFFERED=$(peer_val srvudp peer_packets)
+    U_GOT=$(guest_val "$SRVUDP" 1 packets)
+
+    D_OVR=$(ns_delta 1 2 "$NS_OVR")
+    D_ERR=$(ns_delta 1 2 "$NS_ERR")
+    D_UNK=$(ns_delta 1 2 "$NS_UNK")
+    D_BUF=$(ns_delta 1 2 "$NS_BUF")
+    D_UDP=$(ns_delta 1 2 "$NS_UDP")
+
+    printf 'udp_rx_offered=%s udp_rx_delivered=%s dev_overruns=%s dev_rx_errors=%s dev_unknown_types=%s pool_buffer_failures=%s udp_socket_dropped=%s\n' \
+           "${U_OFFERED:-0}" "${U_GOT:-0}" "$D_OVR" "$D_ERR" "$D_UNK" \
+           "$D_BUF" "$D_UDP"
+
+    if [ "${U_OFFERED:-0}" -gt 0 ] &&
+       [ "${U_GOT:-0}" -lt "${U_OFFERED:-0}" ]; then
+        _short=$(( U_OFFERED - U_GOT ))
+        _seen=$(( D_OVR + D_ERR + D_UNK + D_UDP ))
+        if [ "$_seen" -ge "$_short" ]; then
+            pass "the $_short datagram(s) that did not reach the" \
+                 "application are accounted for: $D_UDP at the socket's" \
+                 "receive queue, $D_UNK with no read outstanding, $D_OVR" \
+                 "chip overruns, $D_ERR receive errors"
+        else
+            pass "of $_short datagram(s) short, $_seen are accounted for on" \
+                 "the guest ($D_UDP socket queue, $D_UNK no read, $D_OVR" \
+                 "overrun, $D_ERR error); the rest never reached the driver"
+        fi
     fi
 else
     # SLIRP has no way in, so these two arms cannot run here -- and they are
