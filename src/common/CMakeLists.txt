@@ -47,16 +47,40 @@ target_link_libraries(netxduo PUBLIC aminetxduo_common)
 if(CMAKE_CROSSCOMPILING)
     add_library(aminetxduo_m68k_rt STATIC ami_udivdi3.c)
 
-    # DO NOT put -fno-lto on this file.  It was tried and reverted, and the
-    # reasoning that led to it was wrong in a way worth writing down.
+    # THE LIBCALL CONCERN IS REAL.  An earlier version of this comment said it
+    # was not; that was wrong, and the correction is why this is written out at
+    # length.
     #
-    # The argument was that these are libcall targets -- nothing calls
-    # __udivdi3 in any source, GCC synthesises the call at RTL expansion, which
-    # is LTRANS, after the plugin has chosen what to keep -- so a whole-program
-    # build would drop them and the link would fail with no libgcc.a to fall
-    # back on.  That does not happen.  The plugin resolves the libcall against
-    # the archive member at the end, and the whole tree links: 147 targets,
-    # zero failures.
+    # These are libcall targets: nothing calls __muldi3 in any source, GCC
+    # synthesises the call during RTL expansion, which is LTRANS -- after WPA
+    # has already decided which LTO definitions survive.  WPA sees no GIMPLE
+    # call naming __muldi3 and deletes it, the call is created too late for the
+    # definition to come back, and the stale dummy left behind stops the real
+    # fallback being pulled either.
+    #
+    # IT DOES NOT FAIL AS A LINK ERROR.  ld publishes __muldi3 at a ZERO-SIZE
+    # symbol on an unrelated function's boundary and exits 0.  P-256 jumps
+    # there, fe_sqr returns nonsense, tls.library sends an off-curve key share,
+    # and every https: URL fails with BAD_ECPOINT.  It was mis-diagnosed twice
+    # on the way -- once as an EC arithmetic miscompile, once as this very
+    # concern being unfounded.
+    #
+    # THE TEST THAT MISSED IT was "the whole tree links, 147 targets, zero
+    # failures".  A link-success check cannot see a symbol resolved to the
+    # wrong address.  Do not accept one as evidence here again.
+    #
+    # tls.library was the only image affected, and that is not luck: it is the
+    # only one calling ami_rt_cpu_select(), which pulls this archive EARLY,
+    # before any libcall exists.  That early pull publishes the dummy WPA then
+    # empties.  src/bsdsocket/library.c:497 documents not calling it, which is
+    # why that image escaped.
+    #
+    # The fix is __attribute__((used)) on the definitions in ami_udivdi3.c --
+    # the mechanism by which an application-supplied compiler-runtime
+    # definition declares reachability the compiler cannot see.  Reduced to 28
+    # bytes of linked text against the pinned toolchain.
+    #
+    # -fno-lto on this file is NOT the fix, for the reason below.
     #
     # -fno-lto turns this member from a slim object, whose index holds only
     # ___gnu_lto_slim, into a real one that exports every symbol here --
