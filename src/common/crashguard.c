@@ -250,7 +250,12 @@ const AmiCrashInfo *ami_crash_info(VOID)
  * tests and tools under the emulator, and always remove it before exit.
  */
 
-static APTR ami_alert_old;
+/* `used' because the ONLY reference to this is the `move.l _ami_alert_old'
+   in the top-level asm() below, which the compiler does not parse. Without
+   it a whole-program build sees a static nobody reads and removes it, and
+   the link fails on an undefined _ami_alert_old from the asm. Harmless
+   without LTO, which is why it went unnoticed. */
+static APTR ami_alert_old __attribute__((used));
 
 VOID ami_alert_report(ULONG num);
 VOID ami_alert_trampoline(VOID);
