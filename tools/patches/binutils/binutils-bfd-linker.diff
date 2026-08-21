@@ -1,0 +1,53 @@
+diff --git a/bfd/linker.c b/bfd/linker.c
+index 4a760828..5d5966d4 100644
+--- a/bfd/linker.c
++++ b/bfd/linker.c
+@@ -24,6 +24,10 @@
+ #include "libbfd.h"
+ #include "bfdlink.h"
+ #include "genlink.h"
++#if BFD_SUPPORTS_PLUGINS
++#include "plugin-api.h"
++#include "plugin.h"
++#endif
+ 
+ /*
+ SECTION
+@@ -1034,13 +1038,36 @@ static bool
+ generic_link_check_archive_element (bfd *abfd,
+ 				    struct bfd_link_info *info,
+ 				    struct bfd_link_hash_entry *h,
+-				    const char *name ATTRIBUTE_UNUSED,
++				    const char *name,
+ 				    bool *pneeded)
+ {
+   asymbol **pp, **ppend;
+ 
+   *pneeded = false;
+ 
++#if BFD_SUPPORTS_PLUGINS
++  /* A slim LTO object has nothing in its native symbol table: the
++     definitions live in the IR, and only the plugin can read them.  The
++     scan below would therefore never find NAME and the member would never
++     be pulled in.  The archive map is authoritative here -- a plugin-aware
++     ar wrote it from the IR symbol table -- so accept it and let
++     add_archive_element offer the member to the plugin, which is what
++     elf_link_add_archive_symbols does for ELF.  */
++  if (h->type == bfd_link_hash_undefined
++      && (abfd->plugin_format == bfd_plugin_yes
++	  || (abfd->plugin_format == bfd_plugin_unknown
++	      && bfd_link_plugin_object_p (abfd))))
++    {
++      bfd *element = abfd;
++
++      if (!(*info->callbacks->add_archive_element) (info, element, name,
++						    &element))
++	return true;
++      *pneeded = true;
++      return bfd_link_add_symbols (element, info);
++    }
++#endif
++
+   if (!bfd_generic_link_read_symbols (abfd))
+     return false;
+ 

@@ -153,8 +153,24 @@ set(AMIGA_TOOLCHAIN_PREFIX "${AMIGA_TOOLCHAIN_BIN}/m68k-amigaos-")
 set(CMAKE_C_COMPILER   "${AMIGA_TOOLCHAIN_PREFIX}gcc")
 set(CMAKE_CXX_COMPILER "${AMIGA_TOOLCHAIN_PREFIX}c++")
 set(CMAKE_ASM_COMPILER "${AMIGA_TOOLCHAIN_PREFIX}gcc")
-set(CMAKE_AR           "${AMIGA_TOOLCHAIN_PREFIX}ar"     CACHE FILEPATH "")
-set(CMAKE_RANLIB       "${AMIGA_TOOLCHAIN_PREFIX}ranlib" CACHE FILEPATH "")
+# gcc-ar/gcc-ranlib/gcc-nm, not the bare ones, because of -flto.
+#
+# A slim LTO object carries its symbols in the IR, not in the native symbol
+# table, and only the LTO plugin can read them. An `ar' that has not loaded the
+# plugin writes an archive index holding exactly one name per member,
+# ___gnu_lto_slim, so ld pulls in no member at all and every symbol the archive
+# was meant to provide comes out undefined. The gcc-* wrappers are the same
+# programs with --plugin already pointed at liblto_plugin.so.
+#
+# The toolchain also symlinks the plugin into <prefix>/lib/bfd-plugins, which
+# makes the bare tools work as well. Both, deliberately: the symlink covers
+# every other consumer of this toolchain, and these three cover a toolchain
+# built somewhere that missed it. Getting this wrong does not fail at the
+# archive step, it fails much later at the link, which is why it is worth the
+# belt and the braces.
+set(CMAKE_AR           "${AMIGA_TOOLCHAIN_PREFIX}gcc-ar"     CACHE FILEPATH "")
+set(CMAKE_RANLIB       "${AMIGA_TOOLCHAIN_PREFIX}gcc-ranlib" CACHE FILEPATH "")
+set(CMAKE_NM           "${AMIGA_TOOLCHAIN_PREFIX}gcc-nm"     CACHE FILEPATH "")
 set(CMAKE_STRIP        "${AMIGA_TOOLCHAIN_PREFIX}strip"  CACHE FILEPATH "")
 set(CMAKE_OBJDUMP      "${AMIGA_TOOLCHAIN_PREFIX}objdump" CACHE FILEPATH "")
 set(AMIGA_SIZE         "${AMIGA_TOOLCHAIN_PREFIX}size"   CACHE FILEPATH "")

@@ -1,0 +1,204 @@
+diff --git a/bfd/amigaos.c b/bfd/amigaos.c
+index 0fdd2c6e..e678d981 100644
+--- a/bfd/amigaos.c
++++ b/bfd/amigaos.c
+@@ -1827,7 +1827,8 @@ amiga_write_object_contents (
+ 	{
+ 	  asymbol *sym_p = abfd->outsymbols[i];
+ 	  sec_ptr osection = sym_p->section;
+-	  if (!osection || !bfd_is_com_section(osection->output_section))
++	  if (!osection || !osection->output_section
++	      || !bfd_is_com_section(osection->output_section))
+ 	    continue;
+ 
+ 	  for (p = abfd->sections; p != NULL; p = p->next)
+@@ -2159,6 +2160,7 @@ amiga_write_section_contents (
+   long *reloc_counts,reloc_count=0;
+   unsigned char *values;
+   int i,j,x,type;
++  int lto_header;
+ 
+   DPRINT(5,("Entering write_section_contents\n"));
+ 
+@@ -2204,6 +2206,32 @@ amiga_write_section_contents (
+   if (amiga_per_section(section)->disk_size == 0)
+     amiga_per_section(section)->disk_size = section->rawsize;
+   disksize = LONGSIZE (amiga_per_section(section)->disk_size) + datadata_relocs;
++
++  /* GCC streams its LTO IR into HUNK_DEBUG hunks.  A hunk size is recorded
++     in longwords, so up to three zero bytes of padding follow the payload
++     and the payload's true length is recorded nowhere -- the reader then
++     has to guess it, and a payload may legitimately end in zeros.
++     libiberty's simple_object_amiga_read_lto_header() already knows how to
++     read an explicit length from an 8-byte { "LTO1", length } header, the
++     same header simple_object_amiga_write_to_file() writes, so emit it
++     here and the length stops being a guess.  Skip it when the contents
++     already start with the magic: the hunk was read from another object
++     (ld -r) and is being written back verbatim, header and all.  */
++  lto_header = (HUNK_VALUE (n[0]) == HUNK_DEBUG
++		&& !AMIGA_DATA(abfd)->IsLoadFile
++		&& section->name != NULL
++		&& (0 == strncmp (section->name, ".gnu.lto", 8)
++		    || 0 == strncmp (section->name, ".gnu.debuglto", 13))
++		&& amiga_per_section(section)->disk_size != 0
++		&& section->contents != NULL
++		&& !(amiga_per_section(section)->disk_size >= 4
++		     && section->contents[0] == 0x4c
++		     && section->contents[1] == 0x54
++		     && section->contents[2] == 0x4f
++		     && section->contents[3] == 0x31));
++  if (lto_header)
++    disksize += 2;
++
+   n[1] = disksize;
+ 
+   /* in a load file, we put section attributes only in the header */
+@@ -2329,6 +2357,14 @@ amiga_write_section_contents (
+ 
+   /* We applied all the relocs, as far as possible to obtain 0 addend fields */
+   /* Write the section contents */
++  if (lto_header)
++    {
++      unsigned long hdr[2];
++      hdr[0] = 0x4c544f31; /* "LTO1", AMIGA_LTO_DEBUG_MAGIC */
++      hdr[1] = amiga_per_section(section)->disk_size;
++      if (!write_longs (hdr, 2, abfd))
++	return false;
++    }
+   if (amiga_per_section(section)->disk_size != 0)
+     {
+       if (bfd_bwrite ((void *)section->contents,
+@@ -2734,8 +2770,15 @@ static bool amiga_write_symbols (
+       if ((sym_p->flags & BSF_LOCAL) && symbol_header == HUNK_SYMBOL)
+ 	continue;
+ 
+-      /* Now, if osection==section, write it out */
+-      if (osection->output_section==section)
++      /* Now, if osection==section, write it out.
++	 A BFD that has never been through a link -- the linker plugin's IR
++	 dummy object is one, see plugin_get_ir_dummy_bfd() -- has
++	 output_section == NULL on every section, so take the symbol's own
++	 section as its output section.  Without this every definition in
++	 that BFD is silently dropped, and ld never learns which symbols an
++	 LTO translation unit defines.  */
++      if ((osection->output_section ? osection->output_section : osection)
++	  == section)
+ 	{
+ 	  DPRINT(5,("Writing it out\n"));
+ 
+@@ -2757,8 +2800,14 @@ static bool amiga_write_symbols (
+ 	}
+       else
+ 	{
+-	  /* write common definitions as bss common references */
+-	  if (bfd_is_com_section(osection->output_section) && section->index == 2)
++	  /* write common definitions as bss common references.
++	     Index 2 is .bss in a normal object; the plugin's IR dummy BFD
++	     has a single section, so put them there instead.  */
++	  if (osection->output_section
++	      && bfd_is_com_section(osection->output_section)
++	      && (section->index == 2
++		  || ((abfd->flags & BFD_PLUGIN) != 0
++		      && section == abfd->sections)))
+ 	    {
+ 	      if ((symbol_count++)==0) /* First write out the header */
+ 		{
+@@ -2779,6 +2828,38 @@ static bool amiga_write_symbols (
+ 	}
+     }/* Of for */
+ 
++  /* An IR dummy BFD created by the linker plugin (BFD_PLUGIN) holds the
++     plugin's symbol list and no relocations at all, so an undefined symbol
++     in it has no reference record for the loop above to hang off and is
++     never written.  ld round-trips that BFD through
++     amiga_write_object_contents and bfd_check_format inside
++     bfd_make_readable, so dropping them loses every reference an LTO
++     translation unit makes, and archive members that satisfy those
++     references are never pulled in.  Write them as EXT_ABSREF32 with an
++     empty reference list; amiga_slurp_symbol_table already reads that back
++     as an undefined symbol.  */
++  if ((abfd->flags & BFD_PLUGIN) != 0
++      && symbol_header == HUNK_EXT
++      && section == abfd->sections)
++    for (i = 0; i < bfd_get_symcount (abfd); i++)
++      {
++	sym_p = abfd->outsymbols[i];
++	if (sym_p->section == NULL || !bfd_is_und_section (sym_p->section))
++	  continue;
++
++	if ((symbol_count++) == 0
++	    && !write_longs (&symbol_header, 1, abfd))
++	  return false;
++
++	if (!write_name (abfd, sym_p->name,
++			 (EXT_ABSREF32
++			  | ((sym_p->flags & BSF_WEAK) ? 0x40 : 0)) << 24))
++	  return false;
++	n[0] = 0;
++	if (!write_longs (n, 1, abfd))
++	  return false;
++      }
++
+   DPRINT(10,("Did traversing\n"));
+   if (symbol_count) /* terminate HUNK_EXT, HUNK_SYMBOL */
+     {
+@@ -4039,10 +4120,24 @@ amiga_gc_keep (struct bfd_hash_table *ht, struct bfd_link_info *info)
+ }
+ 
+ 
++/* The linker plugin's IR dummy BFDs (BFD_PLUGIN, see ld/plugin.c
++   plugin_get_ir_dummy_bfd) define every symbol of every claimed LTO input
++   but hold no contents: the code arrives later in the LTRANS objects the
++   plugin adds.  They must be invisible to the collector, or the first one
++   that defines a wanted symbol captures it and the real section that
++   defines it is never kept -- which purges the entire link.  */
++
++static bool
++amiga_gc_ignore_bfd (bfd *ibfd)
++{
++  return (ibfd->flags & BFD_PLUGIN) != 0;
++}
++
+ static bool
+ amiga_gc_sections (bfd *abfd ATTRIBUTE_UNUSED, struct bfd_link_info *info)
+ {
+   bfd *ibfd;
++  bfd *startup;
+   asection *sec;
+   struct bfd_hash_table referenced;
+   unsigned i;
+@@ -4053,11 +4148,17 @@ amiga_gc_sections (bfd *abfd ATTRIBUTE_UNUSED, struct bfd_link_info *info)
+   amiga_gc_keep (&referenced, info);
+ 
+   // keep all from first/startup module
+-  for (sec = info->input_bfds->sections; sec != NULL; sec = sec->next)
+-    amiga_keep_section(&referenced, sec);
++  for (startup = info->input_bfds;
++       startup != NULL && amiga_gc_ignore_bfd (startup);
++       startup = startup->link.next)
++    ;
++  if (startup != NULL)
++    for (sec = startup->sections; sec != NULL; sec = sec->next)
++      amiga_keep_section(&referenced, sec);
+ 
+   // keep all init sections starting with .list__ or .dlist__
+   for (ibfd = info->input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
++    if (!amiga_gc_ignore_bfd (ibfd))
+     for (sec = ibfd->sections; sec != NULL; sec = sec->next)
+       if (0 == strncmp(".list__", sec->name, 7) || 0 == strncmp(".dlist__", sec->name, 8))
+     	amiga_keep_section(&referenced, sec);
+@@ -4066,12 +4167,14 @@ amiga_gc_sections (bfd *abfd ATTRIBUTE_UNUSED, struct bfd_link_info *info)
+     {
+       i = referenced.count;
+       for (ibfd = info->input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
++	if (!amiga_gc_ignore_bfd (ibfd))
+ 	for (sec = ibfd->sections; sec != NULL; sec = sec->next)
+ 	  amiga_collect(&referenced, sec);
+     }
+ 
+   // discard all not visited stuff
+   for (ibfd = info->input_bfds; ibfd != NULL; ibfd = ibfd->link.next)
++    if (!amiga_gc_ignore_bfd (ibfd))
+     for (sec = ibfd->sections; sec != NULL; sec = sec->next)
+       amiga_purge(&referenced, sec, info->print_gc_sections);
+ 

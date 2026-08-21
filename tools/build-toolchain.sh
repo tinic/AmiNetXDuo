@@ -67,7 +67,7 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # reads it as a pin.  `binutils` has no mirror: only franke.ms carries 2.39.0.
 PINS="
 binutils|https://franke.ms/git/bebbo/binutils-gdb|ab4e5183f56fd83165356a03c890bf0b681d7535|amiga-2.39.0
-gcc|https://franke.ms/git/bebbo/gcc|6f4ca1b48cd0edef7d2ee8da1bf161124f685182|amiga16.2
+gcc|https://franke.ms/git/bebbo/gcc|60f21496319754a0e35b1a8e52df9abbac188065|amiga16.2
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
 fd2sfd|https://franke.ms/git/bebbo/fd2sfd|7f14d7f15aac2b8426f577f838069e53bf6008ea|master
@@ -330,6 +330,50 @@ s = s[:j] + "CONFIG_BINUTILS += --with-system-zlib\n" + s[j:]
 open(p, "w").write(s)
 PY
     echo "==> patched CONFIG_BINUTILS += --with-system-zlib"
+fi
+
+# -flto.  Two changes to binutils; GCC needs no patch, only the pin above,
+# which moved from 6f4ca1b4 to 60f21496 -- the tip of amiga16.2, and the only
+# one of the two that still exists on the branch.
+#
+# First, amiga-gcc configures binutils with --disable-plugins for every target
+# but m68k-elf, so ld accepts -plugin and ignores it.  GCC's liblto_plugin.so
+# is then never loaded, no IR is ever read, and an LTO link quietly produces a
+# library with nothing in it.  Upstream amiga-gcc dropped that gate in 7e75d1c.
+if ! grep -q 'enable-plugins' "$SRC/Makefile"; then
+    python3 - "$SRC/Makefile" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """ifneq (m68k-elf,$(TARGET))
+CONFIG_BINUTILS += --disable-plugins
+endif
+"""
+i = s.index(old)
+s = s[:i] + "CONFIG_BINUTILS += --enable-plugins\n" + s[i + len(old):]
+open(p, "w").write(s)
+PY
+    echo "==> patched CONFIG_BINUTILS += --enable-plugins"
+fi
+
+# Second, bfd.  With the plugin loaded, five defects in the amigaos back end
+# and in the generic archive scan lose the plugin's symbols: slim LTO archive
+# members are never pulled in, the IR dummy BFD's definitions and references
+# are dropped when ld round-trips it, --gc-sections purges the link, and the
+# IR hunk is written without the length header libiberty reads back.  The
+# diffs are against the pinned binutils commit; each is skipped if it is
+# already in the tree, so a rebuild in a populated work directory is a no-op.
+BU_PATCHES="$HERE/patches/binutils"
+if [ -d "$BU_PATCHES" ]; then
+    for patch in "$BU_PATCHES"/*.diff; do
+        [ -f "$patch" ] || continue
+        if git -C "$SRC/projects/binutils" apply --reverse --check "$patch" 2>/dev/null; then
+            echo "    $(basename "$patch") already applied"
+        else
+            echo "    $(basename "$patch")"
+            git -C "$SRC/projects/binutils" apply "$patch"
+        fi
+    done
 fi
 
 # ----------------------------------------------------------------- build ----
