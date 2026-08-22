@@ -35,7 +35,7 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # shipping strip settings on the pinned toolchain:
 #
 #     bsdsocket.library   352,960   was 395,328    -10.7%
-#     tls.library         197,188   was 242,312    -18.6%
+#     tls.library         188,312   was 242,312    -22.4%
 #     usergroup.library     7,172   was   7,684     -6.7%
 #     anxnet.device        30,540   was  33,228     -8.1%
 #
@@ -45,10 +45,11 @@ set(CMAKE_C_FLAGS_RELEASE "-Os -DNDEBUG"
 # At -Os it behaves like the other three. src/netdev/CMakeLists.txt carries the
 # measurement that decided the switch.
 #
-# The tls.library number has crypto68k held OUT of LTO, which is where it is
-# again -- see that module's CMakeLists.txt. With crypto68k in, it is 185,720,
-# and that is the 11,468 bytes the second defect is currently costing.
-# bsdsocket.library pays nothing either way; crypto68k is not linked there.
+# crypto68k is IN, and the only -fno-lto left in a shipping build is on
+# src/tlslib/tls_resume.c. It was held out twice on the way here, once for a
+# late compiler-libcall bug and once for a second defect with a different
+# signature; both are fixed. bsdsocket.library pays nothing either way,
+# crypto68k not being linked there.
 #
 # THIS NEEDS A TOOLCHAIN THAT CAN DO IT, and until 2026-08 none existed. The
 # published asset was built with --disable-plugins, so its ld answers
