@@ -483,9 +483,21 @@ static VOID p_hostname_phase(struct Library *base, const char *self_name,
     rc = p_gethostname(base, buf, (LONG)sizeof(buf));
     Printf((CONST_STRPTR)"hostname full: rc %ld \"%s\"\n", rc, (LONG)buf);
 
-    /* Not a buffer at all: EFAULT, the one error the autodoc does list. */
+    /*
+     * Not a buffer at all: EFAULT, the one error the autodoc does list.
+     *
+     * The call and the Errno() read are SEPARATE STATEMENTS, deliberately.
+     * Written as two arguments to one Printf they are unsequenced, and this
+     * compiler evaluates right to left, so Errno() ran BEFORE gethostname and
+     * reported whatever the previous phase left behind. That is the whole of
+     * the "gethostname(NULL) answers errno 47" report: 47 is AMI_EAFNOSUPPORT
+     * from the p_inet_pton(base, 99, ...) above, and bsd_gethostname() had set
+     * EFAULT correctly all along. Every later hostname line in this file
+     * reported 14 because those already assigned rc first.
+     */
+    rc = p_gethostname(base, NULL, 32L);
     Printf((CONST_STRPTR)"hostname null: rc %ld errno %ld\n",
-           p_gethostname(base, NULL, 32L), p_errno(base));
+           rc, p_errno(base));
 
     for (i = 1; i <= 8; i++)
         p_hostname_size(base, i);

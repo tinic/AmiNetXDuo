@@ -354,6 +354,38 @@ static ULONG own_signals(VOID)
     return n;
 }
 
+/*
+ * Disable(), not Forbid(), and the difference is the whole reason this
+ * function was reporting leaks that are not there.
+ *
+ * Forbid() stops task switching. It does NOT stop Signal() from an interrupt,
+ * and Signal() is exactly what relinks a task between TaskReady and TaskWait.
+ * So a walk of either list under Forbid() can see the same task twice, or
+ * neither time, whenever an interrupt signals during the walk -- which on a
+ * machine running a network stack is most of the time.
+ *
+ * What that looked like: `V 13 shutdown` was recorded as leaking two bytes and
+ * a Task on every call, and it does neither. The reading is a floating one-off
+ * that lands on whichever vector happens to be running -- caught on `sendto`
+ * three times and `recvfrom` once -- and the giveaway was the harness's own
+ * !noise64 control row, a sampling bracket around no library call at all,
+ * reading task=-10. Ten Exec Tasks did not vanish in that interval.
+ *
+ * PortList and SemaphoreList are task-level and Forbid() is right for those.
+ */
+static ULONG list_len_disabled(struct List *l)
+{
+    struct Node *n;
+    ULONG        total = 0;
+
+    Disable();
+    for (n = l->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+        total++;
+    Enable();
+
+    return total;
+}
+
 /* Forbid() rather than Disable(): the lists are only walked. */
 static ULONG list_len(struct List *l)
 {
@@ -370,7 +402,8 @@ static ULONG list_len(struct List *l)
 
 static ULONG count_tasks(VOID)
 {
-    return list_len(&SysBase->TaskReady) + list_len(&SysBase->TaskWait);
+    return list_len_disabled(&SysBase->TaskReady)
+         + list_len_disabled(&SysBase->TaskWait);
 }
 
 static LONG p_query(struct Library *base, ULONG what, APTR buffer, ULONG size)
