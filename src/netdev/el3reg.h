@@ -119,6 +119,17 @@
 #define EL3_W0_MFG_ID           0x00    /* read-only, always EL3_MFG_ID      */
 #define EL3_W0_PRODUCT_ID       0x02
 #define EL3_W0_CONFIG_CTRL      0x04
+
+/*
+ * The board-activate bit in CONFIG_CTRL, in this driver's swap-compensated
+ * view.  Linux's 3c589 driver writes 0x0001 to this register -- "Activate
+ * board." -- through unswapped byte lanes; through the half-exchange this
+ * card's register window was measured to have, the same bit reads and
+ * writes at 0x0100 here.  Empirically confirmed on the machine that found
+ * it: boots where receive worked read 0x0100 set, boots where the card was
+ * deaf read it clear, one bit of difference in the whole register file.
+ */
+#define EL3_CC_ACTIVATE         0x0100
 #define EL3_W0_ADDR_CFG         0x06
 #define EL3_W0_RESOURCE_CFG     0x08
 #define EL3_W0_EEPROM_CMD       0x0a

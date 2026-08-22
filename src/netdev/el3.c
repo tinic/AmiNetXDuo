@@ -522,6 +522,21 @@ LONG el3_init(NetdevNic *nic)
 
     el3_pcmcia_setup(nic);
 
+    /*
+     * Activate the board.  Linux does this unconditionally and first
+     * (3c589_cs.c: outw(0x0001, ioaddr + 4)), and on a PC the card's
+     * power-up state makes it redundant.  On an A1200 nothing ever asserts
+     * CC_RESET to the slot -- Commodore's unfixed Gayle bug -- so the card
+     * wakes with whatever this bit last was, and it decides per boot whether
+     * the receiver hears the wire: measured on real hardware, 2026-08-22,
+     * transmit up and DHCP offers vanishing, CONFIG_CTRL one bit short of a
+     * boot that worked.  Read-modify-write, keeping the media-present bits
+     * the attach probe reads.
+     */
+    el3_window(nic, 0);
+    el3_put(nic, EL3_W0_CONFIG_CTRL,
+            (UWORD)(el3_get(nic, EL3_W0_CONFIG_CTRL) | EL3_CC_ACTIVATE));
+
     /* The station address, three words, low octet first. */
     el3_window(nic, 2);
     for (i = 0; i < 3; i++)
