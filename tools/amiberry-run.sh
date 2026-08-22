@@ -391,7 +391,23 @@ serial_port=tcp://127.0.0.1:$PORT/wait
 EOF
 
 [ -z "$KICKSTART_EXT" ] || echo "kickstart_ext_rom_file=$KICKSTART_EXT" >> "$CFG"
-[ -z "$CPU" ] || echo "cpu_type=$CPU" >> "$CFG"
+# cpu_model, not cpu_type, for anything above the 68000.
+#
+# Amiberry takes `cpu_type=68030' and answers
+#   "no CPU emulation cores available CPU=680000!"
+# then aborts in about two seconds -- which reads exactly like a guest that
+# failed to boot, and cost an investigation an arm before anyone noticed the
+# emulator had never started. `-c 68000' happens to work, so the two callers
+# that use it were never affected and this stayed hidden.
+#
+# The docs/RESEARCH note at the top of this file about cpu_type bisecting the
+# ne2000_pcmcia failure predates this and refers to the 68000 case.
+if [ -n "$CPU" ]; then
+    case "$CPU" in
+        68000) echo "cpu_type=$CPU"  >> "$CFG" ;;
+        *)     echo "cpu_model=$CPU" >> "$CFG" ;;
+    esac
+fi
 
 # ------------------------------------------------------------- -k CLOCK MHz --
 #
