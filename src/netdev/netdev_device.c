@@ -1197,7 +1197,10 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
     unit->nu_InIsr = 0;
 
     if (mine != 0)
+    {
         unit->nu_IntSeen++;
+        unit->nu_IntSilent = 0;
+    }
 
     return mine;
 }
@@ -1252,25 +1255,39 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     }
 
     /*
-     * Interrupt-death fallback.  A powered card removal can burn the IREQ
-     * path while the data lines stay whole: registers answer, transmit works
-     * (a PIO FIFO needs no interrupt to accept a frame), and every inbound
-     * frame sits in the RX FIFO until it overflows -- with nothing counted
-     * anywhere, because the server that would do the counting never runs.
-     * Measured on a real 3c589, 2026-08-22: 37 frames sent and on the wire,
-     * DHCP offers arriving back, and not one receive event of any kind.
+     * Interrupt-silence watchdog.
      *
-     * While no interrupt has EVER been claimed for this unit, the blank
-     * services the chip itself.  The first claimed interrupt raises
-     * nu_IntSeen and disables this forever, so a machine whose interrupts
-     * work pays one compare per blank and can never race its own server out
-     * of this path; on a machine whose interrupts are dead there is no
-     * server to race.  nu_InIsr covers the enabling edge, where an interrupt
-     * could arrive between the test and the chip access: this runs under the
-     * Disable() above, so the server cannot start while the poll is on the
-     * chip, and the poll cannot start while the flag says the server is.
+     * Two ways a PCMCIA card goes deaf while its registers answer and its
+     * transmitter works.  A powered removal can burn the IREQ path outright.
+     * And Gayle's card interrupt is a LATCHED status change: an edge that
+     * lands inside the read-and-clear window is re-latched by original
+     * silicon, but a recreation (an AA-Gayle, measured here) can lose it --
+     * and with a level interrupt source one lost edge is deafness forever,
+     * because the card holds IREQ asserted waiting for service and never
+     * produces another transition.  Commodore's own unfixed reset bug sits
+     * underneath both: the slot never sees CC_RESET at power-on, and 3Com
+     * cards are the documented sufferers.
+     *
+     * So the blank -- already on the chip for the transmit watchdog, under
+     * the same Disable() -- services the chip whenever no interrupt has been
+     * CLAIMED for ten blanks.  On a healthy port the counter never reaches
+     * ten while traffic flows, and an idle machine's spare polls read one
+     * status register and leave.  On a deaf or lossy port the poll drains
+     * the card, which deasserts IREQ, which is what lets a wedged latch see
+     * a fresh edge and start delivering again: the poll does not replace the
+     * interrupt, it re-arms it.  Measured on a real 3c589 behind an
+     * AA-Gayle-R5, 2026-08-22: transmit on the wire, DHCP offers arriving,
+     * zero receive events until this ran.
+     *
+     * nu_InIsr keeps the poll off the chip while the server is on it; the
+     * server cannot start while the poll runs, because Disable() masks it.
+     * nu_TickPolls says in the diagnostics whether a machine is living this
+     * way, which tells a wounded slot from a healthy one.
      */
-    if (unit->nu_Online && unit->nu_IntSeen == 0 && unit->nu_InIsr == 0 &&
+    if (unit->nu_IntSilent < 0xffffu)
+        unit->nu_IntSilent++;
+
+    if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))
     {
         unit->nu_TickPolls++;

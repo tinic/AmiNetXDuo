@@ -86,7 +86,8 @@ typedef struct NetdevUnit
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
     UWORD                       nu_TxWedges;  /* how often it had to be reset  */
     ULONG                       nu_IntSeen;   /* claimed interrupts delivered  */
-    ULONG                       nu_TickPolls; /* tick-serviced while none had  */
+    ULONG                       nu_TickPolls; /* tick-serviced during silence  */
+    UWORD                       nu_IntSilent; /* blanks since a claimed one    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */
     ULONG                       nu_TxProgress;/* last completion the tick saw  */
 

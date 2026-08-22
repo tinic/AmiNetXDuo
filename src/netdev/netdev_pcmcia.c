@@ -555,7 +555,10 @@ static ULONG pc_on_status(register ULONG changes __asm("d0"),
             {
                 unit->nu_InIsr = 1;
                 if (netdev_interrupt(unit) != 0)
+                {
                     unit->nu_IntSeen++;
+                    unit->nu_IntSilent = 0;
+                }
                 unit->nu_InIsr = 0;
             }
         return 0;
@@ -565,7 +568,10 @@ static ULONG pc_on_status(register ULONG changes __asm("d0"),
         {
                 unit->nu_InIsr = 1;
                 if (netdev_interrupt(unit) != 0)
+                {
                     unit->nu_IntSeen++;
+                    unit->nu_IntSilent = 0;
+                }
                 unit->nu_InIsr = 0;
             }
 
