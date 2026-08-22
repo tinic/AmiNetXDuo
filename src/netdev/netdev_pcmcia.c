@@ -854,6 +854,27 @@ APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
     pc_linked = 1;
     pc_owned  = 1;
 
+    /*
+     * The hardware reset Commodore never wired.  Gayle does not assert
+     * CC_RESET to the slot at power-on or reset -- the documented, unfixed
+     * A1200 bug -- so the card wakes holding whatever internal state it last
+     * had, and on the 3c589 that state decides per boot whether the receiver
+     * hears the wire: a deaf boot reads one status bit short of a working
+     * one in CONFIG_CTRL, and the bit refuses to be written, because it is
+     * the card reporting the outcome of a power-up sequence that never ran.
+     * card.resource V39 added CardResetCard() for exactly this; ask for the
+     * pulse before configuring, and let pc_configure_owned()'s settle spin
+     * absorb the recovery the same way it absorbs the COR write's.
+     */
+    if (CardResource != NULL && CardResource->lib_Version >= 39)
+    {
+        BOOL pulsed = pc_reset_card(handle);
+
+        pc_trace("pc: reset ", (ULONG)pulsed);
+        netdev_diag_note(ANXDIAG_PC_RESET, ci, (ULONG)pulsed);
+        pc_settle(2000);
+    }
+
     base = pc_configure_owned(card_out, FALSE);
     if (base == NULL && pc_linked == 0)
     {

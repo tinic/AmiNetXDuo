@@ -165,6 +165,7 @@ extern "C" {
                                        before a chip answered; 0 = at once    */
 #define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
                                        there is no fallback row either        */
+#define ANXDIAG_PC_RESET       68   /* CardResetCard() at claim, 1 = pulsed   */
 
 /* --- the ISA Plug and Play bridge, netdev_isapnp.c --------------------- */
 #define ANXDIAG_PNP_VENDOR     60   /* isolation serial identifier bytes 0..3,
