@@ -1294,6 +1294,35 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
         (VOID)netdev_interrupt(unit);
     }
 
+    /*
+     * The deaf-boot re-roll.  On an A1200 whose slot never sees CC_RESET --
+     * and doubly so behind a recreated Gayle -- the 3c589 wakes in a state
+     * that decides whether the receiver hears the wire, the state is not
+     * reachable through any register (the reference 3c589.device fails on
+     * the same machine), and a re-initialisation rolls the dice again.  So
+     * roll them: a unit that has transmitted and heard nothing five seconds
+     * later is reset and tried again, for as long as it stays deaf.  The
+     * first received frame ends this for the whole uptime, and a machine
+     * whose card comes up hearing never enters it at all.
+     */
+    if (unit->nu_Online && netdev_pcmcia_is_unit(unit) &&
+        unit->nu_Nic.running && unit->nu_Nic.rx_packets == 0 &&
+        unit->nu_Nic.tx_packets >= 4)
+    {
+        if (++unit->nu_RxKickWait >= 250u)
+        {
+            unit->nu_RxKickWait = 0;
+            unit->nu_RxKicks++;
+            if (unit->nu_Nic.ops->reset != NULL)
+                unit->nu_Nic.ops->reset(&unit->nu_Nic);
+            netdev_tx_pump(unit);
+        }
+    }
+    else
+    {
+        unit->nu_RxKickWait = 0;
+    }
+
     Enable();
 
     /*
