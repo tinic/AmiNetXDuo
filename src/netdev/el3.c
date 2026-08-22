@@ -556,12 +556,35 @@ LONG el3_init(NetdevNic *nic)
      * anything, which is why it is started here and not on the first
      * transmit.  Link beat is only meaningful on twisted pair.
      */
+    /*
+     * What the drivers that have worked on this card for decades write, in
+     * the order they write it -- 3c589.device (Cafferkey, 2000) and Linux's
+     * 3c589_cs agree on all three, and this driver's own sequence differed
+     * on each:
+     *
+     *   The resource configuration is written, 0x3f00, not inherited.  This
+     *   card wakes with 0x3000 on the machine that found all of this.
+     *
+     *   The transceiver is selected by writing the address-configuration
+     *   register, not assumed from its power-up value.
+     *
+     *   The media register is written ABSOLUTELY, enable bits only.  The
+     *   register's high bits are status, and a read-modify-write hands them
+     *   back as control: on a board the machine never resets -- Gayle
+     *   asserts no CC_RESET, ever -- whatever undefined state those bits
+     *   power up in was being lovingly preserved across every
+     *   reinitialisation this driver performed.
+     */
+    el3_window(nic, 0);
+    el3_put(nic, EL3_W0_RESOURCE_CFG, EL3_RC_PCMCIA);
+    if ((nic->el3_media & EL3_CC_UTP_PRESENT) != 0)
+        el3_put(nic, EL3_W0_ADDR_CFG, EL3_AC_XCVR_UTP);
+
     el3_window(nic, 4);
     if ((nic->el3_media & EL3_CC_UTP_PRESENT) != 0)
     {
         el3_put(nic, EL3_W4_MEDIA,
-                (UWORD)(el3_get(nic, EL3_W4_MEDIA) | EL3_MEDIA_LINK_ENABLE |
-                        EL3_MEDIA_JABBER_ENABLE));
+                (UWORD)(EL3_MEDIA_LINK_ENABLE | EL3_MEDIA_JABBER_ENABLE));
     }
 
     el3_window(nic, 1);
