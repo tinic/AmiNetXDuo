@@ -139,6 +139,49 @@ int main(void)
     Printf((STRPTR)"phase 3, promiscuous:       %ld/100 saw a frame\n",
            rx_watch());
 
+    /*
+     * Window 6 is the chip's own account of the MAC, kept regardless of what
+     * the FIFO does with the result.  If "good frames received" moves while
+     * the FIFO never holds one, the wire and the PHY are innocent and the
+     * loss is inside the chip; if it stays zero under promiscuous capture on
+     * a chattering LAN, nothing is being decoded off the pair at all.
+     * Statistics registers clear on read, so the delta over the watch is the
+     * count itself.
+     */
+    poke_cmd(0x10, 0x0F);            /* promiscuous for the count */
+    poke_cmd(0x15, 0);               /* statistics enable */
+    Disable();
+    REG(CMD) = swp(cmd_word(1, 6));
+    { volatile UWORD sink;
+      UWORD o;
+      for (o = 0; o < 10; o += 2) { sink = REG(o); (void)sink; } }
+    REG(CMD) = swp(cmd_word(1, 1));
+    Enable();
+
+    Delay(100);                      /* two seconds of LAN chatter */
+
+    {
+        UWORD o;
+
+        Disable();
+        REG(CMD) = swp(cmd_word(1, 6));
+        Enable();
+        for (o = 0; o < 10; o += 2)
+        {
+            UWORD v;
+
+            Disable();
+            v = REG(o);
+            Enable();
+            Printf((STRPTR)"w6 stats +%ld raw=$%04lx swapped=$%04lx\n",
+                   (ULONG)o, (ULONG)v, (ULONG)swp(v));
+        }
+        Disable();
+        REG(CMD) = swp(cmd_word(1, 1));
+        Enable();
+    }
+
+    poke_cmd(0x16, 0);               /* statistics off, as the driver runs */
     poke_cmd(0x10, 0x05);            /* back to normal before leaving */
 
     return 0;
