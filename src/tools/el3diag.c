@@ -155,6 +155,29 @@ int main(void)
            rx_watch());
 
     /*
+     * The live-activate experiment.  The driver now sets the CONFIG_CTRL
+     * activate bit in el3_init() and the register still reads without it,
+     * so either something later in init clears it or the write never
+     * lands.  Set it here, outside any init sequence, and read it straight
+     * back; then let the statistics phase below say whether the MAC came
+     * alive.  No reboot between the dump above and this write, so the
+     * before and after describe the same deaf state.
+     */
+    {
+        UWORD before = swp(peek(0, 0x04));
+
+        Disable();
+        REG(CMD) = swp(cmd_word(1, 0));
+        REG(0x04) = swp((UWORD)(before | 0x0100u));
+        REG(CMD) = swp(cmd_word(1, 1));
+        Enable();
+
+        Printf((STRPTR)"activate: cfg $%04lx -> wrote $%04lx -> reads $%04lx\n",
+               (ULONG)before, (ULONG)(before | 0x0100u),
+               (ULONG)swp(peek(0, 0x04)));
+    }
+
+    /*
      * Window 6 is the chip's own account of the MAC, kept regardless of what
      * the FIFO does with the result.  If "good frames received" moves while
      * the FIFO never holds one, the wire and the PHY are innocent and the
