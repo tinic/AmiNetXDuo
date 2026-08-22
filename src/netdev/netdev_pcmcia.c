@@ -552,12 +552,22 @@ static ULONG pc_on_status(register ULONG changes __asm("d0"),
         if (changes != 0)
             return changes;
         if (pc_ready != 0 && pc_owned != 0 && pc_present != 0 && unit != NULL)
-            (VOID)netdev_interrupt(unit);
+            {
+                unit->nu_InIsr = 1;
+                if (netdev_interrupt(unit) != 0)
+                    unit->nu_IntSeen++;
+                unit->nu_InIsr = 0;
+            }
         return 0;
     }
 
     if (pc_ready != 0 && pc_owned != 0 && pc_present != 0 && unit != NULL)
-        (VOID)netdev_interrupt(unit);
+        {
+                unit->nu_InIsr = 1;
+                if (netdev_interrupt(unit) != 0)
+                    unit->nu_IntSeen++;
+                unit->nu_InIsr = 0;
+            }
 
     /* V37 has no post-status callback.  This is cnet.device's Gayle clear:
        acknowledge exactly the latched changes after draining the card. */

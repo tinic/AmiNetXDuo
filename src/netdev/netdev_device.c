@@ -1190,7 +1190,16 @@ ULONG netdev_interrupt(NetdevUnit *unit)
 
 static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 {
-    return netdev_interrupt(unit);
+    ULONG mine;
+
+    unit->nu_InIsr = 1;
+    mine = netdev_interrupt(unit);
+    unit->nu_InIsr = 0;
+
+    if (mine != 0)
+        unit->nu_IntSeen++;
+
+    return mine;
 }
 
 /*
@@ -1240,6 +1249,32 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
             unit->nu_Nic.ops->reset(&unit->nu_Nic);
         netdev_tx_pump(unit);
         wedged = TRUE;
+    }
+
+    /*
+     * Interrupt-death fallback.  A powered card removal can burn the IREQ
+     * path while the data lines stay whole: registers answer, transmit works
+     * (a PIO FIFO needs no interrupt to accept a frame), and every inbound
+     * frame sits in the RX FIFO until it overflows -- with nothing counted
+     * anywhere, because the server that would do the counting never runs.
+     * Measured on a real 3c589, 2026-08-22: 37 frames sent and on the wire,
+     * DHCP offers arriving back, and not one receive event of any kind.
+     *
+     * While no interrupt has EVER been claimed for this unit, the blank
+     * services the chip itself.  The first claimed interrupt raises
+     * nu_IntSeen and disables this forever, so a machine whose interrupts
+     * work pays one compare per blank and can never race its own server out
+     * of this path; on a machine whose interrupts are dead there is no
+     * server to race.  nu_InIsr covers the enabling edge, where an interrupt
+     * could arrive between the test and the chip access: this runs under the
+     * Disable() above, so the server cannot start while the poll is on the
+     * chip, and the poll cannot start while the flag says the server is.
+     */
+    if (unit->nu_Online && unit->nu_IntSeen == 0 && unit->nu_InIsr == 0 &&
+        (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))
+    {
+        unit->nu_TickPolls++;
+        (VOID)netdev_interrupt(unit);
     }
 
     Enable();
