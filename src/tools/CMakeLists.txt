@@ -211,6 +211,14 @@ aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
 aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
     SOURCES checknetdevice.c)
 
+# El3Diag dumps the live registers of a 3c589 in the PCMCIA slot: active
+# transceiver, the card's own link-beat detect, and the receive FIFO status.
+# It exists for the machine that transmits and cannot hear, where every
+# driver counter reads zero and only the chip knows why.  No stack, no open
+# unit, direct register reads under Disable().
+aminetxduo_add_tool(tool_el3diag El3Diag
+    SOURCES el3diag.c)
+
 # The interactive configurator.  Config-only: it writes the files the parser
 # reads and then runs AddNetInterface, rather than starting a stack itself.
 aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
