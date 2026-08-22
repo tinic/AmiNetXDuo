@@ -23,9 +23,14 @@
  * The card's registers are looked for at $A20300, where the driver put them
  * on the machine this exists for.
  */
+#include "tools.h"
+
 #include <exec/types.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+
+static const char version_tag[] __attribute__((used)) =
+    TOOL_VERSTAG("El3Diag");
 
 #define REG(off) (*(volatile UWORD *)(0xA20300UL + (off)))
 #define CMD      0x0E
