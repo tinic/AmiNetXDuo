@@ -866,13 +866,29 @@ APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
      * pulse before configuring, and let pc_configure_owned()'s settle spin
      * absorb the recovery the same way it absorbs the COR write's.
      */
-    if (CardResource != NULL && CardResource->lib_Version >= 39)
+    /*
+     * Not CardResetCard(): whatever pulse card.resource produces, the cards
+     * need something else.  CardReset 3.0 (Aminet, Artur Pogoda), the tool
+     * that has made PCMCIA network cards work on these machines for twenty
+     * years, holds the slot's reset line through Gayle's own latch for
+     * 300 ms, and its documentation is blunt about why: "PC Cards require
+     * the reset time 100 or 200 mS."  A reset released early is a card
+     * whose power-up sequence half-ran, which is precisely the deaf state
+     * this machine boots into by lottery.  Same mechanism, same duration,
+     * done while the slot is owned, before the CIS is walked or the COR is
+     * written -- the card comes out of it unconfigured, which is exactly
+     * what the code below expects to find.
+     */
     {
-        BOOL pulsed = pc_reset_card(handle);
+        volatile UBYTE *gayle_intreq = (volatile UBYTE *)0x00DA9000UL;
 
-        pc_trace("pc: reset ", (ULONG)pulsed);
-        netdev_diag_note(ANXDIAG_PC_RESET, ci, (ULONG)pulsed);
-        pc_settle(2000);
+        *gayle_intreq = 0xFF;            /* reset start */
+        pc_settle(300000);               /* the hold the cards require */
+        *gayle_intreq = 0xFC;            /* reset stop */
+
+        pc_trace("pc: reset held ", 300UL);
+        netdev_diag_note(ANXDIAG_PC_RESET, ci, 300UL);
+        pc_settle(20000);                /* recovery before the CIS walk */
     }
 
     base = pc_configure_owned(card_out, FALSE);
