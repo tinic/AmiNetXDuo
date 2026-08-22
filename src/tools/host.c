@@ -164,7 +164,7 @@ int main(int argc, char **argv)
        about the machine, not about the name. */
     if (family == TOOL_AF_INET6 && !tool_sock_have_ipv6(sbase))
     {
-        tool_error("%s: no IPv6 on this machine", (LONG)name);
+        tool_error("%s: this machine's network has no IPv6", (LONG)name);
         tool_no_ipv6_note();
         CloseLibrary(sbase);
         FreeArgs(rda);
