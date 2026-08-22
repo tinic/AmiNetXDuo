@@ -203,6 +203,9 @@ int main(int argc, char **argv)
     BOOL            udp;
     ULONG           i;
     ULONG           next_tick;
+#define IPERF_SAMPLE_MAX 600
+    static ULONG sample[IPERF_SAMPLE_MAX];
+    ULONG        sample_n = 0;
     ULONG           last_lo = 0;
 
     (VOID)argv;
@@ -427,24 +430,36 @@ int main(int argc, char **argv)
             break;
         }
 
-        /* One line a second while it runs.  A single average hides whether the
-           transfer starts slow or falls off part way. */
-        if (!quiet && iperf_run.res.ms == 0)
+        /* One sample a second while it runs, PRINTED AFTER.  A single average
+           hides whether the transfer starts slow or falls off part way, but
+           printing from this loop stalls the very task that drains the
+           socket: on a real A1200 each line cost up to 449 ms of zero
+           receive window (measured on the wire, 2026-08-21), an eighth of
+           the whole transfer. */
+        if (!quiet && iperf_run.res.ms == 0 &&
+            sample_n < (ULONG)IPERF_SAMPLE_MAX)
         {
             ULONG now = ami_millis();
 
             if ((LONG)(now - next_tick) >= 0)
             {
-                ULONG delta = iperf_run.res.bytes_lo - last_lo;
-                char  rate[32];
-
-                iperf_format_rate(rate, sizeof(rate),
-                                  iperf_bits_per_sec(0, delta, 1000UL));
-                tool_printf("  %s\n", (LONG)rate);
-
+                sample[sample_n++] = iperf_run.res.bytes_lo - last_lo;
                 last_lo   = iperf_run.res.bytes_lo;
                 next_tick = now + 1000UL;
             }
+        }
+    }
+
+    if (!quiet && sample_n != 0)
+    {
+        ULONG k;
+        char  rate[32];
+
+        for (k = 0; k < sample_n; k++)
+        {
+            iperf_format_rate(rate, sizeof(rate),
+                              iperf_bits_per_sec(0, sample[k], 1000UL));
+            tool_printf("  %s\n", (LONG)rate);
         }
     }
 
