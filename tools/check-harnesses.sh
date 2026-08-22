@@ -249,6 +249,42 @@ say guest_instruments "$instruments"
 say guest_unrun "$unrun"
 say harnesses_manual "$manual"
 say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
+# Rows that DO run and DO assert and are failing on a product finding.  They
+# are not holes and counting them as UNWIRED hid seven of them behind one
+# number; they are also not coverage, so they get a line of their own.
+say harnesses_red "$(grep -c ': manual : RED' "$MANIFEST" || true)"
+
+# --------------------------------------------- a runner that does not fire --
+#
+# THE GAP THE ROWS ABOVE CANNOT SEE.  Everything so far asks whether a runner
+# INVOKES the harness.  Whether that runner ever RUNS is a separate question
+# and no row records it: fifteen rows name .github/workflows/emulator.yml,
+# which is `workflow_dispatch`, a nightly `schedule` and `push: tags`, so
+# nothing in it fires on a pull request or a push to a branch.  That is a
+# deliberate choice -- the tier takes 7-20 minutes and would be cancelled by
+# the next push -- but it means "wired" there and "wired" to tools/ci.sh are
+# not the same claim, and a reader of this manifest cannot tell them apart.
+#
+# REPORTED, NOT FAILED.  The row is correct; it is the runner's schedule that
+# is the fact, and turning a deliberate schedule into a build failure would
+# only teach people to stop reading this script.  What it must not do is stay
+# invisible.
+ondemand=0
+for path in "${!ROW_RUNNER[@]}"; do
+    runner="${ROW_RUNNER[$path]}"
+    case "$runner" in .github/workflows/*.yml) ;; *) continue ;; esac
+    [ -f "$runner" ] || continue
+    # A workflow that runs on a branch push or a pull request fires on the
+    # work; one with only dispatch, cron and tags does not.  `push:` with
+    # nothing but `tags:` under it is the second kind, which is why the test
+    # is for `branches:` and `pull_request:` rather than for `push:`.
+    if grep -qE '^[[:space:]]*(pull_request|branches):' "$runner"; then
+        continue
+    fi
+    printf 'harness_runner_ondemand=%s->%s\n' "$path" "$runner"
+    ondemand=$((ondemand + 1))
+done
+say harnesses_ondemand "$ondemand"
 
 # --------------------------------------------------- references that dangle --
 #

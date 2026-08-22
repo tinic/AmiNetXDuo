@@ -55,10 +55,15 @@
 #                TLS handshake.  A peer probes it every two seconds through a
 #                real https fetch, and the gate is the longest stretch with no
 #                answer.  Needs a bridge and a peer that is not this host.
-#   bridged      tier 2, the two pass/fail harnesses that need a real link:
-#                NetShutdown against live services, and TCP: driven by
-#                Commodore's own Type and Copy.  Needs a bridge, and a peer
-#                for the second.
+#   bridged      tier 2, the pass/fail harnesses that need a real link:
+#                NetShutdown against live services, TCP: driven by Commodore's
+#                own Type and Copy, and the guest programs that drive the
+#                SHIPPED LIBRARY -- the shared-library load, eight concurrent
+#                openers, the API called off a Shell command's stack, the
+#                refused-connect leak, the UDP receive path, netstack
+#                bring-up, and what the commands say when they have no answer.
+#                Needs a bridge; the arms that also need a peer say so and
+#                skip without one.
 #   lossgate     tier 2, throughput on a link that loses packets, against a
 #                recorded baseline.  The only rig that can price a change to
 #                acknowledgement or retransmission behaviour.  Needs a bridge,
@@ -382,6 +387,11 @@ stage_host() {
         note "harnesses: $(sed -n 's/^harnesses_wired=/wired /p' \
               "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_manual=/, manual /p' \
               "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_unwired=/, of those unwired /p' \
+              "$BUILD/check-harnesses.log")$(sed -n 's/^harnesses_red=/ and red /p' \
+              "$BUILD/check-harnesses.log")"
+        # A wired row whose runner only fires nightly is not the same claim as
+        # one tools/ci.sh makes on demand, and the manifest cannot say so.
+        note "  $(sed -n 's/^harnesses_ondemand=/of the wired, on a runner that does not fire on a push: /p' \
               "$BUILD/check-harnesses.log")"
     else
         cat "$BUILD/check-harnesses.log"
@@ -1344,6 +1354,93 @@ stage_bridged() {
     hr "bridged harnesses (tier 2, needs a real link)"
 
     local rc=0 bad=0
+
+    # ---- the guest programs that drive the SHIPPED LIBRARY ------------------
+    #
+    # Seven harnesses that tests/HARNESSES called UNWIRED: every one of them
+    # was written for a named defect, every one of them still runs, and
+    # nothing in this tree invoked any of them.  What they cover was covered
+    # by whoever remembered to type the command.
+    #
+    # THEY ARE HERE AND NOT IN THE EMULATOR TIER for the reason
+    # run-ifconfigure6.sh is: that tier runs eight arms on SLIRP, and a stack
+    # result taken over SLIRP is the emulator's own TCP/IP rather than a
+    # SANA-II driver and our data path.  None of these needs a peer and none
+    # puts a workload on the link, so a bridge and a ROM is the whole
+    # requirement -- which is what `bridged` already has.
+    #
+    # ORDERED BY WHAT THEIR ABSENCE COSTS, worst first, and a silent wrong
+    # answer outranks a loud one.  A datagram delivered to the wrong socket, a
+    # socket leaked on a refused connect, a second opener corrupting the
+    # first: those ship and are never seen.  A netstack that does not come up
+    # is noticed by the first person who boots it, so it is last.
+    #
+    # EVERY ONE GRADES ITS OWN TRANSCRIPT, which is the whole point of wiring
+    # them.  Six reach a verdict through tools/test-verdict.sh, which reads
+    # the guest's own `N checks, M failures` line and holds N to a floor --
+    # tools/test-verdict-selftest.sh proves that path can go red without an
+    # emulator, ten fixtures in under a second.  run-toolsay.sh greps for the
+    # sentences the shipped commands have to print on the branches where they
+    # used to print nothing.
+    #
+    # The table is `name | path | extra args | what it proves`.  A harness that
+    # takes -B is given it; run-udpdrill.sh is not, because its interface is a
+    # tap device it makes in its own address space and it asks amiberry-run.sh
+    # for `-B none` itself.
+    local entry hname hpath hargs hwhy rest
+    for entry in \
+"udpdrill|tests/udpdrill/run-udpdrill.sh| |the UDP receive path, the bind-address filter, and the largest datagram a route takes (108 checks, floor 108)" \
+"leak|tests/leak/run-leak.sh|-B @|the refused-connect leak, seven arms of thirty-two socket lifecycles" \
+"concurrent|tests/concurrent/run-concurrent.sh|-B @|eight applications, each with its own library open (25 checks)" \
+"stack|tests/stack/run-stack.sh|-B @|the API called from the stack a Shell command has, which on a machine with no MMU is a silent overwrite (16 checks, floor 12)" \
+"libraries|tests/libraries/run-libraries.sh|-B @|the shared-library load: open, close, expunge, reopen (30 checks, floor 24)" \
+"toolsay|tests/tools/run-toolsay.sh|-B @|the branches where a shipped command reached a return and printed no sentence at all" \
+"netstack|tests/netstack/run-amiberry.sh|-B @|netstack bring-up (14 checks, floor 12)" \
+    ; do
+        hname="${entry%%|*}";  rest="${entry#*|}"
+        hpath="${rest%%|*}";   rest="${rest#*|}"
+        hargs="${rest%%|*}"
+        hwhy="${entry##*|}"
+
+        printf '\n-- %s\n' "$hwhy"
+        rc=0
+        # shellcheck disable=SC2086
+        AMINETXDUO_RUN_TAG="ci-$hname" "$ROOT/$hpath" -b "$BUILD/default" \
+            ${hargs//@/${AMINETXDUO_AMIBERRY_BACKEND:-ens18}} || rc=$?
+        case "$rc" in
+            0)  note "PASS  $hname" ;;
+            2)  fail "$hname: an ingredient is missing on this machine" ; bad=1 ;;
+            77) skip "$hname: the guest skipped its own body -- read the" \
+                     "reason= line above" ;;
+            *)  fail "$hname: the transcript above is the whole run (rc $rc)" ; bad=1 ;;
+        esac
+    done
+
+    # The AmiTCP ARexx host, which needs Commodore's ARexx and nothing else.
+    # Separate from the table above because of that ingredient: AMITCP is not a
+    # flag, it is a port 31 of the 2,149 comm/ archives surveyed send commands
+    # to, and the defect it exists for turned a clean "host environment not
+    # found" into a hang inside RexxSysLib's wait.  Only the real interpreter
+    # can say whether that is fixed, so nothing of ours is substituted for it
+    # and a runner without it reports that it did not test this.
+    printf '\n-- the AmiTCP ARexx host, driven by RexxMast and RX themselves\n'
+    if [ -z "${AMINETXDUO_AMIGA_REXX:-}" ] &&
+       [ ! -f "$ROOT/build/rexxbin/RX" ] && [ ! -f "$HOME/amiga-rexx/RX" ]; then
+        skip "arexx: no AmigaOS ARexx on this machine.  Point" \
+             "AMINETXDUO_AMIGA_REXX at a directory holding RexxMast, RX," \
+             "WaitForPort, rexxsyslib.library and the mathieeedoub* pair," \
+             "or put them in ~/amiga-rexx.  The ARexx host is unproven here."
+    else
+        rc=0
+        AMINETXDUO_RUN_TAG=ci-arexx "$ROOT/tests/tools/run-arexx.sh" \
+            -b "$BUILD/default" || rc=$?
+        case "$rc" in
+            0) note "PASS  known and unknown commands both answer, the live" \
+                    "snapshots come back, and nothing hangs" ;;
+            2) fail "arexx: an ingredient is missing on this machine" ; bad=1 ;;
+            *) fail "arexx: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
 
     printf '\n-- NetShutdown, and the programs using the network\n'
     "$ROOT/tests/tools/run-netshutdown.sh" -b "$BUILD/default" || rc=$?

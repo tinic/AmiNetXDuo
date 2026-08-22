@@ -24,12 +24,20 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 # `-- arm X`; the count is the evidence that the run did the work.
 LEAK_ARMS=7
 
-while getopts "m:t:b:" opt; do
+# BRIDGED, NEVER SLIRP.  -B names the host NIC the guest bridges onto, and
+# tools/amiberry-run.sh defaults to slirp when nobody says.  Nothing here puts
+# a workload on the link, but a run on SLIRP exercises the emulator's own
+# TCP/IP rather than a SANA-II driver, so the backend is named rather than
+# inherited.
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+
+while getopts "m:t:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B backend]" >&2; exit 2 ;;
     esac
 done
 
@@ -79,7 +87,7 @@ EOF
 export AMINETXDUO_RUN_TAG="$TAG"
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
 RUN_RC=$?
 set -e

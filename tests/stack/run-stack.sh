@@ -42,13 +42,21 @@ TIMEOUT=900
 BUILD="build/ci/default"
 ENFORCE=0
 
-while getopts "m:t:b:e" opt; do
+# BRIDGED, NEVER SLIRP.  -B names the host NIC the guest bridges onto, and
+# tools/amiberry-run.sh defaults to slirp when nobody says.  Nothing here puts
+# a workload on the link, but a run on SLIRP exercises the emulator's own
+# TCP/IP rather than a SANA-II driver, so the backend is named rather than
+# inherited.
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+
+while getopts "m:t:b:B:e" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         e) ENFORCE=1 ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-e]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B backend] [-e]" >&2; exit 2 ;;
     esac
 done
 
@@ -131,7 +139,7 @@ if [ "$ENFORCE" = "1" ]; then
 fi
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
      "$EXE" "$STAGE/devs" "$STAGE/libs"
 RUN_RC=$?
 set -e
