@@ -283,6 +283,64 @@ static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
  * Nothing is committed until the address is accepted, so a rejected first
  * attempt leaves neither the address nor the repair counter touched.
  */
+/*
+ * One EEPROM word, read twice and only believed when both reads agree.
+ *
+ * On the real 3c589 the EEPROM answers correctly once the card is warm, but
+ * reads made straight after the attach-time reset race whatever the part is
+ * still doing internally: the data register then returns stale or lagging
+ * words that LOOK like an address (measured 2026-08-22 -- two boots adopted
+ * two different garbage stations, one of them the true address shifted by a
+ * word, and the DHCP identity changed with every boot).  A single read
+ * cannot see that; two agreeing reads of moving data can only collide while
+ * the data has stopped moving.
+ */
+static BOOL el3_eeprom_stable(NetdevNic *nic, UBYTE word, UWORD *out)
+{
+    UWORD a, b;
+
+    if (!el3_eeprom(nic, word, &a) || !el3_eeprom(nic, word, &b))
+        return FALSE;
+    if (a != b)
+        return FALSE;
+
+    *out = a;
+    return TRUE;
+}
+
+/*
+ * The EEPROM carries its own truth marker: word 7 is the manufacturer ID,
+ * 0x6d50 on every EtherLink III.  Attach polls it until two consecutive
+ * reads both say so, which is the moment the part's post-reset internals
+ * have settled and the address words can be believed.  The spin between
+ * attempts is the pc_settle() shape: attribute-memory reads, each a real
+ * Gayle cycle, because there is no timer at attach time.
+ */
+static BOOL el3_eeprom_ready(NetdevNic *nic)
+{
+    UWORD tries;
+
+    for (tries = 0; tries < 8; tries++)
+    {
+        UWORD id;
+
+        if (el3_eeprom_stable(nic, EL3_EE_MFG_ID, &id) &&
+            id == EL3_MFG_ID)
+            return TRUE;
+
+        {
+            volatile UBYTE *attr = (volatile UBYTE *)0x00a00000UL;
+            ULONG           n    = 2000UL * 4UL;   /* ~2 ms */
+
+            while (n-- != 0)
+                (VOID)*attr;
+        }
+    }
+
+    netdev_diag_note(ANXDIAG_EL3_MFG, netdev_diag_card(nic->card), 0xEEEEUL);
+    return FALSE;
+}
+
 static BOOL el3_take_addr(NetdevNic *nic, UBYTE word0)
 {
     UBYTE addr[NETDEV_ADDR_LEN];
@@ -293,7 +351,7 @@ static BOOL el3_take_addr(NetdevNic *nic, UBYTE word0)
     {
         UWORD w;
 
-        if (!el3_eeprom(nic, (UBYTE)(word0 + i), &w))
+        if (!el3_eeprom_stable(nic, (UBYTE)(word0 + i), &w))
             return FALSE;
 
         addr[i * 2]     = (UBYTE)(w >> 8);
@@ -865,11 +923,31 @@ LONG el3_attach(NetdevNic *nic)
      *
      * Each word holds two octets, the earlier one in the high half.
      */
-    if (!el3_take_addr(nic, EL3_EE_OEM_ADDR_0) &&
-        !el3_take_addr(nic, EL3_EE_NODE_ADDR_0))
+    if (!el3_eeprom_ready(nic) ||
+        (!el3_take_addr(nic, EL3_EE_OEM_ADDR_0) &&
+         !el3_take_addr(nic, EL3_EE_NODE_ADDR_0)))
     {
-        nic->diag_why = (UBYTE)ANXDIAG_WHY_ADDRESS;
-        return -1;
+        /*
+         * The EEPROM did not validate, so nothing it says can be believed --
+         * and an address invented from whatever the data register floats to
+         * is worse than none: it changes per boot, and a DHCP server that
+         * sees a new MAC on every boot hands out a new lease each time and
+         * eventually throttles the port (measured on the real 3c589,
+         * 2026-08-22, two boots, two different garbage stations).  Derive
+         * the address from the machine fingerprint instead, the way
+         * ne2000.c does when a card has no PROM: stable across boots, and
+         * the card still comes up.
+         */
+        UBYTE fp[NETDEV_MAC_FP_MAX];
+        UWORD n;
+        ULONG salt = ((ULONG)nic->card->manid << 16) ^
+                     (ULONG)nic->card->prodid ^
+                     (ULONG)(APTR)nic->board;
+
+        n = netdev_mac_fingerprint(fp, (UWORD)sizeof(fp), salt);
+        netdev_mac_derive(fp, n, nic->factory);
+        nic->mac_derived++;
+        nic->mac_source = (UBYTE)ANXDIAG_MAC_DERIVED;
     }
 
     /*
