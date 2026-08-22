@@ -269,6 +269,21 @@ while read -r -u 3 board model addr mac; do
     # loop's card list on stdin it swallows the remaining cards, so the sweep
     # ran ONE card and reported itself complete, and whichever peer won the
     # race came up without a listening socket.  Both symptoms, one cause.
+    # DELETE THE PREVIOUS TRANSCRIPT AND PEER LOG FIRST.
+    #
+    # Everything this sweep reports is read back out of these two files. If an
+    # arm fails to start -- and one whose flock is still held by a leaked fd 9
+    # exits 2 before booting anything -- the files from the PREVIOUS arm are
+    # still sitting there, and the reader below picks them up and reports them
+    # as this card's result. It produced nine identical "measurements"
+    # (bytes=1830912 ms=3532) from one real run before anyone noticed, which is
+    # worse than any failure: a sweep that fabricates numbers is not a sweep.
+    #
+    # Cheap, unconditional, and it makes a missing file mean "this arm produced
+    # nothing", which is what the reader below already assumes.
+    rm -f "$ROOT/build/amiberry-testhd-$tag/tools.txt" \
+          "$ROOT/build/iperf-peers-$tag" 2>/dev/null || true
+
     set +e
     env AMINETXDUO_RUN_TAG="$tag" \
         AMINETXDUO_AMIBERRY_MAC="02:41:4d:49:$mac" \
