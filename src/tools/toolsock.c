@@ -813,6 +813,7 @@ static VOID tool_no_ipv6(struct Library *base, const char *host)
 
     tool_error("%s: no IPv6 on this machine",
                (LONG)host);
+    tool_no_ipv6_note();
 }
 
 /* gethostbyname(), for a library whose table stops short of getaddrinfo. */
@@ -1014,6 +1015,7 @@ BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
     if (want == TOOL_AF_INET6 && !tool_sock_have_ipv6(base))
     {
         tool_error("%s: no IPv6 on this machine", (LONG)host);
+        tool_no_ipv6_note();
         return FALSE;
     }
 

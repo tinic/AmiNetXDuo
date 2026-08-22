@@ -668,6 +668,62 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
 #endif
 }
 
+#ifdef AMINETXDUO_IPV6
+/*
+ * Is this neighbour one of the machine's default routers?
+ *
+ * NetX Duo answers that with ND_CACHE_ENTRY.nx_nd_cache_is_router, and that
+ * back pointer is only written where an RA is processed and the RA carried a
+ * Source Link-Layer Address option: nx_icmpv6_process_ra.c:701 links the two
+ * entries, and it is reached from the ICMPV6_OPTION_TYPE_SRC_LINK_ADDR arm
+ * alone. A router that advertises without the option, or whose advertisement
+ * arrived before the cache had an entry for it, is in
+ * nx_ipv6_default_router_table with no back pointer at all, and the cache
+ * entry the first packet through it creates is an ordinary STALE neighbour
+ * for ever after. That is timing, not state: the same segment and the same
+ * router read differently from one boot to the next.
+ *
+ * So the table is what is asked, and the back pointer only shortcuts it. The
+ * flag means "it is a router for this machine" (netstatus.h), which is what
+ * being in that table is.
+ */
+static BOOL ns_neighbour_is_router(NX_IP *ip, const ND_CACHE_ENTRY *e)
+{
+    UINT i;
+
+    if (e->nx_nd_cache_is_router != NX_NULL)
+        return TRUE;
+
+    for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+        const NX_IPV6_DEFAULT_ROUTER_ENTRY *r =
+            &ip->nx_ipv6_default_router_table[i];
+
+        if ((r->nx_ipv6_default_router_entry_flag &
+             NX_IPV6_ROUTE_TYPE_VALID) == 0)
+            continue;
+
+        /* The interface too: an fe80:: router address is only unique per
+           link, and two links can carry the same one. */
+        if (r->nx_ipv6_default_router_entry_interface_ptr !=
+            e->nx_nd_cache_interface_ptr)
+            continue;
+
+        if (r->nx_ipv6_default_router_entry_router_address[0] ==
+                e->nx_nd_cache_dest_ip[0] &&
+            r->nx_ipv6_default_router_entry_router_address[1] ==
+                e->nx_nd_cache_dest_ip[1] &&
+            r->nx_ipv6_default_router_entry_router_address[2] ==
+                e->nx_nd_cache_dest_ip[2] &&
+            r->nx_ipv6_default_router_entry_router_address[3] ==
+                e->nx_nd_cache_dest_ip[3])
+            return TRUE;
+    }
+
+    return FALSE;
+}
+#endif
+
 /*
  * The neighbour cache: a flat array, unlike the ARP table's hash of circular
  * lists, so the walk is a loop over the slots.
@@ -705,7 +761,7 @@ static VOID ns_fill_neighbours(NX_IP *ip, NsWriter *w)
 
         if (e->nx_nd_cache_is_static)
             out->nsn6_Flags |= NETSTATUS_ND_STATIC;
-        if (e->nx_nd_cache_is_router != NX_NULL)
+        if (ns_neighbour_is_router(ip, e))
             out->nsn6_Flags |= NETSTATUS_ND_ROUTER;
 
         out->nsn6_Interface = ns_interface_index(ip,

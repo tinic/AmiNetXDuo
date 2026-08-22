@@ -641,12 +641,23 @@ static VOID explain(LONG err, ULONG gateway)
     switch (err)
     {
         case ROUTE_ENOSYS:
+            tool_printf("  This stack was built without its routing table, "
+                        "so there is nothing\n"
+                        "  to add to. A default route still works: "
+                        "AddNetRoute DEFAULTGATEWAY.\n");
             break;
 
         case ROUTE_ENOBUFS:
+            tool_printf("  The routing table is full. netstat -r lists it, "
+                        "DeleteNetRoute\n"
+                        "  makes room.\n");
             break;
 
         case ROUTE_ENOENT:
+            tool_printf("  netstat -r lists the routes there are. The ones "
+                        "marked S were added\n"
+                        "  by hand and are the ones this command can "
+                        "remove.\n");
             break;
 
         case ROUTE_EINVAL:
@@ -654,7 +665,13 @@ static VOID explain(LONG err, ULONG gateway)
             {
                 ami_config_format_ip(gateway, addr, sizeof(addr));
                 tool_printf("  %s is not on any of this machine's own "
-                            "networks.\n", (LONG)addr);
+                            "networks, so nothing here\n"
+                            "  can reach it to use it as a next hop.\n",
+                            (LONG)addr);
+            }
+            else
+            {
+                tool_printf("  The stack would not accept that route.\n");
             }
             break;
 
@@ -853,27 +870,42 @@ static LONG find_prefix6(struct Library *base, const ULONG addr[4],
 }
 #endif /* TOOL_DELETE */
 
-/* The stack said no to an IPv6 route. */
+/* The stack said no to an IPv6 route. One line each: which of these it was is
+   not something "the route was not added" tells anybody. */
 static VOID explain6(LONG err, const char *gateway_text)
 {
     switch (err)
     {
         case ROUTE_ENOSYS:
+            tool_printf("  IPv6 has no table that maps a prefix to a next "
+                        "hop. A packet goes\n"
+                        "  straight to a prefix on this link, or to a default "
+                        "router.\n");
             break;
 
         case ROUTE_ENOBUFS:
+            tool_printf("  There is no room for another. netstat -r lists "
+                        "them, DeleteNetRoute\n"
+                        "  makes room.\n");
             break;
 
         case ROUTE_EEXIST:
+            tool_printf("  That prefix is already on the list. netstat -r "
+                        "shows it.\n");
             break;
 
         case ROUTE_ENOENT:
+            tool_printf("  netstat -r lists the IPv6 routes there are.\n");
             break;
 
         case ROUTE_EINVAL:
             if (gateway_text != NULL)
                 tool_printf("  %s is not on any network this machine has an "
-                            "interface on.\n", (LONG)gateway_text);
+                            "interface on,\n"
+                            "  so nothing here can reach it to use it as a "
+                            "next hop.\n", (LONG)gateway_text);
+            else
+                tool_printf("  The stack would not accept that route.\n");
             break;
 
         default:
@@ -935,6 +967,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     if (!stack_has_ipv6(base))
     {
         tool_error("the running stack has no IPv6");
+        tool_no_ipv6_note();
         tool_netstatus_close(base);
         return RETURN_FAIL;
     }

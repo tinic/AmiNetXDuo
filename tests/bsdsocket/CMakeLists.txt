@@ -165,6 +165,43 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(test_sockopt PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
 
     add_test(NAME socket_options COMMAND test_sockopt)
+
+    # netstatus.c, for NETSTATUS_NEIGHBOURS and the one flag `arp` prints from
+    # it. The router flag came from a NetX Duo back pointer that is only
+    # written when a router advertisement carried a Source Link-Layer Address
+    # option, so whether the segment's own router was flagged came out
+    # differently from one boot to the next and no emulator run could hold it
+    # still. Here the neighbour cache and the default router table are staged
+    # by hand, which is the only way to ask the question at all.
+    #
+    # host/shim-netstatus/tx_amiga.h exists for this target: netstatus.c
+    # includes the real one, which cannot be on the include path here. A
+    # directory of its own because tests/tick reaches host/shim as well and
+    # wants the REAL tx_amiga.h; the shim's header says so.
+    add_executable(test_neighbour host/test_neighbour_host.c
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c")
+
+    target_include_directories(test_neighbour PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim-netstatus"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_neighbour PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    # AMINETXDUO_IPV6 because the whole neighbour cache is behind it, and
+    # NX_INCLUDE_USER_DEFINE_FILE for the reason test_route gives: without it
+    # NX_IP has a different shape than the one that ships.
+    target_compile_definitions(test_neighbour PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
+
+    add_test(NAME neighbour_router COMMAND test_neighbour)
 endif()
 
 # bpf_write() is the only BPF vector that reaches the NetX packet pool. Its
