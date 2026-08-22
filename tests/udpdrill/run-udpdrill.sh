@@ -2,14 +2,15 @@
 #
 # Run the UDP receive-path test under an emulator.
 #
-#   tests/udpdrill/run-udpdrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-A]
+#   tests/udpdrill/run-udpdrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
-# -A picks Amiberry, which runs genuinely headless; FS-UAE dies in GLAD without
-# an X server. Same flag tests/sockopt/run-sockopt.sh carries.
-#
-# NO DRIVER. The test installs its own interface, tests/tcpdrill/tapdev.c,
-# made at run time, and tests/tcpdrill/devs/NetInterfaces/tap0 names it, so
-# nothing here needs a2065.device or anything on the wire.
+# NO DRIVER, AND NO BACKEND. The test installs its own interface,
+# tests/tcpdrill/tapdev.c, made at run time, and
+# tests/tcpdrill/devs/NetInterfaces/tap0 names it, so nothing here needs
+# a2065.device or anything on the wire.  It used to ask for `-N a2065 -B slirp`
+# anyway, under an -A flag that chose between two branches which both ran
+# Amiberry; `-B none` is the honest spelling of a test that puts nothing on a
+# link, and it keeps a SLIRP backend out of a run that has no use for one.
 #
 # SPDX-License-Identifier: MIT
 
@@ -19,17 +20,15 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 TAG=udpdrill
 
-while getopts "m:t:b:T:A" opt; do
+while getopts "m:t:b:T:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b dir] [-T tag] [-A]" >&2
+        *) echo "usage: $0 [-m model] [-t secs] [-b dir] [-T tag]" >&2
            exit 2 ;;
     esac
 done
@@ -56,15 +55,9 @@ export AMINETXDUO_RUN_TAG="$TAG"
 HD="$ROOT/build/amiberry-testhd-$TAG"
 
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -B slirp -m "$MODEL" -t "$TIMEOUT" \
-        "$EXE" "$STAGE/devs" "$STAGE/libs" \
-        > "$ROOT/build/udpdrill-$TAG.log" 2>&1
-else
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$EXE" "$STAGE/devs" "$STAGE/libs" \
-        > "$ROOT/build/udpdrill-$TAG.log" 2>&1
-fi
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B none -m "$MODEL" -t "$TIMEOUT" \
+    "$EXE" "$STAGE/devs" "$STAGE/libs" \
+    > "$ROOT/build/udpdrill-$TAG.log" 2>&1
 RUN_RC=$?
 set -e
 

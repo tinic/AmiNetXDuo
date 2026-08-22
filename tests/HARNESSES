@@ -37,6 +37,12 @@
 #   windows   WinUAE, so a Windows host
 #   UNWIRED   nothing prevents it running where the rest of tier 2 runs.
 #             It simply has no home.  This is the list that should shrink.
+#   RED       it runs where tier 2 runs, it asserts, and it is FAILING on
+#             something that is not rig state.  Wiring it would put a known
+#             red in a gate, so it stays out until the finding is answered --
+#             but it is a different fact from UNWIRED and must not be counted
+#             as one.  The note says what is red and on which check, so the
+#             row is a defect report rather than a hole.
 
 # ---------------------------------------------------------------- tier 1 --
 
@@ -83,44 +89,49 @@ install/test/run-all.sh            : manual : every installer scenario on a real
 tests/tools/run-wirequiet.sh       : tools/ci.sh                    : what the machine puts on the wire when nobody asked it to: every card, a settle, then a window of idle counted off this host's NIC with tcpdump. Nothing else here asserts on what the guest EMITS, which is how a DHCPv6 client rebinding twenty-five times a second passed every stage
 tests/tls/run-reachability.sh      : tools/ci.sh                    : does the machine still answer ARP and a connect while it is doing a TLS handshake, probed from a peer once a second; the gate is the longest stretch of silence, which is the shape the 44 s dropout had
 tests/compare/run-compare.sh       : tools/emurun.sh                : the same workload on another stack
+tests/udpdrill/run-udpdrill.sh     : tools/ci.sh                    : the UDP receive path, the bind-address filter, and the largest datagram a route takes. 108 checks against a floor of 108, on a tap device it makes in its own address space: no card, no backend, no peer
+tests/leak/run-leak.sh             : tools/ci.sh                    : the refused-connect leak, seven arms of thirty-two socket lifecycles
+tests/concurrent/run-concurrent.sh : tools/ci.sh                    : eight applications, each with its own library open
+tests/stack/run-stack.sh           : tools/ci.sh                    : the API called from the stack a Shell command has, which on a machine with no MMU is a silent overwrite of whatever is below it
+tests/libraries/run-libraries.sh   : tools/ci.sh                    : the shared-library load: open, close, expunge, reopen
+tests/tools/run-toolsay.sh         : tools/ci.sh                    : the branches where a shipped command reached a return and printed no sentence at all: arp's two absence explanations, its truncated list, and NetTrace's connect failure
+tests/netstack/run-amiberry.sh     : tools/ci.sh                    : netstack bring-up, Amiberry
+tests/tools/run-arexx.sh           : tools/ci.sh                    : the AmiTCP ARexx host, driven by Commodore's own RexxMast, RX and WaitForPort. AMITCP is a port 31 of the 2,149 comm/ archives surveyed send commands to, and only the real interpreter can say whether RexxSysLib is satisfied by it, so the arm skips by name on a machine without AMINETXDUO_AMIGA_REXX (or ~/amiga-rexx) rather than substituting anything of ours
 
 # ------------------------------------------------- nothing invokes these --
 #
 # UNWIRED first: these need a ROM and a2065.device and nothing else, which is
-# exactly what the emulator tier already has.  Twenty of them call themselves
+# exactly what the emulator tier already has.  Most of them call themselves
 # the regression test for a named defect that shipped.
+#
+# THE RED ROWS ARE NOT IN THIS CLASS and are the more useful outcome: each was
+# run bridged, each asserted, and each came back with a finding.  A harness
+# that has been run and is red is a bug report; a harness that has never been
+# run is an unknown.
 
 tests/atf/run-atf.sh                : manual : AtfTcpSocket PRODUCES NOTHING. It has the serial log every other harness has (aa658929) and prints not one byte on it -- not the first statement of atfc_run(), not a pre-main constructor -- so there is no DH0:.done and the run ends at the timeout. NOT the guest stack: unchanged under `stack 200000`. NOT the missing mathieeedoubbas.library: staged, and the behaviour is unchanged. A pre-push tree took `Exception 3 ... at ffffffff` at 12.8 s; the landed binary takes no exception at all and hangs silently, and the only difference is one dropped serial call, i.e. code layout. A fault that moves with layout is memory corruption, not a fixed bad jump, so where it dies is not yet established. Do not wire it until it runs
-tests/tools/run-toolsay.sh         : manual : UNWIRED. the three branches that reached a return and printed no sentence: arp's two absence explanations, its truncated list, and NetTrace's connect failure
 tests/tools/run-livetools.sh       : manual : UNWIRED. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead)
-tests/tools/run-checkconfig.sh     : manual : UNWIRED. the regression test for "the configuration is wrong and nothing says so"
+tests/tools/run-checkconfig.sh     : manual : RED, and not on rig state. Four of its findings never print: bad1's broadcast address, the off-network router, DEVS:Internet/routes being named at all, and two interfaces claiming one card. One cause -- AMI_CFG_MAX_INTERFACES is 2 and the staged drawer holds four interface files, so CheckNetConfig reports "room for 2, the rest are ignored" and bad1 and eth0 are the two dropped. Every missing finding needs one of those two. The fixture cannot be fixed by dropping files either: "two interfaces on one card" needs bad1 AND eth0, and the routes finding needs an interface on 192.168.1.0/24, so a two-file drawer buys one of the two. It wants either a second boot with a second drawer or a ceiling above 2
 tests/tools/run-dnscache.sh        : manual : UNWIRED. the regression test for the DNS answer cache
 tests/tools/run-dnssearch.sh       : manual : UNWIRED. the regression test for short names and the search list
-tests/tools/run-arexx.sh           : manual : UNWIRED. the AmiTCP ARexx host
 tests/tools/run-routes.sh          : manual : bridged. the regression test for the IPv4 routing table; AddNetRoute and DeleteNetRoute have no other home. The ARP-on-the-wire half needs an unprivileged tcpdump on -B's interface
 tests/tools/run-ifquery.sh         : manual : UNWIRED. the Roadshow interface and statistics APIs
 tests/tools/run-ifreadd.sh         : manual : bridged. AddInterfaceTagList() gives back an interface that works
-tests/tools/run-cycledrill.sh      : manual : UNWIRED. open/expunge/reopen and online/offline
+tests/tools/run-cycledrill.sh      : manual : RED on a product finding. Repaired onto the bridge (the -A branch it needed to read a serial log at all is gone; both arms of it ran Amiberry, and the default arm blanked SERIAL so the orphaned-reader-stack check reported NOT CHECKED on every run). 90 of 91 guest checks pass; the one that does not is "no Task or Process was left behind over the cycles", tasks 21 -> 22 over three open/expunge/reopen cycles. `-n` is its own negative control and proves the gates fire. Its orphaned-reader-stack check still cannot fire: a ToolsSmoke run writes an empty serial log on this rig, so that assertion reports NOT CHECKED whatever the backend is
 tests/tools/run-srcsel.sh          : manual : bridged. outbound source selection
 tests/tools/run-oommsg.sh          : manual : UNWIRED. out of memory, and which message blames what
 tests/tools/run-resolvebreak.sh    : manual : UNWIRED. how long a name lookup blocks, and whether Ctrl-C gets it back
 tests/tools/run-mcastrace.sh       : manual : bridged. two openers racing for one row of the multicast table
 tests/tools/run-evpost.sh          : manual : bridged. a socket event signalled at a Task that has exited
 tests/tools/run-apidrill.sh        : manual : bridged. the whole-vector-surface leak drill. RED: shutdown leaks 2 bytes and one task per call, on every board
-tests/tools/run-addifleak.sh       : manual : UNWIRED. AddNetInterface kept the machine's memory
+tests/tools/run-addifleak.sh       : manual : BLOCKED, its premise does not hold on this rig. A1200 + ne2000_pcmcia, bridged: AddNetInterface returns 0 on all three runs and free memory is identical (227,336 bytes) before and after each, so "the stack was built on only 0 of 3 runs" and there is nothing allocated for the leak arithmetic to weigh. The first call takes 45.7 s and the next two 120 ms, which is the shape of a card that is found and then does nothing. Diagnose the PCMCIA arm before wiring it
 tests/tools/run-dns.sh             : manual : bridged. the resolver API, against a real name server. RED: gethostname(NULL) answers errno 47, not EFAULT
-tests/concurrent/run-concurrent.sh : manual : UNWIRED. eight applications, each with its own library open
-tests/libraries/run-libraries.sh   : manual : UNWIRED. the shared-library load test
-tests/stack/run-stack.sh           : manual : UNWIRED. the API called from the stack a Shell command has
-tests/leak/run-leak.sh             : manual : UNWIRED. the refused-connect leak
-tests/netstack/run-amiberry.sh     : manual : UNWIRED. netstack bring-up, Amiberry
-tests/netstack/run-dhcp3927.sh     : manual : UNWIRED. the DHCP lifecycle and the RFC 3927 fallback
-tests/netstack/run-fitzquery.sh    : manual : UNWIRED. the regression test for "the machine cannot see its own share"
-tests/tcpdrill/run-tcpdrill.sh     : manual : UNWIRED. the tcpdrill scripts; `-s all` runs every one of them, one boot each
-tests/udpdrill/run-udpdrill.sh     : manual : UNWIRED. the UDP receive path, the bind-address filter, and the largest datagram a route takes
+tests/netstack/run-dhcp3927.sh     : manual : bridged, and BLOCKED on the link it needs. Written against SLIRP: its own header says SLIRP answers port 67 from 10.0.2.2 and never withdraws a lease, so "the server stopped answering" is produced by taking the wire away. Run bridged on a segment that has a real DHCP server, 31 of 37 checks pass and the six that fail are the whole RFC 3927 arm -- the conflict probe is not answered, so no link-local candidate is drawn and the address stays the leased one. It needs a segment with NO DHCP server on it and something that answers an ARP probe on cue; neither is the lab bridge
+tests/netstack/run-fitzquery.sh    : manual : asset. needs the Fitz binary, which is fetched and not vendored: it exits 2 with "missing build/fitz/Fitz/fitz, run tests/endurance/fetch-fitz.sh". The same fetch .github/workflows/emulator.yml already runs before tools/ci.sh lossgate would serve it
+tests/tcpdrill/run-tcpdrill.sh     : manual : RED on a product finding. tcp.drill is 30 cases, 240 checks passed and 5 failed, in three cases that are all one subject: x02_data_is_retransmitted, x03_retransmission_needs_no_later_send, u03_retransmission_is_a_plain_segment. It exits 5, so it is not quietly green -- but it grades by the emulator's status rather than through tools/test-verdict.sh, and it still carries the dead -A flag whose two branches both run Amiberry
 tests/ipv6/run-link.sh             : manual : bridged. the IPv6 link test; the router findings only carry information on a segment that has one
 tests/ipv6/run-tools-amiberry.sh   : manual : bridged. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all. Both routers are read off -B's interface, and a segment with no IPv6 router stops the run before it boots. RED: three commands lost the lines that explain their refusals
-tests/ipv6/run-bringup.sh          : manual : UNWIRED. how long the network takes to become usable, IPv6 included
+tests/ipv6/run-bringup.sh          : manual : BLOCKED on an empty serial log, reproduced twice. Every figure it reports is a `netstack: mark <event> <ms> ms` line read out of build/amiberry-serial-<tag>.log, and that file comes back 0 bytes while the run itself is clean -- run_rc=0, a complete guest transcript, ShowNetStatus and netstat -h both answering. It is not this harness alone: of twenty serial logs written in one session, thirteen were empty, and the empty set is every ToolsSmoke run plus tests/leak and tests/stack, while tests/libraries, tests/concurrent, tests/netstack and tests/udpdrill all wrote theirs. Whatever decides that decides whether this harness can exist
 tests/tls/run-api.sh               : manual : bridged. a real HTTPS URL through tls.library
 tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
 tests/tls/run-https.sh             : manual : bridged. the real-HTTPS handshake

@@ -3,7 +3,7 @@
 # THE OPEN/EXPUNGE/REOPEN AND ONLINE/OFFLINE DRILL.
 #
 #   tests/tools/run-cycledrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                 [-A [-N board] [-B backend]] [-n]
+#                                 [-N board] [-B backend] [-n]
 #
 # WHAT THIS IS FOR
 #
@@ -94,11 +94,14 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-# FS-UAE needs an X server; on a headless Linux box it dies in GLAD before the
-# guest boots, so -A picks Amiberry, which runs genuinely headless.
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 BOARD=a2065
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+# BRIDGED, NEVER SLIRP.  This used to default to slirp and -A picked "Amiberry"
+# out of a two-way branch whose other arm ran Amiberry as well -- the only
+# difference between them was that the slirp arm blanked SERIAL, so the
+# orphaned-reader-stack assertion below reported NOT CHECKED on every default
+# run.  A gate whose strongest check is switched off by the default flag is not
+# a gate, so the branch is gone and the backend is named.
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 NEGATIVE=0
 
 # CYCLES and EXPUNGES are what the gates at the bottom demand; GUEST_* is what
@@ -110,16 +113,15 @@ SOCKETS="${AMINETXDUO_CYCLE_SOCKETS:-2}"
 GUEST_CYCLES=""
 GUEST_EXPUNGES=""
 
-while getopts "m:t:b:AN:B:n" opt; do
+while getopts "m:t:b:N:B:n" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         N) BOARD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
         n) NEGATIVE=1 ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-A [-N board] [-B backend]] [-n]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-N board] [-B backend] [-n]" >&2; exit 2 ;;
     esac
 done
 
@@ -222,25 +224,16 @@ EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-cycledrill}"
 
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+SERIAL="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
+
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    SERIAL="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
-    echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
-    "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/CycleDrill" "$STAGE/netstat" "$STAGE/ShowNetStatus" \
-        "$STAGE/NetShutdown"
-else
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    SERIAL=""
-    echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/CycleDrill" "$STAGE/netstat" "$STAGE/ShowNetStatus" \
-        "$STAGE/NetShutdown"
-fi
+echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
+    -t "$TIMEOUT" \
+    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/CycleDrill" "$STAGE/netstat" "$STAGE/ShowNetStatus" \
+    "$STAGE/NetShutdown"
 RUN_RC=$?
 set -e
 
@@ -377,12 +370,12 @@ done
 
 # ---- the known SANA-II reader leak ----------------------------------------
 #
-# Only Amiberry keeps a serial log here, and ami_log() has no other sink, so
-# under FS-UAE this cannot be looked for at all.  Saying so beats printing a
-# zero that means "not checked".
+# ami_log() has no sink but the serial port, so with no serial log this
+# cannot be looked for at all.  Saying so beats printing a zero that means
+# "not checked".
 ORPHANS=0
 if [ -z "${SERIAL:-}" ] || [ ! -f "$SERIAL" ]; then
-    echo " , orphaned SANA-II reader stacks: NOT CHECKED (no serial log; use -A)"
+    echo " , orphaned SANA-II reader stacks: NOT CHECKED (no serial log)"
     ORPHANS=-1
 else
     ORPHANS=$(grep -c "did not stop. Its stack leaks" "$SERIAL" || true)

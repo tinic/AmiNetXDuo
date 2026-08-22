@@ -42,12 +42,20 @@ DEADLINE_SECS="${CONCURRENT_DEADLINE:-60}"
 MARGIN_SECS=30
 TIMEOUT=$(( BOOT_SECS + 2 * DEADLINE_SECS + MARGIN_SECS ))
 
-while getopts "m:t:b:" opt; do
+# BRIDGED, NEVER SLIRP.  -B names the host NIC the guest bridges onto, and
+# tools/amiberry-run.sh defaults to slirp when nobody says.  Nothing here puts
+# a workload on the link, but a run on SLIRP exercises the emulator's own
+# TCP/IP rather than a SANA-II driver, so the backend is named rather than
+# inherited.
+IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
+
+while getopts "m:t:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B backend]" >&2; exit 2 ;;
     esac
 done
 
@@ -99,7 +107,7 @@ export AMINETXDUO_RUN_TAG="$TAG"
 # passing run rather than a failure.
 #
 # A timeout with NO verdict is a real failure and still scores as one.
-OUT=$("$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+OUT=$("$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
       "$EXE" "$STAGE/devs" "$STAGE/libs" 2>&1) && rc=0 || rc=$?
 printf '%s\n' "$OUT"
 
