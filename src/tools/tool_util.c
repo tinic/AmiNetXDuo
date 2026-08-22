@@ -96,6 +96,19 @@ VOID tool_fault(LONG code)
     PrintFault(code, (CONST_STRPTR)tool_name);
 }
 
+/*
+ * Every command that refuses an IPv6 address because the library it opened has
+ * none ends the same way, so the sentence exists once. Two things a user
+ * cannot get at from the refusal itself: that this is which library is
+ * installed rather than something to switch on, and where the addresses the
+ * machine does have are listed.
+ */
+VOID tool_no_ipv6_note(VOID)
+{
+    tool_printf("  IPv6 is a build option, not a setting. ShowNetStatus\n"
+                "  INTERFACES lists the addresses this machine has.\n");
+}
+
 /* ------------------------------------------------------------------ break */
 
 VOID tool_break_arm(VOID)

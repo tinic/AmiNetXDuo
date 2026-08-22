@@ -134,6 +134,7 @@ int main(int argc, char **argv)
     if (tool_parse_ip6(name, v6))
     {
         tool_error("\"%s\" is an address, not a name", (LONG)name);
+        tool_printf("  nslookup asks the DNS for its ip6.arpa record.\n");
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -164,6 +165,7 @@ int main(int argc, char **argv)
     if (family == TOOL_AF_INET6 && !tool_sock_have_ipv6(sbase))
     {
         tool_error("%s: no IPv6 on this machine", (LONG)name);
+        tool_no_ipv6_note();
         CloseLibrary(sbase);
         FreeArgs(rda);
         return RETURN_ERROR;

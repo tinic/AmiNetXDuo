@@ -636,7 +636,12 @@ int main(int argc, char **argv)
 
         if (!has6)
         {
-            tool_error("the running stack has no IPv6");
+            /* The address itself is granted, in the same breath as the
+               refusal: without that the answer reads as a verdict on what was
+               typed, which is what "%s is not an address" above would say. */
+            tool_error("%s is a well-formed IPv6 address, but the running "
+                       "stack has no IPv6", (LONG)address_text);
+            tool_no_ipv6_note();
             FreeArgs(rda);
             return RETURN_FAIL;
         }

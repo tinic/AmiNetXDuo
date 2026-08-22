@@ -644,6 +644,20 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_argtemplates PRIVATE -Wall -Wextra)
     set_target_properties(test_argtemplates PROPERTIES C_STANDARD 11)
 
+    # A refusal that does not say why.  Same technique and the same reason:
+    # an empty `case ROUTE_ENOSYS: break;` compiles, and a message that lost
+    # its second half is a shorter string.  The file's header names the three
+    # that 4d9791be left behind.
+    add_executable(test_refusals
+        test/test_refusals.c)
+
+    target_compile_definitions(test_refusals PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        _GNU_SOURCE)
+
+    target_compile_options(test_refusals PRIVATE -Wall -Wextra)
+    set_target_properties(test_refusals PROPERTIES C_STANDARD 11)
+
     add_executable(test_httplock
         test/test_httplock.c
         httplock.c
@@ -777,4 +791,5 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME tools_arg_contract  COMMAND test_argtemplates contract)
     add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)
     add_test(NAME tools_arg_docs      COMMAND test_argtemplates docs)
+    add_test(NAME tools_refusals      COMMAND test_refusals)
 endif()

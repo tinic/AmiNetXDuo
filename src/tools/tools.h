@@ -51,6 +51,7 @@ VOID tool_printf(const char *fmt, ...);
 VOID tool_say(const char *fmt, ...);       /* tool_printf, flushed at once   */
 VOID tool_error(const char *fmt, ...);     /* "<tool>: ..." + newline        */
 VOID tool_fault(LONG code);                /* PrintFault(code, tool_name)    */
+VOID tool_no_ipv6_note(VOID);              /* why, after "no IPv6" refusals  */
 
 /* ------------------------------------------------------------------ break */
 
