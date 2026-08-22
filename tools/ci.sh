@@ -748,6 +748,23 @@ stage_cross() {
             fail "build $name"
         fi
     done
+
+    # The stack every path in the shipping libraries needs, against a budget.
+    # Its own build: -fstack-usage and -save-temps=obj change no code but are
+    # in no configuration above, and the frames this bounds -- the DHCP/RA
+    # absorb among them -- grew from 1280 to 1412 unobserved, because nothing
+    # that did not need a guest ever looked at them.
+    if tools/check-stack-frames.sh "$BUILD/stackframes" \
+            > "$BUILD/stack-frames.log" 2>&1; then
+        note "$(sed -n 's/^stack_frames=/stack frames: /p' \
+              "$BUILD/stack-frames.log" | head -1)"
+    elif grep -q 'stack_frames=skipped' "$BUILD/stack-frames.log"; then
+        skip "cross: $(grep 'stack_frames=skipped' \
+              "$BUILD/stack-frames.log" | head -1)"
+    else
+        cat "$BUILD/stack-frames.log"
+        fail "a path outgrew its stack budget"
+    fi
 }
 
 # ----------------------------------------------------------- conformance ----
