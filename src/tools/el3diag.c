@@ -114,6 +114,21 @@ int main(void)
                (STRPTR)probe[i].name, (ULONG)raw, (ULONG)swp(raw));
     }
 
+    /* The whole register file, raw, one window per line.  Diffing two of
+       these between a deaf boot and a working one finds every bit that
+       matters without anyone deciding in advance which ones do. */
+    {
+        UWORD w, o;
+
+        for (w = 0; w < 7; w++)
+        {
+            Printf((STRPTR)"w%ld:", (ULONG)w);
+            for (o = 0; o < 16; o += 2)
+                Printf((STRPTR)" %04lx", (ULONG)peek(w, o));
+            Printf((STRPTR)"\n");
+        }
+    }
+
     /*
      * The staged experiment, for the card that hears link beat and captures
      * nothing.  Between each stage the FIFO is watched for two seconds; any
