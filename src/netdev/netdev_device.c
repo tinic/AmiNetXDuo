@@ -1309,7 +1309,7 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
         unit->nu_Nic.running && unit->nu_Nic.rx_packets == 0 &&
         unit->nu_Nic.tx_packets >= 4)
     {
-        if (++unit->nu_RxKickWait >= 250u)
+        if (++unit->nu_RxKickWait >= 100u)
         {
             unit->nu_RxKickWait = 0;
             unit->nu_RxKicks++;
