@@ -62,6 +62,11 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+/* NETCTRL_DHCP_RENEW and NetStatusControl. The only aminetxduo header this
+   file uses: everything else here is a hand-written LVO, because a program
+   that linked the stack would measure a second copy of it. */
+#include <aminetxduo/netstatus.h>
+
 /* ------------------------------------------------------------- the shape -- */
 
 /*
@@ -83,7 +88,7 @@
 #define ST_PORT         7460
 #define ST_CHUNK        512UL
 #define ST_PATTERN      0xA5C3A5C3UL
-#define ST_PHASES       11
+#define ST_PHASES       13
 
 /*
  * Generous because the resolver calls are meant to fail and each one waits out
@@ -437,6 +442,30 @@ static LONG s_getnameinfo(struct Library *base, StAddr *sa, LONG salen,
     return res;
 }
 
+/*
+ * NetStackControl, AMI_NETSTATUS_CONTROL_LVO (-0x36c = -876).  The one entry
+ * point here that is not part of the API a user program calls: it is how this
+ * test provokes the thing it is trying to measure.
+ */
+static LONG s_netstackcontrol(struct Library *base, ULONG op,
+                              NetStatusControl *ctl)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register ULONG           d0  __asm("d0") = AMI_NETSTATUS_MAGIC;
+    register ULONG           d1  __asm("d1") = op;
+    register APTR            a0  __asm("a0") = ctl;
+    register ULONG           d2  __asm("d2") = (ULONG)sizeof(*ctl);
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+
+    __asm __volatile ("jsr a6@(-876:W)"
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
+                      : "r" (a6), "r" (d0), "r" (d1), "r" (a0), "r" (d2)
+                      : "a1", "cc", "memory");
+    return res;
+}
+
 static LONG s_getdtablesize(struct Library *base)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -467,6 +496,7 @@ typedef struct StResult
     LONG    sr_Finished;
     LONG    sr_Bytes;               /* echoed over loopback               */
     LONG    sr_Phase;               /* how far the worker got             */
+    LONG    sr_Renewed;             /* interfaces NETCTRL_DHCP_RENEW took */
     ULONG   sr_Mark[ST_PHASES];     /* the mark as each phase ended       */
 } StResult;
 
@@ -484,6 +514,8 @@ static const char * const st_phase_name[ST_PHASES] =
     "OpenLibrary + getdtablesize",
     "socket/connect/getsockname",
     "loopback send/WaitSelect/recv rounds",
+    "NETCTRL_DHCP_RENEW, which arms the absorb",
+    "gethostbyname .invalid WITH A LEASE PENDING (the absorb)",
     "gethostbyname localhost (hosts file, shallow)",
     "gethostbyname .invalid (DNS)",
     "gethostbyname .local (mDNS)",
@@ -826,12 +858,60 @@ static VOID st_worker_entry(VOID)
      * rounds instead of before them, a resolver that never comes back must
      * not take the send/recv/WaitSelect figures with it.
      */
-    (VOID)s_gethostbyname(base, "localhost");
+    /*
+     * THE CASE NOTHING USED TO MEASURE.
+     *
+     * netstack_dns_absorb_pending() reads the lease's options and reconciles
+     * the resolver, and it runs on the CALLER's stack, inside the lookup, at
+     * ami_ns_ask_name().  It only runs when a lease or a router advertisement
+     * is pending, so every clean run of this test walked straight past it: the
+     * DHCP marks are drained once at ami_netstack_dns_start(), on the startup
+     * process's stack, and after that a mark needs an event.
+     *
+     * NETCTRL_DHCP_RENEW is that event, on demand.  The renewal is asynchronous
+     * -- the state callback marks the interface when the ACK lands -- so this
+     * asks every interface, waits, and only then makes the deepest lookup.
+     * Phase 5's mark is therefore a lookup with the absorb on the path, and
+     * phase 7's is the same lookup without it.
+     *
+     * It needs a DHCP server on the link.  Without one every renew is refused,
+     * sr_Renewed stays zero, and the phase reports that instead of asserting:
+     * an unprovoked absorb must not read as a measured one.
+     */
+    {
+        static NetStatusControl ctl;    /* static: this is the 4 KB worker */
+        LONG index;
+
+        for (index = 0; index < 4; index++)
+        {
+            ULONG i;
+
+            for (i = 0; i < sizeof(ctl); i++)
+                ((UBYTE *)&ctl)[i] = 0;
+            ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+            ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+            ctl.nsc_Index   = (UWORD)index;
+
+            if (s_netstackcontrol(base, NETCTRL_DHCP_RENEW, &ctl) == 0)
+                st_result.sr_Renewed++;
+        }
+    }
     st_phase(4);
+
+    /* Long enough for a DISCOVER/REQUEST exchange and the state callback on a
+       real link; a lease that has not come back yet only means the absorb
+       lands on a later phase, and the high-water mark is over the whole run. */
+    Delay(50 * 5);
+
     (VOID)s_gethostbyname(base, "no-such-host.invalid");
     st_phase(5);
-    (VOID)s_gethostbyname(base, "no-such-host.local");
+
+    (VOID)s_gethostbyname(base, "localhost");
     st_phase(6);
+    (VOID)s_gethostbyname(base, "no-such-host.invalid");
+    st_phase(7);
+    (VOID)s_gethostbyname(base, "no-such-host.local");
+    st_phase(8);
     st_check(1, "gethostbyname reached the resolver three ways", 0);
 
     {
@@ -847,14 +927,14 @@ static VOID st_worker_entry(VOID)
     }
 
     (VOID)s_getservbyname(base, "telnet", "tcp");
-    st_phase(7);
+    st_phase(9);
     st_check(1, "getservbyname returned", 0);
 
     {
         APTR list = NULL;
 
         (VOID)s_getaddrinfo(base, "no-such-host.invalid", NULL, NULL, &list);
-        st_phase(8);
+        st_phase(10);
         st_check(1, "getaddrinfo returned", 0);
     }
 
@@ -871,12 +951,12 @@ static VOID st_worker_entry(VOID)
 
         (VOID)s_getnameinfo(base, &sa, (LONG)sizeof(sa), host,
                             (LONG)sizeof(host), serv, (LONG)sizeof(serv), 0);
-        st_phase(9);
+        st_phase(11);
         st_check(1, "getnameinfo returned", 0);
     }
 
     CloseLibrary(base);
-    st_phase(10);
+    st_phase(12);
 
     st_result.sr_Deepest  = st_mark();
     st_result.sr_Finished = 1;
@@ -1002,6 +1082,7 @@ int main(int argc, char **argv)
     st_log("still unpainted %lu bytes of headroom\n",
            (LONG)st_result.sr_Untouched);
     st_log("bytes echoed    %ld\n", st_result.sr_Bytes);
+    st_log("dhcp renewed    %ld interface(s)\n", st_result.sr_Renewed);
 
     /*
      * Reported, not asserted. AROS rounds NP_StackSize up to 16 KB, so under
@@ -1038,6 +1119,35 @@ int main(int argc, char **argv)
 
         st_check(spare >= (ST_STACK / 8),
                  "an eighth of a Shell stack was still spare", (LONG)spare);
+    }
+
+    /*
+     * The absorb, on its own, because the whole-run mark cannot tell it apart
+     * from anything else: phase 5 is a lookup with a lease pending on the path
+     * and phase 7 is the same lookup without one.
+     *
+     * Reported and not asserted when no renew was accepted -- no DHCP server
+     * on the link is a link this cannot ask the question on, and it must not
+     * answer it anyway.  Asserted when one was: the same eighth of a Shell
+     * stack, because a margin that only holds when nothing is pending is the
+     * defect this phase exists to catch.
+     */
+    if (st_result.sr_Renewed == 0)
+    {
+        st_log("\nnote: no interface accepted NETCTRL_DHCP_RENEW, so the "
+               "absorb was not provoked and phase 5 is not a measurement of "
+               "it\n");
+    }
+    else if (st_result.sr_Phase >= 5)
+    {
+        ULONG mark  = st_result.sr_Mark[5];
+        ULONG spare = (mark < ST_STACK) ? (ST_STACK - mark) : 0;
+
+        st_log("\nthe lookup that absorbed a pending lease touched %lu "
+               "bytes\n", (LONG)mark);
+        st_check(spare >= (ST_STACK / 8),
+                 "an eighth of a Shell stack was spare with a lease pending",
+                 (LONG)spare);
     }
 
     st_log("\nstack: %ld checks, %ld failures\n",
