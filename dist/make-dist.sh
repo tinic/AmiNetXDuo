@@ -252,7 +252,11 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # tests/tools/run-wbgrab.sh runs to check the grab against a decoder on
 # another machine.  A test driver, like ToolsSmoke, and no use on a user's
 # machine for the same reason.
-NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab)
+# El3Diag reads one card's registers at one machine's address through one
+# measured byte-order quirk, and its capture-watch phases read 0/100 on a
+# HEALTHY machine (the driver drains frames faster than the tool samples).
+# A specialist's instrument for a bench, not a command for a drawer.
+NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag)
 missing_from_cmds=()
 for path in "$CMD_BUILD"/src/tools/*; do
     [ -f "$path" ] && [ -x "$path" ] || continue
