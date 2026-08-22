@@ -21,6 +21,63 @@
 #define AMI_DNS_NAME_MAX    256
 
 /*
+ * THE ABSORB DOES NOT RUN ON THE CALLER'S STACK.
+ *
+ * Everything below ami_ns_dns_absorb_pending() runs on whatever stack the
+ * calling task has, because a bsdsocket.library vector runs on its caller's
+ * stack and the absorb hangs off ami_ns_ask_name(), ami_ns_ask_addr(),
+ * ami_ns_ask_name6() and ami_ns_ask_mdns() -- inside a lookup -- as well as off
+ * netstack_dns_absorb_pending() from the report door.  An AmigaDOS Shell hands
+ * a command 4096 bytes, there is no MMU, and a frame that does not fit does not
+ * fault: it writes over what lies below and the machine dies later, elsewhere.
+ *
+ * The option buffers are what make these frames large -- one AmiResolverConfig
+ * is ~760 bytes on its own, and option 15 and option 119 each want 256 -- and
+ * measured with -fstack-usage on the pinned toolchain they came to 2260 bytes
+ * for the deepest chain, against 4096 for the whole Shell stack with the
+ * calling program's own frames and the rest of the lookup already in it.
+ *
+ * So they live here, in one block per absorb, and the frames that used to hold
+ * them are pointers.  It is an Exec AllocMem(), which is legal because the
+ * absorb only ever runs on an adopted caller task and never on a ThreadX
+ * thread -- see the note above the DHCPv6 worker in netstack_dhcpv6.c.  It is
+ * taken only when there is an event to absorb, which is a lease or an
+ * advertisement and not every lookup, and a failure to get it is reported the
+ * same way an unreadable option is: keep the last coherent state and ask for
+ * another pass.
+ */
+typedef struct AmiNsDnsScratch {
+    AmiResolverConfig offered;                  /* the lease's search list  */
+    UCHAR             search_raw[256];          /* option 119, RFC 3397     */
+    char              search_text[AMI_CFG_DOMAIN_LEN];
+    UCHAR             domain_raw[AMI_CFG_DOMAIN_LEN];   /* option 15        */
+    char              domain_text[AMI_CFG_DOMAIN_LEN];
+    UCHAR             host_raw[AMI_CFG_NAME_LEN];       /* option 12        */
+    char              host_text[AMI_CFG_NAME_LEN];
+    ULONG             offered_dns[AMI_CFG_MAX_NAMESERVERS];
+    ULONG             raw_dns[NX_DNS_MAX_SERVERS];      /* option 6         */
+} AmiNsDnsScratch;
+
+static VOID *ami_ns_dns_scratch_alloc(ULONG size)
+{
+    VOID *block = AllocMem(size, MEMF_PUBLIC | MEMF_CLEAR);
+
+    if (block != NULL)
+        AMI_CENSUS_ADD(block, size);
+
+    return block;
+}
+
+static VOID ami_ns_dns_scratch_free(VOID *block, ULONG size)
+{
+    if (block == NULL)
+        return;
+
+    AMI_CENSUS_DROP(block);
+    FreeMem(block, size);
+}
+
+/*
  * ns_Config.resolver is live configuration: Roadshow entry points can change
  * it while other tasks resolve or report it. The ThreadX caller bracket
  * serialises access to the DNS client, but an Exec task that only reads the
@@ -91,10 +148,11 @@ static AmiNsDnsOptionRead ami_ns_dhcp_option_read(UINT status)
  * as silent as each other.
  */
 static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
+                                      AmiNsDnsScratch *sc,
                                       char out[AMI_CFG_DOMAIN_LEN])
 {
-    UCHAR              raw[AMI_CFG_DOMAIN_LEN];
-    UINT               size = (UINT)sizeof(raw);
+    UCHAR             *raw = sc->domain_raw;
+    UINT               size = (UINT)sizeof(sc->domain_raw);
     AmiNsDnsOptionRead read;
     UINT               i;
 
@@ -128,10 +186,11 @@ static BOOL ami_ns_dhcp_domain_option(AmiNetStack *ns, UWORD iface,
 
 /* Option 12, with the same contract as the option 15 reader above. */
 static BOOL ami_ns_dhcp_hostname_option(AmiNetStack *ns, UWORD iface,
+                                        AmiNsDnsScratch *sc,
                                         char out[AMI_CFG_NAME_LEN])
 {
-    UCHAR              raw[AMI_CFG_NAME_LEN];
-    UINT               size = (UINT)sizeof(raw);
+    UCHAR             *raw = sc->host_raw;
+    UINT               size = (UINT)sizeof(sc->host_raw);
     AmiNsDnsOptionRead read;
 
     out[0] = '\0';
@@ -257,18 +316,31 @@ static BOOL ami_ns_dns_dhcpv6_names(const AmiNetStack *ns,
 }
 
 /*
+ * The IPv6 half of the same problem AmiNsDnsScratch solves.  Both absorbs run
+ * on the caller's stack, both carry an AmiResolverConfig, and they are called
+ * one after the other, so one block serves both.
+ */
+typedef struct AmiNsDns6Scratch {
+    NXD_ADDRESS       offered[AMI_RDNSS_MAX];
+    UCHAR             names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
+    AmiResolverConfig search;
+    AmiNsRaSnapshot   ra;
+    char              text[AMI_CFG_IP6_STRLEN];
+} AmiNsDns6Scratch;
+
+/*
  * A Reply has landed. Read what it carried out of the client and put it into
  * the resolver, on a caller thread and not on the client's own, for the reason
  * stated above ns_Ra in netstack_internal.h: the DNS client holds its mutex
  * across a query and that query needs the IP thread.
  */
-static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
+static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
 {
     AmiResolverConfig *r;
-    NXD_ADDRESS        offered[AMI_RDNSS_MAX];
+    NXD_ADDRESS       *offered = sc->offered;
     UWORD              offered_count = 0;
-    UCHAR              names[NX_DHCPV6_DOMAIN_NAME_BUFFER_SIZE];
-    char               text[AMI_CFG_IP6_STRLEN];
+    UCHAR             *names = sc->names;
+    char              *text = sc->text;
     UINT               index;
     UINT               option_status = NX_SUCCESS;
     ULONG              now;
@@ -288,7 +360,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
     now = tx_time_get();
-    memset(names, 0, sizeof(names));
+    memset(names, 0, sizeof(sc->names));
 
     /* The public getters do not lock the client, and reconciliation below
        calls into the DNS client before it reaches the search list. Snapshot
@@ -336,7 +408,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
             option_status = nx_dhcpv6_get_other_option_data(
                 &ns->ns_Dhcpv6, NX_DHCPV6_DOMAIN_NAME_OPTION,
-                names, sizeof(names));
+                names, sizeof(sc->names));
         }
 
         (VOID)tx_mutex_put(&ns->ns_Dhcpv6.nx_dhcpv6_client_mutex);
@@ -379,7 +451,8 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
             continue;
 
         status = nxd_dns_server_remove(&ns->ns_Dns, &server);
-        ami_config_format_ip6(server.nxd_ip_address.v6, text, sizeof(text));
+        ami_config_format_ip6(server.nxd_ip_address.v6, text,
+                              sizeof(sc->text));
 
         if (status != NX_SUCCESS && status != NX_DNS_SERVER_NOT_FOUND)
         {
@@ -413,7 +486,8 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
 
         status = nxd_dns_server_add(&ns->ns_Dns, &server);
 
-        ami_config_format_ip6(server.nxd_ip_address.v6, text, sizeof(text));
+        ami_config_format_ip6(server.nxd_ip_address.v6, text,
+                              sizeof(sc->text));
 
         if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
         {
@@ -449,17 +523,19 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
      */
     if (names_valid)
     {
-        AmiResolverConfig offered = {0};
+        AmiResolverConfig *offered = &sc->search;
         ULONG             pos = 0;
         UWORD             added = 0;
         UWORD             removed = 0;
         UWORD             i;
 
-        while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
+        memset(offered, 0, sizeof(*offered));
+
+        while (pos < (ULONG)sizeof(sc->names) && names[pos] != '\0')
         {
-            (VOID)ami_config_search_offer(&offered,
+            (VOID)ami_config_search_offer(offered,
                                           (const char *)&names[pos]);
-            while (pos < (ULONG)sizeof(names) && names[pos] != '\0')
+            while (pos < (ULONG)sizeof(sc->names) && names[pos] != '\0')
                 pos++;
             pos++;
         }
@@ -470,8 +546,8 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
         {
             UWORD j;
 
-            if (ami_ns_search_array_has(offered.search,
-                                        offered.search_count,
+            if (ami_ns_search_array_has(offered->search,
+                                        offered->search_count,
                                         ns->ns_Dhcpv6SearchApplied[i]))
                 continue;
 
@@ -492,18 +568,18 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
         }
 
         /* In: acquire one reference for each suffix in the replacement set. */
-        for (i = 0; i < offered.search_count; i++)
+        for (i = 0; i < offered->search_count; i++)
         {
             BOOL accepted;
 
             if (ami_ns_search_array_has(ns->ns_Dhcpv6SearchApplied,
                                         ns->ns_Dhcpv6SearchAppliedCount,
-                                        offered.search[i]))
+                                        offered->search[i]))
                 continue;
 
             ami_ns_resolver_forbid();
             accepted = ami_config_search_reference_add(r,
-                                                       offered.search[i]);
+                                                       offered->search[i]);
             ami_ns_resolver_permit();
             if (!accepted)
                 continue;
@@ -511,7 +587,7 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
             ami_ns_copy_name(
                 ns->ns_Dhcpv6SearchApplied
                     [ns->ns_Dhcpv6SearchAppliedCount],
-                offered.search[i], AMI_CFG_NAME_LEN);
+                offered->search[i], AMI_CFG_NAME_LEN);
             ns->ns_Dhcpv6SearchAppliedCount++;
             added++;
         }
@@ -546,10 +622,10 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns)
  * leaves the DNS client and the reported list, and anything it names that is
  * not there yet joins both.
  */
-static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
+static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns, AmiNsDns6Scratch *sc)
 {
     AmiResolverConfig *r;
-    AmiNsRaSnapshot     ra;
+    AmiNsRaSnapshot   *ra = &sc->ra;
     UWORD              i;
     UWORD              j;
 
@@ -558,12 +634,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
     r = &ns->ns_Config.resolver;
 
-    if (!ami_ns_ra_snapshot(&ns->ns_Ra, &ra, tx_time_get()))
+    if (!ami_ns_ra_snapshot(&ns->ns_Ra, ra, tx_time_get()))
         return;
 
-    if (ra.rdnss_pending)
+    if (ra->rdnss_pending)
     {
-        char text[AMI_CFG_IP6_STRLEN];
+        char *text = sc->text;
 
         /* Out: in the configuration, not in the advertisement.  Backwards, so
            the compaction inside the withdraw does not skip an entry. */
@@ -572,12 +648,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
             ULONG gone[AMI_CFG_IP6_WORDS];
             BOOL  withdrawn;
 
-            for (j = 0; j < ra.rdnss_count; j++)
+            for (j = 0; j < ra->rdnss_count; j++)
                 if (ami_ns6_same(r->nameserver6[i],
-                                 ra.rdnss[j].nxd_ip_address.v6))
+                                 ra->rdnss[j].nxd_ip_address.v6))
                     break;
 
-            if (j != ra.rdnss_count)
+            if (j != ra->rdnss_count)
                 continue;
 
             /* Named by DHCPv6 as well, so it is not the advertisement's to
@@ -609,7 +685,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                 (VOID)nxd_dns_server_remove(&ns->ns_Dns, &address);
             }
 
-            ami_config_format_ip6(gone, text, sizeof(text));
+            ami_config_format_ip6(gone, text, sizeof(sc->text));
             AMI_INFO("netstack: advertised name server %s withdrawn", text);
         }
 
@@ -620,12 +696,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
          * DHCP path records its servers for the same reason, and this one
          * recorded none at all, which is the visible half of this defect.
          */
-        for (i = 0; i < ra.rdnss_count; i++)
+        for (i = 0; i < ra->rdnss_count; i++)
         {
-            UINT status = nxd_dns_server_add(&ns->ns_Dns, &ra.rdnss[i]);
+            UINT status = nxd_dns_server_add(&ns->ns_Dns, &ra->rdnss[i]);
 
-            ami_config_format_ip6(ra.rdnss[i].nxd_ip_address.v6, text,
-                                  sizeof(text));
+            ami_config_format_ip6(ra->rdnss[i].nxd_ip_address.v6, text,
+                                  sizeof(sc->text));
 
             if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
             {
@@ -639,7 +715,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
                 ami_ns_resolver_forbid();
                 offered = ami_config_nameserver6_offer(
-                    r, ra.rdnss[i].nxd_ip_address.v6);
+                    r, ra->rdnss[i].nxd_ip_address.v6);
                 ami_ns_resolver_permit();
 
                 if (offered)
@@ -648,7 +724,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
         }
     }
 
-    if (ra.dnssl_pending)
+    if (ra->dnssl_pending)
     {
         UWORD added = 0;
         UWORD removed = 0;
@@ -658,12 +734,12 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
            keeps an identical suffix alive. */
         for (i = ns->ns_DnsslAppliedCount; i-- != 0; )
         {
-            for (j = 0; j < ra.dnssl_count; j++)
+            for (j = 0; j < ra->dnssl_count; j++)
                 if (ami_ns_domain_same(ns->ns_DnsslApplied[i],
-                                       ra.dnssl[j]))
+                                       ra->dnssl[j]))
                     break;
 
-            if (j != ra.dnssl_count)
+            if (j != ra->dnssl_count)
                 continue;
 
             ami_ns_resolver_forbid();
@@ -680,27 +756,27 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
 
         /* In: acquire one RA reference for each domain in the interface
            union.  The handoff already folds duplicates case-insensitively. */
-        for (i = 0; i < ra.dnssl_count; i++)
+        for (i = 0; i < ra->dnssl_count; i++)
         {
             BOOL accepted;
 
             for (j = 0; j < ns->ns_DnsslAppliedCount; j++)
                 if (ami_ns_domain_same(ns->ns_DnsslApplied[j],
-                                       ra.dnssl[i]))
+                                       ra->dnssl[i]))
                     break;
 
             if (j != ns->ns_DnsslAppliedCount)
                 continue;
 
             ami_ns_resolver_forbid();
-            accepted = ami_config_search_reference_add(r, ra.dnssl[i]);
+            accepted = ami_config_search_reference_add(r, ra->dnssl[i]);
             ami_ns_resolver_permit();
 
             if (!accepted)
                 continue;
 
             ami_ns_copy_name(ns->ns_DnsslApplied[ns->ns_DnsslAppliedCount],
-                             ra.dnssl[i], AMI_CFG_NAME_LEN);
+                             ra->dnssl[i], AMI_CFG_NAME_LEN);
             ns->ns_DnsslAppliedCount++;
             added++;
         }
@@ -716,7 +792,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
                      "domain(s)", (long)removed);
         if (added != 0)
             AMI_INFO("netstack: advertised search list, %ld domain(s), "
-                     "first '%s'", (long)added, ra.dnssl[0]);
+                     "first '%s'", (long)added, ra->dnssl[0]);
     }
 }
 
@@ -724,8 +800,27 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns)
    a short Forbid section; the NetX calls between them must stay outside it. */
 static VOID ami_ns_dns_absorb_ipv6_pending(AmiNetStack *ns)
 {
-    ami_ns_dns_absorb_dhcpv6(ns);
-    ami_ns_dns_absorb_rdnss(ns);
+    AmiNsDns6Scratch *sc;
+
+    /* Nothing to absorb costs no allocation, which is what keeps this off the
+       price of an ordinary lookup: every resolver call passes through here. */
+    if (!ns->ns_Dhcpv6DnsPending &&
+        !ami_ns_ra_needs_snapshot(&ns->ns_Ra, tx_time_get()))
+        return;
+
+    sc = (AmiNsDns6Scratch *)ami_ns_dns_scratch_alloc((ULONG)sizeof(*sc));
+    if (sc == NULL)
+    {
+        /* Keep the marks: the next caller tries again.  ns_Ra keeps its own
+           pending flags because no snapshot was taken. */
+        AMI_WARN("netstack: no memory to absorb the IPv6 resolver handoff");
+        return;
+    }
+
+    ami_ns_dns_absorb_dhcpv6(ns, sc);
+    ami_ns_dns_absorb_rdnss(ns, sc);
+
+    ami_ns_dns_scratch_free(sc, (ULONG)sizeof(*sc));
 }
 
 #endif /* AMINETXDUO_IPV6 */
@@ -921,17 +1016,23 @@ static BOOL ami_ns_search_array_has(
 /* TRUE when this interface's search list is now what the lease says.  FALSE
    when nothing could be read, which keeps the last coherent list and asks the
    caller for another pass. */
-static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
+static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface,
+                                         AmiNsDnsScratch *sc)
 {
-    AmiResolverConfig  offered = {0};
-    UCHAR              raw[256];
-    char               text[AMI_CFG_DOMAIN_LEN] = {0};
-    UINT               size = (UINT)sizeof(raw);
+    AmiResolverConfig *offered = &sc->offered;
+    UCHAR             *raw = sc->search_raw;
+    char              *text = sc->search_text;
+    UINT               size = (UINT)sizeof(sc->search_raw);
     AmiNsDnsOptionRead read;
     UWORD              i;
 
     if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
         return TRUE;            /* nothing to do, not "try again" */
+
+    /* One scratch block serves every interface in a pass, so this is cleared
+       here and not at the allocation. */
+    memset(offered, 0, sizeof(*offered));
+    text[0] = '\0';
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
@@ -942,13 +1043,13 @@ static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
         if (!ami_ns_dns_option_usable(read))
             return (BOOL)(!ami_ns_dns_option_retry(read));
         if (read == AMI_NS_DNS_OPTION_READ)
-            (VOID)ami_config_search_from_rfc3397(&offered, raw, (ULONG)size);
+            (VOID)ami_config_search_from_rfc3397(offered, raw, (ULONG)size);
 
-        if (!ami_ns_dhcp_domain_option(ns, iface, text))
+        if (!ami_ns_dhcp_domain_option(ns, iface, sc, text))
             return FALSE;
         if (text[0] != '\0' &&
             text[AMI_CFG_NAME_LEN - 1U] == '\0')
-            (VOID)ami_config_search_offer(&offered, text);
+            (VOID)ami_config_search_offer(offered, text);
     }
 
     for (i = ami_ns_dhcp_search_lease_count(&ns->ns_DhcpSearchLease, iface);
@@ -957,7 +1058,7 @@ static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
         const char *domain = ami_ns_dhcp_search_lease_at(
             &ns->ns_DhcpSearchLease, iface, i);
 
-        if (ami_ns_search_array_has(offered.search, offered.search_count,
+        if (ami_ns_search_array_has(offered->search, offered->search_count,
                                     domain))
             continue;
 
@@ -971,25 +1072,25 @@ static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
                  (long)iface);
     }
 
-    for (i = 0; i < offered.search_count; i++)
+    for (i = 0; i < offered->search_count; i++)
     {
         BOOL accepted;
 
         if (ami_ns_dhcp_search_lease_has(&ns->ns_DhcpSearchLease, iface,
-                                         offered.search[i]))
+                                         offered->search[i]))
             continue;
 
         ami_ns_resolver_forbid();
         accepted = ami_config_search_reference_add(&ns->ns_Config.resolver,
-                                                   offered.search[i]);
+                                                   offered->search[i]);
         ami_ns_resolver_permit();
         if (!accepted)
             continue;
 
         (VOID)ami_ns_dhcp_search_lease_add(&ns->ns_DhcpSearchLease, iface,
-                                           offered.search[i]);
+                                           offered->search[i]);
         AMI_INFO("netstack: interface %ld DHCP search suffix '%s'",
-                 (long)iface, offered.search[i]);
+                 (long)iface, offered->search[i]);
     }
 
     return TRUE;
@@ -997,9 +1098,10 @@ static BOOL ami_ns_dhcp_search_reconcile(AmiNetStack *ns, UWORD iface)
 
 
 /* Same contract as the search reconcile above. */
-static BOOL ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
+static BOOL ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface,
+                                         AmiNsDnsScratch *sc)
 {
-    char text[AMI_CFG_DOMAIN_LEN];
+    char *text = sc->domain_text;
 
     if (ns == NULL || !ns->ns_DhcpStarted || iface >= ns->ns_IfaceCount)
         return TRUE;            /* nothing to do, not "try again" */
@@ -1007,7 +1109,7 @@ static BOOL ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
     text[0] = '\0';
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        if (!ami_ns_dhcp_domain_option(ns, iface, text))
+        if (!ami_ns_dhcp_domain_option(ns, iface, sc, text))
             return FALSE;
     }
 
@@ -1032,14 +1134,15 @@ static BOOL ami_ns_dhcp_domain_reconcile(AmiNetStack *ns, UWORD iface)
 
 
 /* Same contract as the two reconciles above. */
-static BOOL ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
+static BOOL ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface,
+                                                 AmiNsDnsScratch *sc)
 {
-    char text[AMI_CFG_NAME_LEN];
+    char *text = sc->host_text;
 
     text[0] = '\0';
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
     {
-        if (!ami_ns_dhcp_hostname_option(ns, iface, text))
+        if (!ami_ns_dhcp_hostname_option(ns, iface, sc, text))
             return FALSE;
     }
 
@@ -1062,19 +1165,16 @@ static BOOL ami_ns_dhcp_hostname_reconcile_iface(AmiNetStack *ns, UWORD iface)
  * lease owns no servers, host name, or suffixes. The per-interface sets make
  * those withdrawals precise.
  */
-BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
+static BOOL ami_ns_dhcp_reconcile_with(AmiNetStack *ns, UWORD iface,
+                                       AmiNsDnsScratch *sc)
 {
-    ULONG              offered[AMI_CFG_MAX_NAMESERVERS];
-    ULONG              raw[NX_DNS_MAX_SERVERS];
-    UINT               size = (UINT)sizeof(raw);
+    ULONG             *offered = sc->offered_dns;
+    ULONG             *raw = sc->raw_dns;
+    UINT               size = (UINT)sizeof(sc->raw_dns);
     AmiNsDnsOptionRead read;
     BOOL               done = TRUE;
     UWORD              offered_count = 0;
     UWORD              i;
-
-    if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
-        iface >= ns->ns_IfaceCount)
-        return TRUE;    /* nothing to do, not "try again" */
 
     /*
      * All four option families, and then one answer for the interface.
@@ -1085,11 +1185,11 @@ BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
      * option from holding the other three back.  Every one of them is
      * idempotent, so the pass that FALSE asks for repeats them harmlessly.
      */
-    if (!ami_ns_dhcp_hostname_reconcile_iface(ns, iface))
+    if (!ami_ns_dhcp_hostname_reconcile_iface(ns, iface, sc))
         done = FALSE;
-    if (!ami_ns_dhcp_domain_reconcile(ns, iface))
+    if (!ami_ns_dhcp_domain_reconcile(ns, iface, sc))
         done = FALSE;
-    if (!ami_ns_dhcp_search_reconcile(ns, iface))
+    if (!ami_ns_dhcp_search_reconcile(ns, iface, sc))
         done = FALSE;
 
     if (ns->ns_DhcpState[iface] >= (UBYTE)NX_DHCP_STATE_BOUND)
@@ -1172,6 +1272,33 @@ BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
     return done;
 }
 
+BOOL ami_netstack_dns_dhcp_reconcile(AmiNetStack *ns, UWORD iface)
+{
+    AmiNsDnsScratch *sc;
+    BOOL             done;
+
+    if (ns == NULL || !ns->ns_DnsCreated || !ns->ns_DhcpStarted ||
+        iface >= ns->ns_IfaceCount)
+        return TRUE;    /* nothing to do, not "try again" */
+
+    /* The option buffers, off the caller's stack: see AmiNsDnsScratch.  A
+       refusal here is the answer an unreadable option gives -- keep what is
+       installed and ask for another pass -- so a machine short of memory
+       applies the lease's resolver state late rather than losing it. */
+    sc = (AmiNsDnsScratch *)ami_ns_dns_scratch_alloc((ULONG)sizeof(*sc));
+    if (sc == NULL)
+    {
+        AMI_WARN("netstack: no memory to read interface %ld DHCP options",
+                 (long)iface);
+        return FALSE;
+    }
+
+    done = ami_ns_dhcp_reconcile_with(ns, iface, sc);
+    ami_ns_dns_scratch_free(sc, (ULONG)sizeof(*sc));
+
+    return done;
+}
+
 /* The DHCP client invokes its state callback on its own ThreadX task and, on
    several paths, while holding its client mutex.  Do not enter the DNS client
    or mutate resolver configuration there. */
@@ -1200,8 +1327,17 @@ LONG ami_netstack_dns_start(AmiNetStack *ns)
        An unreadable option 12 is not marked here -- the reconcile loop below
        covers every interface and marks the ones that want another pass. */
     if (ns->ns_DhcpStarted)
-        for (i = 0U; i < ns->ns_IfaceCount; i++)
-            (VOID)ami_ns_dhcp_hostname_reconcile_iface(ns, i);
+    {
+        AmiNsDnsScratch *sc =
+            (AmiNsDnsScratch *)ami_ns_dns_scratch_alloc((ULONG)sizeof(*sc));
+
+        if (sc != NULL)
+        {
+            for (i = 0U; i < ns->ns_IfaceCount; i++)
+                (VOID)ami_ns_dhcp_hostname_reconcile_iface(ns, i, sc);
+            ami_ns_dns_scratch_free(sc, (ULONG)sizeof(*sc));
+        }
+    }
 
     status = nx_dns_create(&ns->ns_Dns, &ns->ns_Ip,
                            (UCHAR *)ns->ns_Config.resolver.domain);
