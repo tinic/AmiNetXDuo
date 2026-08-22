@@ -339,8 +339,16 @@ static void t_the_note(void)
           "tool_util.c: tool_no_ipv6_note() is gone");
     CHECK(strstr(text, "build option") != NULL,
           "tool_util.c: the note no longer says IPv6 is a build option");
-    CHECK(strstr(text, "ShowNetStatus") != NULL,
-          "tool_util.c: the note no longer points at ShowNetStatus");
+    CHECK(strstr(text, "can be switched on") != NULL,
+          "tool_util.c: the note no longer says whether it can be switched on");
+
+    /* With the space, and on one printed line. The literals are joined above,
+       so a `\n` between the two words is still a `\n` here: this is what
+       catches a rewrap that puts the command name across two lines, where a
+       reader has to reassemble it before it can be typed. */
+    CHECK(strstr(text, "ShowNetStatus INTERFACES") != NULL,
+          "tool_util.c: the note does not name ShowNetStatus INTERFACES on"
+          " one line");
 
     free(text);
 }

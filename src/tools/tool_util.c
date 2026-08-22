@@ -105,8 +105,10 @@ VOID tool_fault(LONG code)
  */
 VOID tool_no_ipv6_note(VOID)
 {
-    tool_printf("  IPv6 is a build option, not a setting. ShowNetStatus\n"
-                "  INTERFACES lists the addresses this machine has.\n");
+    tool_printf("  IPv6 is a build option, not anything that can be "
+                "switched on from\n"
+                "  here. ShowNetStatus INTERFACES lists the addresses this "
+                "machine has.\n");
 }
 
 /* ------------------------------------------------------------------ break */
