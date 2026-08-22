@@ -50,6 +50,46 @@ static UWORD peek(UWORD window, UWORD off)
     return v;
 }
 
+static UWORD cmd_word(UWORD op, UWORD arg)
+{
+    return (UWORD)((op << 11) | (arg & 0x07FFu));
+}
+
+static VOID poke_cmd(UWORD op, UWORD arg)
+{
+    Disable();
+    REG(CMD) = swp(cmd_word(op, arg));
+    Enable();
+}
+
+static VOID poke_w4(UWORD off, UWORD value)
+{
+    Disable();
+    REG(CMD) = swp(cmd_word(1, 4));
+    REG(off) = swp(value);
+    REG(CMD) = swp(cmd_word(1, 1));
+    Enable();
+}
+
+/* Watch the RX FIFO for about two seconds; the LAN's own broadcast chatter
+   is the traffic source.  Returns how many samples held a complete frame. */
+static ULONG rx_watch(void)
+{
+    ULONG hits = 0;
+    UWORD i;
+
+    for (i = 0; i < 100; i++)
+    {
+        UWORD st = swp(peek(1, 0x08));
+
+        if ((st & 0x8000u) == 0)      /* a complete frame is waiting */
+            hits++;
+        Delay(1);
+    }
+
+    return hits;
+}
+
 int main(void)
 {
     static const struct { const char *name; UWORD win; UWORD off; } probe[] = {
@@ -73,6 +113,33 @@ int main(void)
         Printf((STRPTR)"%s raw=$%04lx swapped=$%04lx\n",
                (STRPTR)probe[i].name, (ULONG)raw, (ULONG)swp(raw));
     }
+
+    /*
+     * The staged experiment, for the card that hears link beat and captures
+     * nothing.  Between each stage the FIFO is watched for two seconds; any
+     * LAN has enough broadcast chatter to show up in that window.
+     */
+    Printf((STRPTR)"phase 0, as found:          %ld/100 samples saw a frame\n",
+           rx_watch());
+
+    {
+        UWORD nd = swp(peek(4, 0x06));
+
+        poke_w4(0x06, (UWORD)(nd & (UWORD)~0x000Fu));
+        Printf((STRPTR)"phase 1, netdiag $%04lx->$%04lx: %ld/100 saw a frame\n",
+               (ULONG)nd, (ULONG)swp(peek(4, 0x06)), rx_watch());
+    }
+
+    poke_cmd(0x10, 0x05);            /* filter individual|broadcast, again */
+    poke_cmd(0x04, 0);               /* RX enable, again */
+    Printf((STRPTR)"phase 2, filter+rxenable:   %ld/100 saw a frame\n",
+           rx_watch());
+
+    poke_cmd(0x10, 0x0F);            /* everything, promiscuous */
+    Printf((STRPTR)"phase 3, promiscuous:       %ld/100 saw a frame\n",
+           rx_watch());
+
+    poke_cmd(0x10, 0x05);            /* back to normal before leaving */
 
     return 0;
 }
