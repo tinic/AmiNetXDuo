@@ -499,6 +499,22 @@ void    _tx_amiga_start_interrupts(void);
 #define TX_AMIGA_TASK_PRIORITY                  1
 #endif
 
+/* Exec priority of a Task parked in _tx_amiga_thread_park() waiting for the
+   baton, and only while it is parked.
+
+   One above the band, because a handoff is a Signal() to a Task at the same
+   Exec priority as the one giving it, and Exec reschedules on a Signal() only
+   for a STRICTLY higher priority.  Without this the woken thread is merely
+   ready and waits behind everything else at TX_AMIGA_TASK_PRIORITY -- the
+   scheduler Task included -- until the giver blocks of its own accord.
+
+   Still far below TX_AMIGA_TIMER_PRIORITY, so the tick continues to preempt
+   a Task waiting here.  */
+
+#ifndef TX_AMIGA_HANDOFF_PRIORITY
+#define TX_AMIGA_HANDOFF_PRIORITY               (TX_AMIGA_TASK_PRIORITY + 1)
+#endif
+
 /* Exec priority of the periodic tick Task.  It must out-prioritise every
    ThreadX task so that it really does preempt the baton holder.  */
 

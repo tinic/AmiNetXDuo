@@ -156,8 +156,12 @@ UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr)
 ULONG                    run_signal;
 UINT                     adopted;
 struct _tx_amiga_ctrl   *ctrl;
+struct Task             *me;
+BYTE                     saved_pri;
+UINT                     raised;
 
 
+    me         =  FindTask((STRPTR) 0);
     run_signal =  thread_ptr -> tx_thread_amiga_run_signal;
     adopted    =  thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED;
 
@@ -167,7 +171,55 @@ struct _tx_amiga_ctrl   *ctrl;
        TX_THREAD has been deleted and reused.  An adopted Task has no control
        block, its teardown is a return, not a RemTask().  */
     ctrl =  (adopted != 0U) ? ((struct _tx_amiga_ctrl *) 0)
-                            : _tx_amiga_ctrl_of(FindTask((STRPTR) 0));
+                            : _tx_amiga_ctrl_of(me);
+
+    /*
+     * Wait for the baton one Exec priority up, and give that back the moment the
+     * baton arrives.
+     *
+     * Every Task ThreadX creates runs at TX_AMIGA_TASK_PRIORITY, so the Signal()
+     * that hands the baton over goes to a Task at the SAME Exec priority as the
+     * one giving it.  Exec reschedules on a Signal() only for a STRICTLY higher
+     * priority, so the handoff did not preempt at the Exec level either: the
+     * woken thread was merely ready, behind whatever else sat at that priority,
+     * until the giver blocked of its own accord.
+     *
+     * Raising only the WAITER, and only while it waits, is the narrow form of
+     * that fix.  It needs no cross-task state, it is the one number Exec looks
+     * at when it picks the next Task, and it puts back exactly what the Task
+     * had.
+     *
+     * RAISE ONLY, never lower.  SetTaskPri() is absolute, and an ADOPTED Task's
+     * priority is the application's: a program that runs itself at 5 and calls
+     * recv() would be dropped to 2 for the length of every receive if this
+     * assigned unconditionally.
+     *
+     * Nothing can invert on it: a Task parked here holds no baton and no Exec
+     * resource, and it is one step above the ThreadX band and far below
+     * TX_AMIGA_TIMER_PRIORITY, so the tick still preempts it.
+     *
+     * Not raised at all when the baton is already this thread's, which is the
+     * common case on the receive path: ami_netstack_baton_acquire() dispatches
+     * itself and only then parks, so the Wait() below returns on a signal that
+     * is already latched and nothing was ever waited for.  Paying two
+     * SetTaskPri() calls there would put a cost on the fast path to buy
+     * something only the slow path uses.  The test is a hint, not a lock: losing
+     * the race costs exactly what raising unconditionally would have cost.
+     */
+    Forbid();
+    raised =  (_tx_thread_current_ptr != thread_ptr) ? ((UINT) TX_TRUE)
+                                                     : ((UINT) TX_FALSE);
+    Permit();
+
+    saved_pri =  me -> tc_Node.ln_Pri;
+    if (saved_pri >= (BYTE) TX_AMIGA_HANDOFF_PRIORITY)
+    {
+        raised =  (UINT) TX_FALSE;
+    }
+    if (raised != ((UINT) TX_FALSE))
+    {
+        (VOID) SetTaskPri(me, (LONG) TX_AMIGA_HANDOFF_PRIORITY);
+    }
 
     for (;;)
     {
@@ -194,6 +246,10 @@ struct _tx_amiga_ctrl   *ctrl;
                a ThreadX thread and let it unwind normally.  */
             thread_ptr -> tx_thread_amiga_flags |=  TX_AMIGA_THREAD_ORPHANED;
             Permit();
+            if (raised != ((UINT) TX_FALSE))
+            {
+                (VOID) SetTaskPri(me, (LONG) saved_pri);
+            }
             return(TX_FALSE);
         }
         else
@@ -206,6 +262,10 @@ struct _tx_amiga_ctrl   *ctrl;
 
             /* We hold the baton.  */
             Permit();
+            if (raised != ((UINT) TX_FALSE))
+            {
+                (VOID) SetTaskPri(me, (LONG) saved_pri);
+            }
             return(TX_TRUE);
         }
 
