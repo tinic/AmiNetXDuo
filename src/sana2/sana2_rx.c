@@ -1150,6 +1150,52 @@ static VOID ami_sana2_rx_teardown(AmiSana2Rx *rx)
 
 /* ----------------------------------------------------------- reader thread */
 
+/*
+ * Not one read is outstanding for this reader: every slot is idle and none
+ * could be armed. There is nothing to wake this thread, so the Wait() below
+ * would not return, and the loop cannot simply go round again either.
+ *
+ * There are two causes and only one of them is an event.
+ *
+ * The pool being dry HAS a source: nx_packet_release() wakes the pool's
+ * suspension list the moment a packet goes back. So suspend on the pool and
+ * come back when one does, rather than sleeping a fixed 40 ms and finding out
+ * at the end of it. The packet that arrives is kept and parked in a slot, so
+ * the wait is not spent on a packet somebody else takes first.
+ *
+ * The interface being down, or the reader stopping, has no such source, and
+ * ami_sana2_rx_stop() raises an exec signal that a ThreadX suspension cannot
+ * see. That case gets the timer, and only that case.
+ */
+static VOID ami_sana2_rx_dry(AmiSana2Rx *rx)
+{
+    AmiSana2If *iface  = rx->iface;
+    NX_PACKET  *packet = NX_NULL;
+    UWORD       i;
+
+    if (rx->stop || !iface->online || iface->pool == NULL)
+    {
+        tx_thread_sleep(AMI_SANA2_RX_DRY_TICKS);
+        return;
+    }
+
+    if (nx_packet_allocate(iface->pool, &packet, NX_RECEIVE_PACKET,
+                           (ULONG)AMI_SANA2_RX_DRY_TICKS) != NX_SUCCESS)
+        return;
+
+    for (i = 0; i < rx->depth; i++)
+    {
+        if (!rx->slot[i].posted && rx->slot[i].packet == NULL)
+        {
+            /* The sweep at the top of the loop arms and posts it. */
+            rx->slot[i].packet = packet;
+            return;
+        }
+    }
+
+    nx_packet_release(packet);
+}
+
 static VOID ami_sana2_rx_thread(ULONG argument)
 {
     AmiSana2Rx *rx    = (AmiSana2Rx *)argument;
@@ -1237,9 +1283,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
         if (ami_sana2_rx_post(rx) == 0)
         {
-            /* Either the pool is empty or the interface is down. Back off
-               rather than spin. ami_sana2_rx_stop() signals out of this. */
-            tx_thread_sleep(2);
+            ami_sana2_rx_dry(rx);
             continue;
         }
 

@@ -178,6 +178,16 @@
 #define AMI_SANA2_RX_REAP_TRIES     25
 #endif
 
+/*
+ * The ceiling on ami_sana2_rx_dry(), the one place the reader has nothing on
+ * the wire and nothing to wake it. A dry pool clears on the packet release
+ * that ends the wait early; an interface that has gone down does not clear at
+ * all, and this is how often the reader looks again.
+ */
+#ifndef AMI_SANA2_RX_DRY_TICKS
+#define AMI_SANA2_RX_DRY_TICKS      2
+#endif
+
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8
 #endif
