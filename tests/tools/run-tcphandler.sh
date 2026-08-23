@@ -63,6 +63,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 MODEL=A1200
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
@@ -327,7 +330,10 @@ peer_alive || {
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tcph}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
+# build/amiberry-serial-<tag>.log is what tools/amiberry-run.sh writes.  This
+# named build/serial-<tag>.log, tools/enforcer-run.sh's spelling, so the
+# handler's own log below was read out of a file that never existed.
+SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 
 if [ -n "$IFACE" ]; then
     echo "==> booting $MODEL with the A2065 bridged on $IFACE, guest $ADDRESS"
@@ -463,7 +469,13 @@ fi
 
 # ---- what the handler itself said ----------------------------------------
 
-if [ -f "$SERIAL" ]; then
+# `TCP: unhandled packet %ld` is an AMI_INFO in src/bsdsocket/tcp_handler.c, so
+# it exists only in a build with AMINETXDUO_LOG.  The test was `[ -f "$SERIAL" ]`
+# over a filename nothing writes; with the name corrected the file always
+# exists and is 0 bytes on a default build, which would have turned
+# "no DOS packet went unanswered" into a sentence printed about an empty file.
+# It is a pass only when there was something to read.
+if serial_log_have "$SERIAL" "$BUILD" "which DOS packets went unanswered"; then
     echo
     echo "=================== the handler's own log ========================="
     grep -i "TCP:" "$SERIAL" | head -40 || true
@@ -476,6 +488,9 @@ if [ -f "$SERIAL" ]; then
     else
         pass "no DOS packet went unanswered"
     fi
+else
+    note "which DOS packets went unanswered was NOT CHECKED: the serial log is
+       empty.  Build with -DAMINETXDUO_LOG=ON to make this assertion exist"
 fi
 
 echo

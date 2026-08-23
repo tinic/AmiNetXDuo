@@ -478,13 +478,17 @@ fi
 
 echo
 echo "==== Fitz's own diagnostics (serial) =================================="
-if [ -f "$SER" ]; then
+# -s, not -f: tools/amiberry-run.sh creates the file before the emulator
+# starts, so `-f` was always true and this printed a column of zeros over an
+# empty file, which reads as "Fitz reported nothing wrong".
+if [ -s "$SER" ]; then
     echo "  EAGAIN on a blocking socket: $(grep -c 'EAGAIN' "$SER" || true)"
     echo "  send/recv failures:          $(grep -cE 'send error|recv error|recv maxretry' "$SER" || true)"
     grep -nE "EAGAIN|send error|recv error|recv maxretry" "$SER" | head -10 |
         sed 's/^/  /' || true
 else
-    echo "  (no serial log)"
+    echo "  (the serial log is empty, so Fitz reported nothing here and"
+    echo "   NOTHING WAS CHECKED -- these are not zeros)"
 fi
 
 echo

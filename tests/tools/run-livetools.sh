@@ -66,6 +66,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
@@ -172,7 +175,11 @@ set +e
 RUN_RC=$?
 set -e
 
-SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
+# build/serial-<tag>.log, which this asked for until 2026-08-22, is
+# tools/enforcer-run.sh's spelling.  tools/amiberry-run.sh -- the runner five
+# lines above -- writes build/amiberry-serial-<tag>.log, so the file named here
+# never existed and the serial branch below was dead on every run.
+SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 
@@ -206,11 +213,13 @@ pass() { echo "  ok: $*"; }
 # defect than a command that blocks, and a test that cannot say which it saw
 # sends the next person looking in the wrong place.
 #
-# FS-UAE writes nothing to the serial port on some hosts, build/serial-*.log
-# is zero bytes for every run on this Mac, INCLUDING runs that demonstrably
-# worked.  Failing there reported a broken stack on a host where nothing was
-# broken, and it did so for long enough to be recorded twice as a known false
-# red, which is exactly how a test stops being read.
+# The serial log is not always there to be counted.  It is empty whenever the
+# library was built with AMINETXDUO_LOG=OFF -- the default -- because
+# `netstack: starting ThreadX` is an AMI_INFO call and compiles to nothing, and
+# a ToolsSmoke guest writes nothing else to the port.  It was also read from
+# the wrong filename here for months, which had the same effect.  Failing on an
+# empty one reported a broken stack where nothing was broken, and did so for
+# long enough to be recorded twice as a known false red.
 #
 # So the serial log is preferred and not required.  When it is empty the
 # transcript answers the same question, the way tests/tools/run-routes.sh
@@ -220,12 +229,14 @@ pass() { echo "  ok: $*"; }
 #
 # What is NOT done here is passing quietly when neither source can answer. A
 # check that cannot tell a reboot from a hang has to say so.
-if [ -s "$SERIAL" ]; then
+if serial_log_have "$SERIAL" "$BUILD" "the boot count off the serial log" \
+     2> /dev/null; then
     BOOTS=$(grep -c "netstack: starting ThreadX" "$SERIAL" || true)
     BOOT_SRC="the serial log"
 else
     BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
-    BOOT_SRC="the transcript (no serial output on this host)"
+    BOOT_SRC="the transcript (the serial log is empty; build with
+       -DAMINETXDUO_LOG=ON for the stronger instrument)"
 fi
 
 if [ "$BOOTS" -gt 1 ]; then

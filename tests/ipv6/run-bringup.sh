@@ -52,6 +52,12 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# Every figure below is a `netstack: mark` line off the serial port, so a build
+# with the log compiled out has nothing to report and this says so before it
+# spends five boots finding out.
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BUILD="${AMINETXDUO_BUILD:-build/v6log}"
 MODEL=A1200
@@ -81,6 +87,13 @@ NETSTAT="$BUILD/src/tools/netstat"
 for f in "$BSD" "$ADDIF" "$SHOW" "$SMOKE" "$NETSTAT"; do
     [ -f "$f" ] || { echo "build $BUILD first: no $f" >&2; exit 2; }
 done
+
+# ToolsSmoke writes to stdout and nothing else, so every byte this harness
+# reads comes from the library's AMI_INFO calls -- which compile to nothing
+# unless the build has AMINETXDUO_LOG.  A build without it produced
+# `result=noserial run_rc=0` on rep after rep, with a complete guest
+# transcript beside it, and the harness was recorded as blocked on the rig.
+serial_log_require_build "$BUILD" "tests/ipv6/run-bringup.sh"
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || {
     echo "No Kickstart.  Set AMINETXDUO_KICKSTART=<rom>." >&2; exit 2; }

@@ -91,6 +91,11 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# The orphaned-reader-stack check below is read out of the serial log, and an
+# empty one is a failure rather than a zero.
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
@@ -225,7 +230,7 @@ EOF
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-cycledrill}"
 
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-SERIAL="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
+SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 
 set +e
 echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
@@ -370,16 +375,28 @@ done
 
 # ---- the known SANA-II reader leak ----------------------------------------
 #
-# ami_log() has no sink but the serial port, so with no serial log this
-# cannot be looked for at all.  Saying so beats printing a zero that means
-# "not checked".
+# The line looked for here is an AMI_ERROR in src/sana2/sana2_rx.c, and
+# ami_log() has no sink but the serial port, so with no serial log this cannot
+# be looked for at all.
+#
+# It used to test `[ ! -f "$SERIAL" ]`, and tools/amiberry-run.sh CREATES the
+# file before it starts the emulator: the file always exists, so the NOT
+# CHECKED branch never ran and `grep -c` over 0 bytes printed
+# "orphaned SANA-II reader stacks logged: 0" on every run of this harness since
+# it was written.  A ToolsSmoke guest writes nothing to the serial port, and a
+# library built with AMINETXDUO_LOG=OFF -- the default, and what every build
+# this harness is pointed at has had -- writes nothing either, so 0 was never
+# a measurement.  Empty is a FAILURE now, not a zero and not a skip.
 ORPHANS=0
-if [ -z "${SERIAL:-}" ] || [ ! -f "$SERIAL" ]; then
-    echo " , orphaned SANA-II reader stacks: NOT CHECKED (no serial log)"
-    ORPHANS=-1
-else
+if serial_log_have "${SERIAL:-}" "$BUILD" \
+                   "orphaned SANA-II reader stacks"; then
     ORPHANS=$(grep -c "did not stop. Its stack leaks" "$SERIAL" || true)
     echo " , orphaned SANA-II reader stacks logged: $ORPHANS"
+else
+    ORPHANS=-1
+    fail "orphaned SANA-II reader stacks were NOT CHECKED: the serial log is
+       empty, so the assertion had no input.  32 KB a time goes unnoticed
+       exactly here"
 fi
 if [ "$ORPHANS" -gt 0 ]; then
     echo "     (src/sana2/sana2_rx.c's last-resort path: a driver ignored AbortIO()."

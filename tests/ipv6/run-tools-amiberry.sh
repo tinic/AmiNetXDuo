@@ -82,6 +82,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 MODEL=A1200
 # The ipv6 list spends about seven minutes of it on `wait` lines, unreachable
 # addresses and one deliberate 30 s resolver timeout, so 420 left no headroom.
@@ -337,7 +340,11 @@ set +e
 RUN_RC=$?
 set -e
 
-SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
+# tools/amiberry-run.sh writes build/amiberry-serial-<tag>.log.  This asked for
+# build/serial-<tag>.log, which is tools/enforcer-run.sh's spelling and which
+# no run of this harness has ever produced, so the serial branch below took the
+# `no serial output on this host` arm every time.
+SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 RAW="$HD/tools.txt"
 [ -f "$RAW" ] || { echo "FAIL: the guest wrote no $RAW (run rc=$RUN_RC)" >&2
                    exit 1; }
@@ -404,12 +411,17 @@ failed() { if [ "$(code "$1")" != "0" ]; then ok "$2"; else bad "$2"; fi; }
 worked() { if [ "$(code "$1")" =  "0" ]; then ok "$2"; else bad "$2"; fi; }
 
 # ---- control: one boot, not a reset dressed up as a hang (RESEARCH 25) ----
-if [ -s "$SERIAL" ]; then
+if serial_log_have "$SERIAL" "$BUILD" "the boot count off the serial log" \
+     2> /dev/null; then
     BOOTS=$(grep -c "netstack: starting ThreadX" "$SERIAL" || true)
     BOOT_SRC="the serial log"
 else
+    # `netstack: starting ThreadX` is an AMI_INFO call, so it is absent from
+    # any build without AMINETXDUO_LOG and the serial log is then 0 bytes.
+    # The transcript answers the same question, more weakly.
     BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
-    BOOT_SRC="the transcript (no serial output on this host)"
+    BOOT_SRC="the transcript (the serial log is empty; build with
+           -DAMINETXDUO_LOG=ON for the stronger instrument)"
 fi
 if [ "$BOOTS" -gt 1 ]; then
     bad "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts, a command

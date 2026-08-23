@@ -70,6 +70,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BUILD="${AMINETXDUO_BUILD:-build/v6ra}"
 MODEL=A1200
@@ -161,7 +164,7 @@ EOF
 
 TAG="rdnss"
 CAP="$ROOT/build/rdnss-ra.txt"
-SERIAL="$ROOT/build/amiberry-serial-$TAG.log"
+SERIAL=$(serial_log_path "$TAG")
 OUT="$ROOT/build/$TAG.out"
 rm -f "$CAP" "$SERIAL" "$OUT"
 
@@ -240,6 +243,17 @@ fi
 # read out of what the guest itself printed. ami_netstack_mark("ip6-global") on
 # the serial port says the same thing and is the second reading, but a build
 # without AMINETXDUO_LOG has no serial port to say it on.
+
+# Whether there is a serial log to read at all, once, so the three fields it
+# feeds can say `notchecked` rather than `no`.  `no` and `not looked at` are
+# different answers and were reported with the same word.
+serial_have=no
+if serial_log_have "$SERIAL" "$BUILD" \
+                   "what the stack absorbed off the advertisement" 2>/dev/null
+then
+    serial_have=yes
+fi
+
 guest_global=no
 if [ -n "$ra_prefix" ] &&
    grep -oiE "${ra_prefix}[0-9A-Fa-f:]+" "$OUT" 2>/dev/null \
@@ -247,7 +261,10 @@ if [ -n "$ra_prefix" ] &&
 then
     guest_global=yes
 fi
-grep -qE "netstack: mark ip6-global " "$SERIAL" 2>/dev/null && guest_global=yes
+if [ "$serial_have" = yes ] &&
+   grep -qE "netstack: mark ip6-global " "$SERIAL"; then
+    guest_global=yes
+fi
 
 echo "guest_global=$guest_global run_rc=$run_rc serial=$SERIAL out=$OUT"
 
@@ -267,12 +284,20 @@ sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
     | grep -qiE "^(Name servers: +| +)${ra_rdnss}[[:space:]]*$" &&
     ns6_reported=yes
 
-ns6_absorbed=no
-grep -qiE "netstack: advertised name server ${ra_rdnss}" "$SERIAL" 2>/dev/null &&
-    ns6_absorbed=yes
+# Both of these are AMI_INFO lines, so they exist only in a build with
+# AMINETXDUO_LOG.  With the log compiled out the serial file is 0 bytes and
+# these two greps answered `no` -- the same word the real negative uses -- on
+# every run.  `notchecked` is the honest third value.
+ns6_absorbed=notchecked
+dnssl_absorbed=notchecked
+if [ "$serial_have" = yes ]; then
+    ns6_absorbed=no
+    grep -qiE "netstack: advertised name server ${ra_rdnss}" "$SERIAL" &&
+        ns6_absorbed=yes
 
-dnssl_absorbed=no
-grep -qiF "advertised search list" "$SERIAL" 2>/dev/null && dnssl_absorbed=yes
+    dnssl_absorbed=no
+    grep -qiF "advertised search list" "$SERIAL" && dnssl_absorbed=yes
+fi
 
 # The only route from "playhouse2" to an address is the advertised suffix:
 # there is no hosts file, no DOMAIN and no SEARCH on this guest.

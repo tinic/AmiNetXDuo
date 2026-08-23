@@ -201,7 +201,10 @@ if [ -n "$WIRE_PID" ]; then
     wait "$WIRE_PID" 2>/dev/null || true
 fi
 
-SERIAL="$ROOT/build/serial-$AMINETXDUO_RUN_TAG.log"
+# No SERIAL here.  It was set to build/serial-<tag>.log, a name
+# tools/amiberry-run.sh does not write, and nothing in this file ever read the
+# variable: every assertion is on the transcript.  A path that is wrong and
+# unused is the next thing somebody copies.
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 

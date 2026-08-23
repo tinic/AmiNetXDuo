@@ -67,6 +67,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
+# shellcheck source=../../tools/serial-log.sh
+. "$ROOT/tools/serial-log.sh"
+
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
@@ -201,12 +204,19 @@ else
 fi
 
 # The stack's own refusal, on the serial port, is what the text is explaining.
-SERIAL="$ROOT/build/amiberry-serial-$AMINETXDUO_RUN_TAG.log"
-if grep -qi "netstack_startup failed" "$SERIAL" 2>/dev/null; then
+#
+# `netstack_startup failed` is an AMI_ERROR, so it is in the binary only when
+# the build has AMINETXDUO_LOG.  This used to say "the run failed elsewhere"
+# about an empty file, which sends the reader to the guest for a fault that is
+# in the build.
+SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
+if ! serial_log_have "$SERIAL" "$BUILD" "the stack's own refusal"; then
+    fail "the stack's own refusal was NOT CHECKED: the serial log is empty"
+elif grep -qi "netstack_startup failed" "$SERIAL"; then
     pass "the stack refused for the reason the text describes"
 else
     fail "the serial log has no netstack_startup failure, the run failed elsewhere"
-    [ -f "$SERIAL" ] && tail -20 "$SERIAL" | sed 's/^/       /' >&2
+    tail -20 "$SERIAL" | sed 's/^/       /' >&2
 fi
 
 echo

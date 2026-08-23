@@ -647,11 +647,27 @@ fi
 # ------------------------------------------------------------------- output --
 
 echo "---- serial ($SERIAL) ----"
+# serial_bytes is a field a caller can read.  Thirteen of twenty serial logs in
+# one session were 0 bytes and every harness assertion reading one of them
+# passed, so the size is part of the run's report and not a thing to infer.
+echo "serial=$SERIAL serial_bytes=$(wc -c < "$SERIAL" | tr -d ' ')"
 if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
     [ ! -s "$SERIALTS" ] || echo "(same output, timestamped: $SERIALTS)"
 else
-    echo "(empty, no ami_log output reached the serial port)"
+    # THIS IS ALMOST ALWAYS THE BUILD, not the serial path.  AMI_ERROR,
+    # AMI_WARN and AMI_INFO compile to `if (0)` unless AMINETXDUO_LOG is
+    # defined and it is OFF by default, so a library built the ordinary way
+    # never writes a byte here.  What is left is whatever the guest program
+    # puts on the port itself with RawPutChar, and a ToolsSmoke guest puts
+    # nothing.  Measured on this rig: tests/stack wrote 0 bytes against a
+    # default build and 3,847 against -DAMINETXDUO_LOG=ON, same minute, same
+    # machine.
+    echo "(empty, nothing was written to the serial port)"
+    echo "  The library's AMI_ERROR/AMI_WARN/AMI_INFO calls compile to nothing"
+    echo "  without -DAMINETXDUO_LOG=ON, and the guest program writes to the"
+    echo "  port only if it carries a RawPutChar tracer of its own.  Rebuild"
+    echo "  with -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2 for a log."
 fi
 
 for produced in "$HD"/*.txt "$HD"/*.log; do
