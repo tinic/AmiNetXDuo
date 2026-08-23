@@ -46,8 +46,9 @@
 
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
-#include "aminetxduo/events.h"
 #endif
+
+#include "aminetxduo/events.h"
 
 #include "aminetxduo/random.h"
 
