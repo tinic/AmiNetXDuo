@@ -9,6 +9,8 @@
 [submodule "third_party/bsdsocktest"]
 	path = third_party/bsdsocktest
 	url = https://github.com/tbdye/bsdsocktest.git
+	branch = main
 [submodule "third_party/dropbear"]
 	path = third_party/dropbear
 	url = https://github.com/mkj/dropbear.git
+	branch = main

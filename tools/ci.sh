@@ -306,6 +306,26 @@ stage_submodules() {
         hr "submodules"
         git submodule update --init --recursive
     fi
+
+    # The headers being present says nothing about which commit they came
+    # from.  A checkout with third_party/netxduo behind the recorded pin
+    # compiles, and fails on a symbol the fork added -- `implicit declaration
+    # of nx_mld_enable`, which reads as a defect in our source and costs a
+    # morning.  This is that, plus the pin itself: an id no submodule ever
+    # produced, or one no ref reaches any more, so a fresh clone cannot get
+    # it.  Before the build, because everything after it is meaningless if
+    # the answer is no.
+    grc=0
+    tools/check-gitlinks.sh > "$BUILD/gitlinks.log" 2>&1 || grc=$?
+    case "$grc" in
+        0) note "gitlinks: $(sed -n 's/^gitlinks=clean //p' "$BUILD/gitlinks.log")" ;;
+        2) note "gitlinks: $(sed -n 's/^gitlinks=skipped //p' "$BUILD/gitlinks.log")" ;;
+        *) hr "submodules"
+           cat "$BUILD/gitlinks.log"
+           echo "a recorded submodule commit is wrong or not checked out\
+ (tools/check-gitlinks.sh)" >&2
+           exit 1 ;;
+    esac
 }
 
 # ------------------------------------------------------------- toolchain ----
