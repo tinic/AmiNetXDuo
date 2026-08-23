@@ -46,6 +46,10 @@
 #include "tools_nx.h"
 #include "tool_events.h"
 
+#include "aminetxduo/events.h"
+
+#include <exec/semaphores.h>
+
 #include "aminetxduo/version.h"
 
 const char *const tool_name = "ShowNetStatus";
@@ -1370,66 +1374,130 @@ static VOID show_users(BOOL stack_running)
  * THE FAULT THIS ANSWERS.  Every AMI_ERROR in the tree compiles away unless
  * AMINETXDUO_LOG is defined, and no shipped binary defines it, so a machine
  * that refused to shut down or came up with a dead card said nothing a user
- * could quote.  The library records numbers instead; the sentences are in
+ * could quote.  The library records numbers; the sentences are in
  * src/tools/tool_events.c and nowhere in any library or device.
  *
- * It works after a teardown, which is when it matters.  NETSTATUS_EVENTS is
- * answered without the ThreadX baton and without a live NX_IP, and
- * tool_netstatus_open() finds a resident library rather than opening one, so
- * asking does not restart the stack being asked about.
+ * READ THROUGH THE PUBLISHED MARK, NOT THROUGH NetStackQuery().  Both work
+ * while the stack is up and only one works afterwards, which is when this is
+ * worth printing: OpenLibrary("bsdsocket.library") calls netstack_startup(),
+ * so a command that opened the library to ask about a teardown would restart
+ * the network and report on a machine that no longer exists.  After a
+ * NetShutdown the library is still resident with an open count of zero, and
+ * FindSemaphore() finds the mark there.  aminetxduo/health.h is the same
+ * arrangement for the same reason.
+ *
+ * The record is copied whole under Forbid() and printed afterwards.  The
+ * library removes the mark under Forbid() in its expunge, before the memory
+ * holding the ring can go, so a reader that holds Forbid() across the find and
+ * the copy cannot be reading a freed one.  The semaphore is never obtained: a
+ * diagnostic must not block on the thing that may be broken.
  *
  * Static: 32 rows of 16 bytes is more than a Shell command's stack.
  */
 static struct
 {
-    NetStatusHeader hdr;
-    NetStatusEvent  e[32];
+    AmiEventMark   mark;
+    NetStatusEvent e[32];
 } sns_events;
 
 #define SNS_EVENT_ROWS  (sizeof(sns_events.e) / sizeof(sns_events.e[0]))
 
-static VOID show_events(BOOL stack_running)
+#define SNS_EV_OK           0
+#define SNS_EV_ABSENT       1
+#define SNS_EV_BAD_VERSION  2
+
+/*
+ * Oldest first, into sns_events.e.  Returns how many were copied, or -1 and
+ * sets *status.
+ */
+static LONG sns_events_read(UWORD *status)
 {
-    struct Library *base;
-    LONG            n;
-    LONG            i;
+    const AmiEventMark   *mark;
+    const NetStatusEvent *ring;
+    LONG                  copied = 0;
+
+    *status = SNS_EV_ABSENT;
+
+    Forbid();
+
+    /* (STRPTR): NDK 3.9 declares FindSemaphore(STRPTR), 3.2 CONST_STRPTR. */
+    mark = (const AmiEventMark *)FindSemaphore((STRPTR)AMI_EVENTS_NAME);
+
+    if (mark != NULL && mark->em_Magic == AMI_EVENTS_MAGIC)
+    {
+        /*
+         * The header's shape and one entry's, and not the whole object's size:
+         * the ring's length is a build option, so a command and a library that
+         * disagree about it agree about everything that matters here.
+         */
+        if (mark->em_Version   == (UWORD)AMI_EVENTS_VERSION &&
+            mark->em_Size      == (UWORD)sizeof(AmiEventMark) &&
+            mark->em_EntrySize == (UWORD)sizeof(NetStatusEvent))
+        {
+            ULONG entries = (ULONG)mark->em_Entries;
+            ULONG have;
+            ULONG first;
+            ULONG i;
+
+            sns_events.mark = *mark;
+            ring            = AMI_EVENTS_RING(mark);
+
+            have  = (mark->em_Seq < entries) ? mark->em_Seq : entries;
+            first = (mark->em_Seq <= entries) ? 0UL : mark->em_Next;
+
+            for (i = 0; i < have && copied < (LONG)SNS_EVENT_ROWS; i++)
+            {
+                sns_events.e[copied] = ring[(first + i) % entries];
+                copied++;
+            }
+
+            *status = SNS_EV_OK;
+        }
+        else
+        {
+            *status = SNS_EV_BAD_VERSION;
+        }
+    }
+
+    Permit();
+
+    return (*status == SNS_EV_OK) ? copied : -1;
+}
+
+static VOID show_events(VOID)
+{
+    UWORD status;
+    LONG  n;
+    LONG  i;
 
     tool_printf("\nWhat the network did\n");
 
-    if (!stack_running)
-    {
-        tool_printf("(bsdsocket.library is not in memory, so its record of "
-                    "what happened has gone with it)\n");
-        return;
-    }
+    n = sns_events_read(&status);
 
-    base = tool_netstatus_open(TRUE);
-    if (base == NULL)
-        return;
-
-    n = tool_netstatus_query(base, NETSTATUS_EVENTS, &sns_events,
-                             sizeof(sns_events), sizeof(NetStatusEvent));
     if (n < 0)
     {
-        tool_printf("(this bsdsocket.library keeps no record)\n");
-        tool_netstatus_close(base);
+        if (status == SNS_EV_BAD_VERSION)
+            tool_printf("(bsdsocket.library keeps a record this command "
+                        "cannot read; install the two together)\n");
+        else
+            tool_printf("(bsdsocket.library is not in memory, so its record "
+                        "of what happened has gone with it)\n");
         return;
     }
 
     if (n == 0)
     {
         tool_printf("(nothing has happened worth recording)\n");
-        tool_netstatus_close(base);
         return;
     }
 
-    /* nse_Seq counts every event ever recorded, so the first one surviving in
+    /* nse_Seq counts every event ever recorded, so the oldest one surviving in
        the ring having a sequence above 1 says how many went past. */
     if (sns_events.e[0].nse_Seq > 1UL)
         tool_printf("(the %ld events before these were overwritten)\n",
                     (LONG)(sns_events.e[0].nse_Seq - 1UL));
 
-    for (i = 0; i < n && i < (LONG)SNS_EVENT_ROWS; i++)
+    for (i = 0; i < n; i++)
     {
         const NetStatusEvent *e    = &sns_events.e[i];
         const char           *text = tool_event_text(e->nse_Code);
@@ -1443,7 +1511,7 @@ static VOID show_events(BOOL stack_running)
 
         if (text == NULL)
         {
-            /* A code from a newer library. The number is still true. */
+            /* A code from a newer library.  The number is still true. */
             tool_printf("event %ld, value %lu\n", (LONG)e->nse_Code,
                         (unsigned long)e->nse_Value);
             continue;
@@ -1468,11 +1536,9 @@ static VOID show_events(BOOL stack_running)
         tool_printf("\n");
     }
 
-    if ((LONG)sns_events.hdr.nsh_Available > n)
-        tool_printf("(list truncated at %ld of %ld)\n", (LONG)n,
-                    (LONG)sns_events.hdr.nsh_Available);
-
-    tool_netstatus_close(base);
+    if ((LONG)sns_events.mark.em_Entries > n &&
+        sns_events.mark.em_Seq > (ULONG)n)
+        tool_printf("(list truncated at %ld)\n", (LONG)n);
 }
 
 /*
@@ -1711,8 +1777,12 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     if (w->users)
         show_users(stack_running);
 
+    /*
+     * No stack_running argument: this one reads the published mark rather than
+     * the library, so it answers after a shutdown, which is the case it is for.
+     */
     if (w->events)
-        show_events(stack_running);
+        show_events();
 
     /* ---- the diagnosis --------------------------------------------------
      *
