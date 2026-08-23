@@ -55,6 +55,45 @@ ULONG ami_millis_quick(void)
     return stub_millis;
 }
 
+/*
+ * Forbid() and the semaphore list.  One published semaphore is all the library
+ * asks for, and the reason it is modelled rather than stubbed out is that the
+ * mark being findable, and then not being findable, is what a reader on the
+ * machine sees and is the half a compile cannot check.
+ */
+static int                     stub_forbid_depth;
+static struct SignalSemaphore *stub_semaphore;
+
+void Forbid(void) { stub_forbid_depth++; }
+void Permit(void) { stub_forbid_depth--; }
+
+void InitSemaphore(struct SignalSemaphore *sem)
+{
+    sem->ss_Link.ln_Name = NULL;
+}
+
+void AddSemaphore(struct SignalSemaphore *sem)
+{
+    stub_semaphore = sem;
+}
+
+void RemSemaphore(struct SignalSemaphore *sem)
+{
+    if (stub_semaphore == sem)
+        stub_semaphore = NULL;
+}
+
+struct SignalSemaphore *FindSemaphore(STRPTR name)
+{
+    if (stub_semaphore == NULL || stub_semaphore->ss_Link.ln_Name == NULL)
+        return NULL;
+
+    if (strcmp(stub_semaphore->ss_Link.ln_Name, (const char *)name) != 0)
+        return NULL;
+
+    return stub_semaphore;
+}
+
 /* ------------------------------------------------------------------ checks */
 
 static int failures;
@@ -344,6 +383,88 @@ static void test_the_shutdown_a_user_reported(void)
     }
 }
 
+/* ---------------------------------------------------------- the published mark
+ *
+ * What a command sees.  ShowNetStatus does not call ami_event_snapshot(): it
+ * finds the mark, checks its shape, and walks the ring itself, because
+ * opening bsdsocket.library to ask would start the network.  That walk is the
+ * half that has no other test, so it is repeated here against the same mark
+ * and checked against the snapshot the library would have given.
+ */
+static void test_published_mark(void)
+{
+    const AmiEventMark   *mark;
+    const NetStatusEvent *ring;
+    NetStatusEvent        via_call[AMINETXDUO_EVENT_RING];
+    ULONG                 held = 0;
+    ULONG                 n;
+    ULONG                 entries;
+    ULONG                 have;
+    ULONG                 first;
+    ULONG                 i;
+
+    check(FindSemaphore((STRPTR)AMI_EVENTS_NAME) == NULL,
+          "nothing is published before the library publishes it");
+
+    ami_event_publish();
+
+    mark = (const AmiEventMark *)FindSemaphore((STRPTR)AMI_EVENTS_NAME);
+    check(mark != NULL, "the mark is findable by name");
+    if (mark == NULL)
+        return;
+
+    check(mark->em_Magic == AMI_EVENTS_MAGIC, "the magic is there");
+    check(mark->em_Version == (UWORD)AMI_EVENTS_VERSION, "and the version");
+    /* The header's shape and one entry's, which is what a reader checks: the
+       ring's length is a build option and is taken from the mark. */
+    check(mark->em_Size == (UWORD)sizeof(AmiEventMark),
+          "em_Size is the header alone");
+    check(mark->em_EntrySize == (UWORD)sizeof(NetStatusEvent),
+          "em_EntrySize is one entry");
+    check(mark->em_Entries == (UWORD)AMINETXDUO_EVENT_RING,
+          "em_Entries is the ring the library kept");
+
+    /* Publishing twice is what a second init would do, and must not move the
+       ring or re-add the semaphore. */
+    ami_event_publish();
+    check(FindSemaphore((STRPTR)AMI_EVENTS_NAME) ==
+          (struct SignalSemaphore *)mark, "publishing twice changes nothing");
+
+    /* The reader's own walk, oldest first, against the library's answer. */
+    n = ami_event_snapshot(via_call,
+                           (ULONG)(sizeof(via_call) / sizeof(via_call[0])),
+                           &held);
+
+    entries = (ULONG)mark->em_Entries;
+    ring    = AMI_EVENTS_RING(mark);
+    have    = (mark->em_Seq < entries) ? mark->em_Seq : entries;
+    first   = (mark->em_Seq <= entries) ? 0UL : mark->em_Next;
+
+    check(have == n, "the two ways agree on how many there are");
+
+    for (i = 0; i < have && i < n; i++)
+    {
+        const NetStatusEvent *e = &ring[(first + i) % entries];
+
+        check(e->nse_Seq   == via_call[i].nse_Seq &&
+              e->nse_Code  == via_call[i].nse_Code &&
+              e->nse_Index == via_call[i].nse_Index &&
+              e->nse_Value == via_call[i].nse_Value &&
+              e->nse_Tick  == via_call[i].nse_Tick,
+              "the two ways agree entry for entry");
+    }
+
+    check(stub_forbid_depth == 0, "publishing left Forbid() balanced");
+
+    /* And the expunge: the mark goes before the memory does, so a reader that
+       arrives afterwards finds nothing rather than a freed ring. */
+    ami_event_unpublish();
+    check(FindSemaphore((STRPTR)AMI_EVENTS_NAME) == NULL,
+          "the expunge takes the mark away");
+    ami_event_unpublish();
+    check(stub_forbid_depth == 0, "unpublishing twice is safe and balanced");
+}
+
 int main(void)
 {
     test_table_is_complete();
@@ -352,6 +473,7 @@ int main(void)
     test_ring_wraps();
     test_short_buffer();
     test_the_shutdown_a_user_reported();
+    test_published_mark();
 
     if (failures != 0)
     {

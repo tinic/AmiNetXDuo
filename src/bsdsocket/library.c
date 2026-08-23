@@ -527,6 +527,12 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_handoff_init(base);
 
     bsd_master_base = base;
+
+    /* The event ring, published where a command can read it without opening
+       this library -- which would start the network.  It stays for as long as
+       the segment does, so a shutdown's events outlive the stack. */
+    ami_event_publish();
+
     ami_set_address_change_hook(bsd_address_changed);
     ami_set_second_hook(bsd_task_sweep);
     ami_set_shutdown_hook(bsd_shutdown_requested);
@@ -1721,6 +1727,11 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     ami_set_second_hook(NULL);
     ami_set_shutdown_hook(NULL);
     bsd_master_base = NULL;
+
+    /* The mark points into the segment about to be unloaded, and its removal
+       is under Forbid(), which is what a reader holds across its find and its
+       copy. */
+    ami_event_unpublish();
 
     seglist = base->sb_SegList;
     neg     = base->sb_Lib.lib_NegSize;
