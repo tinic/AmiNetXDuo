@@ -44,6 +44,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/events.h"
 
 /* tx_amiga_tick_stats(), for NETSTATUS_HEALTH. */
 #include "tx_amiga.h"
@@ -1460,6 +1461,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_OPENERS:     need = 0;                        break;
         case NETSTATUS_TCPSTALL:    need = 0;                        break;
         case NETSTATUS_DEST6:       need = 0;                        break;
+        case NETSTATUS_EVENTS:      need = 0;                        break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1471,6 +1473,29 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     hdr->nsh_Available = 0;
     hdr->nsh_EntrySize = 0;
     hdr->nsh_Reserved  = 0;
+
+    /*
+     * Before the stack is looked for, and without the baton, for the reason
+     * NETSTATUS_HEALTH is: the ring is the library's own memory. It is also
+     * the only way this selector is worth anything -- the events a reader
+     * wants are the ones a teardown left behind, and by then netstack_ip()
+     * answers NULL and the bracket has nothing to enter.
+     */
+    if (what == NETSTATUS_EVENTS)
+    {
+        ULONG held = 0;
+
+        ns_writer_init(&w, hdr, size, NETSTATUS_EVENTS,
+                       sizeof(NetStatusEvent));
+        w.written = ami_event_snapshot((NetStatusEvent *)w.entries, w.room,
+                                       &held);
+        /* What the ring holds, not what the machine did: nse_Seq carries
+           that, and a reader with a buffer too small still learns the size
+           it needs. */
+        w.available = held;
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
 
     /* Answered before the stack is looked for, and without the baton: it reads
        the tick task and the bracket's own counters, not NetX Duo. */

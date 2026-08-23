@@ -1,7 +1,48 @@
 add_library(aminetxduo_common STATIC compat.c crashguard.c ami_random.c
-                                     alloccensus.c)
+                                     alloccensus.c events.c)
 target_include_directories(aminetxduo_common PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 target_link_libraries(aminetxduo_common PUBLIC threadx)
+
+# The event ring's size, here and nowhere else: events.c is its only reader.
+#
+# Not add_compile_definitions() at the top level.  A define on every compile
+# line of the tree changes the LTO options record of every object, and
+# anxnet.device -- which does not link this archive and has no ring in it --
+# moved 8 bytes for it.  A build option that changes an image it does not
+# belong to makes every size measurement afterwards unreadable.
+target_compile_definitions(aminetxduo_common
+    PRIVATE AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING})
+
+# ---------------------------------------------------------------- host test --
+#
+# The ring and the table that decodes it live in different binaries on the
+# machine: bsdsocket.library keeps the ring, ShowNetStatus prints the words.
+# Nothing on the Amiga links both, so nothing there can notice a code that was
+# added to one and not the other.  This links both, and does.
+#
+# Neither source makes an AmigaDOS call -- events.c needs Disable()/Enable()
+# and ami_millis_quick(), all three stubbed in the test, and tool_events.c
+# needs nothing -- so the sources under test are the sources that ship.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test_events
+        test/test_events.c
+        events.c
+        "${CMAKE_SOURCE_DIR}/src/tools/tool_events.c")
+
+    target_include_directories(test_events PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_definitions(test_events
+        PRIVATE AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING})
+
+    target_compile_options(test_events PRIVATE -Wall -Wextra)
+
+    include(CTest)
+    add_test(NAME event_ring COMMAND test_events)
+endif()
 
 # Same reason as src/config: every Shell command in src/tools/ links this and
 # uses two or three functions out of compat.c, and --gc-sections can only drop

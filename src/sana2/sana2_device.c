@@ -8,6 +8,7 @@
 
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/events.h"
 
 #include <exec/memory.h>
 #include <proto/exec.h>
@@ -396,13 +397,22 @@ LONG ami_sana2_offline(AmiSana2If *iface)
     LONG              err;
 
     if (!iface->online)
+    {
+        /* Half of "the LED still blinks after NetShutdown": the interface was
+           marked offline already, usually by a reader that took
+           S2ERR_OUTOFSERVICE, so the device never receives S2_OFFLINE and goes
+           on running its receiver. */
+        ami_event(NETEVENT_OFFLINE_SKIPPED, (UWORD)iface->index, 0UL);
         return 0;
+    }
 
     iface->online = FALSE;
 
     err = ami_sana2_command(iface, &req, S2_OFFLINE);
     if (err != 0 && req.ios2_WireError != S2WERR_UNIT_OFFLINE)
     {
+        ami_event(NETEVENT_OFFLINE_FAILED, (UWORD)iface->index,
+                  (ULONG)req.ios2_WireError);
         AMI_WARN("sana2: S2_OFFLINE failed (%ld/%ld)", (long)err,
                  (long)req.ios2_WireError);
         return err;
@@ -866,6 +876,11 @@ BOOL ami_sana2_close(AmiSana2If *iface)
          */
         if (iface->rx_orphaned || iface->tx_orphaned)
         {
+            /* The one code that settles this on its own: which interface, and
+               which side of it the device would not give back. */
+            ami_event(NETEVENT_IFACE_RETAINED, (UWORD)iface->index,
+                      (iface->rx_orphaned ? NETEVENT_HELD_RX : 0UL) |
+                      (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL));
             AMI_ERROR("sana2: leaking the interface, the device still holds "
                       "requests inside it");
             return FALSE;

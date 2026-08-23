@@ -46,6 +46,7 @@
 
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
+#include "aminetxduo/events.h"
 #endif
 
 #include "aminetxduo/random.h"
@@ -846,6 +847,11 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
 
             if (rx->iface->interface_ptr != NULL)
                 rx->iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+
+            /* The other half of the LED question: this is what cleared
+               iface->online, and so what makes the S2_OFFLINE of the next
+               teardown a no-op. */
+            ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)rx->iface->index, 0UL);
 
             AMI_WARN("sana2: %s went out of service. The link is marked down",
                      rx->iface->device);
