@@ -443,6 +443,14 @@ typedef struct AmiTxSlot
 
 /* ------------------------------------------------------------- interface */
 
+/*
+ * offline_state below.  Never online, online with S2_OFFLINE not yet issued,
+ * and issued.  Only the middle one records a skipped offline.
+ */
+#define AMI_SANA2_OFFLINE_NEVER     0
+#define AMI_SANA2_OFFLINE_UP        1
+#define AMI_SANA2_OFFLINE_ISSUED    2
+
 struct AmiSana2If
 {
     /* Device. The opened request doubles as the template every cloned request
@@ -466,6 +474,20 @@ struct AmiSana2If
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
 
     BOOL                online;
+    /*
+     * Whether S2_OFFLINE has been issued since this interface last went
+     * online.  For the event ring and nothing else.
+     *
+     * A teardown calls ami_sana2_offline() six or seven times over -- from
+     * rx_stop, from close, and from the driver's three link cases -- and every
+     * call after the first finds the interface already offline and returns.
+     * Recording each of those buries the one that means something: an
+     * interface that was marked offline by a READER taking S2ERR_OUTOFSERVICE,
+     * where the device never received the command and goes on running its
+     * receiver.  That is the mechanism behind a card whose LED keeps blinking
+     * after a shutdown, and it is one event, not seven.
+     */
+    UBYTE               offline_state;
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;

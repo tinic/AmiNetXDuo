@@ -60,6 +60,7 @@ tests/tools/run-cardsweep6.sh      : tools/ci.sh                    : every netw
 tests/tools/run-ifconfigure6.sh    : tools/ci.sh                    : ConfigureNetInterface on an interface that has only IPv6; bridged, so it is in the bridged stage rather than the emulator tier
 tests/tools/run-netcapture.sh      : tools/ci.sh                    : NetCapture on every card: the frames are ping's, the filter is checked against an unfiltered capture of the same seconds, and tcpdump reads the files
 tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdown, and what it does to the programs using the network
+tests/tools/run-events.sh          : tools/ci.sh                    : the library's event ring reaching a user: the codes are recorded on the machine and the sentences come out of ShowNetStatus, which nothing off the machine can check
 tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: handler, driven by Commodore's own Type and Copy
 tests/tcpstall/run-tcpstall.sh     : tools/ci.sh                    : a peer that stops answering; the stall must be readable and a deadline must be served
 tests/ipv6/run-mld.sh              : tools/ci.sh                    : the groups this host listens to, announced or not, read out of a capture on the segment
