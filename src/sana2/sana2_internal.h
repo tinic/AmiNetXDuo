@@ -396,6 +396,24 @@ typedef struct AmiRxSlot
     BOOL                posted;
 } AmiRxSlot;
 
+/*
+ * What the copy hook accumulated, lifted out of the slot.
+ *
+ * ami_sana2_rx_complete() re-arms and re-posts the slot BEFORE it delivers the
+ * frame, so the ring is never short across a delivery. Re-arming clears
+ * slot->copied and slot->summed -- it has to, before BeginIO(), or a device
+ * that does not call the copy hook leaves the previous frame's verdict where
+ * the next frame's length is resolved from. The delivery still needs the
+ * values that belong to the frame in hand, so they travel in one of these
+ * rather than in the slot.
+ */
+typedef struct AmiRxSum
+{
+    ULONG   sum;        /* ones-complement sum the copy carried            */
+    ULONG   copied;     /* over how many bytes                             */
+    BOOL    summed;     /* whether the copy took the summing path          */
+} AmiRxSum;
+
 typedef struct AmiSana2Rx
 {
     AmiSana2If         *iface;
@@ -582,7 +600,7 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
  * payload a second time.
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
-                          const AmiRxSlot *slot);
+                          const AmiRxSum *sum);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);
