@@ -236,7 +236,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=96
+HOST_TESTS_EXPECTED=97
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_sockopt and
@@ -744,6 +744,24 @@ stage_cross() {
             else
                 cat "$BUILD/$name-rt-recursion.log"
                 fail "a compiler runtime helper calls itself ($name)"
+            fi
+
+            # And that no diagnostic sentence is inside a resident image.  The
+            # event ring exists because AMINETXDUO_LOG cannot be on in a
+            # shipped build; the moment a message is added to a library "just
+            # this once", the ring is a worse serial log rather than a cheaper
+            # one.  Every configuration, because an image is only as small as
+            # its largest build.
+            if tools/check-no-diag-strings.sh "$BUILD/$name" \
+                    > "$BUILD/$name-diag-strings.log" 2>&1; then
+                note "$(sed -n 's/^diag_strings=/diagnostic strings: /p' \
+                      "$BUILD/$name-diag-strings.log" | head -1)"
+            elif grep -q 'diag_strings=skipped' "$BUILD/$name-diag-strings.log"; then
+                skip "cross: $(grep 'diag_strings=skipped' \
+                      "$BUILD/$name-diag-strings.log" | head -1)"
+            else
+                cat "$BUILD/$name-diag-strings.log"
+                fail "a diagnostic sentence is in a shipped image ($name)"
             fi
         else
             # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the

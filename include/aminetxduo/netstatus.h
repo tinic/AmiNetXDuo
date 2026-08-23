@@ -184,6 +184,12 @@ extern "C" {
    section is left out. */
 #define NETSTATUS_DEST6        15   /* NetStatusDest6[]                      */
 
+/* 16 the same way, and for the same reason: a new record no older library ever
+   wrote. AMI_NETSTATUS_VERSION and AMI_NETSTATUS_MIN_REVISION both stay where
+   they are. A version-10 library that predates it answers EINVAL, and
+   ShowNetStatus leaves the section out rather than reporting a fault. */
+#define NETSTATUS_EVENTS       16   /* NetStatusEvent[]                      */
+
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version.
  * The library fills the rest and writes as many entries after it as will fit,
@@ -873,6 +879,147 @@ typedef struct NetStatusOpener
     ULONG   nso_BreakMask;              /* SBTC_BREAKMASK, what to signal it */
     char    nso_Name[NETSTATUS_NAME_LEN];   /* the task's, empty if unnamed  */
 } NetStatusOpener;
+
+/* ---------------------------------------------------- NETSTATUS_EVENTS,
+ *
+ * THE FAULT THIS EXISTS FOR.  Every diagnostic in the library is an AMI_ERROR,
+ * an AMI_WARN or an AMI_INFO, and all three compile to `do { if (0) ... }
+ * while (0)` unless AMINETXDUO_LOG is defined, which it is not in any shipped
+ * binary and cannot be: the strings are 12,820 bytes on the 68000 tier
+ * (aminetxduo/compat.h).  "sana2: leaking the interface, the device still
+ * holds requests inside it" was written so that a user who hit it could quote
+ * it, and no user has ever been able to.  Two of the paths that decide a
+ * shutdown are silent for exactly this reason.
+ *
+ * So the library records a number.  A small ring in BSS, no allocation, no
+ * strings, and the sentence that goes with each number lives in
+ * src/tools/tool_events.c, which is a Shell command and can afford it.  The
+ * user never sees a code.
+ *
+ * This is not a new mechanism.  anxnet.device already does exactly this
+ * (aminetxduo/anxdiag.h, read by CheckNetDevice), for the same reason and in
+ * the same dialect: a code, a qualifier saying which thing it is about, and a
+ * value whose meaning the code decides.  Two mechanisms that do the same thing
+ * differently would be worse than either, so this is that one with a time and
+ * a sequence number added, and the transport is this interface rather than a
+ * second public semaphore because the library has one already.
+ *
+ * IT ANSWERS WITH THE STACK DOWN.  The ring is the library's own memory, not
+ * NetX Duo's, so this selector is served without the ThreadX baton and without
+ * a live NX_IP -- which is the whole point, since the events worth reading are
+ * the ones a teardown left behind.  tool_netstatus_open() looks for a resident
+ * library rather than opening one, so reading the ring does not restart the
+ * stack it is reporting on.
+ *
+ * WHAT IS LOST IS VISIBLE.  The ring holds AMINETXDUO_EVENT_RING entries and
+ * overwrites its oldest.  nse_Seq counts every event ever recorded, so an
+ * answer whose first entry has nse_Seq > 1 is how a reader knows entries went
+ * past, and which ones.  nsh_Available is what the ring holds, not what the
+ * machine did.
+ *
+ * The numbers are a wire format between two binaries and are never reused or
+ * renumbered.  A code the tool does not know is printed as itself rather than
+ * dropped, so an older ShowNetStatus against a newer library still says
+ * something true.
+ */
+
+/* nse_Index for an event about the machine rather than one interface. */
+#define NETEVENT_NOINDEX        0xffffu
+
+/* --- the stack ---------------------------------------------------------- */
+#define NETEVENT_BRINGUP         1  /* came up; value = interfaces opened    */
+#define NETEVENT_SHUTDOWN        2  /* teardown began; value = interfaces it
+                                       still held                            */
+/*
+ * NETCTRL_STACK_NOTIFY and NETCTRL_STACK_RELEASE, the pair NetShutdown is made
+ * of.  Recorded because a shutdown that did not finish is the reported
+ * complaint and which half ran is the first thing to establish: the value on
+ * NOTIFY is how many programs were signalled, and on RELEASE how many still
+ * had the library open after the hold was given back.  Non-zero there is a
+ * program that did not let go, which NETSTATUS_OPENERS then names.
+ */
+#define NETEVENT_NOTIFY          3  /* value = programs signalled            */
+#define NETEVENT_RELEASE         4  /* value = openers left                  */
+
+/* --- bring-up ----------------------------------------------------------- */
+/*
+ * nse_Index on the first two is the configuration slot rather than an
+ * interface index: a device that does not open never becomes an interface and
+ * has no index of the other kind.
+ */
+#define NETEVENT_DEVICE_OPEN    10  /* OpenDevice() refused; value = its
+                                       error code                            */
+#define NETEVENT_DEVICE_REFUSED 11  /* it opened and then refused a SANA-II
+                                       command; value = the AMI_NET_ERR_*    */
+#define NETEVENT_ATTACH_FAILED  12  /* nx_ip_interface_attach() refused;
+                                       value = the NX_ status                */
+/*
+ * Attached, and nx_interface_link_up is false: the attach drives
+ * NX_LINK_ENABLE through the driver, and a device that would not go online or
+ * whose readers would not start leaves the interface in the stack with nothing
+ * on the wire.  Nothing reports it at the moment it happens.
+ */
+#define NETEVENT_LINK_DOWN      13  /* attached with the link down           */
+
+/* --- the wire ----------------------------------------------------------- */
+/*
+ * The mechanism behind "the card's LED still blinks after NetShutdown", in two
+ * halves that have to be read together.
+ *
+ * OUT_OF_SERVICE is a reader taking S2ERR_OUTOFSERVICE and clearing
+ * iface->online, which is right -- the wire has gone -- and is also what makes
+ * the next ami_sana2_offline() a no-op, because that returns early on an
+ * interface already marked offline.  SKIPPED is that no-op.  The two in
+ * sequence say S2_OFFLINE was never issued to a device that is still running
+ * its receiver, and the LED is the device's rather than the stack's.
+ */
+#define NETEVENT_OUT_OF_SERVICE 20  /* a reader saw S2ERR_OUTOFSERVICE and
+                                       marked the link down                  */
+#define NETEVENT_OFFLINE_SKIPPED 21 /* S2_OFFLINE not issued: already offline */
+#define NETEVENT_OFFLINE_FAILED 22  /* the device refused S2_OFFLINE;
+                                       value = the SANA-II wire error        */
+
+/* --- teardown ----------------------------------------------------------- */
+/*
+ * ami_sana2_close() refusing to close and free, because the device still owns
+ * a request that points into the allocation.  The value says which side, which
+ * is the difference between a driver that ignores AbortIO() on reads and one
+ * that lost a write.  This one code with its interface index settles the
+ * question on its own.
+ */
+#define NETEVENT_IFACE_RETAINED 30  /* value = NETEVENT_HELD_*               */
+/* And the consequence: the packet pool and the whole stack allocation are kept
+   as well, because an orphaned request reaches into both. */
+#define NETEVENT_STACK_RETAINED 31  /* value = interfaces retained           */
+
+/* NETEVENT_IFACE_RETAINED values, and they combine. */
+#define NETEVENT_HELD_RX        0x0001UL
+#define NETEVENT_HELD_TX        0x0002UL
+
+/* --- expunge ------------------------------------------------------------ */
+/*
+ * The library declining to be unloaded.  One code with a reason rather than
+ * five codes, the shape ANXDIAG_ATTACH_FAIL uses for the same kind of answer:
+ * a reader wants to know that the segment stayed, and then which of the five
+ * holds it.
+ */
+#define NETEVENT_EXPUNGE_DECLINED 40 /* value = NETEVENT_EXP_*               */
+
+#define NETEVENT_EXP_OPEN       1   /* somebody still has it open            */
+#define NETEVENT_EXP_KERNEL     2   /* ThreadX would not stop                */
+#define NETEVENT_EXP_TCP        3   /* the TCP: handler is alive             */
+#define NETEVENT_EXP_ADDRALLOC  4   /* an address allocation is running      */
+#define NETEVENT_EXP_NETMON     5   /* a monitoring hook is installed        */
+
+typedef struct NetStatusEvent
+{
+    UWORD   nse_Code;                   /* NETEVENT_*                        */
+    UWORD   nse_Index;                  /* interface, or NETEVENT_NOINDEX    */
+    ULONG   nse_Value;                  /* the code says what it means       */
+    ULONG   nse_Tick;                   /* ms since the stack started; 0 when
+                                           there was no clock yet            */
+    ULONG   nse_Seq;                    /* 1 for the first ever recorded     */
+} NetStatusEvent;
 
 /* ------------------------------------------------------------- control,
  *

@@ -20,6 +20,7 @@
 
 #include "aminetxduo/config.h"
 #include "aminetxduo/version.h"
+#include "aminetxduo/events.h"
 
 #include "net68k.h"          /* n68k_cpu_select() */
 
@@ -1395,6 +1396,11 @@ LONG bsd_stack_unhold(struct AmiSocketBase *base)
                 master->sb_Lib.lib_OpenCnt--;
             master->sb_StackHeld = FALSE;
             Permit();
+
+            /* Non-zero here is a program that has not let go, and the stack
+               stays up until it does. NETSTATUS_OPENERS names it. */
+            ami_event(NETEVENT_RELEASE, NETEVENT_NOINDEX,
+                      (ULONG)master->sb_Lib.lib_OpenCnt);
         }
     }
 
@@ -1455,6 +1461,8 @@ LONG bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled)
     }
 
     ReleaseSemaphore(&master->sb_Lock);
+
+    ami_event(NETEVENT_NOTIFY, NETEVENT_NOINDEX, n);
 
     if (signalled != NULL)
         *signalled = n;
@@ -1634,6 +1642,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     if (base->sb_Lib.lib_OpenCnt > 0)
     {
+        ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
+                  NETEVENT_EXP_OPEN);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
@@ -1647,6 +1657,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      */
     if (!netstack_can_unload())
     {
+        ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
+                  NETEVENT_EXP_KERNEL);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
@@ -1662,6 +1674,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 #ifdef AMINETXDUO_TCPDEVICE
     if (bsd_tcp_handler_alive())
     {
+        ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
+                  NETEVENT_EXP_TCP);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
@@ -1676,6 +1690,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      */
     if (bsd_aam_busy())
     {
+        ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
+                  NETEVENT_EXP_ADDRALLOC);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }
@@ -1689,6 +1705,8 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
      */
     if (bsd_netmon_busy())
     {
+        ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
+                  NETEVENT_EXP_NETMON);
         base->sb_Lib.lib_Flags |= LIBF_DELEXP;
         return NULL;
     }

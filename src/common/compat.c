@@ -328,6 +328,21 @@ VOID ami_timer_close(VOID)
     ReleaseSemaphore(&ami_timer_lock);
 }
 
+/*
+ * ami_millis() when the clock is already there, and 0 when it is not.
+ *
+ * ami_millis() opens timer.device on its first call and that ObtainSemaphore()
+ * can Wait.  The event recorder (src/common/events.c) runs inside lib_expunge,
+ * where Exec holds Forbid(), and a Wait there breaks the Forbid on a path whose
+ * whole job is to decide whether the segment may be unloaded.  So this asks and
+ * does not open.  A stack that has ever taken a timestamp -- which is every one
+ * that got as far as bringing an interface up -- answers a real time.
+ */
+ULONG ami_millis_quick(VOID)
+{
+    return ami_timer_ready ? ami_millis() : 0UL;
+}
+
 ULONG ami_millis(VOID)
 {
     struct EClockVal ev;

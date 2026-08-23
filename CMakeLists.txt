@@ -237,6 +237,30 @@ if(AMINETXDUO_LOG)
     add_compile_definitions(AMINETXDUO_LOG)
 endif()
 
+# The event ring, which is what a shipped binary has instead of that log.  A
+# code, an interface and a value per event, in BSS, with the sentences in
+# ShowNetStatus.  Not an option: a diagnostic that can be switched off is a
+# diagnostic that is off on the machine that needed it, which is the defect the
+# serial log already has.
+#
+# The SIZE is the option.  An AmigaOS hunk records BSS as a length and no
+# bytes, so this costs nothing in any image and 16 bytes of RAM per entry on
+# the machine.  The floor is 8: a bring-up and the shutdown that follows it are
+# eight events on a one-card machine, and a ring that cannot hold one sequence
+# answers nothing.
+set(AMINETXDUO_EVENT_RING "32" CACHE STRING
+    "Events the diagnostic ring keeps (8 or more)")
+if(AMINETXDUO_EVENT_RING LESS 8)
+    message(FATAL_ERROR
+        "AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING} is below the floor of 8")
+endif()
+# Applied to src/common alone, where the ring is, and not with
+# add_compile_definitions(): a define in every compile line of the tree changes
+# the LTO options record of every object, and anxnet.device -- which does not
+# link src/common and has no ring in it -- moved 8 bytes for it.  A build
+# option that changes an image it does not belong to is a measurement nobody
+# can trust afterwards.
+
 # The TCP: AmigaDOS handler, a socket opened as a file handle, so a program
 # that speaks DOS files speaks the network without knowing this library
 # exists, and `Type TCP:host/port` works from the Shell.  AmiTCP and Roadshow
@@ -927,4 +951,5 @@ message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
 message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")
 message(STATUS "  serial log .... ${AMINETXDUO_LOG}")
+message(STATUS "  event ring .... ${AMINETXDUO_EVENT_RING} entries")
 message(STATUS "  TCP: device ... ${AMINETXDUO_TCPDEVICE}")

@@ -506,8 +506,11 @@ aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c toolbudget.c
 aminetxduo_add_tool(tool_shownetservices ShowNetServices
     SOURCES shownetservices.c)
 
+# tool_events.c is here and not in TOOLS_COMMON_SOURCES for tool_devdiag.c's
+# reason: it is a table of sentences, and the only command that prints one
+# should be the only command that carries them.
 aminetxduo_add_tool(tool_shownetstatus ShowNetStatus NX
-    SOURCES shownetstatus.c ${TOOLS_DEVDIAG})
+    SOURCES shownetstatus.c tool_events.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_netstat       netstat       NX SOURCES netstat.c)
 # ping is config-only now, and that is the fix rather than a tidy-up: it used
 # to link its own ThreadX and NetX Duo and call nx_icmp_ping() on an NX_IP that

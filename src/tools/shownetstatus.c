@@ -4,8 +4,8 @@
  *
  *     ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
  *                   DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,TCP/S,
- *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,NAMES/S,ALL/S,
- *                   REPEAT/S
+ *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,EVENTS/S,
+ *                   NAMES/S,ALL/S,REPEAT/S
  *
  * One category switch per subject. With no category it prints a general
  * summary.
@@ -44,6 +44,7 @@
  */
 
 #include "tools_nx.h"
+#include "tool_events.h"
 
 #include "aminetxduo/version.h"
 
@@ -55,7 +56,7 @@ static const char version_tag[] __attribute__((used)) =
 #define TEMPLATE    "INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S," \
                     "DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S," \
                     "TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S," \
-                    "NAMES/S,ALL/S,REPEAT/S"
+                    "EVENTS/S,NAMES/S,ALL/S,REPEAT/S"
 
 enum
 {
@@ -72,6 +73,7 @@ enum
     ARG_TCPSOCKETS,
     ARG_UDPSOCKETS,
     ARG_USERS,
+    ARG_EVENTS,
     ARG_NAMES,
     ARG_ALL,
     ARG_REPEAT,
@@ -97,6 +99,7 @@ typedef struct Wanted
     BOOL    tcpsockets;
     BOOL    udpsockets;
     BOOL    users;
+    BOOL    events;
     BOOL    names;
     BOOL    all;
     BOOL    summary;                /* no category was asked for            */
@@ -1360,6 +1363,118 @@ static VOID show_users(BOOL stack_running)
     tool_netstatus_close(base);
 }
 
+/* ------------------------------------------------------------------ events,
+ *
+ * What the library did, out of the ring it keeps for the purpose.
+ *
+ * THE FAULT THIS ANSWERS.  Every AMI_ERROR in the tree compiles away unless
+ * AMINETXDUO_LOG is defined, and no shipped binary defines it, so a machine
+ * that refused to shut down or came up with a dead card said nothing a user
+ * could quote.  The library records numbers instead; the sentences are in
+ * src/tools/tool_events.c and nowhere in any library or device.
+ *
+ * It works after a teardown, which is when it matters.  NETSTATUS_EVENTS is
+ * answered without the ThreadX baton and without a live NX_IP, and
+ * tool_netstatus_open() finds a resident library rather than opening one, so
+ * asking does not restart the stack being asked about.
+ *
+ * Static: 32 rows of 16 bytes is more than a Shell command's stack.
+ */
+static struct
+{
+    NetStatusHeader hdr;
+    NetStatusEvent  e[32];
+} sns_events;
+
+#define SNS_EVENT_ROWS  (sizeof(sns_events.e) / sizeof(sns_events.e[0]))
+
+static VOID show_events(BOOL stack_running)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    tool_printf("\nWhat the network did\n");
+
+    if (!stack_running)
+    {
+        tool_printf("(bsdsocket.library is not in memory, so its record of "
+                    "what happened has gone with it)\n");
+        return;
+    }
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+        return;
+
+    n = tool_netstatus_query(base, NETSTATUS_EVENTS, &sns_events,
+                             sizeof(sns_events), sizeof(NetStatusEvent));
+    if (n < 0)
+    {
+        tool_printf("(this bsdsocket.library keeps no record)\n");
+        tool_netstatus_close(base);
+        return;
+    }
+
+    if (n == 0)
+    {
+        tool_printf("(nothing has happened worth recording)\n");
+        tool_netstatus_close(base);
+        return;
+    }
+
+    /* nse_Seq counts every event ever recorded, so the first one surviving in
+       the ring having a sequence above 1 says how many went past. */
+    if (sns_events.e[0].nse_Seq > 1UL)
+        tool_printf("(the %ld events before these were overwritten)\n",
+                    (LONG)(sns_events.e[0].nse_Seq - 1UL));
+
+    for (i = 0; i < n && i < (LONG)SNS_EVENT_ROWS; i++)
+    {
+        const NetStatusEvent *e    = &sns_events.e[i];
+        const char           *text = tool_event_text(e->nse_Code);
+        const char           *name;
+
+        tool_printf("%6lu.%03lu  ", (unsigned long)(e->nse_Tick / 1000UL),
+                    (unsigned long)(e->nse_Tick % 1000UL));
+
+        if (e->nse_Index != (UWORD)NETEVENT_NOINDEX)
+            tool_printf("interface %ld: ", (LONG)e->nse_Index);
+
+        if (text == NULL)
+        {
+            /* A code from a newer library. The number is still true. */
+            tool_printf("event %ld, value %lu\n", (LONG)e->nse_Code,
+                        (unsigned long)e->nse_Value);
+            continue;
+        }
+
+        tool_printf("%s", (LONG)text);
+
+        name = tool_event_value_name(e->nse_Code, e->nse_Value);
+        if (name != NULL)
+        {
+            tool_printf(", %s", (LONG)name);
+        }
+        else
+        {
+            const char *detail = tool_event_detail(e->nse_Code);
+
+            if (detail != NULL)
+                tool_printf(", %s %lu", (LONG)detail,
+                            (unsigned long)e->nse_Value);
+        }
+
+        tool_printf("\n");
+    }
+
+    if ((LONG)sns_events.hdr.nsh_Available > n)
+        tool_printf("(list truncated at %ld of %ld)\n", (LONG)n,
+                    (LONG)sns_events.hdr.nsh_Available);
+
+    tool_netstatus_close(base);
+}
+
 /*
  * One pass of the whole report. REPEAT calls it again every second, so nothing
  * here allocates and everything it needs is passed in.
@@ -1596,6 +1711,9 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     if (w->users)
         show_users(stack_running);
 
+    if (w->events)
+        show_events(stack_running);
+
     /* ---- the diagnosis --------------------------------------------------
      *
      * Summary mode only, and all of it after the report rather than
@@ -1755,6 +1873,7 @@ static int shownetstatus_main(int argc, char **argv)
     w.tcpsockets = (args[ARG_TCPSOCKETS] != 0) ? TRUE : FALSE;
     w.udpsockets = (args[ARG_UDPSOCKETS] != 0) ? TRUE : FALSE;
     w.users      = (args[ARG_USERS]      != 0) ? TRUE : FALSE;
+    w.events     = (args[ARG_EVENTS]     != 0) ? TRUE : FALSE;
     w.names      = (args[ARG_NAMES]      != 0) ? TRUE : FALSE;
     w.all        = (args[ARG_ALL]        != 0) ? TRUE : FALSE;
     repeat       = (args[ARG_REPEAT]     != 0) ? TRUE : FALSE;

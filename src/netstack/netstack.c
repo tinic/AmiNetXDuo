@@ -26,6 +26,7 @@
 /* NETSTATUS_DHCPRAW_*, which is published as NX_DHCP_STATE_* and is held to it
    by the _Static_asserts beside netstack_interface_dhcp_raw_state(). */
 #include "aminetxduo/netstatus.h"
+#include "aminetxduo/events.h"
 
 #include "tx_amiga.h"
 
@@ -497,10 +498,14 @@ static VOID ami_ns_second_expired(ULONG id)
 static VOID ami_ns_destroy(AmiNetStack *ns)
 {
     UWORD i;
-    BOOL  requests_retained = FALSE;
+    UWORD requests_retained = 0;
 
     if (ns == NULL)
         return;
+
+    /* The zero point for everything a reader is about to look at: a ring with
+       no shutdown in it is a machine that never tried. */
+    ami_event(NETEVENT_SHUTDOWN, NETEVENT_NOINDEX, (ULONG)ns->ns_IfaceCount);
 
 #ifdef AMINETXDUO_RX_VERIFY
     AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu, bad_ip %lu, "
@@ -609,7 +614,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
             }
             else
             {
-                requests_retained = TRUE;
+                requests_retained++;
             }
         }
     }
@@ -633,6 +638,8 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
      */
     if (requests_retained)
     {
+        ami_event(NETEVENT_STACK_RETAINED, NETEVENT_NOINDEX,
+                  (ULONG)requests_retained);
         AMI_ERROR("netstack: retaining packet pool and stack memory because "
                   "a SANA-II device still owns requests into them");
         return;
@@ -691,6 +698,10 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
             /* The serial log is also what a user is asked to send in, so it
                states what to do as well as what happened. The console version,
                with a device probe behind it, is in src/tools/tool_diag.c. */
+            ami_event((status == AMI_NET_ERR_DEVBAD)
+                          ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                      opened, (ULONG)status);
+
             if (status == AMI_NET_ERR_DEVBAD)
             {
                 AMI_ERROR("netstack: interface '%s' did not start: %s unit "
@@ -1015,6 +1026,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
                card fault and a configuration mistake: NX_DUPLICATED_ENTRY
                means another interface in this stack already carries the
                address this one was given. */
+            ami_event(NETEVENT_ATTACH_FAILED, kept, (ULONG)status);
             AMI_ERROR("netstack: interface '%s' attach failed (%ld), it is "
                       "not part of this stack", cfg->name, (long)status);
             if (!ami_ns_drop_iface(ns, kept))
@@ -1040,6 +1052,20 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         ns->ns_IfaceCount             = kept;
         ns->ns_Config.interface_count = kept;
     }
+
+    /*
+     * What came up.  An interface that attached with its link down is in the
+     * stack, is reported as an interface and has nothing on the wire:
+     * nx_ip_interface_attach() drives NX_LINK_ENABLE through the driver, so
+     * this is a device that would not go online or whose readers would not
+     * start.  Nothing else says so at the moment it happens.
+     */
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+    {
+        if (ns->ns_Ip.nx_ip_interface[i].nx_interface_link_up == NX_FALSE)
+            ami_event(NETEVENT_LINK_DOWN, i, 0UL);
+    }
+    ami_event(NETEVENT_BRINGUP, NETEVENT_NOINDEX, (ULONG)ns->ns_IfaceCount);
 
     /*
      * Both protocol enables below run after every interface is attached,
@@ -3648,6 +3674,9 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     iface = ami_sana2_open(slot_cfg, &err);
     if (iface == NULL)
     {
+        ami_event((err == AMI_NET_ERR_DEVBAD)
+                      ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                  (UWORD)slot, (ULONG)err);
         AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
                   slot_cfg->name, slot_cfg->device,
                   (unsigned long)slot_cfg->unit,
@@ -3714,6 +3743,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     if (status != NX_SUCCESS)
     {
+        ami_event(NETEVENT_ATTACH_FAILED, (UWORD)slot, (ULONG)status);
         AMI_WARN("netstack: interface \'%s\' attach failed (%ld)",
                  slot_cfg->name, (long)status);
         ami_sana2_close(iface);
