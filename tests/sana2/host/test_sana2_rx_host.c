@@ -189,21 +189,47 @@ static void h_record(NX_PACKET *packet, Destination where)
     h_seen_interface = packet->nx_packet_address.nx_packet_interface_ptr;
 }
 
-VOID _nx_ip_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+/*
+ * The reader calls the direct entry points now, under nx_ip_protection. Both
+ * halves are counted: a delivery that skipped the mutex would still record the
+ * right destination, so the mutex is asserted separately (h_ip_locked).
+ */
+static int h_ip_locked;
+static int h_lock_depth;
+
+UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
+{
+    (VOID)mutex_ptr;
+    (VOID)wait_option;
+    h_lock_depth++;
+    return TX_SUCCESS;
+}
+
+UINT _txe_mutex_put(TX_MUTEX *mutex_ptr)
+{
+    (VOID)mutex_ptr;
+    h_lock_depth--;
+    return TX_SUCCESS;
+}
+
+VOID _nx_ip_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
+    h_ip_locked = (h_lock_depth > 0);
     h_record(packet_ptr, TO_IP);
 }
 
-VOID _nx_arp_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+VOID _nx_arp_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
+    h_ip_locked = (h_lock_depth > 0);
     h_record(packet_ptr, TO_ARP);
 }
 
-VOID _nx_rarp_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+VOID _nx_rarp_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
+    h_ip_locked = (h_lock_depth > 0);
     h_record(packet_ptr, TO_RARP);
 }
 
@@ -367,8 +393,8 @@ static void test_demux(void)
         Destination where;
         const char *what;
     } row[] = {
-        { AMI_ETHERTYPE_IPV4, TO_IP,       "IPv4 goes to the IP thread" },
-        { AMI_ETHERTYPE_IPV6, TO_IP,       "IPv6 goes to the IP thread" },
+        { AMI_ETHERTYPE_IPV4, TO_IP,       "IPv4 goes to the IP receiver" },
+        { AMI_ETHERTYPE_IPV6, TO_IP,       "IPv6 goes to the IP receiver" },
         { AMI_ETHERTYPE_ARP,  TO_ARP,      "ARP goes to the ARP receiver" },
         { AMI_ETHERTYPE_RARP, TO_RARP,     "RARP goes to the RARP receiver" },
         { 0x8100,             TO_RELEASED, "a VLAN tag is not handled here" },
@@ -383,9 +409,22 @@ static void test_demux(void)
         fixture_init();
         frame_init(row[i].type, 40);
 
+        h_ip_locked  = 0;
+        h_lock_depth = 0;
+
         ami_sana2_rx_deliver(&iface, &pkt, &slot);
 
         h_check(h_went == row[i].where, row[i].what);
+
+        /*
+         * Input runs on the reader now, so it has to hold what the IP thread
+         * holds. The receiver stub records whether nx_ip_protection was held
+         * when it was called, and the depth back at zero is the release.
+         */
+        if (row[i].where != TO_RELEASED)
+            h_check(h_ip_locked, "the receiver ran under nx_ip_protection");
+
+        h_check(h_lock_depth == 0, "and the mutex was given back");
     }
 
     /* And an unknown type is counted as one, not as an error: it is a wire

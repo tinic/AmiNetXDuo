@@ -26,6 +26,15 @@
  * the work. See sana2_tx.c. The mechanism here is one extra signal bit in a
  * Wait() the reader was making anyway.
  *
+ * IP input runs here, on the reader, and not on the IP thread. NetX Duo
+ * documents _nx_ip_packet_receive() as called by the application I/O driver
+ * (nx_ip_packet_receive.c:65-68), so the entry point is a supported one. What
+ * it is NOT is a way to reach TCP from this thread: nx_tcp_packet_receive.c:102
+ * queues the segment and wakes the IP thread for anything that is not the IP
+ * thread itself, so a TCP segment still crosses. What this does move is the
+ * IPv4/IPv6 header walk, the dispatch, ICMP, IGMP and UDP, into the context the
+ * frame arrived in. See ami_sana2_rx_input() for the lock that goes with it.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -400,14 +409,81 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
 /* ------------------------------------------------------------- delivery */
 
 /*
+ * Run one frame's input on this thread, holding what the IP thread holds while
+ * it does the same thing.
+ *
+ * nx_ip_thread_entry.c:276 takes nx_ip_protection before every
+ * _nx_ip_packet_receive() and before the ARP and RARP dispatches, and so does
+ * every socket call and every send. Without it the reader walks the fragment
+ * list, the ARP cache, the ICMP socket list and the IP counters while an
+ * application thread is inside them. The entry points are documented as
+ * driver-callable; the mutex is what makes calling them from here equivalent to
+ * the IP thread calling them.
+ *
+ * The mutex is recursive for its owner, which is not incidental:
+ * nx_udp_packet_receive.c:167 takes it again underneath, exactly as it does
+ * under the IP thread today.
+ *
+ * TX_WAIT_FOREVER is a ThreadX suspension, not an exec Wait(): the scheduler
+ * takes the baton back the way it does for any other blocking ThreadX service,
+ * so no ami_sana2_block_enter() bracket belongs here and none is wanted. What
+ * the reader must never do inside this is block in exec, which would release
+ * the baton while holding the IP mutex; nothing on the path does. The only
+ * device call it reaches is ami_sana2_tx_send()'s BeginIO(), which queues and
+ * returns.
+ *
+ * The lock also keeps sana2_tx.c's invariant. Its header says a packet may
+ * only be released where every other send runs, under nx_ip_protection, which
+ * is why ami_sana2_tx_defer() hands the reap to the IP thread rather than
+ * doing it. The reader now reaches ami_sana2_tx_send() from in here -- an ICMP
+ * echo reply, an ARP reply, a fragment -- and that calls ami_sana2_tx_reap()
+ * and so nx_packet_transmit_release(). It is the mutex, and nothing else, that
+ * makes that legal. Taking the entry points without it would have broken the
+ * one rule ami_sana2_tx_defer() exists to keep.
+ *
+ * TWO PRICES, both real, both paid here and not before this call existed.
+ *
+ * nx_ip_create.c:203 creates this mutex TX_NO_INHERIT. The readers are
+ * priority 1 and the IP thread is 2 (src/thread_priorities.h) precisely so
+ * that nothing preempts the thread feeding a device with no buffers of its
+ * own. A reader blocked here gives the IP thread no boost, so AutoIP, the
+ * mDNS responder and the DHCPv6 client at 3 and 4 may all run ahead of the
+ * thread a priority-1 reader is queued behind.
+ *
+ * And the wait is against the IP thread doing TCP, which this does not move:
+ * nx_tcp_packet_receive.c:102 queues a segment and wakes the IP thread for any
+ * caller that is not the IP thread, so on a bulk TCP read the reader adds a
+ * mutex round trip and an IP header walk to its own path and takes nothing off
+ * it. What it does move off the IP thread is ICMP, IGMP, UDP and ARP.
+ */
+static VOID ami_sana2_rx_input(NX_IP *ip, NX_PACKET *packet, UWORD type)
+{
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+
+    switch (type)
+    {
+#ifndef NX_DISABLE_IPV4
+    case AMI_ETHERTYPE_ARP:
+        _nx_arp_packet_receive(ip, packet);
+        break;
+
+    case AMI_ETHERTYPE_RARP:
+        _nx_rarp_packet_receive(ip, packet);
+        break;
+#endif
+
+    default:
+        _nx_ip_packet_receive(ip, packet);
+        break;
+    }
+
+    tx_mutex_put(&ip->nx_ip_protection);
+}
+
+/*
  * Hand one Ethernet-shaped packet to NetX Duo. Both the cooked path (header
  * synthesised above) and the raw path (header came off the wire) end here, so
  * the two modes are required to produce the same thing.
- *
- * The deferred entry points are used rather than _nx_ip_packet_receive: the
- * reader is not the IP thread, and the deferred variants are the supported way
- * to queue work onto it (see nx_api.h and nx_ram_network_driver.c, which
- * dispatches by EtherType the same way).
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSlot *slot)
@@ -496,23 +572,23 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_IPV4);
         break;
 
     case AMI_ETHERTYPE_IPV6:
         iface->stats.packets_received++;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_IPV6);
         break;
 
 #ifndef NX_DISABLE_IPV4
     case AMI_ETHERTYPE_ARP:
         iface->stats.packets_received++;
-        _nx_arp_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_ARP);
         break;
 
     case AMI_ETHERTYPE_RARP:
         iface->stats.packets_received++;
-        _nx_rarp_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_RARP);
         break;
 #endif /* !NX_DISABLE_IPV4 */
 
