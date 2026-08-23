@@ -59,6 +59,20 @@ static void h_check(int ok, const char *what)
 
 /* ------------------------------------------------------------------ exec -- */
 
+/* The event ring, counted rather than emptied: the S2ERR_OUTOFSERVICE branch
+   this harness exercises is one of the paths that records one, and a stub that
+   forgets would let the record go missing without a word. */
+UWORD host_last_event_code;
+ULONG host_event_count;
+
+VOID ami_event(UWORD code, UWORD index, ULONG value)
+{
+    (VOID)index;
+    (VOID)value;
+    host_last_event_code = code;
+    host_event_count++;
+}
+
 VOID Disable(VOID) { }
 VOID Enable(VOID)  { }
 VOID Forbid(VOID)  { }
