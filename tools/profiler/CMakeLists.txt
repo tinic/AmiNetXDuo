@@ -42,6 +42,26 @@ endif()
 # drops from HUNK_SYMBOL are recoverable only from the map's placement of each
 # object plus nm on that object.
 function(profile_binary name)
+    # --gc-sections, and it is not an optimisation.
+    #
+    # These two are the only binaries here that link the toolchain's crt0.o
+    # and libc.a, and those carry DWARF.  ld's amiga backend gives every
+    # .debug_* section a LOADABLE DATA hunk -- and an executable that has one
+    # comes out with NO HUNK_RELOC32 AT ALL.  Measured on the same objects:
+    #
+    #   as linked        12 hunks, 0 relocations
+    #   --gc-sections     3 hunks, 1152 relocations
+    #
+    # LoadSeg() relocates nothing, so every absolute address in the code keeps
+    # its link-time value and the program jumps into low memory before it
+    # reaches main().  That is what rebooted the guest twelve seconds into
+    # every run that staged Profile, with no output of its own to say so, and
+    # it read as a fault in the program under test.  -Wl,-s and
+    # -Wl,--strip-debug do NOT prevent it; both leave the twelve hunks.
+    #
+    # src/tools/ passes this already, which is why nothing else in the tree
+    # has ever shown it.
+    target_link_options(${name} PRIVATE -Wl,--gc-sections)
     target_link_options(${name} PRIVATE
         "-Wl,-Map=$<TARGET_FILE_DIR:${name}>/${name}.map")
     if(AMIGA_NDK_INCLUDE)
