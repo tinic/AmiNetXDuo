@@ -184,6 +184,51 @@ TX_THREAD   *thread_ptr;
 
 
 /*
+ * Does a failed _tx_amiga_dispatch_inline() need the scheduler Task poking?
+ *
+ * Only when the scheduler could do something the caller could not, and there is
+ * exactly one such case.  _tx_thread_schedule() dispatches under the same three
+ * conditions the inline tests, so a failure means one of:
+ *
+ *   - nothing is ready.  The scheduler has nothing to dispatch either, and
+ *     whatever makes a thread ready next either dispatches it or pokes.
+ *   - somebody holds the baton.  The scheduler REFUSES to dispatch while
+ *     _tx_thread_current_ptr is non-NULL -- that refusal is the model, see the
+ *     loop in tx_thread_schedule.c -- and the holder hands the baton on itself
+ *     at its next release.  The poke is a wake, a Forbid, a compare and a
+ *     Wait: two Exec context switches that cannot change anything.
+ *   - _tx_thread_system_state is raised (a tick, or an adopt window).  The
+ *     poke is kept: the window closes on another Task, and this is the
+ *     insurance against the site that closes it losing the wake.
+ *
+ * The second case is the one the receive path lives in.  Over a 46.7 s bulk
+ * read the scheduler Task was woken thousands of times and dispatched NOTHING
+ * (TX_AMIGA_SC_SCHED_DISPATCH 0, every handoff TX_AMIGA_SC_DIRECT).  The wakes
+ * are not free: the scheduler Task sits at TX_AMIGA_TASK_PRIORITY like every
+ * other ThreadX task, so each one puts a competitor on Exec's ready list at the
+ * moment the woken thread is trying to be dispatched.
+ *
+ * Call with the core lock held: both pointers are only meaningful under it.
+ */
+static __inline UINT _tx_amiga_wake_needed(UINT dispatched)
+{
+    if (dispatched != ((UINT) TX_FALSE))
+    {
+        return((UINT) TX_FALSE);
+    }
+    if (_tx_thread_execute_ptr == TX_NULL)
+    {
+        return((UINT) TX_FALSE);
+    }
+    if (_tx_thread_current_ptr != TX_NULL)
+    {
+        return((UINT) TX_FALSE);
+    }
+    return((UINT) TX_TRUE);
+}
+
+
+/*
  * Park the calling Exec Task until it holds the ThreadX baton (defined in
  * tx_thread_system_return.c).
  *

@@ -47,9 +47,11 @@ extern VOID _tx_amiga_wake_scheduler(VOID);
 extern UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
 
 /* Dispatch the ready thread from this Task instead of waking the scheduler
-   Task to do it.  Core lock held, baton already released.  TX_FALSE means it
-   did not dispatch, and the scheduler has to be poked after all. */
-extern UINT _tx_amiga_dispatch_try(VOID);
+   Task to do it.  Core lock held, baton already released.  TX_TRUE means it
+   did not dispatch AND the scheduler is the only thing that can, so it has to
+   be poked once the lock is dropped; the port's _tx_amiga_wake_needed() has
+   the three failure cases and why two of them need no poke. */
+extern UINT _tx_amiga_dispatch_or_wake(VOID);
 
 /*
  * One entry per Exec Task currently inside a release/acquire bracket. The
@@ -375,9 +377,7 @@ VOID ami_netstack_baton_release(VOID)
      * stores and goes back to sleep, two Exec context switches for nothing.
      * Under the Forbid(), where the answer is valid.
      */
-    wake =  (_tx_amiga_dispatch_try() == ((UINT) TX_FALSE)) &&
-            (_tx_thread_execute_ptr != TX_NULL)
-            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+    wake =  _tx_amiga_dispatch_or_wake();
 
     Permit();
 
@@ -441,9 +441,7 @@ VOID ami_netstack_baton_acquire(VOID)
      *
      * Under the Forbid(), because the answer is only good while it is held.
      */
-    wake =  (_tx_amiga_dispatch_try() == ((UINT) TX_FALSE)) &&
-            (_tx_thread_execute_ptr != TX_NULL)
-            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+    wake =  _tx_amiga_dispatch_or_wake();
 
     Permit();
 

@@ -1313,10 +1313,33 @@ UINT                 armed;
             _tx_amiga_tick.tx_amiga_tick_skew =
                 backlog + _tx_amiga_tick.tx_amiga_tick_lost;
 
-            /* Unconditionally poke the scheduler.  Only the idle case needs it,
-               but one Signal() per tick is cheap insurance against a lost
-               wake-up hanging the whole stack.  */
-            _tx_amiga_wake_scheduler();
+            /* Poke the scheduler when it could actually dispatch.  This used to
+               be unconditional -- one Signal() per tick as insurance against a
+               lost wake-up hanging the whole stack -- and the insurance is not
+               free: the scheduler Task runs at TX_AMIGA_TASK_PRIORITY, so a
+               poke while a thread holds the baton puts a Task that will find
+               nothing to do onto Exec's ready list at the priority the receive
+               path is trying to be dispatched at, twenty-five times a second.
+
+               The idle case is still covered, and it is the only one the
+               scheduler can serve: with the baton held it refuses to dispatch,
+               and the holder hands it on itself at its next release.  Read
+               under Forbid(), because a pointer read outside it can be stale by
+               the time the Signal() lands.  */
+            {
+                UINT tick_wake;
+
+                Forbid();
+                tick_wake =  ((_tx_thread_current_ptr == TX_NULL) &&
+                              (_tx_thread_execute_ptr != TX_NULL))
+                             ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+                Permit();
+
+                if (tick_wake != ((UINT) TX_FALSE))
+                {
+                    _tx_amiga_wake_scheduler();
+                }
+            }
         }
 
         /* Service cost of this wakeup: everything the tick task did between

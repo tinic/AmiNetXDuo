@@ -222,7 +222,7 @@ VOID _tx_thread_system_return(VOID)
 
 TX_THREAD   *thread_ptr;
 struct Task *me;
-UINT         handed;
+UINT         wake;
 
 
     me =  FindTask((STRPTR) 0);
@@ -279,11 +279,11 @@ UINT         handed;
        waking the scheduler Task to do it.  */
     _tx_thread_current_ptr =  TX_NULL;
 
-    handed =  _tx_amiga_dispatch_inline();
+    wake =  _tx_amiga_wake_needed(_tx_amiga_dispatch_inline());
 
     Permit();
 
-    if (handed == ((UINT) TX_FALSE))
+    if (wake != ((UINT) TX_FALSE))
     {
         _tx_amiga_wake_scheduler();
     }
