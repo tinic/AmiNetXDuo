@@ -13,7 +13,7 @@
 # commit and the build said `implicit declaration of nx_mld_enable`, which
 # reads exactly like a defect of ours.
 #
-# Four things can be wrong, and this checks all four.
+# Five things can be wrong, and this checks all five.
 #
 #   THE WORKING TREE IS STALE.  `git submodule status --recursive` prints `+`
 #   when the checked-out commit is not the recorded one.  Cheapest of the four
@@ -31,13 +31,17 @@
 #   and no ref reaches that commit any more.  This is what pinning a tip costs,
 #   and it is invisible from the machine that did it.
 #
-#   NOT ON THE TRACKED BRANCH.  A pin naming a topic tip rather than the merge
-#   that landed it silently reverts every other fix merged in between --
-#   1d8b8a15 moved netxduo from merge 396dc632 back to tip 7206b214, which is
-#   not a descendant of it.  A pin belongs on the first-parent chain of the
-#   branch .gitmodules names, or on a tag.  Merges and tags do not move.
+#   NOT ON THE TRACKED BRANCH.  A pin belongs on the first-parent chain of the
+#   branch .gitmodules names, or on a tag.  Merges and tags do not move; a
+#   topic tip does, and is deleted the moment it lands.
 #
-# The last two are also swept over every gitlink the history ever recorded,
+#   THE BUMP WENT BACKWARDS.  1d8b8a15 moved netxduo from merge 396dc632 back
+#   to tip 7206b214, which is not a descendant of it, so that commit's tree
+#   silently reverts every fork fix merged in between.  Both ids are real and
+#   both check out: the only thing that separates a bump from a revert is
+#   ancestry, and nothing was asking.
+#
+# Object existence and reachability are also swept over every gitlink recorded,
 # which is cheap because a raw log names each change once: about 140 distinct
 # ids over 3000 commits.  A pin can rot after it is written -- deleting a topic
 # branch on the remote takes its object with it -- so the sweep is the only
@@ -153,6 +157,21 @@ for name in $names; do
     else
         echo "gitlink_$path=TOPIC_TIP recorded=$oid ref=${ref#refs/remotes/}"
         echo "  not on the first-parent chain of ${ref#refs/remotes/}; pin the merge that landed it" >&2
+        rc=1
+    fi
+
+    # 4. A bump goes forwards.  `1d8b8a15` moved netxduo from a merge back to a
+    #    topic tip that was not a descendant of it, which silently reverted
+    #    every fork fix merged in between, and nothing said so: both ids are
+    #    real objects and both check out.  The only thing that distinguishes a
+    #    bump from a revert is ancestry.
+    was="$(git ls-tree "$COMMIT^" "$path" 2>/dev/null | awk '$2 == "commit" { print $3 }')"
+    if [ -n "$was" ] && [ "$was" != "$oid" ] &&
+       git --git-dir="$gitdir" cat-file -e "$was^{commit}" 2>/dev/null &&
+       ! git --git-dir="$gitdir" merge-base --is-ancestor "$was" "$oid"; then
+        echo "gitlink_$path=MOVED_BACK from=$was to=$oid"
+        echo "  the new pin is not a descendant of the old one: this reverts\
+ whatever landed in between" >&2
         rc=1
     fi
 done
