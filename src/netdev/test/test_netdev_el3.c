@@ -115,6 +115,31 @@ VOID  netdev_diag_note(UWORD code, UWORD c, ULONG v)
 UWORD netdev_diag_card(const NetdevCard *c) { (void)c; return 0; }
 
 /*
+ * The machine fingerprint, for the same reason: the real one lives in
+ * netdev_device.c and reads SysBase's memory list, Expansion's ConfigDevs and
+ * the PCMCIA CIS, none of which a host has. el3_attach() calls it only on the
+ * path where the card has no readable station address, and this returns a
+ * fixed four bytes so that path is exercised deterministically rather than
+ * skipped.
+ *
+ * It is declared in netdev_macgen.h and defined in netdev_device.c, which is
+ * the reason this stub is needed at all: netdev_macgen.c, which the test does
+ * link, does not carry it.
+ */
+UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
+{
+    UWORD n = 0;
+
+    while (n < 4 && n < max)
+    {
+        buf[n] = (UBYTE)((salt >> (n * 8)) & 0xFFUL);
+        n++;
+    }
+
+    return n;
+}
+
+/*
  * The other three cores.  netdev_cards.c is linked whole, for the CIS-to-row
  * selection, and netdev_nic_ops_for() names every core in the table.  Linking
  * them all in would drag the DP8390 and the LANCE into a test about neither.

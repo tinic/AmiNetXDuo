@@ -50,6 +50,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <stdint.h>     /* uintptr_t, for the fingerprint salt below */
+
 #include "netdev_nic.h"
 #include "netdev_cards.h"
 #include "netdev_mcaf.h"
@@ -978,9 +980,14 @@ LONG el3_attach(NetdevNic *nic)
          */
         UBYTE fp[NETDEV_MAC_FP_MAX];
         UWORD n;
+        /* uintptr_t, not APTR: on m68k both are 32 bits and (ULONG)(APTR)
+           is silent, but the host tier compiles this file for a 64-bit
+           pointer and -Werror rejects the narrowing. The salt only needs the
+           low half to differ between boards, so the truncation is deliberate
+           and now says so. */
         ULONG salt = ((ULONG)nic->card->manid << 16) ^
                      (ULONG)nic->card->prodid ^
-                     (ULONG)(APTR)nic->board;
+                     (ULONG)(uintptr_t)nic->board;
 
         n = netdev_mac_fingerprint(fp, (UWORD)sizeof(fp), salt);
         netdev_mac_derive(fp, n, nic->factory);
