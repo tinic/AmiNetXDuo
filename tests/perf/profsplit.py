@@ -77,8 +77,8 @@ def main():
     ap.add_argument("--ndk")
     ap.add_argument("--lib", action="append", default=[])
     ap.add_argument("--idle", default=None,
-                    help="the Exec idle address, as hex; default is the "
-                         "single hottest address inside exec.library")
+                    help="explicit Exec idle address for a legacy profile; "
+                         "by default idle is detected from saved SR $2000")
     ap.add_argument("--top", type=int, default=12)
     args = ap.parse_args()
 
@@ -130,13 +130,15 @@ def main():
         name, module = res.resolve(pc)
         return name, module
 
-    hot = defaultdict(int)
-    for pc, _sr, _f, _task, _t in prof.samples:
-        _n, module = bucket(pc)
-        if module == "exec.library":
-            hot[pc] += 1
-    idle_pc = (int(args.idle, 16) if args.idle
-               else (max(hot, key=hot.get) if hot else None))
+    # Exec halts in `stop #$2000`.  The exception frame records the PC after
+    # STOP and SR $2000, which Resolver.is_idle() uses to distinguish a halted
+    # CPU from ordinary dispatcher code.  The old fallback picked the hottest
+    # address in exec.library; on a busy network run that was Signal(), and it
+    # silently reported real scheduler work as idle time.
+    #
+    # Keep --idle as an explicit address override for old profiles that do not
+    # carry SR, but never guess one from the hottest Exec sample.
+    idle_pc = int(args.idle, 16) if args.idle else None
 
     # The `fitz` handler is a different program the profiled run never loaded,
     # so its hunks are unknown and every sample in it is unattributed.  It is
@@ -156,9 +158,10 @@ def main():
     NEAR = 512 * 1024
     libbases = [b for b, _neg, _t, nm in prof.libs if nm.startswith("bsdsocket")]
 
-    def classify(pc):
+    def classify(pc, sr):
         name, module = bucket(pc)
-        if idle_pc is not None and pc == idle_pc:
+        if ((idle_pc is not None and pc == idle_pc) or
+                (idle_pc is None and res.is_idle(pc, sr))):
             return "Exec idle loop"
         if module == "exec.library":
             return "Exec, real work"
@@ -185,17 +188,19 @@ def main():
     per = {"read": defaultdict(int), "write": defaultdict(int)}
     fns = {"read": defaultdict(int), "write": defaultdict(int)}
     counts = {"read": 0, "write": 0}
-    for (pc, _sr, _f, _task, _t), ts in zip(prof.samples, times):
+    for (pc, sr, _f, _task, _t), ts in zip(prof.samples, times):
         for kind, lo, hi in bounds:
             if lo <= ts < hi:
-                per[kind][classify(pc)] += 1
-                nm, mod = bucket(pc)
+                per[kind][classify(pc, sr)] += 1
+                nm, mod, _idle = res.resolve_sample(pc, sr)
                 fns[kind][(nm, mod)] += 1
                 counts[kind] += 1
                 break
 
     if idle_pc is not None:
         print("idle         $%08x, %s" % (idle_pc, res.resolve(idle_pc)[0]))
+    else:
+        print("idle         saved SR $2000 in exec.library (STOP #$2000)")
     print()
     print("%-22s %14s %14s" % ("", "read", "write"))
     print("%-22s %14s %14s"

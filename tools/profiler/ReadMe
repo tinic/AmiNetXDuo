@@ -17,6 +17,131 @@ profile for profreport.py on a cross-development host, which adds function
 names from the executable's symbols.
 
 
+A REPRODUCIBLE AMIBERRY RUN
+---------------------------
+
+Do not profile with Amiberry's JIT.  Make the setting explicit and check the
+emulator log rather than relying on a quickstart profile's current default:
+
+    export AMINETXDUO_AMIBERRY_EXTRA=cachesize=0
+    # after the run: the Amiberry log must contain `JIT=0`
+
+JIT changes both the code the host executes and when emulated interrupts see
+the guest PC.  A profile taken with it is not an m68k instruction profile.
+
+Prove the sampler on the exact emulator, ROM and CPU profile before using it
+on a workload:
+
+    cmake -S . -B build/prof \
+        -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+        -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF
+    cmake --build build/prof --parallel --target Profile profspin
+    AMINETXDUO_AMIBERRY_EXTRA=cachesize=0 \
+        tools/profiler/selftest.sh -b build/prof -m A1200
+
+The final `containment and proportionality` section must say `0 failures,
+PASS`.  A plausible ranking without that proof is not evidence; an exception
+frame read at the wrong offset still resolves to plausible-looking addresses.
+
+For the repository's matched network workload, take the plain control and the
+profile with every other input held constant:
+
+    export AMINETXDUO_FITZ_PEER=user@third-machine
+    export AMINETXDUO_AMIBERRY_EXTRA=cachesize=0
+    tests/perf/run-stackprof.sh -s ours -p -T receive-plain \
+        -b build/prof -m A1200 -k 2048 -C 32768 -r 3
+    tests/perf/run-stackprof.sh -s ours    -T receive-prof  \
+        -b build/prof -m A1200 -k 2048 -C 32768 -r 3
+
+The peer must be a third physical machine, as run-stackprof.sh explains.  Set
+`AMINETXDUO_FASTMEM` explicitly when memory is part of the comparison; `8` is
+the ordinary accelerated A1200 arm and `0` is a materially different machine.
+Never run two emulator measurements on the same host at once.  Interleaving
+controls slow drift, but it cannot repair simultaneous CPU contention.
+
+Keep the scope of the result with the profile.  Amiberry currently does not
+reproduce the reported AmiNetXDuo versus AmiTCP_NG receive-throughput gap seen
+on real X-Surf-100 hardware: under emulation AmiNetXDuo is faster.  An Amiberry
+profile can therefore disprove an explanation of the emulated run, but it
+cannot establish the cause of that hardware-only gap.  That requires a profile
+from affected hardware, or a separate measurement that first reproduces the
+same direction and approximate size of the gap.
+
+
+A REPRODUCIBLE REAL-HARDWARE RECEIVE RUN
+----------------------------------------
+
+Use the same non-LTO `build/prof` binaries configured above.  Copy these four
+files to the real Amiga without changing them:
+
+    build/prof/tools/profiler/Profile
+    build/prof/tools/profiler/profspin
+    build/prof/src/tools/iperf
+    build/prof/src/bsdsocket/bsdsocket.library
+
+Install that library for the run and reboot so the loaded library is certainly
+the file whose map and objects remain in `build/prof`.  Prove the sampler on
+the real CPU before measuring the stack:
+
+    C:Profile OUT=RAM:spin.prof C:profspin RANGES=RAM:spin.ranges
+
+Bring `spin.prof` and `spin.ranges` back to the build host and run the
+`profreport.py --contain` command printed by `tools/profiler/selftest.sh`, with
+paths changed to those two files.  Require `0 failures, PASS` here too.
+
+For TCP receive, run the same transfer twice.  On the Amiga, the plain control
+is:
+
+    C:iperf -s -p 5001 -t 40
+
+Start it first, then on a separate Linux machine run iperf 2 (not iperf3):
+
+    iperf -c AMIGA_ADDRESS -p 5001 -t 30 -l 4096
+
+For the sampled arm, replace only the Amiga command:
+
+    C:Profile QUIET OUT=RAM:iperf-rx.prof FOLDED=RAM:iperf-rx.folded \
+        C:iperf -s -p 5001 -t 40
+
+The repository's independent peer can replace the Linux iperf client while
+keeping the payload length explicit:
+
+    python3 tests/tools/iperfpeer.py send tcp AMIGA_ADDRESS \
+        --port 5001 --seconds 30 --length 4096
+
+Copy `iperf-rx.prof` back into the same checkout and resolve the executable and
+the cooperating shared library from that exact build:
+
+    LIBSPEC="exe=build/prof/src/bsdsocket/bsdsocket.library,"
+    LIBSPEC="${LIBSPEC}map=build/prof/src/bsdsocket/bsdsocket.library.map,"
+    LIBSPEC="${LIBSPEC}objdir=build/prof/src/bsdsocket"
+    tools/profiler/profreport.py iperf-rx.prof \
+        --exe build/prof/src/tools/iperf \
+        --map build/prof/src/tools/iperf.map \
+        --objdir build/prof/src/tools \
+        --lib "$LIBSPEC"
+
+Keep the plain and sampled throughput beside the profile.  Also record the
+Amiga model, CPU and clock, accelerator, Fast RAM, card, SANA-II device name
+and version, AmiNetXDuo commit and build options, Linux `iperf --version`, and
+both exact commands.  Without those fields an emulator result or a different
+driver can accidentally be compared with the hardware-only failure.
+
+The profiler normally adds about four percent to wall time.  The plain run is
+therefore the throughput number; the sampled run supplies shares and a check
+that its overhead stayed modest.  `profreport.py` also reports true idle time
+from the saved exception SR: Exec's idle `stop #$2000` is SR $2000.  Do not
+infer idle from a task's blocked wall time or from the hottest Exec address.
+
+The configuration above deliberately makes a non-LTO diagnostic build.  An
+LTO binary is valid to sample, and global/assembly symbols still resolve.  Its
+file-static functions live in temporary `*.ltrans.o` objects, however, and
+those objects are gone by report time.  The reporter marks those samples
+`UNRESOLVED` rather than assigning them a plausible wrong name.  No-LTO keeps
+the ordinary object files and gives the complete function ranking.  It is a
+diagnostic build, so compare its timing only with its own plain control.
+
+
 WHAT IT CAN PROFILE
 -------------------
 

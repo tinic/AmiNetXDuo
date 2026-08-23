@@ -183,6 +183,38 @@ a second, because the session is kept on disk and survives a reboot.
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build, its options, the
 test suites, continuous integration and the measurement method.
 
+### CPU profiling
+
+`tools/profiler/Profile` is the interrupt-driven m68k sampler.  Its complete
+usage and verification procedure are in **[tools/profiler/ReadMe](tools/profiler/ReadMe)**.
+For an Amiberry performance run:
+
+- disable JIT explicitly with `AMINETXDUO_AMIBERRY_EXTRA=cachesize=0` and
+  confirm the emulator log says `JIT=0`;
+- run `tools/profiler/selftest.sh` first and require its containment check to
+  pass;
+- take an otherwise identical run without the profiler as the throughput
+  control; and
+- use a build configured with `-DAMINETXDUO_LTO=OFF` when the report needs
+  complete function names inside `bsdsocket.library`.  A shipping LTO build is
+  valid to sample, but its temporary `ltrans` objects no longer exist when the
+  report is generated, so their file-static functions cannot be named.
+
+Do not run two emulator measurements on the same host at once.  Build and
+symbolization can proceed in parallel; throughput and profiles cannot.
+
+An emulator profile describes only that emulated machine.  In particular,
+Amiberry currently does **not** reproduce the reported receive-throughput gap
+between AmiNetXDuo and AmiTCP_NG on real X-Surf-100 hardware.  Emulator samples
+can reject an explanation for the emulator run, but they are not evidence for
+the cause of that hardware-only gap.
+
+For an affected real machine, first take an unprofiled receive control, then
+repeat it as `Profile ... C:iperf -s`; drive both from the same Linux iperf 2
+client.  Preserve the raw `.prof` file and the exact machine, accelerator,
+Fast RAM, SANA-II device/version, library build and peer command with it.  The
+copy-and-run commands and host-side report command are in the profiler ReadMe.
+
 ## Licence
 
 AmiNetXDuo is an independent implementation of a published ABI. No

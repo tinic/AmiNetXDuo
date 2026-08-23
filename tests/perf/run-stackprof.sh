@@ -40,9 +40,10 @@
 #               thirty seconds rather than inside a workload whose failure
 #               mode is a timeout.
 #   -c          CONTROL ONLY: the RAM: arm alone, stack up, no traffic.
-#               The only CPU-bound number here -- a wire transfer idles
-#               more than half the run and so prices the rig, not the
-#               code.  Needs no peer.
+#               This separates local FitzBench and memory-copy cost from the
+#               filesystem handler and network path.  It does not predict how
+#               much a wire transfer idles; read that from the sampled SR.
+#               Needs no peer.
 #   -i FILE     use FILE as DEVS:NetInterfaces/eth0 instead of the tree's.  A
 #               stack should be measured with a configuration it agrees is
 #               well formed, because "the interface would not come up" has two
@@ -402,11 +403,12 @@ fi
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
     elif [ "$CTLONLY" = 1 ]; then
         # The RAM: arm alone: the stack is up, its threads are running and no
-        # traffic passes.  This is the harness's only CPU-BOUND number.  A
-        # transfer over the wire idles more than half the run waiting on the
-        # link, so it prices the rig; what is left after this one is cycles.
-        # AddNetInterface still runs, because a library nobody opened costs
-        # nothing and measuring that would answer a different question.
+        # traffic passes.  It prices local FitzBench and memory-copy work
+        # without the filesystem handler or network path.  It is not an
+        # idle-time baseline: true idle comes from samples whose saved SR is
+        # $2000 in Exec's STOP loop.  AddNetInterface still runs, because a
+        # library nobody opened costs nothing and measuring that would answer
+        # a different question.
         if [ "$PROFILE" = 1 ]; then
             echo "$PROF_PREFIX SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS"
         else
