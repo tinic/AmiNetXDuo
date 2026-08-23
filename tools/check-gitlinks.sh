@@ -82,13 +82,16 @@ if ! git show "$COMMIT:.gitmodules" > "$WORK/gitmodules" 2>/dev/null; then
     exit 2
 fi
 
-# Where a submodule's objects live, whether or not it is checked out.
+# Where a submodule's objects live, whether or not it is checked out.  Prints
+# nothing and still succeeds when there is nowhere: a clone made without
+# --recursive has no objects to check and is not a failure.
 sub_gitdir() {
     if [ -e "$1/.git" ] && git -C "$1" rev-parse --absolute-git-dir 2>/dev/null; then
         return 0
     fi
     d="$ROOT/$(git rev-parse --git-path "modules/$2")"
     [ -d "$d" ] && printf '%s\n' "$d"
+    return 0
 }
 
 # One rev-list per submodule, not one per pin: everything a fresh clone would
