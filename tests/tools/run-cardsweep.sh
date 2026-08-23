@@ -100,9 +100,27 @@ LIST=0
 # but the explicit base stays: it is contiguous and printable, so a sweep's
 # ports can be read off one line rather than hashed per card.
 #
-# Distinct ports rather than a wider kill: nothing has to die on time, and two
-# sweeps on one LAN stay out of each other's way by moving the base.
+# Distinct ports rather than a wider kill: nothing has to die on time.
+#
+# PORTBASE ALONE IS NOT ENOUGH to run two sweeps on one LAN, and this comment
+# used to say it was. Ports are the only thing it moves; the run tag, the guest
+# address and the guest MAC all come from the card name, so two sweeps of one
+# card still collide on all three. SWEEP_ID below is what actually separates
+# them, and the address is offset with it.
 PORTBASE="${AMINETXDUO_CARDSWEEP_PORTBASE:-7400}"
+
+# Who this sweep is. Defaults to the checkout's directory name, which is what
+# distinguishes two agents on one host; override for anything else that wants
+# to run concurrently. Sanitised because it reaches a run tag, a file name and
+# a pkill pattern.
+SWEEP_ID="${AMINETXDUO_CARDSWEEP_ID:-$(basename "$ROOT")}"
+SWEEP_ID=$(printf '%s' "$SWEEP_ID" | tr -c 'A-Za-z0-9' '-' | cut -c1-16)
+
+# The last octet of the guest address and of the MAC move with the sweep, so
+# two sweeps of one card are two different machines on the wire rather than two
+# machines claiming one address. A collision there produces an RST from the
+# wrong guest, which reads as "connection refused" and looks like a stack fault.
+SWEEP_SLOT=$(( $(printf '%s' "$SWEEP_ID" | cksum | cut -d' ' -f1) % 6 ))
 
 while getopts "P:B:b:t:c:p:l" opt; do
     case "$opt" in
@@ -234,6 +252,22 @@ echo "==> peer $PEERHOST, bridge $IFACE, build $BUILD, ${TIMEOUT}s per card," \
 while read -r -u 3 board model addr mac; do
     [ -n "$board" ] || continue
 
+    # Move this sweep's guest off the card's shared address and MAC. The table
+    # gives one of each per card, which is right for one sweep and wrong for
+    # two: two guests answering for 192.168.1.241 means an RST from whichever
+    # one did not open the socket, and that reads as "connection refused" from
+    # a stack that is working. SWEEP_SLOT is 0 for a lone sweep, so the
+    # ordinary case keeps the table's own addresses.
+    # DOWNWARD, not upward: the table's addresses are .241-.249, and adding
+    # even one slot's worth puts the last octet past 255. Ten per slot keeps
+    # six slots of nine cards inside .191-.249 with no overlap between slots
+    # and none between cards. (Checked: .261 is what the first version of this
+    # produced, and every arm would have failed to configure.)
+    if [ "$SWEEP_SLOT" -ne 0 ]; then
+        addr="${addr%.*}.$(( ${addr##*.} - SWEEP_SLOT * 10 ))"
+        mac="${mac%:*}:$(printf '%02x' $(( 0x${mac##*:} + SWEEP_SLOT * 32 )))"
+    fi
+
     sana2_select "$board" "$BUILDDIR"
     drv=$SANA2_SEL_DRIVER
     drvpath=$SANA2_SEL_PATH
@@ -256,7 +290,26 @@ while read -r -u 3 board model addr mac; do
         continue
     fi
 
-    tag="cardsweep-$board"
+    # THE TAG CARRIES THE SWEEP'S IDENTITY, NOT JUST THE CARD'S.
+    #
+    # It used to be "cardsweep-$board" and nothing else, and -p PORTBASE was
+    # believed to be enough to run two sweeps on one LAN. It is not: the tag,
+    # the guest address and the guest MAC all derive from the card name alone,
+    # so two sweeps of the same card share all three, and run-iperf.sh's
+    # peer-side `pkill -f '[i]perfpeer-<tag>'` then kills the OTHER sweep's
+    # peers mid-transfer.
+    #
+    # What that looks like is not noise, it is a meaningless verdict: every arm
+    # reports peer_tx_bytes=0 and "the guest can send and cannot be sent to",
+    # the peer logs "connection refused" from whichever guest answered for the
+    # shared address, and the guest's own transfer is truncated -- 978,944
+    # bytes in 1,624 ms where a clean run gets ~2.1 MB in ~3.5 s. The rate
+    # survives, so nothing looks obviously wrong, and a 2% difference cannot be
+    # resolved through it at all. Three agents measured this way for an hour.
+    #
+    # AMINETXDUO_CARDSWEEP_ID defaults to the checkout's own name, which is
+    # what actually distinguishes two sweeps on this host.
+    tag="cardsweep-$SWEEP_ID-$board"
     t0=$(date +%s)
     base=$((PORTBASE + IDX * 10))
     IDX=$((IDX + 1))
