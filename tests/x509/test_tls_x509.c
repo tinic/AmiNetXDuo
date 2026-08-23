@@ -22,6 +22,11 @@
  *   chain     two CAs that have cross-signed each other. The issuer walk has
  *             a cycle in it, and before the depth cap it did not come back.
  *
+ *   pss       RSASSA-PSS chains. The digest, the mask generation function and
+ *             the salt length are all in the signature parameters and nowhere
+ *             else, so a certificate signed this way is unreachable until
+ *             they are read.
+ *
  * The real certificates from tests/tls are parsed first, as a guard: if a
  * strictness change starts rejecting the sample leaf, the sample CA or ISRG
  * Root X1, that is a regression and not a hardening.
@@ -36,6 +41,7 @@
 #include "nx_secure_x509.h"
 #include "nx_crypto_rsa.h"
 #include "nx_crypto_sha2.h"
+#include "nx_crypto_sha5.h"
 #include "nx_crypto_ecdsa.h"
 
 /*
@@ -50,6 +56,7 @@
 #include "tls_root_isrg_x1.h"
 #include "x509_test_vectors.h"
 #include "x509_ext_vectors.h"
+#include "x509_pss_vectors.h"
 
 /* The vendored code takes this around anything that can suspend. Nothing
    suspends here, so the object only has to exist. */
@@ -421,9 +428,13 @@ static union
     ULONG         align;
 } chain_pubkey_metadata;
 
+/* SHA-512 as well as SHA-256: the PSS section verifies a SHA-384 signature,
+   and nx_crypto's SHA-384 runs in the SHA-512 metadata block, which is the
+   larger of the two. */
 static union
 {
-    NX_CRYPTO_SHA256 sha;
+    NX_CRYPTO_SHA256 sha256;
+    NX_CRYPTO_SHA512 sha512;
     ULONG            align;
 } chain_hash_metadata;
 
@@ -590,6 +601,130 @@ UINT status;
           "a name inside excludedSubtrees is refused");
 }
 
+/* ---------------------------------------------------------------- pss ----- */
+
+/*
+ * RSASSA-PSS.  A PSS AlgorithmIdentifier is the only signature identifier in
+ * X.509 whose parameters are not NULL: RFC 4055 3.1 puts the digest, the mask
+ * generation function, the salt length and the trailer field in a SEQUENCE
+ * beside the OID.  Before that SEQUENCE was read, the certificate did not fail
+ * to verify -- it failed to PARSE, at the tbsCertificate signature field, with
+ * NX_SECURE_X509_UNEXPECTED_ASN1_TAG, and the whole chain went with it.
+ *
+ * So the first check here is that the leaf parses at all, separately from
+ * whether it verifies.  The two failures look nothing alike and confusing them
+ * sent an earlier reading of this at the verify path, which was already
+ * correct.
+ */
+static NX_SECURE_X509_CERT              pss_root;
+static NX_SECURE_X509_CERT              pss_int;
+static NX_SECURE_X509_CERT              pss_leaf;
+static NX_SECURE_X509_CERTIFICATE_STORE pss_store;
+
+static UINT pss_verify(const unsigned char *leaf, unsigned leaf_len,
+                       const unsigned char *intermediate, unsigned int_len)
+{
+UINT status;
+
+    memset(&pss_root,  0, sizeof(pss_root));
+    memset(&pss_int,   0, sizeof(pss_int));
+    memset(&pss_leaf,  0, sizeof(pss_leaf));
+    memset(&pss_store, 0, sizeof(pss_store));
+
+    status = _nx_secure_x509_certificate_initialize(&pss_root,
+                                                    (UCHAR *)x509_pss_root, (USHORT)x509_pss_root_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return(status);
+    }
+
+    status = _nx_secure_x509_certificate_initialize(&pss_leaf,
+                                                    (UCHAR *)leaf, (USHORT)leaf_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return(status);
+    }
+
+    chain_arm(&pss_root);
+    chain_arm(&pss_leaf);
+
+    (void)_nx_secure_x509_store_certificate_add(&pss_root, &pss_store,
+                                                NX_SECURE_X509_CERT_LOCATION_TRUSTED);
+    (void)_nx_secure_x509_store_certificate_add(&pss_leaf, &pss_store,
+                                                NX_SECURE_X509_CERT_LOCATION_REMOTE);
+
+    if (intermediate != NX_CRYPTO_NULL)
+    {
+        status = _nx_secure_x509_certificate_initialize(&pss_int,
+                                                        (UCHAR *)intermediate, (USHORT)int_len,
+                                                        NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                        NX_SECURE_X509_KEY_TYPE_NONE);
+        if (status != NX_SECURE_X509_SUCCESS)
+        {
+            return(status);
+        }
+
+        chain_arm(&pss_int);
+        (void)_nx_secure_x509_store_certificate_add(&pss_int, &pss_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_REMOTE);
+    }
+
+    /* current_time 0: expiry is not what is under test here. */
+    return(_nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0));
+}
+
+static void test_pss(void)
+{
+static NX_SECURE_X509_CERT cert;
+static unsigned char       tampered[4096];
+UINT                       status;
+
+    printf("pss\n");
+
+    memset(&cert, 0, sizeof(cert));
+    status = _nx_secure_x509_certificate_initialize(&cert,
+                                                    (UCHAR *)x509_pss_leaf, (USHORT)x509_pss_leaf_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    check(status == NX_SECURE_X509_SUCCESS, "a PSS-signed certificate parses");
+    check(cert.nx_secure_x509_signature_algorithm == NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_256,
+          "the digest comes out of the PSS parameters");
+    check(cert.nx_secure_x509_signature_salt_length == 32,
+          "the salt length comes out of the PSS parameters");
+
+    status = pss_verify(x509_pss_leaf, x509_pss_leaf_len, x509_pss_int, x509_pss_int_len);
+    check(status == NX_SECURE_X509_SUCCESS, "a PSS chain verifies to its root");
+
+    status = pss_verify(x509_pss_leaf384, x509_pss_leaf384_len, NX_CRYPTO_NULL, 0);
+    check(status == NX_SECURE_X509_SUCCESS, "PSS with SHA-384 verifies");
+
+    status = pss_verify(x509_pss_leaf_salt, x509_pss_leaf_salt_len, NX_CRYPTO_NULL, 0);
+    check(status == NX_SECURE_X509_SUCCESS, "PSS with a non-digest salt verifies");
+
+    /*
+     * The same certificate with one byte of the signature changed.  Without
+     * this, every check above is also passed by a verifier that returns
+     * success on any PSS certificate at all.
+     */
+    if (x509_pss_leaf_len <= sizeof(tampered))
+    {
+        memcpy(tampered, x509_pss_leaf, x509_pss_leaf_len);
+        tampered[x509_pss_leaf_len - 1] ^= 0x01;
+
+        status = pss_verify(tampered, x509_pss_leaf_len, x509_pss_int, x509_pss_int_len);
+        check(status == NX_SECURE_X509_CERTIFICATE_SIG_CHECK_FAILED,
+              "a tampered PSS signature is refused");
+    }
+    else
+    {
+        check(0, "the PSS leaf fits the tamper buffer");
+    }
+}
+
 /* ----------------------------------------------------- TLS key usage ------ */
 
 static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
@@ -733,6 +868,7 @@ int main(void)
     test_modulus();
     test_chain();
     test_extensions();
+    test_pss();
     test_tls_key_usage();
 
     if (failures != 0)

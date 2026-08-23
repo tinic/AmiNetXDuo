@@ -35,11 +35,16 @@
 # the trust store.  That is short enough to verify at 14 MHz, which leaves the
 # 1.3 handshake as the only thing under test.
 #
-# Two leaves, because 1.3 authenticates them differently:
+# Three leaves, because 1.3 authenticates them differently:
 #
 #   rsa2.test   RSA leaf, so CertificateVerify is rsa_pss_rsae_sha256 and the
 #               PSS verify path is what carries the handshake
 #   ec2.test    ECDSA P-256 leaf, ecdsa_secp256r1_sha256
+#   pss2.test   RSA leaf whose CERTIFICATE is signed RSASSA-PSS SHA-256, which
+#               is a different thing from the handshake signature above: the
+#               PSS encoding is in the chain this time, and until the X.509
+#               parser read RSASSA-PSS-params this certificate did not parse
+#               at all, so the whole chain was unreachable
 #
 # The verdict is the peer's own "TLS up:" line, not ours: it is the side that
 # knows which version was negotiated.  A guest that quietly fell back to 1.2
@@ -159,20 +164,23 @@ fi
 # the server's address the way an Amiga has always done it.  Rewritten rather
 # than appended to: tests/netstack/devs carries its own rsa2.test line and the
 # resolver takes the first match, so an appended one never wins.
-grep -v -e ' rsa2\.test$' -e ' ec2\.test$' \
+grep -v -e ' rsa2\.test$' -e ' ec2\.test$' -e ' pss2\.test$' \
     "$ROOT/tests/netstack/devs/Internet/hosts" > "$STAGE/devs/Internet/hosts"
 cat >> "$STAGE/devs/Internet/hosts" <<EOF
 $SERVER_ADDR rsa2.test
 $SERVER_ADDR ec2.test
+$SERVER_ADDR pss2.test
 EOF
 
 RSA_PORT=$((BASE_PORT + 1))
 EC_PORT=$((BASE_PORT + 4))
+PSS_PORT=$((BASE_PORT + 8))
 
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 ${PROFARG}SYS:fetch https://rsa2.test:$RSA_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:rsa.bin >DH0:a-rsa.txt
 SYS:fetch https://ec2.test:$EC_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:ec.bin >DH0:b-ec.txt
+SYS:fetch https://pss2.test:$PSS_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:pss.bin >DH0:c-pss.txt
 EOF
 
 # --------------------------------------------------------------- peer ---
@@ -217,7 +225,7 @@ grep -q "listeners" "$PEERLOG" 2>/dev/null || {
     echo "the peer has not opened its listeners:" >&2
     cat "$PEERLOG" 2>/dev/null >&2; exit 2; }
 echo "==> httppeer.py on $PEER_HOST ($SERVER_ADDR), TLS 1.3 ceiling:" \
-     "rsa2.test on $RSA_PORT, ec2.test on $EC_PORT"
+     "rsa2.test on $RSA_PORT, ec2.test on $EC_PORT, pss2.test on $PSS_PORT"
 
 # ---------------------------------------------------------------- run ---
 
@@ -240,24 +248,24 @@ echo
 echo "============================================================"
 echo "  what the server saw"
 echo "============================================================"
-grep -a "TLS up:\|TLS handshake from" "$PEERLOG" 2>/dev/null | tail -6 | sed 's/^/  /' \
+grep -a "TLS up:\|TLS handshake from" "$PEERLOG" 2>/dev/null | tail -8 | sed 's/^/  /' \
     || echo "  (nothing reached the peer at all)"
 
 bad=0
 count13=$(grep -ac "TLS up: TLSv1.3" "$PEERLOG" 2>/dev/null || true)
 count12=$(grep -ac "TLS up: TLSv1.2" "$PEERLOG" 2>/dev/null || true)
 echo
-echo "  TLS 1.3 handshakes: $count13    TLS 1.2: $count12    (want 2 and 0)"
+echo "  TLS 1.3 handshakes: $count13    TLS 1.2: $count12    (want 3 and 0)"
 
 if [ "$RC" != "0" ]; then
     echo "  !! the guest run itself failed, rc=$RC"
     bad=1
 fi
-[ "$count13" = "2" ] || bad=1
+[ "$count13" = "3" ] || bad=1
 [ "$count12" = "0" ] || bad=1
 
 if [ "$bad" = "0" ]; then
-    echo "  PASS: the client completed TLS 1.3 against both leaves"
+    echo "  PASS: the client completed TLS 1.3 against all three leaves"
 else
     echo "  FAIL: see above; nothing here is adjusted to make it pass"
 fi

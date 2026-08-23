@@ -26,6 +26,7 @@ WHAT IS ON WHICH PORT (BASE defaults to 7100)
     BASE+5    https       ECDSA leaf, 3-certificate chain    ec3.test
     BASE+6    https       expired leaf                       expired.test
     BASE+7    https       self-signed leaf                   selfsigned.test
+    BASE+8    https       RSASSA-PSS leaf, 2-certificate chain  pss2.test
     BASE+10   ftp         tests/tools/netpeer.py's FtpHandler
     BASE+20   raw         accept, read the request, close with nothing sent
     BASE+21   raw         accept and RESET immediately
@@ -697,6 +698,7 @@ TLS_SERVERS = (
     (5, "ec3",        "leaf-ec3.chain.pem",        "leaf-ec3.key.pem"),
     (6, "expired",    "leaf-expired.chain.pem",    "leaf-expired.key.pem"),
     (7, "selfsigned", "leaf-selfsigned.chain.pem", "leaf-selfsigned.key.pem"),
+    (8, "pss2",       "leaf-pss2.chain.pem",       "leaf-pss2.key.pem"),
 )
 
 

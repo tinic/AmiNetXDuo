@@ -20,6 +20,7 @@
 #     int-rsa-1       RSA-2048 CA, signed by root-rsa
 #       leaf rsa2.test                                     chain: leaf,int1
 #       leaf expired.test        notAfter in 2020          chain: leaf,int1
+#       leaf pss2.test           RSASSA-PSS SHA-256        chain: leaf,int1
 #       int-rsa-2     signed by int-rsa-1
 #         leaf rsa3.test                                   chain: leaf,int2,int1
 #         int-rsa-3   signed by int-rsa-2
@@ -55,8 +56,13 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 OUT="${1:-$ROOT/build/peer-pki}"
 
+# Regenerated when this script changes, as well as when the stamp is missing.
+# Without the -nt test, adding a certificate here left every machine that had
+# already run once serving the OLD set: httppeer.py skips a chain file it
+# cannot find, so the new arm's port simply never opened and the run failed as
+# a handshake that did not happen.
 STAMP="$OUT/.stamp"
-if [ -f "$STAMP" ]; then
+if [ -f "$STAMP" ] && [ "$STAMP" -nt "${BASH_SOURCE[0]}" ]; then
     echo "==> test PKI already in $OUT (delete $STAMP to regenerate)"
     exit 0
 fi
@@ -154,6 +160,28 @@ issue()
     rm -f "$1.csr"
 }
 
+# $1 name  $2 CN  $3 issuer-name
+#
+# An RSASSA-PSS leaf.  Same shape as issue() with alg rsa and ext leaf, and
+# the padding mode is the only difference, which is the point: nothing about
+# the chain, the key or the extensions changes, so an arm that fails against
+# this one and passes against rsa2.test failed on the signature encoding.
+#
+# saltlen digest, which is what OpenSSL 3 picks by default and what every CA
+# issuing PSS uses.
+issue_pss()
+{
+    newkey "$1" rsa
+    ext_leaf "$2"
+    openssl req -new -key "$1.key.pem" -subj "/CN=$2" -out "$1.csr" 2>/dev/null
+    openssl x509 -req -in "$1.csr" -CA "$3.cert.pem" -CAkey "$3.key.pem" \
+            -CAcreateserial -sha256 \
+            -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest \
+            -not_before "$NOT_BEFORE" -not_after "$NOT_AFTER" \
+            -extfile "$OUT/ext.cnf" -out "$1.cert.pem" 2>/dev/null
+    rm -f "$1.csr"
+}
+
 echo "==> roots"
 selfsigned_ca root-rsa   rsa "AmiNetXDuo Test Root RSA"
 selfsigned_ca root-ec    ec  "AmiNetXDuo Test Root EC"
@@ -173,6 +201,7 @@ issue leaf-rsa4    rsa rsa4.test    int-rsa-3 leaf
 issue leaf-ec2     ec  ec2.test     int-ec-1  leaf
 issue leaf-ec3     ec  ec3.test     int-ec-2  leaf
 issue leaf-expired rsa expired.test int-rsa-1 leaf "20210101000000Z"
+issue_pss leaf-pss2 pss2.test int-rsa-1
 selfsigned_leaf()
 {
     newkey leaf-selfsigned rsa
@@ -193,6 +222,7 @@ cat leaf-rsa4.cert.pem    int-rsa-3.cert.pem int-rsa-2.cert.pem int-rsa-1.cert.p
 cat leaf-ec2.cert.pem     int-ec-1.cert.pem                                     > leaf-ec2.chain.pem
 cat leaf-ec3.cert.pem     int-ec-2.cert.pem int-ec-1.cert.pem                   > leaf-ec3.chain.pem
 cat leaf-expired.cert.pem int-rsa-1.cert.pem                                    > leaf-expired.chain.pem
+cat leaf-pss2.cert.pem    int-rsa-1.cert.pem                                    > leaf-pss2.chain.pem
 cp  leaf-selfsigned.cert.pem                                                      leaf-selfsigned.chain.pem
 
 echo "==> trust stores"
@@ -205,7 +235,7 @@ date > "$STAMP"
 
 echo
 echo "==> test PKI in $OUT"
-for f in leaf-rsa2 leaf-rsa3 leaf-rsa4 leaf-ec2 leaf-ec3 leaf-expired leaf-selfsigned; do
+for f in leaf-rsa2 leaf-rsa3 leaf-rsa4 leaf-ec2 leaf-ec3 leaf-expired leaf-pss2 leaf-selfsigned; do
     printf '    %-16s %d certificate(s) sent\n' "$f" \
         "$(grep -c 'BEGIN CERTIFICATE' "$f.chain.pem")"
 done
