@@ -1512,8 +1512,8 @@ static VOID show_events(VOID)
         if (text == NULL)
         {
             /* A code from a newer library.  The number is still true. */
-            tool_printf("event %ld, value %lu\n", (LONG)e->nse_Code,
-                        (unsigned long)e->nse_Value);
+            tool_printf("event %ld, value %ld\n", (LONG)e->nse_Code,
+                        (LONG)e->nse_Value);
             continue;
         }
 
@@ -1528,9 +1528,11 @@ static VOID show_events(VOID)
         {
             const char *detail = tool_event_detail(e->nse_Code);
 
+            /* Signed: an OpenDevice error is negative, and a count is
+               small and positive, so one form reads correctly for both.
+               -2 printed as 4294967294 is a number nobody can act on. */
             if (detail != NULL)
-                tool_printf(", %s %lu", (LONG)detail,
-                            (unsigned long)e->nse_Value);
+                tool_printf(", %s %ld", (LONG)detail, (LONG)e->nse_Value);
         }
 
         tool_printf("\n");

@@ -1486,6 +1486,21 @@ stage_bridged() {
         *) fail "netshutdown: the transcript above is the whole run" ; bad=1 ;;
     esac
 
+    # Beside the shutdown, because the state it reads is the one the shutdown
+    # leaves behind.  The library's event ring is inside bsdsocket.library and
+    # the sentences are inside ShowNetStatus, so a machine is the only place
+    # the two halves meet: no host test and no build check can see them
+    # together, and a code added to one and not the other builds clean.
+    printf '\n-- the event ring, and the command that turns it into sentences\n'
+    rc=0
+    "$ROOT/tests/tools/run-events.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  the bring-up and the shutdown both came back as" \
+                "sentences, and reading them did not restart the stack" ;;
+        2) fail "events: an ingredient is missing on this machine" ; bad=1 ;;
+        *) fail "events: the transcript above is the whole run" ; bad=1 ;;
+    esac
+
     # Here rather than in the emulator tier because it is bridged only and
     # that tier runs on SLIRP.  It needs no peer and puts no traffic on the
     # link: the bridge is there because a result taken over slirp says nothing

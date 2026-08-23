@@ -35,6 +35,10 @@ VOID  Disable(VOID);
 VOID  Enable(VOID);
 
 VOID  InitSemaphore(struct SignalSemaphore *sigSem);
+/* The event ring's mark, published in bsd_lib_init() and taken back in
+   bsd_lib_expunge(). */
+VOID  AddSemaphore(struct SignalSemaphore *sigSem);
+VOID  RemSemaphore(struct SignalSemaphore *sigSem);
 VOID  ObtainSemaphore(struct SignalSemaphore *sigSem);
 VOID  ReleaseSemaphore(struct SignalSemaphore *sigSem);
 ULONG AttemptSemaphore(struct SignalSemaphore *sigSem);

@@ -180,6 +180,18 @@ NX_IP *netstack_ip(VOID)                    { return &h_ip; }
 BOOL   netstack_ipv6_enabled(VOID)          { return h_ipv6_on; }
 VOID   netstack_dns_absorb_pending(VOID)    { }
 
+/* The event ring. Stubbed empty and not linked: NETSTATUS_EVENTS is answered
+   from src/common/events.c, this harness asks for NETSTATUS_NEIGHBOURS, and
+   src/common/test/test_events.c is where the ring is tested. */
+ULONG ami_event_snapshot(NetStatusEvent *out, ULONG room, ULONG *held)
+{
+    (VOID)out;
+    (VOID)room;
+    if (held != NULL)
+        *held = 0UL;
+    return 0UL;
+}
+
 LONG bsd_nx_enter(struct AmiSocketBase *b)  { (VOID)b; return 0; }
 VOID bsd_nx_leave(struct AmiSocketBase *b)  { (VOID)b; }
 LONG bsd_fail(struct AmiSocketBase *b, LONG code) { (VOID)b; (VOID)code; return -1; }

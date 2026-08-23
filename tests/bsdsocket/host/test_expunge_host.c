@@ -329,6 +329,28 @@ VOID Forbid(VOID)                                { }
 VOID Permit(VOID)                                { }
 VOID Disable(VOID)                               { }
 VOID Enable(VOID)                                { }
+
+/*
+ * The event ring's mark.  Modelled rather than emptied: bsd_lib_expunge()
+ * takes the mark back before it frees anything, and a stub would let a
+ * revision that stopped doing so pass here.
+ */
+static struct SignalSemaphore *host_semaphore;
+
+VOID AddSemaphore(struct SignalSemaphore *s)  { host_semaphore = s; }
+VOID RemSemaphore(struct SignalSemaphore *s)
+{
+    if (host_semaphore == s)
+        host_semaphore = NULL;
+}
+
+BOOL host_event_mark_published(VOID)
+{
+    return (host_semaphore != NULL) ? TRUE : FALSE;
+}
+
+/* The clock the ring asks for, which never opens timer.device. */
+ULONG ami_millis_quick(VOID) { return 0UL; }
 VOID CacheClearU(VOID)                           { }
 
 /*

@@ -1178,7 +1178,7 @@
       ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
                     DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,
                     TCP/S,UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,
-                    NAMES/S,ALL/S,REPEAT/S
+                    EVENTS/S,NAMES/S,ALL/S,REPEAT/S
 
   Reports the state of the network stack. With no options, ShowNetStatus
   prints a summary that combines the settings taken from the
@@ -1206,6 +1206,14 @@
               each of them has open. NetShutdown waits on this list.
               A program listed here must close its sockets before the
               network can be stopped.
+  @{b}EVENTS@{ub}      What the network did: the interfaces that came up and
+              the ones that did not, the devices that refused a
+              command, and what a shutdown reached and what it left
+              behind. The library keeps the last few dozen of these
+              and this command puts them into words.
+
+              It answers after the network has been stopped, which is
+              when it matters. Reading it does not start the network.
   @{b}NAMES@{ub}       Put names to the addresses and ports printed, from
               DEVS:Internet and then from the name servers.
   @{b}ALL@{ub}         With TCPSOCKETS or UDPSOCKETS, include the sockets

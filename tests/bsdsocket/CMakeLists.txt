@@ -76,8 +76,12 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # AMINETXDUO_TCPDEVICE because the shipping library is built with it and
     # the expunge has a decline of its own behind that #ifdef.  Compiling it
     # out here would leave the ordering of the four refusals untested.
+    # events.c and not a stub for ami_event(): the expunge is where the event
+    # ring's mark is taken back, and a stub would make that line untested in
+    # the one harness that runs the real bsd_lib_expunge().
     add_executable(test_expunge host/test_expunge_host.c
-                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c")
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c"
+                                "${CMAKE_SOURCE_DIR}/src/common/events.c")
 
     target_include_directories(test_expunge PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
@@ -101,7 +105,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_options(test_expunge PRIVATE
         -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
 
-    target_compile_definitions(test_expunge PRIVATE AMINETXDUO_TCPDEVICE)
+    target_compile_definitions(test_expunge PRIVATE AMINETXDUO_TCPDEVICE
+        AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING})
 
     add_test(NAME expunge_refusal COMMAND test_expunge)
 
