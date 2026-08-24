@@ -35,6 +35,11 @@ VOID n68k_port_out(volatile void *port, const void *from, ULONG blocks);
 /* The same, for a 16-bit port that is one address and not mirrored: the reads
    stay word-wide, the host side moves a block at a time. */
 VOID n68k_port_in_w(void *to, const volatile void *port, ULONG blocks);
+
+/* Drain + longword ones-complement sum in one pass; the sum has exactly
+   n68k_copy_sum_longwords() semantics so the verifier cannot tell who
+   produced it.  Destination must be even. */
+ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes);
 VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks);
 
 #ifdef __cplusplus
