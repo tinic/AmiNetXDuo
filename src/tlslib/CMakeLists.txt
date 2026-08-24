@@ -124,6 +124,13 @@ if(AMINETXDUO_TLSLIB_LINK)
             AMINETXDUO_CRYPTO68K_LTO_PROBE=1)
     endif()
 
+    # Same reason as the four archives, see src/tls/CMakeLists.txt: the counters
+    # -DAMINETXDUO_SCHEDCOUNT=ON turns on live in the ThreadX port, and this
+    # link has no ThreadX port.
+    if(AMINETXDUO_SCHEDCOUNT)
+        target_compile_options(tls_library PRIVATE -UAMINETXDUO_SCHEDCOUNT)
+    endif()
+
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
 
     # Listed twice rather than wrapped in --start-group: nx_secure and

@@ -406,12 +406,14 @@ void _tx_thread_reset_port_completion(TX_THREAD *thread_ptr, UINT tx_saved_postu
  * sites are the last ones outside the port, and they are the hottest: a wire
  * transfer reacquires the baton about once per receive wake.
  *
- * Same contract as the inline.  The core lock is held, the baton is already
- * released, and TX_FALSE means the caller must fall back to
- * _tx_amiga_wake_scheduler().
+ * The core lock is held and the baton is already released.  TX_TRUE means the
+ * dispatch did not happen AND the scheduler Task is the only thing that can
+ * make it happen, so the caller must call _tx_amiga_wake_scheduler() once it
+ * drops the lock.  The other two ways to fail need no poke, see
+ * _tx_amiga_wake_needed().
  */
-UINT _tx_amiga_dispatch_try(VOID)
+UINT _tx_amiga_dispatch_or_wake(VOID)
 {
 
-    return(_tx_amiga_dispatch_inline());
+    return(_tx_amiga_wake_needed(_tx_amiga_dispatch_inline()));
 }

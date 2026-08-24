@@ -211,3 +211,25 @@ target_link_libraries(aminetxduo_tls PUBLIC nx_secure crypto68k ${AMINETXDUO_TLS
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(aminetxduo_tls PUBLIC "${AMIGA_NDK_INCLUDE}")
 endif()
+
+# -DAMINETXDUO_SCHEDCOUNT=ON DOES NOT REACH THIS SIDE OF THE TREE.
+#
+# The option is a global add_compile_definitions(), and the counters it turns on
+# are emitted by two headers that every one of these sources pulls in through
+# nx_api.h: tx_port.h counts inside TX_DISABLE/TX_RESTORE, and nx_port.h counts
+# every tx_mutex_get()/tx_mutex_put().  Both index _tx_amiga_sched_count[], which
+# is defined in the ThreadX port -- and the block above this one is the list of
+# things tls.library deliberately does NOT link, threadx among them.  So the
+# option built a tls.library with `undefined reference to _tx_amiga_sched_count'
+# out of nx_secure, and nobody could turn the counters on at all.
+#
+# Undefined per target rather than made conditional in the headers: these four
+# archives are only ever linked into tls.library, which has no ThreadX port and
+# therefore no scheduling primitives to count.  There is nothing to lose here.
+#
+# -U after the -D: CMake emits <DEFINES> before <FLAGS>, so the last word wins.
+if(AMINETXDUO_SCHEDCOUNT)
+    foreach(_sc_target nx_crypto nx_secure aminetxduo_tls)
+        target_compile_options(${_sc_target} PRIVATE -UAMINETXDUO_SCHEDCOUNT)
+    endforeach()
+endif()
