@@ -361,6 +361,17 @@ BOOL ami_config_hostname_offer(AmiConfig *cfg, UWORD source, const char *name);
 BOOL ami_config_hostname_valid(const char *name);
 
 /*
+ * The packet pool's share of free memory, as the divisor D in avail / D.
+ *
+ * `fallback` unless ENV:ANXDPOOLDIV holds a number from 4 to 64.  The variable
+ * exists for the low-memory receive experiment of docs/PHYSICAL_RX_A1200.md:
+ * one binary serves every arm of an A/B, because the arms differ by a SetEnv
+ * and not by a build, and a measurement over two binaries measures the
+ * binaries.  An absent variable is the shipped behaviour exactly.
+ */
+ULONG ami_config_pool_divisor(ULONG fallback);
+
+/*
  * "amiga-490007" from 00:80:10:49:00:07: the name a machine none of the four
  * sources named answers to, so that two unconfigured machines on one segment
  * do not both claim amiga.local. The last three octets in lower-case hex,
