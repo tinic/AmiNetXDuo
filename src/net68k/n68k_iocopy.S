@@ -251,15 +251,20 @@ _n68k_port_in_w_sum:
         beq     .Lpws_t1
         cmp.l   #2,d0
         beq     .Lpws_t2
-| three bytes: the word, then the next word's high byte, low lane zero
+| three bytes: the word, then the next word's high byte, low lane zero.
+| The isolation is done before the byte is positioned, not after: `move.w`
+| leaves the upper half of d3 holding the word just consumed, and shifting
+| that left would OR a whole stale word into the answer.  A three-byte tail
+| is what a 331-byte payload has, which is what a DHCP offer is, so the
+| frames this corrupted were exactly the ones a machine needs to boot.
         move.w  d3,a0@+
         swap    d3
         move.l  d3,d2                   | word << 16
         move.w  a1@,d3
-        lsr.w   #8,d3                   | the byte, in the low lane
-        move.b  d3,a0@                  | stored as the third byte
-        lsl.l   #8,d3                   | positioned as bits 15..8
+        and.l   #0xff00,d3              | the byte alone, already at 15..8
         or.l    d3,d2
+        lsr.l   #8,d3                   | and in the low lane to be stored
+        move.b  d3,a0@                  | stored as the third byte
         bra     .Lpws_tadd
 .Lpws_t1:
 | one byte: the word's high byte, positioned as bits 31..24.  The swap is
