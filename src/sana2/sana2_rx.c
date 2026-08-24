@@ -740,7 +740,32 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
     ami_random_arrival();
 
     slot->packet = NULL;     /* ownership passes to NetX Duo */
+
+#ifdef AMINETXDUO_RXPROBE
+    /*
+     * The drain leg of the step budget: this frame's cost from here through
+     * deliver, which is header synthesis, the verify walk or its carried-sum
+     * check, and the queue onto the IP thread.  The clock is read after the
+     * copy hook already ran (the device replied first), so the copy is the
+     * device's ledger and this is the reader's.  The settle leg is stamped
+     * inside deliver, where the TCP sequence is still in reach.
+     */
+    {
+        ULONG t0 = ami_rxprobe_clock();
+        ULONG dt;
+
+        ami_sana2_rx_deliver(iface, packet, slot);
+
+        dt = ami_rxprobe_clock() - t0;
+        rx->probe.drain_count++;
+        rx->probe.drain_sum += dt;
+        if (dt > rx->probe.drain_max)
+            rx->probe.drain_max = dt;
+        rx->probe.drain_hist[ami_rxprobe_bucket(dt)]++;
+    }
+#else
     ami_sana2_rx_deliver(iface, packet, slot);
+#endif
 }
 
 static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
