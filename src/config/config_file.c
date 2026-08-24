@@ -438,6 +438,39 @@ static VOID load_hostname(AmiConfig *cfg)
  * here. tools/check-netdb-free.sh checks that anything reaching
  * ami_netdb_load() also links ami_netdb_free().
  */
+/*
+ * The pool-share dial of docs/PHYSICAL_RX_A1200.md.  A number, alone in
+ * ENV:ANXDPOOLDIV, becomes the divisor over free memory that sizes the packet
+ * pool; anything else -- absent, empty, malformed, out of range -- is the
+ * fallback, silently, because the variable's whole audience is an experiment
+ * that knows it set it.  The range keeps a typo from sizing a pool the machine
+ * cannot survive: 4 claims a quarter of free memory, 64 starves the clamp's
+ * own floor into effect.
+ */
+ULONG ami_config_pool_divisor(ULONG fallback)
+{
+    char  *buf = (char *)ami_cfg_read_file("ENV:ANXDPOOLDIV", NULL);
+    ULONG  value = 0UL;
+    char  *p = buf;
+
+    if (buf == NULL)
+        return fallback;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+    while (*p >= '0' && *p <= '9' && value <= 6400UL)
+        value = value * 10UL + (ULONG)(*p++ - '0');
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+
+    if (*p != '\0' || value < 4UL || value > 64UL)
+        value = fallback;
+
+    ami_free(buf);
+
+    return value;
+}
+
 LONG ami_config_load(AmiConfig *cfg)
 {
     if (cfg == NULL)

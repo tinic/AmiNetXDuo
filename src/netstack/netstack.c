@@ -451,20 +451,26 @@ static ULONG ami_ns_packet_stride(VOID)
 static ULONG ami_ns_pool_packets(VOID)
 {
     ULONG avail;
+    ULONG divisor;
     ULONG packets;
 
     avail = AvailMem(MEMF_PUBLIC);
 
-    packets = (avail / AMI_POOL_MEM_DIVISOR) / ami_ns_packet_stride();
+    /* The divisor is a dial for exactly one experiment; see the function and
+       docs/PHYSICAL_RX_A1200.md.  Without ENV:ANXDPOOLDIV this is the same
+       constant as ever. */
+    divisor = ami_config_pool_divisor((ULONG)AMI_POOL_MEM_DIVISOR);
+
+    packets = (avail / divisor) / ami_ns_packet_stride();
 
     if (packets < (ULONG)AMI_POOL_MIN_PACKETS)
         packets = (ULONG)AMI_POOL_MIN_PACKETS;
     if (packets > (ULONG)AMI_POOL_MAX_PACKETS)
         packets = (ULONG)AMI_POOL_MAX_PACKETS;
 
-    AMI_INFO("netstack: %lu bytes free, pool = %lu x %lu",
-             (unsigned long)avail, (unsigned long)packets,
-             (unsigned long)AMI_POOL_PAYLOAD);
+    AMI_INFO("netstack: %lu bytes free / %lu, pool = %lu x %lu",
+             (unsigned long)avail, (unsigned long)divisor,
+             (unsigned long)packets, (unsigned long)AMI_POOL_PAYLOAD);
 
     return packets;
 }
