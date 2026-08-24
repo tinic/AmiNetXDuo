@@ -526,8 +526,9 @@ static BOOL netdev_would_take(const struct List *list, ULONG type)
  * frame header in hand.  Success means the payload's destination is returned
  * and the CMD_READ is off its queue with its address fields already filled;
  * the core then drains the hardware straight into the answer and finishes
- * with netdev_rx_claimed(), or backs out with netdev_rx_unclaim() and the
- * request rejoins its queue untouched.
+ * with netdev_rx_claimed().  A claim cannot be cancelled after that point:
+ * both supported port cores have already advanced hardware state once the
+ * drain begins.
  *
  * The claim declines whenever the staging path would have done anything the
  * direct path cannot reproduce: a second opener wanting a copy of the same
@@ -626,18 +627,7 @@ static VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
         tr->st.PacketsReceived++;
         tr->st.BytesReceived += len;
     }
-    unit->nu_RxDirect++;
-
     netdev_reply(io, 0, 0);
-}
-
-static VOID netdev_rx_unclaim(APTR arg, APTR token)
-{
-    struct IOSana2Req *io = (struct IOSana2Req *)token;
-    NetdevOpener      *op = NETDEV_OPENER(io->ios2_Req.io_Unit);
-
-    (VOID)arg;
-    AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
 }
 
 /*
@@ -1620,7 +1610,6 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Nic.rx_arg = unit;
     unit->nu_Nic.rx_claim   = netdev_rx_claim;
     unit->nu_Nic.rx_claimed = netdev_rx_claimed;
-    unit->nu_Nic.rx_unclaim = netdev_rx_unclaim;
 
     netdev_bus_setup(&unit->nu_Nic.bus,
              (APTR)((UBYTE *)board + card->reg_off),
@@ -2076,9 +2065,9 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
 
         if (tag == S2_CopyToBuff)
             op->op_CopyTo = (APTR)tags->ti_Data;
-        if (tag == ANXD_S2_RX_DIRECT)
+        else if (tag == ANXD_S2_RX_DIRECT)
             op->op_RxDirect = (APTR)tags->ti_Data;
-        if (tag == ANXD_S2_RX_FILLED)
+        else if (tag == ANXD_S2_RX_FILLED)
             op->op_RxFilled = (APTR)tags->ti_Data;
         else if (tag == S2_CopyFromBuff)
             op->op_CopyFrom = (APTR)tags->ti_Data;

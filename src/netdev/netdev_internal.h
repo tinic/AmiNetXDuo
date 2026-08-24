@@ -100,7 +100,6 @@ typedef struct NetdevUnit
     ULONG                       nu_IntSeen;   /* claimed interrupts delivered  */
     ULONG                       nu_TickPolls; /* tick-serviced during silence  */
     UWORD                       nu_IntSilent; /* blanks since a claimed one    */
-    ULONG                       nu_RxDirect;  /* frames drained without staging*/
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */
     UWORD                       nu_RxKicks;   /* deaf-boot resets performed    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */

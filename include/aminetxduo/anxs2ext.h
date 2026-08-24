@@ -3,11 +3,11 @@
  *
  * The standard hook set moves a received frame twice on a PIO card: once
  * from the FIFO port into the driver's staging buffer, and once from there
- * into the stack's packet through S2_CopyToBuff.  Window 4 of the receive
- * path on a 14 MHz 68020 is spent almost entirely inside those two copies,
- * at interrupt level, and flight-4 of the 2026-08 investigation measured
- * them at the whole of the difference between the throughput this hardware
- * gets and the throughput it could.
+ * into the stack's packet through S2_CopyToBuff.  A 2026-08 profile of the
+ * physical A1200/3C589 case measured the port drain at 9.4% of wall time and
+ * the staging-to-packet copy/checksum at another 8.6%.  This extension removes
+ * the latter and folds its checksum work into the former.  It is a bounded
+ * saving, not an explanation for the whole gap to another stack.
  *
  * SANA-II's own answer is the DMA hook pair, and src/sana2/sana2_device.c
  * records why it is not offered: it is a contract about memory the shim
@@ -20,8 +20,10 @@
  *     would land, before it has copied anything anywhere.  The shim answers
  *     with the packet's payload pointer, or NULL to decline, in which case
  *     the device falls back to the staging copy and S2_CopyToBuff exactly as
- *     if the tag had never been offered.  Runs at interrupt level; the same
- *     constraints as copybuff.doc puts on the standard hooks.
+ *     if the tag had never been offered.  A non-NULL answer must be followed
+ *     by exactly one RX_FILLED call before the CMD_READ is replied.  Runs at
+ *     interrupt level; the same constraints as copybuff.doc puts on the
+ *     standard hooks.
  *
  *   ANXD_S2_RX_FILLED   VOID (*)(APTR ios2_data, ULONG len, ULONG sum,
  *                                UBYTE summed)

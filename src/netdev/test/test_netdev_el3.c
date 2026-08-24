@@ -916,7 +916,7 @@ static void test_receive(void)
 }
 
 /*
- * The two-copy removal itself.  IoSumDrill proves the assembler; this proves
+ * The second-copy removal itself.  IoSumDrill proves the assembler; this proves
  * el3_rint() feeds it only the payload and completes the claimed request
  * instead of also handing the staging buffer up the old path.
  */

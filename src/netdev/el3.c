@@ -822,11 +822,11 @@ static BOOL el3_rint(NetdevNic *nic)
          * decide from it, and it is the same seven words off the FIFO
          * whichever path the rest of the frame takes.  A claimed frame is
          * drained straight into the stack's packet -- one copy where there
-         * were two, and the second one was the larger half of what this
-         * interrupt used to cost (flight 4, 2026-08-22: the staging copy
-         * plus the hook copy were ~1.4 ms of a ~2 ms frame).  A declined
-         * claim reassembles the staging buffer exactly as before: the header
-         * is already at its start, and the payload lands behind it.
+         * were two.  On the physical A1200/3C589 profile the removed
+         * staging-to-packet copy/checksum was 8.6% of wall time; the FIFO
+         * drain itself was a separate 9.4% and remains.  A declined claim
+         * reassembles the staging buffer exactly as before: the header is
+         * already at its start, and the payload lands behind it.
          */
         netdev_bus_rdata(&nic->bus, buf, NETDEV_HDR_LEN);
 
