@@ -225,8 +225,14 @@ int main(void)
 {
     static const UWORD ports[] = { 0x1234u, 0xFF01u, 0x8000u, 0x0001u,
                                    0xFFFFu, 0xABABu };
-    static const ULONG lens[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 32, 33, 34, 35,
-                                  46, 100, 101, 102, 103, 328, 331, 512, 515,
+    /* Every tail residue at several magnitudes, and the two sizes this bug was
+       found at: 331 is a DHCP offer's payload, 46 the shortest Ethernet
+       payload there is. */
+    static const ULONG lens[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8,
+                                  15, 16, 17, 18, 19,
+                                  31, 32, 33, 34, 35,
+                                  46, 100, 101, 102, 103,
+                                  328, 331, 511, 512, 515,
                                   1458, 1459, 1460, 1461, 1462, 1463, 1514 };
     ULONG p;
     ULONG l;
