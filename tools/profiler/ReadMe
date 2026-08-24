@@ -81,13 +81,25 @@ files to the real Amiga without changing them:
 
 Install that library for the run and reboot so the loaded library is certainly
 the file whose map and objects remain in `build/prof`.  Prove the sampler on
-the real CPU before measuring the stack:
+the real CPU before measuring the stack.  On a stock 14 MHz A1200, open a
+dedicated shell and run:
 
-    C:Profile OUT=RAM:spin.prof C:profspin RANGES=RAM:spin.ranges
+    C:ChangeTaskPri 5
+    C:Profile RATE=200 OUT=RAM:spin.prof \
+        C:profspin SCALE=4 RANGES=RAM:spin.ranges
 
 Bring `spin.prof` and `spin.ranges` back to the build host and run the
 `profreport.py --contain` command printed by `tools/profiler/selftest.sh`, with
-paths changed to those two files.  Require `0 failures, PASS` here too.
+paths changed to those two files.  Require `0 failures, PASS` here too, then
+close the dedicated shell.
+
+The temporary priority is part of validating the sampler, not part of the
+measurement.  On a networked stock A1200, background stack tasks can preempt
+`profspin` enough to fail its proportionality check even when every sampled PC
+is correct.  Priority 5 keeps the validation kernels running for their intended
+intervals; `SCALE=4` supplies enough samples at 200 Hz to make their shares
+stable.  Do not raise the shell priority for `iperf` or any real workload: that
+would change the scheduling behaviour being measured.
 
 For TCP receive, run the same transfer twice.  On the Amiga, the plain control
 is:
