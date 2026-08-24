@@ -1048,6 +1048,8 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Settle;     /* handed to IP -> receive notify    */
     NetStatusBudgetLeg  nrb_Fetch;      /* receive notify -> recv() dequeue  */
     NetStatusBudgetLeg  nrb_Ack;        /* CMD_WRITE BeginIO -> reply reaped */
+    NetStatusBudgetLeg  nrb_Push;       /* driver entry send case, enter to
+                                           return: the CPU an ACK costs      */
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

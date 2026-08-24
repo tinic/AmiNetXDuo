@@ -21,7 +21,11 @@
  * the transmit half the first four never see: a CMD_WRITE handed to the
  * device until its reply is reaped (src/sana2/sana2_tx.c owns both ends,
  * per slot rather than latest-stamp, because writes overlap by design).
- * During a receive every write is an ACK, which is what names it.
+ * During a receive every write is an ACK, which is what names it.  The ack
+ * leg spans wall time and mostly measures when the reply happens to be
+ * collected; the push leg is its CPU counterpart, the driver entry's send
+ * case from entry to return (src/sana2/sana2_driver.c), which is what an
+ * acknowledgment actually costs this machine to emit.
  *
  * WHY A SINGLE LATEST-STAMP AND NOT A MATCHED QUEUE.  The regime this
  * measures is the serial one, one frame walked through the whole chain at a
@@ -107,6 +111,11 @@ VOID ami_budget_notify(ULONG now)
 VOID ami_budget_ack(ULONG dt)
 {
     ami_budget_leg(&ami_budget.ack, dt);
+}
+
+VOID ami_budget_push(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.push, dt);
 }
 
 VOID ami_budget_fetch(ULONG now)

@@ -300,6 +300,8 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("ack,    write to reply      ", &b->nrb_Ack,
                     b->nrb_EClockRate);
+    show_budget_leg("push,   driver send case    ", &b->nrb_Push,
+                    b->nrb_EClockRate);
 }
 
 /*

@@ -1533,6 +1533,9 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Ack.nbl_Count    = ami_budget.ack.count;
             out->nrb_Ack.nbl_Sum      = ami_budget.ack.sum;
             out->nrb_Ack.nbl_Max      = ami_budget.ack.max;
+            out->nrb_Push.nbl_Count   = ami_budget.push.count;
+            out->nrb_Push.nbl_Sum     = ami_budget.push.sum;
+            out->nrb_Push.nbl_Max     = ami_budget.push.max;
             {
                 UWORD i;
 
@@ -1543,6 +1546,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                     out->nrb_Settle.nbl_Hist[i] = ami_budget.settle.hist[i];
                     out->nrb_Fetch.nbl_Hist[i]  = ami_budget.fetch.hist[i];
                     out->nrb_Ack.nbl_Hist[i]    = ami_budget.ack.hist[i];
+                    out->nrb_Push.nbl_Hist[i]   = ami_budget.push.hist[i];
                 }
             }
 #endif
