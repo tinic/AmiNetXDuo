@@ -175,6 +175,12 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type);
+struct IOSana2Req *netdev_take(struct List *list, ULONG type);
+UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                       APTR *token);
+VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed);
+VOID netdev_rx_unclaim(APTR arg, APTR token);
 
 /* Every request that stops being quick and enters a list must be prepared the
    same way, whether it goes at the head or tail. */

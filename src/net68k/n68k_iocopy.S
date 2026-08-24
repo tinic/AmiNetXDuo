@@ -211,6 +211,8 @@ _n68k_port_out:
 
 #endif /* AMINETXDUO_NET68K_ASM */
 
+#ifdef AMINETXDUO_NET68K_ASM
+
 | ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes)
 |
 | Drain `bytes` of frame from a fixed 16-bit data port into `to`, summing as
@@ -289,3 +291,5 @@ _n68k_port_in_w_sum:
         move.l  d1,d0
         movem.l sp@+,d2-d3
         rts
+
+#endif /* AMINETXDUO_NET68K_ASM */

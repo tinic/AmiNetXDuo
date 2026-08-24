@@ -14,6 +14,7 @@ option(AMINETXDUO_NETDEV_LINK
 
 set(NETDEV_SOURCES
     netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
+    netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_queue.c      # queued IORequest invariants, host-testable
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
@@ -306,6 +307,26 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
+
+    # The private SANA-II direct-receive handshake.  The EL3 test proves the
+    # FIFO half; this proves the device selects exactly one eligible CMD_READ,
+    # fills its metadata, completes it once, and restores it after a failed
+    # hardware drain.
+    add_executable(test_netdev_direct
+        test/test_netdev_direct.c
+        netdev_direct.c)
+
+    target_include_directories(test_netdev_direct PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_direct PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_direct COMMAND test_netdev_direct)
 
     add_executable(test_netdev_watchdog
         test/test_netdev_watchdog.c

@@ -152,6 +152,9 @@ CROSS_CONFIGS=(
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
+    # The portable fallbacks for the card-I/O and checksum inner loops.  This
+    # is distinct from noasm above, which switches off crypto68k only.
+    "nonet68kasm:-DAMINETXDUO_NET68K_ASM=OFF"
     # Same class as the three below, and it went the same way: it changes the
     # layout of AmiRxSlot, and sana2_rx.c wrote a member the option compiles
     # out.  -DAMINETXDUO_RX_VERIFY=OFF did not build at all, and nothing said
@@ -236,7 +239,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=97
+HOST_TESTS_EXPECTED=98
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_sockopt and
