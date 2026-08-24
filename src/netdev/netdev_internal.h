@@ -116,11 +116,35 @@ typedef struct NetdevUnit
     ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4];
 } NetdevUnit;
 
+/*
+ * Let tools/profiler/Profile recover this device's LoadSeg hunks.  A device
+ * base is private past struct Device, so the profiler cannot safely read
+ * nd_SegList at a fixed offset.  Instead it scans the positive half for this
+ * self-validating five-longword record, then verifies that the device's LVO
+ * targets lie inside the reported hunks.  The convention is documented in
+ * tools/profiler/prof.h; it is repeated here so the shipped driver does not
+ * depend on a development tool's header.
+ */
+#define NETDEV_PROF_SEGTAG_MAGIC   0x50534731UL    /* 'PSG1' */
+
+typedef struct NetdevProfSegTag
+{
+    ULONG   np_Magic;
+    ULONG   np_Size;
+    ULONG   np_LibBase;
+    ULONG   np_SegList;
+    ULONG   np_Sum;
+} NetdevProfSegTag;
+
+_Static_assert(sizeof(NetdevProfSegTag) == 5u * sizeof(ULONG),
+               "the profiler segment tag is exactly five longwords");
+
 typedef struct NetdevDevice
 {
     struct Device       nd_Device;
     struct Library     *nd_ExpansionBase;
     BPTR                nd_SegList;
+    NetdevProfSegTag    nd_ProfSegTag;
     UWORD               nd_UnitCount;
     /* Supported boards found past NETDEV_MAX_UNITS.  Non-zero means a fitted
        card has no unit and nothing else would have said so. */

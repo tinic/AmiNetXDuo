@@ -122,6 +122,18 @@ const struct Resident netdev_romtag =
 
 /* --------------------------------------------------------------- helpers -- */
 
+static VOID netdev_prof_segtag(NetdevDevice *base, BPTR seglist)
+{
+    NetdevProfSegTag *t = &base->nd_ProfSegTag;
+
+    t->np_Magic   = NETDEV_PROF_SEGTAG_MAGIC;
+    t->np_Size    = sizeof(*t);
+    t->np_LibBase = (ULONG)base;
+    t->np_SegList = (ULONG)seglist;
+    t->np_Sum     = 0UL - (t->np_Magic + t->np_Size +
+                           t->np_LibBase + t->np_SegList);
+}
+
 #ifdef NETDEV_TRACE
 /*
  * Raw serial, straight at the custom chips.  A device's romtag init runs
@@ -1957,6 +1969,7 @@ static NetdevDevice *netdev_init(
     SysBase = sysbase;
 
     base->nd_SegList   = seglist;
+    netdev_prof_segtag(base, seglist);
     base->nd_UnitCount = 0;
     InitSemaphore(&base->nd_PcmciaLock);
 

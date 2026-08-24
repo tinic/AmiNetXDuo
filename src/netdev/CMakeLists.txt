@@ -48,6 +48,13 @@ if(AMINETXDUO_NETDEV_LINK AND CMAKE_CROSSCOMPILING)
     # guard above already means cross-only, so this needs no second one.
     target_link_options(anxnet_device PRIVATE "-Wl,-u,_netdev_romtag")
 
+    # Profile can recover the device's hunk addresses from the segment tag in
+    # its base.  Keep the other half of that contract beside the binary: a
+    # diagnostic non-LTO build's map and objects name every file-static
+    # routine once profreport.py has relocated those hunks.
+    target_link_options(anxnet_device PRIVATE
+        "-Wl,-Map=$<TARGET_FILE_DIR:anxnet_device>/anxnet.device.map")
+
     target_include_directories(anxnet_device PRIVATE
         ${AMINETXDUO_CORE_INCLUDES}
         "${CMAKE_CURRENT_SOURCE_DIR}"
