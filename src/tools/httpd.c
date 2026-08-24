@@ -7385,12 +7385,6 @@ static BOOL httpd_writable(HttpConn *c)
 
 /* ------------------------------------------------------------------ main --- */
 
-/* The second listener.  IPv4 has failed on this hardware for reasons the
-   drivers section of the changelog can recount at length, and a rig whose
-   only door is v4 is a rig that maroons its operator.  -1 when v6 could not
-   be bound, and everything that touches it tolerates that. */
-static LONG httpd_lsock6 = -1;
-
 static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port)
 {
     ToolSockAddrAny sa;
@@ -7504,7 +7498,7 @@ static VOID httpd_serve(LONG lsock)
         ToolFdSet   readfds;
         ToolFdSet   writefds;
         ToolTimeval tv;
-        LONG        nfds = ((httpd_lsock6 > lsock) ? httpd_lsock6 : lsock) + 1;
+        LONG        nfds = lsock + 1;
         LONG        ready;
         ULONG       i;
         ULONG       live = 0;
@@ -7596,8 +7590,6 @@ static VOID httpd_serve(LONG lsock)
          */
         if (live < httpd_conns)
             tool_fd_add(&readfds, lsock);
-        if (httpd_lsock6 >= 0 && live < httpd_conns)
-            tool_fd_add(&readfds, httpd_lsock6);
 
         tv.tv_secs  = 0;
         /*
@@ -7652,9 +7644,6 @@ static VOID httpd_serve(LONG lsock)
 
         if (ready > 0 && live < httpd_conns && tool_fd_isset(&readfds, lsock))
             httpd_accept(lsock);
-        if (ready > 0 && live < httpd_conns && httpd_lsock6 >= 0 &&
-            tool_fd_isset(&readfds, httpd_lsock6))
-            httpd_accept(httpd_lsock6);
 
         for (i = 0; i < httpd_conns; i++)
         {
@@ -8149,6 +8138,26 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    /*
+     * No ADDRESS means every address, and on this stack that is spelled as
+     * ONE listener on the IPv6 wildcard: bsd_bind_accepts() makes a [::]
+     * listener deliberately dual-stack, and NetX keys its listen table by
+     * port alone, so a second socket for the other family is not merely
+     * redundant, it is EADDRINUSE.  A named ADDRESS keeps its family; that
+     * is what naming one asks for.
+     */
+    if (args[ARG_ADDRESS] == 0 && tool_sock_have_ipv6(httpd_sb))
+    {
+        UWORD b;
+
+        address.ta_Family  = (UWORD)TOOL_AF_INET6;
+        address.ta_Pad     = 0;
+        address.ta_V4      = 0;
+        for (b = 0; b < 16; b++)
+            address.ta_V6[b] = 0;
+        address.ta_ScopeId = 0;
+    }
+
     httpd_conn = (HttpConn *)ami_alloc(httpd_conns * (ULONG)sizeof(HttpConn));
     if (httpd_conn == NULL)
     {
@@ -8233,24 +8242,17 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (TOOL_ADDR_IS6(&address) && args[ARG_ADDRESS] == 0)
+        tool_printf("Serving %s read-write on port %ld, IPv4 and IPv6"
+                    "  (Ctrl-C to stop)\n",
+                    (LONG)httpd_root, (LONG)port);
+    else
     {
-        ToolAddr any6;
-        UWORD    b;
-
-        any6.ta_Family  = (UWORD)TOOL_AF_INET6;
-        any6.ta_Pad     = 0;
-        any6.ta_V4      = 0;
-        for (b = 0; b < 16; b++)
-            any6.ta_V6[b] = 0;          /* [::], every interface */
-        any6.ta_ScopeId = 0;
-
-        httpd_lsock6 = httpd_listen(&any6, port);
+        tool_addr_text(httpd_sb, &address, dotted, sizeof(dotted));
+        tool_printf("Serving %s read-write on http://%s:%ld/"
+                    "  (Ctrl-C to stop)\n",
+                    (LONG)httpd_root, (LONG)dotted, (LONG)port);
     }
-
-    tool_addr_text(httpd_sb, &address, dotted, sizeof(dotted));
-    tool_printf("Serving %s read-write on http://%s:%ld/%s  (Ctrl-C to stop)\n",
-                (LONG)httpd_root, (LONG)dotted, (LONG)port,
-                (LONG)((httpd_lsock6 >= 0) ? " and on IPv6" : ""));
 
     if (httpd_term_page[0] != '\0')
     {
@@ -8330,8 +8332,6 @@ int main(int argc, char **argv)
     ami_free(httpd_info);
     ami_free(httpd_fib2);
 
-    if (httpd_lsock6 >= 0)
-        (VOID)tool_sock_close(httpd_sb, httpd_lsock6);
     (VOID)tool_sock_close(httpd_sb, lsock);
     CloseLibrary(httpd_sb);
     FreeArgs(rda);
