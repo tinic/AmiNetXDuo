@@ -487,6 +487,22 @@ if(NOT AMINETXDUO_TCP_ACK_EVERY_N STREQUAL "")
         NX_TCP_ACK_EVERY_N_PACKETS=${AMINETXDUO_TCP_ACK_EVERY_N})
 endif()
 
+# Lazy SANA-II transmit-completion collection.  The shipped design signals a
+# reader per completed CMD_WRITE; during a bulk receive that wake preempts the
+# thread emitting the acknowledgment to collect a reply the next send's own
+# reap walk would have collected anyway, measured at ~0.7 ms of exec glue and
+# two scheduler transitions per acknowledgment on the A1200.  ON parks the
+# reply port PA_IGNORE while sends flow and moves the quiet-link safety net,
+# the eleven-second lesson in sana2_tx.c's header, to a one-tick timer that
+# bounds any completion's collection at ~20 ms.  Behaviour, not layout, so it
+# could be per-target; whole-tree like its neighbours so one flag is one arm
+# of an A/B.
+option(AMINETXDUO_TX_LAZY_COLLECT
+       "Collect TX completions lazily, signalling only on a quiet link" OFF)
+if(AMINETXDUO_TX_LAZY_COLLECT)
+    add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
+endif()
+
 # RFC 2018 selective acknowledgment on the receive side.  Also a layout change
 # to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
 # measurement come out of one tree the same way as the option above.

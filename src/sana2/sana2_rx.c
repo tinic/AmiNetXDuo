@@ -1591,6 +1591,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         }
     }
 
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /* The readers exist and the first carries the reaping duty, so the lazy
+       parking's safety net can go live. Not fatal if it cannot: parking
+       stays disengaged and completions signal as shipped. */
+    ami_sana2_tx_lazy_start(iface);
+#endif
+
     iface->rx_running = TRUE;
     return 0;
 }
@@ -1599,6 +1606,13 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
 {
     UWORD i;
     ULONG zombies;
+
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /* Before the readers unwind: the timer defers into iface->ip and holds a
+       pointer into this interface, so it goes first, and the port goes back
+       to signalling for whatever completions the teardown still collects. */
+    ami_sana2_tx_lazy_stop(iface);
+#endif
 
 #ifdef AMINETXDUO_RXPROBE
     ami_sana2_rxprobe_report(iface);

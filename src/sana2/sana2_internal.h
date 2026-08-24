@@ -517,6 +517,22 @@ struct AmiSana2If
     struct MsgPort      tx_port;
     AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
 
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /*
+     * Lazy completion collection, see ami_sana2_tx_lazy_tick(). The timer is
+     * the safety net that collects and un-parks; parking only engages while
+     * it exists (tx_lazy_timer_up). tx_lazy_parked mirrors "mp_Flags is
+     * PA_IGNORE because of a send", never "because no reader is bound", and
+     * every transition of it happens under the same Disable() that guards
+     * the port flags. tx_lazy_last_send is the ThreadX tick of the most
+     * recent send, what the tick measures link quiet against.
+     */
+    TX_TIMER            tx_lazy_timer;
+    BOOL                tx_lazy_timer_up;
+    volatile BOOL       tx_lazy_parked;
+    volatile ULONG      tx_lazy_last_send;
+#endif
+
     /* RX readers, one per packet type. */
     AmiSana2Rx          rx[AMI_SANA2_RX_READERS];
     BOOL                rx_running;
@@ -586,6 +602,10 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface);
 VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit);
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface);
 VOID ami_sana2_tx_defer(AmiSana2If *iface);
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+VOID ami_sana2_tx_lazy_start(AmiSana2If *iface);
+VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface);
+#endif
 VOID ami_sana2_tx_drain(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);

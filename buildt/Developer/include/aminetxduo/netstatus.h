@@ -1048,8 +1048,12 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Settle;     /* handed to IP -> receive notify    */
     NetStatusBudgetLeg  nrb_Fetch;      /* receive notify -> recv() dequeue  */
     NetStatusBudgetLeg  nrb_Ack;        /* CMD_WRITE BeginIO -> reply reaped */
-    NetStatusBudgetLeg  nrb_Push;       /* driver entry send case, enter to
-                                           return: the CPU an ACK costs      */
+    /* The CPU an ACK costs to emit, in three pieces whose sum is the old
+       nrb_Push: src/sana2/sana2_tx.c says exactly what each spans. */
+    NetStatusBudgetLeg  nrb_Reap;       /* TX completion reap walk           */
+    NetStatusBudgetLeg  nrb_Stuff;      /* slot claim + framing, to BeginIO  */
+    NetStatusBudgetLeg  nrb_Post;       /* BeginIO enter -> return (the copy
+                                           hook and FIFO stuffing run inside) */
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

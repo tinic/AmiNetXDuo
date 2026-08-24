@@ -59,6 +59,17 @@
  * no reader bound at all: open-time probing, an interface not yet enabled, or
  * a reader that could not get a signal bit.
  *
+ * AMINETXDUO_TX_LAZY_COLLECT changes one thing about the arrangement above:
+ * while sends are flowing, the completion signal is withheld. During a bulk
+ * receive every transmitted frame is an acknowledgment, the device completes
+ * it synchronously inside BeginIO, and the ReplyMsg's Signal() wakes the
+ * reader, which preempts the sender, defers, and hands the IP thread a reply
+ * that the next send's own reap walk was about to collect anyway. Measured on
+ * the A1200 that round trip is ~0.7 ms of exec glue and two scheduler
+ * transitions per acknowledgment, for collection work that happens either
+ * way. See ami_sana2_tx_lazy_tick() for the mechanism and the safety net
+ * that keeps the eleven-second story above from coming back.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -111,6 +122,12 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
         slot->write_at = 0UL;
 #endif
     }
+
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    iface->tx_lazy_timer_up  = FALSE;
+    iface->tx_lazy_parked    = FALSE;
+    iface->tx_lazy_last_send = 0UL;
+#endif
 }
 
 /*
@@ -141,6 +158,10 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
     iface->tx_port.mp_SigTask = task;
     iface->tx_port.mp_SigBit  = (UBYTE)sigbit;
     iface->tx_port.mp_Flags   = PA_SIGNAL;
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /* The port is armed, whatever parking a previous reader's tenure left. */
+    iface->tx_lazy_parked = FALSE;
+#endif
     Enable();
 }
 
@@ -158,6 +179,11 @@ VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface)
     iface->tx_port.mp_Flags   = PA_IGNORE;
     iface->tx_port.mp_SigTask = NULL;
     iface->tx_port.mp_SigBit  = 0;
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /* PA_IGNORE now means "no reader", not "parked": the lazy tick must not
+       hand this task-less port a PA_SIGNAL back. */
+    iface->tx_lazy_parked = FALSE;
+#endif
     Enable();
 }
 
@@ -188,6 +214,106 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
 
     _nx_ip_driver_deferred_processing(iface->ip);
 }
+
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+/*
+ * Lazy completion collection: no signal per completed CMD_WRITE while sends
+ * are flowing.
+ *
+ * ami_sana2_tx_send() parks the reply port PA_IGNORE just before BeginIO, so
+ * the synchronous completion inside it queues its reply silently, and the
+ * next send's reap walk collects it, which is what happens to most replies
+ * under the shipped design too -- the signal it fires per completion buys a
+ * reader wake, a preemption of the sender and a deferred-processing round
+ * whose only purpose is to collect a reply the next send would have
+ * collected in ~232 us of walk anyway.
+ *
+ * What the shipped signal actually protects is the QUIET link: the lost
+ * ClientHello of the header comment, one segment, no next send, a reply that
+ * sits un-reaped and blocks its own retransmission for eleven seconds. That
+ * duty moves to this one-tick TX_TIMER, which runs in the same context as
+ * NetX Duo's own periodic timers (the tick task, TX_TIMER_PROCESS_IN_ISR)
+ * and does two small things:
+ *
+ *   1. Collects. If anything is queued on the reply port it asks for
+ *      deferred processing, exactly as the reader's wake handler does. A
+ *      completed write is therefore always collected within one tick,
+ *      ~20 ms, whether or not another send ever happens -- against the
+ *      retransmission timer's hundreds of milliseconds that exposure is
+ *      noise, against the eleven seconds it is the whole fix.
+ *
+ *   2. Un-parks. Once the last send is more than a tick old the port gets
+ *      PA_SIGNAL back (only if a reader still owns it; unbind's PA_IGNORE
+ *      means "no reader" and must stay), so a link that has gone quiet is
+ *      back on the shipped arrangement and a lone request/response exchange
+ *      pays no added latency at all.
+ *
+ * The shutdown paths never depended on the signal: ami_sana2_tx_drain()
+ * polls ami_sana2_tx_reap() in its own loop, and rx_stop deletes this timer
+ * before the readers unwind, so the timer cannot outlive the interface it
+ * points into.
+ *
+ * If the timer cannot be created the parking never engages
+ * (tx_lazy_timer_up gates it) and the interface runs the shipped design.
+ */
+static VOID ami_sana2_tx_lazy_tick(ULONG argument)
+{
+    AmiSana2If *iface = (AmiSana2If *)argument;
+
+    if (iface->tx_lazy_parked &&
+        (tx_time_get() - iface->tx_lazy_last_send) > 1UL)
+    {
+        Disable();
+        if (iface->tx_port.mp_SigTask != NULL)
+            iface->tx_port.mp_Flags = PA_SIGNAL;
+        iface->tx_lazy_parked = FALSE;
+        Enable();
+    }
+
+    /* Restoring PA_SIGNAL raises nothing for a reply already queued, so the
+       collection below is not conditional on the parking above. */
+    ami_sana2_tx_defer(iface);
+}
+
+VOID ami_sana2_tx_lazy_start(AmiSana2If *iface)
+{
+    if (iface == NULL || iface->tx_lazy_timer_up)
+        return;
+
+    iface->tx_lazy_parked    = FALSE;
+    iface->tx_lazy_last_send = 0UL;
+
+    if (tx_timer_create(&iface->tx_lazy_timer, (CHAR *)"anxd tx lazy",
+                        ami_sana2_tx_lazy_tick, (ULONG)iface,
+                        1UL, 1UL, TX_AUTO_ACTIVATE) == TX_SUCCESS)
+    {
+        iface->tx_lazy_timer_up = TRUE;
+    }
+    else
+    {
+        AMI_WARN("sana2: no lazy-collect tick. Completions signal per "
+                 "write, the shipped design");
+    }
+}
+
+VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
+{
+    if (iface == NULL || !iface->tx_lazy_timer_up)
+        return;
+
+    tx_timer_deactivate(&iface->tx_lazy_timer);
+    tx_timer_delete(&iface->tx_lazy_timer);
+    iface->tx_lazy_timer_up = FALSE;
+
+    /* Hand the port back to the shipped arrangement: signalling whenever a
+       reader is bound. Without the tick no parking is safe. */
+    Disable();
+    if (iface->tx_port.mp_SigTask != NULL)
+        iface->tx_port.mp_Flags = PA_SIGNAL;
+    iface->tx_lazy_parked = FALSE;
+    Enable();
+}
+#endif /* AMINETXDUO_TX_LAZY_COLLECT */
 
 /*
  * Reap finished writes. Non-blocking by construction: GetMsg() on an empty
@@ -709,6 +835,30 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         for (i = 0; i < SANA2_MAX_ADDR_BYTES; i++)
             slot->req.ios2_DstAddr[i] = 0;
     }
+
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    /*
+     * Park the reply port before BeginIO, because a device is free to
+     * complete the write synchronously inside it and the completion this
+     * send makes silent is its own. The stamp is what the tick's un-park
+     * measures quiet against; the flags flip is once per park, not per
+     * send, so the steady state costs one load and one store here. Only
+     * with the tick net live, and only over a PA_SIGNAL port, so a missing
+     * timer or an unbound reader leaves the shipped behaviour alone.
+     */
+    iface->tx_lazy_last_send = tx_time_get();
+    if (iface->tx_lazy_timer_up && !iface->tx_lazy_parked)
+    {
+        Disable();
+        if (iface->tx_port.mp_SigTask != NULL &&
+            iface->tx_port.mp_Flags == PA_SIGNAL)
+        {
+            iface->tx_port.mp_Flags = PA_IGNORE;
+            iface->tx_lazy_parked   = TRUE;
+        }
+        Enable();
+    }
+#endif
 
     /*
      * BeginIO() and not SendIO(), because SendIO() is
