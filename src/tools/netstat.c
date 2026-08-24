@@ -210,6 +210,95 @@ static VOID show_health(const ToolStats *st)
 }
 
 /*
+ * One leg of the receive step budget: mean and max in microseconds, and the
+ * histogram as the three fullest power-of-two buckets, which is the whole
+ * story when a distribution is bimodal and noise when it is not.  Ticks
+ * convert at ~709/ms, so `ticks * 1000 / (rate / 1000)` stays inside 32 bits
+ * for every delta the library's ceiling admits.
+ */
+static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
+                            ULONG rate)
+{
+    ULONG khz = (rate != 0UL) ? rate / 1000UL : 709UL;
+    UWORD top[3] = { 0, 0, 0 };
+    UWORD i;
+    UWORD n = 0;
+
+    if (leg->nbl_Count == 0)
+    {
+        tool_printf("\t%s: no samples\n", (LONG)name);
+        return;
+    }
+
+    tool_printf("\t%s: %lu samples, mean %lu us, max %lu us\n", (LONG)name,
+                leg->nbl_Count,
+                (leg->nbl_Sum / leg->nbl_Count) * 1000UL / khz,
+                leg->nbl_Max * 1000UL / khz);
+
+    for (i = 0; i < NETSTATUS_BUDGET_BUCKETS; i++)
+    {
+        if (leg->nbl_Hist[i] == 0)
+            continue;
+        if (n < 3)
+            top[n++] = i;
+        else if (leg->nbl_Hist[i] > leg->nbl_Hist[top[0]] ||
+                 leg->nbl_Hist[i] > leg->nbl_Hist[top[1]] ||
+                 leg->nbl_Hist[i] > leg->nbl_Hist[top[2]])
+        {
+            UWORD least = (leg->nbl_Hist[top[0]] <= leg->nbl_Hist[top[1]])
+                              ? ((leg->nbl_Hist[top[0]] <=
+                                  leg->nbl_Hist[top[2]]) ? 0 : 2)
+                              : ((leg->nbl_Hist[top[1]] <=
+                                  leg->nbl_Hist[top[2]]) ? 1 : 2);
+            top[least] = i;
+        }
+    }
+
+    for (i = 0; i < n; i++)
+        tool_printf("\t    %lu under %lu us\n",
+                    leg->nbl_Hist[top[i]],
+                    ((1UL << top[i]) * 1000UL) / khz + 1UL);
+}
+
+/*
+ * The receive step budget, when the library was built to keep one
+ * (AMINETXDUO_RXPROBE).  Any library answers the selector; only an
+ * instrumented one has counts, and the difference is said out loud rather
+ * than shown as a wall of zeros.
+ */
+static VOID show_budget(VOID)
+{
+    static UBYTE buf[sizeof(NetStatusHeader) + sizeof(NetStatusRxBudget)];
+    NetStatusRxBudget *b;
+    struct Library    *base = tool_netstatus_open(TRUE);
+
+    if (base == NULL)
+        return;
+
+    if (tool_netstatus_query(base, NETSTATUS_RXBUDGET, buf, sizeof(buf),
+                             sizeof(NetStatusRxBudget)) <= 0)
+        return;                     /* an older library: no selector, no line */
+
+    b = (NetStatusRxBudget *)(buf + sizeof(NetStatusHeader));
+
+    tool_printf("\nreceive budget:\n");
+
+    if (b->nrb_Drain.nbl_Count == 0 && b->nrb_Settle.nbl_Count == 0 &&
+        b->nrb_Fetch.nbl_Count == 0)
+    {
+        tool_printf("\tnot instrumented (a probe build keeps one)\n");
+        return;
+    }
+
+    show_budget_leg("drain,  reader to IP thread ", &b->nrb_Drain,
+                    b->nrb_EClockRate);
+    show_budget_leg("settle, IP thread to notify ", &b->nrb_Settle,
+                    b->nrb_EClockRate);
+    show_budget_leg("fetch,  notify to recv()    ", &b->nrb_Fetch,
+                    b->nrb_EClockRate);
+}
+
+/*
  * The per-protocol half of -s: the same ToolStats ShowNetStatus prints under
  * IP, ICMP, TCP and UDP, laid out the way netstat lays things out.
  */
@@ -570,6 +659,7 @@ int main(int argc, char **argv)
     {
         show_protocol_stats(&stats);
         show_stats(cfg, &snap);
+        show_budget();
     }
     if (want_routes)
         show_routes(cfg);

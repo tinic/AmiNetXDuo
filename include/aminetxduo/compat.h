@@ -160,6 +160,7 @@ ULONG ami_millis(VOID);
 /* The same, for a caller that may not block: 0 rather than opening the timer.
    src/common/events.c says why. */
 ULONG ami_millis_quick(VOID);
+ULONG ami_eclock_rate(VOID);
 
 /* Hands timer.device back the open ami_millis() took lazily. A library must
    call this before its segment is unloaded; a Shell command need not. */

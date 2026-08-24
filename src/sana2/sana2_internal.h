@@ -300,24 +300,6 @@ typedef struct AmiRxProbe
     UWORD   worst_avail[AMI_RXPROBE_WORST];
     ULONG   last_wake;
     ULONG   baton_last;
-
-    /*
-     * The step budget: where one frame's 2.6 ms goes, as E-Clock aggregates
-     * per hop.  docs/PHYSICAL_RX_A1200.md ends with the copies and the wakeups
-     * accounted and four fifths of busy time not attributed to either; these
-     * are the hops that hold the remainder.  Each is count / sum / max and a
-     * log2 histogram, the same shape the baton figures above use, because a
-     * mean hides exactly the bimodality that matters here.
-     *
-     * Only the drain leg lives here, because only the reader produces it:
-     * ami_sana2_rx_complete(), reply dequeued to packet handed on.  The
-     * settle and fetch legs cross modules and aggregate in the library-wide
-     * budget of src/common/budget.c instead.
-     */
-    ULONG   drain_count;
-    ULONG   drain_sum;
-    ULONG   drain_max;
-    ULONG   drain_hist[AMI_RXPROBE_BUCKETS];
 } AmiRxProbe;
 
 

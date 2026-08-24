@@ -41,6 +41,7 @@
 #include "interfaces.h"
 
 #include "aminetxduo/netstatus.h"
+#include "aminetxduo/budget.h"
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
@@ -1462,6 +1463,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_TCPSTALL:    need = 0;                        break;
         case NETSTATUS_DEST6:       need = 0;                        break;
         case NETSTATUS_EVENTS:      need = 0;                        break;
+        case NETSTATUS_RXBUDGET:    need = sizeof(NetStatusRxBudget); break;
         default:                    return bsd_fail(SocketBase, AMI_EINVAL);
     }
 
@@ -1493,6 +1495,50 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
            that, and a reader with a buffer too small still learns the size
            it needs. */
         w.available = held;
+        ns_writer_finish(&w);
+        return (LONG)hdr->nsh_Count;
+    }
+
+    /*
+     * Like HEALTH: the budget is the library's own memory, not NetX Duo's,
+     * so no baton and no stack lookup.  A build without the probe answers
+     * all-zero counts through the same shape, which is what lets one tool
+     * serve both builds and say which it met.
+     */
+    if (what == NETSTATUS_RXBUDGET)
+    {
+        NetStatusRxBudget *out;
+
+        ns_writer_init(&w, hdr, size, NETSTATUS_RXBUDGET,
+                       sizeof(NetStatusRxBudget));
+        out = (NetStatusRxBudget *)ns_writer_next(&w);
+        if (out != NULL)
+        {
+            out->nrb_EClockRate = ami_eclock_rate();
+#ifdef AMINETXDUO_RXPROBE
+            /* Field for field rather than one memcpy: the two structs agree
+               today, and this keeps a divergence a compile error tomorrow. */
+            out->nrb_Drain.nbl_Count  = ami_budget.drain.count;
+            out->nrb_Drain.nbl_Sum    = ami_budget.drain.sum;
+            out->nrb_Drain.nbl_Max    = ami_budget.drain.max;
+            out->nrb_Settle.nbl_Count = ami_budget.settle.count;
+            out->nrb_Settle.nbl_Sum   = ami_budget.settle.sum;
+            out->nrb_Settle.nbl_Max   = ami_budget.settle.max;
+            out->nrb_Fetch.nbl_Count  = ami_budget.fetch.count;
+            out->nrb_Fetch.nbl_Sum    = ami_budget.fetch.sum;
+            out->nrb_Fetch.nbl_Max    = ami_budget.fetch.max;
+            {
+                UWORD i;
+
+                for (i = 0; i < NETSTATUS_BUDGET_BUCKETS; i++)
+                {
+                    out->nrb_Drain.nbl_Hist[i]  = ami_budget.drain.hist[i];
+                    out->nrb_Settle.nbl_Hist[i] = ami_budget.settle.hist[i];
+                    out->nrb_Fetch.nbl_Hist[i]  = ami_budget.fetch.hist[i];
+                }
+            }
+#endif
+        }
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;
     }

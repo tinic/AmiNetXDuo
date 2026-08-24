@@ -72,6 +72,11 @@ static VOID ami_budget_leg(AmiBudgetLeg *leg, ULONG dt)
     leg->hist[b]++;
 }
 
+VOID ami_budget_drain(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.drain, dt);
+}
+
 VOID ami_budget_deliver(ULONG now)
 {
     ami_budget.deliver_at = now;

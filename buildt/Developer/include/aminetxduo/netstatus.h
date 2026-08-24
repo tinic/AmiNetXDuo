@@ -189,7 +189,6 @@ extern "C" {
    they are. A version-10 library that predates it answers EINVAL, and
    ShowNetStatus leaves the section out rather than reporting a fault. */
 #define NETSTATUS_EVENTS       16   /* NetStatusEvent[]                      */
-#define NETSTATUS_RXBUDGET     17   /* one NetStatusRxBudget                 */
 
 /*
  * Every buffer starts with this. The caller fills nsh_Magic and nsh_Version.
@@ -1021,32 +1020,6 @@ typedef struct NetStatusEvent
                                            there was no clock yet            */
     ULONG   nse_Seq;                    /* 1 for the first ever recorded     */
 } NetStatusEvent;
-
-/* -------------------------------------------------- NETSTATUS_RXBUDGET,
- *
- * The receive step budget: one frame's journey from the SANA-II reader to
- * recv(), as E-Clock aggregates per hop.  Filled only by a library built with
- * AMINETXDUO_RXPROBE; any other build answers the selector with every count
- * zero, so a tool can always ask and honestly print "not instrumented".
- * aminetxduo/budget.h defines the legs and src/common/budget.c the method.
- */
-#define NETSTATUS_BUDGET_BUCKETS  20
-
-typedef struct NetStatusBudgetLeg
-{
-    ULONG   nbl_Count;
-    ULONG   nbl_Sum;                    /* E-Clock ticks                     */
-    ULONG   nbl_Max;
-    ULONG   nbl_Hist[NETSTATUS_BUDGET_BUCKETS];  /* [i] holds < 2^i ticks    */
-} NetStatusBudgetLeg;
-
-typedef struct NetStatusRxBudget
-{
-    ULONG               nrb_EClockRate; /* ticks per second, for conversion  */
-    NetStatusBudgetLeg  nrb_Drain;      /* reply dequeued -> handed to IP    */
-    NetStatusBudgetLeg  nrb_Settle;     /* handed to IP -> receive notify    */
-    NetStatusBudgetLeg  nrb_Fetch;      /* receive notify -> recv() dequeue  */
-} NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,
  *

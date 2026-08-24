@@ -343,6 +343,14 @@ ULONG ami_millis_quick(VOID)
     return ami_timer_ready ? ami_millis() : 0UL;
 }
 
+/* The measured E-Clock rate, or 0 before timer.device answered.  A reader
+   converting tick aggregates to time wants the measured number, not the PAL
+   constant a NTSC machine would be wrong by. */
+ULONG ami_eclock_rate(VOID)
+{
+    return ami_timer_ready ? ami_eclock_hz : 0UL;
+}
+
 #ifdef AMINETXDUO_RXPROBE
 /*
  * The raw E-Clock low word, for the step budget's hop stamps

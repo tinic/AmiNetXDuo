@@ -775,17 +775,10 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
      * inside deliver, where the TCP sequence is still in reach.
      */
     {
-        ULONG t0 = ami_rxprobe_clock();
-        ULONG dt;
+        ULONG t0 = ami_budget_clock();
 
         ami_sana2_rx_deliver(iface, packet, slot);
-
-        dt = ami_rxprobe_clock() - t0;
-        rx->probe.drain_count++;
-        rx->probe.drain_sum += dt;
-        if (dt > rx->probe.drain_max)
-            rx->probe.drain_max = dt;
-        rx->probe.drain_hist[ami_rxprobe_bucket(dt)]++;
+        ami_budget_drain(ami_budget_clock() - t0);
     }
 #else
     ami_sana2_rx_deliver(iface, packet, slot);
