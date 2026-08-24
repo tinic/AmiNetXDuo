@@ -228,6 +228,36 @@ set_target_properties(test_cycledrill PROPERTIES OUTPUT_NAME "CycleDrill")
 # thirty entry points; the rest is what nothing has ever watched.  The table is
 # checked for being dense and in LVO order, so a vector nobody wrote a row for
 # shifts every later row and fails rather than going quietly uncovered.
+# IoSumDrill runs n68k_port_in_w_sum() against a reference written from the
+# specification, in the guest, on the real instructions.  The host tier cannot
+# reach it -- it is assembler -- and the emulated NE2000 arm never calls it,
+# because the DP8390 claim path drains without summing.  Only the 3c589 asks
+# for the fused form, so without this the routine is covered by one machine
+# that exists once.  The sources are taken the same way anxnet.device takes
+# them: the .S end-to-end #ifdef'd on the switch, the .c supplying the symbols
+# when it is off, so the drill measures whichever of the two the driver would
+# have used.
+add_executable(test_iosumdrill iosumdrill.c
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+    "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+target_include_directories(test_iosumdrill PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/net68k")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_iosumdrill PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+if(AMINETXDUO_NET68K_ASM)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c"
+        PROPERTIES COMPILE_DEFINITIONS AMINETXDUO_NET68K_ASM=1)
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
+        PROPERTIES COMPILE_OPTIONS "${AMIGA_ARCH_FLAGS}")
+endif()
+target_compile_options(test_iosumdrill PRIVATE -Wall -Wextra)
+set_target_properties(test_iosumdrill PROPERTIES OUTPUT_NAME "IoSumDrill")
+
 add_executable(test_apidrill apidrill.c)
 target_include_directories(test_apidrill PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)

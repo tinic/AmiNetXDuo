@@ -328,10 +328,10 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
                     st->unknown_types, st->reconfigurations);
         tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
 
-        /* A card whose driver never calls the copy hook has its frames walked
-           a second time for a checksum the copy could have produced. */
+        /* A card whose receive fill produces no sum has its frames walked a
+           second time for a checksum that move could have produced. */
         if (st->packets_received != 0)
-            tool_printf("  copy hook         %10lu    summed while copying %7lu\n",
+            tool_printf("  copy/direct fill  %10lu    summed while filling %7lu\n",
                         st->rx_copy_hook, st->rx_copy_summed);
 
         /* Only when there are any: the four causes behind receive errors are

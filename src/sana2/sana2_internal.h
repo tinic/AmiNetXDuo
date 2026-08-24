@@ -463,7 +463,7 @@ struct AmiSana2If
     /* S2_AnxCardType points here, not at the caller's AmiIfConfig: the tag
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
-    struct TagItem      buffer_tags[8];
+    struct TagItem      buffer_tags[12];
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
@@ -535,6 +535,8 @@ struct AmiSana2If
 /* ------------------------------------------------------------- internals */
 
 /* sana2_copy.c, called by the device in m68k register convention. */
+UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len);
+VOID   ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed);
 BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));

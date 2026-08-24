@@ -18,6 +18,8 @@
 
 #include "net68k.h"
 
+#include "aminetxduo/anxs2ext.h"
+
 /* _nx_ip_packet_checksum_compute(): the deferred path a declined fusion
    hands the packet to. */
 #include "nx_ip.h"
@@ -410,4 +412,66 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     slot->cursor_off = off;
 
     return (len == 0) ? TRUE : FALSE;
+}
+
+/* ---- the private direct-receive pair, aminetxduo/anxs2ext.h ---------- */
+
+/*
+ * ANXD_S2_RX_DIRECT.  The device asks where this CMD_READ's payload would
+ * land.  Saying yes costs nothing beyond the same checks
+ * ami_sana2_copy_to_buff() would make later; saying no makes the device take
+ * the staging path, so a slot that cannot answer safely just declines.
+ * Interrupt level, copybuff.doc constraints.
+ */
+UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
+{
+    AmiRxSlot *slot = (AmiRxSlot *)ios2_data;
+
+    if (slot == NULL || slot->packet == NULL || slot->dst == NULL)
+        return NULL;
+    if (len > slot->capacity)
+        return NULL;
+
+    return slot->dst;
+}
+
+/*
+ * ANXD_S2_RX_FILLED.  The device wrote the payload itself, straight off the
+ * hardware.  `summed` carries whether `sum` is the longword ones-complement
+ * running sum the verifier expects; a drain without a sum leaves the
+ * verifier to walk the frame at task level, which it already knows how to
+ * do for the paths that decline the fused sum.
+ */
+VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
+{
+    AmiRxSlot *slot = (AmiRxSlot *)ios2_data;
+
+    (VOID)len;
+
+    if (slot == NULL)
+        return;
+
+    /* The deliver path reads slot->copied as the received length, and a
+       zero there means the hook never ran and the frame is refused.  This
+       is the direct path's version of the hook running. */
+    slot->copied = len;
+
+    /* Count completion, not the earlier claim.  A core may claim a slot and
+       then put it back when its hardware drain fails; that frame was neither
+       filled nor summed.  These ABI-stable counter names predate the private
+       direct pair, so "copy hook" now means either receive-fill path. */
+    if (slot->owner != NULL && slot->owner->iface != NULL)
+    {
+        slot->owner->iface->stats.rx_copy_hook++;
+        if (summed != 0)
+            slot->owner->iface->stats.rx_copy_summed++;
+    }
+
+#ifdef AMINETXDUO_RX_VERIFY
+    slot->sum    = sum;
+    slot->summed = (BOOL)(summed != 0);
+#else
+    (VOID)sum;
+    (VOID)summed;
+#endif
 }

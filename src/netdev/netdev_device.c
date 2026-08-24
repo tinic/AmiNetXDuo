@@ -15,6 +15,7 @@
  */
 
 #include "netdev_internal.h"
+#include "aminetxduo/anxs2ext.h"
 #include "netdev_watchdog.h"
 #include "netdev_macgen.h"
 #include "dp8390.h"
@@ -515,6 +516,133 @@ static struct IOSana2Req *netdev_take(struct List *list, ULONG type)
     return NULL;
 }
 
+/* Is there a read for this type without taking it?  netdev_rx_claim() must
+   not steal a frame that a second opener would also have received. */
+static BOOL netdev_would_take(const struct List *list, ULONG type)
+{
+    const struct Node *n;
+
+    for (n = list->lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        const struct IOSana2Req *io = (const struct IOSana2Req *)n;
+
+        if (io->ios2_PacketType == type)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/*
+ * The direct-receive claim, from the core's interrupt context, with only the
+ * frame header in hand.  Success means the payload's destination is returned
+ * and the CMD_READ is off its queue with its address fields already filled;
+ * the core then drains the hardware straight into the answer and finishes
+ * with netdev_rx_claimed().  A claim cannot be cancelled after that point:
+ * both supported port cores have already advanced hardware state once the
+ * drain begins.
+ *
+ * The claim declines whenever the staging path would have done anything the
+ * direct path cannot reproduce: a second opener wanting a copy of the same
+ * type, a raw opener (whose buffer wants the header this function has already
+ * consumed the meaning of), a filter hook (which must see the whole frame
+ * before the copy), or an opener that never offered the direct pair.
+ */
+static UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                              APTR *token)
+{
+    NetdevUnit        *unit = (NetdevUnit *)arg;
+    NetdevOpener      *cand = NULL;
+    struct IOSana2Req *io;
+    struct Node       *n;
+    ULONG              type;
+    UBYTE              flags = 0;
+    UBYTE             *dst;
+    UWORD              plen;
+
+    if (frame_len < NETDEV_HDR_LEN)
+        return NULL;
+
+    type = *(const UWORD *)(const APTR)(hdr + 12);
+    plen = (UWORD)(frame_len - NETDEV_HDR_LEN);
+
+    for (n = unit->nu_OpenerList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+    {
+        NetdevOpener *op = (NetdevOpener *)n;
+
+        if (!netdev_would_take(&op->op_Reads, type))
+            continue;
+        if (cand != NULL)
+            return NULL;        /* two takers: everyone gets the staging copy */
+        cand = op;
+    }
+
+    if (cand == NULL || cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
+        return NULL;
+    if (cand->op_Filter != NULL)
+        return NULL;
+
+    io = netdev_take(&cand->op_Reads, type);
+    if (io == NULL)
+        return NULL;
+
+    /* RAW is also a per-request flag.  The direct destination starts after
+       the Ethernet header, so accepting this request would omit fourteen
+       bytes and report the payload length where SANA-II promises the whole
+       frame.  Put it back for the ordinary hand-over immediately below. */
+    if (netdev_io_is_raw(cand, io))
+    {
+        AddHead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        return NULL;
+    }
+
+    dst = ((AnxdS2RxDirect)cand->op_RxDirect)(io->ios2_Data, plen);
+    if (dst == NULL)
+    {
+        AddHead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        return NULL;
+    }
+
+    if ((hdr[0] & 1) != 0)
+    {
+        flags = (UBYTE)((*(const ULONG *)(const APTR)hdr == 0xffffffffUL &&
+                         *(const UWORD *)(const APTR)(hdr + 4) == 0xffffu)
+                        ? SANA2IOF_BCAST : SANA2IOF_MCAST);
+    }
+
+    nd_addr6(io->ios2_DstAddr, hdr);
+    nd_addr6(io->ios2_SrcAddr, hdr + NETDEV_ADDR_LEN);
+    io->ios2_PacketType = type;
+    io->ios2_DataLength = plen;
+    io->ios2_Req.io_Flags =
+        (UBYTE)((io->ios2_Req.io_Flags & ~(SANA2IOF_BCAST | SANA2IOF_MCAST)) |
+                flags);
+
+    *token = io;
+    return dst;
+}
+
+static VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
+{
+    NetdevUnit        *unit = (NetdevUnit *)arg;
+    struct IOSana2Req *io   = (struct IOSana2Req *)token;
+    NetdevOpener      *op   = NETDEV_OPENER(io->ios2_Req.io_Unit);
+    NetdevTrack       *tr   = netdev_track_find(op, io->ios2_PacketType);
+    UWORD              len  = (UWORD)(io->ios2_DataLength + NETDEV_HDR_LEN);
+
+    ((AnxdS2RxFilled)op->op_RxFilled)(io->ios2_Data, io->ios2_DataLength,
+                                      sum, summed);
+
+    unit->nu_Stats.PacketsReceived++;
+    if (tr != NULL)
+    {
+        tr->st.PacketsReceived++;
+        tr->st.BytesReceived += len;
+    }
+    unit->nu_RxDirect++;
+    netdev_reply(io, 0, 0);
+}
+
 /*
  * Called from the interrupt server with a whole frame.  Every opener that has
  * a CMD_READ outstanding for this packet type gets a copy.  If none does, the
@@ -709,7 +837,7 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
         buf = (UBYTE *)unit->nu_TxBuf;
     unit->nu_TxAt = buf;
 
-    if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    if (netdev_io_is_raw(op, io))
     {
         if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
         {
@@ -1493,6 +1621,8 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     unit->nu_Nic.serial = serial;
     unit->nu_Nic.rx     = netdev_rx;
     unit->nu_Nic.rx_arg = unit;
+    unit->nu_Nic.rx_claim   = netdev_rx_claim;
+    unit->nu_Nic.rx_claimed = netdev_rx_claimed;
 
     netdev_bus_setup(&unit->nu_Nic.bus,
              (APTR)((UBYTE *)board + card->reg_off),
@@ -1948,6 +2078,10 @@ static VOID netdev_take_tags(const struct TagItem *tags, NetdevOpener *op,
 
         if (tag == S2_CopyToBuff)
             op->op_CopyTo = (APTR)tags->ti_Data;
+        else if (tag == ANXD_S2_RX_DIRECT)
+            op->op_RxDirect = (APTR)tags->ti_Data;
+        else if (tag == ANXD_S2_RX_FILLED)
+            op->op_RxFilled = (APTR)tags->ti_Data;
         else if (tag == S2_CopyFromBuff)
             op->op_CopyFrom = (APTR)tags->ti_Data;
         else if (tag == S2_PacketFilter)

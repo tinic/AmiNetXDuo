@@ -50,6 +50,8 @@ typedef struct NetdevOpener
     APTR                op_CopyTo;
     APTR                op_CopyFrom;
     APTR                op_Filter;
+    APTR                op_RxDirect;    /* aminetxduo/anxs2ext.h, or NULL */
+    APTR                op_RxFilled;
 
     UBYTE               op_Raw;
     UBYTE               op_Promisc;
@@ -63,6 +65,16 @@ typedef struct NetdevOpener
     NetdevTrack         op_Track[NETDEV_TRACK_MAX];
     UWORD               op_TrackHigh;   /* one past the highest used slot */
 } NetdevOpener;
+
+/* RAW is permitted on either the opener or one individual request.  Keep
+   that SANA-II rule in one predicate: receive hand-over, direct receive and
+   transmit must not quietly disagree about which framing the buffer uses. */
+static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
+                                    const struct IOSana2Req *io)
+{
+    return (BOOL)(op->op_Raw ||
+                  (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+}
 
 typedef struct NetdevUnit
 {
@@ -88,6 +100,7 @@ typedef struct NetdevUnit
     ULONG                       nu_IntSeen;   /* claimed interrupts delivered  */
     ULONG                       nu_TickPolls; /* tick-serviced during silence  */
     UWORD                       nu_IntSilent; /* blanks since a claimed one    */
+    ULONG                       nu_RxDirect;  /* completed direct RX fills      */
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */
     UWORD                       nu_RxKicks;   /* deaf-boot resets performed    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */

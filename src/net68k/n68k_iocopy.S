@@ -209,4 +209,83 @@ _n68k_port_out:
         movem.l sp@+,d2-d7/a2-a3
         rts
 
+| ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes)
+|
+| Drain `bytes` of frame from a fixed 16-bit data port into `to`, summing as
+| the words go past: the 32-bit ones-complement longword sum with per-add
+| end-around carry and a zero-padded, byte-positioned tail -- exactly what
+| n68k_copy_sum_longwords() computes over the same bytes, because the
+| verifier that consumes the answer cannot tell who produced it.  The
+| destination must be even; the caller guarantees it (the receive slot's
+| payload pointer is longword aligned by construction).
+        .globl  _n68k_port_in_w_sum
+_n68k_port_in_w_sum:
+        movem.l d2-d3,sp@-
+        movea.l sp@(12),a0              | to
+        movea.l sp@(16),a1              | port
+        move.l  sp@(20),d0              | bytes
+        moveq   #0,d1                   | sum
+
+        move.l  d0,d3
+        lsr.l   #2,d3                   | whole longwords
+        beq     .Lpws_tail
+.Lpws_loop:
+        move.w  a1@,d2
+        swap    d2
+        move.w  a1@,d2                  | d2 = (w0 << 16) | w1
+        move.l  d2,a0@+
+        add.l   d2,d1
+        bcc.s   .Lpws_nc
+        addq.l  #1,d1                   | end-around carry, per add
+.Lpws_nc:
+        subq.l  #1,d3
+        bne     .Lpws_loop
+.Lpws_tail:
+        and.l   #3,d0                   | 0..3 bytes remain
+        beq     .Lpws_done
+        moveq   #0,d2
+        move.w  a1@,d3                  | first tail word off the port
+        cmp.l   #1,d0
+        beq     .Lpws_t1
+        cmp.l   #2,d0
+        beq     .Lpws_t2
+| three bytes: the word, then the next word's high byte, low lane zero.
+| The isolation is done before the byte is positioned, not after: `move.w`
+| leaves the upper half of d3 holding the word just consumed, and shifting
+| that left would OR a whole stale word into the answer.  A three-byte tail
+| is what a 331-byte payload has, which is what a DHCP offer is, so the
+| frames this corrupted were exactly the ones a machine needs to boot.
+        move.w  d3,a0@+
+        swap    d3
+        move.l  d3,d2                   | word << 16
+        move.w  a1@,d3
+        and.l   #0xff00,d3              | the byte alone, already at 15..8
+        or.l    d3,d2
+        lsr.l   #8,d3                   | and in the low lane to be stored
+        move.b  d3,a0@                  | stored as the third byte
+        bra     .Lpws_tadd
+.Lpws_t1:
+| one byte: the word's high byte, positioned as bits 31..24.  The swap is
+| the whole trick: b0 << 8 in the low half becomes b0 << 24 in the high.
+        move.l  d3,d2
+        and.l   #0xff00,d2
+        swap    d2
+        lsr.w   #8,d3
+        move.b  d3,a0@
+        bra     .Lpws_tadd
+.Lpws_t2:
+| two bytes: the word, positioned in the upper half
+        move.w  d3,a0@+
+        swap    d3
+        move.l  d3,d2
+        bra     .Lpws_tadd
+.Lpws_tadd:
+        add.l   d2,d1
+        bcc.s   .Lpws_done
+        addq.l  #1,d1
+.Lpws_done:
+        move.l  d1,d0
+        movem.l sp@+,d2-d3
+        rts
+
 #endif /* AMINETXDUO_NET68K_ASM */

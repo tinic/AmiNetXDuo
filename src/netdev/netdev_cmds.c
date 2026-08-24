@@ -103,6 +103,7 @@ static const char netdev_stat_grp[]   = "ROM address group bit cleared";
 static const char netdev_stat_cis[]   = "Address taken from the card's CIS";
 static const char netdev_stat_derv[]  = "Address derived, PROM was blank";
 static const char netdev_stat_godd[]  = "Odd registers read as words";
+static const char netdev_stat_drx[]   = "Direct receive fills";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -179,6 +180,11 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
      * work out which binary is running.
      */
     STAT(netdev_stat_godd,  unit->nu_Nic.bus.getodd);
+
+    /* The performance result is meaningful only if the private hook was
+       actually negotiated and used.  Appended so every existing record keeps
+       its numeric Type for callers which learned the older table by index. */
+    STAT(netdev_stat_drx,   unit->nu_RxDirect);
 
 #undef STAT
 
@@ -259,7 +265,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
         if (io->ios2_DataLength > NETDEV_MTU &&
-            !((op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0) &&
+            !(netdev_io_is_raw(op, io) &&
               io->ios2_DataLength <= NETDEV_FRAME_MAX))
         {
             netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);

@@ -5,6 +5,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/anxs2ext.h"
 
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/netstack.h"
@@ -711,6 +712,14 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     tag++;
     iface->buffer_tags[tag].ti_Tag  = S2_CopyFromBuff;
     iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_copy_from_buff;
+    tag++;
+    /* The private direct-receive pair; aminetxduo/anxs2ext.h says what they
+       are and why the standard DMA pair is not this. */
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_DIRECT;
+    iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_direct;
+    tag++;
+    iface->buffer_tags[tag].ti_Tag  = ANXD_S2_RX_FILLED;
+    iface->buffer_tags[tag].ti_Data = (ULONG)ami_sana2_rx_filled;
     tag++;
 #if AMI_SANA2_OFFER_COPY16
     iface->buffer_tags[tag].ti_Tag  = S2_CopyToBuff16;

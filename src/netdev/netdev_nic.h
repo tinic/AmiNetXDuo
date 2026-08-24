@@ -101,6 +101,20 @@ struct NetdevNic
     NetdevRxFn          rx;
     APTR                rx_arg;
 
+    /*
+     * The direct-receive path, for cores whose frames arrive through a port
+     * and must be copied by the CPU anyway.  rx_claim asks, from the frame's
+     * first NETDEV_HDR_LEN bytes, where the payload should be drained to; a
+     * NULL answer (or a NULL hook) means stage-and-rx() as always.  A claimed
+     * frame is always finished with rx_claimed once the payload is in place;
+     * neither supported port core has a recoverable error after its drain has
+     * begun.  Both callbacks run in the same context rx() does.
+     */
+    UBYTE            *(*rx_claim)(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                                  APTR *token);
+    VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
+                                    UBYTE summed);
+
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an
        address error on a 68000 if a field reorder ever lands them odd. */
@@ -236,6 +250,38 @@ struct NetdevNic
     /* One frame at a time comes out of the ring, into here. */
     ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };
+
+/*
+ * Copy exactly `amount` bytes out of a ring into a caller-sized destination.
+ *
+ * A 16-bit remote-DMA core is allowed to consume and store a whole final word
+ * for an odd request.  The driver's traditional staging buffer has padding
+ * for that word; a direct-receive destination does not -- its contract is
+ * exactly the payload length.  Keep the odd byte in an aligned two-byte
+ * scratch object so the core may round without writing beyond `dst`.
+ */
+static inline LONG netdev_ring_copy_exact(NetdevNic *nic, LONG src,
+                                          UBYTE *dst, UWORD amount)
+{
+    if ((amount & 1u) != 0)
+    {
+        UWORD  scratch = 0;
+        UBYTE *tail    = (UBYTE *)(APTR)&scratch;
+        UWORD  bulk    = (UWORD)(amount - 1u);
+
+        if (bulk != 0)
+        {
+            src  = nic->ring_copy(nic, src, dst, bulk);
+            dst += bulk;
+        }
+
+        src = nic->ring_copy(nic, src, tail, 1);
+        *dst = tail[0];
+        return src;
+    }
+
+    return nic->ring_copy(nic, src, dst, amount);
+}
 
 /*
  * The probe record, netdev_diag.c.  Declared here rather than in

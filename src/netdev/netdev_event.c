@@ -187,7 +187,7 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
 const UBYTE *netdev_payload(const NetdevOpener *op, const struct IOSana2Req *io,
                             const UBYTE *frame, UWORD len, ULONG *plen)
 {
-    if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    if (netdev_io_is_raw(op, io))
     {
         *plen = len;
         return frame;
