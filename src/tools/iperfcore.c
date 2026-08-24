@@ -51,7 +51,7 @@ static UBYTE *iperf_buf;            /* the caller's, held for the run       */
 
 VOID iperf_plan_init(IperfPlan *plan)
 {
-    plan->pad       = 0;
+    plan->blocking  = 0;
     plan->port      = (UWORD)IPERF_PORT;
     plan->seconds   = 10;
     plan->kbytes    = 0;
@@ -461,7 +461,10 @@ static VOID iperf_slice_accept(IperfRun *run)
         return;
     }
 
-    (VOID)tool_sock_ioctl(run->sb, s, TOOL_FIONBIO, &nonblock);
+    /* A blocking plan leaves the accepted socket blocking: the data-phase
+       recv() then parks in the library instead of polling it in slices. */
+    if (!run->plan.blocking)
+        (VOID)tool_sock_ioctl(run->sb, s, TOOL_FIONBIO, &nonblock);
     (VOID)tool_sock_addr_get(&from, &run->res.peer);
     run->res.peer_port = tool_sock_addr_port(&from);
 
@@ -570,6 +573,10 @@ static VOID iperf_slice_recv(IperfRun *run)
 {
     ULONG now = ami_millis();
     LONG  burst;
+    /* Blocking reads park until data arrives, so a 64-read burst could hold
+       a slice for seconds at Amiga rates.  Eight keeps the once-a-second
+       sampler and the break check between slices responsive. */
+    LONG  burst_max = run->plan.blocking ? 8 : IPERF_SEND_BURST;
 
     if (run->clock_on && iperf_target_met(run, now))
     {
@@ -578,7 +585,7 @@ static VOID iperf_slice_recv(IperfRun *run)
         return;
     }
 
-    for (burst = 0; burst < IPERF_SEND_BURST; burst++)
+    for (burst = 0; burst < burst_max; burst++)
     {
         ToolSockAddrAny from;
         LONG            n;

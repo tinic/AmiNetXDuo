@@ -1045,21 +1045,21 @@ Archive member included to satisfy reference by file (symbol)
 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
                               CMakeFiles/bsdsocket_library.dir/socket.c.obj (symbol from plugin) (anx6_scope)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
-                              /tmp/ccrMMggc.ltrans1.ltrans.o (__modsi3)
+                              /tmp/cczyn8Hp.ltrans1.ltrans.o (__modsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
-                              /tmp/ccrMMggc.ltrans4.ltrans.o (memcmp)
+                              /tmp/cczyn8Hp.ltrans4.ltrans.o (memcmp)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccrMMggc.ltrans0.ltrans.o (memcpy)
+                              /tmp/cczyn8Hp.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
-                              /tmp/ccrMMggc.ltrans6.ltrans.o (memmove)
+                              /tmp/cczyn8Hp.ltrans6.ltrans.o (memmove)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccrMMggc.ltrans0.ltrans.o (memset)
+                              /tmp/cczyn8Hp.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/ccrMMggc.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/cczyn8Hp.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/ccrMMggc.ltrans1.ltrans.o (strlen)
+                              /tmp/cczyn8Hp.ltrans1.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccrMMggc.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/cczyn8Hp.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -1069,14 +1069,14 @@ Name             Origin             Length             Attributes
 Linker script and memory map
 
 LOAD CMakeFiles/bsdsocket_library.dir/library.c.obj
-LOAD /tmp/ccrMMggc.ltrans0.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans1.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans2.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans3.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans4.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans5.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans6.ltrans.o
-LOAD /tmp/ccrMMggc.ltrans7.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans0.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans1.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans2.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans3.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans4.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans5.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans6.ltrans.o
+LOAD /tmp/cczyn8Hp.ltrans7.ltrans.o
 LOAD CMakeFiles/bsdsocket_library.dir/bsdsocket_vectors.c.obj
 LOAD CMakeFiles/bsdsocket_library.dir/socket.c.obj
 LOAD CMakeFiles/bsdsocket_library.dir/raw.c.obj
@@ -1145,7 +1145,7 @@ END GROUP
                 0x0000000000000000                bsd_stack_transient_hold
                 0x0000000000000000                bsd_stack_hold
                 0x0000000000000000                bsd_lib_close
- .text          0x0000000000000000     0x9dc0 /tmp/ccrMMggc.ltrans0.ltrans.o
+ .text          0x0000000000000000     0x9dc0 /tmp/cczyn8Hp.ltrans0.ltrans.o
                 0x0000000000000000                bsdsocket_entry
                 0x0000000000000004                _tx_amiga_vblank_entry
                 0x00000000000021ac                bsd_tcp_urgent_notify
@@ -1179,7 +1179,7 @@ END GROUP
                 0x00000000000090fa                bsd_udp_accepts_packet
                 0x0000000000009514                bsd_ticks_ms.lto_priv.0
                 0x0000000000009da4                bsd_romtag
- .text          0x0000000000009dc0     0xa2b4 /tmp/ccrMMggc.ltrans1.ltrans.o
+ .text          0x0000000000009dc0     0xa2b4 /tmp/cczyn8Hp.ltrans1.ltrans.o
                 0x0000000000009e18                bsd_SetSocketSignals
                 0x0000000000009ea0                bsd_Errno
                 0x0000000000009fa8                bsd_Inet_NtoA
@@ -1284,7 +1284,7 @@ END GROUP
                 0x0000000000013604                bsd_netmon_dispatch
                 0x0000000000013670                bsd_netmon_have
                 0x00000000000136c9                CSWTCH.29.lto_priv.0
- .text          0x0000000000014074     0xbbf8 /tmp/ccrMMggc.ltrans2.ltrans.o
+ .text          0x0000000000014074     0xbbf8 /tmp/cczyn8Hp.ltrans2.ltrans.o
                 0x0000000000014204                tcp_ctrl_main.lto_priv.0
                 0x0000000000014646                netstack_ip
                 0x000000000001466a                bsd_ObtainNetXDuoContext
@@ -1342,7 +1342,7 @@ END GROUP
                 0x000000000001f9e4                ami_ns_resolve6_once.constprop.0
                 0x000000000001fb68                _tx_amiga_timer_stack_size.lto_priv.0
                 0x000000000001fb6c                ami_ns_lo_cookie.lto_priv.0
- .text          0x000000000001fc6c     0xa56c /tmp/ccrMMggc.ltrans3.ltrans.o
+ .text          0x000000000001fc6c     0xa56c /tmp/cczyn8Hp.ltrans3.ltrans.o
                 0x000000000001fc6c                ami_netstack_rexx_suspend
                 0x000000000001fca0                ami_netstack_rexx_resume
                 0x000000000002000e                ami_ns_capture_address.lto_priv.0
@@ -1410,7 +1410,7 @@ END GROUP
                 0x0000000000028af2                ami_netdb_serv_by_name
                 0x0000000000028b70                ami_netdb_serv_by_port
                 0x0000000000028c52                ami_config_load_interface
- .text          0x000000000002a1d8     0xa30c /tmp/ccrMMggc.ltrans4.ltrans.o
+ .text          0x000000000002a1d8     0xa30c /tmp/cczyn8Hp.ltrans4.ltrans.o
                 0x000000000002a534                ami_random_entropy_bits
                 0x000000000002a77a                _nx_dhcpv6_IP_lifetime_timeout_entry
                 0x000000000002a86c                _nx_dhcpv6_session_timeout_entry
@@ -1484,7 +1484,7 @@ END GROUP
                 0x00000000000324e6                _nx_mdns_service_name_assemble.constprop.0
                 0x000000000003260a                _nx_mdns_host_name_register.lto_priv.0
                 0x0000000000032760                _nx_mdns_thread_entry.lto_priv.0
- .text          0x00000000000344e4     0xab58 /tmp/ccrMMggc.ltrans5.ltrans.o
+ .text          0x00000000000344e4     0xab58 /tmp/cczyn8Hp.ltrans5.ltrans.o
                 0x00000000000344e4                _nx_packet_data_extract_offset
                 0x00000000000346dc                _nx_packet_release
                 0x00000000000348ce                _nx_ip_raw_packet_processing
@@ -1620,7 +1620,7 @@ END GROUP
                 0x000000000003ecb4                _nxde_udp_socket_source_send
                 0x000000000003edd8                _nx_ip_raw_packet_cleanup.constprop.0
                 0x000000000003ee7c                _nxe_ip_raw_packet_disable.isra.0
- .text          0x000000000003f03c     0xa634 /tmp/ccrMMggc.ltrans6.ltrans.o
+ .text          0x000000000003f03c     0xa634 /tmp/cczyn8Hp.ltrans6.ltrans.o
                 0x000000000003f088                _nx_tcp_cleanup_deferred
                 0x000000000003f300                _nx_icmpv6_destination_table_periodic_update
                 0x000000000003f4ea                _nx_nd_cache_slow_periodic_update
@@ -1678,7 +1678,7 @@ END GROUP
                 0x0000000000047b3c                _nx_tcp_sack_permitted_option_get
                 0x0000000000049522                _nx_tcp_packet_receive
                 0x00000000000495ca                _nx_tcp_queue_process
- .text          0x0000000000049670     0x5fe4 /tmp/ccrMMggc.ltrans7.ltrans.o
+ .text          0x0000000000049670     0x5fe4 /tmp/cczyn8Hp.ltrans7.ltrans.o
                 0x0000000000049b7e                _nx_tcp_no_connection_reset
                 0x0000000000049c86                _nx_tcp_sack_option_get.part.0
                 0x0000000000049dca                _nx_tcp_socket_rtt_sample
@@ -3392,18 +3392,18 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000050980       0x74 /tmp/ccrMMggc.ltrans0.ltrans.o
+ .data          0x0000000000050980       0x74 /tmp/cczyn8Hp.ltrans0.ltrans.o
                 0x0000000000050980                _tx_thread_system_state
                 0x0000000000050993                bsd_tcp_name.lto_priv.0
                 0x00000000000509a2                n68k_vec_copy
                 0x00000000000509a6                n68k_vec_copy_sum
                 0x00000000000509aa                n68k_vec_sum
- .data          0x00000000000509f4       0x28 /tmp/ccrMMggc.ltrans2.ltrans.o
+ .data          0x00000000000509f4       0x28 /tmp/cczyn8Hp.ltrans2.ltrans.o
                 0x0000000000050a02                ami_cfg_current_file.lto_priv.0
                 0x0000000000050a06                _tx_amiga_start_status.lto_priv.0
- .data          0x0000000000050a1c       0x30 /tmp/ccrMMggc.ltrans3.ltrans.o
+ .data          0x0000000000050a1c       0x30 /tmp/cczyn8Hp.ltrans3.ltrans.o
                 0x0000000000050a1c                _nx_mdns_dns_sd.lto_priv.0
- .data          0x0000000000050a4c        0x8 /tmp/ccrMMggc.ltrans4.ltrans.o
+ .data          0x0000000000050a4c        0x8 /tmp/cczyn8Hp.ltrans4.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000005897e                ___a4_init = 0x7ffe
@@ -3413,7 +3413,7 @@ END GROUP
 .bss            0x0000000000050a54     0x1590
                 0x0000000000050a54                __bss_start = .
  *(.bss)
- .bss           0x0000000000050a54      0x7fc /tmp/ccrMMggc.ltrans0.ltrans.o
+ .bss           0x0000000000050a54      0x7fc /tmp/cczyn8Hp.ltrans0.ltrans.o
                 0x0000000000050a54                bsd_mcast6_table.lto_priv.0
                 0x0000000000050bd4                bsd_mcast_table.lto_priv.0
                 0x0000000000050c94                tcp_ctrl_port.lto_priv.0
@@ -3438,14 +3438,14 @@ END GROUP
                 0x00000000000511a0                ami_second_hook.lto_priv.0
                 0x00000000000511a4                ami_shutdown_hook.lto_priv.0
                 0x00000000000511a8                SysBase
- .bss           0x0000000000051250      0x168 /tmp/ccrMMggc.ltrans1.ltrans.o
+ .bss           0x0000000000051250      0x168 /tmp/cczyn8Hp.ltrans1.ltrans.o
                 0x0000000000051250                _tx_amiga_tick.lto_priv.0
                 0x000000000005129c                ami_baton_stats
                 0x00000000000512b8                ami_bpf_addr_hook.lto_priv.0
                 0x00000000000512bc                ami_bpf_iface
                 0x0000000000051344                ami_bpf_bound_channels
                 0x0000000000051346                ami_bpf_chan_generation.lto_priv.0
- .bss           0x00000000000513b8      0x304 /tmp/ccrMMggc.ltrans2.ltrans.o
+ .bss           0x00000000000513b8      0x304 /tmp/cczyn8Hp.ltrans2.ltrans.o
                 0x00000000000513b8                temp_rr.lto_priv.0
                 0x00000000000513cc                temp_string_buffer.lto_priv.0
                 0x00000000000514cc                ami_rx_stop_sig.lto_priv.0
@@ -3491,7 +3491,7 @@ END GROUP
                 0x000000000005156c                _tx_timer_time_slice
                 0x0000000000051570                _tx_thread_current_ptr
                 0x0000000000051574                _tx_amiga_kernel_up
- .bss           0x00000000000516bc      0x290 /tmp/ccrMMggc.ltrans3.ltrans.o
+ .bss           0x00000000000516bc      0x290 /tmp/cczyn8Hp.ltrans3.ltrans.o
                 0x00000000000516bc                _tx_amiga_zombies
                 0x00000000000516c0                pool_bits.lto_priv.0
                 0x00000000000516c4                pool_started.lto_priv.0
@@ -3500,15 +3500,15 @@ END GROUP
                 0x00000000000517f2                temp_string_buffer.lto_priv.1
                 0x00000000000518f2                _nx_dhcpv6_DAD_ptr.lto_priv.0
                 0x00000000000518f6                All_DHCPv6_Relay_Servers_Address.lto_priv.0
- .bss           0x000000000005194c      0x340 /tmp/ccrMMggc.ltrans4.ltrans.o
- .bss           0x0000000000051c8c       0x14 /tmp/ccrMMggc.ltrans5.ltrans.o
+ .bss           0x000000000005194c      0x340 /tmp/cczyn8Hp.ltrans4.ltrans.o
+ .bss           0x0000000000051c8c       0x14 /tmp/cczyn8Hp.ltrans5.ltrans.o
                 0x0000000000051c8c                _tx_timer_system_clock
                 0x0000000000051c90                _tx_timer_expired_timer_ptr
                 0x0000000000051c94                _tx_timer_current_ptr
                 0x0000000000051c98                _tx_timer_list_end
                 0x0000000000051c9c                _tx_timer_list_start
- .bss           0x0000000000051ca0      0x1e0 /tmp/ccrMMggc.ltrans6.ltrans.o
- .bss           0x0000000000051e80      0x164 /tmp/ccrMMggc.ltrans7.ltrans.o
+ .bss           0x0000000000051ca0      0x1e0 /tmp/cczyn8Hp.ltrans6.ltrans.o
+ .bss           0x0000000000051e80      0x164 /tmp/cczyn8Hp.ltrans7.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000051fe4                __end = .

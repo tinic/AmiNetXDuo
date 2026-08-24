@@ -264,6 +264,14 @@ int main(int argc, char **argv)
     plan.dir = (UBYTE)(server ? (udp ? IPERF_UDP_RX : IPERF_TCP_RX)
                               : (udp ? IPERF_UDP_TX : IPERF_TCP_TX));
 
+    /* The standalone command owns its loop, so the TCP server receives with
+       a plain blocking recv() -- the shape an application uses, and the one
+       the library can complete without a wakeup round trip per chunk.  The
+       break is still honoured: the library's own EINTR machinery interrupts
+       a parked recv, and tool_break() runs between slices. */
+    if (server && !udp)
+        plan.blocking = 1;
+
     plan.buflen = udp ? (ULONG)IPERF_UDP_DEFAULT
                       : (ULONG)IPERF_TCP_DEFAULT_LEN;
 

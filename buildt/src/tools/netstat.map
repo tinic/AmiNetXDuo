@@ -13,13 +13,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_netstat.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccpFKBNp.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccp4WyDZ.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/ccpFKBNp.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccp4WyDZ.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/ccpFKBNp.ltrans0.ltrans.o (strlen)
+                              /tmp/ccp4WyDZ.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccpFKBNp.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccp4WyDZ.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -30,7 +30,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_netstat.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_netstat.dir/netstat.c.obj
-LOAD /tmp/ccpFKBNp.ltrans0.ltrans.o
+LOAD /tmp/ccp4WyDZ.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_netstat.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_netstat.dir/tool_diag.c.obj
 LOAD CMakeFiles/tool_netstat.dir/netstack_weak.c.obj
@@ -66,7 +66,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_netstat.dir/netstat.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x7c28 /tmp/ccpFKBNp.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x7c28 /tmp/ccp4WyDZ.ltrans0.ltrans.o
                 0x0000000000004df2                main
  .text          0x0000000000007cdc        0x0 CMakeFiles/tool_netstat.dir/tool_util.c.obj (symbol from plugin)
                 0x0000000000007cdc                tool_break
@@ -270,7 +270,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000007de4        0x4 /tmp/ccpFKBNp.ltrans0.ltrans.o
+ .data          0x0000000000007de4        0x4 /tmp/ccp4WyDZ.ltrans0.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000000fde2                ___a4_init = 0x7ffe
@@ -284,7 +284,7 @@ END GROUP
                 0x0000000000007de8                SysBase
                 0x0000000000007dec                DOSBase
                 0x0000000000007df0                _WBenchMsg
- .bss           0x0000000000007df8     0x2f80 /tmp/ccpFKBNp.ltrans0.ltrans.o
+ .bss           0x0000000000007df8     0x2f80 /tmp/ccp4WyDZ.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x000000000000ad78                __end = .

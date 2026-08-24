@@ -55,7 +55,16 @@ enum
 typedef struct IperfPlan
 {
     UBYTE       dir;
-    UBYTE       pad;
+    /*
+     * TCP_RX only: receive with a BLOCKING socket instead of the nonblocking
+     * recv + WaitSelect slices.  The standalone command sets it; a caller
+     * that runs slices inside its own select loop (httpd) must not, which is
+     * the whole reason the slices exist.  A blocking read is what an
+     * ordinary application does, it is the shape the library can serve
+     * without a wakeup round trip per chunk
+     * (AMINETXDUO_RX_DIRECT_COMPLETE), and it is the shape worth measuring.
+     */
+    UBYTE       blocking;
     UWORD       port;
     ToolAddr    peer;               /* the client directions only           */
     ULONG       seconds;            /* 0 when kbytes decides instead        */

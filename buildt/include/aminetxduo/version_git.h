@@ -24,14 +24,14 @@
  * "-dirty" appended when tracked files differ from it.  Empty outside a
  * checkout, which is what an unpacked source tarball is.
  */
-#define AMINETXDUO_VERSION_HASH     "a56fac9-dirty"
+#define AMINETXDUO_VERSION_HASH     "8bf07e7-dirty"
 
 /*
  * Commit count.  By project convention this may appear in a binary's version
  * output and nowhere else -- not in a tag, not in a release name, not in an
  * archive filename.  Empty outside a checkout.
  */
-#define AMINETXDUO_VERSION_BUILD    "3241"
+#define AMINETXDUO_VERSION_BUILD    "3242"
 
 /* d.m.yyyy, for the $VER: strings AmigaOS Version reads.  The commit's date,
    falling back to the configure date outside a checkout. */
