@@ -15,15 +15,15 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_shownetstatus.dir/shownetstatus.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccTRtWWT.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccSHBn4R.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccTRtWWT.ltrans0.ltrans.o (memset)
+                              /tmp/ccSHBn4R.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/ccTRtWWT.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccSHBn4R.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/ccTRtWWT.ltrans0.ltrans.o (strlen)
+                              /tmp/ccSHBn4R.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccTRtWWT.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccSHBn4R.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -34,7 +34,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_shownetstatus.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_shownetstatus.dir/shownetstatus.c.obj
-LOAD /tmp/ccTRtWWT.ltrans0.ltrans.o
+LOAD /tmp/ccSHBn4R.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_shownetstatus.dir/tool_events.c.obj
 LOAD CMakeFiles/tool_shownetstatus.dir/tool_devdiag.c.obj
 LOAD CMakeFiles/tool_shownetstatus.dir/tool_util.c.obj
@@ -72,7 +72,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_shownetstatus.dir/shownetstatus.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0xb2a4 /tmp/ccTRtWWT.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0xb2a4 /tmp/ccSHBn4R.ltrans0.ltrans.o
                 0x00000000000088b6                main
  .text          0x000000000000b358        0x0 CMakeFiles/tool_shownetstatus.dir/tool_events.c.obj (symbol from plugin)
                 0x000000000000b358                tool_event_detail
@@ -303,7 +303,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x000000000000b4d4        0x4 /tmp/ccTRtWWT.ltrans0.ltrans.o
+ .data          0x000000000000b4d4        0x4 /tmp/ccSHBn4R.ltrans0.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x00000000000134d2                ___a4_init = 0x7ffe
@@ -317,7 +317,7 @@ END GROUP
                 0x000000000000b4d8                SysBase
                 0x000000000000b4dc                DOSBase
                 0x000000000000b4e0                _WBenchMsg
- .bss           0x000000000000b4e8     0x2bd4 /tmp/ccTRtWWT.ltrans0.ltrans.o
+ .bss           0x000000000000b4e8     0x2bd4 /tmp/ccSHBn4R.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x000000000000e0bc                __end = .

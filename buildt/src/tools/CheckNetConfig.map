@@ -13,13 +13,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cceLlcF9.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccihA3s3.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cceLlcF9.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccihA3s3.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/cceLlcF9.ltrans0.ltrans.o (strlen)
+                              /tmp/ccihA3s3.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cceLlcF9.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccihA3s3.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -30,7 +30,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_checknetconfig.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj
-LOAD /tmp/cceLlcF9.ltrans0.ltrans.o
+LOAD /tmp/ccihA3s3.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_checknetconfig.dir/tool_devdiag.c.obj
 LOAD CMakeFiles/tool_checknetconfig.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj
@@ -60,7 +60,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x7758 /tmp/cceLlcF9.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x7758 /tmp/ccihA3s3.ltrans0.ltrans.o
                 0x0000000000005882                main
  .text          0x000000000000780c        0x0 CMakeFiles/tool_checknetconfig.dir/tool_devdiag.c.obj (symbol from plugin)
                 0x000000000000780c                tool_scan_devices
@@ -251,7 +251,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000007914        0x4 /tmp/cceLlcF9.ltrans0.ltrans.o
+ .data          0x0000000000007914        0x4 /tmp/ccihA3s3.ltrans0.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000000f912                ___a4_init = 0x7ffe
@@ -265,7 +265,7 @@ END GROUP
                 0x0000000000007918                SysBase
                 0x000000000000791c                DOSBase
                 0x0000000000007920                _WBenchMsg
- .bss           0x0000000000007928     0x1a38 /tmp/cceLlcF9.ltrans0.ltrans.o
+ .bss           0x0000000000007928     0x1a38 /tmp/ccihA3s3.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000009360                __end = .

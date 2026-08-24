@@ -7,15 +7,15 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_fetch.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccoenQow.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccrCJrJG.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccoenQow.ltrans0.ltrans.o (memset)
+                              /tmp/ccrCJrJG.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/ccoenQow.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccrCJrJG.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/ccoenQow.ltrans0.ltrans.o (strlen)
+                              /tmp/ccrCJrJG.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccoenQow.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccrCJrJG.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -26,7 +26,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_fetch.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_fetch.dir/fetch.c.obj
-LOAD /tmp/ccoenQow.ltrans0.ltrans.o
+LOAD /tmp/ccrCJrJG.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_fetch.dir/fetchurl.c.obj
 LOAD CMakeFiles/tool_fetch.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_fetch.dir/toolbudget.c.obj
@@ -58,7 +58,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_fetch.dir/fetch.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x32bc /tmp/ccoenQow.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x32bc /tmp/ccrCJrJG.ltrans0.ltrans.o
                 0x0000000000002f0c                main
  .text          0x0000000000003370        0x0 CMakeFiles/tool_fetch.dir/fetchurl.c.obj (symbol from plugin)
                 0x0000000000003370                fetch_head_field
@@ -305,7 +305,7 @@ END GROUP
                 0x00000000000034ec                SysBase
                 0x00000000000034f0                DOSBase
                 0x00000000000034f4                _WBenchMsg
- .bss           0x00000000000034fc     0x5918 /tmp/ccoenQow.ltrans0.ltrans.o
+ .bss           0x00000000000034fc     0x5918 /tmp/ccrCJrJG.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000008e14                __end = .

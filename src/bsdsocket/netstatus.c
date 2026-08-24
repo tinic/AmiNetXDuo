@@ -42,6 +42,14 @@
 
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/budget.h"
+
+/* The hold ring is copied slot for slot below; the two shapes agreeing is
+   what makes that a straight walk rather than a bounds bug. */
+#if defined(AMINETXDUO_RXPROBE) && \
+    ((NETSTATUS_HOLD_RING != AMI_BUDGET_HOLD_RING) || \
+     (NETSTATUS_HOLD_NAME != AMI_BUDGET_HOLD_NAME))
+#error "NetStatusHold and AmiBudgetHold ring shapes have diverged"
+#endif
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
@@ -1544,6 +1552,29 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Post.nbl_Max     = ami_budget.post.max;
             out->nrb_RxDirect         = ami_budget.rx_direct;
             out->nrb_RxFallback       = ami_budget.rx_fallback;
+            out->nrb_HoldTotal        = ami_budget.hold_total;
+            out->nrb_HoldSlow         = ami_budget.hold_slow;
+            out->nrb_HoldMax          = ami_budget.hold_max;
+            out->nrb_HoldThreshold    = ami_budget.hold_threshold;
+            {
+                UWORD i;
+                UWORD c;
+
+                for (i = 0; i < NETSTATUS_HOLD_RING; i++)
+                {
+                    const AmiBudgetHold *in  = &ami_budget.hold_ring[i];
+                    NetStatusHold       *hld = &out->nrb_Hold[i];
+
+                    hld->nsh_Seq    = in->seq;
+                    hld->nsh_Ticks  = in->ticks;
+                    hld->nsh_Thread = in->thread;
+                    hld->nsh_Site   = in->site;
+                    hld->nsh_State  = in->state;
+                    for (c = 0; c < NETSTATUS_HOLD_NAME; c++)
+                        hld->nsh_Name[c] = in->name[c];
+                    hld->nsh_Name[NETSTATUS_HOLD_NAME - 1] = '\0';
+                }
+            }
             {
                 UWORD i;
 

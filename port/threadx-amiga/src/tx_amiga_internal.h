@@ -24,6 +24,11 @@
 #include <exec/execbase.h>
 #include <proto/exec.h>
 
+/* The baton-holder side of the receive step budget (a no-op outside
+   AMINETXDUO_RXPROBE builds).  The port links aminetxduo_common already, for
+   ami_log(); this adds nothing a shipped build carries.  */
+#include "aminetxduo/budget.h"
+
 
 /* Open-coded NewList(): amiga.lib is not linkable into a shared library.
    Same pattern as src/common/compat.c.  */
@@ -173,6 +178,8 @@ TX_THREAD   *thread_ptr;
     _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
 
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
+
+    ami_budget_hold_start();
 
     _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
                      thread_ptr -> tx_thread_amiga_run_signal);

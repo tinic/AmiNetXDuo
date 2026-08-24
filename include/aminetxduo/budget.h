@@ -18,10 +18,45 @@
 extern "C" {
 #endif
 
+/*
+ * Where a baton hold ended, for the holder ring below.  Site constants live
+ * outside the probe guard so the call sites compile in every build; the
+ * NETSTATUS_HOLDSITE_* names in aminetxduo/netstatus.h mirror these values
+ * and must stay in step.
+ */
+#define AMI_HOLD_SITE_YIELD    1   /* _tx_thread_system_return: blocked in TX */
+#define AMI_HOLD_SITE_SUSPEND  2   /* tx_amiga_adopt_suspend: call returning  */
+#define AMI_HOLD_SITE_DISCARD  3   /* tx_amiga_discard_thread: teardown       */
+#define AMI_HOLD_SITE_ORPHAN   4   /* tx_amiga_orphan_thread: teardown        */
+#define AMI_HOLD_SITE_BRACKET  5   /* baton release: about to Wait() in Exec  */
+#define AMI_HOLD_SITE_REAP     6   /* scheduler took it back from a zombie    */
+
 #ifdef AMINETXDUO_RXPROBE
 
 /* Matches AMI_RXPROBE_BUCKETS; spelled out so this header stands alone. */
 #define AMI_BUDGET_BUCKETS  20
+
+/*
+ * The holder's side of the baton leg.  The waiter's leg above records how
+ * long acquisition took; this records who HELD the baton and for how long,
+ * for every hold that exceeds ~50 ms -- the episodic 250-930 ms holds the
+ * stall investigation measured from the outside.  One global stamp is
+ * enough because the baton model admits exactly one holder at a time, and
+ * every stamp and note happens under the Forbid() the port already holds
+ * at its dispatch and release sites.
+ */
+#define AMI_BUDGET_HOLD_RING   16
+#define AMI_BUDGET_HOLD_NAME   16
+
+typedef struct AmiBudgetHold
+{
+    ULONG   seq;                    /* running count; 0 = empty slot       */
+    ULONG   ticks;                  /* E-Clock ticks the baton was held    */
+    ULONG   thread;                 /* the TX_THREAD's address             */
+    UWORD   site;                   /* AMI_HOLD_SITE_*                     */
+    UWORD   state;                  /* tx_thread_state at release          */
+    char    name[AMI_BUDGET_HOLD_NAME];  /* copy of the thread name        */
+} AmiBudgetHold;
 
 typedef struct AmiBudgetLeg
 {
@@ -51,6 +86,16 @@ typedef struct AmiBudget
        not legs: the question they answer is coverage, not duration. */
     ULONG           rx_direct;
     ULONG           rx_fallback;
+
+    /* The baton holder instrument.  hold_at is the acquisition stamp of the
+       current holder; the rest accumulate.  hold_threshold is the ~50 ms
+       gate in E-Clock ticks, derived from the measured rate on first use. */
+    ULONG           hold_at;
+    ULONG           hold_total;
+    ULONG           hold_slow;
+    ULONG           hold_max;
+    ULONG           hold_threshold;
+    AmiBudgetHold   hold_ring[AMI_BUDGET_HOLD_RING];
 } AmiBudget;
 
 extern AmiBudget ami_budget;
@@ -71,6 +116,13 @@ VOID ami_budget_post(ULONG dt);
 VOID ami_budget_rx_direct(VOID);
 VOID ami_budget_rx_fallback(VOID);
 
+/* Baton dispatched: stamp the new holder's acquisition.  Baton released:
+   note the hold, and ring it if it crossed the threshold.  Both must be
+   called under Forbid(), which every dispatch and release site already
+   holds; name and state are passed in so this header needs no TX_THREAD. */
+VOID ami_budget_hold_start(VOID);
+VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site);
+
 #else
 
 /* Absent from the build: call sites compile to nothing through these. */
@@ -85,6 +137,8 @@ VOID ami_budget_rx_fallback(VOID);
 #define ami_budget_post(dt)      ((VOID)0)
 #define ami_budget_rx_direct()   ((VOID)0)
 #define ami_budget_rx_fallback() ((VOID)0)
+#define ami_budget_hold_start()                  ((VOID)0)
+#define ami_budget_hold_end(th, nm, st, si)      ((VOID)0)
 
 #endif /* AMINETXDUO_RXPROBE */
 

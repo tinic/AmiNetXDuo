@@ -288,6 +288,7 @@ VOID        *stack_start;
         _tx_thread_current_ptr =  thread_ptr;
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+        ami_budget_hold_start();
         Permit();
         return(TX_SUCCESS);
     }
@@ -342,6 +343,9 @@ UINT         wake;
     /* Release the baton before we stop being runnable.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
+        ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                            (ULONG) thread_ptr -> tx_thread_state,
+                            AMI_HOLD_SITE_SUSPEND);
         _tx_thread_current_ptr =  TX_NULL;
         _tx_timer_time_slice   =  ((ULONG) 0);
     }
@@ -443,6 +447,7 @@ struct Task *me;
         _tx_thread_current_ptr =  thread_ptr;
         thread_ptr -> tx_thread_run_count++;
         _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+        ami_budget_hold_start();
         Permit();
         return(TX_SUCCESS);
     }
@@ -492,6 +497,9 @@ BYTE         sig;
        stops the whole stack and costs nothing to rule out.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
+        ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                            (ULONG) thread_ptr -> tx_thread_state,
+                            AMI_HOLD_SITE_DISCARD);
         _tx_thread_current_ptr =  TX_NULL;
         _tx_timer_time_slice   =  ((ULONG) 0);
     }
@@ -607,6 +615,9 @@ UINT         wake;
     /* Release the baton before we stop being a thread.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
+        ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                            (ULONG) thread_ptr -> tx_thread_state,
+                            AMI_HOLD_SITE_ORPHAN);
         _tx_thread_current_ptr =  TX_NULL;
         _tx_timer_time_slice   =  ((ULONG) 0);
     }

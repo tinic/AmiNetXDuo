@@ -7,9 +7,9 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_configurenetinterface.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccHzChEr.ltrans0.ltrans.o (memset)
+                              /tmp/cc6Nny6S.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccHzChEr.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/cc6Nny6S.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -20,7 +20,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_configurenetinterface.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_configurenetinterface.dir/configurenetinterface.c.obj
-LOAD /tmp/ccHzChEr.ltrans0.ltrans.o
+LOAD /tmp/cc6Nny6S.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_configurenetinterface.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_configurenetinterface.dir/tool_diag.c.obj
 LOAD CMakeFiles/tool_configurenetinterface.dir/netstack_weak.c.obj
@@ -49,7 +49,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_configurenetinterface.dir/configurenetinterface.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x277c /tmp/ccHzChEr.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x277c /tmp/cc6Nny6S.ltrans0.ltrans.o
                 0x000000000000182c                main
  .text          0x0000000000002830        0x0 CMakeFiles/tool_configurenetinterface.dir/tool_util.c.obj (symbol from plugin)
                 0x0000000000002830                tool_break
@@ -214,7 +214,7 @@ END GROUP
                 0x00000000000028fc                SysBase
                 0x0000000000002900                DOSBase
                 0x0000000000002904                _WBenchMsg
- .bss           0x000000000000290c      0x5a8 /tmp/ccHzChEr.ltrans0.ltrans.o
+ .bss           0x000000000000290c      0x5a8 /tmp/cc6Nny6S.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000002eb4                __end = .

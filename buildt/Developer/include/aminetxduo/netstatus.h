@@ -1040,6 +1040,34 @@ typedef struct NetStatusBudgetLeg
     ULONG   nbl_Hist[NETSTATUS_BUDGET_BUCKETS];  /* [i] holds < 2^i ticks    */
 } NetStatusBudgetLeg;
 
+/*
+ * The baton holder ring: who held the ThreadX baton longer than ~50 ms, for
+ * how long, and where the hold ended.  The waiter's nrb_Baton leg records
+ * acquisition latency; this is the other side of the same coin.  Site values
+ * mirror AMI_HOLD_SITE_* in aminetxduo/budget.h and must stay in step.
+ */
+#define NETSTATUS_HOLDSITE_YIELD    1   /* blocked inside ThreadX/NetX       */
+#define NETSTATUS_HOLDSITE_SUSPEND  2   /* adopted caller's call returning   */
+#define NETSTATUS_HOLDSITE_DISCARD  3   /* adopted thread teardown           */
+#define NETSTATUS_HOLDSITE_ORPHAN   4   /* adopted thread teardown           */
+#define NETSTATUS_HOLDSITE_BRACKET  5   /* about to Wait() on an IORequest   */
+#define NETSTATUS_HOLDSITE_REAP     6   /* scheduler reclaimed from a zombie */
+
+#define NETSTATUS_HOLD_RING   16
+#define NETSTATUS_HOLD_NAME   16
+
+typedef struct NetStatusHold
+{
+    ULONG   nsh_Seq;                    /* running count of slow holds;
+                                           0 = empty slot                    */
+    ULONG   nsh_Ticks;                  /* E-Clock ticks held                */
+    ULONG   nsh_Thread;                 /* the TX_THREAD's address           */
+    UWORD   nsh_Site;                   /* NETSTATUS_HOLDSITE_*              */
+    UWORD   nsh_State;                  /* tx_thread_state at release        */
+    char    nsh_Name[NETSTATUS_HOLD_NAME];  /* thread name, copied at record
+                                               time, always NUL-terminated   */
+} NetStatusHold;
+
 typedef struct NetStatusRxBudget
 {
     ULONG               nrb_EClockRate; /* ticks per second, for conversion  */
@@ -1059,6 +1087,14 @@ typedef struct NetStatusRxBudget
        packets the classic blocking dequeue fetched. */
     ULONG               nrb_RxDirect;
     ULONG               nrb_RxFallback;
+    /* The holder instrument: every baton hold is measured, holds over
+       nrb_HoldThreshold (E-Clock ticks, ~50 ms) are counted, maxed and
+       ringed with the holder's identity. */
+    ULONG               nrb_HoldTotal;
+    ULONG               nrb_HoldSlow;
+    ULONG               nrb_HoldMax;    /* E-Clock ticks                     */
+    ULONG               nrb_HoldThreshold;
+    NetStatusHold       nrb_Hold[NETSTATUS_HOLD_RING];
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

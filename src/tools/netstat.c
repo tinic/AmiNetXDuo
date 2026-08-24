@@ -261,6 +261,69 @@ static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
 }
 
 /*
+ * The baton holder ring: every hold of the ThreadX baton longer than the
+ * library's ~50 ms threshold, most recent NETSTATUS_HOLD_RING of them, with
+ * the holder's thread name (copied by the library at record time), the hold
+ * duration, and where the hold ended.  Printed longest first, because the
+ * question the ring answers is "who is the machine waiting on".
+ */
+static VOID show_budget_holds(const NetStatusRxBudget *b)
+{
+    static const char *site_name[] = {
+        "?", "yield", "suspend", "discard", "orphan", "bracket", "reap"
+    };
+    ULONG khz = (b->nrb_EClockRate != 0UL) ? b->nrb_EClockRate / 1000UL
+                                           : 709UL;
+    BOOL  done[NETSTATUS_HOLD_RING];
+    UWORD i;
+    UWORD n;
+
+    tool_printf("\tholds:  %lu measured, %lu over %lu ms, max %lu ms\n",
+                b->nrb_HoldTotal, b->nrb_HoldSlow,
+                b->nrb_HoldThreshold / khz, b->nrb_HoldMax / khz);
+
+    for (i = 0; i < NETSTATUS_HOLD_RING; i++)
+        done[i] = (b->nrb_Hold[i].nsh_Seq == 0UL);
+
+    /* Selection over sixteen slots; a sort library would be the bigger
+       code. */
+    for (;;)
+    {
+        const NetStatusHold *h;
+        char                 name[NETSTATUS_HOLD_NAME];
+        UWORD                best = NETSTATUS_HOLD_RING;
+
+        for (i = 0; i < NETSTATUS_HOLD_RING; i++)
+        {
+            if (done[i])
+                continue;
+            if (best == NETSTATUS_HOLD_RING ||
+                b->nrb_Hold[i].nsh_Ticks > b->nrb_Hold[best].nsh_Ticks)
+                best = i;
+        }
+        if (best == NETSTATUS_HOLD_RING)
+            break;
+
+        done[best] = TRUE;
+        h          = &b->nrb_Hold[best];
+
+        /* The library NUL-terminates, but the copy travelled as bytes. */
+        for (n = 0; n < NETSTATUS_HOLD_NAME; n++)
+            name[n] = h->nsh_Name[n];
+        name[NETSTATUS_HOLD_NAME - 1] = '\0';
+
+        tool_printf("\t    seq %-4lu %-15s %5lu.%lu ms  site %-8s state %lu  "
+                    "thr 0x%08lx\n",
+                    h->nsh_Seq, (LONG)name,
+                    h->nsh_Ticks / khz,
+                    (h->nsh_Ticks % khz) * 10UL / khz,
+                    (LONG)((h->nsh_Site < 7)
+                               ? site_name[h->nsh_Site] : site_name[0]),
+                    (ULONG)h->nsh_State, h->nsh_Thread);
+    }
+}
+
+/*
  * The receive step budget, when the library was built to keep one
  * (AMINETXDUO_RXPROBE).  Any library answers the selector; only an
  * instrumented one has counts, and the difference is said out loud rather
@@ -312,6 +375,8 @@ static VOID show_budget(VOID)
        packets the classic blocking dequeue fetched. */
     tool_printf("\tdirect: %lu completed on the IP thread, %lu classic dequeues\n",
                 b->nrb_RxDirect, b->nrb_RxFallback);
+
+    show_budget_holds(b);
 }
 
 /*

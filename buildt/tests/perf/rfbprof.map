@@ -74,9 +74,9 @@ librfbkern020.a(rfbkern.c.obj)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-dummy.o)
                               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-lseekr.o) (_lseek)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
-                              /tmp/cchxAWL7.ltrans0.ltrans.o (memmove)
+                              /tmp/ccBOfLut.ltrans0.ltrans.o (memmove)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cchxAWL7.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccBOfLut.ltrans0.ltrans.o (__umodsi3)
 
 Allocating common symbols
 Common symbol       size              file
@@ -99,7 +99,7 @@ Linker script and memory map
 
 LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
 LOAD CMakeFiles/rfbprof.dir/rfbprof.c.obj
-LOAD /tmp/cchxAWL7.ltrans0.ltrans.o
+LOAD /tmp/ccBOfLut.ltrans0.ltrans.o
 LOAD ../../src/rfb/libaminetxduo_rfb.a
 LOAD librfb_encode_020.a
 LOAD librfb_encode_o2.a
@@ -135,7 +135,7 @@ END GROUP
                 0x0000000000000246                __initcpp
                 0x000000000000026a                __exitcpp
  .text          0x0000000000000284        0x0 CMakeFiles/rfbprof.dir/rfbprof.c.obj (symbol from plugin)
- .text          0x0000000000000284     0x58d0 /tmp/cchxAWL7.ltrans0.ltrans.o
+ .text          0x0000000000000284     0x58d0 /tmp/ccBOfLut.ltrans0.ltrans.o
                 0x000000000000461c                main
  .text          0x0000000000005b54        0x0 rfb_encode.c.obj (symbol from plugin)
                 0x0000000000005b54                rfb_planes
@@ -415,7 +415,7 @@ END GROUP
                 0x00000000000083b4                __ZZZ_DLIST__
  *(.data)
  .data          0x00000000000083b8        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
- .data          0x00000000000083bc       0x24 /tmp/cchxAWL7.ltrans0.ltrans.o
+ .data          0x00000000000083bc       0x24 /tmp/ccBOfLut.ltrans0.ltrans.o
  .data          0x00000000000083e0        0x0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
  .data          0x00000000000083e0        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__stdiowin.o)
                 0x00000000000083e0                __stdiowin
@@ -432,7 +432,7 @@ END GROUP
  *(.bss)
  .bss           0x00000000000084d8        0xc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
                 0x00000000000084d8                __argv
- .bss           0x00000000000084e4     0x811c /tmp/cchxAWL7.ltrans0.ltrans.o
+ .bss           0x00000000000084e4     0x811c /tmp/ccBOfLut.ltrans0.ltrans.o
  .bss           0x0000000000010600        0xc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
  .bss           0x000000000001060c       0x24 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(malloc.o)
  .bss           0x0000000000010630        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o)

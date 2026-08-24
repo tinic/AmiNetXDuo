@@ -336,7 +336,12 @@ UINT         wake;
     }
 
     /* Release the baton, and give it straight to whoever is next rather than
-       waking the scheduler Task to do it.  */
+       waking the scheduler Task to do it.  tx_thread_state already names what
+       the holder is about to block on, which is the site hint the holder ring
+       wants.  */
+    ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                        (ULONG) thread_ptr -> tx_thread_state,
+                        AMI_HOLD_SITE_YIELD);
     _tx_thread_current_ptr =  TX_NULL;
 
     wake =  _tx_amiga_wake_needed(_tx_amiga_dispatch_inline());

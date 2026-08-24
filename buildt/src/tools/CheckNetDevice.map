@@ -7,9 +7,9 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_checknetdevice.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccXbDbGZ.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccZjBEAf.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccXbDbGZ.ltrans0.ltrans.o (memset)
+                              /tmp/ccZjBEAf.ltrans0.ltrans.o (memset)
 
 Memory Configuration
 
@@ -20,7 +20,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_checknetdevice.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_checknetdevice.dir/checknetdevice.c.obj
-LOAD /tmp/ccXbDbGZ.ltrans0.ltrans.o
+LOAD /tmp/ccZjBEAf.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_checknetdevice.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_checknetdevice.dir/tool_diag.c.obj
 LOAD CMakeFiles/tool_checknetdevice.dir/netstack_weak.c.obj
@@ -49,7 +49,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_checknetdevice.dir/checknetdevice.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x3ae4 /tmp/ccXbDbGZ.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x3ae4 /tmp/ccZjBEAf.ltrans0.ltrans.o
                 0x0000000000002f5c                main
  .text          0x0000000000003b98        0x0 CMakeFiles/tool_checknetdevice.dir/tool_util.c.obj (symbol from plugin)
                 0x0000000000003b98                tool_break
@@ -212,7 +212,7 @@ END GROUP
                 0x0000000000003c7c                SysBase
                 0x0000000000003c80                DOSBase
                 0x0000000000003c84                _WBenchMsg
- .bss           0x0000000000003c8c      0x340 /tmp/ccXbDbGZ.ltrans0.ltrans.o
+ .bss           0x0000000000003c8c      0x340 /tmp/ccZjBEAf.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000003fcc                __end = .

@@ -92,6 +92,8 @@ TX_THREAD   *thread_ptr;
 
         thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
 
+        ami_budget_hold_start();
+
         _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
                          thread_ptr -> tx_thread_amiga_run_signal);
 
@@ -359,6 +361,9 @@ UINT                     wake;
            ThreadX will ever run again.  */
         if (_tx_thread_current_ptr == thread_ptr)
         {
+            ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                                (ULONG) thread_ptr -> tx_thread_state,
+                                AMI_HOLD_SITE_REAP);
             _tx_thread_current_ptr =  TX_NULL;
             _tx_timer_time_slice   =  ((ULONG) 0);
             wake =  TX_TRUE;

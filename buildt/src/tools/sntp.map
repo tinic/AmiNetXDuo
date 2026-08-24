@@ -7,13 +7,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_sntp.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
-                              /tmp/ccdVpAjb.ltrans0.ltrans.o (__modsi3)
+                              /tmp/ccwBrvLR.ltrans0.ltrans.o (__modsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccdVpAjb.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccwBrvLR.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccdVpAjb.ltrans0.ltrans.o (memset)
+                              /tmp/ccwBrvLR.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccdVpAjb.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccwBrvLR.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -24,7 +24,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_sntp.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_sntp.dir/sntp.c.obj
-LOAD /tmp/ccdVpAjb.ltrans0.ltrans.o
+LOAD /tmp/ccwBrvLR.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_sntp.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_sntp.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_sntp.dir/tool_util.c.obj
@@ -57,7 +57,7 @@ END GROUP
                 0x00000000000000b4                LocaleBase
                 0x00000000000000b4                BattClockBase
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x1af0 /tmp/ccdVpAjb.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x1af0 /tmp/ccwBrvLR.ltrans0.ltrans.o
                 0x0000000000000c5c                main
  .text          0x0000000000001ba4        0x0 CMakeFiles/tool_sntp.dir/toolsock.c.obj (symbol from plugin)
                 0x0000000000001ba4                tool_sock_addr_v4
@@ -293,7 +293,7 @@ END GROUP
                 0x0000000000001d30                SysBase
                 0x0000000000001d34                DOSBase
                 0x0000000000001d38                _WBenchMsg
- .bss           0x0000000000001d40       0x10 /tmp/ccdVpAjb.ltrans0.ltrans.o
+ .bss           0x0000000000001d40       0x10 /tmp/ccwBrvLR.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000001d50                __end = .

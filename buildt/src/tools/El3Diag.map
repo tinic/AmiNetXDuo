@@ -9,7 +9,7 @@ Archive member included to satisfy reference by file (symbol)
 
 Discarded input sections
 
- .bss           0x0000000000000000        0x4 /tmp/cc8jGpuw.ltrans0.ltrans.o
+ .bss           0x0000000000000000        0x4 /tmp/ccE1ufm0.ltrans0.ltrans.o
 
 Memory Configuration
 
@@ -20,7 +20,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_el3diag.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_el3diag.dir/el3diag.c.obj
-LOAD /tmp/cc8jGpuw.ltrans0.ltrans.o
+LOAD /tmp/ccE1ufm0.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_el3diag.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_el3diag.dir/tool_diag.c.obj
 LOAD CMakeFiles/tool_el3diag.dir/netstack_weak.c.obj
@@ -48,7 +48,7 @@ END GROUP
                 0x000000000000006c                _exit
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_el3diag.dir/el3diag.c.obj (symbol from plugin)
- .text          0x00000000000000b4      0x60c /tmp/cc8jGpuw.ltrans0.ltrans.o
+ .text          0x00000000000000b4      0x60c /tmp/ccE1ufm0.ltrans0.ltrans.o
                 0x00000000000002d6                main
  .text          0x00000000000006c0        0x0 CMakeFiles/tool_el3diag.dir/tool_util.c.obj (symbol from plugin)
                 0x00000000000006c0                tool_break

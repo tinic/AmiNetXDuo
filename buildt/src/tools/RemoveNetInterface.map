@@ -7,7 +7,7 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_removenetinterface.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccaf8xg1.ltrans0.ltrans.o (memset)
+                              /tmp/ccWib6av.ltrans0.ltrans.o (memset)
 
 Memory Configuration
 
@@ -18,7 +18,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_removenetinterface.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_removenetinterface.dir/removenetinterface.c.obj
-LOAD /tmp/ccaf8xg1.ltrans0.ltrans.o
+LOAD /tmp/ccWib6av.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_removenetinterface.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_removenetinterface.dir/tool_diag.c.obj
 LOAD CMakeFiles/tool_removenetinterface.dir/netstack_weak.c.obj
@@ -47,7 +47,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_removenetinterface.dir/removenetinterface.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4      0x918 /tmp/ccaf8xg1.ltrans0.ltrans.o
+ .text          0x00000000000000b4      0x918 /tmp/ccWib6av.ltrans0.ltrans.o
                 0x00000000000005f2                main
  .text          0x00000000000009cc        0x0 CMakeFiles/tool_removenetinterface.dir/tool_util.c.obj (symbol from plugin)
                 0x00000000000009cc                tool_break
@@ -208,7 +208,7 @@ END GROUP
                 0x0000000000000a40                SysBase
                 0x0000000000000a44                DOSBase
                 0x0000000000000a48                _WBenchMsg
- .bss           0x0000000000000a50      0x150 /tmp/ccaf8xg1.ltrans0.ltrans.o
+ .bss           0x0000000000000a50      0x150 /tmp/ccWib6av.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000000ba0                __end = .

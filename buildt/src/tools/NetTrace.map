@@ -7,13 +7,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_nettrace.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cctpCllj.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccRCNx6b.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/cctpCllj.ltrans0.ltrans.o (memset)
+                              /tmp/ccRCNx6b.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cctpCllj.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccRCNx6b.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cctpCllj.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccRCNx6b.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -24,7 +24,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_nettrace.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_nettrace.dir/nettrace.c.obj
-LOAD /tmp/cctpCllj.ltrans0.ltrans.o
+LOAD /tmp/ccRCNx6b.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_nettrace.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_nettrace.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_nettrace.dir/toolbpf.c.obj
@@ -58,7 +58,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_nettrace.dir/nettrace.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x2724 /tmp/cctpCllj.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x2724 /tmp/ccRCNx6b.ltrans0.ltrans.o
                 0x000000000000158a                main
  .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/toolsock.c.obj (symbol from plugin)
                 0x00000000000027d8                tool_sock_addr_v4
@@ -308,7 +308,7 @@ END GROUP
                 0x0000000000002940                SysBase
                 0x0000000000002944                DOSBase
                 0x0000000000002948                _WBenchMsg
- .bss           0x0000000000002950     0x5138 /tmp/cctpCllj.ltrans0.ltrans.o
+ .bss           0x0000000000002950     0x5138 /tmp/ccRCNx6b.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000007a88                __end = .

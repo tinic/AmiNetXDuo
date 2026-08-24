@@ -13,13 +13,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_nslookup.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccUkQTuY.ltrans0.ltrans.o (memcpy)
+                              /tmp/cc8r2jFE.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccUkQTuY.ltrans0.ltrans.o (memset)
+                              /tmp/cc8r2jFE.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/ccUkQTuY.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/cc8r2jFE.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccUkQTuY.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/cc8r2jFE.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -30,7 +30,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_nslookup.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_nslookup.dir/nslookup.c.obj
-LOAD /tmp/ccUkQTuY.ltrans0.ltrans.o
+LOAD /tmp/cc8r2jFE.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_nslookup.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_nslookup.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_nslookup.dir/tool_util.c.obj
@@ -61,7 +61,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_nslookup.dir/nslookup.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x4898 /tmp/ccUkQTuY.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x4898 /tmp/cc8r2jFE.ltrans0.ltrans.o
                 0x000000000000259a                main
  .text          0x000000000000494c        0x0 CMakeFiles/tool_nslookup.dir/toolsock.c.obj (symbol from plugin)
                 0x000000000000494c                tool_sock_addr_v4
@@ -309,7 +309,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000004ab4        0x4 /tmp/ccUkQTuY.ltrans0.ltrans.o
+ .data          0x0000000000004ab4        0x4 /tmp/cc8r2jFE.ltrans0.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000000cab2                ___a4_init = 0x7ffe
@@ -323,7 +323,7 @@ END GROUP
                 0x0000000000004ab8                SysBase
                 0x0000000000004abc                DOSBase
                 0x0000000000004ac0                _WBenchMsg
- .bss           0x0000000000004ac8     0x1c0c /tmp/ccUkQTuY.ltrans0.ltrans.o
+ .bss           0x0000000000004ac8     0x1c0c /tmp/cc8r2jFE.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x00000000000066d4                __end = .

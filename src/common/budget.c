@@ -53,6 +53,7 @@
  */
 
 #include "aminetxduo/budget.h"
+#include "aminetxduo/compat.h"
 
 #ifdef AMINETXDUO_RXPROBE
 
@@ -149,6 +150,79 @@ VOID ami_budget_fetch(ULONG now)
         ami_budget.notify_at = 0UL;
         ami_budget_leg(&ami_budget.fetch, now - opened);
     }
+}
+
+/*
+ * The baton holder's side.  aminetxduo/budget.h says why one stamp suffices;
+ * both entry points run under the caller's Forbid(), so the stamp, the
+ * counters and the ring never race.  A stamp of zero means no clock yet, and
+ * doubles as "not stamped", the same convention as the hop stamps above.
+ */
+VOID ami_budget_hold_start(VOID)
+{
+    ami_budget.hold_at = ami_budget_clock();
+}
+
+VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site)
+{
+    ULONG          at = ami_budget.hold_at;
+    ULONG          now;
+    ULONG          dt;
+    ULONG          thr;
+    AmiBudgetHold *slot;
+    UWORD          i;
+
+    ami_budget.hold_at = 0UL;
+    if (at == 0UL)
+        return;
+
+    now = ami_budget_clock();
+    if (now == 0UL)
+        return;
+
+    dt = now - at;
+    if (dt > AMI_BUDGET_CEILING)
+        return;
+
+    ami_budget.hold_total++;
+
+    /* ~50 ms in E-Clock ticks, from the measured rate rather than the PAL
+       constant an NTSC machine would be 1% wrong by.  Cached: the rate never
+       changes once timer.device has answered. */
+    thr = ami_budget.hold_threshold;
+    if (thr == 0UL)
+    {
+        thr = ami_eclock_rate() / 20UL;
+        if (thr == 0UL)
+            return;
+        ami_budget.hold_threshold = thr;
+    }
+
+    if (dt <= thr)
+        return;
+
+    ami_budget.hold_slow++;
+    if (dt > ami_budget.hold_max)
+        ami_budget.hold_max = dt;
+
+    slot = &ami_budget.hold_ring[(ami_budget.hold_slow - 1UL) %
+                                 (ULONG)AMI_BUDGET_HOLD_RING];
+    slot->seq    = ami_budget.hold_slow;
+    slot->ticks  = dt;
+    slot->thread = (ULONG)thread;
+    slot->site   = site;
+    slot->state  = (UWORD)state;
+
+    /* The name is copied at record time, while the holder is provably alive
+       under this Forbid(); by the time a reader asks, the TX_THREAD behind an
+       adopted caller may be long gone. */
+    for (i = 0; i < (UWORD)(AMI_BUDGET_HOLD_NAME - 1); i++)
+    {
+        if (name == NULL || name[i] == '\0')
+            break;
+        slot->name[i] = name[i];
+    }
+    slot->name[i] = '\0';
 }
 
 #endif /* AMINETXDUO_RXPROBE */

@@ -13,15 +13,15 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_addnetinterface.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cchYLw3J.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccn9OKyM.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/cchYLw3J.ltrans0.ltrans.o (memset)
+                              /tmp/ccn9OKyM.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cchYLw3J.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccn9OKyM.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/cchYLw3J.ltrans0.ltrans.o (strlen)
+                              /tmp/ccn9OKyM.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cchYLw3J.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccn9OKyM.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -32,7 +32,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_addnetinterface.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_addnetinterface.dir/addnetinterface.c.obj
-LOAD /tmp/cchYLw3J.ltrans0.ltrans.o
+LOAD /tmp/ccn9OKyM.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_addnetinterface.dir/tool_devdiag.c.obj
 LOAD CMakeFiles/tool_addnetinterface.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_addnetinterface.dir/tool_diag.c.obj
@@ -62,7 +62,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_addnetinterface.dir/addnetinterface.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x4ac0 /tmp/cchYLw3J.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x4ac0 /tmp/ccn9OKyM.ltrans0.ltrans.o
                 0x0000000000003912                main
  .text          0x0000000000004b74        0x0 CMakeFiles/tool_addnetinterface.dir/tool_devdiag.c.obj (symbol from plugin)
                 0x0000000000004b74                tool_scan_devices
@@ -255,7 +255,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000004cf0        0x4 /tmp/cchYLw3J.ltrans0.ltrans.o
+ .data          0x0000000000004cf0        0x4 /tmp/ccn9OKyM.ltrans0.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000000ccee                ___a4_init = 0x7ffe
@@ -269,7 +269,7 @@ END GROUP
                 0x0000000000004cf4                SysBase
                 0x0000000000004cf8                DOSBase
                 0x0000000000004cfc                _WBenchMsg
- .bss           0x0000000000004d04      0x5f4 /tmp/cchYLw3J.ltrans0.ltrans.o
+ .bss           0x0000000000004d04      0x5f4 /tmp/ccn9OKyM.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x00000000000052f8                __end = .

@@ -7,15 +7,15 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_host.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/ccEzbJCT.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccv1wV9R.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccEzbJCT.ltrans0.ltrans.o (memset)
+                              /tmp/ccv1wV9R.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccEzbJCT.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccv1wV9R.ltrans0.ltrans.o (__umodsi3)
 
 Discarded input sections
 
- .bss           0x0000000000000000        0x4 /tmp/ccEzbJCT.ltrans0.ltrans.o
+ .bss           0x0000000000000000        0x4 /tmp/ccv1wV9R.ltrans0.ltrans.o
 
 Memory Configuration
 
@@ -26,7 +26,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_host.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_host.dir/host.c.obj
-LOAD /tmp/ccEzbJCT.ltrans0.ltrans.o
+LOAD /tmp/ccv1wV9R.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_host.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_host.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_host.dir/tool_util.c.obj
@@ -57,7 +57,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_host.dir/host.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x1088 /tmp/ccEzbJCT.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x1088 /tmp/ccv1wV9R.ltrans0.ltrans.o
                 0x0000000000000720                main
  .text          0x000000000000113c        0x0 CMakeFiles/tool_host.dir/toolsock.c.obj (symbol from plugin)
                 0x000000000000113c                tool_sock_addr_v4

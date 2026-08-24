@@ -15,13 +15,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_ping.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cc07dSLM.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccufNxKa.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/cc07dSLM.ltrans0.ltrans.o (memset)
+                              /tmp/ccufNxKa.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cc07dSLM.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccufNxKa.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cc07dSLM.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccufNxKa.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -32,7 +32,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_ping.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_ping.dir/ping.c.obj
-LOAD /tmp/cc07dSLM.ltrans0.ltrans.o
+LOAD /tmp/ccufNxKa.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_ping.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_ping.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_ping.dir/tool_util.c.obj
@@ -63,7 +63,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_ping.dir/ping.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x2638 /tmp/cc07dSLM.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x2638 /tmp/ccufNxKa.ltrans0.ltrans.o
                 0x00000000000023a6                main
  .text          0x00000000000026ec        0x0 CMakeFiles/tool_ping.dir/toolsock.c.obj (symbol from plugin)
                 0x00000000000026ec                tool_sock_addr_v4
@@ -338,7 +338,7 @@ END GROUP
                 0x0000000000002854                SysBase
                 0x0000000000002858                DOSBase
                 0x000000000000285c                _WBenchMsg
- .bss           0x0000000000002864      0xed4 /tmp/cc07dSLM.ltrans0.ltrans.o
+ .bss           0x0000000000002864      0xed4 /tmp/ccufNxKa.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000003738                __end = .

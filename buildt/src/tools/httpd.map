@@ -11,25 +11,25 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_httpd.dir/httprtg.c.obj (symbol from plugin) (TimerBase)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (__modsi3)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (__modsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
-                              /tmp/cczOnmSP.ltrans1.ltrans.o (memcmp)
+                              /tmp/ccIk12PR.ltrans1.ltrans.o (memcmp)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (memcpy)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
-                              /tmp/cczOnmSP.ltrans2.ltrans.o (memmove)
+                              /tmp/ccIk12PR.ltrans2.ltrans.o (memmove)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (memset)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (strlen)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cczOnmSP.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccIk12PR.ltrans0.ltrans.o (__umodsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
-                              /tmp/cczOnmSP.ltrans1.ltrans.o (__muldi3)
+                              /tmp/ccIk12PR.ltrans1.ltrans.o (__muldi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
-                              /tmp/cczOnmSP.ltrans2.ltrans.o (__udivdi3)
+                              /tmp/ccIk12PR.ltrans2.ltrans.o (__udivdi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
                               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o) (__clz_tab)
 
@@ -75,9 +75,9 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_httpd.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_httpd.dir/httpd.c.obj
-LOAD /tmp/cczOnmSP.ltrans0.ltrans.o
-LOAD /tmp/cczOnmSP.ltrans1.ltrans.o
-LOAD /tmp/cczOnmSP.ltrans2.ltrans.o
+LOAD /tmp/ccIk12PR.ltrans0.ltrans.o
+LOAD /tmp/ccIk12PR.ltrans1.ltrans.o
+LOAD /tmp/ccIk12PR.ltrans2.ltrans.o
 LOAD CMakeFiles/tool_httpd.dir/httppath.c.obj
 LOAD CMakeFiles/tool_httpd.dir/httpif.c.obj
 LOAD CMakeFiles/tool_httpd.dir/httpframe.c.obj
@@ -121,7 +121,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_httpd.dir/httpd.c.obj (symbol from plugin)
                 0x00000000000000b4                LocaleBase
- .text          0x00000000000000b4     0x93c8 /tmp/cczOnmSP.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x93c8 /tmp/ccIk12PR.ltrans0.ltrans.o
                 0x00000000000009d0                hs_len.lto_priv.0
                 0x00000000000009de                hs_append.lto_priv.0
                 0x0000000000001258                hs_nicmp.lto_priv.0
@@ -153,7 +153,7 @@ END GROUP
                 0x000000000000782a                httpd_readable.lto_priv.0
                 0x0000000000008cc4                CSWTCH.47.lto_priv.0
                 0x0000000000008d02                httpd_ws_idle.lto_priv.0
- .text          0x000000000000947c     0xbc5c /tmp/cczOnmSP.ltrans1.ltrans.o
+ .text          0x000000000000947c     0xbc5c /tmp/ccIk12PR.ltrans1.ltrans.o
                 0x0000000000009fa4                term_runner_main.lto_priv.0
                 0x000000000000b89c                hs_copy.part.0.lto_priv.0
                 0x000000000000b8bc                hs_copy.part.0.constprop.0
@@ -194,7 +194,7 @@ END GROUP
                 0x0000000000010480                http_fb_stale
                 0x0000000000013734                main
                 0x0000000000014fba                tool_name
- .text          0x00000000000150d8     0x34d8 /tmp/cczOnmSP.ltrans2.ltrans.o
+ .text          0x00000000000150d8     0x34d8 /tmp/ccIk12PR.ltrans2.ltrans.o
                 0x000000000001568c                rtg_p96_attr.lto_priv.0
                 0x00000000000156a4                rtg_cgx_attr.lto_priv.0
                 0x00000000000156bc                rtg_fmt_p96.lto_priv.0
@@ -612,7 +612,7 @@ END GROUP
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x000000000001909c       0x18 /tmp/cczOnmSP.ltrans0.ltrans.o
+ .data          0x000000000001909c       0x18 /tmp/ccIk12PR.ltrans0.ltrans.o
                 0x000000000001909c                term_rows.lto_priv.0
                 0x000000000001909e                term_cols.lto_priv.0
                 0x00000000000190a0                term_rc.lto_priv.0
@@ -620,11 +620,11 @@ END GROUP
                 0x00000000000190a6                fb_sock.lto_priv.0
                 0x00000000000190aa                httpd_conns.lto_priv.0
                 0x00000000000190ae                httpd_root.lto_priv.0
- .data          0x00000000000190b4       0x24 /tmp/cczOnmSP.ltrans1.ltrans.o
+ .data          0x00000000000190b4       0x24 /tmp/ccIk12PR.ltrans1.ltrans.o
                 0x00000000000190b4                rtg_route.lto_priv.0
                 0x00000000000190b8                rtg_native_cgx.lto_priv.0
                 0x00000000000190bc                rtg_native_p96.lto_priv.0
- .data          0x00000000000190d8        0x8 /tmp/cczOnmSP.ltrans2.ltrans.o
+ .data          0x00000000000190d8        0x8 /tmp/ccIk12PR.ltrans2.ltrans.o
  *(.data.*)
  *(.gnu.linkonce.d.*)
                 0x000000000002109a                ___a4_init = 0x7ffe
@@ -638,7 +638,7 @@ END GROUP
                 0x00000000000190e0                SysBase
                 0x00000000000190e4                DOSBase
                 0x00000000000190e8                _WBenchMsg
- .bss           0x00000000000190f0     0x4cb8 /tmp/cczOnmSP.ltrans0.ltrans.o
+ .bss           0x00000000000190f0     0x4cb8 /tmp/ccIk12PR.ltrans0.ltrans.o
                 0x00000000000190f0                httpd_value.lto_priv.0
                 0x00000000000191f0                httpd_term_gz.lto_priv.0
                 0x00000000000192f0                httpd_term_page.lto_priv.0
@@ -693,7 +693,7 @@ END GROUP
                 0x000000000001b134                httpd_log_console.lto_priv.0
                 0x000000000001b136                httpd_gmt_west.lto_priv.0
                 0x000000000001b13a                httpd_scratch.lto_priv.0
- .bss           0x000000000001dda8     0x429c /tmp/cczOnmSP.ltrans1.ltrans.o
+ .bss           0x000000000001dda8     0x429c /tmp/ccIk12PR.ltrans1.ltrans.o
                 0x000000000001dda8                rtg_off_is_p96.lto_priv.0
                 0x000000000001ddaa                rtg_off.lto_priv.0
                 0x000000000001ddae                TimerBase
@@ -713,7 +713,7 @@ END GROUP
                 0x000000000001dec4                RtgCgxBase.lto_priv.0
                 0x000000000001dec8                RtgP96Base.lto_priv.0
                 0x000000000001decc                GfxBase
- .bss           0x0000000000022044      0x10c /tmp/cczOnmSP.ltrans2.ltrans.o
+ .bss           0x0000000000022044      0x10c /tmp/ccIk12PR.ltrans2.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000022150                __end = .

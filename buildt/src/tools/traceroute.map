@@ -7,13 +7,13 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_traceroute.dir/traceroute.c.obj (symbol from plugin) (TimerBase)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
-                              /tmp/cc4qi5II.ltrans0.ltrans.o (memcpy)
+                              /tmp/cc8zfFl6.ltrans0.ltrans.o (memcpy)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/cc4qi5II.ltrans0.ltrans.o (memset)
+                              /tmp/cc8zfFl6.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                              /tmp/cc4qi5II.ltrans0.ltrans.o (__mulsi3)
+                              /tmp/cc8zfFl6.ltrans0.ltrans.o (__mulsi3)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/cc4qi5II.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/cc8zfFl6.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -24,7 +24,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_traceroute.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_traceroute.dir/traceroute.c.obj
-LOAD /tmp/cc4qi5II.ltrans0.ltrans.o
+LOAD /tmp/cc8zfFl6.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_traceroute.dir/toolsock.c.obj
 LOAD CMakeFiles/tool_traceroute.dir/toolbudget.c.obj
 LOAD CMakeFiles/tool_traceroute.dir/tool_util.c.obj
@@ -55,7 +55,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_traceroute.dir/traceroute.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x1f6c /tmp/cc4qi5II.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x1f6c /tmp/cc8zfFl6.ltrans0.ltrans.o
                 0x0000000000000d68                main
  .text          0x0000000000002020        0x0 CMakeFiles/tool_traceroute.dir/toolsock.c.obj (symbol from plugin)
                 0x0000000000002020                tool_sock_addr_v4
@@ -288,7 +288,7 @@ END GROUP
                 0x0000000000002188                SysBase
                 0x000000000000218c                DOSBase
                 0x0000000000002190                _WBenchMsg
- .bss           0x0000000000002198      0xe54 /tmp/cc4qi5II.ltrans0.ltrans.o
+ .bss           0x0000000000002198      0xe54 /tmp/cc8zfFl6.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x0000000000002fec                __end = .

@@ -7,11 +7,11 @@ Archive member included to satisfy reference by file (symbol)
 ../common/libaminetxduo_common.a(compat.c.obj)
                               CMakeFiles/tool_netsetup.dir/netsetup.c.obj (symbol from plugin) (ami_alloc)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
-                              /tmp/ccxtHfIG.ltrans0.ltrans.o (memset)
+                              /tmp/ccehiuut.ltrans0.ltrans.o (memset)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                              /tmp/ccxtHfIG.ltrans0.ltrans.o (strlen)
+                              /tmp/ccehiuut.ltrans0.ltrans.o (strlen)
 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                              /tmp/ccxtHfIG.ltrans0.ltrans.o (__umodsi3)
+                              /tmp/ccehiuut.ltrans0.ltrans.o (__umodsi3)
 
 Memory Configuration
 
@@ -22,7 +22,7 @@ Linker script and memory map
 
 LOAD CMakeFiles/tool_netsetup.dir/tool_startup.S.obj
 LOAD CMakeFiles/tool_netsetup.dir/netsetup.c.obj
-LOAD /tmp/ccxtHfIG.ltrans0.ltrans.o
+LOAD /tmp/ccehiuut.ltrans0.ltrans.o
 LOAD CMakeFiles/tool_netsetup.dir/tool_devdiag.c.obj
 LOAD CMakeFiles/tool_netsetup.dir/tool_util.c.obj
 LOAD CMakeFiles/tool_netsetup.dir/tool_diag.c.obj
@@ -52,7 +52,7 @@ END GROUP
                 0x000000000000006c                exit
  .text          0x00000000000000b4        0x0 CMakeFiles/tool_netsetup.dir/netsetup.c.obj (symbol from plugin)
                 0x00000000000000b4                tool_name
- .text          0x00000000000000b4     0x3200 /tmp/ccxtHfIG.ltrans0.ltrans.o
+ .text          0x00000000000000b4     0x3200 /tmp/ccehiuut.ltrans0.ltrans.o
                 0x0000000000001f5a                main
  .text          0x00000000000032b4        0x0 CMakeFiles/tool_netsetup.dir/tool_devdiag.c.obj (symbol from plugin)
                 0x00000000000032b4                tool_scan_devices
@@ -226,7 +226,7 @@ END GROUP
                 0x0000000000003394                SysBase
                 0x0000000000003398                DOSBase
                 0x000000000000339c                _WBenchMsg
- .bss           0x00000000000033a4      0x400 /tmp/ccxtHfIG.ltrans0.ltrans.o
+ .bss           0x00000000000033a4      0x400 /tmp/ccehiuut.ltrans0.ltrans.o
  *(.bss.*)
  *(COMMON)
                 0x00000000000037a4                __end = .

@@ -36,6 +36,7 @@
 #include "tx_timer.h"
 #include "tx_amiga.h"
 
+#include "aminetxduo/budget.h"
 #include "aminetxduo/health.h"
 
 #include <exec/tasks.h>
@@ -358,6 +359,11 @@ VOID ami_netstack_baton_release(VOID)
 
     if (_tx_thread_current_ptr == thread)
     {
+        /* The hold that ends here ends at a driver bracket: the holder is
+           about to Wait() on an IORequest outside ThreadX entirely. */
+        ami_budget_hold_end((APTR)thread, thread->tx_thread_name,
+                            (ULONG)thread->tx_thread_state,
+                            AMI_HOLD_SITE_BRACKET);
         _tx_thread_current_ptr = TX_NULL;
         _tx_timer_time_slice   = (ULONG)0;
     }
