@@ -12,7 +12,6 @@
 
 #include "sana2_internal.h"
 
-#include "aminetxduo/budget.h"
 #include "aminetxduo/netstack.h"
 
 #include <proto/exec.h>
@@ -330,9 +329,6 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     case NX_LINK_RARP_SEND:
     {
         NX_PACKET *packet = driver_req->nx_ip_driver_packet;
-#ifdef AMINETXDUO_RXPROBE
-        ULONG push_at = ami_budget_clock();
-#endif
 
         if (packet == NULL)
         {
@@ -340,22 +336,15 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
             break;
         }
 
+        /* What one transmitted frame costs on the CPU -- the push leg of
+           earlier probe builds -- is dissected inside ami_sana2_tx_send()
+           into reap, stuff and post legs; sana2_tx.c says what each spans.
+           Nothing in this case outside that call is worth a clock read. */
         driver_req->nx_ip_driver_status =
             ami_sana2_tx_send(iface, packet,
                               ami_sana2_ether_type(driver_req, packet),
                               driver_req->nx_ip_driver_physical_address_msw,
                               driver_req->nx_ip_driver_physical_address_lsw);
-
-        /* The push leg: what one transmitted frame costs on the CPU, the
-           whole send case from entry back to the stack -- reap of earlier
-           writes, header build, copy into the write buffer, BeginIO.  During
-           a receive every one of these is an ACK, and the ack leg above it in
-           sana2_tx.c only spans wall time to collection; this is the half the
-           budget's other five legs never see.  Same clock as the rest,
-           aggregated as a direct delta like drain. */
-#ifdef AMINETXDUO_RXPROBE
-        ami_budget_push(ami_budget_clock() - push_at);
-#endif
         break;
     }
 

@@ -283,278 +283,278 @@ END GROUP
                 [!provide]                        PROVIDE (___machtype = 0x0)
                 0x0000000000000000                . = 0x0
 
-.text           0x0000000000000000     0x8dec
+.text           0x0000000000000000     0x8ea0
                 0x0000000000000000                __stext = .
  *(.text)
  .text          0x0000000000000000       0xb4 CMakeFiles/tool_netstat.dir/tool_startup.S.obj
                 0x0000000000000000                ____start
                 0x000000000000006c                _exit
                 0x000000000000006c                exit
- .text          0x00000000000000b4     0x16dc CMakeFiles/tool_netstat.dir/netstat.c.obj
-                0x0000000000000bca                main
-                0x000000000000178c                tool_name
- .text          0x0000000000001790      0x220 CMakeFiles/tool_netstat.dir/tool_util.c.obj
- .text          0x00000000000019b0      0x378 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000001d12                diag_device_dirs
- .text          0x0000000000001d28      0x464 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
- .text          0x000000000000218c       0x58 ../config/libaminetxduo_config.a(config_text.c.obj)
- .text          0x00000000000021e4      0x2e0 ../config/libaminetxduo_config.a(config_file.c.obj)
- .text          0x00000000000024c4     0x1950 ../config/libaminetxduo_config.a(config_parse.c.obj)
- .text          0x0000000000003e14       0x68 ../config/libaminetxduo_config.a(config_hostname.c.obj)
- .text          0x0000000000003e7c       0x20 ../net68k/libaminetxduo_net68k.a(n68k_memcpy_hook.c.obj)
-                0x0000000000003e7c                memcpy
- .text          0x0000000000003e9c      0x2c8 ../net68k/libaminetxduo_net68k.a(n68k_checksum_mv0.S.obj)
-                0x0000000000003e9c                n68k_sum_longwords_mv0
-                0x00000000000040d2                n68k_copy_sum_longwords_mv0
- .text          0x0000000000004164      0x114 ../net68k/libaminetxduo_net68k.a(n68k_copy_mv0.S.obj)
-                0x0000000000004164                n68k_copy_bytes_mv0
- .text          0x0000000000004278       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
-                0x0000000000004278                __mulsi3
- .text          0x00000000000042a4       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
-                0x00000000000042a4                strlen
- .text          0x00000000000042b8       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
-                0x00000000000042b8                __umodsi3
-                0x00000000000042c4                __udivsi3
-                0x00000000000042ca                __udivsi4
+ .text          0x00000000000000b4     0x1790 CMakeFiles/tool_netstat.dir/netstat.c.obj
+                0x0000000000000c04                main
+                0x000000000000183e                tool_name
+ .text          0x0000000000001844      0x220 CMakeFiles/tool_netstat.dir/tool_util.c.obj
+ .text          0x0000000000001a64      0x378 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000001dc6                diag_device_dirs
+ .text          0x0000000000001ddc      0x464 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+ .text          0x0000000000002240       0x58 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text          0x0000000000002298      0x2e0 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text          0x0000000000002578     0x1950 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text          0x0000000000003ec8       0x68 ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text          0x0000000000003f30       0x20 ../net68k/libaminetxduo_net68k.a(n68k_memcpy_hook.c.obj)
+                0x0000000000003f30                memcpy
+ .text          0x0000000000003f50      0x2c8 ../net68k/libaminetxduo_net68k.a(n68k_checksum_mv0.S.obj)
+                0x0000000000003f50                n68k_sum_longwords_mv0
+                0x0000000000004186                n68k_copy_sum_longwords_mv0
+ .text          0x0000000000004218      0x114 ../net68k/libaminetxduo_net68k.a(n68k_copy_mv0.S.obj)
+                0x0000000000004218                n68k_copy_bytes_mv0
+ .text          0x000000000000432c       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x000000000000432c                __mulsi3
+ .text          0x0000000000004358       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                0x0000000000004358                strlen
+ .text          0x000000000000436c       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x000000000000436c                __umodsi3
+                0x0000000000004378                __udivsi3
+                0x000000000000437e                __udivsi4
  *(.text.main)
  *(.text*)
  .text.show_budget_leg
-                0x0000000000004310      0x168 CMakeFiles/tool_netstat.dir/netstat.c.obj
+                0x00000000000043c4      0x168 CMakeFiles/tool_netstat.dir/netstat.c.obj
  .text.show_stall
-                0x0000000000004478       0x44 CMakeFiles/tool_netstat.dir/netstat.c.obj
+                0x000000000000452c       0x44 CMakeFiles/tool_netstat.dir/netstat.c.obj
  .text.show_health.constprop.0
-                0x00000000000044bc      0x1c4 CMakeFiles/tool_netstat.dir/netstat.c.obj
+                0x0000000000004570      0x1c4 CMakeFiles/tool_netstat.dir/netstat.c.obj
  .text.tool_printf
-                0x0000000000004680       0x1c CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x0000000000004680                tool_printf
+                0x0000000000004734       0x1c CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x0000000000004734                tool_printf
  .text.tool_error
-                0x000000000000469c       0x7c CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x000000000000469c                tool_error
+                0x0000000000004750       0x7c CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x0000000000004750                tool_error
  .text.tool_fault
-                0x0000000000004718       0x20 CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x0000000000004718                tool_fault
+                0x00000000000047cc       0x20 CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x00000000000047cc                tool_fault
  .text.tool_break_arm
-                0x0000000000004738       0x18 CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x0000000000004738                tool_break_arm
+                0x00000000000047ec       0x18 CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x00000000000047ec                tool_break_arm
  .text.tool_format_mac
-                0x0000000000004750       0x70 CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x0000000000004750                tool_format_mac
+                0x0000000000004804       0x70 CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x0000000000004804                tool_format_mac
  .text.tool_from_workbench
-                0x00000000000047c0       0x1c CMakeFiles/tool_netstat.dir/tool_util.c.obj
-                0x00000000000047c0                tool_from_workbench
+                0x0000000000004874       0x1c CMakeFiles/tool_netstat.dir/tool_util.c.obj
+                0x0000000000004874                tool_from_workbench
  .text.tool_stricmp_n
-                0x00000000000047dc       0x68 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x00000000000047dc                tool_stricmp_n
+                0x0000000000004890       0x68 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004890                tool_stricmp_n
  .text.tool_copy_string
-                0x0000000000004844       0x34 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004844                tool_copy_string
+                0x00000000000048f8       0x34 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x00000000000048f8                tool_copy_string
  .text.tool_wrap
-                0x0000000000004878      0x104 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004878                tool_wrap
+                0x000000000000492c      0x104 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x000000000000492c                tool_wrap
  .text.diag_report
-                0x000000000000497c       0x7c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004a30       0x7c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
  .text.tool_config_watch
-                0x00000000000049f8       0x18 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x00000000000049f8                tool_config_watch
+                0x0000000000004aac       0x18 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004aac                tool_config_watch
  .text.tool_config_unwatch
-                0x0000000000004a10       0x10 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004a10                tool_config_unwatch
+                0x0000000000004ac4       0x10 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004ac4                tool_config_unwatch
  .text.tool_stack_library_running
-                0x0000000000004a20       0x60 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004a20                tool_stack_library_running
+                0x0000000000004ad4       0x60 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004ad4                tool_stack_library_running
  .text.tool_explain_no_stack
-                0x0000000000004a80       0x48 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004a80                tool_explain_no_stack
+                0x0000000000004b34       0x48 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004b34                tool_explain_no_stack
  .text.tool_stack_is_ours
-                0x0000000000004ac8       0x60 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004ac8                tool_stack_is_ours
+                0x0000000000004b7c       0x60 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004b7c                tool_stack_is_ours
  .text.tool_explain_foreign_stack
-                0x0000000000004b28       0x30 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004b28                tool_explain_foreign_stack
+                0x0000000000004bdc       0x30 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004bdc                tool_explain_foreign_stack
  .text.tool_format_ip6
-                0x0000000000004b58       0x28 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004b58                tool_format_ip6
+                0x0000000000004c0c       0x28 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004c0c                tool_format_ip6
  .text.tool_explain_no_netstatus
-                0x0000000000004b80       0x3c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004b80                tool_explain_no_netstatus
+                0x0000000000004c34       0x3c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004c34                tool_explain_no_netstatus
  .text.tool_netstatus_open
-                0x0000000000004bbc       0xb8 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004bbc                tool_netstatus_open
+                0x0000000000004c70       0xb8 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004c70                tool_netstatus_open
  .text.tool_netstatus_close
-                0x0000000000004c74       0x1c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004c74                tool_netstatus_close
+                0x0000000000004d28       0x1c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004d28                tool_netstatus_close
  .text.tool_netstatus_query
-                0x0000000000004c90       0x6c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
-                0x0000000000004c90                tool_netstatus_query
- .text.nx_open  0x0000000000004cfc       0x14 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000004d44       0x6c CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+                0x0000000000004d44                tool_netstatus_query
+ .text.nx_open  0x0000000000004db0       0x14 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
  .text.nx_query_failed
-                0x0000000000004d10       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000004dc4       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
  .text.tool_snapshot
-                0x0000000000004d34      0x418 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000004d34                tool_snapshot
+                0x0000000000004de8      0x418 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000004de8                tool_snapshot
  .text.tool_addr6_state
-                0x000000000000514c       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x000000000000514c                tool_addr6_state
+                0x0000000000005200       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005200                tool_addr6_state
  .text.tool_stats
-                0x0000000000005170      0x478 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005170                tool_stats
+                0x0000000000005224      0x478 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005224                tool_stats
  .text.tool_health_mark
-                0x00000000000055e8      0x254 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x00000000000055e8                tool_health_mark
+                0x000000000000569c      0x254 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x000000000000569c                tool_health_mark
  .text.tool_routes
-                0x000000000000583c       0xfc CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x000000000000583c                tool_routes
+                0x00000000000058f0       0xfc CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x00000000000058f0                tool_routes
  .text.tool_routes6
-                0x0000000000005938       0xfc CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005938                tool_routes6
+                0x00000000000059ec       0xfc CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x00000000000059ec                tool_routes6
  .text.tool_dest6
-                0x0000000000005a34      0x178 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005a34                tool_dest6
+                0x0000000000005ae8      0x178 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005ae8                tool_dest6
  .text.tool_nd_state_name
-                0x0000000000005bac       0x28 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005bac                tool_nd_state_name
+                0x0000000000005c60       0x28 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005c60                tool_nd_state_name
  .text.tool_iface_name
-                0x0000000000005bd4       0x44 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005bd4                tool_iface_name
+                0x0000000000005c88       0x44 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005c88                tool_iface_name
  .text.tool_print_routes
-                0x0000000000005c18      0x1b0 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005c18                tool_print_routes
+                0x0000000000005ccc      0x1b0 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005ccc                tool_print_routes
  .text.tool_print_routes6
-                0x0000000000005dc8      0x1ec CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005dc8                tool_print_routes6
+                0x0000000000005e7c      0x1ec CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000005e7c                tool_print_routes6
  .text.tool_print_dest6
-                0x0000000000005fb4      0x124 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x0000000000005fb4                tool_print_dest6
+                0x0000000000006068      0x124 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x0000000000006068                tool_print_dest6
  .text.tool_tcp_state_name
-                0x00000000000060d8       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
-                0x00000000000060d8                tool_tcp_state_name
+                0x000000000000618c       0x24 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+                0x000000000000618c                tool_tcp_state_name
  .text.scan_item
-                0x00000000000060fc       0xac ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000061b0       0xac ../config/libaminetxduo_config.a(config_text.c.obj)
  .text.split_dotted.part.0
-                0x00000000000061a8       0xb4 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x000000000000625c       0xb4 ../config/libaminetxduo_config.a(config_text.c.obj)
  .text.ami_cfg_strlen
-                0x000000000000625c       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x000000000000625c                ami_cfg_strlen
+                0x0000000000006310       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006310                ami_cfg_strlen
  .text.ami_cfg_zero
-                0x0000000000006270       0x18 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006270                ami_cfg_zero
+                0x0000000000006324       0x18 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006324                ami_cfg_zero
  .text.ami_cfg_stricmp
-                0x0000000000006288       0x7c ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006288                ami_cfg_stricmp
+                0x000000000000633c       0x7c ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x000000000000633c                ami_cfg_stricmp
  .text.ami_cfg_copy_string
-                0x0000000000006304       0x34 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006304                ami_cfg_copy_string
+                0x00000000000063b8       0x34 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000063b8                ami_cfg_copy_string
  .text.ami_cfg_join3
-                0x0000000000006338       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006338                ami_cfg_join3
+                0x00000000000063ec       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000063ec                ami_cfg_join3
  .text.ami_config_set_reporter
-                0x000000000000639c       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x000000000000639c                ami_config_set_reporter
+                0x0000000000006450       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006450                ami_config_set_reporter
  .text.ami_cfg_problem_file
-                0x00000000000063b0       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000063b0                ami_cfg_problem_file
+                0x0000000000006464       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006464                ami_cfg_problem_file
  .text.ami_cfg_problems_wanted
-                0x00000000000063c4       0x10 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000063c4                ami_cfg_problems_wanted
+                0x0000000000006478       0x10 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006478                ami_cfg_problems_wanted
  .text.ami_cfg_problem
-                0x00000000000063d4       0x48 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000063d4                ami_cfg_problem
+                0x0000000000006488       0x48 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006488                ami_cfg_problem
  .text.ami_cfg_next_line
-                0x000000000000641c       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x000000000000641c                ami_cfg_next_line
+                0x00000000000064d0       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000064d0                ami_cfg_next_line
  .text.ami_cfg_trim
-                0x0000000000006470       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006470                ami_cfg_trim
+                0x0000000000006524       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006524                ami_cfg_trim
  .text.ami_cfg_strip_comment
-                0x00000000000064d4       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000064d4                ami_cfg_strip_comment
+                0x0000000000006588       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006588                ami_cfg_strip_comment
  .text.ami_cfg_unquote
-                0x0000000000006528       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006528                ami_cfg_unquote
+                0x00000000000065dc       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000065dc                ami_cfg_unquote
  .text.ami_cfg_tokenize
-                0x0000000000006590       0x40 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006590                ami_cfg_tokenize
+                0x0000000000006644       0x40 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006644                ami_cfg_tokenize
  .text.ami_cfg_next_pair
-                0x00000000000065d0      0x118 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000065d0                ami_cfg_next_pair
+                0x0000000000006684      0x118 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006684                ami_cfg_next_pair
  .text.ami_cfg_parse_ulong
-                0x00000000000066e8       0xec ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000066e8                ami_cfg_parse_ulong
+                0x000000000000679c       0xec ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x000000000000679c                ami_cfg_parse_ulong
  .text.ami_cfg_parse_mac
-                0x00000000000067d4       0xa0 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000067d4                ami_cfg_parse_mac
+                0x0000000000006888       0xa0 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006888                ami_cfg_parse_mac
  .text.ami_cfg_parse_bool
-                0x0000000000006874       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006874                ami_cfg_parse_bool
+                0x0000000000006928       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006928                ami_cfg_parse_bool
  .text.ami_config_parse_ip
-                0x00000000000068dc       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x00000000000068dc                ami_config_parse_ip
+                0x0000000000006990       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000006990                ami_config_parse_ip
  .text.ami_config_format_ip
-                0x0000000000006930       0xb8 ../config/libaminetxduo_config.a(config_text.c.obj)
-                0x0000000000006930                ami_config_format_ip
+                0x00000000000069e4       0xb8 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x00000000000069e4                ami_config_format_ip
  .text.ami_cfg_parse_ip6_inner.part.0
-                0x00000000000069e8      0x3e0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+                0x0000000000006a9c      0x3e0 ../config/libaminetxduo_config.a(config_text6.c.obj)
  .text.ami_config_parse_ip6_zone
-                0x0000000000006dc8       0x38 ../config/libaminetxduo_config.a(config_text6.c.obj)
-                0x0000000000006dc8                ami_config_parse_ip6_zone
+                0x0000000000006e7c       0x38 ../config/libaminetxduo_config.a(config_text6.c.obj)
+                0x0000000000006e7c                ami_config_parse_ip6_zone
  .text.ami_config_format_ip6
-                0x0000000000006e00      0x1d0 ../config/libaminetxduo_config.a(config_text6.c.obj)
-                0x0000000000006e00                ami_config_format_ip6
+                0x0000000000006eb4      0x1d0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+                0x0000000000006eb4                ami_config_format_ip6
  .text.ami_cfg_read_file
-                0x0000000000006fd0       0xd0 ../config/libaminetxduo_config.a(config_file.c.obj)
-                0x0000000000006fd0                ami_cfg_read_file
+                0x0000000000007084       0xd0 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x0000000000007084                ami_cfg_read_file
  .text.load_resolver
-                0x00000000000070a0      0x118 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x0000000000007154      0x118 ../config/libaminetxduo_config.a(config_file.c.obj)
  .text.ami_config_load_interface
-                0x00000000000071b8       0xf0 ../config/libaminetxduo_config.a(config_file.c.obj)
-                0x00000000000071b8                ami_config_load_interface
+                0x000000000000726c       0xf0 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x000000000000726c                ami_config_load_interface
  .text.load_interfaces.constprop.0
-                0x00000000000072a8      0x230 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x000000000000735c      0x230 ../config/libaminetxduo_config.a(config_file.c.obj)
  .text.ami_config_load
-                0x00000000000074d8      0x180 ../config/libaminetxduo_config.a(config_file.c.obj)
-                0x00000000000074d8                ami_config_load
+                0x000000000000758c      0x180 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x000000000000758c                ami_config_load
  .text.dnssd_word
-                0x0000000000007658       0x4c ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x000000000000770c       0x4c ../config/libaminetxduo_config.a(config_parse.c.obj)
  .text.lookup_iptype
-                0x00000000000076a4       0x38 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000007758       0x38 ../config/libaminetxduo_config.a(config_parse.c.obj)
  .text.report_bad_value
-                0x00000000000076dc       0x70 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000007790       0x70 ../config/libaminetxduo_config.a(config_parse.c.obj)
  .text.ami_cfg_parse_interface
-                0x000000000000774c      0xa30 ../config/libaminetxduo_config.a(config_parse.c.obj)
-                0x000000000000774c                ami_cfg_parse_interface
+                0x0000000000007800      0xa30 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000007800                ami_cfg_parse_interface
  .text.ami_cfg_parse_resolver
-                0x000000000000817c      0x2d0 ../config/libaminetxduo_config.a(config_parse.c.obj)
-                0x000000000000817c                ami_cfg_parse_resolver
+                0x0000000000008230      0x2d0 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000008230                ami_cfg_parse_resolver
  .text.ami_cfg_parse_gateway
-                0x000000000000844c      0x258 ../config/libaminetxduo_config.a(config_parse.c.obj)
-                0x000000000000844c                ami_cfg_parse_gateway
+                0x0000000000008500      0x258 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000008500                ami_cfg_parse_gateway
  .text.ami_cfg_parse_tcp_handler
-                0x00000000000086a4      0x144 ../config/libaminetxduo_config.a(config_parse.c.obj)
-                0x00000000000086a4                ami_cfg_parse_tcp_handler
+                0x0000000000008758      0x144 ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x0000000000008758                ami_cfg_parse_tcp_handler
  .text.ami_cfg_parse_dnssd
-                0x00000000000087e8      0x37c ../config/libaminetxduo_config.a(config_parse.c.obj)
-                0x00000000000087e8                ami_cfg_parse_dnssd
+                0x000000000000889c      0x37c ../config/libaminetxduo_config.a(config_parse.c.obj)
+                0x000000000000889c                ami_cfg_parse_dnssd
  .text.ami_config_hostname_valid
-                0x0000000000008b64       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
-                0x0000000000008b64                ami_config_hostname_valid
+                0x0000000000008c18       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+                0x0000000000008c18                ami_config_hostname_valid
  .text.ami_config_hostname_source_text
-                0x0000000000008c00       0x38 ../config/libaminetxduo_config.a(config_hostname.c.obj)
-                0x0000000000008c00                ami_config_hostname_source_text
+                0x0000000000008cb4       0x38 ../config/libaminetxduo_config.a(config_hostname.c.obj)
+                0x0000000000008cb4                ami_config_hostname_source_text
  .text.ami_config_hostname_offer
-                0x0000000000008c38       0x6c ../config/libaminetxduo_config.a(config_hostname.c.obj)
-                0x0000000000008c38                ami_config_hostname_offer
+                0x0000000000008cec       0x6c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+                0x0000000000008cec                ami_config_hostname_offer
  .text.ami_cfg_hostname_from_files
-                0x0000000000008ca4       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
-                0x0000000000008ca4                ami_cfg_hostname_from_files
+                0x0000000000008d58       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+                0x0000000000008d58                ami_cfg_hostname_from_files
  .text.ami_alloc_flags
-                0x0000000000008d40       0x64 ../common/libaminetxduo_common.a(compat.c.obj)
-                0x0000000000008d40                ami_alloc_flags
+                0x0000000000008df4       0x64 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000008df4                ami_alloc_flags
  .text.ami_alloc
-                0x0000000000008da4       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
-                0x0000000000008da4                ami_alloc
+                0x0000000000008e58       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000008e58                ami_alloc
  .text.ami_free
-                0x0000000000008db8       0x34 ../common/libaminetxduo_common.a(compat.c.obj)
-                0x0000000000008db8                ami_free
+                0x0000000000008e6c       0x34 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000008e6c                ami_free
  *(.rodata*)
  *(.data.rel.ro*)
  *(.gnu.linkonce.t.*)
@@ -562,45 +562,45 @@ END GROUP
  *(SORT_BY_NAME(.list___EH_FRAME*))
  *(SORT_BY_NAME(.list_*))
  *(.end_of_lists)
-                0x0000000000008dec                ___datadata_relocs = .
-                0x0000000000008dec                __etext = .
-                0x0000000000008dec                ___text_size = SIZEOF (.text)
-                0x0000000000008dec                . = ALIGN (0x0)
+                0x0000000000008ea0                ___datadata_relocs = .
+                0x0000000000008ea0                __etext = .
+                0x0000000000008ea0                ___text_size = SIZEOF (.text)
+                0x0000000000008ea0                . = ALIGN (0x0)
 
-.data           0x0000000000008dec       0x10
-                0x0000000000008dec                __sdata = .
+.data           0x0000000000008ea0       0x10
+                0x0000000000008ea0                __sdata = .
  *(SORT_BY_NAME(.list___EH_FRAME*))
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x0000000000008dec        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
- .data          0x0000000000008df0        0xc ../net68k/libaminetxduo_net68k.a(n68k_cpu.c.obj)
-                0x0000000000008df0                n68k_vec_copy
-                0x0000000000008df4                n68k_vec_copy_sum
-                0x0000000000008df8                n68k_vec_sum
+ .data          0x0000000000008ea0        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .data          0x0000000000008ea4        0xc ../net68k/libaminetxduo_net68k.a(n68k_cpu.c.obj)
+                0x0000000000008ea4                n68k_vec_copy
+                0x0000000000008ea8                n68k_vec_copy_sum
+                0x0000000000008eac                n68k_vec_sum
  *(.data.*)
  *(.gnu.linkonce.d.*)
-                0x0000000000010dea                ___a4_init = 0x7ffe
-                0x0000000000008dfc                __edata = .
+                0x0000000000010e9e                ___a4_init = 0x7ffe
+                0x0000000000008eb0                __edata = .
                 0x0000000000000010                ___data_size = SIZEOF (.data)
 
-.bss            0x0000000000008dfc     0x2f84
-                0x0000000000008dfc                __bss_start = .
+.bss            0x0000000000008eb0     0x303c
+                0x0000000000008eb0                __bss_start = .
  *(.bss)
- .bss           0x0000000000008dfc       0x10 CMakeFiles/tool_netstat.dir/tool_startup.S.obj
-                0x0000000000008dfc                SysBase
-                0x0000000000008e00                DOSBase
-                0x0000000000008e04                _WBenchMsg
- .bss           0x0000000000008e0c     0x2b2c CMakeFiles/tool_netstat.dir/netstat.c.obj
- .bss           0x000000000000b938        0x4 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
- .bss           0x000000000000b93c      0x354 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
- .bss           0x000000000000bc90        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
- .bss           0x000000000000bc9c       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
-                0x000000000000bc9c                TimerBase
+ .bss           0x0000000000008eb0       0x10 CMakeFiles/tool_netstat.dir/tool_startup.S.obj
+                0x0000000000008eb0                SysBase
+                0x0000000000008eb4                DOSBase
+                0x0000000000008eb8                _WBenchMsg
+ .bss           0x0000000000008ec0     0x2be4 CMakeFiles/tool_netstat.dir/netstat.c.obj
+ .bss           0x000000000000baa4        0x4 CMakeFiles/tool_netstat.dir/tool_diag.c.obj
+ .bss           0x000000000000baa8      0x354 CMakeFiles/tool_netstat.dir/tool_nx.c.obj
+ .bss           0x000000000000bdfc        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
+ .bss           0x000000000000be08       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000000be08                TimerBase
  *(.bss.*)
  *(COMMON)
-                0x000000000000bd80                __end = .
-                0x0000000000002f84                ___bss_size = SIZEOF (.bss)
+                0x000000000000beec                __end = .
+                0x000000000000303c                ___bss_size = SIZEOF (.bss)
 
 .datachip
  *(.datachip)

@@ -40,7 +40,9 @@ typedef struct AmiBudget
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
     AmiBudgetLeg    fetch;          /* receive notify -> recv() returns    */
     AmiBudgetLeg    ack;            /* CMD_WRITE BeginIO -> reply reaped   */
-    AmiBudgetLeg    push;           /* driver entry send case, enter->ret  */
+    AmiBudgetLeg    reap;           /* tx_send: the TX completion reap walk */
+    AmiBudgetLeg    stuff;          /* tx_send: claim + framing + slot fill */
+    AmiBudgetLeg    post;           /* tx_send: BeginIO enter -> return    */
 } AmiBudget;
 
 extern AmiBudget ami_budget;
@@ -55,7 +57,9 @@ VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_notify(ULONG now);
 VOID ami_budget_fetch(ULONG now);
 VOID ami_budget_ack(ULONG dt);
-VOID ami_budget_push(ULONG dt);
+VOID ami_budget_reap(ULONG dt);
+VOID ami_budget_stuff(ULONG dt);
+VOID ami_budget_post(ULONG dt);
 
 #else
 
@@ -66,7 +70,9 @@ VOID ami_budget_push(ULONG dt);
 #define ami_budget_notify(now)   ((VOID)0)
 #define ami_budget_fetch(now)    ((VOID)0)
 #define ami_budget_ack(dt)       ((VOID)0)
-#define ami_budget_push(dt)      ((VOID)0)
+#define ami_budget_reap(dt)      ((VOID)0)
+#define ami_budget_stuff(dt)     ((VOID)0)
+#define ami_budget_post(dt)      ((VOID)0)
 
 #endif /* AMINETXDUO_RXPROBE */
 

@@ -505,6 +505,33 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     UWORD      spins;
     ULONG      length;
     BOOL       raw_write;
+#ifdef AMINETXDUO_RXPROBE
+    /*
+     * The dissection of the old push leg: what one transmitted frame costs
+     * this machine on the CPU, in three named pieces.  During a receive every
+     * frame through here is an ACK, and the ack leg above only spans wall
+     * time to collection; these are the emitting half.
+     *
+     *   reap   the completion reap walk at the top: GetMsg loop, packet
+     *          restore, nx_packet_transmit_release of the previous write.
+     *   stuff  everything between reap and BeginIO: slot claim, the raw
+     *          header when one is built, padding, the slot fill.  The rare
+     *          full-ring spin sleeps land here too.
+     *   post   BeginIO enter to return.  A SANA-II CMD_WRITE calls the
+     *          shim's copy hook from inside BeginIO, so the payload copy
+     *          into the device -- el3's TX FIFO PIO under Forbid -- is in
+     *          this piece, not in stuff.
+     *
+     * Wall-clock deltas like drain, same clock, so an RX interrupt landing
+     * inside a piece still inflates that piece; three smaller windows make
+     * that attribution error three times smaller than the single leg had.
+     * Sampled only on the path that reaches BeginIO, so the three counts
+     * match and their sum reconstructs the old leg.
+     */
+    ULONG probe_t0 = ami_budget_clock();
+    ULONG probe_t1;
+    ULONG probe_t2;
+#endif
 
     if (iface == NULL || packet == NULL)
         return NX_PTR_ERROR;
@@ -512,6 +539,10 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     /* Cheap when the reader has already emptied the port, and the only reaping
        that happens when no reader is bound. */
     ami_sana2_tx_reap(iface);
+
+#ifdef AMINETXDUO_RXPROBE
+    probe_t1 = ami_budget_clock();
+#endif
 
     if (!iface->online)
     {
@@ -693,11 +724,19 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
      */
 #ifdef AMINETXDUO_RXPROBE
     /* The ack leg's opening stamp, as late as it can be taken: everything
-       above is the shim's own framing cost, and the leg is the device's. */
-    slot->write_at = ami_budget_clock();
+       above is the shim's own framing cost, and the leg is the device's.
+       The same read closes the stuff piece and opens post. */
+    probe_t2       = ami_budget_clock();
+    slot->write_at = probe_t2;
 #endif
 
     BeginIO((struct IORequest *)&slot->req);
+
+#ifdef AMINETXDUO_RXPROBE
+    ami_budget_reap(probe_t1 - probe_t0);
+    ami_budget_stuff(probe_t2 - probe_t1);
+    ami_budget_post(ami_budget_clock() - probe_t2);
+#endif
 
     return NX_SUCCESS;
 }

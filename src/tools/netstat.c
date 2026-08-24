@@ -300,7 +300,11 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("ack,    write to reply      ", &b->nrb_Ack,
                     b->nrb_EClockRate);
-    show_budget_leg("push,   driver send case    ", &b->nrb_Push,
+    show_budget_leg("reap,   tx completion walk  ", &b->nrb_Reap,
+                    b->nrb_EClockRate);
+    show_budget_leg("stuff,  claim and framing   ", &b->nrb_Stuff,
+                    b->nrb_EClockRate);
+    show_budget_leg("post,   BeginIO to return   ", &b->nrb_Post,
                     b->nrb_EClockRate);
 }
 
