@@ -1054,6 +1054,11 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Stuff;      /* slot claim + framing, to BeginIO  */
     NetStatusBudgetLeg  nrb_Post;       /* BeginIO enter -> return (the copy
                                            hook and FIFO stuffing run inside) */
+    /* The direct-completion fork (AMINETXDUO_RX_DIRECT_COMPLETE): recv()
+       requests the IP thread completed into the caller's buffer, against the
+       packets the classic blocking dequeue fetched. */
+    ULONG               nrb_RxDirect;
+    ULONG               nrb_RxFallback;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

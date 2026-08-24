@@ -130,6 +130,16 @@ VOID ami_budget_post(ULONG dt)
     ami_budget_leg(&ami_budget.post, dt);
 }
 
+VOID ami_budget_rx_direct(VOID)
+{
+    ami_budget.rx_direct++;
+}
+
+VOID ami_budget_rx_fallback(VOID)
+{
+    ami_budget.rx_fallback++;
+}
+
 VOID ami_budget_fetch(ULONG now)
 {
     ULONG opened = ami_budget.notify_at;

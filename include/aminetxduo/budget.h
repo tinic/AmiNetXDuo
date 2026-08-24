@@ -43,6 +43,14 @@ typedef struct AmiBudget
     AmiBudgetLeg    reap;           /* tx_send: the TX completion reap walk */
     AmiBudgetLeg    stuff;          /* tx_send: claim + framing + slot fill */
     AmiBudgetLeg    post;           /* tx_send: BeginIO enter -> return    */
+
+    /* Which side of the direct-completion fork a receive took: rx_direct
+       counts recv() requests the IP thread completed into the caller's own
+       buffer (AMINETXDUO_RX_DIRECT_COMPLETE), rx_fallback the packets the
+       classic blocking dequeue in bsd_recv_tcp() fetched.  Plain counters,
+       not legs: the question they answer is coverage, not duration. */
+    ULONG           rx_direct;
+    ULONG           rx_fallback;
 } AmiBudget;
 
 extern AmiBudget ami_budget;
@@ -60,6 +68,8 @@ VOID ami_budget_ack(ULONG dt);
 VOID ami_budget_reap(ULONG dt);
 VOID ami_budget_stuff(ULONG dt);
 VOID ami_budget_post(ULONG dt);
+VOID ami_budget_rx_direct(VOID);
+VOID ami_budget_rx_fallback(VOID);
 
 #else
 
@@ -73,6 +83,8 @@ VOID ami_budget_post(ULONG dt);
 #define ami_budget_reap(dt)      ((VOID)0)
 #define ami_budget_stuff(dt)     ((VOID)0)
 #define ami_budget_post(dt)      ((VOID)0)
+#define ami_budget_rx_direct()   ((VOID)0)
+#define ami_budget_rx_fallback() ((VOID)0)
 
 #endif /* AMINETXDUO_RXPROBE */
 

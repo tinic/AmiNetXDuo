@@ -1542,6 +1542,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Post.nbl_Count   = ami_budget.post.count;
             out->nrb_Post.nbl_Sum     = ami_budget.post.sum;
             out->nrb_Post.nbl_Max     = ami_budget.post.max;
+            out->nrb_RxDirect         = ami_budget.rx_direct;
+            out->nrb_RxFallback       = ami_budget.rx_fallback;
             {
                 UWORD i;
 

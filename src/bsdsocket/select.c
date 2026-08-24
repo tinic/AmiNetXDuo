@@ -70,6 +70,8 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
 
 static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 {
+    AmiSocket *sock = (AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr;
+
 #ifdef AMINETXDUO_RXPROBE
     /* The settle leg closes here: the data a deliver stamped is now on this
        socket's queue and about to wake its owner.  budget.h says why the
@@ -77,7 +79,18 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
     ami_budget_notify(ami_budget_clock());
 #endif
 
-    bsd_event_post((AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr, FD_READ);
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+    /* A parked recv() published its buffer: complete it here, on the IP
+       thread with the protection mutex held, instead of waking the caller to
+       come back in and dequeue.  The event post below is then the one
+       boundary Signal it is waiting on.  The callback rule stated further
+       down this file ("none of them enters a vector and none can suspend")
+       is kept: the pump is NX_NO_WAIT dequeues, a copy and bookkeeping. */
+    if (sock != NULL && sock->as_RxDState == BSD_RXD_ARMED)
+        bsd_rxdirect_pump(sock);
+#endif
+
+    bsd_event_post(sock, FD_READ);
 }
 
 /*
@@ -477,7 +490,20 @@ BOOL bsd_readable(AmiSocket *sock)
         return TRUE;
 
     if (sock->as_RxPending != NULL)
+    {
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+        /* The completer parks the packet that empties the receive queue
+           fully drained rather than releasing it out from under the
+           data_check that fired the notify (bsd_rxdirect_pump).  A drained
+           parked packet holds nothing recv() can return, so it must not make
+           the promise on its own; the state and queue tests below still can. */
+        if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) != ASF_TCP ||
+            sock->as_RxPending->nx_packet_length > sock->as_RxOffset)
+            return TRUE;
+#else
         return TRUE;
+#endif
+    }
 
     if ((sock->as_Flags & ASF_RAW) != 0)
         return (sock->as_RawHead != NX_NULL);

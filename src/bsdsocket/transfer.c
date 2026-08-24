@@ -1207,6 +1207,239 @@ static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
     return (BOOL)((length - sock->as_RxOffset) > (ULONG)len);
 }
 
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+
+/*
+ * The completer half of the pending-receive descriptor.  Runs wherever the
+ * baton is: on the IP thread inside the receive notify (protection mutex
+ * held), or on the caller inside its bracket before it parks.  Either way no
+ * other ThreadX thread can be mid-anything, which is the whole protection
+ * story for the as_RxD* fields.
+ *
+ * Dequeues with the real nx_tcp_socket_receive(), so the receive-window
+ * credit and the SWS window-update ACK happen exactly as the classic path's
+ * dequeue does them -- just at settle time instead of fetch time.  NX_NO_WAIT
+ * everywhere: on the IP thread the :244 guard in nx_tcp_socket_receive.c
+ * turns an empty queue into NX_NO_PACKET rather than a suspension, so the
+ * select.c callback rule holds.
+ *
+ * The parking rule: the packet whose dequeue EMPTIES the queue is the segment
+ * that fired this notify, and nx_tcp_socket_state_data_check.c reads that
+ * segment's TCP header again after the notify returns (the FIN bit, :1222).
+ * Releasing it here would hand it to the allocator underneath that read --
+ * the ACK this pump's own window update sends allocates a packet and could
+ * recycle it.  So the queue-emptying packet is parked on as_RxPending,
+ * drained, exactly the shape bsd_recv_tcp() already handles ("leave it
+ * parked and drained, the next call releases it"); intermediate packets are
+ * older segments and are released freely.
+ */
+VOID bsd_rxdirect_pump(AmiSocket *sock)
+{
+    /* A parked packet with the descriptor still armed is the failed-extract
+       corner below; a second notify must not park over it. */
+    if (sock->as_RxPending != NULL)
+        return;
+
+    while (sock->as_RxDFilled < sock->as_RxDWant)
+    {
+        NX_PACKET *packet = NX_NULL;
+        ULONG      length, take, moved;
+        UINT       status;
+
+        status = nx_tcp_socket_receive(&sock->as_Nx.tcp, &packet, NX_NO_WAIT);
+        if (status != NX_SUCCESS)
+        {
+            sock->as_RxDStatus = status;
+            break;
+        }
+
+        length = bsd_packet_len(packet);
+        take   = sock->as_RxDWant - sock->as_RxDFilled;
+        if (take > length)
+            take = length;
+
+        moved = 0;
+        if (take > 0)
+            (VOID)nx_packet_data_extract_offset(
+                      packet, 0, sock->as_RxDDst + sock->as_RxDFilled,
+                      take, &moved);
+
+        sock->as_RxDFilled += moved;
+
+        if (moved < length)
+        {
+            /* The buffer is full (or the extract failed): park the rest for
+               the next call, as the classic loop would have. */
+            sock->as_RxPending = packet;
+            sock->as_RxOffset  = moved;
+            break;
+        }
+
+        if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_head == NX_NULL)
+        {
+            /* Fully consumed AND it emptied the queue: the parking rule. */
+            sock->as_RxPending = packet;
+            sock->as_RxOffset  = length;
+            break;
+        }
+
+        nx_packet_release(packet);
+    }
+
+    if (sock->as_RxDFilled > 0)
+    {
+        sock->as_RxDState = BSD_RXD_DONE;
+
+#ifdef AMINETXDUO_RXPROBE
+        /* The fetch leg closes at the moment the data is in the caller's
+           buffer -- which is now here, before its owner even wakes. */
+        ami_budget_fetch(ami_budget_clock());
+        ami_budget_rx_direct();
+#endif
+    }
+}
+
+/*
+ * The caller half: publish the buffer, park in a plain Wait() on the base's
+ * event signal, and return what the IP thread copied -- without re-entering
+ * NetX Duo on the way out.  Everything that is not the plain blocking stream
+ * read has already been declined by the caller's eligibility test; what this
+ * function still declines (scattered buffers, a borrowed base, a nested
+ * bracket) it declines by returning unhandled, descriptor unarmed, so the
+ * classic path below it is always the answer.
+ *
+ * Entered with the bracket held.  On the handled returns the bracket may or
+ * may not still be held; *held says which, and bsd_recv_iov() leaves only
+ * what is held.
+ */
+static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
+                            BsdIovCursor *cur, LONG len, BOOL *held,
+                            BOOL *handled)
+{
+    UBYTE *dst   = NULL;
+    ULONG  chunk = bsd_iov_chunk(cur, &dst);
+    ULONG  received;
+
+    *handled = FALSE;
+
+    /* One contiguous run must cover the whole request: the descriptor is a
+       flat buffer, and recv() with one iovec -- the case that matters -- is
+       exactly that. */
+    if (dst == NULL || chunk < (ULONG)len)
+        return 0;
+
+    /* The completer signals the opening task; only that task can wait for
+       it.  And the Wait() below runs outside the bracket, so this caller
+       must be the one that holds it, not a vector nested inside another. */
+    if (FindTask(NULL) != base->sb_Task || base->sb_NxNest != 1)
+        return 0;
+
+    /* Clear, then arm, then look: the WaitSelect() pattern.  Anything the
+       completer posts after this clear sets the signal again and the Wait()
+       below returns immediately.  Consuming the event signal here is what
+       WaitSelect() does before every poll; it is level-triggered state, not
+       a message. */
+    SetSignal(0UL, base->sb_EventSigMask);
+
+    sock->as_RxDDst    = dst;
+    sock->as_RxDWant   = (ULONG)len;
+    sock->as_RxDFilled = 0;
+    sock->as_RxDStatus = NX_NO_PACKET;
+    sock->as_RxDState  = BSD_RXD_ARMED;
+
+    /* Data can already be queued -- its notify came and went before this
+       call.  Pump it out now, under the bracket, rather than sleeping on a
+       notify that will never repeat. */
+    bsd_rxdirect_pump(sock);
+
+    if (sock->as_RxDState == BSD_RXD_ARMED &&
+        (sock->as_RxDStatus != NX_NO_PACKET || sock->as_RxPending != NULL))
+    {
+        /* Not receivable (reset, closing), or the freak parked-unfilled
+           corner: the classic path knows how to tell every one of those
+           stories, so unhook and let it. */
+        sock->as_RxDState = BSD_RXD_IDLE;
+        return 0;
+    }
+
+    if (sock->as_RxDState == BSD_RXD_ARMED)
+    {
+        /* Park.  The completer runs on the IP thread, which cannot run
+           while this task holds the bracket -- so drop it first. */
+        bsd_nx_leave(base);
+        *held = FALSE;
+
+        received = Wait(base->sb_EventSigMask | base->sb_BreakMask);
+
+        if ((received & base->sb_BreakMask) != 0)
+        {
+            /* Ctrl-C, or whatever SBTC_BREAKMASK was set to.  The signal is
+               the caller's: Wait() consumed it, so it goes back, the way the
+               classic path leaves it standing. */
+            Signal(base->sb_Task, received & base->sb_BreakMask);
+
+            if (!bsd_nx_need(base, held))
+            {
+                /* No kernel, no completer left to race with. */
+                Forbid();
+                sock->as_RxDState = BSD_RXD_IDLE;
+                Permit();
+
+                *handled = TRUE;
+                return bsd_fail(base, AMI_EINTR);
+            }
+
+            if (sock->as_RxDState == BSD_RXD_ARMED)
+            {
+                sock->as_RxDState = BSD_RXD_IDLE;
+
+                *handled = TRUE;
+                return bsd_fail(base, AMI_EINTR);
+            }
+
+            /* The completer won the race: the data is already in the
+               caller's buffer and dequeued from the socket.  Return it; the
+               break stays posted for the caller's own check. */
+        }
+        else if (sock->as_RxDState != BSD_RXD_DONE)
+        {
+            /* Woken with nothing completed: an event on another descriptor,
+               this socket closing, an urgent byte -- every one of them a
+               story the classic path already tells.  Unhook under the
+               bracket (ARMED means the completer is not mid-copy once we
+               hold it) and fall back rather than retell them here. */
+            if (!bsd_nx_need(base, held))
+            {
+                Forbid();
+                sock->as_RxDState = BSD_RXD_IDLE;
+                Permit();
+
+                *handled = TRUE;
+                return bsd_fail(base, AMI_ENETDOWN);
+            }
+
+            if (sock->as_RxDState == BSD_RXD_ARMED)
+            {
+                sock->as_RxDState = BSD_RXD_IDLE;
+                return 0;
+            }
+        }
+    }
+
+    /* BSD_RXD_DONE: the IP thread copied into the caller's buffer and this
+       task owns the descriptor again -- the completer set DONE last and
+       never comes back to it. */
+    sock->as_RxDState = BSD_RXD_IDLE;
+
+    bsd_iov_advance(cur, sock->as_RxDFilled);
+
+    *handled = TRUE;
+
+    return (LONG)sock->as_RxDFilled;
+}
+
+#endif /* AMINETXDUO_RX_DIRECT_COMPLETE */
+
 static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags, BOOL *held)
 {
@@ -1236,6 +1469,33 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
              */
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
                                                               : NX_NO_WAIT;
+
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+            /*
+             * The direct-completion arm, for the plain blocking stream read
+             * only: an untimed wait, no partial result yet, none of the
+             * flags that change what a read means, and a live connection.
+             * Everything else declines here and the classic path below is
+             * the answer, correct as it always was.
+             */
+            if (now == NX_WAIT_FOREVER && copied == 0 && len > 0 &&
+                (flags & (MSG_PEEK | MSG_WAITALL | MSG_OOB |
+                          MSG_DONTWAIT)) == 0 &&
+                (sock->as_Flags & (ASF_CONNECTED | ASF_EOF |
+                                   ASF_LISTENING)) == ASF_CONNECTED)
+            {
+                BOOL handled = FALSE;
+                LONG direct;
+
+                if (!bsd_nx_need(base, held))
+                    return bsd_fail(base, AMI_ENETDOWN);
+
+                direct = bsd_recv_direct(base, sock, cur, len, held,
+                                         &handled);
+                if (handled)
+                    return direct;
+            }
+#endif
 
             {
                 BsdRecvArgs args;
@@ -1273,6 +1533,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                    hands.  Taken on the dequeue and not after the copy-out,
                    because the copy is already on the profiler's ledger. */
                 ami_budget_fetch(ami_budget_clock());
+                ami_budget_rx_fallback();
 #endif
                 sock->as_RxPending = packet;
                 sock->as_RxOffset  = 0;

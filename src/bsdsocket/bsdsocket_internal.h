@@ -748,6 +748,29 @@ typedef struct AmiSocket
     NX_PACKET              *as_RxPending;
     ULONG                   as_RxOffset;
 
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+    /*
+     * The pending-receive descriptor (transfer.c, bsd_recv_direct).  A plain
+     * blocking stream recv() publishes its buffer here and parks in Exec
+     * Wait(); the receive notify -- on the IP thread, protection mutex held
+     * -- dequeues, copies into as_RxDDst and posts the base's event signal,
+     * so the caller returns without re-entering NetX Duo.
+     *
+     * Who may touch it: any code that is the current ThreadX thread (the
+     * caller inside its bsd_nx_enter() bracket, or the IP thread in the
+     * notify) -- the baton makes those mutually exclusive.  The parked
+     * caller, outside the bracket, only READS as_RxDState and consumes the
+     * rest after seeing BSD_RXD_DONE, which the completer sets last and
+     * never revisits.  ARMED -> DONE is the completer's transition, every
+     * other one is the caller's, made while it holds the bracket.
+     */
+    UBYTE                  *as_RxDDst;      /* the caller's buffer            */
+    ULONG                   as_RxDWant;     /* its capacity                   */
+    ULONG                   as_RxDFilled;   /* bytes the completer copied     */
+    UINT                    as_RxDStatus;   /* last nx receive status         */
+    volatile UBYTE          as_RxDState;    /* BSD_RXD_*                      */
+#endif
+
     ULONG                   as_RcvTimeout;  /* ticks; 0 == block forever     */
     ULONG                   as_SndTimeout;
     LONG                    as_RcvBuf;      /* SO_RCVBUF, as the caller set  */
@@ -1244,6 +1267,18 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet);
 BOOL bsd_udp_accepts_received_packet(const AmiSocket *sock,
                                      const NX_PACKET *packet);
 ULONG bsd_udp_available(const AmiSocket *sock);
+
+#ifdef AMINETXDUO_RX_DIRECT_COMPLETE
+/* as_RxDState.  IDLE is zero so a MEMF_CLEAR socket starts unarmed. */
+#define BSD_RXD_IDLE    0
+#define BSD_RXD_ARMED   1
+#define BSD_RXD_DONE    2
+
+/* The completer half of the pending-receive descriptor. transfer.c owns it;
+ * select.c's receive notify calls it on the IP thread when a descriptor is
+ * armed. Never suspends: NX_NO_WAIT dequeues, a copy, and bookkeeping. */
+VOID bsd_rxdirect_pump(AmiSocket *sock);
+#endif
 
 /*
  * The send direction of the same question: which source must a datagram from

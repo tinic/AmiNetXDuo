@@ -503,6 +503,22 @@ if(AMINETXDUO_TX_LAZY_COLLECT)
     add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
 endif()
 
+# Complete a waiting stream recv() directly on the IP thread.  The shipped
+# design wakes the caller per receive notify and lets it re-enter the library
+# to dequeue -- the budget's fetch leg, ~7.3 ms of wall behind the burst on
+# the A1200.  ON has the blocking caller publish its buffer and park in a
+# plain Wait(); the receive notify, already on the IP thread with the
+# protection mutex held, dequeues, copies into that buffer and posts the one
+# boundary Signal, so the caller returns without re-entering NetX and the
+# window credit reopens at settle time instead of fetch time.  Anything but
+# the plain blocking stream read (MSG_PEEK, MSG_WAITALL, OOB, non-blocking,
+# finite timeouts) declines and takes the shipped path unchanged.
+option(AMINETXDUO_RX_DIRECT_COMPLETE
+       "Complete a waiting stream recv() directly on the IP thread" OFF)
+if(AMINETXDUO_RX_DIRECT_COMPLETE)
+    add_compile_definitions(AMINETXDUO_RX_DIRECT_COMPLETE)
+endif()
+
 # RFC 2018 selective acknowledgment on the receive side.  Also a layout change
 # to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
 # measurement come out of one tree the same way as the option above.

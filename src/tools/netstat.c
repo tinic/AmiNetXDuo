@@ -306,6 +306,12 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("post,   BeginIO to return   ", &b->nrb_Post,
                     b->nrb_EClockRate);
+
+    /* Coverage of the direct-completion fork, not a duration: how many
+       recv() requests the IP thread completed in place against how many
+       packets the classic blocking dequeue fetched. */
+    tool_printf("\tdirect: %lu completed on the IP thread, %lu classic dequeues\n",
+                b->nrb_RxDirect, b->nrb_RxFallback);
 }
 
 /*
