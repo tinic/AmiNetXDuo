@@ -372,6 +372,38 @@ static VOID dp8390_rint(NetdevNic *nic)
             if (nic->frame_at != NULL)
                 fp = (const UBYTE *)nic->frame_at(nic, src, flen);
 
+            if (fp == NULL && nic->rx_claim != NULL &&
+                flen > NETDEV_HDR_LEN)
+            {
+                /*
+                 * The remote-DMA form of el3.c's two-stage drain: the header
+                 * from the ring first, and when the claim answers, the
+                 * payload goes from the ring straight into the stack's
+                 * packet, one copy where there were two.  The ring is
+                 * random-access, so a declined claim costs one 14-byte read
+                 * and nothing else -- the staging path below re-reads from
+                 * the header onward.
+                 */
+                UBYTE *hdr = (UBYTE *)nic->rxbuf;
+
+                (VOID)nic->ring_copy(nic, src, hdr, NETDEV_HDR_LEN);
+
+                {
+                    APTR   token = NULL;
+                    UBYTE *dst   = nic->rx_claim(nic->rx_arg, hdr, flen,
+                                                 &token);
+
+                    if (dst != NULL)
+                    {
+                        (VOID)nic->ring_copy(nic, src + NETDEV_HDR_LEN, dst,
+                                             (UWORD)(flen - NETDEV_HDR_LEN));
+                        nic->rx_packets++;
+                        nic->rx_claimed(nic->rx_arg, token, 0, 0);
+                        goto rx_done;
+                    }
+                }
+            }
+
             if (fp == NULL)
             {
 #ifdef NETDEV_TIME
@@ -393,6 +425,7 @@ static VOID dp8390_rint(NetdevNic *nic)
             nic->rx_packets++;
             if (nic->rx != NULL)
                 nic->rx(nic->rx_arg, fp, flen);
+rx_done:;
         }
         else
         {

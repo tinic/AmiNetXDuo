@@ -77,4 +77,58 @@ VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks)
     }
 }
 
+
+ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes)
+{
+    UWORD                *d = (UWORD *)to;
+    const volatile UWORD *p = (const volatile UWORD *)port;
+    ULONG                 sum = 0;
+    ULONG                 longs = bytes >> 2;
+    ULONG                 tail  = bytes & 3UL;
+    ULONG                 w;
+
+    while (longs-- != 0UL)
+    {
+        UWORD w0 = *p;
+        UWORD w1 = *p;
+
+        *d++ = w0;
+        *d++ = w1;
+        w = ((ULONG)w0 << 16) | w1;
+        sum += w;
+        if (sum < w)
+            sum++;
+    }
+
+    if (tail != 0UL)
+    {
+        UBYTE *db = (UBYTE *)d;
+        UWORD  t0 = *p;
+
+        if (tail == 1UL)
+        {
+            db[0] = (UBYTE)(t0 >> 8);
+            w = ((ULONG)(t0 & 0xff00u)) << 16;
+        }
+        else if (tail == 2UL)
+        {
+            *d = t0;
+            w = (ULONG)t0 << 16;
+        }
+        else
+        {
+            UWORD t1 = *p;
+
+            *d = t0;
+            db[2] = (UBYTE)(t1 >> 8);
+            w = ((ULONG)t0 << 16) | (t1 & 0xff00u);
+        }
+        sum += w;
+        if (sum < w)
+            sum++;
+    }
+
+    return sum;
+}
+
 #endif /* AMINETXDUO_NET68K_ASM */

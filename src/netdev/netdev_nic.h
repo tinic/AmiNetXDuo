@@ -101,6 +101,21 @@ struct NetdevNic
     NetdevRxFn          rx;
     APTR                rx_arg;
 
+    /*
+     * The direct-receive path, for cores whose frames arrive through a port
+     * and must be copied by the CPU anyway.  rx_claim asks, from the frame's
+     * first NETDEV_HDR_LEN bytes, where the payload should be drained to; a
+     * NULL answer (or a NULL hook) means stage-and-rx() as always.  A claimed
+     * frame is finished with rx_claimed once the payload is in place, or
+     * handed back untouched with rx_unclaim when the drain failed.  All three
+     * run in the same context rx() does.
+     */
+    UBYTE            *(*rx_claim)(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                                  APTR *token);
+    VOID              (*rx_claimed)(APTR arg, APTR token, ULONG sum,
+                                    UBYTE summed);
+    VOID              (*rx_unclaim)(APTR arg, APTR token);
+
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an
        address error on a 68000 if a field reorder ever lands them odd. */

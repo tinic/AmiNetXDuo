@@ -53,6 +53,7 @@
 #include <stdint.h>     /* uintptr_t, for the fingerprint salt below */
 
 #include "netdev_nic.h"
+#include "n68k_iocopy.h"
 #include "netdev_cards.h"
 #include "netdev_mcaf.h"
 #include "netdev_macgen.h"
@@ -808,12 +809,50 @@ static BOOL el3_rint(NetdevNic *nic)
     {
         UBYTE *buf = (UBYTE *)nic->rxbuf;
 
-        netdev_bus_rdata(&nic->bus, buf, (UWORD)((len + 1u) & (UWORD)~1u));
+        /*
+         * The header first.  The filter and the direct-receive claim both
+         * decide from it, and it is the same seven words off the FIFO
+         * whichever path the rest of the frame takes.  A claimed frame is
+         * drained straight into the stack's packet -- one copy where there
+         * were two, and the second one was the larger half of what this
+         * interrupt used to cost (flight 4, 2026-08-22: the staging copy
+         * plus the hook copy were ~1.4 ms of a ~2 ms frame).  A declined
+         * claim reassembles the staging buffer exactly as before: the header
+         * is already at its start, and the payload lands behind it.
+         */
+        netdev_bus_rdata(&nic->bus, buf, NETDEV_HDR_LEN);
 
         if (el3_rx_wanted(nic, buf))
         {
-            nic->rx_packets++;
-            nic->rx(nic->rx_arg, buf, len);
+            APTR   token = NULL;
+            UBYTE *dst   = (nic->rx_claim != NULL)
+                         ? nic->rx_claim(nic->rx_arg, buf, len, &token)
+                         : NULL;
+
+            if (dst != NULL)
+            {
+                /*
+                 * The fused drain: the FIFO reads pay for the checksum, and
+                 * the verifier gets the sum the copy hook would have made,
+                 * so nothing anywhere walks these bytes again.  The slot's
+                 * payload pointer is longword aligned by construction, which
+                 * is the routine's one requirement.
+                 */
+                ULONG sum = n68k_port_in_w_sum(dst,
+                                               (const volatile void *)
+                                                   nic->bus.asic,
+                                               (ULONG)(len - NETDEV_HDR_LEN));
+
+                nic->rx_packets++;
+                nic->rx_claimed(nic->rx_arg, token, sum, 1);
+            }
+            else
+            {
+                netdev_bus_rdata(&nic->bus, buf + NETDEV_HDR_LEN,
+                                 (UWORD)(len - NETDEV_HDR_LEN));
+                nic->rx_packets++;
+                nic->rx(nic->rx_arg, buf, len);
+            }
         }
     }
 
