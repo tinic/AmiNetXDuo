@@ -220,26 +220,46 @@ _n68k_port_out:
 | payload pointer is longword aligned by construction).
         .globl  _n68k_port_in_w_sum
 _n68k_port_in_w_sum:
-        movem.l d2-d3,sp@-
-        movea.l sp@(12),a0              | to
-        movea.l sp@(16),a1              | port
-        move.l  sp@(20),d0              | bytes
+        movem.l d2-d5,sp@-
+        movea.l sp@(20),a0              | to
+        movea.l sp@(24),a1              | port
+        move.l  sp@(28),d0              | bytes
         moveq   #0,d1                   | sum
+        moveq   #0,d5                   | ADDX source: add carry only
 
         move.l  d0,d3
         lsr.l   #2,d3                   | whole longwords
-        beq     .Lpws_tail
-.Lpws_loop:
+        move.l  d3,d4
+        and.l   #3,d4                   | longwords after four-way blocks
+        lsr.l   #2,d3
+        beq     .Lpws_rest
+.Lpws_block:
+| Four longwords per branch.  ADD sets X to the carry and ADDX with a zero
+| source folds it back without the taken/not-taken branch the old loop paid
+| once per longword.  MOVE does not change X, and the next ADD establishes it
+| afresh, so the four copies can be written literally without flag plumbing.
+        .rept   4
         move.w  a1@,d2
         swap    d2
         move.w  a1@,d2                  | d2 = (w0 << 16) | w1
         move.l  d2,a0@+
         add.l   d2,d1
-        bcc.s   .Lpws_nc
-        addq.l  #1,d1                   | end-around carry, per add
-.Lpws_nc:
+        addx.l  d5,d1                   | end-around carry, per add
+        .endr
         subq.l  #1,d3
-        bne     .Lpws_loop
+        bne     .Lpws_block
+.Lpws_rest:
+        tst.l   d4
+        beq     .Lpws_tail
+.Lpws_one:
+        move.w  a1@,d2
+        swap    d2
+        move.w  a1@,d2
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d5,d1
+        subq.l  #1,d4
+        bne     .Lpws_one
 .Lpws_tail:
         and.l   #3,d0                   | 0..3 bytes remain
         beq     .Lpws_done
@@ -281,11 +301,10 @@ _n68k_port_in_w_sum:
         bra     .Lpws_tadd
 .Lpws_tadd:
         add.l   d2,d1
-        bcc.s   .Lpws_done
-        addq.l  #1,d1
+        addx.l  d5,d1
 .Lpws_done:
         move.l  d1,d0
-        movem.l sp@+,d2-d3
+        movem.l sp@+,d2-d5
         rts
 
 #endif /* AMINETXDUO_NET68K_ASM */

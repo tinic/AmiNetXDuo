@@ -101,7 +101,7 @@ static ULONG ref_sum(ULONG len, UWORD port)
 }
 
 #define GUARD   0xA5u
-#define MAXLEN  600UL
+#define MAXLEN  1600UL
 
 static VOID one(ULONG len, UWORD portval)
 {
@@ -160,8 +160,12 @@ int main(void)
     /* Every tail residue at several magnitudes, and the two sizes this bug was
        found at: 331 is a DHCP offer's payload, 46 the shortest Ethernet
        payload there is. */
-    static const ULONG lens[] = { 4, 5, 6, 7, 8, 32, 33, 34, 35,
-                                  46, 100, 101, 102, 103, 328, 331, 512, 515 };
+    static const ULONG lens[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8,
+                                  15, 16, 17, 18, 19,
+                                  31, 32, 33, 34, 35,
+                                  46, 100, 101, 102, 103,
+                                  328, 331, 511, 512, 515,
+                                  1458, 1459, 1460, 1461 };
     ULONG p;
     ULONG l;
 
