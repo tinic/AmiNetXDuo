@@ -238,7 +238,10 @@
  * same one duplicate per segment it always did, and the 200 ms delayed-ACK
  * timer is still the RFC 1122 4.2.3.2 backstop underneath everything.
  */
-/* #define NX_TCP_ACK_EVERY_N_PACKETS -- see above, deliberately NOT defined. */
+/* #define NX_TCP_ACK_EVERY_N_PACKETS -- see above, deliberately NOT defined.
+ * Build with -DAMINETXDUO_TCP_ACK_EVERY_N=<N> to bring the counter arm back
+ * for a measurement; the option defines the macro on the command line and
+ * this file stays silent either way. */
 
 /*
  * Retransmit with exponential backoff (RFC 6298 5.5).

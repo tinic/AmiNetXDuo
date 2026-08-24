@@ -473,6 +473,20 @@ if(NOT AMINETXDUO_TCP_TIMESTAMP)
     add_compile_definitions(AMINETXDUO_TCP_TIMESTAMP_OFF)
 endif()
 
+# Acknowledge every Nth data segment instead of the byte-threshold policy.
+# The policy that ships is the else arm of nx_tcp_socket_state_data_check.c:
+# an acknowledgment leaves when half the receive buffer is outstanding, see
+# the NX_TCP_ACK_EVERY_N_PACKETS note in port/netxduo-amiga/inc/nx_user.h for
+# why a segment count was retired.  Empty means that policy; a number brings
+# the vendored counter arm back with that N, which is how one tree measures
+# the two against each other on a machine the X-Surf sweep never ran on.
+set(AMINETXDUO_TCP_ACK_EVERY_N ""
+    CACHE STRING "ACK every Nth data segment instead of the byte threshold")
+if(NOT AMINETXDUO_TCP_ACK_EVERY_N STREQUAL "")
+    add_compile_definitions(
+        NX_TCP_ACK_EVERY_N_PACKETS=${AMINETXDUO_TCP_ACK_EVERY_N})
+endif()
+
 # RFC 2018 selective acknowledgment on the receive side.  Also a layout change
 # to NX_TCP_SOCKET, so also whole-tree.  Both arms of a with/without
 # measurement come out of one tree the same way as the option above.
