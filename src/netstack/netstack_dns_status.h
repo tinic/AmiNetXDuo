@@ -49,7 +49,20 @@ BOOL ami_ns_dns_again(UINT status);
  * removes the symbol and makes the safety check reject the valid binary.
  * `used` also keeps the contract intact if LTO clones the small switch.
  */
-LONG ami_ns_dns_error(UINT status)
-    __attribute__((used, externally_visible));
+#if defined(__has_attribute)
+# if __has_attribute(externally_visible)
+#  define AMI_DNS_STATUS_LTO_ATTR __attribute__((used, externally_visible))
+# else
+#  define AMI_DNS_STATUS_LTO_ATTR __attribute__((used))
+# endif
+#elif defined(__GNUC__)
+# define AMI_DNS_STATUS_LTO_ATTR __attribute__((used, externally_visible))
+#else
+# define AMI_DNS_STATUS_LTO_ATTR
+#endif
+
+LONG ami_ns_dns_error(UINT status) AMI_DNS_STATUS_LTO_ATTR;
+
+#undef AMI_DNS_STATUS_LTO_ATTR
 
 #endif /* AMINETXDUO_NETSTACK_DNS_STATUS_H */
