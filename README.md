@@ -222,6 +222,10 @@ before `Profile` regains control and makes those harmless tail samples look
 like sampler loss.  The exact validation commands and rationale are in the
 profiler ReadMe.
 
+The exact physical A1200 receive profile, driver symbol recovery, rejected
+hypotheses, low-memory lead and recovery procedure are recorded in
+**[docs/PHYSICAL_RX_A1200.md](docs/PHYSICAL_RX_A1200.md)**.
+
 ## Licence
 
 AmiNetXDuo is an independent implementation of a published ABI. No
