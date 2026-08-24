@@ -292,6 +292,8 @@ static VOID show_budget(VOID)
 
     show_budget_leg("drain,  reader to IP thread ", &b->nrb_Drain,
                     b->nrb_EClockRate);
+    show_budget_leg("baton,  asking to holding   ", &b->nrb_Baton,
+                    b->nrb_EClockRate);
     show_budget_leg("settle, IP thread to notify ", &b->nrb_Settle,
                     b->nrb_EClockRate);
     show_budget_leg("fetch,  notify to recv()    ", &b->nrb_Fetch,

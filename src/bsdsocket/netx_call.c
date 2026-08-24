@@ -59,6 +59,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/budget.h"
 
 #include <proto/exec.h>
 
@@ -121,12 +122,31 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
     t0 = bsd_nx_eclock();
 #endif
 
+#ifdef AMINETXDUO_RXPROBE
+    /* The budget's baton leg: what a caller waits between asking for the
+       scheduler bracket and holding it.  This is the suspect the fetch leg's
+       priority experiment left standing, so it is measured at the one place
+       every recv() passes through rather than inferred. */
+    {
+        ULONG bt0 = ami_budget_clock();
+
+#if AMINETXDUO_NXCACHE
+        if (ami_netstack_enter_cached(&base->sb_NxCaller) != AMI_NET_OK)
+            return -1;
+#else
+        if (ami_netstack_enter(&base->sb_NxCaller) != AMI_NET_OK)
+            return -1;
+#endif
+        ami_budget_baton(ami_budget_clock() - bt0);
+    }
+#else
 #if AMINETXDUO_NXCACHE
     if (ami_netstack_enter_cached(&base->sb_NxCaller) != AMI_NET_OK)
         return -1;
 #else
     if (ami_netstack_enter(&base->sb_NxCaller) != AMI_NET_OK)
         return -1;
+#endif
 #endif
 
 #ifdef AMINETXDUO_NXCENSUS

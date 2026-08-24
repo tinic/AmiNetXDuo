@@ -36,6 +36,7 @@ typedef struct AmiBudget
     ULONG           deliver_at;     /* armed by deliver, taken by notify   */
     ULONG           notify_at;      /* armed by notify, taken by fetch     */
     AmiBudgetLeg    drain;          /* reader: reply dequeued -> delivered */
+    AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
     AmiBudgetLeg    fetch;          /* receive notify -> recv() returns    */
 } AmiBudget;
@@ -47,6 +48,7 @@ extern AmiBudget ami_budget;
 ULONG ami_budget_clock(VOID);
 
 VOID ami_budget_drain(ULONG dt);
+VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_notify(ULONG now);
 VOID ami_budget_fetch(ULONG now);
@@ -55,6 +57,7 @@ VOID ami_budget_fetch(ULONG now);
 
 /* Absent from the build: call sites compile to nothing through these. */
 #define ami_budget_drain(dt)     ((VOID)0)
+#define ami_budget_baton(dt)     ((VOID)0)
 #define ami_budget_deliver(now)  ((VOID)0)
 #define ami_budget_notify(now)   ((VOID)0)
 #define ami_budget_fetch(now)    ((VOID)0)

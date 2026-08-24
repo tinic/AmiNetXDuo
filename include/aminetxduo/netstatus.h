@@ -1044,6 +1044,7 @@ typedef struct NetStatusRxBudget
 {
     ULONG               nrb_EClockRate; /* ticks per second, for conversion  */
     NetStatusBudgetLeg  nrb_Drain;      /* reply dequeued -> handed to IP    */
+    NetStatusBudgetLeg  nrb_Baton;      /* bsd_nx_enter, asking -> holding   */
     NetStatusBudgetLeg  nrb_Settle;     /* handed to IP -> receive notify    */
     NetStatusBudgetLeg  nrb_Fetch;      /* receive notify -> recv() dequeue  */
 } NetStatusRxBudget;
