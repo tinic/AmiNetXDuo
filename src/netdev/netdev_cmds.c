@@ -259,7 +259,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             return;
         }
         if (io->ios2_DataLength > NETDEV_MTU &&
-            !((op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0) &&
+            !(netdev_io_is_raw(op, io) &&
               io->ios2_DataLength <= NETDEV_FRAME_MAX))
         {
             netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);

@@ -566,12 +566,22 @@ static UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
 
     if (cand == NULL || cand->op_RxDirect == NULL || cand->op_RxFilled == NULL)
         return NULL;
-    if (cand->op_Raw || cand->op_Filter != NULL)
+    if (cand->op_Filter != NULL)
         return NULL;
 
     io = netdev_take(&cand->op_Reads, type);
     if (io == NULL)
         return NULL;
+
+    /* RAW is also a per-request flag.  The direct destination starts after
+       the Ethernet header, so accepting this request would omit fourteen
+       bytes and report the payload length where SANA-II promises the whole
+       frame.  Put it back for the ordinary hand-over immediately below. */
+    if (netdev_io_is_raw(cand, io))
+    {
+        AddHead(&cand->op_Reads, &io->ios2_Req.io_Message.mn_Node);
+        return NULL;
+    }
 
     dst = ((AnxdS2RxDirect)cand->op_RxDirect)(io->ios2_Data, plen);
     if (dst == NULL)
@@ -824,7 +834,7 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
         buf = (UBYTE *)unit->nu_TxBuf;
     unit->nu_TxAt = buf;
 
-    if (op->op_Raw || (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
+    if (netdev_io_is_raw(op, io))
     {
         if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
         {

@@ -66,6 +66,16 @@ typedef struct NetdevOpener
     UWORD               op_TrackHigh;   /* one past the highest used slot */
 } NetdevOpener;
 
+/* RAW is permitted on either the opener or one individual request.  Keep
+   that SANA-II rule in one predicate: receive hand-over, direct receive and
+   transmit must not quietly disagree about which framing the buffer uses. */
+static inline BOOL netdev_io_is_raw(const NetdevOpener *op,
+                                    const struct IOSana2Req *io)
+{
+    return (BOOL)(op->op_Raw ||
+                  (io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0);
+}
+
 typedef struct NetdevUnit
 {
     NetdevNic                   nu_Nic;
