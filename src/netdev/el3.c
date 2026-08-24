@@ -825,9 +825,15 @@ static BOOL el3_rint(NetdevNic *nic)
         if (el3_rx_wanted(nic, buf))
         {
             APTR   token = NULL;
-            UBYTE *dst   = (nic->rx_claim != NULL)
-                         ? nic->rx_claim(nic->rx_arg, buf, len, &token)
-                         : NULL;
+            /*
+             * PROBE BUILD: the claim is forced off, the split read stays.
+             * A machine that starves IPv4 on this build convicts the
+             * two-stage FIFO read; one that runs clean convicts the claim
+             * delivery.  Nothing else differs from single-copy-rx.
+             */
+            UBYTE *dst   = NULL;
+
+            (VOID)token;
 
             if (dst != NULL)
             {
