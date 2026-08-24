@@ -174,10 +174,18 @@ extern ULONG prof_read_vbr(VOID);
 #define PROF_INTB_AUD(ch)  (7 + (int)(ch))
 
 /*
- * Colour clocks per second and lines per frame.  PAL and NTSC are told apart
- * by ex_EClockFrequency, 709379 against 715909, rather than by opening
- * graphics.library, because that is one fewer thing to fail on a machine whose
- * display the program under test has taken.
+ * Colour clocks per second and lines per frame.
+ *
+ * The oscillator and the video mode are separate facts.  ex_EClockFrequency
+ * identifies the motherboard clock, while Exec's VBlankFrequency describes
+ * the mode currently producing vertical blanks.  A real NTSC A1200 can boot a
+ * PAL display: its audio period still uses the NTSC colour clock, but the
+ * probe sees 50 frames a second and a frame has 312 lines.  Treating the
+ * E-clock as both facts made that machine reject every correctly programmed
+ * audio channel as 4/3 too fast.
+ *
+ * Neither answer needs graphics.library, which is deliberately not opened on
+ * a machine whose display the program under test may have taken.
  */
 #define PROF_CCK_PAL    3546895UL
 #define PROF_CCK_NTSC   3579545UL
@@ -209,7 +217,8 @@ static const char          *prof_err = "";
 static char                 prof_conf[96];
 static ULONG                prof_framecck;
 static ULONG                prof_cck;
-static BOOL                 prof_ntsc;
+static ULONG                prof_vblank_hz;
+static BOOL                 prof_ntsc_video;
 
 static struct ProfSeg       prof_segs[PROF_MAX_SEGS];
 static ULONG                prof_nsegs;
@@ -781,6 +790,50 @@ static VOID prof_watchdog_start(VOID)
     prof_vbl_held = TRUE;
 }
 
+/*
+ * Measure the video frame the sampler will use as its clock.
+ *
+ * ExecBase.VBlankFrequency is a boot-time description, not necessarily the
+ * mode the chipset is producing now.  The physical A1200 that exposed this
+ * runs a 312-line PAL display while VBlankFrequency still says 60; using that
+ * byte made both the rate probe and every saved timestamp call the frame
+ * 262 lines long.  The beam is the authority.  The watchdog has already been
+ * installed, so wait for one boundary and scan the complete frame after it.
+ * Interrupts remain enabled throughout.
+ */
+static VOID prof_video_measure(VOID)
+{
+    ULONG before = prof_vblcount;
+    ULONG frame;
+    ULONG max_vpos = 0UL;
+    ULONG guard;
+
+    /* More than a frame even on a 7 MHz 68000, but bounded: the probe below
+       owns the diagnostic for a stopped vertical blank. */
+    for (guard = 0UL; guard < 2000000UL && prof_vblcount == before; guard++)
+        ;
+    if (prof_vblcount == before)
+        return;
+
+    frame = prof_vblcount;
+    for (guard = 0UL; guard < 2000000UL && prof_vblcount == frame; guard++)
+    {
+        ULONG raw = *PROF_VPOSR;
+        ULONG vpos = (((raw >> 16) & 1UL) << 8) |
+                     ((raw >> 8) & 0xFFUL);
+
+        if (vpos > max_vpos)
+            max_vpos = vpos;
+    }
+    if (prof_vblcount == frame)
+        return;
+
+    prof_ntsc_video = (BOOL)(max_vpos < PROF_LINES_NTSC);
+    prof_vblank_hz  = prof_ntsc_video ? 60UL : 50UL;
+    prof_framecck   = (prof_ntsc_video ? PROF_LINES_NTSC : PROF_LINES_PAL) *
+                      PROF_CCK_LINE;
+}
+
 static VOID prof_watchdog_stop(VOID)
 {
     if (prof_vbl_held)
@@ -1035,7 +1088,7 @@ ULONG total = 0UL, total_frames = 0UL;
 
         /* One frame is 1/50 s PAL, 1/60 NTSC, so this many interrupts should
            have arrived in the frames the beam actually drew. */
-        expect = prof_actual_rate() / (prof_ntsc ? 60UL : 50UL) * frames;
+        expect = prof_actual_rate() * frames / prof_vblank_hz;
         if (expect == 0UL)
         {
             prof_err = "the probe window was too short to measure";
@@ -1222,7 +1275,7 @@ ULONG i, worst = 100UL, per;
     }
 
     /* Interrupts one window should hold: rate * frames / frames-per-second. */
-    per = prof_actual_rate() * PROF_WIN_FRAMES / (prof_ntsc ? 60UL : 50UL);
+    per = prof_actual_rate() * PROF_WIN_FRAMES / prof_vblank_hz;
     if (per == 0UL)
     {
         return(100UL);
@@ -1458,10 +1511,23 @@ BOOL             claimed = FALSE;
     prof_nlibsegs = 0UL;
     prof_ntasks  = 0UL;
 
-    /* PAL or NTSC, from Exec rather than from graphics.library. */
-    prof_ntsc     = (BOOL)(eb->ex_EClockFrequency > (PROF_ECLOCK_PAL + 2000UL));
-    prof_cck      = prof_ntsc ? PROF_CCK_NTSC : PROF_CCK_PAL;
-    prof_framecck = (prof_ntsc ? PROF_LINES_NTSC : PROF_LINES_PAL) * PROF_CCK_LINE;
+    /* The audio clock comes from the oscillator.  The frame rate and shape
+       come from the video mode; they need not name the same standard. */
+    prof_cck = (eb->ex_EClockFrequency > (PROF_ECLOCK_PAL + 2000UL))
+                   ? PROF_CCK_NTSC : PROF_CCK_PAL;
+
+    prof_vblank_hz = (ULONG)eb->VBlankFrequency;
+    if (prof_vblank_hz < 45UL || prof_vblank_hz > 65UL)
+    {
+        /* A damaged or pre-initialisation ExecBase must not become a divide
+           by zero.  The oscillator is the best fallback available here. */
+        prof_vblank_hz =
+            (eb->ex_EClockFrequency > (PROF_ECLOCK_PAL + 2000UL))
+                ? 60UL : 50UL;
+    }
+    prof_ntsc_video = (BOOL)(prof_vblank_hz >= 55UL);
+    prof_framecck = (prof_ntsc_video ? PROF_LINES_NTSC : PROF_LINES_PAL) *
+                    PROF_CCK_LINE;
 
     if (rate_hz < 32UL)    { rate_hz = 32UL; }
     if (rate_hz > 14000UL) { rate_hz = 14000UL; }
@@ -1519,6 +1585,7 @@ BOOL             claimed = FALSE;
     }
 
     prof_watchdog_start();
+    prof_video_measure();
 
     /* Channel 3 first, then 2, 1, 0, or exactly the one asked for. */
     if (channel <= 3UL)
@@ -1717,7 +1784,7 @@ BOOL              ok;
 
     if ((eb->AttnFlags & AFF_68010) != 0) { hdr.ph_Flags |= PROFF_FMTVALID; }
     if (prof_dropped != 0UL)              { hdr.ph_Flags |= PROFF_OVERFLOW; }
-    if (prof_ntsc)                        { hdr.ph_Flags |= PROFF_NTSC; }
+    if (prof_ntsc_video)                  { hdr.ph_Flags |= PROFF_NTSC; }
     if (prof_conf[0] != '\0')             { hdr.ph_Flags |= PROFF_LOSTAUDIO; }
     if (prof_worst_window() < 70UL)       { hdr.ph_Flags |= PROFF_RATEDIP; }
 
