@@ -39,6 +39,7 @@ typedef struct AmiBudget
     AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
     AmiBudgetLeg    fetch;          /* receive notify -> recv() returns    */
+    AmiBudgetLeg    ack;            /* CMD_WRITE BeginIO -> reply reaped   */
 } AmiBudget;
 
 extern AmiBudget ami_budget;
@@ -52,6 +53,7 @@ VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
 VOID ami_budget_notify(ULONG now);
 VOID ami_budget_fetch(ULONG now);
+VOID ami_budget_ack(ULONG dt);
 
 #else
 
@@ -61,6 +63,7 @@ VOID ami_budget_fetch(ULONG now);
 #define ami_budget_deliver(now)  ((VOID)0)
 #define ami_budget_notify(now)   ((VOID)0)
 #define ami_budget_fetch(now)    ((VOID)0)
+#define ami_budget_ack(dt)       ((VOID)0)
 
 #endif /* AMINETXDUO_RXPROBE */
 

@@ -298,6 +298,8 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("fetch,  notify to recv()    ", &b->nrb_Fetch,
                     b->nrb_EClockRate);
+    show_budget_leg("ack,    write to reply      ", &b->nrb_Ack,
+                    b->nrb_EClockRate);
 }
 
 /*

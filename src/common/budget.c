@@ -17,7 +17,11 @@
  *            recv's own dequeue.
  *
  * The drain leg -- the reader's own per-frame cost -- lives in the SANA-II
- * probe (src/sana2/sana2_rx.c), which owns both of its ends.
+ * probe (src/sana2/sana2_rx.c), which owns both of its ends.  The ack leg is
+ * the transmit half the first four never see: a CMD_WRITE handed to the
+ * device until its reply is reaped (src/sana2/sana2_tx.c owns both ends,
+ * per slot rather than latest-stamp, because writes overlap by design).
+ * During a receive every write is an ACK, which is what names it.
  *
  * WHY A SINGLE LATEST-STAMP AND NOT A MATCHED QUEUE.  The regime this
  * measures is the serial one, one frame walked through the whole chain at a
@@ -98,6 +102,11 @@ VOID ami_budget_notify(ULONG now)
     }
 
     ami_budget.notify_at = now;
+}
+
+VOID ami_budget_ack(ULONG dt)
+{
+    ami_budget_leg(&ami_budget.ack, dt);
 }
 
 VOID ami_budget_fetch(ULONG now)

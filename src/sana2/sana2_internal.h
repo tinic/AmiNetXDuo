@@ -440,6 +440,13 @@ typedef struct AmiTxSlot
     UWORD               hdr_len;    /* Ethernet bytes prepended in raw mode*/
     UWORD               pad_len;    /* zero bytes appended to reach 60     */
     volatile BOOL       busy;
+
+#ifdef AMINETXDUO_RXPROBE
+    /* The ack leg's opening stamp: E-Clock at BeginIO, 0 when unarmed.  The
+       reply's reaper closes the pair; per slot, not latest-stamp, because
+       several writes are in flight by design. */
+    ULONG               write_at;
+#endif
 } AmiTxSlot;
 
 /* ------------------------------------------------------------- interface */

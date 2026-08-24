@@ -64,6 +64,8 @@
 
 #include "sana2_internal.h"
 
+#include "aminetxduo/budget.h"
+
 /* _nx_ip_driver_deferred_processing(): the supported way for a driver to ask
    for a callback on the IP thread. Declared in nx_api.h with no nx_ alias, so
    it is spelled with the underscore, as sana2_rx.c spells
@@ -104,6 +106,10 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 
         slot->hdr_len = 0;
         slot->pad_len = 0;
+
+#ifdef AMINETXDUO_RXPROBE
+        slot->write_at = 0UL;
+#endif
     }
 }
 
@@ -202,6 +208,22 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
            AmiTxSlot, so the reply message is the slot. */
         AmiTxSlot *slot = (AmiTxSlot *)msg;
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
+
+#ifdef AMINETXDUO_RXPROBE
+        /*
+         * The ack leg's closing stamp.  What it spans is the device's whole
+         * transmit half as the stack experiences it: BeginIO to the moment
+         * the reply is collected and the packet can be released, which is
+         * what gates a queued TCP segment's retransmission.  A reply that
+         * sat un-reaped across a quiet link exceeds the budget ceiling and
+         * is discarded there rather than owning the maximum.
+         */
+        if (slot->write_at != 0UL)
+        {
+            ami_budget_ack(ami_budget_clock() - slot->write_at);
+            slot->write_at = 0UL;
+        }
+#endif
 
         if (err != 0)
         {
@@ -669,6 +691,12 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
      * SendIO() runs are above. IOF_QUICK stays clear, so the request is queued
      * and replied to iface->tx_port exactly as before.
      */
+#ifdef AMINETXDUO_RXPROBE
+    /* The ack leg's opening stamp, as late as it can be taken: everything
+       above is the shim's own framing cost, and the leg is the device's. */
+    slot->write_at = ami_budget_clock();
+#endif
+
     BeginIO((struct IORequest *)&slot->req);
 
     return NX_SUCCESS;

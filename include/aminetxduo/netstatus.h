@@ -1047,6 +1047,7 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Baton;      /* bsd_nx_enter, asking -> holding   */
     NetStatusBudgetLeg  nrb_Settle;     /* handed to IP -> receive notify    */
     NetStatusBudgetLeg  nrb_Fetch;      /* receive notify -> recv() dequeue  */
+    NetStatusBudgetLeg  nrb_Ack;        /* CMD_WRITE BeginIO -> reply reaped */
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,
