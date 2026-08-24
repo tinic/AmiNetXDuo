@@ -40,6 +40,16 @@ BOOL ami_ns_dns_again(UINT status);
  * exist". Reporting the second as a device failure makes the reader check
  * cables when the host name was mistyped.
  */
-LONG ami_ns_dns_error(UINT status);
+/*
+ * Keep the entry point in the linked symbol table under LTO.  Several DNS
+ * callers tail-call this function.  A 68020 build spells a sufficiently long
+ * tail call as bra.l, and the post-link relocation check can prove its target
+ * only when the target remains a named function.  Without externally_visible
+ * GCC internalizes this cross-file helper, emits the correct branch, then
+ * removes the symbol and makes the safety check reject the valid binary.
+ * `used` also keeps the contract intact if LTO clones the small switch.
+ */
+LONG ami_ns_dns_error(UINT status)
+    __attribute__((used, externally_visible));
 
 #endif /* AMINETXDUO_NETSTACK_DNS_STATUS_H */
