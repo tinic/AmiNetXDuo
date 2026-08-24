@@ -50,11 +50,22 @@ static int            mock_txlen;
 static unsigned char  mock_rxfifo[MOCK_FIFO];
 static int            mock_rxlen;
 static int            mock_rxpos;
+static int            mock_rxread;
 
 /* What the driver delivered upward. */
 static unsigned char  mock_rx_frame[2048];
 static int            mock_rx_len;
 static int            mock_rx_calls;
+
+/* What the private direct-receive callbacks observed. */
+static unsigned char  mock_direct_buf[2048];
+static unsigned char  mock_claim_header[14];
+static unsigned long  mock_claim_sum;
+static unsigned short mock_claim_len;
+static unsigned char  mock_claim_summed;
+static int            mock_claim_accept;
+static int            mock_claim_calls;
+static int            mock_claimed_calls;
 
 static int failures;
 
@@ -105,10 +116,50 @@ static void           mock_put(volatile unsigned short *p, unsigned short v);
 #define EL3_RAW_GET(p)      mock_get((volatile unsigned short *)(p))
 #define EL3_RAW_PUT(p, v)   mock_put((volatile unsigned short *)(p), \
                                      (unsigned short)(v))
+#define EL3_SETTLE_READ(p)  ((void)(p), 0)
 
 /* The probe record, which needs exec and is not what this test is about. */
 #include <exec/types.h>
 #include "netdev_cards.h"
+
+/*
+ * The shipping path drains through n68k_port_in_w_sum(), whose actual 68k
+ * instructions are covered by IoSumDrill.  This test's FIFO is reactive, not
+ * mapped, so route that operation through the model and test the integration
+ * independently: header first, payload into the claimed destination, then one
+ * completion and no staging callback.
+ */
+static ULONG mock_direct_drain_sum(UBYTE *dst, const volatile void *port,
+                                   ULONG len)
+{
+    ULONG sum = 0;
+    ULONG i;
+
+    (void)port;
+    for (i = 0; i < len; i++)
+    {
+        dst[i] = (UBYTE)(mock_rxpos < mock_rxlen ? mock_rxfifo[mock_rxpos++]
+                                                  : 0);
+        mock_rxread++;
+    }
+
+    for (i = 0; i < len; i += 4)
+    {
+        ULONG word = 0;
+        ULONG n;
+
+        for (n = 0; n < 4 && i + n < len; n++)
+            word |= (ULONG)dst[i + n] << (24 - 8 * n);
+        sum += word;
+        if (sum < word)
+            sum++;
+    }
+
+    return sum;
+}
+
+#define EL3_RX_DRAIN_SUM(dst, port, len) \
+    mock_direct_drain_sum((dst), (port), (len))
 
 VOID  netdev_diag_note(UWORD code, UWORD c, ULONG v)
 { (void)code; (void)c; (void)v; }
@@ -273,8 +324,11 @@ static void mock_rdata(const NetdevBus *bus, UBYTE *dst, UWORD len)
 
     (void)bus;
     for (i = 0; i < len; i++)
+    {
         dst[i] = (UBYTE)(mock_rxpos < mock_rxlen ? mock_rxfifo[mock_rxpos++]
                                                  : 0);
+        mock_rxread++;
+    }
 }
 
 static void mock_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
@@ -306,8 +360,17 @@ static void mock_reset_chip(int swapped)
     mock_txlen  = 0;
     mock_rxlen  = 0;
     mock_rxpos  = 0;
+    mock_rxread = 0;
     mock_rx_len = 0;
     mock_rx_calls = 0;
+    memset(mock_direct_buf, 0, sizeof(mock_direct_buf));
+    memset(mock_claim_header, 0, sizeof(mock_claim_header));
+    mock_claim_sum = 0;
+    mock_claim_len = 0;
+    mock_claim_summed = 0;
+    mock_claim_accept = 0;
+    mock_claim_calls = 0;
+    mock_claimed_calls = 0;
     mock_swapped = swapped;
 
     mock_win[0][EL3_W0_MFG_ID / 2]     = EL3_MFG_ID;
@@ -324,6 +387,7 @@ static void mock_reset_chip(int swapped)
     mock_eeprom[EL3_EE_OEM_ADDR_0 + 0]  = 0x00a0;
     mock_eeprom[EL3_EE_OEM_ADDR_0 + 1]  = 0x2411;
     mock_eeprom[EL3_EE_OEM_ADDR_0 + 2]  = 0x2233;
+    mock_eeprom[EL3_EE_MFG_ID]           = EL3_MFG_ID;
 }
 
 static void mock_rx(APTR arg, const UBYTE *frame, UWORD len)
@@ -333,6 +397,29 @@ static void mock_rx(APTR arg, const UBYTE *frame, UWORD len)
     mock_rx_len = (int)len;
     if (len <= sizeof(mock_rx_frame))
         memcpy(mock_rx_frame, frame, len);
+}
+
+static UBYTE *mock_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                            APTR *token)
+{
+    (void)arg;
+    mock_claim_calls++;
+    mock_claim_len = frame_len;
+    memcpy(mock_claim_header, hdr, sizeof(mock_claim_header));
+    if (!mock_claim_accept)
+        return NULL;
+    *token = (APTR)mock_direct_buf;
+    return mock_direct_buf;
+}
+
+static void mock_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
+{
+    (void)arg;
+    expect_u32("direct completion token",
+               (unsigned long)(token == (APTR)mock_direct_buf), 1);
+    mock_claimed_calls++;
+    mock_claim_sum = sum;
+    mock_claim_summed = summed;
 }
 
 static void nic_reset(int swapped)
@@ -829,6 +916,78 @@ static void test_receive(void)
 }
 
 /*
+ * The two-copy removal itself.  IoSumDrill proves the assembler; this proves
+ * el3_rint() feeds it only the payload and completes the claimed request
+ * instead of also handing the staging buffer up the old path.
+ */
+static void test_receive_direct(void)
+{
+    UWORD i;
+
+    nic_reset(1);
+    (void)el3_attach(&nic);
+    memcpy(nic.mac, nic.factory, 6);
+    (void)el3_init(&nic);
+    netdev_mar_clear(nic.mar);
+    nic.rx_claim = mock_rx_claim;
+    nic.rx_claimed = mock_rx_claimed;
+
+    mock_rxlen = 77;                    /* payload 63: three-byte tail */
+    mock_rxpos = 0;
+    memcpy(mock_rxfifo, nic.factory, 6);
+    for (i = 6; i < (UWORD)mock_rxlen; i++)
+        mock_rxfifo[i] = (UBYTE)(i ^ 0x5a);
+    mock_win[1][EL3_W1_RX_STATUS / 2] = (UWORD)mock_rxlen;
+    mock_claim_accept = 1;
+
+    expect_u32("a direct frame is taken", (unsigned long)el3_rint(&nic), 1);
+    expect_u32("direct claim called once", (unsigned long)mock_claim_calls, 1);
+    expect_u32("claim saw the whole frame length",
+               (unsigned long)mock_claim_len, 77);
+    expect_u32("claim saw the frame header",
+               (unsigned long)(memcmp(mock_claim_header, mock_rxfifo, 14) == 0),
+               1);
+    expect_u32("direct completion called once",
+               (unsigned long)mock_claimed_calls, 1);
+    expect_u32("direct completion carries a sum",
+               (unsigned long)(mock_claim_summed != 0 && mock_claim_sum != 0),
+               1);
+    expect_u32("old receive path was not called",
+               (unsigned long)mock_rx_calls, 0);
+    expect_u32("only one frame was counted",
+               (unsigned long)nic.rx_packets, 1);
+    expect_u32("the FIFO was drained exactly once",
+               (unsigned long)mock_rxread, 77);
+    expect_u32("the payload landed without its Ethernet header",
+               (unsigned long)(memcmp(mock_direct_buf, mock_rxfifo + 14,
+                                     63) == 0), 1);
+
+    /* A declined claim must be byte-for-byte the old staging path. */
+    mock_rxpos = 0;
+    mock_rxread = 0;
+    mock_rxlen = 77;
+    mock_rx_calls = 0;
+    mock_claim_calls = 0;
+    mock_claimed_calls = 0;
+    mock_claim_accept = 0;
+    mock_win[1][EL3_W1_RX_STATUS / 2] = (UWORD)mock_rxlen;
+
+    expect_u32("a declined direct frame is still taken",
+               (unsigned long)el3_rint(&nic), 1);
+    expect_u32("declined claim called once",
+               (unsigned long)mock_claim_calls, 1);
+    expect_u32("declined claim was not completed",
+               (unsigned long)mock_claimed_calls, 0);
+    expect_u32("declined frame used the old receive path",
+               (unsigned long)mock_rx_calls, 1);
+    expect_u32("declined frame kept its length",
+               (unsigned long)mock_rx_len, 77);
+    expect_u32("declined frame stayed intact",
+               (unsigned long)(memcmp(mock_rx_frame, mock_rxfifo,
+                                     77) == 0), 1);
+}
+
+/*
  * The interrupt drain.  What matters here is what an acknowledgement does
  * not clear: receive-complete and transmit-complete are cleared by servicing
  * the FIFO and the status stack, so a drain that acknowledged them and left
@@ -970,6 +1129,7 @@ int main(void)
     test_transmit();
     test_tx_status();
     test_receive();
+    test_receive_direct();
     test_interrupt();
     test_reset_and_ops();
     test_card_selection();

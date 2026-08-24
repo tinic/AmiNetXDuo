@@ -57,6 +57,11 @@
 #include "netdev_cards.h"
 #include "netdev_mcaf.h"
 #include "netdev_macgen.h"
+
+#ifndef EL3_RX_DRAIN_SUM
+#define EL3_RX_DRAIN_SUM(dst, port, len) \
+    n68k_port_in_w_sum((dst), (port), (len))
+#endif
 #include "netdev_bsdtypes.h"
 #include "el3.h"
 #include "el3reg.h"
@@ -96,6 +101,9 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #ifndef EL3_RAW_GET
 #define EL3_RAW_GET(p)      (*(p))
 #define EL3_RAW_PUT(p, v)   (*(p) = (v))
+#endif
+#ifndef EL3_SETTLE_READ
+#define EL3_SETTLE_READ(p)  (*(p))
 #endif
 
 static volatile UWORD *el3_at(NetdevNic *nic, UWORD off)
@@ -336,7 +344,7 @@ static BOOL el3_eeprom_ready(NetdevNic *nic)
             ULONG           n    = 2000UL * 4UL;   /* ~2 ms */
 
             while (n-- != 0)
-                (VOID)*attr;
+                (VOID)EL3_SETTLE_READ(attr);
         }
     }
 
@@ -838,10 +846,10 @@ static BOOL el3_rint(NetdevNic *nic)
                  * payload pointer is longword aligned by construction, which
                  * is the routine's one requirement.
                  */
-                ULONG sum = n68k_port_in_w_sum(dst,
-                                               (const volatile void *)
-                                                   nic->bus.asic,
-                                               (ULONG)(len - NETDEV_HDR_LEN));
+                ULONG sum = EL3_RX_DRAIN_SUM(dst,
+                                             (const volatile void *)
+                                                 nic->bus.asic,
+                                             (ULONG)(len - NETDEV_HDR_LEN));
 
                 nic->rx_packets++;
                 nic->rx_claimed(nic->rx_arg, token, sum, 1);
