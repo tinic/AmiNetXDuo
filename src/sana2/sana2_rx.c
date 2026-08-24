@@ -30,6 +30,7 @@
  */
 
 #include "sana2_internal.h"
+#include "aminetxduo/budget.h"
 
 /* tx_amiga_stack_in_use(), for the reader stacks. */
 #include "tx_amiga.h"
@@ -493,6 +494,29 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
             }
 
             packet->nx_packet_interface_capability_flag = caps;
+        }
+#endif
+#ifdef AMINETXDUO_RXPROBE
+        /*
+         * The settle leg's opening stamp: a TCP data segment leaving for the
+         * IP thread.  The receive notify closes the pair -- see
+         * src/common/budget.c for why a single latest-stamp is the honest
+         * shape.  Data segments only: a bare ACK never reaches recv(), and
+         * arming on one would overwrite a stamp a data segment still owns.
+         */
+        {
+            const UCHAR *ip4 = packet->nx_packet_prepend_ptr;
+
+            if (packet->nx_packet_length >= 40UL && (ip4[0] >> 4) == 4U &&
+                ip4[9] == 6U)
+            {
+                UINT  ihl   = (UINT)((ip4[0] & 0x0FU) << 2);
+                ULONG total = ((ULONG)ip4[2] << 8) | ip4[3];
+
+                if (ihl >= 20U && total > (ULONG)ihl + 20UL &&
+                    total <= packet->nx_packet_length)
+                    ami_budget_deliver(ami_budget_clock());
+            }
         }
 #endif
         iface->stats.packets_received++;

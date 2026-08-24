@@ -309,43 +309,17 @@ typedef struct AmiRxProbe
      * log2 histogram, the same shape the baton figures above use, because a
      * mean hides exactly the bimodality that matters here.
      *
-     *   drain    ami_sana2_rx_complete(), reply dequeued to packet handed on:
-     *            the reader's own per-frame cost outside the device.
-     *   settle   deliver to recv: _nx_ip_packet_deferred_receive() to the
-     *            application's recv() dequeueing that same data, matched
-     *            through the TCP sequence ring below.  This is the serialized
-     *            IP-thread, socket and wakeup chain in one number.
-     *   fetch    recv()'s own copy-out, dequeue to return.
+     * Only the drain leg lives here, because only the reader produces it:
+     * ami_sana2_rx_complete(), reply dequeued to packet handed on.  The
+     * settle and fetch legs cross modules and aggregate in the library-wide
+     * budget of src/common/budget.c instead.
      */
     ULONG   drain_count;
     ULONG   drain_sum;
     ULONG   drain_max;
     ULONG   drain_hist[AMI_RXPROBE_BUCKETS];
-
-    ULONG   settle_count;
-    ULONG   settle_sum;
-    ULONG   settle_max;
-    ULONG   settle_hist[AMI_RXPROBE_BUCKETS];
-
-    ULONG   fetch_count;
-    ULONG   fetch_sum;
-    ULONG   fetch_max;
-    ULONG   fetch_hist[AMI_RXPROBE_BUCKETS];
 } AmiRxProbe;
 
-/*
- * The deliver times the settle figure is matched from: TCP sequence to
- * E-Clock, written at deliver, consumed at recv.  A power-of-two ring indexed
- * by sequence bits rather than searched; a slot overwritten before recv read
- * it simply fails the match and the sample is not taken, which starves the
- * figure under loss and reordering instead of poisoning it.
- */
-#define AMI_RXBUDGET_RING   16
-typedef struct AmiRxBudgetRing
-{
-    ULONG   seq[AMI_RXBUDGET_RING];
-    ULONG   when[AMI_RXBUDGET_RING];
-} AmiRxBudgetRing;
 
 /*
  * One bulk TCP flow, latched on the first segment carrying 512 bytes or more.

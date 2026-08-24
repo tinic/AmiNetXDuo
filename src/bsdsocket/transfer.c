@@ -17,6 +17,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/budget.h"
 #include "netmonitor.h"
 #include "udp_queue.h"
 
@@ -1267,6 +1268,12 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
             if (status == NX_SUCCESS)
             {
+#ifdef AMINETXDUO_RXPROBE
+                /* The fetch leg closes: the notify's data is in the caller's
+                   hands.  Taken on the dequeue and not after the copy-out,
+                   because the copy is already on the profiler's ledger. */
+                ami_budget_fetch(ami_budget_clock());
+#endif
                 sock->as_RxPending = packet;
                 sock->as_RxOffset  = 0;
             }

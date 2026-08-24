@@ -23,6 +23,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "aminetxduo/budget.h"
 #include "connfail.h"
 
 #include <proto/exec.h>
@@ -69,6 +70,13 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
 
 static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 {
+#ifdef AMINETXDUO_RXPROBE
+    /* The settle leg closes here: the data a deliver stamped is now on this
+       socket's queue and about to wake its owner.  budget.h says why the
+       clock read is worth having only under the probe. */
+    ami_budget_notify(ami_budget_clock());
+#endif
+
     bsd_event_post((AmiSocket *)socket_ptr->nx_tcp_socket_reserved_ptr, FD_READ);
 }
 

@@ -343,6 +343,30 @@ ULONG ami_millis_quick(VOID)
     return ami_timer_ready ? ami_millis() : 0UL;
 }
 
+#ifdef AMINETXDUO_RXPROBE
+/*
+ * The raw E-Clock low word, for the step budget's hop stamps
+ * (aminetxduo/budget.h).  Raw and not ami_millis(): the hops are tens of
+ * microseconds to a few milliseconds, which milliseconds cannot resolve, and
+ * the budget subtracts two nearby readings so the ~100-minute wrap costs at
+ * most one discarded sample.  It lives here because ami_timer_ready is the
+ * one honest gate on ReadEClock() and this file owns it.  Zero doubles as
+ * "no clock yet", and the budget's disarmed state is also zero, so a stamp
+ * taken before the timer exists arms nothing.
+ */
+ULONG ami_budget_clock(VOID)
+{
+    struct EClockVal ev;
+
+    if (!ami_timer_ready)
+        return 0UL;
+
+    (VOID)ReadEClock(&ev);
+
+    return ev.ev_lo;
+}
+#endif
+
 ULONG ami_millis(VOID)
 {
     struct EClockVal ev;
