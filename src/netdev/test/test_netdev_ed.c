@@ -239,6 +239,47 @@ static void test_ring_copy(void)
     }
 }
 
+/*
+ * The direct receive path gives the core a destination sized to the payload,
+ * unlike the padded staging buffer.  Model a word-port core which writes the
+ * rounded transfer size and prove the exact wrapper keeps that pad local.
+ */
+static UBYTE exact_source[16];
+static UWORD exact_calls;
+
+static LONG padded_ring_copy(NetdevNic *n, LONG src, UBYTE *dst, UWORD amount)
+{
+    UWORD moved = (UWORD)((amount + 1u) & ~1u);
+
+    (VOID)n;
+    memcpy(dst, exact_source + src, moved);
+    exact_calls++;
+    return src + amount;
+}
+
+static void test_ring_copy_exact(void)
+{
+    NetdevNic exact_nic;
+    UBYTE     dst[8];
+    UWORD     i;
+
+    memset(&exact_nic, 0, sizeof(exact_nic));
+    exact_nic.ring_copy = padded_ring_copy;
+    for (i = 0; i < sizeof(exact_source); i++)
+        exact_source[i] = (UBYTE)(0x40u + i);
+
+    memset(dst, 0xcd, sizeof(dst));
+    exact_calls = 0;
+    (VOID)netdev_ring_copy_exact(&exact_nic, 2, dst, 7);
+
+    expect_u32("exact ring copy used a separate odd tail",
+               exact_calls, 2);
+    expect_u32("exact ring copy kept all seven bytes",
+               (unsigned long)(memcmp(dst, exact_source + 2, 7) == 0), 1);
+    expect_u32("exact ring copy did not write its rounded pad",
+               dst[7], 0xcd);
+}
+
 /* ------------------------------------------------------------ write_buf --- */
 
 /*
@@ -405,6 +446,7 @@ int main(void)
 {
     test_read_hdr();
     test_ring_copy();
+    test_ring_copy_exact();
     test_write_buf();
     test_mem_seed_distinct();
     test_attach_station_address();

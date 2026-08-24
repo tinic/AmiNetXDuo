@@ -253,6 +253,38 @@ struct NetdevNic
 };
 
 /*
+ * Copy exactly `amount` bytes out of a ring into a caller-sized destination.
+ *
+ * A 16-bit remote-DMA core is allowed to consume and store a whole final word
+ * for an odd request.  The driver's traditional staging buffer has padding
+ * for that word; a direct-receive destination does not -- its contract is
+ * exactly the payload length.  Keep the odd byte in an aligned two-byte
+ * scratch object so the core may round without writing beyond `dst`.
+ */
+static inline LONG netdev_ring_copy_exact(NetdevNic *nic, LONG src,
+                                          UBYTE *dst, UWORD amount)
+{
+    if ((amount & 1u) != 0)
+    {
+        UWORD  scratch = 0;
+        UBYTE *tail    = (UBYTE *)(APTR)&scratch;
+        UWORD  bulk    = (UWORD)(amount - 1u);
+
+        if (bulk != 0)
+        {
+            src  = nic->ring_copy(nic, src, dst, bulk);
+            dst += bulk;
+        }
+
+        src = nic->ring_copy(nic, src, tail, 1);
+        *dst = tail[0];
+        return src;
+    }
+
+    return nic->ring_copy(nic, src, dst, amount);
+}
+
+/*
  * The probe record, netdev_diag.c.  Declared here rather than in
  * netdev_internal.h, because the chip cores are half of what records into it.
  * "The command register read back 0x23" is a fact only ne2000.c has, and it is

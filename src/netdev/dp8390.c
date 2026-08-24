@@ -395,8 +395,9 @@ static VOID dp8390_rint(NetdevNic *nic)
 
                     if (dst != NULL)
                     {
-                        (VOID)nic->ring_copy(nic, src + NETDEV_HDR_LEN, dst,
-                                             (UWORD)(flen - NETDEV_HDR_LEN));
+                        (VOID)netdev_ring_copy_exact(
+                            nic, src + NETDEV_HDR_LEN, dst,
+                            (UWORD)(flen - NETDEV_HDR_LEN));
                         nic->rx_packets++;
                         nic->rx_claimed(nic->rx_arg, token, 0, 0);
                         goto rx_done;
