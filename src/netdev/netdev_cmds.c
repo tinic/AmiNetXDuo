@@ -103,6 +103,7 @@ static const char netdev_stat_grp[]   = "ROM address group bit cleared";
 static const char netdev_stat_cis[]   = "Address taken from the card's CIS";
 static const char netdev_stat_derv[]  = "Address derived, PROM was blank";
 static const char netdev_stat_godd[]  = "Odd registers read as words";
+static const char netdev_stat_drx[]   = "Direct receive fills";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -179,6 +180,11 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
      * work out which binary is running.
      */
     STAT(netdev_stat_godd,  unit->nu_Nic.bus.getodd);
+
+    /* The performance result is meaningful only if the private hook was
+       actually negotiated and used.  Appended so every existing record keeps
+       its numeric Type for callers which learned the older table by index. */
+    STAT(netdev_stat_drx,   unit->nu_RxDirect);
 
 #undef STAT
 

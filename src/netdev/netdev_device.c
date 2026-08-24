@@ -627,6 +627,7 @@ static VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
         tr->st.PacketsReceived++;
         tr->st.BytesReceived += len;
     }
+    unit->nu_RxDirect++;
     netdev_reply(io, 0, 0);
 }
 
