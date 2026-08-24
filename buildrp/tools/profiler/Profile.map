@@ -1,0 +1,590 @@
+Archive member included to satisfy reference by file (symbol)
+
+libprofile_core.a(prof.c.obj)
+                              CMakeFiles/Profile.dir/profile.c.obj (prof_log_console)
+libprofile_core.a(prof_vector.S.obj)
+                              libprofile_core.a(prof.c.obj) (prof_vector)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__dosbase.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (DOSBase)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              libprofile_core.a(prof.c.obj) (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (__nocommandline)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-sniprintf.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (sniprintf)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__stdiowin.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o) (__stdiowin)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcat.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (strcat)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strchr.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (strchr)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcmp.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (strcmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcpy.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (strcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncpy.o)
+                              libprofile_core.a(prof.c.obj) (strncpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strstr.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o (strstr)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strtoul.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (strtoul)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-sniprintf.o) (_svfiprintf_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (__umodsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-vallocr.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (_realloc_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-vsniprintf.o)
+                              CMakeFiles/Profile.dir/profile.c.obj (vsniprintf)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcrtomb.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (_wcrtomb_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcsrtombs.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (_wcsrtombs_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(malloc.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (_malloc_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-calloc.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o) (calloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-impure.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-sniprintf.o) (_impure_ptr)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-localeconv.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (_localeconv_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (__locale_mb_cur_max)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-malloc.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o) (malloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-mbtowc_r.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (__ascii_mbtowc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memchr.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strstr.o) (memchr)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strstr.o) (memcmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (memmove)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcasecmp.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (strcasecmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlcpy.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (strlcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncasecmp.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (strncasecmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncmp.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (strncmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strtol.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (strtol)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcsnrtombs.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcsrtombs.o) (_wcsnrtombs_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wctomb_r.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (__ascii_wctomb)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-ctype_.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (_ctype_2)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (__modsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-impure.o) (__sf_fake_stdin)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fwalk.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o) (_fwalk)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-getenv_r.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o) (_getenv_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o) (__sread)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-writer.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o) (_write_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-closer.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o) (_close_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-environ.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-getenv_r.o) (environ)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-envlock.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-getenv_r.o) (__env_lock)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fclose.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o) (_fclose_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fflush.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fclose.o) (__sflush_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-lseekr.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o) (_lseek_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-closer.o) (_close)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-readr.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o) (_read_r)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-realloc.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o) (realloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-dummy.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-lseekr.o) (_lseek)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (__udivdi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o) (__umoddi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o) (__clz_tab)
+
+Allocating common symbols
+Common symbol       size              file
+
+__maxfh             0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+_WBenchMsg          0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+__commandlen        0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+__fh                0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+SysBase             0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+__commandline       0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+errno               0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-writer.o)
+__argc              0x4               /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+
+Discarded input sections
+
+ .data          0x0000000000000000        0x0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+ .bss           0x0000000000000000        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o)
+ .text          0x0000000000000000       0x44 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-environ.o)
+ .bss           0x0000000000000000        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-envlock.o)
+ .debug_frame   0x0000000000000000      0x234 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_info    0x0000000000000000      0x808 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_abbrev  0x0000000000000000      0x1b8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_loclists
+                0x0000000000000000      0xf48 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_rnglists
+                0x0000000000000000       0xd8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line    0x0000000000000000      0xa34 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_str     0x0000000000000000      0x20c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_frame   0x0000000000000000      0x220 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_info    0x0000000000000000      0x834 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_abbrev  0x0000000000000000      0x1e4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_loclists
+                0x0000000000000000      0xab4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_rnglists
+                0x0000000000000000       0x90 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_line    0x0000000000000000      0x928 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_str     0x0000000000000000      0x20c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_info    0x0000000000000000       0xe0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_abbrev  0x0000000000000000       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_aranges
+                0x0000000000000000       0x18 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line    0x0000000000000000       0x4c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_str     0x0000000000000000      0x170 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+LOAD CMakeFiles/Profile.dir/profile.c.obj
+LOAD libprofile_core.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0xa9ec
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000      0x284 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x0000000000000000                ____start
+                0x00000000000000c4                __exit
+                0x00000000000000c4                _exit
+                0x00000000000000c4                exit
+                0x000000000000010c                callfuncs
+                0x0000000000000170                __initlibraries
+                0x0000000000000206                __exitlibraries
+                0x0000000000000246                __initcpp
+                0x000000000000026a                __exitcpp
+ .text          0x0000000000000284     0x11c4 CMakeFiles/Profile.dir/profile.c.obj
+                0x000000000000097a                main
+ .text          0x0000000000001448     0x1e64 libprofile_core.a(prof.c.obj)
+                0x0000000000001d1e                prof_log_console
+                0x0000000000001d28                prof_log
+                0x0000000000001db6                prof_note_range
+                0x0000000000001dda                prof_set_target
+                0x0000000000001e06                prof_note_profiler_seglist
+                0x0000000000001e16                prof_target_is_self
+                0x0000000000001e56                prof_error
+                0x0000000000001e5e                prof_conflict
+                0x0000000000001ed4                prof_watch
+                0x0000000000001f94                prof_call_count
+                0x0000000000001f9c                prof_call_refused_count
+                0x0000000000001fa4                prof_watch_base
+                0x0000000000001fac                prof_hit_count
+                0x0000000000001fb4                prof_own_count
+                0x0000000000001fbc                prof_drop_count
+                0x0000000000001fc4                prof_capacity
+                0x0000000000001fcc                prof_level
+                0x0000000000001fd0                prof_channel
+                0x0000000000001fd8                prof_frames
+                0x0000000000001fe0                prof_frame_cck
+                0x0000000000001fe8                prof_color_clock
+                0x0000000000001ff0                prof_source
+                0x0000000000001ff8                prof_actual_rate
+                0x000000000000201c                prof_buffer
+                0x0000000000002024                prof_mark_table
+                0x000000000000203c                prof_range_table
+                0x0000000000002054                prof_stored
+                0x0000000000002074                prof_odd_formats
+                0x00000000000020ba                prof_mark
+                0x00000000000020fe                prof_worst_window
+                0x000000000000218c                prof_gap_summary
+                0x0000000000002538                prof_start
+                0x0000000000002eba                prof_stop
+                0x0000000000002f18                prof_free
+                0x0000000000002f7c                prof_write
+ .text          0x00000000000032ac      0x118 libprofile_core.a(prof_vector.S.obj)
+                0x00000000000032ac                prof_vector
+                0x00000000000033a2                prof_cia_stub
+                0x00000000000033aa                prof_audio_stub
+                0x00000000000033bc                prof_read_vbr
+ .text          0x00000000000033c4        0xc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__dosbase.o)
+ .text          0x00000000000033d0       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x00000000000033d0                memcpy
+ .text          0x0000000000003440       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x0000000000003440                memset
+ .text          0x00000000000034b4       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x00000000000034b4                __mulsi3
+ .text          0x00000000000034e0      0x298 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+                0x00000000000034e0                __initcommandline
+                0x000000000000372e                __exitcommandline
+ .text          0x0000000000003778      0x168 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-sniprintf.o)
+                0x0000000000003778                _sniprintf_r
+                0x0000000000003828                sniprintf
+ .text          0x00000000000038e0       0x1c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__stdiowin.o)
+ .text          0x00000000000038fc       0x4c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcat.o)
+                0x00000000000038fc                strcat
+ .text          0x0000000000003948       0xe0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strchr.o)
+                0x0000000000003948                strchr
+ .text          0x0000000000003a28       0x64 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcmp.o)
+                0x0000000000003a28                strcmp
+ .text          0x0000000000003a8c       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcpy.o)
+                0x0000000000003a8c                strcpy
+ .text          0x0000000000003aa0       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                0x0000000000003aa0                strlen
+ .text          0x0000000000003ab4       0x90 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncpy.o)
+                0x0000000000003ab4                strncpy
+ .text          0x0000000000003b44      0x630 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strstr.o)
+                0x0000000000003ef2                strstr
+ .text          0x0000000000004174      0x2d4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strtoul.o)
+                0x0000000000004174                _strtoul_r
+                0x00000000000041c6                strtoul_l
+                0x00000000000041e8                strtoul
+ .text          0x0000000000004448     0x1628 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-svfiprintf.o)
+                0x0000000000004448                __ssprint_r
+                0x00000000000045fe                _svfiprintf_r
+ .text          0x0000000000005a70       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x0000000000005a70                __umodsi3
+                0x0000000000005a7c                __udivsi3
+                0x0000000000005a82                __udivsi4
+ .text          0x0000000000005ac8       0xac /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-vallocr.o)
+                0x0000000000005ac8                _calloc_r
+                0x0000000000005b08                _realloc_r
+ .text          0x0000000000005b74       0xd0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-vsniprintf.o)
+                0x0000000000005b74                vsniprintf
+                0x0000000000005b96                _vsniprintf_r
+ .text          0x0000000000005c44      0x240 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcrtomb.o)
+                0x0000000000005c44                _wcrtomb_r
+                0x0000000000005d5a                wcrtomb
+ .text          0x0000000000005e84       0x54 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcsrtombs.o)
+                0x0000000000005e84                _wcsrtombs_r
+                0x0000000000005eae                wcsrtombs
+ .text          0x0000000000005ed8      0xa94 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(malloc.o)
+                0x0000000000005ed8                Tree::Leaf::next()
+                0x0000000000005f1a                Tree::Leaf::prev()
+                0x0000000000005f5c                Tree::drr(Tree::Leaf*, Tree::Leaf*)
+                0x0000000000005fda                Tree::rr(Tree::Leaf*, Tree::Leaf*)
+                0x0000000000006028                Tree::drl(Tree::Leaf*, Tree::Leaf*)
+                0x00000000000060a6                Tree::rl(Tree::Leaf*, Tree::Leaf*)
+                0x00000000000060f6                Tree::fixAdd(Tree::Leaf*)
+                0x00000000000061f4                Tree::fixRemove(Tree::Leaf*)
+                0x0000000000006336                __sys_free(char*)
+                0x000000000000634e                __sys_alloc(unsigned int)
+                0x0000000000006374                RawMem::alloc(unsigned int)
+                0x0000000000006388                MemMap::find(int)
+                0x00000000000063ba                MemMap::unlink(MemMap::Leaf*)
+                0x00000000000063dc                MemMap::put(MemMap::Leaf*)
+                0x0000000000006446                MemMap::alloc(unsigned int)
+                0x00000000000065f8                MemMap::free(char*)
+                0x00000000000067d8                _malloc_r
+                0x00000000000067e6                _free_r
+                0x00000000000067fa                __free_all
+ .text          0x000000000000696c       0x1c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-calloc.o)
+                0x000000000000696c                calloc
+ .text          0x0000000000006988        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-impure.o)
+                0x0000000000006988                _global_impure_ptr
+ .text          0x000000000000698c       0x50 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-localeconv.o)
+                0x000000000000698c                __localeconv_l
+                0x0000000000006996                _localeconv_r
+                0x00000000000069b8                localeconv
+ .text          0x00000000000069dc      0xe88 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o)
+                0x0000000000006a26                __C_locale
+                0x0000000000006b90                _setlocale_r
+                0x0000000000006fd4                __loadlocale
+                0x0000000000007798                __get_locale_env
+                0x00000000000077f8                __locale_mb_cur_max
+                0x0000000000007820                __locale_ctype_ptr_l
+                0x000000000000782a                __locale_ctype_ptr
+                0x000000000000784a                setlocale
+ .text          0x0000000000007864       0x28 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-malloc.o)
+                0x0000000000007864                malloc
+                0x0000000000007878                free
+ .text          0x000000000000788c      0x730 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-mbtowc_r.o)
+                0x000000000000788c                _mbtowc_r
+                0x00000000000078f0                __ascii_mbtowc
+                0x000000000000792e                __utf8_mbtowc
+                0x0000000000007c1c                __sjis_mbtowc
+                0x0000000000007cec                __eucjp_mbtowc
+                0x0000000000007dfe                __jis_mbtowc
+ .text          0x0000000000007fbc       0xb4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memchr.o)
+                0x0000000000007fbc                memchr
+ .text          0x0000000000008070       0x80 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                0x0000000000008070                memcmp
+ .text          0x00000000000080f0      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                0x00000000000080f0                memmove
+ .text          0x00000000000081f0       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strcasecmp.o)
+                0x00000000000081f0                strcasecmp
+ .text          0x0000000000008268       0x3c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlcpy.o)
+                0x0000000000008268                strlcpy
+ .text          0x00000000000082a4       0x84 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncasecmp.o)
+                0x00000000000082a4                strncasecmp
+ .text          0x0000000000008328       0xa0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strncmp.o)
+                0x0000000000008328                strncmp
+ .text          0x00000000000083c8      0x328 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strtol.o)
+                0x00000000000083c8                _strtol_r
+                0x000000000000841a                strtol_l
+                0x000000000000843c                strtol
+ .text          0x00000000000086f0      0x218 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wcsnrtombs.o)
+                0x00000000000086f0                _wcsnrtombs_l
+                0x000000000000884e                _wcsnrtombs_r
+                0x00000000000088aa                wcsnrtombs
+ .text          0x0000000000008908      0x300 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-wctomb_r.o)
+                0x0000000000008908                _wctomb_r
+                0x000000000000895c                __ascii_wctomb
+                0x0000000000008988                __utf8_wctomb
+                0x0000000000008a62                __sjis_wctomb
+                0x0000000000008ada                __eucjp_wctomb
+                0x0000000000008b72                __jis_wctomb
+ .text          0x0000000000008c08      0x110 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-ctype_.o)
+                0x0000000000008c08                _ctype_2
+                0x0000000000008d0a                __set_ctype
+ .text          0x0000000000008d18       0x50 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                0x0000000000008d18                __modsi3
+                0x0000000000008d24                __divsi3
+                0x0000000000008d24                ldiv
+                0x0000000000008d24                div
+ .text          0x0000000000008d68      0x4a0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-findfp.o)
+                0x0000000000008d68                __sf_fake_stdin
+                0x0000000000008d88                __sf_fake_stdout
+                0x0000000000008da8                __sf_fake_stderr
+                0x0000000000008dc8                __sfmoreglue
+                0x0000000000008e20                __sfp
+                0x0000000000008eee                _cleanup_r
+                0x0000000000008f02                _cleanup
+                0x0000000000008f18                __sinit
+                0x0000000000008f28                __sfp_lock_acquire
+                0x0000000000008f2a                __sfp_lock_release
+                0x0000000000008f2c                __sinit_lock_acquire
+                0x0000000000008f2e                __sinit_lock_release
+                0x0000000000008f38                __fp_lock_all
+                0x0000000000008f4c                __fp_unlock_all
+ .text          0x0000000000009208       0xcc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fwalk.o)
+                0x0000000000009208                _fwalk
+                0x000000000000926c                _fwalk_reent
+ .text          0x00000000000092d4       0xb0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-getenv_r.o)
+                0x00000000000092d4                _findenv_r
+                0x000000000000936a                _getenv_r
+ .text          0x0000000000009384      0x110 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-stdio.o)
+                0x0000000000009384                __sread
+                0x00000000000093bc                __seofread
+                0x00000000000093c0                __swrite
+                0x0000000000009442                __sseek
+                0x0000000000009482                __sclose
+ .text          0x0000000000009494       0x3c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-writer.o)
+                0x0000000000009494                _write_r
+ .text          0x00000000000094d0       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-closer.o)
+                0x00000000000094d0                _close_r
+ .text          0x00000000000094fc        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-envlock.o)
+                0x00000000000094fc                __env_lock
+                0x00000000000094fe                __env_unlock
+ .text          0x0000000000009500      0x134 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fclose.o)
+                0x0000000000009500                _fclose_r
+                0x0000000000009620                fclose
+ .text          0x0000000000009634      0x274 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-fflush.o)
+                0x0000000000009634                __sflush_r
+                0x00000000000097f4                _fflush_r
+                0x000000000000987c                fflush
+ .text          0x00000000000098a8       0x3c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-lseekr.o)
+                0x00000000000098a8                _lseek_r
+ .text          0x00000000000098e4      0x2a8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+                0x00000000000098e4                _open
+                0x00000000000098e4                open
+                0x00000000000099d8                _close
+                0x00000000000099d8                close
+                0x0000000000009a20                _write
+                0x0000000000009a20                write
+                0x0000000000009a68                _read
+                0x0000000000009a68                read
+                0x0000000000009ab0                __init_fh
+                0x0000000000009adc                __exit_fh
+                0x0000000000009af4                _isatty
+ .text          0x0000000000009b8c       0x3c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-readr.o)
+                0x0000000000009b8c                _read_r
+ .text          0x0000000000009bc8       0x1c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-realloc.o)
+                0x0000000000009bc8                realloc
+ .text          0x0000000000009be4       0xc8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-dummy.o)
+                0x0000000000009be4                _kill
+                0x0000000000009be6                _getpid
+                0x0000000000009bf8                _lseek
+                0x0000000000009c82                lseek
+                0x0000000000009c86                _fstat
+                0x0000000000009c8a                _unlink
+                0x0000000000009ca8                ioctl
+ .text          0x0000000000009cac      0x628 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                0x0000000000009cac                __udivdi3
+ .text          0x000000000000a2d4      0x5bc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+                0x000000000000a2d4                __umoddi3
+ .text          0x000000000000a890      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                0x000000000000a890                __clz_tab
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ .list___CTOR_LIST__
+                0x000000000000a990        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a990                __CTOR_LIST__
+ .list___DTOR_LIST__
+                0x000000000000a994        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a994                __DTOR_LIST__
+ .list___EXIT_LIST__
+                0x000000000000a998       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a998                __EXIT_LIST__
+ .list___EXIT_LIST__
+                0x000000000000a9ac        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+ .list___EXIT_LIST__
+                0x000000000000a9b4        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(malloc.o)
+ .list___EXIT_LIST__
+                0x000000000000a9bc        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+ .list___INIT_LIST__
+                0x000000000000a9c4       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a9c4                __INIT_LIST__
+ .list___INIT_LIST__
+                0x000000000000a9d8        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+ .list___INIT_LIST__
+                0x000000000000a9e0        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+ *(.end_of_lists)
+ .end_of_lists  0x000000000000a9e8        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a9e8                __ZZZ_LIST__
+                0x000000000000a9ec                ___datadata_relocs = .
+                0x000000000000a9ec                __etext = .
+                0x000000000000a9ec                ___text_size = SIZEOF (.text)
+                0x000000000000a9ec                . = ALIGN (0x0)
+
+.data           0x000000000000a9ec      0x374
+                0x000000000000a9ec                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ .dlist___LIB_LIST__
+                0x000000000000a9ec        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a9ec                __LIB_LIST__
+ .dlist___LIB_LIST__
+                0x000000000000a9f0        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__dosbase.o)
+                0x000000000000a9f0                DOSBase
+ *(.end_of_dlists)
+ .end_of_dlists
+                0x000000000000a9f8        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000a9f8                __ZZZ_DLIST__
+ *(.data)
+ .data          0x000000000000a9fc        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+ .data          0x000000000000aa00       0x28 libprofile_core.a(prof.c.obj)
+ .data          0x000000000000aa28        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__stdiowin.o)
+                0x000000000000aa28                __stdiowin
+ .data          0x000000000000aa2c       0xf4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-impure.o)
+                0x000000000000ab1c                _impure_ptr
+ .data          0x000000000000ab20      0x1a4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o)
+                0x000000000000ab3c                __default_locale
+                0x000000000000ab5c                __global_locale
+ .data          0x000000000000acc4       0x90 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-mbtowc_r.o)
+ .data          0x000000000000ad54        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-ctype_.o)
+                0x000000000000ad54                _ctype_
+ .data          0x000000000000ad58        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-getenv_r.o)
+ .data          0x000000000000ad5c        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-environ.o)
+                0x000000000000ad5c                environ
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x00000000000129ea                ___a4_init = 0x7ffe
+                0x000000000000ad60                __edata = .
+                0x0000000000000374                ___data_size = SIZEOF (.data)
+
+.bss            0x000000000000ad60     0x24d8
+                0x000000000000ad60                __bss_start = .
+ *(.bss)
+ .bss           0x000000000000ad60        0xc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000ad60                __argv
+ .bss           0x000000000000ad6c     0x1614 CMakeFiles/Profile.dir/profile.c.obj
+ .bss           0x000000000000c380      0xbb4 libprofile_core.a(prof.c.obj)
+                0x000000000000c380                prof_call_refused
+                0x000000000000c384                prof_frameadj
+                0x000000000000c388                prof_ncalls
+                0x000000000000c38c                prof_call_limit
+                0x000000000000c390                prof_call_next
+                0x000000000000c394                prof_watch_hi
+                0x000000000000c398                prof_watch_lo
+                0x000000000000c39c                prof_intf
+                0x000000000000c39e                prof_ownticks
+                0x000000000000c3a2                prof_taskptr
+                0x000000000000c3a6                prof_chain
+                0x000000000000c3aa                prof_dropped
+                0x000000000000c3ae                prof_hits
+                0x000000000000c3b2                prof_limit
+                0x000000000000c3b6                prof_next
+ .bss           0x000000000000cf34        0xc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+ .bss           0x000000000000cf40       0x24 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(malloc.o)
+ .bss           0x000000000000cf64      0x2ac /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-locale.o)
+                0x000000000000cf64                _PathLocale
+ .bss           0x000000000000d210        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-environ.o)
+                0x000000000000d210                initial_env
+ .bss           0x000000000000d214        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+ *(.bss.*)
+ *(COMMON)
+ COMMON         0x000000000000d218       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/crt0.o
+                0x000000000000d218                _WBenchMsg
+                0x000000000000d21c                __commandlen
+                0x000000000000d220                SysBase
+                0x000000000000d224                __commandline
+                0x000000000000d228                __argc
+ COMMON         0x000000000000d22c        0x4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-writer.o)
+                0x000000000000d22c                errno
+ COMMON         0x000000000000d230        0x8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-open.o)
+                0x000000000000d230                __maxfh
+                0x000000000000d234                __fh
+                0x000000000000d238                __end = .
+                0x00000000000024d8                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(Profile amiga)
+
+.stab           0x0000000000000000       0x18
+ .stab          0x0000000000000000       0x18 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)
+
+.stabstr        0x0000000000000000       0x28
+ .stabstr       0x0000000000000000       0x28 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__nocommandline.o)

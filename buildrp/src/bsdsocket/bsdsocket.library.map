@@ -1865,7 +1865,7 @@ END GROUP
                 [!provide]                        PROVIDE (___machtype = 0x0)
                 0x0000000000000000                . = 0x0
 
-.text           0x0000000000000000    0x598dc
+.text           0x0000000000000000    0x598f0
                 0x0000000000000000                __stext = .
  *(.text)
  .text          0x0000000000000000     0x1004 CMakeFiles/bsdsocket_library.dir/library.c.obj
@@ -4243,757 +4243,757 @@ END GROUP
                 0x000000000004958c       0x9c ../../libnetxduo.a(nx_tcp_enable.c.obj)
                 0x000000000004958c                _nx_tcp_enable
  .text._nx_tcp_fast_periodic_processing
-                0x0000000000049628      0x264 ../../libnetxduo.a(nx_tcp_fast_periodic_processing.c.obj)
+                0x0000000000049628      0x274 ../../libnetxduo.a(nx_tcp_fast_periodic_processing.c.obj)
                 0x0000000000049628                _nx_tcp_fast_periodic_processing
  .text._nx_tcp_socket_window_update_step
-                0x000000000004988c        0xc ../../libnetxduo.a(nx_tcp_fast_periodic_processing.c.obj)
-                0x000000000004988c                _nx_tcp_socket_window_update_step
+                0x000000000004989c        0xc ../../libnetxduo.a(nx_tcp_fast_periodic_processing.c.obj)
+                0x000000000004989c                _nx_tcp_socket_window_update_step
  .text._nx_tcp_free_port_find
-                0x0000000000049898       0x9c ../../libnetxduo.a(nx_tcp_free_port_find.c.obj)
-                0x0000000000049898                _nx_tcp_free_port_find
+                0x00000000000498a8       0x9c ../../libnetxduo.a(nx_tcp_free_port_find.c.obj)
+                0x00000000000498a8                _nx_tcp_free_port_find
  .text._nx_tcp_info_get
-                0x0000000000049934       0xcc ../../libnetxduo.a(nx_tcp_info_get.c.obj)
-                0x0000000000049934                _nx_tcp_info_get
+                0x0000000000049944       0xcc ../../libnetxduo.a(nx_tcp_info_get.c.obj)
+                0x0000000000049944                _nx_tcp_info_get
  .text._nx_tcp_packet_receive
-                0x0000000000049a00       0xb4 ../../libnetxduo.a(nx_tcp_packet_receive.c.obj)
-                0x0000000000049a00                _nx_tcp_packet_receive
+                0x0000000000049a10       0xb4 ../../libnetxduo.a(nx_tcp_packet_receive.c.obj)
+                0x0000000000049a10                _nx_tcp_packet_receive
  .text._nx_tcp_packet_send_ack
-                0x0000000000049ab4       0x4c ../../libnetxduo.a(nx_tcp_packet_send_ack.c.obj)
-                0x0000000000049ab4                _nx_tcp_packet_send_ack
+                0x0000000000049ac4       0x4c ../../libnetxduo.a(nx_tcp_packet_send_ack.c.obj)
+                0x0000000000049ac4                _nx_tcp_packet_send_ack
  .text._nx_tcp_packet_send_control
-                0x0000000000049b00      0x2e8 ../../libnetxduo.a(nx_tcp_packet_send_control.c.obj)
-                0x0000000000049b00                _nx_tcp_packet_send_control
+                0x0000000000049b10      0x2e8 ../../libnetxduo.a(nx_tcp_packet_send_control.c.obj)
+                0x0000000000049b10                _nx_tcp_packet_send_control
  .text._nx_tcp_packet_send_syn
-                0x0000000000049de8      0x260 ../../libnetxduo.a(nx_tcp_packet_send_syn.c.obj)
-                0x0000000000049de8                _nx_tcp_packet_send_syn
+                0x0000000000049df8      0x260 ../../libnetxduo.a(nx_tcp_packet_send_syn.c.obj)
+                0x0000000000049df8                _nx_tcp_packet_send_syn
  .text._nx_tcp_periodic_processing
-                0x000000000004a048       0x9c ../../libnetxduo.a(nx_tcp_periodic_processing.c.obj)
-                0x000000000004a048                _nx_tcp_periodic_processing
+                0x000000000004a058       0x9c ../../libnetxduo.a(nx_tcp_periodic_processing.c.obj)
+                0x000000000004a058                _nx_tcp_periodic_processing
  .text._nx_tcp_queue_process
-                0x000000000004a0e4       0x64 ../../libnetxduo.a(nx_tcp_queue_process.c.obj)
-                0x000000000004a0e4                _nx_tcp_queue_process
+                0x000000000004a0f4       0x64 ../../libnetxduo.a(nx_tcp_queue_process.c.obj)
+                0x000000000004a0f4                _nx_tcp_queue_process
  .text._nx_tcp_receive_cleanup
-                0x000000000004a148      0x104 ../../libnetxduo.a(nx_tcp_receive_cleanup.c.obj)
-                0x000000000004a148                _nx_tcp_receive_cleanup
+                0x000000000004a158      0x104 ../../libnetxduo.a(nx_tcp_receive_cleanup.c.obj)
+                0x000000000004a158                _nx_tcp_receive_cleanup
  .text._nx_tcp_sack_sequence_write
-                0x000000000004a24c       0x2c ../../libnetxduo.a(nx_tcp_sack_option_build.c.obj)
+                0x000000000004a25c       0x2c ../../libnetxduo.a(nx_tcp_sack_option_build.c.obj)
  .text._nx_tcp_sack_option_build
-                0x000000000004a278      0x23c ../../libnetxduo.a(nx_tcp_sack_option_build.c.obj)
-                0x000000000004a278                _nx_tcp_sack_option_build
+                0x000000000004a288      0x23c ../../libnetxduo.a(nx_tcp_sack_option_build.c.obj)
+                0x000000000004a288                _nx_tcp_sack_option_build
  .text._nx_tcp_server_socket_accept
-                0x000000000004a4b4      0x16c ../../libnetxduo.a(nx_tcp_server_socket_accept.c.obj)
-                0x000000000004a4b4                _nx_tcp_server_socket_accept
+                0x000000000004a4c4      0x16c ../../libnetxduo.a(nx_tcp_server_socket_accept.c.obj)
+                0x000000000004a4c4                _nx_tcp_server_socket_accept
  .text._nx_tcp_server_socket_listen
-                0x000000000004a620      0x118 ../../libnetxduo.a(nx_tcp_server_socket_listen.c.obj)
-                0x000000000004a620                _nx_tcp_server_socket_listen
+                0x000000000004a630      0x118 ../../libnetxduo.a(nx_tcp_server_socket_listen.c.obj)
+                0x000000000004a630                _nx_tcp_server_socket_listen
  .text._nx_tcp_server_socket_relisten
-                0x000000000004a738      0x364 ../../libnetxduo.a(nx_tcp_server_socket_relisten.c.obj)
-                0x000000000004a738                _nx_tcp_server_socket_relisten
+                0x000000000004a748      0x364 ../../libnetxduo.a(nx_tcp_server_socket_relisten.c.obj)
+                0x000000000004a748                _nx_tcp_server_socket_relisten
  .text._nx_tcp_server_socket_unaccept
-                0x000000000004aa9c      0x120 ../../libnetxduo.a(nx_tcp_server_socket_unaccept.c.obj)
-                0x000000000004aa9c                _nx_tcp_server_socket_unaccept
+                0x000000000004aaac      0x120 ../../libnetxduo.a(nx_tcp_server_socket_unaccept.c.obj)
+                0x000000000004aaac                _nx_tcp_server_socket_unaccept
  .text._nx_tcp_server_socket_unlisten
-                0x000000000004abbc       0xfc ../../libnetxduo.a(nx_tcp_server_socket_unlisten.c.obj)
-                0x000000000004abbc                _nx_tcp_server_socket_unlisten
+                0x000000000004abcc       0xfc ../../libnetxduo.a(nx_tcp_server_socket_unlisten.c.obj)
+                0x000000000004abcc                _nx_tcp_server_socket_unlisten
  .text._nx_tcp_socket_block_cleanup
-                0x000000000004acb8       0x60 ../../libnetxduo.a(nx_tcp_socket_block_cleanup.c.obj)
-                0x000000000004acb8                _nx_tcp_socket_block_cleanup
+                0x000000000004acc8       0x60 ../../libnetxduo.a(nx_tcp_socket_block_cleanup.c.obj)
+                0x000000000004acc8                _nx_tcp_socket_block_cleanup
  .text._nx_tcp_socket_bytes_available
-                0x000000000004ad18       0x8c ../../libnetxduo.a(nx_tcp_socket_bytes_available.c.obj)
-                0x000000000004ad18                _nx_tcp_socket_bytes_available
+                0x000000000004ad28       0x8c ../../libnetxduo.a(nx_tcp_socket_bytes_available.c.obj)
+                0x000000000004ad28                _nx_tcp_socket_bytes_available
  .text._nx_tcp_socket_connection_reset
-                0x000000000004ada4       0xac ../../libnetxduo.a(nx_tcp_socket_connection_reset.c.obj)
-                0x000000000004ada4                _nx_tcp_socket_connection_reset
+                0x000000000004adb4       0xac ../../libnetxduo.a(nx_tcp_socket_connection_reset.c.obj)
+                0x000000000004adb4                _nx_tcp_socket_connection_reset
  .text._nx_tcp_socket_create
-                0x000000000004ae50      0x128 ../../libnetxduo.a(nx_tcp_socket_create.c.obj)
-                0x000000000004ae50                _nx_tcp_socket_create
+                0x000000000004ae60      0x128 ../../libnetxduo.a(nx_tcp_socket_create.c.obj)
+                0x000000000004ae60                _nx_tcp_socket_create
  .text._nx_tcp_socket_delete
-                0x000000000004af78       0xb8 ../../libnetxduo.a(nx_tcp_socket_delete.c.obj)
-                0x000000000004af78                _nx_tcp_socket_delete
+                0x000000000004af88       0xb8 ../../libnetxduo.a(nx_tcp_socket_delete.c.obj)
+                0x000000000004af88                _nx_tcp_socket_delete
  .text._nx_tcp_socket_disconnect
-                0x000000000004b030      0x24c ../../libnetxduo.a(nx_tcp_socket_disconnect.c.obj)
-                0x000000000004b030                _nx_tcp_socket_disconnect
+                0x000000000004b040      0x24c ../../libnetxduo.a(nx_tcp_socket_disconnect.c.obj)
+                0x000000000004b040                _nx_tcp_socket_disconnect
  .text._nx_tcp_socket_disconnect_complete_notify
-                0x000000000004b27c       0x2c ../../libnetxduo.a(nx_tcp_socket_disconnect_complete_notify.c.obj)
-                0x000000000004b27c                _nx_tcp_socket_disconnect_complete_notify
+                0x000000000004b28c       0x2c ../../libnetxduo.a(nx_tcp_socket_disconnect_complete_notify.c.obj)
+                0x000000000004b28c                _nx_tcp_socket_disconnect_complete_notify
  .text._nx_tcp_socket_establish_notify
-                0x000000000004b2a8       0x2c ../../libnetxduo.a(nx_tcp_socket_establish_notify.c.obj)
-                0x000000000004b2a8                _nx_tcp_socket_establish_notify
+                0x000000000004b2b8       0x2c ../../libnetxduo.a(nx_tcp_socket_establish_notify.c.obj)
+                0x000000000004b2b8                _nx_tcp_socket_establish_notify
  .text._nx_tcp_socket_mss_get
-                0x000000000004b2d4       0x6c ../../libnetxduo.a(nx_tcp_socket_mss_get.c.obj)
-                0x000000000004b2d4                _nx_tcp_socket_mss_get
+                0x000000000004b2e4       0x6c ../../libnetxduo.a(nx_tcp_socket_mss_get.c.obj)
+                0x000000000004b2e4                _nx_tcp_socket_mss_get
  .text._nx_tcp_socket_mss_set
-                0x000000000004b340       0x54 ../../libnetxduo.a(nx_tcp_socket_mss_set.c.obj)
-                0x000000000004b340                _nx_tcp_socket_mss_set
+                0x000000000004b350       0x54 ../../libnetxduo.a(nx_tcp_socket_mss_set.c.obj)
+                0x000000000004b350                _nx_tcp_socket_mss_set
  .text._nx_tcp_socket_receive_notify
-                0x000000000004b394       0x5c ../../libnetxduo.a(nx_tcp_socket_receive_notify.c.obj)
-                0x000000000004b394                _nx_tcp_socket_receive_notify
+                0x000000000004b3a4       0x5c ../../libnetxduo.a(nx_tcp_socket_receive_notify.c.obj)
+                0x000000000004b3a4                _nx_tcp_socket_receive_notify
  .text._nx_tcp_socket_receive_queue_flush
-                0x000000000004b3f0       0x48 ../../libnetxduo.a(nx_tcp_socket_receive_queue_flush.c.obj)
-                0x000000000004b3f0                _nx_tcp_socket_receive_queue_flush
+                0x000000000004b400       0x48 ../../libnetxduo.a(nx_tcp_socket_receive_queue_flush.c.obj)
+                0x000000000004b400                _nx_tcp_socket_receive_queue_flush
  .text._nx_tcp_socket_receive_queue_max_set
-                0x000000000004b438       0x5c ../../libnetxduo.a(nx_tcp_socket_receive_queue_max_set.c.obj)
-                0x000000000004b438                _nx_tcp_socket_receive_queue_max_set
+                0x000000000004b448       0x5c ../../libnetxduo.a(nx_tcp_socket_receive_queue_max_set.c.obj)
+                0x000000000004b448                _nx_tcp_socket_receive_queue_max_set
  .text._nx_tcp_socket_retransmit_packet
-                0x000000000004b494      0x1a8 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
+                0x000000000004b4a4      0x1a8 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
  .text._nx_tcp_socket_retransmit
-                0x000000000004b63c      0x2a8 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
-                0x000000000004b63c                _nx_tcp_socket_retransmit
+                0x000000000004b64c      0x2a8 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
+                0x000000000004b64c                _nx_tcp_socket_retransmit
  .text._nx_tcp_socket_retransmit_tail
-                0x000000000004b8e4       0x30 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
-                0x000000000004b8e4                _nx_tcp_socket_retransmit_tail
+                0x000000000004b8f4       0x30 ../../libnetxduo.a(nx_tcp_socket_retransmit.c.obj)
+                0x000000000004b8f4                _nx_tcp_socket_retransmit_tail
  .text._nx_tcp_socket_thread_resume
-                0x000000000004b914       0x80 ../../libnetxduo.a(nx_tcp_socket_thread_resume.c.obj)
-                0x000000000004b914                _nx_tcp_socket_thread_resume
+                0x000000000004b924       0x80 ../../libnetxduo.a(nx_tcp_socket_thread_resume.c.obj)
+                0x000000000004b924                _nx_tcp_socket_thread_resume
  .text._nx_tcp_socket_transmit_queue_flush
-                0x000000000004b994       0x84 ../../libnetxduo.a(nx_tcp_socket_transmit_queue_flush.c.obj)
-                0x000000000004b994                _nx_tcp_socket_transmit_queue_flush
+                0x000000000004b9a4       0x84 ../../libnetxduo.a(nx_tcp_socket_transmit_queue_flush.c.obj)
+                0x000000000004b9a4                _nx_tcp_socket_transmit_queue_flush
  .text._nx_tcp_socket_window_update_notify_set
-                0x000000000004ba18       0x5c ../../libnetxduo.a(nx_tcp_socket_window_update_notify_set.c.obj)
-                0x000000000004ba18                _nx_tcp_socket_window_update_notify_set
+                0x000000000004ba28       0x5c ../../libnetxduo.a(nx_tcp_socket_window_update_notify_set.c.obj)
+                0x000000000004ba28                _nx_tcp_socket_window_update_notify_set
  .text._nx_tcp_syncache_bucket
-                0x000000000004ba74       0x58 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004ba84       0x58 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_find
-                0x000000000004bacc       0x88 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004badc       0x88 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_send_synack
-                0x000000000004bb54      0x124 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004bb64      0x124 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_hand_over
-                0x000000000004bc78      0x230 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004bc88      0x230 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_send_rst
-                0x000000000004bea8       0xcc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004beb8       0xcc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_release
-                0x000000000004bf74      0x130 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004bf84      0x130 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_hash
-                0x000000000004c0a4      0x150 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c0a4                _nx_tcp_syncache_hash
+                0x000000000004c0b4      0x150 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c0b4                _nx_tcp_syncache_hash
  .text._nx_tcp_syncache_mss_encode
-                0x000000000004c1f4       0x24 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c1f4                _nx_tcp_syncache_mss_encode
+                0x000000000004c204       0x24 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c204                _nx_tcp_syncache_mss_encode
  .text._nx_tcp_syncache_options_encode
-                0x000000000004c218       0x38 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c228       0x38 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
  .text._nx_tcp_syncache_cookie_build
-                0x000000000004c250       0xa4 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c250                _nx_tcp_syncache_cookie_build
+                0x000000000004c260       0xa4 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c260                _nx_tcp_syncache_cookie_build
  .text._nx_tcp_syncache_cookie_check
-                0x000000000004c2f4       0xcc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c2f4                _nx_tcp_syncache_cookie_check
+                0x000000000004c304       0xcc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c304                _nx_tcp_syncache_cookie_check
  .text._nx_tcp_syncache_initialize
-                0x000000000004c3c0       0xa4 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c3c0                _nx_tcp_syncache_initialize
+                0x000000000004c3d0       0xa4 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c3d0                _nx_tcp_syncache_initialize
  .text._nx_tcp_syncache_syn_received
-                0x000000000004c464      0x410 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c464                _nx_tcp_syncache_syn_received
+                0x000000000004c474      0x410 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c474                _nx_tcp_syncache_syn_received
  .text._nx_tcp_syncache_ack_received
-                0x000000000004c874      0x48c ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004c874                _nx_tcp_syncache_ack_received
+                0x000000000004c884      0x48c ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004c884                _nx_tcp_syncache_ack_received
  .text._nx_tcp_syncache_reset_received
-                0x000000000004cd00       0x64 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004cd00                _nx_tcp_syncache_reset_received
+                0x000000000004cd10       0x64 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004cd10                _nx_tcp_syncache_reset_received
  .text._nx_tcp_syncache_deliver
-                0x000000000004cd64       0x84 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004cd64                _nx_tcp_syncache_deliver
+                0x000000000004cd74       0x84 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004cd74                _nx_tcp_syncache_deliver
  .text._nx_tcp_syncache_flush
-                0x000000000004cde8       0x90 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004cde8                _nx_tcp_syncache_flush
+                0x000000000004cdf8       0x90 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004cdf8                _nx_tcp_syncache_flush
  .text._nx_tcp_syncache_periodic
-                0x000000000004ce78       0xfc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
-                0x000000000004ce78                _nx_tcp_syncache_periodic
+                0x000000000004ce88       0xfc ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+                0x000000000004ce88                _nx_tcp_syncache_periodic
  .text._nx_tcp_window_scaling_option_get
-                0x000000000004cf74       0x68 ../../libnetxduo.a(nx_tcp_window_scaling_option_get.c.obj)
-                0x000000000004cf74                _nx_tcp_window_scaling_option_get
+                0x000000000004cf84       0x68 ../../libnetxduo.a(nx_tcp_window_scaling_option_get.c.obj)
+                0x000000000004cf84                _nx_tcp_window_scaling_option_get
  .text._nx_udp_bind_cleanup
-                0x000000000004cfdc       0xac ../../libnetxduo.a(nx_udp_bind_cleanup.c.obj)
-                0x000000000004cfdc                _nx_udp_bind_cleanup
+                0x000000000004cfec       0xac ../../libnetxduo.a(nx_udp_bind_cleanup.c.obj)
+                0x000000000004cfec                _nx_udp_bind_cleanup
  .text._nx_udp_enable
-                0x000000000004d088       0x10 ../../libnetxduo.a(nx_udp_enable.c.obj)
-                0x000000000004d088                _nx_udp_enable
+                0x000000000004d098       0x10 ../../libnetxduo.a(nx_udp_enable.c.obj)
+                0x000000000004d098                _nx_udp_enable
  .text._nx_udp_free_port_find
-                0x000000000004d098       0x9c ../../libnetxduo.a(nx_udp_free_port_find.c.obj)
-                0x000000000004d098                _nx_udp_free_port_find
+                0x000000000004d0a8       0x9c ../../libnetxduo.a(nx_udp_free_port_find.c.obj)
+                0x000000000004d0a8                _nx_udp_free_port_find
  .text._nx_udp_info_get
-                0x000000000004d134       0x8c ../../libnetxduo.a(nx_udp_info_get.c.obj)
-                0x000000000004d134                _nx_udp_info_get
+                0x000000000004d144       0x8c ../../libnetxduo.a(nx_udp_info_get.c.obj)
+                0x000000000004d144                _nx_udp_info_get
  .text._nx_udp_packet_receive
-                0x000000000004d1c0      0x308 ../../libnetxduo.a(nx_udp_packet_receive.c.obj)
-                0x000000000004d1c0                _nx_udp_packet_receive
+                0x000000000004d1d0      0x308 ../../libnetxduo.a(nx_udp_packet_receive.c.obj)
+                0x000000000004d1d0                _nx_udp_packet_receive
  .text._nx_udp_receive_cleanup
-                0x000000000004d4c8       0xa4 ../../libnetxduo.a(nx_udp_receive_cleanup.c.obj)
-                0x000000000004d4c8                _nx_udp_receive_cleanup
+                0x000000000004d4d8       0xa4 ../../libnetxduo.a(nx_udp_receive_cleanup.c.obj)
+                0x000000000004d4d8                _nx_udp_receive_cleanup
  .text._nx_udp_socket_icmp_error_notify
-                0x000000000004d56c       0x2c ../../libnetxduo.a(nx_udp_socket_icmp_error_notify.c.obj)
-                0x000000000004d56c                _nx_udp_socket_icmp_error_notify
+                0x000000000004d57c       0x2c ../../libnetxduo.a(nx_udp_socket_icmp_error_notify.c.obj)
+                0x000000000004d57c                _nx_udp_socket_icmp_error_notify
  .text._nx_udp_socket_port_get
-                0x000000000004d598       0x4c ../../libnetxduo.a(nx_udp_socket_port_get.c.obj)
-                0x000000000004d598                _nx_udp_socket_port_get
+                0x000000000004d5a8       0x4c ../../libnetxduo.a(nx_udp_socket_port_get.c.obj)
+                0x000000000004d5a8                _nx_udp_socket_port_get
  .text._nx_udp_socket_send
-                0x000000000004d5e4       0x30 ../../libnetxduo.a(nx_udp_socket_send.c.obj)
-                0x000000000004d5e4                _nx_udp_socket_send
+                0x000000000004d5f4       0x30 ../../libnetxduo.a(nx_udp_socket_send.c.obj)
+                0x000000000004d5f4                _nx_udp_socket_send
  .text._nxd_icmp_enable
-                0x000000000004d614       0x9c ../../libnetxduo.a(nxd_icmp_enable.c.obj)
-                0x000000000004d614                _nxd_icmp_enable
+                0x000000000004d624       0x9c ../../libnetxduo.a(nxd_icmp_enable.c.obj)
+                0x000000000004d624                _nxd_icmp_enable
  .text._nxd_icmpv6_ra_flag_callback_set
-                0x000000000004d6b0       0x34 ../../libnetxduo.a(nxd_icmpv6_ra_flag_callback_set.c.obj)
-                0x000000000004d6b0                _nxd_icmpv6_ra_flag_callback_set
+                0x000000000004d6c0       0x34 ../../libnetxduo.a(nxd_icmpv6_ra_flag_callback_set.c.obj)
+                0x000000000004d6c0                _nxd_icmpv6_ra_flag_callback_set
  .text._nxd_ip_raw_packet_send
-                0x000000000004d6e4       0x60 ../../libnetxduo.a(nxd_ip_raw_packet_send.c.obj)
-                0x000000000004d6e4                _nxd_ip_raw_packet_send
+                0x000000000004d6f4       0x60 ../../libnetxduo.a(nxd_ip_raw_packet_send.c.obj)
+                0x000000000004d6f4                _nxd_ip_raw_packet_send
  .text._nxd_ip_raw_packet_source_send
-                0x000000000004d744       0xf4 ../../libnetxduo.a(nxd_ip_raw_packet_source_send.c.obj)
-                0x000000000004d744                _nxd_ip_raw_packet_source_send
+                0x000000000004d754       0xf4 ../../libnetxduo.a(nxd_ip_raw_packet_source_send.c.obj)
+                0x000000000004d754                _nxd_ip_raw_packet_source_send
  .text._nxd_ipv6_enable
-                0x000000000004d838      0x1e0 ../../libnetxduo.a(nxd_ipv6_enable.c.obj)
-                0x000000000004d838                _nxd_ipv6_enable
+                0x000000000004d848      0x1e0 ../../libnetxduo.a(nxd_ipv6_enable.c.obj)
+                0x000000000004d848                _nxd_ipv6_enable
  .text._nxd_ipv6_multicast_interface_join
-                0x000000000004da18      0x174 ../../libnetxduo.a(nxd_ipv6_multicast_interface_join.c.obj)
-                0x000000000004da18                _nxd_ipv6_multicast_interface_join
+                0x000000000004da28      0x174 ../../libnetxduo.a(nxd_ipv6_multicast_interface_join.c.obj)
+                0x000000000004da28                _nxd_ipv6_multicast_interface_join
  .text._nxd_ipv6_multicast_interface_leave
-                0x000000000004db8c      0x110 ../../libnetxduo.a(nxd_ipv6_multicast_interface_leave.c.obj)
-                0x000000000004db8c                _nxd_ipv6_multicast_interface_leave
+                0x000000000004db9c      0x110 ../../libnetxduo.a(nxd_ipv6_multicast_interface_leave.c.obj)
+                0x000000000004db9c                _nxd_ipv6_multicast_interface_leave
  .text._nxd_ipv6_prefix_router_timer_tick
-                0x000000000004dc9c       0xd0 ../../libnetxduo.a(nxd_ipv6_prefix_router_timer_tick.c.obj)
-                0x000000000004dc9c                _nxd_ipv6_prefix_router_timer_tick
+                0x000000000004dcac       0xd0 ../../libnetxduo.a(nxd_ipv6_prefix_router_timer_tick.c.obj)
+                0x000000000004dcac                _nxd_ipv6_prefix_router_timer_tick
  .text._nxd_ipv6_raw_packet_send_internal
-                0x000000000004dd6c       0xa0 ../../libnetxduo.a(nxd_ipv6_raw_packet_send_internal.c.obj)
-                0x000000000004dd6c                _nxd_ipv6_raw_packet_send_internal
+                0x000000000004dd7c       0xa0 ../../libnetxduo.a(nxd_ipv6_raw_packet_send_internal.c.obj)
+                0x000000000004dd7c                _nxd_ipv6_raw_packet_send_internal
  .text._nxd_ipv6_router_lookup
-                0x000000000004de0c      0x158 ../../libnetxduo.a(nxd_ipv6_router_lookup.c.obj)
-                0x000000000004de0c                _nxd_ipv6_router_lookup
+                0x000000000004de1c      0x158 ../../libnetxduo.a(nxd_ipv6_router_lookup.c.obj)
+                0x000000000004de1c                _nxd_ipv6_router_lookup
  .text._nxd_ipv6_router_solicitation_check
-                0x000000000004df64       0xd0 ../../libnetxduo.a(nxd_ipv6_router_solicitation_check.c.obj)
-                0x000000000004df64                _nxd_ipv6_router_solicitation_check
+                0x000000000004df74       0xd0 ../../libnetxduo.a(nxd_ipv6_router_solicitation_check.c.obj)
+                0x000000000004df74                _nxd_ipv6_router_solicitation_check
  .text._nxd_ipv6_search_onlink
-                0x000000000004e034       0x98 ../../libnetxduo.a(nxd_ipv6_search_onlink.c.obj)
-                0x000000000004e034                _nxd_ipv6_search_onlink
+                0x000000000004e044       0x98 ../../libnetxduo.a(nxd_ipv6_search_onlink.c.obj)
+                0x000000000004e044                _nxd_ipv6_search_onlink
  .text._nxd_ipv6_stateless_address_autoconfig_disable
-                0x000000000004e0cc       0x6c ../../libnetxduo.a(nxd_ipv6_stateless_address_autoconfig_disable.c.obj)
-                0x000000000004e0cc                _nxd_ipv6_stateless_address_autoconfig_disable
+                0x000000000004e0dc       0x6c ../../libnetxduo.a(nxd_ipv6_stateless_address_autoconfig_disable.c.obj)
+                0x000000000004e0dc                _nxd_ipv6_stateless_address_autoconfig_disable
  .text._nxd_ipv6_stateless_address_autoconfig_enable
-                0x000000000004e138       0x84 ../../libnetxduo.a(nxd_ipv6_stateless_address_autoconfig_enable.c.obj)
-                0x000000000004e138                _nxd_ipv6_stateless_address_autoconfig_enable
+                0x000000000004e148       0x84 ../../libnetxduo.a(nxd_ipv6_stateless_address_autoconfig_enable.c.obj)
+                0x000000000004e148                _nxd_ipv6_stateless_address_autoconfig_enable
  .text._nxd_nd_cache_entry_delete
-                0x000000000004e1bc       0x78 ../../libnetxduo.a(nxd_nd_cache_entry_delete.c.obj)
-                0x000000000004e1bc                _nxd_nd_cache_entry_delete
+                0x000000000004e1cc       0x78 ../../libnetxduo.a(nxd_nd_cache_entry_delete.c.obj)
+                0x000000000004e1cc                _nxd_nd_cache_entry_delete
  .text._nxd_nd_cache_entry_set
-                0x000000000004e234       0x40 ../../libnetxduo.a(nxd_nd_cache_entry_set.c.obj)
-                0x000000000004e234                _nxd_nd_cache_entry_set
+                0x000000000004e244       0x40 ../../libnetxduo.a(nxd_nd_cache_entry_set.c.obj)
+                0x000000000004e244                _nxd_nd_cache_entry_set
  .text._nxd_nd_cache_invalidate
-                0x000000000004e274       0x60 ../../libnetxduo.a(nxd_nd_cache_invalidate.c.obj)
-                0x000000000004e274                _nxd_nd_cache_invalidate
+                0x000000000004e284       0x60 ../../libnetxduo.a(nxd_nd_cache_invalidate.c.obj)
+                0x000000000004e284                _nxd_nd_cache_invalidate
  .text._nxd_tcp_client_socket_connect_internal
-                0x000000000004e2d4      0x32c ../../libnetxduo.a(nxd_tcp_client_socket_connect.c.obj)
-                0x000000000004e2d4                _nxd_tcp_client_socket_connect_internal
+                0x000000000004e2e4      0x32c ../../libnetxduo.a(nxd_tcp_client_socket_connect.c.obj)
+                0x000000000004e2e4                _nxd_tcp_client_socket_connect_internal
  .text._nxd_tcp_client_socket_connect
-                0x000000000004e600       0x20 ../../libnetxduo.a(nxd_tcp_client_socket_connect.c.obj)
-                0x000000000004e600                _nxd_tcp_client_socket_connect
+                0x000000000004e610       0x20 ../../libnetxduo.a(nxd_tcp_client_socket_connect.c.obj)
+                0x000000000004e610                _nxd_tcp_client_socket_connect
  .text._nxd_tcp_client_socket_source_connect
-                0x000000000004e620       0x20 ../../libnetxduo.a(nxd_tcp_client_socket_source_connect.c.obj)
-                0x000000000004e620                _nxd_tcp_client_socket_source_connect
+                0x000000000004e630       0x20 ../../libnetxduo.a(nxd_tcp_client_socket_source_connect.c.obj)
+                0x000000000004e630                _nxd_tcp_client_socket_source_connect
  .text._nxd_tcp_socket_peer_info_get
-                0x000000000004e640       0x80 ../../libnetxduo.a(nxd_tcp_socket_peer_info_get.c.obj)
-                0x000000000004e640                _nxd_tcp_socket_peer_info_get
+                0x000000000004e650       0x80 ../../libnetxduo.a(nxd_tcp_socket_peer_info_get.c.obj)
+                0x000000000004e650                _nxd_tcp_socket_peer_info_get
  .text._nx_arp_interface_entries_delete
-                0x000000000004e6c0       0xcc ../../libnetxduo.a(nx_arp_interface_entries_delete.c.obj)
-                0x000000000004e6c0                _nx_arp_interface_entries_delete
+                0x000000000004e6d0       0xcc ../../libnetxduo.a(nx_arp_interface_entries_delete.c.obj)
+                0x000000000004e6d0                _nx_arp_interface_entries_delete
  .text._nx_arp_packet_receive
-                0x000000000004e78c      0x300 ../../libnetxduo.a(nx_arp_packet_receive.c.obj)
-                0x000000000004e78c                _nx_arp_packet_receive
+                0x000000000004e79c      0x300 ../../libnetxduo.a(nx_arp_packet_receive.c.obj)
+                0x000000000004e79c                _nx_arp_packet_receive
  .text._nx_arp_queue_send
-                0x000000000004ea8c       0xcc ../../libnetxduo.a(nx_arp_queue_send.c.obj)
-                0x000000000004ea8c                _nx_arp_queue_send
+                0x000000000004ea9c       0xcc ../../libnetxduo.a(nx_arp_queue_send.c.obj)
+                0x000000000004ea9c                _nx_arp_queue_send
  .text._nx_icmp_cleanup
-                0x000000000004eb58       0xb0 ../../libnetxduo.a(nx_icmp_cleanup.c.obj)
-                0x000000000004eb58                _nx_icmp_cleanup
+                0x000000000004eb68       0xb0 ../../libnetxduo.a(nx_icmp_cleanup.c.obj)
+                0x000000000004eb68                _nx_icmp_cleanup
  .text._nx_icmp_packet_receive
-                0x000000000004ec08       0x8c ../../libnetxduo.a(nx_icmp_packet_receive.c.obj)
-                0x000000000004ec08                _nx_icmp_packet_receive
+                0x000000000004ec18       0x8c ../../libnetxduo.a(nx_icmp_packet_receive.c.obj)
+                0x000000000004ec18                _nx_icmp_packet_receive
  .text._nx_icmp_queue_process
-                0x000000000004ec94       0x5c ../../libnetxduo.a(nx_icmp_queue_process.c.obj)
-                0x000000000004ec94                _nx_icmp_queue_process
+                0x000000000004eca4       0x5c ../../libnetxduo.a(nx_icmp_queue_process.c.obj)
+                0x000000000004eca4                _nx_icmp_queue_process
  .text._nx_icmpv4_packet_process
-                0x000000000004ecf0       0xac ../../libnetxduo.a(nx_icmpv4_packet_process.c.obj)
-                0x000000000004ecf0                _nx_icmpv4_packet_process
+                0x000000000004ed00       0xac ../../libnetxduo.a(nx_icmpv4_packet_process.c.obj)
+                0x000000000004ed00                _nx_icmpv4_packet_process
  .text._nx_icmpv4_process_echo_reply
-                0x000000000004ed9c      0x10c ../../libnetxduo.a(nx_icmpv4_process_echo_reply.c.obj)
-                0x000000000004ed9c                _nx_icmpv4_process_echo_reply
+                0x000000000004edac      0x10c ../../libnetxduo.a(nx_icmpv4_process_echo_reply.c.obj)
+                0x000000000004edac                _nx_icmpv4_process_echo_reply
  .text._nx_icmpv4_process_echo_request
-                0x000000000004eea8       0xb8 ../../libnetxduo.a(nx_icmpv4_process_echo_request.c.obj)
-                0x000000000004eea8                _nx_icmpv4_process_echo_request
+                0x000000000004eeb8       0xb8 ../../libnetxduo.a(nx_icmpv4_process_echo_request.c.obj)
+                0x000000000004eeb8                _nx_icmpv4_process_echo_request
  .text._nx_icmpv4_process_error
-                0x000000000004ef60      0x170 ../../libnetxduo.a(nx_icmpv4_process_error.c.obj)
-                0x000000000004ef60                _nx_icmpv4_process_error
+                0x000000000004ef70      0x170 ../../libnetxduo.a(nx_icmpv4_process_error.c.obj)
+                0x000000000004ef70                _nx_icmpv4_process_error
  .text._nx_icmpv4_send_error_message
-                0x000000000004f0d0      0x1d0 ../../libnetxduo.a(nx_icmpv4_send_error_message.c.obj)
-                0x000000000004f0d0                _nx_icmpv4_send_error_message
+                0x000000000004f0e0      0x1d0 ../../libnetxduo.a(nx_icmpv4_send_error_message.c.obj)
+                0x000000000004f0e0                _nx_icmpv4_send_error_message
  .text._nx_icmpv6_dest_table_add
-                0x000000000004f2a0      0x220 ../../libnetxduo.a(nx_icmpv6_dest_table_add.c.obj)
-                0x000000000004f2a0                _nx_icmpv6_dest_table_add
+                0x000000000004f2b0      0x220 ../../libnetxduo.a(nx_icmpv6_dest_table_add.c.obj)
+                0x000000000004f2b0                _nx_icmpv6_dest_table_add
  .text._nx_icmpv6_dest_table_find
-                0x000000000004f4c0       0xd8 ../../libnetxduo.a(nx_icmpv6_dest_table_find.c.obj)
-                0x000000000004f4c0                _nx_icmpv6_dest_table_find
+                0x000000000004f4d0       0xd8 ../../libnetxduo.a(nx_icmpv6_dest_table_find.c.obj)
+                0x000000000004f4d0                _nx_icmpv6_dest_table_find
  .text._nx_icmpv6_destination_table_periodic_update
-                0x000000000004f598       0x84 ../../libnetxduo.a(nx_icmpv6_destination_table_periodic_update.c.obj)
-                0x000000000004f598                _nx_icmpv6_destination_table_periodic_update
+                0x000000000004f5a8       0x84 ../../libnetxduo.a(nx_icmpv6_destination_table_periodic_update.c.obj)
+                0x000000000004f5a8                _nx_icmpv6_destination_table_periodic_update
  .text._nx_icmpv6_packet_process
-                0x000000000004f61c      0x134 ../../libnetxduo.a(nx_icmpv6_packet_process.c.obj)
-                0x000000000004f61c                _nx_icmpv6_packet_process
+                0x000000000004f62c      0x134 ../../libnetxduo.a(nx_icmpv6_packet_process.c.obj)
+                0x000000000004f62c                _nx_icmpv6_packet_process
  .text._nx_icmpv6_perform_DAD
-                0x000000000004f750       0xbc ../../libnetxduo.a(nx_icmpv6_perform_DAD.c.obj)
-                0x000000000004f750                _nx_icmpv6_perform_DAD
+                0x000000000004f760       0xbc ../../libnetxduo.a(nx_icmpv6_perform_DAD.c.obj)
+                0x000000000004f760                _nx_icmpv6_perform_DAD
  .text._nx_icmpv6_process_echo_reply
-                0x000000000004f80c      0x154 ../../libnetxduo.a(nx_icmpv6_process_echo_reply.c.obj)
-                0x000000000004f80c                _nx_icmpv6_process_echo_reply
+                0x000000000004f81c      0x154 ../../libnetxduo.a(nx_icmpv6_process_echo_reply.c.obj)
+                0x000000000004f81c                _nx_icmpv6_process_echo_reply
  .text._nx_icmpv6_process_echo_request
-                0x000000000004f960      0x1c8 ../../libnetxduo.a(nx_icmpv6_process_echo_request.c.obj)
-                0x000000000004f960                _nx_icmpv6_process_echo_request
+                0x000000000004f970      0x1c8 ../../libnetxduo.a(nx_icmpv6_process_echo_request.c.obj)
+                0x000000000004f970                _nx_icmpv6_process_echo_request
  .text._nx_icmpv6_process_na
-                0x000000000004fb28      0x2c0 ../../libnetxduo.a(nx_icmpv6_process_na.c.obj)
-                0x000000000004fb28                _nx_icmpv6_process_na
+                0x000000000004fb38      0x2c0 ../../libnetxduo.a(nx_icmpv6_process_na.c.obj)
+                0x000000000004fb38                _nx_icmpv6_process_na
  .text._nx_icmpv6_process_ns
-                0x000000000004fde8      0x294 ../../libnetxduo.a(nx_icmpv6_process_ns.c.obj)
-                0x000000000004fde8                _nx_icmpv6_process_ns
+                0x000000000004fdf8      0x294 ../../libnetxduo.a(nx_icmpv6_process_ns.c.obj)
+                0x000000000004fdf8                _nx_icmpv6_process_ns
  .text._nx_icmpv6_process_packet_too_big
-                0x000000000005007c      0x13c ../../libnetxduo.a(nx_icmpv6_process_packet_too_big.c.obj)
-                0x000000000005007c                _nx_icmpv6_process_packet_too_big
+                0x000000000005008c      0x13c ../../libnetxduo.a(nx_icmpv6_process_packet_too_big.c.obj)
+                0x000000000005008c                _nx_icmpv6_process_packet_too_big
  .text._nx_icmpv6_process_ra
-                0x00000000000501b8      0x60c ../../libnetxduo.a(nx_icmpv6_process_ra.c.obj)
-                0x00000000000501b8                _nx_icmpv6_process_ra
+                0x00000000000501c8      0x60c ../../libnetxduo.a(nx_icmpv6_process_ra.c.obj)
+                0x00000000000501c8                _nx_icmpv6_process_ra
  .text._nx_icmpv6_process_redirect
-                0x00000000000507c4      0x314 ../../libnetxduo.a(nx_icmpv6_process_redirect.c.obj)
-                0x00000000000507c4                _nx_icmpv6_process_redirect
+                0x00000000000507d4      0x314 ../../libnetxduo.a(nx_icmpv6_process_redirect.c.obj)
+                0x00000000000507d4                _nx_icmpv6_process_redirect
  .text._nx_icmpv6_send_error_message
-                0x0000000000050ad8      0x234 ../../libnetxduo.a(nx_icmpv6_send_error_message.c.obj)
-                0x0000000000050ad8                _nx_icmpv6_send_error_message
+                0x0000000000050ae8      0x234 ../../libnetxduo.a(nx_icmpv6_send_error_message.c.obj)
+                0x0000000000050ae8                _nx_icmpv6_send_error_message
  .text._nx_icmpv6_send_ns
-                0x0000000000050d0c      0x218 ../../libnetxduo.a(nx_icmpv6_send_ns.c.obj)
-                0x0000000000050d0c                _nx_icmpv6_send_ns
+                0x0000000000050d1c      0x218 ../../libnetxduo.a(nx_icmpv6_send_ns.c.obj)
+                0x0000000000050d1c                _nx_icmpv6_send_ns
  .text._nx_icmpv6_send_queued_packets
-                0x0000000000050f24      0x1b0 ../../libnetxduo.a(nx_icmpv6_send_queued_packets.c.obj)
-                0x0000000000050f24                _nx_icmpv6_send_queued_packets
+                0x0000000000050f34      0x1b0 ../../libnetxduo.a(nx_icmpv6_send_queued_packets.c.obj)
+                0x0000000000050f34                _nx_icmpv6_send_queued_packets
  .text._nx_icmpv6_send_rs
-                0x00000000000510d4      0x1a4 ../../libnetxduo.a(nx_icmpv6_send_rs.c.obj)
-                0x00000000000510d4                _nx_icmpv6_send_rs
+                0x00000000000510e4      0x1a4 ../../libnetxduo.a(nx_icmpv6_send_rs.c.obj)
+                0x00000000000510e4                _nx_icmpv6_send_rs
  .text._nx_icmpv6_validate_neighbor_message
-                0x0000000000051278       0xd0 ../../libnetxduo.a(nx_icmpv6_validate_neighbor_message.c.obj)
-                0x0000000000051278                _nx_icmpv6_validate_neighbor_message
+                0x0000000000051288       0xd0 ../../libnetxduo.a(nx_icmpv6_validate_neighbor_message.c.obj)
+                0x0000000000051288                _nx_icmpv6_validate_neighbor_message
  .text._nx_icmpv6_validate_options
-                0x0000000000051348       0x44 ../../libnetxduo.a(nx_icmpv6_validate_options.c.obj)
-                0x0000000000051348                _nx_icmpv6_validate_options
+                0x0000000000051358       0x44 ../../libnetxduo.a(nx_icmpv6_validate_options.c.obj)
+                0x0000000000051358                _nx_icmpv6_validate_options
  .text._nx_icmpv6_validate_ra
-                0x000000000005138c       0x88 ../../libnetxduo.a(nx_icmpv6_validate_ra.c.obj)
-                0x000000000005138c                _nx_icmpv6_validate_ra
+                0x000000000005139c       0x88 ../../libnetxduo.a(nx_icmpv6_validate_ra.c.obj)
+                0x000000000005139c                _nx_icmpv6_validate_ra
  .text._nx_igmp_interface_report_send
-                0x0000000000051414      0x194 ../../libnetxduo.a(nx_igmp_interface_report_send.c.obj)
-                0x0000000000051414                _nx_igmp_interface_report_send
+                0x0000000000051424      0x194 ../../libnetxduo.a(nx_igmp_interface_report_send.c.obj)
+                0x0000000000051424                _nx_igmp_interface_report_send
  .text._nx_igmp_multicast_check
-                0x00000000000515a8       0x3c ../../libnetxduo.a(nx_igmp_multicast_check.c.obj)
-                0x00000000000515a8                _nx_igmp_multicast_check
+                0x00000000000515b8       0x3c ../../libnetxduo.a(nx_igmp_multicast_check.c.obj)
+                0x00000000000515b8                _nx_igmp_multicast_check
  .text._nx_igmp_packet_process
-                0x00000000000515e4      0x164 ../../libnetxduo.a(nx_igmp_packet_process.c.obj)
-                0x00000000000515e4                _nx_igmp_packet_process
+                0x00000000000515f4      0x164 ../../libnetxduo.a(nx_igmp_packet_process.c.obj)
+                0x00000000000515f4                _nx_igmp_packet_process
  .text._nx_ip_deferred_link_status_process
-                0x0000000000051748       0x8c ../../libnetxduo.a(nx_ip_deferred_link_status_process.c.obj)
-                0x0000000000051748                _nx_ip_deferred_link_status_process
+                0x0000000000051758       0x8c ../../libnetxduo.a(nx_ip_deferred_link_status_process.c.obj)
+                0x0000000000051758                _nx_ip_deferred_link_status_process
  .text._nx_ip_dispatch_process
-                0x00000000000517d4      0x2fc ../../libnetxduo.a(nx_ip_dispatch_process.c.obj)
-                0x00000000000517d4                _nx_ip_dispatch_process
+                0x00000000000517e4      0x2fc ../../libnetxduo.a(nx_ip_dispatch_process.c.obj)
+                0x00000000000517e4                _nx_ip_dispatch_process
  .text._nx_ip_driver_packet_send
-                0x0000000000051ad0      0x3a4 ../../libnetxduo.a(nx_ip_driver_packet_send.c.obj)
-                0x0000000000051ad0                _nx_ip_driver_packet_send
+                0x0000000000051ae0      0x3a4 ../../libnetxduo.a(nx_ip_driver_packet_send.c.obj)
+                0x0000000000051ae0                _nx_ip_driver_packet_send
  .text._nx_ip_fast_periodic_timer_entry
-                0x0000000000051e74       0x20 ../../libnetxduo.a(nx_ip_fast_periodic_timer_entry.c.obj)
+                0x0000000000051e84       0x20 ../../libnetxduo.a(nx_ip_fast_periodic_timer_entry.c.obj)
  .text._nx_ip_fast_periodic_timer_create
-                0x0000000000051e94       0x4c ../../libnetxduo.a(nx_ip_fast_periodic_timer_entry.c.obj)
-                0x0000000000051e94                _nx_ip_fast_periodic_timer_create
+                0x0000000000051ea4       0x4c ../../libnetxduo.a(nx_ip_fast_periodic_timer_entry.c.obj)
+                0x0000000000051ea4                _nx_ip_fast_periodic_timer_create
  .text._nx_ip_fragment_assembly
-                0x0000000000051ee0      0x410 ../../libnetxduo.a(nx_ip_fragment_assembly.c.obj)
-                0x0000000000051ee0                _nx_ip_fragment_assembly
+                0x0000000000051ef0      0x410 ../../libnetxduo.a(nx_ip_fragment_assembly.c.obj)
+                0x0000000000051ef0                _nx_ip_fragment_assembly
  .text._nx_ip_header_add
-                0x00000000000522f0      0x124 ../../libnetxduo.a(nx_ip_header_add.c.obj)
-                0x00000000000522f0                _nx_ip_header_add
+                0x0000000000052300      0x124 ../../libnetxduo.a(nx_ip_header_add.c.obj)
+                0x0000000000052300                _nx_ip_header_add
  .text._nx_ip_packet_receive
-                0x0000000000052414       0xc0 ../../libnetxduo.a(nx_ip_packet_receive.c.obj)
-                0x0000000000052414                _nx_ip_packet_receive
+                0x0000000000052424       0xc0 ../../libnetxduo.a(nx_ip_packet_receive.c.obj)
+                0x0000000000052424                _nx_ip_packet_receive
  .text._nx_ipv4_option_process
-                0x00000000000524d4       0xf8 ../../libnetxduo.a(nx_ipv4_option_process.c.obj)
-                0x00000000000524d4                _nx_ipv4_option_process
+                0x00000000000524e4       0xf8 ../../libnetxduo.a(nx_ipv4_option_process.c.obj)
+                0x00000000000524e4                _nx_ipv4_option_process
  .text._nx_ipv6_fragment_process
-                0x00000000000525cc      0x278 ../../libnetxduo.a(nx_ipv6_fragment_process.c.obj)
-                0x00000000000525cc                _nx_ipv6_fragment_process
+                0x00000000000525dc      0x278 ../../libnetxduo.a(nx_ipv6_fragment_process.c.obj)
+                0x00000000000525dc                _nx_ipv6_fragment_process
  .text._nx_ipv6_header_add
-                0x0000000000052844      0x110 ../../libnetxduo.a(nx_ipv6_header_add.c.obj)
-                0x0000000000052844                _nx_ipv6_header_add
+                0x0000000000052854      0x110 ../../libnetxduo.a(nx_ipv6_header_add.c.obj)
+                0x0000000000052854                _nx_ipv6_header_add
  .text._nx_ipv6_packet_copy
-                0x0000000000052954      0x124 ../../libnetxduo.a(nx_ipv6_packet_copy.c.obj)
-                0x0000000000052954                _nx_ipv6_packet_copy
+                0x0000000000052964      0x124 ../../libnetxduo.a(nx_ipv6_packet_copy.c.obj)
+                0x0000000000052964                _nx_ipv6_packet_copy
  .text._nx_ipv6_packet_receive
-                0x0000000000052a78      0x1a4 ../../libnetxduo.a(nx_ipv6_packet_receive.c.obj)
-                0x0000000000052a78                _nx_ipv6_packet_receive
+                0x0000000000052a88      0x1a4 ../../libnetxduo.a(nx_ipv6_packet_receive.c.obj)
+                0x0000000000052a88                _nx_ipv6_packet_receive
  .text._nx_ipv6_process_fragment_option
-                0x0000000000052c1c      0x100 ../../libnetxduo.a(nx_ipv6_process_fragment_option.c.obj)
-                0x0000000000052c1c                _nx_ipv6_process_fragment_option
+                0x0000000000052c2c      0x100 ../../libnetxduo.a(nx_ipv6_process_fragment_option.c.obj)
+                0x0000000000052c2c                _nx_ipv6_process_fragment_option
  .text._nx_ipv6_process_hop_by_hop_option
-                0x0000000000052d1c       0xa8 ../../libnetxduo.a(nx_ipv6_process_hop_by_hop_option.c.obj)
-                0x0000000000052d1c                _nx_ipv6_process_hop_by_hop_option
+                0x0000000000052d2c       0xa8 ../../libnetxduo.a(nx_ipv6_process_hop_by_hop_option.c.obj)
+                0x0000000000052d2c                _nx_ipv6_process_hop_by_hop_option
  .text._nx_ipv6_process_routing_option
-                0x0000000000052dc4       0x40 ../../libnetxduo.a(nx_ipv6_process_routing_option.c.obj)
-                0x0000000000052dc4                _nx_ipv6_process_routing_option
+                0x0000000000052dd4       0x40 ../../libnetxduo.a(nx_ipv6_process_routing_option.c.obj)
+                0x0000000000052dd4                _nx_ipv6_process_routing_option
  .text._nx_nd_cache_add
-                0x0000000000052e04       0xdc ../../libnetxduo.a(nx_nd_cache_add.c.obj)
-                0x0000000000052e04                _nx_nd_cache_add
+                0x0000000000052e14       0xdc ../../libnetxduo.a(nx_nd_cache_add.c.obj)
+                0x0000000000052e14                _nx_nd_cache_add
  .text._nx_nd_cache_add_entry
-                0x0000000000052ee0      0x10c ../../libnetxduo.a(nx_nd_cache_add_entry.c.obj)
-                0x0000000000052ee0                _nx_nd_cache_add_entry
+                0x0000000000052ef0      0x10c ../../libnetxduo.a(nx_nd_cache_add_entry.c.obj)
+                0x0000000000052ef0                _nx_nd_cache_add_entry
  .text._nx_nd_cache_delete_internal
-                0x0000000000052fec       0xa8 ../../libnetxduo.a(nx_nd_cache_delete_internal.c.obj)
-                0x0000000000052fec                _nx_nd_cache_delete_internal
+                0x0000000000052ffc       0xa8 ../../libnetxduo.a(nx_nd_cache_delete_internal.c.obj)
+                0x0000000000052ffc                _nx_nd_cache_delete_internal
  .text._nx_nd_cache_fast_periodic_update
-                0x0000000000053094       0x94 ../../libnetxduo.a(nx_nd_cache_fast_periodic_update.c.obj)
-                0x0000000000053094                _nx_nd_cache_fast_periodic_update
+                0x00000000000530a4       0x94 ../../libnetxduo.a(nx_nd_cache_fast_periodic_update.c.obj)
+                0x00000000000530a4                _nx_nd_cache_fast_periodic_update
  .text._nx_nd_cache_find_entry
-                0x0000000000053128       0x98 ../../libnetxduo.a(nx_nd_cache_find_entry.c.obj)
-                0x0000000000053128                _nx_nd_cache_find_entry
+                0x0000000000053138       0x98 ../../libnetxduo.a(nx_nd_cache_find_entry.c.obj)
+                0x0000000000053138                _nx_nd_cache_find_entry
  .text._nx_nd_cache_slow_periodic_update
-                0x00000000000531c0       0x6c ../../libnetxduo.a(nx_nd_cache_slow_periodic_update.c.obj)
-                0x00000000000531c0                _nx_nd_cache_slow_periodic_update
+                0x00000000000531d0       0x6c ../../libnetxduo.a(nx_nd_cache_slow_periodic_update.c.obj)
+                0x00000000000531d0                _nx_nd_cache_slow_periodic_update
  .text._nx_tcp_client_bind_cleanup
-                0x000000000005322c       0xfc ../../libnetxduo.a(nx_tcp_client_bind_cleanup.c.obj)
-                0x000000000005322c                _nx_tcp_client_bind_cleanup
+                0x000000000005323c       0xfc ../../libnetxduo.a(nx_tcp_client_bind_cleanup.c.obj)
+                0x000000000005323c                _nx_tcp_client_bind_cleanup
  .text._nx_tcp_connect_cleanup
-                0x0000000000053328       0xfc ../../libnetxduo.a(nx_tcp_connect_cleanup.c.obj)
-                0x0000000000053328                _nx_tcp_connect_cleanup
+                0x0000000000053338       0xfc ../../libnetxduo.a(nx_tcp_connect_cleanup.c.obj)
+                0x0000000000053338                _nx_tcp_connect_cleanup
  .text._nx_tcp_deferred_cleanup_check
-                0x0000000000053424       0xe0 ../../libnetxduo.a(nx_tcp_deferred_cleanup_check.c.obj)
-                0x0000000000053424                _nx_tcp_deferred_cleanup_check
+                0x0000000000053434       0xe0 ../../libnetxduo.a(nx_tcp_deferred_cleanup_check.c.obj)
+                0x0000000000053434                _nx_tcp_deferred_cleanup_check
  .text._nx_tcp_disconnect_cleanup
-                0x0000000000053504       0xc4 ../../libnetxduo.a(nx_tcp_disconnect_cleanup.c.obj)
-                0x0000000000053504                _nx_tcp_disconnect_cleanup
+                0x0000000000053514       0xc4 ../../libnetxduo.a(nx_tcp_disconnect_cleanup.c.obj)
+                0x0000000000053514                _nx_tcp_disconnect_cleanup
  .text._nx_tcp_mss_option_get
-                0x00000000000535c8       0x60 ../../libnetxduo.a(nx_tcp_mss_option_get.c.obj)
-                0x00000000000535c8                _nx_tcp_mss_option_get
+                0x00000000000535d8       0x60 ../../libnetxduo.a(nx_tcp_mss_option_get.c.obj)
+                0x00000000000535d8                _nx_tcp_mss_option_get
  .text._nx_tcp_packet_process
-                0x0000000000053628      0x778 ../../libnetxduo.a(nx_tcp_packet_process.c.obj)
-                0x0000000000053628                _nx_tcp_packet_process
+                0x0000000000053638      0x778 ../../libnetxduo.a(nx_tcp_packet_process.c.obj)
+                0x0000000000053638                _nx_tcp_packet_process
  .text._nx_tcp_packet_send_probe
-                0x0000000000053da0       0x40 ../../libnetxduo.a(nx_tcp_packet_send_probe.c.obj)
-                0x0000000000053da0                _nx_tcp_packet_send_probe
+                0x0000000000053db0       0x40 ../../libnetxduo.a(nx_tcp_packet_send_probe.c.obj)
+                0x0000000000053db0                _nx_tcp_packet_send_probe
  .text._nx_tcp_sack_permitted_option_get
-                0x0000000000053de0       0x54 ../../libnetxduo.a(nx_tcp_sack_permitted_option_get.c.obj)
-                0x0000000000053de0                _nx_tcp_sack_permitted_option_get
+                0x0000000000053df0       0x54 ../../libnetxduo.a(nx_tcp_sack_permitted_option_get.c.obj)
+                0x0000000000053df0                _nx_tcp_sack_permitted_option_get
  .text._nx_tcp_socket_icmp_error_process
-                0x0000000000053e34       0xc0 ../../libnetxduo.a(nx_tcp_socket_icmp_error_process.c.obj)
-                0x0000000000053e34                _nx_tcp_socket_icmp_error_process
+                0x0000000000053e44       0xc0 ../../libnetxduo.a(nx_tcp_socket_icmp_error_process.c.obj)
+                0x0000000000053e44                _nx_tcp_socket_icmp_error_process
  .text._nx_tcp_socket_packet_process
-                0x0000000000053ef4      0x708 ../../libnetxduo.a(nx_tcp_socket_packet_process.c.obj)
-                0x0000000000053ef4                _nx_tcp_socket_packet_process
+                0x0000000000053f04      0x708 ../../libnetxduo.a(nx_tcp_socket_packet_process.c.obj)
+                0x0000000000053f04                _nx_tcp_socket_packet_process
  .text._nx_tcp_socket_state_ack_check
-                0x00000000000545fc      0x740 ../../libnetxduo.a(nx_tcp_socket_state_ack_check.c.obj)
-                0x00000000000545fc                _nx_tcp_socket_state_ack_check
+                0x000000000005460c      0x740 ../../libnetxduo.a(nx_tcp_socket_state_ack_check.c.obj)
+                0x000000000005460c                _nx_tcp_socket_state_ack_check
  .text._nx_tcp_socket_state_closing
-                0x0000000000054d3c       0x7c ../../libnetxduo.a(nx_tcp_socket_state_closing.c.obj)
-                0x0000000000054d3c                _nx_tcp_socket_state_closing
+                0x0000000000054d4c       0x7c ../../libnetxduo.a(nx_tcp_socket_state_closing.c.obj)
+                0x0000000000054d4c                _nx_tcp_socket_state_closing
  .text._nx_tcp_socket_state_data_trim
-                0x0000000000054db8       0x68 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
-                0x0000000000054db8                _nx_tcp_socket_state_data_trim
+                0x0000000000054dc8       0x68 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
+                0x0000000000054dc8                _nx_tcp_socket_state_data_trim
  .text._nx_tcp_socket_state_data_trim_front
-                0x0000000000054e20       0xa8 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
-                0x0000000000054e20                _nx_tcp_socket_state_data_trim_front
+                0x0000000000054e30       0xa8 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
+                0x0000000000054e30                _nx_tcp_socket_state_data_trim_front
  .text._nx_tcp_socket_state_data_check
-                0x0000000000054ec8      0x5c4 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
-                0x0000000000054ec8                _nx_tcp_socket_state_data_check
+                0x0000000000054ed8      0x5c8 ../../libnetxduo.a(nx_tcp_socket_state_data_check.c.obj)
+                0x0000000000054ed8                _nx_tcp_socket_state_data_check
  .text._nx_tcp_socket_state_established
-                0x000000000005548c       0x74 ../../libnetxduo.a(nx_tcp_socket_state_established.c.obj)
-                0x000000000005548c                _nx_tcp_socket_state_established
+                0x00000000000554a0       0x74 ../../libnetxduo.a(nx_tcp_socket_state_established.c.obj)
+                0x00000000000554a0                _nx_tcp_socket_state_established
  .text._nx_tcp_socket_state_fin_wait1
-                0x0000000000055500       0xc4 ../../libnetxduo.a(nx_tcp_socket_state_fin_wait1.c.obj)
-                0x0000000000055500                _nx_tcp_socket_state_fin_wait1
+                0x0000000000055514       0xc4 ../../libnetxduo.a(nx_tcp_socket_state_fin_wait1.c.obj)
+                0x0000000000055514                _nx_tcp_socket_state_fin_wait1
  .text._nx_tcp_socket_state_fin_wait2
-                0x00000000000555c4       0x80 ../../libnetxduo.a(nx_tcp_socket_state_fin_wait2.c.obj)
-                0x00000000000555c4                _nx_tcp_socket_state_fin_wait2
+                0x00000000000555d8       0x80 ../../libnetxduo.a(nx_tcp_socket_state_fin_wait2.c.obj)
+                0x00000000000555d8                _nx_tcp_socket_state_fin_wait2
  .text._nx_tcp_socket_state_last_ack
-                0x0000000000055644       0x58 ../../libnetxduo.a(nx_tcp_socket_state_last_ack.c.obj)
-                0x0000000000055644                _nx_tcp_socket_state_last_ack
+                0x0000000000055658       0x58 ../../libnetxduo.a(nx_tcp_socket_state_last_ack.c.obj)
+                0x0000000000055658                _nx_tcp_socket_state_last_ack
  .text._nx_tcp_socket_state_syn_received
-                0x000000000005569c       0xe4 ../../libnetxduo.a(nx_tcp_socket_state_syn_received.c.obj)
-                0x000000000005569c                _nx_tcp_socket_state_syn_received
+                0x00000000000556b0       0xe4 ../../libnetxduo.a(nx_tcp_socket_state_syn_received.c.obj)
+                0x00000000000556b0                _nx_tcp_socket_state_syn_received
  .text._nx_tcp_socket_state_syn_sent
-                0x0000000000055780      0x1b4 ../../libnetxduo.a(nx_tcp_socket_state_syn_sent.c.obj)
-                0x0000000000055780                _nx_tcp_socket_state_syn_sent
+                0x0000000000055794      0x1b4 ../../libnetxduo.a(nx_tcp_socket_state_syn_sent.c.obj)
+                0x0000000000055794                _nx_tcp_socket_state_syn_sent
  .text._nx_tcp_socket_state_transmit_check
-                0x0000000000055934       0x88 ../../libnetxduo.a(nx_tcp_socket_state_transmit_check.c.obj)
-                0x0000000000055934                _nx_tcp_socket_state_transmit_check
+                0x0000000000055948       0x88 ../../libnetxduo.a(nx_tcp_socket_state_transmit_check.c.obj)
+                0x0000000000055948                _nx_tcp_socket_state_transmit_check
  .text._nx_udp_socket_icmp_error_process
-                0x00000000000559bc       0xf4 ../../libnetxduo.a(nx_udp_socket_icmp_error_process.c.obj)
-                0x00000000000559bc                _nx_udp_socket_icmp_error_process
+                0x00000000000559d0       0xf4 ../../libnetxduo.a(nx_udp_socket_icmp_error_process.c.obj)
+                0x00000000000559d0                _nx_udp_socket_icmp_error_process
  .text._nxd_ipv6_default_router_table_init
-                0x0000000000055ab0       0xd0 ../../libnetxduo.a(nxd_ipv6_default_router_table_init.c.obj)
-                0x0000000000055ab0                _nxd_ipv6_default_router_table_init
+                0x0000000000055ac4       0xd0 ../../libnetxduo.a(nxd_ipv6_default_router_table_init.c.obj)
+                0x0000000000055ac4                _nxd_ipv6_default_router_table_init
  .text._nxd_ipv6_destination_table_find_next_hop
-                0x0000000000055b80       0x78 ../../libnetxduo.a(nxd_ipv6_destination_table_find_next_hop.c.obj)
-                0x0000000000055b80                _nxd_ipv6_destination_table_find_next_hop
+                0x0000000000055b94       0x78 ../../libnetxduo.a(nxd_ipv6_destination_table_find_next_hop.c.obj)
+                0x0000000000055b94                _nxd_ipv6_destination_table_find_next_hop
  .text._nxd_ipv6_find_default_router_from_address
-                0x0000000000055bf8       0x9c ../../libnetxduo.a(nxd_ipv6_find_default_router_from_address.c.obj)
-                0x0000000000055bf8                _nxd_ipv6_find_default_router_from_address
+                0x0000000000055c0c       0x9c ../../libnetxduo.a(nxd_ipv6_find_default_router_from_address.c.obj)
+                0x0000000000055c0c                _nxd_ipv6_find_default_router_from_address
  .text._nx_icmp_packet_process
-                0x0000000000055c94       0x2c ../../libnetxduo.a(nx_icmp_packet_process.c.obj)
-                0x0000000000055c94                _nx_icmp_packet_process
+                0x0000000000055ca8       0x2c ../../libnetxduo.a(nx_icmp_packet_process.c.obj)
+                0x0000000000055ca8                _nx_icmp_packet_process
  .text._nx_icmpv6_DAD_clear_NDCache_entry
-                0x0000000000055cc0       0x2c ../../libnetxduo.a(nx_icmpv6_DAD_clear_NDCache_entry.c.obj)
-                0x0000000000055cc0                _nx_icmpv6_DAD_clear_NDCache_entry
+                0x0000000000055cd4       0x2c ../../libnetxduo.a(nx_icmpv6_DAD_clear_NDCache_entry.c.obj)
+                0x0000000000055cd4                _nx_icmpv6_DAD_clear_NDCache_entry
  .text._nx_icmpv6_DAD_failure
-                0x0000000000055cec       0x74 ../../libnetxduo.a(nx_icmpv6_DAD_failure.c.obj)
-                0x0000000000055cec                _nx_icmpv6_DAD_failure
+                0x0000000000055d00       0x74 ../../libnetxduo.a(nx_icmpv6_DAD_failure.c.obj)
+                0x0000000000055d00                _nx_icmpv6_DAD_failure
  .text._nx_ipv6_option_error
-                0x0000000000055d60       0x5c ../../libnetxduo.a(nx_ipv6_option_error.c.obj)
-                0x0000000000055d60                _nx_ipv6_option_error
+                0x0000000000055d74       0x5c ../../libnetxduo.a(nx_ipv6_option_error.c.obj)
+                0x0000000000055d74                _nx_ipv6_option_error
  .text._nx_tcp_no_connection_reset
-                0x0000000000055dbc      0x104 ../../libnetxduo.a(nx_tcp_no_connection_reset.c.obj)
-                0x0000000000055dbc                _nx_tcp_no_connection_reset
+                0x0000000000055dd0      0x104 ../../libnetxduo.a(nx_tcp_no_connection_reset.c.obj)
+                0x0000000000055dd0                _nx_tcp_no_connection_reset
  .text._nx_tcp_sack_option_get
-                0x0000000000055ec0      0x148 ../../libnetxduo.a(nx_tcp_sack_option_get.c.obj)
-                0x0000000000055ec0                _nx_tcp_sack_option_get
+                0x0000000000055ed4      0x148 ../../libnetxduo.a(nx_tcp_sack_option_get.c.obj)
+                0x0000000000055ed4                _nx_tcp_sack_option_get
  .text._nx_tcp_socket_rtt_sample
-                0x0000000000056008       0xa4 ../../libnetxduo.a(nx_tcp_socket_rtt_sample.c.obj)
-                0x0000000000056008                _nx_tcp_socket_rtt_sample
+                0x000000000005601c       0xa4 ../../libnetxduo.a(nx_tcp_socket_rtt_sample.c.obj)
+                0x000000000005601c                _nx_tcp_socket_rtt_sample
  .text._tx_event_flags_create
-                0x00000000000560ac       0x84 ../../libthreadx.a(tx_event_flags_create.c.obj)
-                0x00000000000560ac                _tx_event_flags_create
+                0x00000000000560c0       0x84 ../../libthreadx.a(tx_event_flags_create.c.obj)
+                0x00000000000560c0                _tx_event_flags_create
  .text._tx_event_flags_delete
-                0x0000000000056130       0xfc ../../libthreadx.a(tx_event_flags_delete.c.obj)
-                0x0000000000056130                _tx_event_flags_delete
+                0x0000000000056144       0xfc ../../libthreadx.a(tx_event_flags_delete.c.obj)
+                0x0000000000056144                _tx_event_flags_delete
  .text._tx_event_flags_get
-                0x000000000005622c      0x14c ../../libthreadx.a(tx_event_flags_get.c.obj)
-                0x000000000005622c                _tx_event_flags_get
+                0x0000000000056240      0x14c ../../libthreadx.a(tx_event_flags_get.c.obj)
+                0x0000000000056240                _tx_event_flags_get
  .text._tx_event_flags_set
-                0x0000000000056378      0x290 ../../libthreadx.a(tx_event_flags_set.c.obj)
-                0x0000000000056378                _tx_event_flags_set
+                0x000000000005638c      0x290 ../../libthreadx.a(tx_event_flags_set.c.obj)
+                0x000000000005638c                _tx_event_flags_set
  .text._tx_initialize_high_level
-                0x0000000000056608       0x58 ../../libthreadx.a(tx_initialize_high_level.c.obj)
-                0x0000000000056608                _tx_initialize_high_level
+                0x000000000005661c       0x58 ../../libthreadx.a(tx_initialize_high_level.c.obj)
+                0x000000000005661c                _tx_initialize_high_level
  .text._tx_mutex_create
-                0x0000000000056660       0x94 ../../libthreadx.a(tx_mutex_create.c.obj)
-                0x0000000000056660                _tx_mutex_create
+                0x0000000000056674       0x94 ../../libthreadx.a(tx_mutex_create.c.obj)
+                0x0000000000056674                _tx_mutex_create
  .text._tx_mutex_delete
-                0x00000000000566f4      0x134 ../../libthreadx.a(tx_mutex_delete.c.obj)
-                0x00000000000566f4                _tx_mutex_delete
+                0x0000000000056708      0x134 ../../libthreadx.a(tx_mutex_delete.c.obj)
+                0x0000000000056708                _tx_mutex_delete
  .text._tx_mutex_get
-                0x0000000000056828      0x184 ../../libthreadx.a(tx_mutex_get.c.obj)
-                0x0000000000056828                _tx_mutex_get
+                0x000000000005683c      0x184 ../../libthreadx.a(tx_mutex_get.c.obj)
+                0x000000000005683c                _tx_mutex_get
  .text._tx_mutex_priority_change
-                0x00000000000569ac      0x138 ../../libthreadx.a(tx_mutex_priority_change.c.obj)
-                0x00000000000569ac                _tx_mutex_priority_change
+                0x00000000000569c0      0x138 ../../libthreadx.a(tx_mutex_priority_change.c.obj)
+                0x00000000000569c0                _tx_mutex_priority_change
  .text._tx_mutex_put
-                0x0000000000056ae4      0x2f0 ../../libthreadx.a(tx_mutex_put.c.obj)
-                0x0000000000056ae4                _tx_mutex_put
+                0x0000000000056af8      0x2f0 ../../libthreadx.a(tx_mutex_put.c.obj)
+                0x0000000000056af8                _tx_mutex_put
  .text._tx_thread_create
-                0x0000000000056dd4      0x194 ../../libthreadx.a(tx_thread_create.c.obj)
-                0x0000000000056dd4                _tx_thread_create
+                0x0000000000056de8      0x194 ../../libthreadx.a(tx_thread_create.c.obj)
+                0x0000000000056de8                _tx_thread_create
  .text._tx_thread_delete
-                0x0000000000056f68       0xa0 ../../libthreadx.a(tx_thread_delete.c.obj)
-                0x0000000000056f68                _tx_thread_delete
+                0x0000000000056f7c       0xa0 ../../libthreadx.a(tx_thread_delete.c.obj)
+                0x0000000000056f7c                _tx_thread_delete
  .text._tx_thread_identify
-                0x0000000000057008       0x2c ../../libthreadx.a(tx_thread_identify.c.obj)
-                0x0000000000057008                _tx_thread_identify
+                0x000000000005701c       0x2c ../../libthreadx.a(tx_thread_identify.c.obj)
+                0x000000000005701c                _tx_thread_identify
  .text._tx_thread_info_get
-                0x0000000000057034       0x98 ../../libthreadx.a(tx_thread_info_get.c.obj)
-                0x0000000000057034                _tx_thread_info_get
+                0x0000000000057048       0x98 ../../libthreadx.a(tx_thread_info_get.c.obj)
+                0x0000000000057048                _tx_thread_info_get
  .text._tx_thread_initialize
-                0x00000000000570cc       0x60 ../../libthreadx.a(tx_thread_initialize.c.obj)
-                0x00000000000570cc                _tx_thread_initialize
+                0x00000000000570e0       0x60 ../../libthreadx.a(tx_thread_initialize.c.obj)
+                0x00000000000570e0                _tx_thread_initialize
  .text._tx_thread_preemption_change
-                0x000000000005712c       0xdc ../../libthreadx.a(tx_thread_preemption_change.c.obj)
-                0x000000000005712c                _tx_thread_preemption_change
+                0x0000000000057140       0xdc ../../libthreadx.a(tx_thread_preemption_change.c.obj)
+                0x0000000000057140                _tx_thread_preemption_change
  .text._tx_thread_resume
-                0x0000000000057208       0xac ../../libthreadx.a(tx_thread_resume.c.obj)
-                0x0000000000057208                _tx_thread_resume
+                0x000000000005721c       0xac ../../libthreadx.a(tx_thread_resume.c.obj)
+                0x000000000005721c                _tx_thread_resume
  .text._tx_thread_shell_entry
-                0x00000000000572b4       0x6c ../../libthreadx.a(tx_thread_shell_entry.c.obj)
-                0x00000000000572b4                _tx_thread_shell_entry
+                0x00000000000572c8       0x6c ../../libthreadx.a(tx_thread_shell_entry.c.obj)
+                0x00000000000572c8                _tx_thread_shell_entry
  .text._tx_thread_sleep
-                0x0000000000057320       0xb4 ../../libthreadx.a(tx_thread_sleep.c.obj)
-                0x0000000000057320                _tx_thread_sleep
+                0x0000000000057334       0xb4 ../../libthreadx.a(tx_thread_sleep.c.obj)
+                0x0000000000057334                _tx_thread_sleep
  .text._tx_thread_suspend
-                0x00000000000573d4       0xa0 ../../libthreadx.a(tx_thread_suspend.c.obj)
-                0x00000000000573d4                _tx_thread_suspend
+                0x00000000000573e8       0xa0 ../../libthreadx.a(tx_thread_suspend.c.obj)
+                0x00000000000573e8                _tx_thread_suspend
  .text._tx_thread_system_preempt_check
-                0x0000000000057474       0x24 ../../libthreadx.a(tx_thread_system_preempt_check.c.obj)
-                0x0000000000057474                _tx_thread_system_preempt_check
+                0x0000000000057488       0x24 ../../libthreadx.a(tx_thread_system_preempt_check.c.obj)
+                0x0000000000057488                _tx_thread_system_preempt_check
  .text._tx_thread_system_resume
-                0x0000000000057498      0x154 ../../libthreadx.a(tx_thread_system_resume.c.obj)
-                0x0000000000057498                _tx_thread_system_resume
+                0x00000000000574ac      0x154 ../../libthreadx.a(tx_thread_system_resume.c.obj)
+                0x00000000000574ac                _tx_thread_system_resume
  .text._tx_thread_system_suspend
-                0x00000000000575ec      0x2d4 ../../libthreadx.a(tx_thread_system_suspend.c.obj)
-                0x00000000000575ec                _tx_thread_system_suspend
+                0x0000000000057600      0x2d4 ../../libthreadx.a(tx_thread_system_suspend.c.obj)
+                0x0000000000057600                _tx_thread_system_suspend
  .text._tx_thread_terminate
-                0x00000000000578c0      0x14c ../../libthreadx.a(tx_thread_terminate.c.obj)
-                0x00000000000578c0                _tx_thread_terminate
+                0x00000000000578d4      0x14c ../../libthreadx.a(tx_thread_terminate.c.obj)
+                0x00000000000578d4                _tx_thread_terminate
  .text._tx_thread_timeout
-                0x0000000000057a0c       0x74 ../../libthreadx.a(tx_thread_timeout.c.obj)
-                0x0000000000057a0c                _tx_thread_timeout
+                0x0000000000057a20       0x74 ../../libthreadx.a(tx_thread_timeout.c.obj)
+                0x0000000000057a20                _tx_thread_timeout
  .text._tx_time_get
-                0x0000000000057a80       0x2c ../../libthreadx.a(tx_time_get.c.obj)
-                0x0000000000057a80                _tx_time_get
+                0x0000000000057a94       0x2c ../../libthreadx.a(tx_time_get.c.obj)
+                0x0000000000057a94                _tx_time_get
  .text._tx_timer_create
-                0x0000000000057aac       0xb0 ../../libthreadx.a(tx_timer_create.c.obj)
-                0x0000000000057aac                _tx_timer_create
+                0x0000000000057ac0       0xb0 ../../libthreadx.a(tx_timer_create.c.obj)
+                0x0000000000057ac0                _tx_timer_create
  .text._tx_timer_deactivate
-                0x0000000000057b5c       0xe0 ../../libthreadx.a(tx_timer_deactivate.c.obj)
-                0x0000000000057b5c                _tx_timer_deactivate
+                0x0000000000057b70       0xe0 ../../libthreadx.a(tx_timer_deactivate.c.obj)
+                0x0000000000057b70                _tx_timer_deactivate
  .text._tx_timer_delete
-                0x0000000000057c3c       0x78 ../../libthreadx.a(tx_timer_delete.c.obj)
-                0x0000000000057c3c                _tx_timer_delete
+                0x0000000000057c50       0x78 ../../libthreadx.a(tx_timer_delete.c.obj)
+                0x0000000000057c50                _tx_timer_delete
  .text._tx_timer_initialize
-                0x0000000000057cb4       0x6c ../../libthreadx.a(tx_timer_initialize.c.obj)
-                0x0000000000057cb4                _tx_timer_initialize
+                0x0000000000057cc8       0x6c ../../libthreadx.a(tx_timer_initialize.c.obj)
+                0x0000000000057cc8                _tx_timer_initialize
  .text._tx_timer_system_activate
-                0x0000000000057d20       0x7c ../../libthreadx.a(tx_timer_system_activate.c.obj)
-                0x0000000000057d20                _tx_timer_system_activate
+                0x0000000000057d34       0x7c ../../libthreadx.a(tx_timer_system_activate.c.obj)
+                0x0000000000057d34                _tx_timer_system_activate
  .text._tx_timer_system_deactivate
-                0x0000000000057d9c       0x44 ../../libthreadx.a(tx_timer_system_deactivate.c.obj)
-                0x0000000000057d9c                _tx_timer_system_deactivate
+                0x0000000000057db0       0x44 ../../libthreadx.a(tx_timer_system_deactivate.c.obj)
+                0x0000000000057db0                _tx_timer_system_deactivate
  .text._txe_event_flags_create
-                0x0000000000057de0       0xb4 ../../libthreadx.a(txe_event_flags_create.c.obj)
-                0x0000000000057de0                _txe_event_flags_create
+                0x0000000000057df4       0xb4 ../../libthreadx.a(txe_event_flags_create.c.obj)
+                0x0000000000057df4                _txe_event_flags_create
  .text._txe_event_flags_delete
-                0x0000000000057e94       0x30 ../../libthreadx.a(txe_event_flags_delete.c.obj)
-                0x0000000000057e94                _txe_event_flags_delete
+                0x0000000000057ea8       0x30 ../../libthreadx.a(txe_event_flags_delete.c.obj)
+                0x0000000000057ea8                _txe_event_flags_delete
  .text._txe_event_flags_get
-                0x0000000000057ec4       0x64 ../../libthreadx.a(txe_event_flags_get.c.obj)
-                0x0000000000057ec4                _txe_event_flags_get
+                0x0000000000057ed8       0x64 ../../libthreadx.a(txe_event_flags_get.c.obj)
+                0x0000000000057ed8                _txe_event_flags_get
  .text._txe_event_flags_set
-                0x0000000000057f28       0x38 ../../libthreadx.a(txe_event_flags_set.c.obj)
-                0x0000000000057f28                _txe_event_flags_set
+                0x0000000000057f3c       0x38 ../../libthreadx.a(txe_event_flags_set.c.obj)
+                0x0000000000057f3c                _txe_event_flags_set
  .text._txe_mutex_create
-                0x0000000000057f60       0xc8 ../../libthreadx.a(txe_mutex_create.c.obj)
-                0x0000000000057f60                _txe_mutex_create
+                0x0000000000057f74       0xc8 ../../libthreadx.a(txe_mutex_create.c.obj)
+                0x0000000000057f74                _txe_mutex_create
  .text._txe_mutex_delete
-                0x0000000000058028       0x30 ../../libthreadx.a(txe_mutex_delete.c.obj)
-                0x0000000000058028                _txe_mutex_delete
+                0x000000000005803c       0x30 ../../libthreadx.a(txe_mutex_delete.c.obj)
+                0x000000000005803c                _txe_mutex_delete
  .text._txe_mutex_get
-                0x0000000000058058       0x50 ../../libthreadx.a(txe_mutex_get.c.obj)
-                0x0000000000058058                _txe_mutex_get
+                0x000000000005806c       0x50 ../../libthreadx.a(txe_mutex_get.c.obj)
+                0x000000000005806c                _txe_mutex_get
  .text._txe_mutex_put
-                0x00000000000580a8       0x3c ../../libthreadx.a(txe_mutex_put.c.obj)
-                0x00000000000580a8                _txe_mutex_put
+                0x00000000000580bc       0x3c ../../libthreadx.a(txe_mutex_put.c.obj)
+                0x00000000000580bc                _txe_mutex_put
  .text._txe_semaphore_create
-                0x00000000000580e4       0xb8 ../../libthreadx.a(txe_semaphore_create.c.obj)
-                0x00000000000580e4                _txe_semaphore_create
+                0x00000000000580f8       0xb8 ../../libthreadx.a(txe_semaphore_create.c.obj)
+                0x00000000000580f8                _txe_semaphore_create
  .text._txe_semaphore_delete
-                0x000000000005819c       0x30 ../../libthreadx.a(txe_semaphore_delete.c.obj)
-                0x000000000005819c                _txe_semaphore_delete
+                0x00000000000581b0       0x30 ../../libthreadx.a(txe_semaphore_delete.c.obj)
+                0x00000000000581b0                _txe_semaphore_delete
  .text._txe_semaphore_get
-                0x00000000000581cc       0x38 ../../libthreadx.a(txe_semaphore_get.c.obj)
-                0x00000000000581cc                _txe_semaphore_get
+                0x00000000000581e0       0x38 ../../libthreadx.a(txe_semaphore_get.c.obj)
+                0x00000000000581e0                _txe_semaphore_get
  .text._txe_semaphore_put
-                0x0000000000058204       0x24 ../../libthreadx.a(txe_semaphore_put.c.obj)
-                0x0000000000058204                _txe_semaphore_put
+                0x0000000000058218       0x24 ../../libthreadx.a(txe_semaphore_put.c.obj)
+                0x0000000000058218                _txe_semaphore_put
  .text._txe_thread_create
-                0x0000000000058228      0x148 ../../libthreadx.a(txe_thread_create.c.obj)
-                0x0000000000058228                _txe_thread_create
+                0x000000000005823c      0x148 ../../libthreadx.a(txe_thread_create.c.obj)
+                0x000000000005823c                _txe_thread_create
  .text._txe_thread_delete
-                0x0000000000058370       0x30 ../../libthreadx.a(txe_thread_delete.c.obj)
-                0x0000000000058370                _txe_thread_delete
+                0x0000000000058384       0x30 ../../libthreadx.a(txe_thread_delete.c.obj)
+                0x0000000000058384                _txe_thread_delete
  .text._txe_thread_info_get
-                0x00000000000583a0       0x44 ../../libthreadx.a(txe_thread_info_get.c.obj)
-                0x00000000000583a0                _txe_thread_info_get
+                0x00000000000583b4       0x44 ../../libthreadx.a(txe_thread_info_get.c.obj)
+                0x00000000000583b4                _txe_thread_info_get
  .text._txe_thread_preemption_change
-                0x00000000000583e4       0x50 ../../libthreadx.a(txe_thread_preemption_change.c.obj)
-                0x00000000000583e4                _txe_thread_preemption_change
+                0x00000000000583f8       0x50 ../../libthreadx.a(txe_thread_preemption_change.c.obj)
+                0x00000000000583f8                _txe_thread_preemption_change
  .text._txe_thread_resume
-                0x0000000000058434       0x24 ../../libthreadx.a(txe_thread_resume.c.obj)
-                0x0000000000058434                _txe_thread_resume
+                0x0000000000058448       0x24 ../../libthreadx.a(txe_thread_resume.c.obj)
+                0x0000000000058448                _txe_thread_resume
  .text._txe_thread_suspend
-                0x0000000000058458       0x24 ../../libthreadx.a(txe_thread_suspend.c.obj)
-                0x0000000000058458                _txe_thread_suspend
+                0x000000000005846c       0x24 ../../libthreadx.a(txe_thread_suspend.c.obj)
+                0x000000000005846c                _txe_thread_suspend
  .text._txe_thread_terminate
-                0x000000000005847c       0x30 ../../libthreadx.a(txe_thread_terminate.c.obj)
-                0x000000000005847c                _txe_thread_terminate
+                0x0000000000058490       0x30 ../../libthreadx.a(txe_thread_terminate.c.obj)
+                0x0000000000058490                _txe_thread_terminate
  .text._txe_thread_wait_abort
-                0x00000000000584ac       0x24 ../../libthreadx.a(txe_thread_wait_abort.c.obj)
-                0x00000000000584ac                _txe_thread_wait_abort
+                0x00000000000584c0       0x24 ../../libthreadx.a(txe_thread_wait_abort.c.obj)
+                0x00000000000584c0                _txe_thread_wait_abort
  .text._txe_timer_activate
-                0x00000000000584d0       0x24 ../../libthreadx.a(txe_timer_activate.c.obj)
-                0x00000000000584d0                _txe_timer_activate
+                0x00000000000584e4       0x24 ../../libthreadx.a(txe_timer_activate.c.obj)
+                0x00000000000584e4                _txe_timer_activate
  .text._txe_timer_change
-                0x00000000000584f4       0x48 ../../libthreadx.a(txe_timer_change.c.obj)
-                0x00000000000584f4                _txe_timer_change
+                0x0000000000058508       0x48 ../../libthreadx.a(txe_timer_change.c.obj)
+                0x0000000000058508                _txe_timer_change
  .text._txe_timer_create
-                0x000000000005853c       0xe4 ../../libthreadx.a(txe_timer_create.c.obj)
-                0x000000000005853c                _txe_timer_create
+                0x0000000000058550       0xe4 ../../libthreadx.a(txe_timer_create.c.obj)
+                0x0000000000058550                _txe_timer_create
  .text._txe_timer_deactivate
-                0x0000000000058620       0x24 ../../libthreadx.a(txe_timer_deactivate.c.obj)
-                0x0000000000058620                _txe_timer_deactivate
+                0x0000000000058634       0x24 ../../libthreadx.a(txe_timer_deactivate.c.obj)
+                0x0000000000058634                _txe_timer_deactivate
  .text._txe_timer_delete
-                0x0000000000058644       0x30 ../../libthreadx.a(txe_timer_delete.c.obj)
-                0x0000000000058644                _txe_timer_delete
+                0x0000000000058658       0x30 ../../libthreadx.a(txe_timer_delete.c.obj)
+                0x0000000000058658                _txe_timer_delete
  .text._txe_timer_info_get
-                0x0000000000058674       0x38 ../../libthreadx.a(txe_timer_info_get.c.obj)
-                0x0000000000058674                _txe_timer_info_get
+                0x0000000000058688       0x38 ../../libthreadx.a(txe_timer_info_get.c.obj)
+                0x0000000000058688                _txe_timer_info_get
  .text._tx_event_flags_cleanup
-                0x00000000000586ac       0xd8 ../../libthreadx.a(tx_event_flags_cleanup.c.obj)
-                0x00000000000586ac                _tx_event_flags_cleanup
+                0x00000000000586c0       0xd8 ../../libthreadx.a(tx_event_flags_cleanup.c.obj)
+                0x00000000000586c0                _tx_event_flags_cleanup
  .text._tx_mutex_cleanup
-                0x0000000000058784       0xcc ../../libthreadx.a(tx_mutex_cleanup.c.obj)
-                0x0000000000058784                _tx_mutex_cleanup
+                0x0000000000058798       0xcc ../../libthreadx.a(tx_mutex_cleanup.c.obj)
+                0x0000000000058798                _tx_mutex_cleanup
  .text._tx_mutex_thread_release
-                0x0000000000058850       0x80 ../../libthreadx.a(tx_mutex_cleanup.c.obj)
-                0x0000000000058850                _tx_mutex_thread_release
+                0x0000000000058864       0x80 ../../libthreadx.a(tx_mutex_cleanup.c.obj)
+                0x0000000000058864                _tx_mutex_thread_release
  .text._tx_mutex_prioritize
-                0x00000000000588d0      0x10c ../../libthreadx.a(tx_mutex_prioritize.c.obj)
-                0x00000000000588d0                _tx_mutex_prioritize
+                0x00000000000588e4      0x10c ../../libthreadx.a(tx_mutex_prioritize.c.obj)
+                0x00000000000588e4                _tx_mutex_prioritize
  .text._tx_semaphore_create
-                0x00000000000589dc       0x8c ../../libthreadx.a(tx_semaphore_create.c.obj)
-                0x00000000000589dc                _tx_semaphore_create
+                0x00000000000589f0       0x8c ../../libthreadx.a(tx_semaphore_create.c.obj)
+                0x00000000000589f0                _tx_semaphore_create
  .text._tx_semaphore_delete
-                0x0000000000058a68       0xfc ../../libthreadx.a(tx_semaphore_delete.c.obj)
-                0x0000000000058a68                _tx_semaphore_delete
+                0x0000000000058a7c       0xfc ../../libthreadx.a(tx_semaphore_delete.c.obj)
+                0x0000000000058a7c                _tx_semaphore_delete
  .text._tx_semaphore_get
-                0x0000000000058b64       0xf4 ../../libthreadx.a(tx_semaphore_get.c.obj)
-                0x0000000000058b64                _tx_semaphore_get
+                0x0000000000058b78       0xf4 ../../libthreadx.a(tx_semaphore_get.c.obj)
+                0x0000000000058b78                _tx_semaphore_get
  .text._tx_semaphore_put
-                0x0000000000058c58       0x90 ../../libthreadx.a(tx_semaphore_put.c.obj)
-                0x0000000000058c58                _tx_semaphore_put
+                0x0000000000058c6c       0x90 ../../libthreadx.a(tx_semaphore_put.c.obj)
+                0x0000000000058c6c                _tx_semaphore_put
  .text._tx_thread_wait_abort
-                0x0000000000058ce8       0xcc ../../libthreadx.a(tx_thread_wait_abort.c.obj)
-                0x0000000000058ce8                _tx_thread_wait_abort
+                0x0000000000058cfc       0xcc ../../libthreadx.a(tx_thread_wait_abort.c.obj)
+                0x0000000000058cfc                _tx_thread_wait_abort
  .text._tx_timer_activate
-                0x0000000000058db4       0x4c ../../libthreadx.a(tx_timer_activate.c.obj)
-                0x0000000000058db4                _tx_timer_activate
+                0x0000000000058dc8       0x4c ../../libthreadx.a(tx_timer_activate.c.obj)
+                0x0000000000058dc8                _tx_timer_activate
  .text._tx_timer_change
-                0x0000000000058e00       0x3c ../../libthreadx.a(tx_timer_change.c.obj)
-                0x0000000000058e00                _tx_timer_change
+                0x0000000000058e14       0x3c ../../libthreadx.a(tx_timer_change.c.obj)
+                0x0000000000058e14                _tx_timer_change
  .text._tx_timer_info_get
-                0x0000000000058e3c       0xfc ../../libthreadx.a(tx_timer_info_get.c.obj)
-                0x0000000000058e3c                _tx_timer_info_get
+                0x0000000000058e50       0xfc ../../libthreadx.a(tx_timer_info_get.c.obj)
+                0x0000000000058e50                _tx_timer_info_get
  .text._tx_semaphore_cleanup
-                0x0000000000058f38       0xcc ../../libthreadx.a(tx_semaphore_cleanup.c.obj)
-                0x0000000000058f38                _tx_semaphore_cleanup
+                0x0000000000058f4c       0xcc ../../libthreadx.a(tx_semaphore_cleanup.c.obj)
+                0x0000000000058f4c                _tx_semaphore_cleanup
  .text._tx_initialize_kernel_enter
-                0x0000000000059004       0x54 ../../libthreadx.a(tx_initialize_kernel_enter.c.obj)
-                0x0000000000059004                _tx_initialize_kernel_enter
+                0x0000000000059018       0x54 ../../libthreadx.a(tx_initialize_kernel_enter.c.obj)
+                0x0000000000059018                _tx_initialize_kernel_enter
  .text._tx_thread_time_slice
-                0x0000000000059058       0x78 ../../libthreadx.a(tx_thread_time_slice.c.obj)
-                0x0000000000059058                _tx_thread_time_slice
+                0x000000000005906c       0x78 ../../libthreadx.a(tx_thread_time_slice.c.obj)
+                0x000000000005906c                _tx_thread_time_slice
  .text._tx_timer_expiration_process
-                0x00000000000590d0      0x17c ../../libthreadx.a(tx_timer_expiration_process.c.obj)
-                0x00000000000590d0                _tx_timer_expiration_process
+                0x00000000000590e4      0x17c ../../libthreadx.a(tx_timer_expiration_process.c.obj)
+                0x00000000000590e4                _tx_timer_expiration_process
  .text.anx6_same_address
-                0x000000000005924c       0x38 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x0000000000059260       0x38 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
  .text.anx6_prefix_covers
-                0x0000000000059284       0x5c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x0000000000059298       0x5c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
  .text.anx6_usable
-                0x00000000000592e0       0x60 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x00000000000592f4       0x60 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
  .text.anx6_common_prefix_len
-                0x0000000000059340       0x5c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
-                0x0000000000059340                anx6_common_prefix_len
+                0x0000000000059354       0x5c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x0000000000059354                anx6_common_prefix_len
  .text.anx6_scope
-                0x000000000005939c       0x8c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
-                0x000000000005939c                anx6_scope
+                0x00000000000593b0       0x8c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x00000000000593b0                anx6_scope
  .text.anx6_policy_lookup
-                0x0000000000059428       0x9c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
-                0x0000000000059428                anx6_policy_lookup
+                0x000000000005943c       0x9c ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x000000000005943c                anx6_policy_lookup
  .text._nxd_ipv6_interface_find
-                0x00000000000594c4      0x418 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
-                0x00000000000594c4                _nxd_ipv6_interface_find
+                0x00000000000594d8      0x418 ../ipv6/libaminetxduo_ipv6.a(ipv6_srcsel.c.obj)
+                0x00000000000594d8                _nxd_ipv6_interface_find
  *(.rodata*)
  *(.data.rel.ro*)
  *(.gnu.linkonce.t.*)
@@ -5001,163 +5001,163 @@ END GROUP
  *(SORT_BY_NAME(.list___EH_FRAME*))
  *(SORT_BY_NAME(.list_*))
  *(.end_of_lists)
-                0x00000000000598dc                ___datadata_relocs = .
-                0x00000000000598dc                __etext = .
-                0x00000000000598dc                ___text_size = SIZEOF (.text)
-                0x00000000000598dc                . = ALIGN (0x0)
+                0x00000000000598f0                ___datadata_relocs = .
+                0x00000000000598f0                __etext = .
+                0x00000000000598f0                ___text_size = SIZEOF (.text)
+                0x00000000000598f0                . = ALIGN (0x0)
 
-.data           0x00000000000598dc      0x1c4
-                0x00000000000598dc                __sdata = .
+.data           0x00000000000598f0      0x1c4
+                0x00000000000598f0                __sdata = .
  *(SORT_BY_NAME(.list___EH_FRAME*))
  *(SORT_BY_NAME(.dlist_*))
  *(.end_of_dlists)
  *(.data)
- .data          0x00000000000598dc       0x44 CMakeFiles/bsdsocket_library.dir/library.c.obj
- .data          0x0000000000059920       0x20 CMakeFiles/bsdsocket_library.dir/socket.c.obj
- .data          0x0000000000059940       0x14 ../netstack/libaminetxduo_netstack.a(netstack_baton.c.obj)
- .data          0x0000000000059954        0x8 ../netstack/libaminetxduo_netstack.a(netstack_rexx.c.obj)
- .data          0x000000000005995c        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
- .data          0x0000000000059960        0x4 ../common/libaminetxduo_common.a(ami_random.c.obj)
- .data          0x0000000000059964        0x4 ../../libnetxduo_addons.a(nxd_dhcp_client.c.obj)
-                0x0000000000059964                _nx_dhcp_request_parameters
- .data          0x0000000000059968       0x10 ../../libnetxduo_addons.a(nxd_dns.c.obj)
-                0x0000000000059968                lookup_end
- .data          0x0000000000059978       0x28 ../../libnetxduo_addons.a(nxd_mdns.c.obj)
- .data          0x00000000000599a0       0x60 ../../libnetxduo.a(nx_system_initialize.c.obj)
-                0x00000000000599a0                _nx_version_id
- .data          0x0000000000059a00       0x20 ../../libnetxduo.a(nx_mld_message_send.c.obj)
- .data          0x0000000000059a20       0x70 ../../libthreadx.a(tx_thread_initialize.c.obj)
-                0x0000000000059a20                _tx_thread_system_state
-                0x0000000000059a24                _tx_version_id
- .data          0x0000000000059a90        0x4 ../../port/threadx-amiga/libthreadx_port.a(tx_initialize_low_level.c.obj)
- .data          0x0000000000059a94        0xc ../net68k/libaminetxduo_net68k.a(n68k_cpu.c.obj)
-                0x0000000000059a94                n68k_vec_copy
-                0x0000000000059a98                n68k_vec_copy_sum
-                0x0000000000059a9c                n68k_vec_sum
+ .data          0x00000000000598f0       0x44 CMakeFiles/bsdsocket_library.dir/library.c.obj
+ .data          0x0000000000059934       0x20 CMakeFiles/bsdsocket_library.dir/socket.c.obj
+ .data          0x0000000000059954       0x14 ../netstack/libaminetxduo_netstack.a(netstack_baton.c.obj)
+ .data          0x0000000000059968        0x8 ../netstack/libaminetxduo_netstack.a(netstack_rexx.c.obj)
+ .data          0x0000000000059970        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .data          0x0000000000059974        0x4 ../common/libaminetxduo_common.a(ami_random.c.obj)
+ .data          0x0000000000059978        0x4 ../../libnetxduo_addons.a(nxd_dhcp_client.c.obj)
+                0x0000000000059978                _nx_dhcp_request_parameters
+ .data          0x000000000005997c       0x10 ../../libnetxduo_addons.a(nxd_dns.c.obj)
+                0x000000000005997c                lookup_end
+ .data          0x000000000005998c       0x28 ../../libnetxduo_addons.a(nxd_mdns.c.obj)
+ .data          0x00000000000599b4       0x60 ../../libnetxduo.a(nx_system_initialize.c.obj)
+                0x00000000000599b4                _nx_version_id
+ .data          0x0000000000059a14       0x20 ../../libnetxduo.a(nx_mld_message_send.c.obj)
+ .data          0x0000000000059a34       0x70 ../../libthreadx.a(tx_thread_initialize.c.obj)
+                0x0000000000059a34                _tx_thread_system_state
+                0x0000000000059a38                _tx_version_id
+ .data          0x0000000000059aa4        0x4 ../../port/threadx-amiga/libthreadx_port.a(tx_initialize_low_level.c.obj)
+ .data          0x0000000000059aa8        0xc ../net68k/libaminetxduo_net68k.a(n68k_cpu.c.obj)
+                0x0000000000059aa8                n68k_vec_copy
+                0x0000000000059aac                n68k_vec_copy_sum
+                0x0000000000059ab0                n68k_vec_sum
  *(.data.*)
  *(.gnu.linkonce.d.*)
-                0x00000000000618da                ___a4_init = 0x7ffe
-                0x0000000000059aa0                __edata = .
+                0x00000000000618ee                ___a4_init = 0x7ffe
+                0x0000000000059ab4                __edata = .
                 0x00000000000001c4                ___data_size = SIZEOF (.data)
 
-.bss            0x0000000000059aa0     0x18bc
-                0x0000000000059aa0                __bss_start = .
+.bss            0x0000000000059ab4     0x18bc
+                0x0000000000059ab4                __bss_start = .
  *(.bss)
- .bss           0x0000000000059aa0       0x7c CMakeFiles/bsdsocket_library.dir/library.c.obj
-                0x0000000000059aa0                SysBase
- .bss           0x0000000000059b1c        0x8 CMakeFiles/bsdsocket_library.dir/socket.c.obj
- .bss           0x0000000000059b24        0x8 CMakeFiles/bsdsocket_library.dir/raw.c.obj
- .bss           0x0000000000059b2c       0x10 CMakeFiles/bsdsocket_library.dir/oob.c.obj
- .bss           0x0000000000059b3c        0x4 CMakeFiles/bsdsocket_library.dir/netdb.c.obj
- .bss           0x0000000000059b40        0xc CMakeFiles/bsdsocket_library.dir/addralloc.c.obj
- .bss           0x0000000000059b4c       0x5c CMakeFiles/bsdsocket_library.dir/netmonitor.c.obj
- .bss           0x0000000000059ba8        0xc CMakeFiles/bsdsocket_library.dir/library_runtime.c.obj
-                0x0000000000059ba8                DOSBase
- .bss           0x0000000000059bb4       0x14 CMakeFiles/bsdsocket_library.dir/tcp_handler.c.obj
- .bss           0x0000000000059bc8      0x240 CMakeFiles/bsdsocket_library.dir/mcast.c.obj
- .bss           0x0000000000059e08       0x3c ../netstack/libaminetxduo_netstack.a(netstack.c.obj)
- .bss           0x0000000000059e44      0x128 ../netstack/libaminetxduo_netstack.a(netstack_baton.c.obj)
-                0x0000000000059e44                ami_baton_stats
- .bss           0x0000000000059f6c       0x1c ../netstack/libaminetxduo_netstack.a(netstack_rexx.c.obj)
-                0x0000000000059f6c                ami_rx_rexxbase
- .bss           0x0000000000059f88        0xc ../sana2/libaminetxduo_sana2.a(sana2_device.c.obj)
- .bss           0x0000000000059f94       0x18 ../sana2/libaminetxduo_sana2.a(sana2_driver.c.obj)
- .bss           0x0000000000059fac        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
- .bss           0x0000000000059fb8       0x44 ../config/libaminetxduo_config.a(netdb.c.obj)
- .bss           0x0000000000059ffc       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
-                0x0000000000059ffc                TimerBase
- .bss           0x000000000005a0e0      0x22c ../common/libaminetxduo_common.a(ami_random.c.obj)
- .bss           0x000000000005a30c      0x248 ../common/libaminetxduo_common.a(events.c.obj)
- .bss           0x000000000005a554      0x2f0 ../common/libaminetxduo_common.a(budget.c.obj)
-                0x000000000005a554                ami_budget
- .bss           0x000000000005a844        0x4 ../../libnetxduo_addons.a(nxd_dhcp_client.c.obj)
- .bss           0x000000000005a848      0x218 ../../libnetxduo_addons.a(nxd_dns.c.obj)
-                0x000000000005a848                _nx_dns_instance_ptr
- .bss           0x000000000005aa60        0x4 ../../libnetxduo_addons.a(nx_auto_ip.c.obj)
- .bss           0x000000000005aa64       0x18 ../../libnetxduo_addons.a(nxd_dhcpv6_client.c.obj)
- .bss           0x000000000005aa7c      0x204 ../../libnetxduo_addons.a(nxd_mdns.c.obj)
- .bss           0x000000000005ac80        0x8 ../../libnetxduo.a(nx_packet_pool_initialize.c.obj)
-                0x000000000005ac80                _nx_packet_pool_created_count
-                0x000000000005ac84                _nx_packet_pool_created_ptr
- .bss           0x000000000005ac88       0x14 ../../libnetxduo.a(nx_system_initialize.c.obj)
-                0x000000000005ac88                _nx_system_build_options_5
-                0x000000000005ac8c                _nx_system_build_options_4
-                0x000000000005ac90                _nx_system_build_options_3
-                0x000000000005ac94                _nx_system_build_options_2
-                0x000000000005ac98                _nx_system_build_options_1
- .bss           0x000000000005ac9c       0x10 ../../libnetxduo.a(nx_tcp_initialize.c.obj)
-                0x000000000005ac9c                _nx_tcp_2MSL_timer_rate
-                0x000000000005aca0                _nx_tcp_transmit_timer_rate
-                0x000000000005aca4                _nx_tcp_ack_timer_rate
-                0x000000000005aca8                _nx_tcp_fast_timer_rate
- .bss           0x000000000005acac        0x8 ../../libnetxduo.a(nx_ip_initialize.c.obj)
-                0x000000000005acac                _nx_ip_created_count
-                0x000000000005acb0                _nx_ip_created_ptr
- .bss           0x000000000005acb4       0x10 ../../libnetxduo.a(nx_mld_message_send.c.obj)
- .bss           0x000000000005acc4      0x1d0 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
- .bss           0x000000000005ae94       0x34 ../../libthreadx.a(tx_initialize_high_level.c.obj)
-                0x000000000005ae94                _tx_initialize_unused_memory
-                0x000000000005ae98                _tx_byte_pool_created_count
-                0x000000000005ae9c                _tx_byte_pool_created_ptr
-                0x000000000005aea0                _tx_block_pool_created_count
-                0x000000000005aea4                _tx_block_pool_created_ptr
-                0x000000000005aea8                _tx_mutex_created_count
-                0x000000000005aeac                _tx_mutex_created_ptr
-                0x000000000005aeb0                _tx_event_flags_created_count
-                0x000000000005aeb4                _tx_event_flags_created_ptr
-                0x000000000005aeb8                _tx_queue_created_count
-                0x000000000005aebc                _tx_queue_created_ptr
-                0x000000000005aec0                _tx_semaphore_created_count
-                0x000000000005aec4                _tx_semaphore_created_ptr
- .bss           0x000000000005aec8       0xac ../../libthreadx.a(tx_thread_initialize.c.obj)
-                0x000000000005aec8                _tx_build_options
-                0x000000000005aecc                _tx_thread_mutex_release
-                0x000000000005aed0                _tx_thread_preempt_disable
-                0x000000000005aed4                _tx_thread_priority_list
-                0x000000000005af54                _tx_thread_highest_priority
-                0x000000000005af58                _tx_thread_preempted_maps
-                0x000000000005af5c                _tx_thread_priority_maps
-                0x000000000005af60                _tx_thread_created_count
-                0x000000000005af64                _tx_thread_created_ptr
-                0x000000000005af68                _tx_thread_execute_ptr
-                0x000000000005af6c                _tx_thread_current_ptr
-                0x000000000005af70                _tx_thread_system_stack_ptr
- .bss           0x000000000005af74       0xac ../../libthreadx.a(tx_timer_initialize.c.obj)
-                0x000000000005af74                _tx_timer_time_slice
-                0x000000000005af78                _tx_timer_processing_active
-                0x000000000005af7c                _tx_timer_expired_timer_ptr
-                0x000000000005af80                _tx_timer_created_count
-                0x000000000005af84                _tx_timer_created_ptr
-                0x000000000005af88                _tx_timer_expired
-                0x000000000005af8c                _tx_timer_current_ptr
-                0x000000000005af90                _tx_timer_list_end
-                0x000000000005af94                _tx_timer_list_start
-                0x000000000005af98                _tx_timer_list
-                0x000000000005b018                _tx_timer_expired_time_slice
-                0x000000000005b01c                _tx_timer_system_clock
- .bss           0x000000000005b020       0xc8 ../../port/threadx-amiga/libthreadx_port.a(tx_initialize_low_level.c.obj)
-                0x000000000005b020                _tx_amiga_timer_base
-                0x000000000005b024                _tx_amiga_zombies_live
-                0x000000000005b028                _tx_amiga_zombies
-                0x000000000005b02c                _tx_amiga_timer_stop
-                0x000000000005b030                _tx_amiga_kernel_stopping
-                0x000000000005b034                _tx_amiga_kernel_up
-                0x000000000005b038                _tx_amiga_kernel_memory_size
-                0x000000000005b03c                _tx_amiga_kernel_memory
-                0x000000000005b040                _tx_amiga_adopt_signal
-                0x000000000005b044                _tx_amiga_adopt_task
-                0x000000000005b048                _tx_amiga_timer_task
-                0x000000000005b04c                _tx_amiga_scheduler_signal
-                0x000000000005b050                _tx_amiga_scheduler_task
- .bss           0x000000000005b0e8      0x1bc ../bpf/libaminetxduo_bpf.a(bpf_channel.c.obj)
-                0x000000000005b0e8                ami_bpf_bound_channels
- .bss           0x000000000005b2a4       0x8c ../bpf/libaminetxduo_bpf.a(bpf_tap.c.obj)
-                0x000000000005b2a4                ami_bpf_iface
- .bss           0x000000000005b330       0x2c ../net68k/libaminetxduo_net68k.a(n68k_rx_verify.c.obj)
-                0x000000000005b330                n68k_rx_verify_stats
+ .bss           0x0000000000059ab4       0x7c CMakeFiles/bsdsocket_library.dir/library.c.obj
+                0x0000000000059ab4                SysBase
+ .bss           0x0000000000059b30        0x8 CMakeFiles/bsdsocket_library.dir/socket.c.obj
+ .bss           0x0000000000059b38        0x8 CMakeFiles/bsdsocket_library.dir/raw.c.obj
+ .bss           0x0000000000059b40       0x10 CMakeFiles/bsdsocket_library.dir/oob.c.obj
+ .bss           0x0000000000059b50        0x4 CMakeFiles/bsdsocket_library.dir/netdb.c.obj
+ .bss           0x0000000000059b54        0xc CMakeFiles/bsdsocket_library.dir/addralloc.c.obj
+ .bss           0x0000000000059b60       0x5c CMakeFiles/bsdsocket_library.dir/netmonitor.c.obj
+ .bss           0x0000000000059bbc        0xc CMakeFiles/bsdsocket_library.dir/library_runtime.c.obj
+                0x0000000000059bbc                DOSBase
+ .bss           0x0000000000059bc8       0x14 CMakeFiles/bsdsocket_library.dir/tcp_handler.c.obj
+ .bss           0x0000000000059bdc      0x240 CMakeFiles/bsdsocket_library.dir/mcast.c.obj
+ .bss           0x0000000000059e1c       0x3c ../netstack/libaminetxduo_netstack.a(netstack.c.obj)
+ .bss           0x0000000000059e58      0x128 ../netstack/libaminetxduo_netstack.a(netstack_baton.c.obj)
+                0x0000000000059e58                ami_baton_stats
+ .bss           0x0000000000059f80       0x1c ../netstack/libaminetxduo_netstack.a(netstack_rexx.c.obj)
+                0x0000000000059f80                ami_rx_rexxbase
+ .bss           0x0000000000059f9c        0xc ../sana2/libaminetxduo_sana2.a(sana2_device.c.obj)
+ .bss           0x0000000000059fa8       0x18 ../sana2/libaminetxduo_sana2.a(sana2_driver.c.obj)
+ .bss           0x0000000000059fc0        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
+ .bss           0x0000000000059fcc       0x44 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .bss           0x000000000005a010       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000005a010                TimerBase
+ .bss           0x000000000005a0f4      0x22c ../common/libaminetxduo_common.a(ami_random.c.obj)
+ .bss           0x000000000005a320      0x248 ../common/libaminetxduo_common.a(events.c.obj)
+ .bss           0x000000000005a568      0x2f0 ../common/libaminetxduo_common.a(budget.c.obj)
+                0x000000000005a568                ami_budget
+ .bss           0x000000000005a858        0x4 ../../libnetxduo_addons.a(nxd_dhcp_client.c.obj)
+ .bss           0x000000000005a85c      0x218 ../../libnetxduo_addons.a(nxd_dns.c.obj)
+                0x000000000005a85c                _nx_dns_instance_ptr
+ .bss           0x000000000005aa74        0x4 ../../libnetxduo_addons.a(nx_auto_ip.c.obj)
+ .bss           0x000000000005aa78       0x18 ../../libnetxduo_addons.a(nxd_dhcpv6_client.c.obj)
+ .bss           0x000000000005aa90      0x204 ../../libnetxduo_addons.a(nxd_mdns.c.obj)
+ .bss           0x000000000005ac94        0x8 ../../libnetxduo.a(nx_packet_pool_initialize.c.obj)
+                0x000000000005ac94                _nx_packet_pool_created_count
+                0x000000000005ac98                _nx_packet_pool_created_ptr
+ .bss           0x000000000005ac9c       0x14 ../../libnetxduo.a(nx_system_initialize.c.obj)
+                0x000000000005ac9c                _nx_system_build_options_5
+                0x000000000005aca0                _nx_system_build_options_4
+                0x000000000005aca4                _nx_system_build_options_3
+                0x000000000005aca8                _nx_system_build_options_2
+                0x000000000005acac                _nx_system_build_options_1
+ .bss           0x000000000005acb0       0x10 ../../libnetxduo.a(nx_tcp_initialize.c.obj)
+                0x000000000005acb0                _nx_tcp_2MSL_timer_rate
+                0x000000000005acb4                _nx_tcp_transmit_timer_rate
+                0x000000000005acb8                _nx_tcp_ack_timer_rate
+                0x000000000005acbc                _nx_tcp_fast_timer_rate
+ .bss           0x000000000005acc0        0x8 ../../libnetxduo.a(nx_ip_initialize.c.obj)
+                0x000000000005acc0                _nx_ip_created_count
+                0x000000000005acc4                _nx_ip_created_ptr
+ .bss           0x000000000005acc8       0x10 ../../libnetxduo.a(nx_mld_message_send.c.obj)
+ .bss           0x000000000005acd8      0x1d0 ../../libnetxduo.a(nx_tcp_syncache.c.obj)
+ .bss           0x000000000005aea8       0x34 ../../libthreadx.a(tx_initialize_high_level.c.obj)
+                0x000000000005aea8                _tx_initialize_unused_memory
+                0x000000000005aeac                _tx_byte_pool_created_count
+                0x000000000005aeb0                _tx_byte_pool_created_ptr
+                0x000000000005aeb4                _tx_block_pool_created_count
+                0x000000000005aeb8                _tx_block_pool_created_ptr
+                0x000000000005aebc                _tx_mutex_created_count
+                0x000000000005aec0                _tx_mutex_created_ptr
+                0x000000000005aec4                _tx_event_flags_created_count
+                0x000000000005aec8                _tx_event_flags_created_ptr
+                0x000000000005aecc                _tx_queue_created_count
+                0x000000000005aed0                _tx_queue_created_ptr
+                0x000000000005aed4                _tx_semaphore_created_count
+                0x000000000005aed8                _tx_semaphore_created_ptr
+ .bss           0x000000000005aedc       0xac ../../libthreadx.a(tx_thread_initialize.c.obj)
+                0x000000000005aedc                _tx_build_options
+                0x000000000005aee0                _tx_thread_mutex_release
+                0x000000000005aee4                _tx_thread_preempt_disable
+                0x000000000005aee8                _tx_thread_priority_list
+                0x000000000005af68                _tx_thread_highest_priority
+                0x000000000005af6c                _tx_thread_preempted_maps
+                0x000000000005af70                _tx_thread_priority_maps
+                0x000000000005af74                _tx_thread_created_count
+                0x000000000005af78                _tx_thread_created_ptr
+                0x000000000005af7c                _tx_thread_execute_ptr
+                0x000000000005af80                _tx_thread_current_ptr
+                0x000000000005af84                _tx_thread_system_stack_ptr
+ .bss           0x000000000005af88       0xac ../../libthreadx.a(tx_timer_initialize.c.obj)
+                0x000000000005af88                _tx_timer_time_slice
+                0x000000000005af8c                _tx_timer_processing_active
+                0x000000000005af90                _tx_timer_expired_timer_ptr
+                0x000000000005af94                _tx_timer_created_count
+                0x000000000005af98                _tx_timer_created_ptr
+                0x000000000005af9c                _tx_timer_expired
+                0x000000000005afa0                _tx_timer_current_ptr
+                0x000000000005afa4                _tx_timer_list_end
+                0x000000000005afa8                _tx_timer_list_start
+                0x000000000005afac                _tx_timer_list
+                0x000000000005b02c                _tx_timer_expired_time_slice
+                0x000000000005b030                _tx_timer_system_clock
+ .bss           0x000000000005b034       0xc8 ../../port/threadx-amiga/libthreadx_port.a(tx_initialize_low_level.c.obj)
+                0x000000000005b034                _tx_amiga_timer_base
+                0x000000000005b038                _tx_amiga_zombies_live
+                0x000000000005b03c                _tx_amiga_zombies
+                0x000000000005b040                _tx_amiga_timer_stop
+                0x000000000005b044                _tx_amiga_kernel_stopping
+                0x000000000005b048                _tx_amiga_kernel_up
+                0x000000000005b04c                _tx_amiga_kernel_memory_size
+                0x000000000005b050                _tx_amiga_kernel_memory
+                0x000000000005b054                _tx_amiga_adopt_signal
+                0x000000000005b058                _tx_amiga_adopt_task
+                0x000000000005b05c                _tx_amiga_timer_task
+                0x000000000005b060                _tx_amiga_scheduler_signal
+                0x000000000005b064                _tx_amiga_scheduler_task
+ .bss           0x000000000005b0fc      0x1bc ../bpf/libaminetxduo_bpf.a(bpf_channel.c.obj)
+                0x000000000005b0fc                ami_bpf_bound_channels
+ .bss           0x000000000005b2b8       0x8c ../bpf/libaminetxduo_bpf.a(bpf_tap.c.obj)
+                0x000000000005b2b8                ami_bpf_iface
+ .bss           0x000000000005b344       0x2c ../net68k/libaminetxduo_net68k.a(n68k_rx_verify.c.obj)
+                0x000000000005b344                n68k_rx_verify_stats
  *(.bss.*)
  *(COMMON)
-                0x000000000005b35c                __end = .
+                0x000000000005b370                __end = .
                 0x00000000000018bc                ___bss_size = SIZEOF (.bss)
 
 .datachip

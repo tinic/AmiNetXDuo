@@ -1,0 +1,727 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_httpd.dir/tool_diag.c.obj (symbol from plugin) (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_httpd.dir/tool_diag.c.obj (symbol from plugin) (ami_config_parse_ip6)
+../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                              CMakeFiles/tool_httpd.dir/httpfb.c.obj (symbol from plugin) (rfb_pal_colours)
+../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                              CMakeFiles/tool_httpd.dir/httpfb.c.obj (symbol from plugin) (rfb_word_geom)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_httpd.dir/httprtg.c.obj (symbol from plugin) (TimerBase)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (__modsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                              /tmp/cczOnmSP.ltrans1.ltrans.o (memcmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                              /tmp/cczOnmSP.ltrans2.ltrans.o (memmove)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              /tmp/cczOnmSP.ltrans0.ltrans.o (__umodsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+                              /tmp/cczOnmSP.ltrans1.ltrans.o (__muldi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                              /tmp/cczOnmSP.ltrans2.ltrans.o (__udivdi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o) (__clz_tab)
+
+Discarded input sections
+
+ .debug_frame   0x0000000000000000       0x64 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_info    0x0000000000000000      0x1a8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_abbrev  0x0000000000000000      0x10c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_line    0x0000000000000000       0x9c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_str     0x0000000000000000      0x19c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_frame   0x0000000000000000      0x234 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_info    0x0000000000000000      0x808 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_abbrev  0x0000000000000000      0x1b8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_loclists
+                0x0000000000000000      0xf48 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_rnglists
+                0x0000000000000000       0xd8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line    0x0000000000000000      0xa34 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_str     0x0000000000000000      0x20c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_info    0x0000000000000000       0xe0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_abbrev  0x0000000000000000       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_aranges
+                0x0000000000000000       0x18 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line    0x0000000000000000       0x4c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_str     0x0000000000000000      0x170 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_httpd.dir/httpd.c.obj
+LOAD /tmp/cczOnmSP.ltrans0.ltrans.o
+LOAD /tmp/cczOnmSP.ltrans1.ltrans.o
+LOAD /tmp/cczOnmSP.ltrans2.ltrans.o
+LOAD CMakeFiles/tool_httpd.dir/httppath.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpif.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpframe.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httplock.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpws.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpsha1.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpterm.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpfb.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httprtg.c.obj
+LOAD CMakeFiles/tool_httpd.dir/toolsock.c.obj
+LOAD CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+LOAD CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+LOAD CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+LOAD CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+LOAD CMakeFiles/tool_httpd.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../rfb/libaminetxduo_rfb.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000    0x1909c
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4        0x0 CMakeFiles/tool_httpd.dir/httpd.c.obj (symbol from plugin)
+                0x00000000000000b4                LocaleBase
+ .text          0x00000000000000b4     0x93c8 /tmp/cczOnmSP.ltrans0.ltrans.o
+                0x00000000000009d0                hs_len.lto_priv.0
+                0x00000000000009de                hs_append.lto_priv.0
+                0x0000000000001258                hs_nicmp.lto_priv.0
+                0x0000000000001662                hs_equal.lto_priv.0
+                0x0000000000001fbc                httpd_now.lto_priv.0
+                0x00000000000020b8                httpd_if_lookup.lto_priv.0
+                0x0000000000002a50                httpd_log.lto_priv.0
+                0x0000000000002a74                httpd_log.constprop.0
+                0x0000000000002b04                httpd_error.lto_priv.0
+                0x0000000000003b28                httpd_put_abandon.lto_priv.0
+                0x0000000000003b66                httpd_dos_status.lto_priv.0
+                0x0000000000003b90                httpd_parent.constprop.0
+                0x0000000000003c08                httpd_name_cut.lto_priv.0
+                0x0000000000003c7e                httpd_name_survives.lto_priv.0
+                0x0000000000003cdc                httpd_kind.lto_priv.0
+                0x0000000000004612                httpd_walk_mark.lto_priv.0
+                0x0000000000004662                httpd_walk_failed.lto_priv.0
+                0x000000000000475a                httpd_walk_release.lto_priv.0
+                0x0000000000004780                httpd_close.lto_priv.0
+                0x0000000000004832                httpd_reset.lto_priv.0
+                0x000000000000495a                httpd_walk_answer.lto_priv.0
+                0x0000000000004a4a                httpd_walk_copy_stage.lto_priv.0
+                0x0000000000004bc0                httpd_lock_allows.lto_priv.0
+                0x0000000000005108                httpd_lock_allows_parent.lto_priv.0
+                0x000000000000575c                httpd_produce.lto_priv.0
+                0x0000000000005b6c                httpd_hostlen.lto_priv.0
+                0x0000000000005bb2                httpd_log_status.lto_priv.0
+                0x00000000000070d0                httpd_iperf_answer.lto_priv.0
+                0x000000000000782a                httpd_readable.lto_priv.0
+                0x0000000000008cc4                CSWTCH.47.lto_priv.0
+                0x0000000000008d02                httpd_ws_idle.lto_priv.0
+ .text          0x000000000000947c     0xbc5c /tmp/cczOnmSP.ltrans1.ltrans.o
+                0x0000000000009fa4                term_runner_main.lto_priv.0
+                0x000000000000b89c                hs_copy.part.0.lto_priv.0
+                0x000000000000b8bc                hs_copy.part.0.constprop.0
+                0x000000000000b8ec                httpd_log.part.0.lto_priv.0
+                0x000000000000b960                http_path_resolve
+                0x000000000000bc40                http_path_join.constprop.0
+                0x000000000000bcd4                http_path_up
+                0x000000000000bd16                http_path_within
+                0x000000000000bf86                httpd_copy_or_move.part.0.lto_priv.0
+                0x000000000000c258                http_xml_escape.constprop.0.isra.0
+                0x000000000000c312                http_content_type
+                0x000000000000c3c4                http_url_escape.part.0.constprop.0
+                0x000000000000c49e                http_if_eval.part.0.constprop.0
+                0x000000000000c706                hf_token_is.lto_priv.0
+                0x000000000000c750                http_frame_token_is.constprop.0
+                0x000000000000c7ac                http_frame_has_token.constprop.0
+                0x000000000000c824                http_frame_etag_listed
+                0x000000000000c8f8                http_frame_list_add.constprop.0
+                0x000000000000c974                hf_decimal.lto_priv.0
+                0x000000000000c9e6                hl_equal.lto_priv.0
+                0x000000000000ca18                httplock_expire
+                0x000000000000ca3e                httplock_on
+                0x000000000000ca98                httplock_by_token
+                0x000000000000caf2                httplock_drop
+                0x000000000000cb2a                httplock_covers
+                0x000000000000cb54                httplock_held
+                0x000000000000cb8e                http_ws_close_frame
+                0x000000000000ecf8                http_ws_live_stale
+                0x000000000000ed2e                http_ws_accept.part.0.constprop.0
+                0x000000000000f0e4                term_reply.lto_priv.0
+                0x000000000000f112                term_reply.constprop.0
+                0x0000000000010000                term_handle.lto_priv.0
+                0x0000000000010068                term_handle_discard.lto_priv.0
+                0x0000000000010086                term_task_alive.lto_priv.0
+                0x00000000000100e4                http_term_available
+                0x000000000001010c                http_term_stop
+                0x000000000001039c                http_fb_stop
+                0x0000000000010480                http_fb_stale
+                0x0000000000013734                main
+                0x0000000000014fba                tool_name
+ .text          0x00000000000150d8     0x34d8 /tmp/cczOnmSP.ltrans2.ltrans.o
+                0x000000000001568c                rtg_p96_attr.lto_priv.0
+                0x00000000000156a4                rtg_cgx_attr.lto_priv.0
+                0x00000000000156bc                rtg_fmt_p96.lto_priv.0
+                0x0000000000015818                rtg_fmt_cgx.lto_priv.0
+                0x0000000000015994                rtg_read_via.lto_priv.0
+                0x0000000000015b02                rtg_off_free.lto_priv.0
+                0x0000000000015b3e                http_rtg_detach
+                0x0000000000015b94                rtg_put.lto_priv.0
+                0x0000000000015bc0                rtg_put_num.lto_priv.0
+                0x0000000000015c2c                tool_fd_add
+                0x0000000000015c5c                tool_fd_isset
+                0x0000000000015c8a                tool_sock_send
+                0x0000000000015caa                tool_sock_close.isra.0
+                0x0000000000015cbc                tool_sock_have_ipv6
+                0x0000000000015cea                tool_sock_addr.isra.0
+                0x0000000000015d38                tool_sock_addr_get
+                0x0000000000015e5e                tool_sock_errstr
+                0x0000000000015fca                iperf_target_met.constprop.0
+                0x000000000001602a                iperf_open_client.constprop.0
+                0x000000000001616a                iperf_open_server.constprop.0
+                0x00000000000162c6                iperf_wait.constprop.0
+                0x000000000001632a                iperf_wait_send.constprop.0.isra.0
+                0x000000000001635c                wire_put32.lto_priv.0
+                0x0000000000016386                iperf_dg_put
+                0x00000000000163c8                _nx_crypto_sha1_update.isra.0
+                0x0000000000016480                tool_printf
+                0x00000000000164a6                tool_error
+                0x0000000000016632                tool_no_ipv6.lto_priv.0
+                0x0000000000016682                tool_fault
+                0x00000000000166a0                tool_break
+                0x00000000000166da                tool_copy_string.constprop.0
+                0x00000000000166fe                tool_addr_text.constprop.0
+                0x00000000000167f4                tool_stack_library_running
+                0x0000000000016850                rfb_geom_ok.constprop.0
+                0x00000000000168ec                rfb_shadow_size.constprop.0
+                0x000000000001692c                rfb_scratch_size.constprop.0
+                0x00000000000169f4                rfb_encoder_init.constprop.0
+                0x0000000000016ca4                rfb_encode_band.constprop.0
+                0x0000000000017e50                put_num.lto_priv.0
+                0x0000000000017ec2                put_signed.lto_priv.0
+                0x0000000000017f1e                skip_spaces.lto_priv.0
+                0x0000000000017f4e                take_keyword.lto_priv.0
+                0x0000000000017fa0                take_int.lto_priv.0
+                0x0000000000018038                ami_alloc
+                0x000000000001809c                ami_free
+                0x00000000000180e2                ami_millis
+                0x0000000000018302                iperf_clock_start.constprop.0
+                0x000000000001834c                iperf_count.constprop.0
+                0x000000000001837c                iperf_end.constprop.0
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httppath.c.obj (symbol from plugin)
+                0x00000000000185b0                http_url_escape
+                0x00000000000185b0                http_path_join
+                0x00000000000185b0                http_utf8_trim
+                0x00000000000185b0                http_path_root
+                0x00000000000185b0                http_path_error
+                0x00000000000185b0                http_xml_escape
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpif.c.obj (symbol from plugin)
+                0x00000000000185b0                http_if_eval
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpframe.c.obj (symbol from plugin)
+                0x00000000000185b0                http_frame_length
+                0x00000000000185b0                http_chunk_feed
+                0x00000000000185b0                http_frame_field_name
+                0x00000000000185b0                http_chunk_start
+                0x00000000000185b0                http_chunk_off
+                0x00000000000185b0                http_frame_range
+                0x00000000000185b0                http_frame_coding
+                0x00000000000185b0                http_frame_error
+                0x00000000000185b0                http_frame_token_is
+                0x00000000000185b0                http_frame_list_add
+                0x00000000000185b0                http_frame_has_token
+                0x00000000000185b0                http_frame_version
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httplock.c.obj (symbol from plugin)
+                0x00000000000185b0                httplock_allows_parent
+                0x00000000000185b0                httplock_free_slot
+                0x00000000000185b0                httplock_allows
+                0x00000000000185b0                httplock_allows_tree
+                0x00000000000185b0                httplock_exact
+                0x00000000000185b0                httplock_reset
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpws.c.obj (symbol from plugin)
+                0x00000000000185b0                http_ws_accept
+                0x00000000000185b0                http_ws_reset
+                0x00000000000185b0                http_ws_close_reason
+                0x00000000000185b0                http_ws_b64_encode
+                0x00000000000185b0                http_ws_head
+                0x00000000000185b0                http_ws_live_ping_due
+                0x00000000000185b0                http_ws_feed
+                0x00000000000185b0                http_ws_b64_decode
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpsha1.c.obj (symbol from plugin)
+                0x00000000000185b0                _nx_crypto_memset_ptr
+                0x00000000000185b0                http_ws_sha1
+                0x00000000000185b0                _nx_crypto_memcpy_ptr
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpterm.c.obj (symbol from plugin)
+                0x00000000000185b0                http_term_sock_wants_write
+                0x00000000000185b0                http_term_service
+                0x00000000000185b0                http_term_sock_idle
+                0x00000000000185b0                http_term_resize
+                0x00000000000185b0                http_term_sock_read
+                0x00000000000185b0                http_term_sock_evict
+                0x00000000000185b0                http_term_stats_word
+                0x00000000000185b0                http_term_pending
+                0x00000000000185b0                http_term_read
+                0x00000000000185b0                http_term_init
+                0x00000000000185b0                http_term_sock_begin
+                0x00000000000185b0                http_term_mode_word
+                0x00000000000185b0                http_term_eof
+                0x00000000000185b0                http_term_break
+                0x00000000000185b0                http_term_sock_wants_read
+                0x00000000000185b0                http_term_err
+                0x00000000000185b0                http_term_mode_sent
+                0x00000000000185b0                http_term_sock_write
+                0x00000000000185b0                http_term_sock_stale
+                0x00000000000185b0                http_term_write
+                0x00000000000185b0                http_term_stats_sent
+                0x00000000000185b0                http_term_shutdown
+                0x00000000000185b0                http_term_raw
+                0x00000000000185b0                http_term_start
+                0x00000000000185b0                http_term_rc
+                0x00000000000185b0                http_term_running
+                0x00000000000185b0                http_term_sigmask
+                0x00000000000185b0                http_term_trace
+                0x00000000000185b0                http_term_announce
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httpfb.c.obj (symbol from plugin)
+                0x00000000000185b0                http_fb_wants_write
+                0x00000000000185b0                http_fb_close
+                0x00000000000185b0                http_fb_available
+                0x00000000000185b0                http_fb_geometry
+                0x00000000000185b0                http_fb_why
+                0x00000000000185b0                http_fb_stats
+                0x00000000000185b0                http_fb_buttons_held
+                0x00000000000185b0                http_fb_write
+                0x00000000000185b0                http_fb_idle
+                0x00000000000185b0                http_fb_fault
+                0x00000000000185b0                http_fb_slice
+                0x00000000000185b0                http_fb_start
+                0x00000000000185b0                http_fb_read
+                0x00000000000185b0                http_fb_enabled
+                0x00000000000185b0                http_fb_open
+                0x00000000000185b0                IntuitionBase
+                0x00000000000185b0                http_fb_evict
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/httprtg.c.obj (symbol from plugin)
+                0x00000000000185b0                http_rtg_owns
+                0x00000000000185b0                http_rtg_describe
+                0x00000000000185b0                http_rtg_attach
+                0x00000000000185b0                http_rtg_close
+                0x00000000000185b0                http_rtg_word
+                0x00000000000185b0                http_rtg_attached_to
+                0x00000000000185b0                http_rtg_read
+                0x00000000000185b0                http_rtg_open
+                0x00000000000185b0                http_rtg_present
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/toolsock.c.obj (symbol from plugin)
+                0x00000000000185b0                tool_sock_addr_v4
+                0x00000000000185b0                tool_sock_connect_timed
+                0x00000000000185b0                tool_sock_resolve_af
+                0x00000000000185b0                tool_sock_bind
+                0x00000000000185b0                tool_sock_family_absent
+                0x00000000000185b0                tool_addr_v4
+                0x00000000000185b0                tool_sock_getsockopt
+                0x00000000000185b0                tool_sock_socket
+                0x00000000000185b0                tool_sock_gethostbyname
+                0x00000000000185b0                tool_addr_any
+                0x00000000000185b0                tool_sock_getsockname
+                0x00000000000185b0                tool_sock_fail_why
+                0x00000000000185b0                tool_sock_ntop
+                0x00000000000185b0                tool_sock_addr_same
+                0x00000000000185b0                tool_sock_send_full
+                0x00000000000185b0                tool_sock_errno
+                0x00000000000185b0                tool_sock_connect
+                0x00000000000185b0                tool_addr_text
+                0x00000000000185b0                tool_socket_open
+                0x00000000000185b0                tool_sock_addr
+                0x00000000000185b0                tool_sock_listen
+                0x00000000000185b0                tool_sock_getservbyname
+                0x00000000000185b0                tool_sock_resolve_list
+                0x00000000000185b0                tool_sock_fail
+                0x00000000000185b0                tool_sock_port
+                0x00000000000185b0                tool_sock_connect_host
+                0x00000000000185b0                tool_sock_have_lvo
+                0x00000000000185b0                tool_sock_recv
+                0x00000000000185b0                tool_input_open
+                0x00000000000185b0                tool_sock_select_sigs
+                0x00000000000185b0                tool_fd_zero
+                0x00000000000185b0                tool_input_close
+                0x00000000000185b0                tool_arg_family
+                0x00000000000185b0                tool_sock_shutdown
+                0x00000000000185b0                tool_sock_sendto
+                0x00000000000185b0                tool_output_write
+                0x00000000000185b0                tool_sock_resolve
+                0x00000000000185b0                tool_sock_freeaddrinfo
+                0x00000000000185b0                tool_sock_select
+                0x00000000000185b0                tool_sock_setsockopt
+                0x00000000000185b0                tool_sock_accept
+                0x00000000000185b0                tool_sock_close
+                0x00000000000185b0                tool_sock_say_no_family
+                0x00000000000185b0                tool_sock_addr_port
+                0x00000000000185b0                tool_sock_recvfrom
+                0x00000000000185b0                tool_sock_ioctl
+                0x00000000000185b0                tool_sock_getaddrinfo
+                0x00000000000185b0                tool_input_read
+                0x00000000000185b0                tool_host_unbracket
+                0x00000000000185b0                tool_sock_addr_text
+                0x00000000000185b0                tool_addr_same
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/toolbudget.c.obj (symbol from plugin)
+                0x00000000000185b0                tool_budget_init
+                0x00000000000185b0                tool_budget_again
+                0x00000000000185b0                tool_budget_done
+                0x00000000000185b0                tool_budget_first
+                0x00000000000185b0                tool_budget_left
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/iperfcore.c.obj (symbol from plugin)
+                0x00000000000185b0                iperf_abort
+                0x00000000000185b0                iperf_slice
+                0x00000000000185b0                iperf_end
+                0x00000000000185b0                iperf_plan_init
+                0x00000000000185b0                iperf_result_line
+                0x00000000000185b0                iperf_plan_check
+                0x00000000000185b0                iperf_dir_name
+                0x00000000000185b0                iperf_begin
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/iperfwire.c.obj (symbol from plugin)
+                0x00000000000185b0                iperf_add64
+                0x00000000000185b0                iperf_limits_check
+                0x00000000000185b0                iperf_bits_per_sec
+                0x00000000000185b0                iperf_format_rate
+                0x00000000000185b0                iperf_dg_id
+                0x00000000000185b0                iperf_pattern_fill
+                0x00000000000185b0                iperf_dg_get
+                0x00000000000185b0                iperf_report_put
+                0x00000000000185b0                iperf_format_bytes
+                0x00000000000185b0                iperf_slice_budget
+                0x00000000000185b0                iperf_report_get
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj (symbol from plugin)
+                0x00000000000185b0                _nx_crypto_sha1_update
+                0x00000000000185b0                _nx_crypto_method_sha1_init
+                0x00000000000185b0                _nx_crypto_sha1_process_buffer
+                0x00000000000185b0                _nx_crypto_method_sha1_cleanup
+                0x00000000000185b0                _nx_crypto_method_sha1_operation
+                0x00000000000185b0                _nx_crypto_sha1_initialize
+                0x00000000000185b0                _nx_crypto_sha1_digest_calculate
+                0x00000000000185b0                _nx_crypto_sha1_padding
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/tool_util.c.obj (symbol from plugin)
+                0x00000000000185b0                tool_prefix_len
+                0x00000000000185b0                tool_delay_ticks
+                0x00000000000185b0                tool_require_stack
+                0x00000000000185b0                tool_format_mac
+                0x00000000000185b0                tool_say
+                0x00000000000185b0                tool_basename
+                0x00000000000185b0                tool_net_error
+                0x00000000000185b0                tool_broadcast
+                0x00000000000185b0                tool_break_arm
+                0x00000000000185b0                tool_from_workbench
+                0x00000000000185b0                tool_no_ipv6_note
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/tool_diag.c.obj (symbol from plugin)
+                0x00000000000185b0                tool_stack_domain
+                0x00000000000185b0                tool_config_unwatch
+                0x00000000000185b0                tool_copy_string
+                0x00000000000185b0                tool_netstatus_control
+                0x00000000000185b0                tool_stack_query
+                0x00000000000185b0                tool_explain_interface_file
+                0x00000000000185b0                diag_is_resident
+                0x00000000000185b0                tool_stack_start
+                0x00000000000185b0                tool_list_dir
+                0x00000000000185b0                tool_explain_no_netstatus
+                0x00000000000185b0                diag_device_dirs
+                0x00000000000185b0                tool_stack_version
+                0x00000000000185b0                tool_wrap
+                0x00000000000185b0                tool_netstatus_close
+                0x00000000000185b0                tool_usage
+                0x00000000000185b0                tool_join_path
+                0x00000000000185b0                tool_explain_foreign_stack
+                0x00000000000185b0                tool_explain_no_stack
+                0x00000000000185b0                tool_device_probe
+                0x00000000000185b0                tool_exists
+                0x00000000000185b0                tool_parse_ip6
+                0x00000000000185b0                tool_netstatus_open
+                0x00000000000185b0                tool_stack_release
+                0x00000000000185b0                tool_format_ip6
+                0x00000000000185b0                tool_device_where
+                0x00000000000185b0                tool_stack_lookup_addr
+                0x00000000000185b0                tool_explain_dhcp
+                0x00000000000185b0                tool_config_watch
+                0x00000000000185b0                tool_stack_lookup
+                0x00000000000185b0                tool_explain_resolve
+                0x00000000000185b0                tool_stricmp_n
+                0x00000000000185b0                tool_stack_name_servers
+                0x00000000000185b0                tool_netstatus_query
+                0x00000000000185b0                tool_stricmp
+                0x00000000000185b0                tool_netstatus_system
+                0x00000000000185b0                tool_stack_installed
+                0x00000000000185b0                tool_stack_is_ours
+ .text          0x00000000000185b0        0x0 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj (symbol from plugin)
+                0x00000000000185b0                netstack_pool
+                0x00000000000185b0                netstack_ip
+                0x00000000000185b0                netstack_get
+                0x00000000000185b0                netstack_interface_stack_down
+                0x00000000000185b0                netstack_ipv6_address_get
+                0x00000000000185b0                netstack_interface_start
+                0x00000000000185b0                netstack_shutdown
+                0x00000000000185b0                netstack_interface_is_up
+                0x00000000000185b0                netstack_interface_down
+                0x00000000000185b0                netstack_interface_count
+                0x00000000000185b0                netstack_can_unload
+                0x00000000000185b0                netstack_resolve
+                0x00000000000185b0                netstack_startup
+                0x00000000000185b0                netstack_config
+                0x00000000000185b0                netstack_resolve_reverse
+                0x00000000000185b0                tx_application_define
+                0x00000000000185b0                netstack_interface_up
+ .text          0x00000000000185b0        0x0 config_text.c.obj (symbol from plugin)
+                0x00000000000185b0                ami_cfg_problem_file
+                0x00000000000185b0                ami_cfg_parse_net_number
+                0x00000000000185b0                ami_cfg_stricmp
+                0x00000000000185b0                ami_config_parse_ip
+                0x00000000000185b0                ami_cfg_unquote
+                0x00000000000185b0                ami_cfg_next_line
+                0x00000000000185b0                ami_cfg_problems_wanted
+                0x00000000000185b0                ami_cfg_problem
+                0x00000000000185b0                ami_cfg_tokenize
+                0x00000000000185b0                ami_cfg_join3
+                0x00000000000185b0                ami_cfg_parse_ulong
+                0x00000000000185b0                ami_cfg_strlen
+                0x00000000000185b0                ami_cfg_parse_mac
+                0x00000000000185b0                ami_config_format_ip
+                0x00000000000185b0                ami_cfg_parse_bool
+                0x00000000000185b0                ami_config_set_reporter
+                0x00000000000185b0                ami_cfg_trim
+                0x00000000000185b0                ami_cfg_zero
+                0x00000000000185b0                ami_cfg_strip_comment
+                0x00000000000185b0                ami_cfg_copy_string
+                0x00000000000185b0                ami_cfg_next_pair
+ .text          0x00000000000185b0        0x0 config_text6.c.obj (symbol from plugin)
+                0x00000000000185b0                ami_config_format_ip6_zone
+                0x00000000000185b0                ami_config_format_ip6
+                0x00000000000185b0                ami_config_parse_ip6_zone
+                0x00000000000185b0                ami_config_parse_ip6
+ .text          0x00000000000185b0        0x0 rfb_encode.c.obj (symbol from plugin)
+                0x00000000000185b0                rfb_planes
+                0x00000000000185b0                rfb_unpackbits
+                0x00000000000185b0                rfb_encode_frame
+                0x00000000000185b0                rfb_scratch_size
+                0x00000000000185b0                rfb_encoder_init
+                0x00000000000185b0                rfb_encode_band
+                0x00000000000185b0                rfb_packbits
+                0x00000000000185b0                rfb_worst_case_frame
+                0x00000000000185b0                rfb_pal_colours
+                0x00000000000185b0                rfb_shadow_size
+                0x00000000000185b0                rfb_encode_frame_planes
+                0x00000000000185b0                rfb_scroll_defaults
+ .text          0x00000000000185b0        0x0 rfb_words.c.obj (symbol from plugin)
+                0x00000000000185b0                rfb_word_ptr
+                0x00000000000185b0                rfb_word_pal
+                0x00000000000185b0                rfb_word_geom
+                0x00000000000185b0                rfb_word_parse
+ .text          0x00000000000185b0        0x0 compat.c.obj (symbol from plugin)
+                0x00000000000185b0                ami_log
+                0x00000000000185b0                ami_set_shutdown_hook
+                0x00000000000185b0                ami_eclock_rate
+                0x00000000000185b0                ami_sana2_open_device
+                0x00000000000185b0                ami_set_second_hook
+                0x00000000000185b0                ami_millis_quick
+                0x00000000000185b0                ami_mem_open_delta
+                0x00000000000185b0                ami_timer_close
+                0x00000000000185b0                ami_second_notify
+                0x00000000000185b0                ami_alloc_count
+                0x00000000000185b0                ami_alloc_flags
+                0x00000000000185b0                ami_mem_socket_delta
+                0x00000000000185b0                ami_sana2_set_open_hooks
+                0x00000000000185b0                ami_set_address_change_hook
+                0x00000000000185b0                ami_signal_alloc
+                0x00000000000185b0                ami_mem_stats
+                0x00000000000185b0                ami_address_change_notify
+                0x00000000000185b0                ami_shutdown_notify
+                0x00000000000185b0                ami_signal_free
+ .text          0x00000000000185b0       0x50 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                0x00000000000185b0                __modsi3
+                0x00000000000185bc                __divsi3
+                0x00000000000185bc                ldiv
+                0x00000000000185bc                div
+ .text          0x0000000000018600       0x80 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                0x0000000000018600                memcmp
+ .text          0x0000000000018680       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x0000000000018680                memcpy
+ .text          0x00000000000186f0      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                0x00000000000186f0                memmove
+ .text          0x00000000000187f0       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x00000000000187f0                memset
+ .text          0x0000000000018864       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x0000000000018864                __mulsi3
+ .text          0x0000000000018890       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                0x0000000000018890                strlen
+ .text          0x00000000000188a4       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000188a4                __umodsi3
+                0x00000000000188b0                __udivsi3
+                0x00000000000188b6                __udivsi4
+ .text          0x00000000000188fc       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+                0x00000000000188fc                __muldi3
+ .text          0x0000000000018974      0x628 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                0x0000000000018974                __udivdi3
+ .text          0x0000000000018f9c      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                0x0000000000018f9c                __clz_tab
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x000000000001909c                ___datadata_relocs = .
+                0x000000000001909c                __etext = .
+                0x000000000001909c                ___text_size = SIZEOF (.text)
+                0x000000000001909c                . = ALIGN (0x0)
+
+.data           0x000000000001909c       0x44
+                0x000000000001909c                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ .data          0x000000000001909c       0x18 /tmp/cczOnmSP.ltrans0.ltrans.o
+                0x000000000001909c                term_rows.lto_priv.0
+                0x000000000001909e                term_cols.lto_priv.0
+                0x00000000000190a0                term_rc.lto_priv.0
+                0x00000000000190a4                term_gen.lto_priv.0
+                0x00000000000190a6                fb_sock.lto_priv.0
+                0x00000000000190aa                httpd_conns.lto_priv.0
+                0x00000000000190ae                httpd_root.lto_priv.0
+ .data          0x00000000000190b4       0x24 /tmp/cczOnmSP.ltrans1.ltrans.o
+                0x00000000000190b4                rtg_route.lto_priv.0
+                0x00000000000190b8                rtg_native_cgx.lto_priv.0
+                0x00000000000190bc                rtg_native_p96.lto_priv.0
+ .data          0x00000000000190d8        0x8 /tmp/cczOnmSP.ltrans2.ltrans.o
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000002109a                ___a4_init = 0x7ffe
+                0x00000000000190e0                __edata = .
+                0x0000000000000044                ___data_size = SIZEOF (.data)
+
+.bss            0x00000000000190e0     0x9070
+                0x00000000000190e0                __bss_start = .
+ *(.bss)
+ .bss           0x00000000000190e0       0x10 CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+                0x00000000000190e0                SysBase
+                0x00000000000190e4                DOSBase
+                0x00000000000190e8                _WBenchMsg
+ .bss           0x00000000000190f0     0x4cb8 /tmp/cczOnmSP.ltrans0.ltrans.o
+                0x00000000000190f0                httpd_value.lto_priv.0
+                0x00000000000191f0                httpd_term_gz.lto_priv.0
+                0x00000000000192f0                httpd_term_page.lto_priv.0
+                0x00000000000193f0                term_want_resize.lto_priv.0
+                0x00000000000193f1                term_seq_esc.lto_priv.0
+                0x00000000000193f2                term_seq_n.lto_priv.0
+                0x00000000000193f4                term_break_port.lto_priv.0
+                0x00000000000193f8                term_shell_task.lto_priv.0
+                0x00000000000193fc                term_in_urgent.lto_priv.0
+                0x00000000000193fd                term_mode_pending.lto_priv.0
+                0x00000000000193fe                term_raw.lto_priv.0
+                0x0000000000019400                term_err.lto_priv.0
+                0x0000000000019404                term_said_rc.lto_priv.0
+                0x0000000000019406                term_traced.lto_priv.0
+                0x0000000000019408                term_stop_passes.lto_priv.0
+                0x000000000001940a                term_abandoned.lto_priv.0
+                0x000000000001940b                term_stopping.lto_priv.0
+                0x000000000001940c                term_reaped.lto_priv.0
+                0x000000000001940e                term_runners.lto_priv.0
+                0x0000000000019412                term_runner.lto_priv.0
+                0x0000000000019416                term_wait_pkt.lto_priv.0
+                0x000000000001941a                term_out.lto_priv.0
+                0x0000000000019436                term_in.lto_priv.0
+                0x0000000000019452                term_active.lto_priv.0
+                0x0000000000019453                httpd_console_gz.lto_priv.0
+                0x0000000000019553                httpd_console_page.lto_priv.0
+                0x0000000000019654                fb_on.lto_priv.0
+                0x0000000000019656                fb_tx_len.lto_priv.0
+                0x000000000001965a                fb_tx_sent.lto_priv.0
+                0x000000000001965e                fb_sb.lto_priv.0
+                0x0000000000019662                fb_tx.lto_priv.0
+                0x0000000000019666                fb_close_code.lto_priv.0
+                0x0000000000019668                fb_closing.lto_priv.0
+                0x000000000001966a                iperf_buf.lto_priv.0
+                0x000000000001966e                httpd_trace.lto_priv.0
+                0x0000000000019670                httpd_verbose.lto_priv.0
+                0x0000000000019672                httpd_token_seed.lto_priv.0
+                0x0000000000019676                httpd_token_start.lto_priv.0
+                0x000000000001967a                httpd_info.lto_priv.0
+                0x000000000001967e                httpd_conn.lto_priv.0
+                0x0000000000019682                httpd_probe.lto_priv.0
+                0x0000000000019782                httpd_text.lto_priv.0
+                0x0000000000019d82                httplock_table.lto_priv.0
+                0x000000000001abd2                httpd_escape.lto_priv.0
+                0x000000000001b028                httpd_fib2.lto_priv.0
+                0x000000000001b02c                httpd_iperf.lto_priv.0
+                0x000000000001b124                httpd_iperf_owner.lto_priv.0
+                0x000000000001b128                httpd_sb.lto_priv.0
+                0x000000000001b12c                fb_buttons.lto_priv.0
+                0x000000000001b12e                fb_live.lto_priv.0
+                0x000000000001b130                httpd_log_dropped.lto_priv.0
+                0x000000000001b134                httpd_log_console.lto_priv.0
+                0x000000000001b136                httpd_gmt_west.lto_priv.0
+                0x000000000001b13a                httpd_scratch.lto_priv.0
+ .bss           0x000000000001dda8     0x429c /tmp/cczOnmSP.ltrans1.ltrans.o
+                0x000000000001dda8                rtg_off_is_p96.lto_priv.0
+                0x000000000001ddaa                rtg_off.lto_priv.0
+                0x000000000001ddae                TimerBase
+                0x000000000001ddb2                rtg_row_bytes.lto_priv.0
+                0x000000000001ddb6                rtg_bpp.lto_priv.0
+                0x000000000001ddb8                rtg_stride.lto_priv.0
+                0x000000000001ddbc                rtg_h.lto_priv.0
+                0x000000000001ddbe                rtg_w.lto_priv.0
+                0x000000000001ddc0                rtg_rp.lto_priv.0
+                0x000000000001ddc4                rtg_bm.lto_priv.0
+                0x000000000001ddc8                rtg_depth.lto_priv.0
+                0x000000000001ddca                rtg_on_board.lto_priv.0
+                0x000000000001ddcb                rtg_on_board_known.lto_priv.0
+                0x000000000001ddcc                fb_enc.lto_priv.0
+                0x000000000001de90                fb_cfg.lto_priv.0
+                0x000000000001deba                fb_rg.lto_priv.0
+                0x000000000001dec4                RtgCgxBase.lto_priv.0
+                0x000000000001dec8                RtgP96Base.lto_priv.0
+                0x000000000001decc                GfxBase
+ .bss           0x0000000000022044      0x10c /tmp/cczOnmSP.ltrans2.ltrans.o
+ *(.bss.*)
+ *(COMMON)
+                0x0000000000022150                __end = .
+                0x0000000000009070                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(httpd amiga)

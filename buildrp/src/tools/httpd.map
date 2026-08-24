@@ -1,0 +1,1476 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_httpd.dir/tool_diag.c.obj (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_httpd.dir/tool_diag.c.obj (ami_config_parse_ip6)
+../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                              CMakeFiles/tool_httpd.dir/httpfb.c.obj (rfb_pal_colours)
+../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                              CMakeFiles/tool_httpd.dir/httpfb.c.obj (rfb_word_geom)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_httpd.dir/httprtg.c.obj (TimerBase)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (__modsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                              CMakeFiles/tool_httpd.dir/httpfb.c.obj (memcmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                              ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj) (memmove)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              CMakeFiles/tool_httpd.dir/httpd.c.obj (__umodsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+                              CMakeFiles/tool_httpd.dir/iperfcore.c.obj (__muldi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                              CMakeFiles/tool_httpd.dir/iperfwire.c.obj (__udivdi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+                              CMakeFiles/tool_httpd.dir/iperfwire.c.obj (__umoddi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                              /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o) (__clz_tab)
+
+Discarded input sections
+
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_httpd.dir/httplock.c.obj
+ .text.httplock_reset
+                0x0000000000000000       0x34 CMakeFiles/tool_httpd.dir/httplock.c.obj
+ .text.http_ws_b64_decode
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/httpws.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_httpd.dir/httpsha1.c.obj
+ .text.http_term_raw
+                0x0000000000000000       0x10 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_term_mode_sent
+                0x0000000000000000        0x8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_term_stats_sent
+                0x0000000000000000        0x8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_fb_enabled
+                0x0000000000000000        0x8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.tool_sock_send_full
+                0x0000000000000000       0x54 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_getsockname
+                0x0000000000000000       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_gethostbyname
+                0x0000000000000000       0x14 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_getservbyname
+                0x0000000000000000       0x18 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_ntop
+                0x0000000000000000       0x20 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_freeaddrinfo
+                0x0000000000000000       0x14 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_getaddrinfo
+                0x0000000000000000       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_addr_any
+                0x0000000000000000       0x20 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_addr_v4
+                0x0000000000000000       0x34 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_resolve
+                0x0000000000000000       0x1c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_connect_timed
+                0x0000000000000000      0x174 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_connect_one
+                0x0000000000000000      0x1ac CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_connect_host
+                0x0000000000000000      0x1ac CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_arg_family
+                0x0000000000000000       0x34 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_port
+                0x0000000000000000       0xc4 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_fail_why
+                0x0000000000000000       0x50 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_fail
+                0x0000000000000000       0x2c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_input_open
+                0x0000000000000000       0x5c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_input_close
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_input_read
+                0x0000000000000000       0x54 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_output_write
+                0x0000000000000000       0x40 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.tool_budget_init
+                0x0000000000000000       0x18 CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.tool_budget_left
+                0x0000000000000000       0x20 CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.tool_budget_first
+                0x0000000000000000       0x6c CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.tool_budget_done
+                0x0000000000000000       0x2c CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.tool_budget_again
+                0x0000000000000000       0x40 CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+ .text.line_put
+                0x0000000000000000       0x38 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.line_num
+                0x0000000000000000       0x88 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_abort
+                0x0000000000000000       0x38 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_result_line
+                0x0000000000000000      0x1ac CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.fmt_fixed2.constprop.0.isra.0
+                0x0000000000000000      0x1ac CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text.iperf_dg_id
+                0x0000000000000000       0x10 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text.iperf_format_rate
+                0x0000000000000000       0x60 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text.iperf_format_bytes
+                0x0000000000000000       0x78 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text._nx_crypto_method_sha1_init
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+ .text._nx_crypto_method_sha1_cleanup
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+ .text._nx_crypto_method_sha1_operation
+                0x0000000000000000       0xcc CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+ .text.tool_say
+                0x0000000000000000       0x2c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_format_mac
+                0x0000000000000000       0x70 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_broadcast
+                0x0000000000000000        0xc CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_prefix_len
+                0x0000000000000000       0x14 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_net_error
+                0x0000000000000000       0x24 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_require_stack
+                0x0000000000000000       0x1c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text.tool_basename
+                0x0000000000000000       0x20 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .bss           0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.diag_copy
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stricmp
+                0x0000000000000000       0x58 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stricmp_n
+                0x0000000000000000       0x68 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_list_dir
+                0x0000000000000000      0x10c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_join_path.part.0
+                0x0000000000000000       0x78 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_join_path
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.diag_is_resident
+                0x0000000000000000       0x50 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_device_where
+                0x0000000000000000       0x74 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_device_probe
+                0x0000000000000000      0x138 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_wrap
+                0x0000000000000000      0x104 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.diag_report
+                0x0000000000000000       0x7c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_config_watch
+                0x0000000000000000       0x18 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_config_unwatch
+                0x0000000000000000       0x10 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_explain_interface_file
+                0x0000000000000000       0x40 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_explain_dhcp
+                0x0000000000000000       0x1c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_version
+                0x0000000000000000       0x98 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_is_ours
+                0x0000000000000000       0x60 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_release
+                0x0000000000000000       0x3c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_lookup
+                0x0000000000000000       0xa0 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_lookup_addr
+                0x0000000000000000       0xb4 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_name_servers
+                0x0000000000000000       0xb4 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_explain_foreign_stack
+                0x0000000000000000       0x30 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_query
+                0x0000000000000000       0x84 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_domain
+                0x0000000000000000       0x90 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_format_ip6
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_parse_ip6
+                0x0000000000000000       0x28 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_explain_no_netstatus
+                0x0000000000000000       0x3c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_netstatus_open
+                0x0000000000000000       0xb8 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_netstatus_close
+                0x0000000000000000       0x1c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_netstatus_query
+                0x0000000000000000       0x6c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_netstatus_control
+                0x0000000000000000       0x60 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_stack_start
+                0x0000000000000000       0x74 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text.tool_netstatus_system
+                0x0000000000000000       0x74 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_startup
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_shutdown
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_can_unload
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_get
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_ip
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_pool
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_config
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_count
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_up
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_down
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_stack_down
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_is_up
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_interface_start
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_ipv6_address_get
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_resolve
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.netstack_resolve_reverse
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text.tx_application_define
+                0x0000000000000000        0x4 CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+ .text          0x0000000000000000       0x58 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .data          0x0000000000000000        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .bss           0x0000000000000000        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.scan_item
+                0x0000000000000000       0xac ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_strlen
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_zero
+                0x0000000000000000       0x18 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_stricmp
+                0x0000000000000000       0x7c ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_join3
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_config_set_reporter
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem_file
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problems_wanted
+                0x0000000000000000       0x10 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem
+                0x0000000000000000       0x48 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_next_line
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_trim
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_strip_comment
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_unquote
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_tokenize
+                0x0000000000000000       0x40 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_next_pair
+                0x0000000000000000      0x118 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_ulong
+                0x0000000000000000       0xec ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_mac
+                0x0000000000000000       0xa0 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_bool
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_net_number
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text          0x0000000000000000        0x0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_cfg_parse_ip6_inner.part.0
+                0x0000000000000000      0x3e0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6
+                0x0000000000000000       0x20 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6_zone
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_format_ip6
+                0x0000000000000000      0x1d0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_format_ip6_zone
+                0x0000000000000000       0x90 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text          0x0000000000000000        0x0 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_unpackbits
+                0x0000000000000000       0xa8 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_encode_frame_planes
+                0x0000000000000000       0x34 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_encode_frame
+                0x0000000000000000       0x78 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.ami_sana2_open_once
+                0x0000000000000000       0x40 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.put_char
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc_count
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_stats
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_socket_delta
+                0x0000000000000000       0x54 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_open_delta
+                0x0000000000000000       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_log  0x0000000000000000       0x88 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_alloc
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_free
+                0x0000000000000000       0x1c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_timer_close
+                0x0000000000000000       0x60 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_eclock_rate
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_budget_clock
+                0x0000000000000000       0x28 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_millis_quick
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_set_open_hooks
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_address_change_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_address_change_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_second_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_second_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_shutdown_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_shutdown_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_open_device
+                0x0000000000000000       0xac ../common/libaminetxduo_common.a(compat.c.obj)
+ .debug_frame   0x0000000000000000       0x64 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_info    0x0000000000000000      0x1a8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_abbrev  0x0000000000000000      0x10c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_line    0x0000000000000000       0x9c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_str     0x0000000000000000      0x19c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+ .debug_frame   0x0000000000000000      0x234 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_info    0x0000000000000000      0x808 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_abbrev  0x0000000000000000      0x1b8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_loclists
+                0x0000000000000000      0xf48 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_rnglists
+                0x0000000000000000       0xd8 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line    0x0000000000000000      0xa34 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_str     0x0000000000000000      0x20c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+ .text          0x0000000000000000      0x5bc /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_frame   0x0000000000000000      0x220 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_info    0x0000000000000000      0x834 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_abbrev  0x0000000000000000      0x1e4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_loclists
+                0x0000000000000000      0xab4 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_aranges
+                0x0000000000000000       0x20 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_rnglists
+                0x0000000000000000       0x90 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_line    0x0000000000000000      0x928 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_str     0x0000000000000000      0x20c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_umoddi3.o)
+ .debug_info    0x0000000000000000       0xe0 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_abbrev  0x0000000000000000       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_aranges
+                0x0000000000000000       0x18 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line    0x0000000000000000       0x4c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_str     0x0000000000000000      0x170 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+ .debug_line_str
+                0x0000000000000000       0xec /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_httpd.dir/httpd.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httppath.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpif.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpframe.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httplock.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpws.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpsha1.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpterm.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httpfb.c.obj
+LOAD CMakeFiles/tool_httpd.dir/httprtg.c.obj
+LOAD CMakeFiles/tool_httpd.dir/toolsock.c.obj
+LOAD CMakeFiles/tool_httpd.dir/toolbudget.c.obj
+LOAD CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+LOAD CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+LOAD CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+LOAD CMakeFiles/tool_httpd.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_httpd.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../rfb/libaminetxduo_rfb.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000    0x1b468
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4     0x4dd4 CMakeFiles/tool_httpd.dir/httpd.c.obj
+                0x0000000000002668                main
+                0x0000000000004e84                tool_name
+ .text          0x0000000000004e88      0x3ac CMakeFiles/tool_httpd.dir/httppath.c.obj
+ .text          0x0000000000005234        0x8 CMakeFiles/tool_httpd.dir/httpif.c.obj
+ .text          0x000000000000523c       0x94 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+ .text          0x00000000000052d0      0x15c CMakeFiles/tool_httpd.dir/httpws.c.obj
+ .text          0x000000000000542c      0x390 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text          0x00000000000057bc      0x7e8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text          0x0000000000005fa4      0x470 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text          0x0000000000006414      0x310 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text          0x0000000000006724      0x15c CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text          0x0000000000006880      0x124 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text          0x00000000000069a4       0x40 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+                0x00000000000069a4                _nx_crypto_sha1_padding
+ .text          0x00000000000069e4      0x220 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+ .text          0x0000000000006c04      0x378 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000006f66                diag_device_dirs
+ .text          0x0000000000006f7c       0x48 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text          0x0000000000006fc4       0x44 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text          0x0000000000007008       0x50 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__divsi3.o)
+                0x0000000000007008                __modsi3
+                0x0000000000007014                __divsi3
+                0x0000000000007014                ldiv
+                0x0000000000007014                div
+ .text          0x0000000000007058       0x80 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                0x0000000000007058                memcmp
+ .text          0x00000000000070d8       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x00000000000070d8                memcpy
+ .text          0x0000000000007148      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                0x0000000000007148                memmove
+ .text          0x0000000000007248       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x0000000000007248                memset
+ .text          0x00000000000072bc       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x00000000000072bc                __mulsi3
+ .text          0x00000000000072e8       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                0x00000000000072e8                strlen
+ .text          0x00000000000072fc       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000072fc                __umodsi3
+                0x0000000000007308                __udivsi3
+                0x000000000000730e                __udivsi4
+ .text          0x0000000000007354       0x78 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_muldi3.o)
+                0x0000000000007354                __muldi3
+ .text          0x00000000000073cc      0x628 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_udivdi3.o)
+                0x00000000000073cc                __udivdi3
+ .text          0x00000000000079f4      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a(_clz.o)
+                0x00000000000079f4                __clz_tab
+ *(.text.main)
+ *(.text*)
+ .text.hs_len   0x0000000000007af4       0x10 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_append
+                0x0000000000007b04       0x38 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_append_num
+                0x0000000000007b3c       0x9c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_nicmp
+                0x0000000000007bd8       0x6c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_equal
+                0x0000000000007c44       0x4c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_stamp_secs
+                0x0000000000007c90       0x94 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_now
+                0x0000000000007d24       0x60 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_civil
+                0x0000000000007d84      0x130 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_two
+                0x0000000000007eb4       0x48 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_rfc1123
+                0x0000000000007efc      0x150 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_reason
+                0x000000000000804c      0x20c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_out
+                0x0000000000008258       0x44 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_out_num
+                0x000000000000829c       0x44 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_begin
+                0x00000000000082e0       0xb4 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_header
+                0x0000000000008394       0x3c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_dos_status
+                0x00000000000083d0       0x2c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_etag
+                0x00000000000083fc       0xf8 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_etag_of
+                0x00000000000084f4       0x74 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_kind
+                0x0000000000008568       0x5c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_mark
+                0x00000000000085c4       0x18 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_release
+                0x00000000000085dc       0x28 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_digits
+                0x0000000000008604       0x48 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_local
+                0x000000000000864c       0x20 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_allow_header
+                0x000000000000866c       0x58 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_chunk_sink
+                0x00000000000086c4       0x2c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_refuse_drain
+                0x00000000000086f0       0x7c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_url_of
+                0x000000000000876c       0xbc CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_failed
+                0x0000000000008828      0x10c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_href
+                0x0000000000008934       0xec CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_copy.part.0
+                0x0000000000008a20       0x20 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_finish_head
+                0x0000000000008a40       0x8c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_begin_stream
+                0x0000000000008acc       0x3c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_note_nsdecl
+                0x0000000000008b08       0x88 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_put_abandon
+                0x0000000000008b90       0x40 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_reset
+                0x0000000000008bd0      0x11c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_close
+                0x0000000000008cec       0xbc CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_name_cut
+                0x0000000000008da8       0x78 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_name_survives
+                0x0000000000008e20       0x60 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_pf_want
+                0x0000000000008e80       0x5c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_emit_chunk
+                0x0000000000008edc       0xac CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_sink_put
+                0x0000000000008f88       0x4c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_hostlen
+                0x0000000000008fd4       0x3c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_may_log
+                0x0000000000009010       0x20 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_log.part.0
+                0x0000000000009030       0x78 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_log
+                0x00000000000090a8       0x28 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_log_status
+                0x00000000000090d0       0x40 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_query_take.constprop.0
+                0x0000000000009110       0x68 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_parent.constprop.0
+                0x0000000000009178       0x7c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_header_num.constprop.0
+                0x00000000000091f4       0x44 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_options
+                0x0000000000009238       0x68 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_body_text
+                0x00000000000092a0       0x68 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_locked
+                0x0000000000009308       0x2c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_lock_allows
+                0x0000000000009334       0x48 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_lock_allows_tree
+                0x000000000000937c       0x48 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_lock_allows_parent
+                0x00000000000093c4       0x48 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_empty
+                0x000000000000940c       0x3c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_log.constprop.0
+                0x0000000000009448       0x24 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_copy.part.0.constprop.0
+                0x000000000000946c       0x28 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_spare_name.constprop.0
+                0x0000000000009494      0x138 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_append.constprop.0
+                0x00000000000095cc       0x40 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_error
+                0x000000000000960c      0x190 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_put
+                0x000000000000979c      0x21c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_unlock
+                0x00000000000099b8       0x80 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_may_write
+                0x0000000000009a38       0x60 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_mkcol
+                0x0000000000009a98      0x10c CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_begin_put
+                0x0000000000009ba4      0x1e8 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_consume_body
+                0x0000000000009d8c      0x198 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_app_page_get
+                0x0000000000009f24      0x220 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_dispatch.constprop.0
+                0x000000000000a144      0x9a4 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hs_append.constprop.1
+                0x000000000000aae8       0x40 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_answer
+                0x000000000000ab28       0xb4 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_activelock.constprop.0
+                0x000000000000abdc      0x198 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_proppatch
+                0x000000000000ad74      0x314 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_lock
+                0x000000000000b088      0x368 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_parse
+                0x000000000000b3f0      0xd68 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_propfind_entry
+                0x000000000000c158      0x664 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_if_lookup
+                0x000000000000c7bc       0x84 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_xml_tag
+                0x000000000000c840      0x4a8 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_sink_xml
+                0x000000000000cce8      0x2fc CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_delete
+                0x000000000000cfe4       0xb4 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_copy_stage
+                0x000000000000d098      0x188 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_walk_slice
+                0x000000000000d220      0x910 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_copy_or_move.part.0
+                0x000000000000db30      0x2dc CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_move
+                0x000000000000de0c       0x54 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_copy
+                0x000000000000de60       0x20 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_examine.constprop.0
+                0x000000000000de80       0xec CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_get
+                0x000000000000df6c      0x470 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.httpd_do_propfind
+                0x000000000000e3dc       0xf8 CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .text.hp_len   0x000000000000e4d4       0x10 CMakeFiles/tool_httpd.dir/httppath.c.obj
+ .text.hp_hex   0x000000000000e4e4       0x38 CMakeFiles/tool_httpd.dir/httppath.c.obj
+ .text.http_path_resolve
+                0x000000000000e51c      0x2fc CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e51c                http_path_resolve
+ .text.http_path_root
+                0x000000000000e818       0x58 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e818                http_path_root
+ .text.http_utf8_trim
+                0x000000000000e870       0x90 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e870                http_utf8_trim
+ .text.http_path_error
+                0x000000000000e900       0x20 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e900                http_path_error
+ .text.http_path_join
+                0x000000000000e920       0x9c CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e920                http_path_join
+ .text.http_path_up
+                0x000000000000e9bc       0x44 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000e9bc                http_path_up
+ .text.http_path_within
+                0x000000000000ea00       0x94 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000ea00                http_path_within
+ .text.http_url_escape
+                0x000000000000ea94       0xbc CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000ea94                http_url_escape
+ .text.http_xml_escape
+                0x000000000000eb50       0x9c CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000eb50                http_xml_escape
+ .text.http_content_type
+                0x000000000000ebec       0xb4 CMakeFiles/tool_httpd.dir/httppath.c.obj
+                0x000000000000ebec                http_content_type
+ .text.hi_same  0x000000000000eca0       0x2c CMakeFiles/tool_httpd.dir/httpif.c.obj
+ .text.hi_take  0x000000000000eccc       0x64 CMakeFiles/tool_httpd.dir/httpif.c.obj
+ .text.hi_nicmp
+                0x000000000000ed30       0x60 CMakeFiles/tool_httpd.dir/httpif.c.obj
+ .text.http_if_eval
+                0x000000000000ed90      0x284 CMakeFiles/tool_httpd.dir/httpif.c.obj
+                0x000000000000ed90                http_if_eval
+ .text.hf_token_is
+                0x000000000000f014       0x4c CMakeFiles/tool_httpd.dir/httpframe.c.obj
+ .text.hf_decimal
+                0x000000000000f060       0x74 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+ .text.http_frame_length
+                0x000000000000f0d4       0x98 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f0d4                http_frame_length
+ .text.http_frame_error
+                0x000000000000f16c       0x20 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f16c                http_frame_error
+ .text.http_frame_token_is
+                0x000000000000f18c       0x68 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f18c                http_frame_token_is
+ .text.http_frame_has_token
+                0x000000000000f1f4       0x84 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f1f4                http_frame_has_token
+ .text.http_frame_field_name
+                0x000000000000f278       0xb4 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f278                http_frame_field_name
+ .text.http_frame_etag_listed
+                0x000000000000f32c       0xe0 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f32c                http_frame_etag_listed
+ .text.http_frame_version
+                0x000000000000f40c       0x50 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f40c                http_frame_version
+ .text.http_frame_list_add
+                0x000000000000f45c       0x90 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f45c                http_frame_list_add
+ .text.http_frame_range
+                0x000000000000f4ec      0x10c CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f4ec                http_frame_range
+ .text.http_frame_coding
+                0x000000000000f5f8       0x90 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f5f8                http_frame_coding
+ .text.http_chunk_start
+                0x000000000000f688       0x18 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f688                http_chunk_start
+ .text.http_chunk_off
+                0x000000000000f6a0       0x14 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f6a0                http_chunk_off
+ .text.http_chunk_feed
+                0x000000000000f6b4      0x1b4 CMakeFiles/tool_httpd.dir/httpframe.c.obj
+                0x000000000000f6b4                http_chunk_feed
+ .text.hl_equal
+                0x000000000000f868       0x34 CMakeFiles/tool_httpd.dir/httplock.c.obj
+ .text.httplock_expire
+                0x000000000000f89c       0x28 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000f89c                httplock_expire
+ .text.httplock_on
+                0x000000000000f8c4       0x64 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000f8c4                httplock_on
+ .text.httplock_exact
+                0x000000000000f928       0x3c CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000f928                httplock_exact
+ .text.httplock_by_token
+                0x000000000000f964       0x68 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000f964                httplock_by_token
+ .text.httplock_free_slot
+                0x000000000000f9cc       0x3c CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000f9cc                httplock_free_slot
+ .text.httplock_drop
+                0x000000000000fa08       0x3c CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000fa08                httplock_drop
+ .text.httplock_covers
+                0x000000000000fa44       0x44 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000fa44                httplock_covers
+ .text.httplock_held
+                0x000000000000fa88       0x4c CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000fa88                httplock_held
+ .text.httplock_allows
+                0x000000000000fad4       0x24 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000fad4                httplock_allows
+ .text.httplock_allows_tree
+                0x000000000000faf8       0x80 CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000faf8                httplock_allows_tree
+ .text.httplock_allows_parent
+                0x000000000000fb78       0x7c CMakeFiles/tool_httpd.dir/httplock.c.obj
+                0x000000000000fb78                httplock_allows_parent
+ .text.ws_utf8_piece
+                0x000000000000fbf4       0xd8 CMakeFiles/tool_httpd.dir/httpws.c.obj
+ .text.http_ws_b64_decode.part.0
+                0x000000000000fccc       0xc4 CMakeFiles/tool_httpd.dir/httpws.c.obj
+ .text.http_ws_b64_encode
+                0x000000000000fd90       0xd4 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x000000000000fd90                http_ws_b64_encode
+ .text.http_ws_accept
+                0x000000000000fe64      0x134 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x000000000000fe64                http_ws_accept
+ .text.http_ws_reset
+                0x000000000000ff98       0x3c CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x000000000000ff98                http_ws_reset
+ .text.http_ws_feed
+                0x000000000000ffd4      0x5fc CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x000000000000ffd4                http_ws_feed
+ .text.http_ws_close_reason
+                0x00000000000105d0       0x2c CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x00000000000105d0                http_ws_close_reason
+ .text.http_ws_head
+                0x00000000000105fc       0xc4 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x00000000000105fc                http_ws_head
+ .text.http_ws_close_frame
+                0x00000000000106c0       0x88 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x00000000000106c0                http_ws_close_frame
+ .text.http_ws_live_stale
+                0x0000000000010748       0x38 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x0000000000010748                http_ws_live_stale
+ .text.http_ws_live_ping_due
+                0x0000000000010780       0x38 CMakeFiles/tool_httpd.dir/httpws.c.obj
+                0x0000000000010780                http_ws_live_ping_due
+ .text.http_ws_sha1
+                0x00000000000107b8       0x48 CMakeFiles/tool_httpd.dir/httpsha1.c.obj
+                0x00000000000107b8                http_ws_sha1
+ .text.ring_put
+                0x0000000000010800       0x70 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.ring_get
+                0x0000000000010870       0x6c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_reply
+                0x00000000000108dc       0x30 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_packet_current
+                0x000000000001090c       0x54 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_ticks
+                0x0000000000010960       0x38 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_handle
+                0x0000000000010998       0x68 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_runner_main
+                0x0000000000010a00       0xa8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.sock_after
+                0x0000000000010aa8       0x3c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.sock_control
+                0x0000000000010ae4       0x60 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_num
+                0x0000000000010b44       0x78 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_st_put
+                0x0000000000010bbc       0x3c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_seq_flush
+                0x0000000000010bf8       0x54 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_handle_discard
+                0x0000000000010c4c       0x20 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.sock_close
+                0x0000000000010c6c       0x4c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.sock_number.constprop.0
+                0x0000000000010cb8       0x60 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_seq_has.constprop.0
+                0x0000000000010d18       0x78 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_readable
+                0x0000000000010d90       0x64 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_char_ready
+                0x0000000000010df4       0x20 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_reply.constprop.0
+                0x0000000000010e14       0x30 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_wait_service
+                0x0000000000010e44       0x58 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_retry
+                0x0000000000010e9c      0x2b8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_kick
+                0x0000000000011154       0x18 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_inject
+                0x000000000001116c       0x3c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.term_task_alive
+                0x00000000000111a8       0x60 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_term_trace
+                0x0000000000011208       0x10 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011208                http_term_trace
+ .text.http_term_sigmask
+                0x0000000000011218       0x1c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011218                http_term_sigmask
+ .text.http_term_init
+                0x0000000000011234       0xbc CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011234                http_term_init
+ .text.http_term_announce
+                0x00000000000112f0       0xe4 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000112f0                http_term_announce
+ .text.http_term_available
+                0x00000000000113d4       0x28 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000113d4                http_term_available
+ .text.http_term_running
+                0x00000000000113fc       0x28 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000113fc                http_term_running
+ .text.http_term_start
+                0x0000000000011424      0x2d0 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011424                http_term_start
+ .text.http_term_mode_word
+                0x00000000000116f4       0x2c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000116f4                http_term_mode_word
+ .text.http_term_stats_word
+                0x0000000000011720       0x6c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011720                http_term_stats_word
+ .text.http_term_resize
+                0x000000000001178c       0x70 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x000000000001178c                http_term_resize
+ .text.http_term_write
+                0x00000000000117fc       0x50 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000117fc                http_term_write
+ .text.sock_feed_shell
+                0x000000000001184c       0x50 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.sock_feed_first
+                0x000000000001189c       0xd0 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_term_pending
+                0x000000000001196c       0x14 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x000000000001196c                http_term_pending
+ .text.http_term_read
+                0x0000000000011980       0x48 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011980                http_term_read
+ .text.http_term_eof
+                0x00000000000119c8       0x18 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000119c8                http_term_eof
+ .text.http_term_break
+                0x00000000000119e0       0x44 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000119e0                http_term_break
+ .text.http_term_service
+                0x0000000000011a24      0x644 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000011a24                http_term_service
+ .text.sock_sink
+                0x0000000000012068      0x248 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .text.http_term_rc
+                0x00000000000122b0        0x8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000122b0                http_term_rc
+ .text.http_term_err
+                0x00000000000122b8        0x8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000122b8                http_term_err
+ .text.http_term_stop
+                0x00000000000122c0       0x88 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000122c0                http_term_stop
+ .text.http_term_shutdown
+                0x0000000000012348      0x150 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012348                http_term_shutdown
+ .text.http_term_sock_begin
+                0x0000000000012498       0x70 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012498                http_term_sock_begin
+ .text.http_term_sock_wants_read
+                0x0000000000012508       0x30 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012508                http_term_sock_wants_read
+ .text.http_term_sock_wants_write
+                0x0000000000012538       0x74 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012538                http_term_sock_wants_write
+ .text.http_term_sock_read
+                0x00000000000125ac       0xcc CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x00000000000125ac                http_term_sock_read
+ .text.http_term_sock_write
+                0x0000000000012678      0x1f8 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012678                http_term_sock_write
+ .text.http_term_sock_stale
+                0x0000000000012870       0x2c CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012870                http_term_sock_stale
+ .text.http_term_sock_idle
+                0x000000000001289c       0x78 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x000000000001289c                http_term_sock_idle
+ .text.http_term_sock_evict
+                0x0000000000012914       0xa4 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+                0x0000000000012914                http_term_sock_evict
+ .text.fb_say   0x00000000000129b8       0x28 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_put_num
+                0x00000000000129e0       0x6c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_say3  0x0000000000012a4c       0x74 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_ticks
+                0x0000000000012ac0       0x38 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_listed
+                0x0000000000012af8       0x24 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_lock_front
+                0x0000000000012b1c       0xc8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_input_close
+                0x0000000000012be4       0x5c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_close_libraries
+                0x0000000000012c40       0x44 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_display_units
+                0x0000000000012c84      0x1cc CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_forget_shadow
+                0x0000000000012e50       0x6c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_ask_resync
+                0x0000000000012ebc       0x70 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_frame_payload
+                0x0000000000012f2c       0x60 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_free_buffers
+                0x0000000000012f8c       0x78 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_take_buffers
+                0x0000000000013004      0x20c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_colours
+                0x0000000000013210       0x3c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_write_event
+                0x000000000001324c       0x54 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_inject_buttons
+                0x00000000000132a0       0xa4 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_close_saying
+                0x0000000000013344       0x44 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_control.part.0
+                0x0000000000013388       0x60 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_close_session
+                0x00000000000133e8       0x64 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_sink  0x000000000001344c      0x2b8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_geometry_of
+                0x0000000000013704      0x348 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.fb_examine
+                0x0000000000013a4c      0x1c0 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .text.http_fb_fault
+                0x0000000000013c0c        0x8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013c0c                http_fb_fault
+ .text.http_fb_geometry
+                0x0000000000013c14       0x38 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013c14                http_fb_geometry
+ .text.http_fb_open
+                0x0000000000013c4c      0x1b4 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013c4c                http_fb_open
+ .text.http_fb_buttons_held
+                0x0000000000013e00       0x1c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013e00                http_fb_buttons_held
+ .text.http_fb_available
+                0x0000000000013e1c       0x1c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013e1c                http_fb_available
+ .text.http_fb_start
+                0x0000000000013e38      0x2e8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000013e38                http_fb_start
+ .text.http_fb_stop
+                0x0000000000014120       0xe8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000014120                http_fb_stop
+ .text.http_fb_close
+                0x0000000000014208       0x1c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000014208                http_fb_close
+ .text.http_fb_why
+                0x0000000000014224        0x8 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000014224                http_fb_why
+ .text.http_fb_stats
+                0x000000000001422c       0x48 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x000000000001422c                http_fb_stats
+ .text.http_fb_wants_write
+                0x0000000000014274       0x38 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000014274                http_fb_wants_write
+ .text.http_fb_read
+                0x00000000000142ac       0xa0 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x00000000000142ac                http_fb_read
+ .text.http_fb_slice
+                0x000000000001434c      0xd54 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x000000000001434c                http_fb_slice
+ .text.http_fb_write
+                0x00000000000150a0      0x18c CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x00000000000150a0                http_fb_write
+ .text.http_fb_stale
+                0x000000000001522c       0x34 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x000000000001522c                http_fb_stale
+ .text.http_fb_idle
+                0x0000000000015260       0x88 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x0000000000015260                http_fb_idle
+ .text.http_fb_evict
+                0x00000000000152e8       0xc0 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x00000000000152e8                http_fb_evict
+ .text.rtg_p96_attr
+                0x00000000000153a8       0x18 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_cgx_attr
+                0x00000000000153c0       0x18 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_fmt_p96
+                0x00000000000153d8       0x40 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_fmt_cgx
+                0x0000000000015418       0x40 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_off_free
+                0x0000000000015458       0x3c CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_put  0x0000000000015494       0x2c CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_put_num
+                0x00000000000154c0       0x6c CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_cvt_row
+                0x000000000001552c      0x148 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_read_cgx_lock
+                0x0000000000015674      0x144 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_read_p96_lock
+                0x00000000000157b8      0x120 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.rtg_read_via
+                0x00000000000158d8      0x174 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .text.http_rtg_open
+                0x0000000000015a4c       0x60 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015a4c                http_rtg_open
+ .text.http_rtg_present
+                0x0000000000015aac       0x1c CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015aac                http_rtg_present
+ .text.http_rtg_owns
+                0x0000000000015ac8       0x50 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015ac8                http_rtg_owns
+ .text.http_rtg_describe
+                0x0000000000015b18      0x1a0 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015b18                http_rtg_describe
+ .text.http_rtg_detach
+                0x0000000000015cb8       0x58 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015cb8                http_rtg_detach
+ .text.http_rtg_close
+                0x0000000000015d10       0x44 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015d10                http_rtg_close
+ .text.http_rtg_attach
+                0x0000000000015d54      0x690 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x0000000000015d54                http_rtg_attach
+ .text.http_rtg_attached_to
+                0x00000000000163e4       0x28 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x00000000000163e4                http_rtg_attached_to
+ .text.http_rtg_read
+                0x000000000001640c       0x90 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x000000000001640c                http_rtg_read
+ .text.http_rtg_word
+                0x000000000001649c      0x248 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+                0x000000000001649c                http_rtg_word
+ .text.tool_fd_zero
+                0x00000000000166e4       0x18 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000166e4                tool_fd_zero
+ .text.tool_fd_add
+                0x00000000000166fc       0x30 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000166fc                tool_fd_add
+ .text.tool_fd_isset
+                0x000000000001672c       0x30 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x000000000001672c                tool_fd_isset
+ .text.tool_socket_open
+                0x000000000001675c       0x48 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x000000000001675c                tool_socket_open
+ .text.tool_sock_socket
+                0x00000000000167a4       0x20 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000167a4                tool_sock_socket
+ .text.tool_sock_bind
+                0x00000000000167c4       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000167c4                tool_sock_bind
+ .text.tool_sock_listen
+                0x00000000000167e8       0x18 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000167e8                tool_sock_listen
+ .text.tool_sock_accept
+                0x0000000000016800       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016800                tool_sock_accept
+ .text.tool_sock_connect
+                0x0000000000016824       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016824                tool_sock_connect
+ .text.tool_sock_sendto
+                0x0000000000016848       0x30 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016848                tool_sock_sendto
+ .text.tool_sock_send
+                0x0000000000016878       0x20 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016878                tool_sock_send
+ .text.tool_sock_recvfrom
+                0x0000000000016898       0x34 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016898                tool_sock_recvfrom
+ .text.tool_sock_recv
+                0x00000000000168cc       0x20 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000168cc                tool_sock_recv
+ .text.tool_sock_shutdown
+                0x00000000000168ec       0x18 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000168ec                tool_sock_shutdown
+ .text.tool_sock_setsockopt
+                0x0000000000016904       0x28 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016904                tool_sock_setsockopt
+ .text.tool_sock_getsockopt
+                0x000000000001692c       0x28 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x000000000001692c                tool_sock_getsockopt
+ .text.tool_sock_ioctl
+                0x0000000000016954       0x1c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016954                tool_sock_ioctl
+ .text.tool_sock_close
+                0x0000000000016970       0x14 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016970                tool_sock_close
+ .text.tool_sock_select_sigs
+                0x0000000000016984       0x28 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016984                tool_sock_select_sigs
+ .text.tool_sock_select
+                0x00000000000169ac       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000169ac                tool_sock_select
+ .text.tool_sock_errno
+                0x00000000000169d0       0x10 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000169d0                tool_sock_errno
+ .text.tool_sock_have_lvo
+                0x00000000000169e0       0x24 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000169e0                tool_sock_have_lvo
+ .text.tool_sock_have_ipv6
+                0x0000000000016a04       0x30 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016a04                tool_sock_have_ipv6
+ .text.tool_no_ipv6
+                0x0000000000016a34       0x60 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_addr_v4
+                0x0000000000016a94       0x2c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016a94                tool_addr_v4
+ .text.tool_sock_addr
+                0x0000000000016ac0       0x68 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016ac0                tool_sock_addr
+ .text.tool_sock_addr_get
+                0x0000000000016b28       0x50 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016b28                tool_sock_addr_get
+ .text.tool_sock_addr_port
+                0x0000000000016b78        0xc CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016b78                tool_sock_addr_port
+ .text.tool_addr_same
+                0x0000000000016b84       0x40 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016b84                tool_addr_same
+ .text.tool_gai_list
+                0x0000000000016bc4       0xf0 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .text.tool_sock_addr_same
+                0x0000000000016cb4       0x68 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016cb4                tool_sock_addr_same
+ .text.tool_addr_text
+                0x0000000000016d1c       0x78 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016d1c                tool_addr_text
+ .text.tool_sock_addr_text
+                0x0000000000016d94       0x58 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016d94                tool_sock_addr_text
+ .text.tool_host_unbracket
+                0x0000000000016dec       0x58 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016dec                tool_host_unbracket
+ .text.tool_sock_family_absent
+                0x0000000000016e44       0x44 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016e44                tool_sock_family_absent
+ .text.tool_sock_say_no_family
+                0x0000000000016e88       0x3c CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016e88                tool_sock_say_no_family
+ .text.tool_sock_resolve_list
+                0x0000000000016ec4      0x220 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000016ec4                tool_sock_resolve_list
+ .text.tool_sock_resolve_af
+                0x00000000000170e4       0x44 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x00000000000170e4                tool_sock_resolve_af
+ .text.tool_sock_errstr
+                0x0000000000017128      0x170 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+                0x0000000000017128                tool_sock_errstr
+ .text.iperf_open_client
+                0x0000000000017298      0x140 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_open_server
+                0x00000000000173d8      0x174 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_wait
+                0x000000000001754c       0x6c CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_count
+                0x00000000000175b8       0x30 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_target_met
+                0x00000000000175e8       0x44 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_clock_start
+                0x000000000001762c       0x40 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_wait_send.isra.0
+                0x000000000001766c       0x38 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .text.iperf_plan_init
+                0x00000000000176a4       0x24 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x00000000000176a4                iperf_plan_init
+ .text.iperf_plan_check
+                0x00000000000176c8       0x50 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x00000000000176c8                iperf_plan_check
+ .text.iperf_dir_name
+                0x0000000000017718       0x24 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x0000000000017718                iperf_dir_name
+ .text.iperf_begin
+                0x000000000001773c      0x128 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x000000000001773c                iperf_begin
+ .text.iperf_slice
+                0x0000000000017864      0x83c CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x0000000000017864                iperf_slice
+ .text.iperf_end
+                0x00000000000180a0       0xac CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+                0x00000000000180a0                iperf_end
+ .text.wire_put32
+                0x000000000001814c       0x2c CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text.wire_get32
+                0x0000000000018178       0x2c CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+ .text.iperf_pattern_fill
+                0x00000000000181a4       0x40 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x00000000000181a4                iperf_pattern_fill
+ .text.iperf_dg_put
+                0x00000000000181e4       0x44 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x00000000000181e4                iperf_dg_put
+ .text.iperf_dg_get
+                0x0000000000018228       0x28 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x0000000000018228                iperf_dg_get
+ .text.iperf_report_put
+                0x0000000000018250       0x94 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x0000000000018250                iperf_report_put
+ .text.iperf_report_get
+                0x00000000000182e4       0xa0 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x00000000000182e4                iperf_report_get
+ .text.iperf_add64
+                0x0000000000018384       0x1c CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x0000000000018384                iperf_add64
+ .text.iperf_limits_check
+                0x00000000000183a0       0x74 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x00000000000183a0                iperf_limits_check
+ .text.iperf_slice_budget
+                0x0000000000018414       0x98 CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x0000000000018414                iperf_slice_budget
+ .text.iperf_bits_per_sec
+                0x00000000000184ac       0x7c CMakeFiles/tool_httpd.dir/iperfwire.c.obj
+                0x00000000000184ac                iperf_bits_per_sec
+ .text._nx_crypto_sha1_initialize
+                0x0000000000018528       0x44 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+                0x0000000000018528                _nx_crypto_sha1_initialize
+ .text._nx_crypto_sha1_process_buffer
+                0x000000000001856c      0x1a8 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+                0x000000000001856c                _nx_crypto_sha1_process_buffer
+ .text._nx_crypto_sha1_update
+                0x0000000000018714       0xdc CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+                0x0000000000018714                _nx_crypto_sha1_update
+ .text._nx_crypto_sha1_digest_calculate
+                0x00000000000187f0      0x124 CMakeFiles/tool_httpd.dir/__/__/third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c.obj
+                0x00000000000187f0                _nx_crypto_sha1_digest_calculate
+ .text.tool_printf
+                0x0000000000018914       0x1c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x0000000000018914                tool_printf
+ .text.tool_error
+                0x0000000000018930       0x7c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x0000000000018930                tool_error
+ .text.tool_fault
+                0x00000000000189ac       0x20 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x00000000000189ac                tool_fault
+ .text.tool_no_ipv6_note
+                0x00000000000189cc       0x10 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x00000000000189cc                tool_no_ipv6_note
+ .text.tool_break_arm
+                0x00000000000189dc       0x18 CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x00000000000189dc                tool_break_arm
+ .text.tool_break
+                0x00000000000189f4       0x3c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x00000000000189f4                tool_break
+ .text.tool_delay_ticks
+                0x0000000000018a30       0x3c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x0000000000018a30                tool_delay_ticks
+ .text.tool_from_workbench
+                0x0000000000018a6c       0x1c CMakeFiles/tool_httpd.dir/tool_util.c.obj
+                0x0000000000018a6c                tool_from_workbench
+ .text.tool_exists
+                0x0000000000018a88       0x2c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018a88                tool_exists
+ .text.tool_copy_string
+                0x0000000000018ab4       0x34 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018ab4                tool_copy_string
+ .text.tool_explain_resolve
+                0x0000000000018ae8       0x40 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018ae8                tool_explain_resolve
+ .text.tool_stack_library_running
+                0x0000000000018b28       0x60 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018b28                tool_stack_library_running
+ .text.tool_explain_no_stack
+                0x0000000000018b88       0x48 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018b88                tool_explain_no_stack
+ .text.tool_stack_installed
+                0x0000000000018bd0       0x1c CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018bd0                tool_stack_installed
+ .text.tool_usage
+                0x0000000000018bec       0x30 CMakeFiles/tool_httpd.dir/tool_diag.c.obj
+                0x0000000000018bec                tool_usage
+ .text.split_dotted.part.0
+                0x0000000000018c1c       0xb4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_copy_string
+                0x0000000000018cd0       0x34 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000018cd0                ami_cfg_copy_string
+ .text.ami_config_parse_ip
+                0x0000000000018d04       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000018d04                ami_config_parse_ip
+ .text.ami_config_format_ip
+                0x0000000000018d58       0xb8 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000018d58                ami_config_format_ip
+ .text.rfb_geom_ok
+                0x0000000000018e10       0x94 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_put8
+                0x0000000000018ea4       0x28 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_put16
+                0x0000000000018ecc       0x48 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_run_differs
+                0x0000000000018f14       0x4c ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_blk_match
+                0x0000000000018f60      0x120 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+ .text.rfb_packbits
+                0x0000000000019080       0xf4 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x0000000000019080                rfb_packbits
+ .text.rfb_planes
+                0x0000000000019174       0x24 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x0000000000019174                rfb_planes
+ .text.rfb_pal_colours
+                0x0000000000019198       0x54 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x0000000000019198                rfb_pal_colours
+ .text.rfb_shadow_size
+                0x00000000000191ec       0x40 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x00000000000191ec                rfb_shadow_size
+ .text.rfb_scratch_size
+                0x000000000001922c      0x140 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x000000000001922c                rfb_scratch_size
+ .text.rfb_worst_case_frame
+                0x000000000001936c       0xb8 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x000000000001936c                rfb_worst_case_frame
+ .text.rfb_scroll_defaults
+                0x0000000000019424       0x78 ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x0000000000019424                rfb_scroll_defaults
+ .text.rfb_encoder_init
+                0x000000000001949c      0x29c ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x000000000001949c                rfb_encoder_init
+ .text.rfb_encode_band
+                0x0000000000019738     0x118c ../rfb/libaminetxduo_rfb.a(rfb_encode.c.obj)
+                0x0000000000019738                rfb_encode_band
+ .text.put_num  0x000000000001a8c4       0x74 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text.skip_spaces
+                0x000000000001a938       0x30 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text.take_keyword
+                0x000000000001a968       0x54 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text.take_int
+                0x000000000001a9bc       0x9c ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text.put_signed
+                0x000000000001aa58       0x60 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+ .text.rfb_word_geom
+                0x000000000001aab8      0x19c ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                0x000000000001aab8                rfb_word_geom
+ .text.rfb_word_pal
+                0x000000000001ac54       0xa4 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                0x000000000001ac54                rfb_word_pal
+ .text.rfb_word_ptr
+                0x000000000001acf8      0x2c0 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                0x000000000001acf8                rfb_word_ptr
+ .text.rfb_word_parse
+                0x000000000001afb8      0x1d0 ../rfb/libaminetxduo_rfb.a(rfb_words.c.obj)
+                0x000000000001afb8                rfb_word_parse
+ .text.ami_timer_lock_init
+                0x000000000001b188       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc_flags
+                0x000000000001b1c4       0x64 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000001b1c4                ami_alloc_flags
+ .text.ami_alloc
+                0x000000000001b228       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000001b228                ami_alloc
+ .text.ami_free
+                0x000000000001b23c       0x34 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000001b23c                ami_free
+ .text.ami_millis
+                0x000000000001b270      0x1f8 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000001b270                ami_millis
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x000000000001b468                ___datadata_relocs = .
+                0x000000000001b468                __etext = .
+                0x000000000001b468                ___text_size = SIZEOF (.text)
+                0x000000000001b468                . = ALIGN (0x0)
+
+.data           0x000000000001b468       0x44
+                0x000000000001b468                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ .data          0x000000000001b468        0xc CMakeFiles/tool_httpd.dir/httpd.c.obj
+ .data          0x000000000001b474        0x8 CMakeFiles/tool_httpd.dir/httpsha1.c.obj
+                0x000000000001b474                _nx_crypto_memcpy_ptr
+                0x000000000001b478                _nx_crypto_memset_ptr
+ .data          0x000000000001b47c        0xc CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .data          0x000000000001b488       0x18 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+ .data          0x000000000001b4a0        0xc CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x0000000000023466                ___a4_init = 0x7ffe
+                0x000000000001b4ac                __edata = .
+                0x0000000000000044                ___data_size = SIZEOF (.data)
+
+.bss            0x000000000001b4ac     0x908c
+                0x000000000001b4ac                __bss_start = .
+ *(.bss)
+ .bss           0x000000000001b4ac       0x10 CMakeFiles/tool_httpd.dir/tool_startup.S.obj
+                0x000000000001b4ac                SysBase
+                0x000000000001b4b0                DOSBase
+                0x000000000001b4b4                _WBenchMsg
+ .bss           0x000000000001b4bc     0x416c CMakeFiles/tool_httpd.dir/httpd.c.obj
+                0x000000000001b4bc                LocaleBase
+ .bss           0x000000000001f628      0xe50 CMakeFiles/tool_httpd.dir/httplock.c.obj
+ .bss           0x0000000000020478      0x130 CMakeFiles/tool_httpd.dir/httpterm.c.obj
+ .bss           0x00000000000205a8     0x3e24 CMakeFiles/tool_httpd.dir/httpfb.c.obj
+                0x00000000000205a8                IntuitionBase
+                0x00000000000205ac                GfxBase
+ .bss           0x00000000000243cc       0x44 CMakeFiles/tool_httpd.dir/httprtg.c.obj
+ .bss           0x0000000000024410       0x40 CMakeFiles/tool_httpd.dir/toolsock.c.obj
+ .bss           0x0000000000024450        0x4 CMakeFiles/tool_httpd.dir/iperfcore.c.obj
+ .bss           0x0000000000024454       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000024454                TimerBase
+ *(.bss.*)
+ *(COMMON)
+                0x0000000000024538                __end = .
+                0x000000000000908c                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(httpd amiga)

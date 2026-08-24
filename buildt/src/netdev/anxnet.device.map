@@ -1,0 +1,231 @@
+Archive member included to satisfy reference by file (symbol)
+
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              /tmp/ccsv50bF.ltrans0.ltrans.o (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              /tmp/ccsv50bF.ltrans0.ltrans.o (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              /tmp/ccsv50bF.ltrans0.ltrans.o (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              /tmp/ccsv50bF.ltrans0.ltrans.o (__umodsi3)
+
+Allocating common symbols
+Common symbol       size              file
+
+__gnu_lto_slim      0x1               CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.c.obj
+
+Discarded input sections
+
+ .text          0x0000000000000000        0x0 CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.c.obj
+ .bss           0x0000000000000000        0x0 CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.c.obj
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/anxnet_device.dir/netdev_device.c.obj
+LOAD /tmp/ccsv50bF.ltrans0.ltrans.o
+LOAD CMakeFiles/anxnet_device.dir/netdev_queue.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_cmds.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_event.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_watchdog.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_mcast.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_bus.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_cards.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_pcmcia.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_isapnp.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_diag.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_mcaf.c.obj
+LOAD CMakeFiles/anxnet_device.dir/netdev_macgen.c.obj
+LOAD CMakeFiles/anxnet_device.dir/dp8390.c.obj
+LOAD CMakeFiles/anxnet_device.dir/ne2000.c.obj
+LOAD CMakeFiles/anxnet_device.dir/ed.c.obj
+LOAD CMakeFiles/anxnet_device.dir/lance.c.obj
+LOAD CMakeFiles/anxnet_device.dir/el3.c.obj
+LOAD CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.S.obj
+LOAD CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.c.obj
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x77f8
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000        0x0 CMakeFiles/anxnet_device.dir/netdev_device.c.obj (symbol from plugin)
+                0x0000000000000000                netdev_tx_pump
+                0x0000000000000000                netdev_pcmcia_detached
+                0x0000000000000000                netdev_interrupt
+                0x0000000000000000                netdev_online
+                0x0000000000000000                netdev_hook_call
+                0x0000000000000000                ExpansionBase
+                0x0000000000000000                netdev_offline
+                0x0000000000000000                netdev_copy_call
+                0x0000000000000000                netdev_reply
+                0x0000000000000000                SysBase
+                0x0000000000000000                netdev_tx_direct
+                0x0000000000000000                netdev_mac_fingerprint
+                0x0000000000000000                netdev_pcmcia_reattach
+                0x0000000000000000                netdev_rebuild_filter
+                0x0000000000000000                netdev_drop_writes
+ .text          0x0000000000000000     0x74d0 /tmp/ccsv50bF.ltrans0.ltrans.o
+                0x0000000000000000                netdev_entry
+                0x0000000000007020                netdev_romtag
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_queue.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_queue_tail
+                0x00000000000074d0                netdev_queue_head
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_cmds.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_perform
+                0x00000000000074d0                netdev_abort
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_event.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_filter_ok
+                0x00000000000074d0                netdev_event_wait
+                0x00000000000074d0                netdev_event
+                0x00000000000074d0                netdev_event_rescan
+                0x00000000000074d0                netdev_payload
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_watchdog.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_tx_watchdog_tick
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_mcast.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_mcast_range_wide
+                0x00000000000074d0                netdev_mcast_del
+                0x00000000000074d0                netdev_mcast_range_apply
+                0x00000000000074d0                netdev_mcast_add
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_bus.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_bus_regmap
+                0x00000000000074d0                netdev_bus_generic
+                0x00000000000074d0                netdev_bus_setup
+                0x00000000000074d0                netdev_bus_set_getodd
+                0x00000000000074d0                netdev_bus_split
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_cards.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_cards
+                0x00000000000074d0                netdev_card_count
+                0x00000000000074d0                netdev_nic_ops_for
+                0x00000000000074d0                netdev_card_by_cis
+                0x00000000000074d0                netdev_card_by_name
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_pcmcia.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_pcmcia_fingerprint
+                0x00000000000074d0                netdev_pcmcia_release
+                0x00000000000074d0                netdev_pcmcia_is_unit
+                0x00000000000074d0                netdev_pcmcia_cancel_resume
+                0x00000000000074d0                netdev_pcmcia_available
+                0x00000000000074d0                CardResource
+                0x00000000000074d0                netdev_pcmcia_bind
+                0x00000000000074d0                netdev_pcmcia_claim
+                0x00000000000074d0                netdev_mac_cis_node_id
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_isapnp.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_isapnp_configure
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_diag.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_diag_counts
+                0x00000000000074d0                netdev_diag_reset
+                0x00000000000074d0                netdev_diag_unpublish
+                0x00000000000074d0                netdev_diag_publish
+                0x00000000000074d0                netdev_diag_card
+                0x00000000000074d0                netdev_diag_note
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_mcaf.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_mar_all
+                0x00000000000074d0                netdev_mar_clear
+                0x00000000000074d0                netdev_mar_set
+                0x00000000000074d0                netdev_ether_crc32_be
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/netdev_macgen.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_mac_derive
+                0x00000000000074d0                netdev_mac_usable
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/dp8390.c.obj (symbol from plugin)
+                0x00000000000074d0                dp8390_intr
+                0x00000000000074d0                dp8390_config
+                0x00000000000074d0                dp8390_halt
+                0x00000000000074d0                dp8390_tx
+                0x00000000000074d0                dp8390_reset
+                0x00000000000074d0                dp8390_init
+                0x00000000000074d0                dp8390_setfilter
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/ne2000.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_nic_ne2000
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/ed.c.obj (symbol from plugin)
+                0x00000000000074d0                netdev_nic_ed
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/lance.c.obj (symbol from plugin)
+                0x00000000000074d0                lance_intr
+                0x00000000000074d0                lance_attach
+                0x00000000000074d0                lance_halt
+                0x00000000000074d0                lance_setfilter
+                0x00000000000074d0                lance_init
+                0x00000000000074d0                lance_reset
+                0x00000000000074d0                netdev_nic_lance
+                0x00000000000074d0                lance_tx
+ .text          0x00000000000074d0        0x0 CMakeFiles/anxnet_device.dir/el3.c.obj (symbol from plugin)
+                0x00000000000074d0                el3_tx
+                0x00000000000074d0                netdev_nic_el3
+                0x00000000000074d0                el3_attach
+                0x00000000000074d0                el3_init
+                0x00000000000074d0                el3_drain_tx_status
+                0x00000000000074d0                el3_reset
+                0x00000000000074d0                el3_halt
+                0x00000000000074d0                el3_setfilter
+                0x00000000000074d0                el3_answers
+                0x00000000000074d0                el3_intr
+ .text          0x00000000000074d0      0x1c0 CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.S.obj
+                0x00000000000074d0                n68k_copy_longs
+                0x0000000000007532                n68k_port_in
+                0x0000000000007560                n68k_port_in_w
+                0x000000000000759a                n68k_port_out_w
+                0x00000000000075d4                n68k_port_out
+                0x00000000000075fe                n68k_port_in_w_sum
+ .text          0x0000000000007690       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x0000000000007690                memcpy
+ .text          0x0000000000007700       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x0000000000007700                memset
+ .text          0x0000000000007774       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x0000000000007774                __mulsi3
+ .text          0x00000000000077a0       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000077a0                __umodsi3
+                0x00000000000077ac                __udivsi3
+                0x00000000000077b2                __udivsi4
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x00000000000077f8                ___datadata_relocs = .
+                0x00000000000077f8                __etext = .
+                0x00000000000077f8                ___text_size = SIZEOF (.text)
+                0x00000000000077f8                . = ALIGN (0x0)
+
+.data           0x00000000000077f8       0x8c
+                0x00000000000077f8                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ .data          0x00000000000077f8       0x8c /tmp/ccsv50bF.ltrans0.ltrans.o
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000f7f6                ___a4_init = 0x7ffe
+                0x0000000000007884                __edata = .
+                0x000000000000008c                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000007884       0xf1
+                0x0000000000007884                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000007884       0xf0 /tmp/ccsv50bF.ltrans0.ltrans.o
+ *(.bss.*)
+ *(COMMON)
+ COMMON         0x0000000000007974        0x1 CMakeFiles/anxnet_device.dir/__/net68k/n68k_iocopy.c.obj
+                0x0000000000007974                __gnu_lto_slim
+                0x0000000000007975                __end = .
+                0x00000000000000f1                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(anxnet.device amiga)

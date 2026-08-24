@@ -1,0 +1,279 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj (symbol from plugin) (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj (symbol from plugin) (ami_config_parse_ip6)
+../config/libaminetxduo_config.a(config_file.c.obj)
+                              CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj (symbol from plugin) (ami_config_load)
+../config/libaminetxduo_config.a(config_parse.c.obj)
+                              config_file.c.obj (symbol from plugin) (ami_cfg_parse_interface)
+../config/libaminetxduo_config.a(config_hostname.c.obj)
+                              config_parse.c.obj (symbol from plugin) (ami_config_hostname_valid)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              /tmp/cceLlcF9.ltrans0.ltrans.o (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              /tmp/cceLlcF9.ltrans0.ltrans.o (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              /tmp/cceLlcF9.ltrans0.ltrans.o (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              /tmp/cceLlcF9.ltrans0.ltrans.o (__umodsi3)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_checknetconfig.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj
+LOAD /tmp/cceLlcF9.ltrans0.ltrans.o
+LOAD CMakeFiles/tool_checknetconfig.dir/tool_devdiag.c.obj
+LOAD CMakeFiles/tool_checknetconfig.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_checknetconfig.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x7914
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_checknetconfig.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4        0x0 CMakeFiles/tool_checknetconfig.dir/checknetconfig.c.obj (symbol from plugin)
+                0x00000000000000b4                tool_name
+ .text          0x00000000000000b4     0x7758 /tmp/cceLlcF9.ltrans0.ltrans.o
+                0x0000000000005882                main
+ .text          0x000000000000780c        0x0 CMakeFiles/tool_checknetconfig.dir/tool_devdiag.c.obj (symbol from plugin)
+                0x000000000000780c                tool_scan_devices
+                0x000000000000780c                tool_scan_device
+                0x000000000000780c                tool_explain_no_interfaces
+                0x000000000000780c                tool_explain_device
+                0x000000000000780c                tool_find_interface
+                0x000000000000780c                tool_explain_device_refused
+ .text          0x000000000000780c        0x0 CMakeFiles/tool_checknetconfig.dir/tool_util.c.obj (symbol from plugin)
+                0x000000000000780c                tool_break
+                0x000000000000780c                tool_error
+                0x000000000000780c                tool_prefix_len
+                0x000000000000780c                tool_printf
+                0x000000000000780c                tool_delay_ticks
+                0x000000000000780c                tool_require_stack
+                0x000000000000780c                tool_format_mac
+                0x000000000000780c                tool_say
+                0x000000000000780c                tool_basename
+                0x000000000000780c                tool_net_error
+                0x000000000000780c                tool_broadcast
+                0x000000000000780c                tool_break_arm
+                0x000000000000780c                tool_fault
+                0x000000000000780c                tool_from_workbench
+                0x000000000000780c                tool_no_ipv6_note
+ .text          0x000000000000780c        0x0 CMakeFiles/tool_checknetconfig.dir/tool_diag.c.obj (symbol from plugin)
+                0x000000000000780c                tool_stack_domain
+                0x000000000000780c                tool_config_unwatch
+                0x000000000000780c                tool_copy_string
+                0x000000000000780c                tool_netstatus_control
+                0x000000000000780c                tool_stack_query
+                0x000000000000780c                tool_explain_interface_file
+                0x000000000000780c                diag_is_resident
+                0x000000000000780c                tool_stack_start
+                0x000000000000780c                tool_list_dir
+                0x000000000000780c                tool_explain_no_netstatus
+                0x000000000000780c                diag_device_dirs
+                0x000000000000780c                tool_stack_version
+                0x000000000000780c                tool_wrap
+                0x000000000000780c                tool_netstatus_close
+                0x000000000000780c                tool_usage
+                0x000000000000780c                tool_join_path
+                0x000000000000780c                tool_explain_foreign_stack
+                0x000000000000780c                tool_stack_library_running
+                0x000000000000780c                tool_explain_no_stack
+                0x000000000000780c                tool_device_probe
+                0x000000000000780c                tool_exists
+                0x000000000000780c                tool_parse_ip6
+                0x000000000000780c                tool_netstatus_open
+                0x000000000000780c                tool_stack_release
+                0x000000000000780c                tool_format_ip6
+                0x000000000000780c                tool_device_where
+                0x000000000000780c                tool_stack_lookup_addr
+                0x000000000000780c                tool_explain_dhcp
+                0x000000000000780c                tool_config_watch
+                0x000000000000780c                tool_stack_lookup
+                0x000000000000780c                tool_explain_resolve
+                0x000000000000780c                tool_stricmp_n
+                0x000000000000780c                tool_stack_name_servers
+                0x000000000000780c                tool_netstatus_query
+                0x000000000000780c                tool_stricmp
+                0x000000000000780c                tool_netstatus_system
+                0x000000000000780c                tool_stack_installed
+                0x000000000000780c                tool_stack_is_ours
+ .text          0x000000000000780c        0x0 CMakeFiles/tool_checknetconfig.dir/netstack_weak.c.obj (symbol from plugin)
+                0x000000000000780c                netstack_pool
+                0x000000000000780c                netstack_ip
+                0x000000000000780c                netstack_get
+                0x000000000000780c                netstack_interface_stack_down
+                0x000000000000780c                netstack_ipv6_address_get
+                0x000000000000780c                netstack_interface_start
+                0x000000000000780c                netstack_shutdown
+                0x000000000000780c                netstack_interface_is_up
+                0x000000000000780c                netstack_interface_down
+                0x000000000000780c                netstack_interface_count
+                0x000000000000780c                netstack_can_unload
+                0x000000000000780c                netstack_resolve
+                0x000000000000780c                netstack_startup
+                0x000000000000780c                netstack_config
+                0x000000000000780c                netstack_resolve_reverse
+                0x000000000000780c                tx_application_define
+                0x000000000000780c                netstack_interface_up
+ .text          0x000000000000780c        0x0 config_text.c.obj (symbol from plugin)
+                0x000000000000780c                ami_cfg_problem_file
+                0x000000000000780c                ami_cfg_parse_net_number
+                0x000000000000780c                ami_cfg_stricmp
+                0x000000000000780c                ami_config_parse_ip
+                0x000000000000780c                ami_cfg_unquote
+                0x000000000000780c                ami_cfg_next_line
+                0x000000000000780c                ami_cfg_problems_wanted
+                0x000000000000780c                ami_cfg_problem
+                0x000000000000780c                ami_cfg_tokenize
+                0x000000000000780c                ami_cfg_join3
+                0x000000000000780c                ami_cfg_parse_ulong
+                0x000000000000780c                ami_cfg_strlen
+                0x000000000000780c                ami_cfg_parse_mac
+                0x000000000000780c                ami_config_format_ip
+                0x000000000000780c                ami_cfg_parse_bool
+                0x000000000000780c                ami_config_set_reporter
+                0x000000000000780c                ami_cfg_trim
+                0x000000000000780c                ami_cfg_zero
+                0x000000000000780c                ami_cfg_strip_comment
+                0x000000000000780c                ami_cfg_copy_string
+                0x000000000000780c                ami_cfg_next_pair
+ .text          0x000000000000780c        0x0 config_text6.c.obj (symbol from plugin)
+                0x000000000000780c                ami_config_format_ip6_zone
+                0x000000000000780c                ami_config_format_ip6
+                0x000000000000780c                ami_config_parse_ip6_zone
+                0x000000000000780c                ami_config_parse_ip6
+ .text          0x000000000000780c        0x0 config_file.c.obj (symbol from plugin)
+                0x000000000000780c                ami_config_load
+                0x000000000000780c                ami_config_load_interface
+                0x000000000000780c                ami_cfg_read_file
+                0x000000000000780c                ami_config_pool_divisor
+ .text          0x000000000000780c        0x0 config_parse.c.obj (symbol from plugin)
+                0x000000000000780c                ami_config_nameserver6_withdraw
+                0x000000000000780c                ami_cfg_parse_gateway
+                0x000000000000780c                ami_config_search_reference_remove
+                0x000000000000780c                ami_cfg_parse_tcp_handler
+                0x000000000000780c                ami_cfg_parse_resolver
+                0x000000000000780c                ami_config_search_offer
+                0x000000000000780c                ami_cfg_parse_interface
+                0x000000000000780c                ami_config_search_withdraw
+                0x000000000000780c                ami_config_search_from_rfc3397
+                0x000000000000780c                ami_config_search_list
+                0x000000000000780c                ami_config_iface_wants_ipv4
+                0x000000000000780c                ami_config_search_withdraw_rfc3397
+                0x000000000000780c                ami_config_search_reference_add
+                0x000000000000780c                ami_config_nameserver6_offer
+                0x000000000000780c                ami_cfg_parse_dnssd
+                0x000000000000780c                ami_config_iface_wants_ipv6
+ .text          0x000000000000780c        0x0 config_hostname.c.obj (symbol from plugin)
+                0x000000000000780c                ami_config_hostname_offer
+                0x000000000000780c                ami_config_hostname_from_hwaddr
+                0x000000000000780c                ami_config_hostname_source_text
+                0x000000000000780c                ami_config_hostname_valid
+                0x000000000000780c                ami_cfg_hostname_from_files
+ .text          0x000000000000780c        0x0 compat.c.obj (symbol from plugin)
+                0x000000000000780c                ami_log
+                0x000000000000780c                ami_set_shutdown_hook
+                0x000000000000780c                ami_eclock_rate
+                0x000000000000780c                ami_free
+                0x000000000000780c                ami_sana2_open_device
+                0x000000000000780c                ami_set_second_hook
+                0x000000000000780c                ami_millis_quick
+                0x000000000000780c                ami_mem_open_delta
+                0x000000000000780c                ami_timer_close
+                0x000000000000780c                ami_second_notify
+                0x000000000000780c                ami_alloc_count
+                0x000000000000780c                ami_alloc_flags
+                0x000000000000780c                ami_mem_socket_delta
+                0x000000000000780c                ami_sana2_set_open_hooks
+                0x000000000000780c                ami_set_address_change_hook
+                0x000000000000780c                ami_signal_alloc
+                0x000000000000780c                ami_mem_stats
+                0x000000000000780c                ami_address_change_notify
+                0x000000000000780c                ami_alloc
+                0x000000000000780c                TimerBase
+                0x000000000000780c                ami_shutdown_notify
+                0x000000000000780c                ami_millis
+                0x000000000000780c                ami_signal_free
+ .text          0x000000000000780c       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x000000000000780c                memcpy
+ .text          0x000000000000787c       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x000000000000787c                __mulsi3
+ .text          0x00000000000078a8       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                0x00000000000078a8                strlen
+ .text          0x00000000000078bc       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000078bc                __umodsi3
+                0x00000000000078c8                __udivsi3
+                0x00000000000078ce                __udivsi4
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x0000000000007914                ___datadata_relocs = .
+                0x0000000000007914                __etext = .
+                0x0000000000007914                ___text_size = SIZEOF (.text)
+                0x0000000000007914                . = ALIGN (0x0)
+
+.data           0x0000000000007914        0x4
+                0x0000000000007914                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ .data          0x0000000000007914        0x4 /tmp/cceLlcF9.ltrans0.ltrans.o
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000f912                ___a4_init = 0x7ffe
+                0x0000000000007918                __edata = .
+                0x0000000000000004                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000007918     0x1a48
+                0x0000000000007918                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000007918       0x10 CMakeFiles/tool_checknetconfig.dir/tool_startup.S.obj
+                0x0000000000007918                SysBase
+                0x000000000000791c                DOSBase
+                0x0000000000007920                _WBenchMsg
+ .bss           0x0000000000007928     0x1a38 /tmp/cceLlcF9.ltrans0.ltrans.o
+ *(.bss.*)
+ *(COMMON)
+                0x0000000000009360                __end = .
+                0x0000000000001a48                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(CheckNetConfig amiga)

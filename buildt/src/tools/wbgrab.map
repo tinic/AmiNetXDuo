@@ -1,0 +1,235 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_wbgrab.dir/tool_diag.c.obj (symbol from plugin) (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_wbgrab.dir/tool_diag.c.obj (symbol from plugin) (ami_config_parse_ip6)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_wbgrab.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              /tmp/cc1bQcbx.ltrans0.ltrans.o (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              /tmp/cc1bQcbx.ltrans0.ltrans.o (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              /tmp/cc1bQcbx.ltrans0.ltrans.o (__umodsi3)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_wbgrab.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_wbgrab.dir/wbgrab.c.obj
+LOAD /tmp/cc1bQcbx.ltrans0.ltrans.o
+LOAD CMakeFiles/tool_wbgrab.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_wbgrab.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_wbgrab.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x129c
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_wbgrab.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4        0x0 CMakeFiles/tool_wbgrab.dir/wbgrab.c.obj (symbol from plugin)
+                0x00000000000000b4                LayersBase
+                0x00000000000000b4                tool_name
+                0x00000000000000b4                GfxBase
+                0x00000000000000b4                IntuitionBase
+ .text          0x00000000000000b4     0x10f0 /tmp/cc1bQcbx.ltrans0.ltrans.o
+                0x000000000000095e                main
+ .text          0x00000000000011a4        0x0 CMakeFiles/tool_wbgrab.dir/tool_util.c.obj (symbol from plugin)
+                0x00000000000011a4                tool_break
+                0x00000000000011a4                tool_error
+                0x00000000000011a4                tool_prefix_len
+                0x00000000000011a4                tool_printf
+                0x00000000000011a4                tool_delay_ticks
+                0x00000000000011a4                tool_require_stack
+                0x00000000000011a4                tool_format_mac
+                0x00000000000011a4                tool_say
+                0x00000000000011a4                tool_basename
+                0x00000000000011a4                tool_net_error
+                0x00000000000011a4                tool_broadcast
+                0x00000000000011a4                tool_break_arm
+                0x00000000000011a4                tool_fault
+                0x00000000000011a4                tool_from_workbench
+                0x00000000000011a4                tool_no_ipv6_note
+ .text          0x00000000000011a4        0x0 CMakeFiles/tool_wbgrab.dir/tool_diag.c.obj (symbol from plugin)
+                0x00000000000011a4                tool_stack_domain
+                0x00000000000011a4                tool_config_unwatch
+                0x00000000000011a4                tool_copy_string
+                0x00000000000011a4                tool_netstatus_control
+                0x00000000000011a4                tool_stack_query
+                0x00000000000011a4                tool_explain_interface_file
+                0x00000000000011a4                diag_is_resident
+                0x00000000000011a4                tool_stack_start
+                0x00000000000011a4                tool_list_dir
+                0x00000000000011a4                tool_explain_no_netstatus
+                0x00000000000011a4                diag_device_dirs
+                0x00000000000011a4                tool_stack_version
+                0x00000000000011a4                tool_wrap
+                0x00000000000011a4                tool_netstatus_close
+                0x00000000000011a4                tool_usage
+                0x00000000000011a4                tool_join_path
+                0x00000000000011a4                tool_explain_foreign_stack
+                0x00000000000011a4                tool_stack_library_running
+                0x00000000000011a4                tool_explain_no_stack
+                0x00000000000011a4                tool_device_probe
+                0x00000000000011a4                tool_exists
+                0x00000000000011a4                tool_parse_ip6
+                0x00000000000011a4                tool_netstatus_open
+                0x00000000000011a4                tool_stack_release
+                0x00000000000011a4                tool_format_ip6
+                0x00000000000011a4                tool_device_where
+                0x00000000000011a4                tool_stack_lookup_addr
+                0x00000000000011a4                tool_explain_dhcp
+                0x00000000000011a4                tool_config_watch
+                0x00000000000011a4                tool_stack_lookup
+                0x00000000000011a4                tool_explain_resolve
+                0x00000000000011a4                tool_stricmp_n
+                0x00000000000011a4                tool_stack_name_servers
+                0x00000000000011a4                tool_netstatus_query
+                0x00000000000011a4                tool_stricmp
+                0x00000000000011a4                tool_netstatus_system
+                0x00000000000011a4                tool_stack_installed
+                0x00000000000011a4                tool_stack_is_ours
+ .text          0x00000000000011a4        0x0 CMakeFiles/tool_wbgrab.dir/netstack_weak.c.obj (symbol from plugin)
+                0x00000000000011a4                netstack_pool
+                0x00000000000011a4                netstack_ip
+                0x00000000000011a4                netstack_get
+                0x00000000000011a4                netstack_interface_stack_down
+                0x00000000000011a4                netstack_ipv6_address_get
+                0x00000000000011a4                netstack_interface_start
+                0x00000000000011a4                netstack_shutdown
+                0x00000000000011a4                netstack_interface_is_up
+                0x00000000000011a4                netstack_interface_down
+                0x00000000000011a4                netstack_interface_count
+                0x00000000000011a4                netstack_can_unload
+                0x00000000000011a4                netstack_resolve
+                0x00000000000011a4                netstack_startup
+                0x00000000000011a4                netstack_config
+                0x00000000000011a4                netstack_resolve_reverse
+                0x00000000000011a4                tx_application_define
+                0x00000000000011a4                netstack_interface_up
+ .text          0x00000000000011a4        0x0 config_text.c.obj (symbol from plugin)
+                0x00000000000011a4                ami_cfg_problem_file
+                0x00000000000011a4                ami_cfg_parse_net_number
+                0x00000000000011a4                ami_cfg_stricmp
+                0x00000000000011a4                ami_config_parse_ip
+                0x00000000000011a4                ami_cfg_unquote
+                0x00000000000011a4                ami_cfg_next_line
+                0x00000000000011a4                ami_cfg_problems_wanted
+                0x00000000000011a4                ami_cfg_problem
+                0x00000000000011a4                ami_cfg_tokenize
+                0x00000000000011a4                ami_cfg_join3
+                0x00000000000011a4                ami_cfg_parse_ulong
+                0x00000000000011a4                ami_cfg_strlen
+                0x00000000000011a4                ami_cfg_parse_mac
+                0x00000000000011a4                ami_config_format_ip
+                0x00000000000011a4                ami_cfg_parse_bool
+                0x00000000000011a4                ami_config_set_reporter
+                0x00000000000011a4                ami_cfg_trim
+                0x00000000000011a4                ami_cfg_zero
+                0x00000000000011a4                ami_cfg_strip_comment
+                0x00000000000011a4                ami_cfg_copy_string
+                0x00000000000011a4                ami_cfg_next_pair
+ .text          0x00000000000011a4        0x0 config_text6.c.obj (symbol from plugin)
+                0x00000000000011a4                ami_config_format_ip6_zone
+                0x00000000000011a4                ami_config_format_ip6
+                0x00000000000011a4                ami_config_parse_ip6_zone
+                0x00000000000011a4                ami_config_parse_ip6
+ .text          0x00000000000011a4        0x0 compat.c.obj (symbol from plugin)
+                0x00000000000011a4                ami_log
+                0x00000000000011a4                ami_set_shutdown_hook
+                0x00000000000011a4                ami_eclock_rate
+                0x00000000000011a4                ami_free
+                0x00000000000011a4                ami_sana2_open_device
+                0x00000000000011a4                ami_set_second_hook
+                0x00000000000011a4                ami_millis_quick
+                0x00000000000011a4                ami_mem_open_delta
+                0x00000000000011a4                ami_timer_close
+                0x00000000000011a4                ami_second_notify
+                0x00000000000011a4                ami_alloc_count
+                0x00000000000011a4                ami_alloc_flags
+                0x00000000000011a4                ami_mem_socket_delta
+                0x00000000000011a4                ami_sana2_set_open_hooks
+                0x00000000000011a4                ami_set_address_change_hook
+                0x00000000000011a4                ami_signal_alloc
+                0x00000000000011a4                ami_mem_stats
+                0x00000000000011a4                ami_address_change_notify
+                0x00000000000011a4                ami_alloc
+                0x00000000000011a4                TimerBase
+                0x00000000000011a4                ami_shutdown_notify
+                0x00000000000011a4                ami_millis
+                0x00000000000011a4                ami_signal_free
+ .text          0x00000000000011a4       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x00000000000011a4                memset
+ .text          0x0000000000001218       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x0000000000001218                __mulsi3
+ .text          0x0000000000001244       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x0000000000001244                __umodsi3
+                0x0000000000001250                __udivsi3
+                0x0000000000001256                __udivsi4
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x000000000000129c                ___datadata_relocs = .
+                0x000000000000129c                __etext = .
+                0x000000000000129c                ___text_size = SIZEOF (.text)
+                0x000000000000129c                . = ALIGN (0x0)
+
+.data           0x000000000000129c        0x0
+                0x000000000000129c                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000929a                ___a4_init = 0x7ffe
+                0x000000000000129c                __edata = .
+                0x0000000000000000                ___data_size = SIZEOF (.data)
+
+.bss            0x000000000000129c      0x330
+                0x000000000000129c                __bss_start = .
+ *(.bss)
+ .bss           0x000000000000129c       0x10 CMakeFiles/tool_wbgrab.dir/tool_startup.S.obj
+                0x000000000000129c                SysBase
+                0x00000000000012a0                DOSBase
+                0x00000000000012a4                _WBenchMsg
+ .bss           0x00000000000012ac      0x320 /tmp/cc1bQcbx.ltrans0.ltrans.o
+ *(.bss.*)
+ *(COMMON)
+                0x00000000000015cc                __end = .
+                0x0000000000000330                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(wbgrab amiga)

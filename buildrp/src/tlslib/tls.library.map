@@ -1,0 +1,1419 @@
+Archive member included to satisfy reference by file (symbol)
+
+../tls/libaminetxduo_tls.a(tls_amiga.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (ami_tls_timer_open)
+../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (ami_tls_crypto_initialize)
+../crypto68k/libcrypto68k.a(c68k_prim.c.obj)
+                              CMakeFiles/tls_library.dir/tls_netx.c.obj (c68k_yield_hook)
+../crypto68k/libcrypto68k.a(c68k_powm.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_huge_number_mont_power_modulus)
+../crypto68k/libcrypto68k.a(c68k_crt.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_crt_power_modulus)
+../crypto68k/libcrypto68k.a(c68k_p256.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_p256_ec_multiple)
+../crypto68k/libcrypto68k.a(c68k_p256_table.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_p256.c.obj) (c68k_p256_comb)
+../crypto68k/libcrypto68k.a(c68k_aes.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_aes_key_set)
+../crypto68k/libcrypto68k.a(c68k_sha256.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_sha256_initialize)
+../crypto68k/libcrypto68k.a(c68k_chacha20.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (c68k_chacha20_poly1305_initialize)
+../crypto68k/libcrypto68k.a(c68k_poly1305.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_chacha20.c.obj) (c68k_poly1305_initialize)
+../crypto68k/libcrypto68k.a(c68k_cpu.c.obj)
+                              CMakeFiles/tls_library.dir/tls_library.c.obj (c68k_cpu_select)
+../crypto68k/libcrypto68k.a(c68k_prim_mulw.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj) (c68k_addmul_1_mulw)
+../crypto68k/libcrypto68k.a(c68k_prim.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj) (c68k_addmul_1_mulu)
+../crypto68k/libcrypto68k.a(c68k_chacha20.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_chacha20.c.obj) (c68k_chacha20_core_asm)
+../crypto68k/libcrypto68k.a(c68k_poly1305.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_poly1305.c.obj) (c68k_poly1305_blocks_asm)
+../crypto68k/libcrypto68k.a(c68k_aes.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_aes.c.obj) (c68k_aes_core_enc_t4_asm)
+../crypto68k/libcrypto68k.a(c68k_p256_mv20.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_p256.c.obj) (c68k_p256_add_raw_mv20)
+../crypto68k/libcrypto68k.a(c68k_p256_mv0.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_p256.c.obj) (c68k_p256_add_raw_mv0)
+../crypto68k/libcrypto68k.a(c68k_div.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_powm.c.obj) (c68k_mod)
+../crypto68k/libcrypto68k.a(c68k_mont.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_powm.c.obj) (c68k_mont_n0inv)
+../crypto68k/libcrypto68k.a(c68k_25519.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj) (c68k_25519_cpu_select)
+../crypto68k/libcrypto68k.a(c68k_25519_mulu.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_25519.c.obj) (c68k_fe_mul_asm_mulu)
+../crypto68k/libcrypto68k.a(c68k_25519_mulw.S.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_25519.c.obj) (c68k_fe_mul_asm_mulw)
+../tls/libnx_secure.a(nx_secure_remote_certificate_verify.c.obj)
+                              CMakeFiles/tls_library.dir/tls_store.c.obj (_nx_secure_remote_certificate_verify)
+../tls/libnx_secure.a(nx_secure_tls_allocate_handshake_packet.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_allocate_handshake_packet)
+../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_client_handshake)
+../tls/libnx_secure.a(nx_secure_tls_ecc_initialize.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_ecc_initialize)
+../tls/libnx_secure.a(nx_secure_tls_generate_keys.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_generate_keys)
+../tls/libnx_secure.a(nx_secure_tls_generate_premaster_secret.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_generate_premaster_secret)
+../tls/libnx_secure.a(nx_secure_tls_handshake_hash_update.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_handshake_hash_update)
+../tls/libnx_secure.a(nx_secure_tls_initialize.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_protection)
+../tls/libnx_secure.a(nx_secure_tls_local_certificate_add.c.obj)
+                              CMakeFiles/tls_library.dir/tls_netx.c.obj (_nx_secure_tls_local_certificate_add)
+../tls/libnx_secure.a(nx_secure_tls_metadata_size_calculate.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_metadata_size_calculate)
+../tls/libnx_secure.a(nx_secure_tls_packet_allocate.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_packet_allocate)
+../tls/libnx_secure.a(nx_secure_tls_packet_release.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_packet_release)
+../tls/libnx_secure.a(nx_secure_tls_process_certificate_request.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_process_certificate_request)
+../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_process_finished)
+../tls/libnx_secure.a(nx_secure_tls_process_handshake_header.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_process_handshake_header)
+../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_process_remote_certificate)
+../tls/libnx_secure.a(nx_secure_tls_process_server_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_process_server_key_exchange)
+../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_process_serverhello)
+../tls/libnx_secure.a(nx_secure_tls_process_serverhello_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj) (_nx_secure_tls_process_serverhello_extensions)
+../tls/libnx_secure.a(nx_secure_tls_protocol_version_get.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_generate_premaster_secret.c.obj) (_nx_secure_tls_protocol_version_get)
+../tls/libnx_secure.a(nx_secure_tls_remote_certificate_allocate.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_remote_certificate_allocate)
+../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free_all.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj) (_nx_secure_tls_remote_certificate_free_all)
+../tls/libnx_secure.a(nx_secure_tls_remote_certificate_verify.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj) (_nx_secure_tls_remote_certificate_verify)
+../tls/libnx_secure.a(nx_secure_tls_send_certificate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_send_certificate)
+../tls/libnx_secure.a(nx_secure_tls_send_certificate_verify.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_send_certificate_verify)
+../tls/libnx_secure.a(nx_secure_tls_send_changecipherspec.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_send_changecipherspec)
+../tls/libnx_secure.a(nx_secure_tls_send_client_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_send_client_key_exchange)
+../tls/libnx_secure.a(nx_secure_tls_send_clienthello.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_send_clienthello)
+../tls/libnx_secure.a(nx_secure_tls_send_clienthello_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_clienthello.c.obj) (_nx_secure_tls_send_clienthello_extensions)
+../tls/libnx_secure.a(nx_secure_tls_send_finished.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_send_finished)
+../tls/libnx_secure.a(nx_secure_tls_send_handshake_record.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_send_handshake_record)
+../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_send_record)
+../tls/libnx_secure.a(nx_secure_tls_send_serverhello.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj) (_nx_secure_tls_hello_retry_request_random)
+../tls/libnx_secure.a(nx_secure_tls_send_serverhello_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_serverhello.c.obj) (_nx_secure_tls_send_serverhello_extensions)
+../tls/libnx_secure.a(nx_secure_tls_session_certificate_callback_set.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_certificate_callback_set)
+../tls/libnx_secure.a(nx_secure_tls_session_create.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_create)
+../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create.c.obj) (_nx_secure_tls_session_create_ext)
+../tls/libnx_secure.a(nx_secure_tls_session_delete.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_delete)
+../tls/libnx_secure.a(nx_secure_tls_session_end.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_end)
+../tls/libnx_secure.a(nx_secure_tls_session_hash_capture.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj) (_nx_secure_tls_session_hash_capture)
+../tls/libnx_secure.a(nx_secure_tls_session_iv_size_get.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_packet_allocate.c.obj) (_nx_secure_tls_session_iv_size_get)
+../tls/libnx_secure.a(nx_secure_tls_session_keys_set.c.obj)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (_nx_secure_tls_session_keys_set)
+../tls/libnx_secure.a(nx_secure_tls_session_packet_buffer_set.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_packet_buffer_set)
+../tls/libnx_secure.a(nx_secure_tls_session_receive.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_receive)
+../tls/libnx_secure.a(nx_secure_tls_session_receive_records.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_receive.c.obj) (_nx_secure_tls_session_receive_records)
+../tls/libnx_secure.a(nx_secure_tls_session_reset.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_tls_session_reset)
+../tls/libnx_secure.a(nx_secure_tls_session_send.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_send)
+../tls/libnx_secure.a(nx_secure_tls_session_sni_extension_set.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_sni_extension_set)
+../tls/libnx_secure.a(nx_secure_tls_session_start.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_start)
+../tls/libnx_secure.a(nx_secure_tls_session_time_function_set.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_tls_session_time_function_set)
+../tls/libnx_secure.a(nx_secure_trusted_certificate_add.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_trusted_certificate_add)
+../tls/libnx_secure.a(nx_secure_verify_mac.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_verify_mac)
+../tls/libnx_secure.a(nx_secure_x509.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj) (_nx_secure_x509_certificate_parse)
+../tls/libnx_secure.a(nx_secure_x509_asn1_tlv_block_parse.c.obj)
+                              CMakeFiles/tls_library.dir/tls_store.c.obj (_nx_secure_x509_asn1_tlv_block_parse)
+../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_remote_certificate_verify.c.obj) (_nx_secure_x509_certificate_chain_verify)
+../tls/libnx_secure.a(nx_secure_x509_certificate_initialize.c.obj)
+                              CMakeFiles/tls_library.dir/tls_store.c.obj (_nx_secure_x509_certificate_initialize)
+../tls/libnx_secure.a(nx_secure_x509_certificate_list_add.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj) (_nx_secure_x509_certificate_list_add)
+../tls/libnx_secure.a(nx_secure_x509_certificate_verify.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj) (_nx_secure_x509_certificate_verify)
+../tls/libnx_secure.a(nx_secure_x509_common_name_dns_check.c.obj)
+                              CMakeFiles/tls_library.dir/tls_conn.c.obj (_nx_secure_x509_common_name_dns_check)
+../tls/libnx_secure.a(nx_secure_x509_distinguished_name_compare.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_certificate.c.obj) (_nx_secure_x509_distinguished_name_compare)
+../tls/libnx_secure.a(nx_secure_x509_distinguished_name_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509.c.obj) (_nx_secure_x509_distinguished_name_parse)
+../tls/libnx_secure.a(nx_secure_x509_ec_private_key_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_initialize.c.obj) (_nx_secure_x509_ec_private_key_parse)
+../tls/libnx_secure.a(nx_secure_x509_expiration_check.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj) (_nx_secure_x509_expiration_check)
+../tls/libnx_secure.a(nx_secure_x509_extension_find.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_common_name_dns_check.c.obj) (_nx_secure_x509_extension_find)
+../tls/libnx_secure.a(nx_secure_x509_extension_policy_check.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj) (_nx_secure_x509_name_constraints_check)
+../tls/libnx_secure.a(nx_secure_x509_find_certificate_methods.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_certificate_verify.c.obj) (_nx_secure_x509_find_certificate_methods)
+../tls/libnx_secure.a(nx_secure_x509_find_curve_method.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_verify.c.obj) (_nx_secure_x509_find_curve_method)
+../tls/libnx_secure.a(nx_secure_x509_free_certificate_get.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj) (_nx_secure_x509_free_certificate_get)
+../tls/libnx_secure.a(nx_secure_x509_key_usage_extension_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_verify.c.obj) (_nx_secure_x509_key_usage_extension_parse)
+../tls/libnx_secure.a(nx_secure_x509_local_device_certificate_get.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_certificate_request.c.obj) (_nx_secure_x509_local_device_certificate_get)
+../tls/libnx_secure.a(nx_secure_x509_oid_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509.c.obj) (_nx_secure_x509_oid_parse)
+../tls/libnx_secure.a(nx_secure_x509_pkcs1_rsa_private_key_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_initialize.c.obj) (_nx_secure_x509_pkcs1_rsa_private_key_parse)
+../tls/libnx_secure.a(nx_secure_x509_pkcs7_decode.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_verify.c.obj) (_nx_secure_x509_pkcs7_decode)
+../tls/libnx_secure.a(nx_secure_x509_remote_endpoint_certificate_get.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj) (_nx_secure_x509_remote_endpoint_certificate_get)
+../tls/libnx_secure.a(nx_secure_x509_store_certificate_add.c.obj)
+                              CMakeFiles/tls_library.dir/tls_store.c.obj (_nx_secure_x509_store_certificate_add)
+../tls/libnx_secure.a(nx_secure_x509_store_certificate_find.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj) (_nx_secure_x509_store_certificate_find)
+../tls/libnx_secure.a(nx_secure_x509_subject_alt_names_find.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_common_name_dns_check.c.obj) (_nx_secure_x509_subject_alt_names_find_ex)
+../tls/libnx_secure.a(nx_secure_x509_wildcard_compare.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_common_name_dns_check.c.obj) (_nx_secure_x509_wildcard_compare)
+../tls/libnx_secure.a(nx_secure_tls_record_payload_encrypt.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj) (_nx_secure_tls_record_payload_encrypt)
+../tls/libnx_secure.a(nx_secure_generate_client_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_generate_client_key_exchange)
+../tls/libnx_secure.a(nx_secure_generate_master_secret.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_generate_master_secret)
+../tls/libnx_secure.a(nx_secure_generate_premaster_secret.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_generate_premaster_secret)
+../tls/libnx_secure.a(nx_secure_generate_server_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_generate_server_key_exchange)
+../tls/libnx_secure.a(nx_secure_generate_session_keys.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_generate_session_keys)
+../tls/libnx_secure.a(nx_secure_process_client_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_process_client_key_exchange)
+../tls/libnx_secure.a(nx_secure_process_server_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_process_server_key_exchange)
+../tls/libnx_secure.a(nx_secure_session_keys_set.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj) (_nx_secure_session_keys_set)
+../tls/libnx_secure.a(nx_secure_tls_1_3_crypto_init.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_start.c.obj) (_nx_secure_tls_1_3_crypto_init)
+../tls/libnx_secure.a(nx_secure_tls_1_3_finished_hash_generate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj) (_nx_secure_tls_1_3_finished_hash_generate)
+../tls/libnx_secure.a(nx_secure_tls_1_3_transcript_hash_save.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_clienthello_extensions.c.obj) (_nx_secure_tls_1_3_transcript_hash_save)
+../tls/libnx_secure.a(nx_secure_tls_check_protocol_version.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj) (_nx_secure_tls_check_protocol_version)
+../tls/libnx_secure.a(nx_secure_tls_ciphersuite_lookup.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj) (_nx_secure_tls_ciphersuite_lookup)
+../tls/libnx_secure.a(nx_secure_tls_ecc_generate_keys.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_generate_server_key_exchange.c.obj) (_nx_secure_tls_ecc_generate_keys)
+../tls/libnx_secure.a(nx_secure_tls_find_curve_method.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_serverhello_extensions.c.obj) (_nx_secure_tls_find_curve_method)
+../tls/libnx_secure.a(nx_secure_tls_finished_hash_generate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj) (_nx_secure_tls_finished_hash_generate)
+../tls/libnx_secure.a(nx_secure_tls_handshake_hash_init.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_handshake_hash_update.c.obj) (_nx_secure_tls_handshake_hash_init)
+../tls/libnx_secure.a(nx_secure_tls_handshake_process.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_start.c.obj) (_nx_secure_tls_handshake_process)
+../tls/libnx_secure.a(nx_secure_tls_hash_record.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_verify_mac.c.obj) (_nx_secure_tls_hash_record)
+../tls/libnx_secure.a(nx_secure_tls_key_material_init.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_reset.c.obj) (_nx_secure_tls_key_material_init)
+../tls/libnx_secure.a(nx_secure_tls_map_error_to_alert.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_receive_records.c.obj) (_nx_secure_tls_map_error_to_alert)
+../tls/libnx_secure.a(nx_secure_tls_newest_supported_version.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_protocol_version_get.c.obj) (_nx_secure_tls_newest_supported_version)
+../tls/libnx_secure.a(nx_secure_tls_process_clienthello_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_process_server_key_exchange.c.obj) (_nx_secure_tls_get_signature_algorithm_id)
+../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_receive_records.c.obj) (_nx_secure_tls_process_record)
+../tls/libnx_secure.a(nx_secure_tls_psk_binder_generate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_clienthello_extensions.c.obj) (_nx_secure_tls_psk_binder_generate)
+../tls/libnx_secure.a(nx_secure_tls_record_hash_calculate.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj) (_nx_secure_tls_record_hash_calculate)
+../tls/libnx_secure.a(nx_secure_tls_record_hash_initialize.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj) (_nx_secure_tls_record_hash_initialize)
+../tls/libnx_secure.a(nx_secure_tls_record_hash_update.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj) (_nx_secure_tls_record_hash_update)
+../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free_all.c.obj) (_nx_secure_tls_remote_certificate_free)
+../tls/libnx_secure.a(nx_secure_tls_send_alert.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_session_end.c.obj) (_nx_secure_tls_send_alert)
+../tls/libnx_secure.a(nx_secure_tls_server_handshake.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_server_handshake)
+../tls/libnx_secure.a(nx_secure_tls_verify_mac.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_verify_mac)
+../tls/libnx_secure.a(nx_secure_x509_basic_constraints_extension_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj) (_nx_secure_x509_basic_constraints_extension_parse)
+../tls/libnx_secure.a(nx_secure_x509_certificate_list_find.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_local_device_certificate_get.c.obj) (_nx_secure_x509_certificate_list_find)
+../tls/libnx_secure.a(nx_secure_x509_extended_key_usage_extension_parse.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_extension_policy_check.c.obj) (_nx_secure_x509_extended_key_usage_extension_parse)
+../tls/libnx_secure.a(nx_secure_x509_store_certificate_remove.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free.c.obj) (_nx_secure_x509_store_certificate_remove)
+../tls/libnx_secure.a(nx_secure_tls_record_payload_decrypt.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_record_payload_decrypt)
+../tls/libnx_secure.a(nx_secure_tls_1_3_client_handshake.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_1_3_client_handshake)
+../tls/libnx_secure.a(nx_secure_tls_1_3_generate_keys.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_psk_binder_generate.c.obj) (_nx_secure_tls_1_3_generate_psk_secret)
+../tls/libnx_secure.a(nx_secure_tls_1_3_server_handshake.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_1_3_server_handshake)
+../tls/libnx_secure.a(nx_secure_tls_1_3_session_keys_set.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_1_3_client_handshake.c.obj) (_nx_secure_tls_1_3_session_keys_set)
+../tls/libnx_secure.a(nx_secure_tls_process_certificate_verify.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_1_3_client_handshake.c.obj) (_nx_secure_tls_process_certificate_verify)
+../tls/libnx_secure.a(nx_secure_tls_process_changecipherspec.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_process_changecipherspec)
+../tls/libnx_secure.a(nx_secure_tls_process_client_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_server_handshake.c.obj) (_nx_secure_tls_process_client_key_exchange)
+../tls/libnx_secure.a(nx_secure_tls_process_clienthello.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_server_handshake.c.obj) (_nx_secure_tls_process_clienthello)
+../tls/libnx_secure.a(nx_secure_tls_process_encrypted_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_1_3_client_handshake.c.obj) (_nx_secure_tls_process_encrypted_extensions)
+../tls/libnx_secure.a(nx_secure_tls_process_header.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj) (_nx_secure_tls_process_header)
+../tls/libnx_secure.a(nx_secure_tls_send_encrypted_extensions.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_1_3_server_handshake.c.obj) (_nx_secure_tls_send_encrypted_extensions)
+../tls/libnx_secure.a(nx_secure_tls_send_newsessionticket.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_1_3_server_handshake.c.obj) (_nx_secure_tls_send_newsessionticket)
+../tls/libnx_secure.a(nx_secure_tls_send_server_key_exchange.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_tls_server_handshake.c.obj) (_nx_secure_tls_send_server_key_exchange)
+../tls/libnx_secure.a(nx_secure_x509_certificate_list_remove.c.obj)
+                              ../tls/libnx_secure.a(nx_secure_x509_store_certificate_remove.c.obj) (_nx_secure_x509_certificate_list_remove)
+../tls/libnx_crypto.a(nx_crypto_ec.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (_nx_crypto_ec_fp_projective_multiple)
+../tls/libnx_crypto.a(nx_crypto_ec_secp192r1_fixed_points.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_ec_secp192r1_fixed_points)
+../tls/libnx_crypto.a(nx_crypto_ec_secp224r1_fixed_points.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_ec_secp224r1_fixed_points)
+../tls/libnx_crypto.a(nx_crypto_ec_secp256r1_fixed_points.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_ec_secp256r1_fixed_points)
+../tls/libnx_crypto.a(nx_crypto_ec_secp384r1_fixed_points.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_ec_secp384r1_fixed_points)
+../tls/libnx_crypto.a(nx_crypto_ec_secp521r1_fixed_points.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_ec_secp521r1_fixed_points)
+../tls/libnx_crypto.a(nx_crypto_hmac.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (_nx_crypto_hmac_initialize)
+../tls/libnx_crypto.a(nx_crypto_huge_number.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (_nx_crypto_huge_number_is_zero)
+../tls/libnx_crypto.a(nx_crypto_initialize.c.obj)
+                              ../crypto68k/libcrypto68k.a(c68k_crt.c.obj) (_nx_crypto_memcpy_ptr)
+../tls/libnx_crypto.a(nx_crypto_methods.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (crypto_method_hkdf)
+../tls/libnx_crypto.a(nx_crypto_null_cipher.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_null_init)
+../tls/libnx_crypto.a(nx_crypto_pkcs1_v1.5.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_pkcs1_v1_5_init)
+../tls/libnx_crypto.a(nx_crypto_rsa.c.obj)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (_nx_crypto_method_rsa_init)
+../tls/libnx_crypto.a(nx_crypto_sha1.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_sha1_init)
+../tls/libnx_crypto.a(nx_crypto_sha2.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_sha256_init)
+../tls/libnx_crypto.a(nx_crypto_sha5.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_sha512_init)
+../tls/libnx_crypto.a(nx_crypto_tls_prf_1.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_prf_1_init)
+../tls/libnx_crypto.a(nx_crypto_tls_prf_sha256.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_prf_sha_256_init)
+../tls/libnx_crypto.a(nx_crypto_tls_prf_sha384.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_prf_sha384_init)
+../tls/libnx_crypto.a(nx_crypto_tls_prf_sha512.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_prf_sha512_init)
+../tls/libnx_crypto.a(nx_crypto_3des.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_3des_init)
+../tls/libnx_crypto.a(nx_crypto_aes.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_aes_init)
+../tls/libnx_crypto.a(nx_crypto_cbc.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_3des.c.obj) (_nx_crypto_cbc_encrypt)
+../tls/libnx_crypto.a(nx_crypto_ccm.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_aes.c.obj) (_nx_crypto_ccm_encrypt_init)
+../tls/libnx_crypto.a(nx_crypto_ctr.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_aes.c.obj) (_nx_crypto_ctr_encrypt)
+../tls/libnx_crypto.a(nx_crypto_des.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_3des.c.obj) (_nx_crypto_des_key_set)
+../tls/libnx_crypto.a(nx_crypto_drbg.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_drbg_init)
+../tls/libnx_crypto.a(nx_crypto_ecdh.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_ecdh_init)
+../tls/libnx_crypto.a(nx_crypto_ecdsa.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_ecdsa_init)
+../tls/libnx_crypto.a(nx_crypto_ecjpake.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_ecjpake_init)
+../tls/libnx_crypto.a(nx_crypto_gcm.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_aes.c.obj) (_nx_crypto_gcm_encrypt_init)
+../tls/libnx_crypto.a(nx_crypto_hkdf.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_hkdf_init)
+../tls/libnx_crypto.a(nx_crypto_hmac_md5.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_hmac_md5_init)
+../tls/libnx_crypto.a(nx_crypto_hmac_sha1.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_hmac_sha1_init)
+../tls/libnx_crypto.a(nx_crypto_hmac_sha2.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_hmac_sha256_init)
+../tls/libnx_crypto.a(nx_crypto_hmac_sha5.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_methods.c.obj) (_nx_crypto_method_hmac_sha512_init)
+../tls/libnx_crypto.a(nx_crypto_md5.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_hmac_md5.c.obj) (_nx_crypto_md5_initialize)
+../tls/libnx_crypto.a(nx_crypto_phash.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_tls_prf_1.c.obj) (_nx_crypto_phash)
+../tls/libnx_crypto.a(nx_crypto_xcbc_mac.c.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_aes.c.obj) (_nx_crypto_xcbc_mac)
+../crypto68k/libcrypto68k.a(c68k_dispatch.S.obj)
+                              ../tls/libnx_crypto.a(nx_crypto_huge_number.c.obj) (c68k_addmul_1)
+../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                              CMakeFiles/tls_library.dir/tls_library.c.obj (ami_rt_cpu_select)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (memcmp)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj) (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                              ../tls/libnx_crypto.a(nx_crypto_ec.c.obj) (memmove)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              CMakeFiles/tls_library.dir/tls_resume.c.obj (memset)
+
+Discarded input sections
+
+ .bss           0x0000000000000000        0x4 ../crypto68k/libcrypto68k.a(c68k_sha256.c.obj)
+ .text          0x0000000000000000       0x30 ../tls/libnx_secure.a(nx_secure_tls_initialize.c.obj)
+ .data          0x0000000000000000       0x54 ../tls/libnx_secure.a(nx_secure_tls_initialize.c.obj)
+ .text          0x0000000000000000        0x4 ../tls/libnx_crypto.a(nx_crypto_initialize.c.obj)
+ .text          0x0000000000000000        0x0 ../tls/libnx_crypto.a(nx_crypto_methods.c.obj)
+ .bss           0x0000000000000000       0x20 ../tls/libnx_crypto.a(nx_crypto_methods.c.obj)
+ .text          0x0000000000000000        0x0 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__divdi3
+                0x0000000000000000       0x64 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__moddi3
+                0x0000000000000000       0x84 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__divsi3
+                0x0000000000000000       0x4c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__modsi3
+                0x0000000000000000       0x6c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__ashldi3
+                0x0000000000000000       0x5c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.__ashrdi3
+                0x0000000000000000       0x5c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tls_library.dir/tls_library.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_vectors.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_netx.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_conn.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_hostname.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_path.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_store.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_resume.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_expiry.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_time.c.obj
+LOAD CMakeFiles/tls_library.dir/tls_runtime.c.obj
+LOAD ../tls/libaminetxduo_tls.a
+LOAD ../crypto68k/libcrypto68k.a
+LOAD ../tls/libnx_secure.a
+LOAD ../tls/libnx_crypto.a
+LOAD ../tls/libaminetxduo_tls.a
+LOAD ../crypto68k/libcrypto68k.a
+LOAD ../tls/libnx_secure.a
+LOAD ../tls/libnx_crypto.a
+LOAD ../common/libaminetxduo_m68k_rt.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000    0x37e10
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000      0x1b0 CMakeFiles/tls_library.dir/tls_library.c.obj
+                0x0000000000000000                tls_library_entry
+                0x00000000000000ce                tls_lib_open
+                0x00000000000000e0                tls_lib_expunge
+                0x0000000000000156                tls_lib_close
+                0x0000000000000180                tls_lib_reserved
+                0x0000000000000184                tls_romtag
+ .text          0x00000000000001b0       0x3c CMakeFiles/tls_library.dir/tls_vectors.c.obj
+                0x00000000000001b0                TlsVectorTable
+ .text          0x00000000000001ec      0x214 CMakeFiles/tls_library.dir/tls_netx.c.obj
+                0x000000000000020c                tls_netx_bind
+                0x000000000000027a                tls_netx_ctx
+                0x0000000000000282                _nx_packet_allocate
+                0x0000000000000298                _nx_packet_data_append
+                0x00000000000002ae                _nx_packet_data_extract_offset
+                0x00000000000002c4                _nx_packet_release
+                0x00000000000002da                _nx_tcp_socket_receive
+                0x00000000000002f0                _nx_tcp_socket_send
+                0x0000000000000306                _tx_mutex_create
+                0x000000000000031c                _tx_mutex_delete
+                0x0000000000000332                _tx_mutex_get
+                0x0000000000000348                _tx_mutex_put
+                0x000000000000035e                _tx_thread_identify
+                0x0000000000000370                _tx_thread_sleep
+                0x0000000000000386                _nxe_secure_tls_local_certificate_add
+                0x000000000000039c                ami_random_rand
+                0x00000000000003ae                ami_crypto_rbg
+                0x00000000000003d8                ami_random_add_entropy
+                0x00000000000003ec                ami_random_entropy_bits
+                0x00000000000003fe                ami_random_init
+ .text          0x0000000000000400     0x11f4 CMakeFiles/tls_library.dir/tls_conn.c.obj
+                0x000000000000065e                tls_TLSErrorString
+                0x00000000000006ae                tls_TLSOpenA
+                0x0000000000000d30                tls_TLSClose
+                0x0000000000000da4                tls_TLSRead
+                0x0000000000000f44                tls_TLSWrite
+                0x000000000000105c                tls_TLSPending
+                0x000000000000107a                tls_TLSInfo
+                0x0000000000001140                tls_TLSBuffered
+                0x0000000000001158                tls_TLSRandom
+                0x0000000000001194                tls_TLSWaitSelect
+ .text          0x00000000000015f4       0x64 CMakeFiles/tls_library.dir/tls_hostname.c.obj
+                0x00000000000015f4                tls_hostname_set
+ .text          0x0000000000001658       0x48 CMakeFiles/tls_library.dir/tls_path.c.obj
+                0x0000000000001658                tls_path_set
+ .text          0x00000000000016a0      0x6fc CMakeFiles/tls_library.dir/tls_store.c.obj
+                0x0000000000001a80                tls_store_close
+                0x0000000000001aaa                tls_store_open
+                0x0000000000001cac                tls_store_count
+                0x0000000000001cc0                tls_conn_for_session
+                0x0000000000001d0c                tls_registry_add
+                0x0000000000001d72                tls_store_attach
+                0x0000000000001d98                tls_store_detach
+ .text          0x0000000000001d9c     0x124c CMakeFiles/tls_library.dir/tls_resume.c.obj
+                0x000000000000227c                tls_resume_count
+                0x00000000000022d6                tls_resume_prepare
+                0x000000000000271e                tls_resume_evict
+                0x00000000000027b6                tls_resume_record
+                0x0000000000002a3a                __wrap__nx_secure_tls_send_clienthello
+                0x0000000000002be8                __wrap__nx_secure_tls_client_handshake
+ .text          0x0000000000002fe8       0x50 CMakeFiles/tls_library.dir/tls_expiry.c.obj
+                0x0000000000002fe8                tls_expired
+ .text          0x0000000000003038       0xb4 CMakeFiles/tls_library.dir/tls_time.c.obj
+                0x0000000000003038                tls_time_monotonic
+                0x00000000000030b8                tls_time_is_known
+                0x00000000000030d0                tls_time_now
+ .text          0x00000000000030ec       0xf4 CMakeFiles/tls_library.dir/tls_runtime.c.obj
+                0x00000000000030f8                tls_runtime_open
+                0x0000000000003124                tls_runtime_close
+                0x000000000000314c                tls_alloc
+                0x0000000000003168                tls_free
+                0x0000000000003182                tls_bzero
+                0x0000000000003198                tls_strlen
+                0x00000000000031ae                tls_strncpy
+ .text          0x00000000000031e0      0x29c ../tls/libaminetxduo_tls.a(tls_amiga.c.obj)
+                0x0000000000003228                ami_tls_timer_open
+                0x0000000000003320                ami_tls_timer_is_open
+                0x000000000000332e                ami_tls_timer_close
+                0x000000000000338c                ami_tls_eclock
+                0x00000000000033b4                ami_tls_eclock_hz
+                0x00000000000033c0                ami_tls_eclock_micros
+                0x000000000000344c                ami_tls_seed_rng
+ .text          0x000000000000347c      0xcbc ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj)
+                0x0000000000003ef2                ami_tls_crypto_set_arithmetic
+                0x0000000000003f08                ami_tls_crypto_set_crt
+                0x0000000000003f1c                ami_tls_crypto_set_client_thread
+                0x0000000000003f26                ami_tls_crypto_counters_get
+                0x0000000000003f62                ami_tls_crypto_counters_reset
+                0x0000000000003f7c                ami_tls_crypto_initialize
+                0x0000000000004014                ami_tls_rsa_key_register
+                0x00000000000040c0                ami_tls_rsa_key_reset
+                0x00000000000040e0                ami_tls_local_certificate_add
+                0x0000000000004106                ami_crypto_ecc_offered_groups_size
+                0x000000000000410a                ami_crypto_ecc_offered_groups
+                0x000000000000410c                ami_crypto_ecc_supported_groups_size
+                0x0000000000004110                ami_crypto_ecc_supported_groups
+                0x0000000000004116                ami_crypto_tls_ciphers_ecc
+ .text          0x0000000000004138      0x1a0 ../crypto68k/libcrypto68k.a(c68k_prim.c.obj)
+                0x0000000000004138                c68k_yield_stride
+                0x0000000000004170                c68k_addmul_1_c
+                0x000000000000421e                c68k_submul_1
+                0x0000000000004290                c68k_div_2by1_c
+                0x00000000000042d2                c68k_using_assembly
+ .text          0x00000000000042d8      0x608 ../crypto68k/libcrypto68k.a(c68k_powm.c.obj)
+                0x0000000000004312                c68k_mont_setup_rr
+                0x0000000000004464                c68k_mont_power_modulus
+                0x000000000000484e                c68k_huge_number_mont_power_modulus
+ .text          0x00000000000048e0      0x2a4 ../crypto68k/libcrypto68k.a(c68k_crt.c.obj)
+                0x00000000000048e0                c68k_crt_power_modulus
+ .text          0x0000000000004b84     0x10b0 ../crypto68k/libcrypto68k.a(c68k_p256.c.obj)
+                0x0000000000004d80                c68k_p256_cpu_select
+                0x0000000000004dc0                c68k_p256_fe_reduce
+                0x0000000000004e3e                c68k_p256_fe_mul
+                0x0000000000004ea2                c68k_p256_fe_sqr
+                0x0000000000004f8e                c68k_p256_fe_inv
+                0x000000000000515c                c68k_p256_jac_double
+                0x00000000000052fe                c68k_p256_jac_add_affine
+                0x000000000000554c                c68k_p256_mul_g
+                0x00000000000056b0                c68k_p256_mul_point
+                0x0000000000005a42                c68k_p256_ec_multiple
+                0x0000000000005b36                c68k_p256_self_check
+ .text          0x0000000000005c34      0xf80 ../crypto68k/libcrypto68k.a(c68k_p256_table.c.obj)
+                0x0000000000005c34                c68k_p256_comb
+ .text          0x0000000000006bb4     0x1c5c ../crypto68k/libcrypto68k.a(c68k_aes.c.obj)
+                0x000000000000809e                c68k_aes_variant_name
+                0x00000000000080bc                c68k_aes_variant_is_asm
+                0x00000000000080cc                c68k_aes_key_set
+                0x000000000000837c                c68k_aes_encrypt_block
+                0x000000000000841c                c68k_aes_decrypt_block
+                0x00000000000084be                c68k_aes_cbc_encrypt
+                0x00000000000085d8                c68k_aes_cbc_decrypt
+ .text          0x0000000000008810      0x810 ../crypto68k/libcrypto68k.a(c68k_sha256.c.obj)
+                0x0000000000008cd2                c68k_sha256_variant_name
+                0x0000000000008ce8                c68k_sha256_variant_is_asm
+                0x0000000000008cec                c68k_sha256_initialize
+                0x0000000000008d4c                c68k_sha256_update
+                0x0000000000008e30                c68k_sha256_digest_calculate
+ .text          0x0000000000009020      0x718 ../crypto68k/libcrypto68k.a(c68k_chacha20.c.obj)
+                0x000000000000908a                c68k_chacha20_core_c
+                0x00000000000092ec                c68k_chacha20_core_is_asm
+                0x00000000000092f0                c68k_chacha20_initialize
+                0x00000000000093f8                c68k_chacha20_xor
+                0x0000000000009500                c68k_chacha20_keystream
+                0x0000000000009528                c68k_chacha20_poly1305_initialize
+                0x000000000000959e                c68k_chacha20_poly1305_associate
+                0x00000000000095cc                c68k_chacha20_poly1305_encrypt
+                0x000000000000960c                c68k_chacha20_poly1305_decrypt
+                0x000000000000965c                c68k_chacha20_poly1305_tag
+                0x0000000000009702                c68k_chacha20_poly1305_verify
+ .text          0x0000000000009738      0x8dc ../crypto68k/libcrypto68k.a(c68k_poly1305.c.obj)
+                0x0000000000009768                c68k_poly1305_initialize
+                0x0000000000009844                c68k_poly1305_blocks_c
+                0x0000000000009c96                c68k_poly1305_blocks
+                0x0000000000009c9e                c68k_poly1305_blocks_is_asm
+                0x0000000000009cb2                c68k_poly1305_update
+                0x0000000000009d52                c68k_poly1305_finish
+ .text          0x000000000000a014       0xa0 ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj)
+                0x000000000000a014                c68k_cpu_select
+                0x000000000000a0ac                c68k_cpu_class
+ .text          0x000000000000a0b4       0xa4 ../crypto68k/libcrypto68k.a(c68k_prim_mulw.S.obj)
+                0x000000000000a0b4                c68k_addmul_1_mulw
+ .text          0x000000000000a158      0x14c ../crypto68k/libcrypto68k.a(c68k_prim.S.obj)
+                0x000000000000a158                c68k_addmul_1_mulu
+                0x000000000000a1be                c68k_add_carry
+                0x000000000000a1e6                c68k_div_2by1_mulu
+                0x000000000000a1fc                c68k_add
+                0x000000000000a234                c68k_sub
+                0x000000000000a26c                c68k_cmp
+ .text          0x000000000000a2a4      0x260 ../crypto68k/libcrypto68k.a(c68k_chacha20.S.obj)
+                0x000000000000a2a4                c68k_chacha20_core_asm
+                0x000000000000a4ae                c68k_chacha20_xor_block_asm
+ .text          0x000000000000a504      0x184 ../crypto68k/libcrypto68k.a(c68k_poly1305.S.obj)
+                0x000000000000a504                c68k_poly1305_blocks_asm
+ .text          0x000000000000a688      0x6c8 ../crypto68k/libcrypto68k.a(c68k_aes.S.obj)
+                0x000000000000a688                c68k_aes_core_enc_t4_asm
+                0x000000000000a834                c68k_aes_core_dec_t4_asm
+                0x000000000000a9e0                c68k_aes_core_enc_t1_asm
+                0x000000000000ab98                c68k_aes_core_dec_t1_asm
+ .text          0x000000000000ad50      0x278 ../crypto68k/libcrypto68k.a(c68k_p256_mv20.S.obj)
+                0x000000000000ad50                c68k_p256_add_raw_mv20
+                0x000000000000ada6                c68k_p256_sub_raw_mv20
+                0x000000000000adfc                c68k_p256_reduce_core_mv20
+ .text          0x000000000000afc8      0x288 ../crypto68k/libcrypto68k.a(c68k_p256_mv0.S.obj)
+                0x000000000000afc8                c68k_p256_add_raw_mv0
+                0x000000000000b01e                c68k_p256_sub_raw_mv0
+                0x000000000000b074                c68k_p256_reduce_core_mv0
+ .text          0x000000000000b250      0x338 ../crypto68k/libcrypto68k.a(c68k_div.c.obj)
+                0x000000000000b2a8                c68k_mod
+ .text          0x000000000000b588      0x6b8 ../crypto68k/libcrypto68k.a(c68k_mont.c.obj)
+                0x000000000000bb08                c68k_mont_n0inv
+                0x000000000000bb3c                c68k_mont_mul
+                0x000000000000bbb8                c68k_mont_sqr
+ .text          0x000000000000bc40     0x1ab4 ../crypto68k/libcrypto68k.a(c68k_25519.c.obj)
+                0x000000000000cb04                c68k_25519_fe_add
+                0x000000000000cb0c                c68k_25519_fe_add_ref
+                0x000000000000cb10                c68k_25519_fe_sub
+                0x000000000000cb18                c68k_25519_fe_sub_ref
+                0x000000000000cb1c                c68k_25519_fe_mul
+                0x000000000000cb24                c68k_25519_fe_mul_ref
+                0x000000000000cb28                c68k_25519_fe_mul_is_asm
+                0x000000000000cb2c                c68k_25519_fe_sqr
+                0x000000000000cb34                c68k_25519_fe_sqr_ref
+                0x000000000000cb38                c68k_x25519
+                0x000000000000ce78                c68k_x25519_base
+                0x000000000000ce8e                c68k_ed25519_pubkey
+                0x000000000000ceea                c68k_ed25519_sign
+                0x000000000000d058                c68k_ed25519_verify
+                0x000000000000d408                c68k_25519_selfcheck_sqr
+                0x000000000000d480                c68k_25519_cpu_select
+ .text          0x000000000000d6f4      0x3d4 ../crypto68k/libcrypto68k.a(c68k_25519_mulu.S.obj)
+                0x000000000000d868                c68k_fe_mul_asm_mulu
+                0x000000000000d994                c68k_fe_add_asm_mulu
+                0x000000000000d9c8                c68k_fe_sub_asm_mulu
+                0x000000000000da1e                c68k_fe_sqr_asm_mulu
+ .text          0x000000000000dac8      0x3d4 ../crypto68k/libcrypto68k.a(c68k_25519_mulw.S.obj)
+                0x000000000000dc3c                c68k_fe_mul_asm_mulw
+                0x000000000000dd68                c68k_fe_add_asm_mulw
+                0x000000000000dd9c                c68k_fe_sub_asm_mulw
+                0x000000000000ddf2                c68k_fe_sqr_asm_mulw
+ .text          0x000000000000de9c       0x7c ../tls/libnx_secure.a(nx_secure_remote_certificate_verify.c.obj)
+                0x000000000000de9c                _nx_secure_remote_certificate_verify
+ .text          0x000000000000df18       0x80 ../tls/libnx_secure.a(nx_secure_tls_allocate_handshake_packet.c.obj)
+                0x000000000000df18                _nx_secure_tls_allocate_handshake_packet
+ .text          0x000000000000df98      0x498 ../tls/libnx_secure.a(nx_secure_tls_client_handshake.c.obj)
+                0x000000000000df98                _nx_secure_tls_client_handshake
+ .text          0x000000000000e430       0x34 ../tls/libnx_secure.a(nx_secure_tls_ecc_initialize.c.obj)
+                0x000000000000e430                _nx_secure_tls_ecc_initialize
+ .text          0x000000000000e464       0xa4 ../tls/libnx_secure.a(nx_secure_tls_generate_keys.c.obj)
+                0x000000000000e464                _nx_secure_tls_generate_keys
+ .text          0x000000000000e508       0x60 ../tls/libnx_secure.a(nx_secure_tls_generate_premaster_secret.c.obj)
+                0x000000000000e508                _nx_secure_tls_generate_premaster_secret
+ .text          0x000000000000e568      0x188 ../tls/libnx_secure.a(nx_secure_tls_handshake_hash_update.c.obj)
+                0x000000000000e568                _nx_secure_tls_handshake_hash_update
+ .text          0x000000000000e6f0       0x7c ../tls/libnx_secure.a(nx_secure_tls_local_certificate_add.c.obj)
+                0x000000000000e6f0                _nx_secure_tls_local_certificate_add
+ .text          0x000000000000e76c      0x114 ../tls/libnx_secure.a(nx_secure_tls_metadata_size_calculate.c.obj)
+                0x000000000000e76c                _nx_secure_tls_metadata_size_calculate
+ .text          0x000000000000e880      0x108 ../tls/libnx_secure.a(nx_secure_tls_packet_allocate.c.obj)
+                0x000000000000e880                _nx_secure_tls_packet_allocate
+ .text          0x000000000000e988       0x40 ../tls/libnx_secure.a(nx_secure_tls_packet_release.c.obj)
+                0x000000000000e988                _nx_secure_tls_packet_release
+ .text          0x000000000000e9c8      0x1f4 ../tls/libnx_secure.a(nx_secure_tls_process_certificate_request.c.obj)
+                0x000000000000e9c8                _nx_secure_tls_process_certificate_request
+ .text          0x000000000000ebbc      0x15c ../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj)
+                0x000000000000ebdc                _nx_secure_tls_process_finished
+ .text          0x000000000000ed18       0x50 ../tls/libnx_secure.a(nx_secure_tls_process_handshake_header.c.obj)
+                0x000000000000ed18                _nx_secure_tls_process_handshake_header
+ .text          0x000000000000ed68      0x3b8 ../tls/libnx_secure.a(nx_secure_tls_process_remote_certificate.c.obj)
+                0x000000000000ed68                _nx_secure_tls_process_remote_certificate
+ .text          0x000000000000f120       0x80 ../tls/libnx_secure.a(nx_secure_tls_process_server_key_exchange.c.obj)
+                0x000000000000f120                _nx_secure_tls_process_server_key_exchange
+ .text          0x000000000000f1a0      0x260 ../tls/libnx_secure.a(nx_secure_tls_process_serverhello.c.obj)
+                0x000000000000f1a0                _nx_secure_tls_process_serverhello
+ .text          0x000000000000f400      0x4b0 ../tls/libnx_secure.a(nx_secure_tls_process_serverhello_extensions.c.obj)
+                0x000000000000f400                _nx_secure_tls_process_serverhello_extensions
+ .text          0x000000000000f8b0       0x18 ../tls/libnx_secure.a(nx_secure_tls_protocol_version_get.c.obj)
+                0x000000000000f8b0                _nx_secure_tls_protocol_version_get
+ .text          0x000000000000f8c8       0x68 ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_allocate.c.obj)
+                0x000000000000f8c8                _nx_secure_tls_remote_certificate_allocate
+ .text          0x000000000000f930       0x34 ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free_all.c.obj)
+                0x000000000000f930                _nx_secure_tls_remote_certificate_free_all
+ .text          0x000000000000f964      0x11c ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_verify.c.obj)
+                0x000000000000f964                _nx_secure_tls_remote_certificate_verify
+ .text          0x000000000000fa80      0x1ec ../tls/libnx_secure.a(nx_secure_tls_send_certificate.c.obj)
+                0x000000000000fa80                _nx_secure_tls_send_certificate
+ .text          0x000000000000fc6c      0x7c4 ../tls/libnx_secure.a(nx_secure_tls_send_certificate_verify.c.obj)
+                0x000000000000fcc6                _nx_secure_tls_send_certificate_verify
+ .text          0x0000000000010430       0x28 ../tls/libnx_secure.a(nx_secure_tls_send_changecipherspec.c.obj)
+                0x0000000000010430                _nx_secure_tls_send_changecipherspec
+ .text          0x0000000000010458       0x84 ../tls/libnx_secure.a(nx_secure_tls_send_client_key_exchange.c.obj)
+                0x0000000000010458                _nx_secure_tls_send_client_key_exchange
+ .text          0x00000000000104dc      0x2ac ../tls/libnx_secure.a(nx_secure_tls_send_clienthello.c.obj)
+                0x00000000000104dc                _nx_secure_tls_send_clienthello
+ .text          0x0000000000010788      0x76c ../tls/libnx_secure.a(nx_secure_tls_send_clienthello_extensions.c.obj)
+                0x0000000000010788                _nx_secure_tls_send_clienthello_extensions
+                0x0000000000010c84                _nx_secure_tls_send_clienthello_psk_extension
+ .text          0x0000000000010ef4       0xcc ../tls/libnx_secure.a(nx_secure_tls_send_finished.c.obj)
+                0x0000000000010f14                _nx_secure_tls_send_finished
+ .text          0x0000000000010fc0       0xd0 ../tls/libnx_secure.a(nx_secure_tls_send_handshake_record.c.obj)
+                0x0000000000010fc0                _nx_secure_tls_send_handshake_record
+ .text          0x0000000000011090      0x3b8 ../tls/libnx_secure.a(nx_secure_tls_send_record.c.obj)
+                0x000000000001117c                _nx_secure_tls_send_record
+ .text          0x0000000000011448      0x280 ../tls/libnx_secure.a(nx_secure_tls_send_serverhello.c.obj)
+                0x0000000000011478                _nx_secure_tls_send_serverhello
+                0x0000000000011696                _nx_secure_tls_1_1_random
+                0x000000000001169e                _nx_secure_tls_1_2_random
+                0x00000000000116a6                _nx_secure_tls_hello_retry_request_random
+ .text          0x00000000000116c8      0x148 ../tls/libnx_secure.a(nx_secure_tls_send_serverhello_extensions.c.obj)
+                0x00000000000116c8                _nx_secure_tls_send_serverhello_extensions
+ .text          0x0000000000011810       0x10 ../tls/libnx_secure.a(nx_secure_tls_session_certificate_callback_set.c.obj)
+                0x0000000000011810                _nx_secure_tls_session_certificate_callback_set
+ .text          0x0000000000011820       0x38 ../tls/libnx_secure.a(nx_secure_tls_session_create.c.obj)
+                0x0000000000011820                _nx_secure_tls_session_create
+ .text          0x0000000000011858      0x808 ../tls/libnx_secure.a(nx_secure_tls_session_create_ext.c.obj)
+                0x00000000000118bc                _nx_secure_tls_session_create_ext
+ .text          0x0000000000012060       0x90 ../tls/libnx_secure.a(nx_secure_tls_session_delete.c.obj)
+                0x0000000000012060                _nx_secure_tls_session_delete
+ .text          0x00000000000120f0      0x138 ../tls/libnx_secure.a(nx_secure_tls_session_end.c.obj)
+                0x00000000000120f0                _nx_secure_tls_session_end
+ .text          0x0000000000012228       0xb8 ../tls/libnx_secure.a(nx_secure_tls_session_hash_capture.c.obj)
+                0x0000000000012228                _nx_secure_tls_session_hash_capture
+ .text          0x00000000000122e0       0x70 ../tls/libnx_secure.a(nx_secure_tls_session_iv_size_get.c.obj)
+                0x00000000000122e0                _nx_secure_tls_session_iv_size_get
+ .text          0x0000000000012350       0x94 ../tls/libnx_secure.a(nx_secure_tls_session_keys_set.c.obj)
+                0x0000000000012350                _nx_secure_tls_session_keys_set
+ .text          0x00000000000123e4       0x38 ../tls/libnx_secure.a(nx_secure_tls_session_packet_buffer_set.c.obj)
+                0x00000000000123e4                _nx_secure_tls_session_packet_buffer_set
+ .text          0x000000000001241c       0x34 ../tls/libnx_secure.a(nx_secure_tls_session_receive.c.obj)
+                0x000000000001241c                _nx_secure_tls_session_receive
+ .text          0x0000000000012450      0x2a0 ../tls/libnx_secure.a(nx_secure_tls_session_receive_records.c.obj)
+                0x0000000000012450                _nx_secure_tls_session_receive_records
+ .text          0x00000000000126f0       0xdc ../tls/libnx_secure.a(nx_secure_tls_session_reset.c.obj)
+                0x00000000000126f0                _nx_secure_tls_session_reset
+ .text          0x00000000000127cc       0x50 ../tls/libnx_secure.a(nx_secure_tls_session_send.c.obj)
+                0x00000000000127cc                _nx_secure_tls_session_send
+ .text          0x000000000001281c       0x10 ../tls/libnx_secure.a(nx_secure_tls_session_sni_extension_set.c.obj)
+                0x000000000001281c                _nx_secure_tls_session_sni_extension_set
+ .text          0x000000000001282c      0x148 ../tls/libnx_secure.a(nx_secure_tls_session_start.c.obj)
+                0x000000000001282c                _nx_secure_tls_session_start
+ .text          0x0000000000012974       0x10 ../tls/libnx_secure.a(nx_secure_tls_session_time_function_set.c.obj)
+                0x0000000000012974                _nx_secure_tls_session_time_function_set
+ .text          0x0000000000012984       0x24 ../tls/libnx_secure.a(nx_secure_trusted_certificate_add.c.obj)
+                0x0000000000012984                _nx_secure_trusted_certificate_add
+ .text          0x00000000000129a8      0x188 ../tls/libnx_secure.a(nx_secure_verify_mac.c.obj)
+                0x00000000000129a8                _nx_secure_verify_mac
+ .text          0x0000000000012b30      0xda0 ../tls/libnx_secure.a(nx_secure_x509.c.obj)
+                0x0000000000012f2a                _nx_secure_x509_certificate_parse
+ .text          0x00000000000138d0       0xf8 ../tls/libnx_secure.a(nx_secure_x509_asn1_tlv_block_parse.c.obj)
+                0x00000000000138d0                _nx_secure_x509_asn1_tlv_block_parse
+ .text          0x00000000000139c8      0x150 ../tls/libnx_secure.a(nx_secure_x509_certificate_chain_verify.c.obj)
+                0x00000000000139c8                _nx_secure_x509_certificate_chain_verify
+ .text          0x0000000000013b18      0x12c ../tls/libnx_secure.a(nx_secure_x509_certificate_initialize.c.obj)
+                0x0000000000013b18                _nx_secure_x509_certificate_initialize
+ .text          0x0000000000013c44       0x74 ../tls/libnx_secure.a(nx_secure_x509_certificate_list_add.c.obj)
+                0x0000000000013c44                _nx_secure_x509_certificate_list_add
+ .text          0x0000000000013cb8      0x4b8 ../tls/libnx_secure.a(nx_secure_x509_certificate_verify.c.obj)
+                0x0000000000013cb8                _nx_secure_x509_certificate_verify
+ .text          0x0000000000014170       0x84 ../tls/libnx_secure.a(nx_secure_x509_common_name_dns_check.c.obj)
+                0x0000000000014170                _nx_secure_x509_common_name_dns_check
+ .text          0x00000000000141f4       0x40 ../tls/libnx_secure.a(nx_secure_x509_distinguished_name_compare.c.obj)
+                0x00000000000141f4                _nx_secure_x509_distinguished_name_compare
+ .text          0x0000000000014234      0x1ac ../tls/libnx_secure.a(nx_secure_x509_distinguished_name_parse.c.obj)
+                0x0000000000014234                _nx_secure_x509_distinguished_name_parse
+ .text          0x00000000000143e0      0x1bc ../tls/libnx_secure.a(nx_secure_x509_ec_private_key_parse.c.obj)
+                0x00000000000143e0                _nx_secure_x509_ec_private_key_parse
+ .text          0x000000000001459c      0x84c ../tls/libnx_secure.a(nx_secure_x509_expiration_check.c.obj)
+                0x0000000000014d36                _nx_secure_x509_expiration_check
+ .text          0x0000000000014de8      0x178 ../tls/libnx_secure.a(nx_secure_x509_extension_find.c.obj)
+                0x0000000000014de8                _nx_secure_x509_extension_find
+ .text          0x0000000000014f60      0x544 ../tls/libnx_secure.a(nx_secure_x509_extension_policy_check.c.obj)
+                0x0000000000014fe6                _nx_secure_x509_name_constraints_check
+                0x00000000000152b4                _nx_secure_x509_server_auth_check
+                0x0000000000015300                _nx_secure_x509_critical_extensions_check
+                0x000000000001543a                _nx_secure_x509_extension_policy_check
+ .text          0x00000000000154a4       0x4c ../tls/libnx_secure.a(nx_secure_x509_find_certificate_methods.c.obj)
+                0x00000000000154a4                _nx_secure_x509_find_certificate_methods
+ .text          0x00000000000154f0       0x5c ../tls/libnx_secure.a(nx_secure_x509_find_curve_method.c.obj)
+                0x00000000000154f0                _nx_secure_x509_find_curve_method
+ .text          0x000000000001554c       0x30 ../tls/libnx_secure.a(nx_secure_x509_free_certificate_get.c.obj)
+                0x000000000001554c                _nx_secure_x509_free_certificate_get
+ .text          0x000000000001557c       0x88 ../tls/libnx_secure.a(nx_secure_x509_key_usage_extension_parse.c.obj)
+                0x000000000001557c                _nx_secure_x509_key_usage_extension_parse
+ .text          0x0000000000015604       0x5c ../tls/libnx_secure.a(nx_secure_x509_local_device_certificate_get.c.obj)
+                0x0000000000015604                _nx_secure_x509_local_device_certificate_get
+ .text          0x0000000000015660      0x1e8 ../tls/libnx_secure.a(nx_secure_x509_oid_parse.c.obj)
+                0x0000000000015660                _nx_secure_x509_oid_parse
+ .text          0x0000000000015848      0x2e0 ../tls/libnx_secure.a(nx_secure_x509_pkcs1_rsa_private_key_parse.c.obj)
+                0x000000000001587e                _nx_secure_x509_pkcs1_rsa_private_key_parse
+ .text          0x0000000000015b28      0x190 ../tls/libnx_secure.a(nx_secure_x509_pkcs7_decode.c.obj)
+                0x0000000000015b28                _nx_secure_x509_pkcs7_decode
+ .text          0x0000000000015cb8       0x5c ../tls/libnx_secure.a(nx_secure_x509_remote_endpoint_certificate_get.c.obj)
+                0x0000000000015cb8                _nx_secure_x509_remote_endpoint_certificate_get
+ .text          0x0000000000015d14       0x74 ../tls/libnx_secure.a(nx_secure_x509_store_certificate_add.c.obj)
+                0x0000000000015d14                _nx_secure_x509_store_certificate_add
+ .text          0x0000000000015d88       0x94 ../tls/libnx_secure.a(nx_secure_x509_store_certificate_find.c.obj)
+                0x0000000000015d88                _nx_secure_x509_store_certificate_find
+ .text          0x0000000000015e1c      0x120 ../tls/libnx_secure.a(nx_secure_x509_subject_alt_names_find.c.obj)
+                0x0000000000015e1c                _nx_secure_x509_subject_alt_names_find_ex
+                0x0000000000015f1e                _nx_secure_x509_subject_alt_names_find
+ .text          0x0000000000015f3c       0x68 ../tls/libnx_secure.a(nx_secure_x509_wildcard_compare.c.obj)
+                0x0000000000015f3c                _nx_secure_x509_wildcard_compare
+ .text          0x0000000000015fa4      0x678 ../tls/libnx_secure.a(nx_secure_tls_record_payload_encrypt.c.obj)
+                0x0000000000015fa4                _nx_secure_tls_record_payload_encrypt
+ .text          0x000000000001661c      0x1f8 ../tls/libnx_secure.a(nx_secure_generate_client_key_exchange.c.obj)
+                0x000000000001661c                _nx_secure_generate_client_key_exchange
+ .text          0x0000000000016814      0x1a4 ../tls/libnx_secure.a(nx_secure_generate_master_secret.c.obj)
+                0x000000000001683a                _nx_secure_generate_master_secret
+ .text          0x00000000000169b8      0x1f4 ../tls/libnx_secure.a(nx_secure_generate_premaster_secret.c.obj)
+                0x00000000000169b8                _nx_secure_generate_premaster_secret
+ .text          0x0000000000016bac       0x8c ../tls/libnx_secure.a(nx_secure_generate_server_key_exchange.c.obj)
+                0x0000000000016bac                _nx_secure_generate_server_key_exchange
+ .text          0x0000000000016c38      0x140 ../tls/libnx_secure.a(nx_secure_generate_session_keys.c.obj)
+                0x0000000000016c46                _nx_secure_generate_session_keys
+ .text          0x0000000000016d78      0x4d0 ../tls/libnx_secure.a(nx_secure_process_client_key_exchange.c.obj)
+                0x0000000000016d78                _nx_secure_process_client_key_exchange
+ .text          0x0000000000017248      0x700 ../tls/libnx_secure.a(nx_secure_process_server_key_exchange.c.obj)
+                0x0000000000017248                _nx_secure_process_server_key_exchange
+ .text          0x0000000000017948      0x1c8 ../tls/libnx_secure.a(nx_secure_session_keys_set.c.obj)
+                0x0000000000017948                _nx_secure_session_keys_set
+ .text          0x0000000000017b10       0xd0 ../tls/libnx_secure.a(nx_secure_tls_1_3_crypto_init.c.obj)
+                0x0000000000017b10                _nx_secure_tls_1_3_crypto_init
+ .text          0x0000000000017be0      0x170 ../tls/libnx_secure.a(nx_secure_tls_1_3_finished_hash_generate.c.obj)
+                0x0000000000017be0                _nx_secure_tls_1_3_finished_hash_generate
+ .text          0x0000000000017d50       0xa4 ../tls/libnx_secure.a(nx_secure_tls_1_3_transcript_hash_save.c.obj)
+                0x0000000000017d50                _nx_secure_tls_1_3_transcript_hash_save
+ .text          0x0000000000017df4       0x98 ../tls/libnx_secure.a(nx_secure_tls_check_protocol_version.c.obj)
+                0x0000000000017df4                _nx_secure_tls_check_protocol_version
+ .text          0x0000000000017e8c       0x44 ../tls/libnx_secure.a(nx_secure_tls_ciphersuite_lookup.c.obj)
+                0x0000000000017e8c                _nx_secure_tls_ciphersuite_lookup
+ .text          0x0000000000017ed0      0x770 ../tls/libnx_secure.a(nx_secure_tls_ecc_generate_keys.c.obj)
+                0x0000000000017ed0                _nx_secure_tls_ecc_generate_keys
+ .text          0x0000000000018640       0x5c ../tls/libnx_secure.a(nx_secure_tls_find_curve_method.c.obj)
+                0x0000000000018640                _nx_secure_tls_find_curve_method
+ .text          0x000000000001869c      0x174 ../tls/libnx_secure.a(nx_secure_tls_finished_hash_generate.c.obj)
+                0x000000000001869c                _nx_secure_tls_finished_hash_generate
+ .text          0x0000000000018810       0xf8 ../tls/libnx_secure.a(nx_secure_tls_handshake_hash_init.c.obj)
+                0x0000000000018810                _nx_secure_tls_handshake_hash_init
+ .text          0x0000000000018908       0xb4 ../tls/libnx_secure.a(nx_secure_tls_handshake_process.c.obj)
+                0x0000000000018908                _nx_secure_tls_handshake_process
+ .text          0x00000000000189bc      0x244 ../tls/libnx_secure.a(nx_secure_tls_hash_record.c.obj)
+                0x00000000000189bc                _nx_secure_tls_hash_record
+ .text          0x0000000000018c00       0x18 ../tls/libnx_secure.a(nx_secure_tls_key_material_init.c.obj)
+                0x0000000000018c00                _nx_secure_tls_key_material_init
+ .text          0x0000000000018c18      0x1d8 ../tls/libnx_secure.a(nx_secure_tls_map_error_to_alert.c.obj)
+                0x0000000000018c18                _nx_secure_tls_map_error_to_alert
+ .text          0x0000000000018df0       0xe8 ../tls/libnx_secure.a(nx_secure_tls_newest_supported_version.c.obj)
+                0x0000000000018df0                _nx_secure_tls_newest_supported_version
+                0x0000000000018e44                _nx_secure_tls_highest_supported_version_negotiate
+ .text          0x0000000000018ed8      0x7fc ../tls/libnx_secure.a(nx_secure_tls_process_clienthello_extensions.c.obj)
+                0x0000000000018ed8                _nx_secure_tls_process_clienthello_extensions
+                0x00000000000192d2                _nx_secure_tls_get_signature_algorithm_id
+                0x0000000000019394                _nx_secure_tls_proc_clienthello_sec_sa_extension
+ .text          0x00000000000196d4      0x644 ../tls/libnx_secure.a(nx_secure_tls_process_record.c.obj)
+                0x00000000000196d4                _nx_secure_tls_process_record
+ .text          0x0000000000019d18      0x168 ../tls/libnx_secure.a(nx_secure_tls_psk_binder_generate.c.obj)
+                0x0000000000019d18                _nx_secure_tls_psk_binder_generate
+ .text          0x0000000000019e80       0x90 ../tls/libnx_secure.a(nx_secure_tls_record_hash_calculate.c.obj)
+                0x0000000000019e80                _nx_secure_tls_record_hash_calculate
+ .text          0x0000000000019f10      0x16c ../tls/libnx_secure.a(nx_secure_tls_record_hash_initialize.c.obj)
+                0x0000000000019f10                _nx_secure_tls_record_hash_initialize
+ .text          0x000000000001a07c       0x68 ../tls/libnx_secure.a(nx_secure_tls_record_hash_update.c.obj)
+                0x000000000001a07c                _nx_secure_tls_record_hash_update
+ .text          0x000000000001a0e4       0x9c ../tls/libnx_secure.a(nx_secure_tls_remote_certificate_free.c.obj)
+                0x000000000001a0e4                _nx_secure_tls_remote_certificate_free
+ .text          0x000000000001a180       0x44 ../tls/libnx_secure.a(nx_secure_tls_send_alert.c.obj)
+                0x000000000001a180                _nx_secure_tls_send_alert
+ .text          0x000000000001a1c4      0x3c4 ../tls/libnx_secure.a(nx_secure_tls_server_handshake.c.obj)
+                0x000000000001a1c4                _nx_secure_tls_server_handshake
+ .text          0x000000000001a588       0x58 ../tls/libnx_secure.a(nx_secure_tls_verify_mac.c.obj)
+                0x000000000001a588                _nx_secure_tls_verify_mac
+ .text          0x000000000001a5e0      0x180 ../tls/libnx_secure.a(nx_secure_x509_basic_constraints_extension_parse.c.obj)
+                0x000000000001a5e0                _nx_secure_x509_basic_constraints_extension_parse
+ .text          0x000000000001a760       0x68 ../tls/libnx_secure.a(nx_secure_x509_certificate_list_find.c.obj)
+                0x000000000001a760                _nx_secure_x509_certificate_list_find
+ .text          0x000000000001a7c8       0xfc ../tls/libnx_secure.a(nx_secure_x509_extended_key_usage_extension_parse.c.obj)
+                0x000000000001a7c8                _nx_secure_x509_extended_key_usage_extension_parse
+ .text          0x000000000001a8c4       0x60 ../tls/libnx_secure.a(nx_secure_x509_store_certificate_remove.c.obj)
+                0x000000000001a8c4                _nx_secure_x509_store_certificate_remove
+ .text          0x000000000001a924      0x7e4 ../tls/libnx_secure.a(nx_secure_tls_record_payload_decrypt.c.obj)
+                0x000000000001acce                _nx_secure_tls_record_payload_decrypt
+ .text          0x000000000001b108      0x608 ../tls/libnx_secure.a(nx_secure_tls_1_3_client_handshake.c.obj)
+                0x000000000001b108                _nx_secure_tls_1_3_client_handshake
+ .text          0x000000000001b710      0xc74 ../tls/libnx_secure.a(nx_secure_tls_1_3_generate_keys.c.obj)
+                0x000000000001bafe                _nx_secure_tls_1_3_generate_psk_secret
+                0x000000000001bc1a                _nx_secure_tls_1_3_generate_handshake_keys
+                0x000000000001c07a                _nx_secure_tls_1_3_generate_session_keys
+                0x000000000001c320                _nx_secure_tls_1_3_session_psk_generate
+ .text          0x000000000001c384      0x4e4 ../tls/libnx_secure.a(nx_secure_tls_1_3_server_handshake.c.obj)
+                0x000000000001c384                _nx_secure_tls_1_3_server_handshake
+ .text          0x000000000001c868      0x180 ../tls/libnx_secure.a(nx_secure_tls_1_3_session_keys_set.c.obj)
+                0x000000000001c868                _nx_secure_tls_1_3_session_keys_set
+ .text          0x000000000001c9e8      0x850 ../tls/libnx_secure.a(nx_secure_tls_process_certificate_verify.c.obj)
+                0x000000000001ca2e                _nx_secure_tls_process_certificate_verify
+ .text          0x000000000001d238       0x8c ../tls/libnx_secure.a(nx_secure_tls_process_changecipherspec.c.obj)
+                0x000000000001d238                _nx_secure_tls_process_changecipherspec
+ .text          0x000000000001d2c4       0x50 ../tls/libnx_secure.a(nx_secure_tls_process_client_key_exchange.c.obj)
+                0x000000000001d2c4                _nx_secure_tls_process_client_key_exchange
+ .text          0x000000000001d314      0x414 ../tls/libnx_secure.a(nx_secure_tls_process_clienthello.c.obj)
+                0x000000000001d314                _nx_secure_tls_process_clienthello
+ .text          0x000000000001d728       0x10 ../tls/libnx_secure.a(nx_secure_tls_process_encrypted_extensions.c.obj)
+                0x000000000001d728                _nx_secure_tls_process_encrypted_extensions
+ .text          0x000000000001d738       0xac ../tls/libnx_secure.a(nx_secure_tls_process_header.c.obj)
+                0x000000000001d738                _nx_secure_tls_process_header
+ .text          0x000000000001d7e4       0x34 ../tls/libnx_secure.a(nx_secure_tls_send_encrypted_extensions.c.obj)
+                0x000000000001d7e4                _nx_secure_tls_send_encrypted_extensions
+ .text          0x000000000001d818       0xe8 ../tls/libnx_secure.a(nx_secure_tls_send_newsessionticket.c.obj)
+                0x000000000001d82a                _nx_secure_tls_send_newsessionticket
+ .text          0x000000000001d900       0x8c ../tls/libnx_secure.a(nx_secure_tls_send_server_key_exchange.c.obj)
+                0x000000000001d900                _nx_secure_tls_send_server_key_exchange
+ .text          0x000000000001d98c       0x64 ../tls/libnx_secure.a(nx_secure_x509_certificate_list_remove.c.obj)
+                0x000000000001d98c                _nx_secure_x509_certificate_list_remove
+ .text          0x000000000001d9f0     0x3990 ../tls/libnx_crypto.a(nx_crypto_ec.c.obj)
+                0x000000000001d9f0                _nx_crypto_ec_secp192r1_reduce
+                0x000000000001dbc8                _nx_crypto_ec_secp224r1_reduce
+                0x000000000001ddec                _nx_crypto_ec_secp256r1_reduce
+                0x000000000001e1b4                _nx_crypto_ec_secp384r1_reduce
+                0x000000000001e5be                _nx_crypto_ec_secp521r1_reduce
+                0x000000000001e730                _nx_crypto_ec_point_is_infinite
+                0x000000000001e778                _nx_crypto_ec_point_set_infinite
+                0x000000000001e7b2                _nx_crypto_ec_point_setup
+                0x000000000001e810                _nx_crypto_ec_point_extract_uncompressed
+                0x000000000001e882                _nx_crypto_ec_point_fp_affine_to_projective
+                0x000000000001e89a                _nx_crypto_ec_point_fp_projective_to_affine
+                0x000000000001ea0a                _nx_crypto_ec_add_digit_reduce
+                0x000000000001ea54                _nx_crypto_ec_subtract_digit_reduce
+                0x000000000001ea92                _nx_crypto_ec_fp_reduce
+                0x000000000001eaaa                _nx_crypto_ec_add_reduce
+                0x000000000001eaf4                _nx_crypto_ec_subtract_reduce
+                0x000000000001eb38                _nx_crypto_ec_fp_affine_add
+                0x000000000001eea0                _nx_crypto_ec_fp_affine_subtract
+                0x000000000001ef66                _nx_crypto_ec_fp_projective_add
+                0x000000000001f2c6                _nx_crypto_ec_fp_projective_double
+                0x000000000001f5f2                _nx_crypto_ec_naf_compute
+                0x000000000001f6f0                _nx_crypto_ec_fp_fixed_multiple
+                0x000000000001f940                _nx_crypto_ec_fp_projective_multiple
+                0x000000000001fb78                _nx_crypto_ec_key_pair_generation_extra
+                0x000000000001fc92                _nx_crypto_ec_key_pair_stream_generate
+                0x000000000001fd80                _nx_crypto_ec_precomputation
+                0x0000000000020558                _nx_crypto_ec_fixed_output
+                0x0000000000020932                _nx_crypto_ec_get_named_curve
+                0x0000000000020966                _nx_crypto_method_ec_secp192r1_operation
+                0x0000000000020984                _nx_crypto_method_ec_secp224r1_operation
+                0x00000000000209a2                _nx_crypto_method_ec_secp256r1_operation
+                0x00000000000209c0                _nx_crypto_method_ec_secp384r1_operation
+                0x00000000000209de                _nx_crypto_method_ec_secp521r1_operation
+                0x00000000000209fc                _nx_crypto_ec_validate_public_key
+                0x0000000000020b4a                _nx_crypto_ec_secp521r1
+                0x0000000000020bfc                _nx_crypto_ec_secp384r1
+                0x0000000000020cae                _nx_crypto_ec_secp256r1
+                0x0000000000020d60                _nx_crypto_ec_secp224r1
+                0x0000000000020e12                _nx_crypto_ec_secp192r1
+ .text          0x0000000000021380      0xb6c ../tls/libnx_crypto.a(nx_crypto_ec_secp192r1_fixed_points.c.obj)
+                0x0000000000021380                _nx_crypto_ec_secp192r1_fixed_points
+ .text          0x0000000000021eec      0xc54 ../tls/libnx_crypto.a(nx_crypto_ec_secp224r1_fixed_points.c.obj)
+                0x0000000000021eec                _nx_crypto_ec_secp224r1_fixed_points
+ .text          0x0000000000022b40      0xd3c ../tls/libnx_crypto.a(nx_crypto_ec_secp256r1_fixed_points.c.obj)
+                0x0000000000022b40                _nx_crypto_ec_secp256r1_fixed_points
+ .text          0x000000000002387c     0x235c ../tls/libnx_crypto.a(nx_crypto_ec_secp384r1_fixed_points.c.obj)
+                0x000000000002387c                _nx_crypto_ec_secp384r1_fixed_points
+ .text          0x0000000000025bd8     0x2ce4 ../tls/libnx_crypto.a(nx_crypto_ec_secp521r1_fixed_points.c.obj)
+                0x0000000000025bd8                _nx_crypto_ec_secp521r1_fixed_points
+ .text          0x00000000000288bc      0x4e8 ../tls/libnx_crypto.a(nx_crypto_hmac.c.obj)
+                0x00000000000288bc                _nx_crypto_hmac_hash_initialize
+                0x00000000000288f2                _nx_crypto_hmac_hash_update
+                0x000000000002892c                _nx_crypto_hmac_hash_digest_calculate
+                0x000000000002896c                _nx_crypto_hmac_initialize
+                0x0000000000028a82                _nx_crypto_hmac_update
+                0x0000000000028a9e                _nx_crypto_hmac_digest_calculate
+                0x0000000000028b3a                _nx_crypto_hmac
+                0x0000000000028b96                _nx_crypto_hmac_metadata_set
+                0x0000000000028bc4                _nx_crypto_method_hmac_init
+                0x0000000000028bf2                _nx_crypto_method_hmac_cleanup
+                0x0000000000028c10                _nx_crypto_method_hmac_operation
+ .text          0x0000000000028da4     0x1b0c ../tls/libnx_crypto.a(nx_crypto_huge_number.c.obj)
+                0x0000000000028da4                _nx_crypto_huge_number_is_zero
+                0x0000000000028dce                _nx_crypto_huge_number_add_unsigned
+                0x0000000000028e40                _nx_crypto_huge_number_add_digit_unsigned
+                0x0000000000028eb6                _nx_crypto_huge_number_shift_left
+                0x0000000000028f1e                _nx_crypto_huge_number_adjust_size
+                0x0000000000028f46                _nx_crypto_huge_number_subtract_unsigned
+                0x0000000000029042                _nx_crypto_huge_number_subtract_digit_unsigned
+                0x00000000000290ae                _nx_crypto_huge_number_shift_right
+                0x00000000000290ee                _nx_crypto_huge_number_compare_unsigned
+                0x000000000002916a                _nx_crypto_huge_number_add
+                0x00000000000291d0                _nx_crypto_huge_number_subtract
+                0x0000000000029244                _nx_crypto_huge_number_compare
+                0x0000000000029280                _nx_crypto_huge_number_multiply
+                0x0000000000029312                _nx_crypto_huge_number_multiply_digit
+                0x00000000000293ae                _nx_crypto_huge_number_square
+                0x00000000000294dc                _nx_crypto_huge_number_modulus
+                0x0000000000029808                _nx_crypto_huge_number_setup
+                0x00000000000298fa                _nx_crypto_huge_number_rbg
+                0x00000000000299a2                _nx_crypto_huge_number_extract
+                0x0000000000029a12                _nx_crypto_huge_number_extract_fixed_size
+                0x0000000000029b06                _nx_crypto_huge_number_inverse_modulus_prime
+                0x0000000000029d86                _nx_crypto_huge_number_inverse_modulus
+                0x000000000002a12c                _nx_crypto_huge_number_mont
+                0x000000000002a3f8                _nx_crypto_huge_number_mont_power_modulus
+                0x000000000002a624                _nx_crypto_huge_number_crt_power_modulus
+ .text          0x000000000002a8b0        0xc ../tls/libnx_crypto.a(nx_crypto_null_cipher.c.obj)
+                0x000000000002a8b0                _nx_crypto_method_null_init
+                0x000000000002a8b4                _nx_crypto_method_null_cleanup
+                0x000000000002a8b8                _nx_crypto_method_null_operation
+ .text          0x000000000002a8bc      0x4c0 ../tls/libnx_crypto.a(nx_crypto_pkcs1_v1.5.c.obj)
+                0x000000000002a8bc                _nx_crypto_pkcs1_v1_5_encode
+                0x000000000002a988                _nx_crypto_pkcs1_v1_5_sign
+                0x000000000002aa7e                _nx_crypto_pkcs1_v1_5_verify
+                0x000000000002ab90                _nx_crypto_method_pkcs1_v1_5_init
+                0x000000000002abb8                _nx_crypto_method_pkcs1_v1_5_cleanup
+                0x000000000002abd6                _nx_crypto_method_pkcs1_v1_5_operation
+ .text          0x000000000002ad7c      0x68c ../tls/libnx_crypto.a(nx_crypto_rsa.c.obj)
+                0x000000000002ad7c                _nx_crypto_rsa_operation
+                0x000000000002aefa                _nx_crypto_method_rsa_init
+                0x000000000002af4e                _nx_crypto_method_rsa_cleanup
+                0x000000000002af6c                _nx_crypto_method_rsa_operation
+                0x000000000002b04e                _nx_crypto_rsa_pss_verify
+ .text          0x000000000002b408      0x528 ../tls/libnx_crypto.a(nx_crypto_sha1.c.obj)
+                0x000000000002b408                _nx_crypto_sha1_initialize
+                0x000000000002b44c                _nx_crypto_sha1_process_buffer
+                0x000000000002b5f4                _nx_crypto_sha1_update
+                0x000000000002b6cc                _nx_crypto_sha1_digest_calculate
+                0x000000000002b7f0                _nx_crypto_method_sha1_init
+                0x000000000002b818                _nx_crypto_method_sha1_cleanup
+                0x000000000002b836                _nx_crypto_method_sha1_operation
+                0x000000000002b8f0                _nx_crypto_sha1_padding
+ .text          0x000000000002b930     0x10b0 ../tls/libnx_crypto.a(nx_crypto_sha2.c.obj)
+                0x000000000002b930                _nx_crypto_sha256_initialize
+                0x000000000002b9e2                _nx_crypto_sha256_process_buffer
+                0x000000000002c534                _nx_crypto_sha256_update
+                0x000000000002c60c                _nx_crypto_sha256_digest_calculate
+                0x000000000002c752                _nx_crypto_method_sha256_init
+                0x000000000002c77a                _nx_crypto_method_sha256_cleanup
+                0x000000000002c798                _nx_crypto_method_sha256_operation
+                0x000000000002c8a0                _nx_crypto_sha256_padding
+                0x000000000002c8e0                _sha2_round_constants
+ .text          0x000000000002c9e0      0xf88 ../tls/libnx_crypto.a(nx_crypto_sha5.c.obj)
+                0x000000000002c9e0                _nx_crypto_sha512_initialize
+                0x000000000002cc48                _nx_crypto_sha512_process_buffer
+                0x000000000002d1d2                _nx_crypto_sha512_update
+                0x000000000002d312                _nx_crypto_sha512_digest_calculate
+                0x000000000002d4e8                _nx_crypto_method_sha512_init
+                0x000000000002d510                _nx_crypto_method_sha512_cleanup
+                0x000000000002d52e                _nx_crypto_method_sha512_operation
+                0x000000000002d666                _nx_crypto_sha512_padding
+                0x000000000002d6e6                _sha5_round_constants
+ .text          0x000000000002d968      0x1a8 ../tls/libnx_crypto.a(nx_crypto_tls_prf_1.c.obj)
+                0x000000000002d968                _nx_crypto_method_prf_1_init
+                0x000000000002d9a8                _nx_crypto_method_prf_1_cleanup
+                0x000000000002d9c6                _nx_crypto_method_prf_1_operation
+ .text          0x000000000002db10      0x16c ../tls/libnx_crypto.a(nx_crypto_tls_prf_sha256.c.obj)
+                0x000000000002db10                _nx_crypto_method_prf_sha_256_init
+                0x000000000002db50                _nx_crypto_method_prf_sha_256_cleanup
+                0x000000000002db6e                _nx_crypto_method_prf_sha_256_operation
+ .text          0x000000000002dc7c      0x16c ../tls/libnx_crypto.a(nx_crypto_tls_prf_sha384.c.obj)
+                0x000000000002dc7c                _nx_crypto_method_prf_sha384_init
+                0x000000000002dcbc                _nx_crypto_method_prf_sha384_cleanup
+                0x000000000002dcda                _nx_crypto_method_prf_sha384_operation
+ .text          0x000000000002dde8      0x16c ../tls/libnx_crypto.a(nx_crypto_tls_prf_sha512.c.obj)
+                0x000000000002dde8                _nx_crypto_method_prf_sha512_init
+                0x000000000002de28                _nx_crypto_method_prf_sha512_cleanup
+                0x000000000002de46                _nx_crypto_method_prf_sha512_operation
+ .text          0x000000000002df54      0x2f4 ../tls/libnx_crypto.a(nx_crypto_3des.c.obj)
+                0x000000000002df54                _nx_crypto_3des_encrypt
+                0x000000000002dfa4                _nx_crypto_3des_decrypt
+                0x000000000002dff4                _nx_crypto_3des_key_set
+                0x000000000002e02c                _nx_crypto_method_3des_init
+                0x000000000002e070                _nx_crypto_method_3des_cleanup
+                0x000000000002e08e                _nx_crypto_method_3des_operation
+ .text          0x000000000002e248     0x2364 ../tls/libnx_crypto.a(nx_crypto_aes.c.obj)
+                0x000000000002e248                _nx_crypto_aes_encrypt
+                0x000000000002e6fa                _nx_crypto_aes_key_set
+                0x000000000002e8b8                _nx_crypto_aes_decrypt
+                0x000000000002ed4a                _nx_crypto_method_aes_init
+                0x000000000002edce                _nx_crypto_method_aes_cleanup
+                0x000000000002edec                _nx_crypto_method_aes_cbc_operation
+                0x000000000002ef86                _nx_crypto_method_aes_ccm_operation
+                0x000000000002f2a0                _nx_crypto_method_aes_gcm_operation
+                0x000000000002f59c                _nx_crypto_method_aes_ctr_operation
+                0x000000000002f6c2                _nx_crypto_method_aes_xcbc_operation
+                0x000000000002f730                _nx_crypto_method_aes_operation
+ .text          0x00000000000305ac      0x190 ../tls/libnx_crypto.a(nx_crypto_cbc.c.obj)
+                0x00000000000305ac                _nx_crypto_cbc_encrypt
+                0x0000000000030648                _nx_crypto_cbc_decrypt
+                0x000000000003070e                _nx_crypto_cbc_encrypt_init
+ .text          0x000000000003073c      0x5fc ../tls/libnx_crypto.a(nx_crypto_ccm.c.obj)
+                0x0000000000030954                _nx_crypto_ccm_encrypt_init
+                0x0000000000030b0a                _nx_crypto_ccm_encrypt_update
+                0x0000000000030c06                _nx_crypto_ccm_encrypt_calculate
+                0x0000000000030c88                _nx_crypto_ccm_decrypt_calculate
+ .text          0x0000000000030d38      0x2a8 ../tls/libnx_crypto.a(nx_crypto_ctr.c.obj)
+                0x0000000000030d38                _nx_crypto_ctr_encrypt
+                0x0000000000030f7c                _nx_crypto_ctr_encrypt_init
+ .text          0x0000000000030fe0     0x120c ../tls/libnx_crypto.a(nx_crypto_des.c.obj)
+                0x0000000000030fe0                _nx_crypto_des_key_set
+                0x0000000000031432                _nx_crypto_des_process_block
+                0x0000000000031712                _nx_crypto_des_encrypt
+                0x000000000003172a                _nx_crypto_des_decrypt
+                0x000000000003174a                _nx_crypto_method_des_init
+                0x000000000003179a                _nx_crypto_method_des_cleanup
+                0x00000000000317b8                _nx_crypto_method_des_operation
+ .text          0x00000000000321ec      0xc64 ../tls/libnx_crypto.a(nx_crypto_drbg.c.obj)
+                0x0000000000032678                _nx_crypto_drbg_instantiate
+                0x000000000003284c                _nx_crypto_drbg_reseed
+                0x00000000000329ac                _nx_crypto_drbg_generate
+                0x0000000000032c3e                _nx_crypto_method_drbg_init
+                0x0000000000032c66                _nx_crypto_method_drbg_cleanup
+                0x0000000000032c84                _nx_crypto_method_drbg_operation
+                0x0000000000032d86                _nx_crypto_drbg
+ .text          0x0000000000032e50      0x4dc ../tls/libnx_crypto.a(nx_crypto_ecdh.c.obj)
+                0x0000000000032e50                _nx_crypto_ecdh_key_pair_import
+                0x0000000000032ec6                _nx_crypto_ecdh_private_key_export
+                0x0000000000032f28                _nx_crypto_ecdh_setup
+                0x0000000000033016                _nx_crypto_ecdh_compute_secret
+                0x0000000000033146                _nx_crypto_method_ecdh_init
+                0x000000000003316e                _nx_crypto_method_ecdh_cleanup
+                0x000000000003318c                _nx_crypto_method_ecdh_operation
+ .text          0x000000000003332c      0xa8c ../tls/libnx_crypto.a(nx_crypto_ecdsa.c.obj)
+                0x0000000000033398                _nx_crypto_ecdsa_sign
+                0x000000000003374c                _nx_crypto_ecdsa_verify
+                0x0000000000033b08                _nx_crypto_method_ecdsa_init
+                0x0000000000033b3e                _nx_crypto_method_ecdsa_cleanup
+                0x0000000000033b5c                _nx_crypto_method_ecdsa_operation
+ .text          0x0000000000033db8     0x1610 ../tls/libnx_crypto.a(nx_crypto_ecjpake.c.obj)
+                0x0000000000033db8                _nx_crypto_ecjpake_init
+                0x0000000000033eb8                _nx_crypto_ecjpake_schnorr_zkp_hash
+                0x000000000003424c                _nx_crypto_ecjpake_schnorr_zkp_generate
+                0x0000000000034358                _nx_crypto_ecjpake_hello_generate
+                0x00000000000345aa                _nx_crypto_ecjpake_schnorr_zkp_verify
+                0x0000000000034706                _nx_crypto_ecjpake_hello_process
+                0x00000000000348f4                _nx_crypto_ecjpake_public_key_generate
+                0x0000000000034a04                _nx_crypto_ecjpake_key_exchange_generate
+                0x0000000000034c02                _nx_crypto_ecjpake_pre_master_secret_generate
+                0x0000000000034e0c                _nx_crypto_ecjpake_key_exchange_process
+                0x0000000000035054                _nx_crypto_ecjpake_key_encryption_key_generate
+                0x0000000000035100                _nx_crypto_method_ecjpake_init
+                0x000000000003518c                _nx_crypto_method_ecjpake_cleanup
+                0x00000000000351b8                _nx_crypto_method_ecjpake_operation
+ .text          0x00000000000353c8      0x77c ../tls/libnx_crypto.a(nx_crypto_gcm.c.obj)
+                0x0000000000035760                _nx_crypto_gcm_encrypt_init
+                0x00000000000358a2                _nx_crypto_gcm_encrypt_update
+                0x00000000000358f8                _nx_crypto_gcm_encrypt_calculate
+                0x00000000000359ec                _nx_crypto_gcm_decrypt_update
+                0x0000000000035a42                _nx_crypto_gcm_decrypt_calculate
+ .text          0x0000000000035b44      0x504 ../tls/libnx_crypto.a(nx_crypto_hkdf.c.obj)
+                0x0000000000035b44                _nx_crypto_method_hkdf_init
+                0x0000000000035b9c                _nx_crypto_method_hkdf_cleanup
+                0x0000000000035be0                _nx_crypto_hkdf_extract
+                0x0000000000035cb6                _nx_crypto_hkdf_expand
+                0x0000000000035e38                _nx_crypto_method_hkdf_operation
+ .text          0x0000000000036048      0x178 ../tls/libnx_crypto.a(nx_crypto_hmac_md5.c.obj)
+                0x0000000000036048                _nx_crypto_method_hmac_md5_init
+                0x0000000000036076                _nx_crypto_method_hmac_md5_cleanup
+                0x0000000000036094                _nx_crypto_method_hmac_md5_operation
+ .text          0x00000000000361c0      0x17c ../tls/libnx_crypto.a(nx_crypto_hmac_sha1.c.obj)
+                0x00000000000361c0                _nx_crypto_method_hmac_sha1_init
+                0x00000000000361ee                _nx_crypto_method_hmac_sha1_cleanup
+                0x000000000003620c                _nx_crypto_method_hmac_sha1_operation
+ .text          0x000000000003633c      0x1a8 ../tls/libnx_crypto.a(nx_crypto_hmac_sha2.c.obj)
+                0x000000000003633c                _nx_crypto_method_hmac_sha256_init
+                0x000000000003636a                _nx_crypto_method_hmac_sha256_cleanup
+                0x0000000000036388                _nx_crypto_method_hmac_sha256_operation
+ .text          0x00000000000364e4      0x1c4 ../tls/libnx_crypto.a(nx_crypto_hmac_sha5.c.obj)
+                0x00000000000364e4                _nx_crypto_method_hmac_sha512_init
+                0x0000000000036512                _nx_crypto_method_hmac_sha512_cleanup
+                0x0000000000036530                _nx_crypto_method_hmac_sha512_operation
+ .text          0x00000000000366a8      0xad8 ../tls/libnx_crypto.a(nx_crypto_md5.c.obj)
+                0x00000000000366a8                _nx_crypto_md5_initialize
+                0x00000000000366e4                _nx_crypto_md5_process_buffer
+                0x0000000000036e66                _nx_crypto_md5_update
+                0x0000000000036f3e                _nx_crypto_md5_digest_calculate
+                0x0000000000037048                _nx_crypto_method_md5_init
+                0x000000000003706e                _nx_crypto_method_md5_cleanup
+                0x000000000003708c                _nx_crypto_method_md5_operation
+                0x0000000000037140                _nx_crypto_md5_padding
+ .text          0x0000000000037180      0x1cc ../tls/libnx_crypto.a(nx_crypto_phash.c.obj)
+                0x0000000000037180                _nx_crypto_phash
+ .text          0x000000000003734c      0x3ac ../tls/libnx_crypto.a(nx_crypto_xcbc_mac.c.obj)
+                0x000000000003734c                _nx_crypto_xcbc_mac
+ .text          0x00000000000376f8       0x10 ../crypto68k/libcrypto68k.a(c68k_dispatch.S.obj)
+                0x00000000000376f8                c68k_addmul_1
+                0x0000000000037700                c68k_div_2by1
+ .text          0x0000000000037708       0x80 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcmp.o)
+                0x0000000000037708                memcmp
+ .text          0x0000000000037788       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x0000000000037788                memcpy
+ .text          0x00000000000377f8      0x100 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memmove.o)
+                0x00000000000377f8                memmove
+ .text          0x00000000000378f8       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x00000000000378f8                memset
+ *(.text.main)
+ *(.text*)
+ .text.ami_udivmodsi
+                0x000000000003796c       0xc4 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.ami_divu64_32
+                0x0000000000037a30       0x64 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.ami_umul32_wide
+                0x0000000000037a94       0x7c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ .text.ami_rt_cpu_select
+                0x0000000000037b10       0x28 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037b10                ami_rt_cpu_select
+ .text.__udivmoddi4
+                0x0000000000037b38      0x12c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037b38                __udivmoddi4
+ .text.__udivdi3
+                0x0000000000037c64       0x20 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037c64                __udivdi3
+ .text.__umoddi3
+                0x0000000000037c84       0x30 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037c84                __umoddi3
+ .text.__muldi3
+                0x0000000000037cb4       0x64 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037cb4                __muldi3
+ .text.__mulsi3
+                0x0000000000037d18       0x28 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037d18                __mulsi3
+ .text.__udivsi3
+                0x0000000000037d40       0x2c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037d40                __udivsi3
+ .text.__umodsi3
+                0x0000000000037d6c       0x4c ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037d6c                __umodsi3
+ .text.__lshrdi3
+                0x0000000000037db8       0x58 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+                0x0000000000037db8                __lshrdi3
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x0000000000037e10                ___datadata_relocs = .
+                0x0000000000037e10                __etext = .
+                0x0000000000037e10                ___text_size = SIZEOF (.text)
+                0x0000000000037e10                . = ALIGN (0x0)
+
+.data           0x0000000000037e10      0xb74
+                0x0000000000037e10                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ .data          0x0000000000037e10       0x2c CMakeFiles/tls_library.dir/tls_library.c.obj
+ .data          0x0000000000037e3c      0x1e0 ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj)
+                0x0000000000037e3c                ami_crypto_ecc_offered_curves
+                0x0000000000037e40                ami_crypto_ecc_curves
+ .data          0x000000000003801c        0xc ../crypto68k/libcrypto68k.a(c68k_p256.c.obj)
+ .data          0x0000000000038028        0xc ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj)
+                0x0000000000038028                c68k_vec_poly1305_blocks
+                0x000000000003802c                c68k_vec_div_2by1
+                0x0000000000038030                c68k_vec_addmul_1
+ .data          0x0000000000038034        0x4 ../crypto68k/libcrypto68k.a(c68k_div.c.obj)
+                0x0000000000038034                c68k_fast_modulus
+ .data          0x0000000000038038        0x4 ../crypto68k/libcrypto68k.a(c68k_mont.c.obj)
+                0x0000000000038038                c68k_karatsuba_limbs
+ .data          0x000000000003803c       0x10 ../crypto68k/libcrypto68k.a(c68k_25519.c.obj)
+                0x000000000003803c                c68k_vec_fe_sqr
+                0x0000000000038040                c68k_vec_fe_mul
+                0x0000000000038044                c68k_vec_fe_sub
+                0x0000000000038048                c68k_vec_fe_add
+ .data          0x000000000003804c      0x348 ../tls/libnx_secure.a(nx_secure_x509_oid_parse.c.obj)
+                0x000000000003804c                _nx_secure_x509_oid_map
+ .data          0x0000000000038394        0x8 ../tls/libnx_secure.a(nx_secure_tls_check_protocol_version.c.obj)
+                0x0000000000038394                nx_secure_supported_versions_list
+ .data          0x000000000003839c        0x8 ../tls/libnx_crypto.a(nx_crypto_initialize.c.obj)
+                0x000000000003839c                _nx_crypto_memcpy_ptr
+                0x00000000000383a0                _nx_crypto_memset_ptr
+ .data          0x00000000000383a4      0x5e0 ../tls/libnx_crypto.a(nx_crypto_methods.c.obj)
+                0x00000000000383a4                crypto_method_pkcs1
+                0x00000000000383c4                crypto_method_3des
+                0x00000000000383e4                crypto_method_des
+                0x0000000000038404                crypto_method_hkdf
+                0x0000000000038424                crypto_method_hmac
+                0x0000000000038444                crypto_method_tls_prf_sha512
+                0x0000000000038464                crypto_method_tls_prf_sha384
+                0x0000000000038484                crypto_method_tls_prf_sha256
+                0x00000000000384a4                crypto_method_tls_prf_1
+                0x00000000000384c4                crypto_method_sha512_256
+                0x00000000000384e4                crypto_method_sha512_224
+                0x0000000000038504                crypto_method_sha512
+                0x0000000000038524                crypto_method_sha384
+                0x0000000000038544                crypto_method_sha256
+                0x0000000000038564                crypto_method_sha224
+                0x0000000000038584                crypto_method_sha1
+                0x00000000000385a4                crypto_method_md5
+                0x00000000000385c4                crypto_method_public_null
+                0x00000000000385e4                crypto_method_ec_secp521
+                0x0000000000038604                crypto_method_ec_secp384
+                0x0000000000038624                crypto_method_ec_secp256
+                0x0000000000038644                crypto_method_ec_secp224
+                0x0000000000038664                crypto_method_ec_secp192
+                0x0000000000038684                crypto_method_auth_ecjpake
+                0x00000000000386a4                crypto_method_auth_psk
+                0x00000000000386c4                crypto_method_rsa
+                0x00000000000386e4                crypto_method_hmac_md5
+                0x0000000000038704                crypto_method_hmac_sha512_256
+                0x0000000000038724                crypto_method_hmac_sha512_224
+                0x0000000000038744                crypto_method_hmac_sha512
+                0x0000000000038764                crypto_method_hmac_sha384
+                0x0000000000038784                crypto_method_hmac_sha256
+                0x00000000000387a4                crypto_method_hmac_sha224
+                0x00000000000387c4                crypto_method_hmac_sha1
+                0x00000000000387e4                crypto_method_ecdhe
+                0x0000000000038804                crypto_method_ecdh
+                0x0000000000038824                crypto_method_ecdsa
+                0x0000000000038844                crypto_method_drbg
+                0x0000000000038864                crypto_method_aes_xcbc_mac_96
+                0x0000000000038884                crypto_method_aes_256_gcm_16
+                0x00000000000388a4                crypto_method_aes_128_gcm_16
+                0x00000000000388c4                crypto_method_aes_ccm_16
+                0x00000000000388e4                crypto_method_aes_ccm_8
+                0x0000000000038904                crypto_method_aes_cbc_256
+                0x0000000000038924                crypto_method_aes_cbc_192
+                0x0000000000038944                crypto_method_aes_cbc_128
+                0x0000000000038964                crypto_method_null
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000003fe0e                ___a4_init = 0x7ffe
+                0x0000000000038984                __edata = .
+                0x0000000000000b74                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000038984     0x4748
+                0x0000000000038984                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000038984        0x4 CMakeFiles/tls_library.dir/tls_library.c.obj
+                0x0000000000038984                SysBase
+ .bss           0x0000000000038988        0x4 CMakeFiles/tls_library.dir/tls_netx.c.obj
+ .bss           0x000000000003898c       0x40 CMakeFiles/tls_library.dir/tls_store.c.obj
+ .bss           0x00000000000389cc        0x4 CMakeFiles/tls_library.dir/tls_runtime.c.obj
+                0x00000000000389cc                DOSBase
+ .bss           0x00000000000389d0       0x88 ../tls/libaminetxduo_tls.a(tls_amiga.c.obj)
+                0x00000000000389d0                ami_tls_timer_base
+ .bss           0x0000000000038a58      0x158 ../tls/libaminetxduo_tls.a(ami_tls_crypto.c.obj)
+ .bss           0x0000000000038bb0        0x4 ../crypto68k/libcrypto68k.a(c68k_prim.c.obj)
+                0x0000000000038bb0                c68k_yield_hook
+ .bss           0x0000000000038bb4      0x504 ../crypto68k/libcrypto68k.a(c68k_p256.c.obj)
+ .bss           0x00000000000390b8     0x2208 ../crypto68k/libcrypto68k.a(c68k_aes.c.obj)
+                0x00000000000390b8                c68k_aes_isbox
+                0x00000000000391b8                c68k_aes_sbox
+                0x00000000000392b8                c68k_aes_td
+                0x000000000003a2b8                c68k_aes_te
+                0x000000000003b2b8                c68k_aes_variant
+ .bss           0x000000000003b2c0        0x4 ../crypto68k/libcrypto68k.a(c68k_cpu.c.obj)
+ .bss           0x000000000003b2c4       0x3c ../tls/libnx_secure.a(nx_secure_tls_initialize.c.obj)
+                0x000000000003b2c4                _nx_secure_tls_protection
+                0x000000000003b2f8                _nx_secure_tls_created_count
+                0x000000000003b2fc                _nx_secure_tls_created_ptr
+ .bss           0x000000000003b300       0x20 ../tls/libnx_secure.a(nx_secure_tls_process_finished.c.obj)
+ .bss           0x000000000003b320      0x2fc ../tls/libnx_secure.a(nx_secure_tls_send_certificate_verify.c.obj)
+ .bss           0x000000000003b61c       0x40 ../tls/libnx_secure.a(nx_secure_verify_mac.c.obj)
+ .bss           0x000000000003b65c      0x440 ../tls/libnx_secure.a(nx_secure_x509_certificate_verify.c.obj)
+ .bss           0x000000000003ba9c        0xc ../tls/libnx_secure.a(nx_secure_x509_find_curve_method.c.obj)
+                0x000000000003ba9c                _nx_secure_x509_ecc_curves
+                0x000000000003baa0                _nx_secure_x509_ecc_supported_groups_count
+                0x000000000003baa2                _nx_secure_x509_ecc_supported_groups
+ .bss           0x000000000003baa8      0x258 ../tls/libnx_secure.a(nx_secure_generate_client_key_exchange.c.obj)
+ .bss           0x000000000003bd00       0x40 ../tls/libnx_secure.a(nx_secure_generate_master_secret.c.obj)
+ .bss           0x000000000003bd40       0x40 ../tls/libnx_secure.a(nx_secure_generate_session_keys.c.obj)
+ .bss           0x000000000003bd80      0x258 ../tls/libnx_secure.a(nx_secure_process_client_key_exchange.c.obj)
+ .bss           0x000000000003bfd8      0x498 ../tls/libnx_secure.a(nx_secure_process_server_key_exchange.c.obj)
+ .bss           0x000000000003c470      0x240 ../tls/libnx_secure.a(nx_secure_tls_ecc_generate_keys.c.obj)
+ .bss           0x000000000003c6b0       0x24 ../tls/libnx_secure.a(nx_secure_tls_finished_hash_generate.c.obj)
+ .bss           0x000000000003c6d4       0xe8 ../tls/libnx_secure.a(nx_secure_tls_1_3_generate_keys.c.obj)
+ .bss           0x000000000003c7bc      0x554 ../tls/libnx_secure.a(nx_secure_tls_process_certificate_verify.c.obj)
+ .bss           0x000000000003cd10      0x3b4 ../tls/libnx_crypto.a(nx_crypto_drbg.c.obj)
+ .bss           0x000000000003d0c4        0x8 ../common/libaminetxduo_m68k_rt.a(ami_udivdi3.c.obj)
+ *(.bss.*)
+ *(COMMON)
+                0x000000000003d0cc                __end = .
+                0x0000000000004748                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(tls.library amiga)

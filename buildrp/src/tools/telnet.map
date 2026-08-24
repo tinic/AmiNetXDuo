@@ -1,0 +1,577 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_telnet.dir/tool_diag.c.obj (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_telnet.dir/tool_diag.c.obj (ami_config_parse_ip6)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_telnet.dir/tool_diag.c.obj (ami_alloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              CMakeFiles/tool_telnet.dir/toolsock.c.obj (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              CMakeFiles/tool_telnet.dir/telnet.c.obj (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              ../config/libaminetxduo_config.a(config_text.c.obj) (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              CMakeFiles/tool_telnet.dir/tool_diag.c.obj (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              CMakeFiles/tool_telnet.dir/toolsock.c.obj (__umodsi3)
+
+Discarded input sections
+
+ .text.tool_fd_isset
+                0x0000000000000000       0x30 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_socket
+                0x0000000000000000       0x20 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_listen
+                0x0000000000000000       0x18 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_accept
+                0x0000000000000000       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_sendto
+                0x0000000000000000       0x30 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_recvfrom
+                0x0000000000000000       0x34 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_shutdown
+                0x0000000000000000       0x18 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_getsockopt
+                0x0000000000000000       0x28 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_getsockname
+                0x0000000000000000       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_gethostbyname
+                0x0000000000000000       0x14 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_getservbyname
+                0x0000000000000000       0x18 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_ntop
+                0x0000000000000000       0x20 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_freeaddrinfo
+                0x0000000000000000       0x14 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_getaddrinfo
+                0x0000000000000000       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_addr_any
+                0x0000000000000000       0x20 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_addr_v4
+                0x0000000000000000       0x34 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_addr_port
+                0x0000000000000000        0xc CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_addr_same
+                0x0000000000000000       0x68 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_addr_text
+                0x0000000000000000       0x58 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_resolve_af
+                0x0000000000000000       0x44 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_resolve
+                0x0000000000000000       0x1c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_fail
+                0x0000000000000000       0x2c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+ .text.tool_say
+                0x0000000000000000       0x2c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_format_mac
+                0x0000000000000000       0x70 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_broadcast
+                0x0000000000000000        0xc CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_prefix_len
+                0x0000000000000000       0x14 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_net_error
+                0x0000000000000000       0x24 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_require_stack
+                0x0000000000000000       0x1c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text.tool_basename
+                0x0000000000000000       0x20 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .bss           0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.diag_copy
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stricmp
+                0x0000000000000000       0x58 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stricmp_n
+                0x0000000000000000       0x68 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_list_dir
+                0x0000000000000000      0x10c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_join_path.part.0
+                0x0000000000000000       0x78 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_join_path
+                0x0000000000000000       0x28 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.diag_is_resident
+                0x0000000000000000       0x50 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_device_where
+                0x0000000000000000       0x74 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_device_probe
+                0x0000000000000000      0x138 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_wrap
+                0x0000000000000000      0x104 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.diag_report
+                0x0000000000000000       0x7c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_config_watch
+                0x0000000000000000       0x18 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_config_unwatch
+                0x0000000000000000       0x10 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_explain_interface_file
+                0x0000000000000000       0x40 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_explain_dhcp
+                0x0000000000000000       0x1c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_version
+                0x0000000000000000       0x98 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_is_ours
+                0x0000000000000000       0x60 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_release
+                0x0000000000000000       0x3c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_lookup
+                0x0000000000000000       0xa0 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_lookup_addr
+                0x0000000000000000       0xb4 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_name_servers
+                0x0000000000000000       0xb4 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_explain_foreign_stack
+                0x0000000000000000       0x30 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_query
+                0x0000000000000000       0x84 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_domain
+                0x0000000000000000       0x90 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_format_ip6
+                0x0000000000000000       0x28 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_parse_ip6
+                0x0000000000000000       0x28 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_explain_no_netstatus
+                0x0000000000000000       0x3c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_netstatus_open
+                0x0000000000000000       0xb8 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_netstatus_close
+                0x0000000000000000       0x1c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_netstatus_query
+                0x0000000000000000       0x6c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_netstatus_control
+                0x0000000000000000       0x60 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_stack_start
+                0x0000000000000000       0x74 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text.tool_netstatus_system
+                0x0000000000000000       0x74 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_startup
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_shutdown
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_can_unload
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_get
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_ip
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_pool
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_config
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_count
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_up
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_down
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_stack_down
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_is_up
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_interface_start
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_ipv6_address_get
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_resolve
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.netstack_resolve_reverse
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text.tx_application_define
+                0x0000000000000000        0x4 CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+ .text          0x0000000000000000       0x58 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .data          0x0000000000000000        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .bss           0x0000000000000000        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.scan_item
+                0x0000000000000000       0xac ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_strlen
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_zero
+                0x0000000000000000       0x18 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_stricmp
+                0x0000000000000000       0x7c ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_join3
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_config_set_reporter
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem_file
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problems_wanted
+                0x0000000000000000       0x10 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem
+                0x0000000000000000       0x48 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_next_line
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_trim
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_strip_comment
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_unquote
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_tokenize
+                0x0000000000000000       0x40 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_next_pair
+                0x0000000000000000      0x118 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_ulong
+                0x0000000000000000       0xec ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_mac
+                0x0000000000000000       0xa0 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_bool
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_net_number
+                0x0000000000000000       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text          0x0000000000000000        0x0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_cfg_parse_ip6_inner.part.0
+                0x0000000000000000      0x3e0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6
+                0x0000000000000000       0x20 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6_zone
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_format_ip6
+                0x0000000000000000      0x1d0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_format_ip6_zone
+                0x0000000000000000       0x90 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_sana2_open_once
+                0x0000000000000000       0x40 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.put_char
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc_flags
+                0x0000000000000000       0x64 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_free
+                0x0000000000000000       0x34 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc_count
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_stats
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_socket_delta
+                0x0000000000000000       0x54 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_open_delta
+                0x0000000000000000       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_log  0x0000000000000000       0x88 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_alloc
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_free
+                0x0000000000000000       0x1c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_timer_close
+                0x0000000000000000       0x60 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_eclock_rate
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_budget_clock
+                0x0000000000000000       0x28 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_millis_quick
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_set_open_hooks
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_address_change_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_address_change_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_second_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_second_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_shutdown_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_shutdown_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_open_device
+                0x0000000000000000       0xac ../common/libaminetxduo_common.a(compat.c.obj)
+ .text          0x0000000000000000       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_telnet.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_telnet.dir/telnet.c.obj
+LOAD CMakeFiles/tool_telnet.dir/toolsock.c.obj
+LOAD CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+LOAD CMakeFiles/tool_telnet.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_telnet.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x3208
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_telnet.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4      0xcec CMakeFiles/tool_telnet.dir/telnet.c.obj
+                0x00000000000002a2                main
+                0x0000000000000d9a                tool_name
+ .text          0x0000000000000da0      0x310 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text          0x00000000000010b0      0x220 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+ .text          0x00000000000012d0      0x378 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000001632                diag_device_dirs
+ .text          0x0000000000001648       0x44 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text          0x000000000000168c       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x000000000000168c                memcpy
+ .text          0x00000000000016fc       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x00000000000016fc                memset
+ .text          0x0000000000001770       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x0000000000001770                __mulsi3
+ .text          0x000000000000179c       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x000000000000179c                __umodsi3
+                0x00000000000017a8                __udivsi3
+                0x00000000000017ae                __udivsi4
+ *(.text.main)
+ *(.text*)
+ .text.tn_send_raw
+                0x00000000000017f4       0x58 CMakeFiles/tool_telnet.dir/telnet.c.obj
+ .text.tn_reply
+                0x000000000000184c       0x88 CMakeFiles/tool_telnet.dir/telnet.c.obj
+ .text.tool_fd_zero
+                0x00000000000018d4       0x18 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000018d4                tool_fd_zero
+ .text.tool_fd_add
+                0x00000000000018ec       0x30 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000018ec                tool_fd_add
+ .text.tool_socket_open
+                0x000000000000191c       0x48 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x000000000000191c                tool_socket_open
+ .text.tool_sock_bind
+                0x0000000000001964       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001964                tool_sock_bind
+ .text.tool_sock_connect
+                0x0000000000001988       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001988                tool_sock_connect
+ .text.tool_sock_send
+                0x00000000000019ac       0x20 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000019ac                tool_sock_send
+ .text.tool_sock_send_full
+                0x00000000000019cc       0x54 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000019cc                tool_sock_send_full
+ .text.tool_sock_recv
+                0x0000000000001a20       0x20 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001a20                tool_sock_recv
+ .text.tool_sock_setsockopt
+                0x0000000000001a40       0x28 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001a40                tool_sock_setsockopt
+ .text.tool_sock_ioctl
+                0x0000000000001a68       0x1c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001a68                tool_sock_ioctl
+ .text.tool_sock_close
+                0x0000000000001a84       0x14 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001a84                tool_sock_close
+ .text.tool_sock_select_sigs
+                0x0000000000001a98       0x28 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001a98                tool_sock_select_sigs
+ .text.tool_sock_select
+                0x0000000000001ac0       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001ac0                tool_sock_select
+ .text.tool_sock_errno
+                0x0000000000001ae4       0x10 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001ae4                tool_sock_errno
+ .text.tool_sock_have_lvo
+                0x0000000000001af4       0x24 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001af4                tool_sock_have_lvo
+ .text.tool_sock_have_ipv6
+                0x0000000000001b18       0x30 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001b18                tool_sock_have_ipv6
+ .text.tool_no_ipv6
+                0x0000000000001b48       0x60 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_addr_v4
+                0x0000000000001ba8       0x2c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001ba8                tool_addr_v4
+ .text.tool_sock_addr
+                0x0000000000001bd4       0x68 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001bd4                tool_sock_addr
+ .text.tool_sock_addr_get
+                0x0000000000001c3c       0x50 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001c3c                tool_sock_addr_get
+ .text.tool_addr_same
+                0x0000000000001c8c       0x40 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001c8c                tool_addr_same
+ .text.tool_gai_list
+                0x0000000000001ccc       0xf0 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_addr_text
+                0x0000000000001dbc       0x78 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001dbc                tool_addr_text
+ .text.tool_host_unbracket
+                0x0000000000001e34       0x58 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001e34                tool_host_unbracket
+ .text.tool_sock_family_absent
+                0x0000000000001e8c       0x44 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001e8c                tool_sock_family_absent
+ .text.tool_sock_say_no_family
+                0x0000000000001ed0       0x3c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001ed0                tool_sock_say_no_family
+ .text.tool_sock_resolve_list
+                0x0000000000001f0c      0x220 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000001f0c                tool_sock_resolve_list
+ .text.tool_sock_connect_timed
+                0x000000000000212c      0x174 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x000000000000212c                tool_sock_connect_timed
+ .text.tool_connect_one
+                0x00000000000022a0      0x1ac CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .text.tool_sock_connect_host
+                0x000000000000244c      0x1ac CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x000000000000244c                tool_sock_connect_host
+ .text.tool_arg_family
+                0x00000000000025f8       0x34 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000025f8                tool_arg_family
+ .text.tool_sock_port
+                0x000000000000262c       0xc4 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x000000000000262c                tool_sock_port
+ .text.tool_sock_errstr
+                0x00000000000026f0      0x170 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000026f0                tool_sock_errstr
+ .text.tool_sock_fail_why
+                0x0000000000002860       0x50 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000002860                tool_sock_fail_why
+ .text.tool_input_open
+                0x00000000000028b0       0x5c CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x00000000000028b0                tool_input_open
+ .text.tool_input_close
+                0x000000000000290c       0x28 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x000000000000290c                tool_input_close
+ .text.tool_input_read
+                0x0000000000002934       0x54 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000002934                tool_input_read
+ .text.tool_output_write
+                0x0000000000002988       0x40 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+                0x0000000000002988                tool_output_write
+ .text.tool_budget_init
+                0x00000000000029c8       0x18 CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+                0x00000000000029c8                tool_budget_init
+ .text.tool_budget_left
+                0x00000000000029e0       0x20 CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+                0x00000000000029e0                tool_budget_left
+ .text.tool_budget_first
+                0x0000000000002a00       0x6c CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+                0x0000000000002a00                tool_budget_first
+ .text.tool_budget_done
+                0x0000000000002a6c       0x2c CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+                0x0000000000002a6c                tool_budget_done
+ .text.tool_budget_again
+                0x0000000000002a98       0x40 CMakeFiles/tool_telnet.dir/toolbudget.c.obj
+                0x0000000000002a98                tool_budget_again
+ .text.tool_printf
+                0x0000000000002ad8       0x1c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002ad8                tool_printf
+ .text.tool_error
+                0x0000000000002af4       0x7c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002af4                tool_error
+ .text.tool_fault
+                0x0000000000002b70       0x20 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002b70                tool_fault
+ .text.tool_no_ipv6_note
+                0x0000000000002b90       0x10 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002b90                tool_no_ipv6_note
+ .text.tool_break_arm
+                0x0000000000002ba0       0x18 CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002ba0                tool_break_arm
+ .text.tool_break
+                0x0000000000002bb8       0x3c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002bb8                tool_break
+ .text.tool_delay_ticks
+                0x0000000000002bf4       0x3c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002bf4                tool_delay_ticks
+ .text.tool_from_workbench
+                0x0000000000002c30       0x1c CMakeFiles/tool_telnet.dir/tool_util.c.obj
+                0x0000000000002c30                tool_from_workbench
+ .text.tool_exists
+                0x0000000000002c4c       0x2c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002c4c                tool_exists
+ .text.tool_copy_string
+                0x0000000000002c78       0x34 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002c78                tool_copy_string
+ .text.tool_explain_resolve
+                0x0000000000002cac       0x40 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002cac                tool_explain_resolve
+ .text.tool_stack_library_running
+                0x0000000000002cec       0x60 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002cec                tool_stack_library_running
+ .text.tool_explain_no_stack
+                0x0000000000002d4c       0x48 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002d4c                tool_explain_no_stack
+ .text.tool_stack_installed
+                0x0000000000002d94       0x1c CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002d94                tool_stack_installed
+ .text.tool_usage
+                0x0000000000002db0       0x30 CMakeFiles/tool_telnet.dir/tool_diag.c.obj
+                0x0000000000002db0                tool_usage
+ .text.split_dotted.part.0
+                0x0000000000002de0       0xb4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_copy_string
+                0x0000000000002e94       0x34 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002e94                ami_cfg_copy_string
+ .text.ami_config_parse_ip
+                0x0000000000002ec8       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002ec8                ami_config_parse_ip
+ .text.ami_config_format_ip
+                0x0000000000002f1c       0xb8 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002f1c                ami_config_format_ip
+ .text.ami_timer_lock_init
+                0x0000000000002fd4       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_millis
+                0x0000000000003010      0x1f8 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000003010                ami_millis
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x0000000000003208                ___datadata_relocs = .
+                0x0000000000003208                __etext = .
+                0x0000000000003208                ___text_size = SIZEOF (.text)
+                0x0000000000003208                . = ALIGN (0x0)
+
+.data           0x0000000000003208        0x0
+                0x0000000000003208                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000b206                ___a4_init = 0x7ffe
+                0x0000000000003208                __edata = .
+                0x0000000000000000                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000003208     0x5538
+                0x0000000000003208                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000003208       0x10 CMakeFiles/tool_telnet.dir/tool_startup.S.obj
+                0x0000000000003208                SysBase
+                0x000000000000320c                DOSBase
+                0x0000000000003210                _WBenchMsg
+ .bss           0x0000000000003218     0x5404 CMakeFiles/tool_telnet.dir/telnet.c.obj
+ .bss           0x000000000000861c       0x40 CMakeFiles/tool_telnet.dir/toolsock.c.obj
+ .bss           0x000000000000865c       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x000000000000865c                TimerBase
+ *(.bss.*)
+ *(COMMON)
+                0x0000000000008740                __end = .
+                0x0000000000005538                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(telnet amiga)

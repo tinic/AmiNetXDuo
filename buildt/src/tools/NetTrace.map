@@ -1,0 +1,322 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_nettrace.dir/tool_diag.c.obj (symbol from plugin) (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_nettrace.dir/tool_diag.c.obj (symbol from plugin) (ami_config_parse_ip6)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_nettrace.dir/tool_diag.c.obj (symbol from plugin) (ami_alloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              /tmp/cctpCllj.ltrans0.ltrans.o (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              /tmp/cctpCllj.ltrans0.ltrans.o (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              /tmp/cctpCllj.ltrans0.ltrans.o (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              /tmp/cctpCllj.ltrans0.ltrans.o (__umodsi3)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_nettrace.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_nettrace.dir/nettrace.c.obj
+LOAD /tmp/cctpCllj.ltrans0.ltrans.o
+LOAD CMakeFiles/tool_nettrace.dir/toolsock.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/toolbudget.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/toolbpf.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/toolpcap.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/bpffilter.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_nettrace.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x2940
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_nettrace.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4        0x0 CMakeFiles/tool_nettrace.dir/nettrace.c.obj (symbol from plugin)
+                0x00000000000000b4                tool_name
+ .text          0x00000000000000b4     0x2724 /tmp/cctpCllj.ltrans0.ltrans.o
+                0x000000000000158a                main
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/toolsock.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_sock_addr_v4
+                0x00000000000027d8                tool_sock_connect_timed
+                0x00000000000027d8                tool_sock_resolve_af
+                0x00000000000027d8                tool_sock_bind
+                0x00000000000027d8                tool_sock_family_absent
+                0x00000000000027d8                tool_addr_v4
+                0x00000000000027d8                tool_sock_getsockopt
+                0x00000000000027d8                tool_sock_socket
+                0x00000000000027d8                tool_sock_gethostbyname
+                0x00000000000027d8                tool_addr_any
+                0x00000000000027d8                tool_sock_getsockname
+                0x00000000000027d8                tool_sock_fail_why
+                0x00000000000027d8                tool_sock_ntop
+                0x00000000000027d8                tool_sock_addr_same
+                0x00000000000027d8                tool_sock_send_full
+                0x00000000000027d8                tool_sock_errno
+                0x00000000000027d8                tool_sock_connect
+                0x00000000000027d8                tool_addr_text
+                0x00000000000027d8                tool_socket_open
+                0x00000000000027d8                tool_sock_addr
+                0x00000000000027d8                tool_sock_listen
+                0x00000000000027d8                tool_sock_getservbyname
+                0x00000000000027d8                tool_sock_resolve_list
+                0x00000000000027d8                tool_sock_fail
+                0x00000000000027d8                tool_sock_addr_get
+                0x00000000000027d8                tool_sock_have_ipv6
+                0x00000000000027d8                tool_sock_port
+                0x00000000000027d8                tool_sock_connect_host
+                0x00000000000027d8                tool_sock_errstr
+                0x00000000000027d8                tool_sock_have_lvo
+                0x00000000000027d8                tool_sock_recv
+                0x00000000000027d8                tool_fd_isset
+                0x00000000000027d8                tool_input_open
+                0x00000000000027d8                tool_sock_select_sigs
+                0x00000000000027d8                tool_fd_zero
+                0x00000000000027d8                tool_input_close
+                0x00000000000027d8                tool_arg_family
+                0x00000000000027d8                tool_sock_shutdown
+                0x00000000000027d8                tool_sock_sendto
+                0x00000000000027d8                tool_output_write
+                0x00000000000027d8                tool_sock_resolve
+                0x00000000000027d8                tool_sock_freeaddrinfo
+                0x00000000000027d8                tool_sock_send
+                0x00000000000027d8                tool_sock_select
+                0x00000000000027d8                tool_fd_add
+                0x00000000000027d8                tool_sock_setsockopt
+                0x00000000000027d8                tool_sock_accept
+                0x00000000000027d8                tool_sock_close
+                0x00000000000027d8                tool_sock_say_no_family
+                0x00000000000027d8                tool_sock_addr_port
+                0x00000000000027d8                tool_sock_recvfrom
+                0x00000000000027d8                tool_sock_ioctl
+                0x00000000000027d8                tool_sock_getaddrinfo
+                0x00000000000027d8                tool_input_read
+                0x00000000000027d8                tool_host_unbracket
+                0x00000000000027d8                tool_sock_addr_text
+                0x00000000000027d8                tool_addr_same
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/toolbudget.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_budget_init
+                0x00000000000027d8                tool_budget_again
+                0x00000000000027d8                tool_budget_done
+                0x00000000000027d8                tool_budget_first
+                0x00000000000027d8                tool_budget_left
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/toolbpf.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_bpf_stop
+                0x00000000000027d8                tool_bpf_stats
+                0x00000000000027d8                tool_bpf_start
+                0x00000000000027d8                tool_bpf_read_timeout
+                0x00000000000027d8                tool_bpf_drain
+                0x00000000000027d8                tool_bpf_warn
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/toolpcap.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_pcap_flush
+                0x00000000000027d8                tool_pcap_record
+                0x00000000000027d8                tool_pcap_end
+                0x00000000000027d8                tool_pcap_begin
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/bpffilter.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_bpf_error
+                0x00000000000027d8                tool_bpf_compile
+                0x00000000000027d8                tool_bpf_proto_from_name
+                0x00000000000027d8                tool_bpf_proto_name
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/tool_util.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_break
+                0x00000000000027d8                tool_error
+                0x00000000000027d8                tool_prefix_len
+                0x00000000000027d8                tool_printf
+                0x00000000000027d8                tool_delay_ticks
+                0x00000000000027d8                tool_require_stack
+                0x00000000000027d8                tool_format_mac
+                0x00000000000027d8                tool_say
+                0x00000000000027d8                tool_basename
+                0x00000000000027d8                tool_net_error
+                0x00000000000027d8                tool_broadcast
+                0x00000000000027d8                tool_break_arm
+                0x00000000000027d8                tool_fault
+                0x00000000000027d8                tool_from_workbench
+                0x00000000000027d8                tool_no_ipv6_note
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/tool_diag.c.obj (symbol from plugin)
+                0x00000000000027d8                tool_stack_domain
+                0x00000000000027d8                tool_config_unwatch
+                0x00000000000027d8                tool_copy_string
+                0x00000000000027d8                tool_netstatus_control
+                0x00000000000027d8                tool_stack_query
+                0x00000000000027d8                tool_explain_interface_file
+                0x00000000000027d8                diag_is_resident
+                0x00000000000027d8                tool_stack_start
+                0x00000000000027d8                tool_list_dir
+                0x00000000000027d8                tool_explain_no_netstatus
+                0x00000000000027d8                diag_device_dirs
+                0x00000000000027d8                tool_stack_version
+                0x00000000000027d8                tool_wrap
+                0x00000000000027d8                tool_netstatus_close
+                0x00000000000027d8                tool_usage
+                0x00000000000027d8                tool_join_path
+                0x00000000000027d8                tool_explain_foreign_stack
+                0x00000000000027d8                tool_stack_library_running
+                0x00000000000027d8                tool_explain_no_stack
+                0x00000000000027d8                tool_device_probe
+                0x00000000000027d8                tool_exists
+                0x00000000000027d8                tool_parse_ip6
+                0x00000000000027d8                tool_netstatus_open
+                0x00000000000027d8                tool_stack_release
+                0x00000000000027d8                tool_format_ip6
+                0x00000000000027d8                tool_device_where
+                0x00000000000027d8                tool_stack_lookup_addr
+                0x00000000000027d8                tool_explain_dhcp
+                0x00000000000027d8                tool_config_watch
+                0x00000000000027d8                tool_stack_lookup
+                0x00000000000027d8                tool_explain_resolve
+                0x00000000000027d8                tool_stricmp_n
+                0x00000000000027d8                tool_stack_name_servers
+                0x00000000000027d8                tool_netstatus_query
+                0x00000000000027d8                tool_stricmp
+                0x00000000000027d8                tool_netstatus_system
+                0x00000000000027d8                tool_stack_installed
+                0x00000000000027d8                tool_stack_is_ours
+ .text          0x00000000000027d8        0x0 CMakeFiles/tool_nettrace.dir/netstack_weak.c.obj (symbol from plugin)
+                0x00000000000027d8                netstack_pool
+                0x00000000000027d8                netstack_ip
+                0x00000000000027d8                netstack_get
+                0x00000000000027d8                netstack_interface_stack_down
+                0x00000000000027d8                netstack_ipv6_address_get
+                0x00000000000027d8                netstack_interface_start
+                0x00000000000027d8                netstack_shutdown
+                0x00000000000027d8                netstack_interface_is_up
+                0x00000000000027d8                netstack_interface_down
+                0x00000000000027d8                netstack_interface_count
+                0x00000000000027d8                netstack_can_unload
+                0x00000000000027d8                netstack_resolve
+                0x00000000000027d8                netstack_startup
+                0x00000000000027d8                netstack_config
+                0x00000000000027d8                netstack_resolve_reverse
+                0x00000000000027d8                tx_application_define
+                0x00000000000027d8                netstack_interface_up
+ .text          0x00000000000027d8        0x0 config_text.c.obj (symbol from plugin)
+                0x00000000000027d8                ami_cfg_problem_file
+                0x00000000000027d8                ami_cfg_parse_net_number
+                0x00000000000027d8                ami_cfg_stricmp
+                0x00000000000027d8                ami_config_parse_ip
+                0x00000000000027d8                ami_cfg_unquote
+                0x00000000000027d8                ami_cfg_next_line
+                0x00000000000027d8                ami_cfg_problems_wanted
+                0x00000000000027d8                ami_cfg_problem
+                0x00000000000027d8                ami_cfg_tokenize
+                0x00000000000027d8                ami_cfg_join3
+                0x00000000000027d8                ami_cfg_parse_ulong
+                0x00000000000027d8                ami_cfg_strlen
+                0x00000000000027d8                ami_cfg_parse_mac
+                0x00000000000027d8                ami_config_format_ip
+                0x00000000000027d8                ami_cfg_parse_bool
+                0x00000000000027d8                ami_config_set_reporter
+                0x00000000000027d8                ami_cfg_trim
+                0x00000000000027d8                ami_cfg_zero
+                0x00000000000027d8                ami_cfg_strip_comment
+                0x00000000000027d8                ami_cfg_copy_string
+                0x00000000000027d8                ami_cfg_next_pair
+ .text          0x00000000000027d8        0x0 config_text6.c.obj (symbol from plugin)
+                0x00000000000027d8                ami_config_format_ip6_zone
+                0x00000000000027d8                ami_config_format_ip6
+                0x00000000000027d8                ami_config_parse_ip6_zone
+                0x00000000000027d8                ami_config_parse_ip6
+ .text          0x00000000000027d8        0x0 compat.c.obj (symbol from plugin)
+                0x00000000000027d8                ami_log
+                0x00000000000027d8                ami_set_shutdown_hook
+                0x00000000000027d8                ami_eclock_rate
+                0x00000000000027d8                ami_free
+                0x00000000000027d8                ami_sana2_open_device
+                0x00000000000027d8                ami_set_second_hook
+                0x00000000000027d8                ami_millis_quick
+                0x00000000000027d8                ami_mem_open_delta
+                0x00000000000027d8                ami_timer_close
+                0x00000000000027d8                ami_second_notify
+                0x00000000000027d8                ami_alloc_count
+                0x00000000000027d8                ami_alloc_flags
+                0x00000000000027d8                ami_mem_socket_delta
+                0x00000000000027d8                ami_sana2_set_open_hooks
+                0x00000000000027d8                ami_set_address_change_hook
+                0x00000000000027d8                ami_signal_alloc
+                0x00000000000027d8                ami_mem_stats
+                0x00000000000027d8                ami_address_change_notify
+                0x00000000000027d8                ami_alloc
+                0x00000000000027d8                TimerBase
+                0x00000000000027d8                ami_shutdown_notify
+                0x00000000000027d8                ami_millis
+                0x00000000000027d8                ami_signal_free
+ .text          0x00000000000027d8       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                0x00000000000027d8                memcpy
+ .text          0x0000000000002848       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x0000000000002848                memset
+ .text          0x00000000000028bc       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x00000000000028bc                __mulsi3
+ .text          0x00000000000028e8       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000028e8                __umodsi3
+                0x00000000000028f4                __udivsi3
+                0x00000000000028fa                __udivsi4
+ *(.text.main)
+ *(.text*)
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x0000000000002940                ___datadata_relocs = .
+                0x0000000000002940                __etext = .
+                0x0000000000002940                ___text_size = SIZEOF (.text)
+                0x0000000000002940                . = ALIGN (0x0)
+
+.data           0x0000000000002940        0x0
+                0x0000000000002940                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000a93e                ___a4_init = 0x7ffe
+                0x0000000000002940                __edata = .
+                0x0000000000000000                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000002940     0x5148
+                0x0000000000002940                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000002940       0x10 CMakeFiles/tool_nettrace.dir/tool_startup.S.obj
+                0x0000000000002940                SysBase
+                0x0000000000002944                DOSBase
+                0x0000000000002948                _WBenchMsg
+ .bss           0x0000000000002950     0x5138 /tmp/cctpCllj.ltrans0.ltrans.o
+ *(.bss.*)
+ *(COMMON)
+                0x0000000000007a88                __end = .
+                0x0000000000005148                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(NetTrace amiga)

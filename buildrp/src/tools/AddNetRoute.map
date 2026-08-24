@@ -1,0 +1,552 @@
+Archive member included to satisfy reference by file (symbol)
+
+../config/libaminetxduo_config.a(config_text.c.obj)
+                              CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj (ami_config_set_reporter)
+../config/libaminetxduo_config.a(config_text6.c.obj)
+                              CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj (ami_config_parse_ip6)
+../config/libaminetxduo_config.a(netdb.c.obj)
+                              CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj (ami_netdb_load)
+../config/libaminetxduo_config.a(config_file.c.obj)
+                              ../config/libaminetxduo_config.a(netdb.c.obj) (ami_cfg_read_file)
+../config/libaminetxduo_config.a(config_parse.c.obj)
+                              ../config/libaminetxduo_config.a(config_file.c.obj) (ami_cfg_parse_interface)
+../config/libaminetxduo_config.a(config_hostname.c.obj)
+                              ../config/libaminetxduo_config.a(config_parse.c.obj) (ami_config_hostname_valid)
+../common/libaminetxduo_common.a(compat.c.obj)
+                              CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj (ami_alloc)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+                              CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj (memcpy)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                              CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj (memset)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                              ../config/libaminetxduo_config.a(config_text.c.obj) (__mulsi3)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+                              CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj (strlen)
+/home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                              CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj (__umodsi3)
+
+Discarded input sections
+
+ .text.tool_say
+                0x0000000000000000       0x2c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_break
+                0x0000000000000000       0x3c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_delay_ticks
+                0x0000000000000000       0x3c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_format_mac
+                0x0000000000000000       0x70 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_broadcast
+                0x0000000000000000        0xc CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_net_error
+                0x0000000000000000       0x24 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_require_stack
+                0x0000000000000000       0x1c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text.tool_basename
+                0x0000000000000000       0x20 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .bss           0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.diag_copy
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_exists
+                0x0000000000000000       0x2c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_list_dir
+                0x0000000000000000      0x10c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_join_path.part.0
+                0x0000000000000000       0x78 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_join_path
+                0x0000000000000000       0x28 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.diag_is_resident
+                0x0000000000000000       0x50 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_device_where
+                0x0000000000000000       0x74 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_device_probe
+                0x0000000000000000      0x138 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_wrap
+                0x0000000000000000      0x104 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.diag_report
+                0x0000000000000000       0x7c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_config_watch
+                0x0000000000000000       0x18 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_config_unwatch
+                0x0000000000000000       0x10 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_explain_interface_file
+                0x0000000000000000       0x40 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_explain_dhcp
+                0x0000000000000000       0x1c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_explain_resolve
+                0x0000000000000000       0x40 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_version
+                0x0000000000000000       0x98 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_installed
+                0x0000000000000000       0x1c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_release
+                0x0000000000000000       0x3c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_lookup_addr
+                0x0000000000000000       0xb4 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_name_servers
+                0x0000000000000000       0xb4 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_query
+                0x0000000000000000       0x84 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_domain
+                0x0000000000000000       0x90 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_explain_no_netstatus
+                0x0000000000000000       0x3c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_stack_start
+                0x0000000000000000       0x74 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text.tool_netstatus_system
+                0x0000000000000000       0x74 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+ .text          0x0000000000000000        0x0 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_startup
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_shutdown
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_can_unload
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_get
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_ip
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_pool
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_config
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_count
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_up
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_down
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_stack_down
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_is_up
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_interface_start
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_ipv6_address_get
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_resolve
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.netstack_resolve_reverse
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text.tx_application_define
+                0x0000000000000000        0x4 CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+ .text          0x0000000000000000       0x58 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .data          0x0000000000000000        0x4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .bss           0x0000000000000000        0xc ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_join3
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_config_set_reporter
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem_file
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problems_wanted
+                0x0000000000000000       0x10 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_problem
+                0x0000000000000000       0x48 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_unquote
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_next_pair
+                0x0000000000000000      0x118 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_mac
+                0x0000000000000000       0xa0 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_parse_bool
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text          0x0000000000000000        0x0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6_zone
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_format_ip6_zone
+                0x0000000000000000       0x90 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.netdb_entry
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.netdb_by_value
+                0x0000000000000000       0x50 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_host_by_addr
+                0x0000000000000000       0x10 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_net_by_name
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_net_by_addr
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_proto_by_name
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_proto_by_number
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_serv_by_name
+                0x0000000000000000       0x84 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_serv_by_port
+                0x0000000000000000       0x68 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_net_entry
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_proto_entry
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_serv_entry
+                0x0000000000000000       0x14 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text          0x0000000000000000      0x2e0 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text.load_resolver
+                0x0000000000000000      0x118 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text.ami_config_load_interface
+                0x0000000000000000       0xf0 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text.load_interfaces.constprop.0
+                0x0000000000000000      0x230 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text.ami_config_pool_divisor
+                0x0000000000000000       0xac ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text.ami_config_load
+                0x0000000000000000      0x180 ../config/libaminetxduo_config.a(config_file.c.obj)
+ .text          0x0000000000000000     0x1950 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.dnssd_word
+                0x0000000000000000       0x4c ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.lookup_iptype
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.report_bad_value
+                0x0000000000000000       0x70 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.cfg_rfc3397_name.constprop.0
+                0x0000000000000000       0xd8 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_cfg_parse_interface
+                0x0000000000000000      0xa30 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_iface_wants_ipv4
+                0x0000000000000000       0x2c ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_iface_wants_ipv6
+                0x0000000000000000       0x1c ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_cfg_parse_resolver
+                0x0000000000000000      0x2d0 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_list
+                0x0000000000000000       0xe4 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_offer
+                0x0000000000000000       0xa8 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_nameserver6_offer
+                0x0000000000000000       0xa0 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_nameserver6_withdraw
+                0x0000000000000000       0xb4 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_withdraw
+                0x0000000000000000       0xbc ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_reference_add
+                0x0000000000000000       0x8c ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_reference_remove
+                0x0000000000000000       0x80 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_from_rfc3397
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_config_search_withdraw_rfc3397
+                0x0000000000000000       0x64 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_cfg_parse_gateway
+                0x0000000000000000      0x258 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_cfg_parse_tcp_handler
+                0x0000000000000000      0x144 ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text.ami_cfg_parse_dnssd
+                0x0000000000000000      0x37c ../config/libaminetxduo_config.a(config_parse.c.obj)
+ .text          0x0000000000000000       0x68 ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text.ami_config_hostname_valid
+                0x0000000000000000       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text.ami_config_hostname_from_hwaddr
+                0x0000000000000000       0xac ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text.ami_config_hostname_source_text
+                0x0000000000000000       0x38 ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text.ami_config_hostname_offer
+                0x0000000000000000       0x6c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text.ami_cfg_hostname_from_files
+                0x0000000000000000       0x9c ../config/libaminetxduo_config.a(config_hostname.c.obj)
+ .text          0x0000000000000000       0x44 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_timer_lock_init
+                0x0000000000000000       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_open_once
+                0x0000000000000000       0x40 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.put_char
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_alloc_count
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_stats
+                0x0000000000000000        0x8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_socket_delta
+                0x0000000000000000       0x54 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_mem_open_delta
+                0x0000000000000000       0x3c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_log  0x0000000000000000       0x88 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_alloc
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_signal_free
+                0x0000000000000000       0x1c ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_timer_close
+                0x0000000000000000       0x60 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_eclock_rate
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_budget_clock
+                0x0000000000000000       0x28 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_millis
+                0x0000000000000000      0x1f8 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_millis_quick
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_set_open_hooks
+                0x0000000000000000       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_address_change_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_address_change_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_second_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_second_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_set_shutdown_hook
+                0x0000000000000000        0xc ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_shutdown_notify
+                0x0000000000000000       0x10 ../common/libaminetxduo_common.a(compat.c.obj)
+ .text.ami_sana2_open_device
+                0x0000000000000000       0xac ../common/libaminetxduo_common.a(compat.c.obj)
+ .text          0x0000000000000000       0x70 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memcpy.o)
+ .text          0x0000000000000000       0x14 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-strlen.o)
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD CMakeFiles/tool_addnetroute.dir/tool_startup.S.obj
+LOAD CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+LOAD CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+LOAD CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+LOAD CMakeFiles/tool_addnetroute.dir/netstack_weak.c.obj
+LOAD ../config/libaminetxduo_config.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+LOAD ../common/libaminetxduo_common.a
+LOAD ../../libthreadx.a
+LOAD ../../port/threadx-amiga/libthreadx_port.a
+START GROUP
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libstubs.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libamiga.a
+LOAD /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/libgcc.a
+END GROUP
+                [!provide]                        PROVIDE (___machtype = 0x0)
+                0x0000000000000000                . = 0x0
+
+.text           0x0000000000000000     0x3cc0
+                0x0000000000000000                __stext = .
+ *(.text)
+ .text          0x0000000000000000       0xb4 CMakeFiles/tool_addnetroute.dir/tool_startup.S.obj
+                0x0000000000000000                ____start
+                0x000000000000006c                _exit
+                0x000000000000006c                exit
+ .text          0x00000000000000b4      0x928 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+                0x0000000000000976                main
+                0x00000000000009d6                tool_name
+ .text          0x00000000000009dc      0x220 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+ .text          0x0000000000000bfc      0x378 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000000f5e                diag_device_dirs
+ .text          0x0000000000000f74      0x298 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text          0x000000000000120c       0x74 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-memset.o)
+                0x000000000000120c                memset
+ .text          0x0000000000001280       0x2c /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__mulsi3.o)
+                0x0000000000001280                __mulsi3
+ .text          0x00000000000012ac       0x58 /home/turo/.cache/aminetxduo/toolchain/3869b4427396/lib/gcc/m68k-amigaos/16.2.0b/../../../../m68k-amigaos/lib/libc.a(lib_a-__udivsi3.o)
+                0x00000000000012ac                __umodsi3
+                0x00000000000012b8                __udivsi3
+                0x00000000000012be                __udivsi4
+ *(.text.main)
+ *(.text*)
+ .text.gateway_is_reachable
+                0x0000000000001304       0x64 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.say      0x0000000000001368       0x24 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.is_written_as_ip6
+                0x000000000000138c       0x20 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.mask_for_network
+                0x00000000000013ac       0x30 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.explain  0x00000000000013dc       0x8c CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.resolve_address
+                0x0000000000001468      0x114 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.format_route.constprop.0
+                0x000000000000157c       0xa8 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.format_route6.constprop.0
+                0x0000000000001624       0xb4 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.parse_address6.part.0.constprop.0
+                0x00000000000016d8      0x10c CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.explain6
+                0x00000000000017e4       0x7c CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.addnetroute_main.isra.0
+                0x0000000000001860      0xc68 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .text.tool_printf
+                0x00000000000024c8       0x1c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x00000000000024c8                tool_printf
+ .text.tool_error
+                0x00000000000024e4       0x7c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x00000000000024e4                tool_error
+ .text.tool_fault
+                0x0000000000002560       0x20 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x0000000000002560                tool_fault
+ .text.tool_no_ipv6_note
+                0x0000000000002580       0x10 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x0000000000002580                tool_no_ipv6_note
+ .text.tool_break_arm
+                0x0000000000002590       0x18 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x0000000000002590                tool_break_arm
+ .text.tool_prefix_len
+                0x00000000000025a8       0x14 CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x00000000000025a8                tool_prefix_len
+ .text.tool_from_workbench
+                0x00000000000025bc       0x1c CMakeFiles/tool_addnetroute.dir/tool_util.c.obj
+                0x00000000000025bc                tool_from_workbench
+ .text.tool_stricmp
+                0x00000000000025d8       0x58 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000025d8                tool_stricmp
+ .text.tool_stricmp_n
+                0x0000000000002630       0x68 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002630                tool_stricmp_n
+ .text.tool_copy_string
+                0x0000000000002698       0x34 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002698                tool_copy_string
+ .text.tool_stack_library_running
+                0x00000000000026cc       0x60 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000026cc                tool_stack_library_running
+ .text.tool_explain_no_stack
+                0x000000000000272c       0x48 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x000000000000272c                tool_explain_no_stack
+ .text.tool_stack_is_ours
+                0x0000000000002774       0x60 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002774                tool_stack_is_ours
+ .text.tool_stack_lookup
+                0x00000000000027d4       0xa0 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000027d4                tool_stack_lookup
+ .text.tool_explain_foreign_stack
+                0x0000000000002874       0x30 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002874                tool_explain_foreign_stack
+ .text.tool_usage
+                0x00000000000028a4       0x30 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000028a4                tool_usage
+ .text.tool_format_ip6
+                0x00000000000028d4       0x28 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000028d4                tool_format_ip6
+ .text.tool_parse_ip6
+                0x00000000000028fc       0x28 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000028fc                tool_parse_ip6
+ .text.tool_netstatus_open
+                0x0000000000002924       0xb8 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002924                tool_netstatus_open
+ .text.tool_netstatus_close
+                0x00000000000029dc       0x1c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000029dc                tool_netstatus_close
+ .text.tool_netstatus_query
+                0x00000000000029f8       0x6c CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x00000000000029f8                tool_netstatus_query
+ .text.tool_netstatus_control
+                0x0000000000002a64       0x60 CMakeFiles/tool_addnetroute.dir/tool_diag.c.obj
+                0x0000000000002a64                tool_netstatus_control
+ .text.scan_item
+                0x0000000000002ac4       0xac ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.split_dotted.part.0
+                0x0000000000002b70       0xb4 ../config/libaminetxduo_config.a(config_text.c.obj)
+ .text.ami_cfg_strlen
+                0x0000000000002c24       0x14 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002c24                ami_cfg_strlen
+ .text.ami_cfg_zero
+                0x0000000000002c38       0x18 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002c38                ami_cfg_zero
+ .text.ami_cfg_stricmp
+                0x0000000000002c50       0x7c ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002c50                ami_cfg_stricmp
+ .text.ami_cfg_copy_string
+                0x0000000000002ccc       0x34 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002ccc                ami_cfg_copy_string
+ .text.ami_cfg_next_line
+                0x0000000000002d00       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002d00                ami_cfg_next_line
+ .text.ami_cfg_trim
+                0x0000000000002d54       0x64 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002d54                ami_cfg_trim
+ .text.ami_cfg_strip_comment
+                0x0000000000002db8       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002db8                ami_cfg_strip_comment
+ .text.ami_cfg_tokenize
+                0x0000000000002e0c       0x40 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002e0c                ami_cfg_tokenize
+ .text.ami_cfg_parse_ulong
+                0x0000000000002e4c       0xec ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002e4c                ami_cfg_parse_ulong
+ .text.ami_config_parse_ip
+                0x0000000000002f38       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002f38                ami_config_parse_ip
+ .text.ami_cfg_parse_net_number
+                0x0000000000002f8c       0x54 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002f8c                ami_cfg_parse_net_number
+ .text.ami_config_format_ip
+                0x0000000000002fe0       0xb8 ../config/libaminetxduo_config.a(config_text.c.obj)
+                0x0000000000002fe0                ami_config_format_ip
+ .text.ami_cfg_parse_ip6_inner.part.0
+                0x0000000000003098      0x3e0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+ .text.ami_config_parse_ip6
+                0x0000000000003478       0x20 ../config/libaminetxduo_config.a(config_text6.c.obj)
+                0x0000000000003478                ami_config_parse_ip6
+ .text.ami_config_format_ip6
+                0x0000000000003498      0x1d0 ../config/libaminetxduo_config.a(config_text6.c.obj)
+                0x0000000000003498                ami_config_format_ip6
+ .text.netdb_name_matches
+                0x0000000000003668       0x50 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.netdb_load_one
+                0x00000000000036b8      0x340 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_load
+                0x00000000000039f8       0x84 ../config/libaminetxduo_config.a(netdb.c.obj)
+                0x00000000000039f8                ami_netdb_load
+ .text.netdb_by_name
+                0x0000000000003a7c       0x6c ../config/libaminetxduo_config.a(netdb.c.obj)
+ .text.ami_netdb_free
+                0x0000000000003ae8       0x4c ../config/libaminetxduo_config.a(netdb.c.obj)
+                0x0000000000003ae8                ami_netdb_free
+ .text.ami_netdb_host_by_name
+                0x0000000000003b34       0x10 ../config/libaminetxduo_config.a(netdb.c.obj)
+                0x0000000000003b34                ami_netdb_host_by_name
+ .text.ami_cfg_read_file
+                0x0000000000003b44       0xd0 ../config/libaminetxduo_config.a(config_file.c.obj)
+                0x0000000000003b44                ami_cfg_read_file
+ .text.ami_alloc_flags
+                0x0000000000003c14       0x64 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000003c14                ami_alloc_flags
+ .text.ami_alloc
+                0x0000000000003c78       0x14 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000003c78                ami_alloc
+ .text.ami_free
+                0x0000000000003c8c       0x34 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000003c8c                ami_free
+ *(.rodata*)
+ *(.data.rel.ro*)
+ *(.gnu.linkonce.t.*)
+ *(.gnu.linkonce.r.*)
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.list_*))
+ *(.end_of_lists)
+                0x0000000000003cc0                ___datadata_relocs = .
+                0x0000000000003cc0                __etext = .
+                0x0000000000003cc0                ___text_size = SIZEOF (.text)
+                0x0000000000003cc0                . = ALIGN (0x0)
+
+.data           0x0000000000003cc0        0x0
+                0x0000000000003cc0                __sdata = .
+ *(SORT_BY_NAME(.list___EH_FRAME*))
+ *(SORT_BY_NAME(.dlist_*))
+ *(.end_of_dlists)
+ *(.data)
+ *(.data.*)
+ *(.gnu.linkonce.d.*)
+                0x000000000000bcbe                ___a4_init = 0x7ffe
+                0x0000000000003cc0                __edata = .
+                0x0000000000000000                ___data_size = SIZEOF (.data)
+
+.bss            0x0000000000003cc0      0x40c
+                0x0000000000003cc0                __bss_start = .
+ *(.bss)
+ .bss           0x0000000000003cc0       0x10 CMakeFiles/tool_addnetroute.dir/tool_startup.S.obj
+                0x0000000000003cc0                SysBase
+                0x0000000000003cc4                DOSBase
+                0x0000000000003cc8                _WBenchMsg
+ .bss           0x0000000000003cd0      0x2d4 CMakeFiles/tool_addnetroute.dir/addnetroute.c.obj
+ .bss           0x0000000000003fa4       0x44 ../config/libaminetxduo_config.a(netdb.c.obj)
+ .bss           0x0000000000003fe8       0xe4 ../common/libaminetxduo_common.a(compat.c.obj)
+                0x0000000000003fe8                TimerBase
+ *(.bss.*)
+ *(COMMON)
+                0x00000000000040cc                __end = .
+                0x000000000000040c                ___bss_size = SIZEOF (.bss)
+
+.datachip
+ *(.datachip)
+
+.bsschip
+ *(.bsschip)
+OUTPUT(AddNetRoute amiga)
