@@ -267,6 +267,12 @@ EMULATOR_TESTS=(
     "tests/ram_driver/ram_driver_test:120"
     "tests/mbuf_bpf/mbuf_bpf_test:180"
     "tests/soak/soak_test:240"
+    # The fused port-I/O drain and Internet-checksum routine used by the
+    # 3c589 receive path.  This has to run in a guest: the host cannot execute
+    # the m68k assembly, and a cross build only proves that it assembled.
+    # IoSumDrill checks every tail residue, including the three-byte DHCP
+    # payload case that exposed the original checksum defect.
+    "tests/tools/IoSumDrill:90"
     # The dual stack over the same simulated wire ram_driver_test uses: two
     # NX_IP instances, both ends inside the emulator, so it needs no card, no
     # driver and nothing outside the guest.  85 checks in 18 s on the 68020
