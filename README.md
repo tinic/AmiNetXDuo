@@ -214,6 +214,10 @@ repeat it as `Profile ... C:iperf -s`; drive both from the same Linux iperf 2
 client.  Preserve the raw `.prof` file and the exact machine, accelerator,
 Fast RAM, SANA-II device/version, library build and peer command with it.  The
 copy-and-run commands and host-side report command are in the profiler ReadMe.
+On a stock 14 MHz A1200 start with `RATE=200`, and size `SAMPLES` for the
+transfer plus command startup and teardown; a buffer sized for the transfer
+alone fills before `Profile` regains control and makes those harmless tail
+samples look like sampler loss.
 
 ## Licence
 

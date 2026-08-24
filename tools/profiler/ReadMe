@@ -100,7 +100,8 @@ Start it first, then on a separate Linux machine run iperf 2 (not iperf3):
 
 For the sampled arm, replace only the Amiga command:
 
-    C:Profile QUIET OUT=RAM:iperf-rx.prof FOLDED=RAM:iperf-rx.folded \
+    C:Profile QUIET RATE=200 SAMPLES=8000 \
+        OUT=RAM:iperf-rx.prof FOLDED=RAM:iperf-rx.folded \
         C:iperf -s -p 5001 -t 40
 
 The repository's independent peer can replace the Linux iperf client while
@@ -140,6 +141,25 @@ those objects are gone by report time.  The reporter marks those samples
 `UNRESOLVED` rather than assigning them a plausible wrong name.  No-LTO keeps
 the ordinary object files and gives the complete function ranking.  It is a
 diagnostic build, so compare its timing only with its own plain control.
+
+`RATE=200` is deliberate for the stock 14 MHz 68EC020.  The 1000 Hz default
+is useful on a faster accelerator, but asks this machine to take an interrupt
+every millisecond while it is already CPU-bound.  A 200 Hz physical receive
+profile still collected 4000 samples over twenty seconds and resolved the hot
+path without turning the sampler into a leading cost.  Always keep the plain
+control: the appropriate rate is a measured property of the machine, not its
+model name.
+
+Size `SAMPLES` for the whole command, not just the peer's transfer.  `Profile`
+starts before `iperf` accepts and stops after `iperf` returns, so a 30-second
+peer at 200 Hz needs more than 6000 slots; the 8000 above leaves ten seconds
+for startup and teardown and costs 128 KB.  Once the buffer is full, sampling
+continues only as a dropped-sample count.  A report saying all requested slots
+were stored followed by a few hundred dropped samples normally means this
+tail exceeded the buffer; it does not mean the interrupt handler missed that
+many samples.  Raise `SAMPLES`, subject to the machine's free-memory limit,
+and require the stored timestamps to span the workload before interpreting
+the shares.
 
 
 WHAT IT CAN PROFILE
@@ -217,6 +237,8 @@ THE RATE
 --------
 
 1000 Hz on a 68010 and up, 250 Hz on a plain 68000, and RATE= overrides both.
+Those are general defaults, not a recommendation for a saturated stock A1200;
+the real-hardware receive procedure above starts that machine at 200 Hz.
 
 WHAT THAT COSTS, measured rather than estimated, profspin timing itself with
 and without the profiler attached, under FS-UAE:
