@@ -211,6 +211,55 @@ static void test_copy_to_buff(void)
     h_check(slot.copied == 0, "and reports zero bytes rather than the last count");
 }
 
+/* ----------------------------------------------------- direct receive --- */
+
+static void test_rx_direct(void)
+{
+    AmiSana2If iface;
+    AmiSana2Rx owner;
+    AmiRxSlot  slot;
+    NX_PACKET  pkt;
+    UCHAR      dst[16];
+
+    printf("sana2: private direct receive hooks\n");
+
+    memset(&iface, 0, sizeof(iface));
+    memset(&owner, 0, sizeof(owner));
+    memset(&slot, 0, sizeof(slot));
+    memset(&pkt, 0, sizeof(pkt));
+    owner.iface   = &iface;
+    slot.owner    = &owner;
+    slot.packet   = &pkt;
+    slot.dst      = dst;
+    slot.capacity = sizeof(dst);
+
+    h_check(ami_sana2_rx_direct(NULL, 1) == NULL,
+            "a NULL direct slot is refused");
+    h_check(ami_sana2_rx_direct(&slot, sizeof(dst) + 1) == NULL,
+            "a direct frame over capacity is refused");
+    h_check(ami_sana2_rx_direct(&slot, sizeof(dst)) == dst,
+            "a direct frame at capacity gets the exact destination");
+    h_check(iface.stats.rx_copy_hook == 0,
+            "a claim alone is not counted as a completed fill");
+
+    ami_sana2_rx_filled(&slot, 7, 0x12345678UL, 1);
+    h_check(slot.copied == 7, "direct completion records its length");
+    h_check(iface.stats.rx_copy_hook == 1,
+            "direct completion counts as one receive fill");
+    h_check(iface.stats.rx_copy_summed == 1,
+            "a fused direct completion counts as summed");
+#ifdef AMINETXDUO_RX_VERIFY
+    h_check(slot.sum == 0x12345678UL && slot.summed != FALSE,
+            "direct completion carries its verifier sum");
+#endif
+
+    ami_sana2_rx_filled(&slot, 5, 0, 0);
+    h_check(iface.stats.rx_copy_hook == 2,
+            "a non-fused direct completion is still a receive fill");
+    h_check(iface.stats.rx_copy_summed == 1,
+            "a non-fused direct completion is not counted as summed");
+}
+
 
 /* ----------------------------------------------------- S2_CopyFromBuff --- */
 
@@ -536,6 +585,7 @@ int main(void)
     frame_init();
 
     test_copy_to_buff();
+    test_rx_direct();
     test_from_buff_guards();
     test_from_buff_whole();
     test_from_buff_chunked();

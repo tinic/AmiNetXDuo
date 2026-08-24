@@ -315,7 +315,7 @@ typedef struct NetStatusInterface
     ULONG   nsi_RxErrVerify;
     ULONG   nsi_RxErrLength;
     ULONG   nsi_RxErrIo;
-    /* Whether the driver uses our copy hook, and whether it could sum. */
+    /* Frames filled by the copy/direct hooks, and those summed in the fill. */
     ULONG   nsi_RxCopyHook;
     ULONG   nsi_RxCopySummed;
 } NetStatusInterface;

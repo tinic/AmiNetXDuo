@@ -432,9 +432,6 @@ UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
     if (len > slot->capacity)
         return NULL;
 
-    if (slot->owner != NULL && slot->owner->iface != NULL)
-        slot->owner->iface->stats.rx_copy_hook++;
-
     return slot->dst;
 }
 
@@ -458,6 +455,17 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
        zero there means the hook never ran and the frame is refused.  This
        is the direct path's version of the hook running. */
     slot->copied = len;
+
+    /* Count completion, not the earlier claim.  A core may claim a slot and
+       then put it back when its hardware drain fails; that frame was neither
+       filled nor summed.  These ABI-stable counter names predate the private
+       direct pair, so "copy hook" now means either receive-fill path. */
+    if (slot->owner != NULL && slot->owner->iface != NULL)
+    {
+        slot->owner->iface->stats.rx_copy_hook++;
+        if (summed != 0)
+            slot->owner->iface->stats.rx_copy_summed++;
+    }
 
 #ifdef AMINETXDUO_RX_VERIFY
     slot->sum    = sum;

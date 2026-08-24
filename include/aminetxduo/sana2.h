@@ -141,15 +141,15 @@ typedef struct AmiSana2Stats {
     ULONG   rx_err_length;      /* driver reported 0 or over slot capacity  */
     ULONG   rx_err_io;          /* CMD_READ completed with io_Error         */
     /*
-     * Whether the driver hands frames over through our copy hook at all, and
-     * whether the hook could sum while copying. A device is free not to use
-     * the hook, and one that does not gets its frames walked a second time
-     * for a checksum the copy could have produced -- invisible without this,
-     * and it decides whether the copy-and-sum path is worth anything on a
-     * given card.
+     * Whether the driver fills frames through our standard copy hook or the
+     * private direct-receive pair, and whether that fill also produced the
+     * receive checksum. A device is free to use neither; one that does not
+     * produce a sum gets its frames walked again for the checksum -- invisible
+     * without this, and it decides whether the fused path is active on a
+     * given card. The field names are ABI-stable and predate direct receive.
      */
-    ULONG   rx_copy_hook;       /* frames that came through the copy hook   */
-    ULONG   rx_copy_summed;     /* of those, summed while copying           */
+    ULONG   rx_copy_hook;       /* frames filled by either receive hook     */
+    ULONG   rx_copy_summed;     /* of those, summed while being filled      */
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
