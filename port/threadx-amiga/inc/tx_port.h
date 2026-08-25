@@ -437,7 +437,16 @@ char   *execbase;
 #define TX_TIMER_DELETE_EXTENSION(timer_ptr)
 #define TX_THREAD_CREATE_EXTENSION(thread_ptr)
 #define TX_THREAD_DELETE_EXTENSION(thread_ptr)
-#define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)
+
+/* A terminated thread may be sitting in a green signal wait; its waiter
+   slot must go with it or the realm would keep consuming its mask's bits
+   for a thread that can never collect them -- and once the bit is
+   recycled, consume them out from under the new owner.  Runs under the
+   core lock, which in this port is the Forbid() the purge wants.  A baton
+   build's hook is an empty function (tx_amiga_green.c).  */
+struct TX_THREAD_STRUCT;
+void    _tx_amiga_thread_terminated(struct TX_THREAD_STRUCT *thread_ptr);
+#define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)    _tx_amiga_thread_terminated(thread_ptr);
 #define TX_THREAD_STACK_BUILD_STATUS(thread_ptr)      \
     (((thread_ptr) -> tx_thread_amiga_task != (VOID *) 0) ? TX_SUCCESS : TX_NO_MEMORY)
 #define TX_TIMER_INITIALIZE_EXTENSION(a)

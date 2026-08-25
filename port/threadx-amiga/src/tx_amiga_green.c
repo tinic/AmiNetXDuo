@@ -129,6 +129,21 @@ UINT    i;
         if ((gw -> gw_thread != TX_NULL) && ((gw -> gw_mask & sigs) != 0UL))
         {
 
+            /* A slot whose thread was terminated or completed under it can
+               never collect: purge it here rather than deliver into it, or
+               its mask would stay in the union and the realm would keep
+               consuming those bits -- blind, and once the bit is recycled,
+               out from under the new owner.  The terminate extension purges
+               too; this is the net under the net.  */
+            if ((gw -> gw_thread -> tx_thread_state == ((UINT) TX_TERMINATED)) ||
+                (gw -> gw_thread -> tx_thread_state == ((UINT) TX_COMPLETED)))
+            {
+                gw -> gw_thread   =  TX_NULL;
+                gw -> gw_mask     =  0UL;
+                gw -> gw_received =  0UL;
+                continue;
+            }
+
             gw -> gw_received |=  (gw -> gw_mask & sigs);
 
             /* Resume once: a slot whose thread is already resumed but has not
@@ -142,6 +157,17 @@ UINT    i;
             }
         }
     }
+}
+
+
+/* TX_THREAD_TERMINATED_EXTENSION: a thread terminated while registered in
+   a green wait leaves its slot -- and with it, its mask's claim on the
+   realm's Wait() -- unless it is purged here.  The core lock is held, and
+   the core lock IS the Forbid() the purge wants.  */
+VOID _tx_amiga_thread_terminated(TX_THREAD *thread_ptr)
+{
+
+    _tx_green_forget(thread_ptr);
 }
 
 
@@ -228,6 +254,9 @@ UINT                     i;
         return(0UL);
     }
 
+    for (;;)
+    {
+
     Forbid();
 
     thread =  _tx_thread_current_ptr;
@@ -265,11 +294,13 @@ UINT                     i;
     {
 
         /* Table full -- cannot happen with the stack's thread census, but a
-           spin here would hang the realm.  Busy-wait via the scheduler: yield
-           and re-test, which keeps every other thread running.  */
+           spin here would hang the realm.  Back off through the scheduler
+           -- yield a tick, then run the WHOLE test again from the top (the
+           signal may have latched while we slept) -- iteratively, so a
+           full table sustained for minutes deepens no stack.  */
         Permit();
-        _tx_thread_sleep(1);
-        return(tx_amiga_green_wait(sigmask));
+        (VOID) _tx_thread_sleep(1);
+        continue;
     }
 
 #ifdef AMINETXDUO_RXPROBE
@@ -315,7 +346,10 @@ UINT                     i;
     _tx_green_switch(&thread -> tx_thread_stack_ptr, _tx_green_scheduler_sp);
 
     /* Dispatched again: the scheduler delivered our signals, resumed us and
-       switched in, holding the protocol Forbid().  Collect and free.  */
+       switched in, holding the protocol Forbid().  Collect and free.  A
+       resume that was NOT a delivery -- tx_thread_wait_abort(), or any
+       foreign resume -- collects zero, which is the documented contract:
+       callers own a loop around their condition, never this return.  */
     got =  gw -> gw_received;
     gw -> gw_thread   =  TX_NULL;
     gw -> gw_mask     =  0UL;
@@ -324,6 +358,8 @@ UINT                     i;
     Permit();
 
     return(got);
+
+    }                                   /* overflow backoff retries here */
 }
 
 
@@ -958,6 +994,13 @@ VOID tx_amiga_green_stray_wait_note(VOID)
 
 VOID tx_amiga_gate_fallback_note(VOID)
 {
+}
+
+/* TX_THREAD_TERMINATED_EXTENSION's target; there is no waiter table to
+   purge in a baton build.  */
+VOID _tx_amiga_thread_terminated(TX_THREAD *thread_ptr)
+{
+    (VOID) thread_ptr;
 }
 
 #endif /* AMINETXDUO_GREEN_REALM */
