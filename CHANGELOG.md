@@ -7,6 +7,12 @@ has shipped and is history; three entries landed in one during 2026-08-01 and
 had to be moved out, because a branch started before a release still shows that
 version at the top when it merges.
 
+## Unreleased
+
+- The interface you name is the interface that comes up, whichever file it is in `DEVS:NetInterfaces`. Two interfaces can be online at once and a drawer may describe more than two; the boot brought up whichever came first alphabetically and took both slots, so `AddNetInterface wifi0` on a machine that also had `eth0` and `eth1` was refused "no space left on device" with nothing else in use, and the card the machine was allowed to use was decided by the alphabet. An interface the boot started on its own now gives its slot to one you ask for by name, and says which one it was and how to bring it back. An interface you named keeps its slot: a third `AddNetInterface` is still refused, with the names of the two that are holding them
+- An interface reports its own name. When an earlier interface file named a card that is not in the machine, the machine came up on the next card with the next card's address and reported it under the missing card's name -- in `netstat -i` and in `ShowNetStatus`, which also said the interface file had been changed after the network started, about a file nobody had touched -- while the interface that was actually running was listed as offline
+- A mistyped `DEVICE=` costs a message and nothing else. Bringing up an interface whose driver is not on the machine never takes down one that is working
+
 ## 0.25.2
 
 - `AmiTCP:` is assigned, so a program that opens `AmiTCP:libs/usergroup.library` as a file finds one. 0.25.1 made ixemul clients work by holding `usergroup.library` open, which satisfies a path-qualified `OpenLibrary` because Exec falls back to matching the file part; that does nothing for a program which `Lock`s or `Open`s the path instead. The installer makes the assign and writes it into `S:User-Startup`, and the library makes it on first open if nothing else owns the name -- so a hand-installed library works too. A machine with a real AmiTCP on it keeps its own

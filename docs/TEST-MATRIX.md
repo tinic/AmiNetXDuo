@@ -30,6 +30,7 @@ afterwards.
 | CPU rate | stock (~14 MHz), `cpu_speed=max`, `cpu_multiplier=64` (~209 MHz) | `tests/tools/run-cpuspeed.sh` | green |
 | Memory size | 0 MB, 8 MB, 32 MB, 128 MB | `tests/tools/run-bigmem.sh` | green |
 | Interface count | 1, 2, 3, 4, 8 definitions | `tests/tools/run-multidef.sh` | green (landed red) |
+| Interface slots | which of 4 definitions gets one of 2 slots, and whose name it answers to | `tests/tools/run-ifslots.sh` | green (landed red) |
 | Failure wording | missing device, wrong unit, unusable address, attach cap, no memory | `tests/tools/run-bringupfail.sh`, `bringupfail-verdict.sh` | green (landed red) |
 
 Everything above runs from one stage:
@@ -41,8 +42,8 @@ tools/ci.sh matrix
 It needs a Kickstart and nothing else — SLIRP is enough, because every arm asks
 whether the machine came up and moved a packet, and SLIRP's gateway answers
 ICMP. No bridge, no peer, no licensed Workbench. Twelve boots for the CPU arm,
-four for memory, three for interface count, one for refusals; about five
-minutes in total.
+four for memory, three for interface count, one for refusals, two for interface
+slots; about seven minutes in total.
 
 ### What the green arms measured, 2026-08-25
 
@@ -126,6 +127,48 @@ clause instead.
 That exemption was itself found by running the arm — it had been a false red,
 and would have shipped as a permanent one. Which is the argument for keeping an
 arm past the defect that prompted it.
+
+### `run-ifslots.sh` — the visible half was fixed and the usable half was not
+
+`run-multidef.sh` above asks whether every definition is **visible**. This one
+asks whether the one a user **names** can be brought **up**, which is the half
+that cost the user the rest of their evening after the first was fixed.
+
+The contract:
+
+| | |
+|---|---|
+| the slot | goes to the interface that was **named**, whatever its place in the drawer |
+| the cap | still real. Once both slots are held by interfaces somebody named, a third is refused, by name, with what to type |
+| the name | a live interface answers to **its own**. Never to the name of the description that happens to share its array subscript |
+
+Two defects, both pre-existing and both proven so on `bf8959cd`:
+
+**The slot went by position.** `ami_ns_open_devices()` claimed both `NX_IP`
+slots walking the sorted description list from the head, so on a drawer of
+`aeth0`, `beth1`, `meth2`, `zeth3` the command `AddNetInterface zeth3` failed
+`ENOSPC (28)` on a machine where nothing else was online. The alphabet decided
+which card the machine was allowed to use.
+
+**The name went by subscript.** With `aeth0` naming a card that is not in the
+machine and `zeth3` naming the one that is, the machine came up on `zeth3`'s
+card with `zeth3`'s lease and reported it as `aeth0` — in `netstat -i` and in
+`ShowNetStatus`, the latter adding a note that the interface file had been
+changed after the network started, about a file nobody had touched — while
+`zeth3` was listed as offline. The compaction that moves a surviving
+description down had already broken the position match the tools relied on.
+
+Six claims and a guard, over three boots:
+
+| claim | |
+|---|---|
+| 1 | a machine with four definitions boots |
+| 2 | `ShowNetStatus` lists all four, as `defined` |
+| 3 | a definition that is **not first** in directory order can be brought up, takes a lease and reaches the gateway |
+| 4 | a third simultaneous attach is refused, naming both holders |
+| 4b | a slot is never taken for an interface that cannot open its device: a mistyped `DEVICE=` costs a message and nothing else |
+| 5 | the slot frees on `RemoveNetInterface`, and five add/remove cycles do not leak |
+| 6 | a live interface reports its own name, and the bogus file-changed note is gone |
 
 ### `run-bringupfail.sh` — refusals carried no code, and pointed at a log
 

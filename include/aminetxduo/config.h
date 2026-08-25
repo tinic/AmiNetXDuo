@@ -61,6 +61,18 @@ extern "C" {
  * does not have.  Unlimited and cheaper, which is the usual shape of a limit
  * that was never buying anything.
  *
+ * WHICH OF THEM GETS A SLOT is the second half of the same rule, and it is
+ * not the order of the list.  The start-up pass brings up what it finds, and
+ * on a drawer that describes more interfaces than there are slots it can only
+ * reach the first few -- the list is sorted, so that would make the ALPHABET
+ * decide which card a machine is allowed to use, and `AddNetInterface wifi0`
+ * on a machine that also has eth0 and eth1 was refused ENOSPC with nothing
+ * else online.  So a slot held by an interface NOBODY NAMED yields to one
+ * somebody did (src/netstack/netstack.c, ami_ns_yield_candidate()), once the
+ * newcomer's device has opened and never before.  A slot held by an interface
+ * that WAS named does not yield: that is the attach cap, and it is refused out
+ * loud with the holders' names in it.
+ *
  * AMI_CFG_IFACE_FLOOR is a starting capacity and nothing else.  NO REFUSAL
  * HANGS OFF IT and nothing is ever dropped for exceeding it: the list grows
  * past it silently and without limit, which is the whole point.  It equals the

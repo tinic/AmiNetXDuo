@@ -191,23 +191,12 @@ static const char *service_name(UWORD port, BOOL is_tcp)
 
 /* ---------------------------------------------------------------- report, */
 
+/* The running stack's own name for an NX slot, never the description at that
+   array position: see tool_iface_name() in tool_nx.c, which is the one copy of
+   that rule and which this used to have a second, wrong version of. */
 static const char *iface_name(const AmiConfig *cfg, UWORD index)
 {
-    /*
-     * BOUNDED BY THE ATTACH CAP as well as by the count, because `index` is a
-     * NetX Duo interface index and this list is the DESCRIPTIONS, of which
-     * there may be more.  On a machine with three interface files the two
-     * numberings stop agreeing past the second, and without this the name
-     * printed beside a route would be some other interface's.
-     */
-    if (cfg != NULL && index < cfg->interface_count &&
-        index < (UWORD)AMI_CFG_MAX_ATTACHED &&
-        cfg->interfaces[index].name[0] != '\0')
-    {
-        return cfg->interfaces[index].name;
-    }
-
-    return "?";
+    return tool_iface_name(cfg, index);
 }
 
 static VOID show_counters(const char *name, const AmiSana2Stats *st)
@@ -381,6 +370,26 @@ static VOID show_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
         else
             tool_printf("  address6    %s/%lu\n", (LONG)a6->text, a6->prefix);
     }
+}
+
+/* The lease belonging to a live interface, joined on its NX slot rather than
+   on any array position: the lease table is per slot and the descriptions are
+   not. */
+static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
+                                     const ToolIfInfo *live)
+{
+    UWORD i;
+
+    if (dhcp == NULL || live == NULL)
+        return NULL;
+
+    for (i = 0; i < dhcp->count && i < (UWORD)TOOL_MAX_IF; i++)
+    {
+        if (dhcp->iface[i].nx_index == live->nx_index)
+            return &dhcp->iface[i];
+    }
+
+    return NULL;
 }
 
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
@@ -647,8 +656,11 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
     {
         const ToolIfInfo *live = NULL;
 
-        if (have_live && i < snap->iface_count)
-            live = &snap->iface[i];
+        /* BY IDENTITY.  The row a description gets is the interface really
+           running it, not the NX slot that happens to share its subscript --
+           see tool_iface_live(). */
+        if (have_live)
+            live = tool_iface_live(snap, &cfg->interfaces[i]);
 
         if (live != NULL && live->attached)
             address_text(live->address, addr, sizeof(addr));
@@ -1767,16 +1779,21 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 continue;
 
             /*
-             * Interface handles are index 0..count-1 in config order
-             * (aminetxduo/netstack.h) and the stack attaches them to NX_IP in
-             * that order, so the two indices line up.
+             * BY IDENTITY, never by subscript.  A description is a file in
+             * DEVS:NetInterfaces and an NX slot is a piece of hardware the
+             * stack has open; the drawer may hold more descriptions than there
+             * are slots, and a card that did not open moves everything behind
+             * it down one.  Pairing them by position reported a working card's
+             * address under the name of the interface that failed.
+             *
+             * The lease table is per NX slot, so it is subscripted by the
+             * interface that was found rather than by the description.
              */
-            if (have_live && i < snap.iface_count)
-                live = &snap.iface[i];
+            if (have_live)
+                live = tool_iface_live(&snap, &cfg->interfaces[i]);
 
             show_interface(&cfg->interfaces[i], live, &snap,
-                           (have_lease && i < (LONG)dhcp.count)
-                               ? &dhcp.iface[i] : NULL,
+                           have_lease ? lease_for(&dhcp, live) : NULL,
                            iface_online(live), detailed,
                            stack_running, (BOOL)!elsewhere);
             shown++;
@@ -1842,8 +1859,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     {
         const ToolIfInfo *live = NULL;
 
-        if (have_live && i < snap.iface_count)
-            live = &snap.iface[i];
+        if (have_live)
+            live = tool_iface_live(&snap, &cfg->interfaces[i]);
 
         diagnose_interface(&cfg->interfaces[i], live, &snap,
                            iface_online(live), stack_running,

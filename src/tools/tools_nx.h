@@ -162,6 +162,27 @@ BOOL tool_iface_has_address6(const ToolSnapshot *snap, UWORD nx_index);
 BOOL tool_iface_has_address(const ToolSnapshot *snap, const ToolIfInfo *live);
 
 /*
+ * THE LIVE INTERFACE A DESCRIPTION IS RUNNING ON, matched by identity.
+ *
+ * Never by array position.  A description is one file in DEVS:NetInterfaces
+ * and the drawer may hold more of them than the stack has slots, so the two
+ * numberings are unrelated -- and they part company on the ordinary machine
+ * too: a description whose device does not open takes no slot, and everything
+ * behind it moves down one.  Matching interfaces[i] to NX slot i then reported
+ * a card that was working, with the address it had leased, under the NAME OF
+ * THE INTERFACE THAT FAILED, and reported the one really running as offline.
+ *
+ * The name comes from the library, which takes it from the description the
+ * slot really holds, so it is the identity both ends agree on.  Device and
+ * unit are the fallback for a library too old to send a name.
+ *
+ * NULL means no live interface is running this description, which is what
+ * "defined" means in ShowNetStatus's table.
+ */
+const ToolIfInfo *tool_iface_live(const ToolSnapshot *snap,
+                                  const AmiIfConfig *cfg);
+
+/*
  * One question to the running library. Set `want_sockets` only when the
  * connection table is needed, because it costs another call across the
  * boundary. Returns 0, or a negative code after printing a message.

@@ -336,6 +336,84 @@ static LONG running_index(struct Library *base, const char *name,
 }
 
 /*
+ * WHICH INTERFACES WERE UP BEFORE THE ADD, so that one going down over it can
+ * be reported rather than merely happening.
+ *
+ * There are two interface slots and a drawer may describe more interfaces than
+ * that. An interface the boot brought up on its own initiative gives its slot
+ * to one a user asks for by name (src/netstack/netstack.c,
+ * ami_ns_yield_candidate()), which is the whole reason `AddNetInterface
+ * wifi0` works on a machine whose drawer also holds eth0 and eth1. It is still
+ * an interface that was carrying traffic and now is not, so it is said out
+ * loud. An interface somebody named never yields, so this line cannot appear
+ * for one the user asked for.
+ */
+static char  addif_was_up[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_NAME_LEN];
+static UWORD addif_was_up_count;
+
+static VOID note_what_is_up(struct Library *base)
+{
+    LONG n;
+    LONG i;
+
+    addif_was_up_count = 0;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
+            continue;
+
+        tool_copy_string(addif_was_up[addif_was_up_count],
+                         sizeof(addif_was_up[0]),
+                         addif_ifaces.e[i].nsi_Name);
+        addif_was_up_count++;
+    }
+}
+
+static VOID report_what_yielded(struct Library *base, const char *added)
+{
+    LONG  n;
+    LONG  i;
+    UWORD w;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+    if (n < 0)
+        return;
+
+    for (w = 0; w < addif_was_up_count; w++)
+    {
+        BOOL still = FALSE;
+
+        for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
+                continue;
+
+            if (tool_stricmp(addif_ifaces.e[i].nsi_Name, addif_was_up[w]) == 0)
+            {
+                still = TRUE;
+                break;
+            }
+        }
+
+        if (still || tool_stricmp(addif_was_up[w], added) == 0)
+            continue;
+
+        tool_printf("%s: %s was brought up by the boot and nobody asked for "
+                    "it, so it gave up its interface slot.\n",
+                    (LONG)added, (LONG)addif_was_up[w]);
+        tool_printf("%s: %s is defined and not attached now.  "
+                    "AddNetInterface %s brings it back.\n",
+                    (LONG)added, (LONG)addif_was_up[w],
+                    (LONG)addif_was_up[w]);
+    }
+}
+
+/*
  * Hand the name to the running stack. The library reads
  * DEVS:NetInterfaces/<name> itself and brings the interface up as a boot
  * would, so there is nothing to pass but the name. Returns 0, or the library's
@@ -756,9 +834,28 @@ int main(int argc, char **argv)
                 return RETURN_FAIL;
             }
 
-            if (where < 0)
             {
-                LONG add_err = add_to_running_stack(base, name);
+                /*
+                 * ASKED FOR EVERY TIME, even when it is already attached.
+                 *
+                 * The library needs to know this interface is one somebody
+                 * NAMED, because a slot held by an interface nobody named
+                 * yields to one that is (src/netstack/netstack.c,
+                 * ami_ns_yield_candidate()).  An interface the boot
+                 * brought up on its own stays unspoken-for until a user types
+                 * its name, and the only way to type it is this command.
+                 * EEXIST is the library agreeing it is already up, so it is
+                 * this call succeeding rather than refusing.
+                 */
+                LONG add_err;
+
+                note_what_is_up(base);
+                add_err = add_to_running_stack(base, name);
+
+                if (add_err == EEXIST)
+                    add_err = 0;
+                else if (add_err == 0 && !quiet)
+                    report_what_yielded(base, name);
 
                 if (add_err != 0)
                 {
@@ -771,6 +868,20 @@ int main(int argc, char **argv)
                     explain_add_failure(base, add_err, name, &ifc);
                     rc = RETURN_FAIL;
                     continue;
+                }
+
+                /* The add may have been given a slot that was free only
+                   because an unasked-for interface yielded it, so the address
+                   read before it is stale. */
+                where = running_index(base, name, &addr);
+                if (where == -2)
+                {
+                    tool_error("the network did not say which interfaces it "
+                               "has");
+                    tool_explain_no_netstatus(base);
+                    tool_stack_release(base);
+                    FreeArgs(rda);
+                    return RETURN_FAIL;
                 }
             }
 

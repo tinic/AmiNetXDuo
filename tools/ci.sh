@@ -37,9 +37,10 @@
 #   matrix       tier 2, THE MACHINE THE USER HAS rather than the one this
 #                tree was written on: the same bring-up at 68030/68040/68060
 #                and at two emulator speed settings, three to eight files in
-#                DEVS:NetInterfaces/, what a user is told when bring-up fails
-#                for each cause, and the packet-pool arithmetic at 32 and
-#                128 MB.  Every one of those axes had a coverage of zero until
+#                DEVS:NetInterfaces/, which of them gets the hardware and
+#                whether it answers to its own name, what a user is told when
+#                bring-up fails for each cause, and the packet-pool arithmetic
+#                at 32 and 128 MB.  Every one of those axes had a coverage of zero until
 #                2026-08-25, which is how three defects reached real hardware
 #                unseen.  Needs a ROM and nothing else -- SLIRP is enough.
 #                Two of its four arms landed RED, against the contract rather
@@ -1474,6 +1475,12 @@ stage_cards6() {
 #              wording of a failure, which is the half a user reads.
 #   bigmem     the pool arithmetic at 32 MB and 128 MB.  It has only ever run
 #              at 0 MB and 8 MB.
+#   ifslots    WHICH interface gets the hardware when the drawer describes
+#              more of them than there are slots, and whether a live interface
+#              answers to its own name.  multidef proves every definition is
+#              VISIBLE; this proves the one a user NAMES can be brought UP,
+#              which is the half that cost the user an evening after the
+#              visible half was fixed.
 #
 # SLIRP IS ENOUGH, which is why this is not in `cards` or `bridged`.  Every
 # arm asks whether the machine came up and moved a packet, and SLIRP's gateway
@@ -1552,6 +1559,18 @@ stage_matrix() {
         2) skip "bringupfail: the rig refused it before it could boot" ;;
         *) fail "bringupfail: a refusal does not name the failing operation\
  and its code, or sends the user to a log a shipping build cannot write"
+           bad=$((bad + 1)) ;;
+    esac
+
+    rc=0
+    "$ROOT/tests/tools/run-ifslots.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  the interface a user names is the one that gets a slot,\
+ and it answers to its own name" ;;
+        2) skip "ifslots: the rig refused it before either round booted" ;;
+        *) fail "ifslots: an interface a user NAMED could not be brought up,\
+ or a live interface was reported under another interface's name -- the claim\
+ table above says which"
            bad=$((bad + 1)) ;;
     esac
 

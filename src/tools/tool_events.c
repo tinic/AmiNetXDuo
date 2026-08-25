@@ -75,6 +75,10 @@ static const ToolEventRow tool_event_rows[] =
       "there was no free interface slot, so this interface was described but "
       "never attached",
       "interfaces described" },
+    { NETEVENT_ATTACH_YIELD,
+      "this interface was brought up on its own and gave its slot back to an "
+      "interface that was asked for by name",
+      "interfaces described" },
 
     { NETEVENT_OUT_OF_SERVICE,
       "the device went out of service and the link was marked down",

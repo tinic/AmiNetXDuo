@@ -328,6 +328,52 @@ BOOL tool_iface_has_address(const ToolSnapshot *snap, const ToolIfInfo *live)
     return tool_iface_has_address6(snap, live->nx_index);
 }
 
+const ToolIfInfo *tool_iface_live(const ToolSnapshot *snap,
+                                  const AmiIfConfig *cfg)
+{
+    UWORD i;
+
+    if (snap == NULL || cfg == NULL || cfg->name[0] == '\0')
+        return NULL;
+
+    /* The name first, which is the identity the user typed and the one the
+       library reports for the slot. */
+    for (i = 0; i < snap->iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+    {
+        const ToolIfInfo *live = &snap->iface[i];
+
+        if (!live->attached || live->nx_name[0] == '\0')
+            continue;
+
+        if (tool_stricmp(live->nx_name, cfg->name) == 0)
+            return live;
+    }
+
+    /*
+     * Then the card.  A library too old to answer with a name leaves nx_name
+     * empty, and an interface is still identified by the device and unit it
+     * has open -- which is the pair a description names.  A description with no
+     * DEVICE line describes no card and matches nothing here.
+     */
+    if (cfg->device[0] == '\0')
+        return NULL;
+
+    for (i = 0; i < snap->iface_count && i < (UWORD)TOOL_MAX_IF; i++)
+    {
+        const ToolIfInfo *live = &snap->iface[i];
+
+        if (!live->attached || live->nx_name[0] != '\0' ||
+            live->nx_device[0] == '\0')
+            continue;
+
+        if (tool_stricmp(live->nx_device, cfg->device) == 0 &&
+            live->nx_unit == cfg->unit)
+            return live;
+    }
+
+    return NULL;
+}
+
 /* ---------------------------------------------------- protocol counters, */
 
 LONG tool_stats(ToolStats *out)
@@ -1172,15 +1218,85 @@ const char *tool_nd_state_note(UWORD state)
     }
 }
 
+/*
+ * The live names, by NX slot, cached for the whole run of a command.
+ *
+ * The library knows what each slot is called, because it takes the name from
+ * the description the slot really holds.  This is the only honest source:
+ * subscripting the DESCRIPTIONS by an NX index assumes the two numberings
+ * agree, and they do not -- a drawer may describe more interfaces than there
+ * are slots, and a description whose device will not open takes no slot at all
+ * and moves everything behind it down one.
+ *
+ * Filled once, on first use, so a command that never asks costs nothing and
+ * one that asks per route costs one query.  A slot with no live name leaves
+ * its entry empty and tool_iface_name() falls back to the descriptions, which
+ * is the answer for a library too old to report names.
+ */
+static char nx_slot_name[TOOL_MAX_IF][NETSTATUS_NAME_LEN];
+static BOOL nx_slot_named;
+
+static VOID nx_learn_slot_names(VOID)
+{
+    /* Its own buffer, not the shared one: this runs from inside printing loops
+       that are walking an answer already in nx_answer. */
+    static struct { NetStatusHeader hdr; NetStatusInterface e[TOOL_MAX_IF]; }
+                    names;
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    nx_slot_named = TRUE;
+
+    for (i = 0; i < (LONG)TOOL_MAX_IF; i++)
+        nx_slot_name[i][0] = '\0';
+
+    /* Quiet whatever the command asked for: this is a lookup behind a name in
+       a table, and a stack that is not running is not news here.  The command
+       has said so already, in its own words. */
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+        return;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &names,
+                             sizeof(names), sizeof(NetStatusInterface));
+
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_IF; i++)
+    {
+        const NetStatusInterface *src = &names.e[i];
+
+        if (!(src->nsi_Flags & NETSTATUS_IF_NAMED) ||
+            src->nsi_Index >= (UWORD)TOOL_MAX_IF)
+            continue;
+
+        tool_copy_string(nx_slot_name[src->nsi_Index],
+                         sizeof(nx_slot_name[0]), src->nsi_Name);
+    }
+
+    tool_netstatus_close(base);
+}
+
 const char *tool_iface_name(const AmiConfig *cfg, UWORD index)
 {
     /*
-     * BOUNDED BY THE ATTACH CAP as well as by the count, because `index` is a
-     * NetX Duo interface index and this list is the DESCRIPTIONS, of which
-     * there may be more.  On a machine with three interface files the two
-     * numberings stop agreeing past the second, and without this the name
-     * printed beside a route would be some other interface's.
+     * THE RUNNING STACK'S OWN NAME FOR THE SLOT, because `index` is a NetX Duo
+     * interface index and the description list is not indexed by one.  On a
+     * machine with three interface files, or with one whose card did not open,
+     * the two numberings stop agreeing and the name printed beside a route was
+     * some other interface's.
      */
+    if (index < (UWORD)TOOL_MAX_IF)
+    {
+        if (!nx_slot_named)
+            nx_learn_slot_names();
+
+        if (nx_slot_name[index][0] != '\0')
+            return nx_slot_name[index];
+    }
+
+    /* No live answer: a stack that is not running, or a library too old to
+       name its slots.  The descriptions are then all there is, and on such a
+       machine nothing has moved. */
     if (cfg != NULL && index < cfg->interface_count &&
         index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         cfg->interfaces[index].name[0] != '\0')

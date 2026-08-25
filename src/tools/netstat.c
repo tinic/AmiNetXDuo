@@ -95,8 +95,11 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 
         ami_config_format_ip(info->address, addr, sizeof(addr));
 
+        /* The slot's own name, from the stack, not the description that
+           happens to sit at this subscript -- see tool_iface_name(). */
         tool_printf("%-7s %-5lu %-16s %-6s ",
-                    (LONG)tool_iface_name(cfg, i), info->mtu, (LONG)addr,
+                    (LONG)tool_iface_name(cfg, info->nx_index), info->mtu,
+                    (LONG)addr,
                     (LONG)(info->link_up ? "up" : "down"));
 
         if (info->have_sana2)
@@ -506,12 +509,12 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (!info->have_sana2)
         {
             tool_printf("\n%s: no driver attached, so it has no counters\n",
-                        (LONG)tool_iface_name(cfg, i));
+                        (LONG)tool_iface_name(cfg, info->nx_index));
             shown++;
             continue;
         }
 
-        tool_printf("\n%s (%s)\n", (LONG)tool_iface_name(cfg, i),
+        tool_printf("\n%s (%s)\n", (LONG)tool_iface_name(cfg, info->nx_index),
                     (LONG)(info->sana2_online ? "online" : "offline"));
         tool_printf("  packets received  %10lu    packets sent      %10lu\n",
                     st->packets_received, st->packets_sent);

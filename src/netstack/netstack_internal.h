@@ -241,6 +241,24 @@ struct AmiNetStack
     UWORD               ns_IfaceCfg[AMI_CFG_MAX_ATTACHED];
     UWORD               ns_IfaceCount;
 
+    /*
+     * WHO ASKED FOR THIS SLOT.  Set when an interface was brought up because
+     * something NAMED it -- AddNetInterface, NETCTRL_INTERFACE_ADD,
+     * AddInterfaceTagList() -- and clear when the start-up pass brought it up
+     * on its own initiative because it was in DEVS:NetInterfaces.
+     *
+     * There are AMI_CFG_MAX_ATTACHED slots and a drawer may describe more
+     * interfaces than that (aminetxduo/config.h).  Without this flag the
+     * start-up pass took every slot off the head of the sorted list and the
+     * interface a user then asked for by name was refused, so which card the
+     * machine could use was decided by the alphabet.  With it, a slot held by
+     * an interface nobody asked for yields to one somebody did; a slot held by
+     * an interface that WAS asked for does not, and that is the refusal
+     * the caller reports by name.  ami_ns_yield_candidate() picks; only a
+     * newcomer whose device has already opened may take a slot.
+     */
+    BOOL                ns_IfaceWanted[AMI_CFG_MAX_ATTACHED];
+
     NX_DHCP             ns_Dhcp;
     BOOL                ns_DhcpCreated;
     BOOL                ns_DhcpStarted;

@@ -872,6 +872,16 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
            and interface claims then lose this otherwise live device. */
         ns->ns_IfaceCfg[opened] = opened;
 
+        /*
+         * NOBODY ASKED FOR THIS ONE.  It is in the drawer, so the stack brings
+         * it up; that is not the same thing as a user naming it, and the
+         * difference is what stops the alphabet deciding which card the
+         * machine may use.  ami_ns_yield_candidate() will offer this slot
+         * to an interface that IS named if there is no vacant one, and the
+         * flag on whatever ends up in the slot is set from there.
+         */
+        ns->ns_IfaceWanted[opened] = FALSE;
+
         opened++;
     }
 
@@ -1191,6 +1201,7 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
             ns->ns_Config.interfaces[kept] = ns->ns_Config.interfaces[i];
             ns->ns_Iface[kept]             = ns->ns_Iface[i];
             ns->ns_IfaceMdns[kept]         = ns->ns_IfaceMdns[i];
+            ns->ns_IfaceWanted[kept]       = ns->ns_IfaceWanted[i];
             ns->ns_IfaceCfg[kept]          = kept;
             ns->ns_Iface[i]                = NULL;
         }
@@ -3807,7 +3818,7 @@ VOID netstack_interface_release(UWORD index)
  * The matching ns_Iface[] slot must be free too. The two disagree only if a
  * previous removal left one behind, and that case is refused.
  */
-static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
+static LONG ami_ns_vacant_interface_slot(AmiNetStack *ns)
 {
     UWORD i;
 
@@ -3822,14 +3833,95 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
     return -1;
 }
 
+/*
+ * A SLOT THAT COULD BE MADE VACANT for an interface that was NAMED, and which
+ * one it would be.  This decides; ami_ns_take_interface_slot() below does it.
+ *
+ * There are two kinds of holder:
+ *
+ *   - one somebody NAMED (AddNetInterface, NETCTRL_INTERFACE_ADD,
+ *     AddInterfaceTagList).  That is a decision a person made and this does
+ *     not overrule it: the answer is the refusal, and the caller prints it
+ *     with the holders' names in it.
+ *   - one the START-UP PASS brought up on its own because it found a file in
+ *     DEVS:NetInterfaces.  Nobody asked for it in particular.  A drawer may
+ *     describe more interfaces than there are slots, so which of them the pass
+ *     reached first is the alphabet and the directory scan talking -- and an
+ *     interface a user then asks for BY NAME must not lose a slot to that.
+ *
+ * Last slot first: slot 0 carried the address ami_ns_create_ip() built the
+ * NX_IP around and its gateway is the default route, so it is the one
+ * disturbed last.
+ *
+ * A CANDIDATE AND NOT A CASUALTY.  Nothing is taken down here, because the
+ * caller has not yet proved the newcomer can open its device -- and taking a
+ * working interface down for a mistyped driver name would be a worse defect
+ * than the one this whole mechanism exists to fix.
+ */
+static LONG ami_ns_yield_candidate(AmiNetStack *ns)
+{
+    LONG i;
+
+    for (i = (LONG)AMI_CFG_MAX_ATTACHED - 1; i >= 0; i--)
+    {
+        if (ns->ns_Iface[i] != NULL && !ns->ns_IfaceWanted[i] &&
+            ns->ns_IfaceClaims[i] == 0)
+            return i;
+    }
+
+    return -1;
+}
+
+/*
+ * Take the candidate's slot, now that the newcomer's device has opened.
+ *
+ * The removal is the ordinary one and is NOT forced: an interface carrying TCP
+ * connections keeps its slot and this fails, which the caller turns into the
+ * same refusal a slot held by a named interface gets.  Yielding is recorded,
+ * because an interface that was up and is now merely defined must never be a
+ * silent change; AddNetInterface reads the same fact back out of the interface
+ * list and says it in one line.
+ */
+static LONG ami_ns_take_interface_slot(AmiNetStack *ns, LONG victim)
+{
+    if (victim < 0 || victim >= (LONG)AMI_CFG_MAX_ATTACHED ||
+        ns->ns_Iface[victim] == NULL || ns->ns_IfaceWanted[victim])
+        return -1;
+
+    AMI_INFO("netstack: '%s' was brought up on its own and gives up "
+             "interface slot %ld", ns->ns_Config.interfaces[victim].name,
+             (long)victim);
+
+    if (ami_ns_interface_remove_locked((UWORD)victim, FALSE) != AMI_NET_OK)
+        return -1;
+
+    ami_event(NETEVENT_ATTACH_YIELD, (UWORD)victim,
+              (ULONG)ns->ns_Config.interface_count);
+
+    /* Re-scanned rather than assumed: the removal is what makes the slot
+       vacant, and nx_ip_interface_detach() is the thing that decides it
+       really is. */
+    return ami_ns_vacant_interface_slot(ns);
+}
+
+/*
+ * `wanted` says somebody NAMED this interface, as against the start-up pass
+ * finding it in the drawer.  Every caller of this function is a naming one --
+ * AddInterfaceTagList(), NETCTRL_INTERFACE_ADD, AddNetInterface -- and the
+ * start-up pass has its own loop, so it is passed as TRUE throughout and is a
+ * parameter rather than a constant only so that the rule is stated where the
+ * slot is taken.
+ */
 static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
-                                        UWORD *index_out)
+                                        UWORD *index_out, BOOL wanted)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
     AmiIfConfig  *slot_cfg;
+    AmiIfConfig   open_cfg;
     AmiSana2If   *iface;
     LONG          slot;
+    LONG          victim;
     LONG          err = AMI_NET_OK;
     UINT          status;
     UWORD         i;
@@ -3847,17 +3939,80 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
             continue;
 
         if (ami_ns_same_name(ns->ns_Config.interfaces[i].name, cfg->name))
+        {
+            /*
+             * NAMING AN INTERFACE THAT IS ALREADY UP MAKES IT YOURS, even
+             * though there is nothing to attach.  Without this the start-up
+             * pass's interface stays unasked-for however many times a user
+             * types its name, and the next AddNetInterface of a third
+             * interface would take its slot away from underneath them.
+             * The duplicate is still refused -- the caller decides what that
+             * means, and AddInterfaceTagList() has to keep refusing it.
+             */
+            if (wanted)
+                ns->ns_IfaceWanted[i] = TRUE;
+
             return AMI_NET_ERR_CONFIG;
+        }
     }
 
-    slot = ami_ns_free_interface_slot(ns);
-    if (slot < 0)
+    /*
+     * A vacant slot first, always.  When there is none, an interface the
+     * start-up pass brought up on its own may give one back -- but only to a
+     * caller that NAMED this interface, and only once the device below has
+     * opened.  See ami_ns_yield_candidate().
+     */
+    slot   = ami_ns_vacant_interface_slot(ns);
+    victim = (slot < 0 && wanted) ? ami_ns_yield_candidate(ns) : -1;
+
+    if (slot < 0 && victim < 0)
     {
-        /* Every NetX Duo slot is taken.  See NETEVENT_ATTACH_LIMIT: this is
-           the same refusal as the start-up one, reached by the other road. */
+        /* Every NetX Duo slot is taken by an interface somebody asked for.
+           See NETEVENT_ATTACH_LIMIT: this is the same refusal as the start-up
+           one, reached by the other road. */
         ami_event(NETEVENT_ATTACH_LIMIT, (UWORD)AMI_CFG_MAX_ATTACHED,
                   (ULONG)ns->ns_Config.interface_count);
         return AMI_NET_ERR_NOSLOT;
+    }
+
+    /*
+     * THE DEVICE OPENS BEFORE ANY SLOT CHANGES HANDS.
+     *
+     * ami_sana2_open() copies the device name, unit and card out of the
+     * configuration and keeps no pointer into it, so it can be given a local
+     * copy and needs no slot to have been chosen yet.  That ordering is the
+     * whole safety of the yield: a mistyped DEVICE= must cost the user a
+     * message, not the interface that was already working.
+     */
+    open_cfg = *cfg;
+
+    iface = ami_sana2_open(&open_cfg, &err);
+    if (iface == NULL)
+    {
+        ami_event((err == AMI_NET_ERR_DEVBAD)
+                      ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
+                  NETEVENT_NOINDEX, (ULONG)err);
+        AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
+                  open_cfg.name, open_cfg.device,
+                  (unsigned long)open_cfg.unit,
+                  (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"
+                                              : "did not answer");
+        return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
+    }
+
+    if (slot < 0)
+    {
+        slot = ami_ns_take_interface_slot(ns, victim);
+        if (slot < 0)
+        {
+            /* The candidate would not come down -- it is carrying
+               connections -- so this is the ordinary no-slot refusal after
+               all, and the device just opened is closed again. */
+            ami_sana2_close(iface);
+            ami_event(NETEVENT_ATTACH_LIMIT, (UWORD)AMI_CFG_MAX_ATTACHED,
+                      (ULONG)ns->ns_Config.interface_count);
+            return AMI_NET_ERR_NOSLOT;
+        }
     }
 
     /*
@@ -3868,16 +4023,18 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
      * line, would otherwise write past the end of a shorter list.
      */
     if (!ami_config_reserve(&ns->ns_Config, (UWORD)(slot + 1)))
+    {
+        ami_sana2_close(iface);
         return AMI_NET_ERR_NOMEM;
+    }
 
     /*
-     * The configuration is copied into the storage of the netstack before the
-     * device is opened, and stays there: nx_ip_interface_attach() keeps the
-     * name pointer rather than the name, so the string must outlive the tag
-     * list of the caller.
+     * The configuration is copied into the storage of the netstack and stays
+     * there: nx_ip_interface_attach() keeps the name pointer rather than the
+     * name, so the string must outlive the tag list of the caller.
      */
     slot_cfg = &ns->ns_Config.interfaces[slot];
-    *slot_cfg = *cfg;
+    *slot_cfg = open_cfg;
     slot_cfg->configured = TRUE;
 
 #ifdef AMINETXDUO_IPV6
@@ -3898,21 +4055,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     if ((UWORD)slot >= ns->ns_Config.interface_count)
         ns->ns_Config.interface_count = (UWORD)(slot + 1);
 
-    iface = ami_sana2_open(slot_cfg, &err);
-    if (iface == NULL)
-    {
-        ami_event((err == AMI_NET_ERR_DEVBAD)
-                      ? NETEVENT_DEVICE_REFUSED : NETEVENT_DEVICE_OPEN,
-                  (UWORD)slot, (ULONG)err);
-        AMI_ERROR("netstack: interface \'%s\' did not start: %s unit %lu %s",
-                  slot_cfg->name, slot_cfg->device,
-                  (unsigned long)slot_cfg->unit,
-                  (err == AMI_NET_ERR_DEVBAD) ? "refused a SANA-II command"
-                                              : "did not answer");
-        slot_cfg->configured = FALSE;
-        return (err != AMI_NET_OK) ? err : AMI_NET_ERR_NODEV;
-    }
-
     ns->ns_Iface[slot] = iface;
 
     caller = ami_netstack_enter_alloc();
@@ -3924,7 +4066,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         return AMI_NET_ERR_KERNEL;
     }
 
-    /* The binding first, for the reason in ami_ns_free_interface_slot(). */
+    /* The binding first, for the reason in ami_ns_vacant_interface_slot(). */
     if (ami_sana2_attach(iface, &ns->ns_Ip, (UINT)slot) != AMI_NET_OK)
     {
         ami_netstack_leave_free(caller);
@@ -3988,6 +4130,10 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
        slot before without it. */
     ns->ns_IfaceCfg[slot]  = (UWORD)slot;
 
+    /* Somebody named this one, so the slot is spoken for: a later add asking
+       for a slot will be refused rather than taking this one back. */
+    ns->ns_IfaceWanted[slot] = wanted;
+
     /*
      * MDNS= is acted on and not merely recorded. Setting the flag alone left an
      * interface reporting NETSTATUS_IF_MDNS while it had joined no group,
@@ -4028,7 +4174,7 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 
     ami_ns_lock_init();
     ObtainSemaphore(&ami_ns_lock);
-    rc = ami_ns_interface_add_locked(cfg, index_out);
+    rc = ami_ns_interface_add_locked(cfg, index_out, TRUE);
     ReleaseSemaphore(&ami_ns_lock);
 
     return rc;
@@ -4068,7 +4214,7 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
     autoip_created_before = ns->ns_AutoIpCreated;
     autoip_running_before = ns->ns_AutoIpRunning;
 
-    rc = ami_ns_interface_add_locked(cfg, &index);
+    rc = ami_ns_interface_add_locked(cfg, &index, TRUE);
     if (rc != AMI_NET_OK)
         goto out;
     added = TRUE;

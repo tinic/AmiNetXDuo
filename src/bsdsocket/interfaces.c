@@ -173,20 +173,23 @@ static VOID bsd_put_sockaddr_in(const struct TagItem *item, ULONG host_addr)
 
 /* ---------------------------------------------------------- interface names */
 
+/*
+ * THE DESCRIPTION AN NX SLOT IS REALLY RUNNING, asked of the netstack rather
+ * than looked up by subscript in the parsed list.
+ *
+ * netstack_iface_config() is the one place that knows which description each
+ * slot took, and it is not the subscript: an interface whose device does not
+ * open takes no slot and everything behind it moves down, and a slot may be
+ * given to an interface that was named after the boot.  Indexing the list
+ * directly answered with a neighbouring interface's name, device and unit --
+ * the same defect netstatus.c's ns_config_for() already avoids this way.
+ */
 static const AmiIfConfig *bsd_if_config(UINT index)
 {
-    const AmiConfig *cfg = netstack_config();
-
-    if (cfg == NULL)
+    if (index >= (UINT)AMI_CFG_MAX_ATTACHED)
         return NULL;
 
-    if (index >= cfg->interface_count || index >= (UINT)AMI_CFG_MAX_ATTACHED)
-        return NULL;
-
-    if (!cfg->interfaces[index].configured)
-        return NULL;
-
-    return &cfg->interfaces[index];
+    return netstack_iface_config((UWORD)index);
 }
 
 /*

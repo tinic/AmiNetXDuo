@@ -986,6 +986,21 @@ typedef struct NetStatusOpener
                                        value = the NX_ status                */
 #define NETEVENT_ATTACH_LIMIT   15  /* no NetX Duo slot left; value = how many
                                        interfaces were asked for             */
+/*
+ * The other side of ATTACH_LIMIT, and the reason a machine with four interface
+ * files can still bring up the fourth.
+ *
+ * An interface the start-up pass brought up because it found a file in
+ * DEVS:NetInterfaces was never asked for in particular, and there may be more
+ * files than slots.  When a user then names one that has no slot, the
+ * unasked-for one gives its slot up and goes back to being merely defined.
+ * That is a real change to what the machine has on the wire, so it is
+ * recorded: nse_Index is the slot that yielded, and the value is how many
+ * interfaces the stack knows of.  An interface somebody DID name never yields;
+ * that case is ATTACH_LIMIT above and is refused by name.
+ */
+#define NETEVENT_ATTACH_YIELD   16  /* an unasked-for interface gave up its
+                                       slot; value = interfaces described    */
 
 /* --- the wire ----------------------------------------------------------- */
 /*

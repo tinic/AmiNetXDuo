@@ -390,8 +390,17 @@ LONG tool_find_interface(const char *name)
 
     for (i = 0; i < cfg->interface_count; i++)
     {
-        const char *a = cfg->interfaces[i].name;
+        const char *a;
         const char *b = name;
+
+        /* The caller uses this as an NX interface index, so a slot with no
+           device in it is not an answer: an interface that yielded its slot,
+           or one whose card never opened, still has its name sitting in the
+           list behind a cleared `configured`. */
+        if (!cfg->interfaces[i].configured)
+            continue;
+
+        a = cfg->interfaces[i].name;
 
         while (*a != '\0' && *b != '\0')
         {
