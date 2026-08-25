@@ -23,7 +23,7 @@ Named per-frame work:
 |---|---:|---|
 | ISR fused FIFO copy | ~1.3 | flight-4 / profile (12.8% busy) |
 | drain leg (reader dequeue → deferred receive) | 0.62 | budget |
-| settle CPU (NetX IP+TCP processing per segment) | ~1.2 | budget + profile |
+| settle CPU (NetX IP+TCP processing per segment) | ~0.9 measured | settle dissection 2026-08-25 (demux 0.45 + state 0.47); the leg's other ~2.5 ms is defer, scheduling overlap not work |
 | recv copy-out (`n68k_copy_bytes_mv20`) | ~0.7 | profile (6.6% busy) |
 | TX true CPU (reap 0.23 + stuff 0.29 + post floor ~1.0 per ACK) | ~1.1 | push dissection ×0.75 ACK/frame |
 | TX exec glue (Signal→deferred→IP round trip nested in BeginIO) | ~0.5 | ~0.7 ms/ACK ×0.75 |
