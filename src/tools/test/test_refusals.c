@@ -1,5 +1,5 @@
 /*
- * A refusal that does not say why, and the three shapes it takes here.
+ * A refusal that does not say why, and the four shapes it takes here.
  *
  * WHAT WENT WRONG
  *
@@ -18,6 +18,10 @@
  *     no IPv6       the IPv4-only build's refusals name IPv6 and stop, so a
  *                   user cannot tell a machine that is missing an address
  *                   from a library that has no IPv6 in it at all.
+ *     a catch-all   ConfigureNetInterface tested one errno out of the DHCP
+ *                   lease call and answered every other with "has no DHCP
+ *                   client to ask", so EBUSY -- a client that is working on
+ *                   this interface right now -- read as a stackless machine.
  *
  *   None of it is anything a compiler sees: an empty case arm is legal, and a
  *   shorter string is a shorter string. The emulator tier caught it in
@@ -228,6 +232,31 @@ static void arms_all_speak(const char *file, const char *text,
           file, func, arms);
 }
 
+/* ------------------------------------------------------- the catch-all --- */
+
+/*
+ * A refusal whose `else` answers an errno the caller can actually meet. The
+ * code has to be tested somewhere in the run of source ending at the
+ * catch-all's own sentence, which is where its ladder is.
+ */
+static void catchall_excludes(const char *file, const char *text,
+                              const char *sentence, const char *code)
+{
+    const char *p = strstr(text, sentence);
+    size_t      back;
+
+    if (p == NULL) {
+        CHECK(0, "%s: the \"%s\" refusal is gone", file, sentence);
+        return;
+    }
+
+    back = (size_t)(p - text) < 600U ? (size_t)(p - text) : 600U;
+
+    CHECK(memmem(p - back, back, code, strlen(code)) != NULL,
+          "%s: \"%s\" also answers %s, which is a different fact about the"
+          " machine", file, sentence, code);
+}
+
 /* --------------------------------------------------------- the no-IPv6 -- */
 
 /*
@@ -310,6 +339,30 @@ static void t_arp(void)
           "arp.c: the IPv6 refusal no longer grants the address is valid");
 
     no_ipv6_sites_explain("arp.c", text, 1);
+
+    free(text);
+}
+
+static void t_configurenetinterface(void)
+{
+    char *text = slurp("src/tools/configurenetinterface.c");
+
+    if (text == NULL)
+        return;
+
+    /* EBUSY is what NETCTRL_DHCP_START answers when the client is mid
+       allocation on this interface (src/netstack/netstack.c:3346), and it is
+       the one error in that call that means the machine is working. */
+    CHECK(strstr(text, "#define CNI_EBUSY") != NULL,
+          "configurenetinterface.c: CNI_EBUSY is not among the errno numbers"
+          " this command names");
+
+    catchall_excludes("configurenetinterface.c", text,
+                      "has no DHCP client to ask", "CNI_EBUSY");
+
+    CHECK(strstr(text, "already asking a DHCP server") != NULL,
+          "configurenetinterface.c: the EBUSY refusal does not say a request"
+          " is already in flight");
 
     free(text);
 }
@@ -430,6 +483,7 @@ int main(void)
     t_addnetroute();
     t_host();
     t_arp();
+    t_configurenetinterface();
     t_toolsock();
     t_the_note();
     t_no_dead_log_advice();

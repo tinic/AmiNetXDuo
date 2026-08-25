@@ -294,6 +294,7 @@ enum
  */
 #define CNI_EIO             5
 #define CNI_ENXIO           6
+#define CNI_EBUSY           16
 #define CNI_EINVAL          22
 #define CNI_ENOBUFS         55
 #define CNI_EADDRNOTAVAIL   49
@@ -1112,6 +1113,10 @@ int main(int argc, char **argv)
         {
             if (err == CNI_ENOTCONN)
                 tool_error("%s has no lease to renew", (LONG)name);
+            else if (err == CNI_EBUSY)
+                tool_error("%s is already asking a DHCP server for an "
+                           "address. Wait for that request to be answered or "
+                           "to give up, then ask again", (LONG)name);
             else
                 tool_error("%s has no DHCP client to ask", (LONG)name);
 

@@ -18,7 +18,6 @@ comment beside the code, not an entry here.
 | Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:123` |
 | `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:141` |
-| `ConfigureNetInterface` answers every renewal error but one with "no DHCP client" | EBUSY from a working client reads as a stackless machine | `src/tools/configurenetinterface.c:1116` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
 | `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them | `src/netdev/netdev_device.c:1269`, `:1291` |
 | The tick task's catch-up count crosses no wire | `tx_amiga_tick_catchups` reaches only a serial dump shipped builds compile out | `port/threadx-amiga/inc/tx_amiga.h:173` |
