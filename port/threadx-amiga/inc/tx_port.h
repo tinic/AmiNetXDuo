@@ -484,6 +484,21 @@ void    _tx_amiga_thread_completed(void);
 #define TX_THREAD_COMPLETED_EXTENSION(thread_ptr)     _tx_amiga_thread_completed();
 
 
+/* In a green build, wakeup delivery happens at the realm's scheduling points
+   rather than asynchronously, so a relinquishing green thread must deliver
+   the realm's latched Exec signals (and owed ticks) BEFORE the generic code
+   inspects the ready lists -- or the yield compares against stale lists and
+   no-ops for the whole pass.  See _tx_amiga_relinquish_prepare() in
+   tx_amiga_green.c for the mechanism and the mDNS bound it restores.  Baton
+   builds keep the stock (whitespace) hook: their wakeups are asynchronous
+   Exec signals to sibling Tasks and their ready lists are already true.  */
+
+#ifdef AMINETXDUO_GREEN_REALM
+void    _tx_amiga_relinquish_prepare(void);
+#define TX_THREAD_RELINQUISH_PORT_PREPARE             _tx_amiga_relinquish_prepare();
+#endif
+
+
 /* Start the periodic tick task once the kernel is initialised but before the
    scheduler runs, the exact hook the Linux port uses.  */
 

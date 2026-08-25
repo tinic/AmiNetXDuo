@@ -363,6 +363,73 @@ UINT                     i;
 }
 
 
+/* ------------------------------------------------- relinquish delivery --- */
+
+/*
+ * TX_THREAD_RELINQUISH_PORT_PREPARE: make a green thread's relinquish mean
+ * something.
+ *
+ * The regression this repairs (docs/GREEN-REALM.md, cycle 3): the mDNS
+ * thread's per-record _nx_mdns_yield() calls tx_thread_relinquish(), which
+ * yields only if the ready lists show someone of equal or higher priority.
+ * Under the baton model they did: a device reply signalled the reader's own
+ * Exec Task directly, the reader resumed its TX_THREAD, and the next
+ * relinquish saw it and switched.  Inside the realm the reader suspends in
+ * tx_amiga_green_wait() and its signals LATCH on the realm Task, delivered
+ * only at the top of the realm's scheduler loop -- which cannot run while
+ * the mDNS pass holds the machine.  So relinquish compared against lists
+ * frozen at pass entry and no-opped for the whole 100-536 ms pass; the
+ * yield bound held under baton and silently stopped holding under green.
+ *
+ * The repair delivers here what the realm loop would have delivered: latched
+ * waiter signals (the reader's reply port, the TX reap bit), and the owed
+ * ticks once the VERTB server targets the realm -- which also bounds the
+ * tick-merge's wheel-walk skew by the yield cadence instead of the longest
+ * pass.  Both run under one Forbid(), the same shapes the scheduler loop
+ * uses; _tx_green_deliver() raises _tx_thread_system_state around its
+ * resumes, so preemption stays deferred to the relinquish decision that
+ * follows, exactly where the baton build honoured it (priorities at ThreadX
+ * API boundaries, tx_thread_context_restore.c).  If delivery makes a
+ * higher-priority thread ready, the stock relinquish logic now sees it and
+ * system_return's green arm rotates the realm; if not, the pass continues
+ * undisturbed, one SetSignal() poorer.
+ *
+ * Ordinary contexts (adopted callers, the tick task, foreign tasks) pass
+ * straight through: their wakeups really are asynchronous.
+ */
+VOID _tx_amiga_relinquish_prepare(VOID)
+{
+
+ULONG   mask;
+ULONG   pending;
+
+
+    if (tx_amiga_green_active() == ((UINT) TX_FALSE))
+    {
+        return;
+    }
+
+    Forbid();
+
+    if (_tx_amiga_tick_run.tr_realm != ((UINT) TX_FALSE))
+    {
+        _tx_amiga_tick_deliver((UINT) TX_TRUE);
+    }
+
+    mask =  _tx_green_pending_union();
+    if (mask != 0UL)
+    {
+        pending =  SetSignal(0UL, mask) & mask;
+        if (pending != 0UL)
+        {
+            _tx_green_deliver(pending);
+        }
+    }
+
+    Permit();
+}
+
+
 /* ------------------------------------------------------- first activation --- */
 
 /*
