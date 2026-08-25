@@ -738,12 +738,27 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
     # and on 2026-08-25 that was 185 s of an arm being driven by somebody
     # else's guest.  One grep of the first line a second stops it at the first
     # line.  Costs nothing: $SERIAL is empty until the guest speaks.
+    #
+    # A LINE THAT IS STILL ARRIVING IS NOT A DIFFERENT LINE.  grep matches the
+    # last line of a file whether or not it ends in a newline, and a serial
+    # transcript is being written a byte at a time: the first poll after the
+    # guest speaks sees `ANXD-RUN 1310` of `ANXD-RUN 1310034-12846-1787698200`
+    # and a plain != called our own guest a stranger and took the arm down with
+    # `run_rc=2`, measured on the 68060 cpuspeed arm.  So a token that is a
+    # PREFIX of the expected one is "not yet", and only a token that DIVERGES
+    # is somebody else -- which still stops at the first differing byte, which
+    # is what this check is for.  TOKEN_SEEN is set when the whole token has
+    # arrived, so the poll keeps looking until it decides.
     if [ "$TOKEN_SEEN" = 0 ] && [ -s "$SERIAL" ]; then
         _tok=$(tr -d '\r' < "$SERIAL" 2>/dev/null |
                grep -m1 '^ANXD-RUN ' || true)
         if [ -n "$_tok" ]; then
-            TOKEN_SEEN=1
-            if [ "$_tok" != "ANXD-RUN $RUNTOKEN" ]; then
+            case "ANXD-RUN $RUNTOKEN" in
+            "$_tok"*)
+                [ "$_tok" = "ANXD-RUN $RUNTOKEN" ] && TOKEN_SEEN=1
+                ;;
+            *)
+                TOKEN_SEEN=1
                 echo >&2
                 echo "!! THIS IS NOT OUR GUEST -- stopping at its first line." >&2
                 echo "!!   expected: ANXD-RUN $RUNTOKEN" >&2
@@ -751,7 +766,8 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
                 echo "!! Something else is on serial port $PORT.  Lock" >&2
                 echo "!! directory: $(rig_lockdir)" >&2
                 exit 2
-            fi
+                ;;
+            esac
         fi
     fi
     if [ -f "$HD/.done" ]; then
