@@ -39,6 +39,16 @@ import os, re, sys
 path = sys.argv[1]
 rows = broken = 0
 
+# Lines that carry no subject, so a cite landing on one names nothing.
+NOISE = {'{', '}', '};', ')', ');', '*/', '/*', 'fi', 'esac', 'done', 'else',
+         'break;', 'continue;', 'return;', 'do', 'then', '#endif', '#else',
+         'set -uo pipefail', 'set -eu', 'EOF', 'PY', '"""'}
+NOISE_RE = re.compile(
+    r'^(\*|//|;)'                       # C block continuation, C++ or asm comment
+    r'|^#\s*(SPDX|!)'                   # licence header, shebang
+    r'|^#(?!\s*(define|include|if|ifdef|ifndef|elif|pragma|error|undef))\s'
+    r'|^\}\s*(else|while)?')            # shell comment, but not a cpp directive
+
 for line in open(path, encoding='utf-8'):
     if not line.startswith('| ') or line.startswith('| Item') or set(line.strip()) <= set('|- '):
         continue
@@ -71,11 +81,22 @@ for line in open(path, encoding='utf-8'):
 
         if ln:
             with open(f, errors='ignore') as fh:
-                n = sum(1 for _ in fh)
+                lines = fh.read().split('\n')
+            n = len(lines)
             if int(ln) > n:
                 broken += 1
                 print("backlog_broken_cite=%s reason=line_past_eof lines=%d row=%r"
                       % (cite, n, title))
+                continue
+
+            # A cite that slides onto a live but meaningless line passes an
+            # end-of-file check silently.  25 of 25 in-range cites were wrong
+            # after one comment sweep, every one of them still in range.
+            text = lines[int(ln) - 1].strip()
+            if not text or text in NOISE or NOISE_RE.match(text):
+                broken += 1
+                print("backlog_broken_cite=%s reason=no_anchor line=%r row=%r"
+                      % (cite, text[:40], title))
 
 print("backlog_rows=%d" % rows)
 print("backlog_broken_cites=%d" % broken)

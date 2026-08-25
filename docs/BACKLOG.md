@@ -15,9 +15,9 @@ comment beside the code, not an entry here.
 | `tls.library` runs only on our own `bsdsocket.library` | a hand-coded private LVO, so Roadshow, AmiTCP and Miami get `TLS_ERR_NOSTACK` | `src/tlslib/tls_netx.c:33` |
 | `tls.library` is callable from exactly one compiler | GCC extended-asm stubs, no `.fd` and no pragmas, so SAS/C and vbcc cannot | `include/aminetxduo/tlslib.h`, `developer/sfd/` |
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
-| Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:123` |
+| Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:170` |
 | `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
-| Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:141` |
+| Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:105` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
 | `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them | `src/netdev/netdev_device.c:1123`, `:1291` |
 | The tick task's catch-up count crosses no wire | `tx_amiga_tick_catchups` reaches only a serial dump shipped builds compile out | `port/threadx-amiga/inc/tx_amiga.h:173` |
@@ -29,7 +29,7 @@ comment beside the code, not an entry here.
 | The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
 | `-m68000` ships on compatibility alone | wire 2026-08-25: `any` 417.8, 68020 426.4 (+2.1%), 68060 441.7 KB/s; 68020 also smaller. Spread tracks zero-windows, not CPU | `cmake/toolchain-m68k-amigaos.cmake:261` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
-| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:1103` |
+| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:50` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:162` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
@@ -76,10 +76,10 @@ comment beside the code, not an entry here.
 | No arm reaches the accelerated-Gayle timing ratio | an emulated bus read costs host time, not guest time; needs real hardware | `tests/tools/run-cpuspeed.sh:30` |
 | No arm puts two network boards in one machine | Amiberry holds one board per family in a static; unit numbering and `CARD=` are untested | `tests/tools/cards.sh` |
 | Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
-| The budget has no ACK/TX leg | the transmit half of every received segment is uninstrumented, so a TX cut cannot be priced | `src/common/budget.c:1` |
+| The budget has no ACK/TX leg | the transmit half of every received segment is uninstrumented, so a TX cut cannot be priced | `src/common/budget.c:89` |
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:97` |
 | A pending recv is never completed on the IP thread | priced +2-5% in src/bsdsocket alone; the realm was built instead and is rate-neutral | `src/bsdsocket/transfer.c:990` |
-| The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:542` |
+| The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:789` |
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
 | Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:403` |
