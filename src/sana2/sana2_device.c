@@ -13,6 +13,8 @@
 
 #include <exec/memory.h>
 #include <proto/exec.h>
+
+#include "tx_amiga.h"
 /* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
 #include <inline/alib.h>
 
@@ -107,6 +109,50 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
 }
 
 /*
+ * Complete one submitted IORequest without blocking the machine underneath
+ * the stack.
+ *
+ * From an ordinary Exec context this is DoIO() inside the baton bracket, the
+ * shape the readers taught everything else.  From a GREEN context (the IP
+ * thread reaching a driver entry, a reader flushing at teardown -- both run
+ * inside the realm Task under AMINETXDUO_GREEN_REALM) a DoIO() would put the
+ * realm Task itself to sleep with every other green thread's work on it, so
+ * the request goes out with SendIO() and only the CALLING green thread
+ * sleeps, in tx_amiga_green_wait(), on the reply port's signal.  The reply
+ * port belongs to the realm Task either way, because the green thread's
+ * CreateMsgPort() ran on it.
+ *
+ * The CheckIO() loop, rather than one wait, because the port signal is only
+ * a hint that the port has SOMETHING: a green sibling sharing this port
+ * cannot exist (each caller creates a fresh port), but a latched stale bit
+ * can, and WaitIO() on an incomplete request would block the realm.
+ */
+LONG ami_sana2_do_io(struct IORequest *req)
+{
+#ifdef AMINETXDUO_GREEN_REALM
+    if (tx_amiga_green_active())
+    {
+        SendIO(req);
+        while (CheckIO(req) == NULL)
+        {
+            (VOID)tx_amiga_green_wait(
+                1UL << req->io_Message.mn_ReplyPort->mp_SigBit);
+        }
+        (VOID)WaitIO(req);
+        return (LONG)(BYTE)req->io_Error;
+    }
+#endif
+
+    /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
+       applies. */
+    ami_sana2_block_enter();
+    DoIO(req);
+    ami_sana2_block_leave();
+
+    return (LONG)(BYTE)req->io_Error;
+}
+
+/*
  * Run one synchronous device command. A fresh reply port is created for the
  * calling task each time: control commands come from whichever task is driving
  * (startup task at open, IP thread from the driver entry) and DoIO() waits on
@@ -133,13 +179,9 @@ LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
     req->ios2_Req.io_Error                   = 0;
     req->ios2_WireError                      = 0;
 
-    /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
-       applies. NX_LINK_ENABLE reaches here on the IP thread. */
-    ami_sana2_block_enter();
-    DoIO((struct IORequest *)req);
-    ami_sana2_block_leave();
-
-    err = (LONG)(BYTE)req->ios2_Req.io_Error;
+    /* NX_LINK_ENABLE reaches here on the IP thread; the helper picks the
+       bracket-and-DoIO or the green SendIO shape as the context demands. */
+    err = ami_sana2_do_io((struct IORequest *)req);
 
     req->ios2_Req.io_Message.mn_ReplyPort = NULL;
     DeleteMsgPort(port);

@@ -595,4 +595,18 @@ VOID ami_netstack_rexx_resume(VOID);
 /* The singleton, without the "is it up" filtering the public accessor does. */
 AmiNetStack *ami_netstack_raw(VOID);
 
+/*
+ * The green realm's failure mode is one stray Exec Wait() from a green
+ * thread: it puts the whole realm Task to sleep.  The probe build routes
+ * every Wait() in the sources that include this header (the netstack and
+ * SANA-II layers -- the realm's code) through a checked wrapper
+ * (netstack_baton.c) that passes ordinary contexts straight through, and
+ * converts a green-context Wait() into tx_amiga_green_wait() while counting
+ * it in gs_stray_wait, which must read zero.
+ */
+#if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+ULONG ami_green_checked_wait(ULONG sigmask);
+#define Wait(sigmask) ami_green_checked_wait(sigmask)
+#endif
+
 #endif /* AMINETXDUO_NETSTACK_INTERNAL_H */
