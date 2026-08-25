@@ -503,7 +503,7 @@ if(AMINETXDUO_TX_LAZY_COLLECT)
     add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
 endif()
 
-# The green realm (docs/THREADING-OPTIONS.md option 4, docs/GREEN-REALM.md):
+# The green realm:
 # every thread the stack creates becomes a coroutine inside the ONE master
 # Exec Task, with a real m68k stack switch per handoff instead of an Exec
 # Signal/Wait/dispatch round trip; the realm owns the stack's single idle

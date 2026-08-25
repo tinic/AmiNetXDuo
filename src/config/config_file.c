@@ -355,7 +355,7 @@ static VOID load_hostname(AmiConfig *cfg)
  * ami_netdb_load() also links ami_netdb_free().
  */
 /*
- * The pool-share dial of docs/PHYSICAL_RX_A1200.md.  A number, alone in
+ * The pool-share dial.  A number, alone in
  * ENV:ANXDPOOLDIV, becomes the divisor over free memory that sizes the packet
  * pool; anything else -- absent, empty, malformed, out of range -- is the
  * fallback, silently, because the variable's whole audience is an experiment

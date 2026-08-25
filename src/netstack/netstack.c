@@ -546,9 +546,8 @@ static ULONG ami_ns_pool_packets(VOID)
 
     avail = AvailMem(MEMF_PUBLIC);
 
-    /* The divisor is a dial for exactly one experiment; see the function and
-       docs/PHYSICAL_RX_A1200.md.  Without ENV:ANXDPOOLDIV this is the same
-       constant as ever. */
+    /* The divisor is a dial for exactly one experiment; see the function.
+       Without ENV:ANXDPOOLDIV this is the same constant as ever. */
     divisor = ami_config_pool_divisor((ULONG)AMI_POOL_MEM_DIVISOR);
 
     packets = (avail / divisor) / ami_ns_packet_stride();

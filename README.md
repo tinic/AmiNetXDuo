@@ -183,10 +183,9 @@ a second, because the session is kept on disk and survives a reboot.
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build, its options, the
 test suites, continuous integration and the measurement method.
 
-**[docs/TEST-MATRIX.md](docs/TEST-MATRIX.md)** covers which axes of "the machine
-a user actually has" are asserted — board, CPU model and rate, memory size,
-interface count, refusal wording — what runs them (`tools/ci.sh matrix`), and
-which axes still cannot be reached without real hardware.
+`tools/ci.sh matrix` covers which axes of "the machine a user actually has" are
+asserted — board, CPU model and rate, memory size, interface count, refusal
+wording. Each arm's header says what it reaches and what it cannot.
 
 ### CPU profiling
 
@@ -226,10 +225,6 @@ plus command startup and teardown; a buffer sized for the transfer alone fills
 before `Profile` regains control and makes those harmless tail samples look
 like sampler loss.  The exact validation commands and rationale are in the
 profiler ReadMe.
-
-The exact physical A1200 receive profile, driver symbol recovery, rejected
-hypotheses, low-memory lead and recovery procedure are recorded in
-**[docs/PHYSICAL_RX_A1200.md](docs/PHYSICAL_RX_A1200.md)**.
 
 ## Licence
 

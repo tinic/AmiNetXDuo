@@ -62,9 +62,9 @@
 #   half: code that behaves differently at 68030/68040/68060 -- a different
 #   instruction set, caches that are on, alignment, anything gated on the
 #   model -- and any path that hangs, expires or races when the processor
-#   changes underneath it.  The timing-ratio half is
-#   docs/TEST-MATRIX.md's "uncoverable without real hardware", and it is
-#   listed there rather than quietly implied to be covered here.
+#   changes underneath it.  The timing-ratio half is uncoverable without real
+#   hardware, and is a docs/BACKLOG.md row rather than quietly implied to be
+#   covered here.
 #
 #   THIS IS STILL WORTH BOOTING.  Before it, no arm in this tree had ever run
 #   ANY CPU but the A1200's 68EC020, on any board, at any tier -- so the

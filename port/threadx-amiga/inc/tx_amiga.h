@@ -460,10 +460,10 @@ VOID    tx_amiga_sched_stats(TX_AMIGA_SCHED_STATS *stats);
 /*
  * Built with -DAMINETXDUO_GREEN_REALM=ON, every thread the stack creates is
  * a coroutine inside the realm Task (real m68k stack switching) instead of
- * an Exec Task of its own; docs/GREEN-REALM.md is the design and state
- * document.  These entry points exist in every build so callers need no
- * conditional code: in a baton build tx_amiga_green_active() is always
- * FALSE, tx_amiga_green_wait() is a plain Wait(), and the stats read zero.
+ * an Exec Task of its own.  These entry points exist in every build so
+ * callers need no conditional code: in a baton build tx_amiga_green_active()
+ * is always FALSE, tx_amiga_green_wait() is a plain Wait(), and the stats
+ * read zero.
  */
 
 /* TX_TRUE while the caller runs in a green context (on the realm Task with a
@@ -524,9 +524,9 @@ VOID    tx_amiga_gate_fast_note(VOID);
 /* ------------------------------------------------------------------------ */
 
 /*
- * The adopted-caller request gate, docs/THREADING-OPTIONS.md option 4's
- * client boundary.  An application Task entering a bsdsocket vector no
- * longer becomes a ThreadX thread itself: its continuation -- the rest of
+ * The adopted-caller request gate, the green realm's client boundary.  An
+ * application Task entering a bsdsocket vector no longer becomes a ThreadX
+ * thread itself: its continuation -- the rest of
  * the vector body, captured at the bracket -- is handed to a cached GREEN
  * proxy thread and executes inside the realm, where a NetX suspension is a
  * stack switch instead of an Exec round trip.  The Task itself parks on a

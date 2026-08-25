@@ -44,8 +44,7 @@
 #                2026-08-25, which is how three defects reached real hardware
 #                unseen.  Needs a ROM and nothing else -- SLIRP is enough.
 #                Two of its four arms landed RED, against the contract rather
-#                than the behaviour, and went green on the fixes; see
-#                docs/TEST-MATRIX.md.
+#                than the behaviour, and went green on the fixes.
 #   emulator     tier 2, boots FS-UAE, needs a ROM
 #   cards        tier 2, boots EVERY network card this project supports,
 #                one guest each, and proves each one carries bytes in
@@ -510,6 +509,18 @@ stage_host() {
     else
         cat "$BUILD/check-backlog.log"
         fail "docs/BACKLOG.md cites something that is not there (tools/check-backlog.sh)"
+        return 1
+    fi
+
+    # A rule is a gate, a behaviour is a test, open work is a backlog row.
+    # Narrative in docs/*.md is none of those, so it has a ceiling.
+    if tools/check-doc-budget.sh > "$BUILD/doc-budget.log" 2>&1; then
+        note "doc budget: $(sed -n 's/^doc_total_lines=/lines /p' \
+              "$BUILD/doc-budget.log") of $(sed -n 's/^doc_total_max=//p' \
+              "$BUILD/doc-budget.log")"
+    else
+        cat "$BUILD/doc-budget.log"
+        fail "docs/*.md is over its line budget (tools/check-doc-budget.sh)"
         return 1
     fi
 
@@ -1565,8 +1576,7 @@ stage_cards6() {
 # tree did, went red on the defects above, and went green when those were
 # fixed -- without an assertion changing.  That order is the only way an arm
 # added at the same time as its fix can be trusted afterwards, and it is worth
-# preserving if a fifth arm is added here.  docs/TEST-MATRIX.md keeps the
-# record; the harness headers have the detail.
+# preserving if a fifth arm is added here.  The harness headers have the detail.
 stage_matrix() {
     hr "machine matrix (tier 2, needs a ROM; SLIRP is enough)"
 

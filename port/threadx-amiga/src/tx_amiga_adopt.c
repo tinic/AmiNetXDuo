@@ -471,11 +471,10 @@ struct Task *me;
 #ifdef AMINETXDUO_GREEN_REALM
 
 /*
- * The free-baton fast path of the request gate (docs/GREEN-REALM.md, the
- * cycle-3 verdict's next item): resume the cached adopted thread ONLY if
- * that gets the baton immediately -- the same condition the resume fast
- * path above takes -- and otherwise back out completely, so the caller can
- * submit through the gate instead of parking.
+ * The free-baton fast path of the request gate: resume the cached adopted
+ * thread ONLY if that gets the baton immediately -- the same condition the
+ * resume fast path above takes -- and otherwise back out completely, so the
+ * caller can submit through the gate instead of parking.
  *
  * Take-or-back-out is one atom.  Everything that mutates ThreadX state in
  * this port runs in task context under the core Forbid() (interrupt servers

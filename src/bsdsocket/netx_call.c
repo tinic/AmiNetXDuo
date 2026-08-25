@@ -104,7 +104,7 @@ static ULONG bsd_nx_eclock(VOID)
 #ifdef AMINETXDUO_GREEN_REALM
 
 /*
- * The request gate, docs/THREADING-OPTIONS.md option 4's client boundary.
+ * The request gate, the green realm's client boundary.
  *
  * In a green build the bracket does not adopt the calling Task; it MIGRATES
  * the rest of the vector into the realm.  tx_amiga_gate_call() captures the

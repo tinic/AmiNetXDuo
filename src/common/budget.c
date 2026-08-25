@@ -2,9 +2,9 @@
  * The receive step budget: where one frame's time goes between the reader and
  * the application, as E-Clock aggregates per hop.
  *
- * docs/PHYSICAL_RX_A1200.md profiled the affected machine to 5.7% idle, both
- * required copies at 19.4% of busy time, and no third bulk pass -- which
- * leaves the per-frame chain itself holding the unattributed remainder.  The
+ * The affected machine profiles to 5.7% idle, both required copies at 19.4%
+ * of busy time, and no third bulk pass -- which leaves the per-frame chain
+ * itself holding the unattributed remainder.  The
  * chain is not one function, so no sampler names it; it is a sequence of
  * handoffs, and what this module records is the time between them:
  *

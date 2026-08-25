@@ -3,8 +3,7 @@
 2026-08-25.  The transfer-performance campaign is closed: both our stack and
 AmiTCP_NG sit on the identical 1.31 Mbit/s steady plateau over the same
 anxnet.device on the real A1200+3c589, which names the plateau as the
-hardware/PIO ceiling and satisfies the match-or-beat rule
-(docs/RECEIVE_BUDGET.md, the two calibration sections).  Everything the
+hardware/PIO ceiling and satisfies the match-or-beat rule.  Everything the
 campaign proved is on main; every flag it added preserves the shipped
 default.  What is left is a set of RELEASE decisions -- defaults, presets,
 packaging -- and none of them is taken here.  Each entry below is the
@@ -53,8 +52,8 @@ named preset rather than as folklore:
   tradeoff, not a free cut: the campaign's own history is the argument for
   keeping v6 -- when a probe build broke IPv4 receive on the real machine,
   IPv6 stayed end-to-end alive and WAS the rescue channel that let the rig
-  be repaired remotely (docs/RECEIVE_BUDGET.md era; the v6-only deploy
-  path).  A 2 MB machine run headless benefits from v6 exactly when things
+  be repaired remotely over the v6-only deploy
+  path.  A 2 MB machine run headless benefits from v6 exactly when things
   go wrong.
 - Plus (a) ON, per its record.
 
@@ -397,7 +396,7 @@ One session, in this order.  Nothing here needs a second visit.
 
 `-DAMINETXDUO_GREEN_REALM` (the option-4 green-thread port) is on main via
 the campaign's landing merge, default OFF, and OFF is the shipping answer.
-The close-out (docs/GREEN-REALM.md cycle 4) is explicit: with the free-baton
+The close-out is explicit: with the free-baton
 fast path the realm is rate-NEUTRAL on hardware (+0.35%, inside the +-2%
 band), architecturally superior (handoffs/frame 0.00, the mDNS storm hold
 bound TIGHTER than the baton port's), and not worth shipping for speed.  It
@@ -417,15 +416,11 @@ rig, one sitting: ours 2778 > Roadshow demo 2757 > AmiTCP_NG 2142 kbit/s;
 a clean-Release Roadshow arm on its own rig read +15-19% in our favour.
 Physical: AmiTCP_NG 4.1.5 over our device on the real A1200+3c589 reached
 1.158-1.160 Mbit/s with the same 1.31 Mbit/s steady plateau as ours -- the
-ceiling is the machine's, and no foreign stack extracts more from it
-(docs/RECEIVE_BUDGET.md, both calibration sections, method caveats
-included there).
+ceiling is the machine's, and no foreign stack extracts more from it.
 
 Scope discipline: the line holds for the measured machine and card.  The
 X-Surf-100 report (their 906 KB/s vs our 412) is different hardware, a
 different driver and an open backlog row -- the reassurance line must not
 be stretched over it.
 
-Recommendation: use the line, scoped exactly as above, and link the
-calibration sections rather than restating numbers that carry method
-caveats.
+Recommendation: use the line, scoped exactly as above.

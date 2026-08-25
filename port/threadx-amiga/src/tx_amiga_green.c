@@ -17,8 +17,8 @@
 /*    release-around-Wait() bracket, and the counters the prototype is     */
 /*    measured by.                                                         */
 /*                                                                        */
-/*    The model (docs/THREADING-OPTIONS.md option 4): threads the stack    */
-/*    creates through tx_thread_create() no longer get an Exec Task each.  */
+/*    The model: threads the stack creates through tx_thread_create()     */
+/*    no longer get an Exec Task each.                                    */
 /*    Their context is their ThreadX stack plus a saved SP, and the realm  */
 /*    Task -- the master Task sitting in tx_kernel_enter() -- enters and   */
 /*    leaves those contexts with _tx_green_switch().  A ThreadX handoff    */
@@ -369,7 +369,7 @@ UINT                     i;
  * TX_THREAD_RELINQUISH_PORT_PREPARE: make a green thread's relinquish mean
  * something.
  *
- * The regression this repairs (docs/GREEN-REALM.md, cycle 3): the mDNS
+ * The regression this repairs: the mDNS
  * thread's per-record _nx_mdns_yield() calls tx_thread_relinquish(), which
  * yields only if the ready lists show someone of equal or higher priority.
  * Under the baton model they did: a device reply signalled the reader's own
@@ -539,7 +539,7 @@ ULONG ami_green_checked_wait(ULONG sigmask)
 /* ------------------------------------------------------- the request gate --- */
 
 /*
- * The client boundary, docs/THREADING-OPTIONS.md option 4: an application
+ * The client boundary: an application
  * Task's bracket becomes "submit the continuation, park, one Signal back".
  * The continuation is captured by _tx_green_switch() itself -- what it saves
  * on the caller's stack IS the request -- and the same switch moves the

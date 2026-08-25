@@ -124,7 +124,7 @@ tests/tools/run-ifconfigure.sh     : .github/workflows/emulator.yml : ConfigureN
 tests/tools/run-ifdhcp.sh          : .github/workflows/emulator.yml : ConfigureNetInterface, DHCP half
 tests/tools/run-ifremove.sh        : .github/workflows/emulator.yml : RemoveNetInterface across its surface
 tests/tools/run-iperf.sh           : .github/workflows/emulator.yml : iperf, byte counts against a peer
-tests/tools/run-payverify.sh       : manual : payload CONTENT against a peer -- both ends hash a position-dependent pattern, so a placement bug the fused receive sum would certify fails the join. Manual for the same reasons as the guest-as-server iperf arms: peer + bridged, it needs a third machine the guest can call. The tier is run on the playhouse rig; docs/RECEIVE_BUDGET.md's payload-integrity section records the runs
+tests/tools/run-payverify.sh       : manual : payload CONTENT against a peer -- both ends hash a position-dependent pattern, so a placement bug the fused receive sum would certify fails the join. Manual for the same reasons as the guest-as-server iperf arms: peer + bridged, it needs a third machine the guest can call. The tier is run on the playhouse rig
 tests/tools/run-mdnsctl.sh         : .github/workflows/emulator.yml : the responder switched on and off
 tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml : NetSetup writes a usable configuration
 tests/tools/run-onoff.sh           : .github/workflows/emulator.yml : Online and Offline

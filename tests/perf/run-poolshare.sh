@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The packet-pool memory-share A/B of docs/PHYSICAL_RX_A1200.md.
+# The packet-pool memory-share A/B.
 #
 #   tests/perf/run-poolshare.sh -b BUILDDIR -B IFACE -P PEERSSH
 #                               [-N BOARD] [-m MODEL] [-a ADDRESS]

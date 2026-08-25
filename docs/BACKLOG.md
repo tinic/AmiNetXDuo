@@ -22,7 +22,7 @@ comment beside the code, not an entry here.
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
 | Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:123` |
 | `main` cannot be built at `-DAMINETXDUO_CPU=68020` at all | the post-link check refuses a 32-bit pcrel branch landing off a function | `cmake/check-pcrel-branches.cmake:188` |
-| The `cpu68060` cross arm has been red on main and nothing says so | seven test images fail the pcrel check; the shipped images build clean | `tests/crypto68k/CMakeLists.txt` |
+| `cpu68060` is red and `tls.library` is in the list, not seven test images | twelve targets fail the pcrel check and one of them ships | `cmake/check-pcrel-branches.cmake:188` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:141` |
 | `ConfigureNetInterface` answers every renewal error but one with "no DHCP client" | EBUSY from a working client reads as a stackless machine | `src/tools/configurenetinterface.c:1116` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
@@ -82,3 +82,13 @@ comment beside the code, not an entry here.
 | `aamprobe.c` hard-codes `a2065.device` twice | on any other board the re-add is refused with errno 6 and later asserts read poison | `tests/tools/aamprobe.c:795`, `:926` |
 | binutils `amiga-2.46` cannot assemble gcc 16.2's own output | it forces a byte displacement on `jne`/`jeq`; we stay pinned at `amiga-2.39.0` | bebbo's `binutils-gdb` |
 | The console records `.pfs` and nothing else can read it | an MP4 export needs a vendored muxer under the CSP and a lossless codec | `src/tools/web/client/console/pfs.ts` |
+| No arm reaches the accelerated-Gayle timing ratio | an emulated bus read costs host time, not guest time; needs real hardware | `tests/tools/run-cpuspeed.sh:66` |
+| No arm puts two network boards in one machine | Amiberry holds one board per family in a static; unit numbering and `CARD=` are untested | `tests/tools/cards.sh` |
+| Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
+| The budget has no ACK/TX leg | the transmit half of every received segment is uninstrumented, so a TX cut cannot be priced | `src/common/budget.c:1` |
+| No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:3` |
+| A pending recv is never completed on the IP thread | priced +2-5% in src/bsdsocket alone; the realm was built instead and is rate-neutral | `src/bsdsocket/transfer.c:1210` |
+| The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:542` |
+| The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:463` |
+| `docs/SHIP-DECISIONS.md` is exempt from the doc budget | it goes when the 0.25.3 LTO re-release lands; that release was pulled | `tools/check-doc-budget.sh:23` |
+| The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |

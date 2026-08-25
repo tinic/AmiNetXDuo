@@ -220,8 +220,8 @@ TAG="${AMINETXDUO_RUN_TAG:-winuae}"
 # session, one machine.
 # STILL HASHED, and knowingly.  tools/amiberry-run.sh allocates its port
 # through tools/emu-rig-lock.sh instead, after the hash there put three readers
-# on one number and produced two red rows that were not defects
-# (docs/TEST-MATRIX.md).  The same fix does not port: this number is a port on
+# on one number and produced two red rows that were not defects.
+# The same fix does not port: this number is a port on
 # the WINDOWS host at the other end of $WINUAE_HOST, and neither the flock nor
 # the bind probe can be taken there from here -- both would be answered by this
 # machine's kernel about this machine's ports, which is a check that passes and
