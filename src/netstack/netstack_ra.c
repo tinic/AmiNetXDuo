@@ -110,7 +110,7 @@ VOID ami_ns_ra_rdnss(AmiNsRaPending *pending, UWORD interface_index,
     UWORD i;
 
     if (pending == NULL || address == NULL ||
-        interface_index >= AMI_CFG_MAX_INTERFACES)
+        interface_index >= AMI_CFG_MAX_ATTACHED)
         return;
 
     /* The consumer snapshots under the same Forbid().  The producer is the
@@ -179,7 +179,7 @@ VOID ami_ns_ra_dnssl(AmiNsRaPending *pending, UWORD interface_index,
 
     if (pending == NULL || domains == NULL || length == 0 ||
         length > (UINT)AMI_DNSSL_MAX ||
-        interface_index >= AMI_CFG_MAX_INTERFACES)
+        interface_index >= AMI_CFG_MAX_ATTACHED)
         return;
 
     /* RFC 8106 keeps an expiration time per domain and per interface.  Decode
@@ -256,7 +256,7 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
 
     /* Expiry is a withdrawal even when no new packet arrived.  Compact before
        copying so the caller reconciles against the still-valid set. */
-    for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0; iface < AMI_CFG_MAX_ATTACHED; iface++)
     {
         i = 0;
         while (i < pending->rdnss_count[iface])
@@ -277,7 +277,7 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
         }
     }
 
-    for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0; iface < AMI_CFG_MAX_ATTACHED; iface++)
     {
         i = 0;
         while (i < pending->dnssl_count[iface])
@@ -302,7 +302,7 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
     if (pending->rdnss_pending)
     {
         snapshot->rdnss_count = 0;
-        for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+        for (iface = 0; iface < AMI_CFG_MAX_ATTACHED; iface++)
             for (i = 0; i < pending->rdnss_count[iface] &&
                         snapshot->rdnss_count < (UWORD)AMI_RDNSS_MAX; i++)
             {
@@ -325,7 +325,7 @@ BOOL ami_ns_ra_snapshot(AmiNsRaPending *pending, AmiNsRaSnapshot *snapshot,
     if (pending->dnssl_pending)
     {
         snapshot->dnssl_count = 0;
-        for (iface = 0; iface < AMI_CFG_MAX_INTERFACES; iface++)
+        for (iface = 0; iface < AMI_CFG_MAX_ATTACHED; iface++)
             for (i = 0; i < pending->dnssl_count[iface] &&
                         snapshot->dnssl_count < (UWORD)AMI_CFG_MAX_SEARCH; i++)
             {
@@ -368,12 +368,12 @@ BOOL ami_ns_ra_needs_snapshot(AmiNsRaPending *pending, ULONG now)
     Forbid();
 
     needed = (BOOL)(pending->rdnss_pending || pending->dnssl_pending);
-    for (iface = 0; !needed && iface < AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0; !needed && iface < AMI_CFG_MAX_ATTACHED; iface++)
         for (i = 0; !needed && i < pending->rdnss_count[iface]; i++)
             needed = ami_ns_ra_expired(pending->rdnss[iface][i].received,
                                        pending->rdnss[iface][i].lifetime, now);
 
-    for (iface = 0; !needed && iface < AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0; !needed && iface < AMI_CFG_MAX_ATTACHED; iface++)
         for (i = 0; !needed && i < pending->dnssl_count[iface]; i++)
             needed = ami_ns_ra_expired(pending->dnssl[iface][i].received,
                                        pending->dnssl[iface][i].lifetime, now);
@@ -397,7 +397,7 @@ BOOL ami_ns_ra_rdnss_has(AmiNsRaPending *pending,
        state or compact the repository. Expired entries simply no longer own
        the address and the ordinary snapshot path will publish their removal. */
     Forbid();
-    for (iface = 0; !found && iface < AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0; !found && iface < AMI_CFG_MAX_ATTACHED; iface++)
         for (i = 0; !found && i < pending->rdnss_count[iface]; i++)
             if (!ami_ns_ra_expired(pending->rdnss[iface][i].received,
                                    pending->rdnss[iface][i].lifetime, now) &&

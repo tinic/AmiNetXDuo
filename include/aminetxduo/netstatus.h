@@ -965,6 +965,27 @@ typedef struct NetStatusOpener
  * on the wire.  Nothing reports it at the moment it happens.
  */
 #define NETEVENT_LINK_DOWN      13  /* attached with the link down           */
+/*
+ * The two bring-up failures that used to leave the ring saying nothing, so a
+ * command that read it after AddNetInterface refused could find no record of
+ * the stage that refused.
+ *
+ * ONLINE_FAILED is netstack_interface_up(): NX_LINK_ENABLE through the driver,
+ * which is the S2_ONLINE the device is sent.  Its value is the NX_ status,
+ * because that is what the call returns and the SANA-II error underneath it
+ * has already been consumed by the shim.
+ *
+ * ATTACH_LIMIT is the honest refusal that the config layer used to pre-empt by
+ * refusing to PARSE a third interface (aminetxduo/config.h).  NetX Duo has
+ * AMI_CFG_MAX_ATTACHED interface slots and no more; the value is how many
+ * interfaces were described, and nse_Index is the slot that would have been
+ * next, which is also the count already up.  A reader can therefore say
+ * "three described, two online" without re-reading the drawer.
+ */
+#define NETEVENT_ONLINE_FAILED  14  /* the interface would not go online;
+                                       value = the NX_ status                */
+#define NETEVENT_ATTACH_LIMIT   15  /* no NetX Duo slot left; value = how many
+                                       interfaces were asked for             */
 
 /* --- the wire ----------------------------------------------------------- */
 /*

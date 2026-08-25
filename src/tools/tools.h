@@ -50,8 +50,30 @@ extern const char *const tool_name;
 VOID tool_printf(const char *fmt, ...);
 VOID tool_say(const char *fmt, ...);       /* tool_printf, flushed at once   */
 VOID tool_error(const char *fmt, ...);     /* "<tool>: ..." + newline        */
+VOID tool_hint(const char *fmt, ...);      /* ONE line under a refusal       */
 VOID tool_fault(LONG code);                /* PrintFault(code, tool_name)    */
 VOID tool_no_ipv6_note(VOID);              /* why, after "no IPv6" refusals  */
+
+/*
+ * THE IDENTIFIER, not a translation of it.
+ *
+ * A refusal prints the operation and then one of these, so the first line
+ * carries the symbol that is in the source -- S2ERR_OUTOFSERVICE, not "the
+ * device is out of service" alone -- and can be grepped, searched for, and
+ * quoted in a bug report by somebody who cannot read C.  The number is printed
+ * beside it so a code this build has no name for is still reportable.
+ *
+ * Never NULL: an unrecognised code yields a token that reads as unknown, so a
+ * caller's format string never has a hole in it.
+ *
+ * tool_code_sana2() and tool_code_wire() are the SANA-II pair from
+ * devices/sana2.h, ios2_Error and ios2_WireError. Neither means much alone,
+ * so they are printed together.
+ */
+const char *tool_code_net(LONG err);       /* AMI_NET_ERR_*                  */
+const char *tool_code_errno(LONG err);     /* EINVAL, ENXIO, ...             */
+const char *tool_code_sana2(LONG err);     /* S2ERR_*                        */
+const char *tool_code_wire(LONG err);      /* S2WERR_*                       */
 
 /* ------------------------------------------------------------------ break */
 
@@ -166,6 +188,13 @@ VOID tool_explain_interface_file(const char *name);   /* file missing        */
 VOID tool_explain_device(const char *device, ULONG unit,
                          const char *card);
 VOID tool_explain_device_refused(const char *device, ULONG unit);
+
+/*
+ * The ios2_Error / ios2_WireError the last tool_device_probe() saw, for a
+ * refusal that wants to name them. Both zero when the probe never got as far
+ * as a SANA-II command.
+ */
+VOID tool_probe_sana2_codes(LONG *error, LONG *wire);
 VOID tool_explain_no_interfaces(VOID);                /* nothing configured  */
 VOID tool_explain_dhcp(const char *name);             /* nobody answered     */
 VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */

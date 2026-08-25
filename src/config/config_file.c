@@ -5,6 +5,14 @@
  * works on memory buffers, which is what lets the host test drive the same
  * parsers. No newlib stdio anywhere: this code lives in a shared library.
  *
+ * TWO SEAMS carry AmigaDOS across that line and nothing else does:
+ * ami_cfg_read_file() for a file's bytes, and ami_cfg_scan_interfaces() for the
+ * names in DEVS:NetInterfaces. The interface list they feed lives in
+ * config_list.c, which has neither, and is therefore covered by the host test
+ * rather than only by compilation -- the parse ceiling that used to drop the
+ * third interface file could only ever be caught by a test that enumerates a
+ * drawer, and while the scan was inline here no such test could exist.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -88,22 +96,6 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 
 /* -------------------------------------------------------------- utilities */
 
-static VOID join_path(char *dst, ULONG dstlen, const char *dir, const char *name)
-{
-    ULONG pos;
-
-    ami_cfg_copy_string(dst, dstlen, dir);
-    pos = ami_cfg_strlen(dst);
-
-    if (pos > 0 && dst[pos - 1] != '/' && dst[pos - 1] != ':' && pos + 1 < dstlen)
-    {
-        dst[pos++] = '/';
-        dst[pos]   = '\0';
-    }
-
-    ami_cfg_copy_string(dst + pos, dstlen - pos, name);
-}
-
 /* Workbench icons sit next to the configuration files, and are not one. */
 static BOOL is_icon(const char *name)
 {
@@ -117,73 +109,26 @@ static BOOL is_icon(const char *name)
 
 /* ------------------------------------------------------------- interfaces */
 
-LONG ami_config_load_interface(const char *name, AmiIfConfig *out)
-{
-    char  path[AMI_CFG_PATH_LEN + AMI_CFG_NAME_LEN + 8];
-    char *buf;
-    LONG  result;
-
-    if (name == NULL || out == NULL)
-        return AMI_CFG_ERR_SYNTAX;
-
-    join_path(path, sizeof(path), AMI_CFG_DIR_NETINTERFACES, name);
-
-    buf = (char *)ami_cfg_read_file(path, NULL);
-    if (buf == NULL)
-    {
-        ami_cfg_zero(out, sizeof(*out));
-        return AMI_CFG_ERR_IO;
-    }
-
-    /*
-     * `path` is on this stack frame and the reporter is handed it by pointer,
-     * so the name is cleared before this function returns rather than left for
-     * the next caller to overwrite.
-     */
-    ami_cfg_problem_file(path);
-    result = ami_cfg_parse_interface(name, buf, out);
-    ami_cfg_problem_file(NULL);
-
-    ami_free(buf);
-
-    return result;
-}
-
 /*
- * Roadshow processes the interface files in alphabetical order (a PRI tooltype
- * can override that, and icons are not read here). A sorted array makes the
- * first interface deterministic, and its gateway becomes the default route
- * when no routes file exists.
+ * Every interface file in DEVS:NetInterfaces, handed to `sink` one name at a
+ * time.  FALSE only when the drawer itself is missing.
+ *
+ * A SINK RATHER THAN A LIST because the number of files is not known before
+ * the scan and there is no ceiling on it any more: collecting the names first
+ * would need its own growing array, and the caller already has one it is
+ * filling.  ExNext() drives, config_list.c decides what a name becomes.
+ *
+ * This is the second of the two seams that keep AmigaDOS in this file, beside
+ * ami_cfg_read_file().  test/test_config.c replaces both, which is what lets
+ * the host test enumerate a drawer of five and prove none of them is dropped.
  */
-static VOID insert_interface(AmiConfig *cfg, const AmiIfConfig *iface)
-{
-    UWORD pos;
-    UWORD i;
-
-    if (cfg->interface_count >= AMI_CFG_MAX_INTERFACES)
-    {
-        AMI_WARN("config: more than %ld interfaces, ignoring '%s'",
-                 (long)AMI_CFG_MAX_INTERFACES, iface->name);
-        return;
-    }
-
-    for (pos = 0; pos < cfg->interface_count; pos++)
-    {
-        if (ami_cfg_stricmp(iface->name, cfg->interfaces[pos].name) < 0)
-            break;
-    }
-
-    for (i = cfg->interface_count; i > pos; i--)
-        cfg->interfaces[i] = cfg->interfaces[i - 1];
-
-    cfg->interfaces[pos] = *iface;
-    cfg->interface_count++;
-}
-
-static VOID load_interfaces(AmiConfig *cfg)
+BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
 {
     struct FileInfoBlock *fib;
     BPTR                  lock;
+
+    if (cfg == NULL || sink == NULL)
+        return FALSE;
 
     lock = Lock((STRPTR)AMI_CFG_DIR_NETINTERFACES, ACCESS_READ);
     if (lock == 0)
@@ -197,21 +142,20 @@ static VOID load_interfaces(AmiConfig *cfg)
                         "Run NetSetup: it asks which card this machine has, "
                         "then writes the drawer and the file.");
         ami_cfg_problem_file(NULL);
-        return;
+        return FALSE;
     }
 
     fib = (struct FileInfoBlock *)ami_alloc(sizeof(struct FileInfoBlock));
     if (fib == NULL)
     {
         UnLock(lock);
-        return;
+        return FALSE;
     }
 
     if (Examine(lock, fib))
     {
         while (ExNext(lock, fib))
         {
-            AmiIfConfig iface;
             /* fib_FileName is TEXT[] (unsigned char), the strings here are char. */
             const char *entry_name = (const char *)fib->fib_FileName;
 
@@ -220,42 +164,14 @@ static VOID load_interfaces(AmiConfig *cfg)
             if (is_icon(entry_name))
                 continue;
 
-            if (ami_config_load_interface(entry_name, &iface) != AMI_CFG_OK)
-            {
-                char text[AMI_CFG_NAME_LEN + 64];
-
-                ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
-                ami_cfg_join3(text, sizeof(text), "the file '", entry_name,
-                              "' cannot be used, so that interface does "
-                              "not exist");
-                ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR, text,
-                                "The problems listed above it say why.  "
-                                "NetSetup can rewrite the file from scratch.");
-                ami_cfg_problem_file(NULL);
-                continue;
-            }
-
-            AMI_INFO("config: interface %s: %s unit %lu",
-                     iface.name, iface.device, (unsigned long)iface.unit);
-
-            insert_interface(cfg, &iface);
+            sink(cfg, entry_name);
         }
     }
 
     ami_free(fib);
     UnLock(lock);
 
-    if (cfg->interface_count == 0)
-    {
-        ami_cfg_problem_file(AMI_CFG_DIR_NETINTERFACES);
-        ami_cfg_problem(0, AMI_CFG_PROBLEM_ERROR,
-                        "the DEVS:NetInterfaces drawer holds no usable "
-                        "interface file",
-                        "One file per network card goes in there.  The name "
-                        "of the file is the name of the card, and eth0 is "
-                        "the usual choice.  NetSetup writes one.");
-        ami_cfg_problem_file(NULL);
-    }
+    return TRUE;
 }
 
 /* ----------------------------------------------------------------- pieces */
@@ -479,7 +395,21 @@ LONG ami_config_load(AmiConfig *cfg)
     ami_cfg_zero(cfg, sizeof(*cfg));
     cfg->tcp_handler = TRUE;
 
-    load_interfaces(cfg);
+    /*
+     * The floor up front, and not because the drawer needs it: the netstack
+     * places an attached interface at the NetX Duo slot number it was handed,
+     * so it writes interfaces[slot] by index for slots the parser never
+     * appended.  A machine with an empty DEVS:NetInterfaces and an interface
+     * added later through AddInterfaceTagList() reaches exactly that.
+     * Fatal when it fails, which is the invariant the rest of the tree leans
+     * on: a loaded configuration always has capacity for every slot NetX Duo can
+     * attach, so no later reserve can ever move the list under an attached
+     * interface whose name NetX Duo is holding a pointer to.
+     */
+    if (!ami_config_reserve(cfg, (UWORD)AMI_CFG_IFACE_FLOOR))
+        return AMI_CFG_ERR_NOMEM;
+
+    ami_config_load_interfaces(cfg);
     load_resolver(cfg);
     load_gateway(cfg);
     load_tcp_handler(cfg);

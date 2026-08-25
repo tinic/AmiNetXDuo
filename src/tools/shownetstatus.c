@@ -193,7 +193,15 @@ static const char *service_name(UWORD port, BOOL is_tcp)
 
 static const char *iface_name(const AmiConfig *cfg, UWORD index)
 {
+    /*
+     * BOUNDED BY THE ATTACH CAP as well as by the count, because `index` is a
+     * NetX Duo interface index and this list is the DESCRIPTIONS, of which
+     * there may be more.  On a machine with three interface files the two
+     * numberings stop agreeing past the second, and without this the name
+     * printed beside a route would be some other interface's.
+     */
     if (cfg != NULL && index < cfg->interface_count &&
+        index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         cfg->interfaces[index].name[0] != '\0')
     {
         return cfg->interfaces[index].name;
@@ -625,6 +633,9 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
 
     tool_printf("\nInterfaces\n");
     tool_printf("Name            State    Link     Address\n");
+    /* State: online (attached, link up), offline (attached, link down),
+       defined (described in DEVS:NetInterfaces, not attached), ? (the
+       running stack could not be read). */
 
     if (cfg->interface_count == 0)
     {
@@ -644,9 +655,24 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
         else
             tool_copy_string(addr, sizeof(addr), "-");
 
+        /*
+         * EVERY DEFINITION IS LISTED, however many there are, and the State
+         * column says which of three things each one is.
+         *
+         * "defined" is the state that had nowhere to be shown before.  A
+         * machine may describe more interfaces than NetX Duo has slots for --
+         * that is allowed and normal, see aminetxduo/config.h -- and one that
+         * was never attached has no live entry at all.  It used to fall
+         * through to "offline", which says an interface was up and was taken
+         * down.  Printing them apart is the visible half of the fix: an
+         * interface the user wrote a file for now APPEARS on this list instead
+         * of silently not existing, which is what sent somebody looking at
+         * their card for an evening.
+         */
         tool_printf("%-15s %-8s %-8s %s\n",
                     (LONG)cfg->interfaces[i].name,
                     (LONG)(!readable ? "?" :
+                           (live == NULL || !live->attached) ? "defined" :
                            iface_online(live) ? "online" : "offline"),
                     (LONG)(live != NULL && live->attached
                                ? (live->link_up ? "up" : "down") : "?"),
@@ -1120,12 +1146,29 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
 
     if (live == NULL || !live->attached)
     {
+        /*
+         * THE BRANCH THE MISSING INTERFACE NOW REACHES.
+         *
+         * It could not be reached before, for the interfaces it matters most
+         * for: the parser stopped at two, so a third interface file was
+         * dropped and never became a description at all.  This report then
+         * had nothing to say about it, because as far as the configuration
+         * was concerned there was nothing there.  Every definition is read
+         * now, so an interface that exists on disk and is not running is
+         * VISIBLE here, which is the whole point of the change.
+         *
+         * The advice names the two things that can be looked at rather than
+         * asking the user to run the whole bring-up again and watch it go by:
+         * the event ring has the call that refused, and if the answer is that
+         * every slot is taken then something has to come down first.
+         */
         problem_head();
-        tool_printf("  * %s is configured but the stack never attached it.\n",
+        tool_printf("  * %s is described in DEVS:NetInterfaces but was never "
+                    "attached, so it is not part of the running network.\n",
                     (LONG)cfg->name);
-        tool_printf("    Start the network again and watch what\n");
-        tool_printf("    AddNetInterface says about its driver (%s).\n",
-                    (LONG)cfg->device);
+        tool_printf("    ShowNetStatus EVENTS names the call that refused; "
+                    "if every interface slot is taken, RemoveNetInterface "
+                    "frees one.\n");
         return;
     }
 
@@ -2018,7 +2061,12 @@ static int shownetstatus_main(int argc, char **argv)
     }
 
     if (from_disk != NULL)
+    {
+        /* The list first, then the struct that held it: ami_free() on the
+           AmiConfig alone would drop the container and orphan interfaces[]. */
+        ami_config_free(from_disk);
         ami_free(from_disk);
+    }
 
     FreeArgs(rda);
     return (int)rc;

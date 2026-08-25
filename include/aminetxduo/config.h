@@ -21,11 +21,55 @@
 extern "C" {
 #endif
 
-/* Two, matching NX_MAX_PHYSICAL_INTERFACES in port/netxduo-amiga/inc/nx_user.h.
-   It was 4, which the stack could parse and NetX Duo could not attach: a third
-   interface would have been accepted from the config and then had nowhere to
-   go. */
-#define AMI_CFG_MAX_INTERFACES      2
+/*
+ * A DEFINITION IS NOT AN ATTACHMENT, and conflating them was the defect.
+ *
+ * AMI_CFG_MAX_ATTACHED is how many interfaces can be ONLINE AT ONCE.  It is
+ * NX_MAX_PHYSICAL_INTERFACES (port/netxduo-amiga/inc/nx_user.h), because every
+ * attached interface costs an NX_INTERFACE inside the NX_IP plus a slot in
+ * every per-interface table in src/netstack.  That is a real constraint, and
+ * the ATTACH path is where it is refused -- out loud, naming what is already
+ * up.  It is the only limit on interfaces anywhere in this tree.
+ *
+ * HOW MANY MAY BE DESCRIBED: any number.  A file in DEVS:NetInterfaces is a
+ * description on disk.  It opens no device, creates no NetX Duo object and
+ * costs nothing until somebody attaches it, so a machine that keeps five card
+ * definitions and brings up whichever two it wants is doing something ordinary
+ * and nothing here may stop it.  interfaces[] below is therefore a list that
+ * grows, not an array with a ceiling.
+ *
+ * WHAT USED TO BE HERE was a single constant at 2, and the comment recorded
+ * the wrong fix being chosen deliberately: "It was 4, which the stack could
+ * parse and NetX Duo could not attach".  The PARSE limit was lowered to the
+ * ATTACH limit instead of the attach being taught to refuse clearly, so the
+ * third and later files were dropped by the parser (src/config/config_list.c)
+ * behind an AMI_WARN that no shipped build compiles -- silently, and in
+ * whatever order the directory happened to be read.  Nothing on the machine
+ * said an interface had gone.  A card renamed from "eth0" to "wifi" could
+ * disappear, and the machine would report the card and the driver as healthy,
+ * because as far as the configuration went that interface did not exist.
+ *
+ * Raising that constant would have been the same defect with a bigger
+ * number, and it would have been paid for by every machine that does not need
+ * it.  Measured, m68k: sizeof(AmiIfConfig) is 404 bytes, so an array of eight
+ * inside this struct is 3,232 of them -- 2,424 bytes (2.4 KB) more than the
+ * array of two, on every machine, including the 2 MB A1200 with one card.
+ * Holding the list on the end of a pointer instead takes sizeof(AmiConfig)
+ * from 4,392 bytes to 3,592, and each description that EXISTS costs 404.  A
+ * one-card machine pays 4,400 all in, eight bytes more than it used to; the
+ * fixed array of eight would have charged it 6,816 for seven descriptions it
+ * does not have.  Unlimited and cheaper, which is the usual shape of a limit
+ * that was never buying anything.
+ *
+ * AMI_CFG_IFACE_FLOOR is a starting capacity and nothing else.  NO REFUSAL
+ * HANGS OFF IT and nothing is ever dropped for exceeding it: the list grows
+ * past it silently and without limit, which is the whole point.  It equals the
+ * attach cap only so that the netstack -- which writes an attached interface
+ * into this list at the NetX Duo slot number it was handed, by index -- always
+ * has that index available even on a machine whose drawer was empty.
+ */
+#define AMI_CFG_MAX_ATTACHED        2
+#define AMI_CFG_IFACE_FLOOR         AMI_CFG_MAX_ATTACHED
 #define AMI_CFG_MAX_NAMESERVERS     4
 #define AMI_CFG_MAX_SEARCH          6
 
@@ -301,8 +345,25 @@ typedef enum {
 } AmiHostnameSource;
 
 typedef struct AmiConfig {
-    AmiIfConfig         interfaces[AMI_CFG_MAX_INTERFACES];
+    /*
+     * Every interface DESCRIBED, and there is no limit on how many: see the
+     * head of this file.  A LIST THAT GROWS, not an array -- interface_count
+     * entries are live and interface_capacity are allocated.  NULL with a count of
+     * zero is a valid empty configuration and is what a zeroed AmiConfig is.
+     *
+     * Subscripting is unchanged, `cfg->interfaces[i]` reads the same on a
+     * pointer as it did on an array, which is why the forty-odd readers of it
+     * across src/netstack, src/bsdsocket and src/tools did not have to move.
+     * What DID have to move is the ownership: whoever loads one frees it, see
+     * ami_config_free() below.
+     *
+     * interface_count can exceed AMI_CFG_MAX_ATTACHED, and does on any machine
+     * with three cards described.  A reader that means "a slot NetX Duo has"
+     * must bound its index by AMI_CFG_MAX_ATTACHED as well as by the count.
+     */
+    AmiIfConfig        *interfaces;
     UWORD               interface_count;
+    UWORD               interface_capacity;
     AmiResolverConfig   resolver;
     char                hostname[AMI_CFG_NAME_LEN];
     UWORD               hostname_source;     /* AmiHostnameSource                */
@@ -330,6 +391,18 @@ typedef struct AmiConfig {
  * Read the Roadshow config layout into *cfg. Missing files are not an error: an
  * empty config yields interface_count == 0 and the caller decides.
  * Returns 0 on success, or a negative AMI_CFG_ERR_* code.
+ *
+ * OWNER FREES.  interfaces[] is allocated here, so every caller must call
+ * ami_config_free() before it lets the AmiConfig go, and a command that can
+ * leave from several places needs one exit that does it -- the shape
+ * ami_netdb_free() already forced on ping, ShowNetStatus and AddNetRoute
+ * (a body function called from a main() that does the cleanup).  A library
+ * allocation leaks until the library is expunged and AmigaOS reclaims nothing
+ * a Process did not free, so this is not a tidy-up: see docs/ALLOCATIONS.md.
+ *
+ * *cfg is OVERWRITTEN, not merged: the struct is zeroed first.  Loading twice
+ * into the same AmiConfig without an ami_config_free() between the two loses
+ * the first list.
  */
 #define AMI_CFG_OK              0
 #define AMI_CFG_ERR_NOMEM      (-1)
@@ -337,6 +410,25 @@ typedef struct AmiConfig {
 #define AMI_CFG_ERR_IO         (-3)
 
 LONG ami_config_load(AmiConfig *cfg);
+
+/*
+ * Give back everything ami_config_load() took, and leave *cfg a valid empty
+ * configuration.  Safe on a zeroed AmiConfig, safe to call twice, and safe on
+ * one that a failed load left half-built.
+ */
+VOID ami_config_free(AmiConfig *cfg);
+
+/*
+ * Make sure interfaces[] can hold at least `want` descriptions, growing it if
+ * it cannot.  TRUE when it can afterwards, FALSE only when memory ran out --
+ * never because `want` was judged too large.  Existing entries are carried
+ * over; new ones are zeroed.
+ *
+ * Callers that write a slot by index rather than by appending -- the netstack,
+ * which places an attached interface at the NetX Duo slot number it was given
+ * -- must reserve first.  The parser appends and grows on its own.
+ */
+BOOL ami_config_reserve(AmiConfig *cfg, UWORD want);
 
 /* Parse one interface file by name (DEVS:NetInterfaces/<name>). */
 LONG ami_config_load_interface(const char *name, AmiIfConfig *out);

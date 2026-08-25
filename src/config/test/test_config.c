@@ -11,6 +11,15 @@
  * of DEVS:NetInterfaces, is therefore not covered here; it is verified by
  * compilation and needs an on-Amiga run to be tested properly.
  *
+ * config_list.c IS covered, and that is the point of it being a file.  It owns
+ * the interface list -- how it grows, how it is ordered, who frees it -- and
+ * that logic used to sit inside config_file.c behind the AmigaDOS scan, where
+ * no host test could reach it.  A parse ceiling can only be caught by a test
+ * that enumerates MORE interface files than the ceiling, so for as long as the
+ * scan was unreachable from here, the ceiling that silently dropped the third
+ * interface file was untestable by construction.  ami_cfg_scan_interfaces() is
+ * the second stub below, beside ami_cfg_read_file().
+ *
  *   cc -std=c99 -Wall -Wextra -I../../../include -Ishim \
  *      test_config.c ../config_text.c ../config_parse.c ../netdb.c -o test_config
  *
@@ -85,7 +94,7 @@ static struct Fixture
     const char *path;
     const char *text;
 }
-fixtures[8];
+fixtures[48];       /* a drawer of nine, plus the DEVS:Internet files */
 
 static void set_fixture(const char *path, const char *text)
 {
@@ -105,6 +114,60 @@ static void set_fixture(const char *path, const char *text)
 static void clear_fixtures(void)
 {
     memset(fixtures, 0, sizeof(fixtures));
+}
+
+/* ------------------------------------------------------------- the drawer
+ *
+ * The second seam.  config_file.c walks DEVS:NetInterfaces with Lock(),
+ * Examine() and ExNext(); here the drawer is a staged list, so a case can put
+ * any number of interface files in it and hand them over in any order.
+ *
+ * That is the whole point of the split.  The parse ceiling this rework removed
+ * could only be caught by a test that enumerates a drawer LARGER than the
+ * ceiling, and while the scan lived inside the AmigaDOS file there was no way
+ * to write one.
+ */
+
+#define DRAWER_MAX 16
+
+static char     drawer_name[DRAWER_MAX][AMI_CFG_NAME_LEN];
+static char     drawer_path[DRAWER_MAX][AMI_CFG_NAME_LEN + 32];
+static char     drawer_text[DRAWER_MAX][160];
+static unsigned drawer_count;
+
+static void clear_drawer(void)
+{
+    drawer_count = 0;
+}
+
+/* One interface file: it appears in the scan AND to ami_cfg_read_file(). */
+static void stage_interface(const char *name, unsigned unit)
+{
+    unsigned i = drawer_count++;
+
+    sprintf(drawer_name[i], "%s", name);
+    sprintf(drawer_path[i], "DEVS:NetInterfaces/%s", name);
+    sprintf(drawer_text[i],
+            "DEVICE=ariadne.device\nUNIT=%u\nCONFIGURE=DHCP\n", unit);
+
+    set_fixture(drawer_path[i], drawer_text[i]);
+}
+
+/*
+ * Handed over in STAGING order, not sorted, so a case can stage names out of
+ * alphabetical order and watch insert_interface() put them right.
+ */
+BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
+{
+    unsigned i;
+
+    if (cfg == NULL || sink == NULL)
+        return FALSE;
+
+    for (i = 0; i < drawer_count; i++)
+        sink(cfg, drawer_name[i]);
+
+    return TRUE;
 }
 
 APTR ami_cfg_read_file(const char *path, ULONG *size_out)
@@ -162,6 +225,31 @@ static int checks;
 #define CHECK_IP(got, a, b, c, d)                                            \
     CHECK((got) == (((ULONG)(a) << 24) | ((ULONG)(b) << 16) |                \
                     ((ULONG)(c) << 8)  |  (ULONG)(d)))
+
+/*
+ * A configuration with `count` empty descriptions in it, ready to be filled.
+ *
+ * WHY THIS EXISTS.  interfaces[] is a grown list now, not a fixed array, so
+ * the shape these cases used to use -- memset the struct, set interface_count,
+ * then subscript -- produces a count with NO LIST UNDER IT and subscripts
+ * NULL.  It still compiles, which is exactly why the helper is here rather
+ * than the reserve being written out eight times: one place to get right.
+ *
+ * Frees first, so a case can reset between arms without leaking the previous
+ * list.  The caller zeroes the struct once at its declaration; after that this
+ * owns it, and the caller ends with ami_config_free().
+ */
+static void cfg_reset(AmiConfig *cfg, UWORD count)
+{
+    ami_config_free(cfg);
+    memset(cfg, 0, sizeof(*cfg));
+
+    if (count > 0)
+    {
+        CHECK(ami_config_reserve(cfg, count));
+        cfg->interface_count = count;
+    }
+}
 
 /* A mutable copy, because every parser here tokenises in place. */
 static char *dup_text(const char *s)
@@ -1081,12 +1169,15 @@ static void test_hostname_precedence(void)
 {
     AmiConfig cfg;
 
+    /* cfg_reset() frees the previous list before it builds the next,
+       so the struct has to be valid before the first one. */
+    memset(&cfg, 0, sizeof(cfg));
+
     printf("host name: which source wins\n");
 
     /* The reported machine once the remnant ENV:HOSTNAME is gone: ID=a1200 is
        the only source, and it now names the machine. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     ami_cfg_hostname_from_files(&cfg, NULL);
     CHECK_STR(cfg.hostname, "a1200");
@@ -1094,8 +1185,7 @@ static void test_hostname_precedence(void)
 
     /* The same machine with the remnant still in place. ENV:HOSTNAME wins and
        the report says which, so the remnant is visible and removable. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     {
         char *env = dup_text("a3000\n");
@@ -1111,8 +1201,7 @@ static void test_hostname_precedence(void)
      * "Ethernet" is valid RFC 1123 syntax, so an ID ranked above ENV:HOSTNAME
      * would silently rename this machine from myamiga to Ethernet.
      */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "Ethernet");
     {
         char *env = dup_text("myamiga\n");
@@ -1124,8 +1213,7 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
 
     /* No ID=: the environment still answers, as it always did. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     {
         char *env = dup_text("a3000\r\nignored second line\n");
 
@@ -1136,8 +1224,7 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
 
     /* An ID that is not a host name falls through rather than being adopted. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "Ariadne in the study");
     {
         char *env = dup_text("a3000\n");
@@ -1149,8 +1236,7 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
 
     /* Two interfaces, the first with an unusable ID: the second answers. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 2;
+    cfg_reset(&cfg, 2U);
     strcpy(cfg.interfaces[0].id, "the *good* one");
     strcpy(cfg.interfaces[1].id, "a4000");
     ami_cfg_hostname_from_files(&cfg, NULL);
@@ -1158,8 +1244,7 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_INTERFACE);
 
     /* name_resolution has already run and outranks everything below it. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     strcpy(cfg.hostname, "workshop");
     cfg.hostname_source = AMI_HOSTNAME_NAMERES;
@@ -1173,10 +1258,11 @@ static void test_hostname_precedence(void)
     CHECK(cfg.hostname_source == AMI_HOSTNAME_NAMERES);
 
     /* Nothing named it at all. */
-    memset(&cfg, 0, sizeof(cfg));
+    cfg_reset(&cfg, 0U);
     ami_cfg_hostname_from_files(&cfg, NULL);
     CHECK_STR(cfg.hostname, "");
     CHECK(cfg.hostname_source == AMI_HOSTNAME_NONE);
+    ami_config_free(&cfg);
 }
 
 /*
@@ -1196,6 +1282,10 @@ static void test_hostname_from_hwaddr(void)
     static const UBYTE none[6]  = { 0, 0, 0, 0, 0, 0 };
     char      out[AMI_CFG_NAME_LEN];
     AmiConfig cfg;
+
+    /* cfg_reset() frees the previous list before it builds the next,
+       so the struct has to be valid before the first one. */
+    memset(&cfg, 0, sizeof(cfg));
     UWORD     rank;
 
     printf("host name: derived from the hardware address\n");
@@ -1260,7 +1350,7 @@ static void test_hostname_from_hwaddr(void)
     for (rank = (UWORD)AMI_HOSTNAME_INTERFACE;
          rank <= (UWORD)AMI_HOSTNAME_NAMERES; rank++)
     {
-        memset(&cfg, 0, sizeof(cfg));
+        cfg_reset(&cfg, 0U);
 
         CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065),
                                               cfg.hostname,
@@ -1274,17 +1364,21 @@ static void test_hostname_from_hwaddr(void)
 
     /* And the other way round: a name from the files is there already, so
        nothing derives over it. */
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.interface_count = 1;
+    cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     ami_cfg_hostname_from_files(&cfg, NULL);
     CHECK_STR(cfg.hostname, "a1200");
     CHECK(cfg.hostname[0] != '\0');     /* the test the stack makes */
+    ami_config_free(&cfg);
 }
 
 static void test_hostname_offer(void)
 {
     AmiConfig cfg;
+
+    /* cfg_reset() frees the previous list before it builds the next,
+       so the struct has to be valid before the first one. */
+    memset(&cfg, 0, sizeof(cfg));
 
     printf("host name: offers and ranks\n");
 
@@ -1298,7 +1392,7 @@ static void test_hostname_offer(void)
     /* The whole ladder, weakest first, then every rejection back down it.
        DHCP arrives after the files and displaces an ID or an environment
        variable, but never name_resolution. */
-    memset(&cfg, 0, sizeof(cfg));
+    cfg_reset(&cfg, 0U);
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_INTERFACE, "a1200"));
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "leased"));
@@ -1316,7 +1410,7 @@ static void test_hostname_offer(void)
     CHECK_STR(cfg.hostname, "workshop");
 
     /* Off the network, so it is held to the syntax and the old name stands. */
-    memset(&cfg, 0, sizeof(cfg));
+    cfg_reset(&cfg, 0U);
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
     CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_DHCP, "not a name"));
     CHECK_STR(cfg.hostname, "a3000");
@@ -1324,13 +1418,13 @@ static void test_hostname_offer(void)
 
     /* name_resolution and ENV:HOSTNAME are taken as written: a machine whose
        name has always had an underscore in it keeps working. */
-    memset(&cfg, 0, sizeof(cfg));
+    cfg_reset(&cfg, 0U);
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "my_amiga"));
     CHECK_STR(cfg.hostname, "my_amiga");
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_NAMERES, "my_amiga"));
 
     /* Refusals that must not change anything. */
-    memset(&cfg, 0, sizeof(cfg));
+    cfg_reset(&cfg, 0U);
     CHECK(!ami_config_hostname_offer(NULL, AMI_HOSTNAME_ENV, "a1200"));
     CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, NULL));
     CHECK(!ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, ""));
@@ -1347,6 +1441,7 @@ static void test_hostname_offer(void)
     CHECK_STR(ami_config_hostname_source_text(AMI_HOSTNAME_ENV),
               "ENV:HOSTNAME");
     CHECK(ami_config_hostname_source_text(AMI_HOSTNAME_NONE) == NULL);
+    ami_config_free(&cfg);
 }
 
 static void test_resolver(void)
@@ -2292,6 +2387,147 @@ static void test_service_discovery(void)
     CHECK(ami_alloc_count() == 0);
 }
 
+/*
+ * THE DEFECT THIS CASE EXISTS FOR.
+ *
+ * The parser used to stop at AMI_CFG_MAX_INTERFACES, which was 2.  A drawer
+ * holding three interface files had one of them DROPPED -- and which one was
+ * decided by the alphabet, because the sort ran before the ceiling was
+ * applied -- behind an AMI_WARN that no shipped build compiles.  Nothing on
+ * the machine said an interface had gone.  Every diagnostic downstream then
+ * reported the card and the driver as healthy, correctly, because as far as
+ * the configuration was concerned that interface did not exist.
+ *
+ * So: a drawer of NINE, and all nine survive.  The number is deliberately well
+ * past any ceiling anybody might be tempted to reintroduce.
+ */
+static void test_interface_drawer(void)
+{
+    AmiConfig cfg;
+    ULONG     base = ami_alloc_count();
+    UWORD     i;
+
+    printf("interface drawer: every definition survives\n");
+
+    memset(&cfg, 0, sizeof(cfg));
+    clear_fixtures();
+    clear_drawer();
+
+    /* Staged out of order, so the sort has something to do. */
+    stage_interface("eth2",    2);
+    stage_interface("wifi0",   0);
+    stage_interface("eth0",    0);
+    stage_interface("slip0",   0);
+    stage_interface("eth1",    1);
+    stage_interface("ppp0",    0);
+    stage_interface("arcnet0", 0);
+    stage_interface("eth3",    3);
+    stage_interface("zorro0",  0);
+
+    ami_config_load_interfaces(&cfg);
+
+    /* NINE.  Not two, and not any other number this tree picked. */
+    CHECK(cfg.interface_count == 9);
+
+    /* Sorted -- and the sort is now ONLY an order.  Nothing was dropped off
+       the end of it to make the list fit. */
+    CHECK_STR(cfg.interfaces[0].name, "arcnet0");
+    CHECK_STR(cfg.interfaces[1].name, "eth0");
+    CHECK_STR(cfg.interfaces[2].name, "eth1");
+    CHECK_STR(cfg.interfaces[3].name, "eth2");
+    CHECK_STR(cfg.interfaces[4].name, "eth3");
+    CHECK_STR(cfg.interfaces[5].name, "ppp0");
+    CHECK_STR(cfg.interfaces[6].name, "slip0");
+    CHECK_STR(cfg.interfaces[7].name, "wifi0");
+    CHECK_STR(cfg.interfaces[8].name, "zorro0");
+
+    /* The ones that used to vanish are not placeholders: they parsed, and
+       they carry their own settings. */
+    CHECK(cfg.interfaces[4].unit == 3);
+    for (i = 0; i < cfg.interface_count; i++)
+        CHECK(cfg.interfaces[i].iptype == AMI_IPTYPE_DHCP);
+
+    /* The list grew to hold them rather than stopping at the floor. */
+    CHECK(cfg.interface_capacity >= 9);
+
+    ami_config_free(&cfg);
+
+    /*
+     * OWNER FREES.  AmigaOS reclaims nothing a Process did not free and a
+     * library allocation leaks until expunge (docs/ALLOCATIONS.md), so the
+     * census has to come back to exactly where it started.
+     */
+    CHECK(cfg.interfaces == NULL);
+    CHECK(cfg.interface_count == 0);
+    CHECK(cfg.interface_capacity == 0);
+    CHECK(ami_alloc_count() == base);
+
+    /* Twice is safe, which is what lets a command free on an exit path that
+       may or may not have loaded. */
+    ami_config_free(&cfg);
+    CHECK(ami_alloc_count() == base);
+
+    clear_fixtures();
+    clear_drawer();
+}
+
+/* The growth itself: what it keeps, what it costs, and what it refuses. */
+static void test_interface_reserve(void)
+{
+    AmiConfig cfg;
+    ULONG     base = ami_alloc_count();
+    UWORD     i;
+
+    printf("interface list: growth keeps what it held\n");
+
+    memset(&cfg, 0, sizeof(cfg));
+
+    /* The floor, as ami_config_load() takes it up front. */
+    CHECK(ami_config_reserve(&cfg, (UWORD)AMI_CFG_IFACE_FLOOR));
+    CHECK(cfg.interfaces != NULL);
+    CHECK(cfg.interface_capacity >= (UWORD)AMI_CFG_IFACE_FLOOR);
+
+    for (i = 0; i < (UWORD)AMI_CFG_IFACE_FLOOR; i++)
+    {
+        sprintf(cfg.interfaces[i].name, "if%u", (unsigned)i);
+        cfg.interface_count++;
+    }
+
+    /* Far past any ceiling this tree ever had. */
+    CHECK(ami_config_reserve(&cfg, 300U));
+    CHECK(cfg.interface_capacity >= 300U);
+
+    /* Carried over, not lost; and everything past the old end is zeroed. */
+    for (i = 0; i < (UWORD)AMI_CFG_IFACE_FLOOR; i++)
+    {
+        char want[16];
+
+        sprintf(want, "if%u", (unsigned)i);
+        CHECK_STR(cfg.interfaces[i].name, want);
+    }
+    CHECK(cfg.interfaces[299].name[0] == '\0');
+
+    /* Asking for what it already holds allocates nothing, which is what makes
+       the netstack's reserve-before-write a call that cannot move the list
+       under an attached interface NetX Duo holds a name pointer into. */
+    {
+        ULONG held = ami_alloc_count();
+
+        CHECK(ami_config_reserve(&cfg, 10U));
+        CHECK(ami_alloc_count() == held);
+    }
+
+    ami_config_free(&cfg);
+    CHECK(ami_alloc_count() == base);
+
+    /* NULL is not a crash, and neither is a config nothing ever loaded. */
+    CHECK(!ami_config_reserve(NULL, 1U));
+    ami_config_free(NULL);
+    memset(&cfg, 0, sizeof(cfg));
+    ami_config_free(&cfg);
+    CHECK(ami_alloc_count() == base);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "-v") == 0)
@@ -2313,6 +2549,8 @@ int main(int argc, char **argv)
     test_ipv6_only_no_error();
 #endif
     test_interface_card();
+    test_interface_drawer();
+    test_interface_reserve();
     test_hostname_syntax();
     test_hostname_precedence();
     test_hostname_from_hwaddr();

@@ -1,14 +1,18 @@
 # Roadshow-layout configuration and the DEVS:Internet netdb store.
 #
-# config_text.c / config_parse.c / netdb.c are free of AmigaDOS calls, all
-# file access goes through the ami_cfg_read_file() hook that config_file.c
-# implements, so the same sources build and run on the host (see below).
+# config_text.c / config_parse.c / config_list.c / netdb.c are free of
+# AmigaDOS calls: file bytes arrive through the ami_cfg_read_file() hook and
+# interface NAMES through the ami_cfg_scan_interfaces() hook, both of which
+# config_file.c implements.  So the same sources build and run on the host
+# (see below), and config_list.c -- which owns the growing interface list --
+# is covered by the host test rather than only by compilation.
 
 add_library(aminetxduo_config STATIC
     config_text.c
     config_text6.c
     config_parse.c
     config_hostname.c
+    config_list.c
     netdb.c
     config_file.c)
 
@@ -51,7 +55,8 @@ target_compile_options(aminetxduo_config PRIVATE -fno-optimize-sibling-calls)
 #   cc -std=c99 -Wall -Wextra -Iinclude -Isrc/config/test/shim \
 #      src/config/test/test_config.c src/config/config_text.c \
 #      src/config/config_text6.c src/config/config_parse.c \
-#      src/config/config_hostname.c src/config/netdb.c -o test_config
+#      src/config/config_hostname.c src/config/config_list.c \
+#      src/config/netdb.c -o test_config
 
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_config
@@ -60,6 +65,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         config_text6.c
         config_parse.c
         config_hostname.c
+        config_list.c
         netdb.c)
 
     target_include_directories(test_config PRIVATE

@@ -39,7 +39,7 @@ VOID ami_ns_dhcp_hostname_update(AmiNsDhcpHostnameState *state,
                                  UWORD interface_index,
                                  const char *hostname)
 {
-    if (state == NULL || interface_index >= AMI_CFG_MAX_INTERFACES)
+    if (state == NULL || interface_index >= AMI_CFG_MAX_ATTACHED)
         return;
 
     ami_ns_hostname_copy(state->lease[interface_index], hostname);
@@ -88,7 +88,7 @@ BOOL ami_ns_dhcp_hostname_reconcile(AmiConfig *config,
     if (config == NULL || state == NULL)
         return FALSE;
 
-    for (iface = 0U; iface < (UWORD)AMI_CFG_MAX_INTERFACES; iface++)
+    for (iface = 0U; iface < (UWORD)AMI_CFG_MAX_ATTACHED; iface++)
         if (state->lease[iface][0] != '\0')
         {
             offered = state->lease[iface];

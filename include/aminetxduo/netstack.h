@@ -64,6 +64,19 @@ typedef struct AmiNetStack AmiNetStack;
 #define AMI_NET_ERR_ABORTED   (-11)
 
 /*
+ * Every NetX Duo interface slot is taken: AMI_CFG_MAX_ATTACHED interfaces are
+ * already up and this one has nowhere to go.  Separate from AMI_NET_ERR_STATE,
+ * which is what it used to return, because the two need opposite words -- one
+ * says the network is not running, and this one says it is running and full,
+ * so a user has to take an interface down before this one can come up.
+ *
+ * Describing more interfaces than can be attached is deliberately allowed; see
+ * the two limits at the head of aminetxduo/config.h.  This is the refusal that
+ * allowing it requires.
+ */
+#define AMI_NET_ERR_NOSLOT    (-12)
+
+/*
  * Bring the stack up (idempotent, reference-counted). Reads the config, starts
  * ThreadX, creates the packet pool and NX_IP, attaches interfaces, runs DHCP
  * where configured. Blocks until the first interface has an address or the

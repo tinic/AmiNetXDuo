@@ -1908,7 +1908,12 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                    it in: NX_MAX_PHYSICAL_INTERFACES is 2, so a user can reach
                    the second without there being a bug. */
                 case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
-                default:                 return bsd_fail(SocketBase, AMI_ENOSPC);
+                /* Explicitly, rather than through the default: everything
+                   else that reaches here is a stack in the wrong state, and
+                   ENOSPC told a caller to free an interface slot for faults
+                   that had nothing to do with slots. */
+                case AMI_NET_ERR_NOSLOT: return bsd_fail(SocketBase, AMI_ENOSPC);
+                default:                 return bsd_fail(SocketBase, AMI_ENXIO);
             }
         }
 

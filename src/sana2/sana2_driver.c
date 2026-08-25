@@ -38,7 +38,7 @@ typedef struct AmiSana2Binding
     AmiSana2If * volatile iface;
 } AmiSana2Binding;
 
-static AmiSana2Binding ami_sana2_bindings[AMI_CFG_MAX_INTERFACES];
+static AmiSana2Binding ami_sana2_bindings[AMI_CFG_MAX_ATTACHED];
 
 LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
 {
@@ -49,7 +49,7 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
         return AMI_NET_ERR_STATE;
 
     Forbid();
-    for (i = 0; i < AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ami_sana2_bindings[i].iface == iface)
         {
@@ -90,7 +90,7 @@ VOID ami_sana2_unbind(AmiSana2If *iface)
     UWORD i;
 
     Forbid();
-    for (i = 0; i < AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ami_sana2_bindings[i].iface == iface)
         {
@@ -115,7 +115,7 @@ static AmiSana2If *ami_sana2_lookup(NX_IP_DRIVER *req)
     if (iface != NULL)
         return iface;
 
-    for (i = 0; i < AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ami_sana2_bindings[i].iface != NULL &&
             ami_sana2_bindings[i].ip == req->nx_ip_driver_ptr &&

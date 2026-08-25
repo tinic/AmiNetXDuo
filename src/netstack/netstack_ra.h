@@ -37,12 +37,12 @@ typedef struct AmiNsDnsslEntry
 
 typedef struct AmiNsRaPending
 {
-    AmiNsRdnssEntry rdnss[AMI_CFG_MAX_INTERFACES][AMI_RDNSS_MAX];
-    UWORD         rdnss_count[AMI_CFG_MAX_INTERFACES];
+    AmiNsRdnssEntry rdnss[AMI_CFG_MAX_ATTACHED][AMI_RDNSS_MAX];
+    UWORD         rdnss_count[AMI_CFG_MAX_ATTACHED];
     volatile BOOL rdnss_pending;
 
-    AmiNsDnsslEntry dnssl[AMI_CFG_MAX_INTERFACES][AMI_CFG_MAX_SEARCH];
-    UWORD         dnssl_count[AMI_CFG_MAX_INTERFACES];
+    AmiNsDnsslEntry dnssl[AMI_CFG_MAX_ATTACHED][AMI_CFG_MAX_SEARCH];
+    UWORD         dnssl_count[AMI_CFG_MAX_ATTACHED];
     volatile BOOL dnssl_pending;
 } AmiNsRaPending;
 

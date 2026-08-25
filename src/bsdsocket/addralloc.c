@@ -511,7 +511,7 @@ typedef struct BsdAamJob
  * message pointer, and because the published API already limits it to one
  * allocation per interface, AAMR_Busy is what the second asker gets.
  */
-static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_INTERFACES];
+static BsdAamJob *bsd_aam_jobs[AMI_CFG_MAX_ATTACHED];
 static LONG       bsd_aam_workers;
 
 BOOL bsd_aam_busy(VOID)
@@ -524,7 +524,7 @@ static BsdAamJob *bsd_aam_find(const struct AddressAllocationMessage *aam)
 {
     UWORD i;
 
-    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
         if (bsd_aam_jobs[i] != NULL && bsd_aam_jobs[i]->baj_Message == aam)
             return bsd_aam_jobs[i];
@@ -725,7 +725,7 @@ static VOID bsd_aam_worker(VOID)
      * must point at it and AbortInterfaceConfig() must no longer find it.
      */
     Forbid();
-    if (job->baj_Index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+    if (job->baj_Index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         bsd_aam_jobs[job->baj_Index] == job)
         bsd_aam_jobs[job->baj_Index] = NULL;
     job->baj_Done = TRUE;

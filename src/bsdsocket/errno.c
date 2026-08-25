@@ -753,7 +753,14 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
                 {
                     UWORD i;
 
-                    for (i = 0; i < cfg->interface_count; i++)
+                    /*
+                     * Bounded by the ATTACH cap and not by interface_count
+                     * alone: interface_count counts descriptions, which may
+                     * exceed the number of NetX Duo slots, and `i` is used as
+                     * an interface index below.
+                     */
+                    for (i = 0; i < cfg->interface_count &&
+                                i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
                     {
                         if (!cfg->interfaces[i].configured)
                             continue;

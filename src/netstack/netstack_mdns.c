@@ -443,7 +443,7 @@ LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable)
     UINT          status;
 
     if (ns == NULL || !ns->ns_IpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED ||
         index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
         return AMI_NET_ERR_STATE;
 
@@ -511,7 +511,7 @@ VOID ami_netstack_mdns_stop(AmiNetStack *ns)
     if (ns == NULL)
         return;
 
-    for (n = 0; n < (UWORD)AMI_CFG_MAX_INTERFACES; n++)
+    for (n = 0; n < (UWORD)AMI_CFG_MAX_ATTACHED; n++)
     {
         ns->ns_IfaceMdns[n]    = FALSE;
         ns->ns_IfaceMdnsSvc[n] = FALSE;

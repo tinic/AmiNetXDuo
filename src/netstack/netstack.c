@@ -700,7 +700,7 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
 
     /* The NX_IP teardown above has already taken the interfaces offline and
        stopped the reader threads.  Closing the devices is all that is left. */
-    for (i = 0; i < AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ns->ns_Iface[i] != NULL)
         {
@@ -764,10 +764,32 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
         ns->ns_IpStack = NULL;
     }
 
+    /*
+     * The interface list, last of the config's allocations and deliberately
+     * after the NX_IP is gone: nx_ip_interface_attach() kept a POINTER to each
+     * interface's name inside this list, so it may only be freed once nothing
+     * can read a name back.  The retained-requests path above returns before
+     * this for the same reason it keeps the pool.
+     */
+    ami_config_free(&ns->ns_Config);
+
     ami_free(ns);
 }
 
 /* -------------------------------------------------------- device open pass */
+
+/*
+ * The attach cap is one number wearing two names.  AMI_CFG_MAX_ATTACHED sizes
+ * ns_Iface[] and every per-interface table in this file;
+ * NX_MAX_PHYSICAL_INTERFACES is how many NX_INTERFACEs an NX_IP has.  A build
+ * where they disagree would either write past our arrays or leave a NetX Duo
+ * slot permanently unreachable, so it does not build.
+ *
+ * The PARSE has no such limit and must not acquire one: any number of
+ * interfaces may be described (aminetxduo/config.h).
+ */
+_Static_assert((int)AMI_CFG_MAX_ATTACHED == (int)NX_MAX_PHYSICAL_INTERFACES,
+               "AMI_CFG_MAX_ATTACHED must equal NX_MAX_PHYSICAL_INTERFACES");
 
 static LONG ami_ns_open_devices(AmiNetStack *ns)
 {
@@ -780,8 +802,25 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
         const AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];
         LONG               status;
 
-        if (opened >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+        /*
+         * AMI_CFG_MAX_ATTACHED and not NX_MAX_PHYSICAL_INTERFACES directly:
+         * the two are defined equal and the compile-time check below says so,
+         * but the arrays this loop WRITES -- ns_Iface[], ns_IfaceMdns[] -- are
+         * sized by AMI_CFG_MAX_ATTACHED, so that is the bound that keeps them
+         * in range.  Guarding with the other constant made the safety of the
+         * write depend on two independently editable numbers agreeing.
+         */
+        if (opened >= (UWORD)AMI_CFG_MAX_ATTACHED)
         {
+            /*
+             * The real limit, refused where it really is.  Recorded rather
+             * than only logged: the AMI_WARN beside it is absent from every
+             * shipped binary, and this is the branch a user with three cards
+             * meets.  nse_Value is how many were asked for, so the reader can
+             * say "three described, two up" without re-reading the drawer.
+             */
+            ami_event(NETEVENT_ATTACH_LIMIT, opened,
+                      (ULONG)ns->ns_Config.interface_count);
             AMI_WARN("netstack: only %ld interfaces supported, '%s' ignored",
                      (long)NX_MAX_PHYSICAL_INTERFACES, cfg->name);
             break;
@@ -981,9 +1020,24 @@ static UINT ami_ns_budget_filter(VOID *ip_header_ptr, UINT direction)
 
 static LONG ami_ns_create_ip(AmiNetStack *ns)
 {
-    const AmiIfConfig *cfg0 = &ns->ns_Config.interfaces[0];
+    const AmiIfConfig *cfg0;
     ULONG              addr0;
     ULONG              mask0;
+
+    /*
+     * interfaces[] is a pointer now, so [0] is worth one check.
+     *
+     * It cannot be NULL on any path that reaches here -- ami_config_load()
+     * fails outright if it cannot take the floor, and ami_ns_bring_up()
+     * returns before this when the count is zero -- but "cannot" was also true
+     * of the array this replaced, and an array could not be NULL whatever
+     * happened upstream. This is the one line that keeps a future caller from
+     * turning a missed reserve into a jump through address zero.
+     */
+    if (ns->ns_Config.interfaces == NULL || ns->ns_Config.interface_count == 0)
+        return AMI_NET_ERR_CONFIG;
+
+    cfg0 = &ns->ns_Config.interfaces[0];
     ULONG              actual;
     UINT               status;
     UWORD              i;
@@ -1680,7 +1734,7 @@ static VOID ami_ns_dhcp_state_changed(NX_DHCP *dhcp_ptr, UINT iface_index,
     UBYTE        previous;
 
     if (ns == NULL || dhcp_ptr != &ns->ns_Dhcp ||
-        iface_index >= (UINT)AMI_CFG_MAX_INTERFACES)
+        iface_index >= (UINT)AMI_CFG_MAX_ATTACHED)
         return;
 
     previous = ns->ns_DhcpState[iface_index];
@@ -2256,6 +2310,10 @@ static LONG ami_ns_bring_up(VOID)
 
     if (ami_config_load(&ns->ns_Config) != AMI_CFG_OK)
     {
+        /* A failed load can still have allocated: the floor reservation
+           succeeds before anything else can go wrong.  Free is safe on a
+           half-built config and on one that never got that far. */
+        ami_config_free(&ns->ns_Config);
         ami_free(ns);
         return AMI_NET_ERR_CONFIG;
     }
@@ -2265,6 +2323,7 @@ static LONG ami_ns_bring_up(VOID)
         AMI_ERROR("netstack: nothing to bring up, DEVS:NetInterfaces holds "
                   "no usable interface file. Run NetSetup to write one, or "
                   "ShowNetStatus to see what is wrong with the one there");
+        ami_config_free(&ns->ns_Config);
         ami_free(ns);
         return AMI_NET_ERR_CONFIG;
     }
@@ -2662,11 +2721,11 @@ const AmiIfConfig *netstack_iface_config(UWORD nx_index)
     UWORD              slot;
 
     if (ns == NULL || nx_index >= ns->ns_IfaceCount ||
-        nx_index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return NULL;
 
     slot = ns->ns_IfaceCfg[nx_index];
-    if (slot >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+    if (slot >= (UWORD)AMI_CFG_MAX_ATTACHED ||
         !ns->ns_Config.interfaces[slot].configured)
         return NULL;
 
@@ -2677,7 +2736,7 @@ BOOL netstack_iface_mdns(UWORD nx_index)
 {
     const AmiNetStack *ns = ami_netstack_raw();
 
-    if (ns == NULL || nx_index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+    if (ns == NULL || nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return FALSE;
 
     return ns->ns_IfaceMdns[nx_index];
@@ -2689,7 +2748,7 @@ LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable)
     AmiNetStack *ns = ami_netstack_raw();
 
     if (ns == NULL || !ns->ns_IpCreated ||
-        nx_index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+        nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED ||
         ns->ns_Iface[nx_index] == NULL)
         return AMI_NET_ERR_STATE;
 
@@ -2810,7 +2869,21 @@ LONG netstack_interface_up(UWORD index)
 
     ami_netstack_leave_free(caller);
 
-    return (status == NX_SUCCESS) ? AMI_NET_OK : AMI_NET_ERR_NODEV;
+    if (status != NX_SUCCESS)
+    {
+        /*
+         * NX_LINK_ENABLE is the S2_ONLINE the device is sent, and this is the
+         * call AddNetInterface and Online both end at.  Until this event
+         * existed the ring had nothing to say about the commonest late
+         * failure, so a command that read it after "eth0 did not come online"
+         * found the device open, the interface attached and no record of the
+         * stage that refused.
+         */
+        ami_event(NETEVENT_ONLINE_FAILED, index, (ULONG)status);
+        return AMI_NET_ERR_NODEV;
+    }
+
+    return AMI_NET_OK;
 }
 
 static LONG ami_ns_interface_disable(UWORD index, UINT command)
@@ -2889,7 +2962,7 @@ LONG netstack_interface_stack_down(UWORD index)
 {
     AmiNetStack *ns = ami_ns;
 
-    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         ns->ns_Config.interfaces[index].down_goes_offline)
         return netstack_interface_down(index);
 
@@ -2973,7 +3046,7 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     BOOL          autoip_removed = FALSE;
 
     if (ns == NULL || !ns->ns_IpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL)
         return AMI_NET_ERR_STATE;
 
     /* `force` overrides live TCP users, not an operation that still owns this
@@ -3156,7 +3229,7 @@ LONG netstack_interface_remove_named(const char *name, BOOL force)
         goto out;
     }
 
-    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ns->ns_Iface[i] == NULL ||
             !ns->ns_Config.interfaces[i].configured)
@@ -3234,7 +3307,7 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
     LONG          rc;
 
     if (ns == NULL || !ns->ns_IpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES || ns->ns_Iface[index] == NULL)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL)
         return AMI_NET_ERR_STATE;
 
     caller = ami_netstack_enter_alloc();
@@ -3323,7 +3396,7 @@ LONG netstack_interface_dhcp_state(UWORD index)
 {
     AmiNetStack *ns = ami_ns;
 
-    if (ns == NULL || index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+    if (ns == NULL || index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return AMI_NET_ERR_STATE;
 
     if (!ns->ns_DhcpCreated)
@@ -3417,7 +3490,7 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
     ami_ns_zero(out, sizeof(*out));
 
     if (ns == NULL || !ns->ns_IpCreated || !ns->ns_DhcpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return AMI_NET_ERR_STATE;
 
     if (netstack_interface_dhcp_state(index) != AMI_DHCP_BOUND)
@@ -3509,7 +3582,7 @@ UWORD netstack_interface_dhcp_raw_state(UWORD index)
     AmiNetStack *ns = ami_ns;
 
     if (ns == NULL || !ns->ns_DhcpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return (UWORD)NX_DHCP_STATE_NOT_STARTED;
 
     return (UWORD)ns->ns_DhcpState[index];
@@ -3522,7 +3595,7 @@ LONG netstack_interface_dhcp_renew(UWORD index)
     UINT          status;
 
     if (ns == NULL || !ns->ns_IpCreated || !ns->ns_DhcpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return AMI_NET_ERR_STATE;
 
     /*
@@ -3562,7 +3635,7 @@ LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
     AmiNetCaller *caller;
 
     if (ns == NULL || !ns->ns_DhcpCreated ||
-        index >= (UWORD)AMI_CFG_MAX_INTERFACES)
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
         return AMI_NET_ERR_STATE;
 
     caller = ami_netstack_enter_alloc();
@@ -3631,7 +3704,7 @@ LONG netstack_interface_claim(const char *name, UWORD *index_out)
     ns = ami_ns;
     if (ns != NULL && ns->ns_IpCreated)
     {
-        for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+        for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
         {
             UWORD cfg_index;
 
@@ -3639,7 +3712,7 @@ LONG netstack_interface_claim(const char *name, UWORD *index_out)
                 continue;
 
             cfg_index = ns->ns_IfaceCfg[i];
-            if (cfg_index >= (UWORD)AMI_CFG_MAX_INTERFACES ||
+            if (cfg_index >= (UWORD)AMI_CFG_MAX_ATTACHED ||
                 !ns->ns_Config.interfaces[cfg_index].configured ||
                 !ami_ns_same_name(ns->ns_Config.interfaces[cfg_index].name,
                                   name))
@@ -3685,7 +3758,7 @@ LONG ami_netstack_interface_claim_cookie(APTR cookie, UWORD *index_out)
     ns = ami_ns;
     if (ns != NULL && ns->ns_IpCreated)
     {
-        for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+        for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
         {
             if ((APTR)ns->ns_Iface[i] != cookie)
                 continue;
@@ -3715,7 +3788,7 @@ VOID netstack_interface_release(UWORD index)
     ObtainSemaphore(&ami_ns_lock);
 
     ns = ami_ns;
-    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_INTERFACES &&
+    if (ns != NULL && index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         ns->ns_IfaceClaims[index] != 0)
         ns->ns_IfaceClaims[index]--;
 
@@ -3739,7 +3812,7 @@ static LONG ami_ns_free_interface_slot(AmiNetStack *ns)
     UWORD i;
 
     for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
-                i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+                i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid == 0 &&
             ns->ns_Iface[i] == NULL && ns->ns_IfaceClaims[i] == 0)
@@ -3768,7 +3841,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         return AMI_NET_ERR_CONFIG;
 
     /* "Each such device must be assigned a unique interface name." */
-    for (i = 0; i < (UWORD)AMI_CFG_MAX_INTERFACES; i++)
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
     {
         if (ns->ns_Iface[i] == NULL)
             continue;
@@ -3779,7 +3852,23 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     slot = ami_ns_free_interface_slot(ns);
     if (slot < 0)
-        return AMI_NET_ERR_STATE;
+    {
+        /* Every NetX Duo slot is taken.  See NETEVENT_ATTACH_LIMIT: this is
+           the same refusal as the start-up one, reached by the other road. */
+        ami_event(NETEVENT_ATTACH_LIMIT, (UWORD)AMI_CFG_MAX_ATTACHED,
+                  (ULONG)ns->ns_Config.interface_count);
+        return AMI_NET_ERR_NOSLOT;
+    }
+
+    /*
+     * The slot is a NetX Duo index, not a position in the parsed list, so the
+     * list has to be long enough to have that index at all.  ami_config_load()
+     * reserves the floor for exactly this, and this is the belt: a stack whose
+     * config was never loaded, or whose floor reservation failed at the memory
+     * line, would otherwise write past the end of a shorter list.
+     */
+    if (!ami_config_reserve(&ns->ns_Config, (UWORD)(slot + 1)))
+        return AMI_NET_ERR_NOMEM;
 
     /*
      * The configuration is copied into the storage of the netstack before the

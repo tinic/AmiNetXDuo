@@ -1174,7 +1174,15 @@ const char *tool_nd_state_note(UWORD state)
 
 const char *tool_iface_name(const AmiConfig *cfg, UWORD index)
 {
+    /*
+     * BOUNDED BY THE ATTACH CAP as well as by the count, because `index` is a
+     * NetX Duo interface index and this list is the DESCRIPTIONS, of which
+     * there may be more.  On a machine with three interface files the two
+     * numberings stop agreeing past the second, and without this the name
+     * printed beside a route would be some other interface's.
+     */
     if (cfg != NULL && index < cfg->interface_count &&
+        index < (UWORD)AMI_CFG_MAX_ATTACHED &&
         cfg->interfaces[index].name[0] != '\0')
     {
         return cfg->interfaces[index].name;

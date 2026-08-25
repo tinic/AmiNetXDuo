@@ -214,31 +214,31 @@ struct AmiNetStack
     APTR                ns_ArpCache;
     BOOL                ns_IpCreated;
 
-    AmiSana2If         *ns_Iface[AMI_CFG_MAX_INTERFACES];
+    AmiSana2If         *ns_Iface[AMI_CFG_MAX_ATTACHED];
 
     /* Operations that resolved an interface name and still use its numeric
        NetX slot.  A claimed slot cannot be removed and reused underneath the
        operation; ami_ns_lock serialises updates to this table. */
-    UWORD               ns_IfaceClaims[AMI_CFG_MAX_INTERFACES];
+    UWORD               ns_IfaceClaims[AMI_CFG_MAX_ATTACHED];
 
     /* MDNS= for each interface, by NX interface index rather than by
        configuration index: ns_Iface[] is filled in open order and an
        interface that fails to open takes no slot, so the two are not
        the same number. */
-    BOOL                ns_IfaceMdns[AMI_CFG_MAX_INTERFACES];
+    BOOL                ns_IfaceMdns[AMI_CFG_MAX_ATTACHED];
 
     /* Whether the service_discovery services have been registered on that
        interface.  nx_mdns_disable() leaves the local records suspended rather
        than deleting them, and nx_mdns_enable() re-announces what it finds, so
        adding them a second time on an off/on pair announces each service
        twice. */
-    BOOL                ns_IfaceMdnsSvc[AMI_CFG_MAX_INTERFACES];
+    BOOL                ns_IfaceMdnsSvc[AMI_CFG_MAX_ATTACHED];
 
     /* Which configuration slot each opened interface came from.
        ns_Iface[] is in open order, so this is the only mapping back:
        an interface that failed to open advanced the configuration
        index and not the NX one. */
-    UWORD               ns_IfaceCfg[AMI_CFG_MAX_INTERFACES];
+    UWORD               ns_IfaceCfg[AMI_CFG_MAX_ATTACHED];
     UWORD               ns_IfaceCount;
 
     NX_DHCP             ns_Dhcp;
@@ -261,8 +261,8 @@ struct AmiNetStack
      * callbacks report only the new value, so the previous one is kept here to
      * let the notifications report transitions such as a lost lease.
      */
-    UBYTE               ns_DhcpState[AMI_CFG_MAX_INTERFACES];
-    ULONG               ns_LastAddress[AMI_CFG_MAX_INTERFACES];
+    UBYTE               ns_DhcpState[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_LastAddress[AMI_CFG_MAX_ATTACHED];
     AmiNsDhcpHostnameState ns_DhcpHostname;
 
     /*

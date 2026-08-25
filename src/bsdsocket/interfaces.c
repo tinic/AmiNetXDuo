@@ -180,7 +180,7 @@ static const AmiIfConfig *bsd_if_config(UINT index)
     if (cfg == NULL)
         return NULL;
 
-    if (index >= cfg->interface_count || index >= (UINT)AMI_CFG_MAX_INTERFACES)
+    if (index >= cfg->interface_count || index >= (UINT)AMI_CFG_MAX_ATTACHED)
         return NULL;
 
     if (!cfg->interfaces[index].configured)

@@ -13,15 +13,15 @@
 
 typedef struct AmiNsDhcpDnsLease
 {
-    ULONG server[AMI_CFG_MAX_INTERFACES][AMI_CFG_MAX_NAMESERVERS];
-    UWORD count[AMI_CFG_MAX_INTERFACES];
+    ULONG server[AMI_CFG_MAX_ATTACHED][AMI_CFG_MAX_NAMESERVERS];
+    UWORD count[AMI_CFG_MAX_ATTACHED];
 } AmiNsDhcpDnsLease;
 
 typedef struct AmiNsDhcpSearchLease
 {
-    char  domain[AMI_CFG_MAX_INTERFACES][AMI_CFG_MAX_SEARCH]
+    char  domain[AMI_CFG_MAX_ATTACHED][AMI_CFG_MAX_SEARCH]
                 [AMI_CFG_NAME_LEN];
-    UWORD count[AMI_CFG_MAX_INTERFACES];
+    UWORD count[AMI_CFG_MAX_ATTACHED];
 } AmiNsDhcpSearchLease;
 
 BOOL  ami_ns_dhcp_dns_lease_has(const AmiNsDhcpDnsLease *lease,

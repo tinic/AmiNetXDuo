@@ -1,10 +1,12 @@
 /*
  * AmiNetXDuo, internal helpers for the configuration/netdb parsers.
  *
- * The text handling (config_text.c), the file-format parsers (config_parse.c)
- * and the netdb store (netdb.c) make no dos.library calls. Every byte they see
- * arrives through the ami_cfg_read_file() hook in config_file.c. The host test
- * (test/test_config.c) drives the same code with a stdio-backed hook.
+ * The text handling (config_text.c), the file-format parsers (config_parse.c),
+ * the interface list (config_list.c) and the netdb store (netdb.c) make no
+ * dos.library calls. Every byte they see arrives through the
+ * ami_cfg_read_file() hook in config_file.c, and every interface NAME through
+ * the ami_cfg_scan_interfaces() hook beside it. The host test
+ * (test/test_config.c) drives the same code with stdio-backed hooks.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -67,6 +69,35 @@ extern "C" {
  * config_file.c has the dos.library implementation. The host test replaces it.
  */
 APTR ami_cfg_read_file(const char *path, ULONG *size_out);
+
+/*
+ * The other half of that seam: the names in DEVS:NetInterfaces.
+ *
+ * `sink` is called once per interface file, drawers and .info icons already
+ * skipped. Returns FALSE only when the drawer itself is missing, which has its
+ * own message; an empty drawer returns TRUE with nothing handed over.
+ *
+ * A SINK AND NOT A LIST because there is no ceiling on how many interfaces may
+ * be described, so the count is not known before the scan and returning them
+ * would need a second growing array beside the one the caller is already
+ * filling.
+ *
+ * config_file.c has the dos.library implementation. The host test replaces it,
+ * which is what lets test/test_config.c stage a drawer of any size.
+ */
+typedef VOID (*AmiCfgIfaceSink)(AmiConfig *cfg, const char *name);
+
+BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink);
+
+/*
+ * One name from the drawer: read it, parse it, and place it in the sorted
+ * list. This is the sink ami_config_load_interfaces() hands over. Public to
+ * the test, which calls it directly to stage a drawer.
+ */
+VOID ami_cfg_take_interface(AmiConfig *cfg, const char *name);
+
+/* Scan the drawer and take every file in it, however many there are. */
+VOID ami_config_load_interfaces(AmiConfig *cfg);
 
 /* ------------------------------------------------------------ diagnostics */
 

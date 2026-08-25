@@ -118,17 +118,24 @@ static BOOL running_name(char *out, ULONG outlen, UWORD *source)
 static BOOL configured_name(char *out, ULONG outlen, UWORD *source)
 {
     static AmiConfig cfg;               /* far too big for a 4 KB stack */
+    BOOL             found = FALSE;
 
     *source = (UWORD)AMI_HOSTNAME_NONE;
     out[0]  = '\0';
 
-    if (ami_config_load(&cfg) != AMI_CFG_OK || cfg.hostname[0] == '\0')
-        return FALSE;
+    /* Everything wanted is copied out before the free, so the whole load has
+       exactly one lifetime and this function has no owner to hand one to.
+       ami_config_load() allocates the interface list; see its header. */
+    if (ami_config_load(&cfg) == AMI_CFG_OK && cfg.hostname[0] != '\0')
+    {
+        tool_copy_string(out, outlen, cfg.hostname);
+        *source = cfg.hostname_source;
+        found   = TRUE;
+    }
 
-    tool_copy_string(out, outlen, cfg.hostname);
-    *source = cfg.hostname_source;
+    ami_config_free(&cfg);
 
-    return TRUE;
+    return found;
 }
 
 /* "ENV:HOSTNAME", or the phrase for a machine nothing named. */

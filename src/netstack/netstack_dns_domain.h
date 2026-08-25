@@ -14,7 +14,7 @@ typedef struct AmiNsDhcpDomainState
     /* IPv4 leases occupy their interface slot. The one DHCPv6 client uses
        the final slot, after every interface, so both families share one
        ordered default-domain owner without colliding on an interface. */
-    char lease[AMI_CFG_MAX_INTERFACES + 1U][AMI_CFG_DOMAIN_LEN];
+    char lease[AMI_CFG_MAX_ATTACHED + 1U][AMI_CFG_DOMAIN_LEN];
     char owner[AMI_CFG_DOMAIN_LEN];
 } AmiNsDhcpDomainState;
 

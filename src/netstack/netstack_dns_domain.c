@@ -172,7 +172,7 @@ VOID ami_ns_dns_dhcp_default_update(AmiNsDhcpDomainState *state,
                                     UWORD interface_index,
                                     const char *domain)
 {
-    if (state == NULL || interface_index >= AMI_CFG_MAX_INTERFACES)
+    if (state == NULL || interface_index >= AMI_CFG_MAX_ATTACHED)
         return;
 
     if (domain == NULL)
@@ -190,7 +190,7 @@ VOID ami_ns_dns_dhcpv6_default_update(AmiNsDhcpDomainState *state,
 
     if (domain == NULL)
         domain = "";
-    ami_ns_domain_copy(state->lease[AMI_CFG_MAX_INTERFACES], domain,
+    ami_ns_domain_copy(state->lease[AMI_CFG_MAX_ATTACHED], domain,
                        (UWORD)AMI_CFG_DOMAIN_LEN);
 }
 
@@ -210,7 +210,7 @@ VOID ami_ns_dns_dhcp_default_reconcile(
          (ra_owner == NULL || ra_applied == NULL)))
         return;
 
-    for (iface = 0; iface < AMI_CFG_MAX_INTERFACES + 1U; iface++)
+    for (iface = 0; iface < AMI_CFG_MAX_ATTACHED + 1U; iface++)
         if (dhcp->lease[iface][0] != '\0')
         {
             offered = dhcp->lease[iface];

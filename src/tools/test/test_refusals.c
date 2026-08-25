@@ -36,6 +36,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -353,6 +354,75 @@ static void t_the_note(void)
     free(text);
 }
 
+/* --------------------------------------------------- the log that is not --- */
+
+/*
+ * NO SHIPPED STRING MAY SEND ANYBODY TO A LOG.
+ *
+ * AMI_ERROR, AMI_WARN and AMI_INFO compile to do { if (0) ... } while (0)
+ * unless AMINETXDUO_LOG is defined, and it is OFF in every build that ships
+ * (include/aminetxduo/compat.h, docs/BACKLOG.md).  So a command that ends its
+ * explanation with "check the debug log for what failed" is naming a file that
+ * cannot exist on the machine reading the message.
+ *
+ * tool_devdiag.c did exactly that, on the commonest bring-up failure there is,
+ * and it was the last line somebody read before they gave up and spent an
+ * evening on their hardware instead.  Nothing in the build could see it: a
+ * string is a string, and the advice was well written.  This is the check that
+ * sees it.
+ *
+ * Comments are stripped before this runs, so the paragraph in tool_devdiag.c
+ * that quotes the old sentence in order to explain why it is gone does not
+ * trip.  That is deliberate -- the record of a defect has to be able to name
+ * it -- and it is also why this cannot be a grep.
+ *
+ * ShowNetStatus EVENTS is the answer a refusal is allowed to give instead: the
+ * event ring IS recorded by a shipped build, and read through the published
+ * semaphore without opening the library.
+ */
+static void t_no_dead_log_advice(void)
+{
+    static const char *const dead[] = { "debug log", "check the log", NULL };
+
+    char           path[512];
+    DIR           *dir;
+    struct dirent *ent;
+
+    snprintf(path, sizeof(path), "%s/src/tools", source_dir());
+
+    dir = opendir(path);
+    if (dir == NULL) {
+        printf("  FAIL cannot read %s\n", path);
+        failures++;
+        return;
+    }
+
+    while ((ent = readdir(dir)) != NULL) {
+        size_t n = strlen(ent->d_name);
+        char   rel[512];
+        char  *text;
+        int    i;
+
+        if (n < 3 || strcmp(ent->d_name + n - 2, ".c") != 0)
+            continue;
+
+        snprintf(rel, sizeof(rel), "src/tools/%s", ent->d_name);
+        text = slurp(rel);
+        if (text == NULL)
+            continue;
+
+        for (i = 0; dead[i] != NULL; i++) {
+            CHECK(strstr(text, dead[i]) == NULL,
+                  "%s: a printed string still sends the reader to \"%s\","
+                  " which no shipped build can write", rel, dead[i]);
+        }
+
+        free(text);
+    }
+
+    closedir(dir);
+}
+
 int main(void)
 {
     printf("refusals that say why\n");
@@ -362,6 +432,7 @@ int main(void)
     t_arp();
     t_toolsock();
     t_the_note();
+    t_no_dead_log_advice();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

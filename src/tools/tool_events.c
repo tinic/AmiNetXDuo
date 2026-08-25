@@ -67,6 +67,14 @@ static const ToolEventRow tool_event_rows[] =
       "the interface joined the stack with its link down, so it carries no "
       "traffic",
       NULL },
+    { NETEVENT_ONLINE_FAILED,
+      "the interface would not go online, so the driver was sent S2_ONLINE "
+      "and refused it",
+      "NetX Duo status" },
+    { NETEVENT_ATTACH_LIMIT,
+      "there was no free interface slot, so this interface was described but "
+      "never attached",
+      "interfaces described" },
 
     { NETEVENT_OUT_OF_SERVICE,
       "the device went out of service and the link was marked down",

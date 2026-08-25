@@ -272,6 +272,27 @@ static BOOL diag_copy(register APTR to __asm("a0"),
     return FALSE;
 }
 
+/*
+ * THE SANA-II PAIR FROM THE LAST PROBE, so a refusal can name it.
+ *
+ * ios2_Error and ios2_WireError were being read into the request and thrown
+ * away, and the command then told the user that the device "refused a SANA-II
+ * command" without saying which command or what it answered.  That is a
+ * sentence nobody can act on and nobody can look up.  They are kept here
+ * instead: the probe is one call on one Process, so one set is enough and the
+ * signature of tool_device_probe() does not have to change.
+ */
+static LONG diag_probe_error;
+static LONG diag_probe_wire;
+
+VOID tool_probe_sana2_codes(LONG *error, LONG *wire)
+{
+    if (error != NULL)
+        *error = diag_probe_error;
+    if (wire != NULL)
+        *wire = diag_probe_wire;
+}
+
 LONG tool_device_probe(const char *device, ULONG unit, const char *card)
 {
     struct IOSana2Req *req;
@@ -279,6 +300,9 @@ LONG tool_device_probe(const char *device, ULONG unit, const char *card)
     struct TagItem     tags[4];
     LONG               status;
     UWORD              tag = 0;
+
+    diag_probe_error = 0;
+    diag_probe_wire  = 0;
 
     if (device == NULL || *device == '\0')
         return TOOL_PROBE_NO_NAME;
@@ -337,7 +361,12 @@ LONG tool_device_probe(const char *device, ULONG unit, const char *card)
         req->ios2_StatData       = &query;
 
         if (DoIO((struct IORequest *)req) != 0 || query.SizeSupplied == 0UL)
-            status = TOOL_PROBE_REFUSED;
+        {
+            /* Kept before CloseDevice(), which overwrites io_Error. */
+            diag_probe_error = (LONG)req->ios2_Req.io_Error;
+            diag_probe_wire  = (LONG)req->ios2_WireError;
+            status           = TOOL_PROBE_REFUSED;
+        }
 
         CloseDevice((struct IORequest *)req);
     }

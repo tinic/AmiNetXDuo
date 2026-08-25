@@ -649,7 +649,8 @@ int main(int argc, char **argv)
 
             if (base == NULL)
             {
-                tool_error("%s did not come online", (LONG)name);
+                tool_error("bsdsocket.library did not open, so %s did not "
+                           "come online", (LONG)name);
 
                 /* Probe the card only when the library that would drive it is
                    installed. */
@@ -715,8 +716,10 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        tool_error("the network did not start: %s",
-                   (LONG)tool_net_error(err));
+        /* The operation, then the symbol, then the number: the first line
+           is the one a user can quote and a maintainer can grep for. */
+        tool_error("netstack_startup: %s (%s, %ld)",
+                   (LONG)tool_net_error(err), (LONG)tool_code_net(err), err);
 
         if (err == AMI_NET_ERR_NODEV)
             tool_explain_device(ifc.device, ifc.unit, ifc.card);
@@ -785,8 +788,9 @@ int main(int argc, char **argv)
     err = netstack_interface_up((UWORD)index);
     if (err != AMI_NET_OK)
     {
-        tool_error("%s did not come online: %s", (LONG)name,
-                   (LONG)tool_net_error(err));
+        tool_error("netstack_interface_up (S2_ONLINE): %s: %s (%s, %ld)",
+                   (LONG)name, (LONG)tool_net_error(err),
+                   (LONG)tool_code_net(err), err);
         tool_explain_device(ifc.device, ifc.unit, ifc.card);
         FreeArgs(rda);
         return RETURN_FAIL;

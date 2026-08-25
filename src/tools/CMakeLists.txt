@@ -607,6 +607,23 @@ if(CMAKE_CROSSCOMPILING)
     add_dependencies(tool_netdb_free_check tools)
 endif()
 
+# ------------------------------------------------ the config free check ---
+#
+# The same debt, one struct along.  ami_config_load() allocates the interface
+# list -- 404 bytes per interface DEVS:NetInterfaces describes -- and until the
+# definition ceiling was lifted it allocated nothing, so not one of its six
+# callers had a free and all six became leaks in the commit that made the list
+# unlimited.  A rule that was created retroactively for existing callers is
+# exactly the kind the next caller will not know about.
+if(CMAKE_CROSSCOMPILING)
+    add_custom_target(tool_config_free_check ALL
+        COMMAND "${CMAKE_SOURCE_DIR}/tools/check-config-free.sh"
+                "${CMAKE_BINARY_DIR}"
+        COMMENT "every command that loads the configuration also frees it"
+        VERBATIM)
+    add_dependencies(tool_config_free_check tools)
+endif()
+
 # --------------------------------------------------------------- host tests --
 #
 # Host only: httppath.c, httpif.c and fetchurl.c are the files here free of

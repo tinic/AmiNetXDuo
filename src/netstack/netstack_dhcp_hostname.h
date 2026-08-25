@@ -11,7 +11,7 @@
 
 typedef struct AmiNsDhcpHostnameState
 {
-    char  lease[AMI_CFG_MAX_INTERFACES][AMI_CFG_NAME_LEN];
+    char  lease[AMI_CFG_MAX_ATTACHED][AMI_CFG_NAME_LEN];
     char  owner[AMI_CFG_NAME_LEN];
     char  fallback[AMI_CFG_NAME_LEN];
     UWORD fallback_source;

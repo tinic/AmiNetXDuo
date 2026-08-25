@@ -95,7 +95,7 @@ static void h_case_invalid_values(void)
     h_check(!ami_ns_dhcp_dns_lease_add(&lease, 0U, 0UL),
             "zero is not a name server");
     h_check(!ami_ns_dhcp_dns_lease_add(&lease,
-                                       AMI_CFG_MAX_INTERFACES, DNS_A),
+                                       AMI_CFG_MAX_ATTACHED, DNS_A),
             "an invalid interface cannot own a server");
     h_check(ami_ns_dhcp_dns_lease_at(&lease, 0U, 0U) == 0UL,
             "an absent slot reads as empty");

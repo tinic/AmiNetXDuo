@@ -12,7 +12,7 @@ BOOL ami_ns_dhcp_dns_lease_has(const AmiNsDhcpDnsLease *lease,
 {
     UWORD i;
 
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES ||
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED ||
         server == 0UL)
         return FALSE;
 
@@ -29,7 +29,7 @@ BOOL ami_ns_dhcp_dns_lease_add(AmiNsDhcpDnsLease *lease,
 {
     UWORD count;
 
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES ||
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED ||
         server == 0UL ||
         ami_ns_dhcp_dns_lease_has(lease, interface_index, server))
         return FALSE;
@@ -50,7 +50,7 @@ BOOL ami_ns_dhcp_dns_lease_remove(AmiNsDhcpDnsLease *lease,
     UWORD count;
     UWORD i;
 
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES)
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED)
         return FALSE;
 
     count = lease->count[interface_index];
@@ -75,7 +75,7 @@ BOOL ami_ns_dhcp_dns_lease_remove(AmiNsDhcpDnsLease *lease,
 UWORD ami_ns_dhcp_dns_lease_count(const AmiNsDhcpDnsLease *lease,
                                   UWORD interface_index)
 {
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES)
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED)
         return 0U;
 
     return lease->count[interface_index];
@@ -85,7 +85,7 @@ UWORD ami_ns_dhcp_dns_lease_count(const AmiNsDhcpDnsLease *lease,
 ULONG ami_ns_dhcp_dns_lease_at(const AmiNsDhcpDnsLease *lease,
                                UWORD interface_index, UWORD at)
 {
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES ||
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED ||
         at >= lease->count[interface_index])
         return 0UL;
 
@@ -118,7 +118,7 @@ BOOL ami_ns_dhcp_search_lease_has(const AmiNsDhcpSearchLease *lease,
     UWORD i;
 
     if (lease == NULL || domain == NULL || domain[0] == '\0' ||
-        interface_index >= AMI_CFG_MAX_INTERFACES)
+        interface_index >= AMI_CFG_MAX_ATTACHED)
         return FALSE;
 
     for (i = 0; i < lease->count[interface_index]; i++)
@@ -135,7 +135,7 @@ BOOL ami_ns_dhcp_search_lease_add(AmiNsDhcpSearchLease *lease,
     UWORD i;
 
     if (lease == NULL || domain == NULL || domain[0] == '\0' ||
-        interface_index >= AMI_CFG_MAX_INTERFACES ||
+        interface_index >= AMI_CFG_MAX_ATTACHED ||
         ami_ns_dhcp_search_lease_has(lease, interface_index, domain))
         return FALSE;
 
@@ -164,7 +164,7 @@ BOOL ami_ns_dhcp_search_lease_remove(AmiNsDhcpSearchLease *lease,
     UWORD j;
 
     if (lease == NULL || domain == NULL ||
-        interface_index >= AMI_CFG_MAX_INTERFACES)
+        interface_index >= AMI_CFG_MAX_ATTACHED)
         return FALSE;
 
     count = lease->count[interface_index];
@@ -189,7 +189,7 @@ BOOL ami_ns_dhcp_search_lease_remove(AmiNsDhcpSearchLease *lease,
 UWORD ami_ns_dhcp_search_lease_count(const AmiNsDhcpSearchLease *lease,
                                      UWORD interface_index)
 {
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES)
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED)
         return 0U;
     return lease->count[interface_index];
 }
@@ -198,7 +198,7 @@ UWORD ami_ns_dhcp_search_lease_count(const AmiNsDhcpSearchLease *lease,
 const char *ami_ns_dhcp_search_lease_at(const AmiNsDhcpSearchLease *lease,
                                         UWORD interface_index, UWORD at)
 {
-    if (lease == NULL || interface_index >= AMI_CFG_MAX_INTERFACES ||
+    if (lease == NULL || interface_index >= AMI_CFG_MAX_ATTACHED ||
         at >= lease->count[interface_index])
         return NULL;
     return lease->domain[interface_index][at];

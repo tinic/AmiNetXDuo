@@ -13,8 +13,11 @@
  * file. Only the name matters, because the directory is fixed, and more than
  * one name can be given. Several names are sorted before they are used, so a
  * list brings interfaces up in a defined order rather than in the order typed.
- * The ceiling is AMI_CFG_MAX_INTERFACES, which is what the parsed
- * configuration holds.
+ *
+ * How many names ONE invocation accepts is AMI_CFG_MAX_ATTACHED, because that
+ * is how many interfaces can be online at once. It is not a limit on
+ * DEVS:NetInterfaces, which may describe as many as the user likes and has
+ * every one of them read (aminetxduo/config.h).
  *
  * TIMEOUT is how long to wait, in seconds, for an interface that asks for its
  * address to be given one. It bounds the DHCP exchange, so ten seconds is both
@@ -26,8 +29,11 @@
  * interfaces with a typo in the third brings two up and then fails.
  *
  * This is also the first command a new user runs, so every failure below
- * prints what is wrong, where, and what to type next. The terse version still
- * goes to the serial log.
+ * leads with the operation that refused and its code -- the symbol, not only a
+ * translation of it -- and then at most one line saying what to type next.
+ * Nothing here points at a serial log: AMI_ERROR and friends compile to
+ * nothing without AMINETXDUO_LOG, so no shipped build can write one.
+ * ShowNetStatus EVENTS is where what the library recorded can be read.
  *
  * QUIET drops that running commentary and nothing else. User-Startup wants a
  * boot that says nothing when it works and still says why it did not. A boot
@@ -200,7 +206,7 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
 /*
  * Sort the names, so a list of interfaces is brought up in an order that does
  * not depend on how it was typed. Insertion sort: the list is at most
- * AMI_CFG_MAX_INTERFACES long.
+ * AMI_CFG_MAX_ATTACHED long.
  */
 static VOID sort_names(STRPTR *names, ULONG count)
 {
@@ -354,9 +360,47 @@ static LONG add_to_running_stack(struct Library *base, const char *name)
     return (err != 0) ? err : EIO;
 }
 
+/*
+ * THE ONE REFUSAL ABOUT HOW MANY INTERFACES THERE CAN BE, and the only one
+ * left anywhere in this tree.
+ *
+ * It is at the ATTACH and not at the parse.  DEVS:NetInterfaces may describe
+ * as many interfaces as the user likes and every one of them is read; what is
+ * finite is how many can be ONLINE AT ONCE, because each one costs an
+ * NX_INTERFACE inside the NX_IP.  So this names the interfaces that are
+ * holding the slots and says one of them has to go down.  It does not ask
+ * anybody to delete a file they wrote, and there is no version of this message
+ * that mentions the drawer.
+ */
+static VOID explain_no_slot(struct Library *base, const char *name)
+{
+    LONG n;
+    LONG i;
+    LONG shown = 0;
+
+    tool_printf("  %s cannot come up: all %ld interface slots are in use",
+                (LONG)name, (LONG)NX_MAX_PHYSICAL_INTERFACES);
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (!(addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_NAMED))
+            continue;
+
+        tool_printf((shown == 0) ? " by %s" : " and %s",
+                    (LONG)addif_ifaces.e[i].nsi_Name);
+        shown++;
+    }
+
+    tool_printf(".\n");
+    tool_printf("  Take one down first:  RemoveNetInterface <name>\n");
+}
+
 /* Why the add was refused, in the words the rest of this command uses. */
-static VOID explain_add_failure(LONG err, const char *name,
-                                const AmiIfConfig *ifc)
+static VOID explain_add_failure(struct Library *base, LONG err,
+                                const char *name, const AmiIfConfig *ifc)
 {
     switch (err)
     {
@@ -378,9 +422,7 @@ static VOID explain_add_failure(LONG err, const char *name,
             break;
 
         case ENOSPC:
-            tool_printf("  this stack holds %ld interfaces and they are all "
-                        "in use. RemoveNetInterface frees one.\n",
-                        (LONG)NX_MAX_PHYSICAL_INTERFACES);
+            explain_no_slot(base, name);
             break;
 
         case ENOBUFS:
@@ -541,10 +583,20 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    if (count > (ULONG)AMI_CFG_MAX_INTERFACES)
+    /*
+     * The ATTACH limit, and the only limit on interfaces anywhere.  It is not
+     * about the drawer: DEVS:NetInterfaces may describe as many interfaces as
+     * the user likes and every one of them is read.  This is how many can be
+     * ONLINE AT ONCE, refused here rather than after two of the three named
+     * have already been started.
+     */
+    if (count > (ULONG)AMI_CFG_MAX_ATTACHED)
     {
-        tool_error("this stack holds %ld interfaces, and %lu were named",
-                   (LONG)AMI_CFG_MAX_INTERFACES, count);
+        tool_error("attach: at most %ld interfaces can be online at once, "
+                   "and %lu were named",
+                   (LONG)AMI_CFG_MAX_ATTACHED, count);
+        tool_hint("Name %ld or fewer; the rest can stay in "
+                  "DEVS:NetInterfaces.", (LONG)AMI_CFG_MAX_ATTACHED);
 
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -644,7 +696,11 @@ int main(int argc, char **argv)
 
         if (base == NULL)
         {
-            tool_error("the network did not start");
+            /* OpenLibrary() carries no status back, so there is no code to
+               print here -- the operation is named instead of a code being
+               invented for it. */
+            tool_error("bsdsocket.library did not open, so the network did "
+                       "not start");
             explain_library_failure(&ifc);
             FreeArgs(rda);
             return RETURN_FAIL;
@@ -706,9 +762,13 @@ int main(int argc, char **argv)
 
                 if (add_err != 0)
                 {
-                    tool_error("%s was not added to the running network",
-                               (LONG)name);
-                    explain_add_failure(add_err, name, &ifc);
+                    /* The operation and its code first.  add_err was being
+                       consumed by the explainer and never shown, so a refusal
+                       the explainer had no arm for printed nothing at all. */
+                    tool_error("NETCTRL_INTERFACE_ADD refused %s: %s (%ld)",
+                               (LONG)name, (LONG)tool_code_errno(add_err),
+                               add_err);
+                    explain_add_failure(base, add_err, name, &ifc);
                     rc = RETURN_FAIL;
                     continue;
                 }
@@ -802,8 +862,10 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        tool_error("the network did not start: %s",
-                   (LONG)tool_net_error(err));
+        /* The operation, then the symbol, then the number: the first line
+           is the one a user can quote and a maintainer can grep for. */
+        tool_error("netstack_startup: %s (%s, %ld)",
+                   (LONG)tool_net_error(err), (LONG)tool_code_net(err), err);
         explain_startup_failure(err, &ifc);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -843,8 +905,10 @@ int main(int argc, char **argv)
             err = netstack_interface_up((UWORD)index);
             if (err != AMI_NET_OK)
             {
-                tool_error("%s did not come online: %s", (LONG)name,
-                           (LONG)tool_net_error(err));
+                tool_error("netstack_interface_up (S2_ONLINE): %s: %s "
+                           "(%s, %ld)", (LONG)name,
+                           (LONG)tool_net_error(err),
+                           (LONG)tool_code_net(err), err);
                 tool_explain_device(ifc.device, ifc.unit, ifc.card);
                 FreeArgs(rda);
                 return RETURN_FAIL;

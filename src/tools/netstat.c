@@ -783,6 +783,10 @@ int main(int argc, char **argv)
     if (want_health && !want_stats && tool_health_mark(&stats))
         show_health(&stats);
 
+    /* ami_config_load() allocates the interface list and this command is its
+       owner. One exit after the load, so one free. */
+    ami_config_free(&netstat_config);
+
     FreeArgs(rda);
     return RETURN_OK;
 }

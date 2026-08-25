@@ -206,8 +206,24 @@ const ToolDevice *tool_scan_device(ULONG index)
 
 VOID tool_explain_device_refused(const char *device, ULONG unit)
 {
-    tool_printf("  %s unit %lu opened, then refused a SANA-II command.\n",
-                (LONG)device, unit);
+    LONG error = 0;
+    LONG wire  = 0;
+
+    tool_probe_sana2_codes(&error, &wire);
+
+    /*
+     * THE OPERATION AND ITS CODES, on the first line.  This used to read "%s
+     * unit %lu opened, then refused a SANA-II command" and stop, which named
+     * neither the command nor the answer: there was nothing in it to look up,
+     * quote, or search the source for.  S2_DEVICEQUERY is the command
+     * tool_device_probe() sends, and the pair is what the driver put in
+     * ios2_Error and ios2_WireError.
+     */
+    tool_printf("  S2_DEVICEQUERY: %s unit %lu opened, then refused it "
+                "(%s/%s, %ld/%ld)\n",
+                (LONG)device, unit,
+                (LONG)tool_code_sana2(error), (LONG)tool_code_wire(wire),
+                error, wire);
 }
 
 VOID tool_explain_device(const char *device, ULONG unit, const char *card)
@@ -226,12 +242,11 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
         tool_device_probe(device, unit, card) != 0 &&
         tool_device_probe(device, unit, NULL) == 0)
     {
-        tool_printf("  %s unit %lu opens, and there is no %s in this machine.\n",
+        tool_printf("  %s unit %lu opens, but there is no %s in this "
+                    "machine, and CARD= pinned it to one.\n",
                     (LONG)device, unit, (LONG)card);
-        tool_printf("  The CARD line in DEVS:NetInterfaces asked for that board\n");
-        tool_printf("  and %s will not bind to a different one.  Correct the\n",
-                    (LONG)device);
-        tool_printf("  CARD line, or remove it and let UNIT choose.\n");
+        tool_printf("  Correct the CARD line in DEVS:NetInterfaces/, or "
+                    "remove it and let UNIT choose.\n");
         return;
     }
 
@@ -295,12 +310,27 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
        usual mistake. */
     if (probe == 0)
     {
-        tool_printf("  %s unit %lu opens on its own, so the card and the\n",
+        /*
+         * THE SENTENCE THAT COST SOMEBODY AN EVENING used to end here with
+         * "Check the debug log for what failed after the device opened."
+         *
+         * There is no debug log.  AMI_ERROR, AMI_WARN and AMI_INFO compile to
+         * nothing unless AMINETXDUO_LOG is defined, and it is off in every
+         * shipped build (aminetxduo/compat.h, docs/BACKLOG.md), so the one
+         * thing this told the user to go and read cannot exist on the machine
+         * they were reading it on.
+         *
+         * ShowNetStatus EVENTS is what does exist.  The library records
+         * bring-up failures in the event ring -- which call refused and what
+         * it answered -- and that command reads the ring through the published
+         * semaphore without opening the library, so it works with the stack
+         * down, which is the state this branch is reached in.
+         */
+        tool_printf("  %s unit %lu opens on its own, so neither the card nor "
+                    "the driver is what stopped the stack.\n",
                     (LONG)device, unit);
-        tool_printf("  driver are not the problem.  Something else stopped the\n");
-        tool_printf("  stack.  Check the interface file for a wrong ADDRESS or\n");
-        tool_printf("  CONFIGURE line.  Check the debug log for what failed\n");
-        tool_printf("  after the device opened.\n");
+        tool_printf("  ShowNetStatus EVENTS names the call that refused; "
+                    "CheckNetConfig reads the interface file.\n");
         return;
     }
 
@@ -309,8 +339,9 @@ VOID tool_explain_device(const char *device, ULONG unit, const char *card)
 
     if (unit != 0 && tool_device_probe(device, 0, card) == 0)
     {
-        tool_printf("  Unit 0 opens. Almost every card is unit 0: change the UNIT\n");
-        tool_printf("  line in DEVS:NetInterfaces to 0, or run NetSetup again.\n");
+        tool_printf("  Unit 0 opens, and almost every card is unit 0.\n");
+        tool_printf("  Change the UNIT line in DEVS:NetInterfaces/ to 0, or "
+                    "run NetSetup again.\n");
         return;
     }
 

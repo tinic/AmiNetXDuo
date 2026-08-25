@@ -633,31 +633,22 @@ static VOID check_collisions(const AmiConfig *cfg)
 }
 
 /*
- * Interface files the stack will never look at. The parsed configuration holds
- * AMI_CFG_MAX_INTERFACES and the drawer can hold more. The rest are dropped
- * silently, in alphabetical order rather than by write time.
+ * THERE WAS A CHECK HERE and it has been deleted, because what it warned about
+ * no longer happens and the advice it gave was wrong.
+ *
+ * It counted the files in DEVS:NetInterfaces, and if there were more than the
+ * parser would keep it reported a fault and told the user to "move the unused
+ * files out of DEVS:NetInterfaces".  That was true of a parser that stopped at
+ * two, and it was the wrong thing to say even then: a drawer holding five card
+ * definitions is an ordinary way to run a machine, and a checker that calls it
+ * a fault and asks the user to delete their own files is serving the array
+ * rather than the user.  The parser now reads every file
+ * (src/config/config_list.c), so nothing is dropped and nothing to report.
+ *
+ * How many may be ONLINE AT ONCE is still limited, and that is refused at the
+ * attach with the interfaces that hold the slots named -- not here, and not
+ * about the drawer.  ShowNetStatus lists every definition with its state.
  */
-static VOID check_drawer_size(const AmiConfig *cfg)
-{
-    static char names[CNC_MAX_FILES][TOOL_NAME_LEN];
-    ULONG       count = tool_list_dir(CNC_DIR_INTERFACES, names,
-                                      (ULONG)CNC_MAX_FILES, NULL);
-
-    if (count <= (ULONG)AMI_CFG_MAX_INTERFACES ||
-        cfg->interface_count < (UWORD)AMI_CFG_MAX_INTERFACES)
-    {
-        return;
-    }
-
-    finding(CNC_DIR_INTERFACES, 0, AMI_CFG_PROBLEM_WARN);
-    say("      the drawer holds %lu interface files and this stack has room\n",
-        count);
-    say("      for %ld, so the rest are ignored\n",
-        (LONG)AMI_CFG_MAX_INTERFACES);
-    note("The files are taken in alphabetical order, so the ones at the end "
-         "of the alphabet are dropped. Move the unused files out of "
-         "DEVS:NetInterfaces.");
-}
 
 /*
  * Roadshow keeps interface files it is not to start at boot in
@@ -1019,7 +1010,6 @@ int main(int argc, char **argv)
 
     check_interfaces(&cnc_config);
     check_collisions(&cnc_config);
-    check_drawer_size(&cnc_config);
     check_gateway(&cnc_config);
     check_resolver(&cnc_config);
 
@@ -1053,6 +1043,10 @@ int main(int argc, char **argv)
         tool_fault(ERROR_BREAK);
         rc = RETURN_WARN;
     }
+
+    /* ami_config_load() allocates the interface list and this command is its
+       owner. One exit, so one free. */
+    ami_config_free(&cnc_config);
 
     FreeArgs(rda);
     return (int)rc;

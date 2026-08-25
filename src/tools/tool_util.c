@@ -91,6 +91,37 @@ VOID tool_error(const char *fmt, ...)
     FPutC(err, '\n');
 }
 
+/*
+ * ONE line, under the refusal it belongs to, and never more than one.
+ *
+ * WHAT THIS REPLACED was the house style of answering a failure with four or
+ * five lines of prose, and the prose had two faults that no amount of writing
+ * fixes.  It never named the call that refused, so the sentence could not be
+ * looked up in the source or reported to anybody; and its usual last suggestion
+ * was to consult a debug log, which no shipped build can produce, because
+ * AMI_ERROR and friends compile to nothing without AMINETXDUO_LOG
+ * (src/common/compat.h, docs/BACKLOG.md).  It sent users to look for a file
+ * that does not exist.
+ *
+ * The shape now is: tool_error() with the operation and its code, then at most
+ * one of these naming something that EXISTS -- a command to run, a line in a
+ * file to change.  Same stream as tool_error(), so a "*>" redirection keeps the
+ * pair together, and indented so the hint reads as subordinate to the refusal.
+ */
+VOID tool_hint(const char *fmt, ...)
+{
+    va_list args;
+    BPTR    err = tool_error_stream();
+
+    FPuts(err, (CONST_STRPTR)"  ");
+
+    va_start(args, fmt);
+    VFPrintf(err, (CONST_STRPTR)fmt, (APTR)args);   /* (APTR): see tool_printf */
+    va_end(args);
+
+    FPutC(err, '\n');
+}
+
 VOID tool_fault(LONG code)
 {
     PrintFault(code, (CONST_STRPTR)tool_name);
@@ -205,7 +236,122 @@ const char *tool_net_error(LONG err)
         case AMI_NET_ERR_NONAME:    return "there is no such name";
         case AMI_NET_ERR_NOSERVER:  return "no name server is configured";
         case AMI_NET_ERR_TIMEOUT:   return "the name server did not answer";
+        case AMI_NET_ERR_BUSY:      return "the interface is still in use";
+        case AMI_NET_ERR_ABORTED:   return "the caller asked to be let go";
+        case AMI_NET_ERR_NOSLOT:    return "every interface slot is taken";
         default:                    return "unknown error";
+    }
+}
+
+/* --------------------------------------------------------- the code names,
+ *
+ * WHY THESE EXIST.  A refusal that says only what a command thinks went wrong
+ * cannot be looked up, and the sentence is a translation somebody has to
+ * translate back.  These give the identifier that is in the source, so the
+ * first line of a refusal locates the stage in the tree without anything else
+ * being asked of the user.  The number goes beside it, because a code this
+ * build does not know still has to be reportable.
+ *
+ * In tool_util.c, and so in every command, on purpose: the whole point is that
+ * every refusal can name itself, and a table only some commands carry gives
+ * only some commands the ability.  It is about 300 bytes.
+ *
+ * Never NULL.  An unknown code gets a token that reads as one, so the caller's
+ * format string never has a hole in it and the number carries the meaning.
+ */
+
+const char *tool_code_net(LONG err)
+{
+    switch (err)
+    {
+        case AMI_NET_OK:            return "AMI_NET_OK";
+        case AMI_NET_ERR_NOMEM:     return "AMI_NET_ERR_NOMEM";
+        case AMI_NET_ERR_NODEV:     return "AMI_NET_ERR_NODEV";
+        case AMI_NET_ERR_CONFIG:    return "AMI_NET_ERR_CONFIG";
+        case AMI_NET_ERR_KERNEL:    return "AMI_NET_ERR_KERNEL";
+        case AMI_NET_ERR_STATE:     return "AMI_NET_ERR_STATE";
+        case AMI_NET_ERR_NONAME:    return "AMI_NET_ERR_NONAME";
+        case AMI_NET_ERR_NOSERVER:  return "AMI_NET_ERR_NOSERVER";
+        case AMI_NET_ERR_TIMEOUT:   return "AMI_NET_ERR_TIMEOUT";
+        case AMI_NET_ERR_BUSY:      return "AMI_NET_ERR_BUSY";
+        case AMI_NET_ERR_DEVBAD:    return "AMI_NET_ERR_DEVBAD";
+        case AMI_NET_ERR_ABORTED:   return "AMI_NET_ERR_ABORTED";
+        case AMI_NET_ERR_NOSLOT:    return "AMI_NET_ERR_NOSLOT";
+        default:                    return "AMI_NET_ERR_?";
+    }
+}
+
+/*
+ * 4.4BSD's numbering, which is what every Amiga bsdsocket.library reports and
+ * what src/bsdsocket/netstatus.c hands back from NetStackControl(). Only the
+ * ones that vector can return are here; anything else prints as its number.
+ */
+const char *tool_code_errno(LONG err)
+{
+    switch (err)
+    {
+        case 0:     return "no error";
+        case 1:     return "EPERM";
+        case 2:     return "ENOENT";
+        case 5:     return "EIO";
+        case 6:     return "ENXIO";
+        case 17:    return "EEXIST";
+        case 22:    return "EINVAL";
+        case 16:    return "EBUSY";
+        case 28:    return "ENOSPC";
+        case 55:    return "ENOBUFS";
+        case 78:    return "ENOSYS";
+        default:    return "errno";
+    }
+}
+
+/*
+ * SANA-II, devices/sana2.h.  ios2_Error is the first and ios2_WireError the
+ * second, and they are reported as a pair because neither is meaningful alone:
+ * S2ERR_OUTOFSERVICE with S2WERR_UNIT_OFFLINE is a card that was taken down,
+ * and the same S2ERR_ with S2WERR_RCVREL_HDW_ERR is one that failed.
+ */
+const char *tool_code_sana2(LONG err)
+{
+    switch (err)
+    {
+        case 0:     return "S2ERR_NO_ERROR";
+        case 1:     return "S2ERR_NO_RESOURCES";
+        case 3:     return "S2ERR_BAD_ARGUMENT";
+        case 4:     return "S2ERR_BAD_STATE";
+        case 5:     return "S2ERR_BAD_ADDRESS";
+        case 6:     return "S2ERR_MTU_EXCEEDED";
+        case 8:     return "S2ERR_NOT_SUPPORTED";
+        case 9:     return "S2ERR_SOFTWARE";
+        case 10:    return "S2ERR_OUTOFSERVICE";
+        case 11:    return "S2ERR_TX_FAILURE";
+        default:    return "S2ERR_?";
+    }
+}
+
+const char *tool_code_wire(LONG err)
+{
+    switch (err)
+    {
+        case 0:     return "S2WERR_GENERIC_ERROR";
+        case 1:     return "S2WERR_NOT_CONFIGURED";
+        case 2:     return "S2WERR_UNIT_ONLINE";
+        case 3:     return "S2WERR_UNIT_OFFLINE";
+        case 4:     return "S2WERR_ALREADY_TRACKED";
+        case 5:     return "S2WERR_NOT_TRACKED";
+        case 6:     return "S2WERR_BUFF_ERROR";
+        case 7:     return "S2WERR_SRC_ADDRESS";
+        case 8:     return "S2WERR_DST_ADDRESS";
+        case 9:     return "S2WERR_BAD_BROADCAST";
+        case 10:    return "S2WERR_BAD_MULTICAST";
+        case 11:    return "S2WERR_MULTICAST_FULL";
+        case 12:    return "S2WERR_BAD_EVENT";
+        case 13:    return "S2WERR_BAD_STATDATA";
+        case 15:    return "S2WERR_IS_CONFIGURED";
+        case 16:    return "S2WERR_NULL_POINTER";
+        case 17:    return "S2WERR_TOO_MANY_RETRIES";
+        case 18:    return "S2WERR_RCVRBLE_HDW_ERR";
+        default:    return "S2WERR_?";
     }
 }
 

@@ -832,14 +832,25 @@ static BOOL nsl_default_server(ToolAddr *out)
         }
     }
 
-    if (ami_config_load(&nsl_config) == AMI_CFG_OK &&
-        nsl_config.resolver.nameserver_count > 0)
+    /*
+     * ONE EXIT after the load, because ami_config_load() now allocates the
+     * interface list and this function is its only owner.  The address wanted
+     * is copied into *out before the free, so nothing here outlives it.
+     */
     {
-        tool_addr_v4(out, nsl_config.resolver.nameserver[0]);
-        return TRUE;
-    }
+        BOOL found = FALSE;
 
-    return FALSE;
+        if (ami_config_load(&nsl_config) == AMI_CFG_OK &&
+            nsl_config.resolver.nameserver_count > 0)
+        {
+            tool_addr_v4(out, nsl_config.resolver.nameserver[0]);
+            found = TRUE;
+        }
+
+        ami_config_free(&nsl_config);
+
+        return found;
+    }
 }
 
 /* The RCODE, as a sentence. Only the first six are named by RFC 1035. */
