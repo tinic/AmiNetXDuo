@@ -58,6 +58,42 @@ emu_board_lines() { # board mac backend [extra-options]
     esac
 }
 
+# DOES THE EMULATOR ACTUALLY USE THE mac= WE WROTE?  $1 board.  0 yes, 1 no.
+#
+# On every board but one, yes.  On ne2000_pcmcia, NO, and the option is
+# accepted in silence -- which is the worst shape a configuration key can have.
+#
+# THE MECHANISM, so nobody has to bisect it again.  Amiberry builds the PCMCIA
+# NE2000 from gayle.cpp:1590:
+#
+#     if (!ne2000->init(ne2000_board_state, NULL)) {
+#
+# The NULL is the autoconfig_info, and ne2000_init_pcmcia() reads the MAC out
+# of `aci->rc->configtext`; with no aci there is no configtext, so
+# ethernet_getmac() is handed a null pointer, returns false, and the card takes
+# `td->mac` -- the HOST INTERFACE's address.  Every Zorro board reaches
+# ne2000_init_2() through a real aci and is unaffected, and the A2065 does the
+# same thing through a2065.cpp:1516.
+#
+# MEASURED, not read: nine bridged pcmcia configs on playhouse3 carrying nine
+# different mac= values all logged `NE2000: 'ens18' 3E:24:11:93:E8:8B`, which
+# is ens18's own address.  The matching a2065 runs logged
+# `7990: 'ens18' 00:80:10:49:AA:BB` for mac=02:41:4d:49:aa:bb -- the last three
+# bytes kept, the first three overwritten with Commodore's, exactly as
+# documented above.
+#
+# WHAT IT IS FOR.  A caller that puts this board on a bridge cannot give two
+# guests distinct identities, so it must not run two at once.
+# tools/amiberry-run.sh takes an interlock through tools/emu-rig-lock.sh
+# instead, and refuses the second run rather than producing two transcripts
+# that quietly describe each other.
+emu_board_mac_honoured() { # board
+    case "$1" in
+    ne2000_pcmcia) return 1 ;;
+    *)             return 0 ;;
+    esac
+}
+
 # HOW MUCH FAST RAM A BOARD LEAVES ROOM FOR.  $1 board, $2 what the caller
 # would otherwise use.  Prints a figure in MB.
 #

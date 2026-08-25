@@ -103,12 +103,23 @@ FAILED=0
 echo "=============================================================="
 echo "==> shipped commands, and whether any of them names a log"
 echo "=============================================================="
-if "$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD"; then
-    printf 'strings   PASS  no shipped command sends the user to a log\n' >> "$RESULTS"
-else
-    printf 'strings   FAIL  a shipped command sends the user to a log\n' >> "$RESULTS"
-    FAILED=$((FAILED + 1))
-fi
+# A SKIP IS NOT A FAIL, and this row reported one as the other.
+# check-no-log-advice.sh exits 2 for "there is nothing built to check" and 1
+# for "a command sends the user to a log"; an `if` collapses both into the same
+# branch, so a tree with no build/ci/default -- a fresh clone, a host stage
+# that has not run yet -- produced `strings FAIL` and counted an assertion that
+# had never been made.  A red row that names a defect nobody introduced costs
+# the same time as a real one, and teaches people to discount the row.
+"$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD"
+case "$?" in
+    0) printf 'strings   PASS  no shipped command sends the user to a log\n' \
+           >> "$RESULTS" ;;
+    2) printf 'strings   SKIP  nothing built at %s to check\n' "$BUILD" \
+           >> "$RESULTS" ;;
+    *) printf 'strings   FAIL  a shipped command sends the user to a log\n' \
+           >> "$RESULTS"
+       FAILED=$((FAILED + 1)) ;;
+esac
 
 # ------------------------------------------------------- the live half ----
 
@@ -238,6 +249,17 @@ echo "=================== the refusal matrix ========================"
 cat "$RESULTS"
 echo "==============================================================="
 echo "bringupfail_failed=$FAILED"
+
+# NOTHING RAN IS NOT A PASS EITHER.  With no build and no rig both halves skip,
+# every row above says SKIP, and reporting that as green would be the same
+# defect as reporting it red one direction over: a stage that asserted nothing
+# reading like a stage that asserted everything.  Exit 2 is what tools/ci.sh
+# already means by "the rig refused it before it could boot".
+if ! grep -q '  PASS  ' "$RESULTS" && ! grep -q '^live      FAIL' "$RESULTS"; then
+    echo "bringupfail: SKIPPED -- neither half of this harness could run."
+    echo "             Build the tree and set AMINETXDUO_KICKSTART."
+    exit 2
+fi
 
 if [ "$FAILED" = 0 ]; then
     echo "bringupfail: PASS -- every refusal names its operation and its code,"

@@ -46,6 +46,34 @@ ICMP. No bridge, no peer, no licensed Workbench. Twelve boots for the CPU arm,
 four for memory, three for interface count, one for refusals, two for interface
 slots; about seven minutes in total.
 
+## Two red rows on 2026-08-25 that were not defects
+
+Recorded here because the sweep below reports them, and a red row nobody can
+explain is read as a defect until somebody spends a day on it.  Both came from
+two runs sharing one emulator serial port.
+
+| row | what it looked like | what it was |
+|---|---|---|
+| `cpuspeed: a2065 68060 real` at `wall_s=185` while `68060 max` and `68060 clk209` passed at 16 s | a CPU-rate defect | contention. A real rate defect is monotonic in rate; one slow arm timing out while its FASTER siblings are green is two runs on one port |
+| `run-multidef.sh` round 4, `eth2 is DEFINED and appears NOWHERE`, from a transcript carrying eth0 and eth2 online on the same address | an interface-slot defect | the same. That transcript was another guest's |
+
+The harness cannot produce either any more: `tools/amiberry-run.sh` allocates
+the port through `tools/emu-rig-lock.sh` instead of hashing its tag into 900
+slots, and the guest signs its own transcript with a run token the harness
+checks at the first line and again at the end.  The mechanism, the measurements
+behind it and the one board that has to be serialized rather than isolated are
+in `tools/emu-rig-lock.sh` and in `tests/HARNESSES`, which is where they stay
+in step with the code.  `tools/emu-rig-lock-selftest.sh` asserts the exclusion
+and runs in `tools/ci.sh host`, so it goes red on any machine: no emulator, no
+ROM, no network.
+
+Before believing a suspicious red:
+
+```
+ls "${AMINETXDUO_RIG_LOCKDIR:-/tmp/aminetxduo-rig-$(id -u)}"
+pgrep -af serial-timestamp.py     # two lines on one port is the old bug
+```
+
 ### What the green arms measured, 2026-08-25
 
 Twelve CPU arms, all green: `a2065` and `ne2000_pcmcia` × 68020/68030/68040/68060

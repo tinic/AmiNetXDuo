@@ -438,6 +438,23 @@ stage_host() {
         return 1
     fi
 
+    # THAT TWO RUNS ON ONE MACHINE CANNOT TAKE THE SAME THING.  The emulator
+    # harnesses used to hash a run tag into 900 serial-port slots, so two
+    # checkouts running the same arm always collided and one guest was driven
+    # by the other's reader: no crash, just a transcript describing a machine
+    # the arm never booted, and two red rows in a release gate that were not
+    # defects.  The allocator that replaced it is only worth what its
+    # exclusion is worth, and that is a claim a host stage can check -- it
+    # needs no emulator, no ROM and no network.
+    if tools/emu-rig-lock-selftest.sh > "$BUILD/rig-lock-selftest.log" 2>&1; then
+        note "rig lock selftest: $(sed -n 's/^rig_lock_selftest=//p' \
+              "$BUILD/rig-lock-selftest.log")"
+    else
+        cat "$BUILD/rig-lock-selftest.log"
+        fail "two runs on one host can take the same port, name or address"
+        return 1
+    fi
+
     # The same argument one level down, for the harnesses that grade a
     # transcript rather than a check count.  run-addifup.sh is the gate for
     # "AddNetInterface never came back" and runs on one self-hosted runner, so
@@ -1520,13 +1537,21 @@ stage_matrix() {
 
     # The strings half of the refusal arm needs no emulator at all, so it runs
     # first and its verdict survives a rig that cannot boot anything.
-    if "$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD/default"; then
-        note "PASS  no shipped command sends the user to a log"
-    else
-        fail "a shipped command tells the user to read a debug log that a\
+    # Exit 2 is "nothing built to check" and exit 1 is "a command does it".
+    # An `if` made those one branch, and a matrix stage run without the cross
+    # stage having built build/ci/default reported the skip as a FAIL -- an
+    # assertion counted red that had never been made.  Same defect, same shape,
+    # in tests/tools/run-bringupfail.sh.
+    rc=0
+    "$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  no shipped command sends the user to a log" ;;
+        2) skip "log advice: nothing built at $BUILD/default to run strings\
+ over -- run the cross stage first" ;;
+        *) fail "a shipped command tells the user to read a debug log that a\
  shipping build does not produce (tests/tools/check-no-log-advice.sh)"
-        bad=$((bad + 1))
-    fi
+           bad=$((bad + 1)) ;;
+    esac
 
     "$ROOT/tests/tools/run-cpuspeed.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in

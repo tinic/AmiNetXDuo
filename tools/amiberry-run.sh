@@ -267,9 +267,56 @@ SERIALTS="$ROOT/build/amiberry-serial-$TAG.stamped.log"
 UAELOG="$ROOT/build/amiberry-$TAG.log"
 CFG="$ROOT/build/amiberry-$TAG.uae"
 
-# One listening port per tag, so two tagged runs never collide.  Same hashing
-# as tools/winuae-run.sh.
-PORT=$((12000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
+# THE SERIAL PORT IS ALLOCATED, NOT DERIVED.  It used to be
+#
+#     PORT=$((12000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
+#
+# and $TAG is the PER-ARM tag, so two checkouts running the same arm always got
+# the same number and two unrelated arms collided one time in 900.  With
+# `serial_port=.../wait` the emulator listens and blocks until something
+# connects, and nothing checked that the something was ours: on 2026-08-25
+# three readers were measured on 12714 at once, and what came out was a
+# transcript with two interfaces on one address and an arm that hung at 185 s
+# while its faster siblings passed in 16 s.  tools/emu-rig-lock.sh has the long
+# version and the mechanism.
+#
+# rig_claim_port both locks the number against every other harness in this tree
+# and bind-probes it against everything else on the host, and HOLDS it -- the
+# descriptor stays open for the life of this script, so the reservation cannot
+# lapse between the probe and the emulator's own bind.
+# shellcheck source=emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
+rig_claim_port "amiberry $TAG" || exit 2
+PORT="$RIG_PORT"
+
+# AND NO ORPHANED READER IS AIMED AT IT.  rig_port_readers has the mechanism
+# and the reason it is anchored the way it is.  The reader's own pid goes in a
+# file further down and the trap kills it on every path out, so this run cannot
+# create one; this is the belt for the runs that started before that fix, or
+# under a shell that was killed with -9.
+#
+# NOT KILLED FROM HERE.  Another agent's live run is indistinguishable from an
+# orphan at this distance and reaping one would be worse than the collision.
+# It refuses and names the process instead, which takes two seconds to act on.
+_stale=$(rig_port_readers "$PORT")
+if [ -n "$_stale" ]; then
+    echo >&2
+    echo "REFUSING to boot: a serial reader is already aimed at port $PORT." >&2
+    printf '  %s\n' "$_stale" >&2
+    echo >&2
+    echo "  Nothing is listening there yet, so the port passed the bind" >&2
+    echo "  probe -- and the moment this run's emulator binds it, that" >&2
+    echo "  reader connects and takes this guest's transcript." >&2
+    echo "  It is left alone rather than killed: from here an orphan and" >&2
+    echo "  another agent's live run look identical." >&2
+    exit 2
+fi
+
+# A RUN TOKEN, printed by the guest into its own transcript.  Recorded here so
+# that a log read a week later can be matched to the run that produced it
+# without believing a filename.  See the envsetup line in the Startup-Sequence
+# and the check after the run.
+RUNTOKEN="$(printf '%s-%s-%s' "$$" "$PORT" "$(date +%s)")"
 
 # One MAC per tag, for the reason at the board table above.  The derivation and
 # the reasoning behind its shape live in tools/emu-mac.sh, which is where every
@@ -282,6 +329,48 @@ PORT=$((12000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
 # shellcheck source=emu-mac.sh
 . "$ROOT/tools/emu-mac.sh"
 MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
+
+# EXCEPT ON THE ONE BOARD WHERE THE EMULATOR THROWS THE MAC AWAY.  Amiberry
+# instantiates the PCMCIA NE2000 with no autoconfig record at all
+# (`ne2000->init(ne2000_board_state, NULL)`, gayle.cpp:1590), so the mac= we
+# just wrote never reaches ne2000_init_2() and it falls back to the HOST
+# INTERFACE's address.  Measured across every bridged pcmcia run on this rig:
+# nine different mac= values in nine configs, and `NE2000: 'ens18'
+# 3E:24:11:93:E8:8B` in all nine logs -- ens18's own address.  The A2065 is not
+# affected; it takes the same option through a2065.cpp:1516 and honours it.
+#
+# So two bridged pcmcia guests are two machines at two addresses under ONE
+# hardware address, which is not a collision anything reports.  The frames
+# arrive, every neighbour cache on the LAN keeps whichever answered last, and
+# what fails is an assertion somewhere else entirely -- a peer that reached the
+# other run's listener, an arp table with the wrong owner in it.
+#
+# It cannot be fixed from here, so it is DETECTED instead: one bridged pcmcia
+# run at a time on a host, and the second is refused with a sentence that says
+# what to do.  SLIRP runs are untouched -- each has a NAT of its own and no
+# shared segment to poison.
+if [ -n "$BOARD" ] && ! emu_board_mac_honoured "$BOARD"; then
+    case "$BACKEND" in
+        slirp|slirp_inbound) ;;
+        *)
+            if ! rig_claim_name "bridged-$BOARD" "$TAG ($BACKEND) in $ROOT"; then
+                echo >&2
+                echo "REFUSING to start a second bridged $BOARD run on this host." >&2
+                echo >&2
+                echo "  Amiberry ignores mac= for this board and gives every" >&2
+                echo "  guest the host interface's own address (gayle.cpp:1590)," >&2
+                echo "  so two of these on one LAN are one hardware address at" >&2
+                echo "  two IP addresses and they poison each other's ARP." >&2
+                echo >&2
+                echo "  Serialize them: wait for the run above to finish." >&2
+                echo "  -B slirp needs no interlock, and -N a2065 honours mac=" >&2
+                echo "  and may be run bridged in parallel." >&2
+                exit 2
+            fi
+            echo "==> bridged $BOARD interlock held (mac= is ignored on this board)"
+            ;;
+    esac
+fi
 
 rm -rf "$HD"
 mkdir -p "$HD/s" "$HD/c" "$HD/env" "$HD/envarc" "$HD/t" "$HD/clips" "$ROOT/build"
@@ -347,9 +436,16 @@ cp "$ENVSETUP" "$HD/c/envsetup"
 # the overrun that wedged the TLS test on 4096.
 STACK_BYTES="${AMINETXDUO_GUEST_STACK:-8192}"
 
+# envsetup takes the run token and prints it out the serial port before
+# anything else runs, so the FIRST line of every transcript says which run
+# produced it.  A transcript is otherwise anonymous: the reader connects to a
+# socket and writes what arrives, and if the socket belonged to another
+# emulator there is nothing in the bytes to say so.  That is not a hypothetical
+# -- it is what happened on 2026-08-25, and the arms that read a foreign
+# transcript reported findings about a guest they never booted.
 cat > "$HD/s/Startup-Sequence" <<EOF
 failat 9999
-c:envsetup
+c:envsetup $RUNTOKEN
 stack $STACK_BYTES
 $EXE_NAME${GUEST_ARGS:+ $GUEST_ARGS} >DH0:stdout.txt
 echo >DH0:.done "\$RC"
@@ -451,18 +547,41 @@ AMIBERRY_PID=""
 NC_PID=""
 LOGCAP_PID=""
 LOGPIPE=""
+
+# WHERE THE ORPHANS CAME FROM.  $NC_PID is the retry SUBSHELL, and the reader
+# is a child of it; killing the subshell left `python3 tools/serial-timestamp.py`
+# running, still connected, still holding a socket, for as long as the machine
+# was up.  `pgrep -af serial-timestamp.py` on playhouse3 routinely showed
+# readers belonging to harnesses that had exited hours before, and the first
+# thing anyone diagnosing a collision had to do was work out which of them were
+# alive.  The subshell writes the reader's pid into $READERPID and cleanup
+# kills that too, so a run reaps what it started -- on every path out,
+# including the failure ones, because the trap covers them all.
+READERPID="$ROOT/build/amiberry-$TAG.readerpid"
+rm -f "$READERPID"
+
 cleanup() {
+    local rp
+    rp=$(cat "$READERPID" 2>/dev/null || true)
     [ -n "$NC_PID" ] && kill -TERM "$NC_PID" 2>/dev/null || true
     NC_PID=""
-    [ -n "$AMIBERRY_PID" ] || return 0
-    kill -TERM "$AMIBERRY_PID" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        kill -0 "$AMIBERRY_PID" 2>/dev/null || { AMIBERRY_PID=""; return 0; }
-        sleep 0.5
-    done
-    echo "!! amiberry $AMIBERRY_PID ignored SIGTERM; sending SIGKILL" >&2
-    kill -KILL "$AMIBERRY_PID" 2>/dev/null || true
-    AMIBERRY_PID=""
+    [ -n "$rp" ] && kill -TERM "$rp" 2>/dev/null || true
+    rm -f "$READERPID"
+    if [ -n "$AMIBERRY_PID" ]; then
+        kill -TERM "$AMIBERRY_PID" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            kill -0 "$AMIBERRY_PID" 2>/dev/null || { AMIBERRY_PID=""; break; }
+            sleep 0.5
+        done
+        if [ -n "$AMIBERRY_PID" ]; then
+            echo "!! amiberry $AMIBERRY_PID ignored SIGTERM; sending SIGKILL" >&2
+            kill -KILL "$AMIBERRY_PID" 2>/dev/null || true
+            AMIBERRY_PID=""
+        fi
+    fi
+    # And the port goes back only once nothing of ours can still be on it.
+    rig_release_port
+    return 0
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -533,10 +652,62 @@ else
 fi
 AMIBERRY_PID=$!
 
+# ------------------------------------------- WHOSE LISTENER IS ON THIS PORT --
+#
+# The reservation above makes a collision very unlikely.  Being able to SAY SO
+# is a different and stronger property, and it is the one that was missing:
+# nothing checked, so nothing could report, and an arm read a foreign guest and
+# published findings about a machine it never booted.
+#
+# WHAT CANNOT BE DONE HERE, so nobody spends an afternoon on it again.  The
+# obvious check is "is the process listening on $PORT the amiberry we started",
+# and on this rig it has NO ANSWER.  Amiberry carries file capabilities --
+#
+#     amiberry cap_net_admin,cap_net_raw=eip
+#
+# which the bridged backends need -- and a process that gains capabilities from
+# its executable is marked NON-DUMPABLE: the kernel reparents its /proc entry
+# to root, so /proc/<pid>/fd is unreadable even by the user who started it, and
+# ss(8) declines to name it for the same reason.  Measured: a live amiberry
+# listening on 127.0.0.1:12709 shows as `LISTEN 0 1 127.0.0.1:12709` with an
+# EMPTY Process column, while sshd's socket in the same output carries its pid.
+#
+# So the check that is made is the one that has an answer:
+#
+#   the port we reserved is bound at all, which says the emulator got the
+#     number this script chose rather than failing over to something else;
+#   the GUEST'S OWN TOKEN, below and in the run loop, which is a stronger
+#     statement than socket ownership anyway -- it is the machine under test
+#     saying which run it belongs to, in the artefact that outlives the rig.
+LISTEN_INODE=""
+for _ in $(seq 1 40); do
+    kill -0 "$AMIBERRY_PID" 2>/dev/null || break
+    LISTEN_INODE=$(rig_listen_inode "$PORT" || true)
+    [ -n "$LISTEN_INODE" ] && break
+    sleep 0.5
+done
+
+if [ -z "$LISTEN_INODE" ]; then
+    echo "==> serial port $PORT: nothing bound it yet"
+elif rig_pid_holds_socket "$AMIBERRY_PID" "$LISTEN_INODE" 2>/dev/null; then
+    echo "==> serial port $PORT, held by amiberry $AMIBERRY_PID"
+else
+    echo "==> serial port $PORT bound (owner opaque: amiberry has file caps)"
+fi
+
 # serial_port=.../wait blocks the emulator until this connects, so retry until
 # it does.  A single attempt loses the race often enough to matter, and the
 # failure is not a missing log, it is an emulator that waits forever.
+#
+# THE READER'S PID GOES IN A FILE.  $! here is the subshell, and the reader is
+# its child; cleanup needs the child, or it leaks (see $READERPID above).  The
+# port lock is closed inside the subshell for the same reason in reverse: an
+# inherited descriptor would keep the port reserved for as long as any stray
+# reader lived, which is the leak this whole file is about, only quieter.
 (
+    [ -z "${RIG_PORT_FD:-}" ] || eval "exec ${RIG_PORT_FD}>&-" 2>/dev/null || true
+    reader=""
+    trap '[ -z "$reader" ] || kill -TERM "$reader" 2>/dev/null; exit 0' TERM INT
     for _ in $(seq 1 60); do
         kill -0 "$AMIBERRY_PID" 2>/dev/null || exit 0
         # Both readers append to $SERIAL identically; the python one also
@@ -544,10 +715,13 @@ AMIBERRY_PID=$!
         # so the retry above behaves as it did with nc alone.
         if [ -n "$SERIAL_READER" ]; then
             $SERIAL_READER 127.0.0.1 "$PORT" "$SERIAL" "$SERIALTS" \
-                2>/dev/null && exit 0
+                2>/dev/null &
         else
-            nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null && exit 0
+            nc 127.0.0.1 "$PORT" >> "$SERIAL" 2>/dev/null &
         fi
+        reader=$!
+        echo "$reader" > "$READERPID"
+        wait "$reader" && exit 0
         sleep 0.5
     done
 ) &
@@ -556,7 +730,30 @@ NC_PID=$!
 status=124
 elapsed=0
 EARLY_EXIT=0
+TOKEN_SEEN=0
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
+    # THE PAIRING CHECK, AS SOON AS THERE IS ANYTHING TO CHECK.  The same
+    # assertion is made again after the run, over the finished file, but by
+    # then a foreign transcript has already been read for the whole timeout --
+    # and on 2026-08-25 that was 185 s of an arm being driven by somebody
+    # else's guest.  One grep of the first line a second stops it at the first
+    # line.  Costs nothing: $SERIAL is empty until the guest speaks.
+    if [ "$TOKEN_SEEN" = 0 ] && [ -s "$SERIAL" ]; then
+        _tok=$(tr -d '\r' < "$SERIAL" 2>/dev/null |
+               grep -m1 '^ANXD-RUN ' || true)
+        if [ -n "$_tok" ]; then
+            TOKEN_SEEN=1
+            if [ "$_tok" != "ANXD-RUN $RUNTOKEN" ]; then
+                echo >&2
+                echo "!! THIS IS NOT OUR GUEST -- stopping at its first line." >&2
+                echo "!!   expected: ANXD-RUN $RUNTOKEN" >&2
+                echo "!!   arriving: $_tok" >&2
+                echo "!! Something else is on serial port $PORT.  Lock" >&2
+                echo "!! directory: $(rig_lockdir)" >&2
+                exit 2
+            fi
+        fi
+    fi
     if [ -f "$HD/.done" ]; then
         status=$(tr -dc '0-9' < "$HD/.done" | head -c 4)
         status=${status:-0}
@@ -583,6 +780,42 @@ if [ -n "$LOGCAP_PID" ]; then
     LOGCAP_PID=""
 fi
 [ -z "$LOGPIPE" ] || rm -f "$LOGPIPE"
+
+# ------------------------------------------------- WHOSE TRANSCRIPT IS THIS --
+#
+# The listener check above asked the question of the host, before a byte was
+# read.  This asks it of the ARTEFACT, which is the copy that survives: a
+# transcript on disk a week later has no pid, no port and no lock directory,
+# only the bytes the guest sent.  envsetup prints `ANXD-RUN <token>` as its
+# first act, so a transcript either opens with this run's token or it did not
+# come from this run.
+#
+# THE POLARITY MATTERS.  A DIFFERENT token is fatal: it is a foreign guest, and
+# every assertion downstream would be reading someone else's machine.  NO token
+# is only a note -- a guest can die in the ROM before AmigaDOS runs a line of
+# the Startup-Sequence, and that is a real failure with its own diagnosis
+# further down; turning it into "the transcript is foreign" would put the wrong
+# word on it.
+#
+# THE CR IS NOT OPTIONAL.  Exec's raw serial output turns the LF into CR LF, so
+# every line in $SERIAL ends `\r\n`; an anchored `$` match without stripping it
+# reports this run's own token as foreign, which is a check that fires on
+# everything and is therefore worse than no check.  Caught the first time this
+# ran.
+_foreign=$(tr -d '\r' < "$SERIAL" 2>/dev/null | grep -a '^ANXD-RUN ' |
+           grep -av "^ANXD-RUN $RUNTOKEN\$" | head -1 || true)
+if [ -n "$_foreign" ]; then
+    echo >&2
+    echo "!! THIS IS NOT THIS RUN'S TRANSCRIPT." >&2
+    echo "!!   expected: ANXD-RUN $RUNTOKEN" >&2
+    echo "!!   found:    $_foreign" >&2
+    echo "!! $SERIAL was written by another emulator's guest." >&2
+    exit 2
+fi
+if ! tr -d '\r' < "$SERIAL" 2>/dev/null |
+        grep -qa "^ANXD-RUN $RUNTOKEN\$"; then
+    echo "!! no run token in $SERIAL: the guest did not reach c:envsetup" >&2
+fi
 
 # ------------------------------------------- illegal instruction assertion --
 #

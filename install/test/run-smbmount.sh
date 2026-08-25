@@ -605,7 +605,14 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 
 CFG="$ROOT/build/smb-$TAG.uae"
 SERIAL="$ROOT/build/smb-$TAG-serial.log"
-PORT=$((12000 + $(printf '%s' "smb-$TAG" | cksum | cut -d' ' -f1) % 900))
+# ALLOCATED, not hashed: `smb-$TAG` hashed into the same 900 slots that
+# tools/amiberry-run.sh used, so an SMB run and an unrelated arm in another
+# checkout could land on one port and read each other's guest.
+# tools/emu-rig-lock.sh has the mechanism.
+# shellcheck source=../../tools/emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
+rig_claim_port "run-smbmount $TAG" || exit 2
+PORT="$RIG_PORT"
 : > "$SERIAL"
 
 cat > "$CFG" <<EOF

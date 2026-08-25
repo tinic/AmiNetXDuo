@@ -27,6 +27,15 @@
 #     found-empty count) after the transfer;
 #   the peer's byte count and rate, which is what the sender's kernel saw
 #     accepted, not what anything here printed;
+#   IT IS SAFE TO RUN TWO OF THESE AT ONCE only in the sense that the second
+#   REFUSES: the guest address and the emulator's serial port are both claimed
+#   through tools/emu-rig-lock.sh, so they cannot alias, but Amiberry gives
+#   every bridged ne2000_pcmcia guest the HOST's MAC address whatever mac= says
+#   (tools/emu-board.sh emu_board_mac_honoured), and one hardware address on
+#   two guests cannot be made to work from here.  tools/amiberry-run.sh takes
+#   an interlock and the second run stops with a sentence saying to serialize.
+#   `-N a2065` honours mac= and has no such limit.
+#
 #   the wire's zero-window count and window ceiling, from a pcap taken on the
 #     emulator host's own interface, which carries every guest frame.
 #
@@ -54,7 +63,7 @@ IFACE=
 PEERSSH=
 BOARD=ne2000_pcmcia
 MODEL=A1200
-ADDRESS=192.168.1.240
+ADDRESS=
 NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
 DIVISORS="16 8"
@@ -85,10 +94,37 @@ for f in "$BSD" "$TOOLS/AddNetInterface" "$TOOLS/iperf" "$TOOLS/netstat"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
+# THE GUEST'S ADDRESS IS CLAIMED, NOT PINNED.  It was 192.168.1.240, and a
+# pinned address on a shared LAN is wrong twice over:
+#
+#   two runs of this harness at once are two guests at ONE address, and the
+#     peer's connection lands on whichever answered its ARP -- "the guest never
+#     accepted" from a run whose guest is sitting happily in `iperf -s`;
+#   .240 is CONTESTED on the lab LAN in its own right -- it is inside the
+#     range the router hands out -- and .243, which tests/tools/run-events.sh
+#     took the same way, is a live
+#     machine.  A ping scan on 2026-08-25 found fifteen live hosts in
+#     192.168.1.200-254 and .243 among them.
+#
+# rig_claim_address locks the address against other runs AND pings it before
+# taking it, so a range may safely overlap real machines: one that answers is
+# skipped.  -a still wins, for a reservation somebody wants to hold.
+if [ -z "$ADDRESS" ]; then
+    # shellcheck source=../../tools/emu-rig-lock.sh
+    . "$ROOT/tools/emu-rig-lock.sh"
+    rig_claim_address "${AMINETXDUO_RIG_ADDR_PREFIX:-192.168.1}" \
+                      "${AMINETXDUO_RIG_ADDR_FIRST:-200}" \
+                      "${AMINETXDUO_RIG_ADDR_LAST:-254}" \
+                      "poolshare in $ROOT" || {
+        echo "no free guest address; pass -a <addr> to pin one" >&2; exit 2; }
+    ADDRESS="$RIG_ADDRESS"
+fi
+
 # The whole point is one binary for every arm; print what it is so the record
 # survives the build directory.
 echo "library_sha256=$(sha256sum "$BSD" | cut -d' ' -f1)"
 echo "divisors=$DIVISORS fastmem=${AMINETXDUO_FASTMEM:-unset}"
+echo "guest_address=$ADDRESS"
 
 RESULTS="$ROOT/build/poolshare-results-$$"
 mkdir -p "$RESULTS"

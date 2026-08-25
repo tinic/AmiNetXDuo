@@ -44,6 +44,42 @@
 #             as one.  The note says what is red and on which check, so the
 #             row is a defect report rather than a hole.
 
+# RUNNING TWO OF THESE AT ONCE
+#
+# Safe by default, and it did not used to be.  Every harness below reaches the
+# emulator through tools/amiberry-run.sh, which used to derive the guest's
+# serial port by hashing its PER-ARM tag into 900 slots -- so two checkouts
+# running the same arm always picked the same port, and with
+# `serial_port=.../wait` the emulator blocks until something connects and
+# nothing checked whose reader it was.  On 2026-08-25 three readers were
+# measured on 12714 at once and the arms that read a foreign guest reported
+# findings about a machine they had never booted: a transcript with two
+# interfaces on one address, an arm hung at 185 s while its FASTER siblings
+# passed in 16 s, two red rows in a release gate that were not defects.
+#
+# What replaced it is one lock directory, host-wide:
+#
+#     $AMINETXDUO_RIG_LOCKDIR, or ${TMPDIR:-/tmp}/aminetxduo-rig-<uid>
+#
+# tools/emu-rig-lock.sh claims a serial port out of it by locking AND
+# bind-probing, holds the reservation for the life of the run, verifies that
+# the listener on that port is the emulator this run started, and has the guest
+# echo a run token into the first line of its own transcript.  Nothing has to
+# be set, nothing has to be remembered, and AMINETXDUO_RUN_TAG is for naming
+# artefacts -- it never was the thing that kept two runs apart.
+#
+# THE TWO THAT STILL NEED SERIALIZING, and both refuse rather than corrupt:
+#
+#   a bridged ne2000_pcmcia guest.  Amiberry ignores mac= on that board and
+#     hands every guest the HOST interface's address (gayle.cpp:1590,
+#     tools/emu-board.sh emu_board_mac_honoured), so two of them on one LAN are
+#     one hardware address at two IP addresses.  The second run stops with a
+#     sentence saying to serialize.  -N a2065 honours mac= and is unaffected.
+#   a harness that PINS a guest address with -a.  Left to itself
+#     tests/perf/run-poolshare.sh claims one and pings it first; pin one and
+#     you own the collision, including with the fifteen live machines a scan
+#     found in 192.168.1.200-254.
+
 # ---------------------------------------------------------------- tier 1 --
 
 # Nothing here yet: every harness below needs an emulator.

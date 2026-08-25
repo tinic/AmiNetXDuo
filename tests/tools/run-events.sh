@@ -63,10 +63,20 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 IFDEVICE="${AMINETXDUO_IFDEVICE:-a2065.device}"
-ADDRESS=192.168.1.243
+ADDRESS=
 NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
 REPLAY=""
+
+# THE GUEST ADDRESS IS CLAIMED, NOT PINNED.  This harness had 192.168.1.243
+# written into it, and .243 is a LIVE MACHINE on the lab LAN -- a ping scan on
+# 2026-08-25 found it answering, along with fourteen other hosts in
+# 192.168.1.200-254.  A pinned address is also two guests at one address the
+# moment two runs overlap.  rig_claim_address locks it against other runs and
+# PINGS it before taking it, so a range may overlap real machines safely: one
+# that answers is skipped.  -a still pins one.
+# shellcheck source=../../tools/emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
 
 while getopts "m:t:b:N:B:a:g:r:" opt; do
     case "$opt" in
@@ -85,6 +95,18 @@ while getopts "m:t:b:N:B:a:g:r:" opt; do
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
+
+# -r replays a transcript and boots nothing, so it needs no address and must
+# not take one off a rig it is not using.
+if [ -z "$ADDRESS" ] && [ -z "$REPLAY" ]; then
+    rig_claim_address "${AMINETXDUO_RIG_ADDR_PREFIX:-192.168.1}" \
+                      "${AMINETXDUO_RIG_ADDR_FIRST:-200}" \
+                      "${AMINETXDUO_RIG_ADDR_LAST:-254}" \
+                      "run-events in $ROOT" || {
+        echo "no free guest address; pass -a <addr> to pin one" >&2; exit 2; }
+    ADDRESS="$RIG_ADDRESS"
+    echo "guest_address=$ADDRESS"
+fi
 
 case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
 
@@ -160,6 +182,9 @@ EOF
 # well as a success.  A device name no machine has: the open fails, the
 # interface never exists, and NETEVENT_DEVICE_OPEN is the only thing on the
 # machine that says so afterwards.
+# Its ADDRESS is pinned and that is safe: nosuch.device never opens, so the
+# interface never exists and not one frame carrying this address reaches the
+# wire.  It is a string in a file the config parser reads, not a guest.
 cat > "$STAGE/devs/NetInterfaces/eth9" <<EOF
 DEVICE=nosuch.device
 UNIT=0

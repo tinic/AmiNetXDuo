@@ -333,6 +333,8 @@ case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 . "$ROOT/tools/sana2-stage.sh"
 # shellcheck source=../../tools/emu-board.sh
 . "$ROOT/tools/emu-board.sh"
+# shellcheck source=../../tools/emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
 
 BOARD_MODEL=$(cards_rows "$BOARD" | awk '{ print $2; exit }')
 if [ -z "$BOARD_MODEL" ]; then
@@ -1048,9 +1050,14 @@ boot() {
     local elapsed=0
     local port
 
-    # One listening port per run name, so two runs never collide.  Same
-    # hashing as tools/amiberry-run.sh.
-    port=$((12000 + $(printf '%s' "$TAG-$name" | cksum | cut -d' ' -f1) % 900))
+    # ALLOCATED, not hashed.  Hashing "$TAG-$name" gave the same number to the
+    # same run name in every checkout, so two release gates in two clones
+    # listened on one port and the second guest was driven by the first one's
+    # reader.  tools/emu-rig-lock.sh locks and bind-probes it instead, and
+    # holds the reservation until this script exits -- one claim per boot,
+    # released with the run.  The reasoning is in that file.
+    rig_claim_port "run-workbench $TAG-$name" || exit 2
+    port="$RIG_PORT"
 
     : > "$serial"
     rm -f "$HD/.done"

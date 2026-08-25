@@ -157,12 +157,23 @@ PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
 # The peer port, when nobody asked for one.  A run that shares a port with
 # another run does not fail: it reports a number measured against somebody
-# else's traffic, which is worse.  tools/amiberry-run.sh derives its own the
-# same way, and TAG is only known here.
+# else's traffic, which is worse.
+#
+# This one is a LISTENING PORT ON THE PEER, not on this host, so the bind probe
+# in tools/emu-rig-lock.sh cannot answer for it -- it can only ask the kernel
+# it is running on.  The flock still can, and it is the half that keeps two
+# runs on this rig apart, which is the case that bites.  The old derivation is
+# kept as the fallback for a host with no flock(1).
 if [ -z "$PORT" ]; then
-    # TAG and the pid: two runs with the same tag -- both instances asking
-    # for -s ours with no -T -- would otherwise still share a port.
-    PORT=$((17000 + ($(printf %s "$TAG" | cksum | cut -d" " -f1) + $$) % 700))
+    # shellcheck source=../../tools/emu-rig-lock.sh
+    . "$ROOT/tools/emu-rig-lock.sh"
+    if rig_claim_port "stackprof-peer $TAG" 17000 700 2> /dev/null; then
+        PORT="$RIG_PORT"
+    else
+        # TAG and the pid: two runs with the same tag -- both instances asking
+        # for -s ours with no -T -- would otherwise still share a port.
+        PORT=$((17000 + ($(printf %s "$TAG" | cksum | cut -d" " -f1) + $$) % 700))
+    fi
 fi
 
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac

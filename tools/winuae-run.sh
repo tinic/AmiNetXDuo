@@ -218,6 +218,16 @@ TAG="${AMINETXDUO_RUN_TAG:-winuae}"
 # all keyed on the tag so two runs never share any of them.  The emulator
 # itself is still serialised by a mutex on the Windows side, one interactive
 # session, one machine.
+# STILL HASHED, and knowingly.  tools/amiberry-run.sh allocates its port
+# through tools/emu-rig-lock.sh instead, after the hash there put three readers
+# on one number and produced two red rows that were not defects
+# (docs/TEST-MATRIX.md).  The same fix does not port: this number is a port on
+# the WINDOWS host at the other end of $WINUAE_HOST, and neither the flock nor
+# the bind probe can be taken there from here -- both would be answered by this
+# machine's kernel about this machine's ports, which is a check that passes and
+# means nothing.  The range is 11000 rather than 12000 so the two runners
+# cannot collide with each other, and a rig that runs two WinUAE arms at once
+# needs the claim made ON that host before this is safe.
 PORT=$((11000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
 
 HD="$ROOT/build/winuae-testhd-$TAG"
