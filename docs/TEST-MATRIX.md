@@ -314,3 +314,141 @@ assertion of its own that could not fail while it was being written — a grep
 for a reason word that matched the command's own progress echo, a name that was
 present only because the harness had asked for it, a check-count floor that a
 one-packet pool clears.
+
+## The final gate of the defect-fix phase — 2026-08-25, `1805861d`
+
+Ten commits landed on 2026-08-25, from six agents, and until this run no single
+pass had ever covered the finished tree. Each of them was gated against the tip
+that existed while it was being written, which proves the commit and not the
+result of putting all ten together. A tree that has only ever been tested in
+pieces has been tested in pieces.
+
+So: one fresh clone of `1805861d`, its own build directory, on the machine that
+has the Kickstarts and `a2065.device` in it — every gate below ran against the
+same tree, in the same session, and nothing was rebuilt between them.
+
+| | gate | result |
+|---|---|---|
+| 1 | `tools/ci.sh host` | **green** — 99/99 ctest, 99 registered against `HOST_TESTS_EXPECTED`, and all twelve `*-verdict-selftest.sh` graders reporting 0 wrong |
+| 2 | `tools/ci.sh matrix` | **green** — every arm; the detail is below |
+| 3 | `tests/tools/run-ifdhcp.sh`, SLIRP | **green** — PASS, 21 s against a 105 s ceiling |
+| 3 | `tests/tools/run-nettools.sh` | **green** — `nettools_result=PASS` |
+| 3 | `tests/tools/run-cardsweep.sh` | **green** — `cards=9 pass=9 fail=0 fail_assert=0 skip=0 carried_both_ways=9 wall_s=369` |
+| 4 | bridged poolshare, `ne2000_pcmcia` | **green** — `peer_bytes=6356992 peer_lost=0 peer_outoforder=0`, `zero_windows=0`, 140 packets the fewest ever free of 207 |
+| 4 | bridged poolshare, `a2065` | **green** — `peer_bytes=8642560 peer_lost=0 peer_outoforder=0`, `zero_windows=0` |
+| 5 | `tests/netdev/run-netdelay.sh` at 68020 | **green** — 6 checks, 0 failures |
+| 5 | `tests/netdev/run-netdelay.sh` at 68060 | **green** — 6 checks, 0 failures |
+| 6 | `tests/tools/run-payverify.sh`, unshaped | **green** — 64/64 connections content-verified, v4 and v6, 11 856 direct fills |
+| 6 | the same under `-E 'loss 1%'` | **green** — 26/26, retransmissions up to 17 on one socket, guest overruns 0, qdisc removed and verified |
+| 7 | `tools/ci.sh cross`, all 14 configurations | 13 green. `cpu68060` **red, and pre-existing** — proven below |
+
+One red in the whole run, and it is the one that was already known. Nothing
+today's ten commits touched is in it.
+
+### The matrix stage, arm by arm
+
+This was the stage with no history to compare against — `tools/ci.sh matrix`
+landed on 2026-08-25 as well, so this is the first time it has been run against
+a tree it was not written on.
+
+| arm | boots | result |
+|---|---|---|
+| `check-no-log-advice.sh` | 0 | `log_advice_commands_checked=39 log_advice_offences=0` |
+| `run-cpuspeed.sh` | 12 | `cpuspeed_arms=12 cpuspeed_failed=0` |
+| `run-bigmem.sh` | 4 | `bigmem_arms=4 bigmem_failed=0` |
+| `run-multidef.sh` | 3 | PASS — every definition visible, every refusal carrying a reason |
+| `run-bringupfail.sh` | 1 | PASS — every refusal naming its operation and its code |
+| `run-ifslots.sh` | 3 | PASS — 29 checks, 0 failures, claims 1–6 and guard 4b |
+
+The memory arm had `AMINETXDUO_KICKSTART_A3000` and used it, so the two arms
+that need an A3000 to map their memory ran rather than skipping — the whole
+point of that variable is that a skipped 32 MB arm and a green one look alike:
+
+| arm | machine | Fast | Zorro III | pool | pool verdict |
+|---|---|---|---|---|---|
+| `chip-only` | A1200 68020 | 0 MB | — | 57 | band |
+| `lab-a1200` | A1200 68020 | 8 MB | — | 378 | band |
+| `accel-32m` | A3000 68030 | 8 MB | 32 MB | 513 | saturated |
+| `accel-128m` | A3000 68030 | 8 MB | 128 MB | 513 | saturated |
+
+The clamp still holds across the quadrupling, which is the assertion — 513 in
+both rows and not 513 as a constant.
+
+### The two timing arms are the fix, measured
+
+`run-netdelay.sh` is the only gate whose numbers mean something on their own,
+because it is the arm the raster-beam work was written for. Both CPUs, same
+tree, same boot:
+
+| | spins per line | lines per field | line costed at | 300 ms from the clock | the same hold counted in bus reads |
+|---|---|---|---|---|---|
+| 68020 | 17 | 313 | 63 µs | **311 ms** | 900 ms |
+| 68060 | 29 | 313 | 63 µs | **306 ms** | 859 ms |
+
+A wait asked for 300 ms gets 311 and 306. The counted loop it replaced gets 900
+and 859 on the same two machines, which is the shape of a measure of the CPU
+rather than of time — and the reason the never-shorter guarantee is the way
+round it is.
+
+### The one red: `cpu68060`, pre-existing and unchanged
+
+`tools/ci.sh cross` builds 14 configurations. Thirteen are clean. `cpu68060`
+fails, and it fails in `cmake/check-pcrel-branches.cmake`:
+
+```
+crypto68k_test: a 32-bit PC-relative branch does not land on a function.
+```
+
+**It is not today's.** Two proofs, one structural and one empirical.
+
+*Structural.* Between `f729d014` — the tip before the defect-fix phase began —
+and `1805861d`, `git diff` reports **no change at all** to
+`cmake/check-pcrel-branches.cmake`, `src/crypto68k/`, `tests/crypto68k/`,
+`src/tls/`, `src/tlslib/`, `tests/tls/` or the rest of `cmake/`. The entire
+surface this gate inspects is byte-identical across all ten commits.
+
+*Empirical.* The same configuration was built on a pristine `f729d014`
+worktree, with `-k` on both sides so the build does not stop at the first
+refusal and the whole list is visible. The two lists are identical — same
+twelve targets, same ten distinct refusals, in the same set:
+
+```
+src/tlslib/tls.library
+tests/crypto68k/crypto68k_25519_test   tests/crypto68k/crypto68k_bench
+tests/crypto68k/crypto68k_bulk         tests/crypto68k/crypto68k_ec_bench
+tests/crypto68k/crypto68k_ec_test      tests/crypto68k/crypto68k_test
+tests/tls/tls_bench                    tests/tls/tls_decompose
+tests/tls/tls_handshake                tests/tls/tls_https
+tests/tls/tls_interop
+```
+
+**Two corrections to how this red has been described, both from that
+enumeration.** It has been carried as "seven test images in `tests/crypto68k`
+and `tls_bench`". It is twelve targets, not seven; and `src/tlslib/tls.library`
+is in the list, which is **a shipped image and not a test image**. A user who
+selects `-DAMINETXDUO_CPU=68060` — a documented value of a cache variable with
+a `STRINGS` list, not an internal knob — cannot build `tls.library` at all.
+That is a larger defect than the note it inherited, it is pre-existing on
+`f729d014` exactly as it is on `1805861d`, and it is not fixed here: the brief
+for this run was to gate the tree and to fix only a proven regression.
+
+The reason it was under-described is worth keeping. `tools/ci.sh` builds in
+parallel and without `-k`, so `gmake` stops shortly after the first refusal and
+reports whichever targets happened to be in flight. The failure is real either
+way and the arm is correctly red, but the *list* that run prints is an artifact
+of scheduling. Enumerating it needs `-k`.
+
+### What this run does not cover
+
+Nothing here changes the honest gaps above — the PiStorm/Gayle rate half, the
+el3 FIFO under a real card, and two cards in one machine are as uncovered as
+they were, and the A1200 is out of service, so every arm above is emulated. The
+claim this section supports is narrower and is only about coverage in time: on
+2026-08-25 the tree at `1805861d` was gated once, as a unit, by everything in
+this document that can be run without that hardware.
+
+And it is `1805861d` and not whatever `main` says today. `e2acb0a3` landed
+while this run was in progress; it changes `docs/BACKLOG.md`,
+`docs/TEST-MATRIX.md` and one row of `tests/HARNESSES`, and **no source file at
+all**, so every result above still describes the code that is in the tree. The
+next commit that touches `src/` is the one that makes this section history.
