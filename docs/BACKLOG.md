@@ -5,6 +5,7 @@ comment beside the code, not an entry here.
 **ONE LINE PER ROW.** What is wrong and where. Not how it was found.
 | Item | Why it is open | Cite |
 |---|---|---|
+| `-ffunction-sections` reaches LTRANS without `-fno-optimize-sibling-calls` | a pairing the tree calls indivisible is split | `src/common/CMakeLists.txt:144` |
 | The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |

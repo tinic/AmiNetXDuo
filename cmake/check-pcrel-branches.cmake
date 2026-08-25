@@ -1,39 +1,12 @@
 # Fail the build on a 32-bit PC-relative branch that does not land on a function.
+# Function entries are nm UNION the linker map: an Amiga hunk symbol table holds no
+# locals, so a correct tail call to a static needs MAPFILE or this fails closed.
 #
-# WHAT THIS CATCHES, AND WHY IT IS A POST-LINK CHECK
-#
-# This toolchain mis-resolves a 32-bit PC-relative relocation (RELRELOC32)
-# against a LOCAL SECTION SYMBOL, the shape produced by a tail call from one
-# -ffunction-sections section to another section of the SAME object.  The
-# assembler leaves a non-zero addend in the displacement field and the linker
-# adds it a second time, so the branch lands twelve bytes short of its target:
-# in the MIDDLE of the preceding function, at whatever instruction boundary
-# happens to sit there.
-#
-# Nothing before the link can see it.  The object's relocation is well formed
-# and the object's disassembly shows only a placeholder; the wrong number
-# exists solely in the linked image.  Hence POST_BUILD, on the image.
-#
-# `ping` rebooted an A1200 on exactly this, and did it silently: six boots
-# for a two-command list, which from the outside reads as a hang.
-# docs/RESEARCH.md §25.
-#
-# THE INVARIANT
-#
-# A 68020 `bra.l`/`bsr.l` (opcode 60FF / 61FF) is emitted by this compiler only
-# for a call or a tail call, so the target is always a function entry, an
-# address that appears in the symbol table.  A branch that lands anywhere else
-# is a mis-resolved relocation.  Cross-OBJECT tail calls relocate against a
-# global symbol with a zero addend and come out right, which is why the great
-# many of those in bsdsocket.library pass this check unchanged.
-#
-# Inputs: BINARY, OBJDUMP, NM.
+# Inputs: BINARY, OBJDUMP, NM, MAPFILE (optional).
 #
 # SPDX-License-Identifier: MIT
 
-# Run with `cmake -P`, which starts with no policies set: IN_LIST below is an
-# `if` OPERATOR only under CMP0057, and without this the script fails with
-# "Unknown arguments specified" on CMake 3.31 while passing on 4.x.
+# cmake -P starts with no policies set; IN_LIST needs CMP0057.
 cmake_minimum_required(VERSION 3.20)
 
 if(NOT EXISTS "${BINARY}")
@@ -67,11 +40,45 @@ foreach(line IN LISTS nm_lines)
     endif()
 endforeach()
 
-# Walk the disassembly.  objdump decodes 60FF/61FF for a plain 68000, so it
-# prints them as a two-byte short branch and then carries on decoding the
-# 32-bit displacement as if it were code.  The mnemonics below the branch are
-# therefore meaningless, what matters is the BYTE COLUMN, which is contiguous
-# and in address order, so the displacement is simply the next two words.
+# Input sections start at column one, output sections at column zero; a long name
+# wraps its address onto the next line.  Requiring a second 0x<size> keeps symbol
+# lines out, and the gate on the header keeps the discarded listing out.
+set(map_addrs "")
+set(map_seen 0)
+if(MAPFILE AND EXISTS "${MAPFILE}")
+    file(READ "${MAPFILE}" map_out)
+    string(REPLACE ";" "\\;" map_out "${map_out}")
+    string(REPLACE "\n" ";" map_lines "${map_out}")
+    set(in_map 0)
+    set(pending "")
+    foreach(line IN LISTS map_lines)
+        if(NOT in_map)
+            if(line MATCHES "^Linker script and memory map")
+                set(in_map 1)
+            endif()
+            continue()
+        endif()
+        if(pending)
+            if(line MATCHES "^[ \t]+0x0*([0-9a-fA-F]+)[ \t]+0x[0-9a-fA-F]+")
+                math(EXPR a "0x0${CMAKE_MATCH_1}")
+                list(APPEND map_addrs "${a}")
+            endif()
+            set(pending "")
+        elseif(line MATCHES "^ (\\.text[^ \t]*)[ \t]+0x0*([0-9a-fA-F]+)[ \t]+0x[0-9a-fA-F]+")
+            math(EXPR a "0x0${CMAKE_MATCH_2}")
+            list(APPEND map_addrs "${a}")
+        elseif(line MATCHES "^ (\\.text[^ \t]*)[ \t]*$")
+            set(pending "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+    list(LENGTH map_addrs map_seen)
+    list(APPEND code_addrs ${map_addrs})
+    list(REMOVE_DUPLICATES code_addrs)
+endif()
+
+# objdump decodes 60FF/61FF as a short branch for a plain 68000 and then decodes
+# the displacement as code, so the mnemonics are meaningless: read the BYTE
+# COLUMN, which is contiguous and in address order.
 string(REPLACE "\n" ";" dis_lines "${dis_out}")
 set(want 0)          # words still needed to complete a displacement
 set(words "")
@@ -89,35 +96,9 @@ foreach(line IN LISTS dis_lines)
     endif()
 endforeach()
 
-# DATA READ AS CODE.
-#
-# On m68k-amigaos there is no .rodata: string literals live in the plain .text
-# (docs/RESEARCH.md 46).  objdump disassembles .text linearly, so it renders
-# those strings, and the tables beside them, as instructions, and a table
-# entry whose bytes are 61 FF at an even address, first on an objdump line, is
-# indistinguishable from a bsr.l here.
-#
-# Not hypothetical: the configuration name table ("bootp\0auto\0...\0none\0")
-# and the lookup array after it produced exactly that, and adding one warning
-# string elsewhere in the library shifted the bytes onto an even address and
-# started failing the build.
-#
-# The first discriminator is that the m68k fetches instructions on even
-# addresses ONLY.  A computed target that is odd cannot be a branch destination
-# on any 68k, so the bytes were data.
-#
-# The second is range: a target outside the disassembled code cannot be a
-# branch destination either.  The 68k has no code there to reach.  A switch
-# dispatch table in bsdsocket.library hit exactly this, {UWORD case, ULONG
-# target} pairs whose second half read as 60FF at an even line start, giving a
-# 393216-byte displacement to an address past the end of the image.
-#
-# The real defect this check exists for lands twelve bytes short of a function
-#, even, and inside the code, so neither rule loses anything it was written
-# to catch.
-#
-# Attributing the data to a symbol does not help: objdump counts it as part of
-# whatever function precedes it, so the run has no boundary to detect.
+# DATA READ AS CODE: there is no .rodata here, so objdump renders literals and
+# tables as instructions and 60FF/61FF occurs in them.  An odd target cannot be
+# fetched by a 68k and one past the image has no code, so both are data.
 
 foreach(line IN LISTS dis_lines)
     # Byte column: "   5acc:\t60ff           \tbras ..."
@@ -132,11 +113,8 @@ foreach(line IN LISTS dis_lines)
     set(first_on_line 1)
     foreach(w IN LISTS line_words)
         if(want GREATER 0 AND NOT word_at EQUAL expect_at)
-            # The displacement has to be read from the two words that FOLLOW
-            # the opcode, and objdump stops disassembling at a section end
-            # ("Address ... is out of bounds"), so the words are not always
-            # there.  Reading whatever came next instead would invent a target;
-            # abandon this one rather than report a number nobody can trust.
+            # objdump stops at a section end, so the two words after the opcode
+            # are not always there.  Abandon rather than invent a target.
             set(want 0)
             set(words "")
         endif()
@@ -164,10 +142,8 @@ foreach(line IN LISTS dis_lines)
                 set(words "")
             endif()
         elseif(first_on_line AND w MATCHES "^6[01][fF][fF]$")
-            # An instruction START, which is why only the first word of a line
-            # qualifies: the same bit pattern occurs constantly as an immediate
-            # operand in the middle of a longer instruction, and objdump's line
-            # boundaries are the only thing that says which is which.
+            # Only the first word of a line is an instruction START; the same bit
+            # pattern is constantly an immediate inside a longer instruction.
             set(branch_hex "${line_addr}")
             math(EXPR branch_at "0x${line_addr}")
             set(want 2)
@@ -185,10 +161,21 @@ if(bad)
         message("  ${b}")
     endforeach()
     get_filename_component(_name "${BINARY}" NAME)
+    list(LENGTH code_addrs _entries)
+    if(map_seen GREATER 0)
+        set(_ground "${_entries} function entries known, ${map_seen} of them\
+ from ${MAPFILE}")
+    else()
+        set(_ground "${_entries} function entries known, ALL FROM nm -- no\
+ usable linker map, so a static or LTO-internalised callee cannot be\
+ recognised and this may be a false refusal; see the header of\
+ cmake/check-pcrel-branches.cmake")
+    endif()
     message(FATAL_ERROR
         "${_name}: a 32-bit PC-relative branch does not land on a function.\n"
         "This is the mis-resolved relocation described in "
         "cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25; the usual "
         "cause is -ffunction-sections without -fno-optimize-sibling-calls. "
-        "Running this binary jumps into the middle of another function.")
+        "Running this binary jumps into the middle of another function.\n"
+        "(${_ground}.)")
 endif()

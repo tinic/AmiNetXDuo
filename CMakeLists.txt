@@ -903,9 +903,15 @@ function(aminetxduo_check_pcrel target)
     if(NOT CMAKE_CROSSCOMPILING)
         return()
     endif()
+    # The map is the only complete list of function entries: a hunk symbol
+    # table holds no locals.  $<TARGET_FILE>.map is the path every target in
+    # this tree that already asks for one uses, so a second ask is a no-op.
+    target_link_options(${target} PRIVATE
+        "-Wl,-Map=$<TARGET_FILE:${target}>.map")
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}"
                 "-DBINARY=$<TARGET_FILE:${target}>"
+                "-DMAPFILE=$<TARGET_FILE:${target}>.map"
                 "-DOBJDUMP=${CMAKE_OBJDUMP}"
                 "-DNM=${CMAKE_NM}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
