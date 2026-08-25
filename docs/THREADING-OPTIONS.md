@@ -218,6 +218,14 @@ ratio.
 
 ## 5. Option 4 — native ThreadX green threads inside one Exec task
 
+> STATUS 2026-08-25: PROTOTYPED on branch `green-realm` behind
+> `-DAMINETXDUO_GREEN_REALM` (default OFF).  The core below is real -- m68k
+> stack switching, the realm's single idle Wait(), the converted reader/DoIO
+> sites, a stray-Wait assert net -- and the emulator gate ladder is green.
+> Adopted callers keep the baton (the request-gate boundary is NOT built).
+> docs/GREEN-REALM.md is the state document; this section remains the design
+> brief it was built from.
+
 Proposal: real m68k context switching in the port, all stack-internal threads
 cooperating inside ONE Exec Task ("the realm"), Exec primitives only at the
 client boundary.
