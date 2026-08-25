@@ -1616,6 +1616,8 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                 out->nrb_GreenWaitFast  = gs.gs_wait_fast;
                 out->nrb_GreenWaitSlow  = gs.gs_wait_slow;
                 out->nrb_GreenStray     = gs.gs_stray_wait;
+                out->nrb_GateCalls      = gs.gs_gate_calls;
+                out->nrb_GateFallback   = gs.gs_gate_fallback;
             }
         }
         ns_writer_finish(&w);

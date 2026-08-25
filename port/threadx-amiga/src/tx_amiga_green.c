@@ -411,6 +411,440 @@ ULONG ami_green_checked_wait(ULONG sigmask)
 #endif /* AMINETXDUO_RXPROBE */
 
 
+/* ------------------------------------------------------- the request gate --- */
+
+/*
+ * The client boundary, docs/THREADING-OPTIONS.md option 4: an application
+ * Task's bracket becomes "submit the continuation, park, one Signal back".
+ * The continuation is captured by _tx_green_switch() itself -- what it saves
+ * on the caller's stack IS the request -- and the same switch moves the
+ * caller onto its side stack, where the parker resumes the proxy and sleeps.
+ * The realm then dispatches the proxy like any green thread: the vector body
+ * resumes at the capture point, on the caller's stack memory, under the
+ * realm's feet, free to suspend in NetX at stack-switch cost.
+ *
+ * What the parked owner still owns is its Exec signal state: Ctrl-C lands on
+ * the OWNER, so the parker's Wait() covers the break mask too and collects
+ * what arrives for the body to poll through tx_amiga_gate_breaks().  The
+ * bits are re-posted to the owner at gate_return, preserving the "EINTR
+ * leaves the signal set" contract.
+ */
+
+#ifndef TX_GATE_SIDE_BYTES
+#define TX_GATE_SIDE_BYTES      1024UL
+#endif
+
+volatile UINT   _tx_amiga_gate_bind_pending =  0U;
+
+
+/* Never invoked: a gate proxy is entered only through its captured context,
+   not through _tx_thread_shell_entry().  If it ever were, sleeping forever
+   in ThreadX keeps the realm alive, unlike an Exec Wait() would.  */
+static VOID _tx_gate_proxy_entry(ULONG id)
+{
+
+    (VOID) id;
+    for (;;)
+    {
+        (VOID) _tx_thread_sleep(0x7FFFFFFFUL);
+    }
+}
+
+
+static BYTE _tx_gate_sigbit(ULONG sigmask)
+{
+
+BYTE    bit;
+
+
+    for (bit = 0; bit < 32; bit++)
+    {
+        if (sigmask == (1UL << ((ULONG) bit)))
+        {
+            return(bit);
+        }
+    }
+    return((BYTE) -1);
+}
+
+
+UINT tx_amiga_gate_bind(TX_AMIGA_GATE *gate, CHAR *name, UINT priority)
+{
+
+struct Task *me;
+BYTE         sig;
+UINT         status;
+
+
+    if (gate == (TX_AMIGA_GATE *) 0)
+    {
+        return(TX_PTR_ERROR);
+    }
+    if (priority >= ((UINT) TX_MAX_PRIORITIES))
+    {
+        return(TX_PRIORITY_ERROR);
+    }
+    if ((_tx_amiga_kernel_up == TX_FALSE) ||
+        (_tx_amiga_kernel_stopping != TX_FALSE))
+    {
+        return(TX_NOT_DONE);
+    }
+    if (gate -> ag_Live != 0U)
+    {
+        return(TX_NOT_DONE);
+    }
+
+    me =  FindTask((STRPTR) 0);
+
+    gate -> ag_Side =  (APTR) AllocMem(TX_GATE_SIDE_BYTES, MEMF_PUBLIC);
+    if (gate -> ag_Side == (APTR) 0)
+    {
+        return(TX_NO_MEMORY);
+    }
+
+    /* The completion bit is the OWNER's: it Wait()s on it, so it must
+       allocate it, the same rule the adoption run signal follows.  */
+    sig =  AllocSignal(-1);
+    if (sig < 0)
+    {
+        FreeMem(gate -> ag_Side, TX_GATE_SIDE_BYTES);
+        gate -> ag_Side =  (APTR) 0;
+        return(TX_NO_MEMORY);
+    }
+
+    gate -> ag_DoneMask  =  1UL << ((ULONG) sig);
+    gate -> ag_Task      =  me;
+    gate -> ag_ResumeSP  =  (APTR) 0;
+    gate -> ag_Breaks    =  0UL;
+    gate -> ag_BreakMask =  0UL;
+    gate -> ag_Done      =  0U;
+    gate -> ag_Active    =  0U;
+    gate -> ag_OwnerDead =  0U;
+
+    Forbid();
+
+    /* Interrupt context across the create, the adopt handshake's shape.  The
+       internal create is used on purpose: _txe_thread_create() would refuse
+       the owner's stack region as overlapping when a second base on the same
+       Task binds, and the region really is shared -- serially, one bracket
+       at a time, which the nest counter already guarantees.  */
+    _tx_thread_system_state++;
+    _tx_amiga_gate_bind_pending =  1U;
+
+    status =  _tx_thread_create(&gate -> ag_Thread, name, _tx_gate_proxy_entry,
+                                0UL,
+                                (VOID *) me -> tc_SPLower,
+                                (ULONG) (((UBYTE *) me -> tc_SPUpper) -
+                                         ((UBYTE *) me -> tc_SPLower)),
+                                priority, priority,
+                                TX_NO_TIME_SLICE, TX_DONT_START);
+
+    _tx_amiga_gate_bind_pending =  0U;
+    _tx_thread_system_state--;
+
+    Permit();
+
+    if (status != TX_SUCCESS)
+    {
+        FreeMem(gate -> ag_Side, TX_GATE_SIDE_BYTES);
+        gate -> ag_Side     =  (APTR) 0;
+        gate -> ag_DoneMask =  0UL;
+        FreeSignal(sig);
+        return(status);
+    }
+
+    gate -> ag_Live =  1U;
+
+    return(TX_SUCCESS);
+}
+
+
+UINT tx_amiga_gate_call(TX_AMIGA_GATE *gate, ULONG break_mask)
+{
+
+ULONG   *frame;
+ULONG    top;
+UINT     i;
+
+
+    if ((gate == (TX_AMIGA_GATE *) 0) || (gate -> ag_Live == 0U))
+    {
+        return(TX_NOT_DONE);
+    }
+    if ((VOID *) FindTask((STRPTR) 0) != (VOID *) gate -> ag_Task)
+    {
+        return(TX_CALLER_ERROR);
+    }
+    if ((_tx_amiga_kernel_up == TX_FALSE) ||
+        (_tx_amiga_kernel_stopping != TX_FALSE) ||
+        (gate -> ag_OwnerDead != 0U) ||
+        (gate -> ag_Active != 0U) ||
+        (gate -> ag_Thread.tx_thread_state != ((UINT) TX_SUSPENDED)))
+    {
+        return(TX_NOT_DONE);
+    }
+
+    /* The side frame is rebuilt per call (a switch consumes it): eleven
+       registers with the gate in the a2 slot, __tx_gate_park_entry above
+       them.  Same 44-byte shape _tx_green_stack_build() lays.  */
+    top   =  (((ULONG) gate -> ag_Side) + TX_GATE_SIDE_BYTES) & ~3UL;
+    frame =  (ULONG *) (top - 4UL - 44UL);
+    for (i = 0U; i < 11U; i++)
+    {
+        frame[i] =  0UL;
+    }
+    frame[6]  =  (ULONG) gate;                  /* a2 after the movem pop     */
+    frame[11] =  (ULONG) _tx_gate_park_entry;
+
+    gate -> ag_BreakMask =  break_mask;
+    gate -> ag_Breaks    =  0UL;
+    gate -> ag_Done      =  0U;
+    gate -> ag_Active    =  1U;
+
+    /* Drop a completion bit a previous call may have left latched.  */
+    (VOID) SetSignal(0UL, gate -> ag_DoneMask);
+
+    Forbid();
+
+    _tx_green_counters.gc_gate_calls++;
+
+    /* The capture: everything from here to gate_return becomes the proxy's
+       context.  First continuation: the parker, on the side stack, with this
+       Forbid() still held.  Second continuation: the realm dispatches the
+       proxy and execution RESUMES RIGHT HERE on the realm Task, holding the
+       dispatcher's Forbid(), per the switch protocol.  */
+    _tx_green_switch(&gate -> ag_Thread.tx_thread_stack_ptr,
+                     (APTR) frame);
+
+    Permit();
+
+    return(TX_SUCCESS);
+}
+
+
+/* The side-stack half of the owner: resume the proxy, wake the realm, then
+   sleep in the ONE boundary Wait() collecting break bits, and finally jump
+   back into the leave-side context gate_return left behind.  Entered from
+   __tx_gate_park_entry with the capture Forbid() held; never returns.  */
+VOID _tx_gate_park(TX_AMIGA_GATE *gate)
+{
+
+APTR    junk;
+ULONG   sigs;
+
+
+    /* The proxy's context is complete (the capture switch wrote it), so it
+       may run the moment the realm picks it.  Interrupt-context shape, as
+       everywhere a non-thread touches ThreadX state.  */
+    _tx_thread_system_state++;
+    (VOID) _tx_thread_resume(&gate -> ag_Thread);
+    _tx_thread_system_state--;
+
+    Permit();
+
+    /* Only the realm can enter a green context; always poke it.  The signal
+       latches, so a realm already awake pays one compare.  */
+    _tx_amiga_wake_scheduler();
+
+    for (;;)
+    {
+
+        sigs =  Wait(gate -> ag_DoneMask | gate -> ag_BreakMask);
+
+        if ((sigs & gate -> ag_BreakMask) != 0UL)
+        {
+            gate -> ag_Breaks |=  sigs & gate -> ag_BreakMask;
+        }
+        if (gate -> ag_Done != 0U)
+        {
+            break;
+        }
+    }
+
+    /* Adopt the leave-side context.  The resumed side (the tail of
+       tx_amiga_gate_return, running on this Task from here on) Permit()s.  */
+    Forbid();
+    _tx_green_switch(&junk, gate -> ag_ResumeSP);
+
+    /* Unreachable: the context above never switches back.  */
+}
+
+
+VOID tx_amiga_gate_return(TX_AMIGA_GATE *gate)
+{
+
+TX_THREAD   *thread;
+UINT         dead;
+
+
+    thread =  &gate -> ag_Thread;
+
+    Forbid();
+
+    /* Release the baton first, so the suspend has nothing to switch away
+       from -- tx_amiga_adopt_suspend()'s order.  */
+    ami_budget_hold_end((APTR) thread, thread -> tx_thread_name,
+                        (ULONG) thread -> tx_thread_state,
+                        AMI_HOLD_SITE_SUSPEND);
+    _tx_thread_current_ptr =  TX_NULL;
+    _tx_timer_time_slice   =  ((ULONG) 0);
+
+    _tx_thread_system_state++;
+    (VOID) _tx_thread_suspend(thread);
+    _tx_thread_system_state--;
+
+    gate -> ag_Done =  1U;
+    dead            =  gate -> ag_OwnerDead;
+
+    if (dead == 0U)
+    {
+        Signal((struct Task *) gate -> ag_Task, gate -> ag_DoneMask);
+    }
+    else
+    {
+
+        /* Nobody comes back for the leave-side context.  Mark the flight
+           over so the heartbeat's next pass may reap the dormant proxy.  */
+        gate -> ag_Active =  0U;
+    }
+
+    /* Store the leave-side context and give the machine to the realm loop.
+       The parked owner resumes it -- execution continues after this call on
+       the OWNER Task -- once the realm lets the machine go and the owner's
+       Wait() returns.  */
+    _tx_green_switch(&gate -> ag_ResumeSP, _tx_green_scheduler_sp);
+
+    /* === On the owning Task again, under the parker's Forbid(). === */
+    Permit();
+
+    gate -> ag_Active =  0U;
+
+    /* The parker's Wait() consumed any break bits; the contract (EINTR
+       leaves the signal set, transfer.c) wants them still pending.  */
+    if (gate -> ag_Breaks != 0UL)
+    {
+        (VOID) SetSignal(gate -> ag_Breaks, gate -> ag_Breaks);
+    }
+}
+
+
+ULONG tx_amiga_gate_breaks(const TX_AMIGA_GATE *gate)
+{
+
+    if (gate == (const TX_AMIGA_GATE *) 0)
+    {
+        return(0UL);
+    }
+    return(gate -> ag_Breaks);
+}
+
+
+VOID tx_amiga_gate_release(TX_AMIGA_GATE *gate)
+{
+
+BYTE    sig;
+
+
+    if (gate == (TX_AMIGA_GATE *) 0)
+    {
+        return;
+    }
+
+    if (gate -> ag_Live != 0U)
+    {
+
+        Forbid();
+        _tx_thread_system_state++;
+        (VOID) _tx_thread_terminate(&gate -> ag_Thread);
+        (VOID) _tx_thread_delete(&gate -> ag_Thread);
+        _tx_thread_system_state--;
+        Permit();
+
+        gate -> ag_Live =  0U;
+    }
+
+    if (gate -> ag_Side != (APTR) 0)
+    {
+        FreeMem(gate -> ag_Side, TX_GATE_SIDE_BYTES);
+        gate -> ag_Side =  (APTR) 0;
+    }
+
+    /* The bit belongs to the owner's Task; only it can give it back.  A
+       foreign releaser leaves the bit to die with its Task, the same rule
+       tx_amiga_discard_thread() states.  */
+    if ((gate -> ag_DoneMask != 0UL) &&
+        ((VOID *) FindTask((STRPTR) 0) == (VOID *) gate -> ag_Task))
+    {
+        (VOID) SetSignal(0UL, gate -> ag_DoneMask);
+        sig =  _tx_gate_sigbit(gate -> ag_DoneMask);
+        if (sig >= 0)
+        {
+            FreeSignal(sig);
+        }
+    }
+    gate -> ag_DoneMask =  0UL;
+    gate -> ag_Task     =  (struct Task *) 0;
+}
+
+
+UINT tx_amiga_gate_orphan(TX_AMIGA_GATE *gate)
+{
+
+UINT    reaped;
+
+
+    if ((gate == (TX_AMIGA_GATE *) 0) || (gate -> ag_Live == 0U))
+    {
+        return((UINT) TX_TRUE);
+    }
+
+    reaped =  (UINT) TX_FALSE;
+
+    Forbid();
+
+    gate -> ag_OwnerDead =  1U;
+
+    /* Safe to reap unless the realm is INSIDE the proxy's context this
+       instant.  Suspended-mid-flight is safe: terminate runs the ordinary
+       suspension cleanup and the realm never re-enters the context.  */
+    if (_tx_thread_current_ptr != &gate -> ag_Thread)
+    {
+
+        _tx_thread_system_state++;
+        (VOID) _tx_thread_terminate(&gate -> ag_Thread);
+        (VOID) _tx_thread_delete(&gate -> ag_Thread);
+        _tx_thread_system_state--;
+
+        gate -> ag_Live =  0U;
+
+        if (gate -> ag_Side != (APTR) 0)
+        {
+            FreeMem(gate -> ag_Side, TX_GATE_SIDE_BYTES);
+            gate -> ag_Side =  (APTR) 0;
+        }
+
+        /* The signal bit died with the owner; drop only the record.  */
+        gate -> ag_DoneMask =  0UL;
+        gate -> ag_Task     =  (struct Task *) 0;
+
+        reaped =  (UINT) TX_TRUE;
+    }
+
+    Permit();
+
+    return(reaped);
+}
+
+
+VOID tx_amiga_gate_fallback_note(VOID)
+{
+
+    Forbid();
+    _tx_green_counters.gc_gate_fallback++;
+    Permit();
+}
+
+
 /* ------------------------------------------------------------- statistics --- */
 
 VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
@@ -422,12 +856,14 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
     }
 
     Forbid();
-    stats -> gs_switches   =  _tx_green_counters.gc_switches;
-    stats -> gs_external   =  _tx_green_counters.gc_external;
-    stats -> gs_idle_waits =  _tx_green_counters.gc_idle_waits;
-    stats -> gs_wait_fast  =  _tx_green_counters.gc_wait_fast;
-    stats -> gs_wait_slow  =  _tx_green_counters.gc_wait_slow;
-    stats -> gs_stray_wait =  _tx_green_counters.gc_stray_wait;
+    stats -> gs_switches      =  _tx_green_counters.gc_switches;
+    stats -> gs_external      =  _tx_green_counters.gc_external;
+    stats -> gs_idle_waits    =  _tx_green_counters.gc_idle_waits;
+    stats -> gs_wait_fast     =  _tx_green_counters.gc_wait_fast;
+    stats -> gs_wait_slow     =  _tx_green_counters.gc_wait_slow;
+    stats -> gs_stray_wait    =  _tx_green_counters.gc_stray_wait;
+    stats -> gs_gate_calls    =  _tx_green_counters.gc_gate_calls;
+    stats -> gs_gate_fallback =  _tx_green_counters.gc_gate_fallback;
     Permit();
 }
 
@@ -462,16 +898,22 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
 {
     if (stats != (TX_AMIGA_GREEN_STATS *) 0)
     {
-        stats -> gs_switches   =  0UL;
-        stats -> gs_external   =  0UL;
-        stats -> gs_idle_waits =  0UL;
-        stats -> gs_wait_fast  =  0UL;
-        stats -> gs_wait_slow  =  0UL;
-        stats -> gs_stray_wait =  0UL;
+        stats -> gs_switches      =  0UL;
+        stats -> gs_external      =  0UL;
+        stats -> gs_idle_waits    =  0UL;
+        stats -> gs_wait_fast     =  0UL;
+        stats -> gs_wait_slow     =  0UL;
+        stats -> gs_stray_wait    =  0UL;
+        stats -> gs_gate_calls    =  0UL;
+        stats -> gs_gate_fallback =  0UL;
     }
 }
 
 VOID tx_amiga_green_stray_wait_note(VOID)
+{
+}
+
+VOID tx_amiga_gate_fallback_note(VOID)
 {
 }
 

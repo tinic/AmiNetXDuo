@@ -1114,6 +1114,11 @@ typedef struct NetStatusRxBudget
     ULONG               nrb_GreenStray;     /* MUST be zero; a nonzero count
                                                is an unconverted Exec block
                                                inside the realm              */
+    /* The request gate (the adopted-caller boundary): brackets migrated
+       into the realm against brackets that fell back to the adopted-baton
+       path.  Appended at the end, offsets hold. */
+    ULONG               nrb_GateCalls;
+    ULONG               nrb_GateFallback;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

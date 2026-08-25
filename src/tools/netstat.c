@@ -395,6 +395,8 @@ static VOID show_budget(VOID)
         tool_printf("\tgreen:  %lu waits latched, %lu slept, %lu STRAY\n",
                     b->nrb_GreenWaitFast, b->nrb_GreenWaitSlow,
                     b->nrb_GreenStray);
+        tool_printf("\tgreen:  %lu gated brackets, %lu fell back\n",
+                    b->nrb_GateCalls, b->nrb_GateFallback);
     }
 
     show_budget_holds(b);

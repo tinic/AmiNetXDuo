@@ -420,7 +420,10 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
         ULONG slice;
         ULONG started = 0;
 
-        if ((SetSignal(0UL, 0UL) & break_mask) != 0)
+        /* bsd_break_signals(), not SetSignal(): in a green build this loop
+           runs on the realm as the caller's proxy, and the owner's break
+           bits are being collected by its parked side (netx_call.c). */
+        if ((bsd_break_signals(base) & break_mask) != 0)
         {
             *aborted = TRUE;
             return NX_SUCCESS;

@@ -409,15 +409,34 @@ static VOID bsd_task_sweep(VOID)
 
         /* Once per base, not once per second: the latch below is what stops
            it repeating, and a program that does this does it for the rest of
-           the session. */
+           the session.  (In a green build a base whose gate proxy is
+           mid-flight stays on the list one more beat -- see bsd_nx_orphan()
+           -- so the warning takes its own latch.) */
+#ifdef AMINETXDUO_GREEN_REALM
+        if (!child->sb_NxSweepSeen)
+        {
+            child->sb_NxSweepSeen = TRUE;
+#endif
         bsd_latched_tasks++;
         AMI_WARN("bsdsocket: task %lx exited without closing the library. "
                  "Its base will no longer be signalled (%lu so far)",
                  (unsigned long)child->sb_Task,
                  (unsigned long)bsd_latched_tasks);
+#ifdef AMINETXDUO_GREEN_REALM
+        }
+#endif
 
         child->sb_NxNest = 0;
         ami_netstack_release(&child->sb_NxCaller);
+
+        /* The request gate's proxy is a TX_THREAD the realm may be inside
+           this very tick; bsd_nx_orphan() reaps when that is safe and asks
+           for another pass when it is not.  sb_Task stays set until then,
+           so this base comes back next beat rather than being latched with
+           a live proxy still registered. */
+        if (!bsd_nx_orphan(child))
+            continue;
+
         child->sb_Task = NULL;
     }
 

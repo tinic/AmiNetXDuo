@@ -29,6 +29,12 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
+#ifdef AMINETXDUO_GREEN_REALM
+/* TX_AMIGA_GATE, embedded per opener below.  Guarded so the host tier's
+   shim builds, which have no port header and no green realm, do not need
+   one. */
+#include "tx_amiga.h"
+#endif
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -40,6 +46,7 @@
 #include <exec/resident.h>
 #include <exec/semaphores.h>
 #include <exec/tasks.h>
+#include <proto/exec.h>         /* SetSignal for the inline fallbacks below */
 #include <devices/timer.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
@@ -543,6 +550,24 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
 
+#ifdef AMINETXDUO_GREEN_REALM
+    /*
+     * The request gate (netx_call.c): this opener's brackets execute on a
+     * green proxy inside the realm, with the owner parked in one Wait().
+     * sb_NxGated is TRUE exactly while a gated bracket is open, which is the
+     * invariant bsd_break_signals() reads: gated => the code asking runs on
+     * the realm, and the owner's break bits are in the gate, not in
+     * SetSignal().  sb_NxGateDead latches a gate that could not be built so
+     * the fallback (the adopted-baton bracket) is taken without retrying the
+     * bind on every call.  sb_NxSweepSeen keeps the dead-opener sweep's
+     * warning to one line while a mid-flight gate defers its reap.
+     */
+    TX_AMIGA_GATE           sb_NxGate;
+    BOOL                    sb_NxGated;
+    BOOL                    sb_NxGateDead;
+    BOOL                    sb_NxSweepSeen;
+#endif
+
 #ifdef AMINETXDUO_NXCENSUS
     /* Measurement build only, see the census note in netx_call.c. */
     ULONG                   sb_NxCount;     /* brackets actually taken       */
@@ -912,6 +937,51 @@ VOID  bsd_nx_leave(struct AmiSocketBase *base);
 /* Drop the base's cached ThreadX registration. Teardown only, no bracket open.
    See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
+
+/*
+ * The stray-Wait net, extended over the library now that the request gate
+ * runs vector bodies inside the realm: any Exec Wait() a bracket reaches --
+ * the class the gate turns from "stalls every other socket user" into
+ * "sleeps the whole stack" -- is caught, counted in gs_stray_wait (must
+ * read zero) and converted.  The library's legitimate Wait()s (WaitSelect's
+ * park, the TCP: handler, workers) all run on ordinary Tasks, which the
+ * wrapper passes straight through.  Same net as netstack_internal.h's.
+ */
+#if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+ULONG ami_green_checked_wait(ULONG sigmask);
+#define Wait(sigmask) ami_green_checked_wait(sigmask)
+#endif
+
+/*
+ * The break bits pending for this base's owner, observed without consuming.
+ * Inside a bracket this is the ONLY correct way to ask: in a green build the
+ * bracket body runs on the realm, where SetSignal() would read the realm
+ * Task's signals, and the owner's Ctrl-C is being collected by its parked
+ * side (netx_call.c).  In a baton build it is SetSignal(0,0) as always --
+ * inline, so the host tier's per-file test builds need no netx_call.c.
+ *
+ * bsd_nx_orphan() is the dead-opener half of the gate teardown, for
+ * library.c's task sweep, safe at the tick task's interrupt level.  TRUE
+ * once nothing of the gate remains to reap (or there never was one); FALSE
+ * while a mid-flight proxy defers -- the sweep keeps the base and returns
+ * next beat.
+ */
+#ifdef AMINETXDUO_GREEN_REALM
+ULONG bsd_break_signals(struct AmiSocketBase *base);
+BOOL  bsd_nx_orphan(struct AmiSocketBase *base);
+#else
+static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    return SetSignal(0UL, 0UL);
+}
+
+static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    return TRUE;
+}
+#endif
 
 /* library.c */
 struct AmiSocketBase *bsd_lib_open(register ULONG version __asm("d0"),

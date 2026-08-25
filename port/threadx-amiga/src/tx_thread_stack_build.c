@@ -88,6 +88,21 @@ CHAR        *name;
 
 #ifdef AMINETXDUO_GREEN_REALM
 
+    /* A request-gate proxy: green identity, but NO initial frame.  Its
+       context is the caller's captured continuation, written directly into
+       tx_thread_stack_ptr by the capture switch in tx_amiga_gate_call(); a
+       frame laid at stack_end here would scribble on the top of the owning
+       Task's live stack, which is what the "stack" of a gate proxy is.  */
+
+    if (_tx_amiga_gate_bind_pending != 0U)
+    {
+        thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
+        thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
+        thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_GREEN;
+        (VOID) name;
+        return;
+    }
+
     /* Green realm: no Exec Task at all.  The thread's context is an initial
        switch frame on the ThreadX-owned stack, entered and left only by the
        realm Task's scheduler loop (tx_thread_schedule.c).

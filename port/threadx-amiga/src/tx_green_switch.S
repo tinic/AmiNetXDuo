@@ -38,4 +38,14 @@ __tx_green_switch:
         movem.l sp@+,d2-d7/a2-a6
         rts
 
+| First activation of a gate's side-stack frame (tx_amiga_green.c lays it:
+| eleven registers with the TX_AMIGA_GATE pointer in the a2 slot, this entry
+| as the return address).  The switch above has just popped that frame, so
+| a2 holds the gate; hand it to the C parker, which never returns.
+        .globl  __tx_gate_park_entry
+__tx_gate_park_entry:
+        move.l  a2,sp@-
+        jsr     __tx_gate_park
+        illegal                         | the parker must not return
+
 #endif

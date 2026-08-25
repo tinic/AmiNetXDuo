@@ -369,8 +369,30 @@ struct _tx_green_counters
     ULONG   gc_wait_fast;       /* tx_amiga_green_wait() satisfied latched     */
     ULONG   gc_wait_slow;       /* tx_amiga_green_wait() suspended             */
     ULONG   gc_stray_wait;      /* Exec Wait()s caught from green context      */
+    ULONG   gc_gate_calls;      /* brackets carried through the request gate   */
+    ULONG   gc_gate_fallback;   /* brackets the gate declined                  */
 };
 extern struct _tx_green_counters    _tx_green_counters;
+
+/*
+ * The request gate's create handshake (tx_amiga_gate_bind() ->
+ * _tx_thread_stack_build()): non-zero while the TX_THREAD being created is a
+ * gate proxy, which gets the green identity fields but NO initial frame --
+ * its context is written by the capture switch at every tx_amiga_gate_call().
+ * A pair of globals for the reason the adopt handshake is one: create zeroes
+ * the control block before stack_build sees it.
+ */
+extern volatile UINT    _tx_amiga_gate_bind_pending;
+
+/* The C half of the side-stack parker (tx_amiga_green.c); entered through
+   _tx_gate_park_entry in tx_green_switch.S with the dispatcher-side
+   Forbid() still held.  Never returns.  */
+VOID    _tx_gate_park(TX_AMIGA_GATE *gate);
+
+/* The asm shim the side frame returns into (tx_green_switch.S): moves the
+   gate out of the a2 slot and calls _tx_gate_park().  Only its address is
+   taken.  */
+VOID    _tx_gate_park_entry(VOID);
 
 #endif /* AMINETXDUO_GREEN_REALM */
 
