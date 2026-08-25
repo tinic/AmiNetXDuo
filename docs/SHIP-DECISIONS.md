@@ -267,6 +267,17 @@ And one bridged transfer to go with the boots: run-poolshare on the a2065
 with our LTO device, peer on a third machine -- 9,232,384 bytes in 15 s,
 4.92 Mbit/s, 2,254 packets, lost=0, out-of-order=0, zero_windows=2.
 
+A BEHAVIOURAL DIFFERENTIAL, because "the emulator runs LTO happily" had
+never actually been measured.  Eight guest programs, each run from both
+builds back to back on the same rig: library_test, rt_test, stack_test,
+concurrent_test, mbuf_bpf_test, netstack_test, alignprobe, memprobe.  Every
+pair returned the SAME exit status and the same transcript -- including the
+five that exit 20 for want of a staged library, which is the harness and
+not the flag, and which is why they are quoted rather than dropped.  Rerun
+with the libraries staged, library_test reads `5 checks, 2 failures` in
+both arms, failing on the same two.  Nothing in this set behaves
+differently under -flto.
+
 The bridged pcmcia combination specifically could not be run: another agent
 held the bridge with its own ne2000_pcmcia guests throughout, and Amiberry
 ignores `mac=` for that board, so two bridged pcmcia guests carry one MAC.
