@@ -172,15 +172,18 @@ grep " POSTIDLE " "$HD/soak-events.txt" 2>/dev/null | head -30 || echo "  (none)
 
 echo
 echo "=== Fitz's own diagnostics (serial) ==="
-SER="$ROOT/build/serial-$TAG.log"
-if [ -f "$SER" ]; then
+# build/serial-<tag>.log is a path amiberry-run.sh has never written, so these
+# counts were never once taken and the absence read as a clean run.
+. "$ROOT/tools/serial-log.sh"
+SER=$(serial_log_path "$TAG")
+if serial_log_have "$SER" "$BUILD" "Fitz's EAGAIN, relisten and delete counts"; then
     echo "  EAGAIN on a blocking socket: $(grep -c 'EAGAIN' "$SER" || true)"
-    echo "  send/recv failures:          $(grep -c 'send error\|recv error\|recv maxretry' "$SER" || true)"
+    echo "  send/recv failures:          $(grep -cE 'send error|recv error|recv maxretry' "$SER" || true)"
     echo "  relisten failures:           $(grep -c 'relisten failed' "$SER" || true)"
     echo "  refused socket deletes:      $(grep -c 'nx_tcp_socket_delete refused' "$SER" || true)"
-    grep -n "relisten failed\|EAGAIN\|did not complete" "$SER" | head -20 || true
+    grep -nE "relisten failed|EAGAIN|did not complete" "$SER" | head -20 || true
 else
-    echo "  (no serial log)"
+    SERIAL_UNCHECKED=1
 fi
 
 echo
@@ -191,4 +194,8 @@ else
     echo "  (none written)"
 fi
 
-exit "$RUN_RC"
+# An empty serial log means the diagnostics above were NOT taken.  Exit 2, the
+# tree's missing-ingredient code, so it can never be read as a clean run.
+[ "$RUN_RC" = 0 ] || exit "$RUN_RC"
+[ "${SERIAL_UNCHECKED:-0}" = 0 ] || exit 2
+exit 0

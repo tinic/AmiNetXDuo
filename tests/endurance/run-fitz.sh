@@ -169,15 +169,18 @@ fi
 
 echo
 echo "=== Fitz's own diagnostics (serial) ==="
-SER="$ROOT/build/serial-$TAG.log"
-if [ -f "$SER" ]; then
+# build/serial-<tag>.log is a path amiberry-run.sh has never written, so these
+# counts were never once taken and the absence read as a clean run.
+. "$ROOT/tools/serial-log.sh"
+SER=$(serial_log_path "$TAG")
+if serial_log_have "$SER" "$BUILD" "Fitz's EAGAIN and send/recv counts"; then
     EAGAIN=$(grep -c "EAGAIN" "$SER" || true)
-    SERR=$(grep -c "send error\|recv error\|recv maxretry" "$SER" || true)
+    SERR=$(grep -cE "send error|recv error|recv maxretry" "$SER" || true)
     echo "  EAGAIN on a blocking socket: $EAGAIN"
     echo "  send/recv failures:          $SERR"
-    grep -n "EAGAIN\|send error\|recv error\|recv maxretry" "$SER" | head -20 || true
+    grep -nE "EAGAIN|send error|recv error|recv maxretry" "$SER" | head -20 || true
 else
-    echo "  (no serial log)"
+    SERIAL_UNCHECKED=1
 fi
 
 echo
@@ -188,4 +191,8 @@ else
     echo "  (none written)"
 fi
 
-exit "$RUN_RC"
+# An empty serial log means the diagnostics above were NOT taken.  Exit 2, the
+# tree's missing-ingredient code, so it can never be read as a clean run.
+[ "$RUN_RC" = 0 ] || exit "$RUN_RC"
+[ "${SERIAL_UNCHECKED:-0}" = 0 ] || exit 2
+exit 0
