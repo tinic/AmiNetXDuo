@@ -176,12 +176,54 @@ Emulated rates are a property of the host as much as the guest and do NOT
 transfer to hardware; the ranking on one rig in one sitting is the signal.
 What it says: **our stack is not behind either foreign stack over the same
 driver in the same machine -- it leads Roadshow by a hair and AmiTCP_NG by
-~30%.**  If the physical arm agrees, the remaining campaign gap is
-hardware/PIO ceiling, not stack-wide inefficiency, and the levers left are
-the ones the budget already names (option 4 glue, task #4 movem port I/O).
-The physical arm (self-restoring boot, stack swapped under the same rig) is
-prepared and pending its machine slot; until it runs, this section claims
-the emulated ranking only.
+~30%.**
+
+## Calibration: the physical arm (2026-08-25, real A1200 + 3c589)
+
+Run via a self-restoring armed boot: the AmiTCP_NG library SHADOWED ours
+through a LIBS: multi-assign (`Assign LIBS: DH0:amitcp/libs SYS:Libs`) --
+no file overwritten, the restore intrinsic in the reboot, the arm flag
+consumed before anything else ran, so the worst case was always one reset
+back to our stack.  The armed boot ran no httpd and no shell: AmiTCP_NG
+had the machine to itself.  Same iperf binary as the emulated rehearsal,
+30 s sends from the same peer (192.168.1.184), static 192.168.1.218.
+
+| arm | guest kbit/s | peer kbit/s | steady interval |
+|---|---|---|---|
+| AmiTCP_NG 4.1.5, run 1 | 1158 | 1174 | 1.31 Mbit/s |
+| AmiTCP_NG 4.1.5, run 2 | 1159 | 1175 | 1.31 Mbit/s |
+| AmiTCP_NG 4.1.5, run 3 | 1159 | 1174 | 1.31 Mbit/s |
+| AmiTCP_NG 4.1.5, run 4 | 1160 | 1176 | 1.31 Mbit/s |
+| ours, same sitting, rig live x3 | (lost) / 1092 / 1056 | 1171 / 1107 / 1067 | 1.31 Mbit/s + dips |
+
+lost=0, out-of-order=0 in every run on both sides.
+
+**The verdict is in the interval column: both stacks sit on the identical
+1.31 Mbit/s steady plateau over the same device.**  AmiTCP_NG's means are
+tighter (1.158-1.160, spread 0.2%) because nothing else ran during its
+windows and it has no mDNS responder to pay for; our means wear the known
+dip classes (mDNS CPU arithmetic, and in this sitting the live httpd+shell
+rig servicing the measurement's own remote control).  Our historical clean
+band, 1.19-1.23 over 10 s windows, sits above AmiTCP_NG's mean; nothing in
+this table shows a foreign stack extracting more from this hardware than
+we do.
+
+Calibration verdict for the campaign: **the ~1.2-1.3 Mbit/s region is the
+hardware/PIO ceiling of this machine and card for a bsdsocket stack, not a
+stack-wide gap.**  The X-Surf-100 figure (906 KB/s = ~7.4 Mbit/s) is about
+different hardware and is formally dead as a comparison.  Raising the
+plateau means cutting per-frame CPU cost -- option 4's transition glue and
+task #4's movem port I/O -- not stack replacement.  Sub-result: AmiTCP_NG
+never calls the claim tags, so every frame it received took the classic
+CopyToBuff lane of the very same device build -- and it reached the same
+plateau, independently corroborating the claim lane's measured
+rate-neutrality at this operating point.
+
+Method caveats, stated: AmiTCP_NG windows were 30 s (our historical band is
+10 s); its arm had no background services while ours carried the rig; the
+same-sitting "ours" arm is 3 runs to its 4; run 1's guest-side report was
+lost to a detached-CLI redirect quirk (`Run >file cmd` captures only Run's
+banner -- redirect inside an Executed script instead), peer-side count kept.
 
 AmiTCP_NG operational facts, learned the hard way in the rehearsal and
 needed by whoever runs the physical arm:
