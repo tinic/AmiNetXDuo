@@ -200,6 +200,17 @@ rig_release_name() { # name
     unset "RIG_HELD_FDS[$1]"
 }
 
+# Exit 1 from ping means "no reply"; anything else means the prober itself
+# could not run, and an unusable prober must never read as an empty LAN.
+rig_prober_usable() {
+    ping -c 1 -W 1 127.0.0.1 > /dev/null 2>&1 && return 0
+    echo "ping cannot probe: no address can be claimed." >&2
+    echo "  Unprivileged ICMP is off and /usr/bin/ping has no cap_net_raw." >&2
+    echo "  As root: sysctl -w net.ipv4.ping_group_range='0 2147483647'" >&2
+    echo "        or setcap cap_net_raw+ep /usr/bin/ping" >&2
+    return 1
+}
+
 # Claim a LAN address nothing else is using.
 #
 #   rig_claim_address <prefix> <first> <last> [who]
@@ -223,6 +234,8 @@ rig_claim_address() { # prefix first last [who]
     span=$((last - first + 1))
     [ "$span" -gt 0 ] || { echo "empty address range" >&2; return 1; }
 
+    rig_prober_usable || return 1
+
     off=$(( ($$ * 7919 + $(date +%s)) % span ))
     for (( i = 0; i < span; i++ )); do
         n=$(( first + (off + i) % span ))
@@ -230,7 +243,8 @@ rig_claim_address() { # prefix first last [who]
         : >> "$dir/addr-$addr.lock" 2> /dev/null || continue
         exec {fd}>>"$dir/addr-$addr.lock" || continue
         if flock -n "$fd" 2> /dev/null; then
-            if ! ping -c 1 -W 1 "$addr" > /dev/null 2>&1; then
+            ping -c 1 -W 1 "$addr" > /dev/null 2>&1
+            if [ $? -eq 1 ]; then
                 printf 'address=%s pid=%s who=%s since=%s\n' \
                        "$addr" "$$" "$who" "$(date +%FT%T)" \
                        > "$dir/addr-$addr.lock"

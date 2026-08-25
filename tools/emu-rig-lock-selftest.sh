@@ -247,7 +247,9 @@ wait "$R_PID" "$R_DECOY" 2> /dev/null
 # 127.0.0.1 always answers, so a range of exactly that address must yield
 # nothing.  This is the 192.168.1.243 case: an address free of other RUNS is
 # not the same as an address free.
-if rig_claim_address 127.0.0 1 1 selftest-live 2> /dev/null; then
+if ! ping -c 1 -W 1 127.0.0.1 > /dev/null 2>&1; then
+    bad "ping cannot probe, so this assertion would pass vacuously; as root: sysctl -w net.ipv4.ping_group_range='0 2147483647'"
+elif rig_claim_address 127.0.0 1 1 selftest-live 2> /dev/null; then
     bad "claimed 127.0.0.1, which answers a ping"
 else
     ok "an address that answers a ping is not claimed"
