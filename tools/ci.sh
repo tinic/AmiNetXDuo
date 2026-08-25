@@ -390,6 +390,18 @@ stage_host() {
         return 1
     fi
 
+    # No delay in the netdev cores may be a counted loop again.  The unit test
+    # beside it proves the wait primitive measures time; this proves the call
+    # sites go through it, which is the half a unit test cannot see.  Source
+    # only, so it runs here rather than per-configuration in the cross stage.
+    if tools/check-netdev-delays.sh > "$BUILD/netdev-delays.log" 2>&1; then
+        note "netdev delays: $(sed -n 's/^netdev_delays=//p' "$BUILD/netdev-delays.log")"
+    else
+        cat "$BUILD/netdev-delays.log"
+        fail "a delay in src/netdev counts bus reads instead of measuring time"
+        return 1
+    fi
+
     # Which toolchain a build picks, against a fake cache.  The emulator tier
     # ran under GCC 15.2 for three releases: <cache>/current addressed a tree
     # that was not the pin, and both resolvers took it on "it runs" alone.
@@ -1099,6 +1111,32 @@ stage_emulator() {
             fi
         done
     done
+
+    # THE ACCELERATOR ARM, and the only place in this script where the CPU is
+    # the variable under test rather than a property of the machine.
+    #
+    # Every delay in src/netdev used to be a loop counted in bus reads, sized
+    # for a 14 MHz 68020, and a count of reads is a measure of the CPU rather
+    # than of time.  The two arms above cannot see that: both are the speed the
+    # counts were chosen for, so the old shape and the new one agree there.
+    # This runs the wait at 68020 AND at 68060 and holds it to a clock that is
+    # not the driver's own, which is what makes the difference visible.
+    #
+    # It needs no card, no bridge and no peer -- the guest program compiles
+    # netdev_clock.c in and times it directly -- so it belongs in this tier
+    # rather than in `bridged`, and it runs on any machine that can run the two
+    # arms above at all.
+    printf '\n\033[1m-- emulator: the netdev delay at 68020 and 68060\033[0m\n'
+    if [ ! -f "$BUILD/default/tests/netdev/netdelay_test" ]; then
+        fail "emulator: netdelay_test was not built"
+    elif tests/netdev/run-netdelay.sh -b "$BUILD/default" \
+             > "$BUILD/netdelay.log" 2>&1; then
+        note "netdelay: $(sed -n 's/^  300 ms from the clock alone: /300 ms measured as /p' \
+              "$BUILD/netdelay.log" | tr '\n' ' ')"
+    else
+        tail -30 "$BUILD/netdelay.log"
+        fail "a netdev delay does not take the time it asks for"
+    fi
 }
 
 # ------------------------------------------------------------ release e2e ----

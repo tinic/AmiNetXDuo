@@ -33,21 +33,36 @@
  * any unit exists to open.  What is left is the one clock on an Amiga that
  * needs nothing opened, nothing owned, and no context: the raster beam.
  * VHPOSR at $DFF006 is a free-running counter driven by the chipset's own
- * oscillator, one word read away, legal at task level, at interrupt level and
- * under Disable(), and completely untouched by how fast the CPU is.  Its high
- * byte is the vertical position, which advances once per scan line.
- * netdev_device.c already reads it for exactly this reason, under
+ * oscillator, one longword read away, legal at task level, at interrupt level
+ * and under Disable(), and completely untouched by how fast the CPU is.  The
+ * longword at $DFF004 is VPOSR and VHPOSR together, and the vertical position
+ * they carry between them advances once per scan line.  netdev_device.c
+ * already reads the beam for exactly this reason, under
  * -DAMINETXDUO_NETDEV_TIME.
  *
- * WHAT A LINE IS WORTH.  A scan line is 64 us on a 15 kHz PAL or NTSC display
- * and 32 us on the 31 kHz multiscan modes an AGA machine can be in.  That is
- * the whole range: no Amiga display mode has a line rate above about 31.5 kHz.
- * A line is therefore worth AT LEAST 30 us, and a wait costed at 30 us to the
- * line is never short.  On the ordinary 15 kHz machine it comes out about
- * twice the requested time, which is spent once per claim on paths that
- * already take hundreds of milliseconds by design.  This is an assumption
- * about the chipset, which varies by a factor of two, in place of an
- * assumption about the CPU, which varies by a factor of a hundred.
+ * WHAT A LINE IS WORTH, AND WHY IT IS MEASURED RATHER THAN ASSUMED.  A wait
+ * here is counted in scan lines, so the driver has to know what a line costs.
+ * There are only two answers on an Amiga.  Every 15 kHz mode -- which is
+ * nearly every machine, nearly all the time -- has a line of about 64 us, and
+ * PAL and NTSC differ by under one percent of it because the two master clocks
+ * do; every 31 kHz multiscan mode has a line of about 32 us.  Nothing else
+ * exists: no Amiga display mode has a line rate above about 31.5 kHz.
+ *
+ * So the question is not "how long is a line", it is "which of the two is this
+ * machine in", and that is one measurement: how far down the screen the beam
+ * gets before it starts again.  A 15 kHz field is 262 or 313 lines and a
+ * 31 kHz field is 524 or 625, so the two bands do not come close to touching,
+ * and the field RATE never has to be known at all.  It costs four fields --
+ * 80 ms, once, on the claim path, against a reset hold on the same path that
+ * is 300 ms by design.
+ *
+ * The costing is deliberately UNDER the truth in both bands, 63 us against
+ * 63.56 and 31 us against 31.75, so that a wait is long by a fraction of a
+ * percent rather than ever being short by one.  A field length in neither band
+ * means something is not a beam, and the fallback is 30 us -- under the
+ * shortest line any Amiga produces, and therefore never short whatever the
+ * machine turns out to be.  And under all of it sits the floor below, which is
+ * what makes even a wrong answer here safe.
  *
  * NEVER SHORTER THAN IT WAS.  Every wait also carries the iteration count the
  * old code used, and it ends only when BOTH the count is exhausted and the
@@ -92,6 +107,14 @@ typedef struct NetdevWait
 } NetdevWait;
 
 /*
+ * The fallback cost of a scan line, used when the field measurement lands in
+ * neither band and the driver has to assume rather than know.  Under the
+ * shortest line any Amiga display mode produces, so a wait costed at it is
+ * never short on any machine.
+ */
+#define NETDEV_LINE_FLOOR_US    30u
+
+/*
  * Arm a wait for `us` microseconds that will not end before `spins`
  * iterations of the caller's loop have also run.  `spins` is the count the
  * call site used before there was a clock; it is the floor, not the duration.
@@ -115,5 +138,24 @@ BOOL netdev_wait_done(NetdevWait *w);
  * accelerated one and explains every timing failure that follows.
  */
 ULONG netdev_clock_spins_per_line(VOID);
+
+/*
+ * What this machine's scan line was costed at, in microseconds: 63 on the
+ * 15 kHz modes, 31 on the 31 kHz ones, NETDEV_LINE_FLOOR_US when the field
+ * measurement recognised neither and the driver fell back to assuming.  Zero
+ * when there is no beam at all.  Published beside the figure above so that a
+ * machine which times its waits wrongly can be told apart from one that cannot
+ * time them at all.
+ */
+ULONG netdev_clock_us_per_line(VOID);
+
+/*
+ * The raw field length the costing above came from, in scan lines, or 0 if
+ * counting one did not produce a length at all.  It decides nothing on its
+ * own; it is what tells "this machine is in a display mode I do not know"
+ * apart from "I could not count a field here", which are the same 30 us
+ * fallback and very different problems.
+ */
+ULONG netdev_clock_lines_per_field(VOID);
 
 #endif /* AMINETXDUO_NETDEV_CLOCK_H */

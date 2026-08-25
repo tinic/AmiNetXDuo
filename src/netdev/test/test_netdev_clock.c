@@ -4,13 +4,33 @@
  * WHY THIS IS A HOST TEST AND NOT AN EMULATOR RUN.  The defect this file
  * guards against is a wait that comes out short on a fast machine, and every
  * emulator this project runs against emulates a fast machine -- so a green
- * Amiberry run says nothing at all about it, in either direction.  What
- * decides the question is the relationship between three numbers: how many
- * iterations the caller's loop is worth, how far the beam moved while it ran,
- * and when netdev_wait_done() finally says yes.  On real hardware two of those
- * belong to the machine.  Here all three belong to this file, because it
- * supplies the beam -- which is the only way to run the same binary as a
- * 14 MHz 68020 and as an accelerator and compare the answers.
+ * Amiberry run says nothing at all about it, in either direction.  A 68060 arm
+ * reproduces the CONDITION, a CPU fast relative to the chipset, and the
+ * emulated cards it drives have no reset timing to violate, so nothing there
+ * turns red when the hold collapses.  What decides the question is the
+ * relationship between three numbers: how many iterations the caller's loop is
+ * worth, how far the beam moved while it ran, and when netdev_wait_done()
+ * finally says yes.  On real hardware two of those belong to the machine.
+ * Here all three belong to this file, because it supplies the beam -- which is
+ * the only way to run the same binary as a 14 MHz 68020 and as an accelerator
+ * and compare the answers.
+ *
+ * AND THE OLD CODE IS RUN HERE TOO, as spin_counted() below.  A regression
+ * test that only exercises the fix cannot say what the fix was for, and this
+ * one is asserting a DIFFERENCE: the same 300 ms asked for by the same call
+ * site, on the same simulated accelerator, comes out at three milliseconds the
+ * old way and three hundred the new way.  Delete netdev_clock.c and the
+ * assertions that fail are the ones naming the old behaviour, which is what a
+ * gate for this defect has to do.
+ *
+ * TIME IN THIS FILE IS A TICK COUNT, advanced by the loop bodies that would
+ * really cost time on a machine -- the caller's bus access, and each read of
+ * the beam.  The beam's position is then derived from the clock rather than
+ * from how often it happens to be looked at, which is what a real beam does
+ * and what the previous shape of this file could not model.  Without that,
+ * a loop which never reads the beam -- which is exactly what the old code is
+ * -- experiences no time passing at all, and the control below could not be
+ * written.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,79 +68,238 @@ static void expect_at_least(const char *what, ULONG got, ULONG want)
     failures++;
 }
 
-/* ------------------------------------------------------------- the beam --- */
-
-/*
- * The seam netdev_clock.c opens under NETDEV_CLOCK_TEST.  beam_every is how
- * many reads of the beam it takes to advance one scan line, and it is exactly
- * the axis the real machines differ along: a stock 68020 gets round a spin
- * loop a few dozen times to the line, an accelerated one tens of thousands of
- * times.  Everything below is one binary run at several values of it.
- *
- * A real beam advances with time and this one advances with reads, so the
- * iteration counts below are this model's and not a machine's -- they move
- * with NDC_BEAM_EVERY, which decides how many iterations there are between two
- * reads.  Every assertion on them is a lower bound for that reason.  What is
- * exact, and what the test is for, is the number of LINES a wait waits.
- */
-static ULONG beam_reads;
-static ULONG beam_every = 1;
-static ULONG beam_lines;                /* every line ever advanced, no wrap */
-static UWORD beam_pos;
-static int   beam_stuck;
-
-VOID netdev_clock_test_forget(VOID);
-
-UWORD netdev_clock_test_beam(VOID)
+static void expect_below(const char *what, ULONG got, ULONG want)
 {
-    beam_reads++;
-
-    if (!beam_stuck && beam_every != 0u && (beam_reads % beam_every) == 0u)
+    if (got < want)
     {
-        beam_lines++;
-        beam_pos = (UWORD)((beam_pos + 1u) & 0xffu);
+        printf("ok   %s = %lu (< %lu)\n", what,
+               (unsigned long)got, (unsigned long)want);
+        return;
     }
 
-    return beam_pos;
+    printf("FAIL %s: got %lu, want below %lu\n", what,
+           (unsigned long)got, (unsigned long)want);
+    failures++;
 }
 
-static void beam_set(ULONG every, int stuck)
+/* ------------------------------------------------------- the machine ------ */
+
+/*
+ * One simulated machine: how many ticks of its clock a scan line lasts, and
+ * how many lines its display mode puts in a field.  The first is the axis the
+ * real machines differ along -- a stock 68020 gets round a spin loop a few
+ * hundred times to the line, an accelerated one tens of thousands of times --
+ * and the second is the one the driver has to measure before it can price a
+ * line at all.
+ */
+static ULONG mach_ticks;            /* the clock, in loop-iteration units    */
+static ULONG mach_ticks_per_line = 256;
+static ULONG mach_lines_per_field = 313;   /* a PAL field                     */
+static ULONG beam_reads;
+static int   beam_stuck;
+static UWORD beam_frozen;
+
+VOID  netdev_clock_test_forget(VOID);
+ULONG netdev_clock_test_field(VOID);
+
+static ULONG mach_lines(void)
 {
-    beam_reads = 0;
-    beam_lines = 0;
-    beam_every = every;
-    beam_pos   = 0;
-    beam_stuck = stuck;
+    return mach_ticks / mach_ticks_per_line;
+}
+
+/* Reading a custom register costs a bus cycle like anything else does. */
+UWORD netdev_clock_test_vpos(VOID)
+{
+    beam_reads++;
+    mach_ticks++;
+
+    if (beam_stuck)
+        return beam_frozen;
+
+    return (UWORD)(mach_lines() % mach_lines_per_field);
+}
+
+static void machine(ULONG ticks_per_line, ULONG lines_per_field)
+{
+    mach_ticks           = 0;
+    mach_ticks_per_line  = ticks_per_line;
+    mach_lines_per_field = lines_per_field;
+    beam_reads           = 0;
+    beam_stuck           = 0;
+    beam_frozen          = 0;
     netdev_clock_test_forget();
 }
 
-/* Run a wait to completion and answer how many times round the loop it went. */
-static ULONG spin(ULONG us, ULONG spins)
+/*
+ * A machine with no beam at all: the host builds, and the old driver on every
+ * machine.  A frozen position from the first read onwards is what
+ * netdev_clock.c's probe sees as "nothing here".
+ */
+static void machine_no_beam(void)
+{
+    machine(256, 313);
+    beam_stuck  = 1;
+    beam_frozen = 0;
+}
+
+/* ------------------------------------------------- the two delay shapes --- */
+
+/*
+ * THE FIX.  Run a wait to completion; answer how many lines of the machine's
+ * clock went by while it ran, which is the only thing a caller of pc_settle()
+ * ever wanted.
+ */
+static ULONG timed_lines(ULONG us, ULONG spins, ULONG *iters_out)
 {
     NetdevWait w;
+    ULONG      start;
     ULONG      iters = 0;
+
+    (VOID)netdev_clock_us_per_line();       /* measure before the clock starts */
+    start = mach_lines();
 
     netdev_wait_begin(&w, us, spins);
 
     do
+    {
         iters++;
+        mach_ticks++;                       /* the caller's own bus access */
+    }
     while (!netdev_wait_done(&w));
 
-    return iters;
+    if (iters_out != NULL)
+        *iters_out = iters;
+
+    return mach_lines() - start;
 }
 
-/* The measurement's own cost, so a wait's line count can be read out of
-   beam_lines without the calibration's lines in it. */
-static ULONG lines_after_measure(void)
+/*
+ * THE OLD CODE, byte for byte in shape: pc_settle(), ne_delay(), pnp_delay()
+ * and el3_reset_wait() were all this loop with a different register in the
+ * body.  Four reads to the microsecond, asserted rather than measured.
+ */
+static ULONG counted_lines(ULONG us)
 {
-    (VOID)netdev_clock_spins_per_line();
-    return beam_lines;
+    ULONG start = mach_lines();
+    ULONG n     = us * 4u;
+
+    while (n-- != 0u)
+        mach_ticks++;
+
+    return mach_lines() - start;
 }
+
+/* ---------------------------------------------------------------- arms ---- */
+
+/*
+ * The two machines every assertion below is run on.  REFERENCE is the 14 MHz
+ * 68020 the counts in this driver were chosen against: a PCMCIA attribute read
+ * is about a quarter of a microsecond, so a 63 us line holds roughly 256 of
+ * them.  ACCELERATED is the same chipset with a CPU a hundred times quicker
+ * through the loop, which is a PiStorm32, a Blizzard, an ACA or a Vampire.
+ */
+#define REFERENCE_TICKS_PER_LINE    256u
+#define ACCELERATED_TICKS_PER_LINE  25600u
+
+/* 300 ms at 63 us to the line, which is what the Gayle hold has to reach. */
+#define GAYLE_HOLD_US       300000u
+#define GAYLE_HOLD_SPINS    (GAYLE_HOLD_US * 4u)
+#define GAYLE_HOLD_LINES    (GAYLE_HOLD_US / 63u)
 
 int main(void)
 {
-    ULONG base;
+    ULONG lines;
     ULONG iters;
+
+    /* -------------------------------------------------------------------- */
+    printf("-- the line is priced from the field it was measured in\n");
+
+    /*
+     * Every Amiga display mode, and the two that are not one.  A PAL or NTSC
+     * field is 262 or 313 lines and its line is 63 us; a multiscan field is
+     * twice either and its line is 31.  Nothing else is recognised, and
+     * anything else is costed at the floor -- which is under the shortest line
+     * any of them produces, so an unrecognised machine waits too long rather
+     * than not long enough.
+     */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    expect("PAL field, lines", netdev_clock_test_field(), 313);
+    expect("PAL line, us", netdev_clock_us_per_line(), 63);
+
+    machine(REFERENCE_TICKS_PER_LINE, 262);
+    expect("NTSC line, us", netdev_clock_us_per_line(), 63);
+
+    machine(REFERENCE_TICKS_PER_LINE, 625);
+    expect("DblPAL field, lines", netdev_clock_test_field(), 625);
+    expect("DblPAL line, us", netdev_clock_us_per_line(), 31);
+
+    machine(REFERENCE_TICKS_PER_LINE, 524);
+    expect("Productivity line, us", netdev_clock_us_per_line(), 31);
+
+    machine(REFERENCE_TICKS_PER_LINE, 100);
+    expect("a field too short to be one falls back",
+           netdev_clock_us_per_line(), NETDEV_LINE_FLOOR_US);
+
+    machine(REFERENCE_TICKS_PER_LINE, 1500);
+    expect("a field too long to be one falls back",
+           netdev_clock_us_per_line(), NETDEV_LINE_FLOOR_US);
+
+    /* And the measurement does not depend on how fast the CPU reading it is. */
+    machine(ACCELERATED_TICKS_PER_LINE, 313);
+    expect("the field is the same behind an accelerator",
+           netdev_clock_test_field(), 313);
+    expect("and so is the price of a line", netdev_clock_us_per_line(), 63);
+
+    /* -------------------------------------------------------------------- */
+    printf("\n-- the defect: the old loop on the two machines\n");
+
+    /*
+     * THIS IS WHAT WAS WRONG.  The same call, pc_settle(300000), on the two
+     * machines, using the loop the driver used to run.  On the machine the
+     * count was chosen for it is very nearly the 300 ms intended.  On the
+     * accelerated machine the identical code waits about three, because a
+     * count of bus reads was never a measure of time and the CPU got a hundred
+     * times faster while the chipset did not.
+     */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    lines = counted_lines(GAYLE_HOLD_US);
+    expect_at_least("old code, reference machine, lines", lines, 4600);
+
+    machine(ACCELERATED_TICKS_PER_LINE, 313);
+    lines = counted_lines(GAYLE_HOLD_US);
+    expect_below("old code, accelerated machine, lines", lines, 100);
+
+    /* -------------------------------------------------------------------- */
+    printf("\n-- the fix: the same wait, measured\n");
+
+    /*
+     * THE SAME TWO MACHINES THROUGH netdev_wait_*().  Both reach the hold the
+     * card's documentation requires, and the accelerated one reaches it by a
+     * factor of a hundred more iterations than the reference one -- which is
+     * the point.  The wait is the same length; the loop that fills it is not.
+     */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    lines = timed_lines(GAYLE_HOLD_US, GAYLE_HOLD_SPINS, &iters);
+    expect_at_least("new code, reference machine, lines", lines, GAYLE_HOLD_LINES);
+    expect_at_least("new code, reference machine, floor honoured",
+                    iters, GAYLE_HOLD_SPINS);
+
+    machine(ACCELERATED_TICKS_PER_LINE, 313);
+    lines = timed_lines(GAYLE_HOLD_US, GAYLE_HOLD_SPINS, &iters);
+    expect_at_least("new code, accelerated machine, lines", lines, GAYLE_HOLD_LINES);
+
+    /*
+     * AND IT IS NOT MERELY LONGER, IT IS RIGHT.  4762 lines at 63 us is 300
+     * ms; the old file costed every line at 30 us and asked for 10000 of them,
+     * which on a 15 kHz machine is 640 ms for a 300 ms hold.  Twice as long as
+     * asked for is safe and is still not a measurement, so the ceiling is
+     * asserted as well as the floor.
+     */
+    expect_below("new code, and not twice as long as asked", lines,
+                 (GAYLE_HOLD_LINES * 12u) / 10u);
+
+    /* -------------------------------------------------------------------- */
+    printf("\n-- the floor, the barrier and the guard\n");
 
     /*
      * A MACHINE WITH NO BEAM is the old driver exactly.  Nothing measures
@@ -128,46 +307,30 @@ int main(void)
      * also what the host build of el3.c sees, since it compiles
      * netdev_clock.c on a machine with no chipset at all.
      */
-    beam_set(1, 1);
-    expect("no beam, 1000 spins", spin(300000, 1000), 1000);
-    expect("no beam, 4 spins", spin(2000, 4), 4);
+    machine_no_beam();
+    (VOID)timed_lines(GAYLE_HOLD_US, 1000, &iters);
+    expect("no beam, 1000 spins", iters, 1000);
+    machine_no_beam();
+    (VOID)timed_lines(2000, 4, &iters);
+    expect("no beam, 4 spins", iters, 4);
     expect("no beam, no clock", netdev_clock_spins_per_line(), 0);
+    expect("no beam, no line price", netdev_clock_us_per_line(), 0);
 
     /*
-     * A SLOW MACHINE: one line per loop iteration, the shape a 14 MHz 68020
-     * has when the loop body is a real bus access.  Count and clock are then
-     * close, and the longer of the two wins.  A 2 ms wait is 67 lines at 30 us
-     * to the line, so a floor of 8000 iterations is much the longer and the
-     * wait runs all 8000: the machine this driver was tuned on gets precisely
-     * what it always got.
+     * THE COUNT IS A FLOOR AND NOT A CEILING, in both directions.  On the
+     * reference machine the count is the longer of the two and every one of
+     * its iterations still runs; a caller that passes no count at all still
+     * waits the time.
      */
-    beam_set(1, 0);
-    expect("slow machine, count dominates", spin(2000, 8000), 8000);
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    lines = timed_lines(2000, 8000, &iters);
+    expect_at_least("slow machine, every iteration of the count runs",
+                    iters, 8000);
+    expect_at_least("slow machine, and the time as well", lines, 2000u / 63u);
 
-    /*
-     * THE SAME WAIT ON AN ACCELERATOR.  Same binary, same floor -- but the
-     * loop is now 500 times faster relative to the chipset, the count runs out
-     * long before the time does, and the beam ends the wait.  This is the
-     * whole defect in two assertions: under the old code the answer here was
-     * 8000 iterations and a few microseconds of wall clock.
-     */
-    beam_set(500, 0);
-    base  = lines_after_measure();
-    iters = spin(2000, 8000);
-    expect_at_least("fast machine, clock dominates", iters, 66UL * 500UL);
-    expect_at_least("fast machine, lines waited", beam_lines - base, 67);
-
-    /*
-     * AND IT SCALES WITH THE TIME ASKED FOR rather than with the count: the
-     * 300 ms Gayle reset hold is 10000 lines at 30 us to the line on every
-     * machine, which is the wait whose collapse takes a PC Card's power-up
-     * sequence with it.
-     */
-    beam_set(500, 0);
-    base  = lines_after_measure();
-    iters = spin(300000, 4);
-    expect_at_least("gayle hold, lines waited", beam_lines - base, 10000);
-    expect_at_least("gayle hold, iterations", iters, 9999UL * 500UL);
+    machine(ACCELERATED_TICKS_PER_LINE, 313);
+    lines = timed_lines(3000, 0, NULL);
+    expect_at_least("no floor, still timed", lines, 3000u / 63u);
 
     /*
      * A WAIT BELOW NETDEV_WAIT_MIN_US NEVER CONSULTS THE CLOCK.  ne2000.c's
@@ -176,36 +339,38 @@ int main(void)
      * bus barrier rather than a duration in any case.  Four iterations in,
      * four iterations out, and not one read of the beam.
      */
-    beam_set(1, 0);
-    expect("barrier, iterations", spin(1, 4), 4);
+    /* The clock is measured first and the counter zeroed after it, so that
+       what is asserted is that the WAIT never reads the beam -- not that the
+       one-off calibration did not happen. */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    (VOID)netdev_clock_us_per_line();
+    beam_reads = 0;
+    (VOID)timed_lines(1, 4, &iters);
+    expect("barrier, iterations", iters, 4);
     expect("barrier, beam untouched", beam_reads, 0);
 
-    beam_set(1, 0);
-    expect("249 us is still a barrier", spin(249, 996), 996);
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    (VOID)netdev_clock_us_per_line();
+    beam_reads = 0;
+    (VOID)timed_lines(249, 996, &iters);
+    expect("249 us is still a barrier", iters, 996);
     expect("249 us, beam untouched", beam_reads, 0);
 
     /*
-     * THE COUNT IS A FLOOR AND NOT A CEILING.  A caller that asks for time and
-     * passes no count at all still waits the time.
+     * A BEAM THAT MOVES AND THEN STOPS is not a clock, and it must not hang
+     * the claim.  No Amiga's beam does this; the guard exists because a wait
+     * that cannot end is worse than a wait that is wrong, and because nothing
+     * else in this file could show that the guard is there.  The floor is
+     * still honoured: the guard ends the wait, it never shortens it.
      */
-    beam_set(4, 0);
-    base = lines_after_measure();
-    (VOID)spin(3000, 0);
-    expect_at_least("no floor, still timed", beam_lines - base, 100);
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    (VOID)netdev_clock_us_per_line();
+    beam_stuck  = 1;
+    beam_frozen = 7;
+    (VOID)timed_lines(GAYLE_HOLD_US, 32, &iters);
+    expect_at_least("stuck beam terminates, floor kept", iters, 32);
 
-    /*
-     * A BEAM THAT MOVES ONCE AND THEN STOPS is not a clock, and it must not
-     * hang the claim.  No Amiga's beam does this; the guard exists because a
-     * wait that cannot end is worse than a wait that is wrong, and because
-     * nothing else in this file could show that the guard is there.  The floor
-     * is still honoured: the guard ends the wait, it never shortens it.
-     */
-    beam_set(1, 0);
-    (VOID)netdev_clock_spins_per_line();
-    beam_stuck = 1;
-    expect_at_least("stuck beam terminates", spin(300000, 32), 32);
-
-    printf("%s\n", failures == 0 ? "PASS" : "FAIL");
+    printf("\n%s\n", failures == 0 ? "PASS" : "FAIL");
 
     return failures == 0 ? 0 : 1;
 }

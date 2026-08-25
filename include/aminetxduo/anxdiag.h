@@ -174,6 +174,15 @@ extern "C" {
                                        thousands behind an accelerator, and
                                        that ratio is why a counted delay is
                                        not a delay -- see netdev_clock.h      */
+#define ANXDIAG_CLOCK_LINE     70   /* microseconds a scan line was costed at,
+                                       from counting the lines in one field:
+                                       63 on any 15 kHz mode, 31 on any 31 kHz
+                                       one, 30 when the field was in neither
+                                       band and the driver fell back to
+                                       assuming.  0 = no beam.  Beside the
+                                       figure above so that a machine timing
+                                       its waits WRONGLY can be told from one
+                                       that cannot time them at all           */
 
 /* --- the ISA Plug and Play bridge, netdev_isapnp.c --------------------- */
 #define ANXDIAG_PNP_VENDOR     60   /* isolation serial identifier bytes 0..3,

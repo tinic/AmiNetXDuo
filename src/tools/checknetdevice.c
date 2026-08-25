@@ -487,12 +487,38 @@ static VOID cnd_step(const AnxDiagStep *st)
                 "  shorter than they are meant to be.\n");
             return;
         }
-        say("  The delay clock measured %lu spin(s) per raster line.  A line\n"
-            "  is about 64 us, so this CPU goes round a bare loop roughly\n"
-            "  %lu time(s) in a microsecond.  Every wait in this driver is\n"
-            "  timed against the beam and not against that number, which is\n"
-            "  the whole point: a counted loop is a measure of the CPU.\n",
-            v, (v + 63UL) / 64UL);
+        say("  The delay clock measured %lu spin(s) per raster line.  Tens of\n"
+            "  them is a stock CPU; tens of thousands is an accelerator, and\n"
+            "  that ratio is the whole reason a wait here is timed against the\n"
+            "  beam rather than counted in bus reads.  A counted loop measures\n"
+            "  the CPU, not the time.\n", v);
+        return;
+    case ANXDIAG_CLOCK_LINE:
+        if (v == 0)
+        {
+            say("  No beam, so no line to price -- see above.\n");
+            return;
+        }
+        if (v == 63)
+        {
+            say("  A scan line was measured at 63 us, so this machine is in a\n"
+                "  15 kHz PAL or NTSC mode.  Every wait in the driver is\n"
+                "  counted in lines at that price.\n");
+            return;
+        }
+        if (v == 31)
+        {
+            say("  A scan line was measured at 31 us, so this machine is in a\n"
+                "  31 kHz multiscan mode.  Every wait in the driver is counted\n"
+                "  in lines at that price.\n");
+            return;
+        }
+        say("  A scan line was costed at %lu us because counting the lines in\n"
+            "  a field did not give a length any Amiga display mode has.  The\n"
+            "  beam still runs, so the waits are still measured, but they come\n"
+            "  out about twice as long as they ask for.  Harmless, and worth\n"
+            "  reporting: it means the field count is wrong on this machine.\n",
+            v);
         return;
     case ANXDIAG_PC_SETTLE:
         if (v == 0)

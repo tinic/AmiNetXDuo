@@ -54,6 +54,7 @@ install/test/run-smbmount.sh       : tools/ci.sh                    : an SMB sha
 install/test/run-workbench.sh      : tools/ci.sh                    : the release archive on a real Workbench 3.1
 install/test/run-workbench-cards.sh: tools/ci.sh                    : the same install and power cycle on every card in tests/tools/cards.sh, because the gate above booted the A2065 and nothing else
 tests/perf/run-lossgate.sh         : tools/ci.sh                    : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
+tests/netdev/run-netdelay.sh       : tools/ci.sh                    : the netdev delays at 68020 and 68060, held to timer.device rather than to their own iteration count; the 68060 arm is the accelerator one
 tests/tools/run-arpretry.sh        : tools/ci.sh                    : the guest's first ARP is lost on purpose; the connect must still complete
 tests/tools/run-cardsweep.sh       : tools/ci.sh                    : every network card, one boot each
 tests/tools/run-cardsweep6.sh      : tools/ci.sh                    : every network card again, and whether IPv6 reaches past the router

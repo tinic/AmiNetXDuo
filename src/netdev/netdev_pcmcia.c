@@ -912,6 +912,7 @@ APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
         volatile UBYTE *gayle_intreq = (volatile UBYTE *)0x00DA9000UL;
 
         netdev_diag_note(ANXDIAG_CLOCK, ci, netdev_clock_spins_per_line());
+        netdev_diag_note(ANXDIAG_CLOCK_LINE, ci, netdev_clock_us_per_line());
 
         *gayle_intreq = 0xFF;            /* reset start */
         pc_settle(300000);               /* the hold the cards require */
