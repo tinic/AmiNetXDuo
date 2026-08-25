@@ -605,7 +605,14 @@ AmiNetStack *ami_netstack_raw(VOID);
  * it in gs_stray_wait, which must read zero.
  */
 #if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+/* <proto/exec.h> forced first: the NDK's inline Wait macro must expand
+   (once, behind its guard) BEFORE ours is defined, or a TU including it
+   later has ours silently replaced -- the NDK path is -isystem, so the
+   redefinition never warns.  The injected-stray drill caught exactly
+   that: the net compiled dead in every TU with this order reversed.  */
+#include <proto/exec.h>
 ULONG ami_green_checked_wait(ULONG sigmask);
+#undef Wait
 #define Wait(sigmask) ami_green_checked_wait(sigmask)
 #endif
 
