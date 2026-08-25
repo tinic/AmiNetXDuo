@@ -1,12 +1,12 @@
 # The green realm: option 4's prototype, and where it stands
 
-2026-08-25 (cycle 2), branch `green-realm` (off `event-budget`), repo
+2026-08-25 (cycles 2-4), branch `green-realm` (off `event-budget`), repo
 /home/turo/anxd-pollfix.  The design brief is docs/THREADING-OPTIONS.md
 section 5; the glue inventory it removes is docs/RECEIVE_BUDGET.md's
 (~0.9-1.2 ms/frame of Exec Signal/Wait/dispatch round trips at ~1.15 Mbit/s
-on the physical A1200).  EMULATOR-ONLY so far: nothing on this branch has
-touched the physical machine, and nothing may until the endurance story is
-much longer than an evening's.
+on the physical A1200).  Cycles 3 and 4 took it to the physical
+A1200 under the hard rules; the cycle-4 rematch below is the standing
+verdict, and the machine now runs the green2 build.
 
 ## What is built and real
 
@@ -232,21 +232,130 @@ tx_thread_relinquish does not actually rotate the realm the way baton
 preemption did, or the hold instrument mis-spans green tenure.  Must be
 root-caused before any green build ships.
 
+## CYCLE 4 (2026-08-25): the fast path, the relinquish repair, and the rematch
+
+Artifact: green-realm @aef6e005, threadx fork @8ddf646e, netxduo dd0d8e64,
+same configuration as cycle 3 (RXPROBE ON, LTO OFF, TS OFF, LAZY ON, MDNS
+ON, GREEN ON) -- bsdsocket.library 405472 B + netstat 43600 B (build/cmgp
+on playhouse3), deployed as DH0:bsdsocket.library.green2 + netstat.green2
+under the full hard rules.
+
+**Item 1, the free-baton fast path (commit 3eb840fc).**  bsd_nx_enter()
+tries `ami_netstack_try_enter_cached()` before submitting: when the realm
+is idle the bracket enters exactly the way the old adopted bracket did,
+and only a contended stack pays the gate's round trip.  The atom is
+`tx_amiga_adopt_try_resume()` -- takeability check, resume, take-or-back-
+out all under ONE Forbid(), sound because every ThreadX-state mutator in
+this port runs in task context under the core Forbid() (interrupt servers
+only Signal()); a decline touches nothing and the gate's parker pokes the
+realm unconditionally, so no lost-wakeup window exists on either path and
+the realm's Wait() stays the only idle point when the stack is busy.  The
+census attributes: gs_gate_fast / nrb_GateFast / netstat "fast takes"
+partitions every bracket against gated and fallback.
+
+**Item 2, the mDNS regression root-caused and repaired (commit aef6e005).**
+It was semantics, not the instrument: `_nx_mdns_yield()`'s
+tx_thread_relinquish() yields only if the READY LISTS show an equal-or-
+higher-priority thread.  Under the baton they did (a device reply
+signalled the reader's own Exec Task, which readied its TX_THREAD
+asynchronously); inside the realm the reader's signals LATCH on the realm
+Task and are delivered only at the top of the realm scheduler's loop --
+which cannot run while the mDNS pass holds the machine.  Every relinquish
+compared against lists frozen at pass entry and no-opped for the whole
+100-536 ms pass.  The repair: TX_THREAD_RELINQUISH_PORT_PREPARE (new
+whitespace-default hook in the ThreadX fork, the PORT_COMPLETION pattern)
+runs `_tx_amiga_relinquish_prepare()` before the decision -- from a green
+context, under one Forbid(), deliver latched waiter signals and service
+owed ticks.  The tick half also closes the tick merge's stated trade: the
+wheel walk now waits out at most one record, not the longest pass.
+
+**Emulator gates** (all on the exact artifact): four configs compile, host
+tier "all green"; ifdhcp SLIRP PASS; bridged poolshare x3 = 2.884/2.816/
+2.825 Mbit/s, lost=0, STRAY=0, census 1383/1343/1337 FAST takes with 0
+gated and 0 fallbacks, holds 0 over 50 ms (the fast path recovers cycle
+2's emulated -3%); run-iperf SLIRP every reachable arm + the documented
+guest-as-server skip; and the NEW storm arm -- rig lore: LAN multicast
+never reaches the pcap-bridged guest, and host-to-guest from the hosting
+machine does not hairpin through the switch, so the storm must be UNICAST
+mDNS responses fired from a third machine (mdnsstorm.py on the peer,
+25 pps x 16 records, source port 5353, AA set; on-link unicast passes
+_nx_mdns_packet_address_check).  471 datagrams reached the guest stack:
+run completes at 2.561 Mbit/s (mDNS CPU), lost=0, STRAY=0, holds ring
+0 over 50 ms.
+
+## THE PHYSICAL REMATCH (cycle 4) -- the verdict
+
+Control = cycle 3's fresh settle-build numbers (reused per the rules).
+Two boots (18 s and 23 s returns), nine transfers, every one lost=0.
+
+| | control (4) | cycle-3 green (6) | cycle-4 green2 (6) |
+|---|---:|---:|---:|
+| rate, Mbit/s | **1.128** | 1.119 (-0.8%) | 1.143/1.073/1.111/1.150/1.158/1.155 = **1.132 (+0.35%)** |
+| baton leg (bracket entry) | 941 us | 1910 us | **1031 us** (warm runs 4-6: 959) |
+| fetch leg | 6347 us | 8876 us | 8504 us (runs 4-6: 7645) |
+| defer leg | 2469 us | 2704 us | 2702 us |
+| settle leg | 3371 us | 3569 us | 3596 us |
+| ack leg (wall) | 13715 us | 11198 us | 12416 us |
+| post leg | 1495 us | 1117 us | 1625 us |
+| drain leg | ~609 us | ~591 us | ~584 us |
+| sched handoffs/frame | 0.53 | 0.00 | **0.00** (7 boot-time) |
+| census per run | - | ~1300 gated | **~1460 fast / ~27 gated / 0 fallback** |
+| lost / STRAY | 0 / - | 0 / 0 | 0 / 0 |
+
+The storm run (mdnsburst on playhouse3, 0.4 s interval, during a
+transfer): 0.850 Mbit/s, lost=0, and the ring added **ZERO holds over
+50 ms** -- max stays the 101 ms boot entry.  The relinquish repair holds
+on Gayle hardware TIGHTER than the old <=74 ms baton bound, and the stall
+mechanism (which needs >200 ms of ACK dead air) is structurally gone; the
+rate cost under storm is the known mDNS CPU arithmetic, finely
+interleaved.  The responder answered during and after
+(mdnsask: amiga-1200.local A 192.168.1.219).  Post-reboot sanity: 1.154
+Mbit/s, baton 856 us.
+
+**The five pre-registered criteria:**
+
+- (a) baton back near control with fast-path dominance: **PASS** --
+  1031 us vs 941 (was 1910), and 98% of mid-transfer brackets take the
+  fast path (~1460 fast vs ~27 gated, 0 fallbacks).
+- (b) handoffs/frame ~0: **PASS** -- 0.00, boot-only, both boots.
+- (c) rate >= +3%: **NO** -- +0.35%, inside the +-2% band.  Per the
+  pre-registration this is the rate-neutral-but-architecturally-superior
+  outcome, and the close-out below is filed accordingly.
+- (d) storm holds bounded <=~100 ms, no stall dips: **PASS** -- zero
+  over-50 ms holds under storm on hardware; no dead-air mechanism left.
+- (e) lost=0, STRAY=0 throughout: **PASS** -- every emulated and
+  physical run, storm included.
+
+**CLOSE-OUT (filed): keep the branch as the foundation; do not ship for
+speed.**  The fast path did exactly what cycle 3's verdict predicted --
+it removed the gate's unconditional cost (rate -0.8% -> +0.35%, baton
+1910 -> 1031) while keeping every architectural win: handoffs/frame 0.00,
+one idle Wait proven over four cycles, the request gate standing ready
+under contention, and an mDNS bound now TIGHTER than the baton build's.
+What it did not do is find new speed: the glue the realm removes is real
+but the brackets' remaining costs (defer, fetch) are dominated by work
+the realm cannot delete, and +0.35% does not clear a ship-for-speed bar.
+Recommendation: green-realm stays the future foundation -- any lever
+that needs realm-side structure (deferred el3 drain into a green thread,
+tick-merge economics, sub-50 ms scheduling bounds) builds here -- but
+AMINETXDUO_GREEN_REALM stays default OFF for release, and the settle
+lineage remains the shipping configuration.  The machine is left on the
+green2 build deliberately: it is the best-measured configuration of this
+cycle (rate tie, strictly better scheduling bounds), verified live over
+two boots, with the full recovery ladder parked on DH0.
+
 ## Known-unfinished list (next cycle resumes here)
 
-0. **The free-baton fast path** (the cycle-3 verdict's next item), then
-   re-run the physical A/B.  And root-cause the mDNS yield-bound
-   regression above first -- it gates any green deployment.
-2. **Lossgate rung** once the peer has tc-cap (one setcap command, above).
-3. **Owner-death edges of the gate**: the heartbeat reap is built and
+1. **Lossgate rung** once the peer has tc-cap (one setcap command, above).
+2. **Owner-death edges of the gate**: the heartbeat reap is built and
    exercised only by inspection; a targeted test (kill an opener mid-recv
    under the emulator) would close it.  Kernel-stop with a parked gated
    caller is unsupported-by-refcount, as it always was for adopted ones.
-4. **AMINETXDUO_LOG in probe builds**: AMI_WARN/AMI_INFO compile out
+3. **AMINETXDUO_LOG in probe builds**: AMI_WARN/AMI_INFO compile out
    without it, which is why the net's conversions count but do not log on
    the soak rig.  Consider forcing AMINETXDUO_LOG on for RXPROBE builds so
    a stray's warning is seen the day the counter moves.
-5. **WaitIO/WaitPort are outside the net**: the tripwire covers Wait()
+4. **WaitIO/WaitPort are outside the net**: the tripwire covers Wait()
    only.  The converted sites use CheckIO loops, so nothing known blocks,
    but the net cannot prove that class the way it proves Wait().
 
