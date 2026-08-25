@@ -604,6 +604,46 @@ UWORD ami_config_search_withdraw_rfc3397(AmiResolverConfig *res,
  */
 #define AMI_CFG_PROBLEM_ERROR   0   /* the file cannot be used as written  */
 #define AMI_CFG_PROBLEM_WARN    1   /* usable, but something was ignored   */
+#define AMI_CFG_PROBLEM_NOTE    2   /* correct as written, and inert here  */
+
+/*
+ * WHY THERE IS A THIRD SEVERITY, and it is not a smaller warning.
+ *
+ * ERROR and WARN are both about a MISTAKE: something the user typed is wrong,
+ * or is right and could not be honoured, and either way the file would be
+ * better if it were changed. A NOTE is the opposite. It says a line is
+ * correct, is accepted, and does nothing here BY DESIGN -- the Roadshow
+ * compatibility keywords, which this stack reads so that a stock configuration
+ * file loads unchanged and then acts on none of them.
+ *
+ * That is not a problem, and reporting it as one cost the user a lecture on
+ * every command that loads the configuration. Four such keywords in one file
+ * turned `netstat -i' into thirty-three lines, twenty-one of them a
+ * "Problems in the configuration:" essay that ended by saying the lines were
+ * harmless and could stay. The same block appeared under an unrelated error,
+ * so a user asking about one interface was told at length about four keywords
+ * they never chose and cannot usefully remove.
+ *
+ * THE RULE, and it is about the READER rather than the message:
+ *
+ *   ERROR, WARN   every command that loads the configuration prints them.
+ *                 A syntax error, an unusable ADDRESS, a missing DEVICE line
+ *                 are the reason the machine is not working, and the command
+ *                 the user happened to run is where they will see it.
+ *   NOTE          only a command whose JOB is auditing the configuration.
+ *                 CheckNetConfig prints them, at whatever length is useful,
+ *                 because a user who runs it has asked to be told everything
+ *                 about their files. Nothing else prints them at all.
+ *
+ * src/tools/tool_diag.c's reporter -- the one netstat, ShowNetStatus,
+ * AddNetInterface, Online and Offline install -- drops NOTE and prints the
+ * other two. src/tools/checknetconfig.c's prints all three, and counts NOTE
+ * apart from the rest so a file whose only findings are notes still returns
+ * RETURN_OK and still says it has nothing wrong with it.
+ *
+ * Adding a keyword to the inert list therefore needs no change anywhere else:
+ * the category is what decides who sees it, not the keyword.
+ */
 
 typedef struct AmiCfgProblem {
     const char *file;       /* "DEVS:NetInterfaces/eth0", never NULL       */

@@ -23,6 +23,15 @@
  *     default route that exists
  *   * the netdb files parse as the columns they are meant to be
  *
+ * AND IT IS THE ONLY COMMAND THAT PRINTS THE NOTES. A Roadshow keyword this
+ * stack reads and deliberately ignores -- IPREQUESTS, COPYMODE, MULTICAST --
+ * is reported by the configuration layer as AMI_CFG_PROBLEM_NOTE, which every
+ * other command drops (src/tools/tool_diag.c). Auditing the files is what this
+ * command is for, so the notes are printed here in full, under a heading of
+ * their own, at the end. They are counted apart from the faults and do not
+ * change the return code: a file whose only findings are notes is a file with
+ * nothing wrong with it.
+ *
  * Return codes: 0 when nothing was found, 5 (RETURN_WARN) when something was,
  * so a startup script can say
  *
@@ -128,10 +137,107 @@ static VOID finding(const char *file, ULONG line, UWORD severity)
         say("\n  %s:\n", (LONG)file);
 }
 
+/* ------------------------------------------------------------- the notes,
+ *
+ * A KEYWORD THAT IS READ AND DOES NOTHING BY DESIGN IS NOT A PROBLEM, and
+ * this command is the only one that prints them at all.
+ *
+ * The configuration layer reports the Roadshow compatibility keywords --
+ * IPREQUESTS, WRITEREQUESTS, COPYMODE, MULTICAST and the rest -- as
+ * AMI_CFG_PROBLEM_NOTE: correct as written, accepted on purpose so that a
+ * stock Roadshow file loads unchanged, and acted on by nothing here.
+ * src/tools/tool_diag.c drops them, so netstat and ShowNetStatus say nothing
+ * about them. CheckNetConfig is the command whose job is to say everything
+ * there is to say about these files, so it keeps the whole text.
+ *
+ * THEY ARE HELD AND PRINTED AT THE END rather than as they arrive. The
+ * reporter fires during ami_config_load(), interleaved with the real faults,
+ * and a note printed in the middle of the "What is wrong" list is filed under
+ * that heading whether or not it belongs there. A separate list needs the
+ * notes kept until the faults are done with, and the strings in an
+ * AmiCfgProblem live only for the duration of the call, so they are copied.
+ *
+ * They are counted apart from cnc_errors and cnc_warnings, which is what
+ * keeps the return code honest: a configuration whose only findings are notes
+ * returns RETURN_OK and is told it has nothing wrong with it.
+ */
+#define CNC_MAX_NOTES   24      /* more than any real drawer produces */
+#define CNC_NOTE_FILE   48
+#define CNC_NOTE_TEXT   144
+#define CNC_NOTE_HINT   144
+
+static struct CncNote
+{
+    char  file[CNC_NOTE_FILE];
+    ULONG line;
+    char  text[CNC_NOTE_TEXT];
+    char  hint[CNC_NOTE_HINT];
+} cnc_note[CNC_MAX_NOTES];
+
+/* How many arrived, which is not how many were kept -- see show_notes(). */
+static UWORD cnc_notes;
+
+static VOID remember_note(const AmiCfgProblem *problem)
+{
+    struct CncNote *n;
+
+    cnc_notes++;
+
+    if (cnc_notes > (UWORD)CNC_MAX_NOTES)
+        return;
+
+    n = &cnc_note[cnc_notes - 1];
+
+    tool_copy_string(n->file, sizeof(n->file), problem->file);
+    n->line = problem->line;
+    tool_copy_string(n->text, sizeof(n->text), problem->text);
+    tool_copy_string(n->hint, sizeof(n->hint),
+                     (problem->hint != NULL) ? problem->hint : "");
+}
+
+static VOID show_notes(VOID)
+{
+    UWORD shown = (cnc_notes < (UWORD)CNC_MAX_NOTES) ? cnc_notes
+                                                     : (UWORD)CNC_MAX_NOTES;
+    UWORD i;
+
+    if (cnc_notes == 0)
+        return;
+
+    say("\nLines that are read and do nothing\n");
+    note("These are correct as written.  This stack reads them so that a "
+         "Roadshow configuration file works here unchanged, and then acts on "
+         "none of them.  Nothing below needs fixing, and no other command "
+         "mentions it.");
+
+    for (i = 0; i < shown; i++)
+    {
+        if (cnc_note[i].line > 0)
+            say("\n  %s, line %lu:\n", (LONG)cnc_note[i].file,
+                cnc_note[i].line);
+        else
+            say("\n  %s:\n", (LONG)cnc_note[i].file);
+
+        note(cnc_note[i].text);
+
+        if (cnc_note[i].hint[0] != '\0')
+            note(cnc_note[i].hint);
+    }
+
+    if (cnc_notes > shown)
+        say("\n  ...and %lu more.\n", (ULONG)(cnc_notes - shown));
+}
+
 /* The parser's own complaints, in the same shape as everything else here. */
 static VOID cnc_report(const AmiCfgProblem *problem, APTR user)
 {
     (VOID)user;
+
+    if (problem->severity == AMI_CFG_PROBLEM_NOTE)
+    {
+        remember_note(problem);
+        return;
+    }
 
     finding(problem->file, problem->line, problem->severity);
     note(problem->text);
@@ -1022,6 +1128,10 @@ int main(int argc, char **argv)
     }
 
     check_storage_drawer();
+
+    /* Last, and under a heading of their own: they are not faults, and the
+       verdict below does not count them. */
+    show_notes();
 
     /* ---- the verdict ---------------------------------------------------- */
 

@@ -934,6 +934,116 @@ static void test_problem_reporter(void)
 }
 
 /*
+ * WHICH SIDE OF THE LINE EACH FINDING IS ON.
+ *
+ * A Roadshow keyword this stack reads and deliberately ignores is not a
+ * problem with the file, and the severity is what says so: every command that
+ * loads the configuration prints ERROR and WARN, and only CheckNetConfig
+ * prints NOTE (src/tools/tool_diag.c drops it). Reported from a real machine:
+ * four inert keywords in one interface file turned `netstat -i' into
+ * thirty-three lines, twenty-one of them a lecture that ended by saying the
+ * lines were harmless and could stay.
+ *
+ * So this pins the CATEGORY of each kind of finding, not its wording. The
+ * second half is the half that matters most: an interface file with a real
+ * fault in it must still report that fault at a severity ordinary commands
+ * show, or this change would have silenced the useful messages along with the
+ * useless ones.
+ */
+static void test_inert_keywords_are_notes(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+    UWORD       i;
+
+    printf("interface: a keyword ignored by design is a note, not a problem\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/genet");
+
+    /* The user's own file, and there is nothing wrong with it. */
+    buf = dup_text("device = a2065.device\n"    /* line 1 */
+                   "unit = 0\n"                 /* line 2 */
+                   "configure = dhcp\n"         /* line 3 */
+                   "iprequests = 32\n"          /* line 4 */
+                   "writerequests = 32\n"       /* line 5 */
+                   "copymode = 1\n"             /* line 6 */
+                   "multicast = yes\n");        /* line 7 */
+
+    CHECK(ami_cfg_parse_interface("genet", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    /* The knowledge is not lost: all four are still reported, with their
+       line numbers, for CheckNetConfig to print. */
+    CHECK(seen_count == 4);
+    CHECK(seen_mentions("iprequests"));
+    CHECK(seen_mentions("writerequests"));
+    CHECK(seen_mentions("copymode"));
+    CHECK(seen_mentions("multicast"));
+    CHECK(seen[0].line == 4);
+    CHECK(seen[3].line == 7);
+
+    /* And not one of them may reach an ordinary command. */
+    for (i = 0; i < seen_count; i++)
+        CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE);
+
+    /* THE OTHER HALF.  A file with real faults still reports them at a
+       severity every command prints, or the fix above would have silenced the
+       messages that are the reason a machine is not working. */
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/broken");
+
+    buf = dup_text("device = a2065.device\n"    /* line 1 */
+                   "multicast = yes\n"          /* line 2: inert, a note */
+                   "configure = static\n"       /* line 3 */
+                   "address = 10.0.0.300\n"     /* line 4: not an address */
+                   "devcie = a2065.device\n");  /* line 5: a typo */
+
+    /* The parse itself succeeds -- the file names a card, so the interface
+       exists -- and what makes it unusable is reported, which is the part
+       that has to keep reaching ordinary commands. */
+    CHECK(ami_cfg_parse_interface("broken", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(seen_count == 4);
+
+    CHECK(seen[0].line == 2);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_NOTE);
+
+    CHECK(seen[1].line == 4);
+    CHECK(seen[1].severity == AMI_CFG_PROBLEM_ERROR);
+    CHECK(seen_mentions("ADDRESS"));
+
+    CHECK(seen[2].line == 5);
+    CHECK(seen[2].severity == AMI_CFG_PROBLEM_WARN);
+    CHECK(seen_mentions("devcie"));
+
+    /* The whole-file verdict that follows from the bad ADDRESS: still an
+       error, and still one an ordinary command prints. */
+    CHECK(seen[3].line == 0);
+    CHECK(seen[3].severity == AMI_CFG_PROBLEM_ERROR);
+
+    /* A missing DEVICE line is the whole-file verdict, and stays an ERROR. */
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/nodevice");
+
+    buf = dup_text("unit = 0\ncopymode = 1\nconfigure = dhcp\n");
+    CHECK(ami_cfg_parse_interface("nodevice", buf, &iface) != AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(seen_count == 2);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_NOTE);      /* copymode */
+    CHECK(seen[1].line == 0);
+    CHECK(seen[1].severity == AMI_CFG_PROBLEM_ERROR);     /* no DEVICE */
+}
+
+/*
  * CARD=, which board the driver binds to when the device file covers a family
  * of them. Names come from include/aminetxduo/anxnet.h; a name no card has
  * refuses the interface rather than coming up on whatever UNIT points at.
@@ -2544,6 +2654,7 @@ int main(int argc, char **argv)
     test_interface_amitcp_flavour();
     test_interface_errors();
     test_problem_reporter();
+    test_inert_keywords_are_notes();
     test_interface_ipv6_only();
 #ifdef AMINETXDUO_IPV6
     test_ipv6_only_no_error();

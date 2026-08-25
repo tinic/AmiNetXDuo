@@ -76,6 +76,82 @@ static VOID show_addresses6(const ToolSnapshot *snap, UWORD nx_index)
     }
 }
 
+/*
+ * THE DEFINITIONS THAT ARE NOT RUNNING, in one line under the table.
+ *
+ * The table above is the live stack: one row per attached interface. A machine
+ * may describe more interfaces in DEVS:NetInterfaces than the stack has slots
+ * for -- that is allowed and normal, aminetxduo/config.h -- and until now the
+ * ones that did not attach appeared in no column of this command at all. A
+ * user with four files and two attached read a two-row table and had nothing
+ * to tell them the other two exist, let alone why they are not up.
+ *
+ * ShowNetStatus already answers this properly: every definition gets a row,
+ * and the State column says `defined' for one that is described and not
+ * attached. This is the same fact in the shape netstat has, which is a line
+ * rather than a table: the names, and the command that brings one up. Not a
+ * row per definition, because the columns here are Mtu, Address and packet
+ * counts and a definition has none of them, and a row of dashes says less
+ * than the names on one line.
+ *
+ * Matched BY IDENTITY, tool_iface_live(), for the reason that function
+ * carries: the description at subscript i is not the interface in NX slot i.
+ */
+static VOID show_defined_only(const AmiConfig *cfg, const ToolSnapshot *snap)
+{
+    char  list[220];
+    ULONG pos   = 0;
+    UWORD found = 0;
+    UWORD named = 0;
+    UWORD i;
+
+    if (cfg == NULL)
+        return;
+
+    for (i = 0; i < cfg->interface_count; i++)
+    {
+        const ToolIfInfo *live = tool_iface_live(snap, &cfg->interfaces[i]);
+        const char       *name = cfg->interfaces[i].name;
+        ULONG             n;
+
+        if (live != NULL && live->attached)
+            continue;
+
+        found++;
+
+        for (n = 0; name[n] != '\0'; n++)
+            ;
+
+        /* A drawer too big for one line is counted, not half-named. */
+        if (pos + n + 3 >= sizeof(list))
+            continue;
+
+        if (pos > 0)
+        {
+            list[pos++] = ',';
+            list[pos++] = ' ';
+        }
+
+        for (n = 0; name[n] != '\0'; n++)
+            list[pos++] = name[n];
+
+        named++;
+    }
+
+    list[pos] = '\0';
+
+    if (found == 0)
+        return;
+
+    if (found > named)
+        tool_printf("\nDefined but not attached: %s and %lu more\n",
+                    (LONG)list, (ULONG)(found - named));
+    else
+        tool_printf("\nDefined but not attached: %s\n", (LONG)list);
+
+    tool_printf("        AddNetInterface <name> brings one up\n");
+}
+
 static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     char  addr[16];
@@ -119,6 +195,8 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 
         show_addresses6(snap, info->nx_index);
     }
+
+    show_defined_only(cfg, snap);
 }
 
 /*

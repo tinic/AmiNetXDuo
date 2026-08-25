@@ -172,7 +172,18 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
 {
     LONG err;
 
-    tool_config_watch();
+    /*
+     * ONLY THE FIRST READ REPORTS.  `again' already said that -- see the
+     * comment under it -- and the reporter defeated it: the file is read up
+     * to five times in one run (695, 727, 748, 823, 988), and watching every
+     * read printed the whole "Problems in the configuration:" block once per
+     * read. A single bad ADDRESS came out five times, identically, in the
+     * output of one command. The re-reads exist to pick the file up again
+     * after the interface list changed, not to tell the user anything.
+     */
+    if (!again)
+        tool_config_watch();
+
     err = ami_config_load_interface(name, ifc);
     tool_config_unwatch();
 

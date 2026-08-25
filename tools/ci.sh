@@ -1469,7 +1469,11 @@ stage_cards6() {
 #   multidef   three, four and eight files in DEVS:NetInterfaces/.  Nothing
 #              had ever staged more than two, so AMI_CFG_MAX_INTERFACES has
 #              never been reached by a test and the branch that drops the rest
-#              has never executed in CI.
+#              has never executed in CI.  Its `compat' round is the same
+#              question inverted: a file carrying keywords this stack ignores
+#              by design must produce NO output from ordinary commands and a
+#              full report from CheckNetConfig, while a real fault beside it
+#              is still reported by both.
 #   bringupfail  what a user is TOLD when bring-up fails, per cause.  Several
 #              selftests assert the wording of a success; none asserted the
 #              wording of a failure, which is the half a user reads.

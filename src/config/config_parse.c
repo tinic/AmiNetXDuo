@@ -299,6 +299,17 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
  *
  * The reason is per keyword, because "unsupported" does not say what to do
  * next.
+ *
+ * AMI_CFG_PROBLEM_NOTE, NOT _WARN, and the difference is the whole point of
+ * that severity: nothing here is wrong with the file. The keyword is spelled
+ * correctly, this stack accepts it on purpose so that a Roadshow
+ * configuration loads unchanged, and the advice at the end of every one of
+ * these is that the line is harmless and can stay. A message whose own last
+ * sentence says there is no problem must not be printed under the heading
+ * "Problems in the configuration:" by every command that reads a file --
+ * which is what it did, four keywords deep, on a machine whose configuration
+ * was entirely correct. Only CheckNetConfig shows notes now; see
+ * aminetxduo/config.h.
  */
 static const struct { const char *key; const char *why; } cfg_inert_keys[] =
 {
@@ -342,7 +353,7 @@ static VOID report_inert_keyword(ULONG line, const char *key)
             ami_cfg_join3(text, sizeof(text), key,
                           " is read and does nothing: ",
                           cfg_inert_keys[i].why);
-            ami_cfg_problem(line, AMI_CFG_PROBLEM_WARN, text,
+            ami_cfg_problem(line, AMI_CFG_PROBLEM_NOTE, text,
                             "Roadshow acts on it.  This stack does not.  "
                             "The line is harmless and can stay.");
             return;

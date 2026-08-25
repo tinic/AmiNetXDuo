@@ -30,6 +30,7 @@ afterwards.
 | CPU rate | stock (~14 MHz), `cpu_speed=max`, `cpu_multiplier=64` (~209 MHz) | `tests/tools/run-cpuspeed.sh` | green |
 | Memory size | 0 MB, 8 MB, 32 MB, 128 MB | `tests/tools/run-bigmem.sh` | green |
 | Interface count | 1, 2, 3, 4, 8 definitions | `tests/tools/run-multidef.sh` | green (landed red) |
+| Diagnostic volume | a configuration carrying keywords this stack ignores by design, beside one real fault | `tests/tools/run-multidef.sh -r compat` | green (landed red) |
 | Interface slots | which of 4 definitions gets one of 2 slots, and whose name it answers to | `tests/tools/run-ifslots.sh` | green (landed red) |
 | Failure wording | missing device, wrong unit, unusable address, attach cap, no memory | `tests/tools/run-bringupfail.sh`, `bringupfail-verdict.sh` | green (landed red) |
 
@@ -139,6 +140,43 @@ clause instead.
 That exemption was itself found by running the arm — it had been a false red,
 and would have shipped as a permanent one. Which is the argument for keeping an
 arm past the defect that prompted it.
+
+#### the `compat` round — the same defect from the other end
+
+Everything above is about a machine being **too quiet** about a file the user
+wrote. `run-multidef.sh -r compat` is the same fault inverted, reported by the
+user from their own machine: `DEVS:NetInterfaces/genet` carried four Roadshow
+keywords this stack reads and deliberately ignores — `IPREQUESTS`,
+`WRITEREQUESTS`, `COPYMODE`, `MULTICAST` — and **every** command that loads the
+configuration printed six lines about each of them, under the heading
+`Problems in the configuration:`, ending with the sentence *"The line is
+harmless and can stay"*. `netstat -i` was 33 lines, 21 of them that lecture,
+before the table. The same block prefixed an unrelated `ShowNetStatus DHCP`
+error, so a question about one interface was answered with an essay about four
+keywords and then *"there is no interface called DHCP"*.
+
+The round stages that file beside a `badaddr` definition — a real fault — and
+asserts the division of labour in one transcript:
+
+| | |
+|---|---|
+| ordinary commands | `netstat`, `ShowNetStatus`, `AddNetInterface` say **nothing** about a keyword ignored by design. Not a shorter essay: nothing |
+| `CheckNetConfig` | names every one of them, with its line and its reason, under a heading of its own, and does not count them towards the return code |
+| genuine faults | **unchanged**. `netstat -i` and `AddNetInterface` still print the bad `ADDRESS`, with the file and the line |
+
+The last row is what stops the fix from being *"print less"*: without a real
+fault in the same drawer, the arm would pass on a tree that had simply stopped
+reporting configuration problems altogether.
+
+The mechanism is a third severity, `AMI_CFG_PROBLEM_NOTE`
+(`include/aminetxduo/config.h`), and a category rather than a list of keywords:
+`src/tools/tool_diag.c`'s reporter — the one every ordinary command installs —
+drops notes, and `src/tools/checknetconfig.c`'s keeps them. Adding a keyword to
+the inert list needs no change anywhere else.
+
+The round also reads the `netstat -i` table itself: a definition that exists and
+is not attached is now named there (`Defined but not attached: …`), which is the
+visibility clause above asked of the other command a user looks at.
 
 ### `run-ifslots.sh` — the visible half was fixed and the usable half was not
 

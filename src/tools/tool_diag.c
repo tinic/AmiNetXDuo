@@ -446,9 +446,41 @@ VOID tool_wrap(ULONG indent, const char *text)
 
 static UWORD diag_problem_total;
 
+/*
+ * THE REPORTER EVERY ORDINARY COMMAND INSTALLS, and what it refuses to print.
+ *
+ * netstat, ShowNetStatus, AddNetInterface, Online and Offline all load the
+ * configuration as a step towards answering something else, and this hook is
+ * how the parser's findings reach the screen while they do. That makes it the
+ * one place where the volume of those findings is decided for all of them.
+ *
+ * AMI_CFG_PROBLEM_NOTE IS DROPPED HERE. A note is a line that is correct,
+ * accepted, and inert by design -- the Roadshow compatibility keywords. On a
+ * machine with four of them in one interface file, printing notes made
+ * `netstat -i' thirty-three lines long, twenty-one of them a lecture about
+ * keywords the user cannot usefully remove, ahead of the table they asked
+ * for; the same block prefixed an unrelated "there is no interface called
+ * DHCP". Six lines of prose per keyword, on every invocation, on a
+ * configuration with nothing wrong with it.
+ *
+ * This is a category, not a list of keywords: anything the configuration
+ * layer classifies as read-and-ignored-by-design disappears from here without
+ * a change in this file. What is NOT dropped is everything that is really
+ * wrong -- a syntax error, an ADDRESS that is not an address, a missing
+ * DEVICE line, a name too long to keep. Those are why the machine is not
+ * working, and the command the user happened to run is where they need to
+ * see them.
+ *
+ * The knowledge itself is not lost. CheckNetConfig installs its own reporter
+ * (src/tools/checknetconfig.c) and prints the notes in full, under their own
+ * heading, because auditing the configuration is what that command is for.
+ */
 static VOID diag_report(const AmiCfgProblem *problem, APTR user)
 {
     (VOID)user;
+
+    if (problem->severity == AMI_CFG_PROBLEM_NOTE)
+        return;
 
     if (diag_problem_total++ == 0)
     {

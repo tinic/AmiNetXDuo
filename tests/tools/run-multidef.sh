@@ -114,7 +114,43 @@
 #                 reported as defined-and-not-attached, with the reason, by
 #                 the command a user runs to see their interfaces.
 #
-# COST: three boots, about a minute and a half.
+# THE `compat' ROUND, and it is the other half of the same argument
+#
+#   Everything above is about a machine being TOO QUIET: a file the user wrote
+#   and the machine says nothing about.  `compat' is the same defect from the
+#   other end, reported by the user from their own machine on 2026-08-21.
+#
+#   Their DEVS:NetInterfaces/genet carries four Roadshow keywords this stack
+#   reads and deliberately ignores -- IPREQUESTS, WRITEREQUESTS, COPYMODE,
+#   MULTICAST.  Every command that loads the configuration printed six lines
+#   of prose about each of them, under the heading "Problems in the
+#   configuration:", ending with the sentence "The line is harmless and can
+#   stay".  `netstat -i' was thirty-three lines, twenty-one of them that
+#   lecture, before the table.  The same block appeared ahead of an unrelated
+#   error, so `ShowNetStatus DHCP' answered a question about one interface
+#   with an essay about four keywords and then said there is no interface
+#   called DHCP.
+#
+#   A keyword read and ignored BY DESIGN is not a problem with the file, and
+#   the message said so itself.  So the round asserts a division of labour:
+#
+#     ordinary commands   netstat, ShowNetStatus, AddNetInterface say NOTHING
+#                         about them.  Not a shorter essay: nothing.
+#     CheckNetConfig      names every one of them, with its line number and
+#                         its reason, because auditing the files is what that
+#                         command is FOR -- and still reports the file as
+#                         having nothing wrong with it, because it has not.
+#     genuine faults      unchanged.  The round stages a bad ADDRESS beside
+#                         the compat keywords and requires that AddNetInterface
+#                         still prints it, or this arm would pass on a tree
+#                         that had simply stopped reporting configuration
+#                         problems altogether.
+#
+#   It also reads the netstat table itself: a definition that exists and is
+#   not attached must be NAMED there, which is clause 1 above asked of the
+#   other command a user looks at.
+#
+# COST: four boots, about two minutes.
 #
 # SPDX-License-Identifier: MIT
 
@@ -126,7 +162,7 @@ cd "$ROOT" || exit 2
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
 TIMEOUT=240
-ROUNDS="3,4,8"
+ROUNDS="compat,3,4,8"
 LIST=0
 
 while getopts "b:t:r:N:l" opt; do
@@ -193,6 +229,11 @@ kind_of() { # name -> kind
 
 if [ "$LIST" = 1 ]; then
     for r in ${ROUNDS//,/ }; do
+        if [ "$r" = compat ]; then
+            echo "round 'compat': genet (Roadshow keywords this stack ignores)"
+            echo "                badaddr (a real fault, which must still be told)"
+            continue
+        fi
         echo "round of $r:"
         plan_for_round "$r" | sed 's/^/    /'
     done
@@ -205,8 +246,9 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$ROOT/$BUILD/src/tools/AddNetInterface"
 SHOW="$ROOT/$BUILD/src/tools/ShowNetStatus"
 CHECKCFG="$ROOT/$BUILD/src/tools/CheckNetConfig"
+NETSTAT="$ROOT/$BUILD/src/tools/netstat"
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
-for f in "$BSD" "$ADDIF" "$SHOW" "$CHECKCFG" "$SMOKE"; do
+for f in "$BSD" "$ADDIF" "$SHOW" "$CHECKCFG" "$NETSTAT" "$SMOKE"; do
     [ -f "$f" ] || { echo "build $BUILD first: no $f" >&2; exit 2; }
 done
 
@@ -266,11 +308,19 @@ EOF
     # table has to be able to show, and only the second reading can show it.
     echo "SYS:ShowNetStatus INTERFACES" >> "$stage/commands.txt"
 
+    # AND THE OTHER COMMAND A USER LOOKS AT.  `netstat -i' reads the LIVE
+    # stack, one row per attached interface, so a definition that never
+    # attached appeared in no column of it at all -- a machine with four files
+    # and two attached printed a two-row table and nothing to say the other
+    # two exist.  ShowNetStatus grew a `defined' state for exactly this; the
+    # same fact has to be reachable from here.
+    echo "SYS:netstat -i" >> "$stage/commands.txt"
+
     (
         export AMINETXDUO_RUN_TAG="$tag"
         "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -t "$TIMEOUT" \
             "$SMOKE" "$stage/devs" "$stage/libs" "$ADDIF" "$SHOW" \
-            "$CHECKCFG" "$stage/commands.txt"
+            "$CHECKCFG" "$NETSTAT" "$stage/commands.txt"
     )
     rc=$?
 
@@ -400,6 +450,27 @@ EOF
 $(plan_for_round "$n")
 EOF
 
+    # CLAUSE 1, ASKED OF netstat.  eth1 is in every round, it parses cleanly,
+    # and it names a driver that is not on this machine -- so it is DEFINED,
+    # is never attached, and has no row in a table built from the live stack.
+    # A user reading `netstat -i' has to be able to see that it exists.
+    local nsi
+    nsi=$(tr -d '\r' < "$report" |
+          awk '$0 == "===== SYS:netstat -i =====" { grab = 1; next }
+               /^===== / { grab = 0 }
+               grab { print }')
+
+    if printf '%s\n' "$nsi" | grep -qE '^Defined but not attached:.*eth1'; then
+        echo "  ok   netstat -i names eth1 as defined and not attached"
+    elif printf '%s\n' "$nsi" | grep -q '^Defined but not attached:'; then
+        echo "  FAIL netstat -i has the line and does not name eth1"
+        printf '%s\n' "$nsi" | grep '^Defined but not attached:' | sed 's/^/       /'
+        bad=$((bad + 1))
+    else
+        echo "  FAIL netstat -i says nothing about definitions that are not attached"
+        bad=$((bad + 1))
+    fi
+
     # CheckNetConfig's own count, reported and not counted.  See the header.
     if grep -qai "interface files and this stack has room" "$report"; then
         echo "  note CheckNetConfig does warn about the drawer size"
@@ -415,11 +486,252 @@ EOF
     [ "$bad" = 0 ]
 }
 
+# ------------------------------------------------------ the compat round --
+#
+# ONE BOOT, and the whole question is WHO IS TOLD WHAT.  See the header block
+# for where this came from.
+#
+# The drawer:
+#
+#   genet     the user's own file: a working a2065 definition carrying the
+#             four Roadshow keywords this stack reads and ignores by design.
+#             It attaches, and nothing ordinary may say a word about them.
+#   badaddr   a definition with an ADDRESS that is not an address.  It is the
+#             control: a real fault, which every command must STILL report.
+#             Without it this round would pass on a tree that had stopped
+#             reporting configuration problems at all, which is the obvious
+#             wrong way to make the essay go away.
+#   wifipi    a clean definition of a card this machine does not have.  Two
+#             slots, three definitions: this is the one that stays DEFINED,
+#             and it is what `netstat -i' has to name.  The user's machine had
+#             four definitions and attached two, and the two that did not
+#             appeared nowhere in that command's output.
+#
+run_compat_round() {
+    local tag="matrix-multidef-compat"
+    local stage="$ROOT/build/multidef-stage-compat"
+    local hd="$ROOT/build/amiberry-testhd-$tag"
+    local report="$hd/tools.txt"
+    local rc bad=0 kw
+
+    # The four the user has, spelled as their file spells them.
+    local COMPAT_KEYWORDS="iprequests writerequests copymode multicast"
+
+    # THE LECTURE, matched by its own words rather than by the heading it sat
+    # under.  The heading is shared with real faults, and this round stages a
+    # real fault on purpose -- grading on the heading would have required the
+    # machine to stop reporting the fault too, which is the wrong fix and
+    # exactly the one this arm has to be unable to accept.
+    local LECTURE='is read and does nothing|harmless and can stay|iprequests|writerequests|copymode|multicast'
+
+    echo
+    echo "=============================================================="
+    echo "==> Roadshow compatibility keywords, and who is told about them"
+    echo "=============================================================="
+
+    rm -rf "$stage"
+    mkdir -p "$stage/libs" "$stage/devs/NetInterfaces"
+    cp "$BSD" "$stage/libs/bsdsocket.library"
+    cp "$A2065" "$stage/devs/a2065.device"
+
+    # Written with the keywords apart from the working lines, and with the
+    # line numbers spread out, so a report that names a line can be checked
+    # against a line that really is the keyword.
+    cat > "$stage/devs/NetInterfaces/genet" <<'EOF'
+DEVICE=a2065.device
+UNIT=0
+CONFIGURE=DHCP
+IPREQUESTS=32
+WRITEREQUESTS=32
+COPYMODE=1
+MULTICAST=YES
+EOF
+
+    iface_file badaddr > "$stage/devs/NetInterfaces/badaddr"
+    iface_file nodev   > "$stage/devs/NetInterfaces/wifipi"
+
+    cat > "$stage/commands.txt" <<'EOF'
+SYS:CheckNetConfig
+SYS:AddNetInterface genet
+SYS:ShowNetStatus INTERFACES
+SYS:netstat -i
+SYS:AddNetInterface badaddr
+EOF
+
+    (
+        export AMINETXDUO_RUN_TAG="$tag"
+        "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -t "$TIMEOUT" \
+            "$SMOKE" "$stage/devs" "$stage/libs" "$ADDIF" "$SHOW" \
+            "$CHECKCFG" "$NETSTAT" "$stage/commands.txt"
+    )
+    rc=$?
+
+    if [ ! -s "$report" ]; then
+        echo "!! the guest wrote no $report (run rc=$rc)" >&2
+        printf 'round=%-7s FAIL no_transcript run_rc=%s\n' compat "$rc" >> "$RESULTS"
+        return 1
+    fi
+
+    echo
+    echo "------------------ what the guest printed --------------------"
+    cat "$report"
+    echo "--------------------------------------------------------------"
+    echo
+
+    # Everything one command printed, between its own header and the next.
+    cblock() { # command-line
+        tr -d '\r' < "$report" |
+            awk -v want="===== $1 =====" '
+                $0 == want { grab = 1; next }
+                /^===== / { grab = 0 }
+                grab { print }'
+    }
+
+    # ---- the ordinary commands say NOTHING about them --------------------
+    local cmd
+    for cmd in "SYS:AddNetInterface genet" "SYS:ShowNetStatus INTERFACES" \
+               "SYS:netstat -i"; do
+        if cblock "$cmd" | grep -qiE "$LECTURE"; then
+            echo "  FAIL '$cmd' lectures the user about keywords it ignores"
+            cblock "$cmd" | grep -niE "$LECTURE" | head -4 | sed 's/^/       /'
+            bad=$((bad + 1))
+        else
+            echo "  ok   '$cmd' says nothing about the compat keywords"
+        fi
+    done
+
+    # AND THE TABLE IS STILL THERE, which is the other half of "nothing".  A
+    # command that printed no essay because it printed nothing at all would
+    # pass every assertion above.
+    if cblock "SYS:netstat -i" | grep -q '^Network interfaces'; then
+        echo "  ok   netstat -i still prints its table"
+    else
+        echo "  FAIL netstat -i printed no table"
+        bad=$((bad + 1))
+    fi
+
+    if cblock "SYS:netstat -i" | grep -qE '^genet[[:space:]]'; then
+        echo "  ok   netstat -i has a row for the interface that attached"
+    else
+        echo "  FAIL netstat -i has no row for genet"
+        bad=$((bad + 1))
+    fi
+
+    # THE DEFECT MEASURED RATHER THAN DESCRIBED.  On the user's machine
+    # `netstat -i' was 33 lines, of which 21 were the lecture, before the
+    # table.  The number that has to be zero is the second one; the total is
+    # reported and not graded, because this drawer also holds a real fault
+    # whose report is legitimately several lines long.
+    local nlines nlecture
+    nlines=$(cblock "SYS:netstat -i" | grep -c .)
+    nlecture=$(cblock "SYS:netstat -i" | grep -ciE "$LECTURE")
+    echo "  ..   netstat -i is $nlines lines, $nlecture of them lecture"
+    if [ "$nlecture" = 0 ]; then
+        echo "  ok   none of netstat -i is a lecture about ignored keywords"
+    else
+        echo "  FAIL $nlecture lines of netstat -i are the lecture again"
+        bad=$((bad + 1))
+    fi
+
+    # The definition that did not attach is named there.  Two slots, three
+    # definitions: wifipi names a card this machine does not have, so it is
+    # the one left over however the other two are ordered.
+    if cblock "SYS:netstat -i" | grep -qE '^Defined but not attached:.*wifipi'; then
+        echo "  ok   netstat -i names wifipi as defined and not attached"
+    else
+        echo "  FAIL netstat -i does not name the definition that is not attached"
+        bad=$((bad + 1))
+    fi
+
+    # ---- CheckNetConfig still knows all of it ----------------------------
+    #
+    # The knowledge was not deleted, it was recategorised: the command whose
+    # job is auditing these files prints every keyword, with its reason.
+    for kw in $COMPAT_KEYWORDS; do
+        if cblock "SYS:CheckNetConfig" | grep -qi "$kw is read and does nothing"; then
+            echo "  ok   CheckNetConfig still reports $kw"
+        else
+            echo "  FAIL CheckNetConfig no longer reports $kw"
+            bad=$((bad + 1))
+        fi
+    done
+
+    if cblock "SYS:CheckNetConfig" | grep -q 'Lines that are read and do nothing'; then
+        echo "  ok   CheckNetConfig files them under a heading of their own"
+    else
+        echo "  FAIL CheckNetConfig has no heading for them"
+        bad=$((bad + 1))
+    fi
+
+    # ---- and the genuine fault is STILL reported by an ordinary command ---
+    #
+    # This is the clause that stops the fix from being "print less".  badaddr
+    # has an ADDRESS that is not an address; AddNetInterface must still say
+    # so, with the file and the line.
+    if cblock "SYS:AddNetInterface badaddr" |
+       grep -q 'Problems in the configuration:'; then
+        echo "  ok   a real fault still reaches an ordinary command"
+    else
+        echo "  FAIL a real configuration fault is no longer reported"
+        bad=$((bad + 1))
+    fi
+
+    if cblock "SYS:AddNetInterface badaddr" | grep -qE "ADDRESS cannot be"; then
+        echo "  ok   and it names the keyword and the value"
+    else
+        echo "  FAIL the fault was reported without naming what is wrong"
+        bad=$((bad + 1))
+    fi
+
+    if cblock "SYS:AddNetInterface badaddr" |
+       grep -qE 'DEVS:NetInterfaces/badaddr, line [0-9]+'; then
+        echo "  ok   and it names the file and the line"
+    else
+        echo "  FAIL the fault was reported without a file and a line"
+        bad=$((bad + 1))
+    fi
+
+    # ONCE.  AddNetInterface reads the file up to five times in a run, and
+    # every read used to print the whole block: one bad ADDRESS came out five
+    # times, identically, in the output of a single command.  Saying a true
+    # thing five times is the same defect as saying a useless thing once.
+    local nblocks
+    nblocks=$(cblock "SYS:AddNetInterface badaddr" |
+              grep -c '^Problems in the configuration:')
+    if [ "$nblocks" = 1 ]; then
+        echo "  ok   and it says it exactly once"
+    else
+        echo "  FAIL the same fault is printed $nblocks times by one command"
+        bad=$((bad + 1))
+    fi
+
+    # AND BY A COMMAND THAT WAS ASKED SOMETHING ELSE.  netstat loads the same
+    # drawer on its way to the table, and a fault in it is why the machine is
+    # not working: it belongs on the screen of whichever command the user
+    # happened to run.  That is the line this change draws -- notes never,
+    # faults always -- and both halves are asserted on the same transcript.
+    if cblock "SYS:netstat -i" | grep -qE "ADDRESS cannot be"; then
+        echo "  ok   netstat -i reports the real fault it found on the way"
+    else
+        echo "  FAIL netstat -i stopped reporting real configuration faults"
+        bad=$((bad + 1))
+    fi
+
+    printf 'round=%-7s keywords=%-3s failures=%-3s run_rc=%s\n' \
+           compat 4 "$bad" "$rc" >> "$RESULTS"
+
+    [ "$bad" = 0 ]
+}
+
 FAILED=0
 COUNT=0
 for r in ${ROUNDS//,/ }; do
     COUNT=$((COUNT + 1))
-    run_round "$r" || FAILED=$((FAILED + 1))
+    if [ "$r" = compat ]; then
+        run_compat_round || FAILED=$((FAILED + 1))
+    else
+        run_round "$r" || FAILED=$((FAILED + 1))
+    fi
 done
 
 echo
