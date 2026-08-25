@@ -149,6 +149,61 @@ zero errors, and the fused drain is the foundation any faster port I/O
    Worth one measurement (a transitions-per-second figure during transfer)
    before any design work.
 
+## Calibration: other stacks over the same device (2026-08-25, EMULATED)
+
+The ~1.19-1.23 Mbit/s physical figure has never had a reference point on the
+same machine: the oft-quoted AmiTCP 906 KB/s was an X-Surf-100 on somebody
+else's hardware and driver, and comparing across that boundary is exactly the
+conflation docs/PHYSICAL_RX_A1200.md warns about.  The calibration question
+is whether a mature foreign stack, driving OUR anxnet.device on THIS class of
+machine, is faster (stack-wide gap remains) or not (we are at the
+hardware/PIO ceiling).
+
+The emulated leg is done.  One guest recipe (the run-smbmount.sh
+foreign-stack pattern): full Workbench 3.1 SYS:, ne2000_pcmcia bridged,
+anxnet.device from this branch's cmgp build in DEVS:Networks, static IPv4,
+the same C:iperf binary in every arm, the same third-machine sender
+(iperfpeer.py, 10 s tcp sends), four receives per arm, byte counts matched
+peer-side, lost=0 throughout:
+
+| stack | four runs, kbit/s | mean |
+|---|---|---:|
+| AmiTCP_NG 4.1.5, 68020 | 2145 / 2138 / 2141 / 2144 | 2142 |
+| ours (this branch) | 2771 / 2777 / 2768 / 2795 | 2778 |
+| Roadshow demo 1.15 | 2755 / 2756 / 2761 / 2756 | 2757 |
+
+Emulated rates are a property of the host as much as the guest and do NOT
+transfer to hardware; the ranking on one rig in one sitting is the signal.
+What it says: **our stack is not behind either foreign stack over the same
+driver in the same machine -- it leads Roadshow by a hair and AmiTCP_NG by
+~30%.**  If the physical arm agrees, the remaining campaign gap is
+hardware/PIO ceiling, not stack-wide inefficiency, and the levers left are
+the ones the budget already names (option 4 glue, task #4 movem port I/O).
+The physical arm (self-restoring boot, stack swapped under the same rig) is
+prepared and pending its machine slot; until it runs, this section claims
+the emulated ranking only.
+
+AmiTCP_NG operational facts, learned the hard way in the rehearsal and
+needed by whoever runs the physical arm:
+
+- Source: github.com/MW0MWZ/AmiTCP_NG v4.1.5 (GPL fork of AmiTCP 3.0b2,
+  Roadshow-compatible ABI 4.1).  The 68020 archive runs on an emulated
+  68EC020 A1200; no FPU dependency observed.
+- **rexxsyslib.library is a hard dependency, and its absence is a SILENT
+  WEDGE**: AddNetInterface never returns, nothing is logged, the boot looks
+  dead.  Stock Workbench 3.1 ships the library and the physical machine has
+  it (33392 bytes); RexxMast does NOT need to be running (the rehearsal
+  never started it).
+- No usergroup.library dependency (unlike AmiTCP classic).  ROM libraries
+  otherwise: dos, intuition, utility, timer.device.
+- It wants AmiTCP: assigned (db/AmiTCP.config, db/netdb) and
+  DEVS:NetInterfaces files in Roadshow's key=value format; a generic
+  SANA-II device= name is looked up in DEVS:Networks.  Its C: tools shadow
+  ours by name -- stage them in their own drawer, never over C:.
+- A bare-drive guest (no Workbench) wedges even with rexxsyslib staged;
+  the full WB3.1 SYS: is part of the recipe.  Judge foreign-stack boots
+  only by guest-written marker files, never by our rig's probes.
+
 ## Reproducing
 
     cmake -B build/cmb -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
