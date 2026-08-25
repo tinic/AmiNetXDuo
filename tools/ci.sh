@@ -1609,6 +1609,18 @@ stage_matrix() {
         return "$NOTHING"
     fi
 
+    # A missing build makes every harness below answer 2, and a stage of
+    # skips returns green having tested nothing.  The variable is
+    # AMINETXDUO_CI_BUILD, not AMINETXDUO_BUILD, and getting it wrong is how
+    # seven arms were skipped under a green result.
+    if [ ! -f "$ROOT/$BUILD/default/tests/netstack/netstack_test" ]; then
+        fail "machine matrix: nothing is built at $BUILD/default -- run the" \
+             "cross stage first, or set AMINETXDUO_CI_BUILD (not" \
+             "AMINETXDUO_BUILD) to the tree you built.  Every arm below would" \
+             "report 'the rig refused it' and this stage would return green."
+        return 1
+    fi
+
     # The strings half of the refusal arm needs no emulator at all, so it runs
     # first and its verdict survives a rig that cannot boot anything.
     # Exit 2 is "nothing built to check" and exit 1 is "a command does it".
