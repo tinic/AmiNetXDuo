@@ -246,6 +246,176 @@ needed by whoever runs the physical arm:
   the full WB3.1 SYS: is part of the recipe.  Judge foreign-stack boots
   only by guest-written marker files, never by our rig's probes.
 
+## Payload integrity: content against a placement bug the sum would certify (2026-08-25, EMULATED)
+
+Every gate above this section compares BYTE COUNTS.  The single-copy claim
+computes the receive checksum in the same pass that places the bytes, so the
+one failure a byte count cannot see -- bytes placed at the wrong offset, a
+word duplicated or skipped, a tail mishandled, and the result then CERTIFIED
+by a sum taken over the wrongly placed bytes -- passes TCP's check, passes
+iperf's counts, and hands the application corrupted payload without a
+symptom.  IoSumDrill catches the routine lying about a buffer it was handed;
+nothing before this tier checked the bytes an APPLICATION got back against
+the bytes the far end sent.  This section is that check.
+
+### The instrument
+
+`src/tools/paysum.c` on the guest and `tests/tools/paypeer.py` on the peer
+each derive the same position-dependent pattern -- word j of a stream is
+mix32(seed ^ (j * 0x9E3779B9)), bytes big-endian, lowbias32 as the mix -- and
+each computes CRC-32 over what actually crossed on its OWN side of the wire.
+Two implementations, two languages, written from the numbers rather than
+from each other; `paypeer.py selftest` pins shared vectors.  A constant fill
+(iperf's repeating digits, zeros) would certify a placement bug instead of
+catching it, because bytes landed at the wrong offset still hold the right
+values; under this pattern any shift, duplication, skip or cross-connection
+leak changes the bytes, and the changed bytes change exactly one side's CRC.
+`tests/tools/run-payverify.sh` writes both ends' case tables from one
+matrix, gives every connection its own port and seed, and joins the two
+reports port by port: bytes must agree, CRCs must agree, neither end's
+positional verify may have found a first divergence.  The verifying side
+reports `first_bad=<offset>` when it does, which is the reproduction
+parameter a placement bug would be chased with.
+
+### The matrix, and what each arm is for
+
+Per family (IPv4 AND IPv6), per run: receive lengths 1/2/3/4/5, 1459-1463
+(the MSS edges), 4095-4097, 65535-65537, 1048573-1048576 -- every tail
+residue (len mod 4 = 0..3, the class the three-byte-tail bug lived in) at
+several magnitudes; transmit lengths covering the same residues; plus one
+concurrency case per direction, three simultaneous sockets with three
+different seeds through paysum's single select() loop, so a chunk leaked
+across connections lands in a stream whose pattern disagrees with it at
+every byte.  64 verified connections per run.
+
+The IPv6 arm is an independent CONTROL, not just coverage: the v4 receive
+verifier consumes the fused sum (n68k_rx_verify_sum), while the verify
+entry points decline v6 outright (n68k_rx_verify.c:93 and :274) and
+sana2_rx.c's IPv6 arm delivers with no verify block -- NetX walks the
+delivered buffer itself.  So a placement bug shows as v4-hashes-bad with
+v6-clean (self-certification) or as v6 checksum drops during clean v4
+hashes (the same bug convicted by the stack's own walk).  Neither signature
+appeared.
+
+| run | board / lane | families | arms | result |
+|---|---|---|---|---|
+| payfull1 | ne2000_pcmcia, dp8390 CLAIM lane | v4+v6 | plain | 64/64 hashes matched, 11,686 direct fills |
+| payctl1 | a2065, classic CopyToBuff lane | v4+v6 | control | 64/64 hashes matched, 0 direct fills |
+| paystorm1 | ne2000_pcmcia, claim lane | v4+v6 | mDNS storm, 1,495 x 16-record responses | 64/64 hashes matched, 12,924 direct fills |
+| payloss2 | ne2000_pcmcia, claim lane | v4+v6 | UDP burst blast (focused matrix) | 26/26 hashes matched, 15,108 direct fills; loss unwitnessed |
+| payloss5 | ne2000_pcmcia, claim lane | v4+v6 | UDP burst blast + retrans witness | 26/26 hashes matched, 23,049 direct fills, up to 91 retransmissions on one socket |
+| payfull2 | ne2000_pcmcia, claim lane | v4+v6 | repeat, contended host | 62/64 matched; 2 idle-bail truncations (stalls, not corruption -- every delivered byte pattern-perfect), rerun below |
+| payfull3 | ne2000_pcmcia, claim lane | v4+v6 | repeat, fresh seeds | 64/64 hashes matched, direct fills cumulative 37,075 |
+
+Six runs, 370 content-verified connections, zero content divergences.
+Every failure ever seen by this tier was a truncation with the delivered
+prefix pattern-perfect -- the failure mode of a stalled rig, not of a
+placement bug, and the two are distinguishable at a glance because the
+verifying ends report the first diverging offset and none ever had one.
+
+The claim-lane runs assert engagement off the guest's own counters (netstat
+"direct fills" > 0), so a run cannot pass on the wrong path; the a2065 run
+asserts the opposite (0 fills), which is what makes it a lane control: same
+matrix, same hashes, different placement code.  There is no claim-off build
+switch -- the claim has been unconditional since it landed -- so the
+cross-lane pair is the comparison.
+
+### The loss arm, and the tc gate
+
+Retransmission overlap is the injection-prone path content tests most need:
+partial re-delivery placing bytes into a stream whose earlier bytes are
+already placed.  The intended tool -- `tc netem` loss via `~/tc-cap` on the
+peer -- is staged but not granted (`cap_net_admin` not set; one-time
+`sudo setcap cap_net_admin+ep ~/tc-cap` on the peer unblocks it).  The
+substitute needs no privilege: bursty UDP from the peer floods the bridged
+path, frames vanish, TCP retransmits, and the overlap path runs for real.
+One finding about WHERE they vanish: the guest's ring-overrun counter
+stayed 0 through every blast -- under Amiberry the drop happens in the
+host's bridge queue before the emulated NIC ever sees the frame, so the
+guest cannot witness its own loss.  The witness is the peer's kernel
+instead: `ss -ti` sampled through the run records the per-socket lifetime
+retransmission count, and the run that claims loss coverage must show it
+moving (payloss5: up to 91 retransmissions on one socket, every hash still
+matched).  Two calibration lessons are folded into the harness: the blast
+must leave recovery windows or the 68020 starves into an RTO spiral and
+the arm measures nothing but its own weather, and the per-case idle bounds
+on both ends must exceed a deep RTO backoff or a stall reads as a
+truncated case (two such truncations on a contended host -- every
+delivered byte still pattern-perfect -- cost a rerun before the bounds
+were sized to the rig).
+
+### The asm lane, off-hardware (IoSumDrill, 264 -> 500 checks)
+
+The el3 fused drain (`n68k_port_in_w_sum`) -- the routine the campaign flag
+was raised about -- exists on real hardware only, but its INSTRUCTIONS run
+under any emulated machine against a RAM port.  IoSumDrill grew the
+placement-adversarial cases this tier wants: guard bytes BEFORE the
+destination as well as after (an underrun used to be invisible -- the
+destination began at the buffer), the MSS-edge lengths 1458-1463 and 1514,
+back-to-back drains at every ordered pair of tail residues with different
+port values (the register-carry-over class the three-byte-tail bug lived
+in, and exactly el3_rint's position when one interrupt drains a burst), and
+a LIVE port (VHPOSR, the beam counter) whose words differ between reads, so
+the returned sum is checked for consistency against the bytes that actually
+landed -- the case a constant port is blind to, since a drain that reads
+the port the wrong number of times still writes the expected constants.
+500 checks, 0 failures, on the real assembler (`AMINETXDUO_NET68K_ASM=ON`).
+
+### The capability-flag audit
+
+The safety line for everything the verifier declines is that the fork
+requires the PER-PACKET capability flag as well as the interface flag
+before skipping a receive checksum (fork commit 1cb134db).  Audited in the
+pinned fork source: the AND is present and correct at all five skip sites
+-- TCP (nx_tcp_packet_process.c:197-198, both families pass through it),
+UDP (nx_udp_socket_receive.c:268-269), ICMPv4
+(nx_icmpv4_packet_process.c:100-101), ICMPv6
+(nx_icmpv6_packet_process.c:132-133), IPv4 header
+(nx_ipv4_packet_receive.c:291-292); the per-packet flag is cleared by the
+core at allocate and release (nx_packet_allocate.c:121,
+nx_packet_release.c:180), so a recycled packet cannot carry a stale
+promise into a v6 frame the glue never marks.  The interface itself claims
+only v4-side RX capabilities (sana2_driver.c:260-271; no ICMPV6_RX), and
+the TX fuse declines non-IPv4 before touching a frame (sana2_copy.c, the
+version-nibble check), so no v6 path skips a checksum on interface say-so.
+
+One site regressed, found by this audit: the IGMP gate
+(nx_igmp_packet_process.c:92-93) was already written NEGATED in stock --
+it guards the verify block, not a skip -- and 1cb134db's mechanical
+`&& (packet flag)` produced "verify only when the interface does NOT
+advertise the capability and yet the packet claims verified", a combination
+no driver produces.  Every real case skipped, including the
+neither-flag-set case stock NetX verified, so IGMP receive checksums have
+gone unexamined in every NX_ENABLE_INTERFACE_CAPABILITY build since
+2026-08-06.  Group management, not payload -- no user data moves over IGMP
+-- but it is exactly the audited class.  Fix: distribute the negation,
+`!(iface && packet)`; fork branch `igmp-rx-capability-and` (7eaa369b, child
+of the pinned dd0d8e64, pushed), left for the release instance to merge so
+this campaign's artifacts stay the audited pin.
+
+### What is now proven, and what is not
+
+PROVEN, emulated: application-visible payload content survives the dp8390
+claim lane and the classic lane byte-exactly -- both directions, both
+families, every tail residue, 1 byte to 1 MB, under concurrency, under an
+mDNS storm, and across real bridge-drop loss with retransmission -- and
+the fused-sum asm places bytes and sums what it placed at instruction
+level under every adversarial shape the drill can pose without real
+hardware.
+
+NOT proven, stated plainly: the el3 drain on a REAL 3c589 -- actual FIFO
+latency, PCMCIA timing, interrupt preemption mid-drain -- which is the lane
+the risk was flagged for, and which Amiberry does not emulate.  The
+physical arm of this tier is DEFERRED: the machine was reassigned mid-cycle
+and is off-limits.  Nothing was staged to it.  When it returns, the run is
+one deploy of C:paysum (a tool, no library or device change) plus
+`run-payverify.sh`'s matrix pointed at it; until then the real-hardware
+evidence for content integrity remains the indirect pair of IoSumDrill's
+instruction-level checks and the task-#6 landing's rx_err_verify=0 over
+~10k live frames.  Also outside this tier: a truly sequenced port (word
+ORDER within a drain is invisible to both a constant port and a
+commutative sum), and tc-shaped loss until tc-cap is granted.
+
 ## Reproducing
 
     cmake -B build/cmb -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \

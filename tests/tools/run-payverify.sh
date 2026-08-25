@@ -219,7 +219,11 @@ emit_case() {
     local extra=""
     [ "$dir" = tx ] && extra=" SEND"
     [ "$conns" -gt 1 ] && extra="$extra CONNS $conns"
-    echo "SYS:paysum$flag $host $port LEN $len SEED $seed$extra TIMEOUT 90" \
+    # The idle bound is generous on purpose: a shared emulator host can
+    # stall a transfer into deep RTO backoff for minutes without a byte
+    # being wrong, and a bail that fires inside one recovery reads as a
+    # truncated case.  Content decides this tier; time only bounds it.
+    echo "SYS:paysum$flag $host $port LEN $len SEED $seed$extra TIMEOUT 240" \
         >> "$CMDS"
     port=$((port + conns))
     seed=$((seed + conns))
