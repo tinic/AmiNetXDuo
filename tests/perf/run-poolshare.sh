@@ -123,6 +123,12 @@ fi
 # The whole point is one binary for every arm; print what it is so the record
 # survives the build directory.
 echo "library_sha256=$(sha256sum "$BSD" | cut -d' ' -f1)"
+# -b may point at a per-CPU build, so the codegen the number belongs to is
+# recorded next to it; without this a peer_bytes= line is unattributable.
+echo "cpu=$(sed -n 's/^AMINETXDUO_CPU:STRING=//p' \
+    "$BUILDDIR/CMakeCache.txt" 2>/dev/null || echo unknown)" \
+     "arch=$(sed -n 's/^AMIGA_ARCH_FLAGS:STRING=//p' \
+    "$BUILDDIR/CMakeCache.txt" 2>/dev/null || echo unknown)"
 echo "divisors=$DIVISORS fastmem=${AMINETXDUO_FASTMEM:-unset}"
 echo "guest_address=$ADDRESS"
 

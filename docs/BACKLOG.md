@@ -27,7 +27,7 @@ comment beside the code, not an entry here.
 | The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:205` |
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
 | The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
-| The `-m68020` wire figure is still unmeasured; 2026-08-25 the shipping libs build at 68020/68060 (smaller: bsdsocket -2.4%, tls -5.4%) but tests/tls refuse | `cmake/toolchain-m68k-amigaos.cmake:261` |
+| `-m68000` ships and nothing costs it any more | 2026-08-25 wire, 3 runs each: `any` 417.8, `-m68020` 426.4 (+2.1%), `-mcpu=68060` 441.7 KB/s, and 68020 is smaller on every shipped object; within-arm spread reaches 6.1% and tracks the zero-window count, not the CPU, so only 68000/68010 compatibility still argues for `any` | `cmake/toolchain-m68k-amigaos.cmake:261` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
 | The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:1103` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
