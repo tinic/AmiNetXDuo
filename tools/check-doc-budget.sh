@@ -17,10 +17,9 @@ cd "$ROOT" || exit 2
 TOTAL_MAX="${AMINETXDUO_DOC_TOTAL_MAX:-1150}"
 FILE_MAX="${AMINETXDUO_DOC_FILE_MAX:-250}"
 
-# AmiNetXDuo.guide is the shipped manual, not narrative.  SHIP-DECISIONS.md
-# goes when the 0.25.3 LTO re-release lands; that release was pulled, its (d)
-# is the one live entry, and no other doc may join this list.
-EXEMPT="docs/user/AmiNetXDuo.guide docs/SHIP-DECISIONS.md"
+# AmiNetXDuo.guide is the shipped manual, not narrative.  Nothing else may
+# join this list.
+EXEMPT="docs/user/AmiNetXDuo.guide"
 
 total=0
 over=0

@@ -152,13 +152,8 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # here.
 CROSS_CONFIGS=(
     "default:"
-    # NOT WHAT THE ARCHIVE IS BUILT WITH.  docs/SHIP-DECISIONS.md (d) is
-    # DECIDED: every shipped drawer is built with -flto, `default` above is
-    # the shipping arm, and dist/make-dist.sh refuses to pack a build that
-    # has the option off or the flag missing.  This arm is coverage only --
-    # -DAMINETXDUO_LTO=OFF is a configuration a user can select, so it has to
-    # keep compiling under fatal warnings like every other one.  It is not a
-    # shipping shape and nothing may read it as one.
+    # Coverage only.  `default` is the shipping arm and dist/make-dist.sh
+    # refuses to pack a build with LTO off or -flto missing.
     "nolto:-DAMINETXDUO_LTO=OFF"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
     # mDNS off is a real code path and not only a smaller library: the browse

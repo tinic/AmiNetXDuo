@@ -130,12 +130,8 @@ def main():
             bad += 1
             continue
 
-        # The full drawer IS the `default` arm, which carries no -D at all:
-        # the CPU drawers are gone, LTO is the cross default and ships (see
-        # docs/SHIP-DECISIONS.md (d), DECIDED), and nothing else distinguishes
-        # them.  It was briefly mapped to `nolto` for the archive that was cut
-        # without -flto and pulled; a mapping that names another arm is
-        # compared flag for flag like any other pair.
+        # The full drawer IS the `default` arm: no -D at all, LTO on, and
+        # nothing else distinguishes them.
         if arm == "default":
             want = {}
 
