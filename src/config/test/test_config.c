@@ -1,27 +1,9 @@
 /*
  * AmiNetXDuo, host-side test for the configuration and netdb parsers.
  *
- * Builds and runs on the development host (cc -std=c99), not on the Amiga:
- * config_text.c, config_parse.c and netdb.c contain no AmigaDOS calls, so all
- * they need is the tiny <exec/types.h> shim in test/shim and the three stubs
- * below (ami_alloc/ami_free/ami_log and the ami_cfg_read_file hook, which is
- * answered here from an in-memory fixture table rather than from disk).
- *
- * config_file.c, the dos.library Open/Read/Close and the Examine/ExNext scan
- * of DEVS:NetInterfaces, is therefore not covered here; it is verified by
- * compilation and needs an on-Amiga run to be tested properly.
- *
- * config_list.c IS covered, and that is the point of it being a file.  It owns
- * the interface list -- how it grows, how it is ordered, who frees it -- and
- * that logic used to sit inside config_file.c behind the AmigaDOS scan, where
- * no host test could reach it.  A parse ceiling can only be caught by a test
- * that enumerates MORE interface files than the ceiling, so for as long as the
- * scan was unreachable from here, the ceiling that silently dropped the third
- * interface file was untestable by construction.  ami_cfg_scan_interfaces() is
- * the second stub below, beside ami_cfg_read_file().
- *
- *   cc -std=c99 -Wall -Wextra -I../../../include -Ishim \
- *      test_config.c ../config_text.c ../config_parse.c ../netdb.c -o test_config
+ * Host build (cc -std=c99), not the Amiga: file I/O and the DEVS:NetInterfaces
+ * scan are replaced by the in-memory stubs below.  config_file.c is therefore
+ * NOT covered here.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -116,18 +98,6 @@ static void clear_fixtures(void)
     memset(fixtures, 0, sizeof(fixtures));
 }
 
-/* ------------------------------------------------------------- the drawer
- *
- * The second seam.  config_file.c walks DEVS:NetInterfaces with Lock(),
- * Examine() and ExNext(); here the drawer is a staged list, so a case can put
- * any number of interface files in it and hand them over in any order.
- *
- * That is the whole point of the split.  The parse ceiling this rework removed
- * could only be caught by a test that enumerates a drawer LARGER than the
- * ceiling, and while the scan lived inside the AmigaDOS file there was no way
- * to write one.
- */
-
 #define DRAWER_MAX 16
 
 static char     drawer_name[DRAWER_MAX][AMI_CFG_NAME_LEN];
@@ -153,10 +123,7 @@ static void stage_interface(const char *name, unsigned unit)
     set_fixture(drawer_path[i], drawer_text[i]);
 }
 
-/*
- * Handed over in STAGING order, not sorted, so a case can stage names out of
- * alphabetical order and watch insert_interface() put them right.
- */
+/* Handed over in STAGING order, not sorted. */
 BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
 {
     unsigned i;
@@ -227,17 +194,9 @@ static int checks;
                     ((ULONG)(c) << 8)  |  (ULONG)(d)))
 
 /*
- * A configuration with `count` empty descriptions in it, ready to be filled.
- *
- * WHY THIS EXISTS.  interfaces[] is a grown list now, not a fixed array, so
- * the shape these cases used to use -- memset the struct, set interface_count,
- * then subscript -- produces a count with NO LIST UNDER IT and subscripts
- * NULL.  It still compiles, which is exactly why the helper is here rather
- * than the reserve being written out eight times: one place to get right.
- *
- * Frees first, so a case can reset between arms without leaking the previous
- * list.  The caller zeroes the struct once at its declaration; after that this
- * owns it, and the caller ends with ami_config_free().
+ * A configuration with `count` empty descriptions, ready to be filled.
+ * Frees the previous list first, so the caller must zero the struct once at
+ * its declaration and must end with ami_config_free().
  */
 static void cfg_reset(AmiConfig *cfg, UWORD count)
 {
@@ -380,9 +339,6 @@ static void test_ip(void)
     CHECK(!ami_cfg_parse_net_number("cheese", &addr));
 }
 
-
-/* The text conversions are compiled either way (src/config/config_text6.c),
-   so they are tested either way. */
 
 /* Four host-order ULONGs from eight groups, for the expectations below. */
 #define IP6(a, b, c, d, e, f, g, h)                                          \
@@ -572,8 +528,6 @@ static void test_ip6(void)
             CHECK_STR(zone, "eth0");
         }
 
-        /* Malformed: nothing after the '%', and a zone too long to hold,
-           truncating one would name a different interface. */
         CHECK(!ami_config_parse_ip6_zone("fe80::1%", got, NULL,
                                          zone, sizeof(zone)));
         CHECK(!ami_config_parse_ip6_zone("fe80::1%averylonginterfacename",
@@ -592,9 +546,6 @@ static void test_ip6(void)
         CHECK(ami_config_parse_ip6_zone(wide, got, NULL, zone, sizeof(zone)));
         CHECK(ip6_equal(got, ll));
 
-        /* A buffer that cannot hold the zoned form yields "", as the plain
-           formatter does, never a bare address that would parse back as a
-           different destination. */
         ami_config_format_ip6_zone(ll, "eth0", text, sizeof(text));
         CHECK_STR(text, "");
     }
@@ -610,8 +561,6 @@ static void test_ip6(void)
         CHECK(ip6_equal(back, probe));
     }
 
-    /* A buffer that cannot hold the longest form yields "", never a
-       truncated address that would parse back as something else. */
     ami_config_format_ip6(addr, text, 8);
     CHECK_STR(text, "");
 }
@@ -725,9 +674,6 @@ static void test_interface_roadshow(void)
 static void test_interface_static(void)
 {
     AmiIfConfig iface;
-    /* Tabs, CRLF, trailing blanks, spaces around '=', both comment styles,
-     * mixed case keywords, an unrecognised-but-real Roadshow keyword and a
-     * blank line: the shapes hand-edited files actually arrive in. */
     char *buf = dup_text(
         "; DEVS:NetInterfaces/eth0\r\n"
         "\r\n"
@@ -762,8 +708,6 @@ static void test_interface_static(void)
 static void test_interface_amitcp_flavour(void)
 {
     AmiIfConfig iface;
-    /* The IPTYPE=DHCP spelling from the AmiTCP/Genesis-era documentation, and
-     * the 'address=dhcp' spelling Roadshow really uses. */
     char *buf = dup_text(
         "DEVICE=mister_eth.device\n"
         "UNIT=1\n"
@@ -826,12 +770,6 @@ static void test_interface_errors(void)
 
 /* ---------------------------------------------------------- the reporter */
 
-/*
- * The problem reporter puts a file name, a line number and a suggestion on the
- * user's screen (src/tools/tool_diag.c installs one). The line numbers are
- * what these tests pin down: they make the message actionable and are easy to
- * break by adding a `continue`.
- */
 #define MAX_SEEN    8
 
 static struct
@@ -933,23 +871,6 @@ static void test_problem_reporter(void)
     CHECK(seen_count == 0);
 }
 
-/*
- * WHICH SIDE OF THE LINE EACH FINDING IS ON.
- *
- * A Roadshow keyword this stack reads and deliberately ignores is not a
- * problem with the file, and the severity is what says so: every command that
- * loads the configuration prints ERROR and WARN, and only CheckNetConfig
- * prints NOTE (src/tools/tool_diag.c drops it). Reported from a real machine:
- * four inert keywords in one interface file turned `netstat -i' into
- * thirty-three lines, twenty-one of them a lecture that ended by saying the
- * lines were harmless and could stay.
- *
- * So this pins the CATEGORY of each kind of finding, not its wording. The
- * second half is the half that matters most: an interface file with a real
- * fault in it must still report that fault at a severity ordinary commands
- * show, or this change would have silenced the useful messages along with the
- * useless ones.
- */
 static void test_inert_keywords_are_notes(void)
 {
     AmiIfConfig iface;
@@ -975,8 +896,6 @@ static void test_inert_keywords_are_notes(void)
     free(buf);
     ami_config_set_reporter(NULL, NULL);
 
-    /* The knowledge is not lost: all four are still reported, with their
-       line numbers, for CheckNetConfig to print. */
     CHECK(seen_count == 4);
     CHECK(seen_mentions("iprequests"));
     CHECK(seen_mentions("writerequests"));
@@ -989,9 +908,6 @@ static void test_inert_keywords_are_notes(void)
     for (i = 0; i < seen_count; i++)
         CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE);
 
-    /* THE OTHER HALF.  A file with real faults still reports them at a
-       severity every command prints, or the fix above would have silenced the
-       messages that are the reason a machine is not working. */
     seen_count = 0;
     ami_config_set_reporter(collect, NULL);
     ami_cfg_problem_file("DEVS:NetInterfaces/broken");
@@ -1002,9 +918,6 @@ static void test_inert_keywords_are_notes(void)
                    "address = 10.0.0.300\n"     /* line 4: not an address */
                    "devcie = a2065.device\n");  /* line 5: a typo */
 
-    /* The parse itself succeeds -- the file names a card, so the interface
-       exists -- and what makes it unusable is reported, which is the part
-       that has to keep reaching ordinary commands. */
     CHECK(ami_cfg_parse_interface("broken", buf, &iface) == AMI_CFG_OK);
     free(buf);
     ami_config_set_reporter(NULL, NULL);
@@ -1022,8 +935,6 @@ static void test_inert_keywords_are_notes(void)
     CHECK(seen[2].severity == AMI_CFG_PROBLEM_WARN);
     CHECK(seen_mentions("devcie"));
 
-    /* The whole-file verdict that follows from the bad ADDRESS: still an
-       error, and still one an ordinary command prints. */
     CHECK(seen[3].line == 0);
     CHECK(seen[3].severity == AMI_CFG_PROBLEM_ERROR);
 
@@ -1043,20 +954,9 @@ static void test_inert_keywords_are_notes(void)
     CHECK(seen[1].severity == AMI_CFG_PROBLEM_ERROR);     /* no DEVICE */
 }
 
-/*
- * CARD=, which board the driver binds to when the device file covers a family
- * of them. Names come from include/aminetxduo/anxnet.h; a name no card has
- * refuses the interface rather than coming up on whatever UNIT points at.
- */
+/* CARD= names come from include/aminetxduo/anxnet.h; an unknown name must
+   refuse the interface, not fall back to UNIT. */
 
-/*
- * The IPv6-only interface, which the parser refused outright until this.
- *
- * Every case below is a file that must now come up, plus the one that must
- * still be refused -- the sabotage check on the change. "DEVICE and nothing
- * else" is a file whose author forgot the address, and losing that diagnostic
- * in exchange for IPv6-only would be a bad trade.
- */
 static void test_interface_ipv6_only(void)
 {
     AmiIfConfig iface;
@@ -1102,11 +1002,6 @@ static void test_interface_ipv6_only(void)
     free(buf);
 }
 
-/*
- * The same set again, through the reporter, because the fault was never the
- * parsed value: it was the AMI_CFG_PROBLEM_ERROR, which AddNetInterface
- * prints and CheckNetConfig exits non-zero on.
- */
 static void test_ipv6_only_no_error(void)
 {
     AmiIfConfig iface;
@@ -1155,12 +1050,6 @@ static void test_ipv6_only_no_error(void)
     CHECK(ami_config_iface_wants_ipv6(&iface));
     free(buf);
 
-    /*
-     * THE SABOTAGE CHECK. A file that names a device and nothing else has
-     * forgotten its address, and must still be told so. CONFIGURE6 defaults
-     * to AUTO, so treating the default as an IPv6 plan would have swallowed
-     * this diagnostic whole.
-     */
     seen_count = 0;
     buf = dup_text("device=a2065.device\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
@@ -1236,16 +1125,8 @@ static void test_interface_card(void)
     CHECK(seen_mentions("ARIADNE2"));
 }
 
-/*
- * The host-name chain: name_resolution, then DHCP option 12, then
- * ENV:HOSTNAME, then an interface file's ID=. Reported from real hardware: an
- * interface with ID=a1200 was written and the machine kept answering to
- * "a3000", because ID= was parsed and thrown away.
- *
- * ENV:HOSTNAME still wins, deliberately, see AmiHostnameSource. What was
- * actually missing is that nothing said so, which is why the reporter could
- * not see the remnant. ID= now works once the remnant is removed.
- */
+/* Host-name precedence, strongest first: name_resolution, DHCP option 12,
+   ENV:HOSTNAME, an interface file's ID=. */
 static void test_hostname_syntax(void)
 {
     printf("host name: RFC 1123 syntax\n");
@@ -1285,16 +1166,12 @@ static void test_hostname_precedence(void)
 
     printf("host name: which source wins\n");
 
-    /* The reported machine once the remnant ENV:HOSTNAME is gone: ID=a1200 is
-       the only source, and it now names the machine. */
     cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     ami_cfg_hostname_from_files(&cfg, NULL);
     CHECK_STR(cfg.hostname, "a1200");
     CHECK(cfg.hostname_source == AMI_HOSTNAME_INTERFACE);
 
-    /* The same machine with the remnant still in place. ENV:HOSTNAME wins and
-       the report says which, so the remnant is visible and removable. */
     cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     {
@@ -1306,11 +1183,6 @@ static void test_hostname_precedence(void)
     CHECK_STR(cfg.hostname, "a3000");
     CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
 
-    /*
-     * The regression the ranking exists to prevent. ID= is free text and
-     * "Ethernet" is valid RFC 1123 syntax, so an ID ranked above ENV:HOSTNAME
-     * would silently rename this machine from myamiga to Ethernet.
-     */
     cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "Ethernet");
     {
@@ -1375,17 +1247,8 @@ static void test_hostname_precedence(void)
     ami_config_free(&cfg);
 }
 
-/*
- * The default name, and that it stays a default.
- *
- * Reported from this lab: seventy machines with nothing in their config all
- * claimed amiga.local at once and took a working machine's name off the air
- * while its address kept answering.
- */
 static void test_hostname_from_hwaddr(void)
 {
-    /* 00:80:10:49:00:07, a real a2065; and 00:80:10:00:00:00, whose tail is
-       zero but whose address is not. */
     static const UBYTE a2065[6] = { 0x00, 0x80, 0x10, 0x49, 0x00, 0x07 };
     static const UBYTE tail0[6] = { 0x00, 0x80, 0x10, 0x00, 0x00, 0x00 };
     static const UBYTE hexy[6]  = { 0x02, 0x11, 0x22, 0xAB, 0xCD, 0xEF };
@@ -1439,8 +1302,6 @@ static void test_hostname_from_hwaddr(void)
         CHECK(strcmp(out, b) != 0);
     }
 
-    /* No usable address: refused, and the caller keeps "amiga". Never a
-       random suffix, which would rename the machine every boot. */
     out[0] = '\0';
     CHECK(!ami_config_hostname_from_hwaddr(none, sizeof(none), out,
                                            sizeof(out)));
@@ -1452,11 +1313,6 @@ static void test_hostname_from_hwaddr(void)
     CHECK(!ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out, 12));
     CHECK(ami_config_hostname_from_hwaddr(a2065, sizeof(a2065), out, 13));
 
-    /*
-     * What the stack does with it: fill hostname only when the four sources
-     * found nothing, and leave hostname_source at NONE so it is a default and
-     * not a fifth source. Every real source still outranks it.
-     */
     for (rank = (UWORD)AMI_HOSTNAME_INTERFACE;
          rank <= (UWORD)AMI_HOSTNAME_NAMERES; rank++)
     {
@@ -1472,8 +1328,6 @@ static void test_hostname_from_hwaddr(void)
         CHECK(cfg.hostname_source == rank);
     }
 
-    /* And the other way round: a name from the files is there already, so
-       nothing derives over it. */
     cfg_reset(&cfg, 1U);
     strcpy(cfg.interfaces[0].id, "a1200");
     ami_cfg_hostname_from_files(&cfg, NULL);
@@ -1492,16 +1346,11 @@ static void test_hostname_offer(void)
 
     printf("host name: offers and ranks\n");
 
-    /* The documented ranking as numbers. Reordering the enum reorders the
-       chain, so it is asserted rather than left implied by the cases below. */
     CHECK(AMI_HOSTNAME_NONE      < AMI_HOSTNAME_INTERFACE);
     CHECK(AMI_HOSTNAME_INTERFACE < AMI_HOSTNAME_ENV);
     CHECK(AMI_HOSTNAME_ENV       < AMI_HOSTNAME_DHCP);
     CHECK(AMI_HOSTNAME_DHCP      < AMI_HOSTNAME_NAMERES);
 
-    /* The whole ladder, weakest first, then every rejection back down it.
-       DHCP arrives after the files and displaces an ID or an environment
-       variable, but never name_resolution. */
     cfg_reset(&cfg, 0U);
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_INTERFACE, "a1200"));
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "a3000"));
@@ -1526,8 +1375,6 @@ static void test_hostname_offer(void)
     CHECK_STR(cfg.hostname, "a3000");
     CHECK(cfg.hostname_source == AMI_HOSTNAME_ENV);
 
-    /* name_resolution and ENV:HOSTNAME are taken as written: a machine whose
-       name has always had an underscore in it keeps working. */
     cfg_reset(&cfg, 0U);
     CHECK(ami_config_hostname_offer(&cfg, AMI_HOSTNAME_ENV, "my_amiga"));
     CHECK_STR(cfg.hostname, "my_amiga");
@@ -1578,8 +1425,6 @@ static void test_resolver(void)
     CHECK(res.nameserver_count == 2);
     CHECK_IP(res.nameserver[0], 8, 8, 8, 8);
     CHECK_IP(res.nameserver[1], 8, 8, 4, 4);
-    /* Negative use counts: ObtainDomainNameServerList() reports an entry that
-       came from the file as statically configured. */
     CHECK(res.nameserver_use[0] == -1);
     CHECK(res.nameserver_use[1] == -1);
     CHECK_STR(res.domain, "local");
@@ -1619,8 +1464,6 @@ static void test_resolver(void)
     CHECK_IP(res.nameserver[AMI_CFG_MAX_NAMESERVERS - 1], 4, 4, 4, 4);
     CHECK(res.search_count == AMI_CFG_MAX_SEARCH);
 
-    /* A 200-character DOMAIN. SetDefaultDomainName()'s autodoc allows 255 and
-       the store used to be AMI_CFG_NAME_LEN's 64. */
     {
         char line[AMI_CFG_DOMAIN_LEN + 16];
         char expect[201];
@@ -1654,13 +1497,6 @@ static UWORD search_of(const AmiResolverConfig *res, const char *out[])
     return ami_config_search_list(res, out, (UWORD)AMI_CFG_SEARCH_LIST_MAX);
 }
 
-/*
- * The suffixes a name with no dot is tried under, and where they came from.
- *
- * The case this exists for is the one that was reported: a file that says
- * `domain localdomain` on a network whose lease says local.tinic.net. Both
- * have to be tried, and the file's has to be tried first.
- */
 static void test_search_domains(void)
 {
     AmiResolverConfig res;
@@ -1685,8 +1521,6 @@ static void test_search_domains(void)
     CHECK(n == 1);
     CHECK_STR(list[0], "localdomain");
 
-    /* ---- THE REPORTED CASE. The lease's domain arrives after the file's and
-       does not replace it, so both are tried and the file's goes first. */
     CHECK(ami_config_search_offer(&res, "local.tinic.net") == TRUE);
     CHECK(res.search_static == 0);
     CHECK(res.search_count == 1);
@@ -1696,12 +1530,8 @@ static void test_search_domains(void)
     CHECK_STR(list[0], "localdomain");
     CHECK_STR(list[1], "local.tinic.net");
 
-    /* DOMAIN is still what GetDefaultDomainName() reports: the lease adds a
-       place to look, it does not rename the machine's domain. */
     CHECK_STR(res.domain, "localdomain");
 
-    /* ---- SEARCH replaces DOMAIN, as resolv.conf has it, and the lease still
-       lands after everything the file wrote. */
     memset(&res, 0, sizeof(res));
     buf = dup_text("domain unused.test\nsearch one.test two.test\n");
     ami_cfg_parse_resolver(buf, &res, NULL, 0);
@@ -1716,8 +1546,6 @@ static void test_search_domains(void)
     CHECK_STR(list[1], "two.test");
     CHECK_STR(list[2], "three.test");
 
-    /* ---- A lease that repeats what the file said costs no second query,
-       whatever case it spells it in (RFC 4343). */
     memset(&res, 0, sizeof(res));
     buf = dup_text("domain Home.Lan\n");
     ami_cfg_parse_resolver(buf, &res, NULL, 0);
@@ -1782,8 +1610,6 @@ static void test_dhcp_search_option(void)
         CHECK_STR(res.search[0], "eng.example.com");
         CHECK_STR(res.search[1], "sales.example.com");
 
-        /* Nothing from the file, so the lease's list is the whole list, in
-           the order the option wrote it. */
         CHECK(search_of(&res, list) == 2);
         CHECK_STR(list[0], "eng.example.com");
     }
@@ -1820,8 +1646,6 @@ static void test_dhcp_search_option(void)
         CHECK(res.search_count == 0);
     }
 
-    /* A label that runs off the end, and a name with no root label: the walk
-       stops and keeps what it had. */
     {
         static const UBYTE overrun[] = { 9, 'a', 'b', 'c' };
         static const UBYTE unterminated[] = { 2, 'h', 'i' };
@@ -1848,8 +1672,6 @@ static void test_dhcp_search_option(void)
         CHECK(res.search_count == 0);
     }
 
-    /* A name longer than a search slot can hold is dropped, not truncated: a
-       truncated suffix is a different domain. */
     {
         UBYTE big[AMI_CFG_NAME_LEN + 8];
         ULONG i;
@@ -1866,11 +1688,8 @@ static void test_dhcp_search_option(void)
     }
 }
 
-/*
- * RFC 8106 5.2, the router advertisement's list. The same encoding as option
- * 119 and the same decoder, so what is tested here is the withdrawal a zero
- * lifetime means and the padding an advertisement has that a lease does not.
- */
+/* RFC 8106 5.2, the router advertisement's search list: same encoding as
+   DHCP option 119, plus zero-lifetime withdrawal and 8-byte-unit padding. */
 static void test_ra_search_option(void)
 {
     AmiResolverConfig res;
@@ -1879,9 +1698,6 @@ static void test_ra_search_option(void)
 
     printf("RFC 8106 search list\n");
 
-    /* What the lab router advertises, padded to the option's 8-byte unit with
-       zero octets. A zero octet is a root label with nothing in front of it,
-       which ends the walk rather than naming the root. */
     {
         static const UBYTE padded[] = {
             5, 'l', 'o', 'c', 'a', 'l', 5, 't', 'i', 'n', 'i', 'c',
@@ -1911,8 +1727,6 @@ static void test_ra_search_option(void)
         CHECK(res.search_count == 0);
     }
 
-    /* Withdrawing one of several leaves the rest in the order they are still
-       tried in. */
     {
         memset(&res, 0, sizeof(res));
         CHECK(ami_config_search_offer(&res, "one.test") == TRUE);
@@ -1930,8 +1744,6 @@ static void test_ra_search_option(void)
         CHECK_STR(res.search[0], "three.test");
     }
 
-    /* No router may retract what the administrator wrote: an entry below
-       search_static came from DEVS:Internet/name_resolution. */
     {
         memset(&res, 0, sizeof(res));
         buf = dup_text("search file.test\n");
@@ -1959,8 +1771,6 @@ static void test_ra_search_option(void)
         CHECK(ami_config_search_withdraw(NULL, "x.test") == FALSE);
     }
 
-    /* An advertised suffix is reference-counted against other network
-       sources.  Its withdrawal cannot erase the identical DHCP suffix. */
     {
         memset(&res, 0, sizeof(res));
         CHECK(ami_config_search_offer(&res, "shared.test") == TRUE);
@@ -1973,8 +1783,6 @@ static void test_ra_search_option(void)
         CHECK(res.search_count == 0);
     }
 
-    /* Static ownership is permanent even while a router independently owns
-       and then withdraws the same spelling. */
     {
         memset(&res, 0, sizeof(res));
         buf = dup_text("search file.test\n");
@@ -1988,13 +1796,8 @@ static void test_ra_search_option(void)
     }
 }
 
-/*
- * RFC 8106 5.1, the servers. This is the arithmetic the absorb step in
- * src/netstack/netstack_dns.c performs against the DNS client: what the router
- * names joins the reported list, what it stops naming leaves it, and a router
- * naming more than the list holds does not cost the machine the servers that
- * are already answering.
- */
+/* RFC 8106 5.1, the advertised servers.  A router naming more than the list
+   holds must not evict servers that are already answering. */
 static void test_ra_nameserver6(void)
 {
     AmiResolverConfig res;
@@ -2030,8 +1833,6 @@ static void test_ra_nameserver6(void)
     CHECK(ami_config_nameserver6_withdraw(&res, a) == FALSE);
     CHECK(res.nameserver6_count == 1);
 
-    /* Four is what the list holds; the fifth is refused and the four that are
-       answering are untouched, rather than one being evicted for it. */
     memset(&res, 0, sizeof(res));
     for (i = 0; i < 6; i++)
     {
@@ -2057,8 +1858,6 @@ static void test_ra_nameserver6(void)
               == FALSE);
     CHECK(res.nameserver6_count == AMI_CFG_MAX_NAMESERVERS);
 
-    /* Withdrawing from the middle keeps the rest in the order the resolver
-       still asks them in, and clears the slot that fell off the end. */
     CHECK(ami_config_nameserver6_withdraw(&res, s[1]) == TRUE);
     CHECK(res.nameserver6_count == (UWORD)(AMI_CFG_MAX_NAMESERVERS - 1));
     CHECK(res.nameserver6[0][3] == 1);
@@ -2154,8 +1953,6 @@ static void test_tcp_handler(void)
     free(buf);
     CHECK(on == TRUE);
 
-    /* Nothing the file can say by accident may switch the device off: a
-       comment, a typo and an empty file all leave the caller's default. */
     on  = TRUE;
     buf = dup_text("# TCPHANDLER=OFF\n\n");
     ami_cfg_parse_tcp_handler(buf, &on);
@@ -2497,20 +2294,6 @@ static void test_service_discovery(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * THE DEFECT THIS CASE EXISTS FOR.
- *
- * The parser used to stop at AMI_CFG_MAX_INTERFACES, which was 2.  A drawer
- * holding three interface files had one of them DROPPED -- and which one was
- * decided by the alphabet, because the sort ran before the ceiling was
- * applied -- behind an AMI_WARN that no shipped build compiles.  Nothing on
- * the machine said an interface had gone.  Every diagnostic downstream then
- * reported the card and the driver as healthy, correctly, because as far as
- * the configuration was concerned that interface did not exist.
- *
- * So: a drawer of NINE, and all nine survive.  The number is deliberately well
- * past any ceiling anybody might be tempted to reintroduce.
- */
 static void test_interface_drawer(void)
 {
     AmiConfig cfg;
@@ -2539,8 +2322,6 @@ static void test_interface_drawer(void)
     /* NINE.  Not two, and not any other number this tree picked. */
     CHECK(cfg.interface_count == 9);
 
-    /* Sorted -- and the sort is now ONLY an order.  Nothing was dropped off
-       the end of it to make the list fit. */
     CHECK_STR(cfg.interfaces[0].name, "arcnet0");
     CHECK_STR(cfg.interfaces[1].name, "eth0");
     CHECK_STR(cfg.interfaces[2].name, "eth1");
@@ -2551,8 +2332,6 @@ static void test_interface_drawer(void)
     CHECK_STR(cfg.interfaces[7].name, "wifi0");
     CHECK_STR(cfg.interfaces[8].name, "zorro0");
 
-    /* The ones that used to vanish are not placeholders: they parsed, and
-       they carry their own settings. */
     CHECK(cfg.interfaces[4].unit == 3);
     for (i = 0; i < cfg.interface_count; i++)
         CHECK(cfg.interfaces[i].iptype == AMI_IPTYPE_DHCP);
@@ -2562,18 +2341,13 @@ static void test_interface_drawer(void)
 
     ami_config_free(&cfg);
 
-    /*
-     * OWNER FREES.  AmigaOS reclaims nothing a Process did not free and a
-     * library allocation leaks until expunge (docs/ALLOCATIONS.md), so the
-     * census has to come back to exactly where it started.
-     */
+    /* AmigaOS reclaims nothing a Process did not free, so the census must
+       come back to exactly where it started. */
     CHECK(cfg.interfaces == NULL);
     CHECK(cfg.interface_count == 0);
     CHECK(cfg.interface_capacity == 0);
     CHECK(ami_alloc_count() == base);
 
-    /* Twice is safe, which is what lets a command free on an exit path that
-       may or may not have loaded. */
     ami_config_free(&cfg);
     CHECK(ami_alloc_count() == base);
 
@@ -2617,9 +2391,6 @@ static void test_interface_reserve(void)
     }
     CHECK(cfg.interfaces[299].name[0] == '\0');
 
-    /* Asking for what it already holds allocates nothing, which is what makes
-       the netstack's reserve-before-write a call that cannot move the list
-       under an attached interface NetX Duo holds a name pointer into. */
     {
         ULONG held = ami_alloc_count();
 

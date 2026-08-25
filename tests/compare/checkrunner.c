@@ -1,46 +1,6 @@
 /*
  * CheckRunner, the guest half of every harness in tests/compare.
  *
- *   A harness points a command at bsdsocket.library and asks whether the stack
- *   survived, so the driver has to keep running when the command does not.
- *   Everything it produces is appended and flushed one line at a time: when a
- *   transfer takes the machine down, the file already on the host is the whole
- *   evidence, and a buffered report would lose the line that mattered.
- *
- *   For the same reason it scores nothing.  The expectations live on the host,
- *   so a run that dies in the middle is scored the same way as one that
- *   finishes, every case with no result line is a failure, and the first of
- *   them names the command that did it.
- *
- *   Written for a curl suite that no longer exists; nothing about it was ever
- *   curl-specific.  It runs a list of commands and writes down what happened,
- *   which is what run-compare.sh uses it for.
- *
- * Input: DH0:checks.txt, one per line
- *
- *   #  ...                 comment
- *   wait N                 sleep N seconds (nothing here needs it yet; the
- *                          nettools harness grew one and it costs four lines)
- *   NAME<TAB>COMMAND       run COMMAND, calling the result NAME
- *
- *   DH0:results.txt        NAME rc ticks availmem, one line per case
- *   DH0:w/NAME.txt         that command's own stdout and stderr
- *   DH0:checkrunner.txt    the same thing for a human
- *
- *   "Crashes most of the time" and "degrades over a few hundred transfers"
- *   look identical from a single run, and the second is invisible unless
- *   somebody writes the number down.  AvailMem(MEMF_ANY) after each command,
- *   with the child gone and its memory returned, turns a leak of a few
- *   kilobytes per socket into a straight line the host can fit.  Allocation
- *   patterns fragment, so it is not noise-free, but a leak is a trend and
- *   fragmentation is not.
- *
- *   Every command gets 512 Kb of stack because a Kickstart 3.1 Shell gives a
- *   command 4,096 bytes and this toolchain's crt0 exports no __stack hook to
- *   ask for more.  clients/curl/clientrun.c is the same trick for the same
- *   reason; this file is separate because a verification driver wants
- *   results.txt and a demo driver does not.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -62,14 +22,6 @@ static const char version_tag[] __attribute__((used)) =
 #define MAX_LINE    640
 #define CLIENT_STACK    (512UL * 1024UL)
 
-/*
- * NP_WindowPtr = -1 turns "Please insert volume Foo:" into a failed call.
- * A client that names a path on a volume or assign which does not exist,
- * AmiSSL is configured OPENSSLDIR=AmiSSL:, so any AmiSSL-linked binary does
- * this if the assign is missing, otherwise puts up a requester on a machine
- * with nobody at the keyboard, and the run sits there until the harness times
- * out.
- */
 static struct TagItem client_tags[] =
 {
     { NP_StackSize, CLIENT_STACK },
@@ -114,13 +66,6 @@ static ULONG append(char *dst, ULONG dstlen, ULONG used, const char *src)
     return used;
 }
 
-/*
- * A third-party curl built against AmiSSL wants an AmiSSL: assign, because
- * amisslmaster.library resolves the versioned library through it.  A bare
- * directory hard drive has no C:assign to type it with, so the driver makes
- * the assign when the directory is staged and does nothing when it is not.
- * Without it a third-party AmiSSL-linked binary cannot be run at all.
- */
 static VOID maybe_assign(const char *name, const char *dir)
 {
     BPTR lock = Lock((CONST_STRPTR)dir, SHARED_LOCK);
@@ -162,8 +107,6 @@ int main(int argc, char **argv)
     truncate_file(RESULTS);
     truncate_file(REPORT);
     maybe_assign("AmiSSL", "DH0:AmiSSL");
-    /* Same reason, for a stack that reads its configuration through an assign
-       of its own (tests/compare/run-compare.sh). */
     maybe_assign("AmiTCP", "DH0:AmiTCP");
 
     in = Open((CONST_STRPTR)CHECKS, MODE_OLDFILE);
@@ -199,7 +142,6 @@ int main(int argc, char **argv)
         if (line[0] == '\0' || line[0] == '#')
             continue;
 
-        /* wait N, seconds */
         if (line[0] == 'w' && line[1] == 'a' && line[2] == 'i' &&
             line[3] == 't' && line[4] == ' ')
         {
@@ -226,13 +168,6 @@ int main(int argc, char **argv)
         if (cmd == (char *)0 || cmd[0] == '\0')
             continue;
 
-        /*
-         * Each command's own output goes to its own file, so a -w line and a
-         * curl error message can be attributed to the case that produced
-         * them.  <NIL: because nothing here reads standard input and a
-         * command that decided to would otherwise hang the whole run on a
-         * console that has no keyboard.
-         */
         used = 0;
         used = append(command, (ULONG)sizeof(command), used, cmd);
         used = append(command, (ULONG)sizeof(command), used, " <NIL: >>DH0:w/");
@@ -280,22 +215,6 @@ int main(int argc, char **argv)
                              "start\n", (LONG)ran, (LONG)unstarted);
     }
 
-    /*
-     * WHAT THIS RETURN CODE IS ABOUT.
-     *
-     * Not the stack under test: a command that failed is a RESULT, it is in
-     * results.txt, and the expectations for it live on the host, which is the
-     * whole design above.  A driver that exited 20 because a transfer failed
-     * could not be told from one that exited 20 because it could not start,
-     * and tests/compare/run-compare.sh forwards this status.
-     *
-     * It is about whether this program did its job.  It used to be RETURN_OK
-     * unconditionally, so a checks.txt whose every line was a comment, or a
-     * SystemTagList() that could not load one single binary, produced an empty
-     * results.txt and a green run.  Those are the two cases here: nothing was
-     * measured, or a command never started, which is a staging fault and not a
-     * measurement of anything.
-     */
     if (ran == 0)
     {
         emit(REPORT, "CheckRunner: no command in " CHECKS " ran, so nothing "

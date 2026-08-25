@@ -1,9 +1,7 @@
 /*
- * AmiNetXDuo, netstack singleton internals.
- *
- * Private to src/netstack/. Include order matters: tx_api.h and nx_api.h come
- * before any exec header, because <exec/types.h> turns VOID into a macro and
- * that breaks the ThreadX typedefs.
+ * AmiNetXDuo, netstack singleton internals.  Private to src/netstack/.
+ * Include order matters: tx_api.h and nx_api.h come before any exec header,
+ * because <exec/types.h> turns VOID into a macro and breaks the tx typedefs.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -47,15 +45,9 @@
 #define AMI_ARP_CACHE_SIZE          1024
 
 /*
- * 4096 and not the 2048 the NetX Duo samples use, because the AutoIP thread on
- * this port is not the one those samples describe.  -fstack-usage over the
- * m68000 build puts the deepest chain from _nx_auto_ip_thread_entry at 704
- * bytes.  It gets there through _nx_ip_interface_status_check into
- * ami_sana2_driver_entry, so this thread reaches a SANA-II device and makes
- * exec DoIO/SendIO calls, which run on whatever stack is current and are not
- * in that 704.  On a machine with no guard page and no fault, 1,344 bytes of
- * headroom for an Exec device call is too little.  The other 2 KB buys the
- * margin.
+ * 4096 and not the 2048 the NetX Duo samples use: this thread reaches a
+ * SANA-II device through ami_sana2_driver_entry and makes Exec DoIO/SendIO
+ * calls, which run on this stack, on a machine with no guard page.
  */
 #define AMI_AUTOIP_STACK_SIZE       4096
 
@@ -70,100 +62,40 @@
 
 #ifdef AMINETXDUO_IPV6
 /*
- * The DHCPv6 client's own thread stack.
- *
- * 4096, sized the way AMI_AUTOIP_STACK_SIZE is rather than from the NetX Duo
- * samples' 2048.  -fstack-usage over the m68000 build puts the deepest chain
- * from _nx_dhcpv6_thread_entry at 812 bytes, and it reaches the IP thread's
- * send path and the packet pool from there.  The margin is for the same
- * reason AutoIP's is: no guard page and no fault on this target.
+ * The DHCPv6 client's own thread stack.  4096 for the reason
+ * AMI_AUTOIP_STACK_SIZE is: 812 bytes measured, plus headroom for the Exec
+ * calls its send path reaches on a target with no guard page.
  */
 #define AMI_DHCPV6_STACK_SIZE       4096
 
 /*
- * And the deferred-work thread's, which is small because that thread does
- * one thing: wake on an event flag and call into the client.  Its deepest
- * chain is nx_dhcpv6_client_create() -- a thread create, a UDP socket create
- * and a bind -- at 604 bytes measured, and it makes no Exec calls, so it
- * needs none of the headroom the SANA-II paths do.
+ * And the deferred-work thread's, which is small because that thread wakes on
+ * an event flag and calls into the client: 604 bytes measured, and no Exec
+ * calls, so it needs none of the headroom the SANA-II paths do.
  */
 #define AMI_DHCPV6_WORK_STACK_SIZE  2048
 
 /*
- * How long a shutdown waits for the DHCPv6 Release to be answered.  Two
- * seconds: the first retransmission is one second out
- * (NX_DHCPV6_INIT_RELEASE_TRANSMISSION_TIMEOUT), and a machine being switched
- * off must not be held up by a server that has gone away.  RFC 8415 18.2.7
- * lets a client not wait at all.
+ * How long a shutdown waits for the DHCPv6 Release to be answered.  A machine
+ * being switched off must not be held up by a server that has gone away, and
+ * RFC 8415 18.2.7 lets a client not wait at all.
  */
 #define AMI_DHCPV6_RELEASE_TICKS    (2UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 #endif
 
 /*
- * DNS answer cache size.
- *
- * NetX Duo's cache is one buffer with resource records growing up from the
- * bottom and the strings they name growing down from the top.  On this target
- * an NX_DNS_RR is 20 bytes and a name costs ((len & ~3) + 8) in the string
- * table, so a cached A record for a 15-character host name such as
- * "www.example.com" is 20 + 20 = 40 bytes.  Eight bytes of the buffer are the
- * two end pointers.  2048 bytes is therefore about fifty cached names.
- *
- * Real workloads are far smaller: a shell session resolves one host, `fetch`
- * following redirects two or three, the tests/curl suite one peer.  The
- * largest consumer is the reverse lookups ShowNetStatus NAMES and netstat do,
- * one per peer address on screen, bounded by TOOL_MAX_SOCK (32).
- *
- * Undersizing costs only a DNS query, because NetX Duo replaces the least
- * recently used record rather than failing.  Oversizing costs resident memory
- * forever.  2048 bytes is 0.2% of the 1 MB floor target, and a fifth of the
- * 9,792-byte packet pool the DNS client already carries inside the same
- * NX_DNS (10,112 bytes) for its own queries, measured on this toolchain.
+ * DNS answer cache size: about fifty cached names.  Undersizing costs only a
+ * DNS query, because NetX Duo replaces the least recently used record rather
+ * than failing; oversizing costs resident memory forever.
  */
 #define AMI_DNS_CACHE_BYTES         2048
 
 #ifdef AMINETXDUO_MDNS
 /*
- * The two mDNS cache sizes.
- *
- * Same layout as the DNS answer cache above: fixed records growing up from the
- * bottom of one buffer, the strings they name growing down from the top, the
- * two end pointers in between.  An NX_MDNS_RR is larger than an NX_DNS_RR,
- * because it carries the state machine of the record, its retransmit counters
- * and its interface index as well as the data, so the arithmetic differs.
- *
- * The local cache holds what this machine claims: the A record for
- * <host>.local per interface, plus four records per declared service, an
- * SRV, a TXT and two PTRs, one of them the _services._dns-sd._udp enumeration
- * and the names they point at.  An NX_MDNS_RR is 56 bytes and the names run
- * to about 90 more, so 384 per service covers it with room over.  The base
- * kilobyte is the name of the host itself.  If the cache cannot hold that
- * name, the machine has no name.  If it cannot hold a service, that service is
- * not advertised and ami_ns_mdns_services() says which.
- *
- * The peer cache holds what has been learnt.  When it is full the oldest
- * record is evicted and nothing fails.  Two workloads land here.  Name
- * resolution is the small one: one or two names per shell session, and the
- * reverse lookups behind `netstat` and ShowNetStatus NAMES, bounded by
- * TOOL_MAX_SOCK (32).  Undersizing costs only a query on the wire.
- *
- * Browsing is the one that sizes it.  ShowNetServices holds a continuous query
- * open (itself a record here) and every instance it hears about arrives as
- * four records, PTR, SRV, TXT and A, plus the names they point at, around 400
- * bytes together.
- *
- * 32 KB, measured rather than chosen.  A browse of one ordinary house LAN --
- * five cameras, two printers, a 3D printer, an amplifier, a Hue bridge,
- * several Macs -- turns up over twenty service types and more than thirty
- * instances.  At 2 KB most of them were evicted before the window closed.  At
- * 8 KB they were listed, but two thirds of them printed "no address", because
- * the PTR and SRV records survived and the A record they pointed at had been
- * thrown out from under them.  A cache that is too small reports the same
- * network with the answers missing, rather than a smaller network.
- *
- * Both are inline in the AmiNetStack for the reason ns_DnsCache is: identical
- * lifetime, and an allocation that can fail needs a "no mDNS" path.
+ * The two mDNS cache sizes.  The local cache holds what this machine claims,
+ * an A record per interface plus four records per declared service; the peer
+ * cache holds what has been learnt and evicts the oldest when it is full.
  */
 #define AMI_MDNS_LOCAL_CACHE_BYTES  \
     (1024 + AMI_CFG_MAX_SD_SERVICES * 384)
@@ -171,10 +103,9 @@
 #endif
 
 /*
- * Three DHCP options NetX Duo does not name. It retrieves any option code the
- * server sent, so a number suffices: RFC 2132 3.17 for the domain name, 3.12
- * for the classful static route list that aam_StaticRouteTable in the
- * published API carries, and RFC 3397 for the domain search list.
+ * Three DHCP options NetX Duo does not name: RFC 2132 3.17 for the domain
+ * name, 3.12 for the classful static route list, RFC 3397 for the domain
+ * search list.
  */
 #define AMI_DHCP_OPTION_DOMAIN          15
 #define AMI_DHCP_OPTION_STATIC_ROUTE    33
@@ -185,20 +116,15 @@
 #define AMI_LINK_TIMEOUT_TICKS      (10UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * How long to wait after the RFC 3927 fallback fires. The probe/announce
- * sequence is PROBE_WAIT (0-1 s) + PROBE_NUM probes (1-2 s each) + a claim,
- * so 15 s is ample.
+ * How long to wait after the RFC 3927 fallback fires.  PROBE_WAIT plus
+ * PROBE_NUM probes plus a claim fits well inside fifteen seconds.
  */
 #define AMI_AUTOIP_TIMEOUT_TICKS    (15UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
- * Only for the case where the address-arrival semaphore was not created.
- * ami_ns_wait_for_address() then has nothing to be woken by and has to look.
- * Each look walks every interface through nx_ip_interface_address_get(), which
- * takes the IP protection mutex. So the interval is set well clear of the IP
- * and DHCP threads rather than at the one-tick floor, which contends with
- * them. It bounds only how late the address is noticed on a path that is
- * already degraded.
+ * Only for the case where the address-arrival semaphore was not created.  Set
+ * clear of the one-tick floor: each poll walks every interface through
+ * nx_ip_interface_address_get(), which takes the IP protection mutex.
  */
 #define AMI_ADDRESS_POLL_TICKS      ((ULONG)NX_IP_PERIODIC_RATE / 10UL)
 
@@ -228,40 +154,25 @@ struct AmiNetStack
     UWORD               ns_IfaceClaims[AMI_CFG_MAX_ATTACHED];
 
     /* MDNS= for each interface, by NX interface index rather than by
-       configuration index: ns_Iface[] is filled in open order and an
-       interface that fails to open takes no slot, so the two are not
-       the same number. */
+       configuration index: ns_Iface[] is filled in open order and an interface
+       that fails to open takes no slot, so the two are not the same number. */
     BOOL                ns_IfaceMdns[AMI_CFG_MAX_ATTACHED];
 
     /* Whether the service_discovery services have been registered on that
-       interface.  nx_mdns_disable() leaves the local records suspended rather
-       than deleting them, and nx_mdns_enable() re-announces what it finds, so
-       adding them a second time on an off/on pair announces each service
-       twice. */
+       interface.  nx_mdns_disable() only suspends the local records, so adding
+       them again on an off/on pair announces each service twice. */
     BOOL                ns_IfaceMdnsSvc[AMI_CFG_MAX_ATTACHED];
 
-    /* Which configuration slot each opened interface came from.
-       ns_Iface[] is in open order, so this is the only mapping back:
-       an interface that failed to open advanced the configuration
-       index and not the NX one. */
+    /* Which configuration slot each opened interface came from.  ns_Iface[] is
+       in open order, so this is the only mapping back: an interface that failed
+       to open advanced the configuration index and not the NX one. */
     UWORD               ns_IfaceCfg[AMI_CFG_MAX_ATTACHED];
     UWORD               ns_IfaceCount;
 
     /*
-     * WHO ASKED FOR THIS SLOT.  Set when an interface was brought up because
-     * something NAMED it -- AddNetInterface, NETCTRL_INTERFACE_ADD,
-     * AddInterfaceTagList() -- and clear when the start-up pass brought it up
-     * on its own initiative because it was in DEVS:NetInterfaces.
-     *
-     * There are AMI_CFG_MAX_ATTACHED slots and a drawer may describe more
-     * interfaces than that (aminetxduo/config.h).  Without this flag the
-     * start-up pass took every slot off the head of the sorted list and the
-     * interface a user then asked for by name was refused, so which card the
-     * machine could use was decided by the alphabet.  With it, a slot held by
-     * an interface nobody asked for yields to one somebody did; a slot held by
-     * an interface that WAS asked for does not, and that is the refusal
-     * the caller reports by name.  ami_ns_yield_candidate() picks; only a
-     * newcomer whose device has already opened may take a slot.
+     * WHO ASKED FOR THIS SLOT.  Set when something NAMED the interface, clear
+     * when the start-up pass took the slot on its own.  A slot nobody asked
+     * for yields to a newcomer somebody did; ami_ns_yield_candidate() picks.
      */
     BOOL                ns_IfaceWanted[AMI_CFG_MAX_ATTACHED];
 
@@ -270,47 +181,33 @@ struct AmiNetStack
     BOOL                ns_DhcpStarted;
 
     /*
-     * The name the client announces as option 12. nx_dhcp_create() keeps the
+     * The name the client announces as option 12.  nx_dhcp_create() keeps the
      * pointer rather than a copy, so it needs storage that outlives the
-     * NX_DHCP, and storage of its own, because ns_Config.hostname is now
-     * written after startup. An option 12 coming back from the server can
-     * rename the machine. Feeding that straight back into what the next
-     * REQUEST announces lets a server rewrite the name from under a client
-     * that is still transmitting it.
+     * NX_DHCP, and storage of its own: ns_Config.hostname is written later.
      */
     char                ns_DhcpName[AMI_CFG_NAME_LEN];
 
-    /*
-     * Last DHCP state and last address seen per interface. NetX Duo's
-     * callbacks report only the new value, so the previous one is kept here to
-     * let the notifications report transitions such as a lost lease.
-     */
+    /* Last DHCP state and last address seen per interface.  NetX Duo's
+       callbacks report only the new value, so the previous one is kept here to
+       let the notifications report transitions such as a lost lease. */
     UBYTE               ns_DhcpState[AMI_CFG_MAX_ATTACHED];
     ULONG               ns_LastAddress[AMI_CFG_MAX_ATTACHED];
     AmiNsDhcpHostnameState ns_DhcpHostname;
 
-    /*
-     * Another host answered an ARP for an address of this machine.  Counted
-     * rather than only logged, because the log is off in a shipping build and
-     * this is the one fault where the machine works and the network does not:
-     * two hosts on one address, and whichever answers first wins each
-     * exchange.
-     */
+    /* Another host answered an ARP for an address of this machine.  Counted
+       rather than only logged, because the log is off in a shipping build and
+       this is the one fault where the machine works and the network does not. */
     ULONG               ns_AddrConflicts;
     ULONG               ns_LastConflictAddr;
 
-    /*
-     * Posted by ami_ns_address_changed() when an interface gains or loses an
-     * address, so ami_ns_wait_for_address() can block instead of polling.
-     */
+    /* Posted by ami_ns_address_changed() when an interface gains or loses an
+       address, so ami_ns_wait_for_address() can block instead of polling. */
     TX_SEMAPHORE        ns_AddrArrived;
     BOOL                ns_AddrArrivedReady;
 
-    /*
-     * The one-second heartbeat that carries ami_second_notify().  The flag is
-     * needed because ami_ns_destroy() has seven call sites, four of which run
-     * before ThreadX exists, so the delete cannot be inferred from position.
-     */
+    /* The one-second heartbeat that carries ami_second_notify().  The flag is
+       needed because four of ami_ns_destroy()'s seven call sites run before
+       ThreadX exists, so the delete cannot be inferred from position. */
     TX_TIMER            ns_Second;
     BOOL                ns_SecondCreated;
 
@@ -333,24 +230,8 @@ struct AmiNetStack
 #ifdef AMINETXDUO_IPV6
     /*
      * Recursive DNS servers a router advertised, RFC 8106.  ami_ns6_rdnss()
-     * runs on the IP thread and must not call into the DNS client: that client
-     * holds its mutex across a query, and a query needs the IP thread.  So it
-     * only writes here, and the next lookup takes what it finds.
-     *
-     * This is the set each interface's router last described, not a log of
-     * what any router has ever said.  A lifetime of zero takes that source's
-     * entry back out (RFC 8106 5.1), and a finite lifetime is pruned before
-     * the next lookup or report.  The resolver receives the union, so one
-     * interface cannot withdraw a server the other still advertises.
-     *
-     * Four is what RFC 8106 section 5.1 expects a router to advertise (it
-     * recommends no more than three) and is the same order as
-     * NX_DNS_MAX_SERVERS.  A fifth is dropped rather than replacing one that
-     * is answering.
-     *
-     * DNSSL has the same per-entry, per-interface ownership rule.  The
-     * handoff retains that repository; ns_DnsslApplied is the union whose
-     * ownership has actually been acquired in resolver configuration.
+     * runs on the IP thread and must not call into the DNS client, so it only
+     * writes here and the next lookup takes what it finds.  DNSSL is the same.
      */
     AmiNsRaPending      ns_Ra;
     char                ns_DnsslApplied[AMI_CFG_MAX_SEARCH]
@@ -359,21 +240,18 @@ struct AmiNetStack
     char                ns_DnsslDefault[AMI_CFG_NAME_LEN];
 #endif
 #ifdef NX_DNS_CACHE_ENABLE
-    /* Inline rather than separately allocated: small, same lifetime as the
-       NX_DNS it belongs to, and an allocation that can fail needs a "no cache"
-       path.  Explicitly aligned, because nx_dns_cache_initialize() rejects a
-       buffer that is not longword aligned and m68k gives a ULONG only
-       two-byte alignment by default. */
+    /* Inline rather than separately allocated, and explicitly aligned:
+       nx_dns_cache_initialize() rejects a buffer that is not longword aligned,
+       and m68k gives a ULONG only two-byte alignment by default. */
     ULONG               ns_DnsCache[AMI_DNS_CACHE_BYTES / sizeof(ULONG)]
                             __attribute__((aligned(4)));
 #endif
 
 #ifdef AMINETXDUO_MDNS
     /*
-     * The responder, its thread stack and its two caches. Sized in
-     * netstack_mdns.c.  Both caches are inline for the reason ns_DnsCache is,
-     * and longword-aligned because the module lays resource records out from
-     * both ends of the buffer and m68k gives a UCHAR array no alignment.
+     * The responder, its thread stack and its two caches.  Both caches are
+     * longword-aligned because the module lays resource records out from both
+     * ends of the buffer and m68k gives a UCHAR array no alignment.
      */
     NX_MDNS             ns_Mdns;
     APTR                ns_MdnsStack;
@@ -390,11 +268,9 @@ struct AmiNetStack
     BOOL                ns_Ipv6Enabled;
 
     /*
-     * DHCPv6.  netstack_dhcpv6.c owns all of it and its file header explains
-     * the two threads; what matters here is that the NX_DHCPV6 is inline, for
-     * the reason ns_Dhcp is, while both stacks are allocated, because they
-     * exist only on a machine that asked for DHCPv6 and a machine that did
-     * not must not carry 6 KB it never touches.
+     * DHCPv6.  netstack_dhcpv6.c owns all of it.  The NX_DHCPV6 is inline,
+     * while both stacks are allocated, because they exist only on a machine
+     * that asked for DHCPv6 and one that did not must not carry 6 KB.
      */
     NX_DHCPV6           ns_Dhcpv6;
     APTR                ns_Dhcpv6Stack;
@@ -409,9 +285,8 @@ struct AmiNetStack
     BOOL                ns_Dhcpv6Stateful;
     /*
      * A router advertisement has already asked for DHCPv6 once.  Every
-     * advertisement repeats the M and O flags and the router re-advertises
-     * for the life of the machine, so without this each one would restart the
-     * exchange.  Written from the IP thread, read there and from the worker.
+     * advertisement repeats the M and O flags, so without this each would
+     * restart the exchange.  The IP thread writes; it and the worker read.
      */
     volatile BOOL       ns_Dhcpv6Asked;
     /* A Reply has landed and may carry name servers.  Same two-phase rule as
@@ -421,17 +296,13 @@ struct AmiNetStack
        coherent exchange. Link-down and lease loss clear it before publishing
        an empty replacement through ns_Dhcpv6DnsPending. */
     volatile BOOL       ns_Dhcpv6OptionsValid;
-    /* nx_dhcpv6_inform_req_responses as it stood at the last state change.
-       See ami_dhcpv6_inform_reply_seen(): the client's own counter is
-       cumulative and never reset, so only the difference is about the
-       exchange that just ended.  The client's thread owns this. */
+    /* nx_dhcpv6_inform_req_responses as it stood at the last state change: the
+       client's own counter is cumulative and never reset, so only the
+       difference is about the exchange that just ended.  Its thread owns it. */
     ULONG               ns_Dhcpv6InformSeen;
-    /*
-     * The name servers the last Reply named, kept for the same reason
-     * ns_Ra.rdnss[] is: reconciliation has to know which entries in
-     * resolver.nameserver6[] came from which source, or each absorb would
-     * withdraw the other's.  netstack_dns.c states which source wins.
-     */
+    /* The name servers the last Reply named.  Reconciliation has to know which
+       entries in resolver.nameserver6[] came from which source, or each absorb
+       would withdraw the other's; netstack_dns.c states which source wins. */
     NXD_ADDRESS         ns_Dhcpv6Dns[AMI_RDNSS_MAX];
     UWORD               ns_Dhcpv6DnsCount;
     /* Search suffixes whose reference ownership was acquired from the last
@@ -446,22 +317,17 @@ struct AmiNetStack
 };
 
 #ifdef AMINETXDUO_IPV6
-/* netstack_ipv6.c, run from ami_ns_create_ip()/ami_ns_configure_addresses()
-   at the points marked there, and from netstack_interface_add() for an
-   interface that arrives after startup. Both callers must hold a ThreadX
-   bracket. _configure_one() is idempotent: an interface that already has its
+/* netstack_ipv6.c.  Both callers must hold a ThreadX bracket.
+   _configure_one() is idempotent: an interface that already has its
    link-local is left alone. */
 LONG ami_netstack_ipv6_enable(AmiNetStack *ns);
 VOID ami_netstack_ipv6_configure(AmiNetStack *ns);
 VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index);
 
 /*
- * netstack_dhcpv6.c.  _configure() is called from
- * ami_ns_configure_addresses() after ami_netstack_ipv6_configure(), and does
- * nothing at all unless some interface asked for CONFIGURE6=DHCP or AUTO.
- * _release() gives the address back and must run while the interface can
- * still transmit.  _address_notify() is the chained DAD callback; see the
- * file header for why it exists.
+ * netstack_dhcpv6.c.  _configure() does nothing unless some interface asked
+ * for CONFIGURE6=DHCP or AUTO.  _release() gives the address back and must run
+ * while the interface can still transmit.
  */
 VOID ami_netstack_dhcpv6_configure(AmiNetStack *ns);
 VOID ami_netstack_dhcpv6_release(AmiNetStack *ns);
@@ -480,20 +346,9 @@ VOID ami_netstack_ipv6_configure_one(AmiNetStack *ns, UWORD index);
 /* --------------------------------------------------------- bring-up marks */
 
 /*
- * One line per bring-up milestone, stamped with ami_millis(), which is the
- * E-Clock of the guest and so is not affected by the load on the host running
- * the emulator.  The shape is
- *
- *     netstack: mark <event> <ms> ms
- *
- * and tests/ipv6/run-bringup.sh reads it.  The event names are the keys of
- * that script.  An AMI_INFO, so a default build carries neither the strings
- * nor the call.
- *
- * It exists because the interesting part of bring-up is what happens after the
- * command returns.  Duplicate address detection, the router solicitation and
- * the address a router advertisement brings all land on the IP thread, minutes
- * of wall clock after anything a caller can time.
+ * One line per bring-up milestone, "netstack: mark <event> <ms> ms", stamped
+ * with ami_millis().  tests/ipv6/run-bringup.sh reads it and the event names
+ * are the keys of that script.
  */
 VOID ami_netstack_mark(const char *event);
 
@@ -517,13 +372,9 @@ VOID ami_netstack_health_publish(VOID);
 VOID ami_netstack_health_unpublish(VOID);
 
 /*
- * The bracket calls this on every transition so the packet-pool figures in the
- * health mark are never much older than the last thing the stack did.
- *
- * Through a pointer rather than by name: tests/bracket compiles netstack_baton.c
- * on its own against threadx_port, without the rest of the stack, and a direct
- * call to netstack.c does not link there.  NULL until the pool exists, and
- * NULL again before it goes.
+ * Through a pointer rather than by name: tests/bracket compiles
+ * netstack_baton.c on its own against threadx_port, without the rest of the
+ * stack.  NULL until the pool exists, and NULL again before it goes.
  */
 VOID ami_netstack_baton_set_sampler(VOID (*fn)(VOID));
 
@@ -534,13 +385,6 @@ VOID netstack_pool_mark_low(VOID);
 /* Wipe the slot table. Only valid once ThreadX has stopped.  netstack_baton.c
    says what it is for. */
 VOID ami_netstack_baton_reset(VOID);
-
-/* ---------------------------------------------------------- adoption glue,
- *
- * AmiNetCaller / ami_netstack_enter() / ami_netstack_leave() are public.  They
- * live in include/aminetxduo/netstack.h so that bsdsocket.library and the
- * tools share this bracket rather than grow their own.
- */
 
 #ifdef AMINETXDUO_BPF
 /* netstack_capture.c, registers the interfaces with src/bpf/ and installs
@@ -589,9 +433,7 @@ VOID ami_ns_dhcp_text(AmiNetStack *ns, UWORD index, UINT option,
 LONG ami_netstack_mdns_start(AmiNetStack *ns);
 VOID ami_netstack_mdns_stop(AmiNetStack *ns);
 /* One interface, either way, while the stack runs.  netstack_iface_mdns_set()
-   in <aminetxduo/netstack.h> is the published spelling.  The interface add and
-   remove paths call this one directly, because they already have the
-   AmiNetStack. */
+   in <aminetxduo/netstack.h> is the published spelling. */
 LONG ami_netstack_mdns_iface_set(AmiNetStack *ns, UWORD index, BOOL enable);
 LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks);
@@ -601,11 +443,8 @@ LONG ami_netstack_mdns_resolve(const char *name, ULONG *addr_out,
 /* ------------------------------------------------------------ AMITCP port,
  *
  * netstack_rexx.c, the AMITCP public port and the ARexx host servicing it.
- * The port is what `WaitForPort AMITCP` waits on.  The host is why a script
- * that addresses it gets an answer instead of blocking (docs/RESEARCH.md 75.7).
- *
  * Without AMINETXDUO_AREXX there is no host and netstack.c opens the port on
- * its own, so the wait still returns and a script still blocks.
+ * its own, so `WaitForPort AMITCP` still returns and a script still blocks.
  */
 #ifdef AMINETXDUO_AREXX
 VOID ami_netstack_rexx_start(VOID);
@@ -620,20 +459,14 @@ VOID ami_netstack_rexx_resume(VOID);
 AmiNetStack *ami_netstack_raw(VOID);
 
 /*
- * The green realm's failure mode is one stray Exec Wait() from a green
- * thread: it puts the whole realm Task to sleep.  The probe build routes
- * every Wait() in the sources that include this header (the netstack and
- * SANA-II layers -- the realm's code) through a checked wrapper
- * (netstack_baton.c) that passes ordinary contexts straight through, and
- * converts a green-context Wait() into tx_amiga_green_wait() while counting
- * it in gs_stray_wait, which must read zero.
+ * The probe build routes every Wait() in the sources that include this header
+ * through a checked wrapper (netstack_baton.c) that converts a green-context
+ * Wait() into tx_amiga_green_wait() and counts it in gs_stray_wait.
  */
 #if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
-/* <proto/exec.h> forced first: the NDK's inline Wait macro must expand
-   (once, behind its guard) BEFORE ours is defined, or a TU including it
-   later has ours silently replaced -- the NDK path is -isystem, so the
-   redefinition never warns.  The injected-stray drill caught exactly
-   that: the net compiled dead in every TU with this order reversed.  */
+/* <proto/exec.h> forced first: the NDK's inline Wait macro must expand (once,
+   behind its guard) BEFORE ours is defined, or a TU including it later has
+   ours silently replaced -- the NDK path is -isystem, so it never warns.  */
 #include <proto/exec.h>
 ULONG ami_green_checked_wait(ULONG sigmask);
 #undef Wait

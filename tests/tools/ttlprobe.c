@@ -1,32 +1,7 @@
 /*
  * ttlprobe, measures whether setsockopt(IP_TTL) reaches the wire, and on
- * which socket type.
- *
- * This is the measurement `traceroute` is designed around: IP_TTL is honoured
- * on a raw socket and ignored on a UDP one, so a UDP-probe traceroute cannot
- * work on this stack.
- *
- * Four datagrams, each preceded by setsockopt(IPPROTO_IP, IP_TTL) and a
- * getsockopt() to show what the library thinks it stored:
- *
- *   1. raw ICMP, TTL 1      2. raw ICMP, TTL 5
- *   3. UDP,      TTL 1      4. UDP,      TTL 5
- *
- * Its own output proves nothing: getsockopt reads back whatever setsockopt
- * stored, on both.  The answer is on the wire, and Amiberry writes no frame
- * dump: take the capture from a bridged run watched on another machine, or
- * from tools/winuae-run.sh with -a2065log2 through
- * tests/trace/a2065pcap.py --winuae, and read the IP TTL field.
- *
- * A one-off probe rather than a command or a test, so it has no CMake entry.
- * Compile it by hand and stage it like any other executable:
- *
- *   . tools/amiga-toolchain.sh
- *   "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o TtlProbe tests/tools/ttlprobe.c
- *
- * The vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, for
- * the same reason src/tools/toolsock.c does it: the NDK inlines assume a
- * global SocketBase.
+ * which socket type.  The answer is in a frame capture, not in this program's
+ * output.  No CMake entry; compile by hand.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,8 +11,6 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
-/* struct sockaddr_in, open-coded, four fields and a pad, unchanged since
-   4.2BSD. */
 typedef struct ProbeAddr
 {
     UBYTE   sin_len;
@@ -223,7 +196,6 @@ static VOID p_one(struct Library *sb, BOOL raw, LONG ttl, ULONG dest, UWORD id)
 
     if (raw)
     {
-        /* An ICMP echo request, so the packet is a legal one either way. */
         p_packet[0] = 8;                /* type: echo                     */
         p_packet[1] = 0;
         p_packet[2] = 0;
@@ -271,7 +243,6 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    /* Spaced out, so the four are easy to tell apart in the frame dump. */
     p_one(sb, TRUE,  1, dest, 0x4141);
     Delay(50);
     p_one(sb, TRUE,  5, dest, 0x4142);

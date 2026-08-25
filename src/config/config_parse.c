@@ -1,30 +1,9 @@
 /*
  * AmiNetXDuo, Roadshow configuration file parsers.
  *
- * Formats implemented here, per the Roadshow manual (Olaf Barthel, 1.15,
- * 4 September 2023), sections 7.1.1 (DEVS:NetInterfaces), 7.1.2.3
- * (DEVS:Internet/name_resolution) and 7.1.2.6 (DEVS:Internet/routes):
- *
- *   - one `keyword=value` per line, whitespace around either side ignored;
- *   - lines starting with ';' or '#' are comments (a comment starting mid-line
- *     is dropped too, which Roadshow does not do: hand-written files use it,
- *     and it can never make a valid file invalid);
- *   - keywords are case-insensitive (ReadArgs templates);
- *   - "quoted values" use the AmigaDOS '*' escape.
- *
- * Additions to the manual:
- *
- *   - Roadshow's IPTYPE is the SANA-II packet type number (default 2048), not
- *     an address-configuration mode. AmiTCP/Genesis-era documentation and
- *     several configuration generators use `IPTYPE=DHCP`/`STATIC` instead.
- *     Both are accepted and cannot be confused: a numeric IPTYPE is the packet
- *     type, an alphabetic one the address mode.
- *   - GATEWAY= inside an interface file is not a Roadshow keyword (Roadshow
- *     puts the default route in DEVS:Internet/routes) but AmiTCP_NG writes it
- *     and AmiIfConfig has the field, so it is accepted.
- *   - DEVS:Internet/default_gateway does not exist in Roadshow 1.15 either;
- *     docs/RESEARCH.md and config.h call for it, so it is read first and
- *     DEVS:Internet/routes after it.
+ * Per the Roadshow manual 1.15 sections 7.1.1, 7.1.2.3 and 7.1.2.6:
+ * `keyword=value` per line, ';' and '#' comments, case-insensitive keywords,
+ * AmigaDOS '*' escapes in quoted values.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -85,34 +64,17 @@ ami_if_keywords[] =
     { "requiresinitdelay",  IF_KEY_REQUIRESINITDELAY },
     { "hardwareaddress",    IF_KEY_HARDWAREADDRESS   },
 
-    /*
-     * IPv6. Roadshow has no IPv6 keywords and no Amiga stack has ever had
-     * IPv6, so these are new here, named by adding "6" to the IPv4 keyword they
-     * match. No real Roadshow keyword ends in a digit, so nothing collides,
-     * and one interface file describes both families:
-     *
-     *     DEVICE     = a2065.device
-     *     UNIT       = 0
-     *     CONFIGURE  = DHCP              ; IPv4
-     *     CONFIGURE6 = AUTO              ; IPv6: OFF|LINKLOCAL|AUTO|STATIC
-     *     ADDRESS6   = 2001:db8::10/64   ; STATIC only; /64 if the length is
-     *     GATEWAY6   = fe80::1           ; omitted
-     *
-     * In the floor build (no AMINETXDUO_IPV6) these are recognised and then
-     * ignored, so the same file works in both builds with no "unknown keyword"
-     * warning.
-     */
+    /* IPv6 keywords: the IPv4 keyword plus a "6".  In the floor build (no
+       AMINETXDUO_IPV6) they must stay RECOGNISED and be ignored, so the same
+       file loads in both builds without an "unknown keyword" warning. */
     { "address6",           IF_KEY_ADDRESS6  },
     { "ipaddress6",         IF_KEY_ADDRESS6  },
     { "gateway6",           IF_KEY_GATEWAY6  },
     { "configure6",         IF_KEY_CONFIGURE6},
     { "iptype6",            IF_KEY_CONFIGURE6},
 
-    /*
-     * Roadshow keywords parsed with nowhere to put them: they belong to the
-     * SANA-II shim rather than to the IP configuration. Listed so that a stock
-     * configuration file produces no warnings.
-     */
+    /* Roadshow keywords with nowhere to put them; listed so a stock
+       configuration file produces no warnings. */
     { "arptype",            IF_KEY_IGNORED   },
     { "iprequests",         IF_KEY_IGNORED   },
     { "writerequests",      IF_KEY_IGNORED   },
@@ -126,11 +88,6 @@ ami_if_keywords[] =
     { "alias",              IF_KEY_IGNORED   },
     { "destination",        IF_KEY_IGNORED   },
     { "destinationaddr",    IF_KEY_IGNORED   },
-    /* Roadshow's own AddNetInterface template spells the alias
-       DESTINATION=DESTINATIONADDRESS and its ConfigureNetInterface spells it
-       DESTINATION=DESTINATIONADDR, so both are here.  These three were
-       missing, and a stock Roadshow interface file reported three unknown
-       keywords. */
     { "destinationaddress", IF_KEY_IGNORED   },
     { "hardwaretype",       IF_KEY_IGNORED   },
     { "broadcastaddress",   IF_KEY_IGNORED   },
@@ -161,13 +118,7 @@ static IfKey lookup_if_keyword(const char *name)
     return IF_KEY_UNKNOWN;
 }
 
-/* ------------------------------------------------ "did you mean DEVICE?",
- *
- * A mistyped keyword is the commonest fault in a hand-edited interface file,
- * and "unknown keyword 'devcie'" alone does not say where the difference is.
- * Levenshtein distance over the keyword table names the fix. The table is 40
- * short words and this runs once per bad line.
- */
+/* "did you mean DEVICE?": Levenshtein distance over the keyword table. */
 #define CFG_SUGGEST_MAX     24      /* longer than any keyword in the table */
 
 static ULONG edit_distance(const char *a, const char *b)
@@ -255,10 +206,6 @@ static const char *suggest_if_keyword(const char *name)
     return best;
 }
 
-/*
- * "unknown keyword 'devcie'" + "Did you mean DEVICE? ...". Built here because
- * four call sites want the same shape.
- */
 static VOID report_unknown_keyword(ULONG line, const char *key,
                                    const char *known)
 {
@@ -289,27 +236,9 @@ static VOID report_unknown_keyword(ULONG line, const char *key,
 }
 
 /*
- * A Roadshow keyword that is read and does nothing.
- *
- * Silence was the old behaviour: ALIAS= or METRIC= gave no error, no effect
- * and nothing to read, which looks the same as a keyword that worked. A report
- * needs a reporter installed, so the stack at boot still says nothing.
- * CheckNetConfig reads the files and says what is wrong with them, and prints
- * one line per keyword with the reason it is inert.
- *
- * The reason is per keyword, because "unsupported" does not say what to do
- * next.
- *
- * AMI_CFG_PROBLEM_NOTE, NOT _WARN, and the difference is the whole point of
- * that severity: nothing here is wrong with the file. The keyword is spelled
- * correctly, this stack accepts it on purpose so that a Roadshow
- * configuration loads unchanged, and the advice at the end of every one of
- * these is that the line is harmless and can stay. A message whose own last
- * sentence says there is no problem must not be printed under the heading
- * "Problems in the configuration:" by every command that reads a file --
- * which is what it did, four keywords deep, on a machine whose configuration
- * was entirely correct. Only CheckNetConfig shows notes now; see
- * aminetxduo/config.h.
+ * A Roadshow keyword that is read and does nothing.  Severity must stay
+ * AMI_CFG_PROBLEM_NOTE, not _WARN: nothing is wrong with the file, and only
+ * CheckNetConfig prints notes (see aminetxduo/config.h).
  */
 static const struct { const char *key; const char *why; } cfg_inert_keys[] =
 {
@@ -381,16 +310,8 @@ static VOID report_bad_value(ULONG line, UWORD severity, const char *keyword,
     ami_cfg_problem(line, severity, text, hint);
 }
 
-/* ------------------------------------------------------------------ CARD,
- *
- * One device file can cover a family of boards -- anxnet.device is opened for
- * every NE2000/DP8390 card -- and then UNIT alone only says "the Nth board in
- * probe order".  CARD says which board by name.
- *
- * The names are the driver's, include/aminetxduo/anxnet.h. Reading them here
- * makes CARD=nonsense a configuration error with the list beside it, rather
- * than an OpenDevice that fails at boot with nothing to read.
- */
+/* CARD names one board by name where UNIT only says "Nth in probe order".
+   The names are the driver's, include/aminetxduo/anxnet.h. */
 static const char *const cfg_card_names[] = ANXNET_CARD_NAMES;
 
 #define CFG_CARD_COUNT \
@@ -486,12 +407,6 @@ ami_iptype_names[] =
     { "linklocal",AMI_IPTYPE_LINKLOCAL },
     { "static",   AMI_IPTYPE_STATIC    },
     { "manual",   AMI_IPTYPE_STATIC    },
-    /*
-     * NONE used to be a synonym for STATIC, which made it the one value that
-     * did the opposite of what it said: STATIC with no ADDRESS is refused, so
-     * CONFIGURE=NONE refused the interface instead of leaving IPv4 off it.
-     * The IPv6-only machine is spelled with this word.
-     */
     { "none",     AMI_IPTYPE_NONE      },
     { "off",      AMI_IPTYPE_NONE      },
     { "no",       AMI_IPTYPE_NONE      },
@@ -522,8 +437,6 @@ ami_ip6type_names[] =
     { "ra",         AMI_IP6TYPE_AUTO      },
     { "static",     AMI_IP6TYPE_STATIC    },
     { "manual",     AMI_IP6TYPE_STATIC    },
-    /* Spelled the way CONFIGURE=DHCP is, and meaning the same thing one
-       family over: ask a server, do not wait to be told to. */
     { "dhcp",       AMI_IP6TYPE_DHCP      },
     { "dhcpv6",     AMI_IP6TYPE_DHCP      },
     { "stateful",   AMI_IP6TYPE_DHCP      },
@@ -551,14 +464,8 @@ static BOOL lookup_ip6type(const char *value, AmiIp6Type *out)
 
 #ifdef AMINETXDUO_IPV6
 /*
- * RFC 4007 11's "%zone" in an interface file.
- *
- * The file already names the interface, DEVS:NetInterfaces/eth0. A zone on an
- * address in it is either the same interface again, which is harmless, or a
- * different one, which contradicts the file it is written in. Nothing is
- * stored: the file name already says the zone.
- *
- * TRUE to use the address, FALSE to reject the line.
+ * RFC 4007 11 "%zone" in an interface file.  Nothing is stored -- the file
+ * name already says the zone.  TRUE to use the address, FALSE to reject.
  */
 static BOOL cfg_zone_ok(const AmiIfConfig *out, const char *key,
                         const char *zone, const char *value)
@@ -612,21 +519,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     out->iptype = AMI_IPTYPE_STATIC;
 
 #ifdef AMINETXDUO_IPV6
-    /*
-     * The IPv6 default is AUTO, which settles the last open question in
-     * docs/RESEARCH.md §9 ("built and off, or built and on when router
-     * advertisements appear?").
-     *
-     * AUTO always configures the link-local address, and takes a global one
-     * from a router advertisement if one arrives. On a link with no IPv6
-     * router it behaves as LINKLOCAL does: one router solicitation goes out
-     * and nothing answers. The cost is three ICMPv6 packets, and IPv6 then
-     * works on a network that has it with no file edited. It is what every
-     * other operating system on the same wire does.
-     *
-     * A machine that wants no IPv6 sets CONFIGURE6=OFF, or builds the floor
-     * configuration, where none of this exists.
-     */
+    /* The IPv6 default is AUTO: link-local always, plus a global address if
+       a router advertisement arrives.  CONFIGURE6=OFF turns IPv6 off. */
     out->ip6type = AMI_IP6TYPE_AUTO;
     out->prefix6 = 64;
 #endif
@@ -692,12 +586,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 have_device = TRUE;
                 break;
 
-            /*
-             * Which board, when the device file covers a family of them.  An
-             * unknown name is an error and the field stays empty. Acting on
-             * half of it opens the first board in probe order, the silent bind
-             * to the wrong card that CARD exists to prevent.
-             */
             case IF_KEY_CARD:
                 if (!cfg_card_known(value))
                 {
@@ -709,13 +597,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 ami_cfg_copy_string(out->card, sizeof(out->card), value);
                 break;
 
-            /*
-             * Roadshow's ID= is a free-text label for the interface and has no
-             * IP meaning, which is why it was ignored. It is kept now because
-             * ami_config_load() names the machine after it when no stronger
-             * source did, see AmiHostnameSource. Stored verbatim. Whether it
-             * is usable as a host name is decided there.
-             */
+            /* Free text, stored verbatim; ami_config_load() decides whether
+               it is usable as a host name. */
             case IF_KEY_ID:
                 ami_cfg_copy_string(out->id, sizeof(out->id), value);
                 break;
@@ -812,11 +695,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 
             case IF_KEY_IPTYPE:
-                /*
-                 * Numeric: the SANA-II packet type (2048 for Ethernet IPv4),
-                 * which the SANA-II shim owns. Alphabetic: the AmiTCP-style
-                 * address mode.
-                 */
+                /* Numeric IPTYPE is the SANA-II packet type; alphabetic is
+                   the AmiTCP-style address mode. */
                 if (ami_cfg_parse_ulong(value, &n))
                     AMI_DEBUG("config: %s: SANA-II IPTYPE %lu (sana2 layer)",
                               out->name, (unsigned long)n);
@@ -836,11 +716,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 
             case IF_KEY_MDNS:
-                /*
-                 * Answering .local on this wire.  Off unless asked for: the
-                 * responder is per interface and so is its cost, and on a
-                 * 68000 that cost slows everything else.
-                 */
                 if (!ami_cfg_parse_bool(value, &out->mdns))
                 {
                     AMI_WARN("config: %s: bad MDNS '%s'", out->name, value);
@@ -851,13 +726,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
-            /*
-             * Roadshow's DOWNGOESOFFLINE. The field has existed since the
-             * first interface API and is set by IFA_DownGoesOffline, but the
-             * configuration keyword for it was on the ignored list. `Offline
-             * eth0` then sent S2_OFFLINE when a program asked, and never when
-             * the file did.
-             */
             case IF_KEY_DOWNGOESOFFLINE:
                 if (!ami_cfg_parse_bool(value, &out->down_goes_offline))
                 {
@@ -871,12 +739,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
-            /*
-             * A second between opening the device and the first packet.
-             * Roadshow defaults this to YES and names the original Ariadne.
-             * The default here is NO: one card needs the delay, and every
-             * other card pays it at every bring-up.
-             */
+            /* Roadshow defaults this to YES; the default here is NO. */
             case IF_KEY_REQUIRESINITDELAY:
                 if (!ami_cfg_parse_bool(value, &out->requires_init_delay))
                 {
@@ -931,10 +794,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
 #ifdef AMINETXDUO_IPV6
             case IF_KEY_ADDRESS6:
-                /*
-                 * An ADDRESS6 with no CONFIGURE6 implies STATIC, the same way
-                 * a Roadshow ADDRESS implies a static IPv4 interface.
-                 */
+                /* ADDRESS6 with no CONFIGURE6 implies STATIC. */
             {
                 char zone[AMI_CFG_IP6_ZONE_LEN];
 
@@ -992,8 +852,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
             case IF_KEY_ADDRESS6:
             case IF_KEY_GATEWAY6:
             case IF_KEY_CONFIGURE6:
-                /* Recognised, so the file is portable. Acted on only in the
-                   IPv6 build. */
                 AMI_DEBUG("config: %s: %s=%s needs an IPv6 build",
                           out->name, key, value);
                 break;
@@ -1025,12 +883,8 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         return AMI_CFG_ERR_SYNTAX;
     }
 
-    /*
-     * An unknown CARD refuses the interface rather than dropping the line.
-     * Coming up anyway binds to whatever UNIT points at, the silent wrong
-     * board this keyword exists to prevent. report_bad_card() above has
-     * already named the value and the line.
-     */
+    /* An unknown CARD must refuse the interface: coming up anyway binds to
+       whatever UNIT points at. */
     if (bad_card)
     {
         AMI_WARN("config: %s: unknown CARD, ignoring interface", out->name);
@@ -1050,18 +904,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     }
 #endif
 
-    /*
-     * The one question this check is really asking is "will this interface
-     * ever have an address", and until now it only ever asked it of IPv4.
-     *
-     * An IPv6 plan counts, and has to be SAID: CONFIGURE6 defaults to AUTO, so
-     * treating the default as a plan would turn "DEVICE=a2065.device and
-     * nothing else" -- a file whose author forgot the address -- into a
-     * silently accepted IPv6-only interface, and that diagnostic is worth
-     * keeping. ADDRESS6, GATEWAY6 and CONFIGURE6 are the three ways of saying
-     * it, and CONFIGURE=NONE is the fourth: an operator who switches IPv4 off
-     * on a build that has IPv6 has said which family carries the interface.
-     */
+    /* "Will this interface ever have an address".  An IPv6 plan must be
+       stated -- ADDRESS6, GATEWAY6, CONFIGURE6 or CONFIGURE=NONE -- because
+       CONFIGURE6 defaults to AUTO and the default must not count. */
     {
         BOOL v4_plan = (out->iptype == AMI_IPTYPE_DHCP ||
                         out->iptype == AMI_IPTYPE_LINKLOCAL ||
@@ -1096,15 +941,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     return AMI_CFG_OK;
 }
 
-/*
- * The two questions everything downstream of the parser was answering for
- * itself, mostly by testing an address against zero.
- *
- * They are here rather than inline at each site because the sites disagreed:
- * bring-up waited for an address on an interface that had asked for none, and
- * three separate tools reported "no address yet" about a machine that was
- * never going to have an IPv4 address and did not need one.
- */
 BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg)
 {
     if (cfg == NULL)
@@ -1139,12 +975,9 @@ BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg)
 
 /* ------------------------------------------------------- name_resolution */
 
-/*
- * Roadshow's name_resolution is resolv.conf-shaped: `keyword value`, one per
- * line, '#' comments. Also accepted are `keyword=value`, ';' comments, and
- * AmiTCP netdb-myhost lines (HOST <addr> <name> [alias...]), so the same
- * routine can be pointed at an AmiTCP database.
- */
+/* name_resolution is resolv.conf-shaped: `keyword value`, '#' comments.
+   Also accepted: `keyword=value`, ';' comments, and AmiTCP netdb-myhost
+   lines (HOST <addr> <name> [alias...]). */
 VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
                             char *hostname, ULONG hostname_len)
 {
@@ -1237,10 +1070,8 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
         }
         else if (ami_cfg_stricmp(key, "host") == 0)
         {
-            /*
-             * AmiTCP netdb-myhost: HOST <address> <name> [alias...]. The first
-             * non-loopback entry names this machine.
-             */
+            /* HOST <address> <name> [alias...]: the first non-loopback
+               entry names this machine. */
             ULONG addr;
             char *name;
             char *dummy;
@@ -1262,12 +1093,6 @@ VOID ami_cfg_parse_resolver(char *buf, AmiResolverConfig *out,
         }
         else if (ami_config_parse_ip(key, NULL))
         {
-            /*
-             * A standard hosts-file line. ami_config_load() points this parser
-             * at DEVS:Internet/hosts as well, to pick up the NAMESERVER and
-             * DOMAIN lines an AmiTCP netdb keeps there. The host entries
-             * themselves belong to netdb.c.
-             */
             AMI_TRACE("config: skipping hosts entry for '%s'", key);
         }
         else
@@ -1321,8 +1146,6 @@ BOOL ami_config_search_offer(AmiResolverConfig *res, const char *domain)
     if (res == NULL || domain == NULL || *domain == '\0')
         return FALSE;
 
-    /* This came off the network, and is about to be added to a name and
-       queried. */
     if (!ami_config_hostname_valid(domain))
     {
         AMI_WARN("config: the network offered '%s' as a search domain. "
@@ -1401,8 +1224,6 @@ BOOL ami_config_nameserver6_withdraw(AmiResolverConfig *res,
         if (!cfg_ip6_same(res->nameserver6[i], addr))
             continue;
 
-        /* Close the gap: the order of what is left is the order the resolver
-           still asks them in. */
         for (j = (UWORD)(i + 1); j < res->nameserver6_count; j++)
         {
             res->nameserver6[j - 1][0] = res->nameserver6[j][0];
@@ -1437,8 +1258,6 @@ BOOL ami_config_search_withdraw(AmiResolverConfig *res, const char *domain)
         if (ami_cfg_stricmp(res->search[i], domain) != 0)
             continue;
 
-        /* Close the gap: the order of what is left is the order they are
-           still tried in. */
         for (j = (UWORD)(i + 1); j < res->search_count; j++)
         {
             ami_cfg_copy_string(res->search[j - 1], AMI_CFG_NAME_LEN,
@@ -1508,10 +1327,7 @@ BOOL ami_config_search_reference_remove(AmiResolverConfig *res,
 
 /*
  * One RFC 1035 4.1.4 name out of an option 119 payload, starting at *pos.
- *
- * *pos is advanced past the name as it is written in the option, not to where
- * the decoding ended. A name that is a pointer occupies two bytes there and
- * expands from somewhere earlier, so the walk continues after the pointer.
+ * *pos advances past the name AS WRITTEN, not to where decoding ended.
  */
 #define AMI_CFG_RFC3397_JUMPS   8
 
@@ -1692,11 +1508,6 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             else if (ami_cfg_stricmp(key, "device") == 0 ||
                      ami_cfg_stricmp(key, "unit") == 0)
             {
-                /*
-                 * default_gateway names the interface the route belongs to.
-                 * AmiConfig has one global default gateway, so the binding is
-                 * left to the routing layer.
-                 */
                 AMI_DEBUG("config: default_gateway: %s=%s", key, value);
             }
             else if (ami_cfg_stricmp(key, "dst") == 0 ||
@@ -1723,13 +1534,8 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
             }
         }
 
-        /*
-         * DEVS:Internet/default_gateway has no DEFAULT keyword: the GATEWAY in
-         * it is the default route. In DEVS:Internet/routes a line is the
-         * default route only when it carries DEFAULT=. A line with a
-         * DST/HOSTDST/NETDST destination is a specific route, which is not
-         * kept.
-         */
+        /* default_gateway has no DEFAULT keyword -- its GATEWAY is the
+           default route.  In routes, only a DEFAULT= line is. */
         if (have_dst && !is_default)
             continue;
 
@@ -1740,12 +1546,8 @@ VOID ami_cfg_parse_gateway(char *buf, ULONG *out)
 
 /* --------------------------------------------------------- tcp_handler */
 
-/*
- * DEVS:Internet/tcp_handler. One setting, so the file is allowed to be one
- * word: "OFF" on a line by itself means the same as "TCPHANDLER=OFF". Anything
- * else is a warning and leaves the default alone, because the default is the
- * behaviour a machine already has and a typo must not remove it.
- */
+/* DEVS:Internet/tcp_handler: "OFF" alone on a line means "TCPHANDLER=OFF".
+   Anything else warns and leaves the default alone. */
 VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
 {
     char *cursor = buf;
@@ -1813,22 +1615,9 @@ VOID ami_cfg_parse_tcp_handler(char *buf, BOOL *out)
 
 /*
  * DEVS:Internet/service_discovery, one service per line:
- *
  *     <type>  <port>  [instance name]  [txt=key=value;key=value]
- *
- * AmiNetXDuo ships clients only, so an API for a server to call has no
- * callers: the servers an Amiga runs, AmiFTPd and its kind, are already built
- * and are not recompiled against this stack. The file instead says what is
- * listening, which is the assertion a _ftp._tcp record makes. AmiTCP's
- * db/inetd.conf declares the same thing the same way.
- *
- * The instance name can contain spaces (RFC 6763 4.1.1 allows rich text) and
- * runs to the end of the line or to the txt= field, so it needs no quotes.
- * Quotes are accepted anyway, because ami_cfg_unquote() costs nothing here.
- *
- * '#' starts a comment anywhere, as in the netdb files. ';' is a comment only
- * as the first character of a line, because ';' is the separator between
- * key=value pairs inside a TXT record, and removing it mid-line truncates one.
+ * ';' is a comment ONLY as the first character of a line: mid-line it is the
+ * separator between key=value pairs inside a TXT record.
  */
 
 /* One whitespace-delimited word, NUL-terminated in place. No quoting: neither
@@ -1860,10 +1649,9 @@ static char *dnssd_word(char **cursor)
 }
 
 /*
- * RFC 6763 7: "_" then 1..15 characters of letters, digits and hyphens, then
- * "._tcp" or "._udp". The 15 is where NX_MDNS_TYPE_MAX's 21 comes from, so a
- * type this accepts always fits AMI_CFG_SD_TYPE_LEN and the module's own
- * limit, and no accepted line can be truncated on the way in.
+ * RFC 6763 7: "_" then 1..15 of [A-Za-z0-9-], then "._tcp" or "._udp".
+ * The 15 is what makes an accepted type fit both AMI_CFG_SD_TYPE_LEN and
+ * NX_MDNS_TYPE_MAX (21) without truncation.
  */
 static BOOL dnssd_type_ok(const char *s)
 {
@@ -1888,11 +1676,7 @@ static BOOL dnssd_type_ok(const char *s)
                   ami_cfg_stricmp(s, "._udp") == 0);
 }
 
-/*
- * Find the txt= field: "txt=" at a word boundary, case-insensitive. The &&
- * chain stops at the first mismatch, so a string ending mid-keyword is never
- * read past its NUL.
- */
+/* Find "txt=" at a word boundary, case-insensitive. */
 static char *dnssd_txt_field(char *rest)
 {
     char *p = rest;
@@ -1989,12 +1773,8 @@ VOID ami_cfg_parse_dnssd(char *buf, AmiSdService *out, UWORD max, UWORD *count)
         if (txt != NULL)
             ami_cfg_unquote(txt);
 
-        /*
-         * A dot in the instance name becomes a label boundary: the module
-         * builds "<name>.<type>.local" as text and encodes it by splitting on
-         * dots, so "My.Server" claims a name nobody asked for. The line is
-         * refused rather than renamed.
-         */
+        /* A dot in the instance name becomes a label boundary downstream,
+           so the line is refused rather than renamed. */
         namelen = ami_cfg_strlen(rest);
         if (namelen > 0)
         {

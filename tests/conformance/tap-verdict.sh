@@ -5,28 +5,6 @@
 #   . "$ROOT/tests/conformance/tap-verdict.sh"
 #   tap_verdict <log> <emulator-exit-status>
 #
-# Separate from tests/conformance/run-conformance.sh so that
-# tests/conformance/tap-verdict-selftest.sh can drive it, which needs no ROM,
-# no a2065.device and no third_party/bsdsocktest checkout.
-#
-# What it replaced: run-fsuae.sh ended in `exit "$status"`, the emulator's
-# status, which is the guest's, which is tests/conformance/conf_launcher.c:134
-# -- `return RETURN_OK;` unconditional, carrying the comment "hand the harness
-# a success so the run is scored from the TAP log".  Nothing scored the TAP
-# log; the only read of it grepped one line for attribution.  The suite at
-# .github/workflows/emulator.yml:117 was green however many of its tests failed.
-#
-# The grammar is third_party/bsdsocktest/src/tap.c:
-#
-#   1..N                             tap_plan(), :310
-#   ok N - desc                      a pass, :334
-#   ok N - desc  # KNOWN stack: why  a known limitation that passed, :330
-#   not ok N - desc  # KNOWN ...     an expected failure, :342
-#   not ok N - desc                  an UNEXPECTED failure, :349
-#   ok N - # SKIP why                :407
-#   Bail out! why                    :550
-#   # Results: P passed, F failed, K known, S skipped (T total)   :594
-#
 # Returns 0 pass, 1 fail, 3 not measured.  Output is key=value.
 #
 # SPDX-License-Identifier: MIT
@@ -57,8 +35,6 @@ tap_verdict() {
     echo "conformance_bailed=$bailed"
     sed -n 's/^# Results: /conformance_results=/p' "$log" | head -1
 
-    # No plan is "nothing says how much was supposed to run", which is not a
-    # result either way, so it outranks the counts below.
     if [ -z "$plan" ]; then
         echo "conformance=NOT_MEASURED"
         return 3
@@ -79,8 +55,6 @@ tap_verdict() {
         echo "conformance_fail=${unexpected}_unexpected_failures"
         rc=1
     fi
-    # The emulator's status last, and for what it can say: a timeout or a
-    # wrong-CPU guest.  It cannot report a suite failure.
     if [ "$status" != "0" ]; then
         echo "conformance_fail=emulator_exit_$status"
         rc=1

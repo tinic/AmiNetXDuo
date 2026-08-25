@@ -1,19 +1,6 @@
 /*
  * anxnet.device, the card table.
  *
- * Sources for every number here, so the next row does not need the same
- * search:
- *
- *   X-Surf 100   NetBSD sys/arch/amiga/dev/xsh.c (XSURF100_NE_OFFSET 0x0800)
- *                and if_ne_xsh.c (amiga_bus_stride_4).  The 0x8880 window and
- *                the board interrupt byte at +0x40 are from the card, checked
- *                against Amiberry's decode: banks 0x08-0x0f and 0x88-0x8f are
- *                the byte-swapped register image, and any address in the top
- *                128 bytes of a bank is the data port again.
- *   X-Surf       if_ne_xsurf.c: base 0x8000, ISA 0x300 at stride 2 -> 0x8600.
- *   Ariadne II   if_ne_zbus.c: base 0, ISA 0x300 at stride 2 -> 0x600.
- *   Hydra/ASDG   if_ed_zbus.c: register and PROM offsets, 16K/32K buffer.
- *
  * The registers are byte-swapped on the Amiga side of all of these, which is
  * why nothing in netdev_bus.c swaps anything.
  *
@@ -25,18 +12,9 @@
 
 /*
  * The X-Surf 500's register file, transcribed from
- * wiki.icomp.de/wiki/X-Surf-500_registers and not computed from anything.
- *
- * The card hangs off an ACA500's 34-pin header, which exposes so few address
- * lines that the register number's bits come out scattered.  Consecutive
- * registers sit anywhere from $0204 to $6E94 apart, and no stride describes
- * it.  Offsets are from the card's base, $EE0000.
- *
- * 0..15 are the NIC file and 16..31 the ASIC block, which is the same split
- * the NE2000 core uses, so entry 16 is the 16-bit data port and entry 31 is
- * the reset.  Nothing here is derived.  A guessed offset gives a driver that
- * looks right and silently talks to the wrong register, and no emulation of
- * this card exists to catch that.
+ * wiki.icomp.de/wiki/X-Surf-500_registers and not computed: the ACA500 header
+ * exposes so few address lines that no stride describes it.  0..15 are the NIC
+ * file and 16..31 the ASIC block, so entry 16 is the data port and 31 the reset.
  */
 static const ULONG xsurf500_regmap[32] =
 {
@@ -49,21 +27,11 @@ static const ULONG xsurf500_regmap[32] =
 };
 
 /*
- * The X-Surf is a Zorro II board carrying an RTL8019AS on a private ISA bus.
- * Its 4 KB window at board+$8000 is that bus's I/O space at the row's stride
- * of 2, so it reaches ISA ports $000..$7ff and no further.  Port bit 11 comes
- * out of a write-only latch at board+$7e, bit 7.  That is why the PnP ADDRESS
- * port ($279) and WRITE_DATA port ($a79) are one board address, $84f2, with
- * the latch deciding which of the two it is.
- *
- * Derived from Amiberry's model of the card, qemuvga/ne2000.cpp: the XSURF arm
- * of toariadne2() computes `isa_addr = (flags ? 0x1000 : 0) + (addr - 0x8000)`
- * and compares it against `0x279 * 2` and `0xa79 * 2`, and the flag is set from
- * bit 7 of a byte written where `(addr & 0x80ff) == 0x007e`.  The chip's
- * registers appear only while `pnp.activated`, at `io_port * 2` in the same
- * window, 32 ports wide -- the whole NE2000 file, NIC and ASIC.
- *
- * One logical device, so LDN 0.
+ * The X-Surf's 4 KB window at board+$8000 is its private ISA bus's I/O space at
+ * the row's stride of 2, so it reaches ISA ports $000..$7ff and no further.
+ * Port bit 11 comes out of a write-only latch at board+$7e, bit 7, which is why
+ * the PnP ADDRESS ($279) and WRITE_DATA ($a79) ports are one board address,
+ * $84f2.  One logical device, so LDN 0.
  */
 static const NetdevIsaPnp xsurf_pnp =
 {
@@ -84,16 +52,10 @@ const NetdevCard netdev_cards[] =
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     /*
-     * reg_off is still the one place the register base is written down.  The
-     * chip decodes nothing until netdev_isapnp.c configures it.  What that
-     * file programs is derived from this number rather than carried beside
-     * it: ISA port = (reg_off - pnp->io_win) / stride, which is
-     * ($8600 - $8000) / 2 = $300, the port if_ne_xsurf.c names.
-     *
-     * The alternative is to let the PnP phase report where it put the chip
-     * and write that back into the row.  That makes the register base a
-     * runtime value on one row out of ten.  No reader of this table can then
-     * say where the card is.
+     * reg_off is the one place the register base is written down.  The chip
+     * decodes nothing until netdev_isapnp.c configures it, and what that file
+     * programs is derived from this number rather than carried beside it:
+     * ISA port = (reg_off - pnp->io_win) / stride == $300.
      */
     { "xsurf",     4626,    23, 0x8600,     2,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
@@ -112,11 +74,9 @@ const NetdevCard netdev_cards[] =
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL },
 
     /*
-     * The two LANCE boards.  Registers are RDP then RAP, a word apart, and
-     * the 32 KB SRAM behind them holds the rings, the buffers and the init
-     * block.  The Ariadne crosses the SRAM byte lanes -- see lance.c -- and
-     * is an Am79C960 rather than an Am7990, which changes nothing this
-     * driver touches.
+     * The two LANCE boards.  Registers are RDP then RAP, a word apart, and the
+     * 32 KB SRAM behind them holds the rings, the buffers and the init block.
+     * The Ariadne crosses the SRAM byte lanes -- see lance.c.
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
@@ -128,60 +88,29 @@ const NetdevCard netdev_cards[] =
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
-     * Gayle puts the card's I/O space at 0xA20000 and the card is told to
-     * decode at 0x300, so the register file is 0xA20300 with the indices one
-     * byte apart.  netdev_pcmcia.c does the claiming and the configuring.
-     * From the chip core's side it is an NE2000 like any other.
+     * Gayle puts the card's I/O space at 0xA20000 and the card is told to decode
+     * at 0x300, so the register file is 0xA20300 with indices one byte apart.
      */
     { "pcmcia",       0,     0, 0x0300,     1,      0,
       NETDEV_CHIP_NE2000,  10000000UL, 0,       0,       0,       0,
       NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL },
     /*
-     * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B, the same
-     * family as the X-Surf 100, at a fixed $EE0000 with no autoconfig record.
-     * It is therefore probed rather than found, and its register file is a
-     * table (see above) rather than a stride.  The 16-bit data port is ASIC
-     * register 0 at $EE0060.  The FIFO at $EE8440 is sixteen bytes that take a
-     * movem.l, which is what wide_off names.
-     *
-     * Nothing emulates this card, so it has never been run.  It is written to
-     * cost nothing when absent: the probe reads the chip, and attach refuses
-     * if a DP8390 does not answer, as the X-Surf row does today.
+     * The X-Surf 500, on an ACA500 or ACA500plus.  An AX88796B at a fixed
+     * $EE0000 with no autoconfig record, so it is probed rather than found and
+     * its register file is a table rather than a stride.  The FIFO at $EE8440
+     * is sixteen bytes that take a movem.l, which is what wide_off names.
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
       NETDEV_BUS_FIXED, 0x00ee0000UL, 0, 0, xsurf500_regmap, 0, NULL },
 
     /*
-     * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  Same slot
-     * and the same two Gayle windows as the "pcmcia" row.  What differs is the
-     * chip, which is windowed rather than paged and moves frames through one
-     * PIO port instead of a remote-DMA ring.
-     *
-     * Appended, not put beside the other PCMCIA row.  A unit pin is
-     * (index + 1) * 100, so an inserted row renumbers every row after it and
-     * silently repoints somebody's DEVICE= UNIT=.  The table's order is a
-     * published interface, so new cards go on the end.
-     *
-     * manid/prodid are the CIS MANFID, 0x0101/0x0589, which is how
-     * netdev_pcmcia.c tells this card from an NE2000 clone in the same slot.
-     * A PCMCIA row is never matched against a ConfigDev, because the probe's
-     * Zorro loop skips any row that is not NETDEV_BUS_ZORRO, so the two uses
-     * of these two fields cannot collide.
-     *
-     * reg_off 0x0300 is an assumption, and the one thing here a hardware
-     * report has to settle.  The card decodes wherever the configuration table
-     * entry it was given says, and this driver writes the first entry's index
-     * without parsing that entry's I/O descriptor.  It does the same for the
-     * NE2000 row, where 0x300 is what cnet.device has assumed against a
-     * hundred real cards.  The entry's raw bytes go into the probe record
-     * (ANXDIAG_PC_CFTABLE), so one report settles it either way.
-     *
-     * Nothing emulates this card.  Amiberry's PCMCIA support is NE2000 only,
-     * so this row has never been run against a chip.  It is written the way
-     * the X-Surf 500 row above is, to cost nothing when the card is absent,
-     * and the claim gives the slot straight back when no EtherLink III
-     * answers.
+     * The 3Com EtherLink III PCMCIA card, a 3C589 of any revision.  manid/prodid
+     * are the CIS MANFID, which is how netdev_pcmcia.c tells this card from an
+     * NE2000 clone in the same slot; a PCMCIA row is never matched against a
+     * ConfigDev.  Appended, never inserted: a unit pin is (index + 1) * 100, so
+     * the table's order is a published interface.  reg_off 0x0300 is an
+     * assumption, and the entry's raw bytes go into the probe record.
      */
     { "3c589",   0x0101, 0x0589, 0x0300,     1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
@@ -193,9 +122,8 @@ const UWORD netdev_card_count =
 
 /*
  * Chip family -> core.  Here rather than in any of the four cores, because a
- * core that names another is a core that cannot be built without it.  NULL for a
- * family with no core: the board is then recognised and skipped instead of
- * enumerated and then failing to open, and netdev_probe() counts the skip.
+ * core that names another cannot be built without it.  NULL for a family with
+ * no core: the board is recognised and skipped rather than enumerated.
  */
 const struct NetdevNicOps *netdev_nic_ops_for(UBYTE chip)
 {

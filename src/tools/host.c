@@ -2,56 +2,6 @@
  * host, resolve a name the way this machine's own programs would.
  *
  *     host NAME/A,TIMEOUT/N/K,IPV4=-4/S,IPV6=-6/S
- *
- * Asks the machine's resolver through bsdsocket.library's gethostbyname() /
- * gethostbyaddr(), so the answer comes from the whole chain, in the order the
- * chain uses it:
- *
- *     DEVS:Internet/hosts     names written down on this machine
- *     mDNS (.local)           names the local network answers for itself
- *     the resolver cache      anything looked up recently
- *     the name servers        DEVS:Internet/name_resolution, or the DHCP lease
- *
- * A dotted quad is looked up backwards and anything else forwards, as the Unix
- * tool of the same name does. An IPv6 literal is refused with the reason: it
- * is an address, so it would be looked up backwards, and no call this command
- * can reach reverses one. nslookup does, by writing the ip6.arpa query itself.
- * TIMEOUT is accepted and ignored: the timeout is the resolver's, set in
- * DEVS:Internet/name_resolution.
- *
- * A forward lookup goes through getaddrinfo() with AF_UNSPEC, so a name with
- * an AAAA record reports it. gethostbyname() cannot: its hostent carries one
- * address family and this library only ever fills it with IPv4.
- *
- * -4 and -6 mean something different here than in the commands that open a
- * socket. Those pin the family they connect over. This command connects
- * to nothing, so the pair asks for one kind of record and not the other: -4
- * reports the A records, -6 the AAAA. It is what nslookup already does through
- * TYPE=A / TYPE=AAAA, which host has no equivalent of. Both together is an
- * argument error rather than a silent AF_UNSPEC, since asking for exactly one
- * of two things twice cannot be meant.
- *
- * Neither applies to a numeric argument: an address is looked up backwards and
- * already declares its own family. -6 on a dotted quad contradicts the
- * argument and is refused as such.
- *
- * nslookup differs in that it bypasses the resolver: it builds a DNS query and
- * sends it to a name server itself, so it reports what that server said, no
- * hosts file, no mDNS, no cache, and can ask for record types the resolver has
- * no call for (MX, TXT, NS, SRV, SOA) against a nominated server. Comparing the
- * two gives the diagnosis:
- *
- *     both agree                  the name is fine
- *     host works, nslookup fails  the answer came from this machine,
- *                                 DEVS:Internet/hosts, or mDNS, or the cache
- *     host fails, nslookup works  this machine's resolver configuration is
- *                                 wrong, not the network and not the name
- *     both fail                   the name, the servers, or the network
- *
- * Like every other client command, host calls tool_socket_open() and so starts
- * the stack if nothing else has. An earlier version instead checked whether
- * something else had started it and gave up if not.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -119,18 +69,6 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * An IPv6 literal, in either build. host answers through the machine's
-     * resolver, and the resolver reverses IPv4 addresses only, there is no
-     * ip6.arpa call behind gethostbyaddr() or getnameinfo() to ask. Handing
-     * the literal to the forward path instead is what used to produce
-     * "cannot resolve", with advice about spelling and name servers that has
-     * nothing to do with an address.
-     *
-     * Checked before the library is opened, so a question host cannot answer
-     * does not start the network to say so. A dotted quad never gets here:
-     * the IPv6 grammar does not accept one on its own.
-     */
     if (tool_parse_ip6(name, v6))
     {
         tool_error("\"%s\" is an address, not a name", (LONG)name);

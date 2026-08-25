@@ -1,26 +1,9 @@
 /*
  * CheckNetDevice, say what anxnet.device found and what it refused.
  *
- *     CheckNetDevice DEVICE/K,NOLOAD/S,RAW/S
- *
- * A card that does not attach produces no unit, so there is nothing to
- * OpenDevice() and nothing to ask.  Before this command existed the only way
- * to find out why was to rebuild the driver with NETDEV_TRACE and attach a
- * serial cable, so a report that a card does not work could go no further.
- *
- * The driver records every step of its probe into a small structure and
- * publishes it under a public semaphore, whatever the outcome.  This reads it
- * and prints it.  Nothing on that path needs a unit, an open device, a
- * running stack or a filesystem, because the machine being diagnosed is the
- * one where none of those came up.
- *
- * The report goes to standard output, so the Shell can put it in a file:
- *
- *     CheckNetDevice > T:netdevice.txt
- *
- * Return codes: 0 when at least one card attached, 5 (RETURN_WARN) when the
- * driver ran and no card did, 10 (RETURN_ERROR) when there is no record to
- * read at all.
+ * The driver publishes its probe record under a public semaphore whatever the
+ * outcome; this reads it. Nothing on that path needs a unit, an open device, a
+ * running stack or a filesystem.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -50,17 +33,9 @@ enum
 
 /* ------------------------------------------------------------ the record --
  *
- * The record is read under Forbid(), copied whole, and printed afterwards.
- *
- * The record lives inside the device base, so it goes when the device is
- * expunged.  The driver removes the semaphore under Forbid() before that
- * memory can be freed, so a reader that holds Forbid() across the find and
- * the copy cannot be reading a freed one.  Printing takes far too long to do
- * under Forbid(), so the reader takes a copy, and the record holds card names
- * rather than pointers to them.
- *
- * The semaphore is never obtained.  A diagnostic must not block on the driver
- * that can be the broken thing.
+ * Read under Forbid() and copied whole: the driver removes the semaphore under
+ * Forbid() before the memory can be freed. The semaphore is never obtained --
+ * a diagnostic must not block on the driver that can be the broken thing.
  */
 static AnxDiagMark cnd_mark;
 
@@ -217,13 +192,7 @@ static VOID say(const char *fmt, ...)
     va_end(args);
 }
 
-/*
- * One step, as a sentence.  Every code has one, because a step printed as a
- * bare number is a step whose meaning has to be asked about.  A code this
- * command has never heard of -- an older CheckNetDevice against a newer
- * driver -- is printed as itself rather than dropped, so the report is still
- * true.
- */
+/* A code this command has never heard of is printed as itself, not dropped. */
 /* The chip of the card being printed, so ANXDIAG_ATTACH_OK does not claim a
    transfer mode for a part that has no data port.  Set by ANXDIAG_CHIP, which
    the driver records before it calls attach(). */
@@ -319,9 +288,8 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_ATTACH_OK:
         /*
-         * A LANCE has no data port, so it has no transfer mode: bus.dmode is
-         * whatever netdev_bus_setup() left there and reporting it would be an
-         * invented fact.  The chip step above is what says which this is.
+         * A LANCE has no data port, so it has no transfer mode: reporting
+         * bus.dmode would be an invented fact.
          */
         if (cnd_chip_seen == 2 || cnd_chip_seen == 3)
         {
@@ -467,12 +435,9 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  The configuration option register was written at $%08lx.\n", v);
         return;
     case ANXDIAG_PC_CORVAL:
-        /* Bit 6 is the COR's level-mode interrupt request. It is not set:
-           Gayle reports the PC Card interrupt as an edge whatever the card
-           was asked for, so asking for level mode gains nothing and cnet
-           does not ask either. Naming the bit here anyway, because a report
-           that shows the byte without saying which bits were meant leaves
-           the reader to look it up. */
+        /* Bit 6 is the COR's level-mode interrupt request, left clear: Gayle
+           reports the PC Card interrupt as an edge whatever the card asked
+           for. Named here so the byte does not have to be looked up. */
         say("  The byte written there was $%02lx: configuration index %lu,\n"
             "  and bit 6 clear, so the card was not asked for a level-mode\n"
             "  interrupt.\n",
@@ -696,8 +661,7 @@ static VOID cnd_step(const AnxDiagStep *st)
 
 /*
  * The station address is two steps, because it does not fit in one value.
- * Printed where the high half is, and the low half is looked up rather than
- * printed on its own.
+ * Printed where the high half is.
  */
 static VOID cnd_mac(UWORD at)
 {
@@ -722,10 +686,8 @@ static VOID cnd_mac(UWORD at)
 }
 
 /*
- * Grouped by card rather than printed in order.  The recorded order is what
- * happened, but a PCMCIA claim interleaved with a Zorro walk is hard to read
- * one card at a time.  Machine-wide steps come first, then one block per card
- * the probe touched, in the order it touched them.
+ * Grouped by card rather than printed in order: a PCMCIA claim interleaved
+ * with a Zorro walk is hard to read one card at a time.
  */
 static VOID cnd_report(BOOL raw)
 {
@@ -838,12 +800,8 @@ int main(int argc, char **argv)
 
     /*
      * A driver that never ran is not an answer, so without NOLOAD the driver
-     * is loaded and the record read again.
-     *
-     * The open is expected to fail on the machine this command is for, and its
-     * result is thrown away.  It is there to make Exec LoadSeg the driver and
-     * run its romtag init, which is where the probe and the record happen.
-     * Everything printed below came from that probe and not from this open.
+     * is loaded and the record read again. The open is expected to fail; it is
+     * there to make Exec LoadSeg the driver and run its romtag init.
      */
     if (status == CND_ABSENT && args[ARG_NOLOAD] == 0)
     {

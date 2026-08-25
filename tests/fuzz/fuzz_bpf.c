@@ -3,20 +3,8 @@
  * capture ring.
  *
  * Same shim arrangement as src/bpf/test/test_bpf.c (-DAMI_BPF_REPLICA plus the
- * <exec/types.h> shim under src/config/test/shim), driven with random filter
- * programs and random frames instead of the handful of libpcap programs the
- * unit test uses.  Two trust boundaries meet in this code and both are
- * covered:
- *
- *   the wire, ami_bpf_tap_rx() runs the filter over untrusted frame
- *                     bytes on the IP thread;
- *   the library, bpf_setf() runs a caller-chosen program, and the
- *                     interpreter is documented to be total whether or not
- *                     ami_bpf_validate() accepted it, so both the validated
- *                     and the unvalidated path are exercised here.
- *
- * The channel is also driven through BIOCSBLEN / BIOCSETF / read / rotate so
- * the record framing sees short buffers and oversized captures.
+ * <exec/types.h> shim under src/config/test/shim).  The interpreter is total
+ * whether or not ami_bpf_validate() accepted the program, so both paths run.
  *
  * Build: see fuzz.sh.  Usage: fuzz_bpf -r SEED COUNT
  */

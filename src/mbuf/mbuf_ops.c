@@ -1,19 +1,8 @@
 /*
- * AmiNetXDuo, mbuf chain operations.
- *
- * The seven chain-manipulating vectors. Behaviour follows the documented
- * 4.4BSD semantics for m_adj / m_cat / m_copyback / m_copydata / m_copym /
- * m_prepend / m_pullup, including these two:
- *
- *   - mbuf_prepend and mbuf_pullup free the whole chain when they fail. A
- *     caller that writes `if ((m = mbuf_pullup(m, n)) == NULL) mbuf_freem(m);`
- *     double-frees.
- *   - mbuf_adj never frees anything. Emptied mbufs stay in the chain with
- *     m_len 0.
- *
- * Where 4.4BSD panics on a malformed argument, for example m_copydata past the
- * end of the chain, this returns -1 instead. These are called straight from
- * application code across an LVO, on a machine with no memory protection.
+ * AmiNetXDuo, mbuf chain operations, 4.4BSD semantics.  Three rules:
+ *   - mbuf_prepend and mbuf_pullup FREE THE WHOLE CHAIN when they fail.
+ *   - mbuf_adj never frees; emptied mbufs stay in the chain with m_len 0.
+ *   - where 4.4BSD panics on a malformed argument, this returns -1.
  *
  * No AmigaOS calls here.
  *
@@ -38,11 +27,8 @@ ULONG ami_mbuf_length(const struct mbuf *m)
     return total;
 }
 
-/*
- * The span of storage that m can move its data within. FALSE when the storage
- * is not exclusively ours: foreign M_EXT, or one of our clusters that
- * mbuf_copym gave a second reference to.
- */
+/* The span m can move its data within.  FALSE when the storage is not
+   exclusively ours: foreign M_EXT, or a shared cluster. */
 static BOOL ami_mbuf_span(struct mbuf *m, UBYTE **base, UBYTE **end)
 {
     if ((m->m_flags & M_EXT) != 0)
@@ -200,11 +186,7 @@ LONG ami_mbuf_cat(struct mbuf *m, struct mbuf *n)
 
     while (n != NULL)
     {
-        /*
-         * Compact n into the trailing free space of m while it fits and m owns
-         * its storage internally. An M_EXT tail is never compacted into,
-         * because the cluster can be shared.
-         */
+        /* An M_EXT tail is never compacted into: the cluster can be shared. */
         if ((m->m_flags & M_EXT) != 0 ||
             (UBYTE *)m->m_data + m->m_len + n->m_len > AMI_MBUF_END(m))
         {
@@ -245,11 +227,8 @@ LONG ami_mbuf_copydata(struct mbuf *m, LONG off, LONG len, APTR cp)
     if (cp == NULL)
         return -1;
 
-    /*
-     * Pass one: prove the chain is long enough. Nothing is written to cp
-     * unless the whole copy succeeds. 4.4BSD panics here instead, which is
-     * not an option across an LVO.
-     */
+    /* Pass one proves the chain is long enough: nothing is written to cp
+       unless the whole copy succeeds. */
     p = m;
     o = off;
     while (p != NULL && o >= p->m_len)
@@ -564,11 +543,8 @@ struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len)
         return NULL;
     }
 
-    /*
-     * The new data goes at the far end of the mbuf, longword aligned, so that
-     * a second prepend (another protocol header) also gets the cheap path.
-     * Same as MH_ALIGN in 4.4BSD.
-     */
+    /* MH_ALIGN: the new data goes at the far end, longword aligned, so a
+       second prepend also gets the cheap path. */
     offset     = (room - len) & ~((LONG)sizeof(LONG) - 1);
     mn->m_data = (APTR)(AMI_MBUF_BASE(mn) + offset);
     mn->m_len  = len;

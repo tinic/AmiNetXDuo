@@ -2,28 +2,6 @@
  * AmiNetXDuo, receive-queue exhaustion by a sub-MSS peer: what bounds the
  * number of packets a chatty peer can pin, against the real enqueue path.
  *
- * The advertised receive window is a byte budget (src/bsdsocket/socket.c
- * ami_bsd_tcp_window: pool/share * payload).  The pool is spent one whole
- * pinned packet per PEER segment, whatever its size, and the window shrinks
- * only by the bytes a segment carries (nx_tcp_socket_state_data_check.c:1061).
- * So a peer sending one-byte segments pins one packet each while the window
- * barely moves: it fills the pool long before it fills the window.  Without a
- * per-socket packet-count bound nothing stops it, and a full pool drops frames
- * stack-wide.
- *
- * This drives the real _nx_tcp_socket_state_data_check against a socket sized
- * like the lab's 8 MB A1200 (a 72,128-byte window), feeds it one-byte segments
- * in order with no reader draining them, and watches the queue grow.  The bound
- * is nx_tcp_socket_receive_queue_maximum, enforced under NX_ENABLE_LOW_WATERMARK
- * and sized from the window the same way src/bsdsocket/socket.c does.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_tcp_socket_state_data_check.c and nx_tcp_socket_create.c -- the whole path
- * from "a segment arrived in order" to "a packet is on the receive queue".
- *
- * Stubbed: everything that would touch a driver, a real packet pool or another
- * thread, the same shim tests/netstack/host/test_tcp_earlyretx_host.c uses.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -34,8 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-/* ---------------------------------------------------------------- shim ---- */
 
 static ULONG h_now = 1000;
 
@@ -134,8 +110,6 @@ ULONG _nx_tcp_socket_window_update_step(NX_TCP_SOCKET *socket_ptr)
     return socket_ptr -> nx_tcp_socket_rx_window_default / 2;
 }
 
-/* ------------------------------------------------------------- fixture ---- */
-
 /* The lab's 8 MB A1200: 368 packets, an eighth share, a 72,128-byte window. */
 #define H_POOL_TOTAL        368
 #define H_WINDOW            72128UL
@@ -198,11 +172,6 @@ static void h_fixture(void)
     h_sock.nx_tcp_receive_callback = NX_NULL;
 
 #ifdef NX_ENABLE_LOW_WATERMARK
-    /* What src/bsdsocket/socket.c installs after nx_tcp_socket_create: a
-       packet-count cap derived from the same window byte-budget, so a
-       well-behaved full-MSS peer (stopped by the byte window at window/MSS
-       packets) never reaches it, and a sub-MSS flood is bounded to it.  Keep
-       this expression identical to bsd_tcp_rx_queue_cap(). */
     h_sock.nx_tcp_socket_receive_queue_maximum = (H_WINDOW / H_MSS) + 4UL;
 #endif
 }
@@ -252,8 +221,6 @@ static ULONG h_feed(ULONG seg_bytes)
     return h_sock.nx_tcp_socket_receive_queue_count;
 }
 
-/* --------------------------------------------------------------- cases ---- */
-
 static void sub_mss_flood(void)
 {
     ULONG i;
@@ -288,13 +255,6 @@ static void sub_mss_flood(void)
     printf("  pool               %lu of %d packets free\n",
            (unsigned long)h_pool_available, H_POOL_TOTAL);
 
-    /*
-     * The bound: whatever a peer does with segment size, it cannot pin more
-     * than a full-MSS peer's worth of packets plus slack.  A full-MSS peer is
-     * held to H_WINDOW/H_MSS packets by the byte window; the cap sits just
-     * above that.  On the broken build the queue equals the number offered,
-     * which is three pools deep -- so this fails there, which is the point.
-     */
     h_check(queued <= budget_packets + 8UL,
             "a sub-MSS flood pinned more packets than a full-MSS window's worth "
             "(no per-socket receive-queue bound)");
@@ -313,12 +273,6 @@ static void full_mss_not_starved(void)
 
     h_fixture();
 
-    /*
-     * The field metric: a well-behaved full-MSS peer must still fill the whole
-     * byte window.  It pins H_WINDOW/H_MSS packets, and the cap must be above
-     * that so the peer is stopped by the window, not by us.  Feed exactly a
-     * window's worth of MSS segments and confirm every one was admitted.
-     */
     for (i = 0; i < budget_packets; i++)
     {
         queued = h_feed(H_MSS);

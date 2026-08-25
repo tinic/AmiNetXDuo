@@ -5,46 +5,6 @@
 #   tests/tools/run-sntp.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                           [-s TIMESERVER] [-P BASEPORT]
 #
-# WHAT THIS PROVES, AND WHY IT IS NOT A CLOCK TEST
-#
-#   tls.library skips a certificate's notBefore/notAfter when the machine's
-#   clock is outside a plausible window (src/tlslib/tls_time.c).  That is the
-#   right call on an Amiga with a dead battery, the alternative is a machine
-#   that cannot reach any HTTPS site, but it means an EXPIRED certificate is
-#   accepted.  `sntp` puts the clock right, and the check comes back.
-#
-#   So the run is a before and an after, against the same expired certificate:
-#
-#     ClockSet 0        the machine everybody has: no clock, 1978
-#     fetch expired     ACCEPTED, and fetch says "validity dates NOT checked"
-#     sntp <server>     the clock is set from a real time server
-#     fetch expired     REFUSED: "the certificate is expired or not yet valid"
-#
-#   with a certificate that is perfectly good (rsa2.test) fetched on both sides
-#   of it, so that the refusal is demonstrably about the expiry date and not
-#   about the clock having broken TLS in general.
-#
-# WHAT IS ON THE OTHER END
-#
-#   tests/peer/httppeer.py with tests/peer/mkpki.sh's local PKI, which already
-#   contains an expired leaf (notAfter 2021-01-01) chained to a root the guest
-#   trusts.  The guest reaches it at 10.0.2.2, which is what SLIRP calls the
-#   host, and resolves the names out of DEVS:Internet/hosts.
-#
-#   THE TIME SERVER IS A REAL ONE ON THE INTERNET, and that is not laziness.
-#   SLIRP is a NAT and forwards the guest's outbound UDP perfectly well, so a
-#   real server is reachable and was measured to be so.  A local one is not
-#   possible: SNTP is UDP port 123, ports below 1024 need root on both macOS
-#   and Linux, and this suite does not ask for root.  A `PORT` argument on
-#   `sntp` would have made it hermetic and would have been a knob that exists
-#   only for the test, which is the wrong trade.
-#
-#   Everything else in the run IS hermetic; if the time server is unreachable
-#   the script says so and stops before starting the emulator, rather than
-#   producing a failure that looks like a bug in sntp.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
 #
 # SPDX-License-Identifier: MIT
 
@@ -90,11 +50,6 @@ done
 }
 
 # ------------------------------------------------------- the time server ---
-#
-# Asked here, from the host, before anything else is set up.  If the answer is
-# "no route to the internet" then the run would fail in a way that looks like a
-# bug in sntp, and finding that out after four minutes of emulator is worse
-# than finding it out now.
 
 echo "==> checking that $TIMESERVER answers on this host"
 
@@ -156,8 +111,6 @@ cp "$FETCH"    "$STAGE/fetch"
 cp "$NETSTAT"  "$STAGE/netstat"
 cp "$CLOCKSET" "$STAGE/ClockSet"
 
-# fetch has no --resolve, so the names the certificates carry are pointed at
-# SLIRP's host address the way an Amiga has always done it.
 cat >> "$STAGE/devs/Internet/hosts" <<EOF
 10.0.2.2 expired.test
 10.0.2.2 rsa2.test
@@ -192,12 +145,6 @@ EOF
 
 PEERLOG="$ROOT/build/sntp-peer.log"
 
-# The peer's own lifetime has to cover the WAIT for the emulator as well as the
-# run, and a contended host makes that wait as long as it likes: nothing
-# serialises emulator runs any more, the lock lived in the FS-UAE runner.  Sizing it from TIMEOUT alone let the peer expire while this run was
-# still in the queue, and the whole thing then failed as four refused
-# connections.  The trap below is what actually ends it; the number is only a
-# backstop for a script that dies without running it.
 python3 "$ROOT/tests/peer/httppeer.py" --base-port "$BASE_PORT" --pki "$PKI" \
     --advertise 10.0.2.2 --log "$PEERLOG" --seconds 7200 \
     > "$ROOT/build/sntp-peer.out" 2>&1 &

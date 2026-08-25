@@ -1,68 +1,7 @@
 /*
- * ApiDrill, every LVO in bsdsocket.library called in a loop with the machine
- * counted before and after.
- *
- * The commands reach about thirty entry points.  The library has 150, and the
- * ones no command touches are the ones nothing has ever watched.  AmigaOS
- * reclaims nothing when a process exits, so a vector that allocates and does
- * not free is a permanent loss until reboot, and a vector that leaks only on
- * the path where it refuses is the shape that survives longest, because the
- * refusal is what a caller expected anyway.
- *
- * The table below has one row per LVO, in LVO order, and the row's offset is
- * checked against its position at startup.  A vector nobody wrote a row for
- * therefore shifts every later row and fails that check, rather than quietly
- * not being covered.  Rows that cannot be called carry the reason and are
- * counted as uncovered; they are not passes.
- *
- * Each row is called once and the result thrown away, then called `iters`
- * times with a sample taken either side.  The first call is excluded because a
- * lazily built cache, a first-touch buffer or a table parsed on demand is paid
- * once and is not a leak.  What is measured across the remaining calls:
- *
- *   AvailMem(MEMF_ANY)         everything, including allocations the library
- *                              makes outside ami_alloc()
- *   NETSTATUS_HEALTH           nsl_AllocLive, nsl_Sockets, nsl_PoolBadRelease
- *   tc_SigAlloc                signal bits taken out of THIS Task
- *   SysBase->PortList          message ports
- *   SysBase->SemaphoreList     semaphores
- *   TaskReady + TaskWait       tasks and processes
- *
- * The last four are on the caller, not in the library, and are the ones
- * AvailMem cannot separate.  bsd_child_destroy() is only correct on the owning
- * task -- ami_signal_free() would free a bit in the CALLING task's tc_SigAlloc
- * -- so an asymmetry there shows in tc_SigAlloc and nowhere else.
- *
- * Iteration count.  The gate is bytes-per-call, computed as the AvailMem drop
- * divided by `iters`, and the smallest thing AmigaOS can lose is one allocator
- * quantum, 8 bytes.  iters is chosen so 8 bytes a call is well clear of the
- * noise floor: the two `!noise` control rows run the identical sampling
- * bracket around no library call at all, at both iteration counts in use, and
- * assert the floor is zero.  If the machine is noisy those rows go red and say
- * so rather than every row going red for the wrong reason.  64 is the default,
- * 16 for rows whose bracket is expensive (a route added and deleted, a DHCP
- * message created and replied, a library opened and closed); at 16 an 8-byte
- * leak is still 128 bytes against a floor of zero.
- *
- * Failure paths are variants, not afterthoughts.  Most rows have two: the call
- * as it is meant to be made, and the call refused.  SocketBaseTagList()
- * discards every tag after one it refuses (errno.c), so its refusing variant
- * asks for a list whose refused tag sits in the middle, which is where a
- * half-applied allocation would hide.
- *
- * The stubs are rows too.  bsd_enosys() must return -1, bsd_enosys_ptr() NULL
- * and bsd_enosys_bool() FALSE, and each is asserted on every call: a stub that
- * allocates before failing is a leak with no feature attached to it.
- *
- * BROKEN runs the deliberately-broken control rows instead of the table: one
- * leaks memory, one a signal bit, one a socket, one a message port, one a
- * semaphore, and one asserts the wrong value for a stub.  Every gate has to
- * fire.  A drill whose assertions have quietly stopped firing reports no
- * failures either way, and that is the only thing that tells the two apart.
- *
- * Vectors are called by hand at their LVOs, the way cycledrill.c and ifprobe.c
- * do: the NDK inlines assume a global SocketBase and go through the compiler's
- * idea of each prototype, and the point here is to call the vector table.
+ * ApiDrill: every LVO in bsdsocket.library called in a loop with the machine
+ * counted before and after, so a vector that allocates and does not free shows
+ * up as memory, signals, ports, semaphores, tasks or sockets it did not return.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -116,11 +55,8 @@ enum
 
 #define DEF_IFACE       "eth0"
 
-/* ------------------------------------------------------------ the ABI ---- */
-
-/* Open-coded rather than taken from the NDK, for the same reason
-   src/tools/toolsock.h open-codes them: this program must build against a
-   stock NDK and must not share a definition with the library it is testing. */
+/* Open-coded: this program must build against a stock NDK and must not share a
+   definition with the library it is testing. */
 #define P_AF_UNSPEC     0
 #define P_AF_INET       2
 #define P_AF_INET6      23
@@ -179,13 +115,6 @@ typedef struct PIfReq
     UBYTE   ifr_pad[16];
 } PIfReq;
 
-/* ------------------------------------------------------------- registers -- */
-
-/*
- * One shape for every call.  d0..d3 and a0..a3 are the whole argument surface
- * the bsdsocket ABI uses, a6 is the base, and the result is always d0
- * whatever the C type says.
- */
 typedef struct Regs
 {
     ULONG   d0;
@@ -200,19 +129,11 @@ typedef struct Regs
 
 typedef ULONG (*ThunkFn)(struct Library *base, const Regs *r);
 
-/* Struct assignment rather than a byte loop, for the reason cycledrill.c
-   records: -fanalyzer does not follow zero() through a struct and reports
-   every field the callee then reads as uninitialised. */
 static const Regs regs_zero;
 
-/*
- * `jsr a6@(-N:W)` needs a literal, so there is one of these per LVO and the
- * table names the one it wants.  Every argument register is declared both as
- * an input and as a clobbered output: the ABI says a vector preserves d2-d7
- * and a2-a6, but this program is here to find out where the library does not
- * do what it says, and a wrong assumption in the caller would be scored
- * against the vector.
- */
+/* `jsr a6@(-N:W)` needs a literal, so there is one of these per LVO.  Every
+   argument register is both an input and a clobbered output: a caller
+   assumption about d2-d7/a2-a6 would be scored against the vector. */
 #define TH(n)                                                               \
 static ULONG t_##n(struct Library *base, const Regs *r) __attribute__((unused)); \
 static ULONG t_##n(struct Library *base, const Regs *r)                     \
@@ -261,8 +182,6 @@ TH(726) TH(732) TH(738) TH(744) TH(750) TH(756) TH(762) TH(768) TH(774) TH(780)
 TH(786) TH(792) TH(798) TH(804) TH(810) TH(816) TH(822) TH(828) TH(834) TH(840)
 TH(846) TH(852) TH(858) TH(864) TH(870) TH(876) TH(882) TH(888) TH(894) TH(900)
 
-/* ------------------------------------------------------------- reporting -- */
-
 static LONG g_def = DEF_ITERS;      /* ITERS overrides both, keeping the 4:1 */
 static LONG g_few = FEW_ITERS;
 
@@ -293,8 +212,6 @@ static VOID flushout(VOID)
     Flush(Output());
 }
 
-/* Every assertion goes through here, so the count printed at the end is the
-   real one and cannot drift away from the FAILs in the transcript. */
 static BOOL check(BOOL ok, const char *what, LONG a, LONG b)
 {
     checks++;
@@ -305,8 +222,6 @@ static BOOL check(BOOL ok, const char *what, LONG a, LONG b)
     say("FAIL: %s (%ld, %ld)\n", (LONG)what, a, b, 0);
     return FALSE;
 }
-
-/* -------------------------------------------------------------- sampling -- */
 
 typedef struct Sample
 {
@@ -354,25 +269,9 @@ static ULONG own_signals(VOID)
     return n;
 }
 
-/*
- * Disable(), not Forbid(), and the difference is the whole reason this
- * function was reporting leaks that are not there.
- *
- * Forbid() stops task switching. It does NOT stop Signal() from an interrupt,
- * and Signal() is exactly what relinks a task between TaskReady and TaskWait.
- * So a walk of either list under Forbid() can see the same task twice, or
- * neither time, whenever an interrupt signals during the walk -- which on a
- * machine running a network stack is most of the time.
- *
- * What that looked like: `V 13 shutdown` was recorded as leaking two bytes and
- * a Task on every call, and it does neither. The reading is a floating one-off
- * that lands on whichever vector happens to be running -- caught on `sendto`
- * three times and `recvfrom` once -- and the giveaway was the harness's own
- * !noise64 control row, a sampling bracket around no library call at all,
- * reading task=-10. Ten Exec Tasks did not vanish in that interval.
- *
- * PortList and SemaphoreList are task-level and Forbid() is right for those.
- */
+/* Disable(), not Forbid(): Forbid() does not stop Signal() from an interrupt,
+   and Signal() is what relinks a task between TaskReady and TaskWait, so a
+   walk under Forbid() can see the same task twice or neither time. */
 static ULONG list_len_disabled(struct List *l)
 {
     struct Node *n;
@@ -453,8 +352,6 @@ static VOID sample(struct Library *base, Sample *out)
     out->pool_bad   = q_health.e.nsl_PoolBadRelease;
 }
 
-/* ---------------------------------------------------------------- context - */
-
 typedef struct Ctx
 {
     struct Library *base;
@@ -475,9 +372,8 @@ typedef struct Ctx
 
 static Ctx ctx;
 
-/* Scratch the prep functions point the registers at.  File scope so a row's
-   arguments outlive the prep call and so the drill's own stack does not move
-   between iterations. */
+/* File scope so a row's arguments outlive the prep call and so the drill's own
+   stack does not move between iterations. */
 static ProbeAddr    sa_local;
 static ProbeAddr    sa_peer;
 static ProbeAddr    sa_out;
@@ -501,9 +397,6 @@ static struct Hook  monhook;
 static APTR         aam;
 static struct in_addr inaddr;
 
-/* ---------------------------------------------------------- small helpers - */
-
-/* A short-hand for the preps that need to reach the library themselves. */
 static LONG do_socket(LONG dom, LONG type, LONG proto)
 {
     Regs r;
@@ -772,8 +665,6 @@ static LONG do_bpfclose(LONG chan)
     return (LONG)t_372(ctx.base, &r);
 }
 
-/* ------------------------------------------------------------- the preps -- */
-
 #define PREP_OK 1
 #define PREP_NA 0
 
@@ -798,7 +689,6 @@ static VOID fill_local(VOID)
     sa_local.sin_addr   = 0;
 }
 
-/* socket(), and the descriptor is closed again in the post. */
 static LONG pr_socket(LONG v, Regs *r)
 {
     if (v == 0)
@@ -823,8 +713,6 @@ static VOID po_socket(LONG v, ULONG res)
         (VOID)do_close((LONG)res);
 }
 
-/* A socket made in the prep and closed in the post, so the row measures the
-   whole bracket and a leak in it cannot hide behind a descriptor left open. */
 static LONG scratch_fd = -1;
 
 static LONG pr_fresh_udp(LONG v, Regs *r)
@@ -892,7 +780,6 @@ static VOID po_listen(LONG v, ULONG res)
         po_fresh(v, res);
 }
 
-/* accept() has no success path without a peer; both variants refuse. */
 static LONG pr_accept(LONG v, Regs *r)
 {
     alen  = (LONG)sizeof(sa_out);
@@ -1095,8 +982,6 @@ static LONG pr_none(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/* ReleaseSocket parks it, ObtainSocket takes it back, and the descriptor is
-   closed again: a triple whose net effect on the machine must be nothing. */
 static LONG pr_obtainsocket(LONG v, Regs *r)
 {
     LONG id;
@@ -1182,8 +1067,6 @@ static LONG pr_releasecopy(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/* The copy leaves both the caller's descriptor and the parked reference, so
-   both have to go: obtain the copy, close it, close the original. */
 static VOID po_releasecopy(LONG v, ULONG res)
 {
     LONG fd;
@@ -1211,7 +1094,6 @@ static LONG pr_seterrnoptr(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/* Whatever the variant did, put the base back on its own errno. */
 static VOID po_seterrnoptr(LONG v, ULONG res)
 {
     Regs r;
@@ -1363,13 +1245,9 @@ static LONG pr_gethostname(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/*
- * Variant 0 is a list every tag of which is serviced.  Variant 1 puts a tag
- * that is refused in the MIDDLE: SBTC_HAVE_KERNEL_MEMORY_API is query-only, so
- * the SET is refused, the call returns that tag's 1-based index and everything
- * after it is discarded (errno.c).  That discard is where a half-applied
- * allocation would hide, which is the whole reason this variant exists.
- */
+/* Variant 1's refused tag sits in the MIDDLE: SocketBaseTagList() discards
+   every tag after one it refuses, which is where a half-applied allocation
+   would hide. */
 static LONG pr_sbtaglist(LONG v, Regs *r)
 {
     if (v == 0)
@@ -1435,8 +1313,6 @@ static LONG pr_bpf_close(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/* The rest of the bpf family runs against a channel held open for the whole
-   drill, so what is measured is the call and not the open/close pair. */
 static LONG pr_bpf_chan(LONG v, Regs *r)
 {
     if (v == 0)
@@ -1535,9 +1411,6 @@ static VOID po_addroute(LONG v, ULONG res)
         (VOID)do_delroute();
 }
 
-/* ChangeRouteTagList needs the entry to be there first: on an absent one it is
-   ESRCH by design, and this table asserts nothing about the return, so an
-   ESRCH every iteration would drill a path that is one comparison long. */
 static LONG pr_chgroute(LONG v, Regs *r)
 {
     if (v == 0)
@@ -1613,13 +1486,8 @@ static VOID po_getrouteinfo(LONG v, ULONG res)
         do_freerouteinfo((APTR)res);
 }
 
-/*
- * AddInterfaceTagList has no success variant here.  A success adds a second
- * interface to the machine and changes what every later row sees, and the
- * cost of a FAILED add is what run-addifleak.sh already watches.  Both
- * variants are refusals, on the two different paths: an unknown device, and a
- * name that is already taken.
- */
+/* No success variant: a success adds a second interface and changes what every
+   later row sees.  Both variants refuse, on the two different paths. */
 static LONG pr_addiface(LONG v, Regs *r)
 {
     r->a0 = (v == 0) ? (APTR)"drl0" : (APTR)ctx.iface;
@@ -1720,12 +1588,8 @@ static LONG pr_deleteaam(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/*
- * BeginInterfaceConfig on an interface that already has an address is replied
- * inside the call, so this needs no worker and no waiting: the message comes
- * straight back on the port.  A drill that used the DHCP path would be
- * measuring SLIRP.
- */
+/* On an interface that already has an address the message is replied inside
+   the call, so this needs no worker and no waiting. */
 static LONG pr_beginconfig(LONG v, Regs *r)
 {
     if (v != 0)
@@ -1750,9 +1614,8 @@ static VOID po_beginconfig(LONG v, ULONG res)
     if (v != 0 || aam == NULL)
         return;
 
-    /* The refusal was replied inside the call, so the message is on the port
-       already; GetMsg rather than WaitPort, because a WaitPort here would
-       hang the drill if it were not. */
+    /* GetMsg rather than WaitPort: a WaitPort would hang the drill if the
+       message were not already on the port. */
     m = GetMsg(ctx.port);
     (VOID)m;
     do_deleteaam(aam);
@@ -1793,9 +1656,6 @@ typedef LONG (*DrillHookFn)(register struct Hook *hook __asm("a0"),
                             register APTR reserved __asm("a2"),
                             register APTR message __asm("a1"));
 
-/* h_Entry is `ULONG (*)()`, no parameters, because a Hook carries whatever
-   shape the two ends agreed on.  The union says that without claiming the two
-   function types are compatible, which a cast cannot. */
 typedef union DrillEntry
 {
     ULONG       (*de_Raw)(VOID);
@@ -2018,11 +1878,8 @@ static VOID po_setdomain(LONG v, ULONG res)
     (VOID)t_708(ctx.base, &r);
 }
 
-/*
- * RemoveInterface has no success variant: removing the only interface takes
- * the network away and every later row would be measuring a different
- * machine.  tests/tools/run-ifremove.sh drives that path.
- */
+/* No success variant: removing the only interface takes the network away and
+   every later row would be measuring a different machine. */
 static LONG pr_removeiface(LONG v, Regs *r)
 {
     (VOID)v;
@@ -2196,11 +2053,8 @@ static LONG pr_freenameindex(LONG v, Regs *r)
     return PREP_OK;
 }
 
-/* ---------------------------------------------------------- the specials -- */
-
-/* lib_open and lib_close are exec's, and calling them at their LVOs behind
-   exec's back would corrupt the open count.  They are driven the only way a
-   program may drive them, and both rows report the pair. */
+/* lib_open and lib_close are exec's: calling them at their LVOs behind exec's
+   back would corrupt the open count, so both rows drive the pair instead. */
 static ULONG t_openclose(struct Library *base, const Regs *r)
 {
     struct Library *l;
@@ -2215,15 +2069,12 @@ static ULONG t_openclose(struct Library *base, const Regs *r)
     return 1;
 }
 
-/* The sampling bracket around nothing at all: the noise floor. */
 static ULONG t_noop(struct Library *base, const Regs *r)
 {
     (VOID)base;
     (VOID)r;
     return 0;
 }
-
-/* ------------------------------------------------------------- the table -- */
 
 enum
 {
@@ -2258,7 +2109,6 @@ typedef struct VecRow
 
 static const VecRow vectors[] =
 {
-    /* exec's four */
     V_("lib_open",  6, t_openclose, VC_EXEC, 1, FEW_ITERS, NULL, NULL),
     V_("lib_close", 12, t_openclose, VC_EXEC, 1, FEW_ITERS, NULL, NULL),
     S_("lib_expunge", 18, t_18,
@@ -2425,14 +2275,8 @@ static const VecRow vectors[] =
 
 #define NVECTORS ((LONG)(sizeof(vectors) / sizeof(vectors[0])))
 
-/* ------------------------------------------------------ the broken rows --- */
-
-/*
- * Deliberately broken, so a run can show every gate going red.  Nothing here
- * calls the library: each one takes a resource on the caller's side and does
- * not give it back, which is exactly what a leaking vector does, and the gate
- * that has to notice is named in the row.
- */
+/* Deliberately broken, so a BROKEN run shows every gate going red: each takes
+   a resource on the caller's side and does not give it back. */
 static ULONG t_leak_mem(struct Library *base, const Regs *r)
 {
     (VOID)base;
@@ -2506,14 +2350,11 @@ static const VecRow broken[] =
     V_("!broken-sock", 0, t_leak_sock, VC_IMPL, 1, FEW_ITERS, NULL, NULL),
     V_("!broken-port", 0, t_leak_port, VC_IMPL, 1, FEW_ITERS, NULL, NULL),
     V_("!broken-sem",  0, t_leak_sem,  VC_IMPL, 1, FEW_ITERS, NULL, NULL),
-    /* The same stub the table calls, asserted against the wrong value. */
     V_("!broken-rc",   258, t_258, VC_STUB_B, 1, FEW_ITERS, NULL, NULL)
 };
 
 #define NCONTROLS ((LONG)(sizeof(controls) / sizeof(controls[0])))
 #define NBROKEN   ((LONG)(sizeof(broken)   / sizeof(broken[0])))
-
-/* -------------------------------------------------------------- the run --- */
 
 static LONG expected_of(UBYTE cls, BOOL *has)
 {
@@ -2557,7 +2398,6 @@ static VOID run_variant(const VecRow *v, LONG idx, LONG variant)
     say("> %ld %s v%ld\n", idx, (LONG)v->name, variant, 0);
     flushout();
 
-    /* The one-off: a cache built on first use is not a leak. */
     r = regs_zero;
     if (v->prep != NULL && v->prep(variant, &r) == PREP_NA)
     {
@@ -2610,9 +2450,7 @@ static VOID run_variant(const VecRow *v, LONG idx, LONG variant)
     sayv("V %ld %s v%ld it=%ld rc=%ld bytes=%ld total=%ld alloc=%ld sock=%ld "
          "sig=%ld port=%ld sem=%ld task=%ld pool=%ld\n", args);
 
-    /* Loss only.  A window in which the machine handed memory BACK is noise,
-       not a negative leak, and failing on it would only teach people that a
-       red row means nothing. */
+    /* Loss only: a window in which the machine handed memory BACK is noise. */
     ok  = check(bpc <= 0, v->name, bpc, dbytes) ? 1 : 0;
     ok &= check(after.alloc_live == before.alloc_live, v->name,
                 (LONG)before.alloc_live, (LONG)after.alloc_live) ? 1 : 0;
@@ -2656,13 +2494,8 @@ static VOID run_row(const VecRow *v, LONG idx)
         run_variant(v, idx, variant);
 }
 
-/* --------------------------------------------------------- bring-up ------- */
-
-/*
- * The table has to be dense and in LVO order, because that is the only thing
- * that makes a vector nobody wrote a row for visible: a missing row shifts
- * every later one and this check fails naming the first that moved.
- */
+/* The table must be dense and in LVO order: that is what makes a vector nobody
+   wrote a row for visible, as a shift of every later row. */
 static BOOL table_is_dense(VOID)
 {
     LONG i;
@@ -2716,8 +2549,6 @@ static BOOL bring_up(const char *want_iface)
     if (ctx.udp < 0 || ctx.tcp < 0)
         return FALSE;
 
-    /* Non-blocking, so every recv on it refuses at once rather than waiting
-       for a datagram that is not coming. */
     (VOID)do_ioctl(ctx.udp, P_FIONBIO, &nb);
 
     fill_peer();
@@ -2727,8 +2558,6 @@ static BOOL bring_up(const char *want_iface)
     r.d1 = (ULONG)sizeof(sa_peer);
     (VOID)t_54(ctx.base, &r);           /* connect, so send() has a peer */
 
-    /* A descriptor that is guaranteed to be closed, for every failure path
-       that needs an EBADF. */
     ctx.dead = do_socket(P_AF_INET, P_SOCK_DGRAM, 0);
     if (ctx.dead >= 0)
         (VOID)do_close(ctx.dead);
@@ -2738,8 +2567,7 @@ static BOOL bring_up(const char *want_iface)
 
     find_interface(want_iface);
 
-    /* Remember the domain name so the SetDefaultDomainName row can put it
-       back; an empty answer is a legal one and is restored as empty. */
+    /* Remembered so the SetDefaultDomainName row can put it back. */
     zero(saved_domain, sizeof(saved_domain));
     r = regs_zero;
     r.a0 = (APTR)saved_domain;
@@ -2765,8 +2593,6 @@ static VOID tear_down(VOID)
         ctx.port = NULL;
     }
 }
-
-/* -------------------------------------------------------------- main ------ */
 
 int main(void)
 {
@@ -2832,8 +2658,6 @@ int main(void)
         (LONG)ctx.iface, (LONG)ctx.ifindex, (LONG)ctx.port, 0);
     flushout();
 
-    /* The noise floor first, so a machine too busy to measure on says so
-       before three hundred variants blame the library for it. */
     for (i = 0; i < NCONTROLS; i++)
         run_variant(&controls[i], -1 - i, 0);
 

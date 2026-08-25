@@ -1,28 +1,6 @@
 /*
  * AmiNetXDuo, host fuzz driver for the DNS response parser.
  *
- * What is under test is the code that reads a datagram from whatever answered
- * a query.  In this stack that is addons/dns/nxd_dns.c: src/netstack/
- * netstack_dns.c holds the policy (hosts file first, .local to mDNS, which
- * status means which error) and calls nx_dns_host_by_name_get(),
- * nx_dns_host_by_address_get() and nxd_dns_ipv6_address_by_name_get() to do
- * the parsing.  SECURITY.md named netstack_dns.c as the parser; it is not one,
- * and fuzzing it would have proved nothing.  So the vendored parser is
- * compiled here and driven through those three entry points, the three the
- * library exposes, with the response supplied a datagram at a time.
- *
- * The wire is one stub.  _nxe_udp_socket_receive() below hands the parser the
- * fuzz bytes as a real NX_PACKET off a real packet pool; everything above it,
- * from nx_dns_host_by_name_get() down through _nx_dns_response_receive(),
- * _nx_dns_response_process(), the name unencoder, the resource walk and the
- * answer cache, is the shipping code compiled from third_party.  Nothing here
- * reimplements any of it.
- *
- * Type widths are the target's: tests/perf/host/shim's tx_port.h gives a
- * 32-bit ULONG, so the length and TTL arithmetic is the arithmetic the m68k
- * does.  Pointers are the host's 64 bits either way, so a name walk that
- * would wrap a 32-bit pointer cannot be reproduced on this host at all.
- *
  * Usage:
  *   fuzz_dns -s                  every seed case, named
  *   fuzz_dns -c NAME             one seed case by name
@@ -57,11 +35,9 @@ static NX_DNS           fz_dns;
    pool carries 512-byte payloads and a sender is not held to that. */
 #define FZ_WIRE_PAYLOAD (FZW_MAX + 64)
 #define FZ_WIRE_PACKETS 8
-/* _Alignas because the pool is carved into NX_PACKETs and this is a HOST
-   build: NX_PACKET holds 64-bit pointers and wants 8-byte alignment, while the
-   shim's ULONG is the target's 32 bits, so a plain ULONG array is only aligned
-   to 4 and every second packet lands misaligned. On m68k the requirement is 4
-   and the question does not arise. */
+/* _Alignas because the pool is carved into NX_PACKETs and this is a HOST build:
+   NX_PACKET holds 64-bit pointers and wants 8-byte alignment while the shim's
+   ULONG is 32 bits.  On m68k the requirement is 4 and it does not arise. */
 static _Alignas(NX_PACKET) ULONG
                         fz_wire_area[((FZ_WIRE_PAYLOAD + sizeof(NX_PACKET) +
                                       32) * FZ_WIRE_PACKETS) / sizeof(ULONG)];
@@ -173,10 +149,9 @@ ULONG _tx_time_get(VOID)
 /* --------------------------------------------------------------- UDP ----- */
 
 /*
- * The socket, in as much detail as the DNS client can tell.  It never looks at
- * the port table or the interface list, so these are counters and a queue of
- * one.  The internal names, not the _nxe_ ones: nxd_dns.c defines
- * NX_DISABLE_ERROR_CHECKING for itself, so it calls straight through.
+ * The socket, in as much detail as the DNS client can tell.  The internal
+ * names, not the _nxe_ ones: nxd_dns.c defines NX_DISABLE_ERROR_CHECKING for
+ * itself, so it calls straight through.
  */
 
 UINT _nx_udp_socket_create(NX_IP *ip_ptr, NX_UDP_SOCKET *socket_ptr,
@@ -233,11 +208,6 @@ UINT _nxd_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
     return NX_SUCCESS;
 }
 
-/*
- * The wire.  One datagram per query, then nothing, which is what a resolver
- * sees when a single hostile answer arrives and the real server never
- * replies.
- */
 /* The IP header the stub hands up with each datagram; see the receive stub. */
 static NX_IPV4_HEADER fz_ip_header;
 
@@ -282,25 +252,18 @@ UINT _nx_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     p -> nx_packet_ip_interface  = &fz_ip.nx_ip_interface[0];
 
     /*
-     * The client checks that an answer came from the server it asked, so the
-     * stub has to say who sent this one, the real receive path fills
-     * nx_packet_ip_header in as it hands a packet up, and without it every
-     * case was rejected before it reached the parser this fuzzer is aiming at.
-     *
-     * FZ_SERVER, in host order, which is the order the receive path leaves the
-     * header in.  fz_from_server = 0 makes the datagram come from somebody
-     * else, which is how the check itself gets exercised.
+     * The client checks that an answer came from the server it asked, and the
+     * real receive path fills nx_packet_ip_header in.  FZ_SERVER in host order,
+     * which is the order that path leaves the header in.
      */
     fz_ip_header.nx_ip_header_source_ip =
         fz_from_server ? FZ_SERVER : IP_ADDRESS(10, 0, 0, 99);
     p -> nx_packet_ip_header = (UCHAR *)&fz_ip_header;
 
     /*
-     * And the UDP header the port is read out of.  nxd_udp_source_extract()
-     * takes it from the longword eight bytes before the payload, in host
-     * order, which is where the receive path leaves it: source port in the
-     * high half, destination in the low.  A datagram from a name server comes
-     * from port 53.
+     * nxd_udp_source_extract() takes the UDP header from the longword eight
+     * bytes before the payload, in host order: source port in the high half,
+     * destination in the low.
      */
     {
         ULONG *udp = (ULONG *)(p -> nx_packet_prepend_ptr);
@@ -344,11 +307,8 @@ static void fz_pool_check(void)
         fz_fail("a query packet was not released");
 }
 
-/*
- * One datagram, through everything the library exposes.  Each entry point is
- * asked twice: the second call may be answered from the DNS cache, which is
- * the other consumer of whatever the first parse decided to store.
- */
+/* One datagram, through everything the library exposes.  Each entry point is
+   asked twice: the second call may be answered from the DNS cache. */
 static void fz_run_once(const unsigned char *data, size_t len)
 {
     UCHAR record[256];
@@ -419,12 +379,8 @@ static void fz_run_once(const unsigned char *data, size_t len)
     fz_cases++;
 }
 
-/*
- * The harness has to be shown to reach the parser, or a sweep of malformed
- * input proves only that the datagrams were thrown away.  Three well-formed
- * answers, one per entry point, and each must come back with the value the
- * datagram carries.
- */
+/* The harness has to be shown to reach the parser, or a sweep of malformed
+   input proves only that the datagrams were thrown away. */
 static void fz_selftest(void)
 {
     FzwBuf w;
@@ -452,12 +408,8 @@ static void fz_selftest(void)
     if (address != IP_ADDRESS(10, 0, 0, 9))
         fz_fail("a well-formed A answer resolved to the wrong address");
 
-    /*
-     * The question echoed in the other case is the same question (RFC 4343),
-     * and resolvers do normalise before echoing.  A case-sensitive comparison
-     * here was a name that would not resolve at all for anyone who spelled it
-     * with a capital.
-     */
+    /* The question echoed in the other case is the same question (RFC 4343),
+       and resolvers do normalise before echoing. */
     fzw_reset(&w);
     fzs_question_upper(&w, FZ_QNAME);
     memcpy(fz_case.b, w.b, w.len);
@@ -472,12 +424,8 @@ static void fz_selftest(void)
         fz_fail("an answer echoing the question in capitals gave the wrong "
                 "address");
 
-    /*
-     * An A record in the authority section is not an answer.  Nothing here
-     * ties its owner name to the question, so accepting one let a server
-     * answering about one name hand back, and cache, an address for
-     * another.
-     */
+    /* An A record in the authority section is not an answer: nothing here ties
+       its owner name to the question. */
     fzw_reset(&w);
     fzs_a_in_authority(&w, FZ_QNAME);
     memcpy(fz_case.b, w.b, w.len);
@@ -560,19 +508,9 @@ static void fz_selftest(void)
 }
 
 /*
- * A cached record has to expire even when it is asked for constantly.
- *
- * _nx_dns_cache_find_answer() charges elapsed lifetime in whole seconds and
- * used to move the record's clock to the current tick afterwards, throwing the
- * part-second away.  A name looked up more often than once a second therefore
- * charged nothing, every time, and the record stayed at its full TTL for as
- * long as anything kept asking, which is exactly what a transfer that keeps
- * reconnecting does.
- *
- * So: cache an answer with a two-second TTL, then ask for it repeatedly with
- * the clock stepping less than a second each time and no further answer
- * available from the wire.  A lookup that fails is a lookup that went past the
- * cache, which is only possible once the record has expired.
+ * A cached record has to expire even when it is asked for constantly: cache an
+ * answer with a two-second TTL, then ask for it repeatedly with the clock
+ * stepping less than a second and nothing further available from the wire.
  */
 static void fz_cache_expiry_test(void)
 {

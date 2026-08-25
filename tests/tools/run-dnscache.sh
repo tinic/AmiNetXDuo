@@ -1,44 +1,5 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR THE DNS ANSWER CACHE.
-#
-#   tests/tools/run-dnscache.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#
-# WHAT IT IS PROVING
-#
-#   NX_DNS_CACHE_ENABLE plus one call to nx_dns_cache_initialize() is the whole
-#   change, and a `#define` that changes no packet is not a feature.  So the
-#   assertion is not "the second lookup was fast": it is that the second lookup
-#   PUT NO QUERY ON THE WIRE.
-#
-#   Two names are looked up three times each, alternating, from six separate
-#   invocations of `host`.  The stack survives between them, AddNetInterface
-#   holds the reference that keeps it up, so all six share one NX_DNS.
-#
-#     with the cache     two queries leave the machine, one per name;
-#     without it         six do, one per invocation.
-#
-#   Two names rather than one because the count is then the assertion by
-#   itself: a stack that never queried at all, or one that queried every time,
-#   both fail, and no separately built control arm is needed to tell them
-#   apart.
-#
-#   The count is taken from the EMULATED A2065's own frame log, which is
-#   written inside the emulated hardware below every line of our code.
-#
-# WHAT ELSE IT ASSERTS
-#
-#   * every lookup of a name returned the SAME address.  A cache that returned
-#     nothing, or something else, on the hit would otherwise show up here as a
-#     pass, there would be no query on the wire either way.
-#   * the reverse direction is exercised too, because PTR records go through
-#     the same cache by a different path (_nx_dns_host_by_address_get_internal).
-#
-# THE ONE EXTERNAL DEPENDENCY, stated rather than hidden: SLIRP's DNS server at
-# 10.0.2.3 forwards to the host's resolver, so this test needs the host to be
-# able to resolve two public names.  If the first lookup of each name fails the
-# test says so and fails, rather than passing on an empty wire.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -83,7 +44,6 @@ fi
 NAME_A="${AMINETXDUO_DNS_NAME_A:-example.com}"
 NAME_B="${AMINETXDUO_DNS_NAME_B:-example.org}"
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/dnscache-stage"
 rm -rf "$STAGE"
@@ -95,9 +55,6 @@ for t in AddNetInterface host; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# Alternating on purpose. A cache that held exactly one answer would pass a
-# run that asked AAABBB and fail this one, and "holds one entry" is not what
-# was built.
 {
     echo "SYS:AddNetInterface eth0"
     for _ in 1 2 3; do
@@ -106,7 +63,6 @@ done
     done
 } > "$STAGE/commands.txt"
 
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dnscache}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
@@ -129,8 +85,6 @@ echo "====================================================================="
 echo
 
 FAILED=0
-# An assertion that did not run is counted, not just printed.  See the verdict
-# at the end: it is what stops this exiting 0 with its own subject untested.
 UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
@@ -143,7 +97,6 @@ else
     fail "the command list ran $STARTS times, the machine reset"
 fi
 
-# ---- every lookup answered, and answered the same ------------------------
 for name in "$NAME_A" "$NAME_B"; do
     ANSWERS=$(grep -c "^$name " "$REPORT" || true)
     UNIQUE=$(grep "^$name " "$REPORT" | sort -u | wc -l | tr -d ' ')
@@ -163,24 +116,7 @@ for name in "$NAME_A" "$NAME_B"; do
     fi
 done
 
-# ---- THE WIRE ------------------------------------------------------------
-#
-# There is no host-side capture any more.  The only emulator that dumped every
-# A2065 frame into its own log was FS-UAE, tests/trace/a2065pcap.py read that
-# log, and FS-UAE is gone: Amiberry's log carries no frames.  So the two "asked
-# for exactly once" assertions have nothing to read.
-#
-# SKIPPED, NOT FAILED, AND NOT PASSED EITHER.  This used to end in `fail "no
-# host-side capture"`, so the harness could not pass at all -- it is
-# `manual : UNWIRED`, which is why nobody saw it.  A check that cannot be made
-# is not a defect in the product.  But it was then made to exit 0, and that is
-# the opposite mistake: the assertion this file exists for is "the second
-# lookup PUT NO QUERY ON THE WIRE", nothing produces $HD/host.pcap under
-# Amiberry, so every run of it since has reported a cache proved by a harness
-# that never looked at a packet.  It exits 77 now -- see the verdict.
 if [ -s "$HD/host.pcap" ]; then
-    # Queries only: the guest's own datagrams TO port 53. tcpdump prints the
-    # question name for a DNS query, so each name can be counted separately.
     tcpdump -r "$HD/host.pcap" -n "udp dst port 53" 2>/dev/null > "$HD/dns.txt" || true
 
     TOTAL=$(wc -l < "$HD/dns.txt" | tr -d ' ')
@@ -201,9 +137,6 @@ else
 fi
 
 echo
-# Failures first.  A run with both a failure and an unrun assertion is a
-# failure: the skip is the less urgent of the two facts and reporting it first
-# sends somebody to look at the rig instead of at the defect.
 if [ "$FAILED" -ne 0 ]; then
     echo "dnscache: FAILED" >&2
     exit 1

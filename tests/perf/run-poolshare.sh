@@ -1,57 +1,5 @@
 #!/usr/bin/env bash
-#
 # The packet-pool memory-share A/B.
-#
-#   tests/perf/run-poolshare.sh -b BUILDDIR -B IFACE -P PEERSSH
-#                               [-N BOARD] [-m MODEL] [-a ADDRESS]
-#                               [-d "16 8"] [-s SECONDS]
-#
-# WHAT IT MEASURES
-#
-#   Whether the low-memory receive window is the throughput.  The library under
-#   test reads ENV:ANXDPOOLDIV at stack start, so every arm boots the SAME
-#   binary and differs by one environment variable: the divisor over free
-#   memory that sizes the packet pool.  16 is the shipped sixteenth; 8 is the
-#   doc's prescribed eighth.  The guest receives TCP from a third machine at
-#   whatever rate that machine chooses, which is the one direction the pool
-#   can starve.
-#
-#   Run it with AMINETXDUO_FASTMEM=0 to model the machine this is about: a
-#   2 MB chip-RAM A1200.  With fast memory present the pool sizes far from the
-#   clamp and both arms should agree, which makes that configuration the
-#   negative control, not the experiment.
-#
-# WHAT IT RECORDS, PER ARM
-#
-#   the guest's own pool accounting (netstat -s: total, fewest ever free,
-#     found-empty count) after the transfer;
-#   the peer's byte count and rate, which is what the sender's kernel saw
-#     accepted, not what anything here printed;
-#   IT IS SAFE TO RUN TWO OF THESE AT ONCE only in the sense that the second
-#   REFUSES: the guest address and the emulator's serial port are both claimed
-#   through tools/emu-rig-lock.sh, so they cannot alias, but Amiberry gives
-#   every bridged ne2000_pcmcia guest the HOST's MAC address whatever mac= says
-#   (tools/emu-board.sh emu_board_mac_honoured), and one hardware address on
-#   two guests cannot be made to work from here.  tools/amiberry-run.sh takes
-#   an interlock and the second run stops with a sentence saying to serialize.
-#   `-N a2065` honours mac= and has no such limit.
-#
-#   the wire's zero-window count and window ceiling, from a pcap taken on the
-#     emulator host's own interface, which carries every guest frame.
-#
-#   The doc asks for the whole causal chain: more pool storage, fewer or no
-#   zero windows, less sender limitation, higher throughput.  One number
-#   moving alone is not a result.
-#
-# WHY THE PEER IS A THIRD MACHINE
-#
-#   A bridged guest is unreachable from the emulator host (docs/RESEARCH.md
-#   63), so the sender must be elsewhere; -P names it as an ssh destination
-#   that has this repository's tests/tools/iperfpeer.py on PATH-reachable
-#   python3.  The pcap, by contrast, MUST be taken on the emulator host: its
-#   interface is the guest's port, so it sees every frame the guest sends and
-#   receives, switched LAN or not.
-#
 # SPDX-License-Identifier: MIT
 
 set -u
@@ -94,21 +42,6 @@ for f in "$BSD" "$TOOLS/AddNetInterface" "$TOOLS/iperf" "$TOOLS/netstat"; do
     [ -f "$f" ] || { echo "missing $f -- build the tree first" >&2; exit 2; }
 done
 
-# THE GUEST'S ADDRESS IS CLAIMED, NOT PINNED.  It was 192.168.1.240, and a
-# pinned address on a shared LAN is wrong twice over:
-#
-#   two runs of this harness at once are two guests at ONE address, and the
-#     peer's connection lands on whichever answered its ARP -- "the guest never
-#     accepted" from a run whose guest is sitting happily in `iperf -s`;
-#   .240 is CONTESTED on the lab LAN in its own right -- it is inside the
-#     range the router hands out -- and .243, which tests/tools/run-events.sh
-#     took the same way, is a live
-#     machine.  A ping scan on 2026-08-25 found fifteen live hosts in
-#     192.168.1.200-254 and .243 among them.
-#
-# rig_claim_address locks the address against other runs AND pings it before
-# taking it, so a range may safely overlap real machines: one that answers is
-# skipped.  -a still wins, for a reservation somebody wants to hold.
 if [ -z "$ADDRESS" ]; then
     # shellcheck source=../../tools/emu-rig-lock.sh
     . "$ROOT/tools/emu-rig-lock.sh"
@@ -120,8 +53,6 @@ if [ -z "$ADDRESS" ]; then
     ADDRESS="$RIG_ADDRESS"
 fi
 
-# The whole point is one binary for every arm; print what it is so the record
-# survives the build directory.
 echo "library_sha256=$(sha256sum "$BSD" | cut -d' ' -f1)"
 # -b may point at a per-CPU build, so the codegen the number belongs to is
 # recorded next to it; without this a peer_bytes= line is unattributable.
@@ -160,8 +91,6 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 IFEOF
 
-    # The divisor is set explicitly in EVERY arm, the shipped 16 included, so
-    # both arms take the identical code path through the reader.
     {
         echo "echo >ENV:ANXDPOOLDIV $DIV"
         echo "SYS:AddNetInterface eth0"
@@ -174,10 +103,6 @@ IFEOF
         "host $ADDRESS and tcp port $PORT" >/dev/null 2>&1 &
     TCPDUMP_PID=$!
 
-    # The sender retries until the guest listens, then sends for the window.
-    # Its last line is the peer_bytes= record the comparison uses.  The peer
-    # runs this repository's own iperfpeer.py, copied fresh so the two ends
-    # cannot be different versions of the wire format.
     PEERLOG="$RESULTS/arm-$DIV.peer"
     scp -q "$ROOT/tests/tools/iperfpeer.py" "$PEERSSH:/tmp/iperfpeer.$$.py"
     ssh -o BatchMode=yes "$PEERSSH" "

@@ -2,27 +2,6 @@
  * AmiNetXDuo, whether a stalled TCP connection can be seen from outside the
  * stack, and whether an application can decline to wait out the ladder.
  *
- * A socket whose peer stops answering retransmits at +1, +2, +4, +8, +16, +32
- * and +64 seconds and is reset at 127; a connection request gets one more rung
- * and 191.  Nothing is reported while that runs, which is the "hangs, then
- * restarts" users describe, and from outside it is indistinguishable from a
- * peer that has nothing to say.
- *
- * TCP_STALLINFO answers that, and TCP_USER_TIMEOUT lets a caller name its own
- * deadline.  This runs both against a real peer on a real link.
- *
- * THE STALL IS INDUCED AT LAYER 2, FROM THE GUEST
- *
- * A firewall rule on the peer would do it, and this machine shares its peer
- * with other work.  A static ARP entry pointing the peer's address at a MAC
- * nobody owns blackholes this guest's frames and nothing else's: the switch
- * has nowhere to deliver them, no reply comes back, and the connection is
- * exactly as stalled as a peer that went away.  The entry is removed at the
- * end whatever happens, and it never leaves this guest.
- *
- * An ordinary AmigaOS program: OpenLibrary("bsdsocket.library") and calls
- * through the LVO table, linked against none of our code.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,13 +16,6 @@
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: tcpstall_test 1.0 (12.8.2026)";
-
-/* ------------------------------------------------------------------ LVOs,
- *
- * Hand-vectored, and every stub declares d1/a0/a1 written, for the reason
- * tests/leak/refused_leak_test.c states at length: a register that is only an
- * input operand is one GCC may keep a value in across the jsr.
- */
 
 #define T_AF_INET       2
 #define T_SOCK_STREAM   1
@@ -220,9 +192,6 @@ static LONG t_control(struct Library *base, ULONG op, NetStatusControl *ctl)
     return res;
 }
 
-
-/* ------------------------------------------------------------ reporting --- */
-
 static ULONG t_checks;
 static ULONG t_failures;
 
@@ -276,16 +245,6 @@ static ULONG t_elapsed(VOID)
 
 #define T_SECS(hundredths)  ((LONG)((hundredths) / 100UL))
 
-
-/* ------------------------------------------------------ the blackhole ----- */
-
-/*
- * Point the peer's address at a MAC nobody owns.  02: is locally administered
- * and the rest is arbitrary; the frames leave the guest, the switch has
- * nowhere to put them, and nothing comes back.  Delete first, because the
- * address is already resolved by the time a connection exists and a static
- * create on top of a live dynamic entry is not what is being tested here.
- */
 static LONG t_blackhole(struct Library *base, ULONG peer, LONG on)
 {
     NetStatusControl ctl;
@@ -312,9 +271,6 @@ static LONG t_blackhole(struct Library *base, ULONG peer, LONG on)
 
     return t_control(base, NETCTRL_ARP_ADD, &ctl);
 }
-
-
-/* ----------------------------------------------------------- one socket --- */
 
 typedef struct TConn
 {
@@ -412,14 +368,6 @@ static VOID t_poll(struct Library *base, TConn *c, LONG now, UBYTE *chunk,
     }
 }
 
-
-/* ------------------------------------------------------------------ arms --- */
-
-/*
- * The option surface, on a socket that never goes near a network.  A default
- * socket must answer zero and behave as it always did; the TCP options must
- * refuse a UDP socket, as TCP_NODELAY and TCP_MAXSEG already do.
- */
 static VOID t_arm_options(struct Library *base)
 {
     struct TcpStallInfo info = { 0 };
@@ -578,8 +526,6 @@ static VOID t_arm_stall(struct Library *base, ULONG peer, UWORD port)
     (VOID)t_close(base, a.fd);
     (VOID)t_close(base, b.fd);
 
-    /* ---- what has to be true ---------------------------------------- */
-
     t_check(b.failed_at >= 0, "the socket with a 15 s deadline never failed");
     t_check(b.failed_at >= 13 && b.failed_at <= 22,
             "a 15 s deadline was not served within a few seconds of 15");
@@ -597,13 +543,6 @@ static VOID t_arm_stall(struct Library *base, ULONG peer, UWORD port)
           (LONG)b.failed_at, (LONG)b.failed_errno, 0);
 }
 
-
-/* ------------------------------------------------------------------ main --- */
-
-/*
- * PEER/A,PORT/N.  A guest program's argc is 1 whatever the runner passed, so
- * the command line is read back with GetArgStr().
- */
 static ULONG t_parse_ip(const char **p)
 {
     ULONG addr = 0;

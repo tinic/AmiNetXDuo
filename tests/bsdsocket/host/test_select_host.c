@@ -2,54 +2,6 @@
  * src/bsdsocket/select.c on the host: the readiness predicates and what
  * WaitSelect() returns.
  *
- * WHY THIS FILE EXISTS
- *
- *   Two regressions have shipped from this one file, and both went out on a
- *   push that stayed green:
- *
- *     the connected-UDP readability   bsd_readable() answered TRUE for any
- *                                     datagram queued on the port, so a
- *                                     connected socket was reported readable
- *                                     by another peer's traffic and the recv
- *                                     that followed blocked (d3ccab5d)
- *     WaitSelect()'s count            changed from bits set across the three
- *                                     result sets to descriptors, so a socket
- *                                     ready to read and to write answered 1
- *                                     where AmiTCP answers 2, and the standard
- *                                     "decrement once per FD_ISSET" consumption
- *                                     loop stopped early (e6c76f5e, undone by
- *                                     8aa5a3a7)
- *
- *   Both were caught on the emulator by tests/ipv6/ipv6_socket_test.c, which
- *   .github/workflows/emulator.yml runs on a nightly cron and on a tag, never
- *   on a push.  Both shipped with a test asserting the wrong answer.  So the
- *   assertions here are deliberately the same claims, in a tier a push runs.
- *
- *   select.c compiles here at all because host_prelude.h renames struct
- *   timeval; the shim's devices/timer.h says what that is about.
- *
- * WHAT A STUB IS ALLOWED TO DECIDE, WHICH IS THE READ-THIS PART
- *
- *   bsd_readable() asks bsd_udp_accepts_packet() whether a queued datagram
- *   belongs to this socket.  That predicate is transfer.c's and transfer.c
- *   cannot be compiled here: its static assertions pin struct iovec and struct
- *   msghdr to the 4.4BSD shape, and the host's have 64-bit pointers.  So it is
- *   stubbed, and the stub decides only ONE thing -- does the packet come from
- *   the peer this socket connected to -- from a port number the fixture stamps
- *   into each fake packet.  What the real one parses out of a UDP header is
- *   not tested here and tests/ipv6/ipv6_socket_test.c remains where that is
- *   proven.
- *
- *   What IS tested here is select.c's own half, which is where both defects
- *   were: that the predicate is consulted at all rather than the queue count
- *   being taken as readiness, and that the walk continues past a mismatch
- *   because a matching datagram can already be behind one.
- *
- *   Every other stub either records the call or returns what the fixture set.
- *   The Exec signal calls are not stubs in that sense: SetSignal(), Signal()
- *   and Wait() reproduce Exec's semantics, because the break-signal and
- *   user-signal contracts are entirely about which bits survive a call.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -58,8 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* --------------------------------------------------------------- reporting */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -72,8 +22,6 @@ static unsigned long h_failures;
             printf("  FAIL %s\n", (what));                                    \
         }                                                                     \
     } while (0)
-
-/* ------------------------------------------------------------ the fixture */
 
 #define H_FDS           4       /* descriptors the fake table holds          */
 
@@ -144,11 +92,6 @@ static void h_unreachable(const char *what)
     abort();
 }
 
-/*
- * Every test starts from here.  The base is zeroed rather than patched,
- * because sb_SelIn and sb_SelReady carry results between calls and a stale
- * ready set is exactly the kind of thing this file is meant to notice.
- */
 static void h_reset(void)
 {
     memset(&h_base, 0, sizeof(h_base));
@@ -169,7 +112,6 @@ static void h_reset(void)
     h.open_result = 0;              /* timer.device opens                    */
 }
 
-/* A UDP socket connected to peer port `peer`, at descriptor `fd`. */
 static AmiSocket *h_udp(LONG fd, UINT peer)
 {
     AmiSocket *s = &h_sock[fd];
@@ -184,7 +126,6 @@ static AmiSocket *h_udp(LONG fd, UINT peer)
     return s;
 }
 
-/* A connected TCP socket in `state`, at descriptor `fd`. */
 static AmiSocket *h_tcp(LONG fd, UINT state)
 {
     AmiSocket *s = &h_sock[fd];
@@ -199,7 +140,6 @@ static AmiSocket *h_tcp(LONG fd, UINT state)
     return s;
 }
 
-/* Queue `n` fake datagrams on a UDP socket, each stamped with a source port. */
 static void h_queue(AmiSocket *s, const UINT *ports, unsigned n)
 {
     unsigned i;
@@ -214,14 +154,6 @@ static void h_queue(AmiSocket *s, const UINT *ports, unsigned n)
     s->as_Nx.udp.nx_udp_socket_receive_count = n;
 }
 
-/* ------------------------------------------------------- Exec, reproduced */
-
-/*
- * SetSignal(newSignals, signalSet) returns the signal set as it was and then
- * replaces the bits named in signalSet with the bits from newSignals.  The
- * whole of WaitSelect()'s break handling rests on SetSignal(0,0) observing
- * without consuming, so this is the real rule and not an approximation.
- */
 ULONG SetSignal(ULONG newSignals, ULONG signalSet)
 {
     ULONG old = h.signals;
@@ -278,8 +210,6 @@ LONG WaitIO(struct IORequest *io)  { (VOID)io; h.waitios++;  return 0; }
 BYTE ami_signal_alloc(VOID)        { return (BYTE)H_TIMER_BIT; }
 VOID ami_signal_free(BYTE sig)     { (VOID)sig; }
 
-/* ------------------------------------------------- the library, elsewhere */
-
 LONG bsd_fail(struct AmiSocketBase *base, LONG code)
 {
     base->sb_Errno = code;
@@ -329,12 +259,6 @@ BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
     return h.udp_from_peer;
 }
 
-/*
- * The endpoint filter, reduced to the one decision select.c depends on.  See
- * the header: the real predicate is transfer.c's and reads the UDP header.
- * An unconnected socket takes everything, a connected one takes only its
- * peer's, and the fixture spells a peer as a port number.
- */
 BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
 {
     if ((sock->as_Flags & ASF_CONNECTED) == 0)
@@ -347,10 +271,6 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
    two NetX server-socket calls below; a listen refill is a NetX Duo
    conversation and belongs on the emulator. */
 NX_IP *netstack_ip(VOID) { return NX_NULL; }
-
-/* -------------------------------------------------- NetX Duo, as far as it
- * is reached.  The notify setters record that they were armed; the counter is
- * what bsd_events_attach() is checked against. */
 
 UINT _nxe_tcp_socket_bytes_available(NX_TCP_SOCKET *socket_ptr,
                                      ULONG *bytes_available)
@@ -416,8 +336,6 @@ UINT _nxe_tcp_server_socket_relisten(NX_IP *ip_ptr, UINT port,
 
 ULONG _tx_time_get(VOID) { return h.ticks; }
 
-/* --------------------------------------------------- calling WaitSelect() */
-
 typedef struct
 {
     ULONG read[BSD_FD_WORDS];
@@ -438,8 +356,6 @@ static BOOL h_isset(const ULONG *words, LONG fd)
 /* A zero timeout: the poll-only path, which returns without ever reaching
    Wait() or timer.device. */
 static struct timeval h_poll = { 0, 0 };
-
-/* ------------------------------------------------- bsd_readable(), on UDP */
 
 static void t_udp_readability(void)
 {
@@ -493,8 +409,6 @@ static void t_udp_readability(void)
     CHECK(bsd_readable(s) == TRUE, "shutdown(SHUT_RD) is an immediate EOF");
 }
 
-/* ------------------------------------------------- bsd_readable(), on TCP */
-
 static void t_tcp_readability(void)
 {
     AmiSocket *s;
@@ -528,13 +442,6 @@ static void t_tcp_readability(void)
     s = h_tcp(0, NX_TCP_LAST_ACK);
     CHECK(bsd_readable(s) == TRUE, "LAST_ACK: the peer's FIN arrived");
 
-    /*
-     * The states the >= comparison used to catch and must not.  After
-     * shutdown(SHUT_WR) the socket is in FIN_WAIT_1 or FIN_WAIT_2 with
-     * nothing received and nothing receivable; calling that readable makes
-     * `nc -N` spin on a select that returns at once and a recv that answers
-     * EWOULDBLOCK.
-     */
     h_reset();
     s = h_tcp(0, NX_TCP_FIN_WAIT_1);
     CHECK(bsd_readable(s) == FALSE,
@@ -545,11 +452,6 @@ static void t_tcp_readability(void)
     CHECK(bsd_readable(s) == FALSE,
           "FIN_WAIT_2 after shutdown(SHUT_WR) is not readable");
 
-    /*
-     * A listener is readable when accept() will not block, which is a
-     * finished handshake.  ASF_ACCEPTPEND is set when the SYN lands, well
-     * before that, so it cannot stand in for readiness.
-     */
     h_reset();
     s = &h_sock[0];
     s->as_Owner = &h_base;
@@ -563,8 +465,6 @@ static void t_tcp_readability(void)
     CHECK(bsd_readable(s) == TRUE,
           "a listener with a finished handshake is readable");
 }
-
-/* ------------------------------------------------------- bsd_writable() */
 
 static void t_writability(void)
 {
@@ -623,8 +523,6 @@ static void t_writability(void)
           "after shutdown(SHUT_WR) the write fails immediately, so it is writable");
 }
 
-/* ------------------------------------------------------ bsd_exception() */
-
 static void t_exception(void)
 {
     AmiSocket *s;
@@ -650,24 +548,12 @@ static void t_exception(void)
     s->as_SoError = 104;
     CHECK(bsd_exception(s) == TRUE, "a pending SO_ERROR is exceptional");
 
-    /*
-     * FD_ERROR is the event API's latch, which GetSocketEvents() consumes.
-     * WaitSelect() is level-triggered on SO_ERROR instead, so the latch alone
-     * is not an exceptional condition.
-     */
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);
     s->as_Events = FD_ERROR;
     CHECK(bsd_exception(s) == FALSE,
           "the FD_ERROR latch alone is not an exceptional condition");
 }
-
-/* ------------------------------------------- WaitSelect(): what it returns
- *
- * The regression this is against: a socket ready in two sets counted 1.
- * POSIX, 4.4BSD selscan() and AmiTCP's own all count bits, and the standard
- * consumption loop decrements once per FD_ISSET.
- */
 
 static void t_waitselect_count(void)
 {
@@ -705,8 +591,6 @@ static void t_waitselect_count(void)
     CHECK(h_isset(s.read, 0) && h_isset(s.write, 0) && h_isset(s.except, 0),
           "and all three bits are set");
 
-    /* Two descriptors, one set each: the two readings agree here, which is
-       why the defect survived a review. */
     h_reset();
     (void)h_udp(0, 7777);
     (void)h_udp(1, 7777);
@@ -732,8 +616,6 @@ static void t_waitselect_count(void)
     CHECK(!h_isset(s.read, 0) && !h_isset(s.write, 0),
           "and the caller's sets come back cleared");
 }
-
-/* ------------------------------------------------- WaitSelect(): refusals */
 
 static void t_waitselect_refusals(void)
 {
@@ -793,8 +675,6 @@ static void t_waitselect_refusals(void)
           "and that failure leaves the sets alone as well");
 }
 
-/* --------------------------------------- WaitSelect(): break and signals */
-
 static void t_waitselect_signals(void)
 {
     HSets      s, before;
@@ -804,13 +684,6 @@ static void t_waitselect_signals(void)
 
     printf("WaitSelect(): the break mask and the caller's signals\n");
 
-    /*
-     * The autodoc's BUGS section, honoured: "WaitSelect() may ignore the break
-     * signal altogether if a zero length timeout is given, or sockets are
-     * ready at the time the function is entered.  This behaviour was changed
-     * in bsdsocket.library V4.289".  Both escapes leave the loop without
-     * reaching the check after Wait(), so the break is tested first.
-     */
     h_reset();
     (void)h_udp(0, 7777);
     h_queue(&h_sock[0], one_right, 1);      /* ready at entry */
@@ -846,10 +719,6 @@ static void t_waitselect_signals(void)
     CHECK(memcmp(&s, &before, sizeof(s)) == 0,
           "and the sets are untouched");
 
-    /*
-     * A signal the caller named is not a break, even when it is also in the
-     * break mask: break_mask is sb_BreakMask minus the caller's.
-     */
     h_reset();
     (void)h_tcp(0, NX_TCP_SYN_SENT);
     h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
@@ -865,7 +734,6 @@ static void t_waitselect_signals(void)
           "and is consumed, because a signal reported and left standing "
           "is delivered twice");
 
-    /* The same signal arriving from Wait(). */
     h_reset();
     (void)h_tcp(0, NX_TCP_SYN_SENT);
     h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
@@ -880,8 +748,6 @@ static void t_waitselect_signals(void)
           "a caller's signal arriving during the wait ends it the same way");
 }
 
-/* ------------------------------------------- WaitSelect(): the timeout IO */
-
 static void t_waitselect_timeout(void)
 {
     HSets s;
@@ -891,12 +757,6 @@ static void t_waitselect_timeout(void)
 
     printf("WaitSelect(): timer.device, armed only when about to block\n");
 
-    /*
-     * A select that finds a socket ready never blocks, so it must not pay
-     * SendIO/AbortIO/WaitIO for a request it never waits on.  That is 4.5%%
-     * of an A1200 wire transfer, because a bulk reader selects once per recv
-     * and the data is normally already there.
-     */
     h_reset();
     (void)h_udp(0, 7777);
     h_queue(&h_sock[0], one_right, 1);
@@ -930,12 +790,6 @@ static void t_waitselect_timeout(void)
           "an expired request is collected with WaitIO and not aborted");
     CHECK(!h_isset(s.read, 0), "and the result set comes back cleared");
 
-    /*
-     * Ready on the wakeup rather than on expiry: the connect completes while
-     * the caller is blocked, so the timeout request is still running and has
-     * to be aborted as well as collected.  A request left outstanding on a
-     * base the caller reuses is the next WaitSelect()'s stale timer signal.
-     */
     h_reset();
     (void)h_tcp(0, NX_TCP_SYN_SENT);
     h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
@@ -964,15 +818,12 @@ static void t_waitselect_timeout(void)
           "a timer.device that will not open is ENOMEM");
 }
 
-/* ------------------------------------------- the event API's signal routing */
-
 static void t_events(void)
 {
     AmiSocket *s;
 
     printf("bsd_event_post() and bsd_events_attach()\n");
 
-    /* Every event wakes WaitSelect(), whatever else it does. */
     h_reset();
     s = h_udp(0, 7777);
     bsd_event_post(s, FD_READ);
@@ -1007,7 +858,6 @@ static void t_events(void)
     CHECK((h.signals & H_SIGEVENT_SIG) == 0,
           "and one outside it does not");
 
-    /* What bsd_events_attach() arms, per socket flavour. */
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);
     bsd_events_attach(s);

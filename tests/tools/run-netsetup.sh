@@ -5,68 +5,6 @@
 #   tests/tools/run-netsetup.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                               [-A [-N board] [-B backend]] [-r TRANSCRIPT]
 #
-# The command that writes the network configuration, and nothing exercised it.
-# It is the first thing a new user runs and the thing the installer calls, so
-# a defect in it is a machine that never gets a network at all -- and every
-# other test in this drawer stages its DEVS:NetInterfaces by hand, which means
-# they all test the parser against a file NetSetup did not write.
-#
-# What the template offers, and so what is checked here:
-#
-#   NAME        the interface file's name, defaulted to eth0, and refused when
-#               it is not a name a file can have
-#   DEVICE/K    with UNIT/K/N, the driver written into the file
-#   DHCP/S      against ADDRESS/K, NETMASK/K, GATEWAY/K, DNS/K, which are the
-#               other way of getting an address, and are validated as given
-#   ONLINE/S    start the network now
-#   NOONLINE/S  and do not
-#   FORCE/S     replace a configuration that is already there
-#   QUIET/S     say nothing but what was written
-#
-# and the claims in netsetup.c's own header:
-#
-#   "a driver plus a way of getting an address is a full specification, so
-#   nothing needs to be asked"     -- every call below is non-interactive
-#   "an existing file is renamed to .old rather than overwritten"
-#   "an installer re-run must not quietly discard a working configuration"
-#
-# WHAT IS ASSERTED IS THE FILE, NOT THE SENTENCE.  A command that prints
-# "Wrote DEVS:NetInterfaces/eth0" and writes nothing passes any check made of
-# its output, so the bytes are read back off the test drive afterwards -- the
-# emulator's DH0: is a host directory, so DEVS:NetInterfaces/eth0 is a file
-# this script can open.  And once, at the top, the configuration NetSetup
-# wrote is handed to the stack and pinged: a file that parses is not the same
-# claim as a file that works.
-#
-# THE ORDER IS THE POINT IN TWO PLACES
-#
-#   NOONLINE is asserted with a netstat on either side of it, because "did not
-#   start the network" cannot be seen on a machine whose network is already up;
-#   that is why the ONLINE case comes after it and not before.
-#
-#   The refusal case and the FORCE case use different interface names (eth5,
-#   eth6) so that both are still on the drive at the end.  Run against one
-#   name, the second write would erase the evidence of the first.
-#
-# GOOD CASE: 16 s wall on playhouse3 under SLIRP, measured, boot to verdict --
-# fifteen commands, one static bring-up, one ping pair.  The default -t 60 is
-# between 3x and 4x the guest's share of that.  A run that reaches the
-# timeout is a defect to diagnose, not a number to raise: the first assertion
-# below names the command that was still running when the emulator was killed.
-#
-# NOT COVERED HERE:
-#
-#   * every question.  NetSetup with no DEVICE asks, and ToolsSmoke's children
-#     read NIL:, so the interactive path cannot be driven from here; ToolsSmoke
-#     does honour "< file", so a canned answer file would drive it, and that is
-#     a test of a different shape from this one.  Everything below is the
-#     installer's path.
-#   * the disk filling up mid-write, and the rollback that restores the .old
-#     files after it.  It needs a full volume to force.
-#   * nothing of the .old rotation beyond one round.  Both writes below leave
-#     a routes.old and a name_resolution.old; only the resolver's is read back,
-#     because only it is written with a different value each time.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -90,9 +28,6 @@ while getopts "m:t:b:AN:B:r:" opt; do
         A) RUNNER=amiberry ;;
         N) RUNNER=amiberry; BOARD="$OPTARG" ;;
         B) RUNNER=amiberry; IFACE="$OPTARG" ;;
-        # Assert a drive that is already there instead of booting.  For
-        # developing the assertions below, and for showing that they fail on a
-        # transcript broken on purpose.
         r) REPLAY="$OPTARG" ;;
         *) sed -n '3,7p' "$0" >&2; exit 2 ;;
     esac
@@ -132,7 +67,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/netsetup-stage"
 rm -rf "$STAGE"
@@ -140,17 +74,8 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# NO INTERFACE FILE.  This machine is the one a user has before they have ever
-# run anything: a card, no configuration.  Writing that configuration is what
-# NetSetup is for, so the drawer starts empty and every file asserted at the
-# bottom of this script is one the command under test created.
 rm -f "$STAGE/devs/NetInterfaces/"*
 
-# DEVS:Internet/name_resolution, on the other hand, is staged, and its
-# `domain localdomain` line is how the assertions below tell the staged file
-# from the one NetSetup writes, which has no such line.  Refuse to run if the
-# staged copy ever loses it, rather than asserting against a file whose
-# contents were assumed.
 RESOLVER="$STAGE/devs/Internet/name_resolution"
 grep -q '^domain localdomain' "$RESOLVER" || {
     echo "tests/netstack/devs/Internet/name_resolution no longer has the" \
@@ -177,10 +102,6 @@ for t in NetSetup AddNetInterface netstat ping; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# Every line is asserted below by its position in this list.  The DEVICE plus
-# an address makes each call a full specification, which is the header's own
-# condition for asking nothing; a call that started asking would read EOF on
-# NIL: and abort, and the rc assertions would say so.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:netstat -i
 SYS:NetSetup DEVICE=a2065.device UNIT=0 ADDRESS=10.0.2.15 NETMASK=255.255.255.0 GATEWAY=10.0.2.2 DNS=10.0.2.4 NOONLINE
@@ -199,7 +120,6 @@ SYS:NetSetup eth7 DEVICE=a2065.device UNIT=0 DHCP NOONLINE
 SYS:NetSetup eth4 DEVICE=a2065.device UNIT=0 DHCP
 EOF
 
-# ------------------------------------------------------------------ run ---
 
 set +e
 if [ "$RUNNER" = "amiberry" ]; then
@@ -280,7 +200,6 @@ silent_about() { # banner nth extended-regexp description
     fi
 }
 
-# ---- the file NetSetup wrote, read off the drive -------------------------
 
 file_says() { # path extended-regexp description
     if [ ! -f "$1" ]; then
@@ -321,7 +240,6 @@ no_iface_yet() { # nth-netstat description
     fi
 }
 
-# ---- the run finished, and finished once --------------------------------
 EXPECTED_BLOCKS=15
 BLOCKS=$(grep -c '^===== SYS:' "$REPORT" || true)
 if ! grep -q '^===== done, ' "$REPORT"; then
@@ -339,10 +257,8 @@ fi
 WRITE1="SYS:NetSetup DEVICE=a2065.device UNIT=0 ADDRESS=10.0.2.15 NETMASK=255.255.255.0 GATEWAY=10.0.2.2 DNS=10.0.2.4 NOONLINE"
 WRITE2="SYS:NetSetup DEVICE=a2065.device UNIT=0 ADDRESS=10.0.2.15 NETMASK=255.255.255.0 GATEWAY=10.0.2.2 DNS=10.0.2.3 FORCE ONLINE"
 
-# ---- 1. nothing was configured before ------------------------------------
 no_iface_yet 1 "the machine starts with no interface at all"
 
-# ---- 2. a driver and an address is a whole answer, so nothing is asked ---
 want_rc "$WRITE1" 1 0 "a fully specified call writes without asking anything"
 says "$WRITE1" 1 "^Wrote DEVS:NetInterfaces/eth0$" \
      "the interface file is named eth0 when NAME is not given"
@@ -351,15 +267,10 @@ says "$WRITE1" 1 "^Wrote DEVS:Internet/routes$" \
 says "$WRITE1" 1 "^Wrote DEVS:Internet/name_resolution$" \
      "DNS writes the resolver file"
 
-# ---- 3. NOONLINE did not start the network ------------------------------
 silent_about "$WRITE1" 1 "The network is up" \
      "NOONLINE does not say the network came up"
 no_iface_yet 2 "and netstat agrees nothing was started"
 
-# ---- 4. ONLINE does, and the configuration it wrote is usable -----------
-#
-# The whole point of the command: not that the file parses, but that a stack
-# handed that file comes up on it and carries traffic.
 want_rc "$WRITE2" 1 0 "FORCE ONLINE rewrites the file and starts the network"
 says "$WRITE2" 1 "^AddNetInterface eth0$" \
      "it starts it by running the real command"
@@ -374,11 +285,6 @@ says "SYS:ping 10.0.2.2 -c 2 -t 10" 1 ", 0% packet loss" \
      "and the gateway NetSetup wrote answers a ping"
 want_rc "SYS:ping 10.0.2.2 -c 2 -t 10" 1 0 "with ping succeeding"
 
-# ---- 5. an existing configuration is not replaced on a guess ------------
-#
-# The installer re-run.  eth5 is written once and then written at with a
-# different address; the refusal is asserted here and the file is read at the
-# bottom to prove the refusal was not merely printed.
 E5A="SYS:NetSetup eth5 DEVICE=a2065.device UNIT=0 ADDRESS=10.0.2.15 NETMASK=255.255.255.0 NOONLINE"
 E5B="SYS:NetSetup eth5 DEVICE=a2065.device UNIT=0 ADDRESS=192.168.99.9 NOONLINE"
 want_rc "$E5A" 1 0 "eth5 is written"
@@ -387,14 +293,12 @@ says "$E5B" 1 "^NetSetup: DEVS:NetInterfaces/eth5 already exists$" \
 want_rc "$E5B" 1 10 "and returns ERROR"
 silent_about "$E5B" 1 "^Wrote " "and claims to have written nothing"
 
-# ---- 6. FORCE replaces it -----------------------------------------------
 E6A="SYS:NetSetup eth6 DEVICE=a2065.device UNIT=0 ADDRESS=10.0.2.15 NETMASK=255.255.255.0 NOONLINE"
 E6B="SYS:NetSetup eth6 DEVICE=a2065.device UNIT=0 ADDRESS=192.168.99.9 NOONLINE FORCE"
 want_rc "$E6A" 1 0 "eth6 is written"
 want_rc "$E6B" 1 0 "and FORCE writes over it"
 says "$E6B" 1 "^Wrote DEVS:NetInterfaces/eth6$" "saying so"
 
-# ---- 7. what is typed is validated before anything is written -----------
 BADIP="SYS:NetSetup eth9 DEVICE=a2065.device UNIT=0 ADDRESS=notanaddress NOONLINE"
 says "$BADIP" 1 "^NetSetup: ADDRESS=notanaddress is not an address$" \
      "an ADDRESS that is not one is refused, quoting it"
@@ -405,7 +309,6 @@ says "$BADNAME" 1 '^NetSetup: "thisnameiswaytoolong" is not a usable interface n
      "a name no file can have is refused, quoting it"
 want_rc "$BADNAME" 1 10 "and returns ERROR"
 
-# ---- 8. QUIET, against the same call without it -------------------------
 QCALL="SYS:NetSetup eth8 DEVICE=a2065.device UNIT=0 DHCP NOONLINE QUIET"
 LCALL="SYS:NetSetup eth7 DEVICE=a2065.device UNIT=0 DHCP NOONLINE"
 want_rc "$QCALL" 1 0 "QUIET still writes"
@@ -415,7 +318,6 @@ silent_about "$QCALL" 1 "NetSetup: set up a network interface" \
 says "$LCALL" 1 "NetSetup: set up a network interface" \
      "and the same call without QUIET does print it"
 
-# ---- 9. neither ONLINE nor NOONLINE: it says how to start it ------------
 DEFCALL="SYS:NetSetup eth4 DEVICE=a2065.device UNIT=0 DHCP"
 want_rc "$DEFCALL" 1 0 "a call naming neither ONLINE nor NOONLINE writes"
 says "$DEFCALL" 1 "AddNetInterface eth4" \
@@ -423,9 +325,6 @@ says "$DEFCALL" 1 "AddNetInterface eth4" \
 silent_about "$LCALL" 1 "Start the network with" \
      "where NOONLINE does not offer even that"
 
-# ---- 10. and now the drive itself ---------------------------------------
-#
-# Everything above is what the command said.  This is what it did.
 file_says "$IFDIR/eth0" "^DEVICE += a2065\.device$" \
           "eth0 names the driver it was given"
 file_says "$IFDIR/eth0" "^UNIT += 0$"                "and the unit"
@@ -437,11 +336,6 @@ file_says "$IFDIR/eth0" "^STATE += UP$"              "and STATE = UP"
 file_says "$INET/routes" "^DEFAULT += 10\.0\.2\.2$" \
           "DEVS:Internet/routes holds the GATEWAY as the default route"
 
-# The header's claim, and the only way to see it.  The resolver file was
-# written twice with a different DNS each time, so the .old beside it must
-# hold the FIRST one's server and the live file the second's; a command that
-# overwrote in place would leave one file, and one that never rotated would
-# leave the staged file's `domain localdomain` in the live one.
 file_says "$INET/name_resolution" "^NAMESERVER +10\.0\.2\.3$" \
           "the resolver file holds the DNS of the last call that wrote it"
 file_says "$INET/name_resolution.old" "^NAMESERVER +10\.0\.2\.4$" \
@@ -449,10 +343,6 @@ file_says "$INET/name_resolution.old" "^NAMESERVER +10\.0\.2\.4$" \
 file_lacks "$INET/name_resolution" "^domain localdomain$" \
           "the staged file it replaced is gone from the live one"
 
-# eth0 was written twice (NOONLINE, then FORCE ONLINE), so it went through the
-# .old rename too -- and that backup MUST NOT be left behind, because the whole
-# drawer is read as configuration and an eth0.old would come up as a second
-# interface on the same card.
 if find "$IFDIR" -name '*.old' | grep -q .; then
     fail "DEVS:NetInterfaces holds a .old file, which the stack would read" \
          "as another interface"

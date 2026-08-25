@@ -1,48 +1,5 @@
 #!/usr/bin/env bash
-#
 # Hours of Fitz, with the Amiga on both ends of it.
-#
-#   tests/soak/run-fitz-soak.sh [-t SECONDS] [-p PHASE] [-m MODEL] [-T TAG]
-#                               [-b BUILDDIR] [-f FILERS] [-s SAMPLE]
-#                               [-P PORT] [-r]
-#
-# WHAT THIS RUNS
-#
-#   host   fitz-serve <scratch> PORT <p>       the wire arm's server
-#   guest  FitzSoak                            everything else:
-#            SYS:fitz serve DH0:localshare PORT <p+1>
-#            SYS:fitz mount 10.0.2.2:<p>   FITZW:
-#            SYS:fitz mount 127.0.0.1:<p+1> FITZL:
-#            filers, a churner running `fitz query`, and the sampler
-#
-# WHY BOTH ARMS
-#
-# tests/endurance already covers the Amiga as a Fitz client over the wire.
-# The report this comes from has the Amiga SERVING, and FS-UAE's SLIRP has no
-# inbound port forwarding, so the only way to put load on `fitz serve` here is
-# from inside the guest, over 127.0.0.1.  That is not the wire, and a negative
-# result on the loopback arm does not clear the driver.  Running both at once
-# is what makes one emulator-hour worth two.
-#
-# PORTS.  The default base is 17821, deliberately not Fitz's own 17711 and not
-# 17712: another workstream's fitz-serve holds those, and two servers on one
-# port is a failure that looks like a dropped connection.
-#
-# WHAT COMES BACK
-#
-#   build/amiberry-testhd-<tag>/soak-timeline.csv   pool, memory, sockets, TCP stats
-#   build/amiberry-testhd-<tag>/soak-events.txt     every failure, with a full snapshot
-#   build/amiberry-testhd-<tag>/soak-summary.txt    totals
-#   build/amiberry-testhd-<tag>/soak-fitz.txt       what Fitz itself printed
-#   build/serial-<tag>.log                 Fitz's ADEBUG lines, and ours
-#   build/soak-<tag>-peer.log              what the host server saw
-#
-# Those land on the host as the run goes, not at the end, so a run killed at
-# hour three is still worth reading.
-#
-# A RUN OF HOURS HOLDS AN EMULATOR SLOT FOR HOURS, and nothing on the machine
-# can tell a long tenant from an orphan.  Say so before starting one.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -99,7 +56,6 @@ else
 fi
 [ -f "$AMIGA_FITZ" ] || { echo "missing $AMIGA_FITZ" >&2; exit 2; }
 
-# ---- a2065.device --------------------------------------------------------
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -115,7 +71,6 @@ fi
     exit 2
 }
 
-# ---- the host server -----------------------------------------------------
 
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "!! something already listens on $PORT, pick another with -P," >&2
@@ -145,7 +100,6 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 }
 echo "==> fitz-serve on port $PORT sharing $SHARE (pid $PEER_PID)"
 
-# ---- stage the guest -----------------------------------------------------
 
 STAGE="$ROOT/build/soak-stage-$TAG"
 rm -rf "$STAGE"
@@ -176,8 +130,6 @@ EOF
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-# The emulator has to outlive the workload by enough to unwind the mounts and
-# write the summary; -t is a deadline on DH0:.done, not on the test.
 DEADLINE=$((SECONDS_RUN + 600))
 
 echo "==> run:  $SECONDS_RUN s workload in ${PHASE}s phases, $DEADLINE s deadline"
@@ -191,14 +143,7 @@ set +e
 RUN_RC=$?
 set -e
 
-# ---- what came back ------------------------------------------------------
 
-# The guest writes into the drive tools/amiberry-run.sh staged, which is
-# build/amiberry-testhd-<tag>.  Reading build/testhd-<tag> instead found
-# nothing and said so as "(none written)" -- indistinguishable from a run that
-# produced nothing, which is what a 1800 s soak looks like when it is voided by
-# a path.  tests/tcpdrill/run-tcpdrill.sh:112 carries the same line for the same
-# reason.
 HD="$ROOT/build/amiberry-testhd-$TAG"
 if [ ! -d "$HD" ]; then
     echo "no guest drive at $HD; the run wrote nowhere this can read" >&2

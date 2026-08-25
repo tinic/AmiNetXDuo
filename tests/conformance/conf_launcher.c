@@ -1,29 +1,5 @@
 /*
  * AmiNetXDuo, bsdsocktest launcher.
- *
- * tools/amiberry-run.sh runs the staged executable from s/Startup-Sequence with
- * no arguments, and gives it whatever stack the boot shell has (4 KB on
- * Kickstart 3.1).  bsdsocktest needs both: a ReadArgs command line to select
- * a CATEGORY or a HOST, and the 64 KB stack its own `__stack` global asks for
- * a libnix feature this newlib toolchain does not implement.
- *
- * So the harness runs this launcher instead.  It reads the command line from
- * a staged file and re-launches the suite as a child process with a real
- * stack:
- *
- *     DH0:conf-args    one line, e.g. "LOOPBACK VERBOSE NOPAGE"
- *     DH0:bsdsocktest  the suite itself
- *
- * Console output goes to DH0:conf-out.txt (the harness prints every *.txt it
- * finds); the TAP log goes where the suite's own LOG argument says, which
- * defaults to DH0:bsdsocktest.log.
- *
- * The crash guard is installed around the child so a Guru raised by the stack
- * under test is decoded to the serial log instead of killing the emulator
- * silently.  The Alert hook is machine-wide, so it covers the child too; the
- * trap handler is per-task and covers only this launcher, which is why the
- * child's own exceptions still show up as a dead process rather than a dump.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -44,7 +20,6 @@
 
 static char cmdline[512];
 
-/* Read the argument line, tolerating a missing file (= run the defaults). */
 static VOID read_args(VOID)
 {
     BPTR  fh;

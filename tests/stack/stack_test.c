@@ -1,52 +1,6 @@
 /*
  * AmiNetXDuo, the API from a 4 KB stack, and how much of it gets touched.
  *
- * WHY THIS EXISTS
- *
- * A bsdsocket.library vector runs on the CALLER's stack. An AmigaDOS Shell
- * gives a command 4 KB by default, there is no guard page and no MMU, so a
- * frame that does not fit does not fault, it writes over whatever lies below
- * the stack and the machine dies later, somewhere unrelated. That is the
- * opposite of a hosted C environment, where the same mistake is a clean
- * SIGSEGV at the instruction that made it.
- *
- * Every other harness in this tree hides that. tests/soak/fitz_soak.c,
- * tests/endurance/endurance.c and tests/concurrent/concurrent_test.c all spawn
- * their workers with a generous NP_StackSize, concurrent_test at 8 KB, the
- * others more, because a test that is about concurrency does not want to
- * think about stack. So nothing here has ever called the API from a stack a
- * real user's program would have.
- *
- * An A3000 owner on English Amiga Board reported applications freezing under
- * an ordinary file copy, a jerky pointer, then the machine gone, with an
- * upscroller of MungWall hits from this library in the Sashimi window as it
- * died, and said to go and look at stack usage in the API calls. He was
- * reading a stack overflow: on AmigaOS a Process's stack is itself an AllocMem
- * block, so running off the bottom of it lands in the guard MungWall put
- * there, which is exactly the "massive hitting" he saw.
- *
- * WHAT IT DOES
- *
- * A worker Process with NP_StackSize 4096, not a number chosen to be
- * dramatic, it is what `Execute` and the Shell hand out, then hammers the
- * entry points that matter: the loopback connect/send/recv/WaitSelect loop
- * that a file copy is made of, plus the resolver and interface calls, which
- * measurement says are the deep ones.
- *
- * The measurement is a low-water mark, not an estimate. The worker paints its
- * own unused stack with a pattern, works, and then scans up from tc_SPLower
- * for the first word that changed. That is the deepest address anything
- * actually wrote, so it counts what -fstack-usage cannot: the vendored NetX
- * Duo frames, the ThreadX port, and any interrupt or Exec call that borrowed
- * the stack on the way through.
- *
- * A run that overflows does not reach the report, so the parent watchdogs it
- * and a silent worker is a failure rather than a pass.
- *
- * Reaches the library through its LVOs and links nothing of the stack, for the
- * reason tests/leak/CMakeLists.txt gives: linking src/netstack would get a
- * second set of NetX Duo globals and measure the wrong stack.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -67,14 +21,6 @@
    that linked the stack would measure a second copy of it. */
 #include <aminetxduo/netstatus.h>
 
-/* ------------------------------------------------------------- the shape -- */
-
-/*
- * The AmigaDOS Shell default. Raise it from the command line to find the
- * headroom rather than only to pass:
- *
- *   cmake -DSTACK_TEST_STACK=8192 ...
- */
 #ifndef ST_STACK
 #define ST_STACK        4096UL
 #endif
@@ -90,27 +36,10 @@
 #define ST_PATTERN      0xA5C3A5C3UL
 #define ST_PHASES       13
 
-/*
- * Generous because the resolver calls are meant to fail and each one waits out
- * BSD_RESOLVE_TIMEOUT (src/bsdsocket/resolver.c). Waiting them out is the
- * point, the depth reached on the way to the timeout is the measurement,
- * and under SLIRP a lookup with nowhere to go has been seen to take
- * substantially longer than the 30 s nominal.
- */
 #define ST_TIMEOUT_TICKS (600 * 50)     /* 600 s at 50 ticks/s */
 
-/* The signal the worker sends the parent when it is done. */
 #define ST_DONE_SIGNAL  SIGBREAKB_CTRL_F
 #define ST_DONE_MASK    SIGBREAKF_CTRL_F
-
-/* --------------------------------------------------------------- the LVOs -- */
-
-/*
- * Offsets and register assignments from src/bsdsocket/bsdsocket_vectors.c and
- * the NDK's pragmas, not from counting in sixes. Every stub declares d1/a0/a1
- * clobbered, the one in tests/concurrent that did not turned an
- * IoctlSocket() into a call with a garbage request code (RESEARCH 42).
- */
 
 #define S_AF_INET       2
 #define S_SOCK_STREAM   1
@@ -442,11 +371,6 @@ static LONG s_getnameinfo(struct Library *base, StAddr *sa, LONG salen,
     return res;
 }
 
-/*
- * NetStackControl, AMI_NETSTATUS_CONTROL_LVO (-0x36c = -876).  The one entry
- * point here that is not part of the API a user program calls: it is how this
- * test provokes the thing it is trying to measure.
- */
 static LONG s_netstackcontrol(struct Library *base, ULONG op,
                               NetStatusControl *ctl)
 {
@@ -479,12 +403,6 @@ static LONG s_getdtablesize(struct Library *base)
     return res;
 }
 
-/* ------------------------------------------------------------- the shared -- */
-
-/*
- * Everything the worker reports back. It lives in the parent, because a worker
- * that runs out of stack cannot be relied on to hand anything over.
- */
 typedef struct StResult
 {
     ULONG   sr_Asked;               /* NP_StackSize we passed             */
@@ -500,14 +418,6 @@ typedef struct StResult
     ULONG   sr_Mark[ST_PHASES];     /* the mark as each phase ended       */
 } StResult;
 
-/*
- * The worker cannot report for itself. A Process made by CreateNewProc with no
- * NP_Output has no Output() to Printf to, so everything it "logs" goes nowhere
- * and a worker that overflows its stack could not be trusted to say so
- * anyway. It writes a phase number into the shared struct instead, and the
- * parent prints the phase names, including on the timeout path where the last
- * phase reached IS the failure report.
- */
 static const char * const st_phase_name[ST_PHASES] =
 {
     "before OpenLibrary",
@@ -528,14 +438,6 @@ static const char * const st_phase_name[ST_PHASES] =
 static StResult st_result;
 static struct Task *st_parent;
 
-/* ---------------------------------------------------------------- output -- */
-
-/*
- * Flushed per line: the emulator runner reads stdout out of a file after the
- * run, so a line still sitting in a buffer is a line that does not exist if
- * the program never exits, and never exiting is one of the two failures this
- * test is for.
- */
 static VOID st_log(const char *fmt, ...)
 {
     va_list ap;
@@ -560,21 +462,6 @@ static VOID st_check(LONG ok, const char *what, LONG detail)
     st_log("  FAIL %s (%ld)\n", (LONG)what, detail);
 }
 
-/* ------------------------------------------------------------ the painter -- */
-
-/*
- * Paint the worker's own unused stack, then read the mark back.
- *
- * tc_SPLower/tc_SPUpper bound the block CreateNewProc allocated. Painting
- * stops a margin below the current stack pointer so this function's own frame
- * and its return address survive being written over, taking the address of a
- * local is what the C standard gives us for "roughly where the stack is now".
- *
- * The mark is then the distance from tc_SPUpper down to the lowest word that
- * no longer holds the pattern, which counts every frame anything left behind,
- * including the vendored NetX Duo and ThreadX ones that -fstack-usage on our
- * own sources cannot see.
- */
 #define ST_PAINT_MARGIN     256
 
 static VOID st_paint(VOID)
@@ -602,12 +489,6 @@ static ULONG st_mark(VOID)
     if (lo == NULL || hi == NULL)
         return 0;
 
-    /*
-     * The stack that arrived, not the one asked for. AROS rounds NP_StackSize
-     * up to its own floor, 16 KB under the ROM the emulator tier boots, so
-     * a run that reports 4096 without checking would be measuring something
-     * else and calling it the Shell default.
-     */
     st_result.sr_Stack = (ULONG)((UBYTE *)hi - (UBYTE *)lo);
 
     for (p = lo; p < hi; p++)
@@ -619,11 +500,6 @@ static ULONG st_mark(VOID)
     return (ULONG)((UBYTE *)hi - (UBYTE *)p);
 }
 
-/*
- * Record that a phase finished, and what the mark was when it did. The
- * per-phase marks are what turn "976 bytes somewhere" into "the resolver cost
- * this much and the send loop cost that much".
- */
 static VOID st_phase(LONG which)
 {
     st_result.sr_Phase = which;
@@ -632,13 +508,6 @@ static VOID st_phase(LONG which)
         st_result.sr_Mark[which] = st_mark();
 }
 
-/* ------------------------------------------------------------- the server -- */
-
-/*
- * A peer, on a stack of its own choosing. It is not the thing under test,
- * the point is to give the 4 KB worker a real connection to drive, so this one
- * gets room and is not measured.
- */
 #define ST_PEER_STACK   16384UL
 
 static volatile LONG   st_peer_port;
@@ -700,7 +569,6 @@ static VOID st_peer_entry(VOID)
         if (conn < 0)
             continue;
 
-        /* Echo until the far end closes. */
         for (;;)
         {
             UBYTE buf[ST_CHUNK];
@@ -732,13 +600,6 @@ static VOID st_peer_entry(VOID)
     CloseLibrary(base);
 }
 
-/* ------------------------------------------------------------- the worker -- */
-
-/*
- * The whole point of the file: this runs on ST_STACK bytes and nothing else in
- * here may add to its frame, so the buffers are deliberately small and there
- * is no recursion.
- */
 static VOID st_worker_entry(VOID)
 {
     struct Library *base;
@@ -811,7 +672,6 @@ static VOID st_worker_entry(VOID)
             break;
         }
 
-        /* The WaitSelect loop a file copy is made of. */
         rd[0] = 1UL << fd;
         tv.tv_secs  = 5;
         tv.tv_micro = 0;
@@ -840,44 +700,6 @@ static VOID st_worker_entry(VOID)
 
     st_phase(3);
 
-    /*
-     * The resolver last, because it is the part that can hang.
-     *
-     * These lookups are meant to MISS, "localhost" is answered out of
-     * DEVS:Internet/hosts before netstack_resolve() enters the bracket at all,
-     * so a run that only asked for that would measure the shallow path and
-     * call it a pass. A name under .invalid (RFC 2606, guaranteed never to
-     * resolve) goes the whole way to the DNS client and one under .local goes
-     * down the mDNS branch, which is the deeper of the two. getnameinfo on an
-     * unroutable address (RFC 5737 TEST-NET-1) takes netstack_resolve_reverse
-     * the same way, and it is the deepest entry point measured.
-     *
-     * Failure is the expected answer; the depth reached on the way to it is
-     * the measurement. Each miss waits out BSD_RESOLVE_TIMEOUT, which is why
-     * this is minutes rather than seconds and why it runs after the loopback
-     * rounds instead of before them, a resolver that never comes back must
-     * not take the send/recv/WaitSelect figures with it.
-     */
-    /*
-     * THE CASE NOTHING USED TO MEASURE.
-     *
-     * netstack_dns_absorb_pending() reads the lease's options and reconciles
-     * the resolver, and it runs on the CALLER's stack, inside the lookup, at
-     * ami_ns_ask_name().  It only runs when a lease or a router advertisement
-     * is pending, so every clean run of this test walked straight past it: the
-     * DHCP marks are drained once at ami_netstack_dns_start(), on the startup
-     * process's stack, and after that a mark needs an event.
-     *
-     * NETCTRL_DHCP_RENEW is that event, on demand.  The renewal is asynchronous
-     * -- the state callback marks the interface when the ACK lands -- so this
-     * asks every interface, waits, and only then makes the deepest lookup.
-     * Phase 5's mark is therefore a lookup with the absorb on the path, and
-     * phase 7's is the same lookup without it.
-     *
-     * It needs a DHCP server on the link.  Without one every renew is refused,
-     * sr_Renewed stays zero, and the phase reports that instead of asserting:
-     * an unprovoked absorb must not read as a measured one.
-     */
     {
         static NetStatusControl ctl;    /* static: this is the 4 KB worker */
         LONG index;
@@ -898,9 +720,6 @@ static VOID st_worker_entry(VOID)
     }
     st_phase(4);
 
-    /* Long enough for a DISCOVER/REQUEST exchange and the state callback on a
-       real link; a lease that has not come back yet only means the absorb
-       lands on a later phase, and the high-water mark is over the whole run. */
     Delay(50 * 5);
 
     (VOID)s_gethostbyname(base, "no-such-host.invalid");
@@ -917,10 +736,6 @@ static VOID st_worker_entry(VOID)
     {
         UBYTE quad[4];
 
-        /* 127.0.0.1, which DEVS:Internet/hosts answers: this is here for the
-           entry point's own frame, not for the resolver below it, the deep
-           reverse path is getnameinfo's, and paying the timeout twice buys
-           nothing. */
         quad[0] = 127; quad[1] = 0; quad[2] = 0; quad[3] = 1;
         (VOID)s_gethostbyaddr(base, quad, 4, S_AF_INET);
         st_check(1, "gethostbyaddr returned", 0);
@@ -964,8 +779,6 @@ static VOID st_worker_entry(VOID)
     Signal(st_parent, ST_DONE_MASK);
 }
 
-/* ----------------------------------------------------------------- main -- */
-
 int main(int argc, char **argv)
 {
     struct Process *peer;
@@ -993,12 +806,6 @@ int main(int argc, char **argv)
     if (peer == NULL)
         return RETURN_FAIL;
 
-    /*
-     * The peer signals once it is listening, or once it has given up. Waited
-     * on with a bound rather than Wait(): a peer that died on the way would
-     * otherwise hang the whole harness with nothing printed, which is the one
-     * failure mode a test about crashes must not have.
-     */
     while ((SetSignal(0UL, 0UL) & ST_DONE_MASK) == 0)
     {
         Delay(10);
@@ -1032,10 +839,6 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /*
-     * A worker that overflowed does not get as far as signalling, so the
-     * timeout is the failure report rather than a formality.
-     */
     while ((SetSignal(0UL, 0UL) & ST_DONE_MASK) == 0)
     {
         Delay(10);
@@ -1051,11 +854,6 @@ int main(int argc, char **argv)
              "the worker came back", (LONG)waited);
     st_check(st_result.sr_Finished != 0, "the worker ran to the end", 0);
 
-    /*
-     * The per-phase marks. On a timeout this is the whole report: the last
-     * phase that completed is where the worker is stuck or died, and the
-     * worker has no Output() of its own to say so.
-     */
     st_log("\nmark after each phase (bytes of stack used):\n");
     {
         LONG ph;
@@ -1072,7 +870,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Let the peer notice the stop flag and close its listener. */
     Delay(150);
 
     st_log("\n");
@@ -1084,12 +881,6 @@ int main(int argc, char **argv)
     st_log("bytes echoed    %ld\n", st_result.sr_Bytes);
     st_log("dhcp renewed    %ld interface(s)\n", st_result.sr_Renewed);
 
-    /*
-     * Reported, not asserted. AROS rounds NP_StackSize up to 16 KB, so under
-     * the ROM the emulator tier boots the worker never gets the 4 KB it asked
-     * for and the mark is measured against what it did get. On Kickstart the
-     * two agree; a reader has to be able to tell which run this was.
-     */
     if (st_result.sr_Stack > st_result.sr_Asked)
         st_log("note: this ROM rounded the request up, so the headroom below "
                "is against %lu, not %lu\n",
@@ -1099,20 +890,10 @@ int main(int argc, char **argv)
              "the mark fits the stack that was granted",
              (LONG)st_result.sr_Deepest);
 
-    /*
-     * The number the report is really about: what the deepest call cost,
-     * against the 4 KB a Shell command gets, whatever this ROM handed out.
-     */
     st_check(st_result.sr_Deepest < ST_STACK,
              "the mark fits 4 KB, which is what a Shell command has",
              (LONG)st_result.sr_Deepest);
 
-    /*
-     * Headroom, not just survival. A run that touched all but a few dozen
-     * bytes passed by luck: the next Enforcer hit or a slightly different
-     * interrupt on the way through would have gone over. An eighth of a Shell
-     * stack is the bar.
-     */
     {
         ULONG spare = (st_result.sr_Deepest < ST_STACK)
                           ? (ST_STACK - st_result.sr_Deepest) : 0;
@@ -1121,17 +902,6 @@ int main(int argc, char **argv)
                  "an eighth of a Shell stack was still spare", (LONG)spare);
     }
 
-    /*
-     * The absorb, on its own, because the whole-run mark cannot tell it apart
-     * from anything else: phase 5 is a lookup with a lease pending on the path
-     * and phase 7 is the same lookup without one.
-     *
-     * Reported and not asserted when no renew was accepted -- no DHCP server
-     * on the link is a link this cannot ask the question on, and it must not
-     * answer it anyway.  Asserted when one was: the same eighth of a Shell
-     * stack, because a margin that only holds when nothing is pending is the
-     * defect this phase exists to catch.
-     */
     if (st_result.sr_Renewed == 0)
     {
         st_log("\nnote: no interface accepted NETCTRL_DHCP_RENEW, so the "

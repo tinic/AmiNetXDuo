@@ -1,32 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k correctness gate.
  *
- * Bignum bugs are input dependent: a carry that only propagates when a limb is
- * 0xFFFFFFFF, a modulus whose top limb is small, an exponent whose leading
- * bits are zero.  A handful of test vectors does not find those.  So this
- * program checks three things, in increasing order of how much they can hide:
- *
- *   1. Known answers from Python's arbitrary-precision integers
- *      (tests/crypto68k/gen_vectors.py).  Python shares no ancestry with
- *      either nx_crypto or crypto68k, so agreement is independent evidence
- *      rather than two implementations making the same mistake.  Includes the
- *      full RSA-2048 public and private operations.
- *
- *   2. The limb primitive against a straight-line C model, over random limb
- *      counts including 0 and 1, and with operands biased towards 0 and
- *      0xFFFFFFFF where the carry logic breaks.
- *
- *   3. The whole thing against the unmodified vendored implementation, over
- *      random moduli, random operands and random exponent lengths.  A
- *      differential test against the code this module is a drop-in for, so any
- *      disagreement is a bug in one of them.
- *
- * Everything is seeded from a constant.  A failure is reproducible.
- *
- * Run:
- *   AMINETXDUO_RUN_TAG=rsa20 ./tools/amiberry-run.sh        -t 300 build/cm/tests/crypto68k/crypto68k_test
- *   AMINETXDUO_RUN_TAG=rsa30 ./tools/amiberry-run.sh -c 68030 -t 300 build/cm/tests/crypto68k/crypto68k_test
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -49,8 +23,6 @@ static const char *const c68k_prim_names[3] =
     "MULU.W assembly, multiply-accumulate only"
 };
 
-
-/* ------------------------------------------------------------- buffers --- */
 
 #define T_MAX_LIMBS         64u             /* RSA-2048 */
 #define T_POWM_SCRATCH      4096u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
@@ -82,8 +54,6 @@ static VOID t_fail(const char *what, ULONG a, ULONG b)
 }
 
 
-/* --------------------------------------------------- 1. known answers ---- */
-
 static VOID t_known_answers(VOID)
 {
 
@@ -114,7 +84,6 @@ UINT    status;
     }
     c68k_log("  %lu small modexp vectors", (ULONG)i);
 
-    /* RSA-2048 public: m^e mod n, e = 65537. */
     status = c68k_mont_power_modulus(t_mine, t_msg, 64u, t_e, 1u, t_n, 64u,
                                      t_scratch, T_POWM_SCRATCH);
     t_checks++;
@@ -128,8 +97,6 @@ UINT    status;
         c68k_log("  RSA-2048 public (e=65537)  OK");
     }
 
-    /* RSA-2048 private, plain: m^d mod n.  The slow one, and the operation the
-       module exists for, so it gets a KAT. */
     status = c68k_mont_power_modulus(t_mine, t_msg, 64u, t_d, 64u, t_n, 64u,
                                      t_scratch, T_POWM_SCRATCH);
     t_checks++;
@@ -145,12 +112,6 @@ UINT    status;
 }
 
 
-/* ----------------------------------------------- 2. the limb primitive --- */
-
-/*
- * A model of c68k_addmul_1 written plainly enough that it cannot share a bug
- * with either the assembly or the optimised C: one 64-bit accumulator.
- */
 static c68k_limb t_addmul_model(c68k_limb *r, const c68k_limb *b, UINT n,
                                 c68k_limb a)
 {
@@ -245,14 +206,6 @@ UINT        mismatch = 0;
 }
 
 
-/* ------------------------------- 3. differential vs the vendored code ---- */
-
-/*
- * One Montgomery multiply and one Montgomery square, checked against
- * _nx_crypto_huge_number_mont() with the same n0inv.  At this level a carry bug
- * shows up as a single wrong limb rather than smeared over an exponentiation,
- * so it gets the most trials.
- */
 static VOID t_mont_differential(UINT trials)
 {
 
@@ -298,7 +251,6 @@ UINT                    bad_sqr = 0;
 
         n0inv = c68k_mont_n0inv(t_m[0]);
 
-        /* multiply */
         c68k_hn_set(&r_hn, t_ref_result, 0, T_MAX_LIMBS * 2);
         _nx_crypto_huge_number_mont(&m_hn, n0inv, &x_hn, &y_hn, &r_hn);
         c68k_mont_mul(t_mine, t_x, t_y, t_m, m_len, n0inv, t_work);
@@ -310,7 +262,6 @@ UINT                    bad_sqr = 0;
             t_fail("mont_mul", trial, m_len);
         }
 
-        /* square: mont(x, x) in the vendored code, c68k_mont_sqr here */
         c68k_hn_set(&r_hn, t_ref_result, 0, T_MAX_LIMBS * 2);
         _nx_crypto_huge_number_mont(&m_hn, n0inv, &x_hn, &x_hn, &r_hn);
         c68k_mont_sqr(t_mine, t_x, t_m, m_len, n0inv, t_work);
@@ -328,12 +279,6 @@ UINT                    bad_sqr = 0;
 }
 
 
-/*
- * Full exponentiations against _nx_crypto_huge_number_mont_power_modulus, with
- * the exponent length varied across the boundaries where the window logic
- * changes (1, 24, 80, 240 bits) and with exponents whose top limb has leading
- * zeros, the case the vendored code handles differently from this one.
- */
 static VOID t_powm_differential(UINT trials)
 {
 
@@ -361,11 +306,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
         c68k_rand_limbs(t_x, m_len);
         c68k_rand_limbs(t_exp, e_len);
 
-        /*
-         * Chop the exponent's top limb to a random width.  Leading zero bits
-         * of the top limb cost this module nothing, and uniformly random limbs
-         * almost never have them, so those cases are generated here.
-         */
         top_bits = (UINT)(c68k_rand() % 32u) + 1u;
         t_exp[e_len - 1] &= (c68k_limb)(0xFFFFFFFFUL >> (32u - top_bits));
         if (t_exp[e_len - 1] == 0)
@@ -416,9 +356,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
 }
 
 
-/*
- * Two cases the random generator will never produce but a caller might.
- */
 static VOID t_edge_cases(VOID)
 {
 
@@ -431,7 +368,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
     c68k_log("");
     c68k_log("5. Edge cases:");
 
-    /* m = 1 limb, x = 0. */
     t_m[0] = 0xFFFFFFFFUL;
     t_x[0] = 0;
     zero_e[0] = 5u;
@@ -513,8 +449,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
     c68k_log("  0^e, x^0, x^0 mod 1, even modulus, undersized scratch");
 }
 
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(VOID)
 {

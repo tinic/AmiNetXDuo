@@ -1,104 +1,10 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR THE RESOLVER API.
-#
-#   tests/tools/run-dns.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                          [-N BOARD] [-B IFACE]
-#
-# WHAT IT IS PROVING
-#
-#   1. AddDomainNameServer() NESTS.  "Adding the same address twice will
-#      require two calls RemoveDomainNameServer() to remove it again"
-#      (autodoc).  The failure this catches is not cosmetic: with a
-#      non-counting implementation, two programs share a name server, the
-#      first one exits, and the second one's resolver stops working.  The
-#      probe adds the running stack's own server a second time and removes it
-#      once, and the server must still be there.
-#
-#   2. dnsn_UseCount SAYS WHERE THE ENTRY CAME FROM.  Negative is "configured
-#      statically in the file", positive is a real count of run-time adds.
-#      This stack reported -1 for everything, which is right for the file's
-#      entries and wrong for DHCP's and for AddDomainNameServer()'s.  So the
-#      assertion is on both signs at once: the server this harness stages into
-#      DEVS:Internet/name_resolution is negative and the probe's own
-#      192.0.2.53 is positive, in the same list.
-#
-#   3. THE DEFAULT DOMAIN IS USED.  "If no domain name is part of a host name,
-#      a default domain name can be added to it if the host name lookup fails"
-#      (GetDefaultDomainName).  Get/SetDefaultDomainName used to be a property
-#      bag over a feature that did not exist, NetX Duo stores the domain and
-#      never reads it.  The control arm runs FIRST, with the domain cleared,
-#      so that the bare name is seen to fail before it is seen to succeed; and
-#      the bare name's answer must equal the fully qualified name's, which is
-#      what distinguishes "the retry resolved the right name" from "something
-#      answered".
-#
-#   4. inet_pton() TAKES ONLY DOTTED DECIMAL.  Its INPUTS are "numbers in the
-#      range 0..255"; it shared inet_addr()'s 4.3BSD parser, so
-#      inet_pton(AF_INET,"0177.0.0.1") succeeded as 127.0.0.1.  That is the
-#      allow-list bypass shape: a caller that uses inet_pton() to decide
-#      whether a string is a literal address sees one address and the next
-#      resolver sees another.  inet_addr() must keep taking those forms, so
-#      the probe asks both calls the same strings and this script asserts they
-#      DISAGREE.
-#
-#   5. A SHORT BUFFER TRUNCATES.  "The returned name is null-terminated unless
-#      insufficient space is provided" (gethostname), and its ERRORS are
-#      EFAULT and EPERM, there is no error for a name that does not fit.
-#      This stack answered -1/ENAMETOOLONG and wrote nothing, so a caller that
-#      sized its buffer from the autodoc got a failure the autodoc does not
-#      list.  The script asks one byte at a time and checks each prefix,
-#      including the length at which the terminator has to be dropped.
-#
-#   6. gethostname() ANSWERS THE MACHINE'S CONFIGURED NAME, and truncates.
-#      The autodoc's NOTES chain is the first online interface's address in
-#      the host database, then reverse resolution, then HOSTNAME, then
-#      "localhost".  This stack puts the configured name in front of all four
-#      ON PURPOSE and says why at src/bsdsocket/resolver.c:440-455: it is the
-#      same string DHCP option 12 announces and mDNS claims as <name>.local,
-#      and a gethostname() that disagrees with what the machine tells the
-#      network is the worse divergence.  src/config/config_hostname.c:97 then
-#      gives an unconfigured machine "amiga-<last three MAC bytes>", so the
-#      host-database step is unreachable whenever a card is present.
-#
-#      This group used to assert the autodoc's first step instead, and could
-#      not pass on any machine with a network card in it.  What it asserts now
-#      is the name the machine reports -- read out of the transcript, not
-#      named here, because it is derived from the MAC of whichever board -N
-#      put in -- and the truncation semantics, which is the regression this
-#      group was really guarding.
-#
-#   7. h_name IS THE OFFICIAL NAME.  A hosts entry matches on its aliases, so
-#      gethostbyname(alias) must answer with the entry's own name and list the
-#      alias in h_aliases.  It used to echo whatever the caller passed.
-#
-#   8. 255.255.255.255 IS A LITERAL.  "INADDR_NONE ... is a valid broadcast
-#      address, but inet_addr() cannot return that value without indicating
-#      failure" (autodoc BUGS).  The literal test was inet_addr(), so the
-#      broadcast address went to a name server as though it were a host name.
-#
 # THE ONE EXTERNAL DEPENDENCY, stated rather than hidden: the name server named
 # in AMINETXDUO_DNS_STATIC has to answer for www.example.com.  The default is
 # the LAN's own router.  If the fully qualified lookup fails the script says so
-# and fails, rather than passing on a dead resolver.
-#
 # BRIDGED, NEVER SLIRP.  -B names the host NIC to bridge onto and the string
 # `slirp` is refused outright.  The whole file used to run behind NAT -- the
-# staged name server was SLIRP's forwarder at 10.0.2.3 -- and every lookup it
-# makes now goes to a name server on the segment instead.
-#
-# ADDRESSES.  A STATIC address on that LAN rather than a lease, so the address
-# the hosts file names for this machine is the address the machine has: the
-# h_name assertions look that entry up by its own name and its alias.  The
-# default is below the block tests/tools/cards.sh hands to the card sweeps and
-# beside the .240 run-iperf.sh takes; AMINETXDUO_DNS_SELF, _GATEWAY and
-# _NETMASK move it.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -107,9 +13,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-# The bare-name lookups are meant to fail, and a failing lookup is the slow
-# one: the resolver retries every server before it gives up, twice over for
-# the arm that then retries with the domain appended.
 TIMEOUT=600
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
@@ -156,28 +59,17 @@ fi
     exit 2
 }
 
-# The static server this harness stages into DEVS:Internet/name_resolution, and
-# a name that exists under a domain reserved for exactly this (RFC 2606).  The
-# nesting assertions read this address back out of the list with use -1, so it
-# has to be the one in the file and not one a lease supplied.
 STATIC_DNS="${AMINETXDUO_DNS_STATIC:-192.168.1.1}"
 HOST="${AMINETXDUO_DNS_HOST:-www}"
 DOMAIN="${AMINETXDUO_DNS_DOMAIN:-example.com}"
 
-# The guest's own address, and the name the staged hosts file gives it. Both
-# gethostname()'s host-database step and the official-name assertions key off
-# this pair; nothing else in the tree does, so it is staged rather than added
-# to tests/netstack/devs.
 SELF="${AMINETXDUO_DNS_SELF:-192.168.1.239}"
 GATEWAY="${AMINETXDUO_DNS_GATEWAY:-192.168.1.1}"
 NETMASK="${AMINETXDUO_DNS_NETMASK:-255.255.255.0}"
 SELF_NAME=amiga-probe.localdomain
 SELF_ALIAS=amiga-probe
 
-# A MAC of its own, so two guests on this bridge cannot answer for each other.
 export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_DNS_MAC:-02:41:4d:49:00:d4}"
-
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/dns-stage"
 rm -rf "$STAGE"
@@ -190,9 +82,6 @@ cp "$PROBE" "$STAGE/DnsProbe"
 
 printf '%s %s %s\n' "$SELF" "$SELF_NAME" "$SELF_ALIAS" >> "$STAGE/devs/Internet/hosts"
 
-# STATIC, not the shared fixture's DHCP: gethostname() is asserted to derive
-# the guest's name from its own interface address in the hosts file above, and
-# a leased address is not known when that file is written.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
 DEVICE=a2065.device
 UNIT=0
@@ -203,18 +92,11 @@ GATEWAY=$GATEWAY
 STATE=up
 IFEOF
 
-# One name server, named here rather than leased, because the nesting
-# assertions read it back with use -1 and that sign is what says "this entry
-# came out of the file".  The shared fixture names SLIRP's forwarder.
 cat > "$STAGE/devs/Internet/name_resolution" <<NREOF
 nameserver $STATIC_DNS
 domain localdomain
 NREOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name in
-# DEVICE=.  Without it the line above stands whatever -N asked for, so every
-# board but the A2065 opens a2065.device against hardware that is not there and
-# the run reports a stack failure that is really a staging one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -228,8 +110,6 @@ cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:DnsProbe $STATIC_DNS $HOST $DOMAIN $SELF_NAME $SELF_ALIAS
 EOF
-
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dns}"
 
@@ -256,16 +136,12 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# A guru inside the caller is what a wrong list node shape produces, so the
-# first assertion is that the machine stayed up.
 STARTS=$(grep -c "SYS:DnsProbe" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once and ran the probe (no reset)"
 else
     fail "the probe line appears $STARTS times, the machine reset"
 fi
-
-# ---- inet_pton is strict, inet_addr is not -------------------------------
 
 pton_rc() {
     sed -n "s/^pton \"$1\" rc \([-0-9]*\) .*/\1/p" "$REPORT" | head -1
@@ -282,8 +158,6 @@ for good in "1.2.3.4" "0.0.0.0" "255.255.255.255" "127.0.0.1"; do
     fi
 done
 
-# The whole point: each of these must be refused by inet_pton and ACCEPTED by
-# inet_addr. A single shared parser cannot satisfy both columns.
 for bad in "0177.0.0.1" "0x1.2.3.4" "0x7f000001" "010.1.1.1" "127.1"; do
     RC=$(pton_rc "$bad")
     LAX=$(addr_of "$bad")
@@ -313,12 +187,6 @@ else
     fail "inet_pton(bad family) did not answer -1"
 fi
 
-# ---- gethostname ---------------------------------------------------------
-
-# THE NAME IS READ, not named.  Nothing in the guest's configuration names it,
-# so config_hostname.c's default applies and that is cut from the MAC of the
-# board -N asked for.  See the header: this is the stack's documented order and
-# not the autodoc's.
 HOSTNAME_GOT=$(sed -n 's/^hostname full: rc 0 "\(.*\)"$/\1/p' "$REPORT" | head -1)
 if [ -n "$HOSTNAME_GOT" ]; then
     pass "gethostname answers \"$HOSTNAME_GOT\", the machine's configured name"
@@ -328,9 +196,6 @@ else
     HOSTNAME_GOT="__no_name__"
 fi
 
-# And it is the shape config_hostname.c promises: the bare label, never
-# qualified, and a valid RFC 1123 one.  A name with a dot in it would be the
-# regression that comment names -- ShowNetStatus is what qualifies it.
 case "$HOSTNAME_GOT" in
     __no_name__) ;;
     *.*) fail "gethostname answered the qualified \"$HOSTNAME_GOT\"; the bare
@@ -338,10 +203,6 @@ case "$HOSTNAME_GOT" in
     *)   pass "and it is the bare label, not a qualified name" ;;
 esac
 
-# 14 is EFAULT: "the name or namelen parameter gave an invalid address".  Its
-# ERRORS list has EFAULT and EPERM and nothing else, and bsd_gethostname()
-# returns bsd_fail(SocketBase, AMI_EFAULT) on this path, so an errno that is
-# not 14 is the library's and not this test's.
 if grep -q "^hostname null: rc -1 errno 14$" "$REPORT"; then
     pass "gethostname(NULL) is -1 with EFAULT"
 else
@@ -349,9 +210,6 @@ else
     grep "^hostname null:" "$REPORT" >&2 || true
 fi
 
-# THE REGRESSION. Each of these used to be -1/ENAMETOOLONG with the buffer
-# untouched. A truncated name is not terminated, that is the only way the
-# caller can tell it was cut.
 for n in 1 2 3 4 5 6 7 8; do
     WANT=$(printf '%s' "$HOSTNAME_GOT" | cut -c "1-$n")
     if grep -Eq "^hostname $n: rc 0 errno [-0-9]+ \"$WANT\" term no\$" "$REPORT"; then
@@ -377,8 +235,6 @@ else
     grep "^hostname $((NLEN + 1)):" "$REPORT" >&2 || true
 fi
 
-# ---- the official name ---------------------------------------------------
-
 for asked in "$SELF_ALIAS" "$SELF_NAME"; do
     if grep -q "^official \"$asked\": name \"$SELF_NAME\" alias \"$SELF_ALIAS\"$" "$REPORT"; then
         pass "gethostbyname(\"$asked\") answers with the official name and the alias"
@@ -388,8 +244,6 @@ for asked in "$SELF_ALIAS" "$SELF_NAME"; do
     fi
 done
 
-# ---- the broadcast literal -----------------------------------------------
-
 if grep -q "^broadcast \"255.255.255.255\": 255.255.255.255$" "$REPORT"; then
     pass "255.255.255.255 is read as a literal, not sent to a name server"
 else
@@ -397,10 +251,7 @@ else
     grep "^broadcast " "$REPORT" >&2 || true
 fi
 
-# ---- the nesting count ---------------------------------------------------
-
 use_after() {
-    # "add 10.0.2.3 rc 0 use -2" -> -2
     sed -n "s/^$1 $2 rc [-0-9]* use \([-0-9]*\)$/\1/p" "$REPORT" | head -1
 }
 
@@ -417,7 +268,6 @@ else
     fail "adding the file's entry gave use '$(use_after add "$STATIC_DNS")', expected -2"
 fi
 
-# THE REGRESSION. Before the fix this dropped the entry outright.
 if [ "$(use_after remove "$STATIC_DNS")" = "-1" ]; then
     pass "one Remove undoes one Add, $STATIC_DNS is STILL in the list"
 else
@@ -442,7 +292,6 @@ else
     fail "removing $EXTRA twice gave use [$(echo "$REMOVES" | tr '\n' ' ')], expected 1 0"
 fi
 
-# 2 is ENOENT: "the IP address to remove was not found" (autodoc).
 if grep -q "^remove $EXTRA again rc -1 errno 2$" "$REPORT"; then
     pass "one Remove too many is -1 with ENOENT, not a silent success"
 else
@@ -455,8 +304,6 @@ if grep -q "^dnslist final: $STATIC_DNS use -1 " "$REPORT"; then
 else
     fail "the probe did not leave the name server list as it found it"
 fi
-
-# ---- the default domain --------------------------------------------------
 
 QUALIFIED=$(sed -n "s/^qualified \"$HOST\.$DOMAIN\": \(.*\)$/\1/p" "$REPORT" | head -1)
 BARE=$(sed -n "s/^bare \"$HOST\": \(.*\)$/\1/p" "$REPORT" | head -1)
@@ -488,7 +335,6 @@ else
     fail "the default domain store is still too small for the documented 255"
 fi
 
-# "success, FALSE if the default domain name is not set" (autodoc).
 if grep -q "^domain cleared: rc 0$" "$REPORT"; then
     pass "GetDefaultDomainName is FALSE once the domain is cleared"
 else

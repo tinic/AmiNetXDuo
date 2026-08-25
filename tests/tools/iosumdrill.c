@@ -1,37 +1,6 @@
 /*
  * IoSumDrill: n68k_port_in_w_sum() against an independent reference, in the
  * guest, on the real instructions.
- *
- * The fused drain-and-sum is the one routine in the receive path that no test
- * reaches.  The host tests cannot run it -- it is 68k assembler -- and the
- * emulated NE2000 arm never calls it, because the DP8390 claim path drains
- * without summing and reports summed = 0.  Only the 3c589 asks for the fused
- * form, and the 3c589 exists in one machine.  So it shipped unexamined, and a
- * three-byte tail miscomputed the sum: `lsl.l #8` positioned the last byte
- * using a register whose upper half still held the previous word, and that
- * word ORed itself into the answer.  A payload of 331 bytes -- which is what a
- * DHCP offer on an ordinary LAN is -- has a three-byte tail, so every offer
- * was rejected by the receive verifier and no lease could ever be taken.
- *
- * WHAT IT ASSERTS
- *
- * The port is a word of RAM, so every read returns the same value and the
- * drained buffer is predictable.  That is enough: what varies here is the
- * LENGTH, and the tail cases are what the routine gets wrong.  For each length
- * the drill checks two things against a reference written from the
- * specification rather than from the code under test:
- *
- *   the bytes -- the drain must place exactly what the port handed over, and
- *     not one byte more, so a run past the end shows up as a poisoned guard
- *     byte rather than as nothing at all;
- *   the sum -- the 32-bit ones-complement longword sum with per-add
- *     end-around carry and a zero-padded, byte-positioned tail, which is what
- *     n68k_copy_sum_longwords() produces over the same bytes and what the
- *     verifier will check against.
- *
- * Several port values are used because a wrong answer can be right by accident
- * for one of them: 0x0000 sums to zero however it is assembled, and a value
- * whose halves are equal hides a swap.
  */
 #include <exec/types.h>
 #include <exec/memory.h>
@@ -54,11 +23,6 @@ static VOID ck(const char *what, ULONG len, ULONG port, BOOL ok)
     }
 }
 
-/*
- * The reference, from the specification.  `port` is the word every read
- * returns, so byte i of the drained run is the high half of that word when i
- * is even and the low half when it is odd.
- */
 static UBYTE ref_byte(ULONG i, UWORD port)
 {
     return (UBYTE)(((i & 1UL) == 0UL) ? (port >> 8) : port);
@@ -103,18 +67,9 @@ static ULONG ref_sum(ULONG len, UWORD port)
 #define GUARD   0xA5u
 #define MAXLEN  1600UL
 #define PRE     4UL             /* guard bytes BEFORE the destination too:  */
-                                /* an underrun is as much a placement bug   */
-                                /* as an overrun, and buf[0] used to BE the */
-                                /* destination, so nothing could see one.   */
 
-/* The whole allocation: PRE guards, the destination, four tail guards. */
 #define ARENA   (PRE + MAXLEN + 4UL)
 
-/*
- * One drain into a guarded destination, verified byte for byte, both guard
- * bands, and the sum.  `buf` is the arena; the destination is buf + PRE,
- * which AllocMem keeps even, as the routine's contract requires.
- */
 static VOID one_into(UBYTE *buf, ULONG len, UWORD portval, const char *tag)
 {
     static volatile UWORD port;
@@ -178,15 +133,6 @@ static VOID one(ULONG len, UWORD portval)
     FreeMem(buf, ARENA);
 }
 
-/*
- * Two drains back to back, every pair of tail residues, the second call
- * verified as completely as the first.  The three-byte-tail bug was a
- * register carrying stale state WITHIN a call; this is the same class one
- * level up -- anything the routine leaves behind that poisons the next call,
- * which is exactly the position el3_rint puts it in when a burst of frames
- * is drained in one interrupt.  Different port values, so a leak from the
- * first drain cannot be right by accident in the second.
- */
 static VOID pair(ULONG len1, ULONG len2)
 {
     UBYTE *buf;
@@ -206,19 +152,6 @@ static VOID pair(ULONG len1, ULONG len2)
     FreeMem(buf, ARENA);
 }
 
-/*
- * The constant-port arms above have a blind spot by construction: every read
- * returns the same word, so a drain that read the port the wrong number of
- * times -- a word duplicated here, a word skipped there -- still writes the
- * expected bytes.  A LIVE port closes it: VHPOSR ($DFF006) is the video
- * beam's position and changes between reads, so consecutive words differ and
- * the check becomes SELF-consistency -- the returned sum must equal the
- * reference sum computed over whatever bytes actually landed in the buffer.
- * A sum that saw a word the buffer did not get, or missed one it did, cannot
- * match.  (The values are not predictable and do not need to be; ones'
- * complement addition commutes, so ordering is out of scope here and covered
- * by the constant arms' byte checks.)
- */
 static VOID live(ULONG len)
 {
     volatile UWORD *vhposr = (volatile UWORD *)0xDFF006UL;
@@ -292,10 +225,6 @@ int main(void)
 {
     static const UWORD ports[] = { 0x1234u, 0xFF01u, 0x8000u, 0x0001u,
                                    0xFFFFu, 0xABABu };
-    /* Every tail residue at several magnitudes, the two sizes this bug was
-       found at -- 331 is a DHCP offer's payload, 46 the shortest Ethernet
-       payload there is -- and the MSS edges a TCP receive drains all day:
-       1460 and its neighbours, and 1514, a full frame. */
     static const ULONG lens[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 32, 33, 34, 35,
                                   46, 100, 101, 102, 103, 328, 331, 512, 515,
                                   1458, 1459, 1460, 1461, 1462, 1463, 1514 };
@@ -310,8 +239,6 @@ int main(void)
             one(lens[l], ports[p]);
     }
 
-    /* Back to back, every ordered pair of tail residues, at a small length
-       (the register-reuse neighbourhood) and at the MSS. */
     for (r1 = 0UL; r1 < 4UL; r1++)
     {
         for (r2 = 0UL; r2 < 4UL; r2++)
@@ -321,7 +248,6 @@ int main(void)
         }
     }
 
-    /* The live port, every residue at three magnitudes. */
     for (l = 0UL; l < 4UL; l++)
     {
         live(64UL + l);

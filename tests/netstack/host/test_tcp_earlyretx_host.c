@@ -2,32 +2,6 @@
  * AmiNetXDuo, RFC 5827 early retransmit: what recovers a lost segment when the
  * flight is too small to produce three duplicate acknowledgments.
  *
- * Three duplicate acknowledgments are three segments arriving past the hole,
- * so a flight of fewer than four cannot produce them.  Below that the only
- * thing left is the retransmission timeout, and on this port that has a one
- * second floor against a lab round trip of a millisecond.  Section 2 lowers
- * the threshold to one less than the number of outstanding segments while
- * there are fewer than four of them.
- *
- * This cannot be measured on the rig.  A recovery that takes one round trip is
- * indistinguishable, at the guest's 20 ms clock, from a fetch that lost
- * nothing: tests/perf/run-reqresp.sh over eight arms could separate the tail
- * loss probe, which lands in a 200-899 ms band of its own, and could not
- * separate this from noise.  So the threshold is asserted here, against the
- * real acknowledgment path, where one duplicate either retransmits or does
- * not.
- *
- * It also pins the half that must NOT change: at four segments and above the
- * threshold is three, which is every bulk transfer.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_tcp_socket_state_ack_check.c, nx_tcp_socket_send_internal.c,
- * nx_tcp_socket_retransmit.c and nx_tcp_socket_create.c -- the whole path from
- * "a duplicate acknowledgment arrived" to "a segment went out again".
- *
- * Stubbed: everything that would touch a driver, a packet pool or another
- * thread, the same shim tests/netstack/host/test_tcp_rtt_host.c uses.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -38,8 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-/* ---------------------------------------------------------------- shim ---- */
 
 static ULONG h_now = 1000;
 
@@ -247,8 +219,6 @@ VOID _nx_tcp_socket_retransmit_queue_flush(NX_TCP_SOCKET *socket_ptr)
     (void)socket_ptr;
 }
 
-/* ------------------------------------------------------------- fixture ---- */
-
 #define H_SEG_BYTES     512
 #define H_BUF           1024
 #define H_PACKETS       8
@@ -337,18 +307,10 @@ static UINT h_dupack(void)
     return _nx_tcp_socket_state_ack_check(&h_sock, &hdr);
 }
 
-/* --------------------------------------------------------------- cases ---- */
-
 static void small_flight(void)
 {
     UINT before;
 
-    /*
-     * Two segments out and the first of them lost.  The peer holds the second
-     * and answers it with one duplicate acknowledgment, and there is no third
-     * segment to produce a second one: this is the whole of what a request and
-     * its response can ever elicit.
-     */
     h_fixture();
     (VOID)h_send();
     (VOID)h_send();
@@ -372,12 +334,6 @@ static void small_flight(void)
             "a flight of two retransmitted with early retransmit off");
 #endif
 
-    /*
-     * Three out, two duplicates.  The threshold is two here, so the first
-     * duplicate must not be enough: an early retransmit that fires one
-     * acknowledgment sooner than the flight justifies is a retransmission of
-     * something merely reordered.
-     */
     h_fixture();
     (VOID)h_send();
     (VOID)h_send();
@@ -403,11 +359,6 @@ static void large_flight(void)
 {
     UINT before;
 
-    /*
-     * Four segments can produce three duplicates, so the threshold is three
-     * and nothing here has moved.  This is every bulk transfer, and it is the
-     * half of RFC 5827 that must stay exactly as it was.
-     */
     h_fixture();
     (VOID)h_send();
     (VOID)h_send();
@@ -438,12 +389,6 @@ static void single_segment(void)
 {
     UINT before;
 
-    /*
-     * One segment out is the case no threshold reaches, because a duplicate
-     * acknowledgment is a later segment arriving and there is no later
-     * segment.  Nothing here should fire; what covers it is the tail loss
-     * probe, which is a timer and belongs to test_tcp_retries.
-     */
     h_fixture();
     (VOID)h_send();
 

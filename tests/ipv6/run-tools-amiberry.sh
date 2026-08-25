@@ -5,76 +5,6 @@
 #   tests/ipv6/run-tools-amiberry.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                    [-N BOARD] [-B IFACE] [-s]
 #
-# docs/RESEARCH.md 66 measured every command answering an IPv6 literal with
-# "cannot resolve", followed by advice to check the spelling and the name
-# servers, neither of which has anything to do with a literal.  This is the
-# test for the other side of that: a bare literal must never reach the
-# resolver, a real name failure must still say so, and the addresses the stack
-# configures must be visible through a shipped command.
-#
-# TWO MODES, PICKED FROM THE BUILD
-#
-# The build directory's CMakeCache decides which run this is.  Both are real
-# configurations and both are tested.
-#
-#   ipv6   -DAMINETXDUO_IPV6=ON.  ::1 exists, and the commands are asked to
-#          use it.  Default, build/v6.
-#   ipv4   the shipping default, IPv6 off.  ::1 does not exist, and the
-#          commands are asked the same questions anyway.  This is the half
-#          that was never run: the tools support IPv6 unconditionally and the
-#          library they talk to is built either way, so "what does this
-#          command say when the address is valid and the machine cannot use
-#          it" is a question only the IPv4-only build asks.  It found three
-#          commands giving the wrong answer, `host ::1` blamed the spelling,
-#          `nslookup ::1` reported NXDOMAIN for a literal, and `arp ::1`
-#          called a valid address "not an address".  This mode used to refuse
-#          to start.
-#
-# THREE GROUPS, AND WHY THE SCRIPT DOES NOT TREAT THEM ALIKE (ipv6 mode)
-#
-#   control   IPv4 and the machine itself.  A failure here is a defect, and it
-#             is the half that says an IPv6 change broke something that worked.
-#   v6        IPv6 through the commands.  Asserted since the toolsock
-#             conversion; a failure here is a regression.
-#   display   66's acceptance test: a configured ADDRESS6 shown by a command.
-#             Asserted since the NETSTATUS_ADDRESSES6 work.
-#   routes    AddNetRoute/DeleteNetRoute over IPv6, and the neighbour cache in
-#             arp.  The last two of 66.4's list.  A route accepted and never
-#             used would pass a test that only read the table back, so the
-#             assertion that matters is the one on the neighbour cache: adding
-#             an on-link prefix changes which address the next packet is
-#             solicited for.
-#
-# ping and traceroute joined the v6 group once bsdsocket.library grew an
-# AF_INET6 raw socket (RESEARCH 67); their replies are asserted, not pending.
-#
-# Exit 0 all clear, 1 a control or -s failure, 3 nothing but pending work.
-#
-# NO HOST-SIDE PEER, for tests/tools/run-livetools.sh's reason: with several
-# agents queued on the emulator lock a Python server's lifetime can expire
-# before the guest boots, and every case then fails with "connection refused",
-# which looks exactly like a broken command.  Everything here is either inside
-# the guest (::1, and nc listening on itself) or answered by the LAN's own
-# router, which is not a process anybody started for this run.
-#
-# BRIDGED, NEVER SLIRP.  This file used to be written around SLIRP's numbers:
-# it pinged fe80::2, asserted `arp` listed it as a router, leased 10.0.2.15 and
-# reasoned about 10.0.2.3 as a name server.  Every one of those is now READ OFF
-# THIS HOST at run time -- the default route on -B's interface for both
-# families, and the guest's own address out of the transcript -- so the
-# assertions are about a real segment and there is no address in this file that
-# a NAT stub has to invent.  -B names the NIC; `slirp` is refused outright.
-#
-# THE ROUTER IS REQUIRED, and named in the output.  A run on a segment whose
-# IPv6 router is not advertising would fail the neighbour assertions and read
-# as a defect in `arp`; this script stops before booting instead and says which
-# of the two is missing.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -86,8 +16,6 @@ cd "$ROOT"
 . "$ROOT/tools/serial-log.sh"
 
 MODEL=A1200
-# The ipv6 list spends about seven minutes of it on `wait` lines, unreachable
-# addresses and one deliberate 30 s resolver timeout, so 420 left no headroom.
 TIMEOUT=540
 BUILD="${AMINETXDUO_BUILD:-build/v6}"
 STRICT=0
@@ -115,9 +43,6 @@ case "$IFACE" in
 esac
 
 # ------------------------------------------------- what is on this segment ---
-#
-# Read, never assumed.  Both routers are what the guest will see, because the
-# guest is bridged onto the same wire this host is on.
 
 GW4="${AMINETXDUO_V6TOOLS_GW4:-$(ip -o -4 route show default dev "$IFACE" 2>/dev/null |
       awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i+1); exit } }')}"
@@ -164,8 +89,6 @@ for t in $STAGED_TOOLS ToolsSmoke; do
 done
 [ -f "$BSD" ] || { echo "missing $BSD" >&2; exit 2; }
 
-# Which run this is.  A cache that does not say ON is the shipping default,
-# and the ipv4 mode below is written for exactly that library.
 MODE=ipv4
 TAG=v4
 CACHE="$ROOT/$BUILD/CMakeCache.txt"
@@ -196,13 +119,6 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 for t in $STAGED_TOOLS; do cp "$TOOLS/$t" "$STAGE/$t"; done
 
-# DHCP for v4 as every other test has it, plus a static v6 address of our own.
-# STATIC rather than AUTO because an address this file names is one the test
-# can then look for by name; a SLAAC address depends on the MAC.
-#
-# The same file in both modes, deliberately: an IPv4-only library reads
-# CONFIGURE6 and ADDRESS6 as keys it has no build for, and the interface has
-# to come up on IPv4 regardless.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
 DEVICE=a2065.device
 UNIT=0
@@ -211,17 +127,11 @@ CONFIGURE6=STATIC
 ADDRESS6=fd00::10/64
 EOF
 
-# The shared fixture names SLIRP's forwarder, 10.0.2.3, which is nothing on
-# this segment: the resolver waits out its whole failover before falling back
-# on the server the lease carried, and this run makes a name lookup that is
-# MEANT to fail.  The lease is the only source here.
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 # No nameserver line: the DHCP lease on the bridge carries one.
 domain localdomain
 NREOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name
-# in DEVICE=.  Without it the line above stands whatever -N asked for.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -285,10 +195,6 @@ SYS:arp 2001:db8::2
 SYS:AddNetRoute DEFAULTGATEWAY fe80::1
 EOF
 else
-# Every command that takes a host, asked for an address this machine has no
-# transport for, plus the four that read or write the stack's own tables.
-# Nothing here waits on a peer: an address that cannot be reached is refused
-# before a socket is made, so the whole run is as fast as its two IPv4 cases.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus INTERFACES
@@ -340,10 +246,6 @@ set +e
 RUN_RC=$?
 set -e
 
-# tools/amiberry-run.sh writes build/amiberry-serial-<tag>.log.  This asked for
-# build/serial-<tag>.log, which is tools/enforcer-run.sh's spelling and which
-# no run of this harness has ever produced, so the serial branch below took the
-# `no serial output on this host` arm every time.
 SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
 RAW="$HD/tools.txt"
 [ -f "$RAW" ] || { echo "FAIL: the guest wrote no $RAW (run rc=$RUN_RC)" >&2
@@ -379,11 +281,6 @@ block() {
     ' "$REPORT"
 }
 
-# And the return code ToolsSmoke printed below it.  "?" when the command never
-# ran, which must not read as a pass.
-# Field 3 of "----- rc 0, 12 ms, free 1234 -----" is "0," with the comma
-# attached, so it never equals "0": worked() could never pass and failed()
-# could never fail.  Take the digits out of the line.
 code() {
     local rc
     rc=$(awk -v want="===== $1 =====" '
@@ -396,17 +293,11 @@ code() {
 have()    { block "$1" | grep -qiF -- "$2"; }
 have_re() { block "$1" | grep -qE -- "$2"; }
 
-# want CASE PHRASE WHY / deny CASE PHRASE WHY, and the _soon pair for the
-# work that is not in yet.
 want()      { if have "$1" "$2"; then ok   "$3"; else bad  "$3"; fi; }
 deny()      { if have "$1" "$2"; then bad  "$3"; else ok   "$3"; fi; }
 want_soon() { if have "$1" "$2"; then ok   "$3"; else soon "$3"; fi; }
-# The same, matching a set rather than one string: a neighbour's state depends
-# on how long ago it last answered, and every one of them is a pass.
 want_re()   { if have_re "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
-# failed CASE WHY / worked CASE WHY, the return code, for the cases where a
-# command must refuse rather than appear to have an answer.
 failed() { if [ "$(code "$1")" != "0" ]; then ok "$2"; else bad "$2"; fi; }
 worked() { if [ "$(code "$1")" =  "0" ]; then ok "$2"; else bad "$2"; fi; }
 
@@ -416,9 +307,6 @@ if serial_log_have "$SERIAL" "$BUILD" "the boot count off the serial log" \
     BOOTS=$(grep -c "netstack: starting ThreadX" "$SERIAL" || true)
     BOOT_SRC="the serial log"
 else
-    # `netstack: starting ThreadX` is an AMI_INFO call, so it is absent from
-    # any build without AMINETXDUO_LOG and the serial log is then 0 bytes.
-    # The transcript answers the same question, more weakly.
     BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
     BOOT_SRC="the transcript (the serial log is empty; build with
            -DAMINETXDUO_LOG=ON for the stronger instrument)"
@@ -433,14 +321,6 @@ else
 fi
 
 # ---- control: IPv4 still works, in both modes ----------------------------
-#
-# THE GUEST'S OWN ADDRESS IS READ, not named.  This file used to assert
-# 10.0.2.15, which is what SLIRP's DHCP server hands out first and no server
-# on a real segment does.  What the lease was is now taken off the line
-# AddNetInterface printed, and every later assertion about "the address this
-# machine has" is against that.  An empty one is a failure of its own: it is
-# what a run with no lease looks like, and matching an empty string would make
-# every assertion below pass.
 GUEST4=$(block "SYS:AddNetInterface eth0" |
          sed -n 's/.*online, address \([0-9][0-9.]*\).*/\1/p' | head -1)
 echo "ipv6-tools_guest4=${GUEST4:-none}"
@@ -462,18 +342,10 @@ else
 fi
 
 # ---- control: a real name failure must still name the resolver -----------
-#
-# The negative assertions below delete a message; this one proves it was only
-# deleted where it was wrong.  A command that answers every failure with
-# "connection refused" is not an improvement.
 want "SYS:nc no.such.host.invalid 80" "cannot resolve" \
      "a name that does not exist is still reported as a name failure"
 
 # ---- both modes: host refuses a literal, for the reason that is true ------
-#
-# `host` answers through the machine's resolver, and no build has a call that
-# reverses an IPv6 address, so the message is the same on both, and both
-# assert it.  It used to say "cannot resolve", then blame the spelling.
 failed "SYS:host ::1" "host ::1 fails"
 want "SYS:host ::1" "is an address, not a name" \
      "host says ::1 is an address rather than looking it up as a name"
@@ -487,11 +359,6 @@ deny "SYS:host ::1" "Check the spelling" \
      "host does not blame the spelling of a literal"
 
 # ---- both modes: nslookup asks ip6.arpa, whatever carries the query -------
-#
-# A PTR question about an IPv6 address is an ordinary DNS question and needs no
-# IPv6 to carry it.  Telling the literal from a name used to go through the
-# library's inet_pton(), which answers EAFNOSUPPORT on an IPv4-only library --
-# so this passed in one build and reported NXDOMAIN in the other.
 deny "SYS:nslookup ::1" "there is no such name" \
      "nslookup treats ::1 as an address, not a name"
 want "SYS:nslookup ::1" "ip6.arpa" \
@@ -503,9 +370,6 @@ want "SYS:NetTrace LOOPBACK NOCAPTURE BYTES=65536" "65536" \
      "NetTrace moved 65536 bytes over loopback"
 
 # ---- v6: a literal must not be handed to the resolver -------------------
-#
-# 66's exact defect.  The address is a literal in every one of these, so
-# nothing here should mention names, spelling or name servers.
 for c in "SYS:ping ::1 -c 2 -t 20" \
          "SYS:ping fd00::10 -c 2 -t 20" \
          "SYS:ping $ROUTER6 -c 2 -t 20" \
@@ -549,10 +413,6 @@ deny "SYS:traceroute ::1 -m 2 -q 1 -w 3 -n" "did not answer" \
      "traceroute ::1 reached its destination"
 
 # ---- display: 66's acceptance test --------------------------------------
-#
-# The stack really does configure this, an INFO-level library prints
-# "netstack: eth0 fd00::10/64" in the same boot, and until NETSTATUS_ADDRESSES6
-# no shipped command showed it, so a user could not tell whether ADDRESS6 took.
 want "SYS:ShowNetStatus ALL"        "fd00::10" \
      "ShowNetStatus ALL shows the configured fd00::10"
 want "SYS:ShowNetStatus INTERFACES" "fd00::"   \
@@ -563,20 +423,11 @@ want "SYS:ShowNetStatus ALL"        "fe80::"   \
      "ShowNetStatus ALL shows the link-local address"
 
 # ---- routes: AddNetRoute / DeleteNetRoute take an IPv6 prefix ------------
-#
-# 66.4's last item.  Two mechanisms and no third: NetX Duo has no
-# destination-to-next-hop table for IPv6, so a default router and an on-link
-# prefix are what there is to write, and a prefix given a next hop must be
-# refused with the reason rather than accepted and dropped.
 
 deny "SYS:AddNetRoute DEFAULTGATEWAY fd00::99" "four numbers with dots" \
      "AddNetRoute no longer answers an IPv6 literal with the IPv4 advice"
 want "SYS:AddNetRoute DEFAULTGATEWAY fd00::99" "fd00::99" \
      "AddNetRoute set an IPv6 default router"
-# Three seconds after it was added, which is the point: the once-a-second tick
-# in nxd_ipv6_prefix_router_timer_tick.c reads lifetime 0 as expired and drops
-# the entry, so a router asked for with the wrong constant is gone before any
-# command can print it.  This is the same call CONFIGURE6's GATEWAY6 makes.
 want "SYS:netstat -r" "fd00::99" \
      "the IPv6 default route is still there three seconds later"
 want "SYS:netstat -r" "::/0" \
@@ -603,20 +454,6 @@ want "SYS:AddNetRoute DEFAULTGATEWAY fe80::1" "fe80::1" \
      "AddNetRoute took a link-local router with one interface up"
 
 # ---- the route changed where the packet went ----------------------------
-#
-# This is the assertion the rest of the route work is for.  2001:db8::1 is not
-# on this link until the prefix above says it is, so packets for it are handed
-# to a router and neighbour discovery never asks about the address itself.
-# Once it is on link the stack solicits 2001:db8::1 directly, nothing answers,
-# and the cache gains an entry that did not exist before.
-#
-# Two things make this a test of the route rather than of the cache.  The
-# earlier `ping 2001:db8::1` sent to that address long before the route
-# existed, so a stack that did not discard its IPv6 destination cache would
-# still be handing the packets to the router and no entry would ever appear.
-# And the sample is taken while `nc` is still trying: an unanswered neighbour
-# entry is deleted after its third solicitation, so the connection attempt is
-# left running across the `arp` that reads it.
 deny "SYS:arp" "2001:db8::1" \
      "before the route there is no neighbour entry for 2001:db8::1"
 want "SYS:arp 2001:db8::1" "INCOMPLETE" \
@@ -641,11 +478,6 @@ want "SYS:arp 2001:db8::2" "reached through a router" \
 else # ------------------------------------------------------ ipv4 mode ----
 
 # ---- the shape every degraded answer has to have -------------------------
-#
-# Three things at once, and the first is what stops a command passing by going
-# quiet: it must refuse, it must give IPv6 as the reason, and it must not
-# reach for the resolver's vocabulary.  A command that printed nothing, or
-# that failed for a reason it kept to itself, fails here.
 degrades() {
     failed "$1" "$2 refuses rather than appearing to have an answer"
     want "$1" "IPv6"              "$2 gives IPv6 as the reason"
@@ -665,21 +497,10 @@ degrades "SYS:whois example.com SERVER ::1 PORT 7096"    "whois SERVER ::1"
 degrades "SYS:sntp fd00::10 TIMEOUT 5"                   "sntp fd00::10"
 degrades "SYS:fetch http://[::1]/index.html"             "fetch of an IPv6 URL"
 
-# The eight above share tool_sock_resolve(), so one of them proves the exact
-# words rather than only their shape.
 want "SYS:ping ::1 -c 2 -t 20" "this machine's network has no IPv6" \
      "the shared refusal names the machine's network, not the address"
 
 # ---- nslookup: the lookup this machine can still do ----------------------
-#
-# An ip6.arpa PTR travels over IPv4 like any other question, so this is not a
-# degradation case at all, it is the same answer the IPv6 build gives, and
-# the assertions above are shared with it.  Asserted here as well: it fails
-# for a wholly different reason than the commands above, and that is the point.
-# The dotted quad beside it, so the two reverse forms are asserted together.
-# Whether the server has a PTR for the router is the segment's business and
-# not this test's: what is asserted is the question, which the command builds
-# itself.
 want "SYS:nslookup $GW4" "in-addr.arpa" \
      "nslookup asked in-addr.arpa for $GW4"
 deny "SYS:nslookup $GW4" "is not a name the DNS can be asked about" \
@@ -766,11 +587,6 @@ fi
 
 echo
 
-# THE EMULATOR'S OWN STATUS IS PART OF THE VERDICT.  RUN_RC was read and then
-# used only in the "no transcript" message, so a run that timed out half way
-# through, or took an illegal instruction, or came up on a backend it did not
-# ask for, was graded on a partial transcript as if it had finished.
-# tools/amiberry-run.sh's header lists what 4, 5 and 124 mean.
 case "$RUN_RC" in
     0) ;;
     4)   bad "the guest is built for a CPU this machine does not have,\

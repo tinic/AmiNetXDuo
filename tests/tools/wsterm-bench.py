@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-#
 # What a browser terminal on a 68020 actually costs.
-#
-#   tests/tools/wsterm-bench.py ADDRESS [PORT]
-#
-# WHY THIS IS SEPARATE FROM THE DRILL
-#
-#   httpd-drill.py asserts.  This measures, and a measurement has no pass:
-#   "0.4 seconds to echo a line" is neither right nor wrong, it is the answer
-#   to "is this pleasant to use", and that question is answered by a person
-#   reading the number.  Mixing the two would either give the drill a
-#   threshold nobody can justify or give this a green tick that means nothing.
-#
-# WHAT IT MEASURES, AND WHAT EACH ONE IS FOR
-#
-#   upgrade_ms      connect to 101.  The cost of getting in at all, which is
-#                   what a person waits for after typing the address.
-#   prompt_ms       101 to the first byte the Shell prints.  This is
-#                   Execute() creating a process and a Shell starting up, and
-#                   it is the pause before a session looks alive.
-#   echo_rtt_ms     a whole line typed to that line's output, ten times, with
-#                   the median and the worst.  This is the number that decides
-#                   whether typing feels like typing.
-#   out_bytes_per_s the Shell printing as fast as it can, through the frame
-#                   encoder and the socket.
-#
-#                   READ THIS ONE CAREFULLY.  It is bounded by the Shell
-#                   EXECUTING COMMANDS and not by the link: forty Echos of 200
-#                   characters measured 2.88 s on an emulated A1200, which is
-#                   72 ms a command against a 23 ms round trip for one, so most
-#                   of it is the Shell parsing a line and not bytes moving.  A
-#                   pure output figure would need a command that prints a lot
-#                   in one go, and the only commands guaranteed to be on the
-#                   machine are the Shell's own built-ins.  So this is the
-#                   number for "a screenful of command output", which is what a
-#                   session actually does, and not a throughput ceiling.
-#
-#   Echo is used throughout because it is a Shell BUILT-IN: nothing is loaded
-#   from disk, so what is measured is the pipe, the frames and the socket
-#   rather than a filesystem.  A number that included a Load() would be a
-#   measurement of the emulated disk.
-#
 # SPDX-License-Identifier: MIT
 
 import base64
@@ -149,8 +108,6 @@ def main():
 
     print("upgrade_ms=%.0f" % t.upgrade_ms)
 
-    # The prompt.  Waited for by its ">" rather than by a fixed sleep: the
-    # number IS the wait.
     banner, took = t.read_until(b">", WAIT)
     if b">" not in banner:
         print("result=infra")
@@ -159,8 +116,6 @@ def main():
         return 2
     print("prompt_ms=%.0f" % (took * 1000.0))
 
-    # A line typed, and that line's output back.  Ten of them, because one is
-    # a sample of nothing and the spread is part of the answer.
     rtts = []
     for i in range(10):
         tag = "BENCH%02d" % i
@@ -178,12 +133,6 @@ def main():
     print("echo_rtt_ms_median=%.0f" % rtts[len(rtts) // 2])
     print("echo_rtt_ms_worst=%.0f" % rtts[-1])
 
-    # Output throughput.  One command that prints a lot, so the measurement is
-    # of the Shell writing and this side reading rather than of the round trip
-    # ten times over.  Echo of a long string, repeated by the Shell's own
-    # loop-free means: many Echos in one line, separated by semicolons is not
-    # AmigaDOS, so they are sent as one burst of lines instead and the timer
-    # runs from the first byte back to the last.
     line = "X" * 200
     burst = 40
     for _ in range(burst):

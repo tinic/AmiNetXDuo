@@ -1,43 +1,10 @@
 /*
- * traceroute, report the routers between here and a host.
+ * traceroute, report the routers between here and a host. Names and short forms
+ * are Roadshow's.
  *
- *     traceroute MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,
- *                WAIT=-w/N/K,VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K,
- *                IPV4=-4/S,IPV6=-6/S
- *
- *   MAXTTL      how far to go before giving up. Default 30.
- *   NUMERIC     addresses only, with no reverse lookup for each hop.
- *   QUERIES     probes per hop. Default 3.
- *   TOS         the type-of-service byte to send with.
- *   WAIT        seconds to wait for each probe. Default 5.
- *   VERBOSE     also report ICMP that arrives and is not an answer.
- *   PACKETSIZE  the whole datagram, headers included. Default 60.
- *   -4 / -6     pin the family the name resolves to. Without either, the
- *               library answers AF_UNSPEC and the selection rules pick, so on
- *               a dual stack there is otherwise no way to ask for the other.
- *
- * Names and short forms are Roadshow's. Three of Roadshow's options are
- * absent, and they are listed with reasons above the argument template below.
- *
- * Probes are ICMP echo rather than the classic Unix UDP datagrams. That began
- * as a limitation. A UDP probe left with the TTL nx_udp_socket_create() gave
- * it, NX_IP_TIME_TO_LIVE, whatever setsockopt(IPPROTO_IP, IP_TTL) said, so
- * every hop reported as the destination (measured on the wire, and
- * docs/RESEARCH.md 20.1 has the capture). That limitation is gone: IP_TTL,
- * IPV6_UNICAST_HOPS and an RFC 3542 IPV6_HOPLIMIT all reach a UDP send now.
- * The probe stays ICMP because a raw socket sees the TIME_EXCEEDED for its own
- * probes without a second socket and without the port-unreachable convention.
- *
- * IPv6 works the same way over IPV6_UNICAST_HOPS, once NetX Duo stopped
- * dropping the argument on the IPv6 side of that call (docs/RESEARCH.md 67).
- * TOS travels the same route: RFC 2474 gives the IPv4 TOS octet and the IPv6
- * traffic class octet the same meaning, so IPV6_TCLASS carries it
- * (docs/RESEARCH.md 68).
- *
- * A raw ICMP socket sees the whole ICMP input: TIME_EXCEEDED from each router,
- * ECHOREPLY from the destination, and any ICMP belonging to another program's
- * ping. Probes are matched by identifier and sequence, ours in the echo
- * request, and in the copy a router quotes back inside the TIME_EXCEEDED.
+ * Probes are ICMP echo rather than UDP datagrams: a raw socket sees the
+ * TIME_EXCEEDED for its own probes without a second socket and without the
+ * port-unreachable convention. Probes are matched by identifier and sequence.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -54,19 +21,9 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("traceroute");
 
 /*
- * Roadshow options not implemented here:
- *
- *   -p PORT       destination port of a UDP probe. There are no UDP probes
- *                 here (see above), so there is no port to set.
- *   -r DONTROUTE  SO_DONTROUTE. bsdsocket.library does not implement it and
- *                 NetX Duo has no equivalent to implement it with.
- *   -s SOURCE     the address to send from. bind() on a raw socket records an
- *                 address and nothing more, NetX Duo binds sockets to ports,
- *                 and the route chooses the source address of a raw datagram,
- *                 so the option would change nothing.
- *
- * Each would parse and then do nothing, so accepting them would misreport
- * which interface the probe left by.
+ * Roadshow options not implemented here: -p PORT (no UDP probes), -r DONTROUTE
+ * (bsdsocket.library does not implement SO_DONTROUTE), -s SOURCE (the route
+ * chooses a raw datagram's source address). Each would parse and do nothing.
  */
 #define TEMPLATE                                                        \
     "MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,WAIT=-w/N/K," \
@@ -91,10 +48,8 @@ enum
 #define TR_DEFAULT_QUERIES  3UL
 #define TR_DEFAULT_WAIT     5UL         /* seconds                          */
 
-/*
- * PACKETSIZE is the whole IP datagram. The floor is an IP header plus an echo
- * header with no payload.
- */
+/* PACKETSIZE is the whole IP datagram. The floor is an IP header plus an echo
+   header with no payload. */
 #define TR_DEFAULT_PACKET   60UL
 #define TR_MIN_PACKET       28UL        /* 20 IP + 8 ICMP                   */
 #define TR_MAX_PACKET       1400UL
@@ -125,13 +80,9 @@ static UBYTE tr_reply[2048];
 /* ------------------------------------------------------------- the clock, */
 
 /*
- * Tenths of a millisecond since the first call.
- *
- * ami_millis() counts whole milliseconds, which is too coarse for the first
- * hop on a local link, where every probe would round to zero. The EClock is
- * read directly instead, through the timer.device ami_millis() has already
- * opened (that is what TimerBase is), which is why the first call here is to
- * ami_millis() with its result discarded.
+ * Tenths of a millisecond since the first call. ami_millis()'s whole
+ * milliseconds are too coarse for a local first hop, so the EClock is read
+ * directly through the timer.device ami_millis() has already opened.
  */
 extern struct Device *TimerBase;        /* compat.c, for ReadEClock()        */
 
@@ -203,9 +154,8 @@ static UWORD tr_get16(const UBYTE *p)
 }
 
 /*
- * An ICMP echo request ready for the raw socket. IPv4 is checksummed here.
- * ICMPv6's checksum covers the IPv6 pseudo-header, so only the stack can
- * compute it and src/bsdsocket/raw.c does.
+ * An ICMP echo request ready for the raw socket. IPv4 is checksummed here;
+ * ICMPv6's checksum covers the IPv6 pseudo-header, so only the stack can.
  */
 static ULONG tr_build_echo(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 {
@@ -231,8 +181,7 @@ static ULONG tr_build_echo(BOOL v6, UWORD ident, UWORD seq, ULONG payload)
 
 /*
  * What one received datagram means for the probe we are waiting on. TR_OTHER
- * covers both somebody else's ICMP and a reply to a probe already given up on.
- * The caller goes back to waiting with the time it has left.
+ * covers somebody else's ICMP and a reply to a probe already given up on.
  */
 enum
 {
@@ -289,11 +238,9 @@ static LONG tr_classify(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
     if (icmp[0] == exceeded || icmp[0] == unreachable)
     {
         /*
-         * RFC 792 quotes the offending datagram's IP header and the first 64
-         * bits after it. RFC 4443 quotes as much of it as fits an unfragmented
-         * 1280-byte reply. Either way our probe's echo header, identifier and
-         * sequence included, is in there. Anything quoting less than that
-         * cannot be attributed.
+         * RFC 792 quotes the offending IP header and the first 64 bits after
+         * it; RFC 4443 quotes as much as fits 1280 bytes. Either way our echo
+         * header is in there. Anything quoting less cannot be attributed.
          */
         const UBYTE *orig = icmp + 8;
         ULONG        orig_hlen;
@@ -338,10 +285,8 @@ static LONG tr_classify(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
     return TR_OTHER;
 }
 
-/*
- * The one-letter annotations traceroute has printed since 1988 for an
- * unreachable. Codes not in the list print as their number.
- */
+/* The one-letter annotations traceroute has printed since 1988 for an
+   unreachable. Codes not in the list print as their number. */
 static VOID tr_print_unreach(BOOL v6, UBYTE code)
 {
     static char other[8];
@@ -383,10 +328,8 @@ static VOID tr_print_unreach(BOOL v6, UBYTE code)
 
 /* ------------------------------------------------------------------ names, */
 
-/*
- * gethostbyaddr(), LVO -0x0d8. Open-coded here rather than added to toolsock:
- * this is the only command in the tree that wants the reverse direction.
- */
+/* gethostbyaddr(), LVO -0x0d8. Open-coded here rather than added to toolsock:
+   this is the only command that wants the reverse direction. */
 static ToolHostEnt *tr_gethostbyaddr(struct Library *base, const UBYTE *addr,
                                      LONG len, LONG type)
 {
@@ -406,9 +349,8 @@ static ToolHostEnt *tr_gethostbyaddr(struct Library *base, const UBYTE *addr,
 }
 
 /*
- * " name (1.2.3.4)", or just " 1.2.3.4" under NUMERIC. The lookup is on by
- * default since -n turns it off, and runs once per distinct hop rather than
- * once per probe.
+ * " name (1.2.3.4)", or just " 1.2.3.4" under NUMERIC. Runs once per distinct
+ * hop rather than once per probe.
  */
 static VOID tr_show_address(struct Library *sb, const ToolAddr *address,
                             BOOL numeric)
@@ -592,8 +534,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * TOS is set once. Unlike IP_TTL on a UDP socket it does reach the wire:
-     * the raw send path hands it to nxd_ip_raw_packet_send() with the TTL.
+     * TOS is set once, and it does reach the wire: the raw send path hands it
+     * to nxd_ip_raw_packet_send() with the TTL.
      */
     if (tos != 0 &&
         tool_sock_setsockopt(sb, sock,
@@ -619,10 +561,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The identifier that makes a reply ours. Every raw ICMP socket on this
-     * machine is handed a copy of every ICMP packet that arrives, so a
-     * concurrent traceroute and ping each see the other's. The Task address is
-     * unique for as long as this command runs.
+     * The identifier that makes a reply ours: every raw ICMP socket is handed a
+     * copy of every ICMP packet that arrives. The Task address is unique for as
+     * long as this command runs.
      */
     ident = (UWORD)(((ULONG)FindTask(NULL) >> 2) & 0xffffUL);
     if (ident == 0)
@@ -635,8 +576,8 @@ int main(int argc, char **argv)
                 (LONG)host, (LONG)dotted, maxttl, packetsize);
 
     /* !interrupted as well as !done: the inner loops set it and tool_break()
-       has already eaten the signal, so a ttl loop that only re-polls would
-       see nothing and carry on -- one Ctrl-C ending one hop. */
+       has already eaten the signal, so a ttl loop that only re-polls would see
+       nothing and carry on -- one Ctrl-C ending one hop. */
     for (ttl = 1; ttl <= maxttl && !done && !interrupted; ttl++)
     {
         ToolAddr last_shown;            /* the address already printed      */
@@ -717,8 +658,7 @@ int main(int argc, char **argv)
 
                 /*
                  * Signed difference, not `now >= deadline`: the EClock's low
-                 * word wraps about every hundred minutes, and an unsigned
-                 * comparison across the wrap would wait out the rest of it.
+                 * word wraps about every hundred minutes.
                  */
                 if ((LONG)(now - deadline) >= 0)
                     break;
@@ -759,9 +699,8 @@ int main(int argc, char **argv)
                 {
                     /*
                      * ICMP that arrived and was not an answer to this probe.
-                     * Reported under -v: a router answering in an unexpected
-                     * way and nothing coming back at all are different faults
-                     * that otherwise look identical.
+                     * Under -v, because a router answering oddly and nothing
+                     * coming back at all otherwise look identical.
                      */
                     ULONG hlen = v6 ? 0UL
                                     : (ULONG)(tr_reply[0] & 0x0f) * 4UL;
@@ -794,8 +733,7 @@ int main(int argc, char **argv)
 
             /*
              * Either verdict ends the trace but not this hop: the remaining
-             * queries still run, so the last line carries as many timings as
-             * the others.
+             * queries still run.
              */
             if (verdict == TR_UNREACH)
                 tr_print_unreach(v6, code);

@@ -1,34 +1,6 @@
 /*
  * AmiNetXDuo, a TLS 1.2 handshake against a real public HTTPS server.
  *
- * tls_handshake.c runs both ends of the conversation, which measures the
- * arithmetic exactly and says nothing about interoperating with anybody else.
- * This talks to a host on the internet that has never heard of us, through
- * FS-UAE's SLIRP NAT, over the real SANA-II path:
- *
- *     DHCP -> DNS -> TCP -> ClientHello -> a chain we did not issue,
- *     verified against a root CA compiled in here -> HTTP GET -> a response.
- *
- * tls-v1-2.badssl.com exists to be connected to, speaks TLS 1.2, its chain is
- * two deep (leaf + Let's Encrypt R13) rather than the four Cloudflare and
- * SSL.com hand out, and, checked, not assumed, it will negotiate
- * TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, the same suite the loopback test
- * uses.  That last point matters on this machine: nx_crypto's AES-GCM is a
- * bit-serial GHASH at 345 ms per KB against AES-CBC's 22 ms, so a GCM suite
- * would make the transfer the slow part.
- *
- * Measured cost of that chain, 68020: three signature verifications totalling
- * 4.1 s, not 3 x 0.68 s, because ISRG Root X1 is a 4096-bit key and verifying
- * the intermediate against it is a 4096-bit modular exponentiation, roughly
- * 4x a 2048-bit one.  Root key size is a real term in a client's handshake
- * cost here, and the client does not get to choose it.
- *
- * Not a baseline: it depends on the internet, on DHCP from SLIRP, on a third
- * party's server and on a certificate that rotates every ninety days.  It is
- * built but never part of the pass/fail set.  Only one root CA is compiled in,
- * so it is no evidence that this stack can reach arbitrary sites; a real trust
- * store is a separate and larger problem.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -149,10 +121,8 @@ static UINT w_check(UINT ok, const char *what, ULONG detail)
 
 /* -------------------------------------------------------------- the run --- */
 
-/* Overridable so this can be aimed at tests/peer/httppeer.py's local PKI,
-   where the chain is short enough to verify at 14 MHz and the step-by-step
-   output below is the only working view into a handshake: tls.library links
-   no logger and RawPutChar loses characters to the emulated serial. */
+/* Overridable so this can be aimed at tests/peer/httppeer.py's local PKI, where
+   the chain is short enough to verify at 14 MHz. */
 #ifndef W_HOST
 #define W_HOST          "tls-v1-2.badssl.com"
 #endif
@@ -260,32 +230,9 @@ char                        line[96];
                                            ami_crypto_ecc_curves);
     (VOID) W_OK(status, "ecc curves registered");
 
-    /*
-     * WHAT THE CLIENTHELLO OFFERS IS NOT THE SAME LIST, and this offered all
-     * three.
-     *
-     * nx_secure_tls_ecc_initialize() writes the session's TLS list and the
-     * process-wide X.509 list from one call, so it is given the complete set
-     * for the sake of certificate chains -- a chain carries P-384 keys that
-     * still have to be checked -- and the session's own list is then narrowed
-     * to what is worth offering.  Without the narrowing,
-     * _nx_secure_tls_1_3_crypto_init() generates a key pair for every group
-     * the session lists, inside nx_secure_tls_session_start() and before the
-     * ClientHello leaves.  Measured here, A1200 68020 at 13.08 MHz:
-     *
-     *     P-256   1.1 s      P-384   4.5 s      P-521   8.9 s
-     *
-     * Fourteen and a half seconds of arithmetic between the TCP connect and
-     * the first byte of the handshake, for two groups no server in reach
-     * picks.  tls-v1-2.badssl.com closed the connection inside that window and
-     * nx_secure_tls_session_start() returned NX_NOT_CONNECTED at 14.8 s.  The
-     * peer was not at fault: this test was holding a connection open through
-     * fourteen seconds of work it had no reason to do.  Narrowed, the same
-     * step is 1.1 s and the ServerHello arrives 0.2 s later.
-     *
-     * tls.library does the same narrowing at src/tlslib/tls_conn.c:624, which
-     * is the difference between the shipping path and this one.
-     */
+    /* The session's offered-groups list is narrowed after
+       nx_secure_tls_ecc_initialize(): TLS 1.3 generates a key pair for every
+       group the session lists before the ClientHello leaves. */
     w_session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups =
         ami_crypto_ecc_offered_groups;
     w_session.nx_secure_tls_ecc.nx_secure_tls_ecc_supported_groups_count =
@@ -341,9 +288,8 @@ char                        line[96];
     handshake_us = ami_tls_eclock_micros(ami_tls_eclock() - start);
 
     /*
-     * One thread does everything here and is not registered as the client,
-     * there is no server half to tell it apart from, so fold both counter
-     * banks together rather than reading the one that happens to be empty.
+     * One thread does everything here and is not registered as the client, so
+     * both counter banks are folded together.
      */
     ami_tls_crypto_counters_get(&ops, &other);
 
@@ -368,8 +314,7 @@ char                        line[96];
 
     /* nx_secure_tls_protocol_version is the legacy record version and stays
        0x0303 on a TLS 1.3 connection (RFC 8446 5.1), so it is not the answer
-       to "which version did this negotiate".  Same translation TLSInfo()
-       does. */
+       to which version this negotiated. */
     w_log("  negotiated ciphersuite 0x%lx, TLS version 0x%lx",
           (ULONG)w_session.nx_secure_tls_session_ciphersuite ->
               nx_secure_tls_ciphersuite,

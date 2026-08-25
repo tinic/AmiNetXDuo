@@ -2,71 +2,6 @@
  * bsd_lib_expunge() on the host: does it DECLINE while the netstack says the
  * segment cannot be unloaded, and does it stop declining once that clears.
  *
- * WHAT THIS IS ABOUT
- *
- *   tx_amiga_kernel_stop() can refuse -- an application ThreadX thread is
- *   still alive, or a live zombie is outstanding -- and it can time out once
- *   stopping has begun.  Either way an Exec Task may still be executing code,
- *   or standing on a stack, inside this library's hunk.  Until 2026-08-18 the
- *   refusal was logged and then ignored: bsd_lib_expunge() handed the segment
- *   to UnLoadSeg() regardless, which is executing unloaded code on a machine
- *   with no MMU.  netstack_can_unload() now answers the question and expunge
- *   sets LIBF_DELEXP and declines.
- *
- *   That fix had no test.  This is it, and it runs the shipping
- *   bsd_lib_expunge(): src/bsdsocket/library.c is compiled whole into this
- *   binary, not copied, so a change to the guard changes what runs here.
- *
- * WHICH HALF IS COVERED AND WHICH IS NOT.  Read this before believing the
- * result, because the answer is "one of three":
- *
- *   the port      tx_amiga_kernel_stop() really refuses while application
- *                 threads exist, really leaves the kernel usable afterwards,
- *                 and really succeeds once they are gone.  COVERED, on the
- *                 emulator, by tools/smoke/KernelStop, which creates three
- *                 worker threads and asserts TX_THREAD_ERROR from an adopted
- *                 caller, then stops for real after they exit.  Nothing here
- *                 repeats it.
- *
- *   the library   a refusal reaches bsd_lib_expunge() and is enforced there.
- *                 COVERED HERE, and nowhere else.
- *
- *   the joint     ami_ns_kernel_stop_locked() leaves ami_ns_kernel_started
- *                 set when the stop fails, so netstack_can_unload() answers
- *                 FALSE afterwards, and netstack_startup() retries the stop
- *                 so a refusal can clear.  NOT COVERED, by this or by
- *                 anything else.  src/netstack/netstack.c cannot be compiled
- *                 on the host: it reaches NetX Duo's linux port headers,
- *                 which type ULONG as `unsigned long` against the shim's
- *                 `unsigned int`, and every structure it touches then has the
- *                 wrong shape.  netstack_can_unload() is stubbed here, and
- *                 what a stub proves about netstack.c is nothing.
- *
- *   NOR IS THE REFUSAL REACHABLE FROM A GUEST PROGRAM, which is why
- *   tests/tools/cycledrill.c cannot carry this test instead.  The stop
- *   refuses over an application TX_THREAD outliving the last close.  Inside
- *   bsdsocket the only application threads are the caller brackets, and every
- *   one of those is released by bsd_child_destroy() before the close reaches
- *   the netstack, and the stack's own threads, which netstack_shutdown()
- *   deletes before it stops the kernel.  The one path that genuinely leaves a
- *   TX_THREAD alive is an orphaned SANA-II reader (src/sana2/sana2_rx.c,
- *   "reader N did not stop"), and that needs a driver that ignores both
- *   AbortIO() and S2_OFFLINE.  A guest cannot ask for one.
- *
- * WHAT THE STUBS ARE ALLOWED TO DO
- *
- *   Nothing, unless the test said so.  Every Exec call and every library
- *   entry point outside library.c is recorded, and the ones this file has no
- *   business reaching abort() rather than returning a plausible value: on
- *   this path a call that happened at all is the finding.  That is the same
- *   rule tests/bsdsocket/host/shim/proto/exec.h states for its declarations.
- *
- *   The assertions are therefore not only "it returned NULL".  A decline that
- *   had already freed the netdb tables, closed the runtime or cleared the
- *   address-change hook would return NULL too, and would leave a library that
- *   is still loaded and still open-able with its teardown half done.  So each
- *   refusal checks that NONE of those ran.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -75,8 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* --------------------------------------------------------------- reporting */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -90,15 +23,6 @@ static unsigned long h_failures;
         }                                                                     \
     } while (0)
 
-/*
- * key=value, not prose.  A refusal that can only be read as the absence of a
- * crash is the state this test exists to end, so every case prints what it
- * saw as key=value, which is what a harness can read without grepping prose.
- *
- * delexp is -1 where the expunge succeeded.  The base has been handed to
- * FreeMem() by then, so there is no lib_Flags to report and a 0 would be a
- * reading of memory that is not the library's any more.
- */
 #define H_GONE  (-1)
 
 static VOID h_report(const char *name, LONG declined, LONG delexp,
@@ -110,13 +34,6 @@ static VOID h_report(const char *name, LONG declined, LONG delexp,
            (long)teardown_ran);
 }
 
-/* ------------------------------------------------------- the fake machine */
-
-/*
- * The segment the expunge is being asked to hand back.  A value, not NULL:
- * "returned nothing" and "returned the segment" have to be different answers,
- * and NULL is what a decline returns.
- */
 #define H_SEGLIST   ((APTR)0x600DBEEFUL)
 
 #define H_NEG       512U
@@ -133,7 +50,6 @@ static struct AmiSocketBase *h_base;
    and "still in the list" is a question with an answer. */
 static struct List           h_liblist;
 
-/* What the stubs saw. */
 static struct
 {
     LONG    can_unload_calls;
@@ -240,8 +156,6 @@ static LONG h_teardown_ran(VOID)
             h.remove_calls != 0) ? 1 : 0;
 }
 
-/* --------------------------------------------------------------- the stubs */
-
 /*
  * Reached, and expected.
  */
@@ -330,11 +244,6 @@ VOID Permit(VOID)                                { }
 VOID Disable(VOID)                               { }
 VOID Enable(VOID)                                { }
 
-/*
- * The event ring's mark.  Modelled rather than emptied: bsd_lib_expunge()
- * takes the mark back before it frees anything, and a stub would let a
- * revision that stopped doing so pass here.
- */
 static struct SignalSemaphore *host_semaphore;
 
 VOID AddSemaphore(struct SignalSemaphore *s)  { host_semaphore = s; }
@@ -353,11 +262,6 @@ BOOL host_event_mark_published(VOID)
 ULONG ami_millis_quick(VOID) { return 0UL; }
 VOID CacheClearU(VOID)                           { }
 
-/*
- * Everything else.  Reaching one of these from an expunge or a close is the
- * finding, so it says which and stops rather than returning something the
- * caller can carry on with.  Nothing here is a "reasonable default".
- */
 static VOID h_unreachable(const char *what)
 {
     printf("  FAIL %s was called; nothing on this path may reach it\n", what);
@@ -390,19 +294,8 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bs
 LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }
 VOID n68k_cpu_select(ULONG a) { (VOID)a; h_unreachable("n68k_cpu_select"); }
 
-/*
- * The vector table.  library.c names it in the romtag's init table and never
- * calls through it; one entry is enough to define the symbol.
- */
 const APTR BsdVectorTable[] = { (APTR)-1 };
 
-/* --------------------------------------------------------------- the tests */
-
-/*
- * The subject.  netstack_can_unload() says no, so the segment must not go
- * back, LIBF_DELEXP must be set so a later close retries, and NOTHING of the
- * teardown may have run.
- */
 static VOID t_refusal_declines(VOID)
 {
     APTR r;
@@ -430,10 +323,6 @@ static VOID t_refusal_declines(VOID)
              r == H_SEGLIST, h_teardown_ran());
 }
 
-/*
- * And it is not permanent.  The same base, asked again once the netstack says
- * the segment may go, expunges for real.
- */
 static VOID t_refusal_clears(VOID)
 {
     APTR r;
@@ -470,12 +359,6 @@ static VOID t_refusal_clears(VOID)
     h_report("cleared", r == NULL, H_GONE, r == H_SEGLIST, h_teardown_ran());
 }
 
-/*
- * An opener outranks the netstack: OpenCnt is checked first and the netstack
- * is not asked at all.  The order matters, an expunge that consulted a
- * torn-down netstack before noticing it still had callers would answer the
- * wrong question.
- */
 static VOID t_open_count_comes_first(VOID)
 {
     APTR r;
@@ -497,11 +380,6 @@ static VOID t_open_count_comes_first(VOID)
              r == H_SEGLIST, h_teardown_ran());
 }
 
-/*
- * The other three things that run out of this segment holding no open count.
- * Each one declines on its own, and each is checked against a netstack that
- * says yes, so a pass cannot be the netstack guard firing instead.
- */
 static VOID t_other_refusals(VOID)
 {
     APTR r;
@@ -533,12 +411,6 @@ static VOID t_other_refusals(VOID)
     h_report("netmon", r == NULL, 1, r == H_SEGLIST, h_teardown_ran());
 }
 
-/*
- * The retry itself.  LIBF_DELEXP is only worth setting if the last close acts
- * on it, so the close is driven rather than assumed: once with the netstack
- * refusing, which must decline again and leave the flag set, and once with it
- * agreeing, which must expunge.
- */
 static VOID t_last_close_retries(VOID)
 {
     APTR r;
@@ -577,11 +449,6 @@ static VOID t_last_close_retries(VOID)
              h_teardown_ran());
 }
 
-/*
- * An address-allocation worker is allowed to outlive the opener that launched
- * it. Its reference must keep the stack up while that opener exists or closes,
- * then perform the ordinary last-reference shutdown when the worker finishes.
- */
 static VOID t_transient_stack_reference(VOID)
 {
     LONG rc;
@@ -623,12 +490,6 @@ static VOID t_transient_stack_reference(VOID)
     h_report("transient", 0, 0, 0, h_teardown_ran());
 }
 
-/*
- * Both caller-stack fallbacks must give back the reference that a failed
- * netstack_startup() can leave standing.  The normal child path has always
- * done this; signal exhaustion and CreateNewProc() failure used to return the
- * error directly and leak the live stack to an opener that received NULL.
- */
 static VOID t_startup_fallback_ownership(VOID)
 {
     struct AmiSocketBase *opened;

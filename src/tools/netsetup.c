@@ -1,31 +1,8 @@
 /*
- * NetSetup, set up a network interface by answering questions.
- *
- *     NetSetup NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,
- *              DNS/K,IPV6=CONFIGURE6/K,ONLINE/S,NOONLINE/S,FORCE/S,QUIET/S
- *
- * Writes the DEVS:NetInterfaces/<name> keyword file from a few questions,
- * instead of requiring the SANA-II driver details to be known up front.
- *
- * In order:
- *
- *   1. lists the network drivers installed on this machine as a numbered
- *      choice
- *   2. opens the chosen driver to check the card answers, before writing
- *      anything, so a wrong unit number is caught at the question rather than
- *      three commands later
- *   3. asks whether the address is handed out (DHCP) or set here, and checks
- *      every value as it is typed
- *   4. shows what it is about to write and asks
- *   5. writes DEVS:NetInterfaces/<name>, and DEVS:Internet/routes and
- *      name_resolution when a fixed address needs them
- *   6. offers to start the network there and then
- *
- * Nothing is written until the last question is answered: every file is
- * composed in memory first, and an existing file is renamed to .old rather
- * than overwritten, so an abort or a full disk cannot leave a half-written
- * configuration behind. Q or Ctrl-C at any question stops with the disk
- * untouched.
+ * NetSetup, set up a network interface by answering questions: writes the
+ * DEVS:NetInterfaces/<name> keyword file, and DEVS:Internet/routes and
+ * name_resolution when a fixed address needs them. Nothing is written until
+ * the last question is answered, and an existing file is renamed to .old.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -38,10 +15,9 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("NetSetup");
 
 /*
- * IPV6 takes the CONFIGURE6 word, so an interface file for an IPv6-only
- * machine can be written by the command that writes every other one.  There is
- * no ADDRESS6 argument: a static IPv6 address is a two-line hand edit and
- * NetSetup's job is the machine that has nothing yet.
+ * IPV6 takes the CONFIGURE6 word. There is no ADDRESS6 argument: a static IPv6
+ * address is a two-line hand edit, and NetSetup's job is the machine that has
+ * nothing yet.
  */
 #define TEMPLATE \
     "NAME,DEVICE/K,UNIT/K/N,DHCP/S,ADDRESS/K,NETMASK/K,GATEWAY/K,DNS/K," \
@@ -86,10 +62,9 @@ typedef struct Plan
     BOOL  have_gateway;
     BOOL  have_dns;
     /*
-     * The CONFIGURE6 word to write, as given, or empty for "say nothing and
-     * let the default stand".  Not an AmiIp6Type: this command writes a file,
-     * it does not configure a stack, and the parser is the one place that
-     * decides what the word means.
+     * The CONFIGURE6 word to write, as given, or empty for "say nothing".
+     * Not an AmiIp6Type: this command writes a file, and the parser is the one
+     * place that decides what the word means.
      */
     char  configure6[TOOL_NAME_LEN];
     /* IPV6 was given AND no IPv4 addressing was: an IPv6-only interface. */
@@ -100,9 +75,7 @@ typedef struct Plan
 
 /*
  * Abort is a state rather than a return code, because every question can hit
- * it: Ctrl-C, "Q", or end of input. End of input is what NetSetup driven from
- * a script that ran out of answers looks like. Nothing has been written when
- * it stops.
+ * it: Ctrl-C, "Q", or end of input. Nothing has been written when it stops.
  */
 static BOOL setup_aborted;
 
@@ -113,9 +86,9 @@ static VOID abort_setup(const char *why)
 }
 
 /*
- * One line from the user, with the prompt flushed first. Returns NULL once the
- * setup has been aborted. Callers test setup_aborted rather than threading an
- * error code through every question.
+ * One line from the user, with the prompt flushed first. NULL once the setup
+ * has been aborted; callers test setup_aborted rather than threading an error
+ * code through every question.
  */
 static char *ask(const char *prompt, const char *suggestion, char *buf)
 {
@@ -171,9 +144,8 @@ static char *ask(const char *prompt, const char *suggestion, char *buf)
     }
 
     /*
-     * A console echoes what was typed and a file does not, so a scripted run
-     * would print its questions run together with no sign of the answers. Echo
-     * before acting on the answer, so a transcript shows the Q that stopped it.
+     * A console echoes what was typed and a file does not, so echo before
+     * acting on the answer: a transcript then shows the Q that stopped it.
      */
     if (!IsInteractive(Input()))
         tool_printf("%s\n", (LONG)buf);
@@ -295,9 +267,8 @@ static BOOL name_is_sane(const char *name)
 /* ---------------------------------------------------------------- writing, */
 
 /*
- * Files are built here in full and written in one go at the end, so an abort,
- * an out-of-disk or a Ctrl-C cannot leave DEVS:NetInterfaces holding half a
- * file for the stack to read and complain about.
+ * Files are built here in full and written in one go at the end, so an abort
+ * or a full disk cannot leave DEVS:NetInterfaces holding half a file.
  */
 typedef struct Blob
 {
@@ -647,8 +618,8 @@ static BOOL ask_device(Plan *plan)
 
 /*
  * Ask the card whether it is really there, before anything is written. A wrong
- * unit, or a driver for a card that is not installed, is otherwise found out
- * much later by a command that can only say "did not open".
+ * unit is otherwise found out much later by a command that can only say "did
+ * not open".
  */
 static BOOL check_device(Plan *plan, BOOL quiet)
 {
@@ -890,8 +861,7 @@ static VOID bring_up(const Plan *plan)
 
     /*
      * Run the real command rather than starting the stack here, so only one
-     * place knows how to start a network and the user sees whatever
-     * AddNetInterface says about a failure.
+     * place knows how to start a network.
      */
     rc = SystemTagList((CONST_STRPTR)line, NULL);
 
@@ -899,8 +869,7 @@ static VOID bring_up(const Plan *plan)
     {
         /*
          * Not on the command path: the commands need not have been copied to
-         * C: yet, as just after an installer unpacked them elsewhere. Look
-         * next to this binary before giving up.
+         * C: yet. Look next to this binary before giving up.
          */
         char alt[PATH_LEN + 40];
 
@@ -989,10 +958,8 @@ int main(int argc, char **argv)
     plan.have_gateway = FALSE;
     plan.have_dns     = FALSE;
     /*
-     * Both of these are only assigned when IPV6= is given, and the writer
-     * decides whether to emit a CONFIGURE6 line on configure6[0] alone. Left
-     * uninitialised, a call without IPV6= wrote whatever was on the stack
-     * into the interface file, which the stack then reads back.
+     * Both are only assigned when IPV6= is given, and the writer decides
+     * whether to emit a CONFIGURE6 line on configure6[0] alone.
      */
     plan.configure6[0] = '\0';
     plan.ipv6_only     = FALSE;
@@ -1081,9 +1048,8 @@ int main(int argc, char **argv)
 
         /*
          * IPV6 alone, with no DHCP and no ADDRESS, is the IPv6-only machine.
-         * OFF is not: an operator switching IPv6 off has said nothing about
-         * how IPv4 is configured, and an interface with neither is the file
-         * that has no address at all.
+         * OFF is not: an interface with neither family is a file with no
+         * address at all.
          */
         plan.ipv6_only = (BOOL)(!plan.dhcp && plan.address == 0 &&
                                 tool_stricmp((const char *)args[ARG_IPV6],
@@ -1207,8 +1173,7 @@ int main(int argc, char **argv)
     {
         /*
          * Nobody is being asked anything, so an existing interface file is not
-         * replaced on a guess: an installer re-run must not quietly discard a
-         * working configuration.
+         * replaced on a guess.
          */
         tool_error("%s already exists", (LONG)ifpath);
         FreeArgs(rda);
@@ -1288,10 +1253,9 @@ int main(int argc, char **argv)
         }
     }
 
-    /* All the files are in place, so the interface's .old rollback backup is
-       no longer needed and is deleted.  Left in DEVS:NetInterfaces it would be
-       loaded as a second interface, because the drawer is read whole
-       (src/config/config_file.c). */
+    /* The interface's .old rollback backup is deleted: left in
+       DEVS:NetInterfaces it would be loaded as a second interface, because the
+       drawer is read whole. */
     if (kept_if)
     {
         char  keep[PATH_LEN + 8];

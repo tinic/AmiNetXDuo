@@ -2,37 +2,6 @@
  * src/bsdsocket/options.c on the host: setsockopt, getsockopt and the two
  * ioctls, at the SOL_SOCKET and IPPROTO_TCP levels.
  *
- * WHY THIS FILE EXISTS
- *
- *   options.c was outside the host tier until the struct timeval collision
- *   was resolved, for the same reason select.c was: SO_RCVTIMEO, SO_SNDTIMEO
- *   and their two conversion helpers read tv_secs and tv_micro, and the C
- *   library owns the tag.  host_prelude.h renames it, so the whole file
- *   compiles here now and the timeout conversions -- the part that was
- *   unreachable -- are what most of the assertions below are about.
- *
- *   Everything in this file used to be provable only on the emulator, which
- *   .github/workflows/emulator.yml runs on a nightly cron and on a tag, never
- *   on a push.
- *
- * WHAT IS COVERED AND WHAT IS NOT
- *
- *   COVERED: the SOL_SOCKET and IPPROTO_TCP options that are decided in this
- *   file -- the timeout conversions in both directions, SO_ERROR's read and
- *   clear, SO_LINGER's bounds, SO_EVENTMASK, the flag options, the refusals,
- *   and FIONBIO/FIONREAD.
- *
- *   NOT COVERED: anything options.c delegates.  IPPROTO_IPV6 goes to
- *   bsd_setsockopt_ipv6()/bsd_getsockopt_ipv6() in src/ipv6, the membership
- *   options to bsd_mcast_*() and the ancillary-data options to
- *   bsd_cmsg_option(); all are stubbed, and what a stub proves about the file
- *   it stands in for is nothing.  What IS proved is that options.c routes to
- *   them, which is the half that lives here.
- *
- *   The build is the shipping one: AMINETXDUO_IPV6 and AMINETXDUO_MULTICAST
- *   are set project-wide, so the switch statements compiled here have the same
- *   arms as the ones that ship.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -47,8 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* --------------------------------------------------------------- reporting */
-
 static unsigned long h_checks;
 static unsigned long h_failures;
 
@@ -60,8 +27,6 @@ static unsigned long h_failures;
             printf("  FAIL %s\n", (what));                                    \
         }                                                                     \
     } while (0)
-
-/* ------------------------------------------------------------ the fixture */
 
 #define H_FDS   2
 #define H_RATE  ((ULONG)NX_IP_PERIODIC_RATE)
@@ -115,8 +80,6 @@ static AmiSocket *h_udp(LONG fd)
     return s;
 }
 
-/* -------------------------------------------------------------- the stubs */
-
 VOID Forbid(VOID) { }
 VOID Permit(VOID) { }
 
@@ -150,14 +113,6 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 
 VOID bsd_nx_leave(struct AmiSocketBase *base) { (VOID)base; h.nx_leaves++; }
 
-/*
- * The four files options.c hands an option to.  Each records that it was
- * reached and answers what the fixture set, so a test can assert the routing
- * without asserting anything about the file behind it.
- *
- * bsd_cmsg_option() answers 1 for "not mine, carry on", which is the contract
- * its declaration states; the tests that reach it leave it at that.
- */
 LONG bsd_cmsg_option(struct AmiSocketBase *base, AmiSocket *sock, LONG level,
                      LONG optname, APTR optval, socklen_t *optlen, BOOL set)
 {
@@ -289,8 +244,6 @@ BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
 
 UINT anx6_scope(const ULONG *addr) { (VOID)addr; return 0; }
 
-/* --------------------------------------------- NetX Duo and ThreadX stubs */
-
 UINT _nxe_packet_length_get(NX_PACKET *packet_ptr, ULONG *length)
 {
     (VOID)packet_ptr;
@@ -348,12 +301,6 @@ UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 
 UINT _txe_mutex_put(TX_MUTEX *mutex_ptr) { (VOID)mutex_ptr; return TX_SUCCESS; }
 
-/* ------------------------------------------- SO_RCVTIMEO and SO_SNDTIMEO */
-
-/*
- * The conversion in both directions, which is the whole of what the struct
- * timeval collision used to hide from this tier.
- */
 static void t_timeouts(void)
 {
     AmiSocket     *s;
@@ -379,12 +326,6 @@ static void t_timeouts(void)
     CHECK(rc == 0 && s->as_RcvTimeout == 1,
           "one microsecond rounds up to one tick, not to none");
 
-    /*
-     * Rounded up and not truncated, which is a different claim from the one
-     * above: 30000 microseconds is a tick and a half at the Amiga's 50 Hz, and
-     * a socket must never wait less than the caller asked for.  Written as the
-     * contract rather than as a tick count so it holds at any tick rate.
-     */
     h_reset();
     s = h_tcp(0);
     tv.tv_secs = 0; tv.tv_micro = 30000;
@@ -436,7 +377,6 @@ static void t_timeouts(void)
     CHECK(s->as_SndTimeout == 3 * H_RATE && s->as_RcvTimeout == 0,
           "SO_SNDTIMEO sets the send timeout and only that");
 
-    /* Back out again. */
     h_reset();
     s = h_tcp(0);
     s->as_RcvTimeout = 2 * H_RATE;
@@ -466,8 +406,6 @@ static void t_timeouts(void)
           "a short buffer is EINVAL on the way out too");
 }
 
-/* ------------------------------------------------------ SO_ERROR's clear */
-
 static void t_so_error(void)
 {
     AmiSocket *s;
@@ -486,11 +424,6 @@ static void t_so_error(void)
     CHECK(rc == 0 && value == 111, "the pending error is reported");
     CHECK(s->as_SoError == 0, "and cleared by the read");
 
-    /*
-     * Clearing before validating meant a bad optval answered EFAULT and
-     * destroyed the pending error on the way out, and a non-blocking connect
-     * has no other way to find out why it failed.
-     */
     h_reset();
     s = h_tcp(0);
     s->as_SoError = 111;
@@ -511,8 +444,6 @@ static void t_so_error(void)
     CHECK(s->as_Nx.udp.nx_udp_socket_icmp_error == NX_SUCCESS,
           "and NetX Duo's own copy is cleared with it");
 }
-
-/* ------------------------------------------------- SO_LINGER's two bounds */
 
 static void t_linger(void)
 {
@@ -563,9 +494,6 @@ static void t_linger(void)
           "a short linger is EINVAL");
 }
 
-/* ------------------------------------------ the flag options and the event
- * mask, which are what getsockopt has to agree with */
-
 static void t_flags(void)
 {
     AmiSocket *s;
@@ -604,10 +532,6 @@ static void t_flags(void)
                          &h_base);
     CHECK((s->as_Flags & ASF_KEEPALIVE) != 0, "SO_KEEPALIVE sets");
 
-    /*
-     * SO_EVENTMASK is the AmiTCP V4 async event API's, and the FD_* bits it
-     * carries are select.c's.  A value, not a boolean.
-     */
     h_reset();
     s = h_tcp(0);
     value = FD_READ | FD_CLOSE;
@@ -639,8 +563,6 @@ static void t_flags(void)
     CHECK(value == 1, "SO_ACCEPTCONN answers for a listening socket");
 }
 
-/* ---------------------------------------------------------- the refusals */
-
 static void t_refusals(void)
 {
     AmiSocket *s;
@@ -669,10 +591,6 @@ static void t_refusals(void)
     CHECK(rc == -1 && h_base.sb_Errno == AMI_ENOPROTOOPT,
           "and on the way out as well");
 
-    /*
-     * A TCP-level option on a socket with no TCP under it.  Answering 1 or 0
-     * there described a level the socket does not have.
-     */
     h_reset();
     s = h_udp(0);
     len = (socklen_t)sizeof(value);
@@ -697,8 +615,6 @@ static void t_refusals(void)
     CHECK(rc == -1 && h_base.sb_Errno == AMI_ENOPROTOOPT,
           "an unknown level is ENOPROTOOPT");
 }
-
-/* ------------------------------------------- TCP_USER_TIMEOUT, ours alone */
 
 static void t_user_timeout(void)
 {
@@ -731,8 +647,6 @@ static void t_user_timeout(void)
           "and a socket with no TCP under it is refused");
 }
 
-/* ------------------------------------------------ FIONBIO and FIONREAD */
-
 static void t_ioctls(void)
 {
     AmiSocket *s;
@@ -757,11 +671,6 @@ static void t_ioctls(void)
     CHECK(rc == -1 && h_base.sb_Errno == AMI_EFAULT,
           "with no argument it is EFAULT");
 
-    /*
-     * shutdown(SHUT_RD) makes every later receive an EOF even if packets were
-     * queued beforehand, so FIONREAD must report what recv() can return and
-     * not bytes that are now intentionally hidden.
-     */
     h_reset();
     s = h_udp(0);
     s->as_Flags |= ASF_RDSHUT;

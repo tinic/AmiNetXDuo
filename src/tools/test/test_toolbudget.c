@@ -2,22 +2,6 @@
  * The tests for src/tools/toolbudget.c, how one connect timeout is divided
  * over the addresses a name resolved to.
  *
- * THE DEFECT THIS EXISTS TO END.  Every mistake this schedule can make is
- * invisible.  It produces no wrong answer, no error, nothing in a capture and
- * nothing in a log: the only symptom is a user waiting, and how long a
- * connect "should" take is not something anyone checks by eye.  So a change
- * that meant to stop giving up early on a slow address, and did, also turned
- * `telnet host` against a name with a blackholed AAAA and a refusing A from
- * ten seconds into roughly two hundred -- the stack's whole SYN schedule,
- * spent on a retry -- and every build was green.
- *
- * The cases below are that one, and the rest of toolbudget.h's six rules.
- * They are stated in seconds, because seconds are what the user experiences.
- *
- *   cc -std=c11 -Wall -Wextra -Isrc/tools \
- *      src/tools/test/test_toolbudget.c src/tools/toolbudget.c \
- *      -o test_toolbudget
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -36,13 +20,6 @@ static int checks;
             printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);         \
         }                                                                    \
     } while (0)
-
-/* ---------------------------------------------------------- the machine ---
- *
- * A walk of the whole list, driven exactly as tool_sock_connect_host() drives
- * it, against a table of what each address does.  Nothing is a socket: the
- * question is only how many seconds go by and which addresses are tried.
- */
 
 #define MAX_ADDR    4
 
@@ -145,8 +122,6 @@ static void walk(Walk *w, const Addr *addr, unsigned long count,
     }
 }
 
-/* ------------------------------------------------------------ the cases --- */
-
 /* The one from the backlog, and the reason this file exists. */
 static void test_telnet_no_timeout(void)
 {
@@ -159,9 +134,6 @@ static void test_telnet_no_timeout(void)
 
     walk(&w, addr, 2UL, 0UL);
 
-    /* Ten seconds on the AAAA, an immediate reset from the A, done.  This
-       used to be about 200: the AAAA was retried with the stack's whole SYN
-       schedule because "no timeout" was read as "unlimited budget left". */
     CHECK(w.elapsed == 10UL);
     CHECK(w.connected == -1);
     CHECK(w.ntries == 2);

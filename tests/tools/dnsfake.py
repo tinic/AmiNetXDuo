@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-#
 # The name server tests/tools/run-dnsguard.sh points the guest at.
-#
-#   tests/tools/dnsfake.py [--zone ZONE] [--bind ADDR] [--port N]
-#                          [--negative-ttl N]
-#
-# It is authoritative for four names and nothing else, and every one of them
-# is a shape a real resolver on the internet cannot be asked to produce on
-# demand:
-#
-#   plain.<zone>   an ordinary A record.  The control: if this does not
-#                  resolve, nothing else the run says means anything.
-#   alias.<zone>   a CNAME to target.<zone> and then target's A record, which
-#                  is how almost every name on the internet is served.  The
-#                  A record's owner name is the CNAME's target and not the
-#                  name that was asked.
-#   evil.<zone>    a NOERROR answer whose single answer-section A record is
-#                  owned by attacker.example -- a name in nobody's zone but
-#                  the attacker's.  A resolver that does not compare owner
-#                  names takes 10.6.6.6 as the answer for evil.<zone>.
-#   nx.<zone>      NXDOMAIN with an SOA in the authority section, which is
-#                  what RFC 2308 5 says how long the answer may be held for.
-#
-# --forward sends everything outside the zone to a real resolver and returns
-# its reply untouched, so the same run can also put a real answer in front of
-# the guest: a chain a real server built, with the compression pointers a real
-# server uses, which is not a thing the four names above exercise.
-#
-# Every query is written to stdout as one `Q <name> <type>` line, flushed, so
-# that the harness can count what reached the wire rather than infer it.
-#
 # SPDX-License-Identifier: MIT
 
 import argparse
@@ -73,9 +43,6 @@ def decode_name(msg, off):
             off += 1
             break
         if length & 0xC0 == 0xC0:
-            # A compression pointer ends this name; the offset the caller
-            # continues from is the one after the pointer, not after the
-            # target.
             target = ((length & 0x3F) << 8) | msg[off + 1]
             off += 2
             hops += 1
@@ -122,9 +89,6 @@ class Zone(object):
         """Returns (rcode, answers, authority)."""
         name = qname.rstrip(".").lower()
 
-        # The reverse direction reaches the cache by its own path
-        # (_nx_dns_host_by_address_get_internal), so one address has a PTR
-        # record and the rest of the space does not.
         if name.endswith(".in-addr.arpa"):
             arpa_soa = [rr("in-addr.arpa", TYPE_SOA, self.ttl,
                            soa_rdata(self.zone, self.negative_ttl))]
@@ -163,9 +127,6 @@ class Zone(object):
 
         if label == "evil":
             if qtype == TYPE_A:
-                # No CNAME, no relation to the question: a record about a
-                # name this server has no business answering for, sitting in
-                # the answer section of a NOERROR reply.
                 return RCODE_NOERROR, [rr("attacker.example", TYPE_A,
                                           self.ttl, a_rdata("10.6.6.6"))], []
             return RCODE_NOERROR, [], []
@@ -230,8 +191,6 @@ def serve(sock, zone, upstream):
 
         rcode, answers, authority = zone.answer(qname, qtype)
 
-        # QR, AA, and the RCODE.  The question is echoed verbatim, which is
-        # what a resolver ties the answer to the name with.
         header = struct.pack("!HHHHHH", ident, 0x8400 | rcode, 1,
                              len(answers), len(authority), 0)
         body = request[12:off + 4] + b"".join(answers) + b"".join(authority)

@@ -1,24 +1,6 @@
 /*
  * The tests for src/tools/httplock.c, the WebDAV lock table.
  *
- * Every rule here is a decision to refuse somebody, and both mistakes are
- * quiet.  A table that covers too little lets two clients write one file,
- * which shows up as one of them losing work with no error anywhere.  A table
- * that covers too much refuses a client holding the right token, which shows
- * up as a mount that cannot save and a 423 the client does not explain.
- * Neither is visible in a transcript without knowing the answer beforehand.
- *
- * The rules are RFC 4918: §6.6 for expiry, §7.1 for a collection locking its
- * own member namespace, §9.6 for a DELETE destroying what it removes, and
- * §9.10 for depth.  Each is one case below.
- *
- * Paths are AmigaOS paths, because that is what the server locks.  A device
- * ends in ':' and is the top, and comparison is case-insensitive.
- *
- *   cc -std=c11 -Wall -Wextra -Isrc/tools \
- *      src/tools/test/test_httplock.c src/tools/httplock.c \
- *      src/tools/httppath.c -o test_httplock
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -41,8 +23,6 @@ static int checks;
 #define TOKEN  "opaquelocktoken:aabbccdd"
 #define OTHER  "opaquelocktoken:11223344"
 #define NONE   ""
-
-/* ------------------------------------------------------------- the world --- */
 
 static void copy(char *dst, unsigned long len, const char *src)
 {
@@ -74,8 +54,6 @@ static HttpLock *place(const char *path, const char *token,
 
     return l;
 }
-
-/* ---------------------------------------------------------------- depth --- */
 
 /*
  * RFC 4918 §9.10.1.  A Depth: 0 lock is that resource and nothing else.  A
@@ -136,8 +114,6 @@ static void test_case_insensitive(void)
     CHECK(httplock_covers(httplock_on("WORK:PUBLIC", 50), "WORK:PUBLIC") == 1);
 }
 
-/* --------------------------------------------------------------- expiry --- */
-
 /*
  * RFC 4918 §6.6.  Expiry is lazy and the boundary is `now >= expires`, so a
  * lock whose expiry is this second is already gone.
@@ -169,8 +145,6 @@ static void test_expiry(void)
     CHECK(httplock_by_token(TOKEN, 99) != 0);
     CHECK(httplock_by_token(TOKEN, 100) == 0);
 }
-
-/* --------------------------------------------------------------- tokens --- */
 
 /*
  * RFC 4918 §9.10.  A token is what makes the holder the holder.  The table is
@@ -226,8 +200,6 @@ static void test_covers(void)
     CHECK(httplock_covers(l, "Work:Public/notes.txt") == 0);
 }
 
-/* ----------------------------------------------------------------- tree --- */
-
 /*
  * RFC 4918 §9.6.1.  DELETE and MOVE take everything below the address, so a
  * lock on something inside stops them even when the address itself is free.
@@ -278,8 +250,6 @@ static void test_drop(void)
     CHECK(httplock_exact("Work:Keep/b.txt") != 0);
 }
 
-/* --------------------------------------------------------------- parent --- */
-
 /*
  * RFC 4918 §7.1.  A lock on a collection, at any depth including 0, locks that
  * collection's internal member namespace.  Adding a name or taking one away
@@ -311,8 +281,6 @@ static void test_parent(void)
     CHECK(httplock_allows_parent(NONE,  NONE, "Work:new.txt", 50) == 0);
     CHECK(httplock_allows_parent(TOKEN, NONE, "Work:new.txt", 50) == 1);
 }
-
-/* ---------------------------------------------------------------- table --- */
 
 /*
  * The table is a fixed eight.  A ninth asker is told the server is busy, and

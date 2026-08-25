@@ -5,38 +5,6 @@
 #   tests/netstack/run-fitzquery.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
 # WHAT WENT WRONG
-#
-#   Reported from an A3000 with Fitz 1.21: `fitz serve ram: name ramdisk` in
-#   one shell and `fitz query` in another, and the machine lists nothing.
-#   Every other machine on the LAN lists the share, and throughput on the same
-#   box is fine, so this is not the network being down.
-#
-#   `fitz query` broadcasts "LIST\n" to 255.255.255.255:17710
-#   (fitz-common-client.c, fitz_pms_list_udp) and `fitz serve` binds that port
-#   on INADDR_ANY.  Ethernet is simplex, a card does not hear its own
-#   transmission, so a broadcast has to be copied back in software or the
-#   sender never sees it.  NetX Duo's _nx_ip_driver_packet_send() copies one
-#   back for a unicast to our own address and for a joined multicast group, and
-#   did not for a broadcast; see NX_ENABLE_IP_BROADCAST_LOOPBACK in
-#   port/netxduo-amiga/inc/nx_user.h and RESEARCH 45.
-#
-# WHY THIS RUNS FITZ AND NOT A HARNESS
-#
-#   tests/netstack/host/test_bcast_loopback_host.c already answers the question
-#   at the packet level, deterministically, in a millisecond.  What it cannot
-#   answer is whether the datagram reaches bsdsocket.library's recvfrom() and
-#   whether the reply, which the server unicasts back to the sender's
-#   ephemeral port on our own address, gets home.  This runs the reporter's
-#   two commands, on the released Fitz binary, and reads what the second one
-#   printed.
-#
-#   No host peer and no LAN: both halves are in the guest.  SLIRP is there only
-#   so the interface has an address to broadcast from.
-#
-# Needs build/fitz (tests/endurance/fetch-fitz.sh) and an a2065.device, which
-# is not ours to ship: point AMINETXDUO_A2065 at one, or drop a copy in
-# build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -95,11 +63,6 @@ cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$FITZ" "$STAGE/fitz"
 
-# The reporter's two commands.  `&` is SYS_Asynch: the server stays resident,
-# which is the whole point, it has to be listening when the query goes out.
-# `fitz query` with no host is the broadcast form; `fitz query localhost` is
-# the TCP form and would pass whether or not the broadcast is looped back, so
-# it is here as a control rather than as the assertion.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 wait 4
@@ -139,8 +102,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# One boot, or the transcript restarted from the top and means nothing --
-# tests/tools/run-livetools.sh explains why this is checked from the banner.
 BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$BOOTS" -gt 1 ]; then
     fail "THE MACHINE REBOOTED: $BOOTS starts in one run"
@@ -154,8 +115,6 @@ if grep -q "no named services found on LAN" "$REPORT"; then
     fail "'fitz query' found nothing, the broadcast did not come back"
 fi
 
-# The share, in the shape `fitz query` prints it: two spaces, the name, the
-# port and the server's pid.
 if grep -qE "^  ramdisk [0-9]+ [0-9]+" "$REPORT"; then
     pass "'fitz query' listed this machine's own share"
     grep -E "^  ramdisk [0-9]+ [0-9]+" "$REPORT" | sed 's/^/       /'
@@ -163,8 +122,6 @@ else
     fail "'fitz query' did not list 'ramdisk'"
 fi
 
-# Both queries, because the first one racing the server's bind would look the
-# same as a broadcast that is never delivered.
 LISTED=$(grep -cE "^  ramdisk [0-9]+ [0-9]+" "$REPORT" || true)
 if [ "$LISTED" -ge 2 ]; then
     pass "both queries listed it ($LISTED)"

@@ -1,24 +1,6 @@
 /*
  * AmiNetXDuo, AF_INET6 through bsdsocket.library's ABI.
  *
- * The third IPv6 test, and the only one that goes through the LVO jump table:
- * ipv6_test.c drives NetX Duo directly, ipv6_link_test.c drives the netstack,
- * and this one is an ordinary AmigaOS program that does
- * OpenLibrary("bsdsocket.library") and calls vectors, as a ported Unix
- * application would.  It is linked against none of our code.
- *
- * Everything happens over ::1, which nxd_ipv6_enable() configures on the
- * internal loopback interface, so the wire is not a variable.  What is under
- * test is the socket layer, sockaddr_in6 in and out of bind/connect/accept/
- * getsockname/getpeername, IPV6_V6ONLY, inet_ntop/inet_pton for AF_INET6,
- * getaddrinfo.
- *
- * The NDK's sockaddr_in6 is the Linux one (no sin6_len, family at offset 0)
- * sitting in a header whose sockaddr_in is 4.4BSD (sin_len at offset 0, family
- * at offset 1).  A stack that reads sa->sa_family generically gets the padding
- * byte.  Every sockaddr below is built the way a real application would build
- * it, so if that were wrong here, bind() would fail with EAFNOSUPPORT.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -32,13 +14,6 @@
 
 #include <stdarg.h>
 
-/*
- * The one header this program takes from us, and on purpose: RFC 3542's
- * ancillary data is struct shapes and macros, not vectors, so a caller has to
- * have them from somewhere.  Including it here is also the check that it
- * compiles standalone against the NDK, the CMSG_* macros it replaces are
- * <sys/socket.h>'s own.
- */
 #include <stddef.h>
 #include <sys/types.h>          /* ssize_t, which sys/socket.h uses but does
                                    not pull in for itself */
@@ -47,24 +22,14 @@
 #include <netinet/in.h>
 #include "aminetxduo/cmsg.h"
 
-/* The synthetic SANA-II device this test brings the stack up on. */
 #include "tapdev.h"
 
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
 #endif
 
-/*
- * Buffered, and flushed to stdout at the end, as ipv6_test.c does. Streaming
- * straight to RawPutChar() came back as several hundred NUL bytes in the
- * serial capture: this program logs in a tight burst with none of the pauses
- * ami_log() leaves between lines, and the emulator's serial capture does not
- * keep up. The buffer costs 8 KB of BSS.
- */
 #define T_LOG_SIZE      8192
 
 static char     t_log_buffer[T_LOG_SIZE];
@@ -133,17 +98,6 @@ static BOOL t_check(BOOL ok, const char *what, LONG detail)
 }
 
 
-/* -------------------------------------------------------------- the ABI -- */
-
-/*
- * Declared here rather than taken from the NDK's <netinet/in.h>, for the same
- * reason library_test.c declares its own LVOs: the layout is the thing under
- * test, so writing it out keeps the expectation independent of whatever
- * header is on the include path.
- *
- * This must match ndk-include/netinet/in.h:182 exactly, 28 bytes, family at
- * offset 0, no length byte.
- */
 struct t_in6_addr
 {
     UBYTE   s6_addr[16];
@@ -226,24 +180,6 @@ struct t_fdset
 #define T_TAP_ADDR          0x0A090901UL      /* tap0, 10.9.9.1 */
 
 
-/* ------------------------------------------------------------ LVO stubs --- */
-
-/*
- * Every stub declares three variables it never uses because d0, d1, a0 and a1
- * are scratch on AmigaOS: a library function may destroy them without saying
- * so.  An `asm` block that lists them only as inputs tells GCC the opposite,
- * that whatever was in them survives the call, and GCC will reuse the
- * "still valid" copy afterwards.  The first version of this file did that, and
- * `send()` returned the right value while `rc == sizeof(message)` compared
- * false immediately after, because GCC had kept `len` in d1 and the library
- * had overwritten it.
- *
- * The NDK's own idiom (see inline/bsdsocket.h, which declares
- * `register int _d1 __asm("d1"); register int _a0 __asm("a0");
- *  register int _a1 __asm("a1");` and lists them as "=r" outputs) names the
- * scratch registers and declares them written, so GCC knows their previous
- * contents are gone.  a2/a3/d2/d3 are callee-saved and need no such treatment.
- */
 #define BSD_SCRATCH                                                          \
     register LONG _s_d1 __asm("d1");                                         \
     register LONG _s_a0 __asm("a0");                                         \
@@ -770,8 +706,6 @@ BSD_SCRATCH;
 }
 
 
-/* ------------------------------------------------------------- helpers --- */
-
 static VOID t_bzero(APTR p, ULONG n)
 {
 UBYTE  *b = (UBYTE *)p;
@@ -794,7 +728,6 @@ static BOOL t_streq(const char *a, const char *b)
     return (BOOL)(*a == *b);
 }
 
-/* ::1 */
 static VOID t_make_loopback6(struct t_sockaddr_in6 *sa, UWORD port)
 {
     t_bzero(sa, sizeof(*sa));
@@ -803,7 +736,6 @@ static VOID t_make_loopback6(struct t_sockaddr_in6 *sa, UWORD port)
     sa->sin6_addr.s6_addr[15] = 1;
 }
 
-/* :: with a port */
 static VOID t_make_any6(struct t_sockaddr_in6 *sa, UWORD port)
 {
     t_bzero(sa, sizeof(*sa));
@@ -838,8 +770,6 @@ struct t_timeval tv;
 }
 
 
-/* ---------------------------------------------------------------- tests --- */
-
 static VOID t_test_conversions(VOID)
 {
 /* Both zeroed, so a call that returns success without writing its output
@@ -851,7 +781,6 @@ LONG                rc;
 
     t_log("address conversions");
 
-    /* pton then ntop must round-trip through the canonical RFC 5952 form. */
     rc = bsd_inet_pton(T_AF_INET6, (APTR)"2001:0db8:0000:0000:0000:0000:0000:0001",
                        &addr);
     (VOID)t_check((BOOL)(rc == 1), "inet_pton AF_INET6 accepts the long form", rc);
@@ -868,7 +797,6 @@ LONG                rc;
                       "inet_ntop wrote the RFC 5952 canonical form", 0);
     }
 
-    /* v4-mapped uses the dotted tail, as every other stack prints it. */
     rc = bsd_inet_pton(T_AF_INET6, (APTR)"::ffff:10.0.2.15", &addr);
     (VOID)t_check((BOOL)(rc == 1), "inet_pton accepts a v4-mapped address", rc);
     p = bsd_inet_ntop(T_AF_INET6, &addr, text, sizeof(text));
@@ -930,7 +858,6 @@ struct t_sockaddr_in  sa4;
     (VOID)bsd_getsockopt(fd, T_IPPROTO_IPV6, T_IPV6_V6ONLY_BSD, &value, &len);
     (VOID)t_check((BOOL)(value == 1), "IPV6_V6ONLY reads back as 1", value);
 
-    /* A sockaddr_in on an AF_INET6 socket is a programming error. */
     t_bzero(&sa4, sizeof(sa4));
     sa4.sin_len    = sizeof(sa4);
     sa4.sin_family = T_AF_INET;
@@ -940,7 +867,6 @@ struct t_sockaddr_in  sa4;
                   "bind(AF_INET6 socket, sockaddr_in) is EAFNOSUPPORT",
                   bsd_Errno());
 
-    /* The real thing. */
     t_make_any6(&sa, T_PORT + 1);
     rc = bsd_bind(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "bind(::, port)", bsd_Errno());
@@ -958,7 +884,6 @@ struct t_sockaddr_in  sa4;
 
     (VOID)bsd_CloseSocket(fd);
 
-    /* A dgram socket, so the UDP path is reached too. */
     fd = bsd_socket(T_AF_INET6, T_SOCK_DGRAM, 0);
     (VOID)t_check((BOOL)(fd >= 0), "socket(AF_INET6, SOCK_DGRAM)", bsd_Errno());
     if (fd >= 0)
@@ -1032,7 +957,6 @@ char                    buffer[64];
                   "the peer of a ::1 connection is ::1",
                   (LONG)sa.sin6_addr.s6_addr[15]);
 
-    /* getpeername on the client must agree. */
     t_bzero(&sa, sizeof(sa));
     len = sizeof(sa);
     rc  = bsd_getpeername(client, &sa, &len);
@@ -1058,7 +982,6 @@ char                    buffer[64];
     (VOID)t_check(t_streq(buffer, message), "payload survived the round trip", 0);
     t_log("  server got \"%s\"", buffer);
 
-    /* Echo it back so the reverse direction is exercised too. */
     rc = bsd_send(accepted, buffer, sizeof(message), 0);
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(message)), "server echo", rc);
 
@@ -1868,10 +1791,6 @@ static const char     probe[] = "multi-set UDP error";
     tv.tv_micro = 0;
 
     rc = bsd_WaitSelectAll(fd + 1, &read_set, &write_set, &except_set, &tv);
-    /* POSIX returns "the total number of bits set in the bit masks", and
-       AmiTCP's selscan() increments once per set per descriptor. Callers
-       decrement the count once per FD_ISSET they act on, so one descriptor
-       ready in three sets must answer 3 or the loop stops early. */
     (VOID)t_check((BOOL)(rc == 3),
                   "one descriptor ready in three sets counts three", rc);
     (VOID)t_check((BOOL)((read_set.bits[word] & mask) != 0 &&
@@ -1996,9 +1915,6 @@ static const char     data[] = "queued before shutdown";
     (VOID)bsd_CloseSocket(server);
 }
 
-/* A custom raw protocol avoids ICMP's echo traffic while exercising the same
-   global receive tee.  Receiving the first packet on the wildcard sender
-   synchronizes with the IP thread before the bound socket is polled. */
 static VOID t_test_raw_bound_address(VOID)
 {
 LONG                  server, client;
@@ -2033,8 +1949,6 @@ char                  buffer[96];
     rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)), "raw send wrong alias", rc);
 
-    /* The wildcard sender sees its own looped-back packet.  Once this returns,
-       the specifically bound socket has either queued or rejected it. */
     rc = bsd_recv(client, buffer, sizeof(buffer), 0);
     (VOID)t_check((BOOL)(rc >= 20), "raw wildcard synchronization receive", rc);
 
@@ -2080,8 +1994,6 @@ char                  buffer[96];
     sa.sin_family = T_AF_INET;
     sa.sin_addr   = 0x7F000001UL;
 
-    /* As in the peer-transition test, exercise both storage locations: one
-       packet parked by MSG_PEEK and one still on the semaphore-backed queue. */
     rc = bsd_sendto(client, (APTR)wrong, sizeof(wrong), 0, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(wrong)),
                   "raw pre-bind first send", rc);
@@ -2149,11 +2061,6 @@ char                  buffer[96];
     t_bzero(&sa, sizeof(sa));
     sa.sin_len    = sizeof(sa);
     sa.sin_family = T_AF_INET;
-    /* Use two addresses which the stack actually owns.  bind(127.0.0.2)
-       is useful for exercising exact local-destination filtering, but NetX
-       has one address on its loopback interface and therefore transmits any
-       127/8 socket with 127.0.0.1 as its source.  That cannot distinguish the
-       peers this test needs. */
     sa.sin_addr   = T_TAP_ADDR;
     rc = bsd_bind(old_peer, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "raw old peer bind", bsd_Errno());
@@ -2162,8 +2069,6 @@ char                  buffer[96];
     rc = bsd_bind(new_peer, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "raw new peer bind", bsd_Errno());
 
-    /* Leave one old-peer packet parked by MSG_PEEK and another on the raw
-       queue. The new peer's receives synchronize with the global IP hook. */
     sa.sin_addr = T_TAP_ADDR;
     rc = bsd_sendto(old_peer, (APTR)old_data, sizeof(old_data), 0,
                     &sa, sizeof(sa));
@@ -2214,15 +2119,6 @@ char                  buffer[96];
     (VOID)bsd_CloseSocket(server);
 }
 
-/* --------------------------------------------------------- RFC 3542 ------ */
-
-/*
- * A control buffer has to be aligned for a socklen_t, and a bare char array is
- * not: on a 68000 an odd cmsg_len would be an address error rather than a
- * wrong answer.  CMSG_BUFFER() is the declaration that cannot be wrong, and
- * this is the program that has to demonstrate it, it is a caller of the
- * published header and nothing else.
- */
 #define T_CBUF_BYTES    (CMSG_SPACE(sizeof(struct in6_pktinfo)) + \
                          CMSG_SPACE(sizeof(LONG)))
 
@@ -2258,7 +2154,6 @@ ULONG               seen = 0;
     (VOID)t_check((BOOL)(CMSG_FIRSTHDR(&msg) == NULL),
                   "CMSG_FIRSTHDR is NULL when msg_controllen is 0", 0);
 
-    /* Two objects, walked back out. */
     t_bzero(&cbuf, sizeof(cbuf));
     msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
 
@@ -2286,7 +2181,6 @@ ULONG               seen = 0;
     (VOID)t_check((BOOL)(seen == 2), "the loop walks exactly two objects",
                   (LONG)seen);
 
-    /* RFC 3542 3.2's six macros. */
     ICMP6_FILTER_SETBLOCKALL(&filt);
     (VOID)t_check((BOOL)(ICMP6_FILTER_WILLBLOCK(128, &filt) &&
                          !ICMP6_FILTER_WILLPASS(128, &filt)),
@@ -2305,7 +2199,6 @@ ULONG               seen = 0;
                   "SETPASSALL then SETBLOCK blocks one type and no other", 0);
 }
 
-/* The options, through the ABI: set, read back, and refuse where they must. */
 static VOID t_test_cmsg_options(VOID)
 {
 LONG                fd, raw;
@@ -2350,14 +2243,6 @@ struct icmp6_filter filt;
     (VOID)t_check((BOOL)(value == 1), "IPV6_RECVHOPLIMIT reads back as 1",
                   value);
 
-    /*
-     * 49, 50, 51 and 52 are IPV6_HOPOPTS, IPV6_DSTOPTS, IPV6_RTHDR and
-     * IPV6_PKTOPTIONS in the BSD numbering this header set follows, and this
-     * library implements none of them.  They used to be taken as the Linux
-     * spellings of the four options above, so a caller passing an option
-     * buffer to IPV6_DSTOPTS had it read as a struct in6_pktinfo and the
-     * socket's sticky source set from it.
-     */
     {
         LONG optnum;
 
@@ -2378,7 +2263,6 @@ struct icmp6_filter filt;
                       bsd_Errno());
     }
 
-    /* Sticky IPV6_PKTINFO: what goes in comes out. */
     t_bzero(&info, sizeof(info));
     info.ipi6_ifindex = 1;
     rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_PKTINFO, &info, sizeof(info));
@@ -2455,7 +2339,6 @@ struct icmp6_filter filt;
         (VOID)bsd_CloseSocket(raw);
     }
 
-    /* The IPv4 half, on an AF_INET socket. */
     fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
     if (t_check((BOOL)(fd >= 0), "udp4 socket", bsd_Errno()))
     {
@@ -2489,11 +2372,6 @@ struct icmp6_filter filt;
     }
 }
 
-/*
- * The IPV6_HOPLIMIT of the next datagram on `fd`, or -1.  The socket must have
- * IPV6_RECVHOPLIMIT set; there is no timeout, so only call it when the send
- * that fills it said it went out.
- */
 static LONG t_recv_hoplimit(LONG fd, char *buffer, LONG buflen)
 {
 CMSG_BUFFER(cbuf, T_CBUF_BYTES);
@@ -2532,7 +2410,6 @@ struct cmsghdr *c;
     return -1;
 }
 
-/* One datagram over ::1, with the ancillary data attached to it. */
 static VOID t_test_cmsg_receive(VOID)
 {
 LONG                    server, client;
@@ -2647,12 +2524,6 @@ ULONG                   arrived_on = 0;
             (VOID)t_check((BOOL)(info.ipi6_addr.s6_addr[15] == 1),
                           "ipi6_addr is ::1, the address it was sent to",
                           info.ipi6_addr.s6_addr[15]);
-            /*
-             * Loopback has an index like anything else: NetX Duo parks it one
-             * past the physical interfaces and this library numbers a slot by
-             * slot + 1, so it is the last one and if_indextoname() names it.
-             * A datagram off a real interface reports 1 or 2.
-             */
             (VOID)t_check((BOOL)(info.ipi6_ifindex != 0),
                           "ipi6_ifindex names the arrival interface, loopback "
                           "included", (LONG)info.ipi6_ifindex);
@@ -2694,12 +2565,6 @@ ULONG                   arrived_on = 0;
     (VOID)t_check(saw_pktinfo, "an IPV6_PKTINFO object arrived", 0);
     (VOID)t_check(saw_hoplimit, "an IPV6_HOPLIMIT object arrived", 0);
 
-    /*
-     * The other half, and the reason the option exists: answer from the
-     * address the query was sent to.  Over ::1 that is the address half of the
-     * in6_pktinfo rather than the index half, which loopback does not have,
-     * on a machine with two interfaces the index works the same way.
-     */
     if (saw_pktinfo && peer.sin6_port != 0)
     {
         struct in6_pktinfo  reply;
@@ -2811,11 +2676,6 @@ ULONG                   arrived_on = 0;
                           bsd_Errno());
         }
 
-        /*
-         * RFC 3542 6.3, both halves of it: the socket's own hop limit reaches
-         * the wire, and a per-datagram one overrides it.  Neither used to,
-         * IPV6_UNICAST_HOPS was stored and read back and never applied.
-         */
         value = 1;
         (VOID)bsd_setsockopt(client, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &value,
                              sizeof(value));
@@ -2918,7 +2778,6 @@ ULONG                   arrived_on = 0;
                       "and reports MSG_CTRUNC", msg.msg_flags);
     }
 
-    /* No control storage is the shortest possible truncated buffer. */
     rc = bsd_sendto(client, (APTR)datagram, sizeof(datagram), 0, &sa,
                     sizeof(sa));
     if (rc == (LONG)sizeof(datagram))
@@ -2962,11 +2821,6 @@ ULONG                   arrived_on = 0;
     (VOID)bsd_CloseSocket(client);
 }
 
-/*
- * The IPv4 half over 127.0.0.1.  This is the case the whole thing was built
- * for: a UDP server that cannot tell which of its own addresses a query was
- * sent to answers from the wrong one.
- */
 static VOID t_test_cmsg_receive4(VOID)
 {
 LONG                server, client;
@@ -3102,7 +2956,6 @@ APTR                p;
 
     t_log("getaddrinfo / getnameinfo");
 
-    /* A numeric IPv6 literal, no DNS involved. */
     t_bzero(&hints, sizeof(hints));
     hints.ai_family   = T_AF_INET6;
     hints.ai_socktype = T_SOCK_STREAM;
@@ -3134,10 +2987,6 @@ APTR                p;
     (VOID)t_check((BOOL)(rc == -2 && res == NULL),
                   "getaddrinfo rejects an overflowing numeric scope", rc);
 
-    /*
-     * AF_UNSPEC with AI_PASSIVE: the documented order is IPv6 first, then
-     * IPv4, and both are the wildcard address.
-     */
     t_bzero(&hints, sizeof(hints));
     hints.ai_family   = T_AF_UNSPEC;
     hints.ai_socktype = T_SOCK_STREAM;
@@ -3183,7 +3032,6 @@ APTR                p;
                                  "name or service is not known")),
                   "gai_strerror(EAI_NONAME), argument really is in a0", 0);
 
-    /* getnameinfo on a sockaddr_in6, numeric. */
     {
         struct t_sockaddr_in6 sa;
 
@@ -3243,32 +3091,10 @@ APTR                p;
 }
 
 
-/* ------------------------------------------------------------------ main -- */
-
 int main(void)
 {
     t_log("AmiNetXDuo, AF_INET6 through bsdsocket.library");
 
-    /*
-     * An interface, without needing anyone's driver.
-     *
-     * Every check below talks over ::1 and nothing else, but the library will
-     * not bring a stack up with no interface to put it on, so this used to
-     * need Commodore's a2065.device, which is not ours to ship and which
-     * therefore pinned the whole test to the one CI runner that had a copy.
-     *
-     * tests/tcpdrill/tapdev.c is a SANA-II device made at run time with
-     * MakeLibrary()/AddDevice(), so OpenDevice() finds it in ExecBase's list
-     * and never looks in DEVS:. src/sana2/ opens, configures and runs its
-     * readers against it through exactly the same code as a real card.
-     *
-     * It has to be installed by THIS process: the device lives in the
-     * installer's address space and dies with it, so a launcher cannot do it.
-     * That is also why tapdev.c is linked here rather than the test staying a
-     * single translation unit, it takes nothing from this tree either, only
-     * NDK headers, so what the test itself uses of ours is still just
-     * <aminetxduo/cmsg.h>.
-     */
     {
         static const UBYTE tap_mac[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x06 };
 

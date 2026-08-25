@@ -7,121 +7,6 @@
 #
 # WHAT IT PROVES
 #
-#   Every client command carries IPV4=-4/S,IPV6=-6/S, and each of the four arms
-#   the pair has:
-#
-#     -4          resolves the A and connects over IPv4
-#     -6          resolves the AAAA and connects over IPv6
-#     -6, no AAAA fails saying the NAME has no address of that family, which is
-#                 a different sentence from "no such host" and sends the user
-#                 somewhere else
-#     -4 -6       is an argument error, not a silent preference
-#
-#   Every row is written so that IGNORING the flag ends quickly.  That is the
-#   regression each -6 and each -4 -6 row exists to catch, and a command that
-#   would sit there instead turns the regression into a timeout, which this
-#   file reports as infrastructure rather than as a failure.
-#
-#   The third and fourth arms are also swept under SLIRP by
-#   tests/tools/run-toolleak.sh, which measures what they cost.  The second one
-#   cannot be: SLIRP carries no IPv6 at all, so it is here and only here, and
-#   this script is BRIDGED for that reason and has no SLIRP mode to fall back
-#   to.
-#
-# WHY THE -6 ARM MATTERS MORE THAN THE OTHERS
-#
-#   Without -6, destination-address selection decides, and on a dual stack it
-#   has been observed picking the A even where RFC 6724 says the AAAA wins.
-#   That is a separate defect and is not what this measures.  -6 has to force
-#   the AAAA on its own account, not inherit whatever the preference does, so
-#   every -6 arm asserts the ADDRESS THE COMMAND PRINTED, not merely that the
-#   command succeeded: a -6 that quietly fell back to IPv4 would pass an
-#   exit-code test and fail this one.
-#
-# TWO GUESTS ON ONE WIRE
-#
-#   The stack's default host name is `amiga` for every machine and
-#   tools/amiberry-run.sh's default MAC is the same for every run, so a second
-#   guest on the same segment fights the first for both.  This script sets its
-#   own MAC, its own host name and its own run tag, and none of the three may
-#   be shared with tools/demo.sh or another harness running at the same time.
-#
-# OUTPUT
-#
-#   One `<arm>=pass|fail` line per assertion, then `checks=`, `failures=` and
-#   `result=`.  Nothing here is meant to be read as prose.
-#
-#     0   every arm passed
-#     1   an arm failed
-#     2   infrastructure: no build, no ROM, no IPv6 on this wire, a timeout
-#     3   the GUEST came up without a usable global IPv6 address.  Its own
-#         status because it is neither of the other two: nothing is broken and
-#         nothing was proved.  See the next section.
-#
-# PROVING THE ASSERTIONS FIRE
-#
-#   -I ARM inverts one arm's verdict after the transcript has been parsed, so
-#   the check is exercised against the real artifact:
-#
-#       tests/tools/run-family.sh -V -I ping/v6
-#
-#   -V re-reads the last run's transcript without booting anything.
-#
-# THE NAME SERVER IS REACHED OVER IPv4, AND THAT IS NOT A FAILURE
-#
-#   Nothing here asserts that a lookup TRAVELLED over IPv6.  -4 and -6 choose
-#   which record is asked for and which family the command then connects over;
-#   the query itself goes to whatever name server the machine has, and on this
-#   wire that is the IPv4 one the DHCPv4 lease supplies.  The router does
-#   advertise RDNSS, and our side not acting on it is a separate defect owned
-#   elsewhere.
-#
-#   So `dns/aaaa` asking 192.168.1.1 for an AAAA and getting one is the
-#   correct shape of a passing -6 lookup, not a half-measure.  Do not rewrite
-#   these rows to require an IPv6 name server: no arm here needs one, and one
-#   that did could not pass on this network at all.
-#
-# THE GUEST NEEDS A GLOBAL IPv6 ADDRESS, AND IT IS NOT A GIVEN
-#
-#   Every -6 arm is asserted against the address the command printed, and that
-#   only means anything on a guest that has a global IPv6 address of its own.
-#   With nothing but a link-local, a command that answers over IPv4 is
-#   OBEYING RFC 6724 rather than ignoring the flag, so the same red row would
-#   mean the opposite thing.
-#
-#   The lab has lost its IPv6 delegation for hours at a time -- WAN_DHCP6 with
-#   no gateway, 100% loss -- and a run that straddled that reported the
-#   product as broken.  So the guest's own address is a PRECONDITION, checked
-#   out of `ShowNetStatus ALL` in the transcript before any -6 arm is judged,
-#   and the guest is polled for it rather than sampled once.  Without it those
-#   arms are reported `blocked`, which is neither a pass nor a failure, and the
-#   run exits 3.  A tentative address does not count: it is one
-#   duplicate-address probe short of being usable and nothing may be sent from
-#   it, which is why the poll waits for one that is not.
-#
-#   This is not a precaution for one bad afternoon.  That link is unreliable
-#   for IPv6, so every -6 assertion in this tree is written this way.
-#
-# A TIMEOUT IS A DEFECT
-#
-#   A run that burns its ceiling produces a partial transcript and proves
-#   nothing.  It exits 2 and names the command the transcript stops at.
-#   Raising -t is never the fix.
-#
-#   That cuts both ways for the rehearsal above: a build with the flag broken
-#   on purpose is the case most likely to hang rather than fail, because an
-#   ignored flag leaves each command doing what it was asked to do.  Every row
-#   carries a deadline for that reason, and the first rehearsal that did not
-#   sat on one command until the ceiling and reported nothing at all.
-#
-# WHAT IT NEEDS
-#
-#   A 68020 Release build, the SANA-II driver the -N board wants, a Kickstart
-#   matching the model and the CPU, and a wire with a router advertising
-#   IPv6.  The names it asks for are checked from the host first:
-#   if the DUAL name has no AAAA here, or this host cannot reach it over IPv6,
-#   the run exits 2 rather than reporting the Amiga as broken.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -133,19 +18,7 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 IFACE="${AMINETXDUO_FAMILY_IFACE:-ens18}"
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 MODEL="${AMINETXDUO_FAMILY_MODEL:-A1200}"
-# Measured, not guessed.  The slowest row is telnet's -6 arm on a guest with no
-# usable IPv6 source address: telnet has no timeout of its own, so the connect
-# runs to the stack's own ceiling, 191 s on the run of 2026-08-10.  That figure
-# is worth its own look -- nc reached the same host and gave up in the 20 s its
-# -w asked for -- but it is a connect timeout and not a hang, and the whole
-# list has to fit inside this one.
 TIMEOUT="${AMINETXDUO_FAMILY_TIMEOUT:-900}"
-# How long the guest keeps asking for a global IPv6 address before the run
-# gives up on the wire.  The poll stops the moment it has one, so this is a
-# ceiling and not a cost.  Measured on one wire on one afternoon: 2 s on the
-# a2065 and 36 s on the ariadne, which is the whole argument against a number
-# somebody picks -- 20 s would have been right for one card and wrong for the
-# other.
 SLAAC_DEADLINE="${AMINETXDUO_FAMILY_SLAAC_DEADLINE:-90}"
 VERDICT_ONLY=0
 INJECT=""
@@ -154,37 +27,13 @@ GUEST_V6=""
 # A name with an A and an AAAA, and a service on port 80 answering over both.
 DUAL="${AMINETXDUO_FAMILY_DUAL:-example.com}"
 DUAL_V6=""
-# A dual-stack HTTP service whose body is the CLIENT's own address.  fetch
-# prints no address of its own on a successful transfer, so this is how its two
-# arms are told apart: the far end reports which family the request arrived
-# over, which is a stronger statement than anything the client could print.
 ECHO="${AMINETXDUO_FAMILY_ECHO:-icanhazip.com}"
-# A dual-stack name behind anycast whose network drops ICMPv6 time-exceeded in
-# the middle of the path.  Named rather than folded into DUAL because that is
-# the shape the "never finishes" report had, and a target that answers every
-# hop would not reproduce it.
 GOOG="${AMINETXDUO_FAMILY_GOOG:-www.google.com}"
 # The time server for the sntp arms.  2.pool.ntp.org is the pool's IPv6 half.
 NTP="${AMINETXDUO_FAMILY_NTP:-2.pool.ntp.org}"
-# A name with an A and no AAAA.  Written into the guest's DEVS:Internet/hosts,
-# so it needs no DNS at all: the resolver reads that file on the IPv4 side and
-# never on the IPv6 side (src/netstack/netstack_dns.c:1051, the netdb schema has
-# no family field), which is exactly the shape the -6 arm has to report.  .test
-# is reserved by RFC 6761, so the AAAA query is an immediate NXDOMAIN.
-#
-# It points at the guest's own loopback, which is not laziness.  Every -6 row
-# below has to end quickly WHEN THE FLAG IS IGNORED, because that is the
-# regression the row exists to catch and a row that hangs instead reports a
-# timeout, which is infrastructure and not a failure: the broken-build
-# rehearsal of this file hung for eight minutes on `whois SERVER v4only.test`
-# reaching a router that dropped port 43.  Loopback refuses instantly, so a
-# regression is a red row and not a dead boot.
 V4ONLY_NAME="v4only.test"
 V4ONLY_ADDR="${AMINETXDUO_FAMILY_V4ONLY_ADDR:-127.0.0.1}"
 
-# Distinct from tools/demo.sh (…:77) and from the default (…:01).  The a2065's
-# LANCE overwrites the first three octets, so only the last three are the
-# machine's identity on the wire.
 export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_FAMILY_MAC:-02:41:4d:49:00:46}"
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-family}"
 # Not `amiga`: two guests answering for amiga.local take each other off the air.
@@ -208,9 +57,6 @@ done
 TOOLS="$BUILD/src/tools"
 PROBES="$BUILD/tests/tools"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
-# Tagged, like the drive and the log.  The file says two guests may share a
-# wire if they do not share a tag, a MAC or a host name, and a stage directory
-# they both `rm -rf` is a fourth thing they cannot share.
 STAGE="$ROOT/build/family-stage-$AMINETXDUO_RUN_TAG"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
@@ -221,10 +67,6 @@ infra() { echo "error=$*"; echo "result=infra"; exit 2; }
 # ======================================================================= #
 #                          what the host can see                          #
 # ======================================================================= #
-#
-# Asked here, before anything boots.  A wire with no IPv6 router, or a DUAL
-# name that has lost its AAAA, would make every -6 arm red and the Amiga
-# innocent, and a test that cannot tell those apart is worse than none.
 
 host_preflight() {
     local a aaaa
@@ -258,10 +100,6 @@ host_preflight() {
 
     DUAL_V6="$aaaa"
 
-    # Written down, because the judge has to build the same command strings the
-    # boot did and these are not stable between two lookups: a name behind a
-    # round robin answers with a different AAAA a minute later, and -V then
-    # looks for a command line that was never run.
     mkdir -p "$ROOT/build"
     {
         printf 'DUAL=%s\n'        "$DUAL"
@@ -279,11 +117,6 @@ host_preflight() {
     echo "host/goog=$GOOG"
 }
 
-# The board's own driver, not a2065.device for every board.  -N xsurf used to
-# put an X-Surf in the machine and leave DEVICE=a2065.device in the config, so
-# every arm failed on the driver and none of them on what it was testing.
-# sana2_driver_for() is the one table that maps the two, shared with
-# tests/tools/run-cardsweep.sh through tests/tools/run-iperf.sh.
 . "$ROOT/tools/sana2-stage.sh"
 
 find_driver() {
@@ -305,29 +138,11 @@ find_driver() {
 # ======================================================================= #
 #                                the arms                                 #
 # ======================================================================= #
-#
-#   id | rc | command line | assertion...
-#
-# An assertion is `+ERE` (must appear in that command's own block) or `-ERE`
-# (must not).  `rc` is the exit code the command must return, or `*`.
-#
-# The address patterns are the whole point of the -4/-6 rows: a dotted quad and
-# a colonned address cannot be mistaken for one another, so asserting which one
-# the command printed is asserting which family it actually used.
 V4RE='[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
 V6RE='[0-9a-fA-F]*:[0-9a-fA-F]*:'
-# A WHOLE address, for the rows that assert one inside brackets.  $V6RE stops
-# at the second colon, which is enough where the rest of the line follows it
-# and impossible where a `)` has to come next: `\($V6RE\)` cannot match
-# `(2606:4700:10::ac42:93f3)` and traceroute/v6 was red on a run whose
-# traceroute was right.  It still cannot match a dotted quad: a colon is
-# required.
 V6FULL='[0-9a-fA-F:]*:[0-9a-fA-F:]*'
 
 arms() {
-    # A table of one's own, for putting a single arm to the question without
-    # booting the other fifty.  Same seven-and-more fields, same $-expansion;
-    # tests/tools/run-toolleak.sh takes its table the same way.
     if [ -n "${AMINETXDUO_FAMILY_TABLE:-}" ]; then
         eval "cat <<EOF
 $(cat "$AMINETXDUO_FAMILY_TABLE")
@@ -461,11 +276,6 @@ stage_and_boot() {
     done
     cp "$PROBES/TrBreak" "$STAGE/TrBreak"
 
-    # DHCP for IPv4 and, by default, CONFIGURE6=AUTO for IPv6: link-local
-    # always, and a global address from the router advertisement this wire
-    # carries.  The stock file already says that; it is rewritten here so that
-    # a change to the shared one cannot silently move this test to a static
-    # address the LAN does not route.
     cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$driver
 UNIT=0
@@ -473,38 +283,18 @@ CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
 
-    # And the driver itself, where that board's driver really lives: DEVS: for
-    # the A2065, DEVS:Networks for a third-party card, with DEVICE= rewritten
-    # to match.  sana2_stage() owns both halves.
     export AMINETXDUO_SANA2_DRIVER="$drvpath"
     sana2_stage "$BOARD" "$STAGE/devs"
 
     printf '%s %s\n' "$V4ONLY_ADDR" "$V4ONLY_NAME" \
         >> "$STAGE/devs/Internet/hosts"
 
-    # Written, not appended to.  The shared file names SLIRP's forwarder,
-    # 10.0.2.3, which does not exist on a bridged wire: it goes to the head of
-    # the server list ahead of the one DHCP supplies and every lookup pays for
-    # it before falling back.  The lease carries a name server; this file only
-    # has to carry the host name, which must not be `amiga` while another guest
-    # is up.
     printf 'hostname %s\n' "$GUEST_NAME" \
         > "$STAGE/devs/Internet/name_resolution"
 
-    # telnet talks to an HTTP server: two junk lines are a bad request, the
-    # server answers 400 and closes, and the session ends by itself.  A telnet
-    # arm that needed a person would hang the boot.
     printf 'x\r\n\r\n' > "$STAGE/telnetin.txt"
 
     arms | grep -v '^#' | cut -d'|' -f3 > "$STAGE/cmds.raw"
-    # A router advertisement arrives on its own schedule and the address the
-    # guest builds from it appears when it appears.  Sampling once, straight
-    # after bring-up, called the guest address-less and reported every -6 arm
-    # `blocked`; a fixed sleep instead of the sample is the same bug on a
-    # slower machine.  So the wait is the CONDITION, and it is the same
-    # condition guest_global_v6() judges on: ShowNetStatus until one address6
-    # line is neither the fe80 one nor still in duplicate-address detection.
-    # $SLAAC_DEADLINE seconds is when we stop asking and say so.
     {
         echo "SYS:AddNetInterface eth0"
         echo "until $SLAAC_DEADLINE address6 fe80,tentative SYS:ShowNetStatus ALL"
@@ -558,17 +348,6 @@ CHECKS=0
 FAILURES=0
 BLOCKED=0
 
-# The guest's own global IPv6 address.  Not a link-local, and not one still
-# finishing duplicate-address detection: nothing may be sent from a tentative
-# address, so a command that answers over IPv4 from one is right to.
-#
-# The WHOLE transcript, not one block, and the poll above is what makes the
-# tentative exclusion mean something rather than everything.  Measured on the
-# lab wire 2026-08-12: the sample taken straight after AddNetInterface has no
-# global address at all, the one two seconds later has it and it is already
-# out of DAD.  Sampling once at the first moment reported all thirteen -6 arms
-# `blocked` on a guest whose IPv6 worked perfectly -- the transcript of that
-# run has `ping 2606:4700:10::6814:179a` answering in 20 ms with 0% loss.
 guest_global_v6() {
     awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
          { print $2; exit }' "$REPORT"
@@ -579,27 +358,6 @@ slaac_wait_outcome() {
     sed -n 's/^----- until address6: \(.*\) -----$/\1/p' "$REPORT" | head -1
 }
 
-# An arm that cannot mean anything without that address.
-#
-# traceroute/v6-arrives IS in this list, and the -hop arms are not, which looks
-# inconsistent until you look at what each one needs.  A -hop arm needs one
-# router on this link to answer, and a link-local source is enough for that.
-# Arriving needs a globally routable source: on two runs of the same image an
-# hour apart the same command gave hops 1-13 and rc 0, then "cannot send:
-# network unreachable" and rc 10, and the difference was whether the guest had
-# a global address at that moment.  Gating it says so instead of blaming
-# traceroute for the wire.
-#
-# The traceroute -hop arms are deliberately NOT in this list.  They were
-# measured working on a guest that had only a link-local: three IPv6 hops
-# answered against example.com in under 20 ms, so a link-local source is
-# enough to send a probe and receive the router's time-exceeded, and gating
-# them would throw away the one -6 arm that can be exercised on a wire like
-# this one.  Where a globally routable source really is needed -- fetch, nc,
-# telnet, whois, sntp, iperf reaching a host on the internet -- the arm is
-# gated, and against a destination our routes do not cover traceroute says
-# "cannot send: network unreachable" and returns 10 rather than reporting a
-# row of stars.
 v6_dependent() {
     case "$1" in
         */v6-hop)                          return 1 ;;
@@ -612,8 +370,6 @@ verdict() {
     local id="$1" verdict="$2" why="$3"
 
     if [ "$id" = "$INJECT" ]; then
-        # -I: invert this one, so the assertion is exercised against the real
-        # transcript rather than a fabricated one.
         [ "$verdict" = pass ] && { verdict=fail; why="injected"; } \
                               || { verdict=pass; why=""; }
     fi
@@ -641,8 +397,6 @@ judge() {
         echo "guest/global6=$GUEST_V6"
     else
         echo "guest/global6=none"
-        # Every sample, so a global that stayed tentative is told apart from
-        # one that never arrived.
         sed -n 's/^ *address6 */guest\/address6=/p' "$REPORT" | sort -u
     fi
 
@@ -669,9 +423,6 @@ judge() {
         ok=pass
         why=""
 
-        # The precondition, ahead of the assertion rather than after it: with
-        # no global address of its own the guest answering over IPv4 is
-        # correct, so this row has nothing to say either way.
         if [ -z "$GUEST_V6" ] && v6_dependent "$id"; then
             verdict "$id" blocked "guest has no global IPv6 address"
             continue
@@ -700,16 +451,9 @@ judge() {
     done < <(arms)
 }
 
-# What the FAR END saw.  fetch prints no address on a successful transfer, so
-# the only honest way to say which family carried it is to read the body: the
-# echo service answers with the client address it was reached from, and that
-# file is on the guest's drive, which is a directory on this host.
 judge_files() {
     local four six ok
 
-    # The two files the DEFAULT table's fetch rows write.  A run given a table
-    # of its own has no such rows and these would be two failures nothing
-    # asked for.
     if [ -n "${AMINETXDUO_FAMILY_TABLE:-}" ]; then
         return
     fi
@@ -739,7 +483,6 @@ if [ "$VERDICT_ONLY" = 0 ]; then
     host_preflight
     stage_and_boot
 elif [ -f "$PARAMS" ]; then
-    # The names the last boot actually used, not what they resolve to now.
     # shellcheck source=/dev/null
     . "$PARAMS"
 else
@@ -759,8 +502,6 @@ if [ "$FAILURES" -ne 0 ]; then
 fi
 
 if [ "$BLOCKED" -ne 0 ]; then
-    # Nothing failed, but the -6 arms were never put to the question.  Not a
-    # pass: a pass here would be read as "IPv6 works".
     echo "error=no global IPv6 address on the guest after ${SLAAC_DEADLINE}s of\
  asking; the wire carries no usable router advertisement, or the guest did not\
  act on one.  Raising the deadline is not the fix unless the poll shows it\

@@ -1,26 +1,6 @@
 #!/usr/bin/env bash
-#
 # HOW FAR A SOCKET GETS TOWARDS AN SMB SERVER, from a booted guest.
-#
-#   tests/tools/run-smbprobe.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                               [-N board] [-B backend] [-a address]
-#                               [-s SMBHOST] [-r TRANSCRIPT]
-#
-# GitHub #3 says opening SMB2 to the LAN never responds; #4 says mounting SMB
-# freezes the machine.  This is the bottom half of both questions and only the
-# bottom half: ping, then `nc` to 445 and to 139, then the connection table.
-# It shows that a socket to the server opens, which is as far as anything that
-# is not a real Workbench can go -- whatever fails in those reports happens
-# ABOVE the handshake, inside smb2-handler, and install/test/run-smbmount.sh is
-# the gate for that.
-#
-# IT ASSERTS NOTHING.  The transcript is the result and the exit status is 0
-# whatever the guest printed, which is why tests/HARNESSES files it as a bench
-# rather than as coverage: there is nothing here that can go red.  Read it when
-# run-smbmount.sh fails and the question is whether the packets got out at all.
-#
 # BRIDGED, always: the server is a machine on the LAN.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -50,7 +30,6 @@ while getopts "m:t:b:N:B:a:g:s:r:" opt; do
         a) ADDRESS="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
         s) SMBHOST="$OPTARG" ;;
-        # Print a transcript that already exists instead of booting.
         r) REPLAY="$OPTARG" ;;
         *) sed -n '5,7p' "$0" >&2; exit 2 ;;
     esac
@@ -61,9 +40,6 @@ case "$BUILD" in /*) ;; *) BUILD="${BUILD#./}" ;; esac
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
-# Its own tag, and its own staging directory.  Both were run-netshutdown.sh's
-# when this file was cut from it, so the two clobbered each other's drive and
-# stage the moment anything ran them together.
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-smbprobe}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 REPORT="$HD/tools.txt"
@@ -92,8 +68,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/smbprobe-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -103,7 +77,6 @@ cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 
-# A board other than the a2065, the way run-httpd.sh takes one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ "$BOARD" != a2065 ]; then
     if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
@@ -117,8 +90,6 @@ if [ "$BOARD" != a2065 ]; then
     echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 fi
 
-# Static: a lease that arrives late would make "the interface is up" a question
-# about the lab's DHCP server rather than about the server being probed.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$IFDEVICE
 UNIT=0
@@ -140,8 +111,6 @@ SYS:nc -v -w 15 $SMBHOST 445
 SYS:nc -v -w 15 $SMBHOST 139
 SYS:netstat -a
 EOF
-
-# ------------------------------------------------------------------ run ---
 
 echo "==> booting $MODEL under Amiberry, $BOARD bridged on $BACKEND"
 echo "==> probing $SMBHOST"

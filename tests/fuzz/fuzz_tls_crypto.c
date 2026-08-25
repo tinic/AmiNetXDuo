@@ -2,87 +2,6 @@
  * AmiNetXDuo, host fuzz driver for the three TLS handshake messages that
  * dispatch through a negotiated ciphersuite into NX_CRYPTO_METHOD entries.
  *
- * fuzz_tls_record stops where the crypto starts: it carries a ciphersuite
- * table of six IDs and no method pointers, because none of the parsers it
- * drives calls one. ServerKeyExchange, CertificateVerify and Finished all do,
- * so they need the real tables, ami_crypto_tls_ciphers_ecc and
- * ami_crypto_ecc_curves from src/tls/ami_tls_crypto.c, the ones tls_conn.c
- * hands to _nx_secure_tls_session_create(). That is this driver.
- *
- * WHY IT IS A 32-BIT BUILD, like fuzz_mdns
- *
- * ami_tls_crypto.c includes exec/types.h and checks metadata alignment with
- * ((ULONG)crypto_metadata & 3), and _nx_secure_tls_process_certificate_verify()
- * bounds its signature with ((ULONG)packet_buffer + message_length) <
- * ((ULONG)received_signature + length). ULONG is the target's 32 bits, so on
- * an LP64 host both truncate a pointer, the second one is the bounds check
- * under test, and a truncated bounds check is not the one that ships. The
- * -m32 build makes ULONG and the pointer the same width again, which is what
- * the m68k has. tools/ci.sh's host32 stage is where this runs.
- *
- * WHAT IS DRIVEN, AND AT WHICH BOUNDARY
- *
- *   _nx_secure_tls_process_server_key_exchange()  -> _nx_secure_process_server_key_exchange()
- *   _nx_secure_tls_process_certificate_verify()
- *   _nx_secure_tls_process_finished()
- *
- * each on a session built the way tls_conn.c builds one: session_create with
- * ami_crypto_tls_ciphers_ecc, ecc_initialize with ami_crypto_ecc_curves, a
- * record buffer of TLS_DEFAULT_RECORD_BUFFER, four remote certificate slots,
- * and the server's Certificate message already processed so the remote
- * endpoint certificate is in the store, which is where all three of these
- * read the peer's public key from. Everything after that is bytes off the wire.
- *
- * THE LENGTH CONTRACT IS THE RECORD PAYLOAD, NOT THE MESSAGE.
- *
- * Same as fuzz_tls_record. The message is copied into an allocation sized to
- * itself, which models the record payload ending exactly where the message
- * does, and a hostile server produces that at will by putting filler
- * messages in front of it until the target message ends at the record buffer's
- * last byte. An over-read this reports is one a real record reproduces.
- *
- * REACHING THE ECDH IS NOT FREE
- *
- * _nx_secure_process_server_key_exchange() verifies the server's signature
- * over (client_random || server_random || params) before it touches the peer's
- * ECDHE point, so a ServerKeyExchange with a made-up signature stops at the
- * verify and the ECDH import is never exercised. The party that gets past it
- * is a server holding a certificate, which is exactly the hostile server
- * this driver models. So the seeds are SIGNED, at startup, with the private
- * key of the sample leaf in tests/tls/tls_test_certs.h: the same key, the same
- * PKCS#1 v1.5 construction and the same RSA operation
- * nx_secure_tls_send_certificate_verify.c uses. Five parameter shapes are
- * signed once and reused, which is cheap; re-signing every mutation would be
- * an RSA private operation per case, so mutations of the signed region stop at
- * the verify by design. -r reports both counts, so "clean" says which.
- *
- * WHO CAN SEND WHICH OF THESE
- *
- * ServerKeyExchange and Finished are what a server sends a client, so
- * tls.library reaches both on any HTTPS fetch. CertificateVerify is the other
- * direction, only _nx_secure_tls_server_handshake() calls it, and
- * tls_conn.c only ever starts a client session, so nothing in the shipped
- * library reaches it today. It is driven anyway: the function is linked into
- * tls.library, the ciphersuite tables that reach it are ours, and a driver
- * that skipped it would have to be written the day a server session appears.
- * It is also where the first over-read this driver found was.
- *
- * NOT COVERED HERE
- *
- *   The ECDSA signature arm of ServerKeyExchange, and the EC arm of
- *   CertificateVerify. Both need the remote endpoint to carry an EC public
- *   key, and the only certificates in this tree are RSA. The length arithmetic
- *   in front of both arms is driven; the verify itself is not.
- *
- *   TLS 1.3. NX_SECURE_TLS_TLS_1_3_ENABLED is off, so the 1.3 arms of all
- *   three functions are not compiled.
- *
- * Usage, matching fuzz_dhcp:
- *   fuzz_tls_crypto -s                every seed case, named
- *   fuzz_tls_crypto -c NAME           one seed case by name
- *   fuzz_tls_crypto -r SEED COUNT     seeds plus mutations
- *   fuzz_tls_crypto < message         one ServerKeyExchange from stdin
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -97,19 +16,11 @@
 #include "ami_tls_crypto.h"
 #include "tls.h"
 
-/* tls_test_certs.h carries the leaf's private key, which this driver does use
-, see the signing note above, and the CA's, which it does not. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
 #pragma GCC diagnostic pop
 
-/*
- * ami_tls_crypto.c times every operation through timer.device. There is no
- * timer.device here and the counters it keeps are still exact without one,
- * ami_tls_timer_is_open() answering FALSE is the documented "counts but no
- * microseconds" case, and this driver reads only the counts.
- */
 BOOL ami_tls_timer_is_open(VOID)
 {
     return 0;
@@ -133,7 +44,6 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
 
 #define FC_MAX              2048
 
-/* RSA-2048, which is what the sample leaf carries. */
 #define FC_SIG_BYTES        256
 
 /* secp256r1, and an uncompressed point on it: 0x04 || X || Y. */
@@ -176,8 +86,6 @@ static void fc_raw(FcBuf *w, const unsigned char *p, unsigned n)
         fc_u8(w, *p++);
 }
 
-/* ------------------------------------------------------------ the session -- */
-
 static UCHAR               *fc_metadata;
 static ULONG                fc_metadata_size;
 static UCHAR               *fc_record;
@@ -189,10 +97,6 @@ static UCHAR               *fc_remote_der;
 static UCHAR                fc_client_random[32];
 static UCHAR                fc_server_random[32];
 
-/* The chain verify a real session does needs a trust anchor this driver has
-   no reason to supply. Answering NX_SUCCESS is "the chain checked out", which
-   is the branch that installs the remote endpoint, and the endpoint is what
-   all three parsers under test read the peer's public key from. */
 static UINT fc_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
                          NX_SECURE_X509_CERT *certificate, ULONG current_time)
 {
@@ -202,8 +106,6 @@ static UINT fc_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
     return NX_SUCCESS;
 }
 
-/* The server's Certificate message, into the record buffer, so that
-   _nx_secure_x509_remote_endpoint_certificate_get() finds a certificate. */
 static UINT fc_install_certificate(NX_SECURE_TLS_SESSION *s)
 {
     unsigned len   = test_device_cert_der_len;
@@ -224,11 +126,6 @@ static UINT fc_install_certificate(NX_SECURE_TLS_SESSION *s)
     return _nx_secure_tls_process_remote_certificate(s, fc_record, at, at);
 }
 
-/*
- * A session at the moment the server's key exchange arrives: ServerHello
- * processed, ciphersuite chosen, Certificate processed. Rebuilt for every case
- * because every one of these parsers writes into it.
- */
 static UINT fc_session_open(NX_SECURE_TLS_SESSION *s, UINT suite)
 {
     const NX_SECURE_TLS_CIPHERSUITE_INFO *info = NX_NULL;
@@ -275,8 +172,6 @@ static UINT fc_session_open(NX_SECURE_TLS_SESSION *s, UINT suite)
     memcpy(s->nx_secure_tls_key_material.nx_secure_tls_server_random,
            fc_server_random, sizeof(fc_server_random));
 
-    /* The Finished hash is a PRF over the master secret; any value reaches it,
-       and none of them makes a hostile server's Finished match. */
     memset(s->nx_secure_tls_key_material.nx_secure_tls_master_secret, 0x5A,
            sizeof(s->nx_secure_tls_key_material.nx_secure_tls_master_secret));
 
@@ -305,13 +200,6 @@ static void fc_session_close(NX_SECURE_TLS_SESSION *s)
     (void)_nx_secure_tls_session_delete(s);
 }
 
-/* -------------------------------------------------------------- signing ---- */
-
-/*
- * The sample leaf's private key, and the RSA method out of the ciphersuite
- * table, the same object ami_tls_crypto.c puts in nx_secure_tls_public_auth
- * for the ECDHE_RSA suites, which is what verifies what this signs.
- */
 static NX_SECURE_X509_CERT      fc_signer;
 static const NX_CRYPTO_METHOD  *fc_rsa;
 static UCHAR                   *fc_rsa_metadata;
@@ -333,8 +221,6 @@ static const NX_CRYPTO_METHOD *fc_suite_auth(UINT suite)
     return NX_NULL;
 }
 
-/* The hash method the verifier will use, taken from the same X.509 table it
-   looks it up in rather than named directly. */
 static const NX_CRYPTO_METHOD *fc_x509_hash(USHORT identifier)
 {
     NX_SECURE_X509_CRYPTO *table =
@@ -351,8 +237,6 @@ static const NX_CRYPTO_METHOD *fc_x509_hash(USHORT identifier)
     return NX_NULL;
 }
 
-/* SHA-256 over the three pieces the verifier hashes: both randoms, then the
-   key-exchange parameters. */
 static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
                            UCHAR out[32])
 {
@@ -403,11 +287,6 @@ static UINT fc_params_hash(const unsigned char *params, unsigned params_len,
                                   sizeof(metadata), NX_NULL, NX_NULL);
 }
 
-/*
- * PKCS#1 v1.5 over the SHA-256 DigestInfo, then the RSA private operation,
- * nx_secure_tls_send_certificate_verify.c's construction, spelled out here
- * because that function needs a packet and a whole session to reach.
- */
 static UINT fc_sign(const unsigned char *params, unsigned params_len,
                     UCHAR out[FC_SIG_BYTES])
 {
@@ -455,14 +334,6 @@ static UINT fc_sign(const unsigned char *params, unsigned params_len,
     return NX_CRYPTO_SUCCESS;
 }
 
-/* ------------------------------------------------------------- the seeds --- */
-
-/*
- * secp256r1's generator, uncompressed: 0x04 || Gx || Gy. A point off the curve
- * is rejected by the ECDH import before it does any arithmetic, so a seed that
- * carries one stops a step short of the shared-secret calculation. This is a
- * point the curve actually has.
- */
 static const unsigned char fc_p256_g[FC_POINT_BYTES] =
 {
     0x04,
@@ -476,11 +347,6 @@ static const unsigned char fc_p256_g[FC_POINT_BYTES] =
     0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5
 };
 
-/*
- * A ServerKeyExchange, signed. `key_len` bytes of ECDHE point are written
- * starting at offset 4, and the signature covers exactly the range the
- * verifier hashes, packet_buffer[0 .. 4 + key_len).
- */
 static void fcs_ske(FcBuf *w, unsigned curve, unsigned key_len, int sign_it)
 {
     UCHAR    sig[FC_SIG_BYTES];
@@ -491,8 +357,6 @@ static void fcs_ske(FcBuf *w, unsigned curve, unsigned key_len, int sign_it)
     fc_u16(w, curve);
     fc_u8(w, key_len);
 
-    /* The generator, or as much of it as key_len allows; past its end, a
-       pattern, because a longer point is one of the shapes worth sending. */
     for (i = 0; i < key_len; i++)
         fc_u8(w, (i < FC_POINT_BYTES) ? fc_p256_g[i] : (0x10 + (i & 0x7F)));
 
@@ -514,21 +378,16 @@ static void fcs_ske_signed(FcBuf *w)
     fcs_ske(w, FC_CURVE_SECP256R1, FC_POINT_BYTES, 1);
 }
 
-/* The same message with a signature nobody made: the verify path, and nothing
-   past it. */
 static void fcs_ske_unsigned(FcBuf *w)
 {
     fcs_ske(w, FC_CURVE_SECP256R1, FC_POINT_BYTES, 0);
 }
 
-/* A point of no length at all, signed, so the ECDH import is reached with
-   nothing to import. */
 static void fcs_ske_key_empty(FcBuf *w)
 {
     fcs_ske(w, FC_CURVE_SECP256R1, 0, 1);
 }
 
-/* A point one byte short of a P-256 point, and one byte long. */
 static void fcs_ske_key_short(FcBuf *w)
 {
     fcs_ske(w, FC_CURVE_SECP256R1, FC_POINT_BYTES - 1, 1);
@@ -539,27 +398,22 @@ static void fcs_ske_key_long(FcBuf *w)
     fcs_ske(w, FC_CURVE_SECP256R1, FC_POINT_BYTES + 1, 1);
 }
 
-/* The longest point the one-byte length field can promise. */
 static void fcs_ske_key_max(FcBuf *w)
 {
     fcs_ske(w, FC_CURVE_SECP256R1, 255, 1);
 }
 
-/* A curve nobody offered. */
 static void fcs_ske_bad_curve(FcBuf *w)
 {
     fcs_ske(w, 0xBEEF, FC_POINT_BYTES, 0);
 }
 
-/* Not named_curve: the first byte the parser reads. */
 static void fcs_ske_bad_format(FcBuf *w)
 {
     fcs_ske_unsigned(w);
     w->b[0] = 1;
 }
 
-/* Exactly the four bytes the ECDHE arm demands before it reads a key length,
-   and no more. */
 static void fcs_ske_min(FcBuf *w)
 {
     fc_reset(w);
@@ -568,14 +422,12 @@ static void fcs_ske_min(FcBuf *w)
     fc_u8(w, 0);
 }
 
-/* One byte short of that. */
 static void fcs_ske_truncated(FcBuf *w)
 {
     fcs_ske_min(w);
     w->len = 3;
 }
 
-/* A signature length that runs past the message. */
 static void fcs_ske_sig_past_end(FcBuf *w)
 {
     fcs_ske_unsigned(w);
@@ -583,19 +435,12 @@ static void fcs_ske_sig_past_end(FcBuf *w)
     w->b[4 + FC_POINT_BYTES + 3] = 0xFF;
 }
 
-/* A key length that swallows the rest of the message. */
 static void fcs_ske_key_past_end(FcBuf *w)
 {
     fcs_ske_unsigned(w);
     w->b[3] = 0xFF;
 }
 
-/*
- * A CertificateVerify, TLS 1.2 RSA shape: (hash, signature) algorithm, then a
- * 16-bit length, then the signature. The length has to equal the certificate's
- * modulus size or the parser rejects it before reading a signature byte, so
- * FC_SIG_BYTES is not arbitrary here.
- */
 static void fcs_cv(FcBuf *w, unsigned claimed, unsigned present)
 {
     fc_reset(w);
@@ -618,26 +463,22 @@ static void fcs_cv_exact(FcBuf *w)
     fcs_cv(w, FC_SIG_BYTES, FC_SIG_BYTES - 4);
 }
 
-/* A length the modulus check rejects. */
 static void fcs_cv_short(FcBuf *w)
 {
     fcs_cv(w, 16, 16);
 }
 
-/* The header and nothing else. */
 static void fcs_cv_header_only(FcBuf *w)
 {
     fcs_cv(w, FC_SIG_BYTES, 0);
 }
 
-/* Fewer bytes than the four the parser reads before it checks anything. */
 static void fcs_cv_stub(FcBuf *w)
 {
     fc_reset(w);
     fc_u8(w, NX_SECURE_TLS_HASH_ALGORITHM_SHA256);
 }
 
-/* A Finished, at the only length TLS 1.2 accepts. */
 static void fcs_finished(FcBuf *w)
 {
     fc_reset(w);
@@ -667,10 +508,6 @@ static void fcs_ones(FcBuf *w)
     fc_bytes(w, 512, 0xFF);
 }
 
-/* Which parser a seed is for. A ServerKeyExchange is not a Finished and
-   feeding one to the other only tests the length gate, so each seed names its
-   own message, and the sweep still crosses them, because every mutation is
-   run through all three. */
 #define FC_SKE          0
 #define FC_CV           1
 #define FC_FIN          2
@@ -712,15 +549,6 @@ static const FcSeed fc_seeds[] =
 
 #define FC_SEED_COUNT   (int)(sizeof(fc_seeds) / sizeof(fc_seeds[0]))
 
-/* ------------------------------------------------------- the reach counts -- */
-
-/*
- * "Clean" means nothing if the sweep never got past a length check, so every
- * case is measured rather than assumed. The crypto counts come from
- * ami_tls_crypto.c's own instrumentation, the code under test reporting that
- * one of its NX_CRYPTO_METHOD entries ran, and the rest from the status,
- * which for these three functions names how far the parse got.
- */
 static unsigned long fc_n_ske;          /* ServerKeyExchange calls           */
 static unsigned long fc_n_ske_crypto;   /* ... that ran a public-key op      */
 static unsigned long fc_n_ske_dh;       /* ... that completed the ECDH       */
@@ -742,13 +570,6 @@ static ULONG fc_crypto_ops(void)
            b.ami_rsa_private_plain_count + b.ami_ec_multiple_count;
 }
 
-/* ------------------------------------------------------------- the driver -- */
-
-/*
- * One message, in an allocation sized to itself. See the length-contract note
- * at the top: this is the record payload, not a scratch buffer, so a parser
- * that reads past the message lands in the redzone.
- */
 static void fc_run(int message, const unsigned char *msg, unsigned len)
 {
     NX_SECURE_TLS_SESSION s;
@@ -794,10 +615,6 @@ static void fc_run(int message, const unsigned char *msg, unsigned len)
         break;
 
     default:
-        /* A Finished only means anything once the peer's ChangeCipherSpec has
-           switched the read side over and its credentials have been accepted;
-           the parser refuses one before that, so the flags are set here the
-           way the state machine would have set them. */
         s.nx_secure_tls_remote_session_active       = 1;
         s.nx_secure_tls_received_remote_credentials = 1;
 
@@ -815,31 +632,12 @@ static void fc_run(int message, const unsigned char *msg, unsigned len)
     fc_session_close(&s);
 }
 
-/* ---------------------------------------------------------- the selftest --- */
-
 static void fc_fail(const char *what)
 {
     printf("fuzz_tls_crypto: SELFTEST FAILED, %s\n", what);
     exit(2);
 }
 
-/*
- * Proof that the driver reaches the parsers.
- *
- * A driver that stopped at the first length check, a ciphersuite that never
- * resolved, a certificate that never reached the store, would report "clean"
- * for every input and read as coverage. So each of the three is run on a case
- * it must get all the way through, and the thing it must have produced is
- * checked by name:
- *
- *   ServerKeyExchange   a signed message must return NX_SUCCESS and leave a
- *                       pre-master secret, which only the completed ECDH does
- *   CertificateVerify   must run a public-key operation, which is past the
- *                       algorithm check, the modulus-length check and the
- *                       signature bounds
- *   Finished            a 12-byte message must reach the PRF and fail the
- *                       comparison; an 11-byte one must be refused for length
- */
 static void fc_selftest(void)
 {
     NX_SECURE_TLS_SESSION s;
@@ -847,8 +645,6 @@ static void fc_selftest(void)
     UCHAR                *payload;
     ULONG                 before;
     UINT                  status;
-
-    /* ---- ServerKeyExchange ---- */
 
     fcs_ske_signed(&w);
 
@@ -882,8 +678,6 @@ static void fc_selftest(void)
 
     fc_session_close(&s);
 
-    /* ---- CertificateVerify ---- */
-
     fcs_cv_full(&w);
 
     if (fc_session_open(&s, TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256) != NX_SUCCESS)
@@ -902,8 +696,6 @@ static void fc_selftest(void)
         fc_fail("CertificateVerify ran no public-key operation");
 
     fc_session_close(&s);
-
-    /* ---- Finished ---- */
 
     if (fc_session_open(&s, TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256) != NX_SUCCESS)
         fc_fail("session would not open");
@@ -941,13 +733,10 @@ static void fc_selftest(void)
 
     fc_session_close(&s);
 
-    /* The counts above are the selftest's, not the sweep's. */
     fc_n_ske = fc_n_ske_crypto = fc_n_ske_dh = 0;
     fc_n_cv  = fc_n_cv_crypto  = 0;
     fc_n_fin = fc_n_fin_prf    = 0;
 }
-
-/* ---------------------------------------------------------------- setup ---- */
 
 static void fc_env_init(void)
 {
@@ -961,10 +750,6 @@ static void fc_env_init(void)
         fc_server_random[i] = (UCHAR)(0xA0 + i);
     }
 
-    /* nx_secure owns _nx_secure_tls_protection here rather than the driver
-       declaring one, because linking the whole archive means
-       nx_secure_tls_initialize.c is in it. The mutex it creates is uncontended
-       by construction, one thread, nothing suspends. */
     _nx_secure_tls_initialize();
 
     status = ami_tls_crypto_initialize();
@@ -990,10 +775,6 @@ static void fc_env_init(void)
         fc_fail("out of memory");
     }
 
-    /* The signer: the sample leaf, with its private key, and the primes
-       registered so the signature is a CRT operation rather than a full-width
-       one. Nothing about the messages changes either way; it is the difference
-       between a startup that takes a moment and one that is noticed. */
     rsa = fc_suite_auth(TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256);
     if (rsa == NX_NULL)
         fc_fail("no RSA auth method in the ciphersuite table");
@@ -1017,8 +798,6 @@ static void fc_env_init(void)
     (void)ami_tls_rsa_key_register(&fc_signer);
 }
 
-/* --------------------------------------------------------- the mutations --- */
-
 static unsigned long fc_state = 1;
 
 static unsigned fc_rand(void)
@@ -1032,12 +811,6 @@ static unsigned fc_below(unsigned n)
     return (n == 0) ? 0 : (fc_rand() % n);
 }
 
-/*
- * Aimed at the bytes that decide how far a walk goes, the curve id, the
- * one-byte key length, the two-byte signature length, the algorithm pair,
- * rather than at the signature, where a flipped byte only fails a comparison
- * that was going to fail anyway.
- */
 static void fc_mutate(FcBuf *w)
 {
     unsigned rounds = fc_below(6) + 1u;
@@ -1073,12 +846,6 @@ static void fc_mutate(FcBuf *w)
             }
             break;
         case 5:
-            /*
-             * A ServerKeyExchange head the ECDHE arm will accept, most of the
-             * time. A uniformly random one is rejected on the first byte
-             * roughly 255 times in 256, and a sweep that never gets past the
-             * first byte is a sweep of the first byte.
-             */
             if (w->len > 3)
             {
                 static const unsigned short curves[] =
@@ -1093,13 +860,6 @@ static void fc_mutate(FcBuf *w)
             }
             break;
         case 6:
-            /*
-             * A CertificateVerify head, likewise: the algorithm pair has to be
-             * (SHA-256, RSA) and the length has to equal the certificate's
-             * modulus before a signature byte is read at all. The lengths
-             * offered are the ones the bounds arithmetic turns on, the
-             * modulus, its neighbours, and the message's own size.
-             */
             if (w->len > 3)
             {
                 unsigned pick = fc_below(6);
@@ -1198,8 +958,6 @@ int main(int argc, char **argv)
             unsigned long n;
             int           s;
 
-            /* The seeds first, always: a sweep that never runs the known
-               shapes is a sweep whose coverage nobody can state. */
             for (s = 0; s < FC_SEED_COUNT; s++)
                 fc_run_seed(s);
 
@@ -1213,9 +971,6 @@ int main(int argc, char **argv)
                 fc_seeds[pick].build(&w);
                 fc_mutate(&w);
 
-                /* Every mutation through all three, not only the parser its
-                   seed was written for: a ServerKeyExchange arriving where a
-                   Finished was expected is something a server can send. */
                 fc_run(FC_SKE, w.b, w.len);
                 fc_run(FC_CV,  w.b, w.len);
                 fc_run(FC_FIN, w.b, w.len);
@@ -1228,7 +983,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* One ServerKeyExchange on stdin. */
     {
         unsigned char buf[FC_MAX];
         size_t        got = fread(buf, 1, sizeof(buf), stdin);

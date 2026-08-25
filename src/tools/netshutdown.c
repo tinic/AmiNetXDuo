@@ -2,46 +2,6 @@
  * NetShutdown, stop the network and the programs using it.
  *
  *     NetShutdown TIMEOUT/N,QUIET/S
- *
- * The counterpart of AddNetInterface. It does four things, in this order:
- *
- *   1  tells every program that has bsdsocket.library open that the network is
- *      stopping, by sending it SIGBREAKF_CTRL_C (NETCTRL_STACK_NOTIFY), and
- *      waits up to TIMEOUT seconds, five by default, for them to close it.
- *   2  takes every interface down, the same NETCTRL_INTERFACE_DOWN Offline
- *      makes, so nothing is sent and nothing is received afterwards.
- *   3  sends TCP: an ACTION_DIE; left standing it declines every expunge.
- *   4  gives back the reference AddNetInterface left behind
- *      (NETCTRL_STACK_RELEASE), so the last CloseLibrary() shuts the stack
- *      down and hands its memory back rather than finding the library holding
- *      itself up until a reboot.
- *
- * Step 1 follows the existing convention. AmiTCP's api_sendbreaktotasks()
- * signalled SIGBREAKF_CTRL_C to every task on its socketBaseList, AmiTCP_NG
- * still does, and Roadshow's manual describes this command as telling "every
- * network program currently running to let go of the network resources and
- * exit". A program written for any of those already handles it, because it is
- * the same signal Ctrl-C sends.
- *
- * The request cannot be enforced. Roadshow's own documentation says why:
- * "Unlike on a Unix system, it is not possible for an Amiga program to be
- * forced to give up its network resources." A program that ignores the signal
- * keeps its sockets and keeps the library open. This command then takes the
- * traffic away, says which program it was, and lets the shutdown finish when
- * that program exits. Nothing here kills a task.
- *
- * Step 2 departs from Roadshow. Roadshow deactivates the interfaces only once
- * every program has let go, so a shutdown that times out there leaves the
- * network running. This one stops the traffic either way, because a shutdown
- * that leaves the machine on the network does not answer the question that was
- * asked, and a program that ignored the request is not a reason to keep
- * carrying its packets.
- *
- * Before this existed the command did step 2 alone, which left `httpd` serving
- * a drawer and `nc` holding a listener afterwards, holding a library whose
- * network had been taken out from under them, with no way to shut the stack
- * down short of a reboot.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -130,10 +90,6 @@ static LONG count_up(struct Library *base)
 /*
  * The programs holding the library open, this one excluded. Fills the table
  * and returns how many there are, which can be more than it could list.
- *
- * A base whose task has exited is counted: it is holding a reference that will
- * never be given back, and a shutdown that waits for it waits forever, so the
- * wait below has to be able to see it and give up.
  */
 static LONG others_holding(struct Library *base, LONG *listed)
 {
@@ -278,8 +234,6 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /* ---- 1: tell the programs using it -------------------------------- */
-
     holding = others_holding(base, &listed);
 
     if (holding > 0)
@@ -324,8 +278,6 @@ int main(int argc, char **argv)
             }
         }
     }
-
-    /* ---- 2: take the traffic away ------------------------------------- */
 
     n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &nsd_ifaces,
                              sizeof(nsd_ifaces), sizeof(NetStatusInterface));
@@ -396,8 +348,6 @@ int main(int argc, char **argv)
         waited++;
     }
 
-    /* ---- 2b: take TCP: down ------------------------------------------- */
-
     /* After step 1, which is what gets a TCP: file handle closed, and before
        step 3, whose last CloseLibrary() is the expunge this clears. */
     {
@@ -409,24 +359,16 @@ int main(int argc, char **argv)
             say("TCP: is still open by a program and was left running\n");
     }
 
-    /* ---- 3: give the network's own reference back --------------------- */
-
     /*
      * After the interfaces, not before. While the reference is held the stack
      * cannot go down, and once it is given back the last CloseLibrary() takes
      * the stack with it. That last close can be the one at the bottom of this
      * function.
-     *
-     * A refusal is not reported. The only refusal is that the caller is the
-     * last reference, which means this command is about to shut the stack down
-     * by closing its own base, and that is the outcome asked for.
      */
     for (w = 0; w < (ULONG)(sizeof(ctl) / sizeof(ULONG)); w++)
         ((ULONG *)&ctl)[w] = 0;
 
     (VOID)tool_netstatus_control(base, NETCTRL_STACK_RELEASE, &ctl, NULL);
-
-    /* ---- and what happened -------------------------------------------- */
 
     holding = others_holding(base, &listed);
 

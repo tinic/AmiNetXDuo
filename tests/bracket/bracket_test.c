@@ -1,41 +1,15 @@
 /*
- * AmiNetXDuo, the ThreadX/Exec adoption layer, on its own.
- *
- * WHY THIS EXISTS
- *
- * The defect of docs/RESEARCH.md 77.6 was one pointer read: ami_netstack_enter()
- * asked tx_thread_identify() whether the caller was already inside, and that
- * returns _tx_thread_current_ptr, which on this port is the GLOBAL baton holder
- * rather than an answer about the caller. A second Task arriving while the
- * first held the baton read "already a thread", skipped adoption and entered
- * NetX Duo unbracketed. Two Exec Tasks inside the stack at once, on a machine
- * with no memory protection.
- *
- * It survived every automated harness, and the reason is worth stating: the
- * tests that are concurrent do not go through this layer, and the tests that go
- * through this layer are not concurrent. tests/soak has four adopted Tasks and
- * deliberate adopt/orphan churn, and never asks the question this file asks.
- *
- * So this tests the layer itself: no sockets, no NetX Duo, no SANA-II driver,
- * no interface. That is not minimalism for its own sake. It means this can run
- * in public CI, where anything reaching bsdsocket.library through its LVOs
- * cannot, because those need a2065.device and Commodore's driver is not
- * redistributable.
- *
- * WHAT IT ASSERTS
- *
- * The invariant that failed, first and by name: while one Task holds the baton,
- * an unrelated Task must be told it does NOT. Everything else here is secondary
- * to that one, and t_baton_is_not_shared() can fail against the old code,
- * which is the property that makes it a test rather than a description.
+ * AmiNetXDuo, the ThreadX/Exec adoption layer, on its own: while one Task
+ * holds the baton, an unrelated Task must be told it does NOT.  No sockets,
+ * no NetX Duo, no SANA-II driver, so it runs in public CI.
  *
  * SPDX-License-Identifier: MIT
  */
 
 /*
  * tx_api.h first, before any NDK header: tx_port.h typedefs VOID, CHAR and
- * UCHAR itself, and exec/types.h getting there first makes those a redefinition
- * rather than a match. tests/soak/soak_test.c orders them the same way.
+ * UCHAR itself, and exec/types.h getting there first makes those a
+ * redefinition rather than a match.
  */
 #include "tx_api.h"
 #include "tx_amiga.h"
@@ -53,9 +27,8 @@
 
 #include "aminetxduo/netstack.h"
 
-/* The bracket under test, and the counter ThreadX reads to decide whether it is
-   in an interrupt.  Declared here rather than pulled in from tx_thread.h, which
-   wants TX_SOURCE_CODE. */
+/* Declared here rather than pulled in from tx_thread.h, which wants
+   TX_SOURCE_CODE. */
 VOID ami_netstack_baton_release(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
@@ -90,12 +63,8 @@ extern TX_THREAD *_tx_thread_current_ptr;
 static ULONG t_checks;
 static ULONG t_failures;
 
-/*
- * Flushed per line. The emulator runner reads stdout out of a file after the
- * run, so an unflushed line is a line that does not exist if the program wedges
- * and wedging is one of the things this file is here to catch. A sibling
- * harness lost two emulator runs to exactly that.
- */
+/* Flushed per line: the emulator runner reads stdout from a file after the
+   run, so an unflushed line is lost if the program wedges. */
 static VOID t_log(const char *fmt, LONG a, LONG b)
 {
     LONG args[2];
@@ -122,13 +91,9 @@ static VOID t_check(LONG ok, const char *what, LONG detail)
 
 /* ----------------------------------------------------------- spawning tasks -- */
 
-/*
- * The stack is a SEPARATE AllocMem() from the task structure, and the MemList
- * covers only the task: RemTask() frees the task's own MemList entries, and a
- * list covering both frees one address twice. tests/soak/soak_test.c carries
- * the full account of what that looked like, AN_FreeTwice when Exec noticed,
- * recycled memory executing as code when it did not.
- */
+/* The stack is a SEPARATE AllocMem() from the task structure, and the MemList
+   covers only the task: RemTask() frees the task's own MemList entries, and a
+   list covering both frees one address twice. */
 typedef struct BtTask
 {
     struct Task    *bt_Task;
@@ -167,11 +132,6 @@ static VOID bt_reap_target_entry(ULONG input)
     bt_reap_entry_calls++;
 }
 
-/*
- * How far the holder got. It runs as a plain Task, so it cannot print, and a
- * bounded wait that says nothing is no better than the unbounded one it
- * replaced.
- */
 static volatile ULONG bt_mark;
 
 static VOID bt_newlist(struct List *l)
@@ -239,26 +199,9 @@ static struct Task *bt_spawn(BtTask *bt, VOID (*entry)(VOID), const char *name,
     return task;
 }
 
-/*
- * A spawned Task's last act.  RemTask() rather than falling off the end of the
- * entry point, and the flag and the Signal go inside the Forbid() that ends in
- * it.
- *
- * Returning instead lets Exec's default finaliser remove the task some
- * instructions later, and in those instructions main() has already seen
- * bt_Done, run bt_reap() and FreeMem()ed the stack the dying task is still
- * standing on, and then handed that same block to the next Task it spawns.
- * The machine resets: the entry point returns through a stack that now belongs
- * to somebody else, and the PC lands in the middle of a struct Task.  100%
- * reproducible on Kickstart 3.1 under both Amiberry and FS-UAE, and it is what
- * "17/17 checks passed" was hiding, the checks that print are the ones before
- * the first reap.
- *
- * Exec discards the forbid nesting of a task it removes, so the flag, the
- * Signal and the removal are one indivisible step: main cannot see bt_Done set
- * and still find this Task alive.  port/threadx-amiga's _tx_amiga_task_destroy()
- * has the same shape for the same reason.
- */
+/* The flag, the Signal and the RemTask() must be one indivisible step, so that
+   main cannot see bt_Done set and still find this Task alive standing on a
+   stack main is about to free.  Exec discards a removed task's forbid nesting. */
 static VOID bt_finish(BtTask *bt)
 {
     Forbid();
@@ -266,18 +209,12 @@ static VOID bt_finish(BtTask *bt)
     Signal(bt->bt_Parent, BT_SIG_GO);
     RemTask(NULL);
 
-    /* Unreachable.  */
     for (;;)
         Wait(0UL);
 }
 
 /* ------------------------------------------------------- the holder rendezvous -- */
 
-/*
- * Adopt, say so, and keep holding until released. Nothing else: the point is to
- * have exactly one Task legitimately inside while somebody else asks the
- * question.
- */
 static VOID bt_holder_entry(VOID)
 {
     struct Task *me = FindTask(NULL);
@@ -292,7 +229,6 @@ static VOID bt_holder_entry(VOID)
         bt_finish(bt);
     }
 
-    /* Adopted: from here until the orphan below, this Task is the baton. */
     if (tx_amiga_caller_is_thread() == (UINT)TX_FALSE)
         bt->bt_Failures++;              /* the holder must see itself */
 
@@ -310,11 +246,6 @@ static VOID bt_holder_entry(VOID)
 
 /* ------------------------------------------------------------ the churn body -- */
 
-/*
- * Adopt and orphan in a loop, checking the layer's answer either side. Under
- * BT_WORKERS Tasks doing this at once the baton changes hands constantly, which
- * is the state in which the old code answered the wrong question.
- */
 static VOID bt_worker_entry(VOID)
 {
     struct Task *me = FindTask(NULL);
@@ -325,8 +256,6 @@ static VOID bt_worker_entry(VOID)
 
     for (i = 0; i < BT_ROUNDS; i++)
     {
-        /* Not adopted yet: whatever any other Task is doing, the answer for
-           THIS Task is no. This is the assertion the released defect broke. */
         if (tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
         {
             bt->bt_Failures++;
@@ -375,18 +304,6 @@ static VOID bt_worker_entry(VOID)
 
 /* ---------------------------------------------------- forced task death -- */
 
-/*
- * Four points at which an Exec Task may be removed without unwinding:
- *
- *   holding   the adopted thread is _tx_thread_current_ptr;
- *   dormant   its cached TX_THREAD is suspended between calls;
- *   released  netstack_baton.c owns a slot while the Task is in Exec;
- *   event     ThreadX has linked it into an object's suspension list.
- *
- * The first three remove themselves, exactly like a command killed while it
- * is running.  The event waiter cannot execute its own RemTask(), so main
- * removes it after observing the actual TX_EVENT_FLAG state.
- */
 static VOID bt_die_holding_entry(VOID)
 {
     struct Task *me = FindTask(NULL);
@@ -518,37 +435,9 @@ static VOID bt_discard_dead(BtTask *bt, BOOL expect_baton_slot,
 
 /* ------------------------------------------ the shared interrupt state -- */
 
-/*
- * _tx_thread_system_state is one global counter, and every Task in the machine
- * reads it. ThreadX treats a non-zero value as "an ISR is running", and every
- * _tx_thread_system_return() is behind TX_THREAD_SYSTEM_RETURN_CHECK, which
- * tests it. So a Task that reaches _tx_thread_system_suspend() while somebody
- * else has the counter raised does not suspend: it returns still linked into
- * the object's suspension list, with the object's suspended count already
- * incremented. List and count then disagree, and the next
- * _tx_event_flags_set() walks past the end of the list into offset 0x80 of
- * address zero, the Enforcer hits this phase exists for.
- *
- * The port's rule is therefore that the counter may only be raised under an
- * unbroken Forbid(): tx_thread_context_save.c states it, tx_amiga_adopt.c
- * repeats it. netstack_baton.c raised it and then Permit()ed, which is the
- * defect.
- *
- * Catching that needs an observer that runs INSIDE the window, and no Task can
- * poll its way in, Exec will not switch between two Tasks of the same
- * priority except on a quantum boundary. The probe below is dispatched the way
- * the SANA-II readers are on real hardware: it is the highest-priority Task in
- * the phase and it wakes on a device interrupt, so Exec dispatches it at the
- * first instruction where switching is allowed. Under the old code that is the
- * Permit() in the middle of the bracket.
- *
- * Two independent detectors, because they catch it from opposite sides:
- *
- *   bt_probe_shared      the probe ran while the counter was raised
- *   bs_StateShared       a Task entering the bracket found it already raised
- *
- * Both must be zero. Under the old code both fire within the first second.
- */
+/* Port rule under test: _tx_thread_system_state may only be raised under an
+   unbroken Forbid().  The probe is the highest-priority Task in the phase and
+   wakes on a timer interrupt, so it lands inside any Permit() window. */
 
 static volatile ULONG bt_probe_samples;
 static volatile ULONG bt_probe_shared;
@@ -611,11 +500,6 @@ static VOID bt_probe_entry(VOID)
     bt_finish(bt);
 }
 
-/*
- * A SANA-II reader, with the device taken out: adopt once, then hand the baton
- * back and take it again for as long as the phase lasts. That is exactly what
- * ami_sana2_block_enter()/leave() do around the Wait() for an IORequest.
- */
 static VOID bt_baton_entry(VOID)
 {
     struct Task *me = FindTask(NULL);
@@ -654,11 +538,7 @@ static VOID bt_baton_entry(VOID)
     bt_finish(bt);
 }
 
-/*
- * ThreadX calls this from tx_kernel_enter() and the link fails without it. This
- * layer is what is under test, so there is nothing to define: every thread here
- * arrives by adoption from an Exec Task, which is the whole point.
- */
+/* ThreadX calls this from tx_kernel_enter(); the link fails without it. */
 VOID tx_application_define(VOID *first_unused_memory)
 {
     (VOID)first_unused_memory;
@@ -668,12 +548,8 @@ VOID tx_application_define(VOID *first_unused_memory)
 
 /* ------------------------------------------------------------------- the main -- */
 
-/*
- * Poll a flag with a deadline rather than Wait() on a signal. Signals are bits:
- * two set before the first Wait() arrive as one, and the second Wait() then
- * blocks for ever on a wake that already happened. Reporting how far the holder
- * got is the difference between a diagnosis and a harness that stops.
- */
+/* Poll with a deadline, never Wait(): Exec signals are bits, so two set before
+   the first Wait() arrive as one and the second Wait() blocks for ever. */
 static VOID bt_wait_for(volatile UWORD *flag, const char *what)
 {
     ULONG waited = 0;
@@ -701,17 +577,8 @@ static VOID bt_reap(BtTask *bt)
     }
 }
 
-/*
- * Exercise the branch where _tx_amiga_reap() cannot allocate a handshake
- * signal.  An outer Forbid() around delete and the counter snapshots makes the
- * ordering deterministic: delete has to detach and record the still-live task
- * before it can run.  Only after the live-zombie count returns to its baseline
- * is the target's stack safe to release.
- *
- * The target lives in the middle of its allocation so the same fixture can
- * ask both overlap checkers about a new range that wholly contains it.  That
- * is the shape endpoint-only comparisons used to miss.
- */
+/* The target's stack is only safe to release once the live-zombie count is back
+   at its baseline. */
 static VOID bt_test_no_signal_reap(VOID)
 {
     BYTE  held[32];
@@ -786,11 +653,8 @@ static VOID bt_test_no_signal_reap(VOID)
                 (LONG)status);
         if (status == TX_SUCCESS)
         {
-            /* Keep the target from consuming the reaper's wakeup until both
-               counters have been sampled.  Raising this Task's priority is
-               not sufficient: tx_thread_delete() may reschedule internally
-               before it returns.  The port's own Forbid()/Permit() pairs
-               nest inside this outer one. */
+            /* Raising this Task's priority is not sufficient:
+               tx_thread_delete() may reschedule internally before it returns. */
             Forbid();
             status = tx_thread_delete(&bt_reap_target);
             if (status == TX_SUCCESS)
@@ -875,7 +739,6 @@ int main(int argc, char **argv)
         return 20;
     }
 
-    /* main() has adopted nothing, and nothing else is running yet. */
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "an unadopted Task is not the baton holder", 0);
 
@@ -896,12 +759,6 @@ int main(int argc, char **argv)
 
         t_check(bt_holder.bt_Ready != 0U, "holder adopted a thread", 0);
 
-        /*
-         * THE ONE THAT MATTERS. Another Task holds the baton right now. main()
-         * has adopted nothing, so the layer must say no. The released defect
-         * said yes here, and everything downstream, a caller skipping
-         * adoption and entering NetX Duo unbracketed, followed from it.
-         */
         t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
                 "another Task holding the baton does not make us a thread", 0);
 
@@ -936,13 +793,6 @@ int main(int argc, char **argv)
         if (bt_worker[i].bt_Task != NULL)
             Signal(bt_worker[i].bt_Task, BT_SIG_GO);
 
-    /*
-     * Poll the done flags rather than counting signals. Exec signals are BITS,
-     * not counters: six workers setting SIGF_SINGLE can coalesce into one wake,
-     * and a Wait() per worker then blocks for ever on a signal that was already
-     * merged. This harness did exactly that and hung in four runs out of five,
-     * which read like a defect in the layer under test.
-     */
     {
         ULONG waited = 0;
 
@@ -987,7 +837,6 @@ int main(int argc, char **argv)
     t_check(rounds == (LONG)BT_WORKERS * BT_ROUNDS,
             "every worker finished every round", rounds);
 
-    /* And main is still what it was before any of that. */
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "unadopted after the churn, as before it", 0);
 
@@ -1098,11 +947,6 @@ int main(int argc, char **argv)
             }
             else
             {
-                /* Do not leave a live waiter behind after a diagnostic
-                   failure: that would turn shutdown into a second,
-                   misleading failure. Once woken, bt_finish() removes the
-                   Exec Task atomically; its stale TX_THREAD can be discarded
-                   through the same cleanup path. */
                 (VOID)tx_event_flags_set(&bt_dead_flags, 1UL, TX_OR);
                 bt_wait_for(&bt_dead_event.bt_Done,
                             "failed event victim to leave after wakeup");
@@ -1186,18 +1030,9 @@ int main(int argc, char **argv)
     t_check(bt_probe.bt_Failures == 0, "the probe opened timer.device",
             bt_probe.bt_Failures);
 
-    /* Without this, zero violations would mean nothing: a probe that never ran
-       cannot see one. */
     t_check(bt_probe_samples >= 100UL, "the probe sampled often enough",
             (LONG)bt_probe_samples);
 
-    /*
-     * THE ONE THAT MATTERS. Every one of these is a moment where ThreadX was
-     * told an interrupt was in progress while Exec was free to dispatch any
-     * Task in the machine, and the Task it dispatches is holding the baton,
-     * one blocking call away from being left on a suspension list it has been
-     * taken off.
-     */
     t_check(bt_probe_shared == 0UL,
             "_tx_thread_system_state is never raised with switching enabled",
             (LONG)bt_probe_shared);
@@ -1222,15 +1057,8 @@ int main(int argc, char **argv)
 
     bt_reap(&bt_probe);
 
-    /*
-     * The kernel comes down before the program does. tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this program's hunk, and AmigaDOS frees that hunk the
-     * instant main() returns; the next VBlank then calls into it. Nothing
-     * above needs deleting first: every TX_THREAD here belongs to an Exec Task
-     * that adopted itself and orphaned itself again, which is the whole point
-     * of this test, so the kernel owns no application thread by now.
-     */
+    /* The kernel must come down before main() returns: its VERTB interrupt
+       server lives in this program's hunk, which AmigaDOS frees on exit. */
     t_check(tx_amiga_kernel_stop() == TX_SUCCESS, "ThreadX kernel stopped", 0);
 
     t_log("%ld checks, %ld failures, ", (LONG)t_checks, (LONG)t_failures);

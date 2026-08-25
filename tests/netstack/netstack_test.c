@@ -1,22 +1,6 @@
 /*
  * AmiNetXDuo, milestone 3 bring-up test.
  *
- * Brings the whole stack up against a real SANA-II device and reports what
- * happened:
- *
- *   - netstack_startup() reads DEVS:NetInterfaces, opens the device, starts
- *     ThreadX, creates the pool and the NX_IP, runs DHCP and blocks for an
- *     address;
- *   - the address, netmask and gateway are read back from the live NX_IP;
- *   - ICMP echo to the gateway proves the SANA-II TX path, the ARP exchange,
- *     the RX reader threads and the baton hand-back all work end to end;
- *   - a DNS lookup proves the resolver, if the lease brought name servers;
- *   - netstack_shutdown() tears it back down.
- *
- * Shape follows tests/ram_driver/ram_driver_test.c: main() is an AmigaDOS
- * Process, output goes to the serial debug port as it happens and is replayed
- * to stdout at the end.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -38,9 +22,6 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
-
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -87,11 +68,6 @@ va_list args;
     t_put('\n');
 }
 
-/*
- * Replay whatever has been logged since the last call. Incremental because
- * the teardown step can wedge (see the note in main()) and the results
- * gathered before it must reach stdout either way.
- */
 static ULONG    t_log_flushed;
 
 static VOID t_flush(VOID)
@@ -108,9 +84,6 @@ BPTR    out;
     }
     t_log_flushed =  t_log_used;
 }
-
-
-/* -------------------------------------------------------------- results -- */
 
 static volatile ULONG   t_checks;
 static volatile ULONG   t_failures;
@@ -150,15 +123,6 @@ static VOID t_log_ip(const char *label, ULONG addr)
           (addr >>  8) & 0xFFUL,  addr        & 0xFFUL);
 }
 
-
-/* ------------------------------------------------------------- watchdog --- */
-
-/*
- * A bring-up test that hangs reports nothing. This dumps the ThreadX
- * scheduler state, the current thread, the thread due to execute, and what
- * every thread in the system is doing, from an ordinary Exec Process, so it
- * keeps running even when every ThreadX thread is wedged.
- */
 static const char *const t_state_name[] =
 {
     "READY", "COMPLETED", "TERMINATED", "SUSPENDED", "SLEEP", "QUEUE_SUSP",
@@ -241,9 +205,6 @@ struct TagItem  tags[5];
 
     (VOID) CreateNewProc(tags);
 }
-
-
-/* ------------------------------------------------------------- the test --- */
 
 #define T_PING_TIMEOUT      (5UL * (ULONG) NX_IP_PERIODIC_RATE)
 #define T_PING_TRIES        4
@@ -402,7 +363,6 @@ UWORD            i;
         t_log("  (no gateway configured, skipping the wire test)");
     }
 
-    /* Resolver. */
     resolved =  0UL;
     if (netstack_resolve("localhost", &resolved, T_DNS_TIMEOUT) == AMI_NET_OK)
     {
@@ -425,18 +385,6 @@ UWORD            i;
     (VOID) tx_amiga_orphan_thread(&t_main_thread);
 }
 
-
-/* ------------------------------------------------------------------ main -- */
-
-/*
- * What the tick task managed, over the whole run.  Reported rather than checked:
- * the numbers that matter here depend on the machine, and a 7 MHz 68000 is
- * expected to look different from a 68030.
- *
- * delivered / uptime is the real tick rate.  service / wakeups is what the tick
- * costs.  A non-zero skew says the wheel ran late and by how much, which on a
- * slow machine is the budget deferring rather than anything being wrong.
- */
 static VOID t_tick_stats(VOID)
 {
 TX_AMIGA_TICK_STATS  s;
@@ -504,13 +452,6 @@ LONG    status;
           t_checks, t_failures, (t_failures == 0UL) ? "PASS" : "FAIL");
     t_flush();
 
-    /*
-     * Teardown is reported separately, and last, because it can hang: on
-     * Commodore's a2065.device 2.16 an AbortIO() on a pending SANA-II CMD_READ
-     * is not honoured, so ami_sana2_rx_teardown()'s WaitIO() never returns and
-     * the reader thread never posts its "exited" semaphore. Everything above
-     * has already reached stdout by this point.
-     */
     t_log("");
     t_log("tearing down (netstack_shutdown)");
     t_flush();

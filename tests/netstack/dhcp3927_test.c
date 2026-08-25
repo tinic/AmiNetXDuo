@@ -1,40 +1,6 @@
 /*
  * AmiNetXDuo, the DHCP lease lifecycle, and RFC 3927 link-local addressing.
  *
- * Every emulator run in this tree takes a DHCP lease and stops there, so the
- * acquisition handshake (DISCOVER/OFFER/REQUEST/ACK) is exercised constantly
- * and nothing else is: renewal at T1, rebinding at T2, a lease running out, a
- * NAK, and the whole of RFC 3927 had never executed once.  This test drives
- * those paths against FS-UAE's SLIRP, a real DHCP server that will renew and
- * will NAK, and reports what the stack does.
- *
- * SLIRP's lease is 24 hours and it never expires or withdraws one, so the
- * timers are shortened in the live NX_DHCP record rather than waited out; the
- * state machine, the wire traffic and the server are real, only the clock is
- * not.  "The server stopped answering" is produced by taking the link down,
- * which is what an unplugged cable looks like to the client.
- *
- *   A  DHCP times out and the RFC 3927 fallback fires (mode `killlink`):
- *      a link-local address is chosen and probed, and then the link comes
- *      back and DHCP takes over from it.
- *   B  renewal at T1, BOUND -> RENEWING -> ACK -> BOUND.
- *   C  a NAK: ask for an address the server has not leased us.
- *   D  the server goes silent: T1, then T2, then the lease runs out.
- *   E  RFC 3927 conflict detection: probe for an address something else on
- *      the wire already answers for.
- *   H  the probe and announce timing, sampled off the guest's own clock.
- *   F  rate limiting after ten conflicts in a row.
- *   G  a conflict after the address is in use, the defence.
- *
- * E needs a real host on the wire and SLIRP is one.  F and G need a host that
- * answers every probe, and one that stays quiet through the probes and then
- * claims the address anyway; SLIRP is neither, so those two synthesise the
- * peer, a correctly formed ARP frame handed to the same function the
- * SANA-II reader calls (see the note above t_inject_arp()).
- *
- * The mode comes from the environment variable DHCP3927MODE, which
- * run-dhcp3927.sh stages into ENV:.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -57,8 +23,6 @@
 
 #include <stdarg.h>
 
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -122,8 +86,6 @@ BPTR    out;
 }
 
 
-/* -------------------------------------------------------------- results -- */
-
 static volatile ULONG   t_checks;
 static volatile ULONG   t_failures;
 
@@ -158,15 +120,6 @@ static VOID t_log_ip(const char *label, ULONG addr)
           (addr >>  8) & 0xFFUL,  addr        & 0xFFUL);
 }
 
-
-/* ------------------------------------------------------- state observers -- */
-
-/*
- * The DHCP client and the AutoIP module both change the interface address
- * from their own threads with no announcement unless somebody registers for
- * one.  These two are the test's eyes; whether the stack registers its own is
- * one of the things being examined.
- */
 
 static const char *const t_dhcp_state_name[] =
 {
@@ -216,23 +169,6 @@ ULONG   i;
     return(FALSE);
 }
 
-/*
- * No address-change callback here, on purpose: NX_IP holds exactly one and
- * netstack.c registers it.  The "[INFO] netstack: interface 0 address is now
- * ..." lines in the log below are the stack talking, and a test that
- * installed its own would unhook the thing it is here to check.
- */
-
-/* --------------------------------------------------- the link-kill helper -- */
-
-/*
- * Phase A needs DHCP to fail.  SLIRP always answers, so the wire is taken
- * away instead: this Process holds the interface down across the whole of
- * netstack_startup()'s DHCP window, then puts it back.  Polling rather than
- * a single call because the IP thread enables the link itself as it comes up,
- * and whichever of the two runs last would otherwise win.
- */
-
 static volatile BOOL    t_killlink;
 static volatile ULONG   t_link_downs;
 static volatile BOOL    t_link_restored;
@@ -255,20 +191,6 @@ ULONG   i;
         Delay(1UL);
     }
 
-    /*
-     * Then wait for the DHCP client itself, by spinning rather than Delay().
-     * The DISCOVER goes out one ThreadX tick after nx_dhcp_start() returns
-     * (ami_ns_dhcp_discover_now() in src/netstack/netstack.c), so a settling
-     * delay of any length hands DHCP the lease phase A exists to deny it,
-     * leaving the mode testing nothing.
-     *
-     * The sequence point is therefore the client, not the clock: the state
-     * leaves IDLE when nx_dhcp_start() runs, one tick before the DISCOVER,
-     * and by then the readers have had the whole of NX_IP initialisation to
-     * come up.  Twenty milliseconds is below Delay()'s one-tick floor, hence
-     * the spin, bounded, and yielding occasionally so that a client which
-     * never starts ends the loop rather than the run.
-     */
     for (i = 0; i < 200000UL; i++)
     {
         if (netstack_interface_dhcp_state(0) != AMI_DHCP_IDLE)
@@ -314,8 +236,6 @@ struct TagItem  tags[5];
 }
 
 
-/* ----------------------------------------------------------- the phases --- */
-
 static TX_THREAD    t_main_thread;
 
 #define T_SEC(n)    ((ULONG) (n) * (ULONG) NX_IP_PERIODIC_RATE)
@@ -323,7 +243,6 @@ static TX_THREAD    t_main_thread;
 static AmiNetStack *t_ns;
 static NX_IP       *t_ip;
 
-/* Interface 0's record inside the live DHCP client, or NULL. */
 static NX_DHCP_INTERFACE_RECORD *t_record(VOID)
 {
 
@@ -363,7 +282,6 @@ static BOOL t_is_linklocal(ULONG addr)
            (addr <= IP_ADDRESS(169, 254, 254, 255))) ? TRUE : FALSE;
 }
 
-/* Wait up to `seconds` for the DHCP client to reach `want`. */
 static BOOL t_wait_state(UCHAR want, ULONG seconds)
 {
 
@@ -399,15 +317,6 @@ ULONG   i;
 }
 
 
-/* ---- A: the RFC 3927 fallback -------------------------------------------- */
-
-/*
- * netstack_startup() has already returned by the time this runs; the fallback
- * either happened during it or it did not.  What is checked here is the state
- * it left behind: an AutoIP instance that exists and is running, an address
- * inside the RFC 3927 range, and the probe and announce counters that say the
- * ARP sequence in RFC 3927 section 2.2 actually went out on the wire.
- */
 static VOID t_phase_a(VOID)
 {
 
@@ -430,11 +339,6 @@ ULONG   i;
         return;
     }
 
-    /*
-     * netstack_startup() can return before AutoIP has finished: the module's
-     * thread waits for NX_IP_LINK_ENABLED before it will probe at all, so in
-     * `killlink` mode nothing happens until the wire comes back.
-     */
     (VOID) t_wait_address(60UL);
 
     addr =  t_address();
@@ -473,13 +377,6 @@ ULONG   i;
                    "at least one ARP announcement was sent",
                    t_ns->ns_AutoIp.nx_auto_ip_announce_count);
 
-    /*
-     * The link is back, DHCP is still running, and RFC 3927 section 1.9 says
-     * a routable address supersedes the link-local one.  Nothing in the stack
-     * arbitrates that; the DHCP client simply writes over the interface
-     * address when its ACK arrives.  This checks whether it happens at all
-     * and how long it takes.
-     */
     if (t_is_linklocal(addr) && t_ns->ns_DhcpCreated && t_killlink)
     {
         t_log("  waiting for DHCP to supersede the link-local address");
@@ -501,8 +398,6 @@ ULONG   i;
     }
 }
 
-
-/* ---- B: renewal at T1 ----------------------------------------------------- */
 
 static VOID t_phase_b(VOID)
 {
@@ -535,20 +430,11 @@ ULONG                       trace_from;
     addr_before =  t_address();
     trace_from  =  t_dhcp_trace_used;
 
-    /*
-     * Shorten the clock rather than the lease: T1 in two seconds, T2 six
-     * seconds after that, the lease four seconds after that.  These fields
-     * are in ticks: _nx_dhcp_extract_information() multiplies the server's
-     * seconds by NX_IP_PERIODIC_RATE on the way in.  Everything else, the
-     * REQUEST, the server, the ACK, is real.
-     */
     rec->nx_dhcp_renewal_time =  T_SEC(2);
     rec->nx_dhcp_rebind_time  =  T_SEC(8);
     rec->nx_dhcp_lease_time   =  T_SEC(12);
     rec->nx_dhcp_timeout      =  T_SEC(2);
 
-    /* Sit through the whole of it: waiting for BOUND is no use when BOUND is
-       where it starts. */
     tx_thread_sleep(T_SEC(15));
 
     (VOID) t_check((UINT) t_saw_state(NX_DHCP_STATE_RENEWING, trace_from),
@@ -573,13 +459,6 @@ ULONG                       trace_from;
 }
 
 
-/* ---- C: a NAK ------------------------------------------------------------- */
-
-/*
- * SLIRP hands out one lease per MAC and NAKs a REQUEST for anything else, so
- * asking for an address it has not leased us is a real DHCPNAK from a real
- * server rather than a fabricated packet.
- */
 static VOID t_phase_c(VOID)
 {
 
@@ -610,7 +489,6 @@ UINT                        status;
     status =  nx_dhcp_start(&t_ns->ns_Dhcp);
     t_log("  nx_dhcp_start -> %ld", (ULONG) status);
 
-    /* A NAK drops it straight back to INIT, and from there it re-DISCOVERs. */
     (VOID) t_wait_state(NX_DHCP_STATE_BOUND, 60UL);
 
     (VOID) t_check((UINT) t_saw_state(NX_DHCP_STATE_REQUESTING, trace_from),
@@ -630,15 +508,12 @@ UINT                        status;
 
     t_log_ip("address while recovering", t_address());
 
-    /* And it must come back on its own. */
     (VOID) t_check((UINT) t_wait_state(NX_DHCP_STATE_BOUND, 40UL),
                    "the client recovered a lease after the NAK",
                    (ULONG) t_dhcp_state_last);
     t_log_ip("address after recovery", t_address());
 }
 
-
-/* ---- D: the server stops answering ---------------------------------------- */
 
 static VOID t_phase_d(VOID)
 {
@@ -660,8 +535,6 @@ ULONG                       addr;
                  (ULONG) rec->nx_dhcp_state))
         return;
 
-    /* Take the wire away: this is the "cable pulled" case, and it is the only
-       way to stop SLIRP answering. */
     (VOID) netstack_interface_down(0);
     t_log("  interface 0 link down");
 
@@ -678,7 +551,6 @@ ULONG                       addr;
                    "T2 expiry moved the client to REBINDING",
                    (ULONG) t_dhcp_state_last);
 
-    /* And then the lease runs out. */
     (VOID) t_check((UINT) t_wait_state(NX_DHCP_STATE_INIT, 60UL),
                    "the lease ran out and the client went back to INIT",
                    (ULONG) t_dhcp_state_last);
@@ -688,11 +560,6 @@ ULONG                       addr;
     (VOID) t_check((UINT) (addr == 0UL),
                    "the expired address was taken off the interface", addr);
 
-    /*
-     * RFC 3927 1.7 covers a machine with no lease, and netstack.c applies it
-     * on a DHCP timeout at startup, so it has to apply here too or a machine
-     * that loses its lease falls off the network with no address at all.
-     */
     t_log("  AutoIP created after the lease expired: %ld, running %ld",
           (ULONG) t_ns->ns_AutoIpCreated, (ULONG) t_ns->ns_AutoIpRunning);
 
@@ -700,7 +567,6 @@ ULONG                       addr;
                    "losing the lease started RFC 3927 link-local addressing",
                    0UL);
 
-    /* Put the wire back and let it recover. */
     (VOID) netstack_interface_up(0);
     t_log("  interface 0 link up");
 
@@ -718,15 +584,6 @@ ULONG                       addr;
 }
 
 
-/* ---- E: RFC 3927 conflict detection --------------------------------------- */
-
-/*
- * A probe that something else answers.  169.254.x.x is empty on this wire,
- * SLIRP replies to ARP only inside 10.0.2.0/24, so the probe is aimed at
- * 10.0.2.2, which SLIRP does answer.  The address is outside the link-local
- * range deliberately: under test is the conflict machinery in
- * nx_arp_packet_receive.c and the AutoIP retry, not the range check.
- */
 static NX_AUTO_IP   t_own_autoip;
 static UCHAR        t_own_autoip_stack[2048];
 static BOOL         t_own_autoip_created;
@@ -773,12 +630,6 @@ UINT            status;
     (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
     tx_thread_sleep(T_SEC(1));
 
-    /*
-     * This phase needs a real host on the wire that answers ARP for a known
-     * address; SLIRP is that host, and its presence is proved by the DHCP
-     * lease.  With no wire there is nobody to conflict with, and F and G
-     * below cover the same machinery with a synthetic peer.
-     */
     if (!t_saw_state(NX_DHCP_STATE_BOUND, 0UL))
     {
         t_log("  nothing answers on this wire, skipped (see F and G)");
@@ -823,11 +674,6 @@ UINT            status;
         (VOID) t_check((UINT) t_is_linklocal(t_address()),
                        "the retry claimed a link-local address", t_address());
 
-        /*
-         * RFC 3927 section 2.4: the announcements go out ANNOUNCE_WAIT after
-         * the address is claimed, so this has to wait for them rather than
-         * read the counter the instant the address appears.
-         */
         for (i = 0; i < 200UL; i++)
         {
             if (ai->nx_auto_ip_announce_count > 0UL)
@@ -856,23 +702,6 @@ UINT            status;
           ai->nx_auto_ip_conflict_count, (ULONG) NX_AUTO_IP_MAX_CONFLICTS);
 }
 
-
-/* ---- F and G: a peer that answers, and one that takes the address --------- */
-
-/*
- * SLIRP answers ARP inside 10.0.2.0/24 and nowhere else, so it can produce
- * exactly one conflict: AutoIP redraws inside 169.254/16 after the first one
- * and nothing on this wire ever answers again.  Rate limiting needs ten in a
- * row, and defending an address in use needs a host that stays quiet through
- * the probes and then claims the address anyway.  Neither exists here.
- *
- * So the peer is synthesised: a correctly formed ARP frame, byte for byte
- * what another host would put on the wire, handed to
- * _nx_arp_packet_deferred_receive(), the same function the SANA-II reader
- * calls for every ARP frame that arrives from the a2065 (sana2_rx.c:503).
- * Everything downstream of that, nx_arp_packet_receive.c's conflict
- * detection, the defence it sends, the AutoIP thread's response, is real.
- */
 
 extern VOID _nx_arp_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr);
 
@@ -917,15 +746,6 @@ ULONG      *msg;
     return(TRUE);
 }
 
-/* ---- H: the probe and announce timing ------------------------------------- */
-
-/*
- * RFC 3927 sections 2.2.1 and 2.4 specify timing as well as content: a random
- * wait of up to PROBE_WAIT before the first probe, PROBE_NUM probes spaced
- * PROBE_MIN..PROBE_MAX apart, then ANNOUNCE_WAIT of quiet before ANNOUNCE_NUM
- * announcements ANNOUNCE_INTERVAL apart.  Counters cannot show any of that,
- * so this samples the guest's own 50 Hz clock as each one goes.
- */
 static VOID t_phase_h(VOID)
 {
 
@@ -948,11 +768,6 @@ BOOL        spacing_ok =  TRUE;
     if (ai == NX_NULL)
         return;
 
-    /*
-     * Let the previous cycle finish first.  AutoIP sends its second
-     * announcement ANNOUNCE_INTERVAL after the first, so a snapshot taken
-     * straight after the address is cleared counts that one as this cycle's.
-     */
     (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
     tx_thread_sleep(T_SEC(6));
 
@@ -999,12 +814,6 @@ BOOL        spacing_ok =  TRUE;
                    "exactly NX_AUTO_IP_PROBE_NUM probes were sent", probes);
 
     if (probes > 0UL)
-        /*
-         * RFC 3927 2.2.1 wants a random 0..PROBE_WAIT before the first probe.
-         * The allowance on top is for the restart itself: nx_auto_ip_start()
-         * wakes a thread sitting at the bottom of its loop, and it has a full
-         * pass to make before it reaches the delay.
-         */
         (VOID) t_check((UINT) (probe_at[0] <=
                                (T_SEC(NX_AUTO_IP_PROBE_WAIT) +
                                 T_SEC(NX_AUTO_IP_PROBE_MAX))),
@@ -1049,8 +858,6 @@ BOOL        spacing_ok =  TRUE;
 }
 
 
-/* ---- F: rate limiting ----------------------------------------------------- */
-
 static VOID t_phase_f(VOID)
 {
 
@@ -1067,13 +874,11 @@ ULONG       gap;
     if (ai == NX_NULL)
         return;
 
-    /* Give the address back so AutoIP starts probing again. */
     (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
     (VOID) nx_auto_ip_start(ai, 0UL);
 
     last_probe =  ai->nx_auto_ip_probe_count;
 
-    /* Answer every probe, whatever address it is for. */
     for (i = 0; i < 4000UL; i++)
     {
         if (ai->nx_auto_ip_probe_count != last_probe)
@@ -1100,11 +905,6 @@ ULONG       gap;
                  ai->nx_auto_ip_conflict_count))
         return;
 
-    /*
-     * Past the limit the module must wait NX_AUTO_IP_RATE_LIMIT_INTERVAL
-     * before trying again.  This times how long until the next probe leaves
-     * rather than assuming it.
-     */
     last_probe =  ai->nx_auto_ip_probe_count;
     start      =  tx_time_get();
 
@@ -1123,8 +923,6 @@ ULONG       gap;
                    "the retry was held off for the rate-limit interval", gap);
 }
 
-/* ---- G: defending an address already in use ------------------------------- */
-
 static VOID t_phase_g(VOID)
 {
 
@@ -1142,7 +940,6 @@ ULONG       i;
     if (ai == NX_NULL)
         return;
 
-    /* Stop answering and let it settle on an address. */
     (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
     (VOID) nx_auto_ip_start(ai, 0UL);
 
@@ -1153,7 +950,6 @@ ULONG       i;
     addr =  t_address();
     t_log_ip("defending", addr);
 
-    /* Let the announcements finish first. */
     tx_thread_sleep(T_SEC(6));
 
     defends_before   =  ai->nx_auto_ip_defend_count;
@@ -1163,7 +959,6 @@ ULONG       i;
     t_log("  arp defend timeout before: %ld",
           t_ip->nx_ip_interface[0].nx_interface_arp_defend_timeout);
 
-    /* Another host announces the address we are using. */
     (VOID) t_inject_arp((ULONG) NX_ARP_OPTION_REQUEST, addr, addr);
 
     for (i = 0; i < 200UL; i++)
@@ -1190,26 +985,11 @@ ULONG       i;
                    "AutoIP counted the late conflict as a defence",
                    ai->nx_auto_ip_defend_count);
 
-    /* What happens to the address afterwards is the RFC 3927 question. */
     tx_thread_sleep(T_SEC(2));
     t_log_ip("address after the late conflict", t_address());
 }
 
 
-/* ---- I: DHCPDECLINE ------------------------------------------------------- */
-
-/*
- * RFC 2131 section 4.4.1: a client SHOULD check the address the server gave
- * it, an ARP probe, and send DHCPDECLINE if something answers.  NetX Duo's
- * client does that only when NX_DHCP_CLIENT_SEND_ARP_PROBE is defined, and
- * without it the ADDRESS_PROBING state, the conflict handler and
- * _nx_dhcp_interface_decline() are all compiled out: no probe can be sent and
- * no DECLINE can ever leave the machine.
- *
- * With it defined this phase answers the client's probe and watches what it
- * does.  SLIRP will not do the answering, libslirp declines to reply to ARP
- * for the guest's own address, so the peer is synthesised as in F and G.
- */
 #ifdef NX_DHCP_CLIENT_SEND_ARP_PROBE
 static VOID t_phase_i(VOID)
 {
@@ -1232,7 +1012,6 @@ ULONG   trace_from;
     (VOID) nx_ip_interface_address_set(t_ip, 0, 0UL, 0UL);
     (VOID) nx_dhcp_start(&t_ns->ns_Dhcp);
 
-    /* Catch the probe while it is in flight. */
     probe_addr =  0UL;
     for (i = 0; i < 4000UL; i++)
     {
@@ -1253,7 +1032,6 @@ ULONG   trace_from;
 
     t_log_ip("client is probing", probe_addr);
 
-    /* Somebody else is using it. */
     (VOID) t_inject_arp((ULONG) NX_ARP_OPTION_RESPONSE, probe_addr, probe_addr);
 
     for (i = 0; i < 600UL; i++)
@@ -1276,11 +1054,6 @@ ULONG   trace_from;
                    "the disputed address was not put on the interface",
                    t_address());
 
-    /*
-     * D needs a lease to expire, and the DECLINE left the client at INIT with
-     * the interface unaddressed.  The synthetic peer answered once, so the
-     * next probe goes unanswered and the same address is taken.
-     */
     if (!t_wait_state(NX_DHCP_STATE_BOUND, 60UL))
     {
         (VOID) nx_dhcp_stop(&t_ns->ns_Dhcp);
@@ -1296,8 +1069,6 @@ ULONG   trace_from;
 }
 #endif /* NX_DHCP_CLIENT_SEND_ARP_PROBE */
 
-
-/* ---- put the interface back where the next phase needs it ---------------- */
 
 static VOID t_autoip_release(VOID)
 {
@@ -1326,8 +1097,6 @@ static VOID t_autoip_release(VOID)
 }
 
 
-/* ------------------------------------------------------------------ main -- */
-
 static VOID t_run(VOID)
 {
 
@@ -1352,16 +1121,11 @@ UINT    status;
                                            t_dhcp_state_change);
     }
 
-    /*
-     * A runs whenever the stack started AutoIP itself, the `killlink` mode
-     * and a CONFIGURE=AUTO interface are the two ways that happens.
-     */
     if (t_ns->ns_AutoIpCreated || t_killlink)
         t_phase_a();
 
     if (t_ns->ns_DhcpCreated)
     {
-        /* B, C and D need a lease to start from. */
         if (t_wait_state(NX_DHCP_STATE_BOUND, 90UL))
         {
             t_phase_b();

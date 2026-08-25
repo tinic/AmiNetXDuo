@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-#
 # WHAT THE GUEST PUT ON THE WIRE, read out of tests/ipv6/run-mld.sh's capture.
-#
-#   mldcheck.py --pcap FILE --guest-mac 00:80:10:49:6d:1d
-#               --solicited ff02::1:ff49:6d1d [--group ff02::c]
-#
-# Output is key=value, one per line, and the exit code is the verdict: 0 every
-# assertion held, 1 one did not, 2 the capture is unreadable or holds nothing
-# from the guest at all.
-#
-# WHY NOT tcpdump -nvv AND grep.  tcpdump prints an MLDv2 record set as
-# `[gaddr ff02::fb is_ex { }]` and an MLDv1 report as `multicast listener
-# report`, so telling a join from a query answer means reading a record type
-# that is not printed, and telling suppression means correlating two frames by
-# time.  Both are structure, and grepping prose for structure is how a harness
-# starts passing on the wrong thing.
-#
-# The pcap reader is fifty lines because the format is a header and a length
-# per record; a dependency for that would be a dependency the lab has to grow.
-#
 # SPDX-License-Identifier: MIT
 
 import argparse
@@ -52,7 +33,6 @@ class Message(object):
         self.type = mtype
         self.hop_limit = hop_limit
         self.router_alert = router_alert
-        # [(record_type, group)]; record_type is None for MLDv1.
         self.groups = groups
 
     def has(self, group, record_type=None):
@@ -117,8 +97,6 @@ def parse_mld(frame):
         if len(payload) < 8:
             return None
         ext_len = (payload[1] + 1) * 8
-        # Walk the options for a Router Alert.  Pad1 is one octet and has no
-        # length; everything else carries one.
         i = 2
         while i < ext_len and i < len(payload):
             if payload[i] == 0:
@@ -196,7 +174,6 @@ def main():
 
     failures = []
 
-    # ---- every message this host sends is a well-formed one ---------------
     bad_alert = [m for m in ours if not m.router_alert]
     bad_hop = [m for m in ours if m.hop_limit != 1]
     bad_src = [m for m in ours
@@ -209,11 +186,6 @@ def main():
         if bad:
             failures.append(name)
 
-    # ---- a report goes out when a solicited-node group is joined ----------
-    #
-    # Before any query reached the link, so it cannot be a query answer.  The
-    # first peer query is the boundary; with no peer query at all every guest
-    # message qualifies.
     first_query = min([m.t for m in theirs if m.type == MLD_QUERY], default=None)
     unsolicited = [m for m in ours if first_query is None or m.t < first_query]
 
@@ -224,14 +196,12 @@ def main():
     if not join_reports:
         failures.append("join_report_solicited")
 
-    # ff02::1 is excepted by RFC 9777 section 6 and must never be reported.
     all_nodes = ipaddress.IPv6Address("ff02::1")
     leaked = [m for m in ours if m.has(all_nodes)]
     print("all_nodes_reported=%d" % len(leaked))
     if leaked:
         failures.append("all_nodes_exemption")
 
-    # ---- the group joined and left through the socket API -----------------
     probe_join = [m for m in ours
                   if (m.type == MLD_V2_REPORT and m.has(probe, CHANGE_TO_EXCLUDE_MODE))
                   or (m.type == MLD_V1_REPORT and m.has(probe))]
@@ -246,23 +216,6 @@ def main():
     if not probe_leave:
         failures.append("probe_leave")
 
-    # ---- a query is answered ---------------------------------------------
-    #
-    # Paired: for each peer query, the guest messages in the ten seconds after
-    # it that are not themselves a repeat of something already in flight.  Ten
-    # because the default Query Response Interval is 10 000 ms and the timer
-    # that serves it ticks in seconds.
-    # ---- a query is answered, and a second host's answer suppresses ours --
-    #
-    # One loop for both, because they are the same measurement twice with one
-    # thing changed.  A query window is the twelve seconds after a peer query:
-    # the default Query Response Interval is 10 000 ms and the timer serving it
-    # ticks in seconds.
-    #
-    # CONTROL: a query nobody else answers.  The guest must report.
-    # SUPPRESSED: the same query, with the peer reporting the group first.
-    # The guest must not.  Neither window alone says anything -- a guest that
-    # had simply stopped talking would pass the second one on its own.
     v2_answered = 0
     control_windows = control_answered = 0
     suppressed_windows = suppressed = 0
@@ -290,8 +243,6 @@ def main():
             control_windows += 1
             control_answered += 1
         elif v2_here:
-            # A version 2 query, answered in version 2.  Not a control for the
-            # version 1 suppression pair.
             pass
         else:
             control_windows += 1
@@ -307,17 +258,6 @@ def main():
         failures.append("query_answer_v1")
 
     if suppressed_windows == 0:
-        # NOT A FAILURE, AND NOT A PASS.  A switch that snoops MLD consumes
-        # reports rather than flooding them -- RFC 4541 section 3 has it
-        # forward them to multicast router ports only -- so a second host's
-        # report never reaches the guest and there is nothing to be suppressed
-        # by.  Measured on this lab segment: the peer's queries to ff02::1
-        # arrive, and its reports, including one addressed to ff02::1, do not.
-        #
-        # Which is the premise of the whole feature confirmed from the other
-        # side, and it is also why MLDv2 has no suppression at all.  The rule
-        # is exercised in tests/ipv6/host/test_mld_host.c, where a report can
-        # be handed to the receive path directly.
         print("suppression=unreachable_on_this_segment")
     elif suppressed != suppressed_windows:
         failures.append("suppression")

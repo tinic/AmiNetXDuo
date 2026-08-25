@@ -1,30 +1,10 @@
 /*
- * anxnet.device: recording the probe, and publishing it.
+ * anxnet.device: recording the probe, and publishing it.  See
+ * include/aminetxduo/anxdiag.h for why it is a semaphore rather than a port.
  *
- * See include/aminetxduo/anxdiag.h for why this exists and why it is a
- * semaphore rather than a port.  What is here is the parts that touch Exec:
- *
- *   netdev_diag_note()      called from every step of the probe, on every
- *                           path, whatever the outcome.  A bounds test and
- *                           three stores; no allocation, no DOS, nothing that
- *                           can fail, so it is safe to call from anywhere the
- *                           probe reaches.
- *   netdev_diag_publish()   at the end of the romtag init, whether or not a
- *                           single unit came up -- the interesting case is
- *                           the one where none did.
- *   netdev_diag_unpublish() in the expunge, under Forbid(), BEFORE the memory
- *                           holding the record can go.
- *
- * No dos.library anywhere.  This driver is loaded by whichever stack wants it,
- * and that can be before a filesystem is up.  The derived station address does
- * not read the boot volume for the same reason.  The record lives in the
- * device base and goes when the device goes.
- *
- * This driver has already made the lifetime mistake once: netdev_pcmcia.c used
- * to ReleaseCard() without CARDF_REMOVEHANDLE and left card.resource holding a
- * Node in freed BSS.  A published semaphore is the same shape of mistake, so
- * removal is in the expunge path and nowhere else, and the reader copies the
- * record whole rather than keeping a pointer into it.
+ * No dos.library anywhere: this driver is loaded by whichever stack wants it,
+ * and that can be before a filesystem is up.  Removal is in the expunge path
+ * and nowhere else, and the reader copies the record whole.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,11 +16,8 @@
 
 /*
  * The one record, reached by the layers below without a pointer threaded
- * through them.  There is one device base per machine, and the probe is not
- * re-entrant: it runs once, inside the romtag init.  A global here is the same
- * shape as SysBase and ExpansionBase beside it.  It is NULL until
- * netdev_diag_reset(), which makes netdev_diag_note() safe to call from a path
- * that runs before or after the probe.
+ * through them: there is one device base per machine and the probe runs once,
+ * inside the romtag init.  NULL until netdev_diag_reset().
  */
 static AnxDiagMark *netdev_diag;
 
@@ -63,8 +40,7 @@ VOID netdev_diag_reset(AnxDiagMark *mark)
 
     /*
      * The row names, copied once.  The tool indexes them by ds_Card and so
-     * never has to be built from the same table the driver was: a driver
-     * carrying a card row the tool has never heard of still names it.
+     * never has to be built from the same table the driver was.
      */
     n = netdev_card_count;
     if (n > 16u)
@@ -107,12 +83,10 @@ VOID netdev_diag_note(UWORD code, UWORD card, ULONG value)
         return;
 
     /*
-     * A full record counts, it does not wrap.  A ring would keep the end of
-     * the probe and throw the beginning away, and the beginning is where
-     * "expansion.library did not open" and "there is no card.resource on this
-     * machine" live.  Those two answers explain everything after them.
-     * Overflow is a number the tool prints, so a machine that produced more
-     * steps than this holds reports that rather than a plausible half.
+     * A full record counts, it does not wrap.  A ring would keep the end of the
+     * probe and throw the beginning away, and the beginning is where
+     * "expansion.library did not open" lives.  Overflow is a number the tool
+     * prints.
      */
     if (mark->ad_Used >= (UWORD)ANXDIAG_STEPS)
     {
@@ -142,12 +116,9 @@ VOID netdev_diag_publish(AnxDiagMark *mark)
     mark->ad_Semaphore.ss_Link.ln_Pri  = 0;
 
     /*
-     * A second anxnet.device on one machine -- two copies in DEVS:, or one
-     * resident and one loaded -- leaves the first one's record published and
-     * this one unpublished, rather than giving FindSemaphore() two answers.
-     * Same rule as the health mark in src/netstack/netstack_baton.c.
-     *
-     * ad_Magic is the "this one is ours to remove" flag as well as the
+     * A second anxnet.device on one machine leaves the first one's record
+     * published and this one unpublished, rather than giving FindSemaphore()
+     * two answers.  ad_Magic is the "ours to remove" flag as well as the
      * reader's sanity check, which is why it is set here and not in reset().
      */
     Forbid();

@@ -1,67 +1,5 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR "AddNetInterface kept the machine's memory".
-#
-#   tests/tools/run-addifleak.sh [-t SECONDS] [-b BUILDDIR] [-n RUNS]
-#
-# WHAT IT PROVES
-#
-#   AddNetInterface gives everything back.  The command runs several times
-#   against a card that builds a stack and then does not bring the interface
-#   up, and free memory after the last run has to match free memory after the
-#   first: whatever the attempt costs, it has to cost it once and then stop.
-#   AmigaOS reclaims nothing when a process exits, so anything the library
-#   allocated and did not hand back is gone until the machine is switched off.
-#
-# THE MACHINE, AND WHY THIS ONE
-#
-#   An A1200 with a PCMCIA card.  NOT an A600, tempting as the supported floor
-#   is: Amiberry's A600 PCMCIA emulation does not work for ANY stack, the
-#   Roadshow 1.15 demo fails there with "Input/output error" on the same card
-#   that it and we both drive to a DHCP lease on an A1200.  An A600 run would
-#   fail for a reason that has nothing to do with this code, which is the worst
-#   kind of green.
-#
-#   The card is cnet.device on the emulated PCMCIA slot, because THE FAILURE
-#   MODE IS THE POINT.  A device that does not exist fails at OpenDevice(),
-#   before the packet pool, the NX_IP and the ThreadX threads are made, so there
-#   is nothing allocated yet to leak, a run against `nosuchdevice.device`
-#   passes whatever the library does with a half-built stack.  A real driver
-#   that opens and then cannot bring its card up is the case that gets far
-#   enough to strand one, and it is what a user with a card in the slot and no
-#   cable, or a card the driver cannot initialise, actually meets.
-#
-# READING THE RESULT
-#
-#   ToolsSmoke prints `rc N, free M` after every command (src/tools/toolssmoke.c).
-#   The first run pays for whatever a first open costs on this machine; the
-#   difference between the LAST two is the per-invocation leak, and it has to
-#   be 0.  It was 2568 -- one cloned AmiSocketBase -- until 0.20.1.
-#
-#   The premise is AddNetInterface's own line, "the network is running, and
-#   eth0 is configured down", which it reaches only once the library opened and
-#   the pool, the NX_IP and the ThreadX threads were built.  That is the
-#   difference between the two things this test can catch, and it is in the
-#   transcript on every build.  Do not move it back to the serial log: that
-#   line is AMI_INFO() and a default build has neither the string nor the log
-#   level for it.
-#
-# WHAT IT NEEDS
-#
-#   A Kickstart the A600 boots (AMINETXDUO_KICKSTART_A600, or the default ROM),
-#   cnet.device (AMINETXDUO_CNET, or ~/amiga-assets/devs/cnet.device), and a
-#   68000 Release build:
-#
-#     cmake -S . -B build/m68000 -DAMINETXDUO_CPU=68000 -DCMAKE_BUILD_TYPE=Release
-#           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
-#     cmake --build build/m68000 --parallel
-#     tests/tools/run-addifleak.sh -b build/m68000
-#
-#   A 68020 build on a 68000 stops with an illegal instruction before a line of
-#   ours runs, and the run then looks like a hang rather than a mistake.
-#
-# Amiberry only.  FS-UAE cannot be driven headless on the box with the ROMs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -91,9 +29,6 @@ for f in "$ADDIF" "$SMOKE" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build $BUILD first" >&2; exit 2; }
 done
 
-# amiberry-run.sh prefers AMINETXDUO_KICKSTART_A600 over the generic one, and
-# an A1200's 40.68 does not boot an A600.  ~/amiga-assets/env.sh does not export
-# it, so fall back to the ROM that is in the store under its own name.
 if [ -z "${AMINETXDUO_KICKSTART_A600:-}" ]; then
     for candidate in \
         "$HOME/amiga-assets/roms/Kickstart v2.05 r37.350 (1992)(Commodore)(A600HD)[!].rom" \
@@ -118,18 +53,12 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/addifleak-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$CNET"  "$STAGE/devs/cnet.device"
-# AMINETXDUO_ADDIF_DRIVER points the drill at a different SANA-II driver.  The
-# device only has to OPEN here -- STATE=down means bring-up fails afterwards --
-# so this is also the cheapest thing that answers "does the driver load at all
-# under this Kickstart", which for anxnet.device is the only Kickstart 2.x
-# coverage there is.
 ADDIF_DRIVER="${AMINETXDUO_ADDIF_DRIVER:-cnet.device}"
 ADDIF_CARD="${AMINETXDUO_ADDIF_CARD:-}"
 if [ "$ADDIF_DRIVER" != cnet.device ]; then
@@ -137,18 +66,6 @@ if [ "$ADDIF_DRIVER" != cnet.device ]; then
        "$STAGE/devs/$ADDIF_DRIVER"
 fi
 cp "$ADDIF" "$STAGE/AddNetInterface"
-# STATE=down is what makes this test reach the RIGHT state.
-#
-# The card works on this machine, so a plain configuration comes up and there
-# is no failure to measure. Configured down, the device still OPENS, the
-# packet pool, the NX_IP and the ThreadX threads are all made, and bring-up
-# fails afterwards, on the DHCP wait, with no address. That is the state that
-# strands a stack: netstack_startup() keeps ns_Refs at 1 "because a live stack
-# has an owner" when bsd_lib_open() is about to return NULL and there will
-# never be one.
-#
-# A device that never opens cannot show it. Nothing has been allocated yet, so
-# there is nothing to leave behind, and the run passes on a broken build.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$ADDIF_DRIVER
 ${ADDIF_CARD:+CARD=$ADDIF_CARD}
@@ -162,12 +79,7 @@ for _ in $(seq 1 "$RUNS"); do
     echo "SYS:AddNetInterface eth0" >> "$STAGE/commands.txt"
 done
 
-# ------------------------------------------------------------------ run ---
 
-# 1 MB of chip and nothing else.  chipmem_size counts 512 KB units, so 2 is the
-# megabyte; bogomem and fastmem are cleared because the floor is 1 MB TOTAL and
-# quickstart supplies some unasked.  Appended, so a caller sweeping other
-# settings keeps them.
 MEM="chipmem_size=2;bogomem_size=0;fastmem_size=0"
 export AMINETXDUO_AMIBERRY_EXTRA="${AMINETXDUO_AMIBERRY_EXTRA:+$AMINETXDUO_AMIBERRY_EXTRA;}$MEM"
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-addifleak}"
@@ -194,16 +106,11 @@ cat "$REPORT"
 echo "===================================================================="
 echo
 
-# ---------------------------------------------------------- the verdict ---
 
 FAILED=0
 pass() { echo "  ok: $*"; }
 fail() { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
 
-# Every free reading, in order.
-# "----- rc 20, 12 ms, free 1234 -----".  The pattern used to expect ", free"
-# directly after the rc number, matched nothing, and left FREE empty, so the
-# arithmetic below exited before the leak was ever measured.
 mapfile -t FREE < <(sed -n 's/^----- rc -\{0,1\}[0-9]\{1,\},.*, free \([0-9]\{1,\}\) .*/\1/p' "$REPORT")
 
 if [ "${#FREE[@]}" -lt "$RUNS" ]; then
@@ -213,32 +120,6 @@ if [ "${#FREE[@]}" -lt "$RUNS" ]; then
 fi
 pass "all $RUNS runs reported"
 
-# The run has to have got far enough to have something to leak. A card that
-# never opens allocates nothing, so the arithmetic below would read 0 whatever
-# the library does, and the test would pass on a broken build.
-#
-# The premise is the COMMAND'S OWN OUTPUT, once per run.  AddNetInterface
-# reaches "the network is running, and eth0 is configured down"
-# (src/tools/addnetinterface.c) only after bsd_lib_open() returned a base,
-# which is after the packet pool, the NX_IP and the ThreadX threads were all
-# built -- the state that strands a stack, and the one this file measures.  A
-# device that never opened cannot print it: the open fails and the command says
-# so instead.
-#
-# It used to be `pool = ` in the serial log, and that premise could not hold on
-# any build anybody makes.  The line is AMI_INFO() in src/netstack/netstack.c,
-# and it needs BOTH -DAMINETXDUO_LOG=ON, without which the format string is not
-# in the library at all, AND a log level above the release default of WARN,
-# without which ami_log() drops it at run time.  With either missing the serial
-# log has no such line, the premise failed, and the script printed
-# "addifleak: FAILED" on a tree with nothing wrong with it -- a product verdict
-# for two build options.  Both were missing by default, so it was every default
-# build.  The transcript is read by this script already and needs neither.
-#
-# The rc is NOT the premise. STATE=down returns 0 now, by design -- an
-# interface configured down is not a failed one -- while still taking the whole
-# allocation path. Asserting on the rc tested the wording of a decision, not
-# the state this test is about.
 REACHED=$(grep -c 'the network is running, and eth0 is configured down' "$REPORT" || true)
 if [ "$REACHED" -lt "$RUNS" ]; then
     fail "the stack was built on only $REACHED of $RUNS runs, so there was" \

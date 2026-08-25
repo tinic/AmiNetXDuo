@@ -4,74 +4,6 @@
 #
 #   tests/tools/run-bringupfail.sh [-b BUILDDIR] [-t SECONDS] [-N BOARD]
 #
-# WRITTEN RED, NOW GREEN.  Written against the contract in
-# tests/tools/bringupfail-verdict.sh rather than against the behaviour of the
-# day, and on 2026-08-25 the behaviour did not meet it: three of four causes
-# carried no code on the first line, and three shipped commands sent the reader
-# to a debug log no shipping build can write.  Both were fixed the same evening
-# and this went green against the fix without an assertion changing.  The
-# record is below, because an arm written at the same time as its fix proves
-# nothing afterwards.
-#
-# WHAT IT PROVES
-#
-#   Drive bring-up into each failure a user can actually reach, and read the
-#   refusal back:
-#
-#     missing device     DEVICE names a driver that is not on the machine
-#     wrong unit         the right driver, a unit it does not have
-#     unusable address   CONFIGURE=STATIC with an ADDRESS that is not one
-#     attach cap         more interfaces asked for than the stack can hold
-#                        (four; see NX_MAX_PHYSICAL_INTERFACES)
-#     no memory          the pool cannot be allocated
-#
-#   and assert, per cause, that the FIRST line names the failing operation and
-#   its code, and that NOTHING anywhere sends the reader to a log.
-#
-# WHY IT EXISTS
-#
-#   Several verdict selftests in this tree assert the wording of a SUCCESS.
-#   None asserted the wording of a FAILURE, which is the half a user reads --
-#   nobody studies the output of a machine that worked.  With nothing grading
-#   it, "Check the debug log for what failed" shipped and stayed shipped, in a
-#   build configuration that writes no log at all.
-#
-# WHAT WAS RED, on 2026-08-25, before the fix
-#
-#   tests/tools/check-no-log-advice.sh, which this runs FIRST and before any
-#   emulator, found "Check the debug log for what failed" in THREE commands --
-#   AddNetInterface, CheckNetConfig and Online -- one sentence in one shared
-#   help block reached from three places.  It is gone.
-#
-#   Clause 1 was red for three of the four live causes:
-#
-#     missing device    AddNetInterface: nodev was not added to the running
-#                       network            -- operation named, no code
-#     wrong unit        the same shape     -- operation named, no code
-#     attach cap        the same shape     -- operation named, no code
-#     unusable address  DEVS:NetInterfaces/badaddr, line 4:
-#                                          -- PASSED, and see below
-#
-#   The address case passing is worth as much as the other three failing.  It
-#   has no command prefix, no verb and no error number, and it is the best
-#   message on the whole bring-up path: it names the file and the line.  The
-#   grader had to learn to accept that shape (bringupfail-verdict.sh,
-#   BFV_OBJECT and the `line N' half of BFV_CODE) -- before it did, it reported
-#   the best message in the tree as silence, which would have been this harness
-#   inventing a defect.
-#
-# THE STRINGS CHECK RUNS WITHOUT A ROM, on purpose: it is the half of this
-# harness that can go red on any machine, and putting it behind five boots
-# would have hidden it behind a rig requirement for no reason.
-#
-# NO MEMORY IS NOT DRIVEN LIVE.  Starving an emulated A1200 to the point where
-# the pool allocation fails, without also starving it to the point where the
-# Shell cannot load the command, is a narrow window and a flaky arm.  The
-# cause is covered by a fixture in tests/tools/bringupfail-verdict-selftest.sh
-# and is reported here as `fixture' rather than being silently absent from the
-# table.
-#
-# COST: one boot, about half a minute, plus a strings grep.
 #
 # SPDX-License-Identifier: MIT
 
@@ -104,13 +36,6 @@ FAILED=0
 echo "=============================================================="
 echo "==> shipped commands, and whether any of them names a log"
 echo "=============================================================="
-# A SKIP IS NOT A FAIL, and this row reported one as the other.
-# check-no-log-advice.sh exits 2 for "there is nothing built to check" and 1
-# for "a command sends the user to a log"; an `if` collapses both into the same
-# branch, so a tree with no build/ci/default -- a fresh clone, a host stage
-# that has not run yet -- produced `strings FAIL` and counted an assertion that
-# had never been made.  A red row that names a defect nobody introduced costs
-# the same time as a real one, and teaches people to discount the row.
 "$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD"
 case "$?" in
     0) printf 'strings   PASS  no shipped command sends the user to a log\n' \
@@ -156,20 +81,12 @@ if [ "$RIG_OK" = 1 ]; then
     cp "$BSD" "$STAGE/libs/bsdsocket.library"
     cp "$A2065" "$STAGE/devs/a2065.device"
 
-    # ONE FILE PER CAUSE, named for the cause, so the transcript reads as the
-    # table it is about to become.
     printf 'DEVICE=nosuchcard.device\nUNIT=0\nCONFIGURE=DHCP\n' \
         > "$STAGE/devs/NetInterfaces/nodev"
     printf 'DEVICE=a2065.device\nUNIT=9\nCONFIGURE=DHCP\n' \
         > "$STAGE/devs/NetInterfaces/badunit"
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=300.1.1.1\nNETMASK=255.255.255.0\n' \
         > "$STAGE/devs/NetInterfaces/badaddr"
-    # Five valid definitions of the one card there is: one more than
-    # NX_MAX_PHYSICAL_INTERFACES, which is four.  The first four attach; by the
-    # fifth the stack has no room, which is the attach cap reached as a
-    # configuration rather than as an argument.  The count follows the cap --
-    # a drawer with fewer definitions than slots never reaches it, and this
-    # arm would then be grading a success.
     for n in cap0 cap1 cap2 cap3 cap4; do
         printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
             > "$STAGE/devs/NetInterfaces/$n"
@@ -210,10 +127,6 @@ EOF
         echo "----------------------------------------------------------"
         echo
 
-        # ToolsSmoke writes `===== <command> =====` before each command
-        # (src/tools/toolssmoke.c run_command()), which is the only reliable
-        # boundary: a refusal is several lines and the blank lines inside it
-        # are part of the message.
         cause_slice() { # ifname
             tr -d '\r' < "$REPORT" |
                 awk -v want="===== SYS:AddNetInterface $1 =====" '
@@ -256,11 +169,6 @@ cat "$RESULTS"
 echo "==============================================================="
 echo "bringupfail_failed=$FAILED"
 
-# NOTHING RAN IS NOT A PASS EITHER.  With no build and no rig both halves skip,
-# every row above says SKIP, and reporting that as green would be the same
-# defect as reporting it red one direction over: a stage that asserted nothing
-# reading like a stage that asserted everything.  Exit 2 is what tools/ci.sh
-# already means by "the rig refused it before it could boot".
 if ! grep -q '  PASS  ' "$RESULTS" && ! grep -q '^live      FAIL' "$RESULTS"; then
     echo "bringupfail: SKIPPED -- neither half of this harness could run."
     echo "             Build the tree and set AMINETXDUO_KICKSTART."

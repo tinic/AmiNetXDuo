@@ -4,67 +4,6 @@
 #
 #   tests/ipv6/run-rdnss.sh [-B BACKEND] [-b BUILDDIR] [-m MODEL] [-t SECONDS]
 #                           [-n NAME] [-w SECONDS] [-M MAC]
-#
-# WHAT IT ASSERTS
-#
-#   ra_rdnss        the advertisement on this link carries an RFC 8106 5.1
-#                   option, read out of a capture taken during THIS run
-#   ra_dnssl        and an RFC 8106 5.2 option
-#   guest_global    the guest formed a global IPv6 address from the same
-#                   advertisement
-#   ra_default_route  netstat -r shows ::/0 via the router that advertised
-#   ns6_origin      the address formed from it is reported as advertised
-#   ns6_reported    ShowNetStatus lists the advertised name server
-#   short_resolved  a name with no dot in it resolved, which it can only have
-#                   done through the advertised search domain
-#
-# The first two are the LINK's assertions, not the code's: this ISP drops IPv6
-# without warning and a router can be reconfigured, and a machine with only a
-# link-local address produces results indistinguishable from the defects this
-# tests for.  They exit 4, "the link is not what this test needs", so a broken
-# lab is never reported as a broken stack.  guest_global is the same kind of
-# precondition and exits 4 for the same reason.  Only ns6_reported and
-# short_resolved exit 1.
-#
-# THE GUEST HAS NO DHCP AND NO name_resolution FILE
-#
-#   A static IPv4 address on a subnet nothing on this link uses, so there is no
-#   lease, no option 6 name server and no option 15 or 119 search domain; and
-#   nothing in DEVS:Internet, so no NAMESERVER, DOMAIN or SEARCH line either.
-#   Every name server and every suffix the guest ends up with came out of the
-#   advertisement, which is what makes "a short name resolved" mean what it says.
-#
-#   An address rather than none at all because AddNetInterface refuses an
-#   interface with no IPv4 address ("the interface has no address: there is no
-#   ADDRESS line and CONFIGURE does not say DHCP"), so the IPv6-only machine the
-#   router describes -- it sets managed+other-stateful, this stack builds no
-#   DHCPv6, and RFC 8106 is all that is left -- cannot be configured yet.  The
-#   subnet is deliberately one nobody answers on: nothing in this test travels
-#   over IPv4, and a real address on the lab LAN would be a second machine
-#   claiming one.
-#
-# BRIDGED, OR IT MEASURES NOTHING
-#
-#   SLIRP answers a router solicitation itself, with no RDNSS and no DNSSL, so
-#   -B must name a host NIC; amiberry-run.sh refuses the run if the backend it
-#   got was not the one asked for.  That needs CAP_NET_RAW on the amiberry
-#   binary, and the capture needs it on tcpdump.
-#
-#   The guest gets its own MAC, distinct from every other harness here, because
-#   two machines with one MAC on one segment is not a test of anything.
-#
-# WHAT IS NOT ASSERTED HERE, AND WHERE IT IS
-#
-#   A zero lifetime, several servers at once, and a fifth beyond the four the
-#   list holds cannot be produced against a router this test does not own.  The
-#   parsing of all three is in tests/ipv6/host/test_ipv6_ra_host.c and the
-#   bookkeeping they drive is in src/config/test/test_config.c
-#   (test_ra_nameserver6, test_ra_search_option), both of which run in ctest.
-#
-# OUTPUT IS key=value.  Exit 0 if every assertion held, 1 if one failed, 3 if
-# the guest never ran, 4 if the link did not carry what the test needs, 2 for a
-# broken invocation.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -130,7 +69,6 @@ fi
 command -v tcpdump >/dev/null || {
     echo "result=badinvocation reason=notcpdump" >&2; exit 2; }
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/rdnss-stage"
 rm -rf "$STAGE"
@@ -142,9 +80,6 @@ cp "$SHOW"  "$STAGE/ShowNetStatus"
 cp "$HOSTC" "$STAGE/host"
 cp "$NETSTAT" "$STAGE/netstat"
 
-# No DHCP and no DEVS:Internet: see the note at the top.  CONFIGURE6 is spelled
-# out although AUTO is also the default, because this test is about that path
-# and a default is a bad thing to leave implicit here.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
@@ -161,8 +96,6 @@ SYS:netstat -r
 SYS:host $NAME
 EOF
 
-# ------------------------------------------------------------- capture ---
-#
 # In the test, not from the router's good behaviour: the guest's solicitation
 # is what pulls the advertisement, so the capture has to be listening before
 # the emulator starts and has to outlive the solicitation retries.
@@ -189,7 +122,6 @@ grep -q "listening on" "$CAP.err" 2>/dev/null || {
     exit 2
 }
 
-# ------------------------------------------------------------------ run ---
 
 set +e
 AMINETXDUO_RUN_TAG="$TAG" AMINETXDUO_AMIBERRY_MAC="$MAC" \
@@ -211,15 +143,12 @@ if [ ! -s "$SERIAL" ] && [ ! -s "$OUT" ]; then
     exit 3
 fi
 
-# --------------------------------------------------------- the capture ---
 
 ra_count=$(grep -c "router advertisement" "$CAP" || true)
 ra_rdnss=$(sed -n 's/.*rdnss option (25).*addr: \([0-9A-Fa-f:]*\).*/\1/p' "$CAP" \
            | head -1)
 ra_dnssl=$(sed -n 's/.*dnssl option (31).*domain(s): \([^ ,]*\)\.$/\1/p' "$CAP" \
            | head -1)
-# "2607:f598:e1a8:4c00::/64" -> "2607:f598:e1a8:4c00:", the stem every address
-# formed from this advertisement begins with.
 ra_prefix=$(sed -n 's|.*prefix info option (3).*: \([0-9A-Fa-f:]*\)::/64.*|\1:|p' \
             "$CAP" | head -1)
 
@@ -248,20 +177,8 @@ if [ -z "$ra_router" ]; then
     exit 4
 fi
 
-# ----------------------------------------------------------- the guest ---
-#
-# A global address is a precondition, not an assertion: without one the guest
-# has no source for a DNS query and every result below is the same shape as the
-# defects being tested for.
 
-# An address of the advertised prefix that is not the advertised name server,
-# read out of what the guest itself printed. ami_netstack_mark("ip6-global") on
-# the serial port says the same thing and is the second reading, but a build
-# without AMINETXDUO_LOG has no serial port to say it on.
 
-# Whether there is a serial log to read at all, once, so the three fields it
-# feeds can say `notchecked` rather than `no`.  `no` and `not looked at` are
-# different answers and were reported with the same word.
 serial_have=no
 if serial_log_have "$SERIAL" "$BUILD" \
                    "what the stack absorbed off the advertisement" 2>/dev/null
@@ -288,21 +205,12 @@ if [ "$guest_global" = no ]; then
     exit 4
 fi
 
-# ShowNetStatus and host both print to the guest's stdout, which the harness
-# copies into $OUT -- ALONG WITH the serial log, so the address has to be found
-# in the report itself and not merely somewhere in the file. ShowNetStatus
-# writes "Name servers:   <address>" and then one indented address per line.
-#
 # No trailing-anchor on any of these: the guest's lines end CR LF.
 ns6_reported=no
 sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
     | grep -qiE "^(Name servers: +| +)${ra_rdnss}[[:space:]]*$" &&
     ns6_reported=yes
 
-# Both of these are AMI_INFO lines, so they exist only in a build with
-# AMINETXDUO_LOG.  With the log compiled out the serial file is 0 bytes and
-# these two greps answered `no` -- the same word the real negative uses -- on
-# every run.  `notchecked` is the honest third value.
 ns6_absorbed=notchecked
 dnssl_absorbed=notchecked
 if [ "$serial_have" = yes ]; then
@@ -323,8 +231,6 @@ sed -n "/^===== SYS:host $NAME/,/^----- rc/p" "$OUT" 2>/dev/null \
 echo "ns6_reported=$ns6_reported ns6_absorbed=$ns6_absorbed"
 echo "dnssl_absorbed=$dnssl_absorbed short_resolved=$short_resolved"
 
-# An address formed from an advertisement must be reported as one: ShowNetStatus
-# marks it (advertised), which is what tells it apart from a static address.
 ns6_origin=no
 sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
     | grep -E "^  address6 +${ra_prefix}[0-9A-Fa-f:]+/[0-9]+ \(advertised\)" \
@@ -332,8 +238,6 @@ sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
 
 echo "ns6_origin=$ns6_origin"
 
-# The advertisement's sender must be in the default router table, and netstat
-# prints that table as `::/0` with the next hop beside it.
 ra_default_route=no
 sed -n '/^===== SYS:netstat -r/,/^----- rc/p' "$OUT" 2>/dev/null \
     | grep -E '(^|[[:space:]])::/0[[:space:]]' | grep -qiF "$ra_router" &&

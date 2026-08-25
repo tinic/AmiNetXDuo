@@ -2,24 +2,6 @@
  * TcpHandoff, give a connection to a program that knows nothing about
  * sockets.
  *
- * This is the sequence docs/RESEARCH.md scoped for a telnet server, and the
- * one an SSH server needs too, run end to end with two ordinary AmigaDOS
- * commands standing in for the shell:
- *
- *      listen()/accept()                        this program
- *      ReleaseCopyOfSocket(fd, UNIQUE_ID)       bsdsocket.library, handoff.c
- *      Open("TCP:OBTAIN=<id>")                  the TCP: handler
- *      SystemTagList(cmd, SYS_Output = that)    dos.library
- *
- * The far end of the connection is `Copy TCP:localhost/<port> TO <file>`,
- * started asynchronously before the accept().  The near end, once the socket
- * has become a file handle, is `Echo`.  Neither command knows it is talking
- * over TCP, so between them they show that a file handle made this way is an
- * ordinary one in both directions.
- *
- * Nothing here is linked against our code: the library is reached through its
- * published LVOs, as a third-party program would reach it.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -32,7 +14,6 @@
 static const char version_tag[] __attribute__((used)) =
     "$VER: TcpHandoff 1.0 (26.7.2026)";
 
-/* The port this program listens on, and the one the far end dials. */
 #define HANDOFF_PORT        2300
 
 #define HANDOFF_MESSAGE \
@@ -77,7 +58,6 @@ struct TimeVal_local
     ULONG   tv_micro;
 };
 
-/* How long to wait for the peer command to reach us before giving up. */
 #define ACCEPT_TIMEOUT_SECS 60
 
 static struct Library *SocketBase;
@@ -195,11 +175,6 @@ static LONG call_release_copy(LONG s, LONG id)
     return res;
 }
 
-/*
- * WaitSelect() with a timeout, so that "the connection never arrived" is a
- * report rather than a hang.  It is also the call an Amiga server loop is
- * built around.
- */
 static LONG call_wait_select(LONG nfds, APTR rd, struct TimeVal_local *tv)
 {
     register struct Library *a6  __asm("a6") = SocketBase;
@@ -234,16 +209,6 @@ static LONG call_errno(void)
     return res;
 }
 
-/* ------------------------------------------------------------------------- */
-
-/*
- * Progress, written with the file opened and closed around every line.
- *
- * Printf() is not used: this program's stdout is a handle the Shell holds open
- * for its whole life, so anything printed is still sitting in a buffer if the
- * program stops early, which is the case a trace is for.  Same reasoning as
- * ToolsSmoke's report().
- */
 #define STEP_FILE   "DH0:handoff-steps.txt"
 
 static void step(const char *what, LONG a)
@@ -293,11 +258,6 @@ static LONG start_peer(void)
     BPTR           log = Open((CONST_STRPTR)PEER_LOG, MODE_NEWFILE);
     LONG           rc;
 
-    /*
-     * SYS_Asynch closes both handles itself when the command finishes, so
-     * they are opened here and never closed here.  dos.library also requires
-     * them to be two different handles.
-     */
     tags[0].ti_Tag  = SYS_Input;
     tags[0].ti_Data = (ULONG)nil;
     tags[1].ti_Tag  = SYS_Output;
@@ -470,18 +430,12 @@ int main(void)
 
     rc = hand_over(client);
 
-    /*
-     * The handle taken through TCP:OBTAIN held its own reference; this is the
-     * last one, and dropping it is what sends the FIN the peer needs to see
-     * end of file.
-     */
     call_close_socket(client);
     step((const char *)"the accepted socket is closed\n", 0);
 
     call_close_socket(listener);
     step((const char *)"the listener is closed\n", 0);
 
-    /* Let the asynchronous peer finish writing its file. */
     Delay(150);
 
 out:

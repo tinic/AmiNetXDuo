@@ -1,39 +1,7 @@
 /*
- * ShutProbe, what a network shutdown does to the programs that are using the
- * network.
- *
- *     ShutProbe [command] [grace-seconds]
- *
- * A user reported that NetShutdown "doesn't work in the intended way": the
- * other Amiga stacks send SIGBREAKF_CTRL_C to the processes holding
- * bsdsocket.library open, wait a grace period for them to close it, and the
- * refcount then falls to zero.  Ours takes the interfaces down and stops
- * there, so a program sitting in WaitSelect() sits there afterwards too.
- *
- * Reading the source says that.  This measures it, from outside, through the
- * published LVOs and Exec's own library list, so the same binary measures a
- * fixed one and the numbers come from one instrument:
- *
- *   1  two holders are started as separate processes.  One blocks inside the
- *      library, in WaitSelect() with no timeout, which is what a server does
- *      between connections; the other holds a socket and waits on its own
- *      signals outside the library, which is what a program with its own
- *      event loop does.  Both are what the report is about.
- *   2  bsdsocket.library's open count is read off the master base in
- *      SysBase->LibList.  Not through a base of our own: opening the library
- *      to look at it would restart the stack if the shutdown had worked, and
- *      the count is the thing being measured.
- *   3  the command is run, synchronously, and timed.
- *   4  the holders are watched for the grace period.  Either the break
- *      arrived and they closed, or it did not.
- *
- * Then it cleans up after itself: any holder still there is broken by hand,
- * because a probe that leaves two processes wedged in the library cannot be
- * followed by anything.  Whether that was necessary is one of the numbers.
- *
- * Output is key=value, one per line.  The verdict belongs to
- * tests/tools/run-netshutdown.sh; this exits non-zero only when it could not
- * take the measurement at all.
+ * ShutProbe [command] [grace-seconds] -- measures what a network shutdown does
+ * to processes holding bsdsocket.library open.  Prints key=value lines; exits
+ * non-zero only when the measurement could not be taken at all.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -139,12 +107,7 @@ static ULONG p_ms(ULONG start, ULONG end)
 
 /* -------------------------------------------------------------- holders --- */
 
-/*
- * Two of them, so each gets its own entry point and its own slot and there is
- * no index to hand across a CreateNewProc().  The fields are written by the
- * holder and read by the parent, never the other way round except sh_Stop,
- * which is the parent's Ctrl-C of last resort.
- */
+/* Written by the holder process, read by the parent. */
 struct Holder
 {
     volatile LONG   sh_Started;     /* the process is running               */
@@ -164,9 +127,6 @@ static struct Holder holder_select;
 static struct Holder holder_wait;
 static struct Holder holder_deaf;
 
-/* A holder's socket: bound to nothing, connected to nothing.  Holding the
-   library open is the whole job, and a socket makes it a holder the stack
-   knows about rather than one it could ignore. */
 static LONG holder_socket(struct Library *base, struct Holder *h)
 {
     LONG s = call_socket(base, 2 /* AF_INET */, 2 /* SOCK_DGRAM */, 0);
@@ -177,11 +137,7 @@ static LONG holder_socket(struct Library *base, struct Holder *h)
     return s;
 }
 
-/*
- * Inside the library.  WaitSelect() with no timeout and the break mask in
- * signals, which is how the autodoc says a program waits on sockets and
- * Ctrl-C together, and how every server written against this API waits.
- */
+/* Blocks inside the library: WaitSelect(), no timeout, break mask in signals. */
 static VOID holder_select_entry(VOID)
 {
     struct Holder  *h = &holder_select;
@@ -226,11 +182,7 @@ static VOID holder_select_entry(VOID)
     h->sh_Exited = 1;
 }
 
-/*
- * Outside it.  A program with its own event loop is not in a library call
- * when the network is taken away; it is in Wait(), and the only thing that
- * can tell it anything is a signal.
- */
+/* Blocks outside the library: holds a socket, waits in Wait(). */
 static VOID holder_wait_entry(VOID)
 {
     struct Holder  *h = &holder_wait;
@@ -265,16 +217,7 @@ static VOID holder_wait_entry(VOID)
     h->sh_Exited = 1;
 }
 
-/*
- * The one that will not go. It holds the library and waits on a signal
- * nothing sends, so SIGBREAKF_CTRL_C arrives and changes nothing -- a program
- * that does not handle the break, which Roadshow's manual says cannot be made
- * to give its resources up: "Unlike on a Unix system, it is not possible for
- * an Amiga program to be forced to give up its network resources."
- *
- * This is the arm that decides whether the failure is reported or hidden. A
- * shutdown that only ever meets cooperative programs can claim anything.
- */
+/* Uncooperative holder: waits on SIGF_SINGLE, so SIGBREAKF_CTRL_C does nothing. */
 static VOID holder_deaf_entry(VOID)
 {
     struct Holder  *h = &holder_deaf;
@@ -309,13 +252,8 @@ static VOID holder_deaf_entry(VOID)
 
 /* ------------------------------------------------------- the open count --- */
 
-/*
- * The master base, found the way any program finds a library it has not
- * opened.  Its lib_OpenCnt is the number the report is about: every
- * OpenLibrary() of bsdsocket.library adds one, including the one
- * AddNetInterface leaves behind on purpose (NETCTRL_STACK_HOLD), and the
- * stack goes down when the last of them is given back.
- */
+/* Must read the master base via LibList: OpenLibrary() here would itself bump
+   lib_OpenCnt and restart the stack, destroying the measurement. */
 static struct Library *find_bsdsocket(VOID)
 {
     struct Library *lib;
@@ -343,8 +281,6 @@ static LONG both_reached(const struct Holder *a, const struct Holder *b,
     return (*pa != 0 && *pb != 0) ? 1 : 0;
 }
 
-/* Poll rather than wait on a signal: the holders are watched for a state, not
-   for a message, and a tenth of a second is finer than anything measured. */
 static LONG wait_for(LONG offset, ULONG ticks)
 {
     ULONG spent = 0;
@@ -365,16 +301,8 @@ static VOID kv(const char *key, LONG value)
     Printf((CONST_STRPTR)"%s=%ld\n", (LONG)key, value);
 }
 
-/*
- * The command line, split into words.
- *
- * GetArgStr() and not argv: a program started by SystemTagList() the way
- * ToolsSmoke starts this one is handed its arguments there, and argv is empty.
- * That is not a detail worth discovering twice -- the first version of this
- * file read argv[1] and argv[2], got neither, and fell back to defaults that
- * happened to equal what the harness was passing, so it looked like it was
- * reading them right up until a third argument was added.
- */
+/* Must use GetArgStr(): a process started by SystemTagList() gets its
+   arguments there, and argv is empty. */
 #define P_MAX_WORDS 4
 
 static char  p_line[128];
@@ -499,9 +427,7 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Both are in their wait, but "in WaitSelect()" is a state the process
-       reaches just after it sets the flag.  A tenth of a second is longer
-       than that gap and shorter than anything asserted. */
+    /* Cover the gap between setting sh_Blocked and actually entering the wait. */
     Delay(10);
 
     before = open_count(lib);
@@ -544,9 +470,6 @@ int main(int argc, char **argv)
 
     if (deaf)
     {
-        /* It must still be there. A shutdown that got rid of a program which
-           never handled the signal did something to it that no stack on this
-           machine is allowed to do. */
         kv("deaf_still_holding", (holder_deaf.sh_Closed == 0) ? 1 : 0);
     }
 
@@ -559,8 +482,6 @@ int main(int argc, char **argv)
     {
         LONG manual = 0;
 
-        /* Its own release, not a break: the point of it is that it does not
-           listen for one. */
         if (deaf && holder_deaf.sh_Task != NULL)
             Signal(holder_deaf.sh_Task, SIGF_SINGLE);
 
@@ -582,19 +503,14 @@ int main(int argc, char **argv)
             LONG freed = wait_for((LONG)offsetof(struct Holder, sh_Closed),
                                   250UL);
 
-            /* A holder that will not come back even for a signal sent
-               straight to its task is a worse defect than the one being
-               measured, and it wedges every test after this one. */
             kv("holders_freed_by_hand", freed);
         }
     }
 
     kv("opencnt_final", open_count(lib));
 
-    /*
-     * The holders run out of this program's segment, and the Shell unloads it
-     * the moment main() returns.  Wait for them to be gone, and then some.
-     */
+    /* The holders run out of this program's segment; the Shell unloads it the
+       moment main() returns, so they must all be gone first. */
     (VOID)wait_for((LONG)offsetof(struct Holder, sh_Exited), 250UL);
 
     if (deaf)

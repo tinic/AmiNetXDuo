@@ -1,26 +1,5 @@
 /*
  * AmiNetXDuo, host fuzz driver for the DEVS:Internet parsers.
- *
- * Same shim arrangement as src/config/test/test_config.c: the AmigaOS calls
- * the parsers need are answered here, and ami_cfg_read_file() comes from an
- * in-memory fixture rather than from disk.  The difference is that the
- * fixture is whatever bytes arrive on stdin (or in argv[1]), so the whole of
- * netdb.c, config_text.c and config_parse.c can be driven with malformed
- * input under -fsanitize=address,undefined.
- *
- * Every parser that reads a file out of DEVS: belongs here, including
- * DEVS:Internet/service_discovery, see SECURITY.md.
- *
- * Build (see fuzz.sh):
- *   cc -fsanitize=address,undefined -g -std=c99 -Iinclude \
- *      -Isrc/config/test/shim fuzz_config.c \
- *      src/config/config_text.c src/config/config_parse.c src/config/netdb.c
- *
- * Usage:
- *   fuzz_config < case            one case, every file fed the same bytes
- *   fuzz_config -f N < case       feed only file N (0..3 netdb, 4..6 config)
- *   fuzz_config -s [< case]       the service_discovery parser alone
- *   fuzz_config -r SEED COUNT     built-in random generator, no corpus needed
  */
 
 #include "config_internal.h"
@@ -30,8 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* ------------------------------------------------------------------ stubs */
 
 static ULONG stub_outstanding;
 
@@ -103,8 +80,6 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out)
     return buf;
 }
 
-/* ------------------------------------------------------------- the drives */
-
 static const char *const fz_files[] =
 {
     AMI_CFG_FILE_HOSTS,
@@ -115,16 +90,6 @@ static const char *const fz_files[] =
 
 #define FZ_NFILES (int)(sizeof(fz_files) / sizeof(fz_files[0]))
 
-/*
- * DEVS:Internet/service_discovery, in its own function so that `-s` can sweep
- * it alone and a crash names this parser rather than "the config".
- *
- * The array is exactly `max` entries and on the heap, so ASan's redzone sits
- * immediately after the last slot: a parser that trusted its own count instead
- * of checking it against max faults here rather than scribbling on slack.  The
- * count starts non-zero because the contract is "append from *count", not
- * "fill from zero".
- */
 static void fz_run_dnssd(const char *data, size_t len)
 {
     UWORD         max   = AMI_CFG_MAX_SD_SERVICES - 1;
@@ -143,10 +108,6 @@ static void fz_run_dnssd(const char *data, size_t len)
     free(scratch);
 }
 
-/*
- * One pass over everything a file's bytes can reach.  Each parser is driven
- * on its own so a crash names the parser rather than "the config".
- */
 static void fz_run_once(char *data, size_t len, int which)
 {
     AmiConfig  cfg;
@@ -218,8 +179,6 @@ static void fz_run_once(char *data, size_t len, int which)
     fz_run_dnssd(data, len);
 }
 
-/* ------------------------------------------------------- random generator */
-
 static unsigned long fz_state;
 
 static unsigned fz_rand(void)
@@ -228,11 +187,6 @@ static unsigned fz_rand(void)
     return (unsigned)(fz_state >> 33);
 }
 
-/*
- * Bytes shaped like a netdb file rather than uniform noise: the interesting
- * region of this input space is quoting, whitespace runs and line breaks, and
- * uniform random bytes reach almost none of it.
- */
 static const char *const fz_atoms[] =
 {
     " ", "\t", "\n", "\r", "\r\n", "#", ";", "\"", "\"\"", "\"\"\"\"",

@@ -1,32 +1,6 @@
 #!/usr/bin/env bash
-#
 # Regenerate tests/x509/x509_pss_vectors.h, the RSASSA-PSS certificates the
 # PSS section of test_tls_x509.c verifies.
-#
-#   tests/x509/mkpssvectors.sh tests/x509/x509_pss_vectors.h
-#
-# Run by hand, not by the build, for the reason mkextvectors.sh gives: a test
-# that mints its own certificates proves whatever the generator did that run.
-#
-# WHAT IS GENERATED
-#
-#   root          RSA-2048 CA, self-signed with PKCS#1 v1.5 SHA-256.  A root's
-#                 own signature is never checked by the chain walk, so making
-#                 it PSS would test nothing; this one is the trust anchor.
-#   int           CA under the root, signed RSASSA-PSS SHA-256.  An
-#                 intermediate is where a real chain meets PSS first.
-#   leaf          pss.test under int, signed RSASSA-PSS SHA-256, salt 32.
-#   leaf384       pss384.test directly under the root, RSASSA-PSS SHA-384,
-#                 so the digest genuinely comes out of the parameters rather
-#                 than being assumed.
-#   leaf_salt     pss-salt.test under the root, RSASSA-PSS SHA-256 with the
-#                 salt length forced to the maximum instead of the digest
-#                 length.  A verifier that hardcodes sLen = hLen rejects it.
-#
-# The tampered case is built in the test rather than here: it is the leaf with
-# one signature byte flipped, and doing that in C keeps the pair provably the
-# same certificate.
-#
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 
@@ -74,7 +48,6 @@ mkleaf leaf      int  pss.test      sha256 digest
 mkleaf leaf384   root pss384.test   sha384 digest
 mkleaf leaf_salt root pss-salt.test sha256 max
 
-# ---------------------------------------------------------------------------
 emit() {    # emit <c-name> <pem>
     local name=$1 pem=$2
     openssl x509 -in "$pem.pem" -outform DER -out "$pem.der"

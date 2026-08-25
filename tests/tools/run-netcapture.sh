@@ -6,67 +6,6 @@
 #                                 [-P user@peer] [-A ADDRESS] [-t SECONDS]
 #                                 [-M MACHEAD] [-l]
 #
-# WHAT IT PROVES
-#
-#   1. NetCapture records traffic IT DID NOT MAKE.  The frames in the file are
-#      ping's, and ping is a separate command launched separately -- which is
-#      the whole difference between this and NetTrace, and the only thing a
-#      capture tool is for.
-#   2. The file is a pcap.  TCPDUMP READS IT, on a machine that is not the one
-#      that wrote it, and reports the packets.  Not "the header looks right":
-#      the reader that a user will actually point at this file.
-#   3. The filter works on the machine and not only in the host test.  Two
-#      channels capture the same seconds, one with PROTO=ICMP and one with no
-#      filter at all; the filtered file must be all ICMP and the unfiltered one
-#      must NOT be, or the first proves nothing about the filter and only that
-#      the segment was quiet.
-#   4. A stop condition stops it.  A third channel with COUNT=5 must produce a
-#      file with exactly five packets in it, closed and readable.
-#
-# WHAT IT DOES NOT PROVE
-#
-#   Ctrl-C.  There is no way to deliver SIGBREAKF_CTRL_C to a background
-#   command from a staged command list -- AmigaDOS `Break` is a Workbench C:
-#   command and this drive has no Workbench on it.  The SECONDS and COUNT arms
-#   above take the identical path out: netcapture.c's loop breaks and calls
-#   tool_bpf_stop(), which is the one place the file is drained, flushed and
-#   closed.  Ctrl-C differs by which `if` fires and by nothing else.
-#
-# BRIDGED, NEVER SLIRP
-#
-#   SLIRP is user-mode NAT inside the emulator; there is no segment there, no
-#   ARP, no mDNS, and nothing else on it for an unfiltered capture to see.  The
-#   third assertion above would then be vacuous.  -B names a host NIC.
-#
-# EVERY CARD, and a FRESH MAC PER RUN
-#
-#   The card table is tests/tools/cards.sh, shared with the two sweeps, so a
-#   card added there is a card this boots.  The MAC head here is 02:41:4d:4e,
-#   which is neither sweep's and is not the demo's, and the tail is the card's:
-#   two Amigas on one segment with one address take each other off the network.
-#
-#   THE FRAMES ARE IDENTIFIED BY IP ADDRESS, NOT BY MAC.  Every card mangles
-#   the configured MAC in its own way -- the A2065's LANCE writes Commodore's
-#   OUI over the first three octets -- so a harness that derives the address it
-#   expects fails on whichever family it derived wrong, and says nothing about
-#   the capture.  The guest's leased address is printed by AddNetInterface and
-#   is read back from the transcript instead.
-#
-# THE PEER
-#
-#   -P names a machine with tcpdump that is NOT this one.  It reads the files.
-#   Without it they are read here, which is a weaker claim and says so
-#   (reader=local).  -A is what the guest pings; it must answer, and it
-#   defaults to the peer's address when -P is a host this can resolve.
-#
-#   A peer on THIS host cannot be pinged by the guest: Amiberry injects with
-#   pcap on the backend NIC and injected frames never enter this host's own RX
-#   path.  That is why -A defaults to the router and not to 127.0.0.1.
-#
-# OUTPUT IS key=value, one line per card and one summary.  Exit 0 everything
-# asserted held, 1 something did not, 2 a broken invocation or a missing
-# prerequisite, 3 a card produced no capture to read at all.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -132,8 +71,6 @@ done
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || refuse "no_kickstart"
 
-# The reader.  A peer is the claim worth making: the file crosses a machine
-# boundary and is read by a tcpdump that knows nothing about how it was made.
 READER=local
 if [ -n "$PEER" ]; then
     if ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$PEER" \
@@ -152,16 +89,6 @@ kv backend "$BACKEND"
 kv reader "$READER"
 kv ping_target "$TARGET"
 
-# Read a pcap wherever the reader is.  One place, so the two arms cannot drift.
-#
-# EVERY ssh AND scp HERE TAKES ITS STDIN FROM /dev/null.  ssh reads whatever
-# stdin it is given, and the card loop below feeds the card list on a file
-# descriptor these functions can see: without this the first card's tcpdump
-# swallowed the remaining eight and the sweep reported itself complete after
-# one.  tests/tools/run-cardsweep.sh:265 records the same bug from the other
-# end.  The loop also moves the list to fd 3, so both halves of the mistake
-# are closed.
-#
 #   pcap_lines <file> [expression]
 pcap_lines() {
     local file="$1" expr="${2:-}"
@@ -179,9 +106,6 @@ pcap_lines() {
     fi
 }
 
-# Does tcpdump accept the file at all?  A file it refuses prints nothing on
-# stdout and everything on stderr, which is indistinguishable from an empty
-# capture unless the two are asked separately.
 pcap_readable() {
     local file="$1"
 
@@ -204,8 +128,6 @@ failed=0
 novrd=0
 
 run_card() {
-    # $3 is the cards.sh static address, unused here: nothing calls in, so the
-    # guest takes a lease and the harness reads back what it got.
     local board=$1 model=$2 mactail=$4
     local tag="nc-$board"
     local mac="$MACHEAD:$mactail"
@@ -226,11 +148,6 @@ run_card() {
     cp "$CAPTURE" "$stage/NetCapture"
     cp "$PING"    "$stage/ping"
 
-    # The SANA-II driver for this board, from the one place that knows which
-    # driver covers which card.  A driver that is not on this machine is a
-    # SKIP with its own status, decided before booting: sana2_stage() warns
-    # and carries on, which would spend a boot and a timeout to report "the
-    # network did not start".
     sana2_select "$board" "$BUILD"
     if [ -z "$SANA2_SEL_PATH" ]; then
         kv "card_$board" "skip_no_driver driver=$SANA2_SEL_DRIVER source=$SANA2_SEL_SOURCE"
@@ -238,8 +155,6 @@ run_card() {
         return
     fi
 
-    # DHCP, not a static address: nothing has to call in here, so there is no
-    # reason for this sweep to hold nine addresses of the lab's.
     {
         printf 'DEVICE=%s\n' "$SANA2_SEL_DRIVER"
         printf 'UNIT=0\n'
@@ -252,22 +167,6 @@ run_card() {
     AMINETXDUO_SANA2_CARD="$SANA2_SEL_CARD" \
         sana2_stage "$board" "$stage/devs" > "$ROOT/build/$tag-sana2.log" 2>&1
 
-    # THE EXPERIMENT.
-    #
-    # Two channels over the same seconds, so the filtered and unfiltered files
-    # are of the SAME traffic and the comparison between them means something.
-    # Then ping, which is a different command in a different process, and is
-    # the only thing here that puts a packet on the wire on purpose.
-    #
-    # `&` is ToolsSmoke's SYS_Asynch prefix: SystemTagList() waits, and a
-    # capture that waits cannot be running while ping runs.
-    #
-    # Each background capture redirects its own summary: ToolsSmoke gives a
-    # SYS_Asynch child NIL: handles, so "anything to be kept is redirected by
-    # the line itself".  That summary is the command's OWN count of what it
-    # wrote, and it is checked against tcpdump's count of what is in the file
-    # -- a command that reports a number it did not write is the failure that
-    # a capture nobody reads back would never show.
     cat > "$stage/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 30
@@ -312,25 +211,11 @@ EOF
     n_icmp=$(pcap_lines "$icmp" | grep -c . )
     n_five=$(pcap_lines "$five" | grep -c . )
 
-    # The unfiltered capture must hold something the filtered one excludes, or
-    # "the filtered file is all ICMP" is a fact about the segment.
     n_noticmp=$(pcap_lines "$all" "not icmp and not icmp6" | grep -c . )
 
     # ICMP means the pings: echo request or reply, not merely IP protocol 1.
     n_echo=$(pcap_lines "$icmp" | grep -ci 'echo re')
 
-    # The frames are this machine's.
-    #
-    # ASKED BY ADDRESS, NOT BY MAC.  The address the guest leased is printed by
-    # AddNetInterface and is therefore known; the MAC that reaches the wire is
-    # not.  The A2065's LANCE writes Commodore's OUI over the configured
-    # address, the other eight cards each do something of their own, and a
-    # harness that guesses fails on whichever family it guessed wrong -- for a
-    # reason that has nothing to do with the capture.  ariadne failed exactly
-    # that way on 2026-08-17 with all nine other assertions holding.
-    #
-    # It is also the stronger claim: these are the frames of the ping between
-    # this machine and the target, not merely frames carrying an address.
     guest_addr=$(sed -n 's/.*online, address \([0-9.]*\).*/\1/p' \
                  "$hd/tools.txt" 2>/dev/null | head -1)
 
@@ -346,13 +231,9 @@ EOF
                 awk '{print $2}')
     [ -n "$guest_mac" ] || guest_mac=none
 
-    # Everything the ICMP filter kept must be ICMP.  Asked as its negation, so
-    # a tcpdump that printed nothing does not read as a pass.
     local n_wrong
     n_wrong=$(pcap_lines "$icmp" "not icmp and not icmp6" | grep -c . )
 
-    # What the command said it wrote, out of its own summary line, against
-    # what tcpdump found in the file.
     local said_all said_five said_stop dropped
     said_all=$(sed -n 's/.*written=\([0-9]*\).*/\1/p' "$hd/all.txt" 2>/dev/null | tail -1)
     said_five=$(sed -n 's/.*written=\([0-9]*\).*/\1/p' "$hd/five.txt" 2>/dev/null | tail -1)
@@ -392,8 +273,6 @@ while read -r -u 3 board model addr mactail; do
     run_card "$board" "$model" "$addr" "$mactail"
 done 3< <(cards_rows "$ONLY")
 
-# Cards this project names that no arm can reach.  A list of what is covered
-# is worth nothing without the list of what is not.
 printf '%s\n' "$UNTESTABLE" | while read -r drv why; do
     [ -n "$drv" ] || continue
     kv untestable "$drv ($why)"

@@ -1,53 +1,9 @@
 /*
  * AmiNetXDuo, timer-driven PC sampling for AmigaOS/m68k.
  *
- * tests/perf/perf_test.c prices every primitive the data path touches and
- * multiplies by call counts.  It accounts for about 22% of a wire transfer and
- * leaves 78% inside NetX Duo with no name on it.  Arithmetic cannot say where
- * that goes; a ranked list of sampled program counters can.
- *
- * HOW THE PC IS OBTAINED, which is the whole difficulty.
- *
- * A timer raises an interrupt.  We do NOT read the exception frame from an
- * Exec interrupt server: by the time AddIntServer()'s dispatcher calls a
- * server it has pushed registers on top of the frame, and the distance from
- * SSP back to it is undocumented and version-dependent.  A wrong offset there
- * yields a plausible address that is not the PC, and nothing about the
- * resulting profile looks wrong.
- *
- * Instead prof_vector.S is installed directly in the 68k autovector, so it is
- * the first instruction executed after the CPU takes the exception and SP
- * points exactly at the frame the CPU just built:
- *
- *      0(SP)   SR      word
- *      2(SP)   PC      long
- *      6(SP)   format/vector word, 68010 and up only
- *
- * That layout is identical on every 68k.  The 68010+ frame is EIGHT bytes
- * rather than six, but the extra word is APPENDED; SR and PC do not move, so
- * the handler needs no CPU test to find the PC.  It records the format word
- * anyway and prof_write() checks that every sample carried format $0, which
- * is what would catch a 68020 throwaway frame (format $1, pushed when SR's M
- * bit is set) or any other shape we did not expect.  On a 68000 that word is
- * stale stack and is ignored; PROFF_FMTVALID says which.
- *
- * WHAT RAISES THE INTERRUPT: audio channel 3, at level 4.  A CIA timer is the
- * obvious choice and does not work, see the source table in prof.c for the
- * two separate ways both CIA-B timers were lost, and for why an interrupt
- * acknowledged through a chip that latches its own request cannot be trusted
- * at kHz rates on this OS.  Audio DMA raises the interrupt and Exec's
- * dispatcher clears INTREQ; nothing latches, so nothing wedges.  Level 4 also
- * means a sample can be taken inside a level-2 or level-3 handler, which is
- * where a SANA-II driver's receive path runs.
- *
- * The vector chains to the one it displaced with a push/RTS, restoring SP to
- * the frame first, so Exec's own dispatch runs exactly as before.
- *
- * WHAT IS INVISIBLE.  Exec's Disable() clears INTENA's master enable, so no
- * sample is taken inside a Disable()/Enable() pair; the interrupt lands
- * immediately after instead, charging that time to whatever runs next.
- * Forbid()/Permit() does NOT mask interrupts and is sampled normally, which
- * matters because that is where the ThreadX bracket lives, ~270 us a call.
+ * prof_vector.S sits directly in the 68k autovector, so SP points at the CPU
+ * exception frame: 0(SP) SR word, 2(SP) PC long, 6(SP) format/vector word on
+ * 68010+ (appended; SR and PC do not move).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -105,39 +61,28 @@ struct ProfLib
     char    pl_Name[32];
 };
 
-/* One resolved jump-table entry: where LVO -pv_LVO of library pv_LibIdx
-   actually lands.  A sample in ROM is named by the nearest preceding one. */
 struct ProfLVO  { ULONG pv_Target; UWORD pv_LibIdx; UWORD pv_LVO; };
 
 struct ProfMark { ULONG pm_Index; char pm_Label[28]; };
 
 
-/* Reserve `max_samples` records and start sampling at `rate_hz`.  FALSE on
-   failure, with prof_error() saying why. */
 BOOL        prof_start(ULONG max_samples, ULONG rate_hz);
 
-/* Stop the timer and restore the autovector.  Idempotent. */
 VOID        prof_stop(VOID);
 
-/* Note a phase boundary at the current sample index. */
 VOID        prof_mark(const char *label);
 
-/* Write the profile.  Call after prof_stop(). */
+/* Call after prof_stop(). */
 BOOL        prof_write(const char *path);
 
 VOID        prof_free(VOID);
 
-/* The recorded samples and the phase marks, for a caller that wants to check
-   the profile on the Amiga rather than wait for the host tool. */
 const struct ProfSample *prof_buffer(VOID);
 const struct ProfMark   *prof_mark_table(ULONG *count);
 
-/* Samples whose frame was not format $0.  Must be zero on a 68010 and up;
-   always zero on a 68000, where there is no format word to read. */
 ULONG       prof_odd_formats(VOID);
 
-/* RawDoFmt-free logging to the serial port, which is where amiberry-run.sh
-   captures output from.  Both profiler binaries need it. */
+/* Logs to the serial port: that is where amiberry-run.sh captures output. */
 VOID        prof_log(const char *fmt, ...);
 VOID        prof_log_flush(VOID);
 

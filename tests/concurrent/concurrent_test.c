@@ -1,54 +1,6 @@
 /*
  * AmiNetXDuo, eight applications inside the stack at once.
  *
- * WHY THIS EXISTS
- *
- * The baton defect of docs/RESEARCH.md 77.6 was a second Task entering NetX Duo
- * without the baton, and it survived every automated harness in this tree. Not
- * for want of concurrency tests, for want of one that is concurrent through
- * bsdsocket.library:
- *
- *   tests/soak         4 adopted Tasks, 2 ThreadX threads, deliberate baton
- *                      churn, and zero socket calls. It drives the ThreadX
- *                      port directly, so ami_netstack_enter() is never on the
- *                      path.
- *   tests/ram_driver   nx_tcp_* directly, same gap.
- *   tests/endurance    up to 34 worker contexts, each with its own library
- *                      base, exactly the right shape, and not in
- *                      EMULATOR_TESTS, because it runs for hours.
- *   tests/soak/fitz_soak   the same, and the same reason.
- *
- * So the routinely-exercised count of concurrent library users was one. This
- * closes that at a size CI can afford.
- *
- * WHAT IT DOES
- *
- * Eight Processes, each with its OWN bsdsocket.library base, which is what
- * makes them applications rather than threads, and what makes each one arrive
- * at the bracket as an unrelated Exec Task. Four listen on 127.0.0.1, four
- * connect and echo-verify against them, all at the same time.
- *
- * Each pair's payload is keyed to its own id, so a byte that arrives on the
- * wrong connection is a failure rather than a coincidence: two Tasks inside
- * NetX Duo at once corrupt shared state, and cross-fed payload is what that
- * looks like from out here.
- *
- * The watchdog is not garnish. The visible symptom of the baton defect was a
- * NetX Duo caller error, but that was only the subset whose timing left the
- * pointer NULL; the rest wedged silently. A test that only checks return codes
- * would have called that a pass.
- *
- * Reaches the library through its LVOs and links nothing of the stack, for the
- * reason tests/leak/CMakeLists.txt gives: linking src/netstack would get a
- * second set of NetX Duo globals and measure the wrong stack.
- *
- * Reading a run: the verdict line is the result, and it is printed before the
- * last CloseLibrary(), which hangs in the a2065 teardown and stops the run from
- * ever writing DH0:.done. A trailing timeout under a verdict is expected;
- * run-concurrent.sh scores the verdict and says so. A timeout with no verdict
- * is a real failure, and the last [ct] line in the serial log is how far it
- * got.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -64,8 +16,6 @@
 #include <inline/macros.h>
 #include <proto/dos.h>
 
-/* ------------------------------------------------------------- the shape -- */
-
 #ifndef CT_PAIRS
 #define CT_PAIRS        4               /* 4 servers + 4 clients == 8 bases  */
 #endif
@@ -76,30 +26,8 @@
 #define CT_PORT_BASE    7420
 #define CT_CHUNK        2048UL
 
-/*
- * A bsdsocket call runs NetX Duo on the CALLER's stack, ami_netstack_enter()
- * takes the baton and descends from there, so a child's stack has to carry
- * the whole TCP/IP call depth, not just this file's frames. The stack's own
- * session processes get TCP_SESSION_STACK (16 KB) and its startup process gets
- * BSD_STARTUP_STACK (64 KB); every other harness here spawns at 64 KB or more.
- *
- * The first version of this test used 8 KB, and that was the hang: RESEARCH
- * 16.9 records the same failure from the other end, a 4 KB Shell stack under
- * NetTrace gave an F-line trap and a reboot loop, which the runner reported as
- * a timeout with truncated output, because a reboot reopens DH0:stdout.txt.
- */
 #define CT_STACK        (64UL * 1024UL)
 
-/*
- * Two deadlines run back to back, servers reaching listen(), then everything
- * finishing, so the harness needs 2 x CT_DEADLINE_SECS of its own, and the
- * -t it runs under has to cover that PLUS the boot it does not control.
- *
- * CT_BUDGET_SECS is that arithmetic, and run-concurrent.sh derives its default
- * -t from the same numbers rather than from a guess. Kickstart boot and the
- * DHCP attempt against SLIRP come out of CT_BOOT_SECS; DHCP is the long pole
- * and is bounded by the stack's own retry schedule, not by us.
- */
 #ifndef CT_DEADLINE_SECS
 #define CT_DEADLINE_SECS  60
 #endif
@@ -109,16 +37,6 @@
 #define CT_TIMEOUT_TICKS  (CT_DEADLINE_SECS * 50)   /* 50 ticks/s            */
 #define CT_POLL_TICKS     10
 #define CT_BEAT_TICKS     100           /* heartbeat every 2 s               */
-
-/* --------------------------------------------------------------- the LVOs -- */
-
-/*
- * Offsets and register assignments from the NDK's own
- * pragmas/bsdsocket_pragmas.h, socket 0x01e, send 0x042, recv 0x04e, and
- * not from counting in sixes. Every stub declares d1/a0/a1 clobbered: the one
- * that did not turned IoctlSocket(FIONBIO) into a call with a garbage request
- * code and wedged a test for a day (RESEARCH 42).
- */
 
 #define C_AF_INET       2
 #define C_SOCK_STREAM   1
@@ -302,8 +220,6 @@ static LONG c_errno(struct Library *base)
     return res;
 }
 
-/* -------------------------------------------------------------- the state -- */
-
 typedef struct CtApp
 {
     UWORD           ca_Id;
@@ -319,10 +235,6 @@ typedef struct CtApp
     struct Process *ca_Proc;
 } CtApp;
 
-/*
- * Static, not allocated: the child reads it through pr_Task.tc_UserData while
- * the parent is inside Wait(), and a static lives past any argument frame.
- */
 static CtApp ct_app[CT_APPS];
 
 static ULONG ct_checks;
@@ -357,24 +269,6 @@ static const char *const ct_phase_name[] = {
     "accepted", "connected", "transferring", "closed", "exited"
 };
 
-/*
- * Two channels, because they fail in different ways.
- *
- * ct_log() is stdout, flushed per line: the runner reads it out of a file
- * after the run, so an unflushed line is a line that does not exist when the
- * program never exits.
- *
- * ct_trace() is the serial port through exec's RawPutChar, and it is the one
- * that survives. It needs no FileHandle and no dos.library, so a child can
- * trace without sharing the parent's Output(); FS-UAE writes it to
- * build/serial-<tag>.log as it arrives, and the runner prints that log even on
- * a timeout. A guest reboot reopens DH0:stdout.txt and erases stdout; it does
- * not truncate the serial log, which is how a reboot loop becomes visible
- * rather than looking like a silent hang.
- *
- * The NDK declares RawPutChar only in the assembler headers, so it is wired up
- * here the way src/common/compat.c does it.
- */
 #ifndef RawPutChar
 #  define RawPutChar(c) \
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
@@ -443,8 +337,6 @@ static UBYTE ct_byte(UWORD pair, ULONG off)
 {
     return (UBYTE)((ULONG)(pair * 31U + 7U) + off * 3UL);
 }
-
-/* -------------------------------------------------------------- the apps -- */
 
 static VOID ct_server_body(CtApp *a, struct Library *base)
 {
@@ -593,12 +485,6 @@ static VOID ct_client_body(CtApp *a, struct Library *base)
     ct_phase(a, CT_P_CONNECTED);
     a->ca_Started = 1U;
 
-    /*
-     * Send a chunk, read it back, verify, repeat. Lock-step rather than
-     * streaming: it keeps all four pairs inside a socket call at overlapping
-     * times, which is the state this test exists to produce, and it bounds the
-     * buffers to one chunk.
-     */
     ct_phase(a, CT_P_XFER);
     while (sent < CT_BYTES)
     {
@@ -661,11 +547,6 @@ done:
     ct_phase(a, CT_P_CLOSED);
 }
 
-/*
- * One application. Its own library base, opened here and closed here, so the
- * bracket sees an unrelated Exec Task with an unrelated base, which is the
- * whole point of spawning Processes instead of starting threads.
- */
 static VOID ct_app_entry(VOID)
 {
     struct Process *me = (struct Process *)FindTask((STRPTR)0);
@@ -677,10 +558,6 @@ static VOID ct_app_entry(VOID)
     a = (CtApp *)me->pr_Task.tc_UserData;
     if (a == NULL)
     {
-        /* The parent sets tc_UserData under Forbid() before it signals, so
-           this means the signal was already pending at creation and the Wait()
-           fell straight through. Say so rather than exiting silently, which
-           reads from outside as a child that never started. */
         ct_trace("child woke with no CtApp, SIGF_SINGLE was already set");
         return;
     }
@@ -709,20 +586,6 @@ static VOID ct_app_entry(VOID)
     a->ca_Done = 1U;
 }
 
-/*
- * Spawn one application, following tests/endurance/endurance.c, which is the
- * working precedent for a worker with its own library base.
- *
- * Forbid() covers creation and tc_UserData together: without it the child can
- * reach ct_app_entry() before the pointer is stored, and if SIGF_SINGLE is
- * already pending the Wait() falls through onto a NULL.
- *
- * No NP_Output. The first version passed the parent's Output() to all eight
- * with NP_CloseOutput FALSE, which put nine Processes on one FileHandle's
- * fh_Buf/fh_Pos. Children have no reason to touch dos.library at all now that
- * ct_trace() goes to the serial port, so the sharing is simply removed rather
- * than made safe.
- */
 static struct Process *ct_spawn(CtApp *a, const char *name)
 {
     struct Process *p;
@@ -751,8 +614,6 @@ static struct Process *ct_spawn(CtApp *a, const char *name)
     return p;
 }
 
-/* --------------------------------------------------------------- the main -- */
-
 static VOID ct_main_body(VOID)
 {
     struct Library *base;
@@ -771,12 +632,6 @@ static VOID ct_main_body(VOID)
     ct_log("concurrent: 2 x %ld s of deadline; needs -t %ld or more\n",
            (LONG)CT_DEADLINE_SECS, (LONG)CT_BUDGET_SECS);
 
-    /*
-     * The parent holds a base of its own for the duration. Without it the
-     * stack would come up and go down again around each child, and the run
-     * would measure eight sequential startups rather than eight concurrent
-     * users.
-     */
     ct_log("concurrent: opening the library (this starts the stack)\n");
     ct_trace("parent: OpenLibrary(bsdsocket.library)");
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
@@ -846,12 +701,6 @@ static VOID ct_main_body(VOID)
             live++;
     }
 
-    /*
-     * Wait with a deadline. A wedge is the failure mode that matters: the
-     * baton defect's loud symptom was a caller error, but its quiet one was a
-     * Task that never came back, and a harness without a deadline reports that
-     * as nothing at all.
-     */
     ct_log("concurrent: %ld applications running\n", (LONG)live);
     for (;;)
     {
@@ -913,12 +762,6 @@ static VOID ct_main_body(VOID)
                      (LONG)a->ca_Bytes);
     }
 
-    /*
-     * The verdict goes out before the park below, not after it. A wedged run
-     * never leaves that loop, so a summary printed afterwards is a summary
-     * nobody ever reads, which is how the first version of this managed to
-     * hang and report nothing.
-     */
     ct_log("%ld checks, %ld failures, %s\n",
            (LONG)ct_checks, (LONG)ct_failures,
            (LONG)((ct_failures == 0UL) ? "PASS" : "FAIL"));
@@ -926,11 +769,6 @@ static VOID ct_main_body(VOID)
              (LONG)ct_checks, (LONG)ct_failures,
              (LONG)((ct_failures == 0UL) ? "PASS" : "FAIL"));
 
-    /* A wedged child is still running in our address space; leaving would free
-       nothing and it would write into a static that no longer belongs to it.
-       The runner sees this as a timeout with no exit status, because DH0:.done
-       is written by the Startup-Sequence after we return: the verdict above is
-       the result, and the timeout is only how it had to be delivered. */
     {
         UWORD stuck = 0;
 
@@ -956,28 +794,11 @@ static VOID ct_main_body(VOID)
         }
     }
 
-    /*
-     * The parent's is the last base, so this is what shuts the stack down,
-     * and bsd_lib_close() runs netstack_shutdown() on the CALLER's stack.
-     * Startup does not: bsd_lib_open() hands it to a 64 KB Process precisely
-     * because an opener's stack cannot carry it. That asymmetry is why this
-     * whole function runs on a spawned Process rather than on main()'s, which
-     * a Kickstart 3.1 Shell gives 4,096 bytes.
-     */
     ct_trace("parent: CloseLibrary (last base, this stops the stack)");
     CloseLibrary(base);
     ct_trace("parent: stack stopped");
 }
 
-/*
- * main() does nothing but hand the work to a Process with a real stack.
- *
- * A Shell command gets 4,096 bytes on Kickstart 3.1 and this toolchain's crt0
- * exports no __stack hook to ask for more (RESEARCH 11.5), so every harness
- * here that touches the library does its work on a spawned Process instead,
- * tests/crypto68k, tests/compare, ClientRun. This one is an application like
- * the eight it spawns, and it has the same reason to be one.
- */
 static struct Task *ct_launcher;
 static volatile UWORD ct_main_done;
 
@@ -1003,10 +824,6 @@ int main(int argc, char **argv)
                           NP_Priority,  (ULONG)0,
                           NP_StackSize, CT_STACK,
                           NP_Cli,       (ULONG)FALSE,
-                          /* Safe to share here, unlike the eight: this one
-                             does all the ct_log() and main() is inside Wait()
-                             for its whole life, so the FileHandle has one
-                             writer at a time. */
                           NP_Output,    (ULONG)Output(),
                           NP_CloseOutput, (ULONG)FALSE,
                           TAG_DONE);

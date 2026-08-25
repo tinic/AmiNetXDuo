@@ -25,8 +25,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* --------------------------------------------------------------- harness --- */
-
 static int failures;
 static int checks;
 
@@ -72,33 +70,6 @@ static const char *composed(const FetchUrl *u)
     return out;
 }
 
-
-/* ------------------------------------------------- RFC 3986 section 5.4 --- */
-
-/*
- * Base: http://a/b/c/d;p?q
- *
- * The deviations, all deliberate:
- *
- *   "g:h"  ->  "g:h".  A URI in a scheme this command does not speak.  It is
- *              resolved correctly, scheme "g", no authority, and then
- *              refused, which is checked below rather than skipped.
- *
- *   Every expected target carrying a "#fragment" has it dropped, so "#s"
- *              gives "http://a/b/c/d;p?q" rather than ".../d;p?q#s".  RFC 9110
- *              section 7.1: the target URI excludes the fragment, and section
- *              10.2.2's rule that a fragment-less Location inherits the
- *              original reference's fragment concerns what a user agent
- *              displays, not what it puts on the wire.
- *
- *   "//g"  ->  "http://g" becomes "http://g/".  An empty path is written "/"
- *              in the request line, per RFC 9112 section 3.2.1.
- *
- *   "http:g" -> the strict answer, "http:g", is a scheme with no authority,
- *              so it is refused here too.  Section 5.4.2 records the
- *              alternative ("http://a/b/c/g") as what a non-strict parser
- *              produces for backward compatibility.  This one is strict.
- */
 
 typedef struct RefCase
 {
@@ -212,8 +183,6 @@ static void test_rfc3986_examples(void)
 }
 
 
-/* ------------------------------------------------------ what fetch needs --- */
-
 /* The two shapes the old resolver got wrong, spelled out on their own. */
 static void test_relative_redirects(void)
 {
@@ -223,12 +192,10 @@ static void test_relative_redirects(void)
     CHECK(fetch_url_parse("http://example.com/dir/page.html", &base)
           == FETCH_URL_OK);
 
-    /* "about.html" used to become a DNS lookup for a host called about.html */
     CHECK(fetch_url_resolve(&base, "about.html", &got) == FETCH_URL_OK);
     CHECK_STR(got.host, "example.com");
     CHECK_STR(got.path, "/dir/about.html");
 
-    /* "docs/x.html" used to become host "docs", path "/x.html" */
     CHECK(fetch_url_resolve(&base, "docs/x.html", &got) == FETCH_URL_OK);
     CHECK_STR(got.host, "example.com");
     CHECK_STR(got.path, "/dir/docs/x.html");
@@ -369,8 +336,6 @@ static void test_parse_shapes(void)
     CHECK_STR(u.path, "/a?x=../y");
 }
 
-
-/* -------------------------------------------------- the interim response --- */
 
 /*
  * RFC 9110 section 15.2: "A client MUST be able to parse one or more 1xx
@@ -514,8 +479,6 @@ static void test_head_truncation(void)
     CHECK(fetch_head_status(&head) == 200);
 }
 
-
-/* ------------------------------------------------------------------ main --- */
 
 int main(void)
 {

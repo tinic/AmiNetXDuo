@@ -1,35 +1,6 @@
 /*
  * AmiNetXDuo, the SANA-II receive path's delivery, on the host.
  *
- * ami_sana2_rx_deliver() is where a frame stops being the device's and becomes
- * the stack's.  It reads the EtherType out of the link header, hands the
- * packet to one of three NetX Duo deferred entry points, strips the header and
- * counts what happened -- and it is the last place anything looks at the frame
- * before NetX Duo parses it as an IP datagram.
- *
- * Two of its decisions are load-bearing and neither is visible when wrong:
- *
- *   The strip.  Fourteen bytes come off the front and fourteen off the length,
- *   and the two have to agree.  A length left a header long makes every packet
- *   carry fourteen bytes of somebody else's frame off the end; a prepend
- *   pointer left where it was hands the IP layer an Ethernet header to parse as
- *   a version nibble.  Both look like a peer sending nonsense.
- *
- *   The runt reject.  A frame shorter than a link header has no EtherType to
- *   read, and reading one anyway is a load past the end of what was received.
- *   The check has to come first.
- *
- * WHAT IS DELIBERATELY NOT HERE
- *
- *   ami_sana2_rx_arm(), _post(), _complete() and _drain() are static and are
- *   reached only from ami_sana2_rx_thread(), which is an Exec task that
- *   Wait()s on a signal raised from device interrupt context.  Driving them
- *   from a host binary would mean either making them extern or faking a
- *   scheduler, and neither is worth doing to the shipping code.  The Ethernet
- *   header ami_sana2_rx_complete() synthesises therefore stays covered by
- *   tests/tcpdrill under an emulator, and this file says so rather than
- *   leaving the gap silent.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -41,8 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-/* --------------------------------------------------------------- harness -- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -56,8 +25,6 @@ static void h_check(int ok, const char *what)
         printf("  FAIL %s\n", what);
     }
 }
-
-/* ------------------------------------------------------------------ exec -- */
 
 /* The event ring, counted rather than emptied: the S2ERR_OUTOFSERVICE branch
    this harness exercises is one of the paths that records one, and a stub that
@@ -101,12 +68,6 @@ VOID AddTail(struct List *list, struct Node *node)
 
 struct Node *RemHead(struct List *list) { (VOID)list; return NULL; }
 
-/*
- * The rest of sana2_rx.c is the reader task and its teardown.  None of it is
- * called from here; these exist because the translation unit is compiled
- * whole, which is the point -- the function under test is the one that ships,
- * in the object that ships, not a copy.
- */
 struct MsgPort *CreateMsgPort(VOID) { return NULL; }
 VOID  DeleteMsgPort(struct MsgPort *port) { (VOID)port; }
 LONG  DoIO(struct IORequest *req) { (VOID)req; return 0; }
@@ -122,10 +83,6 @@ VOID ami_free(APTR ptr) { (VOID)ptr; }
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
-/* The entropy pool's arrival sampler, which the receive path feeds one call
-   per delivered frame.  It reads timer.device and hashes, neither of which
-   exists here, and this test is about what the slots and the packet lengths
-   do; ami_random.c has its own coverage. */
 VOID ami_random_arrival(VOID) { }
 
 UINT tx_amiga_stack_in_use(APTR base, ULONG size)
@@ -142,8 +99,6 @@ ULONG tx_amiga_zombie_tasks(VOID)
 {
     return 0;
 }
-
-/* --------------------------------------------------------------- threadx -- */
 
 UINT _txe_thread_create(TX_THREAD *p, CHAR *n, VOID (*e)(ULONG), ULONG i,
                         VOID *s, ULONG l, UINT pr, UINT t, ULONG ts, UINT a,
@@ -167,13 +122,6 @@ UINT _txe_semaphore_delete(TX_SEMAPHORE *s) { (VOID)s; return TX_SUCCESS; }
 UINT _txe_semaphore_get(TX_SEMAPHORE *s, ULONG w) { (VOID)s; (VOID)w; return TX_SUCCESS; }
 UINT _txe_semaphore_put(TX_SEMAPHORE *s) { (VOID)s; return TX_SUCCESS; }
 
-/* --------------------------------------------------------------- netx duo -- */
-
-/*
- * Which deferred entry point a frame reached, and what shape it was in when it
- * got there.  Recorded rather than asserted inside the stub, so each test says
- * what it expects.
- */
 typedef enum { TO_NOWHERE, TO_IP, TO_ARP, TO_RARP, TO_RELEASED } Destination;
 
 static Destination h_went;
@@ -225,20 +173,12 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool, NX_PACKET **packet,
     return NX_NO_PACKET;
 }
 
-/* ---------------------------------------------------------------- net68k -- */
-
 VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
     if (len != 0)
         memcpy(to, from, (size_t)len);
 }
 
-/*
- * The receive verifier, when this is an AMINETXDUO_RX_VERIFY build.  What it
- * answers is the test's to choose: the capability flags it publishes are what
- * tell NetX Duo not to walk the payload again, so a frame it declines must
- * carry NO flags and a frame it rejects must not reach the stack at all.
- */
 static ULONG h_verify_caps;
 static UINT  h_verify_drop;
 static int   h_verify_walks;
@@ -260,8 +200,6 @@ ULONG n68k_rx_verify_sum(NX_PACKET *packet, ULONG sum, ULONG length, UINT *drop)
     return h_verify_caps;
 }
 
-/* ---------------------------------------------------- the transmit side -- */
-
 VOID ami_sana2_tx_defer(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 {
@@ -269,26 +207,15 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 }
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface) { (VOID)iface; }
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
-/* The real one counts the driver bindings, which live in sana2_driver.c and
-   need an NX_IP.  ami_sana2_rx_start() is the only caller and this harness
-   does not start readers; the plan is called directly, with the interface
-   count as an argument, which is the whole reason it is one. */
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
 LONG ami_sana2_do_io(struct IORequest *req) { (VOID)req; return 0; }
 
-/* ------------------------------------------------------------- fixtures -- */
-
 static AmiSana2If   iface;
 static NX_IP        ip;
 static NX_INTERFACE interface_obj;
 
-/*
- * A packet in the shape ami_sana2_rx_complete() hands over: prepend at
- * data_start + AMI_SANA2_RX_PAD, the link header there, the payload after it,
- * length covering both.
- */
 static UCHAR      buffer[256];
 static NX_PACKET  pkt;
 static AmiRxSlot  slot;
@@ -316,7 +243,6 @@ static void fixture_init(void)
     h_verify_sums    = 0;
 }
 
-/* A frame of `payload` bytes after a link header carrying `type`. */
 static void frame_init(UWORD type, ULONG payload)
 {
     UCHAR *base = buffer + AMI_SANA2_RX_PAD;
@@ -358,14 +284,6 @@ static void runt_init(ULONG length)
     pkt.nx_packet_length      = length;
 }
 
-/* ================================================== the EtherType demux == */
-
-/*
- * Four types go four places and everything else is dropped.  The default arm
- * matters as much as the four: a frame with a type nobody handles that is
- * passed to the IP thread anyway is an NX_PACKET the stack will not recognise
- * and will not release, and on a machine with a fixed pool that is a leak.
- */
 static void test_demux(void)
 {
     static const struct {
@@ -406,14 +324,6 @@ static void test_demux(void)
     h_check(h_releases == 1, "and the packet goes back to the pool");
 }
 
-/* ==================================================== the header strip === */
-
-/*
- * The prepend pointer and the length have to move together.  A length that
- * kept the header's fourteen bytes puts fourteen bytes of the next thing in
- * the buffer on the end of every datagram, which TCP sees as data and UDP
- * hands to the application.
- */
 static void test_header_strip(void)
 {
     printf("sana2: the link header comes off the pointer and the length\n");
@@ -434,13 +344,6 @@ static void test_header_strip(void)
     h_check(iface.stats.packets_received == 1, "and it is counted as received");
 }
 
-/*
- * The IP header's alignment.  Every longword NetX Duo and n68k_checksum.c read
- * out of the payload assumes it starts on a multiple of four, and on a 68000
- * an odd one is an Address Error rather than a slow path.  The pad exists to
- * make that true and there is a _Static_assert on it in sana2_rx.c; this is
- * the run-time half, on the pointer the stack actually receives.
- */
 static void test_payload_alignment(void)
 {
     printf("sana2: the payload lands on a longword boundary\n");
@@ -457,14 +360,6 @@ static void test_payload_alignment(void)
             "so the payload starts aligned from the pool block");
 }
 
-/* ===================================================== the runt reject === */
-
-/*
- * A frame shorter than a link header is refused before the type is read.  The
- * order is the whole of it: reading base[12] and base[13] out of a nine-byte
- * frame is a load past what the device wrote, and what it finds there decides
- * where the packet goes.
- */
 static void test_runt(void)
 {
     ULONG length;
@@ -536,19 +431,8 @@ static void test_completion_length_consistency(void)
 #endif
 }
 
-/* ============================================ the receive checksum fork == */
-
 #ifdef AMINETXDUO_RX_VERIFY
 
-/*
- * The offload.  ami_sana2_rx_deliver() tells NetX Duo what it verified through
- * nx_packet_interface_capability_flag, and the stack then does not walk those
- * bytes again.  Publishing a flag for a check that did not happen is a frame
- * accepted with a bad checksum; publishing none for one that did is only slow.
- *
- * IPv4 only.  IPv6, ARP and RARP go through untouched, and a flag left on one
- * of them from a previous frame would be the same lie.
- */
 static void test_verify_publishes_only_what_it_checked(void)
 {
     printf("sana2: what the verifier checked is what is published\n");
@@ -605,15 +489,6 @@ static void test_verify_drop(void)
     h_check(iface.stats.packets_received == 0, "and is not received");
 }
 
-/*
- * Which of the two verifier entry points is used, and why it matters.
- *
- * The copy hook sums the frame out of loads the copy was already doing, and
- * sets slot->summed when it did.  A slot that did NOT sum -- a misaligned
- * buffer, or a driver that never called the hook -- must send the verifier
- * down the walking path, because the accumulator in the slot is then the
- * PREVIOUS frame's and checking these bytes against it would accept anything.
- */
 static void test_verify_uses_the_carried_sum(void)
 {
     printf("sana2: a carried sum is used, and only when it is this frame's\n");
@@ -651,23 +526,6 @@ static void test_verify_uses_the_carried_sum(void)
 }
 
 #endif /* AMINETXDUO_RX_VERIFY */
-
-/* ==================================================== the read-depth plan == */
-
-/*
- * ami_sana2_rx_plan() is arithmetic over two scalars -- the line rate
- * S2_DEVICEQUERY reported and the size of the packet pool -- and every
- * interesting case of it is a machine or a card that no emulator here has.
- * A device that answers 0, one that answers nonsense, one whose rate did not
- * fit a ULONG, a pool of ten packets: none of those can be booted, and all of
- * them decide how many frames the stack can catch.
- *
- * The three rules, each checked on its own so a failure names which one:
- *
- *   the ladder    a faster wire earns a deeper queue, in steps
- *   the budget    all three readers together may pin a quarter of the pool
- *   the floors    and they are never taken below what they had before
- */
 
 /* Enough packets that the budget never binds: the ladder alone decides. */
 #define PLAN_BIG_POOL   512UL
@@ -738,13 +596,6 @@ static void test_plan_degenerate_bps(void)
     printf("sana2: a device that will not say what wire it is lands at ten "
            "megabits\n");
 
-    /*
-     * 0 is what ami_sana2_query() leaves behind for a device that does not
-     * fill BPS in, and for one that supplies a short block that stops before
-     * it: the block is zeroed before the command goes out.  It has to mean
-     * something definite, and it means the wire every board in
-     * src/netdev/netdev_cards.c but one reports.
-     */
     plan_at(0UL, PLAN_BIG_POOL, TRUE, &zero);
     plan_at(10000000UL, PLAN_BIG_POOL, TRUE, &ten);
 
@@ -775,46 +626,18 @@ static void test_plan_budget(void)
             d.ipv6 == AMI_SANA2_RX_DEPTH_IPV6,
             "an empty pool buys nothing above the floors");
 
-    /*
-     * The 1 MB machine of docs/RESEARCH.md 81: seventeen packets.  A quarter
-     * is four, which is less than the floors already cost, so the floors win
-     * and a fast card buys it nothing.  This is the case AROSTCP's floor of
-     * sixteen would have spent the whole pool on.
-     */
     plan_at(100000000UL, 17UL, TRUE, &d);
     h_check(d.ipv4 == AMI_SANA2_RX_DEPTH_IPV4,
             "seventeen packets and a fast card still gets the floor");
     h_check((ULONG)d.ipv4 + d.arp + d.ipv6 < 17UL,
             "and the readers do not take the pool");
 
-    /*
-     * The memory-tight A1200 measured in the constants' comments: 2 MB of chip
-     * and no Fast RAM is a pool of 47.  The window is 5, the budget is 11 and
-     * the floors are 8, so IPv4 gets its one packet above the floor and IPv6
-     * takes what is left.  Five and not eight is the whole of that comment: a
-     * deeper IPv4 queue caught a fifth as many datagrams under a flood.
-     */
     plan_at(10000000UL, 47UL, TRUE, &d);
     h_check(d.ipv4 == 5, "47 packets: IPv4 gets the pool's own number, five");
     h_check(d.arp == 2 && d.ipv6 == 4, "and the plan is 5/2/4 exactly");
     h_check((ULONG)d.ipv4 + d.arp + d.ipv6 <= 47UL / AMI_SANA2_RX_BUDGET_SHARE,
             "and the three of them stay inside a quarter of that pool");
 
-    /*
-     * The whole plan is asserted here rather than read off a guest because the
-     * one machine where it cannot be: on a 2 MB A1200 the interface's own log
-     * line is overwritten by the tick line from another task at exactly that
-     * point, deterministically, so `ip 5 arp` is all a serial capture gets.
-     * The other five machines were read off the guest and agree with this
-     * table:
-     *
-     *      pool  47 (A1200, no Fast)      5 / 2 / 4    (ip4 observed)
-     *      pool 127 (A1200, 2 MB Fast)   15 / 2 / 8    observed
-     *      pool 207 (A1200, 4 MB Fast)   25 / 2 / 8    observed
-     *      pool 367 (A1200, 8 MB Fast)   32 / 2 / 8    observed
-     *      pool 367 (A3000, no Fast)     32 / 2 / 8    observed
-     *      pool 513 (A3000, 8 MB Fast)   32 / 2 / 8    observed
-     */
     plan_at(10000000UL, 127UL, TRUE, &d);
     h_check(d.ipv4 == 15 && d.arp == 2 && d.ipv6 == 8,
             "127 packets: 15/2/8, which is what the guest printed");
@@ -825,12 +648,6 @@ static void test_plan_budget(void)
     h_check(d.ipv4 == 32 && d.arp == 2 && d.ipv6 == 8,
             "513 packets: 32/2/8, which is what the A3000 printed");
 
-    /*
-     * The lab's 8 MB A1200: 368 packets, so 46 frames of window and a budget
-     * of 92 pinned packets. Both readers reach the ceiling and the pool is
-     * nowhere near paying for it, which is the case the IPv6 reader was two
-     * deep in.
-     */
     plan_at(10000000UL, 368UL, TRUE, &d);
     h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
             "368 packets: IPv4 gets the ceiling");
@@ -840,12 +657,6 @@ static void test_plan_budget(void)
     h_check(d.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
             "and a hundred-megabit card on that machine asks for no more");
 
-    /*
-     * The IPv6 cap is a cap and not a share: a pool ten times bigger does not
-     * move it.  A packet pinned by a reader nothing is arriving on is one the
-     * other reader's window cannot have, and that is measured -- see the
-     * constant's own comment.
-     */
     plan_at(10000000UL, 4096UL, TRUE, &d);
     h_check(d.ipv6 == AMI_SANA2_RX_WANT_IPV6,
             "and a pool ten times that size does not move the IPv6 cap");
@@ -925,13 +736,6 @@ static void test_plan_single_stack(void)
             "no IPv6 reader is planned when none will be started");
     h_check(single.arp == dual.arp, "the ARP reader is unmoved either way");
 
-    /*
-     * IPv4 is NOT given what the IPv6 reader would have had, and that is a
-     * property rather than an omission: its want is the pool's own eighth and
-     * the budget is the pool's quarter, so once the floors fit at all there is
-     * always enough for IPv4 to reach its want.  The IPv6 reader is spending
-     * what nothing else asked for.
-     */
     h_check(single.ipv4 == dual.ipv4,
             "and IPv4 is no deeper for it: its want was already affordable");
     h_check((ULONG)single.ipv4 + single.arp <
@@ -939,12 +743,6 @@ static void test_plan_single_stack(void)
             "what changes is what the machine pins in total");
 }
 
-/*
- * The ARP reader stays at its floor, and this is the assertion that says so
- * on purpose rather than by omission.  Its frames are 60 bytes and its
- * traffic is request-and-reply; a deeper queue buys tolerance of a broadcast
- * storm and costs a pinned packet per slot on every machine.
- */
 static void test_plan_arp_is_flat(void)
 {
     AmiRxDepths d;
@@ -960,19 +758,6 @@ static void test_plan_arp_is_flat(void)
     }
 }
 
-/*
- * FOUR INTERFACES SHARE ONE POOL, and the budget is the machine's rather than
- * each interface's.
- *
- * NX_MAX_PHYSICAL_INTERFACES went from two to four, and the arithmetic that
- * had to be re-checked for it is this one: every outstanding read pins a
- * packet, the packets come out of one pool, and a quarter of the pool EACH
- * would have let four interfaces pin all of it -- leaving the sockets and the
- * transmit path drawing on nothing.  The first assertion is the one that
- * matters most, though: a machine with one interface must be exactly where it
- * was, because that is the machine every depth in the table above was
- * measured on.
- */
 static void test_plan_shares_one_pool(void)
 {
     AmiRxDepths one;
@@ -1040,8 +825,6 @@ static void test_plan_shares_one_pool(void)
             two.ipv6 == AMI_SANA2_RX_DEPTH_IPV6,
             "47 packets and two interfaces: each keeps its floors and no more");
 }
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {

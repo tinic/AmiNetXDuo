@@ -1,23 +1,7 @@
 /*
- * AmiNetXDuo tools, reading the running NetX Duo instance.
- *
- * Only ShowNetStatus and netstat need this. The rest of the tools stay clear
- * of the stack's internals.
- *
- * The snapshot comes from bsdsocket.library through NetStackQuery()
- * (include/aminetxduo/netstatus.h), the same idiom NetTrace uses for the
- * capture engine. The structures below are filled by copying scalars across a
- * library boundary, not by walking another task's memory.
- *
- * The earlier design handed each command an NX_IP * from netstack_ip() and let
- * it walk NetX Duo's tables. That cannot work in a shipped build: a Shell
- * command links its own copy of ThreadX and NetX Duo, its kernel is never
- * entered and its NX_IP owns no interfaces, while the running stack lives
- * inside bsdsocket.library's own copy of the same archives. No tool links
- * aminetxduo_netstack, so netstack_ip() resolved to src/tools/netstack_weak.c's
- * weak stub and returned NULL in every shipped build, leaving `netstat`, `ping`
- * and ShowNetStatus's live path printing "the network is up, but this command
- * cannot read it". docs/RESEARCH.md 21.
+ * AmiNetXDuo tools, reading the running NetX Duo instance through
+ * bsdsocket.library's NetStackQuery(). Only ShowNetStatus and netstat need
+ * this; no tool links aminetxduo_netstack, so netstack_ip() answers NULL.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,9 +18,8 @@ extern "C" {
 
 /*
  * Suppress the failure messages the three calls below print by default.
- * netstat wants them. ShowNetStatus does not, since it words a running but
- * unreadable stack itself, and an error block halfway through its table would
- * break the report.
+ * netstat wants them; ShowNetStatus does not, since an error block halfway
+ * through its table would break the report.
  */
 VOID tool_nx_quiet(BOOL quiet);
 
@@ -45,11 +28,8 @@ VOID tool_nx_quiet(BOOL quiet);
 #define TOOL_MAX_IF     NX_MAX_PHYSICAL_INTERFACES
 #define TOOL_MAX_SOCK   32
 
-/*
- * IPv6 addresses across all interfaces.  Each gets a link-local one and can
- * hold a configured or advertised global one alongside it, so two per
- * interface plus room to see a third arrive.
- */
+/* IPv6 addresses across all interfaces: a link-local plus a global one per
+   interface, with room to see a third arrive. */
 #define TOOL_MAX_ADDR6  (TOOL_MAX_IF * 3)
 
 typedef struct ToolIfInfo
@@ -64,12 +44,9 @@ typedef struct ToolIfInfo
     UBYTE           mac[AMI_ETH_ADDR_SIZE];
     char            nx_name[NETSTATUS_NAME_LEN];
     /*
-     * The driver the running stack has open, which is not always the driver
-     * the config file names: the file can be edited after the stack starts,
-     * and an interface brought up by hand need never have been in it.
-     *
-     * Empty when the interface has no SANA-II device, a loopback or an
-     * unattached slot, so an empty string is a fact, not a failure.
+     * The driver the running stack has open, which is not always the one the
+     * config file names. Empty when the interface has no SANA-II device, so an
+     * empty string is a fact, not a failure.
      */
     char            nx_device[NETSTATUS_DEVICE_LEN];
     ULONG           nx_unit;
@@ -81,12 +58,9 @@ typedef struct ToolIfInfo
 } ToolIfInfo;
 
 /*
- * One IPv6 address of one interface, already in text.
- *
- * The text is made while the library is open, because the only RFC 5952
- * formatter on the machine is bsdsocket.library's inet_ntop(), a command
- * built from an IPv4-only tree has none of its own, and the tools are one
- * binary whichever way the library was built.
+ * One IPv6 address of one interface, already in text: the only RFC 5952
+ * formatter on the machine is bsdsocket.library's inet_ntop(), and a command
+ * built from an IPv4-only tree has none of its own.
  */
 typedef struct ToolAddr6Info
 {
@@ -114,8 +88,7 @@ typedef struct ToolSockInfo
     /*
      * NETSTATUS_TCPSTALL, joined on the tuple above. All zero on a library too
      * old to know the selector, which is also what a connection with nothing
-     * outstanding reads, so the two are deliberately indistinguishable: there
-     * is nothing to report either way.
+     * outstanding reads; the two are deliberately indistinguishable.
      */
     ULONG   stalled_ms;
     ULONG   retransmits;
@@ -128,9 +101,8 @@ typedef struct ToolSnapshot
     ToolIfInfo      iface[TOOL_MAX_IF];
     UWORD           iface_count;
     /*
-     * Empty on a machine whose library has no IPv6, and empty on one that has
-     * it but has brought no interface up.  A library too old to know the
-     * selector answers with an error, which is also empty and not a failure.
+     * Empty on a library with no IPv6, on one that has brought no interface up,
+     * and on one too old to know the selector. None of the three is a failure.
      */
     ToolAddr6Info   addr6[TOOL_MAX_ADDR6];
     UWORD           addr6_count;
@@ -149,45 +121,26 @@ typedef struct ToolSnapshot
 } ToolSnapshot;
 
 /*
- * Does this interface have an address at all, of either family.
- *
- * Every command used to answer this with `info->address != 0`, which is
- * false on an IPv6-only interface that is working perfectly, and which is why
- * such a machine was told by four separate commands that it had no address
- * yet and by a fifth that it should run NetSetup to fix that.
- *
- * Both need the snapshot as well as the interface, because the IPv6 addresses
- * are a separate table joined on nx_index. A snapshot from a library without
- * IPv6 has no entries, so the IPv4-only answer is unchanged.
+ * Does this interface have an address at all, of either family. Both need the
+ * snapshot as well as the interface: the IPv6 addresses are a separate table
+ * joined on nx_index, empty on a library without IPv6.
  */
 BOOL tool_iface_has_address6(const ToolSnapshot *snap, UWORD nx_index);
 BOOL tool_iface_has_address(const ToolSnapshot *snap, const ToolIfInfo *live);
 
 /*
- * THE LIVE INTERFACE A DESCRIPTION IS RUNNING ON, matched by identity.
- *
- * Never by array position.  A description is one file in DEVS:NetInterfaces
- * and the drawer may hold more of them than the stack has slots, so the two
- * numberings are unrelated -- and they part company on the ordinary machine
- * too: a description whose device does not open takes no slot, and everything
- * behind it moves down one.  Matching interfaces[i] to NX slot i then reported
- * a card that was working, with the address it had leased, under the NAME OF
- * THE INTERFACE THAT FAILED, and reported the one really running as offline.
- *
- * The name comes from the library, which takes it from the description the
- * slot really holds, so it is the identity both ends agree on.  Device and
- * unit are the fallback for a library too old to send a name.
- *
- * NULL means no live interface is running this description, which is what
- * "defined" means in ShowNetStatus's table.
+ * The live interface a description is running on, matched by IDENTITY and never
+ * by array position: DEVS:NetInterfaces may hold more descriptions than the
+ * stack has slots, and one whose device does not open takes no slot at all.
+ * NULL means no live interface is running this description.
  */
 const ToolIfInfo *tool_iface_live(const ToolSnapshot *snap,
                                   const AmiIfConfig *cfg);
 
 /*
  * One question to the running library. Set `want_sockets` only when the
- * connection table is needed, because it costs another call across the
- * boundary. Returns 0, or a negative code after printing a message.
+ * connection table is needed; it costs another call. 0, or a negative code
+ * after printing a message.
  */
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
@@ -195,12 +148,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets);
 
 /*
  * The per-protocol counters and the ARP cache in one place, so ShowNetStatus
- * and netstat cannot report different numbers for the same thing. Only their
- * layout differs.
- *
- * A `have_*` flag is FALSE when the protocol is not enabled in the running
- * stack. That is not the same as every counter reading zero, and must not be
- * printed as though it were.
+ * and netstat cannot report different numbers. A `have_*` flag is FALSE when
+ * the protocol is not enabled, which is not the same as every counter zero.
  */
 
 #define TOOL_MAX_ARP    32
@@ -218,17 +167,9 @@ typedef struct ToolArpEntry
 /* ------------------------------------------------------- neighbours, */
 
 /*
- * The IPv6 half of the address cache. There is no ARP in IPv6: neighbour
- * discovery does the same job and NetX Duo keeps its answers in a separate
- * table, so this is a separate snapshot rather than more rows in the one
- * above.
- *
- * The address arrives as text for ToolAddr6Info's reason: the library's
- * inet_ntop() is the only RFC 5952 formatter a command built from an
- * IPv4-only tree can reach.
- *
- * Empty on a machine whose library has no IPv6, and on one too old to know
- * the selector. Neither is a failure.
+ * The IPv6 half of the address cache. There is no ARP in IPv6; NetX Duo keeps
+ * neighbour discovery's answers in a separate table. Text for ToolAddr6Info's
+ * reason. Empty on a library with no IPv6 or too old to know the selector.
  */
 
 #define TOOL_MAX_ND     16
@@ -380,11 +321,7 @@ BOOL tool_health_mark(ToolStats *out);
 
 /* --------------------------------------------------------------- DHCP, */
 
-/*
- * What the server said, per interface. The lease used to be applied at
- * bring-up and discarded, so a DHCP-addressed machine could not say who gave
- * out its address or for how long.
- */
+/* What the server said, per interface. */
 
 typedef struct ToolDhcpInfo
 {
@@ -411,8 +348,8 @@ typedef struct ToolDhcp
 } ToolDhcp;
 
 /*
- * Returns 0, or a negative code.  A stack too old to know the selector is not
- * an error, and callers treat it as having no lease detail to give.
+ * Returns 0, or a negative code. A stack too old to know the selector is not an
+ * error; callers treat it as having no lease detail to give.
  */
 LONG tool_dhcp(ToolDhcp *out);
 
@@ -445,12 +382,9 @@ typedef struct ToolRoutes
 LONG tool_routes(ToolRoutes *out);
 
 /*
- * The IPv6 routes: the on-link prefixes and the default routers, in the order
- * the stack consults them. Separate from ToolRoutes because IPv6 has no
- * netmask and no single default gateway. There can be several default routers,
- * each with its own lifetime.
- *
- * Text rather than words, for ToolAddr6Info's reason.
+ * The IPv6 routes: on-link prefixes and default routers, in the order the stack
+ * consults them. Separate from ToolRoutes -- IPv6 has no netmask and no single
+ * default gateway. Text rather than words, for ToolAddr6Info's reason.
  */
 #define TOOL_MAX_ROUTE6 12
 
@@ -481,15 +415,9 @@ LONG tool_routes6(ToolRoutes6 *out);
 VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg);
 
 /*
- * The IPv6 destination cache, which is what the two lists above resolve TO.
- * One entry per destination this machine has sent to, and it is a fixed-size
- * cache: a machine that reaches more distinct addresses than it has slots is
- * evicting on every new one, and until this was reportable a full table was
- * silent in both directions -- nothing said which destinations held the slots
- * and nothing said a send had been dropped for want of one.
- *
- * `age` is uses of the table since this entry was last chosen, so 0 is the
- * entry just used and the largest is the next one evicted.
+ * The IPv6 destination cache, a fixed-size cache of one entry per destination
+ * this machine has sent to. `age` is uses of the table since this entry was
+ * last chosen, so 0 is the entry just used and the largest is next evicted.
  */
 #define TOOL_MAX_DEST6  16
 
@@ -520,11 +448,7 @@ VOID tool_print_dest6(const ToolDest6Table *table, const AmiConfig *cfg);
 
 /*
  * The table, printed. Both commands that print one call this, so they cannot
- * disagree about the stack's routes.
- *
- * `fmt` turns an address into text. NULL means ami_config_format_ip(), the
- * dotted quad. ShowNetStatus passes its own so NAMES turns a gateway into a
- * host name here as it does elsewhere in that report.
+ * disagree. `fmt` turns an address into text; NULL means ami_config_format_ip().
  */
 typedef VOID (*ToolAddrText)(ULONG addr, char *buf, ULONG buflen);
 

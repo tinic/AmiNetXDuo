@@ -2,35 +2,6 @@
  * AmiNetXDuo, router advertisement processing and router solicitation
  * retransmission, driven directly rather than over a wire.
  *
- * Three things are checked here that no network can be made to produce on
- * demand:
- *
- *   1. A prefix advertised autonomous (A=1) but not on-link (L=0) forms an
- *      address.  The two flags are independent, RFC 4862 5.5.3 for A, RFC
- *      4861 6.3.4 for L, and the combination is what 3GPP and several CPE
- *      firmwares advertise.  It used to form nothing, because the autonomous
- *      test was nested inside the on-link one.
- *
- *   2. The router advertisement MTU option lowers the interface MTU, is
- *      ignored below the RFC 8200 minimum of 1280, and never raises the MTU
- *      above what the driver reported.  RFC 4861 6.3.4.
- *
- *   3. Router solicitation does not stop.  RFC 7559 replaces the fixed count
- *      with an unbounded exponential backoff and RFC 8504 5.4 makes it a MUST,
- *      so the sequence is the configured number of solicitations at the base
- *      interval and then a doubling one up to an hour, and a solicitation an
- *      hour, forever, rather than silence.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_icmpv6_process_ra.c and nxd_ipv6_router_solicitation_check.c, the two
- * functions under test, with nx_icmpv6_validate_ra.c,
- * nx_icmpv6_validate_options.c and nx_ipv6_util.c underneath them.
- *
- * Stubbed: everything the advertisement path calls outward, the prefix list,
- * the default router table, the neighbour cache, multicast join and
- * _nx_icmpv6_send_rs.  Each stub records what it was asked to do, which is how
- * "the prefix list was not touched" can be a check rather than an inference.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -43,9 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-
-/* ------------------------------------------------------------- harness ---- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -60,9 +28,6 @@ static void h_check(int ok, const char *what)
         printf("FAIL %s\n", what);
     }
 }
-
-
-/* --------------------------------------------------------------- stubs ---- */
 
 static TX_THREAD h_caller_thread;
 
@@ -99,7 +64,6 @@ UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
     return TX_SUCCESS;
 }
 
-/* What the advertisement path did on the way out. */
 static UINT  h_prefix_adds;
 static UINT  h_prefix_deletes;
 static ULONG h_prefix_added[4];
@@ -108,13 +72,11 @@ static UINT  h_multicast_joins;
 static UINT  h_packets_released;
 static UINT  h_prefix_add_full;       /* make the next add fail */
 
-/* What the RFC 8106 callback was handed, in order. */
 #define H_RDNSS_MAX   8
 static UINT  h_rdnss_count;
 static ULONG h_rdnss_address[H_RDNSS_MAX][4];
 static ULONG h_rdnss_lifetime[H_RDNSS_MAX];
 
-/* What the RFC 8106 5.2 callback was handed, from the last call. */
 static UINT  h_dnssl_calls;
 static UINT  h_dnssl_length;
 static ULONG h_dnssl_lifetime;
@@ -219,12 +181,6 @@ VOID _nx_icmpv6_send_queued_packets(NX_IP *ip_ptr, ND_CACHE_ENTRY *nd_entry)
     NX_PARAMETER_NOT_USED(nd_entry);
 }
 
-/*
- * The destination table, which the advertisement path reaches only with Path
- * MTU Discovery enabled.  What it is asked for is recorded rather than stored:
- * the point is that the MTU option and Path MTU Discovery work from the same
- * clamped number, and this is where that can be seen.
- */
 static NX_IPV6_DESTINATION_ENTRY h_dest_entry;
 static UINT                      h_dest_adds;
 static ULONG                     h_dest_added_mtu;
@@ -258,7 +214,6 @@ UINT _nx_packet_release(NX_PACKET *packet_ptr)
     return NX_SUCCESS;
 }
 
-/* The solicitations, with the second they were sent in. */
 #define H_MAX_SENDS     64
 
 static ULONG h_now;                     /* seconds since the interface came up */
@@ -285,9 +240,6 @@ UINT _nx_icmpv6_send_rs(NX_IP *ip_ptr, UINT interface_index)
     h_send_count++;
     return NX_SUCCESS;
 }
-
-
-/* ----------------------------------------------------------- the fixture -- */
 
 static NX_IP           h_ip;
 static NXD_IPV6_ADDRESS h_link_local;   /* the address the packet arrived on   */
@@ -374,12 +326,6 @@ static VOID h_reset(VOID)
     if_ptr -> nxd_interface_ipv6_address_list_head = NX_NULL;
 }
 
-/*
- * The advertisement.  The IPv6 header is in host order, which is what
- * _nx_ipv6_packet_receive() leaves behind for the dispatcher; the ICMPv6
- * message is in network order, which is what comes off the wire, so the
- * multi-byte fields go through the same endian macros the stack uses.
- */
 static VOID h_build_ra(UCHAR *message, UINT *length, USHORT router_lifetime)
 {
 NX_ICMPV6_RA *ra = (NX_ICMPV6_RA *)message;
@@ -475,10 +421,6 @@ UCHAR *option = message + *length;
     *length += 8U;
 }
 
-/*
- * The RFC 8106 option: the header, then `count` addresses of 2001:db8::53:<n>.
- * The option length is in 8-byte units and covers both, so 1 + 2 * count.
- */
 static VOID h_add_rdnss_option(UCHAR *message, UINT *length, UINT count,
                                ULONG lifetime, UCHAR option_length_override)
 {
@@ -535,10 +477,6 @@ static VOID h_rdnss_notify(NX_IP *ip_ptr, UINT interface_index,
     h_rdnss_count++;
 }
 
-/*
- * The RFC 8106 5.2 option: the header, then RFC 1035 label sequences copied in
- * as given, then zero octets out to the 8-byte unit the length is counted in.
- */
 static VOID h_add_dnssl_option(UCHAR *message, UINT *length,
                                const UCHAR *payload, UINT payload_length,
                                ULONG lifetime, UCHAR option_length_override)
@@ -633,9 +571,6 @@ static int h_is_expected_address(NXD_IPV6_ADDRESS *entry)
            (entry -> nxd_ipv6_address_prefix_length == 64);
 }
 
-
-/* ------------------------------------------------- the prefix information -- */
-
 /* The two flag bits, in the option byte. */
 #define H_ONLINK        0x80
 #define H_AUTONOMOUS    0x40
@@ -683,9 +618,6 @@ char              what[128];
     h_check(h_packets_released == 1, what);
 }
 
-
-/* ---------------------------------------------------------- the MTU option -- */
-
 static ULONG h_mtu_case(ULONG advertised)
 {
 UINT length;
@@ -697,13 +629,6 @@ UINT length;
     return h_ip.nx_ip_interface[0].nx_interface_ip_mtu_size;
 }
 
-
-/* -------------------------------------------------------- the solicitations -- */
-
-/*
- * Seed the interface the way nxd_ipv6_enable() does, then run the once-a-second
- * check for `seconds` seconds.
- */
 static VOID h_solicit_for(ULONG seconds)
 {
 NX_INTERFACE *if_ptr = &h_ip.nx_ip_interface[0];
@@ -734,9 +659,6 @@ ULONG spread = (want / 10) + 1;
     return (gap + spread >= want) && (gap <= want + spread);
 }
 
-
-/* ----------------------------------------------------------------- main --- */
-
 int main(void)
 {
 UINT  i;
@@ -749,18 +671,9 @@ char  what[128];
        Seeded so a failure can be reproduced. */
     srand(1);
 
-    /* --- (1) the prefix information option's two flags are independent --- */
-
     /* On-link and autonomous, which always worked. */
     h_prefix_case(H_ONLINK | H_AUTONOMOUS, 3600, 1, 1, "A=1 L=1");
 
-    /*
-     * Autonomous only.  The address is formed AND the prefix goes on the list:
-     * that list is what nxd_ipv6_prefix_router_timer_tick.c counts down, so a
-     * prefix that is not on it leaves an address nothing can ever remove.  It
-     * is marked not-on-link, so _nxd_ipv6_search_onlink() passes over it and
-     * the L bit still means what it says.
-     */
     h_prefix_case(H_AUTONOMOUS, 3600, 1, 1, "A=1 L=0");
     h_check(h_prefix_added_onlink == 0,
             "A=1 L=0: the entry is on the list but not on-link");
@@ -798,8 +711,6 @@ char  what[128];
         h_check(h_formed_address() == NX_NULL,
                 "A=1 prefix /48: forms no address");
 
-        /* An on-link prefix the prefix list will not hold forms no address
-           either, which is what this code did before the flags were split. */
         h_reset();
         h_prefix_add_full = 1;
         h_build_ra(h_message, &length, 1800);
@@ -824,8 +735,6 @@ char  what[128];
                 "A=1 L=0 with a full prefix list: forms no address");
     }
 
-    /* ------------------------- (2) the MTU option ------------------------- */
-
     h_reset();
     mtu = h_mtu_case(1400);
     h_check(mtu == 1400, "MTU option 1400 lowers the interface MTU");
@@ -845,13 +754,6 @@ char  what[128];
     h_check(mtu == (ULONG)NX_MINIMUM_IPV6_PATH_MTU,
             "MTU option at the IPv6 minimum is taken");
 
-    /*
-     * And with Path MTU Discovery on, the router's own destination entry is
-     * written from that same clamped number rather than from what was
-     * advertised.  9000 became the link MTU above; the table has to agree, or
-     * the stack would send 9000-byte packets at a router it had just decided
-     * was 1500.
-     */
     h_reset();
     (VOID)h_mtu_case(9000);
     h_check(h_dest_adds == 1, "the MTU option writes one destination entry");
@@ -859,8 +761,6 @@ char  what[128];
             "the destination entry takes the clamped MTU, not the advertised one");
     h_check(h_dest_added_timeout == NX_WAIT_FOREVER,
             "an MTU from a router advertisement is not aged out");
-
-    /* ---------------------- (3) router solicitation ---------------------- */
 
     h_reset();
     h_solicit_for(24 * 60 * 60);        /* a day */
@@ -948,14 +848,6 @@ char  what[128];
         }
     }
 
-    /* --- (4) the recursive DNS server option, RFC 8106 --- */
-
-    /*
-     * On an IPv6-only link this is the resolver's only route in: no DHCPv6 is
-     * built and the name_resolution file takes a dotted quad.  Before this the
-     * option fell through the walk's if/else-if chain with everything else the
-     * stack does not parse.
-     */
     {
     UINT length;
 
@@ -999,12 +891,6 @@ char  what[128];
         h_check(h_is_expected_address(h_formed_address()),
                 "and does not stop the option after it being processed");
 
-        /*
-         * A length that claims more addresses than the option holds.  The walk
-         * is bounded by the length field either way, so what matters is that
-         * the count taken from it never reads past the option: 5 units is one
-         * header and two addresses, and two is what may be reported.
-         */
         h_reset();
         h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
         h_build_ra(h_message, &length, 1800);
@@ -1027,13 +913,6 @@ char  what[128];
                 "and the rest of the advertisement is processed anyway");
     }
 
-    /* --- (5) the DNS search list option, RFC 8106 5.2 --- */
-
-    /*
-     * The other half of the same problem: a resolver with a name server and no
-     * suffix answers a fully qualified name and nothing else, and a link with
-     * no DHCPv4 on it has no option 119 to supply one.
-     */
     {
     /* "local.tinic.net", the encoding pfSense advertises. */
     static const UCHAR one[] = { 5, 'l','o','c','a','l',
@@ -1135,20 +1014,6 @@ char  what[128];
                 "and the rest of the advertisement is processed anyway");
     }
 
-    /* --- (6) the neighbour discovery timers a router may advertise --- */
-
-    /*
-     * Both fields are milliseconds and both are stored in a coarser unit: the
-     * retransmit timer in NX_IP_FAST_TIMER_RATE ticks of 100 ms, the reachable
-     * time in whole seconds.  Anything below one unit truncates to zero, and a
-     * zero is what nx_nd_cache_fast_periodic_update and nx_ipv6_packet_send
-     * would then re-arm a cache entry to.  A router advertising a sub-unit
-     * value is the only way to reach it, which is why it is driven here and
-     * not from a link.
-     *
-     * It does not happen: _nx_icmpv6_process_ra floors each to 1 where it
-     * writes it.  This is the case that holds it there.
-     */
     {
     UINT length;
 
@@ -1188,7 +1053,6 @@ char  what[128];
                 "an unspecified timer changes nothing");
     }
 
-    /* --- the default router table, RFC 4861 6.3.4 --- */
     {
     UINT length;
 

@@ -8,48 +8,6 @@
 # The guest is bridged onto a host NIC and the server runs on a THIRD machine.
 # Both are required, and the reason is the whole history of this test.  Served
 # from this machine over the emulator's SLIRP, this test failed the way a
-# broken client fails: the flight after ServerHello decrypted, its four
-# messages were all recognised, and then the socket was CLOSED from Certificate
-# onward with no server segment to account for it, intermittently, and only
-# with certificate verification on.  Bridged against a peer on another machine,
-# the same binaries complete the handshake against both leaves, on both CPU
-# arms, run after run.  Whatever closed that socket was between the guest and
-# this host's loopback, and SLIRP is a TCP implementation inside the emulator,
-# so a close it originates is invisible to any capture taken here, which is
-# what "closed locally" meant.
-#
-# A third machine and not this one: Amiberry's bridge injects with libpcap, so
-# a frame the guest addresses to its own host leaves on the wire and the switch
-# does not hand it back to the port it came from.  The server is unreachable
-# and nothing is logged at all.
-#
-# tls_handshake.c cannot answer this any more.  A 1.3 server has to sign
-# CertificateVerify with RSA-PSS and nx_crypto has _nx_crypto_rsa_pss_verify
-# with no matching sign, so the loopback test's server half is pinned to 1.2
-# and the round it runs is a 1.2 round.  The public hosts cannot answer it
-# either: they serve three-certificate chains that do not finish verifying at
-# 14 MHz before the far end gives up.
-#
-# So the server here is tests/peer/httppeer.py with mkpki.sh's local PKI, with
-# its version ceiling raised, serving a two-certificate chain whose root is in
-# the trust store.  That is short enough to verify at 14 MHz, which leaves the
-# 1.3 handshake as the only thing under test.
-#
-# Three leaves, because 1.3 authenticates them differently:
-#
-#   rsa2.test   RSA leaf, so CertificateVerify is rsa_pss_rsae_sha256 and the
-#               PSS verify path is what carries the handshake
-#   ec2.test    ECDSA P-256 leaf, ecdsa_secp256r1_sha256
-#   pss2.test   RSA leaf whose CERTIFICATE is signed RSASSA-PSS SHA-256, which
-#               is a different thing from the handshake signature above: the
-#               PSS encoding is in the chain this time, and until the X.509
-#               parser read RSASSA-PSS-params this certificate did not parse
-#               at all, so the whole chain was unreachable
-#
-# The verdict is the peer's own "TLS up:" line, not ours: it is the side that
-# knows which version was negotiated.  A guest that quietly fell back to 1.2
-# would still fetch the page, so a body alone proves nothing.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -88,10 +46,6 @@ case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 export AMINETXDUO_EMU_BACKEND="$BRIDGE"
 
-# Ask the peer for its own address rather than resolving the name here: the
-# machine ssh landed on cannot be wrong about its own interfaces, and a stale
-# answer points the guest at something that is not serving, which reads as a
-# handshake failure.
 SERVER_ADDR=$(ssh "$PEER_HOST" \
     "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}'" \
     2>/dev/null | cut -d/ -f1 | head -1)
@@ -123,20 +77,12 @@ fi
     exit 2
 }
 
-# ----------------------------------------------------------------- PKI ---
 
 PKI="$ROOT/build/peer-pki"
 "$ROOT/tests/peer/mkpki.sh" "$PKI" >/dev/null
 [ -f "$PKI/teststore" ] || { echo "no trust store in $PKI" >&2; exit 2; }
 
-# ------------------------------------------------------------- staging ---
 
-# One staging directory PER RUN, keyed on the tag the emulator run already uses.
-# It was a fixed path, which meant two of these could not run at once: the
-# second wiped the first's drive mid-boot and died on `cannot create directory
-# .../devs`.  The arms here are independent -- different model, different MAC,
-# different peer port -- so running them together is what makes this gate cost
-# one arm's wall clock instead of the sum.
 STAGE="$ROOT/build/tls13-stage${AMINETXDUO_RUN_TAG:+-$AMINETXDUO_RUN_TAG}"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -148,10 +94,6 @@ cp "$PKI/teststore" "$STAGE/devs/Internet/certificates"
 cp "$ADDIF"         "$STAGE/AddNetInterface"
 cp "$FETCH"         "$STAGE/fetch"
 
-# AMINETXDUO_PROFILE=1 samples ONLY the transfer.  AddNetInterface below brings
-# the stack up first, in its own command, so DHCP and the netstack coming up
-# are not in the profile: in tls_https, which starts its own stack, that was
-# 6.6 s of the run and swamped everything else.
 PROFARG=""
 if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
     PROF="$BUILD/tools/profiler/Profile"
@@ -160,10 +102,6 @@ if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
     PROFARG="SYS:Profile OUT=DH0:tls.prof FOLDED=DH0:tls.folded "
 fi
 
-# fetch has no --resolve, so the names the certificates carry are pointed at
-# the server's address the way an Amiga has always done it.  Rewritten rather
-# than appended to: tests/netstack/devs carries its own rsa2.test line and the
-# resolver takes the first match, so an appended one never wins.
 grep -v -e ' rsa2\.test$' -e ' ec2\.test$' -e ' pss2\.test$' \
     "$ROOT/tests/netstack/devs/Internet/hosts" > "$STAGE/devs/Internet/hosts"
 cat >> "$STAGE/devs/Internet/hosts" <<EOF
@@ -183,7 +121,6 @@ SYS:fetch https://ec2.test:$EC_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TI
 SYS:fetch https://pss2.test:$PSS_PORT/bytes/16 TIMEOUT ${AMINETXDUO_TLS13_FETCH_TIMEOUT:-25} TO DH0:pss.bin >DH0:c-pss.txt
 EOF
 
-# --------------------------------------------------------------- peer ---
 
 PEERLOG="$ROOT/build/tls13-peer.log"
 rm -f "$PEERLOG"
@@ -193,11 +130,6 @@ rm -f "$PEERLOG"
 # the ssh channel: one file to grep, wherever the server ran.
 RDIR="/tmp/tls13-peer-$BASE_PORT"
 ssh "$PEER_HOST" "rm -rf $RDIR && mkdir -p $RDIR" >/dev/null
-# tar over ssh and not rsync: the peer only has to be a machine with ssh and
-# python3, and rsync is not installed on every one of them.  It was, on the
-# machine this was written against, and the run against one without it fails
-# in three seconds with `rsync: command not found` -- which the gate reports
-# as `result=incomplete`, indistinguishable from a guest that never booted.
 tar -C "$ROOT/tests" -cf - peer tools | ssh "$PEER_HOST" "tar -C $RDIR -xf -"
 tar -C "$(dirname "$PKI")" -cf - "$(basename "$PKI")" |
     ssh "$PEER_HOST" "tar -C $RDIR -xf -"
@@ -227,7 +159,6 @@ grep -q "listeners" "$PEERLOG" 2>/dev/null || {
 echo "==> httppeer.py on $PEER_HOST ($SERVER_ADDR), TLS 1.3 ceiling:" \
      "rsa2.test on $RSA_PORT, ec2.test on $EC_PORT, pss2.test on $PSS_PORT"
 
-# ---------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tls13}"
 
@@ -242,7 +173,6 @@ set +e
 RC=$?
 set -e
 
-# ------------------------------------------------------------- verdict ---
 
 echo
 echo "============================================================"

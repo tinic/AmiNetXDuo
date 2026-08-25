@@ -1,41 +1,5 @@
 #!/usr/bin/env python3
-#
 # THE OTHER HOST ON THE LINK, FOR tests/ipv6/run-mld.sh.
-#
-#   mldpeer.py --iface ens18 query-v1  [--group ADDR] [--mrd MS]
-#   mldpeer.py --iface ens18 query-v2  [--group ADDR] [--mrd MS]
-#   mldpeer.py --iface ens18 report-v1  --group ADDR
-#
-# The guest under test is an Amiga behind an emulator on a bridged segment.
-# Proving its MLD works needs two things this makes: a querier, so that the
-# delayed-response half of RFC 2710 has anything to answer, and a second
-# listener, so that report suppression has anything to be suppressed by.
-#
-# WHY NOT THE KERNEL.  Linux sends MLD reports of its own, and could stand in
-# for the second listener -- but only for groups it has joined, and the group
-# that matters is the guest's solicited-node address, derived from a MAC this
-# harness assigns.  Forcing the kernel to version 1 needs
-# /proc/sys/net/ipv6/conf/*/force_mld_version, and a querier needs a bridge
-# with mcast_querier set: both are root.  A raw frame needs CAP_NET_RAW on one
-# copy of one binary, which the lab already grants for tcpdump.
-#
-# CAP_NET_RAW, AND THE COPY THAT CARRIES IT.  AF_PACKET needs it.  The pattern
-# in tests/perf/peercap.sh is a private copy of the binary holding the
-# capability, so the packaged one is left alone:
-#
-#   cp $(command -v python3) ~/python3-cap
-#   sudo /usr/sbin/setcap cap_net_raw+eip ~/python3-cap
-#
-# A CAPABILITY IS DROPPED BY ANY WRITE TO THE FILE, and a python3 upgrade
-# rewrites it.  A copy that is present, executable, the right version and
-# unprivileged fails here with PermissionError and nothing else, so the error
-# says what to do rather than what went wrong.
-#
-# EVERY FIELD IS BUILT BY HAND, including the Hop-by-Hop Router Alert: the
-# point of the exercise is what is on the wire, and a library that supplies a
-# default is a library that can supply the same wrong default the code under
-# test does.
-#
 # SPDX-License-Identifier: MIT
 
 import argparse
@@ -126,8 +90,6 @@ def build_frame(src_mac, src_ip, dst_ip, message):
     hbh = hop_by_hop_router_alert()
     payload = hbh + message
 
-    # Version 6, no traffic class, no flow label.  Hop limit 1: an MLD message
-    # is never forwarded.
     ipv6 = struct.pack("!IHBB", 0x60000000, len(payload), NEXT_HEADER_HOP_BY_HOP, 1)
     ipv6 += src_ip + dst_ip
 
@@ -155,8 +117,6 @@ def main():
         message = mld_v1_message(MLD_QUERY, group, args.mrd)
     elif args.kind == "query-v2":
         dst_ip = group if args.group != "::" else ipaddress.IPv6Address(ALL_NODES).packed
-        # Under 32768 a Maximum Response Code is plain milliseconds, which is
-        # the half of RFC 9777 section 5.1.3 a lab querier lands in.
         message = mld_v2_query(group, args.mrd)
     elif args.kind == "report-v1":
         if args.group == "::":

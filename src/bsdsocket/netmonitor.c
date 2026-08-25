@@ -1,55 +1,5 @@
 /*
  * bsdsocket.library, the network monitoring hooks.
- *
- *   AddNetMonitorHookTagList()  install a callback
- * "Monitoring hooks can be used both for inspecting and filtering data that
- * enters the stack, or for denying access to certain APIs. More than one hook
- * can be installed for each monitoring task."
- *
- * Same primary source as interfaces.c, routing.c and netstats.c: NDK 3.2's
- * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h from the
- * same NDK, used as an ABI reference only. No Roadshow, AmiTCP, AROSTCP or
- * Miami code was consulted or is present.
- *
- *   The hook uses the standard Amiga hook register convention, but the middle
- *   argument is not the usual object: "action = hookfunc(hook, reserved, imm)"
- *   in A0, A2, A1, with "the 'reserved' parameter will be set to NULL for
- *   future expansion". A0/A1 alone is a guess, and anything but NULL in A2
- *   becomes an ABI promise.
- *
- *   The two families answer with different vocabularies:
- *
- *     the in-stack types  return MA_Continue / MA_Ignore / MA_Drop /
- *     (ICMP, UDP,         MA_DropWithReset, what to do with a packet.
- *      TCP_Connect,       "Any positive return value will cause the data to
- *      Packet)            be dropped and the corresponding errno value to be
- *                        set to the result."
- *
- *     the call-site types return an ERRNO, "An error value of 0 will allow
- *     (Connect, Bind,     the call to proceed (unless another hook denies
- *      Send)              this), and any error value > 0 will cause the call
- *                        to be aborted and the errno variable to be set to
- *                        this value."
- *
- *   So 0 means "continue" in both, and everything else means something
- *   different in each. MA_Continue is 0, which is what lets one dispatcher
- *   serve both.
- *
- *   RemoveNetMonitorHook() takes only the hook, no type, so removal
- *   searches every list. One hook cannot be installed for two types at once,
- *   because nothing then says which one to remove.
- *
- * The three call-site types are implemented: MHT_Connect, MHT_Bind and
- * MHT_Send. The four in-stack types are refused with EINVAL, the documented
- * error for an unsupported type. Nothing dispatches them, and a hook that is
- * installed but never called looks the same as a quiet network. The details
- * are at the check in bsd_AddNetMonitorHookTagList().
- *
- * "It must be called before the library is closed, or the library will stay
- * in memory indefinitely." bsd_lib_expunge() implements that by declining
- * while bsd_netmon_busy() is true. An expunge with hooks installed unloads the
- * segment under a caller that still believes its hook is live.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -132,34 +82,13 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
                                   register struct TagItem *tags __asm("a1"),
                                   register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* "tags, Pointer to a 'struct TagItem' list. No tags are defined yet."
-       Accepted and ignored. A refusal of a non-NULL list breaks the first
-       caller that passes TAG_DONE. */
     (VOID)tags;
 
-    /* "[EFAULT] The hook parameter is not valid." */
     if (hook == NULL || hook->h_Entry == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
     /*
      * "[EINVAL] The monitor type is not supported."
-     *
-     * Four of the seven are not supported here. The registry below serves any
-     * type, but a hook is only called from a dispatch point, and only
-     * connect(), bind() and send() have one. A hook accepted for a type that
-     * nothing dispatches returns success to a caller. That caller then never
-     * hears anything, and cannot tell that from a quiet network.
-     *
-     *   MHT_ICMP           all four are invoked "from within the TCP/IP stack
-     *   MHT_UDP            itself", the IP receive path, which reaches this
-     *   MHT_TCP_Connect    library only through the NX_IP packet filter that
-     *   MHT_Packet         netstack_capture.c already installs for src/bpf/.
-     *                      A dispatch of them has to chain that filter, which
-     *                      is a netstack change and not this one.
-     *
-     * MHT_TCP_Connect has a second obstacle: MA_DropWithReset needs an RST
-     * sent from inside a receive filter. A silent degrade to a plain drop
-     * hides that from the caller, so the hook is refused instead.
      */
     if (type < 0 || type >= BSD_MHT_COUNT)
         return bsd_fail(SocketBase, AMI_EINVAL);
@@ -171,12 +100,6 @@ LONG bsd_AddNetMonitorHookTagList(register LONG type __asm("d0"),
 
     bsd_mon_setup();
 
-    /*
-     * The same Hook twice is two nodes that share one MinNode, which corrupts
-     * both lists on the first walk. RemoveNetMonitorHook() takes no type, so
-     * it cannot say which to take out. EBUSY is not one of the two documented
-     * errors, but neither of those fits: the hook is valid and so is the type.
-     */
     if (bsd_mon_installed(hook))
     {
         Permit();
@@ -196,7 +119,6 @@ VOID bsd_RemoveNetMonitorHook(register struct Hook *hook __asm("a0"),
 {
     (VOID)SocketBase;
 
-    /* "this may be NULL in which case this function does nothing." */
     if (hook == NULL)
         return;
 
@@ -216,13 +138,9 @@ VOID bsd_RemoveNetMonitorHook(register struct Hook *hook __asm("a0"),
     Permit();
 }
 
-/* ---------------------------------------------------------- the dispatch, */
-
 /*
  * The hook itself, called the way the autodoc lays it out: the Hook in A0,
  * NULL in A2, the message in A1. Declared with register annotations rather
- * than called through inline assembly. The compiler then checks the shape at
- * every call site, as bsdsocket_vectors.h does for the LVOs.
  */
 typedef LONG (*BsdMonitorFn)(register struct Hook *hook __asm("a0"),
                              register APTR reserved __asm("a2"),
@@ -231,10 +149,6 @@ typedef LONG (*BsdMonitorFn)(register struct Hook *hook __asm("a0"),
 /*
  * utility/hooks.h declares h_Entry as `ULONG (*)()`, no parameters, because
  * a Hook carries whatever shape the installer agreed on. The real shape is a
- * conversion between two function types, and a plain cast cannot express that
- * without -Wcast-function-type. The union does the conversion and makes no
- * claim that the two types are compatible. The API decides which declaration
- * is correct, not the compiler.
  */
 typedef union BsdMonitorEntry
 {
@@ -245,16 +159,6 @@ typedef union BsdMonitorEntry
 /*
  * Every hook of one type, in install order. Stops at the first that does not
  * answer 0.
- *
- * The walk stops because of "unless another hook denies this": one hook that
- * allows a call cannot overrule another that denied it, so the first refusal
- * is the answer. MA_Continue is 0 and so is "no error", which lets the two
- * vocabularies share this path.
- *
- * The list is walked under Forbid() because another task can remove a hook at
- * any moment, so a hook runs with task switching disabled. The
- * autodoc expects that: "the hook code may be invoked frequently, your code
- * should perform its tasks swiftly and without delay".
  */
 LONG bsd_netmon_dispatch(LONG type, APTR message)
 {
@@ -303,8 +207,6 @@ BOOL bsd_netmon_have(LONG type)
 /*
  * The name a program chose to be known by, for the cmm_Caller/bmm_Caller
  * field. SBTC_LOGTAGPTR is the only place an application can say what it is
- * called. That is what "if it chose to be identified" means here. A program
- * that never set one is reported as NULL.
  */
 STRPTR bsd_netmon_caller(struct AmiSocketBase *base)
 {

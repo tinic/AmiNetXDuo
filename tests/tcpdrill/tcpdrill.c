@@ -1,149 +1,6 @@
 /*
  * tcpdrill -- a packet-level conformance harness for AmiNetXDuo's TCP.
  *
- * Google's packetdrill states a test as two interleaved things: the socket
- * calls an application makes, and the exact packets that must appear on the
- * wire in response -- flags, sequence numbers, window, options, and the time
- * between them.  A failing case is then a specification of what should have
- * happened, which is the property this harness is after.  Its published
- * scripts were read as a description of correct TCP behaviour; none of its
- * code or syntax is reproduced here, and it could not be run here anyway
- * (tapdev.h has the SLIRP detail that puts the peer inside the guest).
- *
- * One file, DH0:drill.txt, holding every case.  One directive per line, first
- * word is the verb, `#` starts a comment.  Blank lines are ignored.
- *
- *   case NAME              start a case.  Everything below resets.
- *   peerport N             the fake peer's port          (default 9000)
- *   localport N            bind to this port             (default ephemeral)
- *   socket                 create a non-blocking TCP socket
- *   opt NAME VALUE         setsockopt: nodelay rcvbuf sndbuf oobinline
- *                          reuseaddr linger keepalive sndtimeo rcvtimeo
- *                          (the two timeouts in milliseconds)
- *   connect [= ETIMEDOUT] [min=MS max=MS break=0]
- *                          connect(); EINPROGRESS is the expected answer.
- *                          With `= ETIMEDOUT` the call must have BLOCKED and
- *                          come back with that errno, which needs `blocking`
- *                          and `opt sndtimeo` before it.
- *   localaddr WHICH        the local address `listen` binds to: `any`, the
- *                          default; `iface`, the address the wire carries;
- *                          `loopback`; or `foreign`, one this machine has not
- *                          got.  NetX registers a listen against a port and
- *                          not an address, so which of these the stack honours
- *                          is a decision bsdsocket.library makes on its own.
- *   listen [= ERRNO]       bind localport, listen(4).  With `= ERRNO` the
- *                          bind must instead fail with that errno.
- *   accept [= none] [wait=MS tries=N]
- *                          accept(); the accepted socket becomes the subject.
- *                          `= none` requires the listener never to hand one
- *                          over, which is how a refused connection reads to
- *                          the application.  `wait=` makes the listener
- *                          blocking with SO_RCVTIMEO and calls accept() N
- *                          times in a row with nothing in between, so what
- *                          the stack does DURING an application's wait is
- *                          measurable; the elapsed time is checked, because
- *                          an accept that returns at once never waited.
- *   send N [= AGAIN]       send N bytes of a known pattern; AGAIN requires
- *                          the send to be refused, as a closed window must
- *   oob N                  send one byte, value N, with MSG_OOB
- *   recv MAX = WHAT        recv(); WHAT is a byte count, EOF, AGAIN, or
- *                          ENOTCONN
- *   readable 0|1           WaitSelect() with a zero timeout, read set
- *   writable 0|1           the same, write set
- *   shutdown rd|wr|both
- *   close [within=MS]      CloseSocket(), optionally bounded: the call must
- *                          not wait for a peer that has stopped answering
- *   idle MS                let MS pass; frames that arrive are queued
- *
- * The blocking half.  Everything above runs the socket non-blocking, because
- * the script engine is the peer and a call that waits stops the only thing
- * that could answer it.  `wire` moves the peer into a Process of its own for
- * the duration of one blocking call, which is the only way anything below is
- * reachable at all; see "the wire" further down for what each mode does.
- *
- *   blocking               take FIONBIO back off the socket
- *   wire MODE [key=value]  start the peer task: `grant`, `dribble`, `finack`
- *                          or `silent`
- *   join                   stop it and report what it saw
- *   bstream N [timeout=MS] [short=0|1] [min=MS] [max=MS]
- *                          the application write loop, blocking, N bytes.
- *                          `timeout` is SO_SNDTIMEO; a short send is required
- *                          unless `short=0`, because a case whose send never
- *                          went short reached nothing; min/max bound the whole
- *                          loop, which is how a case says it WAITED
- *   bshort N               the first short send credited exactly N
- *   brecv N [waitall] = N  one blocking recv(), bytes checked as well as count
- *   bclose min=MS max=MS   CloseSocket() that must wait, bounded both ways
- *   wirestream N           the peer received the stream byte for byte, once
- *   wiregrants N           the peer really did close the window N times
- *
- *   tx FLAGS [key=value]   the next frame the stack sends must be this
- *   notx MS                the stack must send nothing for MS
- *   txcount MIN MAX        discard everything queued, and assert how much of
- *                          it there was -- a retransmission series is a count
- *   txsame FLAGS           discard everything queued, and assert every frame
- *                          of it was FLAGS at the sequence number already
- *                          latched.  A retransmission ladder of any length
- *                          passes; a segment RE-ISSUED under a new sequence
- *                          number does not.  At least one frame is required
- *   rx FLAGS [key=value]   inject this frame into the stack
- *   repeat N ... end       run the lines between them N times, $i counting
- *                          from zero.  N may be an expression, which is how a
- *                          case whose length follows the receive buffer is
- *                          written once
- *   icmp TYPE CODE [seq=N] inject an ICMP error quoting a segment this stack
- *                          sent at seq=N -- the four-tuple and sequence number
- *                          are what a receiver demultiplexes it on
- *
- * FLAGS is a string from FSRPAUEC, or `-` for none.  Keys:
- *
- *   seq=N   our sequence numbers are offsets from our initial sequence number,
- *           which the harness learns from the first SYN it sees; the peer's
- *           are offsets from the ISN this harness chose.  So `seq=1 ack=1`
- *           after a handshake means what it looks like, on both sides, and a
- *           script never contains a number the stack picked.
- *   ack=N   the same, the other way round.
- *   win=N   exact advertised window.  winmin/winmax bound it instead.
- *   len=N   payload bytes.
- *   urg=N   urgent pointer.
- *   mss=N   the MSS option must be present with this value (tx) or is sent
- *           with it (rx).
- *   ts=1/0  the RFC 7323 timestamps option must be present or absent (tx), or
- *           is sent with TSval 0 (rx).
- *   tsval=N the peer's TSval, injected (rx).  Never assertable on tx: that
- *           value is this stack's own clock.
- *   tsecr=N the echo.  On tx it is what TS.Recent held, which is a TSval a
- *           previous rx line chose, so a script can name it; on rx it is sent.
- *   wsok=1/0 the RFC 7323 window scale option must be present or absent (tx).
- *   wscale=N its shift exactly (tx), or the shift offered by the peer (rx).
- *   sackok=1/0 RFC 2018 SACK-Permitted must be present or absent (tx), or is
- *           offered (rx).
- *   sack=lo:hi[,lo:hi...]  the RFC 2018 blocks, in order, in the offsets
- *           `ack=` counts in.  `sack=-` requires no option at all.
- *   badopt=1 the injected frame carries an MSS option whose length byte says
- *           3, which is not its length (rx).
- *   dst=bcast|subnet|mcast  the injected frame goes to that destination, in
- *           the IP header and in the Ethernet header both (rx).
- *   hdrlen=N the data offset in bytes.  `hdrlen=auto` instead requires it to
- *           account for exactly the options this line names, which is what the
- *           assertion is for and does not go stale when the build gains one.
- *   within=MS / after=MS
- *           bounds on the gap between this frame and the previous event,
- *           measured from the E-Clock reading taken inside the device's
- *           BeginIO -- the instant the stack handed the frame over -- so the
- *           harness's own polling interval does not enter the measurement.
- *
- * A value may be an expression instead of a literal: $name, then any run of
- * + - * / and further operands, evaluated left to right.  $winfloor, $wincap
- * and $synwin come from the build's BSD_TCP_WINDOW/BSD_TCP_WINDOW_CEILING;
- * $rwnd is the receive buffer read back off the wire; $i is the `repeat`
- * iteration.  See var_value().
- *
- * Output goes to DH0:tcpdrill.txt: one line per directive that asserted
- * something, and a decoded expected/observed pair for every failure.  Flushed
- * line by line, because §16.9 records a diagnostic tool losing its last twenty
- * lines to a reboot.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -184,19 +41,12 @@
 #define DRILL_HAS_TS        1
 #endif
 
-/* ------------------------------------------------------------ the network - */
-
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, DEVS:NetInterfaces */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness       */
 
-/* `localaddr`.  The loopback address is one the machine has and the wire
-   cannot reach; the foreign one is on this subnet and belongs to nobody, so
-   bind() has to refuse it without any interface being consulted. */
 #define LOOPBACK_IP     0x7F000001UL            /* 127.0.0.1 */
 #define FOREIGN_IP      0x0A09094DUL            /* 10.9.9.77 */
 
-/* `dst=`.  The subnet is the /24 DEVS:NetInterfaces/tap0 configures, and the
-   multicast address is the all-hosts group, which nothing here has joined. */
 #define DST_UNICAST     0
 #define DST_BCAST       1                       /* 255.255.255.255 */
 #define DST_SUBNET      2                       /* 10.9.9.255      */
@@ -210,8 +60,6 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x44, 0x52, 0x4C, 0x02 };
 #define ETYPE_ARP       0x0806
 #define ETYPE_IPV6      0x86DD
 #define ETH_HDR         14
-
-/* --------------------------------------------------------------- sockets -- */
 
 #define AF_INET_        2
 #define SOCK_STREAM_    1
@@ -472,8 +320,6 @@ static LONG s_errno(VOID)
     return r;
 }
 
-/* ------------------------------------------------------------- reporting -- */
-
 static BPTR  out_file;
 static ULONG n_pass;
 static ULONG n_fail;
@@ -495,7 +341,6 @@ static VOID emit(const char *s)
     if (out_file != (BPTR)0)
     {
         Write(out_file, (APTR)s, (LONG)n);
-        /* Flush on every line: see the header. */
         Flush(out_file);
     }
     Write(Output(), (APTR)s, (LONG)n);
@@ -584,8 +429,6 @@ static VOID say(const char *fmt, ...)
     emit(line);
 }
 
-/* ---------------------------------------------------------- packet bytes -- */
-
 static ULONG rd32(const UBYTE *p) { return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
                                            ((ULONG)p[2] << 8) | (ULONG)p[3]; }
 static UWORD rd16(const UBYTE *p) { return (UWORD)(((UWORD)p[0] << 8) | p[1]); }
@@ -637,8 +480,6 @@ static ULONG ones_partial(const UBYTE *p, ULONG n, ULONG sum)
     return sum;
 }
 
-/* -------------------------------------------------------------- decoding -- */
-
 #define TF_FIN  0x01
 #define TF_SYN  0x02
 #define TF_RST  0x04
@@ -677,9 +518,6 @@ typedef struct Seg
     BOOL    ip_ok;              /* IP header checksum verified  */
     BOOL    tcp_ok;             /* TCP checksum verified        */
 
-    /* Enough of the frame to say what a frame the decoder rejected actually
-       was: "non-TCP frame ether=0x0800" on its own does not distinguish, for
-       instance, an ICMP echo reply. */
     ULONG   frame_len;
     UBYTE   head[34];
 } Seg;
@@ -739,8 +577,6 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
     s->urg      = rd16(&tcp[18]);
     s->dlen     = iplen - ihl - thl;
 
-    /* The TCP checksum is verified on every frame the stack sends: it costs
-       nothing here and no script would think to assert on it. */
     {
         ULONG sum = 0;
         UBYTE ph[4];
@@ -755,14 +591,6 @@ static BOOL decode(Seg *s, const UBYTE *f, ULONG len, ULONG stamp)
         s->tcp_ok = ((UWORD)(~sum) == 0) ? TRUE : FALSE;
     }
 
-    /* Options: walk the area properly and pick out the four this harness
-       asserts on -- the MSS, RFC 7323 timestamps, the RFC 7323 window scale
-       and RFC 2018 SACK-Permitted.
-       THE WALK STOPS AT AN END-OF-OPTION-LIST, which is what a conforming peer
-       does and is the whole reason the window scale option's own padding byte
-       matters: an option emitted after an EOL is not on the wire as far as
-       anything that parses properly is concerned.  wscale.drill x01 is that
-       case. */
     {
         const UBYTE *o   = tcp + 20;
         const UBYTE *end = tcp + thl;
@@ -824,8 +652,6 @@ static VOID flag_string(UWORD f, char *out)
     *o = '\0';
 }
 
-/* ---------------------------------------------------------------- clocks -- */
-
 static ULONG eclock_per_ms;
 
 static ULONG ticks_to_ms(ULONG a, ULONG b)     /* b - a, in milliseconds */
@@ -837,15 +663,7 @@ static ULONG ticks_to_ms(ULONG a, ULONG b)     /* b - a, in milliseconds */
     return d / eclock_per_ms;
 }
 
-/*
- * Above this, `b` came BEFORE `a` and the subtraction wrapped: the E-Clock is
- * 32 bits at about 709 kHz, so its whole range is 6,057,710 ms and a backwards
- * gap of one millisecond reads as all of it.  No case runs five minutes, so
- * anything past that is the wrap and not a wait.
- */
 #define GAP_BACKWARDS_MS    300000UL
-
-/* ------------------------------------------------------------ case state -- */
 
 typedef struct Case
 {
@@ -862,13 +680,6 @@ typedef struct Case
     ULONG   line;
     LONG    send_rc;            /* what the last send() returned */
     ULONG   wire_bytes;         /* tx payload accepted since that send */
-    /*
-     * The receive buffer, read off the wire rather than configured: the window
-     * field of the first non-SYN frame the stack sends, shifted back up.  RFC
-     * 7323 2.2, the scale applies only when BOTH SYNs carried the option, so a
-     * case whose injected SYN-ACK offers none learns the 65535 the stack
-     * correctly falls back to.  $rwnd.
-     */
     LONG    rwnd;
     LONG    our_wscale;         /* shift our SYN offered, -1 if none   */
     LONG    peer_wscale;        /* shift an injected SYN offered, -1   */
@@ -879,15 +690,12 @@ typedef struct Case
 
 static Case cs;
 
-/* A queue of frames the stack sent that no directive has consumed yet. */
 #define PEND_MAX    32
 static Seg   pend[PEND_MAX];
 static UWORD pend_head, pend_tail, pend_count;
 
 static UBYTE scratch[TAP_FRAME_MAX];
 static UBYTE payload[4096];
-
-/* ------------------------------------------------------------------- ARP -- */
 
 static VOID arp_reply(const UBYTE *req)
 {
@@ -912,10 +720,6 @@ static VOID arp_reply(const UBYTE *req)
     (VOID)tap_rx_put(f, (ULONG)sizeof(f));
 }
 
-/*
- * Drain the device.  ARP is answered here and never queued: it is not part of
- * any script and happens whenever the stack has to resolve the peer.
- */
 static ULONG n_background;      /* frames dropped by the filter in pump() */
 
 static VOID pump(VOID)
@@ -937,20 +741,6 @@ static VOID pump(VOID)
             continue;
         }
 
-        /*
-         * Traffic that is not part of any case.  The stack under test is a
-         * whole stack: it answers ARP (above), and anything else in the tree
-         * that opens a UDP socket -- mDNS, a DHCP renewal, an IGMP report --
-         * puts frames on this wire that no script mentions.  They used to be
-         * queued like everything else, so the next `tx` in whatever case was
-         * running failed with "non-TCP frame ether=0x0800" and every assertion
-         * after it was one frame out of step; that is how c04, c05 and a01
-         * failed in one run of an unchanged stack and passed in the next.
-         *
-         * Anything IPv4 that is not TCP to the peer is therefore counted and
-         * dropped.  A malformed TCP segment, or one aimed at the peer, still
-         * reaches the queue -- those are results.
-         */
         if (ether == ETYPE_IP && len >= ETH_HDR + 20 &&
             (scratch[ETH_HDR + 9] != 6 || rd32(&scratch[ETH_HDR + 16]) != PEER_IP))
         {
@@ -958,15 +748,6 @@ static VOID pump(VOID)
             continue;
         }
 
-        /*
-         * IPv6 is the same thing one EtherType along, and it is not optional
-         * traffic: stateless autoconfiguration solicits a router and its own
-         * address as soon as the interface comes up, and duplicate-address
-         * detection repeats on a timer.  Nothing here is scripted in v6, so
-         * the whole EtherType is background.  Without this the first case in
-         * a file catches the startup burst and a later one catches a
-         * retransmission, which is a failure that moves when the timing does.
-         */
         if (ether == ETYPE_IPV6)
         {
             n_background++;
@@ -1000,21 +781,6 @@ static BOOL pend_pop(Seg *out)
     return TRUE;
 }
 
-/*
- * Wait up to `ms` for one frame, servicing ARP throughout, and report how long
- * that really took.
- *
- * THE BUDGET IS THE E-CLOCK, NOT A COUNT OF POLLS.  It used to add 20 to a
- * counter per Delay(1) and stop when the counter reached `ms`, which assumes
- * one iteration costs one tick.  It does not: pump() drains the ring, decodes
- * every frame and answers ARP, on a 14 MHz 68020, and one iteration measures
- * 34 ms here -- so every bound ran 1.7 times its name.  tcp.drill x03's
- * `notx 400` covered 20 iterations, 680 ms, and failed on a retransmission
- * 681 ms out: a violation reported against a bound the harness never
- * enforced.  Every other measurement in this file is already taken from the
- * E-Clock; this one is now too, and the transcript prints what each `notx`
- * really covered so the next drift is read rather than triaged.
- */
 static BOOL wait_frame_for(Seg *out, ULONG ms, ULONG *took)
 {
     ULONG start = tap_eclock_now();
@@ -1045,8 +811,6 @@ static BOOL wait_frame(Seg *out, ULONG ms)
     return wait_frame_for(out, ms, NULL);
 }
 
-/* ------------------------------------------------------------- injection -- */
-
 typedef struct Inject
 {
     UWORD   flags;
@@ -1061,27 +825,10 @@ typedef struct Inject
     ULONG   tsecr;
     LONG    wscale;             /* RFC 7323 window scale, -1 for none  */
     BOOL    sackok;             /* RFC 2018 SACK-Permitted             */
-    /*
-     * RFC 2018 SACK BLOCKS TO SEND, which is the half of this option the
-     * harness could not do.  `sack=` was an assertion on what LEAVES, so
-     * every case in sack.drill was receive side and nothing could put a
-     * peer's blocks in front of the stack -- which is why the send-side
-     * change sat on a fork branch for nine days with no case that reached it.
-     *
-     * Absolute sequence numbers, already offset by the ISN, because that is
-     * what goes on the wire.
-     */
     UWORD   n_sack;
     ULONG   sack_lo[4];
     ULONG   sack_hi[4];
     LONG    corrupt;            /* payload byte to flip after the checksum */
-    /*
-     * Where in the STREAM this segment's payload starts, for the pattern the
-     * bytes are generated from.  A one-segment case wants 0 and gets it from
-     * the zeroed record; a peer that dribbles a stream over several segments
-     * needs each one to carry the bytes belonging to its own offset, or the
-     * receiver cannot tell a correct stream from a shuffled one.
-     */
     ULONG   dofs;
     ULONG   pad;                /* Ethernet padding past the datagram      */
     BOOL    unaligned;          /* hand the device an odd buffer           */
@@ -1089,17 +836,8 @@ typedef struct Inject
     LONG    dst;                /* DST_UNICAST and the three below         */
 } Inject;
 
-/*
- * The frame is built inside a longword-aligned buffer and handed over at an
- * offset, because where it starts decides whether the IP header the device
- * copies out is longword aligned -- and src/sana2/sana2_copy.c takes its
- * copy-and-sum path only when it is.  Offset 2 is the aligned case, which is
- * what a driver that positions its receive buffer for the stack produces;
- * offset 0 is the other one, which SANA-II equally allows.
- */
 static ULONG f_aligned[(TAP_FRAME_MAX / 4) + 2];
 
-/* Set while the wire task owns the wire; see build_and_inject's tail. */
 static BOOL  inject_quiet;
 static ULONG n_inject_dropped;
 
@@ -1124,12 +862,6 @@ static VOID build_and_inject(const Inject *in)
     cp(&f[6], peer_mac, 6);
     wr16(&f[12], ETYPE_IP);
 
-    /*
-     * A broadcast IP destination has to arrive in a broadcast Ethernet frame,
-     * or the stack sees a unicast frame that merely claims one and the case
-     * tests the wrong thing.  RFC 1122 4.2.3.10 MUST-57 is about the segment
-     * the wire actually delivered to everybody.
-     */
     if (in->dst == DST_BCAST)
     {
         dst_ip = 0xFFFFFFFFUL;
@@ -1196,7 +928,6 @@ static VOID build_and_inject(const Inject *in)
             at = (UWORD)(at + 4);
         }
 
-        /* kind 4, length 2, NOP, NOP. */
         if (in->sackok)
         {
             tcp[at]     = 4;
@@ -1206,12 +937,6 @@ static VOID build_and_inject(const Inject *in)
             at = (UWORD)(at + 4);
         }
 
-        /*
-         * NOP, NOP, kind 5, length 2 + 8n, then each block as two network
-         * order longwords: RFC 2018 section 3, the layout every stack that
-         * sends blocks uses.  The two NOPs put the blocks on a longword
-         * boundary, which is what makes reading them a plain 32-bit load.
-         */
         if (in->n_sack > 0)
         {
             UWORD b;
@@ -1260,12 +985,6 @@ static VOID build_and_inject(const Inject *in)
         wr16(&tcp[16], (UWORD)(~sum));
     }
 
-    /*
-     * After the checksum, so the segment is exactly what a damaged one on the
-     * wire looks like: the bytes and the checksum disagree, and nothing else
-     * about the frame is wrong.  The stack has to reject it whether it summed
-     * the payload in a pass of its own or inside the copy.
-     */
     if ((in->corrupt >= 0) && ((ULONG)in->corrupt < in->dlen))
     {
         tcp[thl + in->corrupt] ^= 0xFF;
@@ -1286,16 +1005,6 @@ static VOID build_and_inject(const Inject *in)
     }
 }
 
-/*
- * An ICMP error quoting a TCP segment this stack sent.
- *
- * RFC 792: the message carries the offending IP header and the first 64 bits
- * of its data, which for TCP is the two ports and the sequence number -- all
- * three of which a receiver has to match before it may act on the message
- * (RFC 5927 4.1).  The quoted header is built here rather than captured
- * because a case wants to name a segment whether or not it is still on the
- * queue, including one with a sequence number the stack never sent.
- */
 static VOID inject_icmp(UBYTE type, UBYTE code, ULONG seq)
 {
     static UBYTE f[TAP_FRAME_MAX];
@@ -1322,7 +1031,6 @@ static VOID inject_icmp(UBYTE type, UBYTE code, ULONG seq)
     icmp[0] = type;
     icmp[1] = code;
 
-    /* The offending datagram, as this stack would have sent it. */
     q[0] = 0x45;
     wr16(&q[2], (UWORD)(20 + 20));
     wr16(&q[4], 0x4200);
@@ -1344,8 +1052,6 @@ static VOID inject_icmp(UBYTE type, UBYTE code, ULONG seq)
         cs.fails++;
     }
 }
-
-/* ---------------------------------------------------------- the parser ---- */
 
 static BOOL is_space(char c) { return (c == ' ' || c == '\t' || c == '\r') ? TRUE : FALSE; }
 
@@ -1375,21 +1081,6 @@ static BOOL streq(const char *a, const char *b)
     return (*a == '\0' && *b == '\0') ? TRUE : FALSE;
 }
 
-/*
- * Numbers a script does not have to know.
- *
- * The advertised window is not a constant of the protocol: it comes from
- * BSD_TCP_WINDOW and BSD_TCP_WINDOW_CEILING, which the build sets, and above
- * 65535 it is carried scaled.  A script that spells the number out is a
- * snapshot of one build's configuration and fails on the next, which is what
- * `winmax=33580` and `win=32120` were.
- *
- * $winfloor / $wincap / $synwin come from the same header the library compiles
- * against, via tests/tcpdrill/CMakeLists.txt.  $rwnd is measured instead: it is
- * the receive buffer read back off the wire, so it needs no configuration at
- * all and is right even when the pool budget, not the ceiling, is what bounded
- * the window.  $i is the iteration inside a `repeat`.
- */
 static LONG cur_iter;
 
 static BOOL is_word(char c)
@@ -1473,8 +1164,6 @@ static LONG to_num(const char *s)
     }
     return v;
 }
-
-/* --------------------------------------------------- expectation records -- */
 
 typedef struct Expect
 {
@@ -1573,8 +1262,6 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "sackok")){ e->have_sackok = TRUE; e->sackok = to_num(eq + 1); }
             else if (streq(key, "sack"))
             {
-                /* `sack=-` is no option at all; otherwise lo:hi pairs, comma
-                   separated, in the offsets `ack=` counts in. */
                 const char *v = eq + 1;
 
                 e->have_sack = TRUE;
@@ -1593,10 +1280,6 @@ static const char *parse_keys(const char *p, Expect *e)
             else if (streq(key, "hdrlen"))
             {
                 e->have_hdrlen = TRUE;
-                /* `auto`: the data offset must account for exactly the options
-                   this line names and nothing else, which is the assertion
-                   worth making and the one that does not go stale when the
-                   build gains an option. */
                 if (streq(eq + 1, "auto"))
                     e->hdrlen_auto = TRUE;
                 else
@@ -1623,14 +1306,6 @@ static const char *parse_keys(const char *p, Expect *e)
             }
             else
             {
-                /*
-                 * A key nobody reads is an assertion that does not run, and it
-                 * reads as a pass.  sack.drill and dsack.drill spent their
-                 * whole lives asserting `sack=` and `hdrlen=` at a parser that
-                 * dropped both on the floor: 41 lines of block expectations
-                 * between them, none of them checked, and a stack that emitted
-                 * no option at all would have passed every one.  Count it.
-                 */
                 say("!! unknown key %s=", key);
                 n_fail++;
             }
@@ -1638,8 +1313,6 @@ static const char *parse_keys(const char *p, Expect *e)
         p = next;
     }
 }
-
-/* ---------------------------------------------------------- the reporter -- */
 
 static VOID describe(const Seg *s, char *out, ULONG max)
 {
@@ -1763,8 +1436,6 @@ static VOID fail(const char *what, const char *why)
     say("       %s", why);
 }
 
-/* ------------------------------------------------------------- directives - */
-
 static VOID do_tx(const char *args, const char *raw)
 {
     char    tok[48];
@@ -1781,13 +1452,6 @@ static VOID do_tx(const char *args, const char *raw)
     e.flags = parse_flags(tok);
     (VOID)parse_keys(args, &e);
 
-    /*
-     * How long to keep waiting before reporting that nothing came.  Twice the
-     * bound: a frame that arrives late still fails on `within` afterwards, and
-     * "gap too long, got 1800" is a better transcript than "nothing was sent
-     * at all".  4000 is what the old default of 2000 polls came to in real
-     * time on this guest, so no line that used to fit stops fitting.
-     */
     limit = e.have_within ? ((ULONG)e.within + 60UL) * 2UL : 4000UL;
 
     if (!wait_frame(&got, limit))
@@ -1813,17 +1477,6 @@ static VOID do_tx(const char *args, const char *raw)
     if (cs.local_port == 0)
         cs.local_port = got.src_port;
 
-    /*
-     * The window, unscaled.  Our SYN names the shift; every later frame
-     * carries the window in units of it, and only when the peer's SYN offered
-     * the option as well (RFC 7323 2.2), which is what makes a case with a
-     * plain SYN-ACK read back the 65535 the stack correctly falls back to.
-     *
-     * $rwnd is RCV.BUFF and is latched from the first frame after the
-     * handshake, where nothing has been received yet and the window is the
-     * whole buffer.  win_full is this frame's window, which shrinks as data
-     * arrives; the two are the same thing only on that first frame.
-     */
     if ((got.flags & TF_SYN) != 0)
     {
         if (got.wscale >= 0)
@@ -1884,15 +1537,6 @@ static VOID do_tx(const char *args, const char *raw)
     if (e.have_ack)
         CHECK(got.ack == cs.p_isn + (ULONG)e.ack, "ack",
               e.ack, (LONG)(got.ack - cs.p_isn));
-    /*
-     * win/winmin/winmax are the receiver's window, not the sixteen bits that
-     * carry it: cs.rwnd above has already shifted the field back up by the
-     * scale the two SYNs settled on.  A script says what the receiver has room
-     * for and does not have to know whether the connection negotiated a shift.
-     * On a SYN the shift is zero by definition (RFC 7323 2.2), so nothing
-     * changes there.  Exact only while the shift divides the segment size,
-     * which holds for every window this pool can produce.
-     */
     if (e.have_win)
         CHECK(win_full == e.win, "win", e.win, win_full);
     if (e.have_winmin)
@@ -1944,19 +1588,6 @@ static VOID do_tx(const char *args, const char *raw)
 
         if (e.hdrlen_auto)
         {
-            /*
-             * The option area the build and the negotiation together imply,
-             * laid out the way _nx_tcp_packet_send_syn and
-             * _nx_tcp_sack_option_build lay it out.  A SYN carries the MSS
-             * word and a second option word whatever goes in it, padding
-             * included, and a third only when the window scale has taken the
-             * second and SACK-Permitted still needs a home.  Twelve for the
-             * timestamp, 4 + 8n for n SACK blocks.
-             *
-             * A SYN-ACK offers only what the peer's SYN offered, RFC 2018
-             * section 2 and RFC 7323 2.2/5.2, so what the harness injected is
-             * half of every term.
-             */
             BOOL syn = ((e.flags & TF_SYN) != 0) ? TRUE : FALSE;
             BOOL sa  = (syn && ((e.flags & TF_ACK) != 0)) ? TRUE : FALSE;
             BOOL ws  = (DRILL_HAS_WSCALE && (!sa || (cs.peer_wscale >= 0)))
@@ -1989,14 +1620,6 @@ static VOID do_tx(const char *args, const char *raw)
     {
         ULONG gap = ticks_to_ms(cs.t_last, got.stamp);
 
-        /* THE FRAME PREDATES THE EVENT IT IS MEASURED FROM.  do_rx() reads the
-           clock before it injects, on purpose, so an answer that is already
-           transmitted and stamped when a later injection resets it comes out
-           of the unsigned subtraction as 6,057,710 ms -- the E-Clock's whole
-           range.  That reads as "gap too long", which is the opposite of what
-           happened, and it cost sack.drill s14 a triage: a retransmission RFC
-           5827 had sent two injections earlier looked like one that never
-           came.  Say which way round it was. */
         CHECK(gap < GAP_BACKWARDS_MS,
               "sent BEFORE the previous directive, ms early", 0,
               (LONG)ticks_to_ms(got.stamp, cs.t_last));
@@ -2011,8 +1634,6 @@ static VOID do_tx(const char *args, const char *raw)
         ULONG       gap  = ticks_to_ms(cs.t_last, got.stamp);
         const char *sign = "+";
 
-        /* Same thing on a line that asserted no bound: print the direction the
-           gap really had rather than the range of the counter. */
         if (gap >= GAP_BACKWARDS_MS)
         {
             gap  = ticks_to_ms(got.stamp, cs.t_last);
@@ -2026,14 +1647,6 @@ static VOID do_tx(const char *args, const char *raw)
     }
 }
 
-/*
- * `wirebytes` -- the last send() credited exactly the bytes that left.
- *
- * A short send has to report what it put on the wire and not what it was
- * offered; the case names in tcp.drill are the specification.  Counted from
- * the tx directives the script already matched, so it asserts nothing the
- * script has not already accounted for.
- */
 static VOID do_wirebytes(const char *args, const char *raw)
 {
     char why[96];
@@ -2063,61 +1676,6 @@ static VOID do_wirebytes(const char *args, const char *raw)
 
     pass(raw);
 }
-
-/* ------------------------------------------------------------- the wire -- */
-/*
- * A SECOND TASK, BECAUSE A WIRE SCRIPT CANNOT BLOCK.
- *
- * Every socket above is non-blocking, and has to be: this program is both the
- * application and the peer, so a call that waits stops the only thing that
- * could answer it and waits for ever.  That put four decisions in
- * bsdsocket.library out of reach of every script here, and in each of them THE
- * BLOCKING IS THE BEHAVIOUR:
- *
- *   transfer.c bsd_send_consumed()  what a send() credits when the peer's
- *                                   window closes part-way through the packet
- *                                   NetX Duo is segmenting.  A wrong answer
- *                                   duplicates stream bytes.
- *   transfer.c MSG_WAITALL          keep waiting until the caller's buffer is
- *                                   full.  On a non-blocking socket the flag
- *                                   has nothing to change.
- *   socket.c   SO_LINGER {1, n>0}   a close that waits for the peer.
- *   errno.c    bsd_wait_errno()     ENOBUFS on a socket that meant to wait,
- *                                   EWOULDBLOCK on one that did not.
- *
- * So the peer moves into a Process of its own and the script's task keeps the
- * socket.  Only the peer half moves: the wire task calls tap_tx_get(),
- * tap_rx_put() and build_and_inject() and never touches bsdsocket.library, so
- * there is no socket shared across tasks and no ObtainSocket() in the picture.
- * The two are exclusive by construction -- `wire` starts the task, the
- * blocking directive that follows is the only thing the main task does while
- * it runs, and `join` stops it -- so the frame builder and the tap ring have
- * one user at a time even though they are global.
- *
- * The peer is a fixed rule rather than a script.  A blocked application cannot
- * step a script, and the four behaviours above each need one rule applied to
- * whatever arrives:
- *
- *   grant win=W grants=K [open=O] [stall=MS]
- *       Acknowledge each data segment and re-advertise W, K times.  Then say
- *       nothing for MS -- which is the window closing mid-packet, and what
- *       makes the blocked send() give up and report -- and after that
- *       acknowledge with O so the rest of the transfer completes.
- *   dribble bytes=N chunk=C gap=MS
- *       Deliver N bytes of the stream C at a time, MS apart.  A receive that
- *       returns early returns one chunk.
- *   finack after=MS
- *       Absorb everything; MS after a FIN arrives, answer it.
- *   silent
- *       Absorb everything and answer nothing at all.
- *
- * WHAT IT RECORDS IS THE STREAM, NOT A COUNT.  Every data segment is checked
- * byte for byte against the pattern its sequence number says it should carry.
- * The fault bsd_send_consumed() exists to prevent does not change how many
- * bytes leave -- the application sends the credited remainder, so the count is
- * self-consistent at every step -- it puts the same application bytes on the
- * wire twice under two different sequence numbers.  Only the bytes show it.
- */
 
 #define WIRE_GRANT      1
 #define WIRE_DRIBBLE    2
@@ -2162,8 +1720,6 @@ static BOOL  wire_live;         /* a task exists and has not been joined  */
 static ULONG wire_t0;
 static UBYTE wire_scratch[TAP_FRAME_MAX];
 
-/* Everything this peer puts on the wire.  `ackx` is what to add to the
-   contiguous byte count for the acknowledgement, which is 1 for a FIN. */
 static VOID wire_put(UWORD flags, ULONG win, ULONG dlen, ULONG ackx)
 {
     Inject in;
@@ -2257,15 +1813,6 @@ static VOID wire_react(const Seg *s, ULONG now)
 
 static VOID wire_body(VOID)
 {
-    /*
-     * `join` stops this task the instant the blocking call returns, and the
-     * segments that call produced are still in the tap ring when it does.
-     * Leaving on w_Run alone lost them: b01 credited 2000 bytes, the peer had
-     * counted 900, and the missing 1100 were two frames sitting in the ring at
-     * the moment the loop exited -- which reads exactly like the data-loss
-     * defect the case is looking for.  So the stop is followed by a fixed
-     * settling period with the drain still running.
-     */
     UWORD settle = 0;
 
     for (;;)
@@ -2304,9 +1851,6 @@ static VOID wire_body(VOID)
         if (wire.w_Mode == WIRE_GRANT && !wire.w_Opened &&
             wire.w_StallEnd != 0 && now >= wire.w_StallEnd)
         {
-            /* The stall is what the blocked send() times out inside.  Opening
-               on the clock rather than on the next retransmission keeps the
-               case off the retransmission timer's schedule. */
             wire.w_Opened = TRUE;
             wire_put(TF_ACK, wire.w_Open, 0UL, 0UL);
         }
@@ -2509,14 +2053,6 @@ static VOID do_join(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `wirestream N` -- the peer received the stream, byte for byte, exactly once.
- *
- * Four separate ways for it to be wrong, because they are four different
- * faults:  a byte that is not the one its sequence number calls for (a send()
- * that under-credited, so the application sent bytes the stack had already
- * sent, under new sequence numbers); a hole; short; and long.
- */
 static VOID do_wirestream(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2578,12 +2114,6 @@ static VOID do_wirestream(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `wiregrants N` -- the peer really did close the window mid-packet N times.
- *
- * Without it a case where the window never closed passes everything else and
- * asserts nothing about the code it names.
- */
 static VOID do_wiregrants(const char *args, const char *raw)
 {
     char  tok[24];
@@ -2627,7 +2157,6 @@ static VOID do_notx(const char *args, const char *raw)
         say("       at        +%ums", took);
         return;
     }
-    /* The measured length, not the asked-for one; see wait_frame_for(). */
     say("  ok   %s   [%ums quiet]", raw, took);
     n_pass++;
 }
@@ -2652,8 +2181,6 @@ static VOID do_rx(const char *args, const char *raw)
     in.dlen  = (ULONG)(e.have_len ? e.len : 0);
     in.badopt = (e.have_badopt && (e.badopt != 0)) ? TRUE : FALSE;
     in.dst    = e.dst;
-    /* `badopt=1` IS the option: the lines that use it name no mss=, so one is
-       supplied to carry the length byte that is the point of the case. */
     in.mss   = e.have_mss ? e.mss : (in.badopt ? 1460 : -1);
     in.ts    = (e.have_tsval || e.have_tsecr || (e.have_ts && e.ts != 0)) ? TRUE : FALSE;
     in.tsval = (ULONG)(e.have_tsval ? e.tsval : 0);
@@ -2662,13 +2189,6 @@ static VOID do_rx(const char *args, const char *raw)
     in.sackok = (e.have_sackok && (e.sackok != 0)) ? TRUE : FALSE;
     in.corrupt   = e.have_corrupt ? e.corrupt : -1;
 
-    /*
-     * On an `rx` line, `sack=` is no longer only an assertion: the blocks are
-     * SENT.  They describe data THIS side sent, so they count in the space
-     * `seq=` on our own segments counts in, which is cs.u_isn -- the opposite
-     * space from the one sack.drill's receive-side cases use, and the reason
-     * that is spelled out here rather than left to the reader.
-     */
     if (e.have_sack && (e.n_sack > 0))
     {
         UWORD b;
@@ -2681,8 +2201,6 @@ static VOID do_rx(const char *args, const char *raw)
         }
     }
 
-    /* What the peer offered is half of every negotiated option, and of the
-       header length `hdrlen=auto` expects. */
     if ((in.flags & TF_SYN) != 0)
     {
         if (in.wscale >= 0)
@@ -2695,23 +2213,11 @@ static VOID do_rx(const char *args, const char *raw)
     in.pad       = (ULONG)(e.have_pad ? e.pad : 0);
     in.unaligned = e.have_unaligned;
 
-    /* Give the stack a moment to post its reads before the very first
-       injection of a case; after that they are always outstanding. */
     pump();
 
-    /*
-     * The clock is read before the injection, not after.  tap_rx_put() ends in
-     * ReplyMsg(), which signals the reader thread, and the reader runs at a
-     * higher priority, so the stack's answer can be transmitted and stamped
-     * before tap_rx_put() has returned here.  Reading the clock afterwards
-     * made every `after`/`within` on an answering frame come out as an
-     * unsigned underflow of about 6,057,780 ms.
-     */
     cs.t_last = tap_eclock_now();
     build_and_inject(&in);
 
-    /* One tick, so the reader thread has run before the next directive
-       asserts on what the injection caused. */
     Delay(1);
     pump();
 
@@ -2744,8 +2250,6 @@ static VOID do_icmp(const char *args, const char *raw)
     pass(raw);
 }
 
-/* --------------------------------------------------------- socket verbs --- */
-
 static VOID sock_nonblocking(LONG s)
 {
     LONG one = 1;
@@ -2765,18 +2269,6 @@ static VOID do_socket(const char *raw)
     pass(raw);
 }
 
-/*
- * `connect [= ETIMEDOUT] [min=MS max=MS break=0]`.
- *
- * Plain, the socket is the non-blocking one do_socket() made and the call
- * reports EINPROGRESS; the frames it causes are asserted by the lines after
- * it.  With an expected errno the call has to have BLOCKED and come back with
- * that errno, which needs `blocking` and `opt sndtimeo` before it.
- *
- * The elapsed time is printed because a connect that is expected to fail is
- * one whose duration is the point: it must come back on its own timeout and
- * not on some other.
- */
 static VOID do_connect(const char *args, const char *raw)
 {
     SockAddrIn a;
@@ -2860,10 +2352,6 @@ static VOID do_connect(const char *args, const char *raw)
                 return;
             }
 
-            /* cs.t_last stays at the moment the call went in, as it does for
-               a non-blocking connect: the SYN the next line asserts on was
-               sent then, and timing it from the return would print it as
-               having arrived before the connect started. */
             n_pass++;
             say("  ok   %s   [%ums]", raw, took);
             return;
@@ -2983,22 +2471,6 @@ static VOID do_listen(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `accept [= none] [wait=MS tries=N min=MS max=MS]`.
- *
- * Without `wait=` the listener is the non-blocking one do_listen() made and
- * this polls it for a second, which is what every case that expects a
- * connection wants.
- *
- * With `wait=` the listener is made BLOCKING with SO_RCVTIMEO set to that
- * many milliseconds, and accept() is called `tries` times in a row with
- * nothing in between -- no poll, no pump, no delay.  Every call must fail.
- * That is the shape a server has while it is waiting for a client, and it is
- * the only shape in which accept()'s own wait runs long enough to do anything
- * to the connection it is waiting for: the point is what the STACK does
- * during those waits, so the harness must not be touching the wire while they
- * run.
- */
 static VOID do_accept(const char *args, const char *raw)
 {
     UWORD tries;
@@ -3023,9 +2495,6 @@ static VOID do_accept(const char *args, const char *raw)
         }
     }
 
-    /* `wait=MS` and `tries=N`, in either order, after the optional `= none`.
-       Written the way every other keyed argument in a script is, with no
-       spaces, so the token has to be split on the '=' here. */
     for (;;)
     {
         char  tok[24];
@@ -3109,12 +2578,6 @@ static VOID do_accept(const char *args, const char *raw)
             return;
         }
 
-        /*
-         * Every wait has to have actually waited.  An accept() that answers
-         * EWOULDBLOCK immediately never enters the wait this case is about,
-         * so the case would pass without exercising anything -- which is what
-         * a listener left non-blocking by a bad `wait=` would do.
-         */
         if (min_ms == 0)
             min_ms = (wait_ms * n_wait) / 2;
 
@@ -3172,9 +2635,6 @@ static VOID do_accept(const char *args, const char *raw)
         return;
     }
 
-    /* With the errno.  "never produced a socket" is the same sentence whether
-       the queue was empty, the listener was not listening, or the stack could
-       not park a spare, and those are three different faults. */
     w = why;
     t = "accept() never produced a socket, errno ";
     while (*t != '\0') *w++ = *t++;
@@ -3197,11 +2657,6 @@ static VOID do_send(const char *args, const char *raw)
     if (want > (LONG)sizeof(payload))
         want = (LONG)sizeof(payload);
 
-    /* `send N = AGAIN` -- the send is expected to be refused, which is what a
-       non-blocking socket must do against a closed window.
-       `send N = SHORT` -- it is expected to take some but not all, which is
-       what a window narrower than the request must produce.  `wirebytes` then
-       says the number it reported is the number that left. */
     args = token(args, tok, sizeof(tok));
     if (tok[0] == '=')
     {
@@ -3281,16 +2736,6 @@ static VOID do_oob(const char *args, const char *raw)
     pass(raw);
 }
 
-/* --------------------------------------------------- the blocking verbs -- */
-
-/*
- * `blocking` -- take FIONBIO back off the subject socket.
- *
- * Everything else in this harness runs non-blocking, so this is spelled out on
- * the case rather than implied by the directive that follows it: a case whose
- * socket blocks is a case that needs a `wire` task, and the two lines belong
- * next to each other where a reader can see the pairing.
- */
 static VOID do_blocking(const char *raw)
 {
     LONG zero_ = 0;
@@ -3303,22 +2748,6 @@ static VOID do_blocking(const char *raw)
     pass(raw);
 }
 
-/*
- * `bstream N [timeout=MS]` -- the write loop an application really has.
- *
- * Not one send().  The fault this is here for -- bsd_send_consumed(),
- * transfer.c -- is invisible to a single call: whatever a short send() credits
- * is a number, and a number on its own is consistent with itself.  It shows up
- * one call later, when the application does the correct thing and offers the
- * REMAINDER, because the bytes the stack already put on the wire and did not
- * admit to then go out a second time under new sequence numbers.  So the loop
- * is the test, and the peer's copy of the stream is the assertion.
- *
- * The timeout is SO_SNDTIMEO and it is what makes a partial send observable at
- * all: with none, bsd_wait_sliced() keeps re-entering nx_tcp_socket_send() on
- * the same, already partly-consumed packet until it goes, and the short return
- * never happens.
- */
 static LONG bstream_short = -1;         /* what the first short send credited */
 
 static VOID do_bstream(const char *args, const char *raw)
@@ -3413,9 +2842,6 @@ static VOID do_bstream(const char *args, const char *raw)
 
         if (rc < 0 && s_errno() == E_WOULDBLOCK)
         {
-            /* A bound, not a retry limit: past this the case has stopped
-               making progress and saying so beats waiting out the harness
-               timeout with no line in the report. */
             if (ticks_to_ms(start, tap_eclock_now()) > 20000UL)
                 break;
             Delay(1);
@@ -3450,12 +2876,6 @@ static VOID do_bstream(const char *args, const char *raw)
         return;
     }
 
-    /*
-     * `min=` is what says the loop WAITED.  A socket with no SO_SNDTIMEO that
-     * meant to block has no other observable: it does not fail, it does not
-     * come back early, and a transfer that completed says nothing about
-     * whether it sat still for the peer or spun.
-     */
     if (ms < lo || (hi != 0 && ms > hi))
     {
         w = why;
@@ -3473,16 +2893,6 @@ static VOID do_bstream(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `bshort N` -- the first short send credited exactly N.
- *
- * `wirestream` says the transfer came out right; this says WHY it did.  N is
- * the number of bytes the peer's grants let through before the window shut,
- * which the script fixes: win * (grants + 1).  Nothing else in the harness
- * pins the arithmetic bsd_send_consumed() does, and a stream that happens to
- * come out right through a compensating pair of errors would pass the other
- * two lines.
- */
 static VOID do_bshort(const char *args, const char *raw)
 {
     char  tok[24];
@@ -3508,15 +2918,6 @@ static VOID do_bshort(const char *args, const char *raw)
     fail(raw, why);
 }
 
-/*
- * `brecv N [waitall] = WHAT` -- one blocking recv().
- *
- * `waitall` is MSG_WAITALL and the whole point of the directive: without it a
- * stream receive returns whatever the socket buffer holds, which against a
- * peer delivering the stream in pieces is the first piece.  The bytes are
- * checked as well as the count -- a receive that filled the buffer with the
- * right number of the wrong bytes is not the behaviour the flag names.
- */
 static VOID do_brecv(const char *args, const char *raw)
 {
     char  tok[24];
@@ -3593,15 +2994,6 @@ static VOID do_brecv(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `bclose min=MS max=MS` -- CloseSocket() on a socket that must wait.
- *
- * The bound is two-sided on purpose.  `close within=MS` above asserts that a
- * close never waits for a peer that stopped answering; SO_LINGER {1, n>0} is
- * the one case where it MUST wait, and an upper bound alone would be satisfied
- * by the close that returns at once -- which is exactly the behaviour the
- * option is there to change.
- */
 static VOID do_bclose(const char *args, const char *raw)
 {
     char  tok[32];
@@ -3685,9 +3077,6 @@ static VOID do_recv(const char *args, const char *raw)
         want = -1;
         want_again = TRUE;
     }
-    /* "This socket is not connected", which is a different answer from "it is
-       connected and there is nothing to read" and the only way to tell a
-       cancelled connect from one that completed behind the caller's back. */
     else if (streq(tok, "ENOTCONN"))
     {
         want = -1;
@@ -3734,14 +3123,6 @@ static VOID do_recv(const char *args, const char *raw)
     }
 }
 
-/*
- * recv N bytes and check that they are the bytes that were sent.  A count is
- * not enough for the copy path: src/sana2/sana2_copy.c moves the frame and
- * sums it in one pass, and a right checksum over a wrongly-copied payload
- * would satisfy every other assertion in this file.  build_and_inject() fills
- * the data with 'a' + i % 26 from the start of the segment, so this is for a
- * case with one segment outstanding.
- */
 static VOID do_recvpat(const char *args, const char *raw)
 {
     char tok[24];
@@ -3919,15 +3300,6 @@ static VOID do_opt(const char *args, const char *raw)
     pass(raw);
 }
 
-/*
- * `close [within=MS]`.
- *
- * CloseSocket() sends a FIN and the connection outlives the descriptor, so the
- * call must never wait for a peer that has stopped answering -- a program that
- * closes and exits would hang on the way out.  The optional bound asserts
- * that.  The number in the transcript is the whole CloseSocket(), measured
- * across the call rather than off the frame it produced.
- */
 static VOID do_close(const char *args, const char *raw)
 {
     Expect e;
@@ -3970,28 +3342,6 @@ static VOID do_close(const char *args, const char *raw)
     say("  ok   %s   [%ums]", raw, ms);
 }
 
-/*
- * `txcount MIN MAX` -- how many frames the stack sent while we were not
- * looking, discarded.
- *
- * A retransmission series is asserted as a count: ten separate `tx` lines
- * would assert the intervals too, and the intervals belong to another
- * workstream.  This checks only that the stack kept retrying and then stopped.
- */
-/*
- * `txsame <flags>` -- every frame the stack has queued is the SAME frame.
- *
- * Not `txcount`, which counts and says nothing about what it counted, and not
- * a run of `tx` lines, which would have to predict how many retransmissions a
- * timer produced.  What this asserts is that all of them carry the flags
- * given AND the sequence number already latched, so a stack that RE-ISSUED a
- * segment rather than retransmitting it -- a new initial sequence number for
- * a handshake already in progress -- fails here while an honest retransmit
- * ladder passes however long it is.
- *
- * At least one frame is required.  With none the sequence-number assertion is
- * vacuous, and a case that asserted nothing would report as one that did.
- */
 static VOID do_txsame(const char *args, const char *raw)
 {
     char  tok[48];
@@ -4014,8 +3364,6 @@ static VOID do_txsame(const char *args, const char *raw)
         {
             describe(&got, desc, sizeof(desc));
             fail(raw, desc);
-            /* Drain the rest, so the next directive is not one frame out of
-               step behind a failure this one already reported. */
             while (pend_pop(&got))
                 ;
             return;
@@ -4073,22 +3421,6 @@ static VOID do_txcount(const char *args, const char *raw)
     say("  ok   %s   [%u frame(s)]", raw, n);
 }
 
-/*
- * `rxorder fifo|lifo`.  Which queued CMD_READ the synthetic device completes
- * when a frame arrives.
- *
- * SANA-II promises nothing about the order, and every driver in the test
- * matrix happens to answer the oldest read first, so a receive path that
- * depends on it fails on a card and nowhere else.  ZZ9000Net is the card:
- * its firmware owns the RX slots and a separate process drains them.
- *
- * tapdev.c has had tap_set_rx_lifo() since the mode was written; what was
- * missing was this line, so rxorder.drill's five directives fell to the
- * catch-all in run_line().  Each one counted a failure -- which is why the
- * script could not pass -- while every case still printed PASS, because the
- * reordering it was asserting about never happened.  The file tested in-order
- * delivery twice and called it LIFO.
- */
 static VOID do_rxorder(const char *args, const char *raw)
 {
     char tok[16];
@@ -4117,20 +3449,6 @@ static VOID do_idle(const char *args, const char *raw)
     (VOID)token(args, tok, sizeof(tok));
     ms = (ULONG)to_num(tok);
 
-    /*
-     * Measured, not counted.  `spent += 20` credited the Delay(1) and nothing
-     * else, so every iteration also spent however long pump() took and the
-     * loop ran past the interval it was asked for -- silently, because nothing
-     * compared the two.  `idle 600` overran the one second retransmission
-     * timeout, the stack retransmitted exactly as it should, and the case that
-     * asked for the idle then matched that frame against its next expectation
-     * and reported the stack for it.  rto01, rto04 and rto05 are the three
-     * cases in rto.drill that use `idle`, and were the three that failed.
-     *
-     * Delay(1) is one 50 Hz tick, so the interval is still granular to 20 ms
-     * plus one pump(); what changes is that the overshoot is bounded by one
-     * iteration instead of accumulating over all of them.
-     */
     start = tap_eclock_now();
 
     while (ticks_to_ms(start, tap_eclock_now()) < ms)
@@ -4142,19 +3460,6 @@ static VOID do_idle(const char *args, const char *raw)
     pass(raw);
 }
 
-/* ----------------------------------------------------------- case control - */
-
-/*
- * Tear a case's socket down so that nothing of it appears in the next case.
- *
- * SO_LINGER {on, 0} is required. Once CloseSocket() started sending a FIN --
- * which is what RFC 793 3.5 asks for and what this harness asserts in c03 --
- * a plain close left a connection retransmitting that FIN into a peer that had
- * stopped listening, once a second, for ten seconds. Those frames turned up in
- * the next four cases, and every case that leaves unacknowledged data behind
- * (x02, x03, x04, z01) does the same with the data. The abortive close ends
- * the connection at once, which a harness whose cases share one stack needs.
- */
 static VOID case_abort(LONG s)
 {
     LONG lin[2];
@@ -4188,8 +3493,6 @@ static VOID case_end(VOID)
     case_abort(cs.lsock);
     cs.lsock = -1;
 
-    /* Give the close its RST/FIN and swallow whatever comes of it, so the
-       next case starts on an empty queue. */
     Delay(2);
     pump();
     while (pend_count != 0)
@@ -4218,15 +3521,10 @@ static VOID case_begin(const char *name)
     for (i = 0; i + 1 < sizeof(cs.name) && name[i] != '\0'; i++)
         cs.name[i] = name[i];
 
-    /* The device is shared by every case in the file, so `rxorder` is reset
-       here for the same reason `cs` is zeroed: a case that says nothing about
-       completion order gets the ordinary one, whatever the case before it
-       asked for and however early it stopped. */
     tap_set_rx_lifo(FALSE);
 
     cs.sock       = -1;
     cs.lsock      = -1;
-    /* No send() yet, which `wirebytes` reports rather than crediting zero. */
     cs.send_rc    = -1;
     cs.peer_port  = DEFAULT_PEER_PORT;
     cs.local_port = 0;
@@ -4241,22 +3539,6 @@ static VOID case_begin(const char *name)
     say("---- %s", cs.name);
 }
 
-/* ------------------------------------------------------------------- run -- */
-
-/*
- * `repeat N` ... `end`.
- *
- * Thirteen segments in and thirteen reads out is a shape, not thirteen facts,
- * and how many of them there are is a function of the receive buffer -- which
- * the build sets.  Writing the lines out once made rwndupdate.drill s03 a
- * transcript of one configuration.  With a count that may be an expression the
- * case says the shape and the harness counts, so `repeat $rwnd/2/1460+2`
- * is thirteen segments on the shipping window and thirty-five on a bigger one
- * without the script changing.
- *
- * $i is the iteration, from zero, which is what lets the body name a sequence
- * number.  No nesting: one level says everything these scripts need to say.
- */
 #define REPEAT_MAX_LINES    12
 
 static char  rep_body[REPEAT_MAX_LINES][160];
@@ -4299,7 +3581,6 @@ static VOID run_line(char *line)
     char        raw[200];
     ULONG       i;
 
-    /* Keep the source line for the report, minus trailing space. */
     for (i = 0; i + 1 < sizeof(raw) && line[i] != '\0'; i++)
         raw[i] = line[i];
     raw[i] = '\0';
@@ -4332,15 +3613,6 @@ static VOID run_line(char *line)
         (VOID)token(args, tok, sizeof(tok));
         cs.peer_port = (UWORD)to_num(tok);
 
-        /*
-         * A different source port is a different connection, and a different
-         * connection has its own initial sequence number.  u_isn is latched
-         * from the first SYN of the case and every injected ack is computed
-         * from it, so without this the second connection's final ACK
-         * acknowledges the FIRST connection's SYN, the stack refuses it as it
-         * should, and the socket sits in SYN_RECEIVED for ever.  Forget it
-         * here and the next SYN-ACK observed re-latches it for this one.
-         */
         cs.u_isn_known = FALSE;
     }
     else if (streq(verb, "localport"))
@@ -4494,8 +3766,6 @@ static LONG run_script(const char *path)
     return 0;
 }
 
-/* ------------------------------------------------------------------ main -- */
-
 int main(void)
 {
     TapStats st;
@@ -4516,12 +3786,6 @@ int main(void)
     eclock_per_ms = tap_eclock_rate() / 1000;
     say("E-Clock %u Hz (%u ticks/ms)", tap_eclock_rate(), eclock_per_ms);
 
-    /*
-     * Opening the library is what brings DEVS:NetInterfaces/tap0 up, and
-     * bring-up is what calls OpenDevice() on the device installed above.  The
-     * order matters: a stack that started first would have looked for
-     * tcpdrill.device in DEVS: and not found it.
-     */
     SockBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
     if (SockBase == NULL)
     {
@@ -4543,7 +3807,6 @@ int main(void)
         return 20;
     }
 
-    /* Let the readers post before the first injection. */
     for (tries = 0; tries < 50 && tap_reads_for(ETYPE_IP) == 0; tries++)
         Delay(1);
 
@@ -4558,8 +3821,6 @@ int main(void)
     say("tap: tx %u  rx delivered %u  rx no-reader %u  copy-failed %u  "
         "tx-overrun %u", st.tx_frames, st.rx_delivered, st.rx_no_reader,
         st.rx_copy_failed, st.tx_overrun);
-    /* Frames the stack sent that no case is about (see pump()).  Reported so a
-       change in the count is visible. */
     say("background frames ignored: %u", n_background);
     say("%u case(s), %u failed; %u check(s) passed, %u failed",
         n_cases, n_cases_failed, n_pass, n_fail);

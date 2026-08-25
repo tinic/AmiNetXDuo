@@ -1,53 +1,6 @@
 /*
  * AmiNetXDuo, host fuzz driver for the TLS record and handshake layers.
  *
- * Everything here runs on bytes a server chose, before a single one of them
- * has been authenticated: the record header arrives first, and the whole
- * plaintext handshake, ServerHello, Certificate, CertificateRequest,
- * NewSessionTicket, ChangeCipherSpec, is parsed before any key exists to
- * check it against. A hostile server, or anyone who can answer a TCP connect,
- * reaches all of it. With no MMU that is not a crashed process, it is a read
- * or a write with the whole machine's privileges.
- *
- * WHAT IS DRIVEN, AND AT WHICH BOUNDARY
- *
- * fr_run() is _nx_secure_tls_client_handshake()'s own loop, reproduced: the
- * record header through _nx_secure_tls_process_header(), then the record
- * payload walked message by message with
- * _nx_secure_tls_process_handshake_header() and dispatched by type. Driving
- * the vendored client_handshake() itself would need the crypto table, a packet
- * pool and a TCP socket, because it answers what it parses, and every reply
- * path is code the wire does not choose. The parsers are what the wire
- * chooses, so the parsers are what runs.
- *
- * THE LENGTH CONTRACT IS THE RECORD BUFFER, NOT THE MESSAGE.
- *
- * On the target, packet_buffer is tls.library's tc_RecordBuffer (tls_conn.c),
- * a heap allocation holding one record, and data_length is that record's
- * payload. A record can fill it exactly, so a parser that reads past the
- * payload is reading past a heap block on a machine with nothing to catch it.
- * That is the allocation this driver hands over: fr_dispatch() copies the
- * payload into a buffer sized to the payload, and every message parser is
- * called at its real offset inside it. Handing a parser a buffer that stops at
- * its own message would be tighter than the caller and would report over-reads
- * the wire cannot produce; handing it a fixed 16 KB would be looser and would
- * report nothing.
- *
- * FR_KNOWN_SLOP is 0. It was 3 while two of these parsers over-read; both are
- * fixed in the fork now, so the driver sees the true end of the buffer again.
- *
- * The ciphersuite table is the driver's own, carrying the six suite IDs
- * ami_tls_crypto.c offers and nothing else, so a lookup succeeds for exactly
- * the suites our client would accept. The real table cannot be linked here:
- * ami_tls_crypto.c includes exec/types.h and casts pointers to a 32-bit ULONG.
- * No parser under test calls a crypto method, only compares the ID.
- *
- * Usage, matching fuzz_dhcp:
- *   fuzz_tls_record -s                every seed case, named
- *   fuzz_tls_record -c NAME           one seed case by name
- *   fuzz_tls_record -r SEED COUNT     seeds plus mutations
- *   fuzz_tls_record < record          one record from stdin
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -65,25 +18,6 @@ TX_MUTEX _nx_secure_tls_protection;
 #define FR_MAX          4096
 #define FR_HDR          NX_SECURE_TLS_RECORD_HEADER_SIZE
 
-/*
- * Padding placed after the record so the driver can tolerate a known over-read
- * without re-reporting it on every mutation. It is 0, and it stays 0: the two
- * that needed it are fixed.
- *
- *   _nx_secure_tls_process_serverhello() read the ciphersuite and compression
- *   method after checking only the session ID, a 38-byte ServerHello with a
- *   session_id_length of 3 left length at exactly 38 and the next three bytes
- *   came from past the message.
- *
- *   _nx_secure_tls_process_certificate_request() read the certificate-type
- *   count with nothing establishing the message had a byte in it; the guard
- *   above it is inside the TLS 1.3 arm.
- *
- * Both were found by this driver at 0 and fixed on the fork's
- * amiga-nx-secure-bounds. Raising this again hides any over-read of one to
- * three bytes at the end of a record, so raise it only to isolate a new one,
- * and put it back.
- */
 #define FR_KNOWN_SLOP   0
 
 typedef struct
@@ -123,7 +57,6 @@ static void fr_bytes(FrBuf *w, unsigned n, unsigned char fill)
         fr_u8(w, fill);
 }
 
-/* Patch a 16-bit length written earlier, once its payload is known. */
 static void fr_patch16(FrBuf *w, unsigned at, unsigned v)
 {
     if (at + 1 < FR_MAX)
@@ -143,7 +76,6 @@ static void fr_patch24(FrBuf *w, unsigned at, unsigned long v)
     }
 }
 
-/* A record header with the payload length filled in afterwards. */
 static void fr_record(FrBuf *w, unsigned type)
 {
     fr_reset(w);
@@ -158,7 +90,6 @@ static void fr_seal(FrBuf *w)
     fr_patch16(w, 3, w->len - FR_HDR);
 }
 
-/* A handshake message header; returns the offset of its 24-bit length. */
 static unsigned fr_msg(FrBuf *w, unsigned type)
 {
     unsigned at;
@@ -174,18 +105,11 @@ static void fr_msg_end(FrBuf *w, unsigned at)
     fr_patch24(w, at, w->len - (at + 3));
 }
 
-/* ------------------------------------------------------- the ciphersuites -- */
-
 /* Numeric rather than included from src/tls/ami_tls_crypto.h, which pulls in
    exec/types.h. RFC 7905. */
 #define FR_ECDHE_RSA_CHACHA20_POLY1305      0xCCA8
 #define FR_ECDHE_ECDSA_CHACHA20_POLY1305    0xCCA9
 
-/*
- * The IDs from ami_ciphersuite_table in src/tls/ami_tls_crypto.c, in its
- * order. The method pointers are null because no parser here calls one,
- * _nx_secure_tls_process_serverhello() compares the ID and stores the row.
- */
 static NX_SECURE_TLS_CIPHERSUITE_INFO fr_suites[] =
 {
     { FR_ECDHE_ECDSA_CHACHA20_POLY1305,
@@ -218,9 +142,6 @@ static void fr_session_init(NX_SECURE_TLS_SESSION *s)
     s->nx_secure_tls_client_state = NX_SECURE_TLS_CLIENT_STATE_HELLO_REQUEST;
 }
 
-/* ------------------------------------------------------------- the seeds --- */
-
-/* Server random plus a session ID; the shape every ServerHello starts with. */
 static void frs_hello_body(FrBuf *w, unsigned sid_len, unsigned suite)
 {
     unsigned i;
@@ -247,8 +168,6 @@ static void frs_serverhello(FrBuf *w)
     fr_seal(w);
 }
 
-/* The extension block, which is where a ServerHello's parsing actually
-   happens: an id, a length, and a body the parser has to bound itself. */
 static void frs_extensions(FrBuf *w)
 {
     unsigned at;
@@ -300,7 +219,6 @@ static void frs_ext_len_past_end(FrBuf *w)
     fr_seal(w);
 }
 
-/* The extension block claims more than the message holds. */
 static void frs_ext_block_overrun(FrBuf *w)
 {
     unsigned at;
@@ -317,8 +235,6 @@ static void frs_ext_block_overrun(FrBuf *w)
     fr_seal(w);
 }
 
-/* A session ID as long as the field allows, so the ciphersuite that follows
-   sits at the far end of the message. */
 static void frs_sid_max(FrBuf *w)
 {
     unsigned at;
@@ -331,7 +247,6 @@ static void frs_sid_max(FrBuf *w)
     fr_seal(w);
 }
 
-/* Exactly the shortest ServerHello the parser accepts. */
 static void frs_sh_min(FrBuf *w)
 {
     unsigned at;
@@ -343,7 +258,6 @@ static void frs_sh_min(FrBuf *w)
     fr_seal(w);
 }
 
-/* A ciphersuite our client never offered. */
 static void frs_sh_unknown_suite(FrBuf *w)
 {
     unsigned at;
@@ -403,7 +317,6 @@ static void frs_msg_past_record(FrBuf *w)
     fr_seal(w);
 }
 
-/* A NewSessionTicket whose ticket length runs past the message. */
 static void frs_ticket_overrun(FrBuf *w)
 {
     unsigned at;
@@ -417,7 +330,6 @@ static void frs_ticket_overrun(FrBuf *w)
     fr_seal(w);
 }
 
-/* A CertificateRequest with every count at its maximum. */
 static void frs_certreq_max(FrBuf *w)
 {
     unsigned at;
@@ -433,7 +345,6 @@ static void frs_certreq_max(FrBuf *w)
     fr_seal(w);
 }
 
-/* A record header and nothing else. */
 static void frs_header_only(FrBuf *w)
 {
     fr_record(w, NX_SECURE_TLS_HANDSHAKE);
@@ -450,7 +361,6 @@ static void frs_short_header(FrBuf *w)
     fr_u8(w, 0x03);
 }
 
-/* A record header claiming far more payload than arrived. */
 static void frs_len_past_end(FrBuf *w)
 {
     unsigned at;
@@ -462,7 +372,6 @@ static void frs_len_past_end(FrBuf *w)
     fr_patch16(w, 3, 0x4000);
 }
 
-/* A protocol version no client here speaks. */
 static void frs_bad_version(FrBuf *w)
 {
     frs_serverhello(w);
@@ -470,7 +379,6 @@ static void frs_bad_version(FrBuf *w)
     w->b[2] = 0x99;
 }
 
-/* An alert, which is the one record type a server can send at any moment. */
 static void frs_alert(FrBuf *w)
 {
     fr_record(w, NX_SECURE_TLS_ALERT);
@@ -486,7 +394,6 @@ static void frs_changecipherspec(FrBuf *w)
     fr_seal(w);
 }
 
-/* A record type that is not one of the four. */
 static void frs_bad_type(FrBuf *w)
 {
     frs_serverhello(w);
@@ -539,15 +446,6 @@ static const FrSeed fr_seeds[] =
 
 #define FR_SEED_COUNT   (int)(sizeof(fr_seeds) / sizeof(fr_seeds[0]))
 
-/* ------------------------------------------------------------- the driver -- */
-
-/*
- * The record payload, message by message, exactly as
- * _nx_secure_tls_client_handshake() walks it: the same header call, the same
- * fragment test, the same dispatch. `data` is a fresh allocation of `len`
- * bytes, the record buffer, so that a parser reading past the payload
- * lands in the redzone rather than in whatever the last case left behind.
- */
 static void fr_dispatch(NX_SECURE_TLS_SESSION *s, UCHAR *data, unsigned len)
 {
     UCHAR   *msg    = data;
@@ -583,14 +481,6 @@ static void fr_dispatch(NX_SECURE_TLS_SESSION *s, UCHAR *data, unsigned len)
                                                              message_length);
             break;
 
-        /*
-         * NewSessionTicket has no case. _nx_secure_tls_process_newsessionticket()
-         * is inside #if NX_SECURE_TLS_TLS_1_3_ENABLED and TLS 1.3 is off here,
-         * so nothing vendored parses one. The TLS 1.2 ticket is parsed by
-         * tls_resume_take_ticket() in src/tlslib/tls_resume.c, which cannot be
-         * built on a host, see the note in tests/fuzz/CMakeLists.txt. The
-         * seed still carries one, because the header walk has to step over it.
-         */
         default:
             break;
         }
@@ -600,15 +490,6 @@ static void fr_dispatch(NX_SECURE_TLS_SESSION *s, UCHAR *data, unsigned len)
     }
 }
 
-/*
- * The record header, through a real NX_PACKET chain.
- *
- * Chained rather than flat because that is what TCP delivers and because the
- * chain is where the header parse can go wrong: nx_packet_data_extract_offset
- * walks prepend/append pointers across packets, and a header split across two
- * of them is the case a flat buffer never reaches. The split point is part of
- * the input, so the sweep tries all of them.
- */
 static UINT fr_record_header(NX_SECURE_TLS_SESSION *s, const unsigned char *msg,
                              unsigned len, unsigned split, USHORT *type,
                              UINT *length)
@@ -688,16 +569,6 @@ static void fr_run(const unsigned char *msg, unsigned len, unsigned split)
     free(payload);
 }
 
-/*
- * Proof that the driver reaches the parsers.
- *
- * A driver that stopped at the record header, a version check that always
- * failed, a length that never cleared, would report "clean" for every input
- * and read as coverage. So a known-good ServerHello goes in and the fields it
- * must have filled come out: the negotiated version, the session ID it
- * carried, and the ciphersuite row the lookup chose. If any of that is missing
- * the sweep does not run.
- */
 static void fr_selftest(void)
 {
     NX_SECURE_TLS_SESSION s;
@@ -776,12 +647,6 @@ static unsigned fr_below(unsigned n)
     return (n == 0) ? 0 : (fr_rand() % n);
 }
 
-/*
- * Aimed at the bytes that decide how far a walk goes, a record length, a
- * message length, an extension length, the session ID byte, rather than at
- * the payload. A flipped random byte changes a key nobody derives here; a
- * flipped length byte changes where the next read lands.
- */
 static void fr_mutate(FrBuf *w)
 {
     unsigned rounds = fr_below(6) + 1u;
@@ -837,8 +702,6 @@ static void fr_run_seed(int s)
 
     fr_seeds[s].build(&w);
 
-    /* Every seed twice: flat, and split so the record header straddles two
-       packets. */
     fr_run(w.b, w.len, 0);
     fr_run(w.b, w.len, 3);
 }
@@ -891,8 +754,6 @@ int main(int argc, char **argv)
             unsigned long n;
             int           s;
 
-            /* The seeds first, always: a sweep that never runs the known
-               shapes is a sweep whose coverage nobody can state. */
             for (s = 0; s < FR_SEED_COUNT; s++)
                 fr_run_seed(s);
 
@@ -913,7 +774,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* One record on stdin. */
     {
         unsigned char buf[FR_MAX];
         size_t        got = fread(buf, 1, sizeof(buf), stdin);

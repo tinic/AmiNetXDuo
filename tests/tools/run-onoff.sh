@@ -5,65 +5,6 @@
 #   tests/tools/run-onoff.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                            [-A [-N board] [-B backend]] [-r TRANSCRIPT]
 #
-# Two commands out of one source (src/tools/onoff.c, TOOL_OFFLINE picks which)
-# and nothing exercised either of them.  run-livetools.sh runs `Offline eth0`
-# and `Online eth0` and asserts nothing about the pair, so an interface that
-# went down and never came back, or one that came back listed but could not
-# pass a packet, read as a pass there.  That is the shape RemoveNetInterface
-# shipped in.
-#
-# What the template offers, and so what is checked here:
-#
-#   NAME/A      required, and both spellings the header promises: a configured
-#               interface, or the SANA-II driver an interface uses
-#   UNIT/N      checked against the unit the interface file already names
-#   TIMEOUT/N   the bounded wait, and that the bound is not spent
-#
-# plus the four ways they end -- OK, WARN with the stack down, ERROR on an
-# argument that contradicts the configuration, FAIL on a name that resolves to
-# nothing -- and the state transition seen from outside the commands: netstat
-# before and after, in both directions, and a ping in all three states.
-#
-# THE PING IS THE POINT.  "eth0 is offline" is a sentence the command prints;
-# an interface that is still forwarding after it is a lie that only traffic
-# catches.  Likewise "eth0 is online" after a down/up cycle: the interface is
-# listed again either way, so the assertion that separates a working Online
-# from a cosmetic one is a reply arriving.  All three pings are asserted, the
-# middle one negatively, because a suite that only ever asserts success cannot
-# tell a working Offline from one that does nothing at all.
-#
-# ONE BOOT.  ToolsSmoke reopens its transcript from the top after a reset, so a
-# reboot would renumber every block below; the count of blocks is asserted for
-# that reason.  The steps are ordered so each leaves the machine in the state
-# the next one needs, and the two stack-down cases run first because they are
-# the only ones that need the stack down.
-#
-# GOOD CASE: 25 s wall on playhouse3 under SLIRP, measured, boot to verdict --
-# a static bring-up with no lease to wait for, twenty commands and three pings.
-# The default -t 90 is between 3x and 4x the guest's share of that.  A run that
-# reaches the timeout is a defect to diagnose, not a number to raise: the first
-# assertion below names the command that was still running when the emulator
-# was killed, so a hang says which command hung.
-#
-# NOT COVERED HERE:
-#
-#   * the TIMEOUT that expires.  Reaching it needs an interface that accepts
-#     NETCTRL_INTERFACE_UP and then does not come up, which nothing on this
-#     machine can be made to do on purpose; the bounded case is asserted
-#     instead, that the wait ends when the state is reached rather than when
-#     the clock does.
-#   * Ctrl-C in the middle of the wait (tool_break/ERROR_BREAK).  ToolsSmoke's
-#     children have no console to break.
-#   * the ambiguous name, an interface file called the same thing as a driver.
-#     It needs a second interface file in the drawer, which the library reads
-#     at startup, so it cannot share a boot with the live half above.
-#   * Online on a machine where the stack has never been opened, which starts
-#     the whole stack rather than switching one interface.  That path is
-#     tests/tools/run-addifup.sh's subject, from the other command.
-#
-# SLIRP by default, which needs no peer: 10.0.2.2 answers ICMP locally, so the
-# three pings measure this stack and not the network.  -A runs it bridged.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -87,10 +28,6 @@ while getopts "m:t:b:AN:B:r:" opt; do
         A) RUNNER=amiberry ;;
         N) RUNNER=amiberry; BOARD="$OPTARG" ;;
         B) RUNNER=amiberry; IFACE="$OPTARG" ;;
-        # Assert a transcript that already exists instead of booting.  For
-        # developing the assertions below, and for showing that they fail on a
-        # transcript that has been broken on purpose; it proves nothing about
-        # the product on its own, which is why it prints that it did not run.
         r) REPLAY="$OPTARG" ;;
         *) sed -n '3,7p' "$0" >&2; exit 2 ;;
     esac
@@ -139,10 +76,6 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# Static, and SLIRP's own numbers, so "came back online" can be asserted
-# against the address it had before rather than against whatever a server felt
-# like handing out the second time.  UNIT 0 is what the UNIT/N cases below
-# contradict on purpose.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -152,8 +85,6 @@ NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
 
-# The board's own driver, when -A named one that is not the A2065.  Staged the
-# way tests/netstack/run-amiberry.sh stages it.
 if [ "$RUNNER" = amiberry ]; then
     . "$ROOT/tools/sana2-stage.sh"
 
@@ -173,10 +104,6 @@ for t in AddNetInterface Online Offline netstat ping; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# Step by step, and every line is asserted below by its position in this list.
-# The three netstat -i and the three pings are the outside view: the commands'
-# own sentences are checked too, but only these can tell "printed offline"
-# from "is offline".
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:Offline eth0
 SYS:Offline
@@ -240,8 +167,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# The Nth block for a given command banner: its output and nothing else, so
-# every assertion below reads the transcript by the same rule.
 block() {
     awk -v banner="$1" -v want="$2" '
         index($0, "===== " banner " =====") == 1 { n++; if (n == want) { on = 1; next } }
@@ -250,8 +175,6 @@ block() {
     ' "$REPORT"
 }
 
-# The rc ToolsSmoke recorded for that block.  RETURN_OK 0, WARN 5, ERROR 10,
-# FAIL 20, which is what the command returns and what a script calling it sees.
 rc_of() { block "$1" "$2" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'; }
 
 # How long that command took, in milliseconds.  Only TIMEOUT/N needs it.
@@ -274,8 +197,6 @@ says() { # banner nth extended-regexp description
 
 ifaces() { block "SYS:netstat -i" "$1"; }
 
-# eth0's line in the Nth netstat -i, or nothing.  Its fields are
-# name/mtu/address/link (src/tools/netstat.c show_interfaces).
 eth0_line() { ifaces "$1" | grep -E '^eth0 ' || true; }
 
 iface_up() { # nth-netstat description
@@ -291,10 +212,6 @@ iface_up() { # nth-netstat description
 }
 
 # ---- the run finished, and finished once --------------------------------
-#
-# A transcript that stops part way through is a hang, and the block that has
-# no rc line names the command it hung in.  Diagnosing it here is the
-# difference between "something timed out" and "Offline eth0 never returned".
 EXPECTED_BLOCKS=20
 BLOCKS=$(grep -c '^===== SYS:' "$REPORT" || true)
 if ! grep -q '^===== done, ' "$REPORT"; then
@@ -352,8 +269,6 @@ elif printf '%s\n' "$PING2" | grep -q ' received' ; then
     fail "an offline eth0 still passed traffic"
     show "SYS:ping 10.0.2.2 -c 1 -t 5" 1
 else
-    # No summary at all: the send itself was refused, which is also a pass
-    # for this step, but say which happened.
     pass "and nothing gets through: ping could not send at all"
 fi
 if [ "$PRC2" = 0 ]; then
@@ -368,9 +283,6 @@ says "SYS:Offline eth0" 3 "^eth0 is already offline$" \
 want_rc "SYS:Offline eth0" 3 0 "and returns OK, not an error"
 
 # ---- 7. Online, and the interface is usable again -----------------------
-#
-# An interface that comes back listed but cannot pass a packet is the failure
-# this file was written for, so the address and the reply are both asserted.
 says "SYS:Online eth0" 1 "^eth0 is online, address 10\.0\.2\.15$" \
      "Online reports eth0 online with the address it had"
 want_rc "SYS:Online eth0" 1 0 "and returns OK"
@@ -384,11 +296,6 @@ says "SYS:Online eth0" 2 "^eth0 is already online$" \
 want_rc "SYS:Online eth0" 2 0 "and returns OK"
 
 # ---- 8. TIMEOUT/N is accepted, and the bound is not spent ---------------
-#
-# The transition is synchronous, so the state is reached before the wait
-# begins and the command must come back at once.  Sitting for the whole five
-# seconds would mean the wait is polling something that never changes, which
-# is what the LINKUP/ONLINE note in onoff.c is about.
 says "SYS:Offline eth0 TIMEOUT 5" 1 "^eth0 is offline$" \
      "TIMEOUT 5 is accepted and the interface goes down"
 want_rc "SYS:Offline eth0 TIMEOUT 5" 1 0 "and returns OK"

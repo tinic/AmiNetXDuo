@@ -1,20 +1,7 @@
 /*
- * The tests for src/tools/httpws.c, RFC 6455 on the wire.
- *
- * Everything here fails silently.  An accept computed over the key without the
- * GUID is 28 characters of base64 and every browser refuses the connection
- * with no diagnostic the server can see.  A mask applied from the wrong offset
- * when a frame is split across two reads produces different bytes rather than
- * an error, so a shell behind it runs a command nobody typed.  A control frame
- * accepted while fragmented, or a 64-bit length whose top word was not
- * checked, is a length the decoder and the client disagree about, and after
- * that the two are reading different frames on the same socket for ever.
- *
- * So the vectors are written down.  The handshake pair is RFC 6455 1.3's own,
- * digit for digit, and the frames are 5.7's.  The rest are the cases the
- * specification says a server must fail, each fed both whole and one byte at a
- * time, because a state machine that is right on a whole buffer and wrong
- * across a split is the failure this decoder exists to avoid.
+ * The tests for src/tools/httpws.c, RFC 6455 on the wire. The handshake pair is
+ * RFC 6455 1.3's own, digit for digit, and the frames are 5.7's. Every case is
+ * fed both whole and one byte at a time.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools -DNX_CRYPTO_STANDALONE_ENABLE \
  *      -Ithird_party/netxduo/crypto_libraries/inc \
@@ -44,9 +31,8 @@ static int checks;
 /* ------------------------------------------------------------ the sink --- */
 
 /*
- * What the decoder said, flattened.  A message's pieces are concatenated and
- * the count of calls is kept, because one message in three pieces and three
- * messages are the difference a fragmentation test is about.
+ * What the decoder said, flattened. A message's pieces are concatenated and the
+ * count of calls is kept.
  */
 typedef struct
 {
@@ -54,12 +40,9 @@ typedef struct
     int             finals;
     HttpWsEvent     last_ev;
     /*
-     * Two buffers, for a reason.  RFC 6455 5.4 lets a control frame arrive
-     * between the fragments of a data message, so a reader with one
-     * accumulator concatenates a ping's payload onto the half-finished message
-     * and delivers both as one.  A single buffer here reported "Helhi" and
-     * "lo" for a Hello split around a ping, which is what a terminal with one
-     * buffer would type into the shell.
+     * Two buffers: RFC 6455 5.4 lets a control frame arrive between the
+     * fragments of a data message, so one accumulator would concatenate a
+     * ping's payload onto the half-finished message.
      */
     unsigned long   len;
     unsigned char   buf[4096];
@@ -136,10 +119,8 @@ static void heard_clear(void)
 }
 
 /*
- * Feed the same bytes two ways, in one call and one byte at a time.  The log
- * both produce has to be identical, and the failure code too.  A decoder is
- * only correct if the split does not matter, and every real split is the
- * network's choice.
+ * Feed the same bytes two ways, in one call and one byte at a time. The log and
+ * the failure code both have to be identical.
  */
 static void feed_both(const unsigned char *frame, long len,
                       char *log_whole, unsigned short *fail_whole,
@@ -241,10 +222,7 @@ static void test_handshake(void)
     printf("the upgrade handshake\n");
 
     /*
-     * RFC 6455 1.3, verbatim.  This pair is why the GUID is in the source.
-     * The key alone hashes to something else entirely, and a server that got
-     * it wrong would look identical from the outside up to the moment every
-     * browser refused it.
+     * RFC 6455 1.3, verbatim. This pair is why the GUID is in the source.
      */
     CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25jZQ==", accept,
                          sizeof(accept)) == 1);
@@ -263,10 +241,8 @@ static void test_handshake(void)
                          sizeof(accept)) == 0);
     CHECK(http_ws_accept("dGhlIHNhbXBsZSBub25j!!==", accept,
                          sizeof(accept)) == 0);
-    /* 24 unpadded characters decode to eighteen bytes, not sixteen, so a
-       length check on the text alone would let this through and a nonce of the
-       wrong size would be hashed.  The padded form of the same length is the
-       one that is a key. */
+    /* 24 unpadded characters decode to eighteen bytes, not sixteen, so a length
+       check on the text alone would hash a nonce of the wrong size. */
     CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAAAA", accept,
                          sizeof(accept)) == 0);
     CHECK(http_ws_accept("AAAAAAAAAAAAAAAAAAAAAA==", accept,
@@ -360,10 +336,8 @@ static void test_frames(void)
                "3: ", 0);
     }
 
-    /* RFC 6455 5.5.1: receiving Close ends input.  A client can concatenate
-       another frame in the same TCP segment, but none of that later frame may
-       be delivered.  For the terminal, the binary payload would otherwise be
-       a command run after the client had closed the session. */
+    /* RFC 6455 5.5.1: receiving Close ends input. A client can concatenate
+       another frame in the same TCP segment, but none of it may be delivered. */
     {
         static const unsigned char after_close[] = {
             0x88, 0x80, 0, 0, 0, 0,
@@ -670,11 +644,8 @@ static void test_encoder(void)
     CHECK(n == 4 && out[1] == 2 && out[2] == 0x03 && out[3] == 0xe8);
 
     /*
-     * What this server sends must be what it can read back, minus the mask
-     * that only a client applies.  An encoder and a decoder that agree with
-     * each other and not with the specification is the failure a single-sided
-     * test cannot see, so every case above is the RFC's bytes and this one is
-     * the round trip.
+     * What this server sends must be what it can read back, minus the mask that
+     * only a client applies.
      */
     {
         HttpWsIn      in;

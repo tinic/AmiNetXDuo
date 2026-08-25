@@ -1,30 +1,11 @@
 /*
- * StatProbe, checks that GetNetworkStatistics() reports the running stack.
+ * StatProbe: checks that GetNetworkStatistics() reports the running stack --
+ * that the return value is a byte count, that the counters are non-zero, and
+ * that a listen() shows as exactly one entry in TCPS_LISTEN (4.4BSD's
+ * enumeration, not NetX Duo's).
  *
- * The call hands back 4.4BSD's own kernel statistics structures by value.
- * Three things a build cannot check and this can:
- *
- *   1. The return value is a byte count, not zero-on-success and not an entry
- *      count, the two other readings the prototype allows.  A NULL
- *      destination asks how much would be needed and copies nothing.
- *
- *   2. The numbers are the running stack's.  This machine got its address by
- *      DHCP over UDP, so udps_ipackets and ips_total cannot be zero.  A stub
- *      returning a zeroed struct of the right size passes every structural
- *      check and fails these.
- *
- *   3. pcd_tcp_state is 4.4BSD's enumeration, not NetX Duo's, and a BSD
- *      listen() is one entry.  The enumerations agree up to CLOSE_WAIT and
- *      diverge after it.  This stack implements one listening descriptor as
- *      two NX_TCP_SOCKETs, the descriptor's own, left in CLOSED, and a spare
- *      parked on the port in SYN_RECEIVED (src/bsdsocket/socket.c), so a
- *      literal report would show one listen() as two sockets on one port,
- *      neither listening and one apparently mid-handshake with nobody.  The
- *      probe listens on a port and asserts that exactly one entry appears and
- *      that its state is TCPS_LISTEN.
- *
- * Vectors are called by hand at their LVOs, the same way routeprobe.c and
- * ifprobe.c do: the NDK inlines assume a global SocketBase.
+ * Vectors are called by hand at their LVOs: the NDK inlines assume a global
+ * SocketBase.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -33,7 +14,7 @@
 #include <dos/dos.h>
 
 /* <libraries/bsdsocket.h> pulls in <sys/socket.h>, which uses size_t and
-   ssize_t without declaring them. Same ordering note as ifprobe.c. */
+   ssize_t without declaring them: these must precede it. */
 #include <stddef.h>
 #include <sys/types.h>
 #include <libraries/bsdsocket.h>
@@ -154,10 +135,6 @@ static LONG p_errno(struct Library *base)
 
 /* ------------------------------------------------------------------ main -- */
 
-/*
- * The whole of a struct plus a little, so a short read cannot be mistaken for
- * a full one and an overrun would be visible as a changed guard byte.
- */
 #define GUARD_BYTE  0x5A
 
 static UBYTE buffer[512];
@@ -234,10 +211,8 @@ int main(void)
                       ? ", sizeof(struct ipstat), correctly" : ", WRONG"));
 
     /* ---- and the numbers themselves --------------------------------------
-     *
-     * This machine leased its address by DHCP, which is UDP over IP, so
-     * neither of these can be zero on a stack that is really counting.
-     */
+       This machine leased its address by DHCP over UDP, so neither of these
+       can be zero on a stack that is really counting. */
     p_fill_guard();
     rc = p_stats(base, NETSTATUS_ip, NETWORKSTATUS_VERSION, buffer,
                  (LONG)sizeof(buffer));
@@ -279,11 +254,7 @@ int main(void)
            (LONG)(p_guard_intact((ULONG)rc) ? "intact" : "OVERRUN"));
 
     /* ---- a caller that asks for less than the whole struct ----------------
-     *
-     * "size, Number of bytes to copy" is the caller's limit. Copying the
-     * whole struct regardless would overrun a buffer sized against an older
-     * layout, which is the one way this call can corrupt an application.
-     */
+       "size" is the caller's limit, not a suggestion. */
     p_fill_guard();
     rc = p_stats(base, NETSTATUS_ip, NETWORKSTATUS_VERSION, buffer, 8);
     Printf((CONST_STRPTR)"NETSTATUS_ip into 8 bytes: rc %ld guard %s\n", rc,
@@ -353,11 +324,6 @@ int main(void)
                               : ", NOT THE BSD NUMBER, WRONG"));
     }
 
-    /*
-     * A buffer that holds exactly one entry, while there is at least one:
-     * "size" is a limit and the call must fill what fits and report only
-     * that, rather than writing the whole table.
-     */
     if (n > 0)
     {
         p_fill_guard();

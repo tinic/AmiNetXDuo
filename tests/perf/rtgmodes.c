@@ -1,26 +1,6 @@
 /*
  * Every display mode the graphics card really publishes, as key=value.
  *
- *   rtgmodes                       lists and returns
- *
- * A TEST TOOL, and it exists because the console harness had been GUESSING.
- * screenmode.prefs names a mode by ID; Amiberry's uaegfx derives that ID from
- * a table this side cannot see; and an ID the board does not hold opens no
- * screen at all, silently, leaving Workbench on the chipset with every other
- * check in the harness passing on it.  Two attempts at a truecolour arm were
- * spent on IDs worked out from the emulator's source.
- *
- * So this asks the display database.  It prints one line a card mode with the
- * ID, the shape, the depth and the pixel format, and the harness reads its
- * answer instead of writing one down.  A depth the board publishes nothing for
- * is then a fact in the output rather than a screen that never opened.
- *
- * IT OPENS NOTHING AND IT ALWAYS RETURNS, which is why it may be run from
- * S:Startup-Sequence: a lister that fell into an open-and-wait path stopped a
- * boot at that line once already, with the server three lines below it never
- * reached.  There is no code here that can do that.  See tests/perf/rtgout.h
- * for the other half of surviving that position in the boot.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -43,11 +23,6 @@
 #define CYBRIDATTR_PIXFMT       0x80000001UL
 #define CYBRIDATTR_DEPTH        0x80000004UL
 
-/* CyberGraphX's pixel-format numbering, which is NOT Picasso96's RGBFTYPE and
-   is not in the same order.  This is the numbering GetCyberIDAttr answers in,
-   including on a Picasso96 machine, where cybergraphics.library is P96's own
-   emulation of it -- so it is the numbering printed, and the name goes beside
-   the number so nobody has to hold the table in their head. */
 static const char *const pixfmt_name[] =
 {
     "LUT8",     "RGB15",    "BGR15",    "RGB15PC",
@@ -109,15 +84,6 @@ int main(VOID)
             continue;
         rtg++;
 
-        /* THE HANDLE, NOT A NULL AND THE ID.  GetDisplayInfoData() accepts
-           either, but the NULL form puts a compile-time zero in a0 -- and the
-           NDK's LP5 already binds a0 to one of its own clobber operands, so
-           gcc satisfies the argument's "rf" constraint from a data register
-           instead and the library is entered with whatever a0 held.  That is
-           not a theory: it returned 0 for every card mode here, and moving an
-           unrelated print turned it into an illegal instruction that took the
-           machine down mid-boot.  FindDisplayInfo() hands over a real pointer,
-           which gcc does keep in a0. */
         handle = FindDisplayInfo(id);
         if (handle == NULL)
             continue;

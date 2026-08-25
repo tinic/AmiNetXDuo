@@ -1,62 +1,7 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR THE IPv4 ROUTING TABLE.
-#
-#   tests/tools/run-routes.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                             [-N BOARD] [-B IFACE]
-#
-# WHAT IT IS PROVING
-#
-#   NX_ENABLE_IP_STATIC_ROUTING is a `#define` in port/netxduo-amiga/inc/
-#   nx_user.h, and a `#define` that changes no packet is not a feature.  So
-#   this test does not stop at "AddNetRoute printed something": it makes the
-#   guest send to an address that ONLY a static route can reach, and then
-#   looks for the consequence on the wire.
-#
-#   The consequence is chosen so that it cannot be produced any other way.
-#   The next hops are .249, .250 and .251 of the guest's own subnet, derived at
-#   run time because a fixed address is only on-subnet on the network it was
-#   written for, and NetX Duo refuses one that is not.  Sending to 192.168.77.5:
-#
-#     * with the route, _nx_ip_route_find() matches the table entry,
-#                             the next hop becomes .249, and the stack
-#                             emits  ARP who-has <.249>  and nothing else;
-#     * without the route , the default gateway is used, whose ARP entry the
-#                             DHCP exchange already resolved, so the frame goes
-#                             straight out with no ARP at all.
-#
-#   That ARP request therefore appears if and only if the routing table was
-#   consulted.  It is read off the host NIC, which is why this harness is
 #   bridged only: under SLIRP the frames touch no NIC and there is nothing to
 #   read at all.  -B names the NIC and the string `slirp` is refused outright.
-#
-# WHAT ELSE IT ASSERTS
-#
-#   * NETSTATUS_ROUTES reports the entry, with the S flag that marks it as one
-#     somebody added rather than one derived from an interface, and stops
-#     reporting it after the delete.
-#   * a next hop that is NOT on any of the machine's own subnets is refused
-#     rather than stored, and so is deleting a route that is not there.  That
-#     is NetX Duo's rule, and "the call returned success" is not evidence that
-#     anything was checked.
-#   * netstat -r prints the same table, through the same renderer
-#     ShowNetStatus uses, so the two commands cannot disagree about it.
-#   * ChangeRouteTagList moves a route's next hop, and the next packet for that
-#     destination goes to the NEW one.  Same shape of evidence as above and for
-#     the same reason: "the table reads back differently" is what a vector that
-#     wrote to the wrong table would also produce.  This half needs a host NIC
-#     to capture on, so it needs an unprivileged tcpdump and skips without one.
-#
-# The route is added through NETCTRL_ROUTE_ADD by tests/tools/routeprobe.c
-# rather than by AddNetRoute: what is under test is the stack, and a test that
-# went through a command's ReadArgs template would fail whenever the template
-# changed.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -114,8 +59,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/routes-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -128,11 +71,6 @@ done
 cp "$PROBE" "$STAGE/RouteProbe"
 cp "$RTPROBE" "$STAGE/RtProbe"
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name in
-# DEVICE=.  Without it the interface file copied in above keeps
-# DEVICE=a2065.device whatever -N asked for, so every other board opens
-# a2065.device against hardware that is not there and the run reports a stack
-# failure that is really a staging one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -142,10 +80,6 @@ if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
 fi
 sana2_stage "$BOARD" "$STAGE/devs"
 
-# The order is the experiment.  RouteProbe prints the table before, with and
-# after the route, so the transcript shows it changing rather than only its
-# final state; netstat -r is run either side to prove the shipped command sees
-# the same table the library reports.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:netstat -r
@@ -154,27 +88,15 @@ SYS:netstat -r
 SYS:RtProbe
 EOF
 
-# ------------------------------------------------------------------ run ---
-
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-routes}"
-# A MAC of its own, so two guests on this bridge cannot answer for each other.
 export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_ROUTES_MAC:-02:41:4d:49:00:c7}"
 
-# ---- the wire, when there is one to watch --------------------------------
-#
-# Amiberry writes no frame log, so the a2065pcap.py route the FS-UAE-era
-# assertions below took does not exist here.  Bridged onto a host NIC there is
-# something better: the frames really are on that NIC, so tcpdump on the host
-# sees exactly what left the card.  Captured for the whole run and read after
-# it; ARP only, which is all the assertions look at and keeps the file small.
 WIRE=""
 WIRE_PID=""
 if command -v tcpdump >/dev/null 2>&1; then
     WIRE="$STAGE/wire.pcap"
     tcpdump -i "$IFACE" -n -s0 -U -w "$WIRE" arp >/dev/null 2>&1 &
     WIRE_PID=$!
-    # tcpdump opens its socket asynchronously; without this the guest's first
-    # frames are missed and the capture reads like a stack that sent nothing.
     sleep 2
     if ! kill -0 "$WIRE_PID" 2>/dev/null; then
         echo "==> tcpdump could not capture on $IFACE, the wire check will skip" >&2
@@ -195,16 +117,11 @@ echo "==> booting $MODEL under Amiberry, $BOARD on $IFACE"
 RUN_RC=$?
 set -e
 
-# By pid, never by name: other runs on this host have tcpdumps of their own.
 if [ -n "$WIRE_PID" ]; then
     kill "$WIRE_PID" 2>/dev/null || true
     wait "$WIRE_PID" 2>/dev/null || true
 fi
 
-# No SERIAL here.  It was set to build/serial-<tag>.log, a name
-# tools/amiberry-run.sh does not write, and nothing in this file ever read the
-# variable: every assertion is on the transcript.  A path that is wrong and
-# unused is the next thing somebody copies.
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 
@@ -215,28 +132,15 @@ echo "====================================================================="
 echo
 
 FAILED=0
-# An assertion that did not run is counted, not just printed.  See the verdict
-# at the end: it is what stops this exiting 0 with its own subject untested.
 UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 
-# The two next hops RtProbe derived, .250 and .251 of whatever subnet the
-# machine is on.  Read here rather than beside the assertions that use them:
-# the wire check below needs them too and comes first.
 RP_HOP=$(sed -n 's/^route next hop: \([0-9.]*\)$/\1/p' "$REPORT" | head -1)
 HOP_A=$(sed -n 's/^next hops: \([0-9.]*\) then [0-9.]*$/\1/p' "$REPORT" | head -1)
 HOP_B=$(sed -n 's/^next hops: [0-9.]* then \([0-9.]*\)$/\1/p' "$REPORT" | head -1)
 
-# ---- one boot, as ever (docs/RESEARCH.md 25) ------------------------------
-#
-# The serial log is the usual boot counter, but FS-UAE writes nothing to it on
-# this host, so the transcript is used instead: ToolsSmoke reopens DH0:tools.txt
-# from the top after a reset, so the FIRST command appearing twice is a reboot.
-# A crash that resets the machine is a different and much worse defect than a
-# command that blocks, and a test that cannot tell them apart sends the next
-# person looking in the wrong place.
 STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted exactly once (no reset)"
@@ -246,23 +150,18 @@ else
     fail "the run did not get as far as bringing the interface up"
 fi
 
-# ---- the table is compiled in -------------------------------------------
 if grep -q "^static routing: compiled in" "$REPORT"; then
     pass "NX_ENABLE_IP_STATIC_ROUTING is in the running stack"
 else
     fail "the running stack reports no routing table"
 fi
 
-# ---- the entry went in, and came back out --------------------------------
 if grep -Eq "^add 192\\.168\\.77\\.0/24 via [0-9.]+: 0 " "$REPORT"; then
     pass "NETCTRL_ROUTE_ADD accepted 192.168.77.0/24 via $RP_HOP"
 else
     fail "NETCTRL_ROUTE_ADD did not accept the route"
 fi
 
-# Reported exactly once, in the "with" listing and in neither of the others.
-# Counting is the assertion: a single "is it there" grep could not tell a
-# table that gained a route from one that always had it.
 SHOWN=$(grep -c "^  192\.168\.77\.0 " "$REPORT" || true)
 if [ "$SHOWN" -eq 1 ]; then
     pass "the route is in the 'with' listing and in neither of the other two"
@@ -277,7 +176,6 @@ else
     fail "the route is not reported with the S flag and the right next hop"
 fi
 
-# ---- the negative cases --------------------------------------------------
 if grep -q "8.8.8.8: .*, refused, correctly" "$REPORT"; then
     pass "a next hop on no local subnet was refused"
 else
@@ -296,21 +194,12 @@ else
     fail "NETCTRL_ROUTE_DELETE did not remove the route"
 fi
 
-# ---- and the shipped command shows the same table ------------------------
 if grep -q "^Routing table" "$REPORT" && grep -q "127.0.0.0" "$REPORT"; then
     pass "netstat -r printed the table from NETSTATUS_ROUTES"
 else
     fail "netstat -r printed no routing table"
 fi
 
-# ---- THE WIRE ------------------------------------------------------------
-#
-# The whole point.  The emulator's own frame log, converted, must contain an
-# ARP request for the route's next hop, an address nothing in this test ever
-# named to the stack except through AddNetRoute.
-# $WIRE is the capture this script took on the host NIC, which exists on a
-# bridged run; $HD/host.pcap is a2065pcap.py's decode of FS-UAE's own frame
-# log, which exists on no runner that is left.  Either is the wire.
 PCAP=""
 [ -s "${WIRE:-}" ] && PCAP="$WIRE"
 [ -z "$PCAP" ] && [ -s "$HD/host.pcap" ] && PCAP="$HD/host.pcap"
@@ -325,10 +214,6 @@ if [ -n "$PCAP" ] && [ -n "$RP_HOP" ]; then
         tcpdump -r "$PCAP" -n 2>/dev/null | grep -i arp | head -20 >&2 || true
     fi
 
-    # And nothing addressed to 192.168.77.5 may have gone to the DEFAULT
-    # gateway's hardware address, which is what a build without the table
-    # would have done.  Checked as "no IP packet for 192.168.77.5 left at
-    # all", because the ARP never resolves, so the queued packet is dropped.
     LEAKED=$(tcpdump -r "$PCAP" -n 2>/dev/null |
              grep -c "> 192.168.77.5" || true)
     if [ "${LEAKED:-0}" -eq 0 ]; then
@@ -337,28 +222,10 @@ if [ -n "$PCAP" ] && [ -n "$RP_HOP" ]; then
         fail "$LEAKED packet(s) for 192.168.77.5 left the machine unrouted"
     fi
 else
-    # a2065pcap.py decoded the capture out of FS-UAE's own log, and FS-UAE is
-    # gone: Amiberry writes no equivalent.  Bridged onto a host NIC there is a
-    # real capture instead, which is why this arm is now reached only when
-    # tcpdump could not open the NIC.
-    #
-    # And skipped is not zero.  "ARP for the next hop appears if and only if
-    # the routing table was consulted" is the whole claim of this file; every
-    # other assertion here reads what a command PRINTED, which a build with no
-    # routing table at all can print correctly.  The verdict at the end exits
-    # 77 for it.
     skip "no wire to read: this host has no tcpdump that can open $IFACE, where the
        frames are on a real NIC and this script captures them"
 fi
 
-# ---- THE WIRE AGAIN, FOR THE CHANGE --------------------------------------
-#
-# The claim ChangeRouteTagList has to earn: not that the table reads back
-# differently, but that the PACKETS go somewhere else afterwards.  RtProbe
-# sends to 192.168.66.5 once before the change and once after, and 192.168.66.5
-# can only leave this machine by the route it just added, so the stack ARPs for
-# whichever next hop that route names.  Two requests, for two different
-# addresses, in that order, and nothing else could have produced them.
 if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" ]; then
     tcpdump -r "$WIRE" -n 2>/dev/null > "$STAGE/wire.txt" || true
     A_FIRST=$(grep -n "who-has $HOP_A" "$STAGE/wire.txt" | head -1 | cut -d: -f1)
@@ -376,12 +243,6 @@ if [ -n "$WIRE" ] && [ -s "$WIRE" ] && [ -n "${HOP_A:-}" ] && [ -n "${HOP_B:-}" 
         fail "no ARP for $HOP_B: the packets did not follow the changed route"
     fi
 
-    # FIRST against FIRST, not last against first.  ARP is retried while a
-    # packet waits on it, so the datagram sent before the change goes on asking
-    # for $HOP_A for as long as it is queued, which is after the change and is
-    # correct: that packet was routed when the old next hop was the one.  What
-    # cannot happen unless the change took is a request for $HOP_B at all, and
-    # what orders the two is which poke produced the first of each.
     if [ -n "$A_FIRST" ] && [ -n "$B_FIRST" ] && [ "$B_FIRST" -gt "$A_FIRST" ]; then
         pass "in that order: $HOP_A first, $HOP_B only after the change"
     else
@@ -396,26 +257,12 @@ else
        -A -B <iface> on a bridged host for the wire half"
 fi
 
-# ---- THE PUBLISHED ROUTING API -------------------------------------------
-#
-# Everything above drives the private NETCTRL_ROUTE_ADD vector.  RtProbe
-# drives AddRouteTagList()/DeleteRouteTagList()/GetRouteInfo()/FreeRouteInfo()
-# instead, the Roadshow ABI a third-party tool uses, and walks the
-# returned table by rtm_msglen, which is the shape no build can check.
-
-# The next hop is not named here: RtProbe derives it from the machine's own
-# subnet, because NetX Duo refuses one that is on no interface and this file
-# should not decide what network the emulator is bridged onto.
 if grep -Eq "^add 192\.168\.66\.0 via [0-9.]+: rc 0 " "$REPORT"; then
     pass "AddRouteTagList added a route with no netmask tag in the grammar"
 else
     fail "AddRouteTagList refused 192.168.66.0"
 fi
 
-# The mask is IMPLIED: 192.168.66.0 has a zero host part under its classful
-# mask, so "the route is assumed to be a to a network" and 255.255.255.0 comes
-# from nothing but the address.  192.168.67.7 does not, so it is a host route
-# with a /32 and the H flag.
 if grep -Eq "^  with +192\.168\.66\.0 +[0-9.]+ +255\.255\.255\.0 +UGS" "$REPORT"; then
     pass "and the classful mask was derived from the address alone"
 else
@@ -428,8 +275,6 @@ else
     fail "192.168.67.7 did not come back as a /32 host route"
 fi
 
-# GetRouteInfo's own shape: version 3 on every entry, and the MTU carried in
-# rtm_rmx for the interface routes that have one.
 if grep -Eq "^  before .* v3 if " "$REPORT"; then
     pass "every entry reports rtm_version 3, as the autodoc specifies"
 else
@@ -448,20 +293,12 @@ else
     fail "GetRouteInfo(AF_INET, RTF_STATIC) did not return exactly two entries"
 fi
 
-# ---- ChangeRouteTagList ---------------------------------------------------
-#
-# The vector with no autodoc page (src/bsdsocket/routing.c).  Three claims:
-# the change reaches the table, the entry keeps its mask and its count, and a
-# change of a route that is not there is refused rather than installing one.
 if grep -Eq "^change 192\.168\.66\.0 to via [0-9.]+: rc 0 " "$REPORT"; then
     pass "ChangeRouteTagList changed the route's next hop"
 else
     fail "ChangeRouteTagList did not change 192.168.66.0"
 fi
 
-# The "changed" listing must carry the second next hop and not the first: a
-# read-back is the only thing that separates a vector that returned 0 from one
-# that did something.
 if [ -n "$HOP_B" ] && grep -Eq "^  changed +192\.168\.66\.0 +${HOP_B//./\\.} +255\.255\.255\.0 +UGS" "$REPORT"; then
     pass "the table reads back 192.168.66.0 via $HOP_B, the new next hop"
 else
@@ -489,7 +326,6 @@ for case in "a route never added" "with no gateway" "dest+default together" \
     fi
 done
 
-# The refused change must not have taken the route with it.
 if [ -n "$HOP_B" ] && grep -Eq "^  survived +192\.168\.66\.0 +${HOP_B//./\\.} " "$REPORT"; then
     pass "and a refused change left the route exactly as it was"
 else
@@ -529,9 +365,6 @@ else
     fail "deleting an absent route reported success"
 fi
 
-# RTA_DefaultGateway names the gateway the route was installed with, so a
-# delete that names a different one has named no entry.  Clearing regardless
-# would take the machine's real default gateway away and report success.
 if grep -q "^delete the default gateway by the wrong address: .*, refused, correctly" "$REPORT"; then
     pass "deleting the default gateway by the wrong address is refused"
 else
@@ -544,8 +377,6 @@ else
     fail "the default gateway went away"
 fi
 
-# The whole of it: delete has to derive the same prefix length add did, from
-# the same string and no mask, or the entries could never be found again.
 if grep -q "^counts: .*, two added and two removed, correctly" "$REPORT"; then
     pass "the table came back to exactly what it was"
 else
@@ -559,9 +390,6 @@ else
 fi
 
 echo
-# Failures first.  A run with both a failure and an unrun assertion is a
-# failure: the skip is the less urgent of the two facts and reporting it first
-# sends somebody to look at the rig instead of at the defect.
 if [ "$FAILED" -ne 0 ]; then
     echo "routes: FAILED" >&2
     exit 1

@@ -1,28 +1,9 @@
 /*
- * AmiNetXDuo, host-side test for the BPF filter VM, the validator and the
- * capture ring.
+ * AmiNetXDuo, host-side test for the BPF filter VM, validator and capture ring.
  *
- * Builds and runs on the development host: bpf_filter.c, bpf_validate.c,
- * bpf_channel.c and bpf_tap.c contain no AmigaOS calls, so all they need is
- * the <exec/types.h> shim in src/config/test/shim, the stubs below, and the
- * replica ABI that -DAMI_BPF_REPLICA selects in include/aminetxduo/bpf.h.
- *
- * The filter programs below are what libpcap emits for "ip", "arp" and
- * "tcp port 80" on an Ethernet link. They run against real frames, and the
- * accept or reject decision is asserted each way round. The "tcp port 80"
- * program exercises the awkward parts: a BPF_LDX|BPF_B|BPF_MSH to pick the IP
- * header length out of the low nibble, a BPF_JSET against the fragment-offset
- * field, and two BPF_IND loads through X.
- *
- * Not covered here, and what covers it instead:
- *   - the exact bpf_hdr and bpf_insn offsets and the BIOC* encodings: asserted
- *     at compile time against the real NDK <net/bpf.h> by bpf_abi_check.c
- *   - Forbid()/Permit(), Signal(), and GetSysTime(): tests/mbuf_bpf/
- *   - ami_bpf_tap_tx(), which needs an NX_PACKET: tests/mbuf_bpf/
- *
- *   cc -std=c11 -Wall -Wextra -DAMI_BPF_REPLICA -I../../../include \
- *      -I../../config/test/shim -I.. test_bpf.c ../bpf_filter.c \
- *      ../bpf_validate.c ../bpf_channel.c ../bpf_tap.c -o test_bpf
+ * Host build; -DAMI_BPF_REPLICA selects the replica ABI in bpf.h.  Not covered
+ * here: the bpf_hdr/BIOC* ABI (bpf_abi_check.c) and anything needing an
+ * NX_PACKET or real Forbid()/Signal() (tests/mbuf_bpf/).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -109,11 +90,7 @@ VOID ami_bpf_lock(VOID)
     }
 }
 
-/*
- * Unlock is the only place inside ami_bpf_read() where another task can get
- * in, so the interleave test below starts its second task there. The hook
- * fires once, on the Nth unlock, and then clears itself.
- */
+/* The hook fires once, on the Nth unlock, and then clears itself. */
 static void (*stub_on_unlock)(void);
 static int    stub_unlock_after;
 
@@ -185,11 +162,6 @@ static void put32be(UBYTE *p, ULONG v)
     p[3] = (UBYTE)v;
 }
 
-/*
- * Ethernet + IPv4 + TCP, with the two fields that the filter under test reads:
- * `ihl_words` (so BPF_MSH has something to compute) and `fragoff` (so the
- * BPF_JSET #0x1fff fragment check has something to reject).
- */
 static ULONG make_tcp(UBYTE *buf, UWORD sport, UWORD dport, UBYTE ihl_words,
                       UWORD fragoff, UBYTE proto)
 {
@@ -255,13 +227,7 @@ static const struct bpf_insn prog_arp[] = {
     BPF_STMT(BPF_RET | BPF_K, 0)
 };
 
-/*
- * tcpdump "tcp port 80", exactly as libpcap emits it for DLT_EN10MB:
- *
- *   ldh  [12] ; jeq #0x800 jf 12 ; ldb [23] ; jeq #6 jf 12 ; ldh [20]
- *   jset #0x1fff jt 12 ; ldxb 4*([14]&0xf) ; ldh [x+14] ; jeq #80 jt 11
- *   ldh [x+16] ; jeq #80 jt 11 jf 12 ; ret #262144 ; ret #0
- */
+/* tcpdump "tcp port 80", exactly as libpcap emits it for DLT_EN10MB. */
 static const struct bpf_insn prog_tcp80[] = {
     BPF_STMT(BPF_LD  | BPF_H | BPF_ABS, 12),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0x0800, 0, 10),
@@ -440,11 +406,6 @@ static void test_filter_real_programs(void)
     len = make_arp(frame);
     CHECK(ami_bpf_filter(prog_tcp80, NELEM(prog_tcp80), frame, len, len) == 0);
 
-    /*
-     * IP options: ihl is 6, so BPF_MSH must give X = 24 and the two indexed
-     * loads must land on the TCP ports four bytes further in. This is the
-     * check that catches an MSH implemented as (b & 0xf) or (b << 2).
-     */
     len = make_tcp(frame, 1234, 80, 6, 0, 6);
     CHECK(ami_bpf_filter(prog_tcp80, NELEM(prog_tcp80), frame, len, len) == 262144);
     len = make_tcp(frame, 1234, 22, 6, 0, 6);
@@ -579,11 +540,6 @@ static void test_filter_scatter(void)
     len    = make_tcp(frame, 1234, 80, 5, 0, 6);
     linear = ami_bpf_filter(prog_tcp80, NELEM(prog_tcp80), frame, len, len);
 
-    /*
-     * Split exactly where the transmit tap splits: link header in segment 0,
-     * packet payload in segment 1. Every load past offset 14 now goes through
-     * the segment walk.
-     */
     view.wirelen = 0;
     view.caplen  = 0;
     view.nsegs   = 0;
@@ -595,11 +551,6 @@ static void test_filter_scatter(void)
     CHECK(ami_bpf_filter_view(prog_ip, NELEM(prog_ip), &view) == 262144);
 
     {
-        /*
-         * A load that straddles the boundary: [13] is one byte inside the link
-         * header and one byte past it. The slow byte-at-a-time path in
-         * ami_bpf_load() is the only path that can answer this.
-         */
         static const struct bpf_insn p[] = {
             BPF_STMT(BPF_LD  | BPF_H | BPF_ABS, 13),
             BPF_STMT(BPF_RET | BPF_A, 0)
@@ -688,8 +639,6 @@ static void test_channel_basics(void)
     CHECK(ami_bpf_open(T_BPF_OWNER, 0) == AMI_BPF_EBUSY);
     CHECK(ami_bpf_open(T_BPF_OWNER, AMI_BPF_MAX_CHANNELS) == AMI_BPF_ENXIO);
 
-    /* "Any free one" skips the channel already taken and names the one it
-       claimed, the form that the Roadshow libpcap uses. */
     CHECK(ami_bpf_open(T_BPF_OWNER, -1) == 1);
     CHECK(ami_bpf_close(T_BPF_OWNER, 1) == 0);
     CHECK(ami_bpf_ioctl(T_BPF_OWNER, 1, BIOCFLUSH, NULL) == AMI_BPF_ENXIO);
@@ -767,8 +716,6 @@ static void test_capture_records(void)
     stub_clock_sec = 111;
     ami_bpf_tap_rx(iface_cookie, frame, len);
 
-    /* A frame whose length is not a multiple of four, so the pad between
-       records has to be real. */
     stub_clock_sec = 222;
     ami_bpf_tap_rx(iface_cookie, frame, 61);
 
@@ -1008,12 +955,8 @@ static void test_write_and_binding(void)
     CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENOBUFS);
     inject_result = 0;
 
-    /*
-     * A detach unbinds the channel and does not close it. A reattach under the
-     * same name rebinds it, because the channel remembers the name it asked
-     * for. A capture therefore survives an interface that goes offline and
-     * returns.
-     */
+    /* A detach unbinds the channel without closing it; the channel remembers
+       the name it asked for, so a reattach rebinds it. */
     ami_bpf_detach_interface(iface_cookie);
     CHECK(ami_bpf_write(T_BPF_OWNER, 0, frame, (LONG)len) == AMI_BPF_ENXIO);
     ami_bpf_tap_rx(iface_cookie, frame, len);
@@ -1048,14 +991,8 @@ static void test_write_and_binding(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * Reproduce the interface-removal window in ami_bpf_write(). The write has
- * selected its injector, then its first unlock lets RemoveInterface() detach
- * and clear the interface row before the callback starts. The callback and
- * cookie must be local snapshots by then; the netstack callback uses that
- * cookie only to make a locked lifetime claim and will reject it if removal
- * won the race.
- */
+/* ami_bpf_write() must snapshot callback and cookie locally before its first
+   unlock: RemoveInterface() can clear the interface row in that window. */
 static void t_detach_mid_write(void)
 {
     ami_bpf_detach_interface(iface_cookie);
@@ -1169,11 +1106,8 @@ static void test_interface_replace_under_tap(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * "The packet filter channel you allocate will be associated with the library
- * base ... It will be automatically closed when the library is closed", and
- * EPERM for every call from anyone else.
- */
+/* A channel belongs to the library base that allocated it: closed with that
+   base, and EPERM for every call from anyone else. */
 static void test_channel_ownership(void)
 {
     UBYTE frame[128];
@@ -1215,8 +1149,6 @@ static void test_channel_ownership(void)
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
 
-    /* A close of one base releases its channels and leaves those of the other
-       base alone. */
     ami_bpf_close_owner(T_BPF_OWNER);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO);
     CHECK(ami_bpf_data_waiting(T_BPF_OTHER, 1) > 0);
@@ -1234,12 +1166,8 @@ static void test_channel_ownership(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * Two closes can validate the same numeric slot before either takes the table
- * lock. Let the first close finish and another owner reopen the slot while the
- * second is entering its critical section: the stale close must not retire
- * the replacement.
- */
+/* Two closes can validate the same numeric slot before either takes the table
+   lock; the stale close must not retire the replacement. */
 static void t_replace_mid_close(void)
 {
     CHECK(ami_bpf_close(T_BPF_OWNER, 0) == 0);
@@ -1285,18 +1213,9 @@ static void test_reopen_under_owner_close(void)
 }
 
 /*
- * The base is closed during a copy-out on one of its channels.
- *
- * ami_bpf_close() answers EBUSY for this, because a caller can be told to try
- * again. ami_bpf_close_owner() cannot, because it runs from
- * bsd_child_destroy() on CloseLibrary() and has nowhere to put a refusal. It
- * therefore takes the channel away at once and leaves the two allocations for
- * the reader, which still copies out of one of them. A free there hands freed
- * memory to a live memcpy, and there is no MMU to notice.
- *
- * The reproduction is exact and not an approximation. The hook below runs on
- * the unlock that ami_bpf_read() takes for the copy outside the lock, the one
- * moment when the window is open.
+ * The base is closed during a copy-out.  ami_bpf_close() may answer EBUSY;
+ * ami_bpf_close_owner() cannot (it runs from CloseLibrary()), so it must take
+ * the channel away and leave the allocations for the in-flight reader.
  */
 static ULONG t_race_allocs;
 
@@ -1327,8 +1246,6 @@ static void test_close_owner_under_reader(void)
     ami_bpf_tap_rx(iface_cookie, frame, len);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0);
 
-    /* The first unlock inside ami_bpf_read() is the copy-out one: there is a
-       record waiting, so the wait loop breaks with the lock still held. */
     before            = ami_alloc_count();
     t_race_allocs     = 0;
     stub_unlock_after = 1;
@@ -1338,8 +1255,6 @@ static void test_close_owner_under_reader(void)
 
     CHECK(stub_on_unlock == NULL);                  /* the hook did fire */
 
-    /* The defect: the allocations of the channel still exist when the close
-       returns, so the copy below reads memory that is still valid. */
     CHECK(before != 0);
     CHECK(t_race_allocs == before);
 
@@ -1360,11 +1275,8 @@ static void test_close_owner_under_reader(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * A reader drops the table lock while it waits for a record. Recycle its
- * numeric slot to another owner at that exact unlock: the old call must not
- * copy or consume the replacement channel's data.
- */
+/* A reader that drops the table lock while waiting must not copy or consume
+   a replacement channel's data if its slot is recycled. */
 static UBYTE t_reopen_frame[128];
 static ULONG t_reopen_len;
 
@@ -1530,13 +1442,8 @@ static void test_reopen_under_reader(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * Capture used to release the channel lock and only then read notify_task and
- * notify_mask from the numeric slot. A close/reopen in that window made the
- * old packet signal the replacement channel's owner. The target lock is
- * Forbid(), so doing the non-blocking Signal() before Permit() makes the
- * notification and the channel state one transaction.
- */
+/* The non-blocking Signal() must happen before Permit(), so the notification
+   and the channel state are one transaction. */
 static char t_notify_old_task;
 static char t_notify_new_task;
 static LONG t_notify_close_status;
@@ -1592,12 +1499,8 @@ static void test_capture_notify_close_reopen(void)
     stub_task = (APTR)"task";
 }
 
-/*
- * The mask setters used to validate the owner before taking the channel
- * lock. Recycle the slot at the lock boundary: the old call must not install
- * its task and mask in the replacement channel. Both notification fields are
- * used by the capture path, so exercise the ordinary and interrupt masks.
- */
+/* A mask setter must not install its task and mask in a replacement channel
+   if the slot is recycled at the lock boundary. */
 static LONG t_mask_close_status;
 static LONG t_mask_open_status;
 
@@ -1643,8 +1546,6 @@ static void test_signal_mask_close_reopen(void)
         CHECK(t_mask_open_status == 0);
         CHECK(status == AMI_BPF_EPERM);
 
-        /* If the stale call contaminated the replacement, immediate capture
-           signals the old task through one of the two mask fields. */
         CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCSETIF, "eth0") == 0);
         CHECK(ami_bpf_ioctl(T_BPF_OTHER, 0, BIOCIMMEDIATE, &one) == 0);
         ami_bpf_tap_rx(iface_cookie, frame, len);
@@ -1660,12 +1561,8 @@ static void test_signal_mask_close_reopen(void)
     stub_task = (APTR)"task";
 }
 
-/*
- * BIOCSBLEN used its AmiBpfChan pointer without locking. A replacement could
- * therefore allocate its buffers and then have their declared size enlarged
- * by the stale call. Capture trusts blen, so the mismatch became an
- * out-of-bounds write into the replacement's allocation.
- */
+/* Capture trusts blen, so a stale BIOCSBLEN enlarging a replacement's
+   declared buffer size is an out-of-bounds write. */
 static LONG t_blen_close_status;
 static LONG t_blen_open_status;
 static LONG t_blen_set_status;
@@ -1716,12 +1613,8 @@ static void test_blen_close_reopen(void)
     CHECK(ami_alloc_count() == 0);
 }
 
-/*
- * BIOCSETIF and BIOCSETF both allocate outside the channel lock. A close and
- * reopen in that window used to leave their AmiBpfChan pointer aimed at the
- * numeric slot and commit into whoever owned the replacement. Reopening with
- * the same owner is included: only the slot generation distinguishes it.
- */
+/* BIOCSETIF and BIOCSETF allocate outside the channel lock, so only the slot
+   generation -- not owner equality -- can reject a stale commit. */
 static APTR t_reopen_owner;
 static LONG t_reopen_close_status;
 static LONG t_reopen_open_status;
@@ -1744,8 +1637,6 @@ static void test_ioctl_close_reopen(void)
     CHECK(ami_bpf_attach_interface("eth0", iface_cookie, DLT_EN10MB, 1500,
                                    test_inject) == 0);
 
-    /* A different base takes the replacement while BIOCSETIF is between its
-       identity snapshot and its buffer allocation. */
     CHECK(ami_bpf_open(T_BPF_OWNER, 0) == 0);
     before                = ami_alloc_count();
     t_reopen_owner        = T_BPF_OTHER;

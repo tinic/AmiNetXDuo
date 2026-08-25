@@ -1,50 +1,6 @@
 #!/usr/bin/env bash
-#
 # HOW LONG DOES THE NETWORK TAKE TO BECOME USABLE, IPv6 INCLUDED.
-#
-#   tests/ipv6/run-bringup.sh [-B BACKEND] [-b BUILDDIR] [-m MODEL]
-#                             [-t SECONDS] [-n REPS] [-w SECONDS]
-#
-# WHAT IT MEASURES
-#
-# Not how long AddNetInterface takes to return.  That command came back in
-# 1.8 s once the duplicate address detection and the DHCP ARP probe were moved
-# off it, and the network was still some seconds away from carrying an IPv6
-# packet: the link-local address was tentative, no router had been solicited,
-# and the global address a router advertisement brings did not exist yet.
-#
-# So the figure here is the last of those, from the stack starting:
-#
-#   bringup_ms = max(ipv4, ip6-global) - start
-#
-# where each term is a `netstack: mark <event> <ms> ms` line
-# (ami_netstack_mark(), src/netstack/netstack.c):
-#
-#   start          the stack begins, immediately before ThreadX starts
-#   ipv4           an interface has a non-zero IPv4 address (the lease)
-#   ip6-linklocal  fe80:: passed duplicate address detection, so it is VALID
-#                  and may be a source; also what unblocks the solicitation
-#   ip6-slaac      a router advertisement formed a global address, TENTATIVE
-#   ip6-global     that address passed DAD.  This is "IPv6 is usable"
-#
-# THE CLOCK IS THE GUEST'S
-#
-# ami_millis() reads the E-Clock, which advances with emulated cycles, so these
-# numbers do not move when something else on the host is compiling.  The host
-# wall clock in tools/serial-timestamp.py's stamped log does, and is not what
-# this reads.
-#
 # BRIDGED, OR IT MEASURES NOTHING
-#
-# SLIRP answers a router solicitation itself and instantly.  The tail this
-# exists to measure is a real router on a real link, so -B names a host NIC and
-# amiberry-run.sh refuses the run if the backend it got was not the one asked
-# for.  That needs CAP_NET_RAW on the amiberry binary.
-#
-# OUTPUT IS key=value, ONE BLOCK PER RUN plus a summary.  Exit 0 if every rep
-# reached ip6-global inside the budget, 1 if any rep came up but over it, 3 if
-# a rep never got there at all, 2 for a broken invocation.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -52,9 +8,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
-# Every figure below is a `netstack: mark` line off the serial port, so a build
-# with the log compiled out has nothing to report and this says so before it
-# spends five boots finding out.
 # shellcheck source=../../tools/serial-log.sh
 . "$ROOT/tools/serial-log.sh"
 
@@ -88,11 +41,6 @@ for f in "$BSD" "$ADDIF" "$SHOW" "$SMOKE" "$NETSTAT"; do
     [ -f "$f" ] || { echo "build $BUILD first: no $f" >&2; exit 2; }
 done
 
-# ToolsSmoke writes to stdout and nothing else, so every byte this harness
-# reads comes from the library's AMI_INFO calls -- which compile to nothing
-# unless the build has AMINETXDUO_LOG.  A build without it produced
-# `result=noserial run_rc=0` on rep after rep, with a complete guest
-# transcript beside it, and the harness was recorded as blocked on the rig.
 serial_log_require_build "$BUILD" "tests/ipv6/run-bringup.sh"
 
 [ -n "${AMINETXDUO_KICKSTART:-}" ] || {
@@ -107,8 +55,6 @@ fi
 [ -f "${A2065:-/nonexistent}" ] || {
     echo "No a2065.device found.  Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/bringup-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/devs/NetInterfaces"
@@ -118,9 +64,6 @@ cp "$ADDIF" "$STAGE/AddNetInterface"
 cp "$SHOW"  "$STAGE/ShowNetStatus"
 cp "$NETSTAT" "$STAGE/netstat"
 
-# What the installer writes, plus CONFIGURE6=AUTO.  AUTO is also what an
-# interface file with no CONFIGURE6 line gets; it is spelled out because this
-# test is about that path and a default is a bad thing to leave implicit here.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'EOF'
 DEVICE=a2065.device
 UNIT=0
@@ -128,10 +71,6 @@ CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
 
-# The wait is the point: every mark after `ipv4` lands on the IP thread after
-# AddNetInterface has returned, so a guest that exits when the command does
-# measures nothing.  ShowNetStatus at the end is the cross-check that what the
-# marks claim is also what a shipped command reports.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 wait $SETTLE
@@ -139,10 +78,6 @@ SYS:ShowNetStatus
 SYS:netstat -h
 EOF
 
-# ------------------------------------------------------------------ run ---
-
-# `mark <event> <ms> ms`, first occurrence only: `ipv4` fires again on every
-# address change and a second interface would repeat the v6 ones.
 mark_of() {
     sed -n "s/^\[INFO\] netstack: mark $2 \([0-9][0-9]*\) ms.*/\1/p" "$1" \
         | head -1
@@ -212,8 +147,6 @@ for rep in $(seq 1 "$REPS"); do
     echo "rep=$rep verdict=$verdict bringup_ms=$bringup ipv4_ms=$r_v4 linklocal_ms=$r_ll slaac_ms=$r_slaac global_ms=$r_glob run_rc=$rc"
     RESULTS+=("$bringup")
 done
-
-# ------------------------------------------------------------- summary ---
 
 n=0; sum=0; min=; max=
 for v in "${RESULTS[@]}"; do

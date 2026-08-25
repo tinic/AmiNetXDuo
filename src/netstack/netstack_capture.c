@@ -1,29 +1,7 @@
 /*
- * AmiNetXDuo, attaching src/bpf/ to the running stack.
- *
- * There are two capture points:
- *
- *   eth0, the SANA-II taps in src/sana2/sana2_rx.c and sana2_tx.c.  Every
- *           frame that crosses a wire, in the exact shape the device saw it,
- *           ARP included.
- *
- *   lo0 , the NetX Duo IP packet filter, installed here.  The loopback
- *           interface in NetX Duo has no link driver (nx_ip_create.c:157 sets
- *           nx_interface_link_driver_entry to NX_NULL) and
- *           _nx_ip_driver_packet_send() shortcuts a loopback destination
- *           straight into _nx_ip_packet_deferred_receive(), so no tap on a
- *           driver can see it.  Loopback is the path every throughput figure
- *           in docs/RESEARCH.md 11 was measured on.
- *
- * The loopback tap fires on NX_IP_PACKET_OUT only.  A loopback datagram is
- * sent once and received once, so capturing both directions puts two identical
- * records in the file, and analysers downstream read the second as a
- * retransmission.  The out direction is taken after _nx_ip_header_add(), so
- * the IP header is real and the checksum final.
- *
- * DLT_EN10MB for both.  The fourteen bytes for lo0 are synthesised here with
- * zeroed addresses.  A single link type means one pcap writer and one filter
- * program.  DLT_NULL for loopback costs a second code path everywhere.
+ * AmiNetXDuo, attaching src/bpf/ to the running stack.  Real interfaces are
+ * captured by the SANA-II taps; lo0 has no link driver, so it is captured by
+ * the NetX Duo IP packet filter installed here.  DLT_EN10MB for both.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -52,9 +30,9 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
     (VOID)ip_ptr;
 
     /*
-     * Outbound only, and only for a packet the loopback interface is carrying.
-     * Anything else is to or from a real device, where the SANA-II taps have
-     * it with its true link header.
+     * Outbound only, and loopback only: a loopback datagram is sent once and
+     * received once, and anything on a real device already has its true link
+     * header from the SANA-II taps.
      */
     if (direction != NX_IP_PACKET_OUT ||
         ami_bpf_capturing() == 0 ||
@@ -70,8 +48,7 @@ static UINT ami_ns_capture_filter(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
 
     /*
      * EtherType from the IP version nibble rather than a flag: both families
-     * arrive at this one call site, and a dual-stack build loops IPv6 through
-     * here as well.
+     * arrive at this one call site in a dual-stack build.
      */
     if ((packet_ptr->nx_packet_prepend_ptr[0] & 0xF0) == 0x60)
     {
@@ -126,10 +103,9 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
         return -1;      /* nothing to inject into: loopback has no device */
 
     /*
-     * A BPF write snapshots this opaque cookie before calling us. A concurrent
-     * RemoveInterface() may already have detached its BPF row, so prove the
-     * SANA-II allocation is still live and pin it for the whole write before
-     * turning the cookie back into a pointer.
+     * A BPF write snapshots this opaque cookie before calling us, and a
+     * concurrent RemoveInterface() may already have detached its BPF row, so
+     * prove the SANA-II allocation live and pin it for the whole write.
      */
     if (ami_netstack_interface_claim_cookie(cookie, &index) != AMI_NET_OK)
         return -1;
@@ -143,11 +119,9 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
     else
     {
         /*
-         * bpf_write() does not enter through a NetX API, so it otherwise
-         * bypasses the mutex held by NX_LINK_DISABLE and
-         * AMI_LINK_STACK_DISABLE. Keep the online test, TX-slot claim and
-         * BeginIO() on the same side of that mutex as the shutdown drain.
-         * The bsdsocket vector adopted this caller before reaching the hook.
+         * bpf_write() does not enter through a NetX API, so keep the online
+         * test, TX-slot claim and BeginIO() on the same side of the IP
+         * protection mutex as the shutdown drain.
          */
         tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
         rc = ami_sana2_inject((AmiSana2If *)cookie, ether_type, dst, payload,
@@ -163,9 +137,9 @@ static LONG ami_ns_capture_inject(APTR cookie, UWORD ether_type,
 /* ------------------------------------------------------------- lifecycle */
 
 /*
- * The address behind a capture cookie, for AMI_BPF_SIOCGIFADDR. Read from the
- * live NX_INTERFACE every time it is asked for, so a DHCP lease that lands
- * between two calls is reflected in the second.
+ * The address behind a capture cookie, for AMI_BPF_SIOCGIFADDR.  Read from the
+ * live NX_INTERFACE every time, so a DHCP lease that lands between two calls
+ * is reflected in the second.
  */
 static ULONG ami_ns_capture_address(APTR cookie)
 {
@@ -230,11 +204,9 @@ VOID ami_netstack_capture_start(AmiNetStack *ns)
 }
 
 /*
- * One interface, registered or unregistered after the stack is already up.
- * An interface added at run time through AddInterfaceTagList() must be
- * capturable like any other.  One removed through RemoveInterface() must stop
- * being reachable before its AmiSana2If is freed, because src/bpf/ holds the
- * pointer as an opaque cookie and otherwise hands a freed one to an injector.
+ * One interface, registered or unregistered after the stack is already up.  A
+ * removed one must stop being reachable before its AmiSana2If is freed,
+ * because src/bpf/ holds the pointer as an opaque cookie.
  */
 VOID ami_netstack_capture_attach_one(AmiNetStack *ns, UWORD index)
 {

@@ -1,45 +1,6 @@
 /*
  * AmiNetXDuo, nx_secure feasibility gate (docs/RESEARCH.md 9, decision 4).
  *
- * Section 9 records that TLS ships as a separate library behind its own build
- * option and that it is benchmarked on 68020 before any API is promised.  This
- * program is that benchmark: how long the arithmetic in a TLS 1.2 handshake
- * takes on the floor target.
- *
- *   Public key, per handshake, once:
- *     RSA-2048 public op, every certificate signature the client checks,
- *                             plus the ServerKeyExchange signature under
- *                             ECDHE_RSA, plus the premaster encryption under
- *                             plain RSA key exchange.  e = 65537, so this is
- *                             17 squarings and a multiply: the cheap one.
- *     RSA-2048 private op , only if the Amiga is the TLS server, or presents
- *                             a client certificate.  Full 2048-bit exponent;
- *                             measured both plain and CRT, because CRT is ~3x
- *                             and nx_crypto only uses it when the primes are
- *                             supplied.
- *     ECDHE P-256 keygen, one fixed-point scalar multiply.
- *     ECDHE P-256 shared, one variable-point scalar multiply.  These two
- *                             are what an ECDHE_* suite costs the client.
- *     ECDSA P-256 verify, for hosts that serve ECDSA certificates, which
- *                             is most of the modern web.
- *
- *   Bulk, per byte, forever after:
- *     SHA-256, HMAC-SHA256, AES-128/256-CBC, AES-128/256-GCM.  These decide
- *     whether a connection is usable once it is up, a 14 MHz 68020 pulling
- *     150 KB/s off the wire cannot afford a cipher that runs at 40 KB/s.
- *
- *   No ThreadX, NetX Duo, packet pool or network is needed.
- *   crypto_libraries/src makes no tx_* or nx_* call at runtime (verified by
- *   grep over all 56 files), so the primitives are timed in a plain AmigaDOS
- *   process with nothing else running, no tick task, no driver interrupts.
- *   The handshake-composition figures at the end are arithmetic on these
- *   measurements, and are labelled as such.
- *
- *   nx_port.h does not define NX_RAND, so nx_api.h falls back to newlib rand()
- *, a 32-bit LCG.  ECDHE private keys come out of it.  That is fine for a
- *   benchmark (the arithmetic is identical whatever the bits are) and is a
- *   hard blocker for shipping.  Flagged in src/tls/tls.h.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -54,7 +15,6 @@
 #include "nx_crypto_sha2.h"
 #include "nx_crypto_hmac_sha2.h"
 
-/* For the session/certificate sizes the memory estimate prints. */
 #include "nx_secure_tls_api.h"
 
 #include "tls.h"
@@ -143,13 +103,8 @@ BPTR    out;
 static ULONG    b_failures;
 static ULONG    b_started;      /* E-Clock at the first measurement */
 
-/*
- * Results are held in microseconds per operation.  The handshake composition
- * at the end sums them, so they have to survive being added up: nanoseconds in
- * a ULONG top out at 4.29 seconds, and a measured RSA-2048 private operation
- * on the floor target is 158 of them.  Microseconds give 4295 seconds of
- * headroom and are still 1000x finer than the E-Clock's 1.4 us tick.
- */
+/* Results are microseconds per operation: nanoseconds in a ULONG top out at
+   4.29 s, and a measured RSA-2048 private op on the floor target is 158 s. */
 #define B_MAX_RESULTS   24
 
 typedef struct
@@ -163,12 +118,9 @@ typedef struct
 static B_RESULT b_results[B_MAX_RESULTS];
 static ULONG    b_result_count;
 
-/*
- * Named slots the composition step reads back, in the order the benchmarks run
- * in: cheapest first.  The RSA private operation without CRT takes minutes on
- * the floor target, so it goes last, a run that hits the harness timeout
- * still delivers every other figure.
- */
+/* Ordered cheapest first.  The RSA private operation without CRT takes minutes
+   on the floor target, so a run that hits the harness timeout still delivers
+   every other figure. */
 #define B_SHA256            0
 #define B_HMAC_SHA256       1
 #define B_AES128_CBC        2
@@ -188,11 +140,6 @@ static ULONG b_us(ULONG slot)
     return (slot < b_result_count) ? b_results[slot].per_op_us : 0;
 }
 
-/*
- * Record one measurement.  `ticks` is the raw E-Clock delta over `iterations`
- * runs; `payload` is the bytes processed per run, or 0 for a keyed operation
- * where throughput is meaningless.
- */
 static VOID b_record(const char *name, ULONG ticks, ULONG iterations,
                      ULONG payload)
 {
@@ -250,8 +197,7 @@ static VOID b_fail(const char *what, UINT status)
 
     /*
      * Still record a slot so the composition indices stay aligned with the
-     * B_* constants, a missing measurement must read as zero, not shift
-     * every later result up by one.
+     * B_* constants: a missing measurement must read as zero, not shift.
      */
     if (b_result_count < B_MAX_RESULTS)
     {
@@ -263,24 +209,9 @@ static VOID b_fail(const char *what, UINT status)
     }
 }
 
-/*
- * Time one operation.
- *
- * A fixed iteration count cannot work here.  The operations span five orders
- * of magnitude, an AES block against a 2048-bit modular exponentiation with
- * a 2048-bit exponent, and the program has to finish inside the harness
- * timeout on a CPU whose speed is the thing being measured.
- *
- * So run once, timed.  If that single run already took longer than
- * B_ENOUGH_TICKS it is the measurement; repeating a four-minute RSA private
- * operation to refine a figure already good to four significant digits would
- * only burn emulator time.  Otherwise pick a repeat count landing near half a
- * second and loop.
- *
- * The operation is a function pointer plus an opaque context rather than five
- * copies of a calibrate/loop/record sequence, where an off-by-one in the
- * iteration count would silently scale a result.
- */
+/* Time one operation: run it once, and if that single run already exceeded
+   B_ENOUGH_TICKS take it as the measurement; otherwise pick a repeat count
+   landing near half a second and loop. */
 typedef UINT (*B_OP)(VOID *context);
 
 #define B_ENOUGH_TICKS(hz)      ((hz) / 4)      /* 250 ms */
@@ -353,13 +284,8 @@ extern NX_CRYPTO_METHOD crypto_method_aes_256_gcm_16;
 
 /* ------------------------------------------------------------- payloads --- */
 
-/*
- * 1024 bytes: comfortably more than one TLS record's worth of framing, small
- * enough that a whole buffer plus the AES round keys stays in a 68030's 256
- * byte caches' working set the same way a real record would.  Both CPUs see
- * the same figure, so the comparison holds even though neither is a
- * cache-accurate model of real silicon.
- */
+/* 1024 bytes: more than one TLS record's worth of framing, small enough that
+   the buffer plus the AES round keys stay inside a 68030's 256-byte caches. */
 #define B_PAYLOAD       1024
 
 static UCHAR    b_plain[B_PAYLOAD];
@@ -407,11 +333,6 @@ ULONG   i;
 
 /* ------------------------------------------------------------- metadata --- */
 
-/*
- * One metadata block per algorithm, sized from the method tables.  These are
- * the largest single allocations a TLS session needs, and the memory estimate
- * at the end prints their measured sizes.
- */
 static NX_CRYPTO_RSA        b_rsa_metadata;
 static NX_CRYPTO_ECDH       b_ecdh_metadata;
 static NX_CRYPTO_ECDH       b_ecdh_peer_metadata;
@@ -525,11 +446,8 @@ VOID   *handler = NX_CRYPTO_NULL;
     return(status);
 }
 
-/*
- * The message: raw modexp input, high byte zeroed so it is safely below the
- * modulus.  Not PKCS#1 padded, padding is a memcpy standing next to a
- * 2048-bit exponentiation and would only blur the figure.
- */
+/* Raw modexp input, high byte zeroed so it is safely below the modulus.  Not
+   PKCS#1 padded: padding would only blur the figure. */
 static UCHAR    b_rsa_message[256];
 
 typedef struct
@@ -575,12 +493,6 @@ B_RSA_CONTEXT   private_ctx;
     private_ctx.exponent      = t_rsa2048_d;
     private_ctx.exponent_bits = 2048;
 
-    /*
-     * Correctness first: public(private(m)) must be m.  The private half uses
-     * CRT, which is both the fast path and the one nx_secure actually takes,
-     * the PKCS#1 parser hands it p and q, so this validates the path that
-     * matters and costs a quarter of what the plain exponentiation would.
-     */
     status = b_rsa_op_crt(b_rsa_message, b_rsa_output);
     if (status == NX_CRYPTO_SUCCESS)
     {
@@ -714,8 +626,6 @@ static VOID b_bench_ecdhe(VOID)
 
 UINT    status;
 
-
-    /* A peer key pair, built once; it plays the server half in DH_CALCULATE. */
     status = b_ecdh_begin(&b_ecdh_peer_metadata);
     if (status == NX_CRYPTO_SUCCESS)
     {
@@ -733,7 +643,6 @@ UINT    status;
         return;
     }
 
-    /* Fixed-point scalar multiply, then variable-point. */
     b_measure("ECDHE P-256 keygen", b_ecdh_keygen_run, &b_ecdh_metadata, 0);
     b_measure("ECDHE P-256 shared", b_ecdh_shared_run, &b_ecdh_metadata, 0);
 
@@ -744,12 +653,8 @@ UINT    status;
 
 /* ----------------------------------------------------------- ECDSA P-256 -- */
 
-/*
- * Scratch for the key-pair generation.  _nx_crypto_ec_key_pair_generation_extra
- * wants room for a private scalar, a point, and huge-number working space; the
- * shape is copied from nx_crypto_method_self_test_ecdsa.c, which is the only
- * documentation this API has.
- */
+/* Scratch for key-pair generation: a private scalar, a point and huge-number
+   working space.  Shape copied from nx_crypto_method_self_test_ecdsa.c. */
 static HN_UBASE b_ecdsa_scratch[3000 / sizeof(HN_UBASE)];
 static UCHAR    b_ecdsa_privkey[64];
 static UCHAR    b_ecdsa_pubkey[128];
@@ -884,7 +789,6 @@ UINT                        buffer_size;
                                              sizeof(b_ecdsa_pubkey),
                                              (UINT *)&b_ecdsa_pubkey_len);
 
-    /* Sign once so there is something to verify. */
     extended.nx_crypto_extended_output_data           = b_ecdsa_sig;
     extended.nx_crypto_extended_output_length_in_byte = sizeof(b_ecdsa_sig);
 
@@ -1075,14 +979,9 @@ B_CIPHER_CONTEXT    ctx;
 
 /* --------------------------------------------------- handshake arithmetic -- */
 
-/*
- * Sums of measurements, not a measured handshake: what the public-key
- * arithmetic in each handshake shape costs, with the record layer, X.509
- * parsing, TCP round trips and the server's own latency all excluded.  A real
- * handshake cannot be faster than these numbers and will be slower.
- * Certificate-chain depth is taken as two signatures (leaf + one
- * intermediate), which is what the public web overwhelmingly serves.
- */
+/* Sums of measurements, not a measured handshake: record layer, X.509 parsing,
+   TCP round trips and server latency are all excluded.  Chain depth is taken
+   as two signatures. */
 static VOID b_compose(VOID)
 {
 
@@ -1099,22 +998,18 @@ ULONG   total;
     b_log("");
     b_log("Handshake public-key arithmetic (sums of the above, ms):");
 
-    /* TLS_RSA_WITH_*: 2 chain verifies + 1 premaster encrypt, all public ops. */
     total = rsa_pub * 3UL;
     b_log("  client, TLS_RSA_WITH_*        : %lu.%lu ms  (3 x RSA public)",
           total / 1000UL, (total % 1000UL) / 100UL);
 
-    /* TLS_ECDHE_RSA_WITH_*: 2 chain verifies + SKE signature verify + ECDHE. */
     total = (rsa_pub * 3UL) + ecdhe;
     b_log("  client, TLS_ECDHE_RSA_WITH_*  : %lu.%lu ms  (3 x RSA public + ECDHE pair)",
           total / 1000UL, (total % 1000UL) / 100UL);
 
-    /* TLS_ECDHE_ECDSA_WITH_*: 3 ECDSA verifies + ECDHE. */
     total = (ecdsa * 3UL) + ecdhe;
     b_log("  client, TLS_ECDHE_ECDSA_WITH_*: %lu.%lu ms  (3 x ECDSA verify + ECDHE pair)",
           total / 1000UL, (total % 1000UL) / 100UL);
 
-    /* Server side adds one private op; CRT if the primes are available. */
     total = b_us(B_RSA_PRIVATE_CRT);
     b_log("  server, RSA-2048 cert, CRT    : %lu.%lu ms  (1 x RSA private, plus the client work above)",
           total / 1000UL, (total % 1000UL) / 100UL);
@@ -1123,11 +1018,6 @@ ULONG   total;
           total / 1000UL, (total % 1000UL) / 100UL);
 }
 
-/*
- * Session memory.  The 1 MB floor already spends 17 x 1568 bytes on the
- * packet pool (docs/RESEARCH.md 81), so what matters is what a TLS session adds
- * on top of a socket, per connection.
- */
 static VOID b_memory(VOID)
 {
 
@@ -1143,12 +1033,9 @@ ULONG   per_conn;
 
     session = (ULONG)sizeof(NX_SECURE_TLS_SESSION);
 
-    /*
-     * NX_SECURE_TLS_MINIMUM_MESSAGE_BUFFER_SIZE is 4000 and is the packet
-     * reassembly buffer the caller has to supply to
-     * nx_secure_tls_session_packet_buffer_set().  A handshake that carries a
-     * full certificate chain does not fit in less.
-     */
+    /* 4000 bytes, the reassembly buffer the caller must supply to
+       nx_secure_tls_session_packet_buffer_set(); a handshake carrying a full
+       certificate chain does not fit in less. */
     per_conn = session + metadata + NX_SECURE_TLS_MINIMUM_MESSAGE_BUFFER_SIZE;
 
     b_log("");
@@ -1183,10 +1070,8 @@ ULONG   hz;
     ami_crash_set_reference((APTR)main, "tls_bench");
     if (!ami_crash_install())
     {
-        /*
-         * A caught exception resumes here.  crashguard.h is explicit that the
-         * unwind is not trustworthy, so get the report out and fail.
-         */
+        /* A caught exception resumes here; crashguard.h says the unwind is
+           not trustworthy, so get the report out and fail. */
         b_log("CRASHED, see the serial log and DH0:crash.txt");
         b_flush();
         ami_crash_remove();
@@ -1219,11 +1104,6 @@ ULONG   hz;
     b_fill_payload();
     b_started = ami_tls_eclock();
 
-    /*
-     * Bulk first.  It is the fast half, and the RSA private operation at the
-     * end can run for minutes on the floor target, if the harness timeout
-     * bites, everything above it is already on the serial port.
-     */
     b_log("");
     b_log("Bulk (per %lu-byte record):", (ULONG)B_PAYLOAD);
     b_bench_hash("SHA-256          ", &crypto_method_sha256,

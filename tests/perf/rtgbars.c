@@ -1,34 +1,6 @@
 /*
  * A KNOWN PICTURE on a truecolour graphics-card screen.
  *
- *   rtgbars DEPTH [WIDTH HEIGHT] [MODEID]     default 32 640 480, best mode
- *
- * A TEST TOOL.  The console serves the front screen, and until now every
- * truecolour session it was measured on served WORKBENCH -- a picture nobody
- * has a reference for.  A frame of it decodes, has colours in it and changes,
- * which is every assertion the harness had, and all of them pass just as well
- * on a frame whose red and blue have been exchanged.  That is not academic:
- * the two four-byte RGBFTYPE codes whose alpha is last were written down the
- * wrong way round in src/tools/httprtg.c until 49ef2137, and the 32-bit path
- * they live on had never been run.
- *
- * So this puts eight bands of known colour in front of the console: black,
- * red, green, blue, yellow, magenta, cyan, white, left to right.  Red at one
- * eighth across and blue at three eighths is the whole point -- a readback
- * that transposes the two shows it in one glance and in one assertion.
- *
- * NOTHING HERE KNOWS THE SCREEN'S PIXEL FORMAT, and that is deliberate.  The
- * colours go in through LoadRGB32() as 32-bit components and come out through
- * SetAPen()/RectFill(), so the CONVERSION to whatever the card holds is the
- * graphics driver's, not this file's.  A test that packed its own pixels would
- * need the same table the code under test uses, and would then agree with it
- * about a transposition instead of catching one.
- *
- * It also blinks a square in the bottom-left corner once a second.  A frozen
- * picture passes a colour check as well as a live one does, so the harness
- * asks for a frame that differs from the one before it, and on a screen this
- * still nothing else would ever move.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -51,14 +23,6 @@
 #include <inline/macros.h>
 
 #include "rtgout.h"
-
-/* ---------------------------------------------- the two RTG libraries ----- */
-/*
- * Hand-declared, as src/tools/httprtg.c declares them, and every offset below
- * is one that file or tests/perf/rtgmodes.c already calls.  Nothing new is
- * guessed at: a wrong library offset on an Amiga is a jump into the middle of
- * another function, and this runs on the boot path.
- */
 
 #define CYBRBIDTG_TB            (TAG_USER + 0x50000)
 #define CYBRBIDTG_Depth         (CYBRBIDTG_TB + 0)
@@ -122,14 +86,6 @@ static const char *name_of(const char *const *tab, ULONG n, ULONG v)
     return (v < n) ? tab[v] : "unknown";
 }
 
-/* ------------------------------------------------------------ the bands --- */
-
-/*
- * Eight colours, each a full-scale component or none at all.  Full scale
- * survives every depth the card offers unchanged -- 0xFF becomes 31 or 63 bits
- * and comes back 0xFF -- so one expectation covers the 15, 16, 24 and 32-bit
- * arms and the checker needs no per-depth table.
- */
 #define BARS  8
 
 static const UBYTE bar_rgb[BARS][3] =
@@ -149,10 +105,6 @@ static const char *const bar_name[BARS] =
     "black", "red", "green", "blue", "yellow", "magenta", "cyan", "white"
 };
 
-/* LoadRGB32's table: a (count << 16) | first header, then three 32-bit
-   components a colour, then a zero.  The components are full-width, so 0xFF
-   goes in as 0xFFFFFFFF and the driver takes whichever end of it the card
-   wants. */
 static ULONG bar_table[1 + BARS * 3 + 1];
 
 static VOID build_table(VOID)
@@ -169,13 +121,6 @@ static VOID build_table(VOID)
     bar_table[at] = 0UL;
 }
 
-/* ---------------------------------------------------------- the argument -- */
-
-/* NOT argv.  A program this harness starts from S:Startup-Sequence sees
-   argc == 1 whatever the line said -- neither this toolchain's crt0 nor
-   src/tools/tool_startup.S builds an argv array -- so an argv reader takes its
-   defaults in silence and the run measures a screen nobody asked for.
-   GetArgStr() is the line as AmigaDOS passed it. */
 static ULONG arg_word(const char **p, ULONG fallback, int hex)
 {
     const char *s = *p;
@@ -219,12 +164,6 @@ int main(VOID)
     if (args == NULL)
         args = "";
 
-    /* ITS OWN FILE, because this command never returns.  The harness starts it
-       with Run, and Run keeps the redirection for itself: the file it was
-       given held Run's own "[CLI 3]" and not one line of what this printed.
-       Opened here, written, and closed before the screen goes up, so the
-       harness has a complete report while the command is still standing.
-       Named for the one harness that starts it, tests/tools/run-console.sh. */
     rtg_out_fh = Open((CONST_STRPTR)"DH0:rtgbars.txt", MODE_NEWFILE);
 
     depth  = arg_word(&args, 32UL, 0);
@@ -255,10 +194,6 @@ int main(VOID)
     a[0] = (ULONG)(P96Base != NULL ? "yes" : "no");
     rtg_say("picasso96api=%s\n", a);
 
-    /* ASKED FOR, NOT ASSUMED.  A mode ID may be given, and then it is used as
-       given; with none, the machine is asked which of its modes is best for
-       the shape and the depth wanted.  Either way the ID is printed, so a
-       screen that came up somewhere unexpected says where. */
     if (id == (ULONG)INVALID_ID && CyberGfxBase != NULL)
     {
         struct TagItem tags[4];
@@ -302,16 +237,8 @@ int main(VOID)
         return RETURN_FAIL;
     }
 
-    /* WHAT IT REALLY OPENED, not what was asked for.  A card that answered
-       BestCModeID with a mode of another depth, or an Intuition that rounded
-       one, would otherwise be reported here as the depth on the command line
-       and the arm would measure the wrong path under the right name. */
     rp = &sc->RastPort;
 
-    /* THE LIBRARY'S DEPTH, NOT struct BitMap's.  A Picasso96 bitmap keeps the
-       legacy Depth field at 8 whatever the screen really is -- a 15-bit screen
-       reported "640x480x8" here and read like a mistake.  p96GetBitMapAttr is
-       what the console asks, so it is what this reports. */
     got_depth = (P96Base != NULL && p96_map_attr(rp->BitMap, P96BMA_ISP96) != 0UL)
                   ? p96_map_attr(rp->BitMap, P96BMA_DEPTH)
                   : (ULONG)rp->BitMap->Depth;
@@ -348,7 +275,6 @@ int main(VOID)
         rtg_say("cgx_pixfmt=%ld %s\n", a);
     }
 
-    /* The colours through the driver, and the bands through the pen. */
     build_table();
     LoadRGB32(&sc->ViewPort, bar_table);
 
@@ -385,10 +311,6 @@ int main(VOID)
     PubScreenStatus(sc, 0);
     ScreenToFront(sc);
 
-    /* And it stays, blinking.  A screen that closed when this returned would
-       be in front for no part of the session it exists for, and one that never
-       changed would let a session that served one grab for ever pass a check
-       about live frames. */
     for (;;)
     {
         Delay(25);

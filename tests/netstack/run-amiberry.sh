@@ -1,34 +1,7 @@
 #!/usr/bin/env bash
-#
 # Run the netstack bring-up test under Amiberry on Linux.
-#
-#   tests/netstack/run-amiberry.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                                  [-N BOARD] [-B BACKEND]
-#
-# The Linux counterpart of tests/netstack/run-winuae.sh.  There was a third,
-# run-fsuae.sh, which drove tools/amiberry-run.sh like this one and could do
-# strictly less: it is gone.
-#
-# -N picks the card and -B picks what it is wired to.  The default is the
-# A2065 on SLIRP, which is what the other two harnesses do.  -B <interface>
-# puts the guest on the host's own LAN instead, with its own MAC and a lease
-# from the real DHCP server, see tools/amiberry-run.sh for what that needs
-# from the host.
-#
-# -m picks the machine, and the board picks it when -m is absent.  A 68000
-# machine, A500, A600, needs a netstack_test built for one, so pass -b at
-# a build configured with -DAMINETXDUO_CPU=68000; a 68020 binary stops it with
-# an illegal instruction before the stack starts.  It also needs a ROM that
-# boots it, which is AMINETXDUO_KICKSTART_A600 and friends.
-#
-# Every driver except a2065.device is a third-party binary this repository does
-# not carry.  They are looked up in AMINETXDUO_SANA2_STORE and ~/amiga-assets/devs,
-# or named outright with AMINETXDUO_SANA2_DRIVER=<path>.  Without one the card is
-# in the machine and nothing can open it, which the run then shows.
-#
 # a2065.device is not ours to ship either: AMINETXDUO_A2065=<path>, or drop a
 # copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -54,10 +27,6 @@ while getopts "m:t:c:b:N:B:" opt; do
     esac
 done
 
-# The board decides the machine when -m did not.  A Zorro III card in an A1200
-# is not a configuration that exists: the bus is not there, the card never
-# autoconfigs, and the run fails as netstack_startup() 0xFFFFFFFE, which
-# reads exactly like a missing driver and is not one.
 if [ -z "$MODEL" ]; then
     case "$BOARD" in
         xsurf100z3) MODEL=A3000 ;;
@@ -65,11 +34,6 @@ if [ -z "$MODEL" ]; then
     esac
 fi
 
-# cnet.device dumps every PCMCIA CIS tuple it walks to the serial port, about
-# 127,000 lines of it, since it reads attribute memory to the end and most of it
-# is CISTPL_NULL.  That is the run, not the network: three minutes of serial at
-# the emulated UART's rate.  So the PCMCIA board gets its own default rather
-# than making every other board wait for it.
 if [ "$TIMEOUT" = 0 ]; then
     case "$BOARD" in
         ne2000_pcmcia) TIMEOUT=420 ;;
@@ -82,11 +46,6 @@ EXE="$ROOT/$BUILD/tests/netstack/netstack_test"
 
 . "$ROOT/tools/sana2-stage.sh"
 
-# A driver that is already on the machine is used without being asked for, so
-# the common case is one command.  The local store first: it is the only source
-# for six of the eight, and someone who put a file there meant that file.  Then
-# the fetch script, for the two whose licences permit downloading.  An explicit
-# AMINETXDUO_SANA2_DRIVER still wins over both.
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
     _have=$(sana2_local_driver "$_want")
@@ -119,18 +78,9 @@ echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-netstack-$BOARD}"
 
-# ---------------------------------------------------------- the verdict ---
-#
-# This used to end in `exec <runner>`, so the script's exit status was the
-# guest's own return code: a guest that opened nothing, ran no checks and
-# returned 0 was a pass, and so was one whose transcript never arrived.
-# tools/test-verdict.sh reads the guest's own counters instead, puts a floor
-# under the number of checks, and fails loudly and by name when there is no
-# transcript at all.
 . "$ROOT/tools/test-verdict.sh"
 
 verdict() {
-    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
     verdict_guest "netstack" 12 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0

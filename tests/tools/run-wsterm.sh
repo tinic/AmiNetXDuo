@@ -1,73 +1,7 @@
 #!/usr/bin/env bash
-#
 # THE WEBSOCKET TERMINAL, AND THE WEBDAV DRILL THAT NOTHING USED TO RUN.
-#
-#   tests/tools/run-wsterm.sh [-t SECONDS] [-p HOSTPORT] [-P GUESTPORT]
-#                             [-b BUILDDIR] [-m MODEL] [-c CPU]
-#
-# WHAT IT PROVES
-#
-#   An emulated Amiga serves /shell, upgrades a real WebSocket, and runs a
-#   command in an AmigaDOS Shell whose output comes back through the socket.
-#   Every check is tests/tools/httpd-drill.py's, at the level of bytes, because
-#   a library client would hide exactly the things that must be right: the
-#   accept value, the mask, and where a fragment ends.
-#
-#   It also runs that file's TWELVE EXISTING WebDAV checks, which nothing in
-#   this tree invoked -- they were written, committed, and never called by any
-#   script or CI stage.  Adding a second suite to the same file and then
-#   inventing a second runner for it would have left the first twelve exactly
-#   as unreachable as they were, so there is one runner and it runs both.
-#
-# SLIRP, AND HOW A GUEST BEHIND NAT IS CONNECTED TO
-#
-#   SLIRP's guest cannot normally be reached from outside, which is why
-#   tests/tools/run-httpd.sh is bridged.  It does not have to be: Amiberry
-#   carries UAE's `slirp_redir`, so one line of configuration forwards a host
-#   port to a guest one and the drill connects to 127.0.0.1.  That keeps this
-#   run off the LAN, needs no address nobody else is using, and needs no
-#   second machine.
-#
-#     slirp_redir=tcp:<host port>:<guest port>:10.0.2.15
-#
-#   The forward is ASSERTED before the drill runs, because a redirection that
-#   did not take produces "connection refused" from the drill, which reads
-#   exactly like a server that never started.
-#
-# A TIMEOUT IS A DEFECT
-#
-#   Two ceilings, and both are measured rather than picked.  BOOT is how long
-#   the guest may take to answer its first request; AMINETXDUO_WS_WAIT is how
-#   long ONE exchange with the Shell may take.  Both are reported at the end
-#   as what they actually cost, so the margin is visible and a run that
-#   creeps towards its ceiling is noticed before it burns one.  A run that
-#   burns either says which exchange it was and exits 2 -- infrastructure,
-#   not a result.  Raising one is never the fix.
-#
-# WHAT IT PRINTS
-#
-#   key=value lines and an exit code, and nothing a caller has to read prose
-#   out of:
-#
-#     boot_seconds=NN        how long the guest took to answer at all
-#     forward=ok|failed      whether the SLIRP redirection took
-#     checks=NN              assertions run
-#     failures=NN            assertions that did not hold
-#     result=pass|fail|infra
-#
-#   0 pass, 1 a failed assertion, 2 infrastructure (no forward, no boot, a
-#   ceiling burned) -- the last is not a result about the software.
-#
-# WHAT IT NEEDS
-#
 #   a2065.device (AMINETXDUO_A2065, or build/a2065.device), a Kickstart, and a
 #   68020 Release build:
-#
-#     cmake -S . -B build/cm -DCMAKE_BUILD_TYPE=Release \
-#           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
-#     cmake --build build/cm --parallel
-#     tests/tools/run-wsterm.sh
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -99,7 +33,6 @@ done
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 PAGE="$ROOT/src/tools/web/shell.html"
-# Staged too, so what the drill measures is the pair httpd chooses between.
 PAGEGZ="$PAGE.gz"
 
 for f in "$TOOLS/httpd" "$BSD" "$PAGE" "$PAGEGZ"; do
@@ -118,12 +51,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-#
-# The shape tests/tools/run-httpd.sh stages, plus the terminal's page.  The
-# content is deliberately awkward in the same way: a space and a bracket in a
-# name is what percent-encoding is for.
-
 STAGE="$ROOT/build/wsterm-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/Public/Docs" "$STAGE/Public/Empty Drawer"
@@ -132,14 +59,6 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-# INSIDE the served drawer, and not beside it at DH0:.
-#
-# -T names a path and does not care whether it is under the document root, and
-# tools/demo.sh and the installer both put it outside.  Here it goes inside on
-# purpose: it is the only way this harness can make the compressed sibling go
-# away and come back, over WebDAV, with no Workbench C: and no Rename.  What
-# that buys is the one state a user with their own page is in -- a -T page with
-# no .gz next to it -- asserted rather than assumed.
 cp "$PAGE"   "$STAGE/Public/shell.html"
 cp "$PAGEGZ" "$STAGE/Public/shell.html.gz"
 
@@ -154,12 +73,6 @@ echo "<html><body><h1>Amiga</h1></body></html>" > "$STAGE/Public/index.html"
 echo "one two three" > "$STAGE/Public/My File [!].txt"
 echo "in a drawer" > "$STAGE/Public/Docs/notes.txt"
 : > "$STAGE/Public/empty.dat"
-
-# ------------------------------------------------------------------ run ---
-#
-# httpd is the only executable: opening bsdsocket.library is what starts the
-# network, so the interface comes up underneath the server.  The server never
-# exits, so the run ends on the harness timeout and 124 is expected.
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-wsterm}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
@@ -188,41 +101,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ------------------------------------------------------- is it there yet ---
-#
-# Polled rather than slept: the boot cost is one of the numbers this run
-# reports, and a fixed sleep would hide it.  BOOT_MAX is the ceiling, and
-# what a good boot actually costs is printed beside it.
-
 BOOT_MAX=${AMINETXDUO_WSTERM_BOOT:-180}
 BOOT_AT=0
 FORWARD=failed
 STARTED=$(date +%s)
-
-# The emulator's own log grows at roughly a megabyte a second and playhouse3
-# is shared; a five-minute run left 313 MB of it and filled the disk twice,
-# which reads as "cat: write error" and "unpack-objects failed" rather than as
-# anything about this feature.
-#
-# THE TRIM THAT USED TO BE HERE IS GONE, and it was worse than useless.
-#
-#   EMULOG=build/amiberry-$TAG.log
-#   tail -c 4194304 "$EMULOG" > "$EMULOG.tail" && mv "$EMULOG.tail" "$EMULOG"
-#
-# `mv` puts a NEW INODE at that name.  The emulator still holds an open
-# descriptor on the old one, which is now unlinked, so everything it writes
-# after the first trim goes to a file with no name and the log on disk stops
-# growing at the moment it was trimmed.  Measured with a writer producing
-# 200,000 lines and one trim 0.3 s in: 25 lines survived, and the file never
-# grew again while the writer ran to completion.  A run that tripped this lost
-# its whole emulator log and looked like it had a very quiet one.
-#
-# Nothing has to replace it.  tools/logcap.sh caps the log at the source now
-# (tools/amiberry-run.sh), so it cannot reach the 32 MB this fired at: the
-# same runs that produced 313 MB here produce a few tens of KB.  The end-of-
-# run `tail -400` went with it -- it ran after the emulator was stopped, so it
-# was safe, but it existed for the same unbounded log and threw away the
-# artifact somebody would read.
 
 for _ in $(seq 1 "$BOOT_MAX"); do
     sleep 1
@@ -249,8 +131,6 @@ if [ "$FORWARD" != ok ]; then
     sed -n '1,40p' "$HD/stdout.txt" 2>/dev/null >&2 || true
     exit 2
 fi
-
-# ---------------------------------------------------------------- the drill --
 
 DRILL_AT=$(date +%s)
 set +e
@@ -281,15 +161,6 @@ fi
 echo "================================================================"
 echo
 
-# ------------------------------------------------------------ the numbers --
-#
-# What the session actually costs, once the assertions have held.  It runs
-# after the drill and not instead of it: this measures and does not assert,
-# because "0.4 seconds to echo a line" is neither right nor wrong -- it is the
-# answer to whether the thing is pleasant to use, and a person reads it.
-#
-# Skipped when the drill failed, since a number taken from a broken session is
-# a number about nothing.
 if [ "$DRILL_RC" -eq 0 ] && [ "${FAILS:-1}" -eq 0 ]; then
     set +e
     python3 "$ROOT/tests/tools/wsterm-bench.py" 127.0.0.1 "$HOSTPORT" \
@@ -308,8 +179,6 @@ echo "drill_seconds=$DRILL_SECS"
 echo "checks=${CHECKS:-0}"
 echo "failures=${FAILS:-0}"
 
-# A drill that produced no tally at all did not finish, which is not the same
-# thing as a drill whose assertions held.
 if [ -z "${CHECKS:-}" ]; then
     echo "result=infra"
     echo "!! the drill printed no tally; it did not reach the end" >&2

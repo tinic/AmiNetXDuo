@@ -1,22 +1,6 @@
 /*
  * PtrProbe: what an injected IECLASS_POINTERPOS actually does, per display mode.
  *
- * The console injects an absolute pointer position for every mouse move a
- * browser sends.  IECLASS_POINTERPOS is not in screen pixels: Intuition
- * multiplies ie_X by IntuitionBase's MouseScaleX (the monitor's ticks per
- * mouse unit) and divides by the screen's ticks-per-pixel to land on a pixel.
- * Both numbers are in the graphics database, and neither is derivable from
- * the ViewPort's Modes bits, which is what src/tools/httpfb.c used to do.
- *
- * This opens a screen per mode, sends a position through input.device, and
- * reads back where the pointer landed in that screen's own pixels
- * (Screen->MouseX/MouseY).  Every row is printed for two rules at once, so
- * one boot produces the before and after table:
- *
- *   old   the Modes-bit rule: SUPERHIRES halves X, HIRES leaves it, else
- *         doubles; LACE leaves Y, else doubles
- *   new   ticks: ie = pixel * DisplayInfo.Resolution / MonitorInfo.MouseTicks
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -211,10 +195,6 @@ static VOID display_units(struct Screen *sc)
         }
     }
 
-    /* The two halves of the position have to come from the same place.  A
-       monitor's ticks against a mode's guessed pixels is a ratio of two
-       different things, so a mode with no record of its own keeps the pair
-       that was there before. */
     if (!have_disp)
         return;
 

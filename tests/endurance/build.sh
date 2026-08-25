@@ -10,37 +10,10 @@
 #   build/endurance/fitz-serve  the host-side Fitz server (no FUSE needed)
 #   build/endurance/fitz        Fitz for m68k, built HERE with debug at WARN
 #
-# Endurance is compiled the way tests/clients/build.sh compiles
-# client_patterns: against the Roadshow NDK headers with
-# tests/conformance/compat first on the include path, so the regenerated
-# inline/bsdsocket.h wins over the NDK one, which GCC 15 cannot compile.
-# Fitz needs exactly the same treatment for exactly the same reason, its
-# amiga-server.c calls SetSocketSignals(), and the NDK's inline for that one
-# is the specific macro that fails.
-#
-# WHY BUILD FITZ RATHER THAN ONLY RUN THE SHIPPED BINARY
-#
-# The released binary has debug compiled out.  Its client treats EAGAIN on a
-# blocking socket as retryable (src/amiga-client.c, checkretry()) and retries
-# ten times before giving up, silently, so on the released binary the defect
-# this harness hunts is visible only as a connection that eventually dies.
-# Built with -DADEBUG=5 the same code prints
-#
-#     * EAGAIN
-#     * recv error err=-1 len=<n> errno=<e>
-#
-# through kprintf() to the serial port, which tools/amiberry-run.sh captures into
-# build/serial*.log.  Both binaries are produced; run-fitz.sh takes the debug
-# one by default and -r switches to the released one, so "did our own build
-# change the answer?" is one flag rather than an argument.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
 
-# The guest CPU.  Fitz is what the soak and endurance harnesses drive, so a
-# 68020 build of it cannot be run on an A600 whatever the stack was built for.
-# Inherits SOAK_ARCH so one setting covers a whole run.
 FITZ_ARCH="${FITZ_ARCH:-${SOAK_ARCH:--m68020}}"
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -70,9 +43,6 @@ if [ ! -d "$FITZ/src" ]; then
     exit 0
 fi
 
-# The host server.  fitz-serve is the half of Fitz that does NOT need FUSE
-# (its own Makefile splits the two binaries for that reason), which is what
-# makes the Amiga-as-client arrangement the one that works on any host.
 echo "  CC fitz-serve (host)"
 (cd "$FITZ/src" && make fitz-serve >/dev/null)
 cp "$FITZ/src/fitz-serve" "$OUT/fitz-serve"
@@ -81,15 +51,6 @@ cp "$FITZ/src/fitz-serve" "$OUT/fitz-serve"
 cp "$FITZ/fitz" "$OUT/fitz-release"
 chmod +w "$OUT/fitz-release"
 
-# And ours, with the diagnostics turned on.
-#
-# -DAUTHENTICATION is deliberately absent: it pulls in speck64be.asm, which is
-# vasm source this tree cannot assemble, and encryption is off in every run
-# --allow-multiple-definition: a 68000 build calls __divsi3, and that newlib
-# object also defines `div`, which collides with lib_a-div.o.  Harmless, and
-# only 68000 reaches it.
-# here anyway (Fitz's own readme calls it "prohibitively slow on a 7 MHz
-# 68000").  -DPARSETZ and -DROADSHOW_SONDERLOCKE match the shipped build.
 echo "  CC fitz (m68k, ADEBUG=5)"
 FITZ_SRC="
     amiga-main.c amiga-client.c amiga-server.c amiga-common.c amiga-tzparse.c

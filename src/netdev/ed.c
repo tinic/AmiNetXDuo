@@ -30,18 +30,8 @@
 /*
  * AmiNetXDuo: adapted from NetBSD sys/arch/amiga/dev/if_ed_zbus.c (rev 1.2).
  * The card geometry -- register, buffer and PROM offsets, the stride, the DCR
- * value, the ring-wrap arithmetic in ring_copy and the 4-byte header's byte
- * order -- is NetBSD's.  What was replaced:
- *
- *   bus_space_*   -> plain moves through the board window.  The buffer is
- *                    mapped, so there is no bus abstraction to go through
- *   mbuf chains   -> one linear frame
- *   test_mem      -> a pattern pass before the zero pass, see ed_test_mem()
- *
- * The chip itself is dp8390.c, unchanged and shared with ne2000.c: same
- * register programming, same ring geometry, same ISR drain, same multicast
- * hash.  All that differs is how the packet buffer is reached, which is the
- * three function pointers NetdevNic already carries.
+ * value, the ring-wrap arithmetic and the 4-byte header's byte order -- is
+ * NetBSD's.  The chip itself is dp8390.c, shared unchanged with ne2000.c.
  *
  * SPDX-License-Identifier: MIT AND BSD-2-Clause-NetBSD
  */
@@ -56,9 +46,8 @@
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 
 /*
- * The packet buffer window.  Recomputed rather than cached, so this core adds
- * no field to NetdevNic: board and card are both already there because every
- * core needs them.
+ * The packet buffer window, recomputed rather than cached so this core adds no
+ * field to NetdevNic.
  */
 static volatile UBYTE *ed_buf(NetdevNic *nic)
 {
@@ -66,30 +55,18 @@ static volatile UBYTE *ed_buf(NetdevNic *nic)
 }
 
 /*
- * unsigned long, not ULONG: ULONG is 32 bits and this file is also compiled
- * for a 64-bit host by test/test_netdev_ed.c, where the truncation is a
- * -Werror diagnostic and the answer would be wrong anyway.
+ * unsigned long, not ULONG: ULONG is 32 bits and this file is also compiled for
+ * a 64-bit host by test/test_netdev_ed.c, where the truncation is a -Werror
+ * diagnostic and the answer would be wrong anyway.
  */
 #define ED_ODD(p)   ((((unsigned long)(const void *)(p)) & 1ul) != 0)
 
 /*
  * Never a byte access.  The buffer is 16 bits wide on both boards and the byte
  * lanes are not separately selectable, so a byte write puts the same value in
- * both halves on real hardware, even where the emulator accepts it.  Every
- * caller here starts on an even chip address.  ED_PAGE_SIZE is 256 and the
- * header is 4 bytes, so nothing rounds it to an odd one.
- *
- * That rules out n68k_copy_bytes(), which is otherwise this same copy.  It
- * brings the destination to a longword boundary with byte moves, and drops to
- * a byte loop on a 68000 whose pointers disagree in parity.  Its longword bulk
- * is available on its own, and that is where its gain is: n68k_copy_longs() is
- * the same movem.l block with the byte paths removed.  The word loops below
- * are what is left, the 0..3 byte tail.
- *
- * The odd-host-address arms are not reachable from today's callers, because
- * the staging buffers are longword-aligned and a ring wrap resumes on a page
- * boundary.  test_netdev_ed.c drives them directly, rather than leaving two
- * branches that read as handled and have never run.
+ * both halves on real hardware.  Every caller here starts on an even chip
+ * address.  That rules out n68k_copy_bytes(), which brings the destination to a
+ * longword boundary with byte moves; n68k_copy_longs() is its bulk alone.
  */
 static VOID ed_copy_in(const volatile UBYTE *src, UBYTE *dst, UWORD len)
 {
@@ -174,22 +151,11 @@ static VOID ed_fill(volatile UBYTE *dst, UWORD val, UWORD len)
 /* ---------------------------------------------------------- buffer access - */
 
 /*
- * Why the first word is swapped and the second is not.
- *
- * ED_DCR_BOS is set, which makes the chip lay packet data down in host byte
- * order on a 68000: the byte the receiver saw first ends up at the lower
- * address.  It does not do the same to the whole 4-byte header, because
- * status/next-page and the byte count are two separate 16-bit quantities to
- * the chip and only the first is a byte pair.  In memory:
- *
- *   +0  next_packet    +1  rsr    +2  count low    +3  count high
- *
- * so the first word reads back swapped and the second reads back in the
- * chip's own little-endian order.  Both NetBSD's ed_zbus_read_hdr() and
- * Linux's hydra_get_8390_hdr() encode exactly this, and Amiberry's DP8390
- * emulation writes exactly this (qemuvga/ne2000.cpp, the `s->dcfg & 2` arm of
- * ne2000_receive).  One uniform swap gets the count backwards, and every frame
- * is then rejected as over-length.
+ * ED_DCR_BOS is set, so the chip lays packet data down in host byte order --
+ * but not the whole 4-byte header: status/next-page and the byte count are two
+ * separate 16-bit quantities and only the first is a byte pair.  In memory
+ * +0 next_packet, +1 rsr, +2 count low, +3 count high, so the first word reads
+ * back swapped and the second in the chip's own little-endian order.
  */
 static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 {
@@ -204,15 +170,10 @@ static VOID ed_read_hdr(NetdevNic *nic, LONG src, NetdevRing *hdr)
 }
 
 /*
- * The wrap is an `if`, not a loop, so nothing here can spin however corrupt
- * the ring is.  That matters, because this runs in the interrupt server.
- *
- * head cannot underflow, and the reason is not local: src is packet_ptr + 4,
- * packet_ptr is mem_ring + (next_packet - rec_page_start) * 256, and
- * dp8390_rint() only ever assigns next_packet a value it has range-checked
- * against [rec_page_start, rec_page_stop).  So src <= mem_end - 252 and
- * amount <= NETDEV_RXBUF_MAX, which is smaller than the smallest ring this
- * table has, so the tail cannot wrap a second time either.
+ * The wrap is an `if`, not a loop, so nothing here can spin however corrupt the
+ * ring is: this runs in the interrupt server.  head cannot underflow because
+ * dp8390_rint() range-checks next_packet against [rec_page_start,
+ * rec_page_stop), so the tail cannot wrap a second time either.
  */
 /*
  * The buffer is mapped, so an unwrapped frame needs no staging at all: the
@@ -247,8 +208,7 @@ static LONG ed_ring_copy(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
 
 /*
  * No DMA to program and no ISR.RDC to wait for: the frame is moved into the
- * transmit slot and that is the whole of it, which is also why this cannot
- * fail the way ne2000_write_buf() can.  Short frames are zero-padded here
+ * transmit slot and that is the whole of it.  Short frames are zero-padded here
  * rather than by the caller, because the pad has to reach the card.
  */
 static UWORD ed_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
@@ -261,9 +221,9 @@ static UWORD ed_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
     if (len < NETDEV_FRAME_MIN)
     {
         /*
-         * ed_copy_out() already zeroed the low half of the last word of an
-         * odd frame, so the pad starts at the next word and never steps back
-         * over the byte that was just written.
+         * ed_copy_out() already zeroed the low half of the last word of an odd
+         * frame, so the pad starts at the next word and never steps back over
+         * the byte that was just written.
          */
         UWORD done = (UWORD)((len + 1u) & ~1u);
 
@@ -277,18 +237,11 @@ static UWORD ed_write_buf(NetdevNic *nic, const UBYTE *frame, UWORD len,
 /* ---------------------------------------------------------------- probe --- */
 
 /*
- * NetBSD zeroes the buffer and reads back zero.  Two things would pass that
- * test: a window that ignores writes and reads as zero, and a window that
- * decodes fewer address lines than the buffer has, so that the top half is an
- * alias of the bottom.  The second is what Amiberry did to the LAN Rover's 32K
- * until ef28da7e, and the symptom was a receive ring that died the first time
- * it crossed page 0x40.
- *
- * So: a distinct pattern per page over the whole buffer, then a second sweep
- * that reads every page back.  A page that aliases another has been
- * overwritten by the time it is read.  The zero pass comes last, and it is
- * what leaves the ring clean.  The read back goes through ed_copy_in(), the
- * same path the receive ring uses.
+ * A distinct pattern per page over the whole buffer, then a second sweep that
+ * reads every page back.  Zeroing and reading back zero would also pass on a
+ * window that ignores writes, and on one that decodes fewer address lines than
+ * the buffer has so the top half aliases the bottom.  The zero pass comes last
+ * and is what leaves the ring clean.
  */
 static UWORD ed_mem_seed(LONG off)
 {
@@ -336,9 +289,8 @@ static BOOL ed_test_mem(NetdevNic *nic)
 
 /*
  * Does a DP8390 answer at all?  CURR on page 1 is the only ring register that
- * reads back what was written, so it is the one that can be measured.  Two
- * patterns, because one would pass against a bus that floats to it.  The
- * chip is left stopped and CURR is set properly by dp8390_init().
+ * reads back what was written.  Two patterns, because one would pass against a
+ * bus that floats to it.  dp8390_init() sets CURR properly afterwards.
  */
 static BOOL ed_test_regs(NetdevNic *nic)
 {
@@ -403,8 +355,7 @@ static LONG ed_attach(NetdevNic *nic)
     /*
      * All-zero or all-ones is a window that is not answering, and a group bit
      * in the first byte is not a station address whatever else it is.  Either
-     * one enumerated would be a unit that comes online and is never delivered
-     * a frame.
+     * one enumerated is a unit that comes online and is never delivered a frame.
      */
     if (ored == 0 || anded == 0xff || (nic->factory[0] & 1u) != 0)
     {
@@ -424,10 +375,9 @@ static LONG ed_attach(NetdevNic *nic)
     nic->rcr_proto = 0;
 
     /*
-     * Two-word FIFO threshold, no auto-init remote DMA, 68000 byte order,
-     * word-wide transfers -- NetBSD's value.  ED_DCR_BOS is the one that is
-     * not optional: without it the chip lays every received frame down
-     * byte-swapped and ed_read_hdr() above reads a header that is not there.
+     * NetBSD's DCR value.  ED_DCR_BOS is the one that is not optional: without
+     * it the chip lays every received frame down byte-swapped and
+     * ed_read_hdr() above reads a header that is not there.
      */
     nic->dcr_reg = ED_DCR_FT0 | ED_DCR_WTS | ED_DCR_LS | ED_DCR_BOS;
 

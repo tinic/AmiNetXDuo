@@ -2,30 +2,6 @@
  * The port header NetX Duo's crypto library asks for when it is built on its
  * own, which is how httpd gets SHA-1 for the WebSocket handshake.
  *
- * third_party/netxduo/crypto_libraries/src/nx_crypto_sha1.c is the SHA-1 in
- * this tree and there is no reason for a second one.  It normally reaches
- * nx_api.h, and httpd links no part of NetX Duo -- it is a bsdsocket.library
- * application, the same as nc and telnet -- so pulling the stack's headers
- * into it to get one hash would be the wrong trade.
- *
- * nx_crypto.h has the escape hatch already.  NX_CRYPTO_STANDALONE_ENABLE swaps
- * nx_api.h for this header, and this header is nothing but the eight integer
- * types and the byte-order macros.  The vendored ports supply one each for
- * Cortex-M and Win32 and there is none for m68k.
- *
- * It is here and not in port/netxduo-amiga because that drawer is on the
- * include path of the stack, the TLS library and the host fuzz drivers, all of
- * which build nx_crypto in its ordinary mode where this file must not be
- * found.  src/tools is on the path of the commands and nothing else, so a
- * header here can only reach what asks for it.
- *
- * The types are not the vendor's.  The Cortex ports say `typedef unsigned long
- * ULONG`, which is 32 bits there and 64 on a 64-bit host, and SHA-1's state is
- * five ULONGs that must be exactly 32.  `unsigned int` is 32 bits on
- * m68k-amigaos and on every host this is tested on, so that is what these say.
- * The assertion below fails the build rather than the digest if it ever is
- * not.
- *
  * SPDX-License-Identifier: MIT
  */
 

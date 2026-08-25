@@ -1,63 +1,6 @@
 /*
  * McastRace, two openers racing for the same row of the multicast table.
  *
- * bsd_mcast_table[16] is one table for the machine, keyed by AmiSocket *, and
- * a row is free precisely because bm_Sock is NULL.  bsd_mcast_join() picks a
- * free row inside the bsd_nx_enter() bracket; if it marks the row used only
- * AFTER bsd_nx_leave(), a second base joining in that window picks the same
- * row.  One of the two memberships then exists in NetX Duo and nowhere else:
- * IP_DROP_MEMBERSHIP cannot find it, and CloseSocket() never leaves it.
- *
- * THE INVARIANT
- *
- *   A join that returned 0 can be dropped.
- *
- * That is all this asserts, and it is enough: the loser of the race is the
- * opener whose row was overwritten, and the only thing it can observe is its
- * own IP_DROP_MEMBERSHIP failing with EADDRNOTAVAIL on a group it holds.
- *
- * WHY A DATAGRAM IS NOT THE ASSERTION
- *
- *   "Both receive, one closes, the other must still receive" does not fail on
- *   this defect when the two joins are for the SAME group: NetX Duo refcounts
- *   membership per NX_IP, so the two joins leave the count at 2 and one
- *   spurious leave still leaves the group live for the other.  What is
- *   destroyed is the library's own socket-to-group mapping, and the drop above
- *   is where that shows.
- *
- * HOW THE WINDOW IS FORCED
- *
- *   The window is a handful of instructions, so it is not waited for, it is
- *   aimed at.
- *
- *   bsd_nx_leave() drops the ThreadX baton and pokes the scheduler Task, which
- *   runs at Exec priority 1 (TX_AMIGA_TASK_PRIORITY) and therefore preempts a
- *   priority-0 caller AT THAT INSTRUCTION.  The scheduler then dispatches
- *   whichever adopted Task was parked waiting for the baton, on an Exec Task of
- *   its own.  So if a second Process is parked on the baton when the first one
- *   leaves, the switch to it happens INSIDE the window and not after it.
- *
- *   HAMMER (this Process, priority 0) joins and drops one group as fast as it
- *   can, so it is inside a bracket nearly all the time.
- *
- *   SNIPER (the child, priority 2) sleeps, wakes on the VBlank interrupt,
- *   asynchronously, wherever HAMMER happens to be, and joins a different
- *   group.  A wake that lands while HAMMER holds the baton parks SNIPER on it,
- *   and HAMMER's next bsd_nx_leave() hands over inside the window.
- *
- *   SNIPER then sleeps once more before dropping, so that HAMMER's late write
- *   to the row lands first.  Dropping immediately would let SNIPER take its own
- *   row back before HAMMER overwrote it, and the run would see nothing.
- *
- * TWO PROCESSES AND TWO BASES, NOT TWO SOCKETS
- *
- *   A base belongs to one Task, and the row is claimed on behalf of a base's
- *   bsd_nx_enter() bracket.  Two sockets on one base are serialised by that
- *   base's nesting counter and cannot reach the window at all.
- *
- * Vectors are called by hand at their LVOs, as in the other probes: the NDK
- * inlines assume one global SocketBase and there are two here.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -69,8 +12,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG r_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -134,8 +75,6 @@ static LONG r_errno(struct Library *base)
     return res;
 }
 
-/* --------------------------------------------------------------- shapes --- */
-
 typedef struct RaceMreq
 {
     ULONG   imr_multiaddr;
@@ -167,8 +106,6 @@ typedef struct RaceStats
     LONG    rs_LastJoinErr;
 } RaceStats;
 
-/* ---------------------------------------------------------------- worker -- */
-
 static LONG r_join(struct Library *sb, LONG s, ULONG group)
 {
     RaceMreq mreq;
@@ -191,11 +128,6 @@ static LONG r_drop(struct Library *sb, LONG s, ULONG group)
                         &mreq, (LONG)sizeof(mreq));
 }
 
-/*
- * One side of the race.  nap is the sleep before each join and hold the sleep
- * between the join and the drop, both in ticks; zero for neither, which is
- * what makes HAMMER a hammer.
- */
 static VOID r_run(struct Library *sb, LONG s, ULONG group, RaceStats *st,
                   ULONG rounds, ULONG nap, ULONG hold,
                   const volatile LONG *stop)
@@ -230,22 +162,12 @@ static VOID r_run(struct Library *sb, LONG s, ULONG group, RaceStats *st,
         }
         else
         {
-            /* The membership is held, the join above returned 0 and nothing
-               since has dropped it, so the only way here is a row that now
-               belongs to somebody else. */
             st->rs_Stolen++;
             st->rs_LastDropErr = r_errno(sb);
         }
     }
 }
 
-/* ----------------------------------------------------------- the sniper --- */
-
-/*
- * Everything the child needs, in the segment both Processes share.  It opens
- * its OWN bsdsocket.library base: the defect is between two bases, and a
- * second socket on this one could not reach it.
- */
 static struct
 {
     struct Task    *rc_Parent;
@@ -288,17 +210,9 @@ static VOID r_sniper(VOID)
         CloseLibrary(sb);
     }
 
-    /*
-     * The shots are spent, so HAMMER stops too: its own ceiling is only there
-     * so that a sniper that died on its first call cannot leave it running for
-     * ever.  Then the handshake, and nothing after it, this Process exits
-     * next and the parent is already free to look at the counters.
-     */
     sniper.rc_Stop = 1;
     Signal(sniper.rc_Parent, sniper.rc_Signal);
 }
-
-/* ------------------------------------------------------------------ main -- */
 
 #define TEMPLATE    "ROUNDS/N,SHOTS/N,NAP/N,HOLD/N,CPRI/N,PPRI/N"
 
@@ -313,12 +227,6 @@ enum
     ARG_COUNT
 };
 
-/*
- * HAMMER rounds are cheap and SNIPER rounds cost two sleeps each, so they are
- * counted separately.  The defaults put the run at about twenty seconds:
- * SHOTS * (NAP + HOLD) ticks is the floor, and HAMMER is bounded only by
- * ROUNDS so that it is still hammering when the last shot goes off.
- */
 #define DEF_ROUNDS  60000UL
 #define DEF_SHOTS   400UL
 #define DEF_NAP     1UL
@@ -425,15 +333,10 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    /*
-     * Below the child and below the ThreadX scheduler Task, which is the whole
-     * mechanism: see the top.
-     */
     oldpri = (LONG)SetTaskPri(FindTask(NULL), ppri);
 
     r_run(sb, s, R_GROUP_HAMMER, &hammer, rounds, 0, 0, &sniper.rc_Stop);
 
-    /* HAMMER is done; let the child finish the shots it has left. */
     Wait(sniper.rc_Signal);
 
     (VOID)SetTaskPri(FindTask(NULL), oldpri);
@@ -441,8 +344,6 @@ int main(void)
     (VOID)r_close(sb, s);
     CloseLibrary(sb);
     FreeSignal(sig);
-
-    /* ---- what happened --------------------------------------------------- */
 
     if (sniper.rc_OpenFailed != 0)
         Printf((CONST_STRPTR)"FAIL: the sniper could not open a second base\n");
@@ -463,11 +364,6 @@ int main(void)
            (LONG)sniper.rc_Stats.rs_JoinFail, sniper.rc_Stats.rs_LastJoinErr,
            sniper.rc_Stats.rs_LastDropErr);
 
-    /*
-     * The line the harness gates on.  "did" is how much racing really
-     * happened, so that a run which did nothing cannot pass by having found
-     * nothing wrong.
-     */
     Printf((CONST_STRPTR)"did: %ld hammer joins, %ld sniper joins\n",
            (LONG)hammer.rs_Joined, (LONG)sniper.rc_Stats.rs_Joined);
 
@@ -487,11 +383,6 @@ int main(void)
         failed++;
     }
 
-    /*
-     * A join refused on a table with at most two rows in use is the same
-     * defect seen from the other end: a row marked used by nobody, or an
-     * EADDRINUSE against a membership this side already lost.
-     */
     if (hammer.rs_JoinFail != 0 || sniper.rc_Stats.rs_JoinFail != 0)
     {
         Printf((CONST_STRPTR)"FAIL: %ld joins were refused on a table with "

@@ -1,45 +1,6 @@
 /*
  * AmiNetXDuo, inbound fragment reassembly and what bounds it.
  *
- * nx_ip_fragment_enable() is now called, so a fragmented datagram is held and
- * put back together instead of counted and released.  What that adds is a
- * queue with the packet pool behind it, and the pool on the smallest supported
- * machine is AMI_POOL_MIN_PACKETS, sixteen.  A first fragment whose tail
- * never arrives pins a whole pool packet for the reassembly timeout however
- * few bytes it carried, so the interesting cases here are the ones a lab
- * network will not produce on demand: a tail that never comes, a pool already
- * spent, and a sender asking for a longer hold than it is entitled to.
- *
- * What is checked:
- *
- *   1. Three IPv6 fragments arriving in order become one datagram, delivered
- *      once, with the fragment header gone and the length the sum of the
- *      parts.  Arriving in the reverse order they become the same datagram,
- *      the assembly list is ordered by offset, not by arrival.
- *
- *   2. A fragment arriving while the pool is at or below the reserve is
- *      refused and queued nowhere.  Without this the reserve does not exist
- *      and sixteen forty-byte packets take the whole pool of a 1 MB machine.
- *      One packet above the reserve is still accepted, so the guard is a
- *      bound and not an off switch.
- *
- *   3. A datagram whose tail never arrives is released, in full, after
- *      NX_IPV6_MAX_REASSEMBLY_TIME sweeps and not before.
- *
- *   4. The IPv4 hold time is NX_IPV4_MAX_REASSEMBLY_TIME whatever TTL the
- *      sender wrote.  RFC 791 section 3.2 makes it MAX(timeout, TTL), which
- *      lets a peer pin a pool packet for 255 seconds by asking; RFC 1122
- *      3.3.2 asks for a fixed value instead.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_ipv6_process_fragment_option.c, nx_ip_fragment_assembly.c and
- * nx_ip_fragment_timeout_check.c, the queue, the reassembly and the sweep,
- * so the list state each check reads is the list the stack would have.
- *
- * Stubbed: the packet pool, _nx_packet_release, _nx_ip_dispatch_process and
- * the two ICMP error senders.  The pool stub is a counter rather than storage
- * because every check here is about the count.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -55,8 +16,6 @@
 #include <string.h>
 
 
-/* ------------------------------------------------------------- harness ---- */
-
 static unsigned long h_checks;
 static unsigned long h_failures;
 
@@ -71,8 +30,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-
-/* --------------------------------------------------------------- stubs ---- */
 
 static TX_THREAD h_caller_thread;
 
@@ -178,14 +135,6 @@ VOID _nx_icmpv4_send_error_message(NX_IP *ip_ptr, NX_PACKET *offending_packet,
 }
 
 
-/* ----------------------------------------------------------- the fixture -- */
-
-/*
- * The pool is AMI_POOL_MIN_PACKETS, the floor src/netstack/ clamps to and the
- * only size at which the reserve is worth arguing about: half of sixteen is
- * eight, and eight packets is what has to be left for ARP, ND and TCP while
- * somebody is holding the other eight.
- */
 #define H_POOL_TOTAL    16
 #define H_POOL_RESERVE  (H_POOL_TOTAL / 2)
 
@@ -201,11 +150,9 @@ static NX_IPV6_HEADER h_v6_header[H_PACKETS];
 static NX_IPV4_HEADER h_v4_header[H_PACKETS];
 static UINT           h_packets_used;
 
-/* 2001:db8::2, the peer that is sending us a fragmented datagram. */
 #define H_PEER_0        0x20010DB8UL
 #define H_PEER_3        2UL
 
-/* 2001:db8::1, us. */
 #define H_LOCAL_0       0x20010DB8UL
 #define H_LOCAL_3       1UL
 
@@ -232,7 +179,6 @@ static VOID h_reset(VOID)
     h_pool.nx_packet_pool_total = H_POOL_TOTAL;
     h_pool.nx_packet_pool_available = H_POOL_TOTAL;
 
-    /* Reassembly is on, which is what the netstack now does at start-up. */
     h_ip.nx_ip_fragment_assembly = _nx_ip_fragment_assembly;
     h_ip.nx_ip_fragment_timeout_check = _nx_ip_fragment_timeout_check;
 }
@@ -252,22 +198,12 @@ NX_PACKET *packet_ptr;
     packet_ptr -> nx_packet_data_start = h_body[h_packets_used];
     packet_ptr -> nx_packet_data_end   = h_body[h_packets_used] + H_PAYLOAD;
 
-    /* Held by reassembly is held out of the pool. */
     h_pool.nx_packet_pool_available--;
     h_packets_used++;
 
     return packet_ptr;
 }
 
-/*
- * One IPv6 fragment, offered to the receive path exactly as
- * _nx_ip_dispatch_process() offers it: prepend_ptr on the fragment header, the
- * outer IPv6 header byte-swapped into host order already, the fragment header
- * still in network order because the option handler is what swaps it.
- *
- * `offset` is in bytes and a multiple of eight, which is what the wire field
- * holds once its three flag bits are masked off.
- */
 static UINT h_deliver_v6(ULONG id, ULONG offset, UINT more, ULONG data_length)
 {
 NX_PACKET                      *packet_ptr = h_next_packet();
@@ -311,11 +247,6 @@ ULONG                           payload_length;
     return _nx_ipv6_process_fragment_option(&h_ip, packet_ptr);
 }
 
-/*
- * One IPv4 fragment, queued the way _nx_ipv4_packet_receive() queues it:
- * prepend_ptr on the IP header, header in host order, no option handler in
- * between.  `offset` is in eight-byte units, as the wire field holds it.
- */
 static VOID h_deliver_v4(ULONG id, ULONG ttl, ULONG offset, UINT more, ULONG data_length)
 {
 NX_PACKET      *packet_ptr = h_next_packet();
@@ -343,7 +274,6 @@ ULONG           total_length;
     packet_ptr -> nx_packet_last        = NX_NULL;
     packet_ptr -> nx_packet_queue_next  = NX_NULL;
 
-    /* Straight onto the received-fragment queue, as the receive path does. */
     if (h_ip.nx_ip_received_fragment_head)
     {
         h_ip.nx_ip_received_fragment_tail -> nx_packet_queue_next = packet_ptr;
@@ -356,18 +286,11 @@ ULONG           total_length;
     }
 }
 
-/*
- * Leave the pool with `free` packets at the moment the next fragment is
- * examined.  The fragment itself is already out of the pool by then, it had
- * to be allocated to be received, so this is one more than the level the
- * guard reads.
- */
 static VOID h_pool_free_after_next(ULONG free)
 {
     h_pool.nx_packet_pool_available = free + 1;
 }
 
-/* Run the once-a-second sweep for `seconds`. */
 static VOID h_age(ULONG seconds)
 {
 ULONG i;
@@ -378,7 +301,6 @@ ULONG i;
     }
 }
 
-/* How many datagrams are on the assembly list. */
 static ULONG h_assembling(VOID)
 {
 NX_PACKET *fragment = h_ip.nx_ip_fragment_assembly_head;
@@ -394,9 +316,6 @@ ULONG      count = 0;
 }
 
 
-/* ---------------------------------------------------------------- tests --- */
-
-/* Three fragments in order. */
 static VOID test_reassembles_in_order(VOID)
 {
     h_reset();
@@ -418,7 +337,6 @@ static VOID test_reassembles_in_order(VOID)
     h_check(h_ip.nx_ip_packets_reassembled == 1, "the reassembly is counted");
 }
 
-/* The same three, arriving last-first. */
 static VOID test_reassembles_out_of_order(VOID)
 {
     h_reset();
@@ -435,14 +353,12 @@ static VOID test_reassembles_out_of_order(VOID)
     h_check(h_assembling() == 0, "and leave nothing on the assembly list");
 }
 
-/* The reserve. */
 static VOID test_pool_reserve(VOID)
 {
 UINT status;
 
     h_reset();
 
-    /* One packet above the reserve: still accepted. */
     h_pool_free_after_next(H_POOL_RESERVE + 1);
 
     status = h_deliver_v6(H_FRAGMENT_ID, 0, 1, 64);
@@ -452,7 +368,6 @@ UINT status;
     h_check(h_ip.nx_ip_received_fragment_head != NX_NULL,
             "and is queued for assembly");
 
-    /* At the reserve: refused, and not queued anywhere. */
     h_reset();
     h_pool_free_after_next(H_POOL_RESERVE);
 
@@ -463,7 +378,6 @@ UINT status;
             "and is queued nowhere");
     h_check(h_assembling() == 0, "and starts no reassembly");
 
-    /* Below it too, which is where a lossy link leaves the pool. */
     h_reset();
     h_pool_free_after_next(0);
 
@@ -474,7 +388,6 @@ UINT status;
             "and is queued nowhere either");
 }
 
-/* A tail that never arrives. */
 static VOID test_incomplete_times_out(VOID)
 {
     h_reset();
@@ -487,7 +400,6 @@ static VOID test_incomplete_times_out(VOID)
     h_check(h_deliveries == 0, "an incomplete datagram is not delivered");
     h_check(h_assembling() == 1, "and is held on the assembly list");
 
-    /* One second short of the timeout it is still held. */
     h_age(NX_IPV6_MAX_REASSEMBLY_TIME);
 
     h_check(h_assembling() == 1,
@@ -501,7 +413,6 @@ static VOID test_incomplete_times_out(VOID)
     h_check(h_ip.nx_ip_reassembly_failures == 1, "and counts the failure");
 }
 
-/* The IPv4 hold time does not follow the sender's TTL. */
 static VOID test_ipv4_hold_time_is_fixed(VOID)
 {
     h_reset();

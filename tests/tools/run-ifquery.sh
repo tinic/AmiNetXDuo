@@ -1,55 +1,8 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR THE ROADSHOW INTERFACE AND STATISTICS APIs.
-#
-#   tests/tools/run-ifquery.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#
-# WHAT IT IS PROVING
-#
-#   ObtainInterfaceList(), ReleaseInterfaceList(), QueryInterfaceTagList() and
-#   ConfigureInterfaceTagList() are the vectors a monitoring or configuration
-#   tool, Roadie, NetMon, RoadshowControl, reaches for first, and both of
-#   the shapes they traffic in are shapes a compiler cannot check:
-#
-#     * a 'struct List' whose Nodes carry a name in ln_Name and nothing else.
-#       A list of the wrong node type walks fine right up to the first
-#       dereference in the CALLER, where it gurus.
-#     * IFQ_* tags whose ti_Data is a POINTER to caller storage rather than
-#       the value.  Getting that backwards writes a number into a pointer the
-#       application still owns.
-#
-#   Neither can be caught by a build, and neither can be caught by a test that
-#   shares a header with the implementation.  So this runs a separate
-#   executable, tests/tools/ifprobe.c, which knows only the published NDK
-#   header, on a booted machine with a real SANA-II card behind the stack.
-#
-# WHY THE PROBE POISONS ITS BUFFERS
-#
-#   Half the published IFQ_* tags have no true value on this stack and are
-#   documented in src/bsdsocket/interfaces.c to be LEFT ALONE rather than
-#   answered with an invented zero.  IfProbe fills every destination with 0xA5
-#   first, so the transcript distinguishes "answered zero" from "not answered"
-#, a test that pre-zeroed could not tell a deliberate omission from a case
-#   that fell through, which is the mistake this whole file exists to prevent.
-#
-# WHAT THE CONFIGURATION HALF ASSERTS
-#
-#   ConfigureInterfaceTagList() validates the whole tag list before applying
-#   any of it, so that a refused call leaves the interface exactly as it was.
-#   The probe sends a legal IFC_NetMask followed by an unsupported IFC_Metric
-#   and then reads the mask back: a one-pass implementation refuses the call
-#   AND changes the mask, which passes the obvious assertion and fails this
-#   one.  Everything the probe changes it puts back, and the address is
-#   restored before the interface state is touched, so a failure part-way
-#   leaves the machine reachable.
-#
-# The SANA-II drivers are not ours to ship.  The -N board's driver is looked up
-# in the driver store, or named with AMINETXDUO_SANA2_DRIVER.
-#
 # IT RUNS BRIDGED AND ONLY BRIDGED.  A DHCP server on the wire is what the
 # allocation half needs, and none of the assertions below knows or cares which
 # server that is.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -58,22 +11,11 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-# The allocation phase spends a documented ten-second minimum waiting for a
-# DHCP server that cannot answer, twice over, so this is not the usual 240.
 TIMEOUT=400
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
-# BRIDGED, AND THERE IS NO OTHER MODE.  This defaulted to SLIRP and its DHCP
-# assertions were written against SLIRP's fixed answers -- 10.0.2.15 from
-# 10.0.2.2 -- so it could not pass anywhere else, and SLIRP is not run here.
-# Everything below is now written against what a DHCP server is REQUIRED to
-# provide: a real address, a real mask, a server that names itself and a router
-# on the leased subnet.  -B takes the host interface to bridge onto.
 IFACE="${AMINETXDUO_IFQUERY_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 
-# -D stages the interface configured down, which is the only way to test that
-# STATE=down is honoured: it is read once at startup and there is no way to ask
-# for it afterwards.  The assertion is at the bottom.
 STATE_DOWN=0
 
 while getopts "m:t:b:N:B:D" opt; do
@@ -88,16 +30,6 @@ while getopts "m:t:b:N:B:D" opt; do
     esac
 done
 
-# The assertions that need a lease.  -D stages the interface configured down,
-# so it never gets one and those rows have nothing to read; every other run
-# has a DHCP server on the wire and they all apply.
-#
-# THIS FUNCTION WAS MISSING.  It was called ten times from cad30b42 (1 Aug) to
-# today and never defined, so under `set -e` an `if live_only` took the else
-# branch every time and the ten assertions it guards -- the address, the mask,
-# the bind type, the netmask atomicity, the address move and restore, ipstat,
-# udpstat and the AAMR_Busy race -- did not run in ANY mode, including the
-# default one CI carries.
 live_only() {
     [ "$STATE_DOWN" = "0" ]
 }
@@ -114,7 +46,6 @@ for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/netstat" \
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
-# The driver the -N board wants, from the one table that maps them.
 . "$ROOT/tools/sana2-stage.sh"
 DRIVER=$(sana2_driver_for "$BOARD")
 
@@ -133,8 +64,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/ifquery-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -144,14 +73,6 @@ export AMINETXDUO_SANA2_DRIVER="$DRVPATH"
 sana2_stage "$BOARD" "$STAGE/devs"
 echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE', from $DRVPATH"
 
-# HARDWAREADDRESS.  Staged unconditionally, because the keyword was on the
-# ignored list for the whole life of the project and nothing here would have
-# noticed: the address S2_CONFIGINTERFACE commits is the one the assertion at
-# the end reads back out of S2_DEVICEQUERY, so a keyword that is dropped and a
-# keyword that is honoured print different lines.
-#
-# Locally administered (bit 1 of the first octet) and not a real vendor
-# prefix, so a run of this cannot collide with hardware on the lab network.
 HWADDR="${AMINETXDUO_IFQUERY_MAC:-02:41:4d:49:71:01}"
 for cfg in "$STAGE"/devs/NetInterfaces/*; do
     [ -f "$cfg" ] || continue
@@ -160,7 +81,6 @@ done
 echo "==> staged HARDWAREADDRESS=$HWADDR"
 
 if [ "$STATE_DOWN" = "1" ]; then
-    # Roadshow's default is up, so the line has to be added rather than changed.
     for cfg in "$STAGE"/devs/NetInterfaces/*; do
         [ -f "$cfg" ] || continue
         printf 'STATE=down\n' >> "$cfg"
@@ -175,27 +95,6 @@ cp "$STATPROBE" "$STAGE/StatProbe"
 cp "$AAMPROBE" "$STAGE/AamProbe"
 cp "$MONPROBE" "$STAGE/MonProbe"
 
-# The probe runs twice, either side of AddNetInterface.  Not to catch an empty
-# list, there is no such state to catch, because OpenLibrary("bsdsocket")
-# starts the whole stack, DHCP included, so by the time the FIRST IfProbe can
-# ask, eth0 is already up.  It runs twice because obtaining and releasing the
-# list has to survive being done again: a block freed twice, or a Node still
-# linked into a freed list, shows up on the second pass and nowhere else.
-#
-# The three IfProbe runs with an argument park the interface in one state and
-# do nothing else, so that netstat can be asked about it afterwards.  SM_Down
-# and SM_Offline both report IFQ_State == SM_Down; the difference is whether
-# the SANA-II device is still on the network, which only netstat prints.
-#
-# They have to come after AddNetInterface: nothing else in the list keeps
-# bsdsocket.library open between commands, and netstat run on its own finds no
-# stack to report on.  AddNetInterface stays resident, so the interface is
-# still in the state the previous command left it in.
-# AamProbe is told, because it cannot ask.  The half of it that needs a lease
-# asks BeginInterfaceConfig for AAMR_AddressKnown, and on an interface staged
-# down there is no address to know, so that request is in order: the stack
-# starts a real allocation, holds the interface's job slot for the documented
-# ten-second floor, and answers AAMR_Busy to the ten assertions after it.
 AAMARG=""
 [ "$STATE_DOWN" = "1" ] && AAMARG=" DOWN"
 
@@ -212,8 +111,6 @@ SYS:StatProbe
 SYS:MonProbe
 SYS:AamProbe${AAMARG}
 EOF
-
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifquery}"
 
@@ -242,15 +139,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# ---- reading a real lease ------------------------------------------------
-#
-# A real DHCP server picks its own numbers, so nothing below may be written
-# against a literal.  What it MUST provide is a shape: an address inside the
-# subnet the mask describes, a mask of contiguous ones, a server that names
-# itself, and a router reachable without going through a router.  Each of
-# those is checkable on any wire and each of them is something a stack that
-# invented the answer, or dropped it, gets wrong.
-
 ip2int() {
     local a b c d
     IFS=. read -r a b c d <<EOF
@@ -264,10 +152,6 @@ EOF
     echo $(( (a << 24) | (b << 16) | (c << 8) | d ))
 }
 
-# A netmask is ones then zeros and nothing else, and this stack has been seen
-# to guess a classful one where the server said /24, so the width is checked
-# as well as the shape.  /8 to /30: narrower has no host addresses, wider is
-# not a mask a DHCP server hands a LAN client.
 is_netmask() {
     local n bits=0 v
     n=$(ip2int "$1") || return 1
@@ -280,7 +164,6 @@ is_netmask() {
     [ "$bits" -ge 8 ] && [ "$bits" -le 30 ]
 }
 
-# On the subnet, and not the two addresses on it that name the subnet itself.
 on_subnet() {
     local a m net bcast
     a=$(ip2int "$1") || return 1
@@ -298,34 +181,17 @@ same_subnet() {
     [ $(( a & m )) -eq $(( b & m )) ]
 }
 
-# The first field the probe printed for a line starting with $1.
 field_after() {
     awk -v key="$1" -v n="$2" '
         index($0, key) == 1 { print $n; exit }' "$REPORT"
 }
 
-# ---- one boot (docs/RESEARCH.md 25) --------------------------------------
-#
-# ToolsSmoke reopens the transcript from the top after a reset, so the FIRST
-# command appearing more than once means the machine went down and came back.
-# A guru inside the caller is exactly what a wrong node shape produces, so
-# this is the assertion that matters most here.
 STARTS=$(grep -c "SYS:IfProbe =====" "$REPORT" || true)
 if [ "$STARTS" -eq 2 ]; then
     pass "the machine booted once and ran both probes (no reset)"
 elif [ "$STARTS" -gt 2 ]; then
     fail "THE MACHINE REBOOTED: the command list restarted"
 else
-    # INCONCLUSIVE, not failed, and it stops here.
-    #
-    # Every assertion below reads $REPORT, so a guest that stopped early fails
-    # all of them at once and the output reads as sixty defects in the code
-    # under test. It is not: it is one run that did not happen. That has cost a
-    # four-run bisect of a change that turned out to be innocent, the same
-    # binary passed on the next attempt and three times after it.
-    #
-    # Seen once in about nine runs of this harness, cause unknown, so it is
-    # worth telling apart rather than explaining away.
     echo
     echo "INCONCLUSIVE: the guest ran $STARTS of 2 IfProbe invocations." >&2
     echo "  It stopped early. Nothing below was tested, so nothing below is" >&2
@@ -335,7 +201,6 @@ else
     exit 2
 fi
 
-# ---- the list ------------------------------------------------------------
 LISTED=$(grep -c "^ObtainInterfaceList: 1 interface(s)" "$REPORT" || true)
 if [ "$LISTED" -eq 2 ]; then
     pass "one interface listed, both times, obtained and released twice"
@@ -349,14 +214,12 @@ else
     fail "the node's ln_Name is not the configured interface name"
 fi
 
-# ---- the query -----------------------------------------------------------
 if grep -q "^query eth0: rc 0 " "$REPORT"; then
     pass "QueryInterfaceTagList(eth0) returned 0"
 else
     fail "QueryInterfaceTagList(eth0) did not return 0"
 fi
 
-# The driver the -N board wants, not a2065.device for every board.
 if grep -Eq "IFQ_DeviceName +$SANA2_DEVICE\$" "$REPORT"; then
     pass "IFQ_DeviceName returned a pointer to the SANA-II device name, $SANA2_DEVICE"
 else
@@ -369,17 +232,12 @@ else
     fail "IFQ_HardwareAddressSize is not 48 bits"
 fi
 
-# The seventh byte must still be poison: "a maximum of 16 bytes will be
-# copied", and six is what an Ethernet address is.  A shim that copied a fixed
-# sixteen would scribble ten bytes past what the caller reserved.
 if grep -Eqi "IFQ_HardwareAddress +[0-9a-f:]+ \(7th byte a5\)" "$REPORT"; then
     pass "IFQ_HardwareAddress wrote six bytes and not one more"
 else
     fail "IFQ_HardwareAddress wrote past the six bytes of an Ethernet address"
 fi
 
-# The leased address and mask, read once here and cross-checked against each
-# other and against everything the run does with them afterwards.
 LEASED=""
 LEASEMASK=""
 if live_only; then
@@ -387,11 +245,6 @@ if live_only; then
     LEASEMASK=$(awk '$1 == "IFQ_NetMask" { print $2; exit }' "$REPORT")
 fi
 
-# sockaddr_in or nothing: sin_len 16 and sin_family AF_INET, which is the half
-# of this tag a compiler cannot check, and an address that is really on the
-# subnet its own mask describes.  A stack that answered with a zero, with the
-# network or broadcast address, or with a sockaddr of the wrong length or
-# family fails this as squarely as it failed the literal it replaced.
 if live_only; then
     if ! grep -Eq "IFQ_Address +$LEASED \(len 16 family 2\)" "$REPORT"; then
         fail "IFQ_Address is not a well-formed sockaddr_in: $(grep -m1 IFQ_Address "$REPORT")"
@@ -402,8 +255,6 @@ if live_only; then
     fi
 fi
 
-# Ones then zeros, /8 to /30.  0.0.0.0 and a classful guess both fail; the
-# classful guess is the one that has actually happened.
 if live_only; then
     if [ -n "$LEASEMASK" ] && is_netmask "$LEASEMASK"; then
         pass "IFQ_NetMask is a contiguous netmask, $LEASEMASK"
@@ -412,7 +263,6 @@ if live_only; then
     fi
 fi
 
-# SM_Up is 3 and SM_Down is 2; the autodoc restricts this tag to those two.
 if live_only; then
     if grep -Eq "IFQ_State +3$" "$REPORT"; then
         pass "IFQ_State is SM_Up on a live interface"
@@ -421,8 +271,6 @@ if live_only; then
     fi
 fi
 
-# The address came from a DHCP server, so the bind type is IFABT_Dynamic and
-# not IFABT_Static.  Nothing about which server it was matters here.
 if live_only; then
     if grep -Eq "IFQ_AddressBindType +2$" "$REPORT"; then
         pass "IFQ_AddressBindType is IFABT_Dynamic for a DHCP lease"
@@ -437,11 +285,6 @@ else
     fail "IFQ_MTU is not 1500"
 fi
 
-# ---- what is deliberately NOT answered -----------------------------------
-#
-# These two are documented in interfaces.c as having no true value here.  The
-# assertion is that they were left alone rather than filled with a zero a
-# monitor would render as a measurement.
 if grep -q "IFQ_GetBytesIn           unanswered" "$REPORT"; then
     pass "IFQ_GetBytesIn was left alone, as documented"
 else
@@ -454,7 +297,6 @@ else
     fail "IFQ_LastStart wrote something, nothing records it"
 fi
 
-# ---- the negative and boundary cases -------------------------------------
 if grep -q "^query nosuchif: .*, refused, correctly" "$REPORT"; then
     pass "an unknown interface name fails rather than returning 0"
 else
@@ -473,12 +315,6 @@ else
     fail "ReleaseInterfaceList(NULL) did not return"
 fi
 
-# ---- ConfigureInterfaceTagList -------------------------------------------
-#
-# The atomicity assertion is the one worth having. The refused list had a
-# legal IFC_NetMask in front of the unsupported IFC_Metric, so a one-pass
-# implementation would refuse the call AND leave 255.255.0.0 on the
-# interface, passing the "refused" check and failing this one.
 if grep -q "config: mask+metric: .*, refused, correctly" "$REPORT"; then
     pass "a tag list containing an unsupported tag is refused"
 else
@@ -493,17 +329,12 @@ if live_only; then
     fi
 fi
 
-# What made IFC_Metric unsupported is that IFQ_Metric would answer something
-# else.  Zero is what it answers, so zero is not a change to refuse.
 if grep -q "config: metric 0: .*, accepted, correctly" "$REPORT"; then
     pass "IFC_Metric 0 names what IFQ_Metric reports, and is accepted"
 else
     fail "IFC_Metric 0 was refused even though IFQ_Metric answers 0"
 fi
 
-# The other half of the same policy. A BOOL tag set FALSE asks for nothing, so
-# it cannot be a change this stack failed to make; refusing it failed the whole
-# configuration for a tool that merely spelled out a default.
 if grep -q "config: BOOL tags at FALSE: .*, accepted, correctly" "$REPORT"; then
     pass "IFC_AssociatedRoute and IFC_SetDebugMode at FALSE are accepted"
 else
@@ -528,19 +359,12 @@ else
     fail "IFC_LimitMTU did not lower the MTU"
 fi
 
-# "you can request that a smaller size is used", so more than the hardware
-# can carry is the hardware's own number, not an error.
 if grep -q "config: IFC_LimitMTU 9000: rc 0, IFQ_MTU now 1500" "$REPORT"; then
     pass "a request above the hardware MTU is clamped to 1500, not refused"
 else
     fail "IFC_LimitMTU 9000 was not clamped to the driver's 1500"
 fi
 
-# The probe asks for host .200 of the subnet it is already on, so the address
-# to expect is computed from the lease and not written down.  Both halves of
-# the line are asserted: what was asked for, and what IFQ_Address reported
-# afterwards.  A stack that accepted IFC_Address and did not move the
-# interface prints rc 0 and the old address, and fails here.
 if live_only; then
     MOVED="${LEASED%.*}.200"
     if grep -Eq "config: address -> $MOVED: rc 0, IFQ_Address now $MOVED\$" "$REPORT"; then
@@ -550,8 +374,6 @@ if live_only; then
     fi
 fi
 
-# And back to the address it had, exactly.  The literal this replaces would
-# have passed on any address in 10.0.2.0/24, including the .200 above.
 if live_only; then
     if grep -Eq "config: address restored: rc 0, IFQ_Address now $LEASED\$" "$REPORT"; then
         pass "and IFC_Address with IFC_NetMask put $LEASED back in one call"
@@ -584,23 +406,12 @@ else
     fail "ConfigureInterfaceTagList accepted an unknown interface"
 fi
 
-# ---- AddInterfaceTagList / RemoveInterface --------------------------------
-#
-# "It tries to release all the resources associated with a networking
-# interface, thus permitting it to be added again with new parameters", so
-# removing and re-adding IS the documented use, and doing exactly that is the
-# only way to find out whether the SANA-II device was really closed and really
-# reopened.  The machine this test runs on has one card, and the round trip
-# happens on the interface the run is riding on.
-
 if grep -q "^remove nosuchif: .*, refused, correctly" "$REPORT"; then
     pass "RemoveInterface refuses a name that is not there"
 else
     fail "RemoveInterface accepted an unknown interface"
 fi
 
-# TRUE for success, 0 for failure, the opposite of every other call in the
-# API, and the NDK header types it LONG where the autodoc says BOOL.
 if grep -q "^remove eth0: rc 1 .*, removed, correctly" "$REPORT"; then
     pass "RemoveInterface returned TRUE, not 0-for-success"
 else
@@ -619,21 +430,12 @@ else
     fail "QueryInterfaceTagList still answers for a removed interface"
 fi
 
-# IFA_PacketFilterMode PFM_Everything asks for promiscuous capture. That is
-# the refusable kind: a caller told it succeeded would read a busy wire as a
-# quiet one. IFA_NumReadRequests used to be refused here and is now accepted --
-# see the next assertion and the tag policy in src/bsdsocket/interfaces.c.
 if grep -q "^add with an unsupported tag: .*, refused, correctly" "$REPORT"; then
     pass "AddInterfaceTagList refuses a tag that would change what is seen"
 else
     fail "AddInterfaceTagList accepted IFA_PacketFilterMode PFM_Everything"
 fi
 
-# And the tuning tags a Roadshow caller passes as a matter of course --
-# IFA_NumReadRequests, IFA_CopyMode, IFA_PacketFilterMode PFM_Local, are
-# accepted. None is implemented and none changes anything this API or the wire
-# can show; refusing one refused the interface itself, which is the likeliest
-# reason a third-party tool worked on Roadshow and not here.
 if grep -q "^add eth0 ($SANA2_DEVICE unit 0): rc 0 .*, added, correctly" "$REPORT"; then
     pass "AddInterfaceTagList accepts the advisory tuning tags and adds"
 else
@@ -652,15 +454,6 @@ else
     fail "two interfaces were allowed to share a name"
 fi
 
-# HARDWAREADDRESS reached the card.
-#
-# The address IFQ_HardwareAddress reports comes from S2_DEVICEQUERY, which is
-# the card answering, not the configuration being read back -- so this is the
-# assertion that separates a keyword acted on from a keyword parsed and
-# dropped, which is what it was until 2026-08-11.
-#
-# A driver that refuses a configured address is a real possibility and is why
-# the failure below says which of the two happened.
 if grep -qi "^  IFQ_HardwareAddress *$HWADDR " "$REPORT"; then
     pass "HARDWAREADDRESS=$HWADDR was committed to the card"
 else
@@ -670,10 +463,6 @@ else
          "the address S2_CONFIGINTERFACE commits."
 fi
 
-# THE EVIDENCE.  The hardware address is read from the card by S2_DEVICEQUERY
-# at open time, so a re-added interface reporting the same MAC went all the
-# way down to the device and back.  Zeroes, or a stale value out of memory
-# that was never freed, would both show here.
 if grep -q "^hardware address after the round trip: .*, the device was reopened, correctly" "$REPORT"; then
     pass "the SANA-II device was really closed and really reopened"
 else
@@ -685,13 +474,6 @@ if grep -q "^state after: 3, .*, up again, correctly" "$REPORT"; then
 else
     fail "the re-added interface would not come up"
 fi
-
-# ---- GetNetworkStatistics ------------------------------------------------
-#
-# Three things a build cannot check: that the return value is a BYTE COUNT
-# rather than zero-or-an-entry-count, that the numbers are the running
-# stack's, and that pcd_tcp_state is 4.4BSD's enumeration rather than NetX
-# Duo's, the two agree up to CLOSE_WAIT and diverge after it.
 
 for case in "version 0" "type 99" "NETSTATUS_mb"; do
     if grep -q "^$case: .*, refused, correctly" "$REPORT"; then
@@ -707,10 +489,6 @@ else
     fail "GetNetworkStatistics(NULL) did not return sizeof(struct ipstat)"
 fi
 
-# This machine leased its address by DHCP, which is UDP over IP, so a stack
-# that is really counting cannot report zero for either of these.  A stub
-# returning a zeroed struct of the right size passes every structural check
-# and fails here.
 if live_only; then
     if grep -Eq "^NETSTATUS_ip: rc 96 total [1-9][0-9]* localout [1-9][0-9]* " "$REPORT"; then
         pass "ipstat carries the running stack's packet counts"
@@ -727,9 +505,6 @@ if live_only; then
     fi
 fi
 
-# Every copy is bounded.  The guard bytes past the end are the assertion that
-# matters: "size" is the caller's limit, and a call that copied the whole
-# struct regardless would corrupt a buffer sized against an older layout.
 GUARDS=$(grep -c "guard intact" "$REPORT" || true)
 OVERRUNS=$(grep -c "OVERRUN" "$REPORT" || true)
 if [ "$OVERRUNS" -eq 0 ] && [ "$GUARDS" -ge 6 ]; then
@@ -750,9 +525,6 @@ else
     fail "the socket table did not grow by one entry"
 fi
 
-# TCPS_LISTEN is 1 and NX_TCP_LISTEN_STATE is 2.  A stack passing NetX Duo's
-# value straight through reports 2, and every monitor shows a listener as a
-# connection in SYN_SENT.
 if grep -q "^listener state: 1, TCPS_LISTEN, correctly" "$REPORT"; then
     pass "pcd_tcp_state is 4.4BSD's enumeration, not NetX Duo's"
 else
@@ -764,14 +536,6 @@ if grep -q "^tcp table into one entry: .*, one entry, correctly" "$REPORT"; then
 else
     fail "the socket table ignored the caller's size limit"
 fi
-
-# ---- the address allocation message --------------------------------------
-#
-# BeginInterfaceConfig() returns VOID.  Everything it has to say it says by
-# filling in aam_Result and replying the message, so an ENOSYS stub for it was
-# not a refusal but a HANG: it returned -1 in a register the caller cannot see
-# and never replied the message the caller was already waiting on.  "replied"
-# on each line below is the assertion that removes that.
 
 for case in "no result ptr:CAAME_Invalid_result_ptr" \
             "version 99:CAAME_Invalid_version" \
@@ -813,8 +577,6 @@ else
     fail "the client identifier was not duplicated"
 fi
 
-# Two of the buffers are arrays of ULONG, and an m68k handed a misaligned one
-# takes an address error rather than a wrong answer.
 if grep -q "^buffers: all present, aligned and distinct, correctly" "$REPORT"; then
     pass "every buffer is present, longword-aligned and distinct"
 else
@@ -841,7 +603,6 @@ else
     fail "CAAMTA_RequestUnicast was not stored"
 fi
 
-# THE ONE THAT MATTERS.  Not the result code, the message coming back.
 begin_replied() {
     if grep -q "^begin $1: .* replied, correctly" "$REPORT"; then
         pass "BeginInterfaceConfig replied the message: $1"
@@ -850,8 +611,6 @@ begin_replied() {
     fi
 }
 
-# The addressed case is a lease row, and the probe skips it when it was told
-# the interface was staged down.
 if live_only; then
     begin_replied "on an addressed interface"
 fi
@@ -863,13 +622,6 @@ if grep -q "^AbortInterfaceConfig(NULL): returned" "$REPORT"; then
 else
     fail "AbortInterfaceConfig did not return"
 fi
-
-# ---- a real DHCP allocation ----------------------------------------------
-#
-# The interface this run is riding on already has an address, so the probe
-# removes it and adds it back, which is what AddInterfaceTagList leaves you
-# with, an interface with no address at all, and then asks
-# BeginInterfaceConfig for one.  A real DISCOVER/OFFER/REQUEST/ACK on the LAN.
 
 if live_only; then
     if grep -q "^live: begin returned with the message still out, asynchronous, correctly" "$REPORT"; then
@@ -885,24 +637,6 @@ if live_only; then
     fi
 fi
 
-# THE LEASE CARRIES THE SERVER'S OWN NUMBERS, and on a real network that is a
-# shape rather than three literals:
-#
-#   * an address that is a host address on the mask that came with it.  The
-#     interface was freshly added and empty, so nothing in this stack could
-#     have produced one -- a zero, or the address it used to have, both fail.
-#   * a mask of contiguous ones.  The defect this catches is a stack that
-#     ignores DHCP option 1 and guesses the classful mask; on 192.168/16 that
-#     is /16 where the server said /24, and is_netmask() alone would not see
-#     it, so it is also checked against the mask the same server gave the same
-#     interface at boot.
-#   * a server address that is not zero and is on the leased subnet, which is
-#     DHCP option 54 having been read.  A stack that never stored the server
-#     identifier prints 0.0.0.0 and fails.
-#
-# A DHCP relay would put the server off the leased subnet and this row would
-# have to change; the lab wire has the server on it and says so here rather
-# than silently accepting either.
 LIVE_ADDR=$(field_after "live: address" 3)
 LIVE_MASK=$(field_after "live: address" 5)
 LIVE_SERVER=$(field_after "live: address" 7)
@@ -925,10 +659,6 @@ else
     pass "the lease carries the server's own numbers: $LIVE_ADDR mask $LIVE_MASK from $LIVE_SERVER"
 fi
 
-# aam_RouterTable is filled from DHCP option 3, which the server only sends
-# because the client asked for it in its parameter request list.  Which router
-# it is cannot be predicted; that there is one, and that it is an address the
-# leased interface can reach without a router, can.
 LIVE_ROUTER=$(field_after "live: router[0]" 3)
 LIVE_ROUTER="${LIVE_ROUTER%,}"
 
@@ -951,8 +681,6 @@ if live_only; then
         fail "the lease expiry DateStamp was not filled in"
     fi
 
-    # And it really configured the interface, rather than only reporting a
-    # number.
     if grep -q "^begin a second time: result 4, replied, correctly" "$REPORT"; then
         pass "a second allocation on the now-addressed interface is AAMR_AddressKnown"
     else
@@ -960,46 +688,12 @@ if live_only; then
     fi
 fi
 
-# ---- the two paths a working DHCP server hides ---------------------------
-#
-# AAMR_Timeout and AAMR_Aborted cannot be reached while a server is answering
-# in a fraction of a second: neither the deadline nor the abort window ever
-# opens.  The probe takes the interface DOWN first, so DISCOVER goes nowhere
-# and the worker runs to its own deadline, the only path that proves the
-# deadline exists, and the only one that releases a lease never granted.
-
 if grep -q "^slow: still running after a second: yes, correctly" "$REPORT"; then
     pass "an allocation with no server to answer is still running a second in"
 else
     fail "the allocation did not stay in flight"
 fi
 
-# ---- and only one of them at a time --------------------------------------
-#
-# "AAMR_Busy, Address allocation is already in progress for this interface."
-# bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and refuses a
-# launch that finds it taken.  Nothing one process does can reach that guard:
-# BeginInterfaceConfig() is asynchronous, but the caller holding the job is the
-# one that would ask again, so the second request has to come from an unrelated
-# program with a base of its own.  The probe forks one, during the window above
-# in which a worker is certainly running.
-#
-# THE RESULT CODE ALONE WOULD NOT CATCH IT.  AAMR_Busy is answered twice over:
-# at the door by that guard, and, if the guard is gone and the worker starts
-# anyway, by netstack_interface_dhcp_start() refusing a second DHCP client on
-# one interface, which bsd_aam_worker() also reports as AAMR_Busy.  Measured:
-# with the guard deleted the second caller is STILL told 11.  What changes is
-# when.  A refusal comes back inside BeginInterfaceConfig(); the other answer
-# costs a CreateNewProc() and a worker's first DHCP call, and arrived ~10 ticks
-# later.  So the probe reports whether the message beat the call's return, and
-# that is what is asserted here.
-#
-# NEGATIVE CONTROL, measured: delete the `if (bsd_aam_jobs[index] != NULL)`
-# branch from src/bsdsocket/addralloc.c and this line reads "REPLIED LATE, so a
-# worker was started".  The collateral is worth knowing too, the second
-# launch overwrites bsd_aam_jobs[index], so the FIRST caller's
-# AbortInterfaceConfig() can no longer find its own job and the three `slow:`
-# assertions below fail with it.
 if grep -q "^busy: .*, refused at the door with AAMR_Busy, correctly" "$REPORT"; then
     pass "a second process asking for an interface already being configured is refused AAMR_Busy"
 elif grep -q "^busy: .*, NOT TESTED" "$REPORT"; then
@@ -1020,41 +714,24 @@ else
     fail "the allocation never timed out"
 fi
 
-# A worker that gave up early would report AAMR_Timeout too, and would be
-# wrong.  The number of ticks is what says the deadline is the caller's.
 if grep -q "^slow: waited at least, correctly the 10-second floor" "$REPORT"; then
     pass "it waited at least the documented ten-second minimum"
 else
     fail "the allocation gave up before the ten-second floor"
 fi
 
-# A library that could not tell its own messages from a caller's would free a
-# stack frame here, and the machine would not survive the next allocation.
 if grep -q "^DeleteAddrAllocMessage on a stack message: .*, refused, correctly" "$REPORT"; then
     pass "DeleteAddrAllocMessage refuses a message it did not allocate"
 else
     fail "DeleteAddrAllocMessage tried to free a message it did not allocate"
 fi
 
-# ---- SM_Down is not SM_Offline -------------------------------------------
-#
-# "SM_Down, the stack will no longer attempt to transmit messages through
-# this interface.  However, the underlying SANA-II device driver may still be
-# connected to the network", against "SM_Offline, same as SM_Down, but also
-# sends an S2_OFFLINE command".  The document separates them so that a unit
-# shared with Envoy or ACS keeps working when this stack lets go of it.
-#
-# Both report IFQ_State == SM_Down, so the difference is invisible to the
-# published API.  netstat prints the device's own state, which is why it runs
-# after each of the two IfProbe state commands.
 if grep -Eq "^state DOWN: rc 0 .* IFQ_State now 2$" "$REPORT"; then
     pass "SM_Down stopped the stack transmitting, IFQ_State reports SM_Down"
 else
     fail "IFC_State SM_Down did not report SM_Down"
 fi
 
-# netstat prints "eth0 (online)" / "eth0 (offline)" from the SANA-II shim's own
-# flag.  The first of the two must be online, the second offline.
 NETSTAT_STATES=$( { grep -Eo "^eth0 \((online|offline)\)$" "$REPORT" || true; } | tr '\n' ' ')
 if [ "$NETSTAT_STATES" = "eth0 (online) eth0 (offline) " ]; then
     pass "SM_Down left the SANA-II device on the network, SM_Offline took it off"
@@ -1068,22 +745,12 @@ else
     fail "SM_Up did not bring the interface back after SM_Offline"
 fi
 
-# ---- the monitoring hooks ------------------------------------------------
-#
-# The denying half is the half with consequences: a hook that returns an errno
-# must make bind() or connect() fail with exactly that errno, before the stack
-# has done anything.
-
-# A client asks whether the API is there before it calls any of it, so a FALSE
-# here means the hooks below are never reached by a conforming caller.
 if grep -q "^SBTC_HAVE_MONITORING_API: .*, TRUE, correctly" "$REPORT"; then
     pass "SBTC_HAVE_MONITORING_API answers TRUE for the three types that work"
 else
     fail "SBTC_HAVE_MONITORING_API answers FALSE although hooks install"
 fi
 
-# SocketBaseTagList() stops at the first tag it refuses, so a SET of a tunable
-# to the value it already holds must not cost the caller the rest of its list.
 if grep -q "^set IP_DEFAULT_TTL to its own value.*, accepted and the next tag was serviced, correctly" "$REPORT"; then
     pass "writing a tunable back at its current value is not a change"
 else
@@ -1124,8 +791,6 @@ else
     fail "an allowing hook was not consulted, or blocked the call"
 fi
 
-# The register convention: A2 was poisoned before the call and must come back
-# NULL.  A wrong guess hands the message in the wrong register entirely.
 if grep -q "^reserved was NULL, correctly, hook was ours, correctly" "$REPORT"; then
     pass "the hook was entered with A0=Hook, A2=NULL, A1=message"
 else
@@ -1168,9 +833,6 @@ else
     fail "MHT_Connect did not deny the connect"
 fi
 
-# MHT_Send, and the per-call message shape the autodoc specifies.  These
-# compile fine while being wrong, which is why they are asserted rather than
-# commented.
 if grep -q "^send denied: .*, denied before the send, correctly" "$REPORT"; then
     pass "MHT_Send fails send() with the hook's errno, before anything is sent"
 else
@@ -1219,11 +881,6 @@ else
     fail "RemoveNetMonitorHook did not survive NULL or a double removal"
 fi
 
-# STATE=down, when it was staged.  SM_Down is 2 and SM_Up is 3
-# (libraries/bsdsocket.h).  The first IfProbe runs before anything has called
-# Online, so the state it reports is the one the config asked for, and with
-# the default config that same reading is SM_Up, which is what makes this an
-# assertion rather than a restatement of the file.
 if [ "$STATE_DOWN" = "1" ]; then
     if grep -q "^  IFQ_State *2$" "$REPORT"; then
         pass "STATE=down was honoured: the interface came up configured down"

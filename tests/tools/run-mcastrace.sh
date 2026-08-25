@@ -1,72 +1,9 @@
 #!/usr/bin/env bash
-#
 # TWO OPENERS RACING FOR ONE ROW OF THE MULTICAST TABLE.
-#
-#   tests/tools/run-mcastrace.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                [-N BOARD] [-B IFACE] [-n]
-#
-# WHAT THIS IS FOR
-#
-#   bsd_mcast_table[16] (src/bsdsocket/mcast.c) is one table for the machine
-#   and a row is free precisely because bm_Sock is NULL.  bsd_mcast_join()
-#   picks a free row inside the bsd_nx_enter() bracket; marking it used only
-#   after bsd_nx_leave() lets a second base pick the same row in that window.
-#   The loser's membership then exists in NetX Duo and nowhere else.
-#
-#   One process cannot reach this.  A base belongs to one Task and serialises
-#   itself on its own nesting counter, so the two joins have to come from two
-#   Processes with a base each, which is what McastRace is.
-#
-# THE ASSERTION
-#
-#   A join that returned 0 can be dropped.  That is the only thing the loser of
-#   the race can observe, and it is enough: its row was overwritten, so
-#   IP_DROP_MEMBERSHIP cannot find the membership it is holding.
-#
-#   Receiving a datagram is NOT the assertion.  NetX Duo refcounts membership
-#   per NX_IP, so two joins for one group leave the count at 2 and one spurious
-#   leave still leaves the group live for the other opener.  What the defect
-#   destroys is the library's own socket-to-group mapping.
-#
-# WHY THE COUNT GATES ARE HALF THE FILE
-#
-#   The window is a handful of instructions.  A run that raced nothing finds
-#   nothing wrong and would otherwise pass, so the guest reports how much
-#   racing it did and this script demands a floor for both sides.  `-n` is the
-#   control for exactly that: it asks the guest for one round and one shot,
-#   leaves the gates where they were, and requires this script to REJECT the
-#   run.  If -n ever reports PASSED the gates have stopped gating.
-#
-#   That control tests the gates.  The control for the DEFECT is to put it
-#   back, move the three stores in bsd_mcast_join() below bsd_nx_leave() --
-#   and see this script fail.  Measured on Amiberry/A1200, 200 shots:
-#
-#     row claimed inside the bracket   200 joined, 200 dropped,  0 stolen
-#     stores moved back below it       200 joined, 137 dropped, 63 stolen
-#
-#   Every one of those 63 is errno 49, EADDRNOTAVAIL, on a group the sniper was
-#   holding.  A longer run of the broken build stops finishing at all: at 400
-#   shots the guest never reached its summary and the harness timed out.
-#
 # BRIDGED, NEVER SLIRP.  -B names the host NIC to bridge onto and the string
 # `slirp` is refused outright.  Nothing on the LAN has to answer -- the race is
-# between two openers inside the guest -- but a board that came up on NAT is
-# not a board.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
-# ENVIRONMENT
-#
-#   AMINETXDUO_RACE_ROUNDS   hammer round ceiling  (default 60000)
-#   AMINETXDUO_RACE_SHOTS    sniper rounds         (default 200)
-#   AMINETXDUO_RACE_NAP      ticks before a shot   (default 1)
-#   AMINETXDUO_RACE_HOLD     ticks a shot is held  (default 1)
-#   AMINETXDUO_RACE_MIN_HAMMER  hammer joins the gate demands (default 1500)
-#   AMINETXDUO_RACE_MIN_SNIPER  sniper joins the gate demands (default 150)
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -88,8 +25,6 @@ HOLD="${AMINETXDUO_RACE_HOLD:-1}"
 MIN_HAMMER="${AMINETXDUO_RACE_MIN_HAMMER:-1500}"
 MIN_SNIPER="${AMINETXDUO_RACE_MIN_SNIPER:-150}"
 
-# What the guest is asked for.  The same numbers in every run but the negative
-# control, which is the point of there being two sets.
 GUEST_ROUNDS=""
 GUEST_SHOTS=""
 
@@ -114,10 +49,6 @@ case "$IFACE" in
 esac
 
 if [ "$NEGATIVE" = 1 ]; then
-    # One round and one shot, and the gates below are NOT lowered to match.
-    # Lowering them would make the run self-consistent again and prove
-    # nothing: what is tested here is that a run which passes every one of the
-    # guest's own checks while racing almost nothing is still rejected.
     GUEST_ROUNDS=1
     GUEST_SHOTS=1
     echo "==> NEGATIVE CONTROL: this run must be REJECTED by the gates below"
@@ -126,8 +57,6 @@ fi
 GUEST_ROUNDS="${GUEST_ROUNDS:-$ROUNDS}"
 GUEST_SHOTS="${GUEST_SHOTS:-$SHOTS}"
 
-# The sniper sleeps NAP+HOLD ticks per shot and the hammer runs until it stops,
-# so the guest's own floor is SHOTS*(NAP+HOLD)/50 seconds.  The rest is boot.
 if [ "$TIMEOUT" = 0 ]; then
     TIMEOUT=$(( 180 + GUEST_SHOTS * (NAP + HOLD) / 50 ))
 fi
@@ -155,18 +84,12 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/mcastrace-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# STATIC, not DHCP: the run wants the interface up and unchanging for its whole
-# length, and a lease renewal in the middle would reconfigure the interface the
-# memberships are on.  A /24 of its own, on a bridge whose LAN is somebody
-# else's numbers, so nothing here is claimed or answered for.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -176,10 +99,6 @@ NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name in
-# DEVICE=.  Without it the line above stands whatever -N asked for, so every
-# board but the A2065 opens a2065.device against hardware that is not there and
-# the run reports a stack failure that is really a staging one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -195,17 +114,12 @@ cp "$TOOLS/netstat"         "$STAGE/netstat"
 cp "$TOOLS/NetShutdown"     "$STAGE/NetShutdown"
 cp "$RACE"                  "$STAGE/McastRace"
 
-# AddNetInterface first and resident: IP_ADD_MEMBERSHIP with INADDR_ANY takes
-# the first interface whose link is UP, so a run that started before the
-# interface did would fail every join with EADDRNOTAVAIL and prove nothing.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:McastRace ROUNDS $GUEST_ROUNDS SHOTS $GUEST_SHOTS NAP $NAP HOLD $HOLD
 SYS:netstat -h
 SYS:NetShutdown
 EOF
-
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-mcastrace}"
 
@@ -233,12 +147,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# ---- one boot (docs/RESEARCH.md 25) --------------------------------------
-#
-# ToolsSmoke reopens the transcript from the top after a reset, so the first
-# command appearing twice is a reboot and not a hang.  Two Processes writing
-# one table with no lock is exactly the shape that gurus rather than misreports,
-# so this is checked before anything the guest said about itself.
 STARTS=$(grep -c "^===== SYS:AddNetInterface " "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once (no reset)"
@@ -248,7 +156,6 @@ else
     fail "the run never reached AddNetInterface"
 fi
 
-# ---- the guest's own checks ----------------------------------------------
 SUMMARY=$(grep -E "^McastRace: [0-9]+ check\(s\)" "$REPORT" | tail -1 || true)
 if [ -z "$SUMMARY" ]; then
     fail "McastRace printed no summary, it did not finish"
@@ -264,9 +171,6 @@ else
     fi
 fi
 
-# ---- and it really raced --------------------------------------------------
-#
-# The half that matters.  Everything above passes on a run that joined once.
 DID=$(grep -E "^did: [0-9]+ hammer joins" "$REPORT" | tail -1 || true)
 if [ -z "$DID" ]; then
     fail "McastRace did not report what it did"
@@ -284,7 +188,6 @@ else
         || fail "only $D_SNI sniper joins, wanted $MIN_SNIPER, the second base barely ran, so nothing here tested the race"
 fi
 
-# ---- the second base really was a second base -----------------------------
 if grep -q "^FAIL: the sniper could not open a second base" "$REPORT"; then
     fail "the child never got a base of its own, one base cannot race itself"
 else
@@ -293,8 +196,6 @@ fi
 
 echo
 if [ "$NEGATIVE" = 1 ]; then
-    # Inverted: the run above raced almost nothing, so the gates had to reject
-    # it.  A PASS here would mean they are not gating anything.
     if [ "$FAILED" -ne 0 ]; then
         echo "mcastrace: negative control PASSED, the gates reject a run that did not race"
         exit 0

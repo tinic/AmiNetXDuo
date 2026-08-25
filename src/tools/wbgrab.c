@@ -2,57 +2,6 @@
  * wbgrab, the Workbench screen's bitplanes to a file.
  *
  *     wbgrab [FRAMES/N] [DELAY/N] [TO/K]
- *
- * FRAMES frames DELAY ticks apart into one .pfs file, big-endian throughout:
- *
- *      0  char  magic[4]     "PFS2"
- *      4  UWORD width
- *      6  UWORD height
- *      8  UBYTE depth
- *      9  UBYTE flags        0
- *     10  UWORD bytesPerRow  one plane, one row
- *     12  UWORD frameCount
- *     14  UWORD reserved     0
- *     16  UBYTE palette[3 << depth]     R,G,B
- *         frameCount x (depth * bytesPerRow * height), plane-major
- *         frameCount x 12-byte frame records: ULONG milliseconds from the
- *             first frame, WORD pointer x, WORD pointer y, UWORD pointer
- *             image, UWORD reserved
- *
- * The full layout, including the pointer image table this does not write, is
- * in src/tools/web/client/console/pfs.ts.  This is the capture half of a
- * remote framebuffer and does not read the sprite.  It writes the position it
- * can see and image 0, which means no pointer image in this file.
- *
- * bytesPerRow is the bitmap's, not width/8.  A 640-wide screen has 80 and a
- * 644-wide one has 82, and the pixels past the width are real bytes in the
- * frame either way.
- *
- * The timestamps are measured rather than derived from DELAY.  A grab of a
- * 640x256x4 screen costs real milliseconds and a machine under load costs more
- * of them, so the interval between two frames is DELAY plus however long the
- * grab took.  A reader handed DELAY would be told a schedule rather than what
- * happened.  Each frame's time is read off DateStamp() as it is taken.
- *
- * The table goes at the end, after the last frame, which is what makes an
- * early exit -- a Ctrl-C, a screen that changed shape -- come out right.  The
- * frames written are the frames counted and the table appended is exactly as
- * long.  Reserving it up front would mean compacting the file afterwards.
- *
- * The screen is locked per frame and not for the session.  This is the grab
- * half of a remote-framebuffer server, which runs for hours between grabs, and
- * a held LockLayers stops every other task drawing.
- *
- * Only the Workbench screen, and only a standard planar BitMap.  An RTG
- * screen's BitMap has no Planes[] to read and GetBitMapAttr(BMA_FLAGS) is
- * what says so, so that case exits rather than reading whatever the pointers
- * happen to hold.
- *
- * Kickstart 3.0 (V39) or later.  GetBitMapAttr() is the check that keeps the
- * plane reads in bounds and it does not exist before V39, so there is no
- * version of this that runs on 2.x and is still safe.  GetRGB32() comes from
- * the same release, which is why there is no GetRGB4() path either.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -117,8 +66,6 @@ typedef struct Geometry
 
 static UBYTE header[PFS_HEADER_SIZE + PFS_MAX_PALETTE];
 
-/* ------------------------------------------------------------- big-endian */
-
 static VOID put_be16(UBYTE *p, ULONG v)
 {
     p[0] = (UBYTE)((v >> 8) & 0xFF);
@@ -147,8 +94,6 @@ static ULONG wb_millis(VOID)
 
     return (ULONG)ds.ds_Minute * 60000UL + (ULONG)ds.ds_Tick * 20UL;
 }
-
-/* ---------------------------------------------------------------- library */
 
 static BOOL open_libraries(VOID)
 {
@@ -180,8 +125,6 @@ static VOID close_libraries(VOID)
         GfxBase = NULL;
     }
 }
-
-/* --------------------------------------------------------------- geometry */
 
 /*
  * FALSE having said why.  Every refusal here is a bitmap this cannot read
@@ -284,8 +227,6 @@ static BOOL geometry_same(const Geometry *a, const Geometry *b)
                   a->row_stride == b->row_stride);
 }
 
-/* ---------------------------------------------------------------- palette */
-
 /*
  * 3 * (1 << depth) bytes whatever the ColorMap holds.  A screen whose map is
  * shorter than its depth leaves the tail black rather than shortening the
@@ -321,8 +262,6 @@ static VOID read_palette(struct ColorMap *cm, UWORD depth, UBYTE *pal)
         }
     }
 }
-
-/* ------------------------------------------------------------------- grab */
 
 /*
  * Plane-major into dst, which is frame_bytes long.  Called with the layers
@@ -392,8 +331,6 @@ static BOOL grab_frame(const Geometry *want, UBYTE *buf, BOOL *changed)
     return ok;
 }
 
-/* ------------------------------------------------------------------- file */
-
 static BOOL write_all(BPTR fh, const void *data, ULONG len)
 {
     LONG written = Write(fh, (APTR)data, (LONG)len);
@@ -423,8 +360,6 @@ static BOOL patch_frame_count(BPTR fh, UWORD frames)
 
     return write_all(fh, be, sizeof(be));
 }
-
-/* ------------------------------------------------------------------- main */
 
 int main(int argc, char **argv)
 {
@@ -544,10 +479,6 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    /* The timestamps, held until the frames are all written, because the table
-       goes after them.  Four bytes a frame, so the whole of the biggest file
-       this can write is 256 KB of them beside a frame buffer that is already
-       larger than that. */
     times = (ULONG *)AllocVec(frames * sizeof(ULONG), MEMF_ANY);
     if (times == NULL)
     {

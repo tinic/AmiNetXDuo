@@ -1,25 +1,5 @@
 #!/usr/bin/env bash
-#
 # Run the real-HTTPS handshake under Amiberry on a bridged card.
-#
-#   tests/tls/run-https.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                          [-N BOARD] [-B IFACE]
-#
-# Same staging as tests/netstack/run-amiberry.sh, DEVS:NetInterfaces/eth0,
-# DEVS:Internet/* and a SANA-II driver, because this test brings the whole
-# stack up through netstack_startup() before it opens a socket.
-#
-# BRIDGED, NEVER SLIRP.  This harness had no -B at all, so it inherited
-# amiberry-run.sh's slirp default and AMINETXDUO_AMIBERRY_BACKEND was the only
-# way to put it on a wire.  It reaches a public HTTPS server, which is the one
-# thing NAT through a stub cannot do: the run could only burn its ceiling.  -B
-# names the host NIC and the string `slirp` is refused by name.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -77,10 +57,6 @@ mkdir -p "$STAGE"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# The shared fixture names SLIRP's forwarder, 10.0.2.3, which is nothing on a
-# real segment: the resolver waits it out before it falls back on the server
-# the lease carried, thirty seconds per lookup.  The lease is the only source
-# here, so the file names none.
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 # No nameserver line: the DHCP lease on the bridge carries one, and naming
 # SLIRP's dead 10.0.2.3 here costs the resolver's whole failover time on every
@@ -88,10 +64,6 @@ cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 domain localdomain
 NREOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name
-# in DEVICE=.  Without it the shared interface file keeps DEVICE=a2065.device
-# whatever -N asked for, so every other board opens a2065.device against
-# hardware that is not there.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -103,21 +75,9 @@ sana2_stage "$BOARD" "$STAGE/devs"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlshttps}"
 
-# ---------------------------------------------------------- the verdict ---
-#
-# This used to end in `exec <runner>`, so the script's exit status was the
-# guest's own return code: a guest that opened nothing, ran no checks and
-# returned 0 was a pass, and so was one whose transcript never arrived.
-# tools/test-verdict.sh reads the guest's own counters instead, puts a floor
-# under the number of checks, and fails loudly and by name when there is no
-# transcript at all.
 . "$ROOT/tools/test-verdict.sh"
 
 verdict() {
-    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    # A FLOOR OF 1 IS NOT A FLOOR.  23 is the count of a clean bridged run,
-    # A1200 on ens18, 2026-08-20 -- measured, not read off the w_check() calls
-    # in tls_https.c.  A run that makes fewer stopped somewhere.
     verdict_guest "tls-https" 23 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0
@@ -128,9 +88,6 @@ CPUARG=()
 [ -z "$CPU" ] || CPUARG+=(-c "$CPU")
 [ -z "${CLOCK:-}" ] || CPUARG+=(-k "$CLOCK")
 
-# AMINETXDUO_PROFILE=1 runs the same thing under tools/profiler/Profile, which
-# needs no recompilation of the target: the profile lands on the drive as
-# DH0:tls.prof for tools/profiler/profreport.py.
 if [ "${AMINETXDUO_PROFILE:-0}" = "1" ]; then
     case "$BUILD" in /*) PROF="$BUILD/tools/profiler/Profile" ;;
                       *) PROF="$ROOT/$BUILD/tools/profiler/Profile" ;; esac

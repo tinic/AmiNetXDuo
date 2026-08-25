@@ -4,21 +4,6 @@
 #
 #   tests/tools/bringup-verdict-selftest.sh
 #
-# bringup_verdict() is the gate under every arm of the machine matrix --
-# run-cpuspeed.sh, run-bigmem.sh -- and those arms need a ROM, a driver and
-# half an hour of emulator.  Nothing else could tell an arm that passes from
-# an arm that cannot fail, which is the state the whole CPU-speed class of
-# defects lived in: no arm ever ran a fast CPU, so nothing about a delay loop
-# calibrated for 14 MHz was ever asserted, and the matrix was green throughout.
-#
-# The fixtures are the literal output of tests/netstack/netstack_test.c, one
-# per way a bring-up can end on a machine that is faster than the one the
-# delays were written for.  Needs nothing; under a second.
-#
-# THE FIXTURE THAT MATTERS is `linknoping`: link up, an address, and the
-# gateway never answers.  A check count passes it -- the guest ran its twelve
-# -- and it is precisely a card that was claimed too fast to work.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -28,8 +13,6 @@ ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
-# A machine that came all the way up.  netstack_test.c:364, :382, :397 and the
-# pool line at :351.
 cat > "$T/good" <<'EOF'
   ok   config is readable
   hostname 'amiga', 1 interface(s), 1 name server(s)
@@ -50,9 +33,6 @@ cat > "$T/good" <<'EOF'
 16 checks, 0 failures, PASS
 EOF
 
-# THE ONE THIS FILE IS FOR.  The card was claimed, DHCP completed, and nothing
-# off the machine ever answers.  Every check that ran, ran; the count clears
-# any floor; and the interface does not work.
 cat > "$T/linknoping" <<'EOF'
   ok   config is readable
   ok   at least one interface is up
@@ -70,10 +50,6 @@ cat > "$T/linknoping" <<'EOF'
 13 checks, 1 failures, FAIL
 EOF
 
-# No lease, so netstack_test never reaches the gateway check at all: the
-# condition at :394 is false and the assertion is ABSENT rather than failed.
-# A floor under the check count is what this fixture defeats -- twelve checks
-# ran, and the wire was never touched.
 cat > "$T/nolease" <<'EOF'
   ok   config is readable
   ok   at least one interface is up
@@ -90,9 +66,6 @@ cat > "$T/nolease" <<'EOF'
 12 checks, 1 failures, FAIL
 EOF
 
-# The card was never claimed.  This is what a settle loop that collapsed to
-# nothing looks like from outside: the driver opened, the CIS walk or the
-# reset window was not honoured, and the link never came up.
 cat > "$T/nolink" <<'EOF'
   ok   config is readable
   ok   at least one interface is up
@@ -107,10 +80,6 @@ cat > "$T/nolink" <<'EOF'
 12 checks, 2 failures, FAIL
 EOF
 
-# A machine with a lot of memory, so the pool arithmetic ran at a scale it has
-# never run at.  Everything works and the pool is one packet: the shape
-# tests/tools/run-bigmem.sh gates on, and invisible to every other assertion
-# in this tree.
 cat > "$T/tinypool" <<'EOF'
   ok   config is readable
   ok   at least one interface is up
@@ -136,9 +105,6 @@ EOF
 : > "$T/empty"
 
 n=0; bad=0
-# BOTH HALVES, for the reason tests/tools/addifup-verdict-selftest.sh gives:
-# the documented interface is `bringup_result=` on stdout, and it could drift
-# apart from the return code with nothing to say so.
 case_() { # description expected-rc expected-result transcript [poolmin]
     local what="$1" want="$2" wantr="$3" report="$4" poolmin="${5:-0}"
     local out rc gotr
@@ -165,9 +131,6 @@ case_ "no transcript at all"                  1 FAIL "$T/does-not-exist"
 case_ "a good run, pool floor satisfied"      0 PASS "$T/good"     8
 case_ "a good run, pool BELOW the floor"      1 FAIL "$T/tinypool" 8
 
-# What a check-count floor would have graded, over the same fixtures, so the
-# record shows the gap rather than only asserting that there is one.  This is
-# the assertion every existing tier-2 arm makes.
 echo
 echo "-- what a floor of 12 checks grades --"
 for f in good linknoping nolease nolink tinypool stopped; do

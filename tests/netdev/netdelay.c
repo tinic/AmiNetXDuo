@@ -1,41 +1,6 @@
 /*
  * Does a delay in the netdev cores still take the time it asks for when the
  * CPU is fast?
- *
- *   tests/netdev/run-netdelay.sh
- *
- * WHAT THIS MEASURES THAT THE HOST TEST CANNOT.
- * src/netdev/test/test_netdev_clock.c drives netdev_wait_*() against a beam it
- * supplies itself, so it can be exact and it can be two machines at once, and
- * it is the gate that runs on every push.  What it cannot be is a real
- * chipset.  The beam here is the emulated Amiga's own, the field count is
- * whatever display mode the machine really came up in, and the CPU is a real
- * 68060 core running real 68060 code -- so this is where "the driver's idea of
- * 300 ms" is checked against a clock that is not the driver's.
- *
- * AND THE CLOCK IS timer.device, WHICH THE DRIVER ITSELF MAY NOT OPEN.  That
- * is the whole reason netdev_clock.c exists: anxnet.device is a device, some
- * of its waits are at interrupt level, and dp8390.c:57, netdev_device.c:195
- * and netdev_cmds.c:606 each explain why it holds no timer base.  A Shell
- * command is under none of those constraints.  So the driver measures itself
- * against the raster beam, this measures the driver against the E-Clock, and
- * the two clocks have nothing in common except the truth -- which is what
- * makes this an independent check rather than the driver marking its own
- * homework.
- *
- * THE ARM THAT MATTERS IS 68060.  On a 14 MHz 68020 the old counted loop and
- * the new measured wait come out at much the same length, which is why the
- * defect went unseen for as long as it did; the two only separate when the CPU
- * is fast relative to the chipset.  run-netdelay.sh therefore runs this at
- * 68020 and at 68060 and requires both, and it is the 68060 arm that goes red
- * if the wait ever goes back to counting bus reads.
- *
- * WHAT IT CANNOT SETTLE.  Whether a real accelerated Amiga -- a PiStorm32, a
- * Blizzard, an ACA, a Vampire -- behaves like the emulated 68060 here.  Nobody
- * has run this on one.  What it does settle is that the fix works on a machine
- * whose CPU is fast and whose chipset is not, which is the condition the
- * defect needs.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -60,13 +25,6 @@
    figure it asked for is the assertion. */
 #define HOLD_FLOOR_MS   300UL
 
-/* And what the CLOCK on its own must not exceed.  A wait twice as long as
-   asked for is safe and is still not a measurement -- it is what this file's
-   own clock did before it counted the lines in a field.  This ceiling is
-   asserted only against the arm that passes NO floor, because a floor is an
-   iteration count and on a machine whose bus cycles are slow the count is
-   legitimately the longer of the two: the guarantee is that no machine waits
-   LESS than it used to, and honouring it can only ever make a wait longer. */
 #define CLOCK_CEIL_MS   450UL
 
 /* proto/timer.h declares TimerBase itself; this is the definition. */
@@ -85,8 +43,6 @@ static VOID check(CONST_STRPTR what, BOOL ok, LONG detail)
     Printf((CONST_STRPTR)"%s %s (%ld)\n",
            (CONST_STRPTR)(ok ? "ok  " : "FAIL"), what, detail);
 }
-
-/* ------------------------------------------------------------ the clock --- */
 
 static ULONG eclock_hz;
 
@@ -142,17 +98,6 @@ static ULONG eclock_ms(ULONG from, ULONG to)
     return (ULONG)((ticks / (eclock_hz / 1000UL)));
 }
 
-/* ------------------------------------------------------- the two shapes --- */
-
-/*
- * The loop body both arms spin on: a read of VHPOSR, which is a real chip-bus
- * cycle on every Amiga and is safe to read with nothing plugged into anything.
- * The driver's own loops read a PCMCIA attribute or a card register, which are
- * bus cycles of the same order.  Using the same body in both arms is what
- * makes the two numbers comparable, and using a BUS access rather than a
- * register-only spin is the conservative choice: it understates how far the
- * counted loop collapses on a fast CPU rather than overstating it.
- */
 static volatile UWORD *const beam = (volatile UWORD *)0x00DFF006UL;
 
 /* THE FIX.  `spins` is the floor the old call site's count becomes; pass 0 to
@@ -173,10 +118,6 @@ static ULONG timed_hold_ms(ULONG spins)
     return eclock_ms(t0, eclock_low());
 }
 
-/* THE OLD CODE: the same call site as it was written before netdev_clock.c.
-   Reported, never asserted -- what this loop does depends on the cost of a bus
-   cycle on the machine, and the point of the exercise is that the cost of a
-   bus cycle is not a thing the driver is entitled to assume. */
 static ULONG counted_hold_ms(VOID)
 {
     ULONG t0 = eclock_low();
@@ -187,8 +128,6 @@ static ULONG counted_hold_ms(VOID)
 
     return eclock_ms(t0, eclock_low());
 }
-
-/* ---------------------------------------------------------------- main ---- */
 
 int main(VOID)
 {
@@ -209,8 +148,6 @@ int main(VOID)
     check((CONST_STRPTR)"the E-Clock is a plausible Amiga one",
           eclock_hz > 600000UL && eclock_hz < 800000UL, (LONG)eclock_hz);
 
-    /* ---- what the driver measured about this machine -------------------- */
-
     spins   = netdev_clock_spins_per_line();
     us_line = netdev_clock_us_per_line();
     field   = netdev_clock_lines_per_field();
@@ -222,25 +159,9 @@ int main(VOID)
     check((CONST_STRPTR)"the beam was found and is running", spins != 0UL,
           (LONG)spins);
 
-    /*
-     * 63 is any 15 kHz mode and 31 is any 31 kHz one; 30 is the fallback the
-     * driver uses when counting the lines in a field gave a length no Amiga
-     * display mode has.  On a real chipset it should never be the fallback,
-     * and that is worth failing on here even though the driver treats it as
-     * merely imprecise: this is the one place with a real beam to check it
-     * against.
-     */
     check((CONST_STRPTR)"the field count recognised a real display mode",
           us_line == 63UL || us_line == 31UL, (LONG)us_line);
 
-    /* ---- the hold ------------------------------------------------------- */
-
-    /*
-     * THE CLOCK ON ITS OWN, with no floor under it.  This is the arm that says
-     * whether a wait MEASURES TIME: 300 ms asked for, 300 ms taken, on
-     * whatever CPU this is.  Both ends are asserted, because a wait that comes
-     * out at twice the request is safe and is still not a measurement.
-     */
     clock_only = timed_hold_ms(0UL);
     Printf((CONST_STRPTR)"\n300 ms from the clock alone: %lu ms\n", clock_only);
 
@@ -249,13 +170,6 @@ int main(VOID)
     check((CONST_STRPTR)"and does not overshoot it",
           clock_only <= CLOCK_CEIL_MS, (LONG)clock_only);
 
-    /*
-     * AND THE CALL SITE AS IT REALLY RUNS, floor and all.  Only the minimum is
-     * asserted here.  The floor is the iteration count the old code used, kept
-     * so that no machine gets a shorter wait than it did before; on a machine
-     * whose bus cycles are slow that count is the longer of the two and the
-     * hold legitimately runs well past 300 ms, exactly as it always did.
-     */
     at_site = timed_hold_ms(HOLD_SPINS);
     Printf((CONST_STRPTR)"the pc_settle() call site, floor and all: %lu ms\n",
            at_site);

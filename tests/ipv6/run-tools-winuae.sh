@@ -5,37 +5,6 @@
 #   tests/ipv6/run-tools-winuae.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                  [-T TAG] [-6 ADDR] [-4 ADDR]
 #
-# WHAT THIS PROVES THAT tests/ipv6/run-tools-amiberry.sh CANNOT.  SLIRP
-# forwards nothing beyond itself: `traceroute 8.8.8.8` is `*` at every hop
-# there for IPv4 as well, so every trace that harness can run terminates in
-# one hop because the target was one hop away.  RESEARCH 67 could show the
-# hop-limit ramp only by reading it off the emulated A2065's frames.  Here the
-# guest takes a SLAAC address from the LAN's own router advertisement and the
-# ramp is proved the other way round: by routers on the Internet decrementing
-# it and returning ICMPv6 time exceeded, one distinct address per hop.
-#
-# The run needs, and checks for, four things:
-#
-#   * a pcap device to bridge onto, in AMINETXDUO_WINUAE_A2065;
-#   * a WinUAE built from master, 6.0.3 dies on the first coalesced frame,
-#     RESEARCH 63.4, with tools/winuae/a2065-multicast-loopback.patch on
-#     top of it.  Without that patch the guest gets no IPv6 address at all;
-#     the patch header says why;
-#   * a router advertisement on the LAN.  Without one the guest has a
-#     link-local address and nothing else, which can reach no off-link
-#     destination and cannot trace anywhere; that is reported as a skip with
-#     exit 3, not as a failure, because it is the network's answer and not
-#     the stack's.
-#   * an IPv6 destination that answers echo requests.  2606:4700:4700::1111
-#     does; 2001:4860:4860::8888 was measured NOT answering from here, so a
-#     silent target reads as a broken stack.  -6 picks another.
-#
-# IPv4 runs alongside every IPv6 case rather than in a separate script: the
-# question this answers is whether the IPv6 work left IPv4 alone, and the only
-# way to say that about the same boot is to ask both in it.
-#
-# Exit 0 all clear, 1 an assertion failed, 3 the LAN has no IPv6 to test on.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -98,7 +67,6 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
-# --------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/v6wire-stage-$TAG"
 rm -rf "$STAGE"
@@ -118,10 +86,6 @@ CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
 
-# The wait is not padding.  A SLAAC address is TENTATIVE until duplicate
-# address detection finishes and a tentative address cannot be a source, so a
-# ping issued straight after the interface comes up fails with "no route to
-# that network" while everything is in fact working.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 10
@@ -133,7 +97,6 @@ SYS:ping $V6TARGET -c 3 -t 10
 SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n
 EOF
 
-# ------------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="$TAG"
 export AMINETXDUO_WINUAE_EXE="${AMINETXDUO_WINUAE_EXE:-C:\\winuae-patched\\winuae64.exe}"
@@ -161,7 +124,6 @@ cat "$REPORT"
 echo "====================================================================="
 echo
 
-# ------------------------------------------------------------ assertions ---
 
 FAILED=0
 ok()  { echo "  ok:      $*"; }
@@ -177,17 +139,10 @@ block() {
 have() { block "$1" | grep -qiF -- "$2"; }
 want() { if have "$1" "$2"; then ok "$3"; else bad "$3"; fi; }
 
-# Hops that answered, one address per line, from a traceroute block.  A hop
-# that did not answer prints `*` and contributes nothing.
 hops() {
     block "$1" | awk '$1 ~ /^[0-9]+$/ && $2 != "*" { print $2 }'
 }
 
-# ---- the LAN's own answer, before anything is judged --------------------
-#
-# A guest with only fe80:: has nowhere off-link to go.  That is the network
-# saying it has no IPv6, not the stack failing, and the difference has to be
-# reported rather than turned into a red assertion.
 GLOBAL=$(block "SYS:ShowNetStatus INTERFACES" |
          grep -oE '[0-9a-f]{1,4}:[0-9a-f:]*::?[0-9a-f:]*' |
          grep -viE '^(fe80|fd|fc|ff)' | head -1 || true)
@@ -204,7 +159,6 @@ ok "the LAN advertised a prefix; the guest autoconfigured $GLOBAL"
 
 want "SYS:ShowNetStatus INTERFACES" "fe80::" "the link-local address is up"
 
-# ---- control: IPv4 on the same boot -------------------------------------
 want "SYS:ping $V4TARGET -c 2 -t 10" "2 received" \
      "IPv4 ping $V4TARGET got both replies"
 
@@ -218,16 +172,12 @@ fi
 [ "$V4LAST" = "$V4TARGET" ] && ok "IPv4 traceroute reached $V4TARGET" \
                             || bad "IPv4 traceroute ended at '$V4LAST'"
 
-# ---- IPv6 off-link, through a router and not to a neighbour -------------
 want "SYS:ping $V6TARGET -c 3 -t 10" "3 received" \
      "IPv6 ping $V6TARGET got all three replies"
 
 V6HOPS=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | sort -u | wc -l | tr -d ' ')
 V6LAST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | tail -1)
 
-# THE ASSERTION THIS SCRIPT EXISTS FOR.  Three or more distinct addresses
-# means three or more routers each decremented the hop limit to zero and
-# returned ICMPv6 time exceeded, which is the ramp proved end to end.
 if [ "$V6HOPS" -ge 3 ]; then
     ok "IPv6 traceroute crossed $V6HOPS distinct routers, the hop-limit
            ramp works against real routers, not just on the wire"
@@ -237,8 +187,6 @@ fi
 [ "$V6LAST" = "$V6TARGET" ] && ok "IPv6 traceroute reached $V6TARGET" \
                             || bad "IPv6 traceroute ended at '$V6LAST'"
 
-# The first hop must be a router and not the guest itself: a trace whose
-# hop 1 is the destination proves nothing about the ramp.
 V6FIRST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | head -1)
 [ -n "$V6FIRST" ] && [ "$V6FIRST" != "$V6TARGET" ] \
     && ok "hop 1 is a router ($V6FIRST), not the destination" \
@@ -246,11 +194,6 @@ V6FIRST=$(hops "SYS:traceroute $V6TARGET -m 20 -q 1 -w 3 -n" | head -1)
 
 echo
 
-# THE EMULATOR'S OWN STATUS IS PART OF THE VERDICT.  RUN_RC was captured and
-# used only in the "the guest wrote no transcript" message, so a run that
-# timed out half way through, or took an illegal instruction, was graded on a
-# partial transcript as though it had finished.  Same fix as the Amiberry
-# sibling, tests/ipv6/run-tools-amiberry.sh.
 case "$RUN_RC" in
     0) ;;
     4)   bad "the guest is built for a CPU this machine does not have,\

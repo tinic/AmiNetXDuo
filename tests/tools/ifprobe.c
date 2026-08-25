@@ -1,38 +1,6 @@
 /*
  * IfProbe, exercises the Roadshow interface query API on a running stack.
  *
- * ObtainInterfaceList(), ReleaseInterfaceList() and QueryInterfaceTagList()
- * are the three vectors Roadie, NetMon and RoadshowControl reach for first.
- * They pass a struct List of Nodes and a tag list of pointers to caller
- * storage, neither of which a build can check: a list of the wrong node type
- * or a tag that writes a value where a pointer was expected compiles
- * perfectly and gurus inside the application.
- *
- * This is the call sequence a monitor makes, from a separate executable that
- * knows nothing about this stack's internals, against the library on a booted
- * machine:
- *
- *   1. list the interfaces and print ln_Name for each, so the caller walks the
- *      list with nothing but the published Node layout;
- *   2. query the first one for a bundle of tags in one call, which is how a
- *      monitor asks and the only way to catch a case that falls through into
- *      its neighbour;
- *   3. query a name that does not exist, which must fail with -1 and leave a
- *      sensible errno rather than succeed quietly;
- *   4. query with an empty tag list, which must succeed, that is how a
- *      caller asks "does this interface exist?";
- *   5. release the list.
- *
- * The tag storage is poisoned first: every destination is filled with 0xA5
- * before the query, so a tag that was silently not answered is distinguishable
- * from one that answered zero.  Half of the published tags have no true value
- * on this stack and are documented to be left alone; pre-zeroing could not
- * tell that apart from a bug.
- *
- * Vectors are called by hand at the LVOs the ABI assigns, the same way
- * tests/tools/routeprobe.c and src/tools/toolsock.c do: the NDK inlines
- * assume a global SocketBase.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -42,21 +10,12 @@
 #include <dos/dos.h>
 #include <utility/tagitem.h>
 
-/*
- * The IFQ_* tags come from the NDK's own header, not from a copy: a probe that
- * restated the numbers could agree with a wrong implementation.  That header
- * pulls in <sys/socket.h>, which uses size_t and ssize_t without declaring
- * them, so these two come first, the same ordering bsdsocket_internal.h
- * documents.
- */
 #include <stddef.h>
 #include <sys/types.h>
 #include <libraries/bsdsocket.h>
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static struct List *p_obtain_interface_list(struct Library *base)
 {
@@ -174,8 +133,6 @@ static LONG p_errno(struct Library *base)
     return res;
 }
 
-/* ----------------------------------------------------------- little helpers */
-
 /* 0xA5, not 0: a tag documented to be left alone must be visibly untouched. */
 #define POISON_BYTE     0xA5
 #define POISON_LONG     0xA5A5A5A5UL
@@ -219,8 +176,6 @@ static VOID p_show_long(const char *label, LONG value)
     else
         Printf((CONST_STRPTR)"  %-24s %ld\n", (LONG)label, value);
 }
-
-/* ------------------------------------------------------------------- query */
 
 struct sockaddr_in_probe
 {
@@ -373,8 +328,6 @@ static VOID p_query_one(struct Library *base, const char *name)
     p_show_long("IFQ_LastStart", last_start[0]);
 }
 
-/* --------------------------------------------------------- configuration -- */
-
 /* One IFQ_ tag, fetched on its own, for checking what a configure call did. */
 static LONG p_read_long(struct Library *base, const char *name, Tag tag)
 {
@@ -410,12 +363,6 @@ static ULONG p_read_address(struct Library *base, const char *name, Tag tag)
     return sa.sin_addr;
 }
 
-/*
- * ConfigureInterfaceTagList(), exercised on the interface carrying the run.
- * Every change is put back afterwards, and the order matters: a failure
- * part-way must leave the machine reachable, so the address is restored
- * before the state is touched.
- */
 static VOID p_config_phase(struct Library *base, const char *name)
 {
     static char    addr_text[16];
@@ -437,14 +384,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
     p_dotted(original, addr_text);
     Printf((CONST_STRPTR)"config: starting from %s\n", (LONG)addr_text);
 
-    /* ---- a tag this stack refuses, and the atomicity that goes with it ---
-     *
-     * A non-zero IFC_Metric asks for a routing cost this stack cannot spend,
-     * so the call must fail.  The IFC_NetMask in front of it checks atomicity:
-     * the whole list is validated before any of it is applied, so the mask
-     * must not have changed.  A one-pass implementation passes the first half
-     * of this assertion and fails the second.
-     */
     p_dotted(0xFFFF0000UL, mask_text);          /* 255.255.0.0, not ours */
 
     tags[0].ti_Tag  = IFC_NetMask;
@@ -478,7 +417,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc == 0) ? ", accepted, correctly" : ", REFUSED, WRONG"));
 
-    /* ---- an address string that is neither dotted-quad nor a host --------- */
     tags[0].ti_Tag  = IFC_Address;
     tags[0].ti_Data = (ULONG)"999.1.2.3.4";
     tags[1].ti_Tag  = TAG_DONE;
@@ -489,13 +427,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- the BOOL tags at FALSE, which ask for nothing --------------------
-     *
-     * IFC_AssociatedRoute and IFC_SetDebugMode name behaviour this stack does
-     * not have, but FALSE is not a request for it, and refusing a whole
-     * configuration over a tag that asked for nothing is how a Roadshow tool
-     * fails to configure an interface at all.  TRUE is still refused.
-     */
     tags[0].ti_Tag  = IFC_AssociatedRoute;
     tags[0].ti_Data = FALSE;
     tags[1].ti_Tag  = IFC_SetDebugMode;
@@ -518,7 +449,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- the MTU, down and back ------------------------------------------ */
     tags[0].ti_Tag  = IFC_LimitMTU;
     tags[0].ti_Data = 576;
     tags[1].ti_Tag  = TAG_DONE;
@@ -541,7 +471,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
     Printf((CONST_STRPTR)"config: IFC_LimitMTU 9000: rc %ld, IFQ_MTU now %ld\n",
            rc, mtu);
 
-    /* ---- the address, changed and put straight back ---------------------- */
     p_dotted((original & 0xFFFFFF00UL) | 200UL, addr_text);
 
     tags[0].ti_Tag  = IFC_Address;
@@ -569,7 +498,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
     Printf((CONST_STRPTR)"config: address restored: rc %ld, IFQ_Address now %s\n",
            rc, (LONG)mask_text);
 
-    /* ---- down, and back up ------------------------------------------------ */
     tags[0].ti_Tag  = IFC_State;
     tags[0].ti_Data = SM_Down;
     tags[1].ti_Tag  = TAG_DONE;
@@ -592,7 +520,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, state,
            (LONG)((state == SM_Up) ? ", up, correctly" : ", STILL DOWN, WRONG"));
 
-    /* ---- a state value the API never defined ----------------------------- */
     tags[0].ti_Tag  = IFC_State;
     tags[0].ti_Data = 99;
     tags[1].ti_Tag  = TAG_DONE;
@@ -603,7 +530,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- and an interface that does not exist ---------------------------- */
     tags[0].ti_Tag  = IFC_State;
     tags[0].ti_Data = SM_Up;
     tags[1].ti_Tag  = TAG_DONE;
@@ -614,8 +540,6 @@ static VOID p_config_phase(struct Library *base, const char *name)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 }
-
-/* --------------------------------------------- add and remove at run time -- */
 
 /* Interface names are file names in DEVS:NetInterfaces, and AmigaDOS file
    names are case-insensitive, so this is how the library compares them. */
@@ -669,27 +593,6 @@ static LONG p_count_interfaces(struct Library *base, const char *want,
     return count;
 }
 
-/*
- * RemoveInterface() and AddInterfaceTagList(), on the interface this run is
- * riding on.  "It tries to release all the resources associated with a
- * networking interface, thus permitting it to be added again with new
- * parameters", removing and re-adding is the documented use, and the only
- * way to find out whether the SANA-II device was really closed and reopened.
- *
- * The hardware address is the evidence.  It is read from the card by
- * S2_DEVICEQUERY at open time, so a re-added interface that reports the same
- * MAC went all the way down to the device and back; one that reports zeroes,
- * or the previous value out of memory that was never freed, did not.
- *
- * The addressing is the other half.  AddInterfaceTagList() has no address,
- * netmask, gateway or broadcast tag, so the interface comes back BARE and the
- * ConfigureInterfaceTagList() below is what addresses it, "such as setting
- * interface addresses, status and routing metrics".  Both halves are printed:
- * what the freshly added interface is carrying, which must be nothing, and
- * what it is carrying after the configure, which must be what was asked for
- * and not the classful mask this stack falls back to when a caller supplies an
- * address with no mask.
- */
 static VOID p_addremove_phase(struct Library *base, const char *name,
                               const char *device, LONG unit)
 {
@@ -722,13 +625,11 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
     Printf((CONST_STRPTR)"addremove: %ld interface(s), %s is %s\n",
            before, (LONG)name, (LONG)(present ? "there" : "MISSING"));
 
-    /* ---- a name that is not there ---------------------------------------- */
     rc = p_remove_interface(base, "nosuchif", 0);
     Printf((CONST_STRPTR)"remove nosuchif: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
            (LONG)((rc == 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- and the real one ------------------------------------------------ */
     rc = p_remove_interface(base, name, 0);
     Printf((CONST_STRPTR)"remove %s: rc %ld (errno %ld)%s\n",
            (LONG)name, rc, p_errno(base),
@@ -746,16 +647,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
            (LONG)name, rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- put it back ------------------------------------------------------
-     *
-     * With a tag this stack refuses in the list, first: AddInterfaceTagList
-     * must fail as a whole and leave nothing half-created, or the retry below
-     * would hit "an interface of that name already exists".
-     *
-     * PFM_Everything is the refusable kind of tag, it asks for promiscuous
-     * capture, and a caller told it got that while seeing local traffic only
-     * would read a busy wire as a quiet one.
-     */
     tags[0].ti_Tag  = IFA_PacketFilterMode;
     tags[0].ti_Data = PFM_Everything;
     tags[1].ti_Tag  = TAG_DONE;
@@ -766,12 +657,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /*
-     * And with the tuning tags a Roadshow caller passes as a matter of course.
-     * None of them is implemented here and every one of them must be accepted:
-     * they change nothing this API or the wire can show, and refusing one
-     * refused the interface itself.
-     */
     tags[0].ti_Tag  = IFA_NumReadRequests;
     tags[0].ti_Data = 64;
     tags[1].ti_Tag  = IFA_CopyMode;
@@ -802,7 +687,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
            (LONG)name, rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- the evidence ----------------------------------------------------- */
     tags[0].ti_Tag  = IFQ_HardwareAddress;
     tags[0].ti_Data = (ULONG)mac_after;
     tags[1].ti_Tag  = TAG_DONE;
@@ -823,7 +707,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                       ? ", the device was reopened, correctly"
                       : ", WRONG"));
 
-    /* ---- bare, as the published API says ---------------------------------- */
     {
         ULONG addr_now = p_read_address(base, name, IFQ_Address);
         ULONG mask_now = p_read_address(base, name, IFQ_NetMask);
@@ -840,12 +723,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                           : ", STILL ADDRESSED, WRONG"));
     }
 
-    /* ---- and it works again -----------------------------------------------
-     *
-     * The address it had, not a literal.  This was 10.0.2.15, SLIRP's first
-     * lease, which on any other wire puts the interface on a subnet the LAN
-     * does not carry for the rest of the run.
-     */
     {
         char addr_text[16];
         char mask_arg[16];
@@ -874,11 +751,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                           ? ", up again, correctly" : ", STILL DOWN, WRONG"));
     }
 
-    /*
-     * The mask the configure put on it, against the one the interface left
-     * with, which is what IFC_NetMask asked for.  A stack that guessed the
-     * classful mask anyway reads /8 here where it was handed a /24.
-     */
     mask_after = p_read_address(base, name, IFQ_NetMask);
     p_dotted(mask_after, mask_text);
 
@@ -889,20 +761,6 @@ static VOID p_addremove_phase(struct Library *base, const char *name,
                       : ", NOT THE MASK IT HAD, WRONG"));
 }
 
-/* ------------------------------------------------------------------ main -- */
-
-/*
- * `IfProbe DOWN|OFFLINE|UP` moves the first interface to that state and does
- * nothing else, so that `netstat` can be run after it.  SM_Down and SM_Offline
- * both report IFQ_State == SM_Down, the difference between them is whether
- * the SANA-II device is still on the network, which the published API has no
- * way to ask.  netstat prints it, so the harness reads it from there.
- *
- * `word` is the first letter of the argument, read by ReadArgs before the
- * library is opened.  argv is not used: the startup this builds against does
- * not fill it in, which ClockSet documents by taking its own argument through
- * ReadArgs and casting argv to void.
- */
 static LONG p_state_only(struct Library *base, char word)
 {
     struct List    *list = p_obtain_interface_list(base);
@@ -958,15 +816,6 @@ static LONG p_state_only(struct Library *base, char word)
 
     return (rc == 0) ? RETURN_OK : RETURN_FAIL;
 }
-
-
-/* ---------------------------------------------- RFC 3493 4, revision 3 -- */
-/*
- * -0x372..-0x384. No NDK glue names these, so they are called the same way
- * everything else in this file is. A library older than revision 3 has
- * MakeLibrary()'s (APTR)-1 in these slots, so lib_Revision is checked once
- * before any of them is entered.
- */
 
 struct probe_if_nameindex { ULONG if_index; char *if_name; };
 
@@ -1176,11 +1025,6 @@ int main(int argc, char **argv)
     if (first[0] != '\0')
         p_query_one(base, first);
 
-    /*
-     * A name nothing answers to.  The autodoc gives no errno for this, so the
-     * assertion is only that it fails: a query that returns 0 having written
-     * nothing is the failure mode a monitor cannot see.
-     */
     rc = p_query_interface(base, "nosuchif", NULL);
     Printf((CONST_STRPTR)"query nosuchif: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
@@ -1196,32 +1040,12 @@ int main(int argc, char **argv)
                (LONG)((rc == 0) ? ", accepted, correctly" : ", REFUSED, WRONG"));
     }
 
-    /*
-     * The configuration half, last, on the interface this run is riding on.
-     * Everything it changes it puts back, and it runs after the list
-     * assertions so that a machine it fails to restore has already produced
-     * the transcript for those.
-     */
     if (first[0] != '\0')
         p_config_phase(base, first);
 
-    /*
-     * The list obtained above is released before the interface it names is
-     * removed.  It is documented as "a copy", but nothing published says a
-     * list survives its interfaces, so the probe does not rely on it.
-     */
     p_release_interface_list(base, list);
     list = NULL;
 
-    /*
-     * THE DRIVER IS READ OFF THE INTERFACE, not assumed.  This call named
-     * "a2065.device" outright, so on any other board the re-add below was
-     * refused with errno 6 and every assertion after it read a poisoned
-     * buffer -- a run that looked like AddInterfaceTagList() handing back a
-     * broken interface, on a rig that had simply asked for the wrong device.
-     * IFQ_DeviceName and IFQ_DeviceUnit are what the interface itself says,
-     * and they are the pair that has to go back in.
-     */
     if (first[0] != '\0')
     {
         char           device[64];

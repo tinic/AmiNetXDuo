@@ -23,23 +23,9 @@
 /* --------------------------------------------------------------- tunables */
 
 /*
- * CMD_READ is per packet type and the device has no buffers of its own: every
- * frame that arrives with no matching read outstanding is dropped. Each
- * outstanding read pins one NX_PACKET for its whole life, so a reader's depth
- * is its receive window in frames, and it is paid for out of the packet pool.
- *
- * The floors below are what a reader gets when nothing else can be afforded.
- * Four for IPv4 is measured: with tests/curl/run-curlverify.sh -p, sixteen
- * concurrent HTTP transfers through curl's multi interface lost six at depth
- * four, twenty-four lost seven, and forty lost fifteen. All failed as
- * `curl: (7) Could not connect` after about thirteen seconds, on connections
- * the host had already accepted -- the SYN went out, the peer answered, and
- * the SYN/ACK arrived in a burst with no read outstanding to catch it. At
- * depth eight, forty concurrent transfers lost none.
- *
- * What each reader gets ABOVE its floor is ami_sana2_rx_plan(), from the line
- * rate the device reports and what the pool can spare. Both numbers are read
- * there and the reasoning is there.
+ * CMD_READ is per packet type and the device has no buffers of its own, so a
+ * reader's depth is its receive window in frames and each outstanding read pins
+ * one NX_PACKET.  These are floors; ami_sana2_rx_plan() decides the rest.
  */
 #ifndef AMI_SANA2_RX_DEPTH_IPV4
 #define AMI_SANA2_RX_DEPTH_IPV4     4
@@ -52,126 +38,36 @@
 #endif
 
 /*
- * The receive window in frames, which is what a reader has to be deep enough
- * to catch.
- *
- * One in AMI_SANA2_RX_POOL_SHARE pool packets is exactly the share
- * src/bsdsocket/bsdsocket_internal.h's BSD_TCP_WINDOW_POOL_SHARE gives a
- * socket's TCP receive window, and that is not a coincidence to be tidied
- * away: the window is the bytes a peer is allowed to have in flight, and the
- * read queue is where those bytes land. The two constants have to move
- * together, and this comment is the only thing saying so -- sana2 is below
- * bsdsocket and cannot include its header.
+ * AMI_SANA2_RX_POOL_SHARE must move together with
+ * src/bsdsocket/bsdsocket_internal.h's BSD_TCP_WINDOW_POOL_SHARE: the window is
+ * the bytes a peer may have in flight and the read queue is where they land.
+ * sana2 is below bsdsocket and cannot include its header.
  */
 #ifndef AMI_SANA2_RX_POOL_SHARE
 #define AMI_SANA2_RX_POOL_SHARE     8
 #endif
 
 /*
- * THERE IS DELIBERATELY NO MINIMUM HERE ABOVE AMI_SANA2_RX_DEPTH_IPV4, AND
- * RAISING ONE IS THE MISTAKE TO READ THIS BEFORE MAKING.
- *
- * Eight looked right. tests/curl/run-curlverify.sh -p loses fifteen SYN/ACKs
- * of forty at depth four and none at eight, so a want floored at eight was
- * tried, and it is wrong on the machine it was aimed at. Under a UDP flood the
- * memory-tight A1200 -- 2 MB chip, no Fast RAM, pool 47 packets -- caught this
- * many datagrams of 2552 offered at 6000 kbit/s, three runs each, arms
- * alternating direction:
- *
- *      plan 5/2/2, the pool's own number      168, 170, 186
- *      plan 7/2/2, the want floored at eight   28,  30,  39
- *      plan 5/2/4, the floor taken out again  166, 175, 184
- *
- * Non-overlapping, and the third row is the second row's binary with the floor
- * removed. Two extra reads out of forty-seven packets cost four fifths of what
- * the machine could catch.
- *
- * A PACKET IS WORTH MORE FREE THAN POSTED WHEN THE READ QUEUE AND THE SOCKET
- * RECEIVE QUEUE COME OUT OF ONE POOL. A deeper read queue hands the socket
- * more datagrams sooner, the socket queue overruns, and the reader cannot then
- * allocate a replacement to re-arm with -- so the queue that was made deeper
- * runs shallower in practice. That turnover is the whole reason this is a want
- * and not a floor.
- *
- * AND IT IS THE MEASURED ANSWER TO AROSTCP'S FLOOR OF SIXTEEN. Sixteen is a
- * third of this pool. Seven was already four fifths of the way down; sixteen
- * is far past where it turns over. The reference implementation is not wrong
- * for its own stack -- it is wrong for a stack whose reads and whose sockets
- * are drawing on the same packets -- and nothing in the code says so, which is
- * why this comment does.
- *
- * The curl measurement is not contradicted: it was taken on a machine whose
- * pool gives thirty-two anyway. Every machine with any Fast RAM at all is
- * already above eight from the pool alone, so the floor could only ever have
- * bitten where it did harm.
+ * There is deliberately NO MINIMUM here above AMI_SANA2_RX_DEPTH_IPV4.  The
+ * read queue and the socket receive queue come out of one pool, so past a point
+ * a packet is worth more free than posted: on a 47-packet pool a floor of eight
+ * cost four fifths of the datagrams the machine could catch.  A want, not a
+ * floor.
  */
 /*
  * The deepest the IPv6 reader is planned, however much the pool can spare.
- *
- * IPv4 is not capped this way and IPv6 is, because a packet pinned by a reader
- * nothing is arriving on is a packet the other reader's window and the
- * transmit path cannot have -- and a dual-stack machine is not receiving at
- * full rate on both protocols at once. One CPU, one wire, one pool.
- *
- * Both sides are measured, a2065 on an 8 MB A1200 (pool 367), the guest
- * pulling 2 MB over each protocol in the same boot, n=3 interleaved, medians
- * in kbit/s:
- *
- *      IPv6 depth       2      8     32
- *      IPv6 rate      386   1959   4013
- *      IPv4 beside   4660   4686   4686
- *
- * Two is a cliff and eight is five times off it. Thirty-two is twice as good
- * again and it is not what ships: the same tree at thirty-two read one to five
- * per cent below `main` on all nine cards of the streaming gate, one sign,
- * where eight does not -- and the twenty-four extra packets are eight per cent
- * of the biggest pool this stack ever gets and unaffordable on every smaller
- * one. Five times, for six packets.
+ * IPv4 is not capped this way because a dual-stack machine is not receiving at
+ * full rate on both protocols at once: one CPU, one wire, one pool.
  */
 #ifndef AMI_SANA2_RX_WANT_IPV6
 #define AMI_SANA2_RX_WANT_IPV6      8
 #endif
 
 /*
- * One in this many pool packets can be PINNED by the readers, all of them
- * together and not one each.
- *
- * A quarter, and the floors override it: a machine whose pool cannot spare
- * even the floors still gets them, because a reader below its floor cannot
- * absorb the smallest burst there is and the alternative to spending the
- * packets is a link that drops SYN/ACKs.
- *
- * Twice the window share above, so a machine can hold a window's worth of
- * reads on one protocol and still have the same again for the other.
- *
- * AND IT IS A QUARTER FOR THE MACHINE, NOT A QUARTER EACH.  There is one
- * packet pool and there may now be four interfaces
- * (NX_MAX_PHYSICAL_INTERFACES), so the plan divides this budget by how many
- * interfaces are attached when the readers start: four interfaces each taking
- * a quarter would leave the pool with nothing for the sockets or the transmit
- * path, which is the same turnover the floor-of-eight measurement below ran
- * into, one interface at a time.  A machine with ONE interface divides by one
- * and its numbers are unchanged -- every depth in the table in
- * tests/sana2/host/test_sana2_rx_host.c is the depth it was.
- *
- * THE FLOORS ARE STILL NEVER GIVEN UP, and on the smallest machine they are
- * the whole answer: a 47-packet pool with two interfaces has a budget of five
- * against floors of eight, so each interface gets exactly 4/2/2 and the
- * division changes nothing it could have had.  That is the intended shape --
- * what four interfaces share is the discretionary part, and what each is
- * guaranteed is the burst it cannot work below.
- *
- * WHICH LEAVES ONE ARITHMETIC LIMIT WORTH WRITING DOWN RATHER THAN CODING
- * AGAINST.  The floors are 8 packets an interface, so four interfaces would
- * pin 32 -- more than AMI_POOL_MIN_PACKETS, which is 16.  That combination is
- * a machine under about 1 MB free running FOUR cards, and no such machine
- * exists: the reference floor -- 2 MB of chip RAM, no Fast RAM -- makes a
- * 57-packet pool, which pays four sets of floors and a little over.  Nothing
- * clamps it because nothing needs to: a reader that cannot get a packet takes
- * the NX_NO_WAIT refusal, counts it in stats.alloc_failures -- `netstat -h`
- * prints the pool's side of the same event as "found the pool empty" -- and
- * arms the slots it did get.  The shape of the failure is a shallower queue,
- * not an interface that will not start.
+ * One in this many pool packets may be PINNED by the readers, all of them
+ * together and not one each, divided again by how many interfaces are attached.
+ * The per-reader floors override it: a reader below its floor cannot absorb the
+ * smallest burst there is.  Twice the window share above.
  */
 #ifndef AMI_SANA2_RX_BUDGET_SHARE
 #define AMI_SANA2_RX_BUDGET_SHARE   4
@@ -182,26 +78,19 @@
 #endif
 
 /*
- * The line rate assumed for a device that does not report one.
- *
- * S2_DEVICEQUERY answers into a zeroed block, so a device that does not fill
- * BPS in, and one that supplies a short block that stops before it, both
- * arrive here as 0. Ten megabits is what every Ethernet board in
- * src/netdev/netdev_cards.c but the x-surf-100 reports, so a device that
- * cannot say lands where the common case is rather than at either extreme.
- *
- * A nonsense rate needs no separate case: the ladder's bottom step covers
- * every wire slower than the reader, so a device answering 1 is capped where a
- * serial line is capped, which is the floor, which is where it belongs.
+ * The line rate assumed for a device that does not report one.  S2_DEVICEQUERY
+ * answers into a zeroed block, so "did not fill BPS in" and "supplied a short
+ * block that stopped before it" both arrive here as 0.  A nonsense rate needs
+ * no case: the ladder's bottom step covers every wire slower than the reader.
  */
 #ifndef AMI_SANA2_BPS_DEFAULT
 #define AMI_SANA2_BPS_DEFAULT       10000000UL
 #endif
 
 /*
- * How long a reader waits for the device to give its queued CMD_READs back
- * once it has asked. 25 x 2 ticks is one second: generous for a driver that
- * honours AbortIO(), and bounded for one that does not.
+ * How long a reader waits for the device to give its queued CMD_READs back.
+ * 25 x 2 ticks is one second: generous for a driver that honours AbortIO(),
+ * bounded for one that does not.
  */
 #ifndef AMI_SANA2_RX_REAP_TRIES
 #define AMI_SANA2_RX_REAP_TRIES     25
@@ -222,12 +111,9 @@
 #endif
 
 /*
- * Probe for raw-frame support at open time (see ami_sana2_probe_raw).
- *
- * Off, and off here rather than only in the build: the probe's WaitIO() has no
- * deadline, and a2065.device 2.16 does not answer the AbortIO() before it, so
- * ami_sana2_open() never returns. CMakeLists.txt gives the same answer. This
- * is what a build that does not go through it gets.
+ * Probe for raw-frame support at open time (see ami_sana2_probe_raw).  Off:
+ * the probe's WaitIO() has no deadline and a2065.device 2.16 does not answer
+ * the AbortIO() before it, so ami_sana2_open() never returns.
  */
 #ifndef AMI_SANA2_PROBE_RAW
 #define AMI_SANA2_PROBE_RAW         0
@@ -251,11 +137,9 @@
 #endif
 
 /*
- * How deep each read queue goes on this machine, on this wire.
- *
- * Three numbers rather than one, because the pool pays for all three at once
- * and the ARP reader is not the same kind of consumer as the other two. Filled
- * by ami_sana2_rx_plan(); see it for what decides each.
+ * How deep each read queue goes on this machine, on this wire.  Three numbers
+ * rather than one, because the pool pays for all three at once.  Filled by
+ * ami_sana2_rx_plan(); see it for what decides each.
  */
 typedef struct AmiRxDepths
 {
@@ -265,13 +149,10 @@ typedef struct AmiRxDepths
 } AmiRxDepths;
 
 /*
- * `bps` is what S2_DEVICEQUERY reported, 0 when the device did not say.
- * `pool_total` is nx_packet_pool_total, 0 when there is no pool yet.
- * `dual_stack` says whether an IPv6 reader will be started at all.
- * `ifaces` is how many interfaces are sharing that pool, 0 read as 1.
- *
- * Extern, and taking scalars rather than the interface, so the arithmetic runs
- * under tests/sana2/host with no device and no pool behind it.
+ * `bps` is what S2_DEVICEQUERY reported (0 when the device did not say),
+ * `pool_total` is nx_packet_pool_total (0 when there is no pool yet), `ifaces`
+ * is how many interfaces share that pool (0 read as 1).  Scalars rather than
+ * the interface, so the arithmetic runs under tests/sana2/host.
  */
 VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
                        UWORD ifaces, AmiRxDepths *out);
@@ -284,18 +165,9 @@ UWORD ami_sana2_bound_count(VOID);
 /* ---------------------------------------------------------- receive probe */
 
 /*
- * Off by default, in the shape AMINETXDUO_NXCENSUS uses: two ReadEClock()
- * calls per drain, and the totals go to the serial log when the readers stop.
- *
+ * Off by default:
  *   cmake -B build/rxprobe -DAMINETXDUO_RXPROBE=ON ...
- *
- * It answers two questions the existing counters cannot. The first is how many
- * CMD_READs the device still held each time the reader woke, which is the
- * receive window in frames, live rather than configured. A frame that arrives
- * with none outstanding is dropped by the device and counted nowhere. The
- * second is whether the TCP sequence space is already holed when the frame
- * reaches NetX Duo, which separates a frame lost below this line from one
- * NetX Duo dropped after it.
+ * Two ReadEClock() calls per drain; the totals go to the serial log at rx stop.
  */
 #ifdef AMINETXDUO_RXPROBE
 
@@ -340,8 +212,8 @@ typedef struct AmiRxProbe
 
 /*
  * One bulk TCP flow, latched on the first segment carrying 512 bytes or more.
- * `next` is the sequence that wire order produces, so a segment starting
- * beyond it is a hole that already existed when the frame reached this line.
+ * `next` is the sequence that wire order produces, so a segment starting beyond
+ * it is a hole that already existed when the frame reached this line.
  */
 typedef struct AmiRxSeqProbe
 {
@@ -380,8 +252,8 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface);
 
 /*
  * Two bytes of slack in front of the synthesised Ethernet header so the IP
- * header lands on a 4-byte boundary. NetX Duo's NX_PHYSICAL_HEADER is 16 for
- * the same reason, and the 68020 pays for misaligned longword reads.
+ * header lands on a 4-byte boundary; the 68020 pays for misaligned longword
+ * reads.  NetX Duo's NX_PHYSICAL_HEADER is 16 for the same reason.
  */
 #define AMI_SANA2_RX_PAD            2
 
@@ -392,9 +264,8 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface);
 struct AmiSana2Rx;
 
 /*
- * One outstanding CMD_READ. `req` must stay first: completed requests come
- * back as struct Message * from GetMsg() and are cast straight back to the
- * slot.
+ * One outstanding CMD_READ.  `req` must stay first: completed requests come
+ * back as struct Message * from GetMsg() and are cast straight back to the slot.
  */
 typedef struct AmiRxSlot
 {
@@ -407,10 +278,9 @@ typedef struct AmiRxSlot
 #ifdef AMINETXDUO_RX_VERIFY
     /*
      * The frame's ones-complement sum, computed out of the loads the copy is
-     * already doing.  Here rather than in NX_PACKET because this struct
-     * belongs to the shim and its lifetime is the slot's. It is written by the
-     * copy hook and read by the drain, one request apart, and re-armed before
-     * the next. Growing NX_PACKET to carry the same value hung the stack.
+     * already doing.  Written by the copy hook and read by the drain one
+     * request later, re-armed before the next.  Not in NX_PACKET: growing it to
+     * carry the same value hung the stack.
      */
     ULONG               sum;
     BOOL                summed;
@@ -434,9 +304,8 @@ typedef struct AmiSana2Rx
     ULONG               wake_mask;
 
     /*
-     * TX reaping duty. Exactly one reader carries it (see
-     * ami_sana2_tx_reap_bind()), and only that reader has a nonzero reap_mask,
-     * the signal the TX reply port raises on completion.
+     * Exactly one reader carries the TX reaping duty (see
+     * ami_sana2_tx_reap_bind()), and only that reader has a nonzero reap_mask.
      */
     BOOL                reap_tx;        /* this reader has the duty         */
     BYTE                reap_sigbit;    /* -1 when none is held             */
@@ -487,8 +356,8 @@ typedef struct AmiTxSlot
 /* ------------------------------------------------------------- interface */
 
 /*
- * offline_state below.  Never online, online with S2_OFFLINE not yet issued,
- * and issued.  Only the middle one records a skipped offline.
+ * offline_state below: never online, online with S2_OFFLINE not yet issued, and
+ * issued.  Only the middle one records a skipped offline.
  */
 #define AMI_SANA2_OFFLINE_NEVER     0
 #define AMI_SANA2_OFFLINE_UP        1
@@ -518,17 +387,9 @@ struct AmiSana2If
 
     BOOL                online;
     /*
-     * Whether S2_OFFLINE has been issued since this interface last went
-     * online.  For the event ring and nothing else.
-     *
-     * A teardown calls ami_sana2_offline() six or seven times over -- from
-     * rx_stop, from close, and from the driver's three link cases -- and every
-     * call after the first finds the interface already offline and returns.
-     * Recording each of those buries the one that means something: an
-     * interface that was marked offline by a READER taking S2ERR_OUTOFSERVICE,
-     * where the device never received the command and goes on running its
-     * receiver.  That is the mechanism behind a card whose LED keeps blinking
-     * after a shutdown, and it is one event, not seven.
+     * Whether S2_OFFLINE has been issued since this interface last went online.
+     * For the event ring and nothing else: a teardown calls ami_sana2_offline()
+     * six or seven times over, and only the first means anything.
      */
     UBYTE               offline_state;
     /* Administrative state: the stack's intent, not the wire's condition.
@@ -554,13 +415,10 @@ struct AmiSana2If
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /*
-     * Lazy completion collection, see ami_sana2_tx_lazy_tick(). The timer is
-     * the safety net that collects and un-parks; parking only engages while
-     * it exists (tx_lazy_timer_up). tx_lazy_parked mirrors "mp_Flags is
-     * PA_IGNORE because of a send", never "because no reader is bound", and
-     * every transition of it happens under the same Disable() that guards
-     * the port flags. tx_lazy_last_send is the ThreadX tick of the most
-     * recent send, what the tick measures link quiet against.
+     * Lazy completion collection, see ami_sana2_tx_lazy_tick().  Parking only
+     * engages while the timer exists (tx_lazy_timer_up).  tx_lazy_parked means
+     * "PA_IGNORE because of a send", never "because no reader is bound", and
+     * every transition of it happens under the same Disable() as the port flags.
      */
     TX_TIMER            tx_lazy_timer;
     BOOL                tx_lazy_timer_up;
@@ -646,14 +504,10 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);
 
-/* The probe build's stray-Wait() net over the realm's sources; the wrapper
-   and the rationale live with netstack_internal.h's copy of this block.
-   <proto/exec.h> is forced FIRST: the NDK's inline Wait macro must be
-   expanded (once, behind its own guard) BEFORE ours is defined, or a TU
-   that includes it after this header has ours silently replaced -- the
-   NDK path is -isystem, so the redefinition never even warns.  The
-   injected-stray drill of 2026-08-25 caught this net hanging dead: every
-   Wait() in the sana2 sources compiled to the raw inline.  */
+/* <proto/exec.h> is forced FIRST: the NDK's inline Wait macro must be expanded
+   (once, behind its own guard) BEFORE ours is defined, or a TU that includes
+   it after this header has ours silently replaced -- the NDK path is -isystem,
+   so the redefinition never even warns. */
 #if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
 #include <proto/exec.h>
 ULONG ami_green_checked_wait(ULONG sigmask);

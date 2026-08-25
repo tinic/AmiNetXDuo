@@ -2,21 +2,6 @@
  * AmiNetXDuo, the SYN defence: the cookie's arithmetic and the cache's
  * bookkeeping, on the host.
  *
- * Real, from third_party/netxduo/common/src/nx_tcp_syncache.c: the file is
- * compiled into this binary and the entry points below are the ones
- * nx_tcp_packet_process.c calls.  What is stubbed is only the four things
- * that need a stack under them -- sending a segment, driving a socket to
- * ESTABLISHED, finding a route, and reading the clock -- so what is being
- * tested is the code that ships and not a transcription of it.
- *
- * Reading the clock is stubbed rather than mocked away because the ageing
- * rules are the half of this that a unit test can reach at all: an emulator
- * arm can prove a flood does not take the machine down, but it cannot prove
- * that the oldest entry is the one given up first.
- *
- * The two ctest cases are `syncache_cookie` and `syncache_cache`, selected by
- * argv[1], so a failure names which half broke.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -29,8 +14,6 @@
 #include <stdlib.h>
 
 
-/* ------------------------------------------------------------ the stubs */
-
 static ULONG host_now;
 
 ULONG _tx_time_get(VOID)
@@ -38,8 +21,6 @@ ULONG _tx_time_get(VOID)
     return host_now;
 }
 
-/* Counts, so a test can say what the code under test did rather than only
-   that it returned.  */
 static int stub_synacks;
 static int stub_rsts;
 static int stub_established;
@@ -48,16 +29,6 @@ static ULONG stub_last_seq;
 static ULONG stub_synack_mss;
 static ULONG stub_synack_scale;
 
-/*
- * The real sender decides two things the cookie does not carry -- the segment
- * size and this end's window scale -- and writes both back onto the socket,
- * which is where nx_tcp_syncache.c reads them from.  The stub reproduces that
- * write-back from nx_tcp_packet_send_syn.c, because the property worth
- * testing is that the cookie path's own arithmetic
- * (_nx_tcp_syncache_local_terms) lands on the same two numbers.  A stub that
- * wrote nothing back would leave both at zero on the cached path and the two
- * would agree by accident.
- */
 VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 {
     ULONG mss;
@@ -135,8 +106,6 @@ ULONG _nx_ip_route_find(NX_IP *ip_ptr, ULONG destination_address,
 }
 
 
-/* ------------------------------------------------------------- the rig */
-
 static int failures;
 
 static void ok(const char *what, int cond)
@@ -170,8 +139,6 @@ static void eq(const char *what, unsigned long got, unsigned long want)
 static ULONG test_key[4] = { 0x0badc0deUL, 0x1234abcdUL, 0xfeedfaceUL, 0x00000001UL };
 
 
-/* =========================================================== the cookie */
-
 static UINT cookie_case(void)
 {
     ULONG tuple[3];
@@ -188,11 +155,6 @@ static UINT cookie_case(void)
     tuple[1] = 0xc0a80158UL;    /* 192.168.1.88, this machine     */
     tuple[2] = (50UL << 16) | 40000UL;
 
-    /* Every encoding the option field has survives the round trip.  This is
-       the property the whole "options are not downgraded under attack" claim
-       rests on: a cookie that lost two bits of window scale would negotiate a
-       different connection than the SYN asked for and nothing on the wire
-       would say so.  */
     for (data = 0; data < 1024; data++)
     {
         cookie = _nx_tcp_syncache_cookie_build(test_key, tuple, 3, irs, count, data);
@@ -274,10 +236,6 @@ static UINT cookie_case(void)
                                          &back) == NX_FALSE);
     }
 
-    /* Blind forgery.  The construction gives an off-path guess a chance of
-       (2 / 256) * (1024 / 2^24), which is about one in two million; a quarter
-       of a million tries should land on none, and the bound below leaves room
-       for luck without leaving room for a broken check.  */
     {
         int hits = 0;
 
@@ -388,8 +346,6 @@ static UINT cookie_case(void)
 }
 
 
-/* ============================================================ the cache */
-
 static NX_IP          rig_ip;
 static NX_TCP_LISTEN  rig_listen;
 static NX_TCP_SOCKET  rig_socket;
@@ -485,8 +441,6 @@ static UINT cache_case(void)
     ULONG iss_first;
     ULONG iss_last;
 
-    /* --- a SYN costs one entry and one segment, and no socket ---------- */
-
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
 
@@ -499,12 +453,9 @@ static UINT cache_case(void)
        rig_listen.nx_tcp_listen_socket_ptr == &rig_socket);
     eq("and nothing was handed to the application", (unsigned long) rig_callbacks, 0);
 
-    /* A repeat of the same SYN is the client saying it did not hear us. */
     ok("a repeated SYN is answered again", rig_syn(1, 0x1000) == iss_first);
     eq("and does not take a second entry", cache -> nx_tcp_syncache_count, 1);
     eq("but is answered", (unsigned long) stub_synacks, 2);
-
-    /* --- the ACK is what commits a socket ------------------------------ */
 
     ok("the ACK is consumed", rig_ack(1, 0x1000, iss_first) == NX_TRUE);
     eq("the entry is given back", cache -> nx_tcp_syncache_count, 0);
@@ -532,8 +483,6 @@ static UINT cache_case(void)
        rig_socket.nx_tcp_socket_ts_recent, 888);
 #endif
 
-    /* --- an ACK nobody asked for is not a connection ------------------- */
-
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
 
@@ -543,8 +492,6 @@ static UINT cache_case(void)
     eq("and sent nothing back", (unsigned long) (stub_rsts + stub_synacks), 0);
     ok("and was counted as a forgery",
        cache -> nx_tcp_syncache_cookies_invalid == 1);
-
-    /* --- filling it is a flood, and past full the cookie takes over ---- */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
@@ -588,19 +535,12 @@ static UINT cache_case(void)
     eq("and the MSS came back at the table value below what was asked",
        rig_socket.nx_tcp_socket_peer_mss, 1460);
 
-    /* The two terms the cookie does NOT carry.  The SYN-ACK announced them,
-       the ACK is reconstructed a round trip later without them, and the
-       reconstruction has to land on the same numbers -- otherwise a cookie
-       connection announces one segment size or window scale and then uses
-       another, with nothing on the wire to say so.  */
     eq("the segment size the SYN-ACK announced is reproduced",
        rig_socket.nx_tcp_socket_connect_mss, stub_synack_mss);
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
     eq("and so is the window scale it announced",
        rig_socket.nx_tcp_rcv_win_scale_value, stub_synack_scale);
 #endif
-
-    /* --- ageing gives the entries back, oldest first ------------------- */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
@@ -616,8 +556,6 @@ static UINT cache_case(void)
     }
     eq("two hundred half-open connections", cache -> nx_tcp_syncache_count, 200);
 
-    /* Far enough on that the first hundred are past their time and the
-       second hundred are not.  */
     host_now += NX_TCP_SYNCACHE_TIMEOUT - (4 * NX_IP_PERIODIC_RATE);
     stub_synacks = 0;
     _nx_tcp_syncache_periodic(&rig_ip);
@@ -625,8 +563,6 @@ static UINT cache_case(void)
     eq("the older hundred are given up", cache -> nx_tcp_syncache_count, 100);
     eq("and counted as expired", cache -> nx_tcp_syncache_expired, 100);
 
-    /* The survivors are the second batch: their peers are the 3000 series,
-       and an ACK for one of the first batch is now only a cookie.  */
     ok("and the survivors are the younger ones",
        _nx_tcp_syncache_deliver(&rig_ip, &rig_listen, &rig_socket) == NX_FALSE);
 
@@ -634,8 +570,6 @@ static UINT cache_case(void)
     _nx_tcp_syncache_periodic(&rig_ip);
     eq("and eventually all of them", cache -> nx_tcp_syncache_count, 0);
     eq("the free list is whole again", cache -> nx_tcp_syncache_expired, 200);
-
-    /* --- an aged-out entry is still a connection ----------------------- */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
@@ -653,8 +587,6 @@ static UINT cache_case(void)
     eq("from the cookie alone", cache -> nx_tcp_syncache_cookies_valid, 1);
     eq("and the connection is made", (unsigned long) stub_established, 1);
 
-    /* --- with no socket to give it to, it waits, and is bounded -------- */
-
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
 
@@ -668,7 +600,6 @@ static UINT cache_case(void)
     eq("and none of them reset the peer", (unsigned long) stub_rsts, 0);
     eq("and no socket was committed", (unsigned long) stub_established, 0);
 
-    /* The ninth is past the backlog the application asked for. */
     {
         ULONG iss = rig_syn(4008, 0x7008);
 
@@ -679,7 +610,6 @@ static UINT cache_case(void)
     eq("and the peer is told, rather than left hanging",
        (unsigned long) stub_rsts, 1);
 
-    /* A socket arriving takes the oldest of them. */
     rig_socket.nx_tcp_socket_state = NX_TCP_CLOSED;
     ok("relisten takes one", _nx_tcp_syncache_deliver(&rig_ip, &rig_listen,
                                                       &rig_socket) == NX_TRUE);
@@ -693,17 +623,6 @@ static UINT cache_case(void)
     _nx_tcp_syncache_flush(&rig_ip, 80);
     eq("unlisten empties the queue", cache -> nx_tcp_syncache_accept_count, 0);
     eq("and resets every peer waiting on it", (unsigned long) stub_rsts, 7);
-
-    /* --- the SYN-ACK's terms hold even with no socket on the port ------ */
-    /*
-     * The listen request's socket slot is empty for as long as a connection
-     * is being handed over.  A SYN arriving in that window used to be
-     * answered from a fallback window, and the ACK reconstructed against the
-     * real one -- a different window is a different SCALE, and the peer would
-     * shift by one this end does not use.  The window is recorded on the
-     * listen request now, so both ends of the round trip read the same
-     * number.
-     */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
@@ -728,8 +647,6 @@ static UINT cache_case(void)
        rig_socket.nx_tcp_rcv_win_scale_value, stub_synack_scale);
 #endif
 
-    /* --- a stray SYN does not end a connection already made ------------ */
-
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = NX_NULL;
     {
@@ -741,8 +658,6 @@ static UINT cache_case(void)
     (void) rig_syn(88, 0xD000);
     eq("a forged SYN on the same four-tuple does not throw it away",
        cache -> nx_tcp_syncache_accept_count, 1);
-
-    /* --- a RST cancels a half-open connection ------------------------- */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
@@ -772,8 +687,6 @@ static UINT cache_case(void)
                                         (UINT) (30000u + 55u));
     }
     eq("a RST on the right one gives it back", cache -> nx_tcp_syncache_count, 0);
-
-    /* --- the SYN-ACK retry ladder is bounded -------------------------- */
 
     rig_reset();
     rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;

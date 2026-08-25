@@ -1,87 +1,5 @@
 #!/usr/bin/env bash
-#
 # THE LEAK SWEEP FOR THE WHOLE COMMAND SET.
-#
-#   tests/tools/run-toolleak.sh [-b BUILDDIR] [-g GROUP] [-n RUNS] [-t SECONDS]
-#                               [-V] [-I ROWID]
-#
-# WHAT IT PROVES
-#
-#   Every command gives back everything it took.  Each row of the table below
-#   is run N times inside ONE boot, and by the end of the run an invocation has
-#   to cost nothing at all.  The first runs pay whatever a first open costs on
-#   this machine -- the library, the pool, the resolver's cache -- and the
-#   figure reported is the cost of one more call once that has settled.
-#   AmigaOS reclaims nothing when a process exits, so a per-invocation cost of
-#   any size is memory that is gone until the machine is switched off.
-#
-#   That is tests/tools/run-addifleak.sh's shape, generalised: one table, one
-#   row per (command, arm), rather than one script per command.  Adding a tool
-#   means adding a row.
-#
-# BOTH ARMS
-#
-#   A command that leaks only when it refuses is the common case, because the
-#   refusal path is the one nobody walks.  Every command that has a meaningful
-#   failure gets a row for it: an interface that is not there, a host that does
-#   not resolve, a route with no gateway.  `template` rows are the third arm
-#   every command has: ReadArgs' own "?", which allocates an RDArgs and an
-#   argument buffer and returns before anything else happens.
-#
-# THE PREMISE COLUMN IS NOT DECORATION
-#
-#   A row whose command silently stopped reaching the path it names would read
-#   flat and pass.  Every row therefore states what has to be true of its own
-#   output -- an exit code, or a phrase -- and the row FAILS if it is not,
-#   before the arithmetic is even looked at.  A row with `?` in that column has
-#   no premise and fails as such: nothing here may pass vacuously.
-#
-# BOOTS, AND WHY THERE ARE FOUR
-#
-#   cold    the stack was never started.  Config-only commands and every
-#           command's `?`.  Nothing here may open bsdsocket.library, because
-#           opening it STARTS the stack and the rest of the boot would no
-#           longer be cold.
-#   live    one `AddNetInterface eth0` and then everything that reads or uses
-#           a running stack without disturbing it.
-#   cycle   the commands that take the stack apart: Online/Offline,
-#           AddNetInterface/RemoveNetInterface, NetShutdown.  Each is paired
-#           with the command that puts back what it took, so the pair repeats.
-#   server  `nc -l`, which blocks until its own -w expires and so cannot share
-#           a transcript position with anything.
-#
-#   A boot's command list is CHUNKED to ToolsSmoke's MAX_COMMANDS, which is
-#   read out of the source rather than assumed: past it the driver stops
-#   reading and the run looks like a list nobody wrote.
-#
-# PROVING THE ASSERTION FIRES
-#
-#   -I ROWID subtracts 1024 bytes per run from that row's readings after the
-#   real transcript has been parsed, so the assertion is exercised against the
-#   real artifact rather than a fabricated one:
-#
-#       tests/tools/run-toolleak.sh -g live -V -I netstat/all
-#
-#   -V re-reads the last run's transcripts without booting anything, so the
-#   demonstration costs no emulator time.
-#
-# A TIMEOUT IS A DEFECT
-#
-#   A run that burns its ceiling produces a partial transcript and proves
-#   nothing.  The verdict names the command the transcript stops at, which is
-#   the one that hung, and exits 2 -- infrastructure, not a result.  Raising
-#   -t is never the fix.
-#
-# WHAT IT NEEDS
-#
-#   a2065.device (AMINETXDUO_A2065, or build/a2065.device), a Kickstart, and a
-#   68020 Release build:
-#
-#     cmake -S . -B build/cm -DCMAKE_BUILD_TYPE=Release \
-#           -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
-#     cmake --build build/cm --parallel
-#     tests/tools/run-toolleak.sh
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -100,14 +18,12 @@ VERDICT_ONLY=0
 INJECT=""
 MODEL=A1200
 
-# Host-side peers.  Above 1024 and out of the way of anything real on the box.
 ECHO_PORT="${AMINETXDUO_ECHO_PORT:-7301}"
 TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7323}"
 TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7369}"
 WHOIS_PORT="${AMINETXDUO_WHOIS_PORT:-7343}"
 HTTP_PORT="${AMINETXDUO_HTTP_PORT:-7380}"
 IPERF_PORT="${AMINETXDUO_IPERF_PORT:-7385}"
-# Nothing ever listens here.  It is the refusal arm's other end.
 DEAD_PORT="${AMINETXDUO_DEAD_PORT:-7399}"
 
 while getopts "b:g:n:t:m:VI:" opt; do
@@ -124,36 +40,7 @@ while getopts "b:g:n:t:m:VI:" opt; do
     esac
 done
 
-# ======================================================================= #
-#                              THE TABLE                                  #
-# ======================================================================= #
-#
-#   boot | command | arm | runs | premise | prep | command line
-#
-# premise:  rc=N        the command must have exited N
-#           rc!=N       ... must not have exited N
-#           re:ERE      ERE must appear in the command's own output
-#           ?           nothing stated; the row FAILS.  There is no way to
-#                       write a row that passes without saying what it reached.
-#
-# prep:     `-`, or a command line run before every repetition.  A pair whose
-#           two halves undo each other is measured as a pair: if the prep
-#           leaks, BOTH rows of the pair go red, which is the truth about a
-#           pair and not a defect in the arithmetic.
-#
-# runs:     at least 4, and 5 unless every run costs seconds.  The first pays
-#           the one-off cost; the rest have to be flat.  Four is the floor
-#           because the arithmetic reads a two-run window at each end.
-#
-# The `?` arm exists for every command in the tree.  It is generated rather
-# than written out: see template_rows().  Its premise is a distinctive piece
-# of that command's own ReadArgs template, read out of the source, so a
-# command that stops printing its template cannot pass the row.
-
 table_static() {
-    # A table of one's own, for probing a single command without editing this
-    # file.  Same seven columns; run-nettools.sh takes its command list the
-    # same way.
     if [ -n "${AMINETXDUO_TOOLLEAK_TABLE:-}" ]; then
         eval "cat <<EOF
 $(cat "$AMINETXDUO_TOOLLEAK_TABLE")
@@ -378,26 +265,17 @@ live|ShowNetServices|browse|0|na:a browse that finds something needs MDNS=YES on
 EOF
 }
 
-# The commands, from src/tools/CMakeLists.txt rather than from a list somebody
-# maintained by hand: a tool added there and not here would otherwise be swept
-# by nothing at all.
 tool_names() {
     sed -n 's/^aminetxduo_add_tool(\([A-Za-z_0-9]*\)[[:space:]]\{1,\}\([A-Za-z_0-9]*\).*/\2/p' \
         "$ROOT/src/tools/CMakeLists.txt" | sort -u
 }
 
-# `<command> ?`: ReadArgs prints the template and reads EOF from NIL:.  The
-# premise is a piece of the command's OWN template, taken out of the source it
-# was compiled from, so the row cannot pass on a command that printed nothing.
 template_premise() {
     local tool="$1" src pat
     src=$(grep -l "TOOL_VERSTAG(\"$tool\")" "$ROOT"/src/tools/*.c 2>/dev/null | head -1)
     [ -n "$src" ] || { echo '?'; return; }
-    # The first quoted run of template text on the #define TEMPLATE line(s).
     pat=$(sed -n '/^#define TEMPLATE/,/^$/p' "$src" |
           tr -d '\\\n' | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
-    # Anything with a shell or ERE metacharacter in it is no use as a pattern,
-    # and `|` cannot travel through this table at all.  Take the first field.
     pat=${pat%%,*}
     case "$pat" in
         ''|*'|'*|*'('*) echo '?' ;;
@@ -418,10 +296,6 @@ table() {
     template_rows
 }
 
-# ======================================================================= #
-#                            the verdict half                             #
-# ======================================================================= #
-
 WORK="$ROOT/build/toolleak"
 FAILED=0
 INFRA=0
@@ -430,12 +304,6 @@ REPORT_ROWS=""
 note_fail()  { echo "FAIL: $*" >&2; FAILED=$((FAILED + 1)); }
 note_infra() { echo "INFRA: $*" >&2; INFRA=$((INFRA + 1)); }
 
-# Split a ToolsSmoke transcript into one file per command, and print an index
-# of `idx|banner|kind|rc|free`.  Written against the format toolssmoke.c
-# actually prints -- `----- rc N, M ms, free K -----` -- and a line that does
-# not match becomes `badformat` rather than vanishing, because a pattern that
-# silently matches nothing is how tests/tools/run-addifleak.sh spent months
-# measuring an empty array.
 split_transcript() {
     local transcript="$1" dir="$2"
     rm -rf "$dir"; mkdir -p "$dir"
@@ -469,7 +337,6 @@ split_transcript() {
     ' "$transcript"
 }
 
-# premise_holds PREMISE RC RECFILE
 premise_holds() {
     local premise="$1" rc="$2" rec="$3"
     case "$premise" in
@@ -480,10 +347,6 @@ premise_holds() {
         *)        return 2 ;;
     esac
 }
-
-# ======================================================================= #
-#                               staging                                   #
-# ======================================================================= #
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -526,29 +389,13 @@ stage_group() {
     for t in $(tool_names); do
         cp "$TOOLS/$t" "$stage/$t"
     done
-    # A name with an A record and no AAAA anywhere, for the -6 arms.  The
-    # resolver reads DEVS:Internet/hosts on the IPv4 side and never on the
-    # IPv6 side (src/netstack/netstack_dns.c:1051, the netdb schema has no
-    # family), so this name resolves under -4, does not resolve under -6, and
-    # naming which of those happened is what the -6 arms assert.  .test is
-    # reserved (RFC 6761), so the AAAA query is an immediate NXDOMAIN rather
-    # than a wait.
     printf '10.0.2.2 v4only.test\n' >> "$stage/devs/Internet/hosts"
     printf 'amiga\r\nquit\r\n' > "$stage/telnetin.txt"
     printf 'hello from the amiga\n' > "$stage/greeting.txt"
-    # httpd's bare -T searches PROGDIR:Terminal/shell.html, and PROGDIR: for
-    # SYS:httpd is the stage root.  A stub, not the real 400 KB page: nothing
-    # here ever serves it, the search only opens it.  The second copy of httpd
-    # is the other arm -- a drawer with no Terminal beside it, so the search
-    # runs out and has to say where it looked.
     mkdir -p "$stage/Terminal" "$stage/nopage"
     printf '<html><body>stub</body></html>\n' > "$stage/Terminal/shell.html"
     cp "$TOOLS/httpd" "$stage/nopage/httpd"
 }
-
-# ======================================================================= #
-#                             host-side peers                             #
-# ======================================================================= #
 
 PEER_PID=""
 HTTP_PID=""
@@ -583,9 +430,6 @@ start_peers() {
         > "$WORK/httpd-host.log" 2>&1 &
     HTTP_PID=$!
 
-    # --keep, because the sweep runs each row several times against one peer
-    # and a peer that served once would make every repetition after the first
-    # fail as "connection refused" and blame the tool for it.
     python3 "$ROOT/tests/tools/iperfpeer.py" serve tcp \
         --port "$IPERF_PORT" --seconds "$lifetime" --idle 6 --keep \
         > "$WORK/iperfpeer.out" 2>&1 &
@@ -604,12 +448,6 @@ start_peers() {
          "whois $WHOIS_PORT, http $HTTP_PORT, iperf $IPERF_PORT"
 }
 
-# ======================================================================= #
-#                                chunking                                 #
-# ======================================================================= #
-
-# ToolsSmoke stops reading at MAX_COMMANDS and says nothing, so a list past it
-# is a list whose tail was never run.  Read the ceiling out of the source.
 smoke_max() {
     local n
     n=$(sed -n 's/^#define MAX_COMMANDS[[:space:]]*\([0-9]*\).*/\1/p' \
@@ -627,10 +465,6 @@ group_prologue() {
     esac
 }
 
-# ======================================================================= #
-#                                the run                                  #
-# ======================================================================= #
-
 mkdir -p "$WORK"
 
 SMOKE_MAX=$(smoke_max)
@@ -640,13 +474,9 @@ if [ "$VERDICT_ONLY" = 0 ]; then
     require_binaries
 fi
 
-# The whole run's rows, one file, so the report can be assembled across boots.
 ALLROWS="$WORK/rows.psv"
 table > "$ALLROWS"
 
-# A row is addressed by boot, command and arm, so two rows that share all
-# three are one row as far as every lookup below is concerned, and the second
-# would silently take the first's premise.  That happened.
 DUPES=$(awk -F'|' '{print $1 "|" $2 "|" $3}' "$ALLROWS" | sort | uniq -d)
 if [ -n "$DUPES" ]; then
     echo "INFRA: two rows share a boot, a command and an arm:" >&2
@@ -664,8 +494,6 @@ run_group() {
     local prologue chunk cost limit
     local cmdfile expectfile
 
-    # One report file per group: two groups swept at once must not write over
-    # each other, and the combined table is assembled from all of them.
     REPORT_ROWS="$WORK/report-$group.psv"
     : > "$REPORT_ROWS"
 
@@ -678,7 +506,6 @@ run_group() {
     prologue=$(group_prologue "$group")
     limit=$((SMOKE_MAX - 2))
 
-    # --- pack the rows into as few boots as the driver's ceiling allows ---
     chunk=1
     cost=0
     cmdfile="$WORK/$group-1.commands.txt"
@@ -690,7 +517,6 @@ run_group() {
     local boot command arm runs premise prep cmdline rowcost i
     while IFS='|' read -r boot command arm runs premise prep cmdline; do
         [ -n "$boot" ] || continue
-        # A row that states it cannot be measured is reported, not run.
         if [ "${premise#na:}" != "$premise" ]; then
             printf '%s|%s/%s|not-measurable|-|-|-|%s\n' \
                 "$group" "$command" "$arm" "${premise#na:}" >> "$REPORT_ROWS"
@@ -725,11 +551,6 @@ run_group() {
     local chunks="$chunk"
     echo "==> $group: $(wc -l < "$rows" | tr -d ' ') rows in $chunks boot(s)"
 
-    # --------------- boot each chunk, and read it back before the next -----
-    #
-    # Read back immediately rather than after the last boot: the milliseconds
-    # this chunk measured are what sizes the NEXT chunk's ceiling, and a group
-    # that boots three times would otherwise guess three times over.
     local c tag hd rc
     for ((c = 1; c <= chunks; c++)); do
         tag="toolleak-$group-$c"
@@ -761,24 +582,10 @@ run_group() {
     done
 }
 
-# A ceiling taken from what the list ACTUALLY COST last time, not from a round
-# number.  ToolsSmoke prints the milliseconds every command took, so the good
-# case is an artifact rather than an estimate: build/toolleak/costs.psv carries
-# the worst time each command line has ever taken on this machine, and the
-# ceiling is a boot plus twice the sum.
-#
-# A line nobody has timed yet falls back to the arithmetic below, which reads
-# the command's own TIMEOUT out of it.  The first run of a new row is
-# therefore the only one working from a guess, and it writes down what it
-# learned.
 COSTS="$WORK/costs.psv"
 
 chunk_timeout() {
     local file="$1" line
-    # One pass: measured milliseconds for the lines that have been timed here
-    # before, and the command's own TIMEOUT for the ones that have not.  The
-    # estimate covers ONLY the unknown lines, so a chunk in which one command
-    # line changed does not fall back to estimating all ninety-five.
     line=$(awk -F'\t' -v have="$([ -s "$COSTS" ] && echo 1 || echo 0)" '
         NR == FNR && have == 1 { cost[$1] = $2; next }
         {
@@ -799,17 +606,11 @@ chunk_timeout() {
     local measured estimated known unknown
     read -r measured estimated known unknown <<< "$line"
 
-    # A boot of its own, then twice the work: an emulator that costs more than
-    # double what it has already been seen to cost is hung, and the ceiling is
-    # what says so rather than something to raise.
     echo "==> good case: ${measured}s measured over $known command(s)," \
          "${estimated}s estimated over $unknown never timed here" >&2
     echo $((60 + (measured + estimated) * 2))
 }
 
-# Every command line's worst measured time, so the next ceiling is an artifact
-# and not a guess.  Worst rather than mean: a ceiling sized to the average is
-# one the slowest run walks straight through.
 record_costs() {
     local index="$1"
     [ -s "$index" ] || return 0
@@ -842,9 +643,6 @@ read_chunk() {
     record_costs "$index"
     : > "$WORK/$tag.readings.psv"
 
-    # ---- alignment.  The transcript's Nth command must be the Nth command
-    # the list asked for; anything else means the driver ran something other
-    # than what was staged, and no arithmetic on it means anything.
     local expected="$WORK/$group-$chunk.expect.psv"
     local nexp nrec
     nexp=$(wc -l < "$expected" | tr -d ' ')
@@ -930,7 +728,6 @@ verdict_row() {
         return
     fi
 
-    # ---- the premise, on every run, before any arithmetic ----------------
     local k st bad_premise=""
     for ((k = 0; k < n; k++)); do
         st=0
@@ -952,7 +749,6 @@ verdict_row() {
         return
     fi
 
-    # ---- the injection, for proving this assertion fires -----------------
     if [ -n "$INJECT" ] && [ "$INJECT" = "$rid" ]; then
         for ((k = 0; k < n; k++)); do
             frees[k]=$(( frees[k] - 1024 * k ))
@@ -960,27 +756,6 @@ verdict_row() {
         echo "  (-I $rid: 1024 bytes a run subtracted from the real readings)"
     fi
 
-    # ---- the arithmetic -------------------------------------------------
-    #
-    # A leak is a cost paid on EVERY invocation, so the question is whether it
-    # is still being paid at the end of the run, and the answer is in the last
-    # three readings:
-    #
-    #     EARLY = max(r[n-3], r[n-2])
-    #     LATE  = max(r[n-2], r[n-1])
-    #
-    # one invocation apart, so their difference is the cost of one call.
-    #
-    # NOT r[1] - r[n-1] over the whole run.  Two things break that.  Free
-    # memory JITTERS once a stack is running: a timer thread holds a buffer at
-    # the instant of the sample and gives it back afterwards, which is a
-    # reading 3-4 KB below the true level and never above it -- measured, and a
-    # plain difference called that a 1828-byte leak in a command that leaks
-    # nothing.  Jitter only ever subtracts, so the maximum of a two-run window
-    # is the true level.  And some one-off costs are not paid in one run:
-    # `NetTrace ?` reads 9989504, 9989480, 9989456, 9989456, 9989456 -- it
-    # settles after three and is flat forever after, which a window anchored at
-    # run 2 reports as 12 bytes a call and this reports as the 0 it is.
     local early late delta per
     early=${frees[$((n - 3))]}
     [ "${frees[$((n - 2))]}" -le "$early" ] || early=${frees[$((n - 2))]}
@@ -989,17 +764,12 @@ verdict_row() {
     delta=$((early - late))
     per=$delta
 
-    # What the whole run cost, so a one-off that takes three runs to settle is
-    # SAID rather than merely not failed.
     local settle=$(( frees[1] - frees[n - 1] ))
     if [ "$delta" -eq 0 ] && [ "$settle" -gt 0 ]; then
         echo "  note: $rid settled after the first runs" \
              "($settle bytes between run 2 and run $n, then flat)"
     fi
 
-    # Free memory that went UP is not a leak: something else on the machine
-    # gave memory back between the two windows.  Reported as the number it is
-    # rather than hidden, and not counted against the row.
     if [ "$delta" -lt 0 ]; then
         printf '%s|%s|ok|%s|%s|%s|%s\n' "$group" "$rid" "$per" "${rcs[0]}" \
             "$slowest" "$cmdline" >> "$REPORT_ROWS"
@@ -1017,27 +787,18 @@ verdict_row() {
     fi
 }
 
-# ======================================================================= #
-#                                 drive                                   #
-# ======================================================================= #
-
 if [ "$RUNS_OVERRIDE" != 0 ]; then
     awk -F'|' -v OFS='|' -v n="$RUNS_OVERRIDE" '{$4 = n; print}' "$ALLROWS" \
         > "$ALLROWS.tmp" && mv "$ALLROWS.tmp" "$ALLROWS"
 fi
 
 if [ "$VERDICT_ONLY" = 0 ]; then
-    # The peers have to outlive the whole sweep, not one boot.
     start_peers 5400
 fi
 
 for g in $SWEEP_GROUPS; do
     run_group "$g"
 done
-
-# ======================================================================= #
-#                                 report                                  #
-# ======================================================================= #
 
 echo
 echo "=================== bytes lost per invocation ======================"

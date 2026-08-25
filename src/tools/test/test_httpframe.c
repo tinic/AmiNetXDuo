@@ -2,21 +2,6 @@
  * The tests for src/tools/httpframe.c, how long a request body is, and where
  * it ends.
  *
- * Every failure here is silent on the wire.  A Content-Length that overflowed
- * leaves the tail of a body in the socket, and the server reads it as the next
- * request, so a PUT whose body happens to contain a "DELETE /x HTTP/1.1" line
- * has that DELETE run, and the transcript shows two requests where the client
- * sent one.  A chunk size that wrapped to zero does the same thing and reads as
- * a well-formed end of body.  Neither produces an error, a log line, or a wrong
- * answer to the request that carried it.
- *
- * So the cases are written down: what each parser accepts, what it refuses,
- * and, for the decoder, how much of the buffer it says belonged to the body,
- * because that number is where the next request starts.
- *
- *   cc -std=c11 -Wall -Wextra -Isrc/tools \
- *      src/tools/test/test_httpframe.c src/tools/httpframe.c -o test_httpframe
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,8 +22,6 @@ static int checks;
         }                                                                    \
     } while (0)
 
-/* ------------------------------------------------------------ the length --- */
-
 static void test_length(void)
 {
     unsigned long n;
@@ -55,14 +38,10 @@ static void test_length(void)
           n == 4294967295UL);
     CHECK(http_frame_length("4294967296", &n) == HTTP_FRAME_OVERFLOW);
 
-    /* The one from the backlog: this used to wrap to 10, and the ten bytes
-       the server then read left the rest of the body to be parsed as
-       methods. */
     CHECK(http_frame_length("4294967306", &n) == HTTP_FRAME_OVERFLOW);
     CHECK(http_frame_length("99999999999999999999", &n) ==
           HTTP_FRAME_OVERFLOW);
 
-    /* And the other one: this used to parse as 5. */
     CHECK(http_frame_length("5abc", &n) == HTTP_FRAME_JUNK);
     CHECK(http_frame_length("5 6", &n) == HTTP_FRAME_JUNK);
     CHECK(http_frame_length("+5", &n) == HTTP_FRAME_EMPTY);
@@ -82,8 +61,6 @@ static void test_length(void)
     CHECK(http_frame_error(HTTP_FRAME_OVERFLOW) != NULL);
 }
 
-/* ---------------------------------------------------------- the encoding --- */
-
 static void test_coding(void)
 {
     printf("Transfer-Encoding\n");
@@ -98,10 +75,6 @@ static void test_coding(void)
     CHECK(http_frame_coding("") == HTTP_TE_UNSUPPORTED);
     CHECK(http_frame_coding("identity") == HTTP_TE_UNSUPPORTED);
 
-    /* The two halves of the seven-character prefix test.  "chunkedX" used to
-       match and "gzip, chunked" used to be missed entirely, so a chunked body
-       was read as a Content-Length one, and one that was not chunked was read
-       as chunked. */
     CHECK(http_frame_coding("chunkedX") == HTTP_TE_UNSUPPORTED);
     CHECK(http_frame_coding("chunked-ish") == HTTP_TE_UNSUPPORTED);
     CHECK(http_frame_coding("gzip, chunked") == HTTP_TE_UNSUPPORTED);
@@ -116,8 +89,6 @@ static void test_coding(void)
     /* A parameter makes it a different coding. */
     CHECK(http_frame_coding("chunked;q=1") == HTTP_TE_UNSUPPORTED);
 }
-
-/* ------------------------------------------------------------- the lists --- */
 
 static void test_tokens(void)
 {
@@ -230,8 +201,6 @@ static void test_ranges(void)
     CHECK(!http_frame_range("bytes=0-4294967296", &from, &to));
 }
 
-/* ------------------------------------------------------------- the chunks --- */
-
 static char  sunk[512];
 static long  sunk_n;
 
@@ -329,11 +298,6 @@ static void test_chunks(void)
 
     printf("chunked bodies that are refused\n");
 
-    /*
-     * The one from the backlog.  Nine hex digits used to shift the first one
-     * out, so 0x100000000 became 0, which reads as the terminating chunk, and
-     * everything after it was parsed as a pipelined request.
-     */
     (void)feed(&ch, "100000000\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
@@ -349,8 +313,6 @@ static void test_chunks(void)
     (void)feed(&ch, "5X\r\nhello\r\n0\r\n\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
-    /* A line where a size belongs.  This used to read as zero and end the
-       body. */
     (void)feed(&ch, "\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
@@ -362,9 +324,6 @@ static void test_chunks(void)
     (void)feed(&ch, "000000000000000000000000000000000000000000005\r\nhello");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 
-    /* A chunk whose data is not followed by CRLF.  This used to skip forward
-       to the next '\n' and carry on, which resynchronises the framing onto
-       the body's own bytes. */
     (void)feed(&ch, "5\r\nhelloXX\r\n0\r\n\r\n");
     CHECK(ch.state == HTTP_CHUNK_ERROR);
 

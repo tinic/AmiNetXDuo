@@ -1,15 +1,8 @@
 /*
  * anxnet.device, layer 1 of 3: the AmigaOS device.
  *
- * The romtag lives here, so this file must come first on the link line.  The
- * "moveq #-1,d0 / rts" below must land at offset 0 of the first code hunk,
- * which makes the device file harmless when it is run as a program.
- *
- * One device, every NE2000/DP8390 board in the machine.  Unit N is the Nth
- * supported board in Zorro autoconfig order, which is slot order and is the
- * same on every boot of the same machine.  A unit of 100 or more, or an
- * S2_AnxCardType tag, pins the card type instead.  A pin that does not match
- * refuses the open rather than binding to whatever else was found.
+ * The romtag lives here, so this file must come first on the link line, and
+ * the "moveq #-1,d0 / rts" below must land at offset 0 of the first code hunk.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,11 +34,9 @@
 struct ExecBase *SysBase;
 
 /*
- * proto/expansion.h's inlines read this exact global, and a -nostartfiles
- * image has no auto-open to fill it in.  Without the definition here the link
- * still succeeds against the toolchain's stub, the stub is zero, and
- * FindConfigDev() jumps through a null pointer inside the romtag init.  On an
- * emulator that reads as the whole stack failing to start.
+ * proto/expansion.h's inlines read this exact global and a -nostartfiles image
+ * has no auto-open: without the definition here the link takes the toolchain's
+ * zero stub and FindConfigDev() jumps through null inside the romtag init.
  */
 struct ExpansionBase *ExpansionBase;
 
@@ -137,9 +128,8 @@ static VOID netdev_prof_segtag(NetdevDevice *base, BPTR seglist)
 
 #ifdef NETDEV_TRACE
 /*
- * Raw serial, straight at the custom chips.  A device's romtag init runs
- * before anything of ours is open, and this is the only channel that needs no
- * library open.
+ * Raw serial, straight at the custom chips: a device's romtag init runs before
+ * anything of ours is open, and this is the only channel needing no library.
  */
 static VOID nd_trace(const char *s)
 {
@@ -191,11 +181,9 @@ VOID netdev_trace_val(const char *tag, ULONG v)
 
 #ifdef NETDEV_TIME
 /*
- * Where the time in an interrupt goes, in beam positions.  There is no timer
- * at interrupt level, and ReadEClock() needs a base this code cannot hold.
- * VHPOSR is a free-running counter one chip read away: 227 colour clocks of
- * 280 ns to the line.  The low eight bits of vpos wrap every 256 lines, which
- * is 16 ms and far longer than anything measured here.
+ * Beam positions, because there is no timer at interrupt level and ReadEClock()
+ * needs a base this code cannot hold.  VHPOSR is 227 colour clocks of 280 ns to
+ * the line; the low eight bits of vpos wrap every 256 lines, which is 16 ms.
  */
 #define ND_TICKS_WRAP   (256UL * 227UL)
 
@@ -277,12 +265,9 @@ static VOID nd_time_report(VOID)
 #endif
 
 /*
- * A 6-byte Ethernet address, as a longword and a word.  Both ends are even:
- * the staging buffer is AllocMem'd, and ios2_DstAddr/ios2_SrcAddr sit at even
- * offsets in the request.  The source's second half is 2 mod 4, which costs a
- * 68020 one extra bus cycle and a 68000 nothing.  The byte loop this replaced
- * compiled to `move.b (a2)+,(a6)+ / cmpa.l / bne`, three instructions a byte,
- * twice per frame.  The profile priced the pair at 16% of the hand-over.
+ * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
+ * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
+ * offsets in the request.
  */
 static VOID nd_addr6(UBYTE *to, const UBYTE *from)
 {
@@ -327,11 +312,9 @@ VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire)
 }
 
 /*
- * The buffer-management hooks are m68k register-convention (a0 = to,
- * a1 = from, d0 = len).  A `register ... __asm()` function-pointer typedef
- * miscompiles here: GCC loads the pointer into a0 and jumps through it, which
- * destroys the first argument.  The call is written out instead, with the same
- * shape as tests/tcpdrill/tapdev.c.
+ * The buffer-management hooks are m68k register-convention (a0 = to, a1 = from,
+ * d0 = len).  A `register ... __asm()` function-pointer typedef miscompiles
+ * here: GCC loads the pointer into a0, destroying the first argument.
  */
 BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 {
@@ -354,12 +337,9 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 }
 
 /*
- * A standard utility.library Hook, which S2_PacketFilter is and the two
- * buffer-management tags are not: a0 = the hook, a2 = the object, a1 = the
- * message, result in d0.  Written out for the same reason netdev_copy_call()
- * is: three address registers pinned by a convention no function-pointer
- * typedef can express.  h_Entry, not h_SubEntry, because the entry point is
- * the one the caller registered.
+ * A standard utility.library Hook: a0 = the hook, a2 = the object, a1 = the
+ * message, result in d0.  Written out because no function-pointer typedef can
+ * express three pinned address registers.  h_Entry, not h_SubEntry.
  */
 BOOL netdev_hook_call(APTR hook, APTR object, APTR message)
 {
@@ -385,36 +365,17 @@ BOOL netdev_hook_call(APTR hook, APTR object, APTR message)
 }
 
 /*
- * There is deliberately no diagnostic printed from Open().  Exec calls a
- * device's Open vector under Forbid(), and dos.library's Write() can Wait,
- * which breaks Forbid inside the one call that must not break it.  A refused
- * open reports through io_Error: IOERR_OPENFAIL for a pin that names no board
- * in this machine, IOERR_UNITBUSY for a unit held exclusively.  The caller
- * explains it, because the caller is a shell command with a console and no
- * Forbid.
+ * Nothing may be printed from Open(): exec calls a device's Open vector under
+ * Forbid(), and dos.library's Write() can Wait.  A refused open reports through
+ * io_Error and the caller explains it.
  */
 
 /* ------------------------------------------------------- the RX callback -- */
 
 /*
- * The order is fixed.  The request is filled in first, then the filter hook is
- * asked, and only then is the packet copied out:
- *
- *   "The IOSana2Req structure should be set up to look (almost) exactly as it
- *    would if it was successfully returned for the current packet."
- *                                             copybuff.spec, PacketFilter
- *   "a pointer to a standard Hook to be called before S2_CopyToBuff is done."
- *                                             SANA-II standard.txt
- *
- * A rejected packet is not an error, and the request is not completed.  The
- * caller gets back its CMD_READ still queued, as Commodore's own slip.device
- * does it (main.c, the receive loop: on a FALSE return the IOSana2Req goes
- * back on the queue with AddHead).  The frame then goes to the next opener,
- * and to S2_READORPHAN if nobody else wanted it.
- *
- * RAW is an opener property in the IC drivers and a per-request flag in the
- * SANA-II autodocs.  Both are honoured, because a caller written against
- * either one expects the superset.
+ * The order is fixed: fill the request in, ask the filter hook, and only then
+ * copy the packet out (copybuff.spec, PacketFilter).  A rejected packet is not
+ * an error and the request is not completed: the CMD_READ goes back queued.
  */
 static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
                                        const UBYTE *frame, UWORD len,
@@ -480,9 +441,8 @@ static NetdevRxResult netdev_hand_over(NetdevOpener *op, struct IOSana2Req *io,
 }
 
 /*
- * Called from the interrupt server with a whole frame.  Every opener that has
- * a CMD_READ outstanding for this packet type gets a copy.  If none does, the
- * frame goes to an S2_READORPHAN, and only then is it dropped.
+ * Called from the interrupt server with a whole frame.  Every opener with a
+ * matching CMD_READ gets a copy; failing that S2_READORPHAN, then a drop.
  */
 #ifdef NETDEV_TIME
 static VOID netdev_rx_body(APTR arg, const UBYTE *frame, UWORD len);
@@ -506,12 +466,6 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
     ULONG        type;
     UBYTE        flags = 0;
     BOOL         taken = FALSE;
-    /*
-     * What to post once the frame is disposed of, rather than per opener: one
-     * walk of the event lists at most, and none when the frame was delivered.
-     * netdev_event() returns on a word test when nobody has an S2_ONEVENT
-     * queued.
-     */
     ULONG        events = 0;
 
     if (len < NETDEV_HDR_LEN)
@@ -570,9 +524,8 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
             {
                 /*
                  * The opener's filter hook said no.  Its CMD_READ was taken
-                 * off the queue to be filled in, so it goes back at the head,
-                 * where the opener does not lose its place.  The refusal is
-                 * not counted as a drop, because the opener asked for it.
+                 * off the queue to be filled in, so it goes back at the head.
+                 * Not counted as a drop: the opener asked for it.
                  */
                 AddHead(&op->op_Reads, &io->ios2_Req.io_Message.mn_Node);
             }
@@ -646,16 +599,8 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 /* ------------------------------------------------------------- transmit --- */
 
 /*
- * Drain the pending CMD_WRITE queue into whatever transmit buffers the chip
- * has free.  Runs both from BeginIO under Disable() and from the interrupt
- * server after a transmit completes, so it never touches anything the ISR
- * does not already own.
- */
-/*
  * Frame one CMD_WRITE into nu_TxBuf.  Returns the wire length, or 0 with the
- * request already answered.  No mask needed: everything here is host work,
- * and the opener's CopyFrom is 135 us of the 219 us a transmit spends in the
- * driver on an A3000.
+ * request already answered.
  */
 static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
                              NetdevOpener *op)
@@ -693,10 +638,8 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
     else
     {
         /*
-         * The RAW arm above bounds its length and this one did not, so a
-         * CMD_WRITE with any ios2_DataLength copied that many bytes past
-         * nu_TxBuf, and past the whole unit, because the buffer is its last
-         * field.
+         * nu_TxBuf is the unit's last field, so an unbounded ios2_DataLength
+         * copies past the buffer and past the whole unit.
          */
         if (len > NETDEV_MTU)
         {
@@ -725,9 +668,9 @@ static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
     }
 
     /*
-     * The chip pads a short frame to the Ethernet minimum out of whatever is
-     * in the buffer, so the padding must be written.  Left out, the tail of
-     * the last frame, up to 46 bytes of it, goes on the wire behind every ARP.
+     * The chip pads a short frame to the Ethernet minimum out of whatever is in
+     * the buffer, so the padding must be written: left out, up to 46 bytes of
+     * the last frame go on the wire behind every ARP.
      */
     if (total < NETDEV_FRAME_MIN)
     {
@@ -760,11 +703,6 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     return 0;
 }
 
-/*
- * The timing build's way in.  Wrappers rather than spans inside the two
- * functions, because the transmit rewrite already lost one set of spans that
- * were inlined into a body.  Wrappers cannot be dropped by editing the body.
- */
 #ifdef NETDEV_TIME
 static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
                                    NetdevOpener *op)
@@ -796,12 +734,9 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
 #endif
 
 /*
- * Drain the queue into whatever transmit buffers the chip has free.  Runs
- * from the interrupt server after a transmit completes, and from BeginIO for
- * anything that could not take the direct path.  The caller holds Disable().
- *
- * It stands off while a task-level build owns nu_TxBuf.  The builder pumps
- * again once its own frame is issued, so nothing is stranded.
+ * Drain the queue into whatever transmit buffers the chip has free.  The caller
+ * holds Disable().  Stands off while a task-level build owns nu_TxBuf; that
+ * builder pumps again once its own frame is issued, so nothing is stranded.
  */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
@@ -840,12 +775,9 @@ VOID netdev_tx_pump(NetdevUnit *unit)
 }
 
 /*
- * From BeginIO at task level.  The pump runs the opener's CopyFrom under
- * Disable(), which the timing build prices at 135 us of the 219 us a transmit
- * spends in the driver.  That is 46% of an A3000's frame interval with
- * interrupts off, and on a write it holds up the acknowledgements.  So claim
- * nu_TxBuf under the mask, frame outside it, and take the mask again only for
- * the chip.
+ * From BeginIO at task level.  Claim nu_TxBuf under the mask, frame outside it,
+ * take the mask again only for the chip: the opener's CopyFrom is 135 us of the
+ * 219 us a transmit spends here and must not run with interrupts off.
  */
 VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -956,9 +888,7 @@ LONG netdev_online(NetdevUnit *unit)
     if (rc != 0)
     {
         /* The chip would not start.  cnet.device fires
-           S2EVENT_ERROR|S2EVENT_HARDWARE from both init_card and init_nic for
-           this, and it is the only condition in this driver that is squarely
-           the hardware's. */
+           S2EVENT_ERROR|S2EVENT_HARDWARE from init_card and init_nic for this. */
         netdev_event(unit, S2EVENT_ERROR | S2EVENT_HARDWARE);
         return rc;
     }
@@ -978,8 +908,8 @@ LONG netdev_online(NetdevUnit *unit)
 
 /*
  * Take one opener's CMD_WRITEs off the unit's queue.  Disable(), because the
- * interrupt server walks the same list, and because AddTail() on it is
- * Disable()d too -- that is the only arbitration this driver has.
+ * interrupt server walks the same list and AddTail() on it is Disable()d too --
+ * that is the only arbitration this driver has.
  */
 VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
 {
@@ -1004,14 +934,8 @@ VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
 
 /*
  * The unit outlives every opener, so anything an opener changed about it must
- * be undone when the last one goes.  Across a stack restart three things
- * matter:
- *   - an accept-all-multicast latch that never clears
- *   - a multicast table that fills with 32 stale groups and then refuses the
- *     new stack's joins with S2ERR_NO_RESOURCES, taking IPv6 solicited-node
- *     frames with it
- *   - a configured flag that makes the new stack's S2_CONFIGINTERFACE fail, so
- *     it silently runs on the old stack's address
+ * be undone when the last one goes: the accept-all-multicast latch, the 32-slot
+ * multicast table, and the configured flag.
  */
 static VOID netdev_release_unit(NetdevUnit *unit)
 {
@@ -1087,31 +1011,9 @@ VOID netdev_pcmcia_detached(NetdevUnit *unit, ULONG event)
 ULONG netdev_interrupt(NetdevUnit *unit)
 {
     /*
-     * The chip's own ISR is the only test made.
-     *
-     * A board-level test came first.  X-Surf and X-Surf 100 put an
-     * interrupt-status bit at board+0x40, and INT2 is shared, so a server must
-     * not answer for another card.  It is not worth the risk.  NetBSD's
-     * xsurf.c and xsh.c install dp8390_intr directly with no such test.  The
-     * offset and bit are the one part of the card table that could not be
-     * checked against NetBSD.
-     *
-     * A wrong offset on a row nobody has run leaves the chip's level-triggered
-     * INT unacknowledged.  INT2 then stays down for the whole machine, or the
-     * card never receives.  Reading ISR costs two bus cycles and cannot be
-     * wrong.  dp8390_intr() returns FALSE when it reads zero, which is the
-     * same answer the board bit gave.
-     *
-     * The chip's own error counters are read here and nowhere else.  A CRC
-     * error, a framing error, a receiver overrun and a transmit that gave up
-     * after sixteen collisions are known only to the core, and every core
-     * records them.  A diff of the three counters across ops->intr() raises
-     * S2EVENT_RX and S2EVENT_TX for the whole card family from one site,
-     * rather than from ten cores.  slip.device's PacketOverrun() is the same
-     * event from the same cause.
-     *
-     * The snapshot is gated on nu_EventMask, so a driver nobody is watching
-     * pays one word read and a branch.
+     * Only the chip's own ISR is tested.  Reading it costs two bus cycles and
+     * cannot be wrong, where a board-level status bit on an unverified row can.
+     * The error-counter snapshot below is gated on nu_EventMask.
      */
     UWORD watched = unit->nu_EventMask;
     ULONG rx0 = 0;
@@ -1182,32 +1084,9 @@ static ULONG netdev_server(register NetdevUnit *unit __asm("a1"))
 }
 
 /*
- * NetBSD arms ifp->if_timer on every transmit and dp8390_watchdog() resets the
- * chip when it expires.  There is no callout here and no task, so the tick is
- * the vertical blank, the one clock a device gets for free.
- *
- * netdev_tx_pump() only runs while txb_inuse < txb_cnt, and only a core's own
- * re-init clears txb_inuse.  One lost or never-delivered transmit completion
- * therefore wedges the transmitter for good.  Every later CMD_WRITE queues on
- * nu_Writes and is never replied to, and the caller sits in WaitIO() forever.
- * Nothing else in the driver can notice, because that needs a clock the card
- * does not drive.
- *
- * A nonempty ring is not by itself a wedge.  At line rate a completion is
- * replaced before the next vertical blank and txb_inuse never reaches zero,
- * especially on a LANCE with four descriptors.  Each core therefore advances
- * tx_completed when hardware returns a frame, and only a full interval with no
- * such progress is a stall.
- *
- * The recovery goes through ops->reset rather than a named core.  This tick is
- * armed for every unit, so a call to dp8390_reset() here wrote DP8390 register
- * numbers into whatever chip the unit had.  On an A2065 or an Ariadne that is
- * a LANCE, and the result is an undefined chip, not a recovered one.
- *
- * Disable() rather than a software interrupt: the vertical blank is INT3 and
- * the card is INT2, so this can preempt the card's own server and must not
- * touch the chip alongside it.  The recovery is rare and costs a few
- * milliseconds once, against a transmitter that never comes back.
+ * The vertical blank is the only clock a device gets for free.  Recovery goes
+ * through ops->reset and never a named core, since this tick is armed for every
+ * unit.  Disable(): INT3 can preempt the card's own INT2 server.
  */
 static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 {
@@ -1231,34 +1110,9 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     }
 
     /*
-     * Interrupt-silence watchdog.
-     *
-     * Two ways a PCMCIA card goes deaf while its registers answer and its
-     * transmitter works.  A powered removal can burn the IREQ path outright.
-     * And Gayle's card interrupt is a LATCHED status change: an edge that
-     * lands inside the read-and-clear window is re-latched by original
-     * silicon, but a recreation (an AA-Gayle, measured here) can lose it --
-     * and with a level interrupt source one lost edge is deafness forever,
-     * because the card holds IREQ asserted waiting for service and never
-     * produces another transition.  Commodore's own unfixed reset bug sits
-     * underneath both: the slot never sees CC_RESET at power-on, and 3Com
-     * cards are the documented sufferers.
-     *
-     * So the blank -- already on the chip for the transmit watchdog, under
-     * the same Disable() -- services the chip whenever no interrupt has been
-     * CLAIMED for ten blanks.  On a healthy port the counter never reaches
-     * ten while traffic flows, and an idle machine's spare polls read one
-     * status register and leave.  On a deaf or lossy port the poll drains
-     * the card, which deasserts IREQ, which is what lets a wedged latch see
-     * a fresh edge and start delivering again: the poll does not replace the
-     * interrupt, it re-arms it.  Measured on a real 3c589 behind an
-     * AA-Gayle-R5, 2026-08-22: transmit on the wire, DHCP offers arriving,
-     * zero receive events until this ran.
-     *
-     * nu_InIsr keeps the poll off the chip while the server is on it; the
-     * server cannot start while the poll runs, because Disable() masks it.
-     * nu_TickPolls says in the diagnostics whether a machine is living this
-     * way, which tells a wounded slot from a healthy one.
+     * Gayle's card interrupt is a LATCHED status change, and a lost edge on a
+     * level source is deafness forever, so the blank services the chip after
+     * ten blanks with no claimed interrupt.  nu_InIsr excludes the server.
      */
     if (unit->nu_IntSilent < 0xffffu)
         unit->nu_IntSilent++;
@@ -1271,15 +1125,9 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
     }
 
     /*
-     * The deaf-boot re-roll.  On an A1200 whose slot never sees CC_RESET --
-     * and doubly so behind a recreated Gayle -- the 3c589 wakes in a state
-     * that decides whether the receiver hears the wire, the state is not
-     * reachable through any register (the reference 3c589.device fails on
-     * the same machine), and a re-initialisation rolls the dice again.  So
-     * roll them: a unit that has transmitted and heard nothing five seconds
-     * later is reset and tried again, for as long as it stays deaf.  The
-     * first received frame ends this for the whole uptime, and a machine
-     * whose card comes up hearing never enters it at all.
+     * On an A1200 whose slot never sees CC_RESET the 3c589 wakes in a state
+     * that decides whether the receiver hears the wire and is reachable through
+     * no register; re-initialising rolls again.  The first frame ends this.
      */
     if (unit->nu_Online && netdev_pcmcia_is_unit(unit) &&
         unit->nu_Nic.running && unit->nu_Nic.rx_packets == 0 &&
@@ -1303,10 +1151,7 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 
     /*
      * A transmitter that had to be reset is both a transmit error and a
-     * hardware error.  cnet.device posts S2EVENT_ERROR|S2EVENT_TX for a
-     * transmit DMA timeout, and S2EVENT_ERROR|S2EVENT_HARDWARE for a chip that
-     * had to be re-initialised.  Posted outside the Disable() above only for
-     * tidiness, because netdev_event() takes its own and it nests.
+     * hardware error.  netdev_event() takes its own Disable() and it nests.
      */
     if (wedged)
         netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_HARDWARE);
@@ -1317,51 +1162,9 @@ static ULONG netdev_tick(register NetdevUnit *unit __asm("a1"))
 /* --------------------------------------------------- machine fingerprint -- */
 
 /*
- * A card whose address PROM reads all-zero or all-ones needs an address from
- * somewhere.  The requirement on it is not uniqueness, which nothing here can
- * promise, but "the same on every boot of this machine, and different from the
- * next machine wherever the two machines differ".  What is reachable from a
- * device's probe, which runs with exec.library and expansion.library open and
- * nothing else:
- *
- *   Taken
- *     the caller's salt         the card row, its window and its autoconfig
- *                               serial: separates two units in one machine
- *     ExecBase identity         AttnFlags (CPU/FPU/MMU), the Kickstart version
- *                               and revision, and the E-clock (PAL vs NTSC)
- *     MaxLocMem                 chip RAM size, which is an A600/A1200 fact and
- *                               not a Zorro one
- *     the memory list           each region's attributes and its bounds, which
- *                               is where a trapdoor or PCMCIA-shadowing RAM
- *                               expansion shows up.  mh_Free is not read: it
- *                               moves with whatever is loaded.
- *     every ConfigDev           manufacturer, product and serial number, which
- *                               is per-board and is the input Commodore's own
- *                               convention uses for a MAC (lance.c:465)
- *     the card's CIS            MANFID identifies the model, VERS_1 carries
- *                               free-form strings that some cards use for a
- *                               lot or serial number, and FUNCE is read for
- *                               its LAN node ID before any of this runs
- *
- *   Rejected
- *     battclock / ReadEClock    not stable across boots, which is the one
- *                               property that matters
- *     AvailMem()                moves with what is loaded before the device is
- *                               opened, so the address would move with it
- *     the boot volume's root    the best per-install input there is, and it
- *     block creation date       needs dos.library and a mounted, readable boot
- *                               volume inside a device probe.  A SANA-II
- *                               provider is loaded by whichever stack wants
- *                               it, sometimes before a filesystem is up.  That
- *                               path must not gain a DOS dependency or a
- *                               bootstrap ordering rule.
- *     CIS MANFID alone          it is the card model.  Two people with the
- *                               same D-Link get the same value.
- *
- * The limit: two stock A1200s with the same RAM, the same Kickstart and the
- * same model of card derive the same address.  HARDWAREADDRESS in the
- * interface configuration is the fix, for that pair and for any other pair of
- * cards that collide.
+ * A card whose address PROM reads all-zero or all-ones needs a derived address.
+ * The requirement is not uniqueness but "the same on every boot of this machine,
+ * and different from the next machine wherever the two machines differ".
  */
 static VOID nd_fp_put(UBYTE *buf, UWORD max, UWORD *n, ULONG v, UBYTE bytes)
 {
@@ -1432,8 +1235,8 @@ UWORD netdev_mac_fingerprint(UBYTE *buf, UWORD max, ULONG salt)
 /* ----------------------------------------------------------------- probe -- */
 
 /*
- * One matched board becomes one unit.  Shared by the two ways in: the
- * ConfigDev walk below, and the PCMCIA slot, which has no ConfigDev at all.
+ * One matched board becomes one unit.  Shared by the two ways in: the ConfigDev
+ * walk below, and the PCMCIA slot, which has no ConfigDev at all.
  */
 static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                             APTR board, ULONG serial)
@@ -1486,14 +1289,8 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
     /*
      * A chip behind an ISA Plug and Play bridge decodes nothing until it is
-     * configured, so on the one row that has one this runs before attach.
-     * Attach then has a chip to find.  Every other row returns TRUE without
-     * touching the board.
-     *
-     * A refusal is not passed on to attach.  There is no register file to
-     * detect, so ne2000.c reads a floating bus and files the answer as a
-     * command register that read $ff -- true, and three steps downstream of
-     * the step that failed.  netdev_isapnp.c recorded which.
+     * configured, so this runs before attach.  A refusal is not passed on to
+     * attach, which would read a floating bus and file the wrong reason.
      */
     if (!netdev_isapnp_configure(card, board))
     {
@@ -1503,10 +1300,8 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
     if (unit->nu_Nic.ops->attach(&unit->nu_Nic) != 0)
     {
         nd_trace("anx: attach failed\r\n");
-        /* The core leaves the reason in diag_why, and it is recorded here
-           once, so a core has one field to set rather than a call to
-           remember.  Zero is ANXDIAG_WHY_UNKNOWN, so a refusal is never
-           silent. */
+        /* The core leaves the reason in diag_why and it is recorded here once.
+           Zero is ANXDIAG_WHY_UNKNOWN, so a refusal is never silent. */
         netdev_diag_note(ANXDIAG_ATTACH_FAIL, netdev_diag_card(card),
                          (ULONG)unit->nu_Nic.diag_why);
         return FALSE;       /* the board did not answer as a DP8390 */
@@ -1522,17 +1317,9 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
 
         netdev_diag_note(ANXDIAG_ATTACH_OK, ci, (ULONG)unit->nu_Nic.bus.dmode);
         /*
-         * factory[], not mac[].  mac[] is the OPERATING address and nothing
-         * has set it yet: it arrives with S2_CONFIGINTERFACE when an
-         * interface is configured, which is long after a probe.  A tool that
-         * only probes -- CheckNetDevice is the one that exists -- therefore
-         * read six zeroes and printed them under a card that works, beside a
-         * source line correctly naming where the address had been read from.
-         * A diagnostic that reports a working card as having no address is
-         * worse than one that reports nothing.
-         *
-         * factory[] is what the card itself answered, every driver fills it
-         * at attach, and it is the thing the source line is about.
+         * factory[], not mac[]: mac[] is the OPERATING address and arrives with
+         * S2_CONFIGINTERFACE, long after a probe.  factory[] is what the card
+         * itself answered, and every driver fills it at attach.
          */
         netdev_diag_note(ANXDIAG_MAC_HI, ci,
                          ((ULONG)unit->nu_Nic.factory[0] << 8) |
@@ -1544,9 +1331,6 @@ static BOOL netdev_add_unit(NetdevDevice *dev, const NetdevCard *card,
                          (ULONG)unit->nu_Nic.factory[5]);
         netdev_diag_note(ANXDIAG_MAC_SOURCE, ci,
                          (ULONG)unit->nu_Nic.mac_source);
-        /* No ANXDIAG_GETODD here.  ne2000_detect() records it where the mode
-           is decided, for the split-window cards where it can mean anything.
-           A second record put the same sentence in the report twice. */
         netdev_diag_note(ANXDIAG_UNIT, ci, (ULONG)dev->nd_UnitCount);
     }
 
@@ -1601,21 +1385,8 @@ static VOID netdev_probe(NetdevDevice *dev)
 
     /*
      * FindConfigDev(NULL, -1, -1) walks the board list in the order Expansion
-     * built it, which is autoconfig order, which is slot order.  That makes
-     * unit N the same board on the next boot.
-     *
-     * The ED core moved some unit numbers.  Hydra and the ASDG LAN Rover used
-     * to be recognised and skipped, so on a machine holding one of them plus
-     * an NE2000 board the NE2000 board was unit 0.  It is now unit 1 if the
-     * ED board autoconfigures first.  The pinned numbers did not move, which
-     * is why the two card rows were added before the core.  A pin is
-     * (index + 1) * 100 + instance over netdev_cards[], and hydra has been
-     * index 3 -> 400 and lanrover index 4 -> 500 since the table was written.
-     * Anything that pinned a card by number or by S2_AnxCardType is
-     * unaffected.
-     *
-     * Only bare positional units shift, and only on a machine that has one of
-     * these two boards, where they previously did not work at all.
+     * built it, which is autoconfig order and so slot order: unit N is the same
+     * board on the next boot.  A pin is (index + 1) * 100 + instance.
      */
     while ((cd = FindConfigDev(cd, -1, -1)) != NULL)
     {
@@ -1653,12 +1424,9 @@ static VOID netdev_probe(NetdevDevice *dev)
         netdev_diag_note(ANXDIAG_ZORRO_FOUND, netdev_diag_card(card),
                          (ULONG)cd->cd_BoardAddr);
 
-        /* A supported board past the table is dropped, and a silent drop is
-           the worst case: the card is fitted, nothing opens it, and nothing
-           says why.  Count it so S2_GETSPECIALSTATS can be asked.  Counted
-           after the match, not before, because the count is boards this driver
-           could have driven.  A RAM board walked past once the slots were full
-           is not one of them. */
+        /* A supported board past the end of the table is dropped; count it so
+           S2_GETSPECIALSTATS can be asked.  Counted after the match, because
+           the count is boards this driver could have driven. */
         if (dev->nd_UnitCount >= NETDEV_MAX_UNITS)
         {
             dev->nd_UnitsDropped++;
@@ -1675,9 +1443,9 @@ static VOID netdev_probe(NetdevDevice *dev)
     netdev_diag_note(ANXDIAG_BOARDS, ANXDIAG_NOCARD, (ULONG)boards);
 
     /*
-     * And the slot, after the boards.  Last so that a machine with both keeps
-     * its Zorro unit numbers where they were: a PCMCIA card is the one card
-     * that can be inserted between two boots.
+     * The slot last, so a machine with both keeps its Zorro unit numbers where
+     * they were: a PCMCIA card is the one card that can be inserted between two
+     * boots.
      */
     {
         UWORD i;
@@ -1708,13 +1476,9 @@ static VOID netdev_probe(NetdevDevice *dev)
         }
 
         /*
-         * And the slot, once, not once per PCMCIA row.
-         *
-         * There is one slot in the machine, and netdev_pcmcia.c holds one
-         * handle for it.  A loop that claimed per row could only work while
-         * exactly one row was PCMCIA, because a second claim overwrites the
-         * handle card.resource still holds.  The card names itself in its CIS,
-         * so the claim reads that and hands back the row.
+         * The slot once, not once per PCMCIA row.  There is one slot and
+         * netdev_pcmcia.c holds one handle for it, so a second claim would
+         * overwrite the handle card.resource still holds.
          */
         if (dev->nd_UnitCount < NETDEV_MAX_UNITS)
         {
@@ -1805,9 +1569,7 @@ static NetdevUnit *netdev_find_unit(NetdevDevice *dev, ULONG unit,
 /*
  * Device initialization cannot leave an IFAVAILABLE handle queued for an empty
  * slot, so a card inserted after the romtag probe needs one task-context retry.
- * A positional request can only mean the slot when it asks for the next unit:
- * PCMCIA is deliberately last in probe order.  A pinned request names the row
- * exactly and never falls through to the other PCMCIA core.
+ * PCMCIA is deliberately last in probe order.
  */
 static BOOL netdev_request_is_pcmcia(NetdevDevice *dev, ULONG unit,
                                      const char *pin_name,
@@ -1953,10 +1715,9 @@ static NetdevDevice *netdev_init(
     nd_trace("anx: init\r\n");
 
     /*
-     * The record is armed before anything is tried and published after
-     * everything has been, whether or not a single unit came up.  A machine
-     * where none came up is the case this path exists for: there is no unit to
-     * open and no other way to ask what happened.
+     * Armed before anything is tried and published after everything has been: a
+     * machine where no unit came up has no unit to open and no other way to be
+     * asked what happened.
      */
     netdev_diag_reset(&base->nd_Diag);
     netdev_diag_note(ANXDIAG_START, ANXDIAG_NOCARD, (ULONG)netdev_card_count);
@@ -2038,13 +1799,9 @@ static struct Device *netdev_open(
     nd_newlist(&op->op_Events);
 
     /*
-     * SANA2OPF_MINE is exclusive access, so a driver that takes the flag must
-     * not share the unit.
-     *
-     * Tested, claimed and joined under one Disable().  Split apart, two opens
-     * can race: both read nu_Openers == 0, both decide they can have the unit
-     * exclusively, and both get it.  Opens come from processes, so the race is
-     * rare and hard to reproduce.
+     * SANA2OPF_MINE is exclusive access.  Tested, claimed and joined under one
+     * Disable(): split apart, two opens both read nu_Openers == 0 and both take
+     * the unit exclusively.
      */
     Disable();
     if (hw->nu_Exclusive ||
@@ -2123,16 +1880,14 @@ static BPTR netdev_close(register struct Device     *dev __asm("a6"),
             netdev_reply(q, IOERR_ABORTED, 0);
 
         /* The opener is off the unit's list by now, but nu_EventMask still
-           carries whatever it was waiting for.  Left set, every dropped frame
-           for the rest of the machine's uptime walks the event lists to find
-           them empty. */
+           carries what it was waiting for.  Left set, every dropped frame for
+           the rest of uptime walks the event lists to find them empty. */
         netdev_event_rescan(hw);
 
         /*
-         * And this opener's writes, which live on the unit and not on the
-         * opener.  Left behind, the next transmit interrupt reads op_Raw and
-         * op_CopyFrom out of the memory freed below, at interrupt level, and
-         * the request is never replied to either.
+         * This opener's writes live on the unit and not on the opener.  Left
+         * behind, the next transmit interrupt reads op_Raw and op_CopyFrom out
+         * of the memory freed below, at interrupt level.
          */
         netdev_drop_writes(hw, op);
 
@@ -2202,20 +1957,15 @@ static BPTR netdev_expunge(register struct Device *dev __asm("a6"))
     }
 
     /*
-     * The PCMCIA slot goes back before the seglist does.  card.resource holds
-     * the CardHandle passed to OwnCard(), and that handle and the removal
-     * Interrupt hanging off it are statics in this driver's own BSS.  An
-     * unload without a release leaves the resource with a node in freed
-     * memory.  The next OwnCard() walks it, and the card is gone until the
-     * machine is rebooted.
+     * The PCMCIA slot goes back before the seglist does: the CardHandle and the
+     * removal Interrupt hanging off it are statics in this driver's own BSS, so
+     * an unload without a release leaves card.resource a node in freed memory.
      */
     netdev_pcmcia_release();
 
     /*
-     * The probe record leaves the semaphore list before the memory it lives in
-     * is freed.  nd_Diag is inside this device base.  A name left published
-     * hands the next FindSemaphore() a pointer into freed memory, which is the
-     * same defect as the card.resource handle above.
+     * nd_Diag is inside this device base, so the record must leave the semaphore
+     * list before the memory it lives in is freed.
      */
     netdev_diag_unpublish(&d->nd_Diag);
 

@@ -1,31 +1,7 @@
 /*
  * AmiNetXDuo, crypto68k: AES-128/192/256 CBC.  Tables, key schedule, and
- * the portable C forms of every variant the 68020 assembly is measured
- * against.  See c68k_aes.h for why this file exists and what the machine's
- * missing data cache changed about it.
- *
- *   Three portable implementations of the same cipher.  The literature offers
- *   three plausible answers for a machine with no data cache, and they
- *   disagree about which resource is scarce.  All three are built, checked
- *   against the NIST vectors and against each other, and timed in one process
- *   on the same buffer by tests/crypto68k/crypto68k_bulk.  The two that lose
- *   are kept so the measurement stays reproducible.
- *
- *     T4    four 1 KB tables.  One indexed longword read per byte and no
- *           post-processing.  What the aes_core.c of OpenSSL does, and
- *           therefore what AmiSSL runs on this target.
- *     T1    one 1 KB table and three rotates per column.  What
- *           nx_crypto_aes.c does.  Costs 12 rotates a round to save 3 KB of
- *           table, a trade that only pays if the 3 KB displaces something
- *           from a data cache.
- *     SBOX  a 256-byte S-box and MixColumns done in the ALU, word-parallel.
- *           Trades 4-byte reads for 1-byte reads, which is the right trade
- *           only if the bus is the binding constraint.
- *
- *   The tables are built at run time rather than spelled out: 2,048
- *   hexadecimal constants in a source file cannot be reviewed, and a build
- *   from the field arithmetic is 60 reviewable lines.  Cost is a few
- *   hundred microseconds once, inside the first c68k_aes_key_set().
+ * three portable C forms (T4, T1, SBOX) that the 68020 assembly is measured
+ * against; all three are kept so the comparison stays reproducible.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -72,25 +48,16 @@ UINT c68k_aes_variant_is_asm(UINT variant)
 
 /* -------------------------------------------------------------- tables --- */
 
-/*
- * Shared with the assembly, which indexes them with the scaled (An,Dn.W*4)
- * mode of the 68020 and so needs exactly this layout.  Not static.  The
- * assembler sees them as _c68k_aes_te0 and so on.
- */
+/* Shared with the assembly, which indexes them with the scaled (An,Dn.W*4)
+   mode and needs EXACTLY this layout.  Must not be static. */
 ULONG   c68k_aes_te[4][256];        /* Te0..Te3, encryption               */
 ULONG   c68k_aes_td[4][256];        /* Td0..Td3, equivalent inverse       */
 UCHAR   c68k_aes_sbox[256];
 UCHAR   c68k_aes_isbox[256];
 
 /*
- * Built once, on the first c68k_aes_key_set(), with no lock.  tls.library is
- * an AmigaOS shared library with one data segment behind every opener, so two
- * processes can reach this at the same time, and both write the same bytes.
- * The flag is set last, so a thread that sees it set sees a finished table,
- * and a thread that does not see it set rebuilds and stores the values that
- * were already there.  Reads begin only after the c68k_aes_key_set() of that
- * reader returned, and therefore after its own build completed.  A Forbid()
- * pair gains nothing.
+ * Built once on the first c68k_aes_key_set(), deliberately with no lock:
+ * concurrent builders write identical bytes and the ready flag is set LAST.
  */
 static UINT c68k_aes_tables_ready;
 
@@ -223,15 +190,9 @@ static const UCHAR c68k_aes_rcon[11] =
 };
 
 /*
- * A big-endian longword at an arbitrary address.
- *
- * On the 68020 that is one MOVE.L.  The part does misaligned data accesses in
- * hardware, at the cost of an extra bus cycle, and misaligned is the normal
- * case here.  The payload of a TLS record starts 21 bytes into the packet
- * buffer, so every CBC block in the record path is on an odd address.  Inline
- * assembly because C cannot express an intentionally unaligned load.  GCC
- * compiles the portable form below into four byte reads, three shifts and
- * three ORs, 300 cycles a block of load and store around a 3,000 cycle cipher.
+ * A big-endian longword at an ARBITRARY address -- a TLS record payload
+ * starts 21 bytes into the packet buffer, so every CBC block is odd-aligned.
+ * Inline asm because C cannot express an intentionally unaligned load.
  */
 static ULONG c68k_aes_load_be(const UCHAR *p)
 {
@@ -480,11 +441,7 @@ UINT    r;
 
 
 /* =============================================================== T1, C ==== */
-/*
- * The same rounds with Te1..Te3 replaced by rotations of Te0.  What
- * nx_crypto_aes.c does, and the form a machine with a data cache prefers.
- * Kept so the comparison runs against a real implementation.
- */
+/* The same rounds with Te1..Te3 replaced by rotations of Te0. */
 
 #define ROR8(v)     (((v) >> 8) | ((v) << 24))
 #define ROR16(v)    (((v) >> 16) | ((v) << 16))
@@ -593,15 +550,8 @@ UINT    r;
 
 /* ============================================================= SBOX, C ==== */
 /*
- * A 256-byte S-box and MixColumns computed in the ALU, word-parallel:
- *
- *   u = w ^ rotl8(w)                 per byte: a^b, b^c, c^d, d^a
- *   t = u ^ rotl16(u)                per byte: a^b^c^d
- *   out = w ^ t ^ xtime(u)           the AES MixColumns identity
- *
- * Tried for the bus: four byte reads per column instead of four longword
- * reads is half the traffic on a 16-bit path.  It loses because the traffic
- * was never the binding constraint, see c68k_aes.h.
+ * A 256-byte S-box with MixColumns in the ALU, word-parallel:
+ *   u = w ^ rotl8(w);  t = u ^ rotl16(u);  out = w ^ t ^ xtime(u)
  */
 
 #define ROL8(v)     (((v) << 8) | ((v) >> 24))
@@ -692,12 +642,7 @@ UINT    r;
             ((ULONG)c68k_aes_sbox[B3(s2)])) ^ rk[3];
 }
 
-/*
- * Decryption the same way.  The InvMixColumns of the equivalent inverse cipher
- * is three MixColumns-shaped applications of xtime, so this is slower than its
- * encryption twin.  It exists so the SBOX row of the comparison covers both
- * directions.
- */
+/* Decryption the same way; InvMixColumns is three xtime applications. */
 static ULONG c68k_aes_invmixcolumn(ULONG w)
 {
 
@@ -777,19 +722,8 @@ UINT    r;
 
 /*
  * The assembly, when this build has it.  Same interface as the C round cores
- * (round keys, rounds, four-longword state in memory), so the dispatch is
- * a switch and not two code paths.
- *
- * The state lives in memory.  The 68020 has eight data registers, and a round
- * needs four state words, four accumulators, an index and a temporary, which
- * is ten.  The choice is between the sixteen index bytes extracted from
- * registers, MOVE.B plus a ROL.L each, because only the low byte of a
- * register can be moved out, and the same bytes read out of a sixteen-byte
- * buffer with MOVE.B d16(An),Dn, one instruction and no rotate.  The second
- * is fewer instructions and leaves four registers free for the accumulators,
- * so the round ends with a single MOVEM.L of all four.  On a part with a data
- * cache the sixteen byte reads are free.  Here they are bus cycles, still
- * cheaper than the rotates they replace.
+ * (round keys, rounds, four-longword state IN MEMORY), so the dispatch is a
+ * switch and not two code paths.
  */
 #ifdef C68K_ASM_AES
 extern VOID c68k_aes_core_enc_t4_asm(const ULONG *rk, UINT nr, ULONG *st);
@@ -895,15 +829,8 @@ ULONG   st[4];
 }
 
 /*
- * CBC.  The chaining value stays in st[] across blocks rather than returns to
- * the IV buffer, which is why these exist instead of a loop around
- * c68k_aes_encrypt_block().  nx_crypto_cbc.c does that instead, through a
- * function pointer, with a separate XOR pass over the block.
- *
- * The byte-at-a-time loads are what a portable fallback costs.  `in` can be
- * on any address, because the payload of a TLS record starts 21 bytes into
- * the packet buffer.  The fused assembly path below uses MOVE.L regardless,
- * because the 68020 does misaligned longword accesses in hardware.
+ * CBC.  The chaining value stays in st[] across blocks rather than returning
+ * to the IV buffer.  `in` may be on ANY address.
  */
 VOID c68k_aes_cbc_encrypt(const C68K_AES *aes, UCHAR *iv,
                           const UCHAR *in, UCHAR *out, ULONG blocks)

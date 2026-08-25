@@ -1,27 +1,8 @@
 /*
  * AmiNetXDuo, fetching a real HTTPS URL through tls.library, and nothing else.
  *
- * tests/tls/tls_https.c is linked against our whole stack: it calls
- * netstack_startup(), nx_tcp_socket_create(), nx_secure_tls_session_create(),
- * and verifies the chain against one root CA compiled into the test.  It
- * covers the crypto, not the interface an application would use.
- *
- * This program is linked against nothing of ours.  It opens two shared
- * libraries by name, calls their published vectors, and verifies the chain
- * against DEVS:Internet/certificates, 119 Mozilla roots on disk, of which it
- * parses the one the chain actually needs.
- *
- * Everything below the TLSOpen() call is therefore evidence about the design
- * rather than the arithmetic: that a separate library can borrow
- * bsdsocket.library's NetX Duo through one private vector, that a trust store
- * on disk can be searched lazily by issuer, and that WaitSelect()-shaped code
- * does not hang when the plaintext is already decrypted.
- *
  * Needs LIBS:bsdsocket.library, LIBS:tls.library, DEVS:Internet/certificates,
  * DEVS:NetInterfaces/eth0 and DEVS:a2065.device, see tests/tls/run-api.sh.
- *
- * Not a baseline: it depends on the internet, on FS-UAE's SLIRP NAT, on a
- * third party's server, and on a certificate that rotates every ninety days.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -108,10 +89,9 @@ static BOOL a_check(BOOL ok, const char *what, ULONG detail)
 /* ------------------------------------------- bsdsocket.library, by hand --- */
 
 /*
- * Declared here rather than pulled from <proto/bsdsocket.h> for the same
- * reason tests/libraries/library_test.c does it: the point is to exercise the
- * published ABI, and an inline header that assumes a global SocketBase hides
- * exactly the thing under test.  Offsets from the Roadshow NDK pragmas.
+ * Declared by hand rather than pulled from <proto/bsdsocket.h>: an inline
+ * header that assumes a global SocketBase hides the published ABI that is the
+ * thing under test.  Offsets from the Roadshow NDK pragmas.
  */
 struct t_sockaddr_in
 {
@@ -393,9 +373,8 @@ int main(VOID)
     /* ---- the wrong name must be refused --------------------------------- */
 
     /*
-     * Before the positive test, because a passing positive test proves nothing
-     * about verification unless the negative one also passes: a library that
-     * accepts every certificate passes the fetch and fails here.
+     * Before the positive test: a library that accepts every certificate
+     * passes the fetch and fails here.
      */
     sock = a_connect(sbase, address);
     if (a_check((BOOL)(sock >= 0), "connect for the negative test",
@@ -410,13 +389,9 @@ int main(VOID)
                       "a certificate for another host is REFUSED", 0);
 
         /*
-         * Which refusal is the server's business, not ours.  Asked for a name
-         * it does not serve, this host answers with whatever its default vhost
-         * has, and badssl.com's is broken in assorted ways, so the observed
-         * reason has been "issued to another host" and "expired" on different
-         * days.  Pinning the test to one of them would make it fail when
-         * somebody else changes their configuration.  What must hold is that
-         * the refusal is a verification refusal and not, say, a timeout.
+         * Which refusal is the server's business: asked for a name it does not
+         * serve this host answers with its default vhost, so what must hold is
+         * that the refusal is a verification refusal and not, say, a timeout.
          */
         (VOID)a_check((BOOL)(why == TLS_ERR_HOSTNAME ||
                              why == TLS_ERR_HANDSHAKE ||
@@ -589,16 +564,9 @@ int main(VOID)
     /* ---- the machine with no clock --------------------------------------- */
 
     /*
-     * An Amiga with a dead RTC battery reports 1 January 1978, which is before
-     * every certificate on the internet was issued, so a library that checks
-     * validity dates unconditionally cannot reach a single HTTPS site from
-     * such a machine.  src/tlslib/tls_time.c skips the date check when the
-     * clock is outside a plausible window, and says so in TLSInfo().
-     *
-     * This sets the emulated machine's clock to the AmigaOS epoch, fetches the
-     * same page again, and puts the clock back.  Under FS-UAE the clock is
-     * normally the host's, so without this the branch would never be
-     * exercised.
+     * An Amiga with a dead RTC battery reports 1 January 1978, before every
+     * certificate on the internet was issued.  src/tlslib/tls_time.c skips the
+     * date check outside a plausible window, and says so in TLSInfo().
      */
     if (a_clock_open())
     {
@@ -609,11 +577,9 @@ int main(VOID)
                     (ULONG)bsd_errno(sbase)))
         {
             /*
-             * TLSA_NoResume is load-bearing.  This is the fourth connection to
-             * A_HOST in this run, so without it the library would resume the
-             * session the third one established, and a resumed handshake
-             * sends no certificate, verifies no chain and checks no host name,
-             * which is what the two assertions below claim still happened.
+             * TLSA_NoResume is load-bearing: this is the fourth connection to
+             * A_HOST in this run, and a resumed handshake sends no certificate,
+             * verifies no chain and checks no host name.
              */
             why = TLS_OK;
             tls = TLSOpen(tbase, (APTR)sbase, sock,

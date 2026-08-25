@@ -7,27 +7,6 @@
 #                                    [-m MODEL] [-T TAG] [-b BUILDDIR]
 #                                    [-s SAMPLE] [-P]
 #
-# Fitz (tests/endurance/run-fitz.sh) is the REALISTIC workload and is the one
-# the hours should go to.  This one is the REPRODUCIBLE workload: both ends are
-# in the machine, every read and write size is drawn from a seeded generator,
-# and nothing outside the emulator can affect the result.  It also carries the
-# probes, which Fitz cannot: they need a socket driven deliberately into a
-# state no application would ask for.
-#
-#   P1  a blocking recv() on an idle established socket must WAIT
-#   P2  a blocking send() into a peer that is not reading must WAIT
-#   P3  a blocking send() while the packet pool has been driven to its floor
-#       by connections nobody reads, the specific suspect, because
-#       NX_NO_PACKET means both "nothing to read" and "the pool is empty" and
-#       src/bsdsocket/errno.c:115 maps it to EWOULDBLOCK without asking which
-#   P4  the same on a NON-BLOCKING socket, as the control
-#
-# -P turns the probes off, leaving a plain soak.
-#
-# No host peer and no SLIRP traffic: everything is over 127.0.0.1.  The A2065
-# is still attached because the library brings the stack up on an interface,
-# exactly as tests/clients/run-clients.sh does it.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -109,9 +88,6 @@ nbevery 50
 seed 20260726
 EOF
 
-# the emulator's own bsdsocket emulation off, as tests/clients/run-clients.sh
-# does it,
-# so a pass cannot be WinUAE's host-socket shim answering instead of ours.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'

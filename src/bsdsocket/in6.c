@@ -1,52 +1,12 @@
 /*
  * bsdsocket.library, the AF_INET6 ABI, pinned.
  *
- * Compiled only in an AMINETXDUO_IPV6 build.
- *
- * The Roadshow NDK defines the IPv6 socket ABI even though no Amiga stack ever
- * implemented it, so the shape is not ours to choose, only to check.
- * Two earlier cases where a header did not hold what it appeared to hold:
- *
- *   - ndk-include/pwd.h turned out to be newlib's ten-field `struct passwd`
- *     rather than the Amiga's seven-field one, a silent 12-byte difference.
- *   - bpf_set_notify_mask takes its arguments in (d1,d0) where its immediate
- *     neighbour in the LVO table takes them in (d0,d1).
- *
- * So every offset an application relies on is asserted below.  A toolchain
- * whose netinet/in.h differs is a build failure here, not a wrong answer at
- * run time.
- *
- * Checked against amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include on
- * 2026-07-25:
- *
- *   sys/socket.h:110   typedef unsigned char sa_family_t;
- *   sys/socket.h:196   #define AF_INET6 23
- *   netinet/in.h:87    typedef unsigned short in_port_t;
- *   netinet/in.h:170   struct sockaddr_in { __UBYTE sin_len; sa_family_t
- *                        sin_family; ... }       <-- 4.4BSD, has a length byte
- *   netinet/in.h:178   struct in6_addr { unsigned char s6_addr[16]; }
- *   netinet/in.h:182   struct sockaddr_in6 { sa_family_t sin6_family; ... }
- *                                              <-- Linux, no length byte
- *
- * So `sockaddr_in` and `sockaddr_in6` in the same header disagree about where
- * the address family lives: offset 1 in one, offset 0 in the other.  A cast of
- * a sockaddr_in6 to `struct sockaddr *` therefore reads sa_family from the
- * padding byte the compiler inserted in front of sin6_port.  bsd_sa_family()
- * in socket.c never does that.  It decides from the bytes plus the declared
- * length.
- *
- * A length byte must never be written into a sockaddr_in6 the way
- * bsd_sockaddr_put() writes sin_len into a sockaddr_in.  On this NDK that byte
- * is sin6_family.
- *
  * SPDX-License-Identifier: MIT
  */
 
 #include "bsdsocket_vectors.h"
 
 #include "aminetxduo/config.h"
-
-/* ---------------------------------------------------------------- the ABI */
 
 _Static_assert(AF_INET6 == 23, "AF_INET6 is not the Roadshow NDK's 23");
 
@@ -79,16 +39,12 @@ _Static_assert(sizeof(((struct sockaddr_in6 *)0)->sin6_flowinfo) == 4,
 _Static_assert(sizeof(((struct sockaddr_in6 *)0)->sin6_scope_id) == 4,
                "sin6_scope_id is not four bytes");
 
-/* The IPv4 side, restated: the layout sockaddr_in6 does not share. */
 _Static_assert(sizeof(struct sockaddr_in) == 16, "sockaddr_in is not 16 bytes");
 _Static_assert(offsetof(struct sockaddr_in, sin_len)    == 0, "sin_len moved");
 _Static_assert(offsetof(struct sockaddr_in, sin_family) == 1, "sin_family moved");
 
-/* NetX Duo's side of the same address. */
 _Static_assert(sizeof(((NXD_ADDRESS *)0)->nxd_ip_address.v6) == 16,
                "NXD_ADDRESS.v6 is not four ULONGs");
-
-/* ------------------------------------------------------ address conversion */
 
 /*
  * struct in6_addr is 16 bytes in network order.  NetX Duo keeps four ULONGs in
@@ -164,68 +120,18 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
     /*
      * On a dual-stack socket the mapped form is a spelling of an IPv4 address,
      * so it is converted.  It cannot be left as it stands.  NetX Duo has no
-     * concept of a v4-mapped destination.  It builds an IPv6 header addressed
-     * to ::ffff:a.b.c.d and hands it to neighbour discovery, which then looks
-     * for the MAC of a host that does not speak IPv6.
-     *
-     * The unspecified address (::) is left alone: it is a wildcard for bind(),
-     * not a destination, and the port checks catch it.
      */
     bsd_addr_from_v4(addr, v4);
 
     return TRUE;
 }
 
-/* --------------------------------------------------------- socket options */
-
 /*
  * Level IPPROTO_IPV6.
- *
- * The option numbers are not in the NDK and differ between BSD and Linux, so
- * both numberings are accepted.  The note in bsdsocket_internal.h says why
- * that is safe, and bsd_v6_linux_numbering() below covers the one socket where
- * it is not.  An option that cannot be implemented correctly is refused with
- * ENOPROTOOPT rather than accepted and ignored, the same rule MSG_OOB is held
- * to in transfer.c.
- *
- * IPV6_MULTICAST_HOPS/_IF/_LOOP, IPV6_JOIN_GROUP and IPV6_LEAVE_GROUP are
- * mcast.c's, dispatched from here in an AMINETXDUO_MULTICAST build and
- * ENOPROTOOPT without one, the same arm the IPv4 five answer to.
- *
- * Refused, and why:
- *   IPV6_RTHDR, HOPOPTS, DSTOPTS, RTHDRDSTOPTS, PATHMTU, RECVPATHMTU,
- *   USE_MIN_MTU, DONTFRAG, NEXTHOP, the rest of RFC 3542.  These name IPv6
- *          extension headers and path-MTU state NetX Duo does not expose.
- *          The subset that is implemented, PKTINFO, HOPLIMIT and
- *          ICMP6_FILTER, lives in cmsg.c and is dispatched from here.
- *   IPV6_CHECKSUM, which names the offset of a checksum field the stack must
- *          fill in for an arbitrary raw protocol.  ICMPv6's is filled in
- *          unconditionally (raw.c) because RFC 4443 makes it mandatory and
- *          the sender cannot compute it.  Nothing else raw.c carries has one
- *          to place.
  */
 
 /*
  * Whether the Linux numbering can be read on this socket.
- *
- * It is a convenience for a caller who took the numbers from that lineage
- * rather than from in6.h.  It is only safe where nothing else claims them.
- * On a RAW IPv6 socket RFC 3542 3.1 claims 26 for IPV6_CHECKSUM, an offset
- * into the payload where the kernel computes and checks a checksum.  26 is
- * also Linux's IPV6_V6ONLY.  Read as the latter, the call answers an
- * application that asked for a checksum with success, computes none, checks
- * none, and switches V6ONLY on as a side effect.  ENOPROTOOPT is returned
- * instead: this library computes a checksum for ICMPv6 only (raw.c), because
- * RFC 4443 makes that one mandatory.
- *
- * The whole alias set goes rather than the one number.  The published BSD
- * numbering in in6.h reaches every option this library offers, so nothing is
- * lost.  "The aliases are off on a raw socket" is one rule, where "all but
- * 26" is a special case.
- *
- * RFC 3542 also says an attempt to set or get IPV6_CHECKSUM on a non-raw
- * socket fails.  There 26 is only ever Linux's IPV6_V6ONLY, which is what a
- * caller who spells it that way meant, so that arm is unchanged.
  */
 BOOL bsd_v6_linux_numbering(const AmiSocket *sock)
 {
@@ -263,15 +169,11 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     if ((sock->as_Flags & ASF_INET6) == 0)
         return bsd_fail(base, AMI_ENOPROTOOPT);
 
-    /* RFC 3542's ancillary-data options, and the whole of level
-       IPPROTO_ICMPV6, belong to cmsg.c. */
     owned = bsd_cmsg_option(base, sock, level, optname, optval, &optlen, TRUE);
     if (owned <= 0)
         return owned;
 
 #ifdef AMINETXDUO_MULTICAST
-    /* RFC 3493 section 5.2 belongs to mcast.c, which takes its own bracket
-       and reads a struct rather than an int. */
     if (level == IPPROTO_IPV6 && bsd_mcast6_is_option(sock, optname))
         return bsd_mcast6_setopt(base, sock, optname, optval, optlen);
 #endif
@@ -315,13 +217,6 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         /*
          * The IPv6 hop limit is the IPv4 TTL under another name, and NetX Duo
          * stores one per socket.  IP_TTL and IPV6_UNICAST_HOPS are therefore
-         * the same setting here.  -1 means "use the default", per RFC 3493.
-         *
-         * Where it reaches the wire: raw (raw.c), UDP over either family, and
-         * TCP over IPv4.  Not TCP over IPv6, because
-         * _nx_tcp_socket_send_internal() passes nx_ipv6_hop_limit off the
-         * NX_IP there, not the socket's.  A change there is a change inside
-         * NetX Duo.
          */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);
@@ -342,12 +237,6 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
          * RFC 2474 renamed the IPv4 TOS octet and the IPv6 traffic class
          * octet to the same DS field, and NetX Duo's raw send takes one tos
          * argument for both.  IP_TOS and IPV6_TCLASS are therefore the same
-         * setting here.  -1 means "use the default", per RFC 3542.
-         *
-         * Where it reaches the wire: raw, and TCP or UDP to an IPv4 or
-         * v4-mapped destination.  _nx_ipv6_packet_send() is given a literal 0
-         * for the traffic class from both the TCP and the UDP send paths, so
-         * a real IPv6 destination on either carries none.
          */
         if (value < -1 || value > 255)
             return bsd_fail(base, AMI_EINVAL);

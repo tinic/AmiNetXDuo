@@ -1,25 +1,8 @@
 /*
- * The tests for src/tools/httppath.c, the one part of the WebDAV server
- * that decides whether a request can reach a file outside the document root.
- *
- * The server writes.  A path check that only looked right leaked a file when
- * the server only read, and destroys one now that DELETE, MOVE and PUT are
- * here, and the mistakes are all the same shape: a thing that does not look
- * like an escape until something else has decoded it.  So the escapes are
- * written down here, one case each, and the file is built for the host so they
- * run in `tools/ci.sh host` on every change rather than only when somebody
- * boots an Amiga.
- *
- * Three of the destructive primitives live in that file for the same reason,
- * joining a child onto a walked path, backing up one level, and asking whether
- * one path is inside another.  A walk that appends the wrong separator deletes
- * the parent, and the containment test is what both a lock and a
- * COPY-into-itself check are made of.
- *
- * The AmigaOS case is the one no ported Unix server has.  A colon makes
- * everything before it a device or an assign, so "/RAM:foo" is the RAM disk
- * and not a file called "RAM:foo", and every ../ check ever written is blind
- * to it.  It is tested here in every position a colon can appear in.
+ * The tests for src/tools/httppath.c, which decides whether a request can reach
+ * a file outside the document root, and which also carries the join, the walk
+ * up and the containment test. The AmigaOS case is the one no ported Unix
+ * server has: a colon makes everything before it a device or an assign.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
@@ -130,9 +113,8 @@ static void test_device_escape(void)
     printf("the colon, an AmigaOS device reference\n");
 
     /*
-     * Every one of these resolves to a real place on a real Amiga, and not one
-     * of them contains a "..".  A Unix server ported to this machine refuses
-     * none of them.
+     * Every one of these resolves to a real place on a real Amiga and not one
+     * contains a "..". A ported Unix server refuses none of them.
      */
     CHECK(refused("/RAM:foo") == HTTP_PATH_DEVICE);
     CHECK(refused("/DH0:") == HTTP_PATH_DEVICE);
@@ -170,10 +152,8 @@ static void test_parent_escape(void)
     CHECK(refused("/.%2e/secret") == HTTP_PATH_PARENT);
 
     /*
-     * An encoded separator next to an encoded parent.  Decoding first turns
-     * %2F into a real separator, which can only ever create more segments, and
-     * every segment is checked, so the ".." it was hiding is found rather than
-     * passed through as one long name.
+     * An encoded separator next to an encoded parent. Decoding first can only
+     * create more segments, and every segment is checked.
      */
     CHECK(refused("/a%2F..%2Fsecret") == HTTP_PATH_PARENT);
     CHECK(refused("/..%2Fsecret") == HTTP_PATH_PARENT);
@@ -285,10 +265,9 @@ static void test_fields(void)
 /* ------------------------------------------------- what a write relies on */
 
 /*
- * The document root itself is the one resource a client cannot replace or
- * remove, and `segments == 0` is the only thing that says a path is it.  Every
- * spelling of a root has to agree, because a root written with a trailing
- * slash that came back with one segment would make the drawer deletable.
+ * The document root is the one resource a client cannot replace or remove, and
+ * `segments == 0` is the only thing that says a path is it. Every spelling of a
+ * root has to agree.
  */
 static void test_root_is_identifiable(void)
 {
@@ -323,11 +302,9 @@ static void test_root_is_identifiable(void)
 }
 
 /*
- * COPY and MOVE take the other end of the operation in a header rather than on
- * the request line, and it is an absolute URI.  It goes through this same
- * function, and these are the shapes clients send.  A Destination given its
- * own decoder is the mistake this file exists to make impossible, so every
- * escape is asserted here too and not only on the request line.
+ * COPY and MOVE take the other end in a header, as an absolute URI, and it goes
+ * through this same function. A Destination given its own decoder is the
+ * mistake this file exists to make impossible.
  */
 static void test_destination_forms(void)
 {
@@ -380,9 +357,8 @@ static void test_destination_forms(void)
 }
 
 /*
- * What every walk and every join downstream assumes about a resolved path.
- * These are cheap to assert and expensive to discover.  A path that ended in a
- * separator would make the join produce "a//b", which is a's parent's b.
+ * What every walk and every join downstream assumes about a resolved path. A
+ * path that ended in a separator would make the join produce "a//b".
  */
 static void test_resolved_shape(void)
 {
@@ -447,9 +423,8 @@ static void test_resolved_shape(void)
 }
 
 /*
- * A name longer than a FileInfoBlock carries is refused rather than cut down.
- * Truncating would make two different long names into one, and a PUT of the
- * second would silently overwrite the first.
+ * A name longer than a FileInfoBlock carries is refused rather than cut down:
+ * truncating would make two different long names into one.
  */
 static void test_long_name_refused(void)
 {
@@ -473,8 +448,7 @@ static void test_long_name_refused(void)
 
 /*
  * The document root is the one path a server does not resolve, so the
- * doubled-slash rule has to be applied to it separately, and "Work:Public/"
- * is what a person types when the drawer requester put a separator on the end.
+ * doubled-slash rule has to be applied to it separately.
  */
 static void test_root_trimmed(void)
 {
@@ -532,8 +506,8 @@ static void test_root_trimmed(void)
 
 /*
  * A lock owner is collected into a fixed buffer and handed back inside a
- * <D:owner> in a document declared UTF-8.  Half a character in it is not a
- * character, and a client that validates rejects the whole answer over it.
+ * <D:owner> in a document declared UTF-8. Half a character in it is not a
+ * character.
  */
 static void test_utf8_trim(void)
 {

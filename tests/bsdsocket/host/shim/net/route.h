@@ -1,25 +1,6 @@
 /*
  * <net/route.h> for the bsdsocket host tests.
  *
- * The host has one of its own and it is a different header entirely: Linux's
- * has struct rtentry for SIOCADDRT and none of the routing-socket message
- * shapes.  What routing.c compiles against is the NDK's, so the parts of the
- * NDK's that it names are restated here, from NDK 3.2
- * SANA+RoadshowTCP-IP/netinclude/net/route.h, member for member and in order:
- * GetRouteInfo() hands this layout to a caller that compiled against the real
- * one, so the order is the ABI.
- *
- * sin_len IS THE ONE THING THAT CANNOT BE HONEST HERE.  The Amiga's
- * struct sockaddr_in carries a one-byte length ahead of the family, the way
- * 4.4BSD does; glibc's does not have the member at all, and the host tests get
- * glibc's because host_prelude.h pulls the C library's networking headers in
- * first on purpose.  The macro below sends the write into the padding glibc
- * does have, so bsd_route_sockaddr() compiles and stores it somewhere
- * harmless.  Nothing in tests/bsdsocket/host reads a sockaddr back, and
- * anything that ever does must not do it through this header.  The real
- * layout is asserted on the guest instead, by tests/tools/rtprobe.c, which
- * walks a GetRouteInfo() table by sin_len.
- *
  * SPDX-License-Identifier: MIT
  */
 #ifndef AMINETXDUO_BSD_TEST_NET_ROUTE_H

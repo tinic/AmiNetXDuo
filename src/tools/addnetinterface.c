@@ -2,49 +2,6 @@
  * AddNetInterface, bring up the interface described by
  * DEVS:NetInterfaces/<name>.
  *
- *     AddNetInterface INTERFACE/M,QUIET/S,TIMEOUT/K/N
- *
- * This is the command S:User-Startup invokes, so it is the one that starts the
- * network:
- *
- *     C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
- *
- * INTERFACE is either a bare interface name or the full path to the interface
- * file. Only the name matters, because the directory is fixed, and more than
- * one name can be given. Several names are sorted before they are used, so a
- * list brings interfaces up in a defined order rather than in the order typed.
- *
- * How many names ONE invocation accepts is AMI_CFG_MAX_ATTACHED, because that
- * is how many interfaces can be online at once. It is not a limit on
- * DEVS:NetInterfaces, which may describe as many as the user likes and has
- * every one of them read (aminetxduo/config.h).
- *
- * TIMEOUT is how long to wait, in seconds, for an interface that asks for its
- * address to be given one. It bounds the DHCP exchange, so ten seconds is both
- * the default and the floor: a shorter limit expires before the protocol can
- * finish and reports a failure that is not one.
- *
- * The files are read twice. If any file cannot be used, the first pass stops
- * the command before anything is started. Without that pass, a list of three
- * interfaces with a typo in the third brings two up and then fails.
- *
- * This is also the first command a new user runs, so every failure below
- * leads with the operation that refused and its code -- the symbol, not only a
- * translation of it -- and then at most one line saying what to type next.
- * Nothing here points at a serial log: AMI_ERROR and friends compile to
- * nothing without AMINETXDUO_LOG, so no shipped build can write one.
- * ShowNetStatus EVENTS is where what the library recorded can be read.
- *
- * QUIET drops that running commentary and nothing else. User-Startup wants a
- * boot that says nothing when it works and still says why it did not. A boot
- * that swallows the report that there is no interface called eth0 leaves a
- * machine with no network and no reason given.
- *
- * It does not shut the stack down again. tool_stack_start() asks the library
- * to hold the stack itself, which keeps the interface online after this
- * command exits, as in Roadshow, where the interface stays up until Offline or
- * a reboot. This command's own open is closed like any other.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -68,20 +25,8 @@ enum
 /* Seconds. Both the default and the floor, see the note at the top. */
 #define ADDIF_TIMEOUT       10UL
 
-/*
- * Below this much free, a failed start is a memory problem and no other
- * explanation is worth printing. It is not what the stack costs,
- * docs/RESEARCH.md 81 measured that at 432-439 KB resident plus the packet
- * pool. A 512 KB machine reads about 73 KB here, measured, so the line sits
- * well clear of both.
- */
 #define ADDNETIF_MIN_FREE   (200UL * 1024UL)
 
-/*
- * Out of memory, in the same words from both explainers below. `freemem` is
- * the AvailMem() the caller already tested, so the number printed is the one
- * that was judged.
- */
 static VOID advise_out_of_memory(ULONG freemem)
 {
     tool_printf("  %lu bytes are free. The stack needs about 450K.\n", freemem);
@@ -104,11 +49,6 @@ static VOID explain_startup_failure(LONG err, const AmiIfConfig *ifc)
             break;
 
         case AMI_NET_ERR_CONFIG:
-            /*
-             * The stack came up but no interface got an address. For DHCP
-             * that is nearly always the cable or the server. For a static
-             * interface it is the file.
-             */
             if (ifc->iptype == AMI_IPTYPE_DHCP)
             {
                 tool_explain_dhcp(ifc->name);
@@ -136,18 +76,10 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
 {
     if (!tool_stack_installed())
     {
-        /* Same sentence Online prints for the same machine, onoff.c. */
         tool_printf("  LIBS:bsdsocket.library is not installed.\n");
         return;
     }
 
-    /*
-     * Before blaming the interface. A 512 KB machine fails here: the stack
-     * logs its refusal to the serial port and puts nothing on screen, and the
-     * device probe below would then send someone with no free memory to go and
-     * look at their card. tests/tools/run-oommsg.sh is the run that proves
-     * this branch is reached.
-     */
     {
         ULONG freemem = AvailMem(MEMF_PUBLIC);
 
@@ -163,24 +95,10 @@ static VOID explain_library_failure(const AmiIfConfig *ifc)
     tool_explain_device(ifc->device, ifc->unit, ifc->card);
 }
 
-/*
- * Read DEVS:NetInterfaces/<name>, reporting what is wrong with it if anything
- * is. tool_config_watch() puts the parser's complaints, with line numbers, on
- * the screen instead of only on the serial port.
- */
 static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
 {
     LONG err;
 
-    /*
-     * ONLY THE FIRST READ REPORTS.  `again' already said that -- see the
-     * comment under it -- and the reporter defeated it: the file is read up
-     * to five times in one run (695, 727, 748, 823, 988), and watching every
-     * read printed the whole "Problems in the configuration:" block once per
-     * read. A single bad ADDRESS came out five times, identically, in the
-     * output of one command. The re-reads exist to pick the file up again
-     * after the interface list changed, not to tell the user anything.
-     */
     if (!again)
         tool_config_watch();
 
@@ -190,9 +108,6 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
     if (err == AMI_CFG_OK)
         return TRUE;
 
-    /* A re-read of a file that already parsed once. The first read is what
-       reports on it. Not QUIET: the message is an error and QUIET keeps
-       those. */
     if (again)
         return FALSE;
 
@@ -240,18 +155,6 @@ static VOID sort_names(STRPTR *names, ULONG count)
     }
 }
 
-/* ------------------------------------------- the stack inside the library,
- *
- * Which is every shipped build. Opening bsdsocket.library starts the network
- * and brings up everything in DEVS:NetInterfaces, so a first add needs nothing
- * else. An add against a stack that is already running is a different job, and
- * one this command did not do at all until 0.20.1. It opened the library,
- * found it open, waited for an address the machine already had or never got,
- * and returned RETURN_OK having attached nothing. After RemoveNetInterface the
- * same name added back reported success and attached no interface.
- * NETCTRL_INTERFACE_ADD is the call that does the work.
- */
-
 /* Static: this table is most of a Shell command's 4 KB stack on its own. */
 static struct
 {
@@ -273,21 +176,6 @@ static struct
     NetStatusSystem e;
 } addif_system;
 
-/*
- * THE ROUTE THE FILE ASKED FOR, AND THE ONE THE MACHINE HAS.
- *
- * nx_ip_gateway_address_set() refuses a next hop that is on no interface's
- * network, and the interface comes up anyway -- which is right, and used to
- * be a rollback that took the interface down and, at the slot cap, took
- * another interface with it (src/netstack/netstack.c).  Coming up anyway must
- * not mean coming up silently: a machine with an address and no default route
- * reaches its own subnet and nothing else, and the GATEWAY line in the file is
- * where the user would look last.
- *
- * Asked of the stack rather than remembered, and compared rather than
- * assumed: the gateway is machine-wide, so this is true whether the refusal
- * was this interface's GATEWAY line or the machine's.
- */
 static VOID report_refused_gateway(struct Library *base, const char *name,
                                    ULONG asked_for)
 {
@@ -312,13 +200,6 @@ static VOID report_refused_gateway(struct Library *base, const char *name,
 }
 
 /*
- * Has the running stack given this interface a usable IPv6 address.
- *
- * An IPv6-only interface reports nsi_Address == 0 forever, and every report
- * this command made was built on that number: "the network is running, but
- * this machine has no address yet", and RETURN_WARN with it. The address is in
- * a different table, joined on the interface index.
- *
  * TENTATIVE is skipped: RFC 4862 5.4 says an address under duplicate address
  * detection is not one anything may use yet, and reporting it would mean this
  * command declares success a second before the address is real.
@@ -390,21 +271,6 @@ static LONG running_index(struct Library *base, const char *name,
     return -1;
 }
 
-/*
- * WHICH INTERFACES WERE UP BEFORE THE ADD, so that one going down over it can
- * be reported rather than merely happening.
- *
- * There are NX_MAX_PHYSICAL_INTERFACES interface slots and a drawer may
- * describe more interfaces than that. An interface the boot brought up on its
- * own initiative gives its slot to one a user asks for by name
- * (src/netstack/netstack.c, ami_ns_yield_candidate()), which is the whole
- * reason `AddNetInterface wifi0` works on a machine whose drawer also holds
- * eth0, eth1, eth2 and eth3. It is still an interface that was carrying
- * traffic and now is not, so it is said out loud. An interface somebody named
- * never yields, so this line cannot appear for one the user asked for -- and
- * neither can it appear for an add that FAILED, because the library puts the
- * interface that stood down back before it returns the failure.
- */
 static char  addif_was_up[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_NAME_LEN];
 static UWORD addif_was_up_count;
 
@@ -470,12 +336,6 @@ static VOID report_what_yielded(struct Library *base, const char *added)
     }
 }
 
-/*
- * Hand the name to the running stack. The library reads
- * DEVS:NetInterfaces/<name> itself and brings the interface up as a boot
- * would, so there is nothing to pass but the name. Returns 0, or the library's
- * errno.
- */
 static LONG add_to_running_stack(struct Library *base, const char *name)
 {
     NetStatusControl ctl;
@@ -495,18 +355,6 @@ static LONG add_to_running_stack(struct Library *base, const char *name)
     return (err != 0) ? err : EIO;
 }
 
-/*
- * THE ONE REFUSAL ABOUT HOW MANY INTERFACES THERE CAN BE, and the only one
- * left anywhere in this tree.
- *
- * It is at the ATTACH and not at the parse.  DEVS:NetInterfaces may describe
- * as many interfaces as the user likes and every one of them is read; what is
- * finite is how many can be ONLINE AT ONCE, because each one costs an
- * NX_INTERFACE inside the NX_IP.  So this names the interfaces that are
- * holding the slots and says one of them has to go down.  It does not ask
- * anybody to delete a file they wrote, and there is no version of this message
- * that mentions the drawer.
- */
 static VOID explain_no_slot(struct Library *base, const char *name)
 {
     LONG n;
@@ -569,13 +417,6 @@ static VOID explain_add_failure(struct Library *base, LONG err,
     }
 }
 
-/*
- * Wait up to `seconds` for that interface to be given an address of either
- * family. FALSE means the time ran out, the interface went away, or Ctrl-C was
- * pressed. `text6` receives an IPv6 address when that is what arrived, so the
- * caller can print the address it actually has rather than the one it does
- * not.
- */
 static BOOL wait_for_running_address(struct Library *base, const char *name,
                                      ULONG seconds, ULONG *addr_out,
                                      char *text6, ULONG text6_len,
@@ -718,13 +559,6 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * The ATTACH limit, and the only limit on interfaces anywhere.  It is not
-     * about the drawer: DEVS:NetInterfaces may describe as many interfaces as
-     * the user likes and every one of them is read.  This is how many can be
-     * ONLINE AT ONCE, refused here rather than after two of the three named
-     * have already been started.
-     */
     if (count > (ULONG)AMI_CFG_MAX_ATTACHED)
     {
         tool_error("attach: at most %ld interfaces can be online at once, "
@@ -755,15 +589,6 @@ int main(int argc, char **argv)
             return RETURN_FAIL;
         }
 
-        /*
-         * "Dynamic" is what TIMEOUT is an allowance for: an address that has
-         * to be asked for and takes wall-clock time to arrive. DHCP and RFC
-         * 3927 are the IPv4 ones; on the IPv6 side a router advertisement and
-         * a DHCPv6 exchange are the same, and so is the second of duplicate
-         * address detection every configured IPv6 address pays. Without this
-         * an IPv6-only interface got an allowance of zero and was asked
-         * whether it had an address before it could possibly have had one.
-         */
         if (ifc.iptype != AMI_IPTYPE_STATIC && ifc.iptype != AMI_IPTYPE_NONE)
             dynamic = TRUE;
         if (!ami_config_iface_wants_ipv4(&ifc) &&
@@ -771,19 +596,12 @@ int main(int argc, char **argv)
             dynamic = TRUE;
     }
 
-    /*
-     * Printed only now that every file is known to be good: printing during
-     * the parse pass would list two interfaces and then reject the third,
-     * reading as though the first two had been started.
-     */
     if (!quiet)
     {
         for (n = 0; n < count; n++)
         {
             name = tool_basename((const char *)names[n]);
             (VOID)load_interface(name, &ifc, TRUE);
-            /* The card is part of what was asked for when the file pins one,
-               and this line is the only place the request is echoed. */
             if (ifc.card[0] != '\0')
                 tool_printf("%s: %s unit %ld card %s\n", (LONG)name,
                             (LONG)ifc.device, (LONG)ifc.unit, (LONG)ifc.card);
@@ -793,24 +611,12 @@ int main(int argc, char **argv)
         }
     }
 
-    /*
-     * TIMEOUT is an allowance for an address to be handed out, so there is
-     * nothing to wait for when every named interface has its address in its
-     * file. Waiting anyway would turn a misconfigured static interface into a
-     * ten-second pause before the message that says so.
-     */
     allowance = dynamic ? timeout : 0UL;
 
     /* Second pass. The first file's configuration is what the explainers use. */
     (VOID)load_interface(primary, &ifc, TRUE);
     name = primary;
 
-    /*
-     * netstack_startup() is idempotent and reference counted, and is the call
-     * to use when the stack is linked into this command. It is not in the
-     * shipped build, the stack has to outlive the command, so it lives in
-     * bsdsocket.library, and AMI_NET_ERR_STATE is what says so.
-     */
     err = netstack_startup();
 
     if (err == AMI_NET_ERR_STATE)
@@ -818,12 +624,6 @@ int main(int argc, char **argv)
         struct Library *base;
         BOOL            was_running = tool_stack_library_running();
 
-        /*
-         * Starting the network blocks until an address arrives or DHCP gives
-         * up, up to half a minute. Say so first, or the pause looks like a
-         * hung machine. Nothing is started when the stack is already up, so
-         * the line is not printed then either.
-         */
         if (!quiet && !was_running)
             tool_printf("%s: starting the network...\n", (LONG)name);
 
@@ -831,9 +631,6 @@ int main(int argc, char **argv)
 
         if (base == NULL)
         {
-            /* OpenLibrary() carries no status back, so there is no code to
-               print here -- the operation is named instead of a code being
-               invented for it. */
             tool_error("bsdsocket.library did not open, so the network did "
                        "not start");
             explain_library_failure(&ifc);
@@ -846,29 +643,11 @@ int main(int argc, char **argv)
             tool_error("another TCP/IP stack is installed on this machine");
             tool_explain_foreign_stack(base);
 
-            /*
-             * Holding a reference to a library this command is about to
-             * complain about would only stop its owner unloading it.
-             */
             tool_stack_release(base);
             FreeArgs(rda);
             return RETURN_WARN;
         }
 
-        /*
-         * The first open brought up every interface in DEVS:NetInterfaces at
-         * once, so a name that was in there is already attached and this only
-         * reads it back. A name that is not attached is an interface added to
-         * the directory since the stack started, or one taken out by
-         * RemoveNetInterface, and it is added here.
-         *
-         * Every name is checked, whether or not the stack was already running,
-         * because the question is the same either way and a start that came up
-         * without one of them is a failure this used to report as success.
-         * This is also where TIMEOUT is spent: tool_stack_start() has
-         * already waited for the DHCP exchange it starts, and the wait below
-         * spends the rest of the allowance before deciding nothing answered.
-         */
         for (n = 0; n < count; n++)
         {
             ULONG addr = 0;
@@ -892,18 +671,6 @@ int main(int argc, char **argv)
             }
 
             {
-                /*
-                 * ASKED FOR EVERY TIME, even when it is already attached.
-                 *
-                 * The library needs to know this interface is one somebody
-                 * NAMED, because a slot held by an interface nobody named
-                 * yields to one that is (src/netstack/netstack.c,
-                 * ami_ns_yield_candidate()).  An interface the boot
-                 * brought up on its own stays unspoken-for until a user types
-                 * its name, and the only way to type it is this command.
-                 * EEXIST is the library agreeing it is already up, so it is
-                 * this call succeeding rather than refusing.
-                 */
                 LONG add_err;
 
                 note_what_is_up(base);
@@ -916,9 +683,6 @@ int main(int argc, char **argv)
 
                 if (add_err != 0)
                 {
-                    /* The operation and its code first.  add_err was being
-                       consumed by the explainer and never shown, so a refusal
-                       the explainer had no arm for printed nothing at all. */
                     tool_error("NETCTRL_INTERFACE_ADD refused %s: %s (%ld)",
                                (LONG)name, (LONG)tool_code_errno(add_err),
                                add_err);
@@ -970,32 +734,18 @@ int main(int argc, char **argv)
             }
             else if (text6[0] != '\0')
             {
-                /* IPv6 only, and it is online.  Reported as success, which is
-                   the whole point: this branch used to be the RETURN_WARN
-                   below. */
                 if (!quiet)
                     tool_printf("%s: online, address %s\n", (LONG)name,
                                 (LONG)text6);
             }
             else if (!ifc.up)
             {
-                /*
-                 * The file says STATE=down, so there is no address because
-                 * none was asked for. Sending someone to check a cable they
-                 * deliberately left unplugged is the same mistake as blaming a
-                 * driver for a card that opened.
-                 */
                 if (!quiet)
                     tool_printf("%s: the network is running, and %s is "
                                 "configured down\n", (LONG)name, (LONG)name);
             }
             else
             {
-                /*
-                 * Attached, and nothing gave it an address. WARN and not OK:
-                 * a script that reads the return code is the reason this
-                 * command exists in User-Startup.
-                 */
                 if (!quiet)
                 {
                     tool_printf("%s: the network is running, but this machine "
@@ -1013,12 +763,6 @@ int main(int argc, char **argv)
                 break;
         }
 
-        /*
-         * The network is up and the library is holding it, so this open has
-         * done its job. Before this was here, every AddNetInterface left one
-         * behind: a base on the library's child list naming a Task that is
-         * about to exit (tool_diag.c, tool_stack_start()).
-         */
         if (broken)
         {
             tool_fault(ERROR_BREAK);
@@ -1034,8 +778,6 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        /* The operation, then the symbol, then the number: the first line
-           is the one a user can quote and a maintainer can grep for. */
         tool_error("netstack_startup: %s (%s, %ld)",
                    (LONG)tool_net_error(err), (LONG)tool_code_net(err), err);
         explain_startup_failure(err, &ifc);
@@ -1051,12 +793,6 @@ int main(int argc, char **argv)
         index = tool_find_interface(name);
         if (index < 0)
         {
-            /*
-             * The file parses but the running stack does not know the name:
-             * the stack was already up when this interface file was written,
-             * or the name was removed from it. Add it, which is the same work
-             * NETCTRL_INTERFACE_ADD does for the library build above.
-             */
             UWORD slot = 0;
 
             err = netstack_interface_start(&ifc, &slot);
@@ -1095,14 +831,6 @@ int main(int argc, char **argv)
             ULONG live_mask = 0;
             NX_IP *ip;
 
-            /*
-             * A DHCP interface's address is not the one in the configuration
-             * file: the file says DHCP and has zeroes in it. Read the
-             * interface, where the lease landed. Printing the file's fields
-             * here reported eth0 as 0.0.0.0 netmask 0.0.0.0 one line after a
-             * successful lease. TIMEOUT is how long the lease is given to
-             * arrive.
-             */
             (VOID)wait_for_interface_address(index,
                                              (ifc.iptype != AMI_IPTYPE_STATIC &&
                                               ifc.iptype != AMI_IPTYPE_NONE)

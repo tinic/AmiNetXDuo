@@ -1,25 +1,5 @@
 /*
  * ClockSet, set the guest's clock.
- *
- * SECONDS is seconds since the AmigaOS epoch, 1978-01-01, the same count
- * timer.device and battclock.resource keep.  `ClockSet 0` is the machine with
- * no real-time clock, or a dead battery, which starts at the epoch and stays
- * there.
- *
- * tls.library skips certificate validity dates when the clock is outside a
- * plausible window (src/tlslib/tls_time.c), so an expired certificate is
- * accepted on a machine with no clock; `sntp` puts the clock right and the
- * check comes back.  Testing that needs a machine that starts with the clock
- * wrong, and FS-UAE hands its guest the host's wall clock, so under the
- * emulator every test would otherwise start with the clock already right.
- *
- * There is no C:Date on the harness disk: tools/amiberry-run.sh stages one
- * executable and nothing else, so this is that executable's companion.
- * tests/tls/tls_api.c does the same thing inline; this is the version a
- * scripted run can call.
- *
- * A test tool.  Not installed, not part of the command set.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -100,7 +80,6 @@ int main(int argc, char **argv)
     DeleteIORequest((struct IORequest *)req);
     DeleteMsgPort(port);
 
-    /* Read it back through DateStamp(), which is what tls.library reads. */
     day[0] = date[0] = time[0] = '\0';
     (VOID)DateStamp(&dt.dat_Stamp);
     dt.dat_Format  = FORMAT_DOS;

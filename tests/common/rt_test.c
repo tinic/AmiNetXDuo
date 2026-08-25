@@ -1,41 +1,9 @@
 /*
  * AmiNetXDuo, the compiler runtime, checked on the machine that runs it.
  *
- * src/common/ami_udivdi3.c supplies AmiNetXDuo's compiler runtime:
- * __mulsi3, __udivsi3,
- * __umodsi3, __divsi3, __modsi3, __muldi3, __udivdi3 and friends, plus the
- * three 64-bit shifts.  Most of them have two forms -- the portable one a 68000 needs and a
- * one-instruction one for the parts that have MULU.L and DIVU.L -- chosen from
- * AttnFlags at library or client startup.
- *
- * Two things are asked here, and the first is the one that matters:
- *
- *   1. Is each routine right?  Against a reference in this file that CANNOT
- *      be the routine under test.  Writing `a / b` for the expected value is
- *      the obvious C and it is worthless: on a -m68000 build that division IS
- *      a call to __udivsi3, so the test compares the routine with itself and
- *      passes however wrong it is.  The references below are built from
- *      MULU.W and from single-bit shifts, which the hardware has and the
- *      compiler never lowers to a call.
- *   2. Do the two forms agree?  ami_rt_cpu_select() takes the choice as
- *      parameters, so one binary runs both over the same operands.  The fast
- *      form is only asked for on a machine that has the instructions; on a
- *      68000 it is never selected and executing it would be an illegal
- *      instruction, which is what the flag is for.
- *
- * WHAT THIS FOUND the first time it ran: __lshrdi3, __ashldi3 and __ashrdi3
- * each compiled into a call to themselves, because `value >> count` on a
- * 64-bit value with a variable count is exactly what GCC lowers to a call to
- * __lshrdi3.  Reached from __udivmoddi4's wide-divisor branch, it ate the 4 KB
- * Shell stack and took the machine with it.  tools/check-rt-recursion.sh is
- * the static half of that; this is the half that runs.
- *
- *   cmake --build build --parallel --target rt_test
- *   tools/amiberry-run.sh -t 150 -m A600 build/tests/common/rt_test
- *
- * Output is key=value and an exit code.  It prints through RawDoFmt rather
- * than stdio for the reason tests/perf/n68kmv.c does: printf pulls in newlib's
- * double formatting and a 3.1 ROM has no mathieeedoubbas.library.
+ * The references here are built from MULU.W and single-bit shifts, which the
+ * hardware has and the compiler never lowers to a call: writing `a / b` for the
+ * expected value would compare __udivsi3 with itself and pass however wrong.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -164,11 +132,9 @@ u64     p = ref_mul32((u32)a, (u32)b);
 }
 
 /*
- * 64/64 by restoring division, one bit at a time.
- *
- * The numerator is taken apart into two u32 halves and the bit is picked with
- * a 32-bit shift, so nothing here needs a 64-bit variable shift -- which is
- * the operation that would call __lshrdi3, one of the routines under test.
+ * 64/64 by restoring division, one bit at a time.  The numerator is taken
+ * apart into two u32 halves and the bit picked with a 32-bit shift: nothing
+ * here may need a 64-bit variable shift, which would call __lshrdi3.
  */
 static u64 ref_divmod64(u64 n, u64 d, u64 *remainder)
 {
@@ -227,11 +193,8 @@ u64     r;
     return(neg_q ? -(s64)q : (s64)q);
 }
 
-/*
- * The shifts, one bit at a time.  Slow and beyond argument, which is the
- * point: the routines under test do it in two 32-bit steps and this does not
- * share a line of that reasoning.
- */
+/* The shifts, one bit at a time: the routines under test do it in two 32-bit
+   steps and this shares no line of that reasoning. */
 static u64 ref_lshr(u64 v, int count)
 {
     int i;
@@ -270,11 +233,8 @@ static s64 ref_ashr(s64 v, int count)
 static ULONG    failures;
 static ULONG    checks;
 
-/*
- * Operands chosen for the boundaries the two forms have between them: the
- * 16-bit split the portable multiply works in, the fits-in-16-bits test the
- * portable divide takes, the top bit, and the values either side of them.
- */
+/* Operands chosen for the boundaries the two forms have between them: the
+   16-bit split, the fits-in-16-bits test, the top bit, and their neighbours. */
 static const u32 vals[] =
 {
     0UL, 1UL, 2UL, 3UL, 0xFFFFUL, 0x10000UL, 0x10001UL,
@@ -316,10 +276,8 @@ static VOID check64(const char *what, const char *form,
 
 /* ------------------------------------------------------------- the set --- */
 
-/*
- * The 32-bit five, over every operand pair.  These exist only in a -m68000
- * translation unit, which one binary for every 68k means every build.
- */
+/* The 32-bit five, over every operand pair.  These exist only in a -m68000
+   translation unit, which one binary for every 68k means every build. */
 static VOID sweep32(const char *form)
 {
     int i, j;
@@ -360,12 +318,8 @@ static VOID sweep32(const char *form)
     }
 }
 
-/*
- * The 64-bit set.  The operands are built so that both halves of every
- * divisor are exercised: a divisor above 2^32 takes __udivmoddi4's wide
- * branch, which is where the shift helpers are called from and where the
- * recursion above was found.
- */
+/* A divisor above 2^32 takes __udivmoddi4's wide branch, which is where the
+   shift helpers are called from. */
 static VOID sweep64(const char *form)
 {
     int i, j;
@@ -399,11 +353,8 @@ static VOID sweep64(const char *form)
     }
 }
 
-/*
- * The three shifts, at every count from 0 to 64.  0 and 64 are the ends
- * libgcc defines a behaviour for and 32 is where the two-step form changes
- * shape; the counts between are where the recursion lived.
- */
+/* The three shifts, at every count from 0 to 64: 0 and 64 are the ends libgcc
+   defines a behaviour for, and 32 is where the two-step form changes shape. */
 static VOID sweep_shifts(const char *form)
 {
     int i, c;
@@ -458,16 +409,9 @@ int main(void)
         run_all("hardware");
 
         /*
-         * The 68060 configuration, asked for by hand on whatever this is.
-         *
-         * A 68060 is the part that has MULS.L and DIVU.L but not their
-         * 64-bit-result forms, so it runs the 32-bit fast paths with the
-         * wide multiply left portable.  No rig here produces it: AFF_68060
-         * is set by 68060.library rather than by any ROM, and under an
-         * emulator that does not load it a 68060 reports AttnFlags 0x0F and
-         * selects the same forms an 040 does.  The combination is a
-         * parameter, so it costs one more pass to check it everywhere
-         * instead of nowhere.
+         * A 68060 has MULS.L and DIVU.L but not their 64-bit-result forms.  No
+         * rig here produces it -- AFF_68060 is set by 68060.library, not by any
+         * ROM -- so the combination is asked for by hand.
          */
         ami_rt_cpu_select(1, 0);
         run_all("no-mulul");

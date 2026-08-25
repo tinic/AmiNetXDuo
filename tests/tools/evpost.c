@@ -1,88 +1,8 @@
 /*
  * EvPost, does a socket event signal a Task that has exited?
  *
- * src/bsdsocket/select.c's bsd_event_post() ends in Signal(base->sb_Task,
- * signals) and guards nothing but sb_Task == NULL.  It runs from NetX Duo's
- * receive, transmit and out-of-band callbacks, which is to say on every
- * packet.  sb_Task is the Task that opened the base, and nothing in AmigaOS
- * or in this library takes a base down when its owner exits: a program that
- * opens bsdsocket.library, makes a socket and exits without CloseLibrary()
- * leaves the base on the master's child list for good, pointing at a struct
- * Task Exec has since freed.
- *
- * This asks whether that write actually happens, and it answers by owning the
- * memory it is asking about.  Arguing from the source is not enough: if the
- * block were still allocated to something, or the socket were torn down with
- * its owner, the read would prove nothing either way.
- *
- * THE CONSTRUCTION
- *
- *   1. A child Process opens the library, asks for SBTC_SIGIOMASK with a
- *      distinctive mask, binds a UDP socket, and returns without closing
- *      either the socket or the library.
- *   2. This program waits until that Task is on none of Exec's lists --
- *      ThisTask, TaskReady, TaskWait -- which is the whole set for a live
- *      task, so it is gone.
- *   3. AllocAbs() the range the Task occupied.  AllocAbs() succeeds only on
- *      memory that is FREE, so success is itself the proof that the block was
- *      handed back, and from then on the range belongs to this program and
- *      nothing else can be blamed for what appears in it.
- *   4. Zero it.  Wait, and read it again with no packet sent: the quiet
- *      control.  A non-zero reading there would mean the measurement is noise.
- *   5. Send one UDP datagram to the port the dead child bound, and read the
- *      same longword back.
- *
- * If tc_SigRecvd comes back holding the mask the dead child asked for, then
- * Signal() performed a read-modify-write on freed memory, and on a real
- * machine that memory belongs to whoever got it next.
- *
- * THE LIVE CONTROL, WHICH IS THE HALF THAT MAKES A NEGATIVE READABLE
- *
- *   A second child does exactly what the first does but STAYS ALIVE and
- *   closes everything properly.  It binds the next port up and reports
- *   whether its own signal arrived.  Both children are stimulated by the same
- *   datagram burst through the same code path, so:
- *
- *     control got its signal, dead block written    -> reachable
- *     control got its signal, dead block untouched  -> the pointer was
- *                                                      latched; a live
- *                                                      client is unaffected
- *     control got nothing                           -> the stimulus never
- *                                                      arrived, and the run
- *                                                      says nothing at all
- *
- *   Without it, a build that had merely stopped delivering datagrams would
- *   read as a clean bill of health.
- *
- *   That child blocks in WaitSelect(), which is the shape that would break:
- *   WaitSelect() Waits on sb_EventSigMask and the only thing that sets it is
- *   the Signal() in bsd_event_post().  It is then poked once a round for
- *   SOAK_ROUNDS rounds -- a minute of guest time, so rather more than sixty
- *   sweeps -- and every round has to produce a wakeup.  A sweeper that clears
- *   sb_Task on a task that is ALIVE would turn those into timeouts, silently,
- *   for the rest of the session.  That is a worse failure than the defect and
- *   this is the check for it.
- *
- * THE WINDOW A ONCE-A-SECOND SWEEP CANNOT CLOSE
- *
- *   A third child repeats the orphan exactly, but is stimulated as fast as the
- *   probe can manage after its Task goes, with none of the grace the first was
- *   given.  On a swept build `fast_uaf=yes` is the expected reading and is not
- *   a failure: it is the size of the hole that remains, and it is also what
- *   proves a datagram still reaches an orphan's socket on that build -- so the
- *   headline `uaf=no` cannot be explained away as a packet that never arrived.
- *
- * THE TRIGGER NEEDS NO PEER.  The datagrams go to 127.0.0.1 first; the stack
- * has a loopback interface.  If that does not arrive the probe falls back to
- * a broadcast, which this build loops back
- * (NX_ENABLE_IP_BROADCAST_LOOPBACK).
- *
- * WHAT IT LEAVES BEHIND, ON PURPOSE
- *
- *   The claimed range is never freed and the orphaned base is never closed.
- *   Freeing the range would hand the dead base's Signal() target to the next
- *   allocation, which is the very thing being demonstrated.  This probe is
- *   therefore not a leak test and must not be run inside one.
+ * Leaves the claimed range allocated and the orphaned base open on purpose:
+ * this probe is not a leak test and must not be run inside one.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -113,31 +33,16 @@ static const char version_tag[] __attribute__((used)) =
 #define SOL_SOCKET_L            0xFFFF
 #define SO_BROADCAST_L          0x0020
 
-/*
- * SBTM_SETVAL(SBTC_SIGIOMASK), spelled out so this file needs no amitcp
- * headers: TAG_USER | (code << SBTB_CODE) | SBTF_SET, with SBTC_SIGIOMASK 2,
- * SBTB_CODE 1 and SBTF_SET 1 (amitcp/socketbasetags.h).
- */
+/* SBTM_SETVAL(SBTC_SIGIOMASK), spelled out so this file needs no amitcp
+   headers: TAG_USER | (code << SBTB_CODE) | SBTF_SET, SBTC_SIGIOMASK 2. */
 #define SBTM_SETVAL_SIGIOMASK   0x80000005UL
 
-/*
- * The masks the two children ask to be signalled with, and they have to be
- * disjoint from the ones the library allocates for itself or a hit proves
- * nothing.  AllocSignal(-1) fills from bit 31 DOWNWARDS and a child base
- * allocates exactly one, so sb_EventSigMask is at the top of the word: an
- * observed reading of 8F000000 is bit 31 (the base's own) plus the four
- * asked for here.  Eight allocations in one task would be needed to reach
- * bit 27, and these children make one each.
- *
- * Neither mask overlaps SIGF_DOS, SIGF_SINGLE or SIGBREAKF_CTRL_C, so Delay()
- * in the control child cannot manufacture one.
- */
+/* The masks the children ask to be signalled with.  They must be disjoint from
+   the ones the library allocates for itself (AllocSignal(-1) fills downwards
+   from bit 31) and from SIGF_DOS, SIGF_SINGLE and SIGBREAKF_CTRL_C. */
 #define MARK_MASK               0x0F000000UL    /* the orphan's  */
 #define CTRL_MASK               0x30000000UL    /* the live control's */
 
-/* The first orphan binds this, the live control the next one up, and the
-   second orphan -- the one used to measure the window a once-a-second sweep
-   cannot close -- the one after that. */
 #define EVPOST_PORT             2308
 #define CONTROL_PORT            2309
 #define FAST_PORT               2310
@@ -147,12 +52,8 @@ static const char version_tag[] __attribute__((used)) =
 #define DEATH_TICKS             500         /* 10 s */
 #define SETTLE_TICKS            25          /* 0.5 s */
 
-/*
- * The soak.  120 rounds half a second apart is a minute of guest time, so the
- * live client is poked across rather more than sixty sweeps and every one of
- * them has to have decided correctly that it is alive.  A shorter run would
- * not distinguish "the sweeper is right" from "the sweeper has not run yet".
- */
+/* 120 rounds half a second apart is a minute of guest time, so the live client
+   is poked across rather more than sixty sweeps. */
 #define SOAK_ROUNDS             120
 #define SOAK_ROUND_TICKS        25          /* 0.5 s between rounds */
 #define SOAK_WAIT_TICKS         50          /* 1 s to answer one round */
@@ -195,9 +96,8 @@ static BOOL check(BOOL ok, const char *what, LONG a)
 
 /* ----------------------------------------------------------- the vectors -- */
 /*
- * The base is a parameter, not a global: the two children and this program
- * hold DIFFERENT bases, and the whole point of the probe is which one a
- * signal is charged to.
+ * The base is a parameter, not a global: the children and this program hold
+ * DIFFERENT bases, and which one a signal is charged to is the whole point.
  */
 
 static LONG call_socket(struct Library *base, LONG domain, LONG type, LONG proto)
@@ -365,14 +265,9 @@ static LONG call_sbtaglist(struct Library *base, struct TagItem *tags)
 /* ------------------------------------------------------------- liveness -- */
 
 /*
- * Is this pointer still one of Exec's tasks?  The running one plus the two
- * scheduler lists is the whole set, which is the same test
- * src/bsdsocket/library.c's bsd_task_alive() makes.
- *
- * Disable() and not Forbid(): an interrupt moves a task between TaskWait and
+ * Disable(), not Forbid(): an interrupt moves a task between TaskWait and
  * TaskReady, so Forbid() does not make the walk safe.  Nothing here
- * dereferences the candidate -- the answer comes from the lists, not from the
- * block, which matters because the block may already be somebody else's.
+ * dereferences the candidate; the block may already be somebody else's.
  */
 static BOOL on_list(struct List *list, struct Task *task)
 {
@@ -405,13 +300,6 @@ static BOOL task_alive(struct Task *task)
 
 /* ------------------------------------------------------------ the cost -- */
 
-/*
- * How many nodes a sweep has to walk, and how long one walk takes on this
- * machine.  Both are read here rather than asserted: the sweeper does exactly
- * this scan, once a second, once per child base, so these two numbers are the
- * whole price of the fix and they belong in the transcript of the machine
- * that paid it rather than in an estimate.
- */
 static ULONG count_tasks(VOID)
 {
     struct Node *n;
@@ -438,12 +326,8 @@ static ULONG ticks_now(VOID)
 }
 
 /*
- * Microseconds for ONE liveness scan of a task that is on neither list, which
- * is the worst case and the only case that matters: a live owner is usually
- * found early, a dead one is never found at all and costs the full walk.
- *
- * Timed in batches of 100 so the DateStamp() calls are about one per cent of
- * the measurement rather than all of it.
+ * Microseconds for ONE liveness scan of a task on neither list, the worst case
+ * and the only one that matters.  Batched so DateStamp() is not the measure.
  */
 #define COST_BATCH      100
 #define COST_TICKS      100         /* 2 s */
@@ -471,7 +355,6 @@ static ULONG scan_micros(VOID)
     if (n == 0)
         return 0;
 
-    /* COST_TICKS ticks at 1/50 s is COST_TICKS * 20000 microseconds. */
     return (COST_TICKS * 20000UL) / n;
 }
 
@@ -537,10 +420,8 @@ static volatile ULONG           control_wakes;
 static volatile ULONG           control_bytes;
 
 /*
- * Opens the library, asks to be signalled, binds a socket, and RETURNS
- * WITHOUT CLOSING ANYTHING.  That is the program under study, not a mistake
- * in the probe: it is what a user's program does when it forgets, or is
- * broken by Ctrl-C, and nothing reclaims any of it.
+ * Opens the library, asks to be signalled, binds a socket, and RETURNS WITHOUT
+ * CLOSING ANYTHING.  That is the program under study, not a bug in the probe.
  */
 static VOID orphan_entry(VOID)
 {
@@ -577,17 +458,9 @@ static VOID orphan_entry(VOID)
 }
 
 /*
- * The same program, written correctly: it blocks in WaitSelect(), reads what
- * arrives, and closes both the socket and the library on the way out.
- *
- * This is the client the fix must not break, and WaitSelect() is the shape
- * that would break.  It Waits on sb_EventSigMask, and the only thing that
- * sets that bit is the Signal() in bsd_event_post() -- the very call the
- * sweeper decides whether to make.  A sweeper that clears sb_Task on a task
- * that is alive turns every one of these wakeups into a timeout, silently and
- * for the rest of the session, and that is a worse failure than the defect
- * being fixed.  So the parent pokes this child once per round for many rounds,
- * and every round is a fresh sweep that has to have got the answer right.
+ * The same program written correctly: it blocks in WaitSelect(), which is the
+ * shape a sweeper that clears sb_Task on a LIVE task would break, silently
+ * turning every wakeup into a timeout for the rest of the session.
  */
 static VOID control_entry(VOID)
 {
@@ -623,7 +496,6 @@ static VOID control_entry(VOID)
     }
     control_step = 4;
 
-    /* Start from a clean slate: nothing before this point is the stimulus. */
     (VOID)SetSignal(0UL, CTRL_MASK);
 
     control_step  = 5;
@@ -795,20 +667,14 @@ int main(void)
     say("evpost/death_ticks=%ld\n", (LONG)i, 0);
     check(died, "the orphan Task is on none of Exec's lists", (LONG)i);
 
-    /*
-     * A second's grace before the claim.  Any periodic sweeper gets its
-     * chance here, which is the point: the probe must measure the fix as a
-     * user would meet it, not race it.
-     */
+    /* A second's grace: any periodic sweeper gets its chance here, which is
+       the point -- measure the fix as a user meets it, do not race it. */
     Delay(SETTLE_TICKS * 4);
 
     /* ---- own the block --------------------------------------------------- */
 
-    /*
-     * AllocAbs() succeeds only if the whole range is free.  Success is the
-     * evidence that the Task was handed back, and it is also what makes
-     * everything after this a statement about memory this program owns.
-     */
+    /* AllocAbs() succeeds only if the whole range is free, so success is the
+       evidence that the Task was handed back. */
     claimed = NULL;
     for (i = 0; i < 50 && claimed == NULL; i++)
     {
@@ -822,11 +688,6 @@ int main(void)
 
     if (claimed == NULL)
     {
-        /*
-         * Not a pass.  Either the block was never freed, or something took it
-         * between the death and the claim.  Reading it now would be reading
-         * somebody else's memory and the answer could not be attributed.
-         */
         check(FALSE, "AllocAbs() reclaimed the freed Task block", 0);
         Printf((CONST_STRPTR)
                "evpost/verdict=inconclusive (the block could not be owned)\n");
@@ -899,13 +760,8 @@ int main(void)
     say("evpost/uaf=%s\n",
         (LONG)(((after & MARK_MASK) != 0) ? "yes" : "no"), 0);
 
-    /*
-     * The reading, stated as the question it answers.  Deliberately NOT a
-     * check(): "reachable" and "latched" are both results, and which one is
-     * expected depends on which build this is.  The gate lives in the run
-     * script, which knows.  The one thing that is always wrong is a stimulus
-     * that did not arrive, because it makes the other reading meaningless.
-     */
+    /* Deliberately not a pass/fail on the reading itself: reachable and
+       latched are both results, and the gate lives in the run script. */
     check(woke,
           "the stimulus reached a LIVE client, so the reading means something",
           (LONG)control_step);
@@ -926,19 +782,9 @@ int main(void)
     /* ---- the soak: does a live WaitSelect() client keep waking? ---------- */
 
     /*
-     * The false-negative check, and the one that matters more than the fix.
-     *
-     * A sweeper runs once a second whether or not anything is wrong, and every
-     * pass is another chance to clear sb_Task on a task that is alive.  The
-     * cost of getting that wrong is not a crash: it is a client that never
-     * wakes again, for the rest of the session, looking exactly like the
-     * network having gone away.  So the live child is poked once per round for
-     * SOAK_ROUNDS rounds spanning rather more than SOAK_ROUNDS sweeps, and
-     * every single round has to produce a wakeup.
-     *
      * A missed round is recorded rather than broken out of: how many were
-     * missed, and whether they stop for good after the first, is the
-     * difference between a dropped datagram and a latched pointer.
+     * missed, and whether they stop for good after the first, separates a
+     * dropped datagram from a latched pointer.
      */
     {
         ULONG seen  = control_wakes;
@@ -955,15 +801,9 @@ int main(void)
                                broadcast ? 0xFFFFFFFFUL : 0x7F000001UL,
                                CONTROL_PORT);
 
-            /*
-             * POLL FOR THE WAKEUP, do not sample at a fixed offset.  Sampling
-             * every SOAK_ROUND_TICKS against a child on its own schedule
-             * reports a miss whenever the two drift past each other and a
-             * double on the round after, which measures the drift and not the
-             * thing being asked about.  What is being asked is "did this
-             * datagram wake the client within a bounded time", so wait for
-             * that answer and bound the wait.
-             */
+            /* Poll for the wakeup rather than sampling at a fixed offset:
+               sampling against a child on its own schedule measures the
+               drift, not whether the datagram woke the client in time. */
             for (waited = 0; waited < SOAK_WAIT_TICKS; waited++)
             {
                 if (control_wakes > seen)
@@ -1003,16 +843,9 @@ int main(void)
     /* ---- the residual window ------------------------------------------- */
 
     /*
-     * What a once-a-second sweep cannot do is act inside the second.  This
-     * measures that rather than leaving it as a caveat: a SECOND orphan is
-     * made and stimulated as fast as the probe can manage after its Task
-     * goes, with none of the grace the first one was given.
-     *
-     * On a build with the sweep, `fast_uaf=yes` is the expected reading and is
-     * NOT a failure -- it is the size of the remaining hole, and it is also
-     * the thing that proves the datagram still reaches an orphan's socket on
-     * this build, so the first orphan's `uaf=no` cannot be explained away as
-     * a packet that never arrived.
+     * On a build with the sweep `fast_uaf=yes` is expected and is NOT a
+     * failure: it is the size of the remaining hole, and it proves a datagram
+     * still reaches an orphan's socket on this build.
      */
     orphan_ready  = FALSE;
     orphan_task   = NULL;
@@ -1081,11 +914,8 @@ int main(void)
     say("evpost/tasks=%ld\n", (LONG)count_tasks(), 0);
     say("evpost/scan_us=%ld\n", (LONG)scan_micros(), 0);
 
-    /*
-     * The claimed range is NOT freed and the orphan's base is NOT closed.
-     * See the header: giving the range back would hand a dead base's Signal()
-     * target to the next allocation, which is the defect, not the test.
-     */
+    /* The claimed range is NOT freed and the orphan's base is NOT closed:
+       giving the range back is the defect, not the test. */
     say("evpost/retained=%ld bytes, deliberately\n", (LONG)claim_bytes, 0);
 
     CloseLibrary(base);

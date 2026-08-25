@@ -1,89 +1,5 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR OUTBOUND SOURCE SELECTION.
-#
-#   tests/tools/run-srcsel.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                             [-N board] [-B backend]
-#
-# WHAT IT IS PROVING, HALF ONE: THE SOURCE THE CALLER NAMED
-#
-#   bind() names a local address and the send direction has to honour it.
-#   NetX Duo binds a socket to a port only, so the library maps the bound
-#   address to the index nxd_udp_socket_source_send() takes for a datagram and
-#   nxd_tcp_client_socket_source_connect() takes for a connect.
-#
-#   The assertion is on the source address the RECEIVER saw, not on the send
-#   returning len, the send returned len before any of this existed, with
-#   whatever source NetX picked.  The TCP arm asserts the address the
-#   ACCEPTING end reports, for the same reason.
-#
-#   It also holds the refusal.  A destination the bound address cannot reach
-#   is ENETUNREACH, for a datagram, which used to be dropped inside
-#   _nx_ip_packet_send() with the send already reported successful, and for a
-#   connect(), before the SYN.
-#
-# WHAT IT IS PROVING, HALF TWO: THE SOURCE NOTHING NAMED
-#
-#   RFC 6724 source address selection, src/ipv6/ipv6_srcsel.c, which decides
-#   what an unbound AF_INET6 socket sends from.  tests/ipv6/host drives its
-#   rules one at a time over a hand-built NX_IP, which is the only way to reach
-#   most of them; this is the check that the same code, in the shipped library,
-#   on a booted machine with a real interface, answers the same.
-#
-#   Three destinations and three different answers: a global on this node's own
-#   prefix takes the global source, a link-local destination takes the
-#   link-local, and ::1 takes ::1.  The fourth is the refusal: a global on a
-#   prefix that is not on-link, with no default router, has no outgoing
-#   interface and therefore no source.
-#
-#   WHAT THIS ARM DOES NOT SEPARATE, said plainly.  The guest has one interface
-#   with one link-local and one global on it, and in that configuration the
-#   routine this replaced answers all four the same way -- every rule agrees
-#   when there is nothing for them to disagree about.  So this is a wiring and
-#   regression gate, not a rule gate: the rules are separated in
-#   tests/ipv6/host/test_ipv6_srcsel_host.c, which can build the address tables
-#   that force them apart, and a lab guest cannot.
-#
-#   It does go red.  Verified 2026-08-16 by building bsdsocket.library with the
-#   comparator neutralised, so the selection returns the first candidate: 9 of
-#   the 10 v6 keys FAIL and the harness exits 1.  A second global-scope address
-#   on the guest -- a ULA beside the global -- would let this arm separate Rule
-#   6 as well, which is the one docs/CONFORMANCE.md names; the interface file
-#   carries one ADDRESS6 and that is what stops it today.
-#
-# WHAT IT DOES NOT PROVE.  The case the source connect exists for is two
-# interfaces, source on one, route out of the other, and the guest here
-# has one.  What is measured is the single-interface half.
-#
-# BRIDGED, NEVER SLIRP.  -B names the host interface to bridge onto and the
-# script refuses the string `slirp` outright.  Every assertion here is on what
-# the GUEST prints and nothing on the LAN has to answer, so the bridge is not
-# carrying test traffic -- it is there because slirp is not a network and a
-# result taken over it says nothing about the stack.
-#
-# ADDRESSES.  A /24 nothing on the host's LAN uses for IPv4, and the RFC 3849
-# documentation prefix for IPv6, so no address here is claimed or answered for
-# anywhere.  The IPv6 four are constants shared with tests/tools/srcprobe.c:
-#
-#   2001:db8:6724:1::10/64   ADDRESS6, the guest's own          SELF6
-#   2001:db8:6724:1::1       same /64, on-link                  ONLINK6
-#   2001:db8:6724:9::1       a different /64, no route to it    OFF6
-#   fe80::1                  a link-local destination           LL6
-#
-#   Changing one means changing both files.  CONFIGURE6=STATIC and no
-#   GATEWAY6, deliberately: it makes the whole arm independent of whether the
-#   lab has a router advertising anything this minute, and it is what leaves
-#   OFF6 with no route.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
-# OUTPUT IS key=value AND AN EXIT CODE.  Nothing here reads prose, from the
-# guest or from itself; srcprobe.c prints one `key=ok` or `key=fail:<errno>`
-# line per check and the keys below are matched exactly.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -140,16 +56,12 @@ fi
     exit 2
 }
 
-# The probe is given `self` on its command line before the guest boots, so a
-# DHCP lease is not knowable then and the IPv4 side is static too.
 SELF="${AMINETXDUO_SRC_SELF:-10.78.0.2}"
 PEER="${AMINETXDUO_SRC_PEER:-10.78.0.1}"
 MASK="${AMINETXDUO_SRC_MASK:-255.255.255.0}"
 
-# Shared with srcprobe.c; see the block comment above.
 SELF6="${AMINETXDUO_SRC_SELF6:-2001:db8:6724:1::10/64}"
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/srcsel-stage"
 rm -rf "$STAGE"
@@ -169,10 +81,6 @@ ADDRESS6=$SELF6
 STATE=up
 IFEOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name in
-# DEVICE=.  Without it the line above stands whatever -N asked for, so every
-# board but the A2065 opens a2065.device against hardware that is not there and
-# the run reports a stack failure that is really a staging one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -191,17 +99,9 @@ SYS:AddNetInterface eth0
 SYS:SrcProbe $SELF $PEER
 EOF
 
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-srcsel}"
 
-# A FRESH MAC EVERY RUN, not one pinned to this harness.  A repeated MAC means
-# a repeated link-local, and a router or switch that still holds the previous
-# run's neighbour entry can answer for a guest that never finished bringing the
-# address up -- which is the shape of failure this arm is looking for.  The
-# byte can be pinned with AMINETXDUO_SRCSEL_RUNBYTE when a run has to be
-# repeated on the same address.
-#
 # 02:41:4d:4c:<runbyte>:7a: fourth byte 0x4c keeps this clear of both the
 # derived space in tools/amiberry-run.sh (0x49) and run-cardsweep6.sh's (0x4b).
 RUNBYTE="${AMINETXDUO_SRCSEL_RUNBYTE:-$(printf '%02x' $((RANDOM % 256)))}"
@@ -239,8 +139,6 @@ FAILED=0
 fail() { echo "$1=FAIL"; FAILED=1; }
 pass() { echo "$1=ok"; }
 
-# The probe running twice means the machine reset, which a wrong source index
-# into nx_ip_interface[] is one way to produce.
 STARTS=$(grep -c "SYS:SrcProbe" "$REPORT" || true)
 echo "srcsel_probe_starts=$STARTS"
 if [ "$STARTS" -eq 1 ]; then
@@ -263,8 +161,6 @@ else
     grep '=fail:' "$REPORT" || true
 fi
 
-# Named individually so a silently skipped arm cannot pass by absence.  The
-# IPv6 keys are the RFC 6724 half.
 for want in \
     v4_udp_bound_iface_src \
     v4_udp_bound_loopback_src \

@@ -34,7 +34,6 @@
 #   -m MODEL           emulator profile (default A1200, the only timing one)
 #   -t SECS            timeout (default 300)
 #   -T TAG             run tag; results land in build/amiberry-testhd-<tag>/
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -68,7 +67,6 @@ case "$BUILD" in
     *)  BUILD="$ROOT/$BUILD" ;;
 esac
 
-# ------------------------------------------------------------- the probe ----
 
 . "$ROOT/tools/amiga-toolchain.sh"
 
@@ -89,7 +87,6 @@ if [ ! -x "$PROBE" ] ||
                     "$ROOT/tests/tcpdrill/tapdev.c"
 fi
 
-# ------------------------------------------------------------- the stack ----
 
 STAGE="$ROOT/build/tick-stage-$TAG"
 rm -rf "$STAGE"
@@ -110,8 +107,6 @@ case "$STACK" in
         [ -d "$RSDIR" ] || { echo "no Roadshow at $RSDIR (-R DIR)" >&2; exit 2; }
         [ -f "$RSDIR/Libs/bsdsocket.library" ] || {
             echo "no bsdsocket.library under $RSDIR/Libs" >&2; exit 2; }
-        # Their whole Libs/ drawer: AddNetInterface is not ours and opening
-        # something it needs is not a thumb on the scale.
         cp -R "$RSDIR/Libs/." "$STAGE/libs/"
         cp "$RSDIR/C/AddNetInterface" "$STAGE/AddNetInterface"
         cp "$ROOT/tests/compare/tick-if.roadshow" "$STAGE/devs/NetInterfaces/tap0"

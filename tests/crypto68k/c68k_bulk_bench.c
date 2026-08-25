@@ -1,29 +1,6 @@
 /*
  * AmiNetXDuo, the TLS record path, measured: AES-128-CBC and SHA-256.
  *
- *   docs/RESEARCH.md 15 left the bulk path as the one row where neither this
- *   tree nor AmiSSL had any m68k assembly, and named it the largest remaining
- *   lever on `https://` throughput.  Before writing any, two things had to be
- *   settled on the machine rather than from the literature:
- *
- *     1. Which AES suits a part with no data cache.  The classic four-table
- *        layout, the one-table-and-rotates layout that nx_crypto_aes.c uses,
- *        and a byte-oriented S-box are three different answers to "which
- *        resource is scarce", and the usual reasoning assumes a cache this
- *        machine does not have.
- *     2. Where the instruction cache knee falls.  It is 256 bytes here, so
- *        unrolling can and does make things slower, and the turning point has
- *        to be measured before an assembly round is written.
- *
- *   So this program is three things in one run: instruction-cost kernels,
- *   every AES and SHA-256 variant timed on the same buffer, and every one of
- *   them checked against the published vectors and against each other before
- *   a single time is believed.
- *
- *   As in c68k_amissl_bench.c, ratios measured back to back inside one run are
- *   the only figures an emulator does not distort, and the only difference
- *   between two rows here is the code that ran.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -77,8 +54,6 @@ static NX_CRYPTO_HMAC       b_our_hmac;
 static C68K_SHA256          b_our_hmac_ctx;
 
 
-/* --------------------------------------------------------------- report -- */
-
 static VOID b_fail(const char *what)
 {
 
@@ -104,7 +79,6 @@ ULONG   i;
     }
 }
 
-/* Bytes per second, in KiB/s, from a microsecond figure for B_BULK_BYTES. */
 static ULONG b_kbs(ULONG micros)
 {
 
@@ -116,8 +90,6 @@ static ULONG b_kbs(ULONG micros)
     return(((B_BULK_BYTES * 1000uL) / micros) * 1000uL / 1024uL);
 }
 
-
-/* ================================================= instruction kernels ==== */
 
 extern VOID bk_empty(ULONG reps);
 extern VOID bk_add(ULONG reps);
@@ -162,16 +134,6 @@ static APTR     b_table;                /* 4 KB of Fast RAM                */
 typedef VOID (*B_REG_KERNEL)(ULONG);
 typedef VOID (*B_MEM_KERNEL)(APTR, ULONG);
 
-/*
- * Picoseconds per body slot.
- *
- * The first version of this was wrong in a way that has caught this project
- * twice (see the note above c_measure_ps() in tests/perf/cpucal.c): ULONG is
- * 32 bits, a 23 ms kernel is 23,000,000 nanoseconds, and multiplying that by
- * the further thousand picoseconds want overflows and prints a rotate as
- * costing nothing.  So the scaling divides the slot count by a thousand
- * instead, and the rep count is a round 40,000 to keep that exact.
- */
 static ULONG b_scale(ULONG micros, ULONG slots)
 {
 
@@ -232,11 +194,6 @@ ULONG   cycles_x100;
              cycles_x100 / 100uL, cycles_x100 % 100uL);
 }
 
-/*
- * The instruction-cache sweep reports per ADD.L for a straight-line body of
- * the named size.  The loop overhead is spread over a different number of
- * slots in each row, so it is divided out here rather than subtracted.
- */
 static VOID b_report_ic(const char *what, B_REG_KERNEL fn, ULONG body_bytes)
 {
 
@@ -339,8 +296,6 @@ static VOID b_bench_kernels(VOID)
 }
 
 
-/* ============================================================== vectors ==== */
-
 /* FIPS-197 C.1, AES-128 with key 000102..0f. */
 static const UCHAR b_fips_key128[16] =
 {
@@ -412,8 +367,6 @@ static const UCHAR b_hmac_rfc4231_2[32] =
 };
 
 
-/* ================================================================== AES ==== */
-
 static UINT b_aes_check_vectors(VOID)
 {
 
@@ -451,12 +404,6 @@ UINT    bad;
     return(bad);
 }
 
-/*
- * The awkward shapes.  Every one of these has been a bug in somebody's CBC:
- * a zero-length call that walks off the end, a single block that never enters
- * the loop, a chaining value that is not carried between calls, and an
- * in-place transform that reads a byte it has already overwritten.
- */
 static VOID b_aes_check_shapes(VOID)
 {
 
@@ -497,7 +444,6 @@ UINT    i;
     b_check("CBC chaining across calls", got, ref, 64uL);
     b_check("CBC chaining leaves the same IV", iv_a, iv_b, 16uL);
 
-    /* Decrypt in place, which is what a record layer wants to do. */
     for (i = 0; i < 64u; i++)
     {
         got[i] = ref[i];
@@ -509,7 +455,6 @@ UINT    i;
     c68k_aes_cbc_decrypt(&b_aes, iv_a, got, got, 4uL);
     b_check("CBC decrypt in place", got, b_plain, 64uL);
 
-    /* One block, both directions. */
     for (i = 0; i < 16u; i++)
     {
         iv_a[i] = b_iv[i];
@@ -559,7 +504,6 @@ UINT    saved;
 
     saved = c68k_aes_variant;
 
-    /* The reference: the vendored implementation, on the same buffer. */
     if (_nx_crypto_aes_key_set(&b_nx_aes, b_key,
                                NX_CRYPTO_AES_KEY_SIZE_128_BITS) !=
         NX_CRYPTO_SUCCESS)
@@ -650,8 +594,6 @@ UINT    saved;
 }
 
 
-/* ============================================================= SHA-256 ==== */
-
 static VOID b_sha_one(const UCHAR *msg, ULONG len, const UCHAR *want,
                       const char *what)
 {
@@ -726,7 +668,6 @@ C68K_SHA256 ctx;
 
     saved = c68k_sha256_variant;
 
-    /* The reference. */
     start = c68k_eclock();
     (VOID)_nx_crypto_sha256_initialize(&b_nx_sha, NX_CRYPTO_HASH_SHA256);
     (VOID)_nx_crypto_sha256_update(&b_nx_sha, b_plain, (UINT)B_BULK_BYTES);
@@ -770,13 +711,6 @@ C68K_SHA256 ctx;
     c68k_sha256_variant = saved;
 }
 
-
-/* ================================================= HMAC, through nx_crypto == */
-/*
- * HMAC is nx_crypto's framing with the hash swapped underneath it, which is
- * exactly how src/tls/ami_tls_crypto.c wires it, so measuring it any other
- * way would measure something the TLS stack does not run.
- */
 
 static VOID b_bench_hmac(VOID)
 {
@@ -845,15 +779,6 @@ UINT    saved;
     c68k_sha256_variant = saved;
 }
 
-
-/* ================================================ ChaCha20-Poly1305 ======= */
-/*
- * The other record path.  The case for adding it rests on one claim: that on a
- * 68020 an AEAD nobody has hand-optimised beats the AES-CBC-plus-HMAC pair two
- * rounds of work have already gone into.  Checked against RFC 8439's own
- * vectors first, 2.4.2 for the cipher, 2.5.2 for the authenticator, 2.8.2
- * for the AEAD.
- */
 
 static const UCHAR b_cc_key[32] =
 {
@@ -993,14 +918,6 @@ UINT            i;
     b_check("RFC 8439 2.8.2 tag on decrypt", b_tag, b_aead_tag, 16uL);
 }
 
-/*
- * The block function this build ships against the portable C one, eight
- * blocks deep.  RFC 8439's vectors check one block and a keystream; this
- * checks that the register schedule in c68k_chacha20.S is still the same
- * function after the counter has advanced, which is what an assembly bug
- * that only appeared on the second block would look like.  It costs nothing
- * on a build with no assembly, where it compares the C against itself.
- */
 #define B_CC_BLOCKS     8u
 
 static VOID b_chacha_check_core(VOID)
@@ -1043,24 +960,6 @@ UINT            o;
             got, want, (ULONG)(B_CC_BLOCKS * 64u));
 }
 
-/*
- * Poly1305's block function, the shipped one against the portable C one, over
- * the same blocks and from the same starting accumulator.
- *
- * The equivalent of the ChaCha20 check above, for the same reason: RFC 8439
- * 2.5.2 authenticates 34 bytes, two blocks and a partial, and a kernel bug in
- * the carry between limbs or in the fold round the top of 2^130 can hide until
- * the accumulator is large and the limbs have been near their bounds a few
- * hundred times.  So it runs both over 1, 2, 3, 5, 17 and 200 blocks, twice
- * per count, once with the 2^128 bit a full block carries and once without,
- * which is the short-final-block case c68k_poly1305_finish() takes and which
- * nothing else here reaches with a grown accumulator.
- *
- * It compares the accumulator rather than a tag: h is what the kernel writes,
- * a tag is h after a reduction that is common to both paths, and a difference
- * in the fifth limb that the final carry happens to absorb should still be a
- * failure.
- */
 static const ULONG b_poly_block_counts[] =
 {
     1uL, 2uL, 3uL, 5uL, 17uL, 200uL
@@ -1089,9 +988,6 @@ UINT            pass;
             c68k_poly1305_initialize(&ours, b_poly_key);
             c68k_poly1305_initialize(&ref, b_poly_key);
 
-            /* Not from zero: run 64 blocks in first, through both paths, so
-               that the counts below compare a kernel picking up an accumulator
-               it did not itself produce. */
             c68k_poly1305_blocks(&ours, b_plain, 64uL, (ULONG)1uL << 24);
             c68k_poly1305_blocks_c(&ref, b_plain, 64uL, (ULONG)1uL << 24);
 
@@ -1105,23 +1001,6 @@ UINT            pass;
     }
 }
 
-/*
- * Independent known answers: the tag over the first N bytes of b_plain under
- * RFC 8439 2.5.2's key, for seventeen lengths that straddle every boundary the
- * buffering has, empty, one byte, one short of a block, exactly a block, one
- * past it, and the same around 32, 64, 128, 1024 and the whole 16 KiB.
- *
- * They were computed off-target from the definition in RFC 8439 2.5, r
- * clamped, the message read little-endian sixteen bytes at a time with the
- * 2^128 bit appended, the accumulator multiplied by r modulo 2^130 - 5, s
- * added at the end, by a generator that reproduces 2.5.2's own tag before it
- * emits any of these.  They are not this implementation's own output recorded,
- * which would only prove it is deterministic.
- *
- * Every length is run twice: once as a single update, and once split at 1, 13
- * and the rest, which lands the split inside a block for every length past 14
- * and exercises the leftover buffer in the state a packet chain leaves it.
- */
 static const ULONG b_poly_lens[] =
 {
     0uL, 1uL, 15uL, 16uL, 17uL, 31uL, 32uL, 33uL, 63uL, 64uL, 127uL, 128uL,
@@ -1198,12 +1077,6 @@ UINT    k;
     }
 }
 
-/*
- * Neither the RFC vectors nor the comparisons above would catch a verify()
- * that always agreed.  So: the real tag, then every one of the sixteen bytes
- * flipped in turn, then a record whose ciphertext was altered under an
- * untouched tag, which is the forgery an attacker can construct.
- */
 static VOID b_poly_check_forged(VOID)
 {
 
@@ -1291,9 +1164,6 @@ ULONG   odd_us;
     c68k_poly1305_finish(&b_poly, b_tag);
     mac_us = c68k_eclock_micros(c68k_eclock() - start);
 
-    /* And the portable C block function over the same bytes, in the same run
-, the only comparison an emulator does not distort, and the one that
-       says what the assembly is worth on this machine. */
     c68k_poly1305_initialize(&b_poly, b_poly_key);
     start = c68k_eclock();
     c68k_poly1305_blocks_c(&b_poly, b_cipher, B_BULK_BYTES / 16uL,
@@ -1308,8 +1178,6 @@ ULONG   odd_us;
              (LONG)"      its block function, portable C",
              mac_c_us, b_kbs(mac_c_us));
 
-    /* And through the AEAD, which is what a record costs: the two above plus
-       one extra ChaCha20 block for the one-time Poly1305 key. */
     start = c68k_eclock();
     c68k_chacha20_poly1305_initialize(&b_aead, b_aead_key, b_aead_nonce);
     c68k_chacha20_poly1305_associate(&b_aead, b_aead_aad, 13uL);
@@ -1329,8 +1197,6 @@ ULONG   odd_us;
     c68k_log("      the cipher starting one byte in: %lu us", odd_us);
 }
 
-
-/* ============================================================== summary ==== */
 
 static VOID b_summary(VOID)
 {
@@ -1381,11 +1247,6 @@ C68K_SHA256 ctx;
     c68k_log("    recv: HMAC %lu us + AES decrypt %lu us = %lu us, %lu KB/s",
              mac, dec, mac + dec, b_kbs(mac + dec));
 
-    /*
-     * The same record through the AEAD, in one call each way, because that is
-     * how it is paid: the cipher and the authenticator are one operation, not
-     * two passes to choose between.
-     */
     start = c68k_eclock();
     c68k_chacha20_poly1305_initialize(&b_aead, b_key, b_iv);
     c68k_chacha20_poly1305_associate(&b_aead, b_iv, 13uL);
@@ -1416,8 +1277,6 @@ C68K_SHA256 ctx;
              ((mac + dec) * 100uL / aead_dec) % 100uL);
 }
 
-
-/* ================================================================== body == */
 
 static int b_body(VOID)
 {

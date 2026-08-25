@@ -1,84 +1,5 @@
 #!/usr/bin/env bash
-#
 # Fitz bulk throughput, on a link that has latency.
-#
-#   tests/perf/run-fitzbench.sh [-H user@host] [-A addr] [-m MODEL] [-c CPU]
-#                               [-b BUILDDIR] [-k KB] [-C CHUNK] [-r REPS]
-#                               [-T TAG] [-t SECONDS] [-p PORT] [-s] [-x]
-#                               [-a] [-B IFACE] [-N BOARD]
-#                               [-w] [-l PCT] [-L PCT]
-#
-# WHAT IT MEASURES
-#
-#   The guest mounts a Fitz share served by a THIRD machine on the LAN and
-#   FitzBench writes a file to it and reads it back, timed with ReadEClock().
-#   Then it does the same against RAM:, which is the same program and the same
-#   AmigaDOS with no network under it, the control that says how much of the
-#   figure is ours.
-#
-#   READ IS THE FIGURE TO COMPARE ON.  tools/profiler/Profile over a real mount,
-#   2026-08-02: the read arm leaves the guest CPU 60% idle, the write arm 22%,
-#   which is what the write figure pricing buffer acceptance rather than
-#   throughput looks like from the CPU's side.  Of the busy CPU on a read,
-#   bsdsocket.library is 79%, Exec 9%, the driver 6% and Fitz itself 4%.
-#
-# WHY A BRIDGED EMULATOR AND NOT FS-UAE
-#
-#   Every throughput conclusion this project drew before this script came from
-#   SLIRP, whose bandwidth-delay product is nearly zero, or from loopback,
-#   where it is exactly zero.  docs/RESEARCH.md 64.6 spells out what that makes
-#   unanswerable: a receive window cannot be shown to matter on a link with no
-#   delay term, whatever the CPU is doing.  A bridged emulator puts the A2065
-#   on a real adapter, so the guest takes a real DHCP lease and the peer is a
-#   real machine several hops of real hardware away.
-#
-#   -a is bridged AMIBERRY, run on the Linux host it is installed on, the
-#   emulator is local, so this script has to BE on that machine.  -B names the
-#   host NIC (ens18) and tools/amiberry-run.sh reads the backend back out of the
-#   emulator log, so a run that quietly fell back to NAT fails rather than
-#   printing a number.
-#
-#   The default is bridged WINUAE over ssh to winbuilder, which is where this
-#   script started.
-#
-#   -s runs it on FS-UAE/SLIRP against a server on this Mac instead.  That is a
-#   smoke test for the harness, not a measurement: read nothing into the
-#   numbers it prints.
-#
-# -N NAMES THE CARD AND ITS DRIVER BOTH.  The board key goes to the emulator,
-# and tools/sana2-stage.sh's table decides which SANA-II driver is staged and
-# what DEVS:NetInterfaces/eth0 asks for.  A card whose driver is not on this
-# host is refused before the boot rather than booted into "the network did not
-# start".  Amiberry only: the other two branches boot an a2065 and say so.
-#
-# THE PEER MUST BE A THIRD MACHINE.  A frame the emulator's host sends to the
-# guest's MAC leaves its NIC and never comes back to that NIC's own pcap
-# capture, so a server on the host is unreachable from the guest while being
-# reachable from everywhere else (docs/RESEARCH.md 63).  That holds for
-# Amiberry's uaenet_pcap exactly as it holds for WinUAE's.
-#
-# THE PATCHED WINUAE IS THE DEFAULT HERE.  6.0.3 copies a captured frame into a
-# 4000-byte buffer without checking its length and dies on the first coalesced
-# receive, which a bulk transfer produces immediately; C:\winuae-patched is a
-# build from master that does not (63.4, 63.5).
-#
-# REPEATABILITY.  Three reps per direction inside one boot, and the boot itself
-# is cheap enough to repeat.  Quote the mean and the spread, and compare
-# libraries rather than quoting an absolute rate: warp mode is on, so the
-# emulated CPU has no defined speed and only ratios between runs mean anything.
-#
-# -w ALSO MEASURES THE INBOUND LOSS RATE, which is what to gate on rather than
-# the rate.  The peer captures its own egress and tests/perf/lossrate.py turns
-# it into retransmissions over data segments sent, over the read phases: one
-# number, taken where the counters are exact, and upstream of the throughput
-# rather than downstream of everything.  -l fails the run above a raw loss
-# percentage and -L above the percentage with spurious retransmissions
-# removed; both imply -w.  What to set them to is a property of the rig and
-# has to be measured on it, across 29 runs of 13 libraries on one rig the
-# raw rate's within-library spread was 13% of its own mean and the worst pair
-# differed by 58%, so a single run cannot carry a tight threshold and the
-# useful gate is the median of three.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -87,23 +8,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 . "$ROOT/tests/perf/peercap.sh"
 
-# NOT playhouse2, whatever its convenience: it is an LXC container on a veth,
-# so its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever
-# fixes up.  Our stack rejects it, correctly, and the run reads as "1
-# connection made, 6 bad packets, 6 checksum errors" and no transfer, which
-# looks like our defect and is not.  The peer must also be a THIRD machine:
-# a frame the emulator's own host sends to the guest's MAC never comes back to
-# that NIC's pcap capture (63).
-# Checked after getopts, not here: both tests used to run before the option
-# parse below, so -H was rejected before it was read and -H turo@playhouse2 went
-# straight past the guard the env var could not.
 PEER="${AMINETXDUO_FITZ_PEER:-}"
-# ssh dials a name, the guest dials a number, and they are two spellings of one
-# machine.  Derived from $PEER rather than defaulted, because the two used to be
-# independent inputs with a validated name and an unvalidated address: the
-# default was 192.168.1.184, which is the playhouse2 the case above refuses.  A
-# run that staged the server on one machine and pointed the guest at another
-# still exited 0, printing RESULT read FAILED beside a healthy RAM: control.
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-}"
 PEER_BIN="${AMINETXDUO_FITZ_PEER_BIN:-\$HOME/fitzsrc/fitz-serve}"
@@ -121,11 +26,6 @@ ACCURATE=0
 ROADSHOW=""
 NGDIR="${AMINETXDUO_CMP_AMITCPNG:-}"
 EXTRALIBS="${AMINETXDUO_FITZ_EXTRALIBS:-}"
-# -a IS USE_AMIBERRY, NOT AMIBERRY.  tools/amiberry-run.sh reads $AMIBERRY as
-# the PATH to the emulator, and amiga-assets/env.sh exports it.  A plain
-# `AMIBERRY=1` here keeps that export attribute, so the flag arrives in the
-# child as a path of "1" and the run dies on "amiberry not found; set
-# AMIBERRY=<path>" with the emulator installed and working.
 USE_AMIBERRY=0
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 BOARD=a2065
@@ -165,19 +65,8 @@ while getopts "H:A:m:c:b:k:C:r:T:t:p:sxR:aB:N:wl:L:G:E:" opt; do
     esac
 done
 
-# The share is per-port, as the server and its kill pattern already are.  One
-# fixed /tmp/fitzbench-share left two runs on two ports writing one
-# fitzbench.dat on the peer, and the second run's write truncated it under the
-# first run's read: `Read() gave 0 of 32768` mid-transfer on a clean link, with
-# the connection itself never closed or lost.
 PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
-# NOT playhouse2, whatever its convenience: it is an LXC container on a veth, so
-# its SYN-ACK carries an uncomputed TX-offload checksum that no NIC ever fixes
-# up.  Our stack rejects it, correctly, and the run reads as "1 connection made,
-# 6 bad packets, 6 checksum errors" and no transfer, which looks like our defect
-# and is not.  The peer must also be a THIRD machine: a frame the emulator's own
-# host sends to the guest's MAC never comes back to that NIC's pcap capture (63).
 case "$PEER" in
     *playhouse2*)
         echo "playhouse2 cannot serve this: VMs on one Proxmox host never cross" >&2
@@ -195,8 +84,6 @@ esac
 [ "$USE_AMIBERRY" = "0" ] || [ "$SLIRP" = "0" ] || {
     echo "-a and -s are different emulators; pick one" >&2; exit 2; }
 
-# Resolve the emulator NOW, not after staging a drive and starting a server on
-# the peer: a bad environment must cost a second, not a boot and a timeout.
 if [ "$USE_AMIBERRY" = "1" ]; then
     . "$ROOT/tools/amiberry-resolve.sh"
     amiberry_resolve || exit 2
@@ -227,26 +114,8 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
-# ------------------------------------------------------------------ board ---
-#
-# -N names the card the emulator puts in the machine, and a card that is not
-# the a2065 needs ITS driver on the disk and an eth0 that names that driver.
-# Staging below copied a2065.device unconditionally and left DEVICE=a2065.device
-# in place whatever -N said, so `-N ne2000_pcmcia` booted a machine holding an
-# NE2000 and a guest asking for a card that was not in it: "AddNetInterface: the
-# network did not start", both FitzBench arms printing RESULT FAILED, and this
-# script exiting 0 over it.  Resolve the driver HERE, before a boot and before a
-# server on the peer, and refuse when this host has not got it.
-#
-# board -> driver is tools/sana2-stage.sh, the table the card sweeps use.  The
-# VENDOR driver, not anxnet.device: this measures the stack over whatever
-# already works, and cnet.device is the measured-good ne2000 arm.  A driver of
-# ours is benchmarked by naming it, which the two knobs below still do.
 . "$ROOT/tools/sana2-stage.sh"
 
-# The keys tools/amiberry-run.sh:228 knows.  Repeated rather than derived
-# because that file is a script and not sourceable; an unknown board costs a
-# second here instead of a staged drive, a started server and a boot.
 case "$BOARD" in
     a2065|ariadne|ariadne2|hydra|eb920|xsurf|xsurf100z2|xsurf100z3|ne2000_pcmcia) ;;
     *) echo "unknown network board '$BOARD'.  tools/amiberry-run.sh knows:" >&2
@@ -255,16 +124,11 @@ case "$BOARD" in
        exit 2 ;;
 esac
 
-# Only the Amiberry branch below passes -N to an emulator at all: the WinUAE one
-# has no board argument and the SLIRP one boots an a2065.  Refuse rather than
-# accept a board key, ignore it, and print a figure for a different card.
 [ "$BOARD" = a2065 ] || [ "$USE_AMIBERRY" = "1" ] || {
     echo "-N $BOARD needs the Amiberry path (-a, or -B <iface>): the WinUAE" >&2
     echo "and SLIRP branches here boot an a2065 and nothing else." >&2
     exit 2; }
 
-# Empty for the a2065, whose driver the block above already resolved, and empty
-# when the caller spelled the staging out with the two knobs.
 BOARD_DRIVER=""
 BOARD_DEVICE=""
 if [ "$BOARD" != a2065 ] &&
@@ -283,13 +147,8 @@ if [ "$BOARD" != a2065 ] &&
         exit 2; }
 fi
 
-# ------------------------------------------------------------- the server ---
-#
-# SLIRP reaches this Mac at 10.0.2.2; bridged reaches a real address, and the
-# server has to be somewhere the guest's frames actually go.
 
 if [ -z "$PEER" ]; then
-    # The server is somebody else's problem: it is already listening at -A.
     [ -n "$PEER_ADDR" ] || {
         echo "no peer: give -A <addr> for a server that is already listening," >&2
         echo "or -H <user@host> to have this script start one" >&2; exit 2; }
@@ -307,10 +166,6 @@ elif [ "$SLIRP" = "1" ]; then
     PEER_PID=$!
     cleanup() { kill -TERM "$PEER_PID" 2>/dev/null || true; }
 else
-    # Ask the peer for its own address rather than resolving the name here.
-    # Local resolution answers for whatever this host's resolver believes, which
-    # on a Mac is not the lab's DNS and on any host can be stale; the machine
-    # ssh actually landed on cannot be wrong about its own interfaces.
     PEER_ADDRS=$(ssh "$PEER" \
         "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}' | cut -d/ -f1" \
         2>/dev/null)
@@ -323,9 +178,6 @@ else
             echo "note: $PEER holds more than one address, using $PEER_ADDR" >&2
             echo "      pass -A to choose the one the guest's bridge reaches" >&2; }
     else
-        # The guest cannot report reaching the wrong machine: it times out, and
-        # the RAM: control arm passes beside it, so the run reads as a partial
-        # success and exits 0.  Catch the mismatch here instead.
         printf '%s\n' "$PEER_ADDRS" | grep -qx "$PEER_ADDR" || {
             echo "$PEER does not hold $PEER_ADDR -- the server would be staged" >&2
             echo "on one machine and the guest pointed at another.  It holds:" >&2
@@ -335,25 +187,9 @@ else
 
     SERVER_ADDR="$PEER_ADDR"
     PEERLOG="$ROOT/build/fitzbench-$TAG-peer.log"
-    # Matched on our own port, not on the binary: a bare fitz-serve pattern
-    # takes out every other run on the peer, and this is a shared machine.
-    # The bracket is not decoration either -- pkill -f matches the remote
-    # shell's own command line, so an unbracketed pattern kills the connection
-    # that issued it.
-    # TERM, THEN KILL.  fitz-serve does not exit on SIGTERM, so `pkill -f`
-    # alone left one behind on every run: four arms of a loss gate left three
-    # servers, and tests/perf/run-lossgate.sh:163 then refused to start --
-    # "the peer already has 3 fitz-serve process(es) running" -- which is the
-    # right refusal about the wrong machine's state, and it blocks the only
-    # rig that can price an ack or retransmit change from running twice.
     PEER_KILL="pkill -f '[f]itz-serve .* PORT $PORT'; sleep 1;
                pkill -9 -f '[f]itz-serve .* PORT $PORT'; true"
     ssh "$PEER" "$PEER_KILL" >/dev/null 2>&1 || true
-    # `ps` is the assertion, not decoration: a fitz-serve that died on the
-    # spot -- a missing binary, a port already bound -- leaves the guest to
-    # time out on a mount, which the RESULT gate below reports as our defect.
-    # Its non-zero status used to kill this script through set -e with nothing
-    # said, so it is read here and it says which machine and which port.
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
                  sleep 1; ps -o args= -C fitz-serve" > "$PEERLOG" 2>&1 || {
@@ -369,24 +205,16 @@ trap cleanup EXIT INT TERM HUP
 
 echo "==> fitz-serve on $SERVER_ADDR:$PORT"
 
-# ---------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/fitzbench-stage-$TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
-# A board other than the a2065 needs ITS driver on the disk and an interface
-# file naming it. AMINETXDUO_EXTRA_DRIVER=<path> stages one; AMINETXDUO_IFCONFIG
-# replaces DEVS:NetInterfaces/eth0. The a2065 copy above stays: harmless, and
-# the ARP/loopback paths in some plans still reference it.
 [ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || \
     cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
 [ -z "${AMINETXDUO_IFCONFIG:-}" ] || \
     cp "$AMINETXDUO_IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
-# What -N resolved to, staged the same way the two knobs above stage: the driver
-# at DEVS: root under its own name, and eth0 naming it bare.  That is the shape
-# the ne2000 arm was measured working in.
 if [ -n "$BOARD_DRIVER" ]; then
     cp "$BOARD_DRIVER" "$STAGE/devs/$BOARD_DEVICE"
     sed "s|^DEVICE=.*|DEVICE=$BOARD_DEVICE|" "$STAGE/devs/NetInterfaces/eth0" \
@@ -395,12 +223,6 @@ if [ -n "$BOARD_DRIVER" ]; then
     echo "==> $BOARD: staged $BOARD_DEVICE from $BOARD_DRIVER"
 fi
 
-# In the same key=value shape tools/sana2-stage.sh prints, and deliberately a
-# different answer: this script compares STACKS over one SANA-II driver, so -N
-# stages the VENDOR driver for the board on purpose.  tests/tools/run-iperf.sh
-# asks the other question, "does our driver carry traffic", and defaults to
-# anxnet.device for the same board.  Both say which, so neither has to be
-# guessed at from the boot log.
 case "$BOARD" in
     a2065) _fb_dev=a2065.device; _fb_path=${A2065:-none} ;;
     *)     _fb_dev=$BOARD_DEVICE; _fb_path=$BOARD_DRIVER ;;
@@ -415,12 +237,6 @@ printf 'sana2_staged board=%s driver=%s source=%s device=%s card=none dir=DEVS: 
        "$(case "$_fb_dev" in anxnet*) echo anxnet ;; *) echo vendor ;; esac)" \
        "${_fb_dev:-none}" "${_fb_path:-none}"
 
-# The interface file and the disk have to agree, whichever of the three staged
-# them.  AMINETXDUO_EXTRA_DRIVER stages under the file's BASENAME, so a driver
-# taken from a build tree as anxnet.000 lands as anxnet.000 while eth0 asks for
-# anxnet.device; and a hand-written AMINETXDUO_IFCONFIG can name anything at
-# all.  Either way the guest says the device would not open, both FitzBench arms
-# print RESULT FAILED, and the only thing measured is the boot.
 WANT_DEVICE=$(sed -n 's/^DEVICE=//p' "$STAGE/devs/NetInterfaces/eth0" |
               head -1 | tr -d '\r')
 WANT_DEVICE=${WANT_DEVICE##*[:/]}
@@ -431,14 +247,7 @@ WANT_DEVICE=${WANT_DEVICE##*[:/]}
     echo "What is on the drive:" >&2
     (cd "$STAGE/devs" && find . -name '*.device' | sed 's|^\./|  |') >&2
     exit 2; }
-# -R swaps the whole stack, library and starter both.  It is the discriminator
-# for "is this rig or is this us": a figure Roadshow also cannot beat on the
-# same emulator, the same bridge and the same peer is not ours to fix.
 if [ -n "$NGDIR" ]; then
-    # AmiTCP_NG, the same swap the -R arm makes.  Two differences from
-    # Roadshow: it ships no usergroup.library, so ours goes in beside it, and
-    # its commands want mathieeedoubbas and rexxsyslib in LIBS:, which a bare
-    # boot shell does not have -- pass them with -L.
     [ -f "$NGDIR/Libs/bsdsocket.library" ] || {
         echo "no AmiTCP_NG at $NGDIR" >&2; exit 2; }
     cp "$NGDIR/Libs/bsdsocket.library" "$STAGE/libs/bsdsocket.library"
@@ -458,12 +267,7 @@ else
     cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 fi
 [ -n "$ROADSHOW$NGDIR" ] || cp "$TOOLS/netstat" "$STAGE/NetStat"
-# Libraries the stack under test needs and the boot shell has no LIBS: for.
 if [ -n "$EXTRALIBS" ]; then
-    # An -E naming a directory with no .library in it leaves the glob unexpanded
-    # and the test false, which under set -e exited this script from inside the
-    # loop with nothing printed.  The caller asked for libraries; say there are
-    # none rather than dying as if the run had finished.
     _found=0
     for _l in "$EXTRALIBS"/*.library; do
         [ -f "$_l" ] || continue
@@ -476,21 +280,9 @@ fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 
-# `&` is SYS_Asynch: a Fitz mount stays resident as a DOS handler and never
-# returns, so the benchmark line after it would never run otherwise.  The RAM:
-# arm is last and deliberately in the same boot, it prices this program,
-# AmigaDOS and the emulator's current mood with no network under any of it, and
-# a network figure is only worth reading beside it.
 STATARGS="-s"
-# Neither foreign stack ships our NetStat, so -s is ours to ask for only when
-# the arm is ours.  NG was missed here and logged "wrong number of arguments"
-# and rc 10 on every run, losing the packet-rate block.
 [ -z "$ROADSHOW$NGDIR" ] || STATARGS=""
 
-# NetStat runs on BOTH sides of the network arm.  Its counters are cumulative,
-# so bytes/sec can be had from FitzBench alone but the PACKET rate cannot: only
-# the difference across the timed window divided by that window is a rate, and
-# the packet rate is the number the emulator's delivery pacing shows up in.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 wait 6
@@ -502,15 +294,11 @@ SYS:NetStat $STATARGS
 SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS
 EOF
 
-# -------------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
-# -x drops warp and asks for cycle accounting.  Warp makes the guest's speed a
-# function of host load, which shows up directly as run-to-run spread; real
-# speed costs wall clock and buys repeatability.
 [ "$ACCURATE" = "0" ] || CPUARG+=(-x)
 
 CAPDIR="$ROOT/build/losscap-$TAG"
@@ -520,10 +308,6 @@ if [ "$LOSSCAP" = "1" ]; then
         echo "-w needs an ssh-able peer (-H): the capture is taken there" >&2
         exit 2
     fi
-    # Fatal, and fatal HERE, before an emulator boot: -w was asked for, and a
-    # run that captures nothing reports no loss rate, skips the -l/-L gate and
-    # exits 0.  That is a green gate over an empty capture, which is worse than
-    # no gate at all.  peercap_start says why.
     peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" || exit 2
     CAPTURING=1
 fi
@@ -561,14 +345,6 @@ fi
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
 
-# The emulator's exit status is the backend assertion's only way out, and this
-# read it into a variable it used in one error message.  A `-B ens99` run is
-# rejected by tools/amiberry-run.sh, comes up on SLIRP, reaches the peer
-# through NAT anyway -- SLIRP forwards to real addresses -- and produced
-# `read 230 write 348` with `!! ASKED FOR 'ens99' AND DID NOT GET IT` in the
-# same log and rc=0 out of this script.  A zero bandwidth-delay path has no
-# window, no RTT and no loss, so those are not throughput figures; stop before
-# printing any.
 if [ "$RUN_RC" != "0" ]; then
     echo "FAIL: the emulator run failed (rc=$RUN_RC); no figure from it is" >&2
     echo "usable.  Its own output above says which assertion refused it." >&2
@@ -581,19 +357,6 @@ cat "$REPORT"
 echo "====================================================================="
 echo
 
-# A NUMBER PER DIRECTION PER ARM, PARSED, OR THIS RUN FAILED.
-#
-# Two ways this has reported a green run over nothing.  A bare "fitzbench:
-# RESULT" anywhere is satisfied by the RAM: arm alone, which has no network
-# under it and prints a figure even when the card never carried a byte: the
-# ariadne and ariadne_ii arms of the 2026-08-10 driver sweep exited 0 with
-# read_kbs=0 that way.  And "fitzbench: RESULT" is a SUBSTRING OF THE FAILURE
-# MESSAGE -- fitzbench.c:314 prints "fitzbench: RESULT write FAILED" when no rep
-# timed -- so the arm-scoped version of the same test passed a run whose guest
-# could not open its network device at all, which is how -N shipped broken.
-#
-# So the test is what the run claims to have measured: kbs_mean, parsed, greater
-# than zero, for both directions of both arms.  Nothing here matches prose.
 FIGURES=$(awk '
     # The arm each line belongs to.  fitzbench names it itself further down
     # ("fitzbench: file=FITZ:fitzbench.dat"), but the header is what brackets
@@ -644,26 +407,8 @@ FIGURES=$(awk '
 
 echo "==> results ($MODEL${CPU:+/$CPU}, $KB KB, chunk $CHUNK, $REPS reps)"
 grep "fitzbench: RESULT\|fitzbench: file=" "$REPORT" | sed 's/^/    /'
-# key=value, so nothing downstream has to read the block above.
 printf '%s\n' "$FIGURES"
 
-# ------------------------------------------------------------ packet rate ---
-#
-# Bytes/sec is FitzBench's own figure.  Packets/sec is not derivable from it,
-# and it is the one the emulator's delivery pacing shows up in: Amiberry hands
-# the guest received frames from the hsync handler and looks at transmit every
-# 16th hsync (src/a2065.cpp), so there is a ceiling on frames/sec that has
-# nothing to do with how fast the guest's TCP is.
-#
-# The bracket holds both directions, the warm-up pair and the verify read, so
-# what comes out of it is a count and a mean size over the whole network arm,
-# not a per-direction rate.  A per-direction rate wants a capture: the mean
-# frame size here mixes a write's full segments with the read's bare ACKs.
-#
-# ONLY THE ip: BLOCK IS READ.  NetStat prints "packets sent" three times per
-# run, under ip:, under tcp: and again in the SANA-II interface statistics --
-# and taking them positionally reads the driver's counter as the second run's
-# IP counter, which comes out negative.
 echo
 awk -v kb="$KB" -v reps="$REPS" -v board="$BOARD" '
     /^===== / { cmd = $0; infitz = (cmd ~ /FitzBench FITZ:/); inip = 0; inif = 0 }

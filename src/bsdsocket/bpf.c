@@ -1,27 +1,9 @@
 /*
  * bsdsocket.library, the eight bpf_* LVOs.
  *
- * Thin wrappers. The work lives in src/bpf/. What is here is the m68k register
- * convention, the SocketBase argument every vector carries, and the errno the
- * caller reads back.
- *
- * The slots exist whatever AMINETXDUO_BPF says. A build without it compiles
- * eight ENOSYS bodies, so the vector table has the same shape either way. A
- * caller then gets a documented failure, not a jump into a slot that means
- * something else in the next build.
- *
  * bpf_set_notify_mask takes (d1, d0), channel in d1, mask in d0, the
  * reverse of every other call in the group, including bpf_set_interrupt_mask.
  * Both pragmas/bsdsocket_pragmas.h and the .fd agree, so it is real.
- * tools/gen_vectors.py reads the order from the pragma, so the declaration in
- * bsdsocket_vectors.h follows automatically.
- *
- * The table-only vectors need no ThreadX bracket. src/bpf/ guards its own
- * table with Forbid()/Permit(), which suits a structure shared with the
- * SANA-II reader Tasks and the IP thread. bpf_write() is the exception: its
- * injector allocates from the NetX packet pool and takes nx_ip_protection, so
- * that vector adopts the caller for the duration of the write.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -68,8 +50,6 @@ static LONG bsd_bpf_result(struct AmiSocketBase *SocketBase, LONG status)
 /*
  * The autodoc: the channel "will be associated with the library base ... It
  * will be automatically closed when the library is closed". library.c calls
- * this from bsd_child_destroy(). It frees memory and takes Forbid()/Permit(),
- * and does not block.
  */
 VOID bsd_bpf_close_all(struct AmiSocketBase *SocketBase)
 {

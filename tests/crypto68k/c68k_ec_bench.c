@@ -1,24 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k P-256 before/after benchmark.
  *
- * Same method as c68k_bench.c: every figure is a pair, the unmodified vendored
- * routine and this module, run back to back in one process on the same
- * operands, and only the ratio of a pair is trustworthy.  FS-UAE's 68020 is
- * not a 14 MHz A1200, and its 68030 model is not a timing model at all, it
- * does not charge for MULU.L, so it flatters anything that moves work into
- * multiplies.  Read the 68020 column; the 68030 column is printed so the
- * figure is attributable.
- *
- * The three headline operations are the ones docs/RESEARCH.md 9 measured:
- * ECDHE key generation, ECDHE shared secret, ECDSA verify.  They are timed
- * through the real vendored APIs, with nothing changed but one function
- * pointer in a copy of the curve structure, so the ratio is what a TLS
- * handshake would see.
- *
- * The layers below are timed too, to show which layer costs the time.
- *
- * Budget about 120 s of emulated time; run it with -t 400.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -64,8 +46,6 @@ static c68k_p256_aff        b_aff_q;
 static c68k_limb            b_k[8];
 
 
-/* ------------------------------------------------------------- timing ---- */
-
 typedef VOID (*B_OP)(VOID);
 
 static ULONG b_time_n(B_OP op, ULONG n)
@@ -99,8 +79,6 @@ ULONG   ratio;
              (LONG)name, ref, opt, ratio / 10UL, ratio % 10UL);
 }
 
-
-/* --------------------------------------------------------- 1. the field -- */
 
 static VOID b_ref_mul(VOID)
 {
@@ -149,8 +127,6 @@ static VOID b_opt_reduce(VOID)
     c68k_p256_fe_reduce(b_fr, b_prod);
 }
 
-/* The multiply on its own, so the reduction's share of a field multiply can be
-   read off. */
 static VOID b_ref_mul_only(VOID)
 {
 
@@ -216,8 +192,6 @@ ULONG       mul_only;
     b_report("reduce alone     ", ref, opt);
 }
 
-
-/* -------------------------------------------------- 2. point operations -- */
 
 static NX_CRYPTO_EC_POINT   b_proj;
 static c68k_p256_jac        b_jac;
@@ -291,8 +265,6 @@ ULONG       opt;
     b_report("projective + affine add   ", ref, opt);
 }
 
-
-/* ------------------------------------------- 3. scalar multiplication ---- */
 
 static VOID b_mul_ref_fixed(VOID)
 {
@@ -381,8 +353,6 @@ ULONG       opt;
 }
 
 
-/* ------------------------------------------ 4. the headline operations --- */
-
 static VOID b_op_keygen(VOID)
 {
 
@@ -426,8 +396,6 @@ ULONG   ratio;
     c68k_log("");
     c68k_log("4. The three operations docs/RESEARCH.md 9 measured:");
 
-    /* ECDHE key generation is one fixed-base multiplication; the random draw
-       around it is noise by comparison. */
     b_curve = b_ref_curve;
     ref = b_time_n(b_op_keygen, 3UL);
     b_curve = &b_opt_curve;
@@ -435,13 +403,6 @@ ULONG   ratio;
     b_report("ECDHE P-256 keygen (k*G)  ", ref, opt);
     b_sum_ref += ref; b_sum_opt += opt;
 
-    /*
-     * _nx_crypto_ecdh_key_pair_import() sets the key size but not the curve
-     * pointer, only _nx_crypto_ecdh_setup() does that, and setup generates a
-     * random key, which a known-answer test cannot use.  So the curve is
-     * assigned here.  Vendored behaviour, not ours; without it compute_secret
-     * dereferences a null curve.
-     */
     b_ecdh.nx_crypto_ecdh_curve = b_ref_curve;
     (VOID) _nx_crypto_ecdh_key_pair_import(&b_ecdh, b_ref_curve,
                                            (UCHAR *)v_ecdh_priv, 32UL,
@@ -471,8 +432,6 @@ ULONG   ratio;
              ratio / 10UL, ratio % 10UL);
 }
 
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(VOID)
 {

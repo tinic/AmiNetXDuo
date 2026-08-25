@@ -1,36 +1,10 @@
 /*
  * AmiNetXDuo, crypto68k: X25519 and Ed25519 over eight 32-bit limbs.
  *
- * Read src/crypto68k/c68k_25519.h first.  It says why this file exists.  This
- * comment covers how, and the two decisions that are not obvious.
- *
- *   A field element is eight uint32 limbs, little-endian, holding any value
- *   below 2^256 that is congruent to the intended one modulo p = 2^255-19.
- *   Nothing is kept fully reduced until it is serialised.  That works because
- *
- *       2^256 = 2 * 2^255 = 2 * (p + 19) = 2p + 38 = 38  (mod p)
- *
- *   so a 512-bit product folds into 256 bits with eight multiplies by 38, and
- *   an addition that carries out of the top folds with a single add of 38.
- *
- *   For comparison, what Dropbear runs today: TweetNaCl stores sixteen 16-bit
- *   limbs in an `i64[16]` and multiplies with `t[i+j] += a[i]*b[j]` on those
- *   i64s, 256 iterations, each a software 64x64 multiply, on a machine whose
- *   MULU.L does 32x32->64 in one instruction.  Here it is 64 iterations of
- *   that instruction.
- *
- *   Not radix 2^25.5 (the ref10 layout).  This part has a real 32x32->64
- *   multiply and a real ADDX, and ref10 splits limbs to 25/26 bits only to
- *   keep products inside a 64-bit accumulator on machines where the carry is
- *   expensive to propagate.  ref10 pays 100 multiplies where this pays 64 (72
- *   with the reduction), and its saving is carry handling this machine does in
- *   the ALU for free.
- *
- *   The Montgomery ladder for X25519 and the double-and-add for Ed25519 are
- *   the textbook algorithms, and the Ed25519 base point has no precomputed
- *   table.  A signed-window base table cuts Ed25519 signing by roughly
- *   another five times.  It is a separate, testable change.  This file changes
- *   the field and nothing else, so a measurement of it measures one thing.
+ * A field element is eight little-endian uint32 limbs holding ANY value below
+ * 2^256 congruent to the intended one mod p = 2^255-19; nothing is fully
+ * reduced until it is serialised.  2^256 = 38 (mod p) is what makes the fold
+ * a multiply by 38.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -38,10 +12,7 @@
 #include "c68k_25519.h"
 #include "c68k_variant.h"
 
-/*
- * <stdint.h> rather than exec/types.h: this file has to compile on the build
- * host for the vector tests, and it never touches an AmigaOS type.
- */
+/* <stdint.h>, not exec/types.h: this file must compile on the build host. */
 #include <stdint.h>
 #include <string.h>
 
@@ -50,9 +21,7 @@ typedef uint32_t fe[8];
 
 /* ------------------------------------------------------------- constants */
 
-/* d = -121665/121666, the Edwards curve constant; d2 = 2d; sqrtm1 = sqrt(-1).
-   Generated rather than transcribed, see the derivation in the commit that
-   added this file. */
+/* d = -121665/121666, the Edwards curve constant; d2 = 2d; sqrtm1 = sqrt(-1). */
 static const fe fe_d      = { 0x135978a3u, 0x75eb4dcau, 0x4141d8abu, 0x00700a4du,
                               0x7779e898u, 0x8cc74079u, 0x2b6ffe73u, 0x52036ceeu };
 static const fe fe_d2     = { 0x26b2f159u, 0xebd69b94u, 0x8283b156u, 0x00e0149au,
@@ -81,17 +50,9 @@ static void fe_copy(fe r, const fe a)
 }
 
 /*
- * Fold a carry out of the top back in.  2^256 = 38 (mod p), so a carry of c
- * out of limb 7 is worth 38c at the bottom.
- *
- * The loop is required.  The first version ran one propagation pass and
- * dropped what came out of limb 7, on the assumption that a value near
- * 2^256-1 cannot arise.  It arises constantly.  This representation is lazy,
- * so 0 is routinely carried as 2^256-38 and 1 as 2^256-37, and an addition of
- * 38 to either carries straight through all eight limbs.  A dropped carry
- * loses exactly 38, and the symptom was an Ed25519 doubling that returned 37
- * where it owed -1.  A second pass always terminates: a carry out means every
- * limb is now small.
+ * Fold a carry out of the top back in: 2^256 = 38 (mod p).  The LOOP IS
+ * REQUIRED -- adding 38 to a lazily represented 0 (2^256-38) carries through
+ * all eight limbs.  It terminates: a carry out means every limb is now small.
  */
 static void fe_fold(fe r, uint32_t c)
 {
@@ -134,9 +95,8 @@ static void fe_sub_c(fe r, const fe a, const fe b)
         t = (t >> 32) & 1u ? (uint64_t)1 << 63 : 0;   /* borrow flag */
     }
 
-    /* Same form as fe_fold, and the same trap.  A borrow out of limb 7 is
-       worth another 38 off, because a dropped borrow silently adds
-       2^256 = 38 back on.  Terminates for the mirror-image reason. */
+    /* A borrow out of limb 7 is worth another 38 off: a dropped borrow
+       silently adds 2^256 = 38 back on. */
     while (t) {
         uint64_t s = 38u;
 
@@ -152,15 +112,8 @@ static void fe_sub_c(fe r, const fe a, const fe b)
 }
 
 /*
- * One binary for every CPU takes the vectors.  Both halves of c68k_25519.S are
- * assembled -- the MULU.L one for a 68020 to a 68040, the four-MULU.W one for
- * a 68000 or a 68060, which is the same split c68k_prim.S and c68k_prim_mulw.S
- * have -- and c68k_cpu_select() points these at one set.  They start on the C,
- * so a program that never selects is slow and correct.
- *
- * fe_add and fe_sub carry no multiply and the two assemblies of them are the
- * same instructions.  They are vectored anyway, because one variant per object
- * is what keeps the symbols apart and a profile honest.
+ * Run-time CPU dispatch: c68k_cpu_select() points these at one assembly set.
+ * They start on the C, so a program that never selects is slow and correct.
  */
 #if defined(C68K_MV)
 
@@ -208,11 +161,8 @@ void c68k_25519_fe_sub_ref(uint32_t r[8], const uint32_t a[8],
 }
 
 /*
- * The multiply.  Operand scanning, 64 MULU.L, then the 2^256 = 38 fold.
- *
- * The accumulator never overflows: (2^32-1)^2 + (2^32-1) + (2^32-1) is exactly
- * 2^64-1, so the product, the running word and the carry can all be added
- * before the store without a second accumulator word.
+ * Operand scanning, 64 MULU.L, then the 2^256 = 38 fold.  The accumulator
+ * cannot overflow: (2^32-1)^2 + 2*(2^32-1) is exactly 2^64-1.
  */
 static void fe_mul_c(fe r, const fe a, const fe b)
 {
@@ -247,16 +197,9 @@ static void fe_mul_c(fe r, const fe a, const fe b)
 }
 
 /*
- * Which one the rest of this file calls, the same shape c68k_poly1305.c uses:
- * a macro rather than a wrapper, so a build without the assembly gets no extra
- * call and there is nothing to choose between at run time.
- *
- * Both assembly options select it, and they are different code.  C68K_ASM is
- * the 68020/68040 build and c68k_25519.S uses MULU.L there.  C68K_ASM_MULW is
- * the 68000 and 68060 build, where that form of MULU.L either does not exist
- * or traps, and the same file builds the product from four MULU.W.  The two
- * are mutually exclusive and src/crypto68k/CMakeLists.txt refuses both at
- * once, because they define the same symbol.
+ * C68K_ASM (68020-68040, MULU.L) and C68K_ASM_MULW (68000/68060, four MULU.W)
+ * are MUTUALLY EXCLUSIVE -- they define the same symbol, and
+ * src/crypto68k/CMakeLists.txt refuses both at once.
  */
 #if defined(C68K_MV)
 extern void c68k_fe_mul_asm_mulu(fe r, const fe a, const fe b);
@@ -270,12 +213,8 @@ extern void c68k_fe_mul_asm(fe r, const fe a, const fe b);
 #define fe_mul  fe_mul_c
 #endif
 
-/*
- * The dispatch and the reference, as real functions, so an on-Amiga test can
- * run the shipped kernel and the portable one over the same input and compare.
- * Neither is on any hot path: everything below calls the macro.  They also
- * keep fe_mul_c referenced in an assembly build, where nothing else calls it.
- */
+/* Real functions for the on-Amiga comparison test; they also keep fe_mul_c
+   referenced in an assembly build, where nothing else calls it. */
 void c68k_25519_fe_mul(uint32_t r[8], const uint32_t a[8], const uint32_t b[8])
 {
     fe_mul(r, a, b);
@@ -297,13 +236,9 @@ int c68k_25519_fe_mul_is_asm(void)
 }
 
 /*
- * The squaring.  Thirty-six multiplies instead of sixty-four, because every
- * off-diagonal product appears twice.  They are summed once, then doubled, and
- * then the eight diagonal squares are added.
- *
- * A transcription error here still produces plausible output, so
- * tests/crypto68k/host checks it against fe_mul(r,a,a) on random inputs rather
- * than only against published vectors.
+ * Squaring: 36 multiplies, the off-diagonal sum doubled, then the eight
+ * diagonal squares added.  Checked against fe_mul(r,a,a) on random inputs --
+ * published vectors cannot catch a transcription error here.
  */
 static void fe_sqr_c(fe r, const fe a)
 {
@@ -426,13 +361,9 @@ static void fe_frombytes(fe r, const unsigned char b[32])
 }
 
 /*
- * Full reduction, then little-endian bytes.
- *
- * Two steps.  First fold bit 255 back in, 2^255 = 19 (mod p), which leaves
- * a value below 2^255.  That is still not canonical, because anything from p
- * to 2^255-1 is a second representation of 0..18.  So t+19 is computed and its
- * bit 255 examined: the bit is set exactly when t >= p, and in that case
- * t+19-2^255 is t-p.
+ * Full reduction, then little-endian bytes.  Fold bit 255 back in
+ * (2^255 = 19 mod p), then test bit 255 of t+19: it is set exactly when
+ * t >= p, and t+19-2^255 is then t-p.
  */
 static void fe_tobytes(unsigned char out[32], const fe a)
 {
@@ -500,13 +431,7 @@ static unsigned char fe_isodd(const fe a)
     return (unsigned char)(b[0] & 1);
 }
 
-/*
- * r = a^(p-2), the inverse.  The addition chain is the ref10 one: 254
- * squarings and 11 multiplies, against the 254 squarings and 251 multiplies
- * that the square-and-multiply-every-bit loop of TweetNaCl costs.  That is
- * 240 field multiplies saved per inversion, and there are three inversions in
- * a handshake.
- */
+/* r = a^(p-2), the inverse, via the ref10 addition chain. */
 static void fe_pow_2n_mul(fe r, const fe a, int n, const fe m)
 {
     fe  t;
@@ -577,11 +502,7 @@ static void fe_pow22523(fe out, const fe z)
 
 /* ------------------------------------------------------------- X25519 --- */
 
-/*
- * The ladder of RFC 7748 section 5, unchanged in structure.  Nine full
- * multiplies (four of them squarings) and one multiply by a24 per bit, and one
- * inversion at the end.
- */
+/* The ladder of RFC 7748 section 5, unchanged in structure. */
 static void x25519_core(fe out, const unsigned char e[32], const fe x1)
 {
     fe       x2, z2, x3, z3;
@@ -738,12 +659,7 @@ static void ge_add(ge *r, const ge *p, const ge *q)
     fe_mul(r->Z, f, g);
 }
 
-/*
- * dbl-2008-hwcd for a = -1: four multiplies and four squarings, against the
- * eight-multiply generic addition TweetNaCl reuses for doubling.  On this part
- * a squaring is a little over half a multiply, so this is worth about a third
- * of the doubling.
- */
+/* dbl-2008-hwcd for a = -1: four multiplies and four squarings. */
 static void ge_dbl(ge *r, const ge *p)
 {
     fe a, b, c, e, f, g, h, t;
@@ -780,10 +696,7 @@ static void ge_pack(unsigned char out[32], const ge *p)
     out[31] ^= (unsigned char)(fe_isodd(x) << 7);
 }
 
-/*
- * Constant-time double-and-add.  The scalar steers a conditional swap and
- * never a branch, as in TweetNaCl.
- */
+/* Constant-time: the scalar must steer a conditional swap, never a branch. */
 static void ge_scalarmult(ge *r, const ge *q, const unsigned char s[32])
 {
     ge  p, t;
@@ -812,10 +725,8 @@ static void ge_scalarmult_base(ge *r, const unsigned char s[32])
 }
 
 /*
- * Decompress a public key: recover x from y and the sign bit, on the curve
- * -x^2 + y^2 = 1 + d x^2 y^2.  Returns 0 on success.  The point is negated on
- * the way out, because verification computes h*(-A) + s*B and comparing that
- * with R is one group addition cheaper than the other arrangement.
+ * Decompress a public key on -x^2 + y^2 = 1 + d x^2 y^2.  Returns 0 on
+ * success.  The point is NEGATED on the way out: verification wants h*(-A).
  */
 static int ge_unpack_neg(ge *r, const unsigned char p[32])
 {
@@ -864,12 +775,8 @@ static int ge_unpack_neg(ge *r, const unsigned char p[32])
 
 /* --------------------------------------------------- scalars mod L ----- */
 
-/*
- * L = 2^252 + 27742317777372353535851937790883648493, the group order, as 32
- * little-endian bytes.  The reduction below is the TweetNaCl one, and is
- * nowhere near the hot path: it runs three times in a handshake against twenty
- * thousand field multiplies.
- */
+/* L = 2^252 + 27742317777372353535851937790883648493, the group order, as 32
+   little-endian bytes. */
 static const int64_t sc_L[32] = {
     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
     0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
@@ -987,13 +894,7 @@ void c68k_ed25519_sign(c68k_sha512_fn sha512, unsigned char sig[64],
     memset(r, 0, sizeof(r));
 }
 
-/*
- * Verification.  Two variable-base scalar multiplications and one addition:
- *   [s]B + [h](-A) must equal R.
- * The two multiplications are done separately rather than with a joint
- * (Straus) loop.  A joint one saves about a quarter, and is a change to make
- * against a measurement of this.
- */
+/* Verification: [s]B + [h](-A) must equal R. */
 int c68k_ed25519_verify(c68k_sha512_fn sha512,
                         const unsigned char *m, unsigned long mlen,
                         const unsigned char sig[64],
@@ -1035,12 +936,7 @@ int c68k_ed25519_verify(c68k_sha512_fn sha512,
 
 /* ---------------------------------------------------------- self-check - */
 
-/*
- * Exposed only for tests/crypto68k: fe_sqr(r,a) must equal fe_mul(r,a,a) for
- * every input, and published vectors cannot prove that because they exercise
- * the same handful of values.  Kept out of the header so nothing in the stack
- * can reach it.
- */
+/* Exposed only for tests/crypto68k; deliberately kept out of the header. */
 int c68k_25519_selfcheck_sqr(const unsigned char in[32]);
 int c68k_25519_selfcheck_sqr(const unsigned char in[32])
 {
@@ -1057,11 +953,8 @@ int c68k_25519_selfcheck_sqr(const unsigned char in[32])
 
 
 #ifdef C68K_MV
-/*
- * Called by c68k_cpu_select(), which is the only place AttnFlags is read.  It
- * lives here rather than there because fe_mul_c and its three siblings are
- * static to this file: the default has to be set where it can be named.
- */
+/* Called by c68k_cpu_select(); lives here because fe_mul_c and its siblings
+   are static to this file. */
 void c68k_25519_cpu_select(unsigned int mul_ul)
 {
 

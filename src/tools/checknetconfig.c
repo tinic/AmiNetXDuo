@@ -2,43 +2,6 @@
  * CheckNetConfig, read the network configuration and report what is wrong
  * with it.
  *
- *     CheckNetConfig QUIET/S,VERBOSE/S
- *
- * Reads every file the stack would read and prints a file, a line and
- * something to type. Works with the network down: nothing here opens
- * bsdsocket.library or asks the running stack anything.
- *
- * src/config already reports bad syntax, unknown keywords, a missing DEVICE
- * line and a static interface with no ADDRESS, each with a line number,
- * through the reporter hook tool_config_watch() installs. Those are forwarded
- * rather than rewritten. The checks here are the ones needing more than a
- * single line:
- *
- *   * the driver named exists on this machine, and the unit it names opens
- *   * the netmask is a mask at all, and the address is a host on it rather
- *     than the network or the broadcast address
- *   * the router is on a network one of the interfaces is on
- *   * no two interfaces claim the same card, or the same address
- *   * a name server can be reached, or is at least on the far side of a
- *     default route that exists
- *   * the netdb files parse as the columns they are meant to be
- *
- * AND IT IS THE ONLY COMMAND THAT PRINTS THE NOTES. A Roadshow keyword this
- * stack reads and deliberately ignores -- IPREQUESTS, COPYMODE, MULTICAST --
- * is reported by the configuration layer as AMI_CFG_PROBLEM_NOTE, which every
- * other command drops (src/tools/tool_diag.c). Auditing the files is what this
- * command is for, so the notes are printed here in full, under a heading of
- * their own, at the end. They are counted apart from the faults and do not
- * change the return code: a file whose only findings are notes is a file with
- * nothing wrong with it.
- *
- * Return codes: 0 when nothing was found, 5 (RETURN_WARN) when something was,
- * so a startup script can say
- *
- *     CheckNetConfig QUIET
- *     IF WARN
- *         echo "The network configuration needs attention."
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -68,20 +31,11 @@ enum
 /* Long enough for any line in these files. Longer ones are read in pieces. */
 #define CNC_LINE_MAX        200
 
-/* ---------------------------------------------------------------- output,
- *
- * QUIET suppresses the findings but not the counting, so the return code is
- * the same either way. Every printing path goes through these three, and
- * tool_printf() is not called directly below.
- */
-
 static BOOL  cnc_quiet;
 static BOOL  cnc_verbose;
 static UWORD cnc_errors;
 static UWORD cnc_warnings;
 
-/* tool_printf() with the QUIET gate. Same body, because there is no v-form to
-   share. */
 static VOID say(const char *fmt, ...)
 {
     va_list args;
@@ -137,30 +91,6 @@ static VOID finding(const char *file, ULONG line, UWORD severity)
         say("\n  %s:\n", (LONG)file);
 }
 
-/* ------------------------------------------------------------- the notes,
- *
- * A KEYWORD THAT IS READ AND DOES NOTHING BY DESIGN IS NOT A PROBLEM, and
- * this command is the only one that prints them at all.
- *
- * The configuration layer reports the Roadshow compatibility keywords --
- * IPREQUESTS, WRITEREQUESTS, COPYMODE, MULTICAST and the rest -- as
- * AMI_CFG_PROBLEM_NOTE: correct as written, accepted on purpose so that a
- * stock Roadshow file loads unchanged, and acted on by nothing here.
- * src/tools/tool_diag.c drops them, so netstat and ShowNetStatus say nothing
- * about them. CheckNetConfig is the command whose job is to say everything
- * there is to say about these files, so it keeps the whole text.
- *
- * THEY ARE HELD AND PRINTED AT THE END rather than as they arrive. The
- * reporter fires during ami_config_load(), interleaved with the real faults,
- * and a note printed in the middle of the "What is wrong" list is filed under
- * that heading whether or not it belongs there. A separate list needs the
- * notes kept until the faults are done with, and the strings in an
- * AmiCfgProblem live only for the duration of the call, so they are copied.
- *
- * They are counted apart from cnc_errors and cnc_warnings, which is what
- * keeps the return code honest: a configuration whose only findings are notes
- * returns RETURN_OK and is told it has nothing wrong with it.
- */
 #define CNC_MAX_NOTES   24      /* more than any real drawer produces */
 #define CNC_NOTE_FILE   48
 #define CNC_NOTE_TEXT   144
@@ -246,12 +176,6 @@ static VOID cnc_report(const AmiCfgProblem *problem, APTR user)
         note(problem->hint);
 }
 
-/* --------------------------------------------------------------- reading,
- *
- * The files are read a second time, by hand, to be able to name a line number:
- * a parsed AmiConfig no longer carries the positions.
- */
-
 /* TRUE when `line` begins with `keyword` as a whole word. */
 static BOOL line_starts_with(const char *line, const char *keyword)
 {
@@ -302,8 +226,6 @@ static ULONG keyword_line(const char *path, const char *keyword)
     return found;
 }
 
-/* ------------------------------------------------------------ addressing, */
-
 /*
  * A netmask is a run of ones followed by a run of zeroes and nothing else.
  * 0.0.0.0 and 255.255.255.255 both satisfy that. Both are rejected elsewhere
@@ -343,12 +265,6 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
     return -1;
 }
 
-/*
- * TRUE when at least one interface will be given its IPv4 address at run time.
- *
- * IPv4 ONLY. Everything this gates is an IPv4 fact -- an IPv4 GATEWAY, an IPv4
- * name server -- and no router advertisement supplies either.
- */
 static BOOL any_dynamic_v4(const AmiConfig *cfg)
 {
     UWORD i;
@@ -379,16 +295,6 @@ static BOOL any_static_address(const AmiConfig *cfg)
     return FALSE;
 }
 
-/* ------------------------------------------------------- the driver check,
- *
- * Catches the commonest way for a configuration to be wrong while looking
- * right: the file names a driver that is not on this machine, or the wrong
- * unit of one that is.
- *
- * tool_explain_device() asks the hardware. It probes the unit, and unit 0 too
- * when another was asked for, and prints what to do about it, so the finding
- * here only says where.
- */
 static VOID check_device(const char *path, const AmiIfConfig *ifc)
 {
     const char *where;
@@ -400,12 +306,6 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     where = tool_device_where(ifc->device);
     line  = keyword_line(path, "DEVICE");
 
-    /*
-     * The probe is skipped while the network is running: the stack has the
-     * driver open and a second OpenDevice() of a unit already in use fails,
-     * which would report a working interface as broken. The network being up
-     * already answers whether the card opens. ShowNetStatus reports the rest.
-     */
     if (where != NULL && tool_stack_library_running())
         return;
 
@@ -435,8 +335,6 @@ static VOID check_device(const char *path, const AmiIfConfig *ifc)
     if (!cnc_quiet)
         tool_explain_device(ifc->device, ifc->unit, ifc->card);
 }
-
-/* ------------------------------------------------------ the address check, */
 
 static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
 {
@@ -539,8 +437,6 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
     }
 }
 
-/* --------------------------------------------------------- the router check */
-
 static VOID check_gateway(const AmiConfig *cfg)
 {
     const char *path;
@@ -613,8 +509,6 @@ static VOID check_gateway(const AmiConfig *cfg)
          "of the two addresses normally match.");
 }
 
-/* ------------------------------------------------------ the resolver check */
-
 static VOID check_resolver(const AmiConfig *cfg)
 {
     static const char *const path = "DEVS:Internet/name_resolution";
@@ -660,15 +554,6 @@ static VOID check_resolver(const AmiConfig *cfg)
     }
 }
 
-/* ------------------------------------------------- the whole-drawer checks */
-
-/*
- * Two interfaces on one card, or two with one address: both parse cleanly and
- * leave one of the pair silently doing nothing.
- *
- * The finding is against the drawer rather than either file, since nothing
- * here can tell which of the two is the mistake. Both are named.
- */
 static VOID check_collisions(const AmiConfig *cfg)
 {
     UWORD i;
@@ -732,30 +617,6 @@ static VOID check_collisions(const AmiConfig *cfg)
     }
 }
 
-/*
- * THERE WAS A CHECK HERE and it has been deleted, because what it warned about
- * no longer happens and the advice it gave was wrong.
- *
- * It counted the files in DEVS:NetInterfaces, and if there were more than the
- * parser would keep it reported a fault and told the user to "move the unused
- * files out of DEVS:NetInterfaces".  That was true of a parser that stopped at
- * two, and it was the wrong thing to say even then: a drawer holding five card
- * definitions is an ordinary way to run a machine, and a checker that calls it
- * a fault and asks the user to delete their own files is serving the array
- * rather than the user.  The parser now reads every file
- * (src/config/config_list.c), so nothing is dropped and nothing to report.
- *
- * How many may be ONLINE AT ONCE is still limited, and that is refused at the
- * attach with the interfaces that hold the slots named -- not here, and not
- * about the drawer.  ShowNetStatus lists every definition with its state.
- */
-
-/*
- * Roadshow keeps interface files it is not to start at boot in
- * SYS:Storage/NetInterfaces, and a machine migrated from it will have them.
- * Reported as information rather than as a fault. They explain why a file
- * written there has no effect.
- */
 static VOID check_storage_drawer(VOID)
 {
     static char names[CNC_MAX_FILES][TOOL_NAME_LEN];
@@ -775,17 +636,6 @@ static VOID check_storage_drawer(VOID)
     note("Nothing starts these: only DEVS:NetInterfaces is read at boot. "
          "Move one there to use it.");
 }
-
-/* ---------------------------------------------------------- the netdb files
- *
- * These back get{host,net,proto,serv}by*(). src/config/netdb.c drops a line it
- * cannot use without saying anything, which is right for a stack that must
- * come up regardless.
- *
- * DEVS:Internet/networks is not checked: its second column is a network
- * number, which can be written short ("10", "192.168.1"), so a checker would
- * fire on correct files.
- */
 
 #define CNC_COL_ADDRESS     0       /* a dotted quad                          */
 #define CNC_COL_NUMBER      1       /* a plain decimal number                 */
@@ -946,10 +796,6 @@ static VOID check_netdb_file(const NetdbFile *spec)
             said++;
         }
 
-        /*
-         * A file with the wrong format throughout would otherwise produce one
-         * finding per line and bury every other finding.
-         */
         if (said >= 5)
         {
             finding(spec->path, 0, AMI_CFG_PROBLEM_WARN);
@@ -962,15 +808,6 @@ static VOID check_netdb_file(const NetdbFile *spec)
     Close(file);
 }
 
-/*
- * The IPv6 half, which nothing checked: check_addressing() above returns
- * before it starts on an interface with no IPv4 address, which is every
- * IPv6-only one.
- *
- * Three addresses a machine cannot have.  A prefix out of range is refused by
- * the parser already, and an address on a link with no router is a network
- * fact rather than a file fault, so neither is here.
- */
 static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
 {
     char text[AMI_CFG_IP6_STRLEN];
@@ -1004,13 +841,8 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
         return;
     }
 
-    /*
-     * fe80::/10, RFC 4291 2.5.6.  Not an error and not ignorable: the
-     * interface configures its own link-local from the MAC in every mode, so
-     * writing one down either duplicates that or replaces it with one derived
-     * from nothing, and either way the address reaches no further than this
-     * wire.
-     */
+    /* fe80::/10, RFC 4291 2.5.6.  The interface derives its own link-local
+       from the MAC in every mode, so a written one never reaches off-wire. */
     if ((ifc->address6[0] & 0xFFC00000UL) == 0xFE800000UL)
     {
         finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_WARN);
@@ -1021,8 +853,6 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
              "network uses, or CONFIGURE6 = AUTO to be given one.");
     }
 }
-
-/* --------------------------------------------------------------- the run, */
 
 /* Static: an AmiConfig is far larger than a Shell command's 4 KB stack. */
 static AmiConfig cnc_config;
@@ -1093,11 +923,6 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    /*
-     * Everything the parser finds, bad syntax, unknown keywords, a missing
-     * DEVICE line, a static interface with no address, arrives through this
-     * hook with the file and line already attached.
-     */
     ami_config_set_reporter(cnc_report, NULL);
     (VOID)ami_config_load(&cnc_config);
     ami_config_set_reporter(NULL, NULL);
@@ -1126,8 +951,6 @@ int main(int argc, char **argv)
     /* Last, and under a heading of their own: they are not faults, and the
        verdict below does not count them. */
     show_notes();
-
-    /* ---- the verdict ---------------------------------------------------- */
 
     if (cnc_errors == 0 && cnc_warnings == 0)
     {

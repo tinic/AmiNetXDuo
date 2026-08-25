@@ -1,32 +1,9 @@
 /*
  * AmiNetXDuo, host vectors for src/crypto68k/c68k_25519.c.
  *
- * The code is portable C over <stdint.h> and makes every arithmetic error
- * identically on both machines, so the vectors run here, in a second, on
- * every push, rather than only under the emulator, where queue time is the
- * scarcest resource in the project.  §18's SHA-256 endianness bug was caught
- * this way and would not have been by a vector run only on the guest.
- *
- * The checks:
- *
- *   1. fe_sqr against fe_mul on random inputs.  Published vectors cannot find
- *      a squaring bug: they exercise a handful of values and both routines
- *      would have to be wrong in the same way to agree.  This is the check
- *      that would have caught the lazy-reduction carry bug that made an
- *      Ed25519 doubling return 37 where it owed -1, see the fe_fold comment.
- *   2. RFC 7748 section 5.2 and 6.1: X25519 against the published values, and
- *      a full Diffie-Hellman where both sides have to reach the same secret.
- *   3. RFC 8032 section 7.1: Ed25519 tests 1, 2, 3 and SHA(abc), each checking
- *      the public key, the signature byte for byte, and the verification, so a
- *      signer that is wrong in a self-consistent way cannot pass.
- *   4. Rejection.  A verifier that returns 0 for everything passes every
- *      positive vector ever written, so each signature is also mutated and
- *      has to be refused.
- *
- * c68k_25519.c takes its hash as a callback and contains none (see its
- * header).  This tier binds it to _nx_crypto_sha512_*, the SHA-512 this tree
- * already has, so the test covers the callback interface as well as the curve
- * arithmetic.
+ * The code is portable C over <stdint.h>, so the vectors run here in a second
+ * on every push rather than only under the emulator.  c68k_25519.c takes its
+ * hash as a callback; this tier binds it to _nx_crypto_sha512_*.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -2,47 +2,6 @@
  * AmiNetXDuo, host fuzz driver for httpd's request framing: the
  * Content-Length parser, the Transfer-Encoding list, and the chunked decoder.
  *
- * WHY THIS ONE
- *
- * httpd is the newest thing in the tree that reads bytes off the network from
- * whoever connected, and the framing is the part of it with no answer to check
- * against. A parser that gets a header wrong sends a wrong reply and somebody
- * notices; a parser that gets the LENGTH wrong sends a right reply and leaves
- * the rest of the body in the socket, where the server reads it as the next
- * request. That is request smuggling, and it needs no attacker here, a
- * Content-Length that overflowed does it by itself.
- *
- * There is no MMU underneath, so a decoder that walks off its size line is not
- * a fault but another task's memory, surfacing later as something unrelated.
- * httpframe.c is portable C for exactly this reason, and this drives it under
- * ASan and UBSan.
- *
- * WHAT IS ASSERTED, beyond "it did not crash"
- *
- *   the count, http_chunk_feed() may never claim more of the buffer
- *                     than it was given, and never less than zero. The count
- *                     is where the server starts parsing the next request, so
- *                     one byte of slack there IS the smuggle.
- *   the sink, no more bytes are handed out than the chunk sizes asked
- *                     for, and `total` agrees with what the sink counted.
- *   the dribble, the same bytes fed one at a time must reach the same
- *                     state and produce the same output. Everything the
- *                     decoder is in the middle of is supposed to live in the
- *                     HttpChunk, and this is the only cheap way to find out
- *                     whether any of it is really living on the stack.
- *   the stop, once DONE or ERROR, nothing more is consumed. A decoder
- *                     that keeps reading after a framing failure is reading
- *                     the next request as body.
- *   the reference , and the one that matters. fz_reference() below is a
- *                     second decoder, written straight through with 64-bit
- *                     arithmetic and no state machine, and the two must agree
- *                     on all three of: is this body well formed, where does it
- *                     end, and what are its bytes. The structural checks above
- *                     pass on a decoder that is merely memory-safe, and every
- *                     framing fault found here was, so without
- *                     an oracle the sweep says "clean" about a decoder that
- *                     reads 0x100000000 as the end of the body.
- *
  * Usage:
  *   fuzz_httpframe -s             the seed cases, including the backlog's
  *   fuzz_httpframe -r SEED COUNT  built-in random generator, no corpus needed
@@ -102,25 +61,9 @@ static void fz_collect(void *ctx, const unsigned char *data, long len)
 /* ---------------------------------------------------------- the reference */
 
 /*
- * A second chunked decoder, and the point of the driver.
- *
- * Written the way the RFC reads rather than the way a server has to work: it
- * gets the whole buffer at once, walks it start to finish, uses 64-bit
- * arithmetic so a size that overflows 32 bits is visible as a large number
- * rather than as a small one, and has no state to carry between calls. It is
- * slow and it could not run on the target. It exists only to disagree.
- *
- * The rules, which are httpframe.c's and RFC 7230 4.1's:
- *
- *   a size line is one to eight significant hex digits, then either the end
- *   of the line or the ';' of a chunk extension, and it fits in the buffer;
- *   the data is exactly that many bytes and is followed by a line ending;
- *   a zero size begins the trailers, which end at a blank line.
- *
- * CR is dropped wherever it appears in a size line and any run of them is
- * allowed before the LF after a chunk's data, which is what httpframe.c does;
- * a reference that was stricter than the thing it checks would report
- * disagreements that are only about that.
+ * A second chunked decoder, 64-bit and stateless, whose only job is to
+ * disagree.  It must match httpframe.c on CR handling: CR is dropped anywhere
+ * in a size line, and any run of them is allowed before the LF after data.
  */
 enum { FZ_REF_BAD = 0, FZ_REF_DONE, FZ_REF_MORE };
 
@@ -297,10 +240,6 @@ static int fz_fail(const char *what, const unsigned char *body,
     return 1;
 }
 
-/*
- * One body through the decoder twice: whole, then one byte per call.  Returns
- * non-zero when something the header promises did not hold.
- */
 static int fz_body(const unsigned char *body, unsigned long len)
 {
     HttpChunk     whole;
@@ -328,7 +267,6 @@ static int fz_body(const unsigned char *body, unsigned long len)
     if (took < 0 || (unsigned long)took > len)
         return fz_fail("consumed a count outside the buffer", body, len);
 
-    /* Everything the sink got came out of a chunk whose size was declared. */
     if (whole.total != fz_sunk_n)
         return fz_fail("total disagrees with what the sink counted",
                        body, len);
@@ -336,7 +274,6 @@ static int fz_body(const unsigned char *body, unsigned long len)
     if (fz_sunk_n > len)
         return fz_fail("handed out more bytes than the body held", body, len);
 
-    /* A body that is neither finished nor broken took all of it. */
     if (whole.state != HTTP_CHUNK_DONE && whole.state != HTTP_CHUNK_ERROR &&
         (unsigned long)took != len)
         return fz_fail("stopped early without finishing or failing",
@@ -355,9 +292,8 @@ static int fz_body(const unsigned char *body, unsigned long len)
     switch (fz_reference(body, len))
     {
         case FZ_REF_BAD:
-            /* The framing is not readable, so the decoder may not have found
-               an end to the body in it.  This is the one that matters: a
-               decoder that says DONE here has told the server that whatever
+            /* The one that matters: a decoder that says DONE on framing the
+               reference calls malformed has told the server that whatever
                follows is the next request. */
             if (whole.state != HTTP_CHUNK_ERROR)
                 return fz_fail("read a body the reference calls malformed",
@@ -369,7 +305,6 @@ static int fz_body(const unsigned char *body, unsigned long len)
                 return fz_fail("did not finish a body the reference did",
                                body, len);
 
-            /* Where the body ends is where the next request starts. */
             if ((unsigned long)took != fz_ref_used)
                 return fz_fail("ended the body somewhere else than the "
                                "reference", body, len);
@@ -457,12 +392,8 @@ static int fz_body(const unsigned char *body, unsigned long len)
 
 #define FZ_BODY_MAX     512
 
-/*
- * A body that is mostly a chunked body.  Pure random bytes reach ERROR on the
- * first size line and never see CHUNK_DATA or the trailer, so most cases are
- * built to the grammar and then damaged, which is what puts the interesting
- * states under the mutation.
- */
+/* A body that is mostly a chunked body: pure random bytes reach ERROR on the
+   first size line and never see CHUNK_DATA or the trailer. */
 static unsigned long fz_make(unsigned char *out)
 {
     unsigned long n = 0;
@@ -471,7 +402,6 @@ static unsigned long fz_make(unsigned char *out)
 
     if (fz_below(8) == 0)
     {
-        /* Sometimes just noise, so nothing is assumed about the shape. */
         unsigned long len = fz_below(FZ_BODY_MAX);
 
         for (n = 0; n < len; n++)
@@ -535,7 +465,6 @@ static unsigned long fz_make(unsigned char *out)
         for (j = 0; j < size && n + 1UL < FZ_BODY_MAX; j++)
             out[n++] = (unsigned char)('a' + (fz_rand() % 26));
 
-        /* Sometimes the CRLF after the data is not one. */
         if (n + 2UL < FZ_BODY_MAX)
         {
             if (fz_below(8) == 0)
@@ -551,7 +480,6 @@ static unsigned long fz_make(unsigned char *out)
         }
     }
 
-    /* The terminator and a trailer, usually. */
     if (fz_below(8) != 0 && n + 8UL < FZ_BODY_MAX)
     {
         out[n++] = '0';
@@ -575,7 +503,6 @@ static unsigned long fz_make(unsigned char *out)
         }
     }
 
-    /* Then damage it, so the grammar is a starting point and not a cage. */
     {
         unsigned bites = fz_below(4);
         unsigned b;
@@ -584,7 +511,6 @@ static unsigned long fz_make(unsigned char *out)
             out[fz_below((unsigned)n)] = (unsigned char)fz_rand();
     }
 
-    /* And sometimes cut it short, which is every state entered mid-way. */
     if (fz_below(4) == 0 && n > 0UL)
         n = fz_below((unsigned)n);
 
@@ -593,11 +519,8 @@ static unsigned long fz_make(unsigned char *out)
 
 /* --------------------------------------------------- the header parsers */
 
-/*
- * Neither of these has an invariant richer than "it terminated and returned
- * one of its own values", but both walk a caller's string to its NUL and both
- * are reached before anything else in the server, so they are swept too.
- */
+/* Neither has an invariant richer than terminating and returning one of its own
+   values, but both walk a caller's string to its NUL. */
 static int fz_headers(void)
 {
     char          text[64];
@@ -652,11 +575,8 @@ static int fz_headers(void)
 
 /* --------------------------------------------------------------- the seeds */
 
-/*
- * The named cases, so they run on every ctest whatever the sweep happens to
- * generate.  Each of these was a way to end a body early and have the rest of
- * it parsed as a request.
- */
+/* The named cases, so they run on every ctest.  Each was a way to end a body
+   early and have the rest of it parsed as a request. */
 static int fz_seeds(void)
 {
     static const char *bodies[] = {

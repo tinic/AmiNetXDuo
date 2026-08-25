@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-#
 # mkofs, an empty 880 KB OFS floppy image.
-#
-#   tests/tools/mkofs.py OUT.adf [VOLUME]
-#
-# WHY THIS EXISTS
-#
-#   OFS stores 30 characters of a name, takes a longer one, and answers
-#   SUCCESS.  So two names that differ only after the cut are one file, and a
-#   server that trusts the create cannot see it, a DELETE of one removes the
-#   other, and nothing in the exchange says so.
-#
-#   Every filesystem an emulator offers by default hides that.  A directory
-#   filesystem keeps both names apart, and so does FFS.  Attaching an image
-#   this writes as DF0: is the only way the case can be exercised at all,
-#   which is why tests/tools/httpd-drill.py's last check reports itself as not
-#   applicable everywhere else.
-#
-#   Written rather than fetched because it is 60 lines of a documented
-#   on-disk format and the alternative is a binary in the tree.
-#
 # SPDX-License-Identifier: MIT
 
 import struct

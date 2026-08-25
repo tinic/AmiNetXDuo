@@ -1,31 +1,6 @@
 /*
  * tcpdrill, the synthetic SANA-II device.  See tapdev.h for why it exists.
  *
- * MakeLibrary() builds a six-entry Exec device vector, Open, Close, Expunge,
- * Null, BeginIO, AbortIO, and AddDevice() puts it where OpenDevice() looks
- * first.  Everything is in this program's own address space, so there is no
- * segment list, no __saveds and nothing resident: the device dies with the
- * process that installed it.
- *
- * OpenDevice() is handed a tag list carrying S2_CopyToBuff and S2_CopyFromBuff,
- * and a SANA-II device moves packet data only through them, the stack's
- * NX_PACKET is not something the device may touch directly.
- * src/sana2/sana2_copy.c is the other end of both, so calling them tests the
- * shipped receive and transmit paths rather than a bypass around them.
- *
- * They are m68k register-convention functions (a0 = to, a1 = from, d0 = len).
- * A `register ... __asm()` typedef miscompiles on this toolchain, GCC 15
- * loads the function pointer into a0 and then jumps through it, destroying the
- * first argument, so the call is written out as inline asm below.  The wrong
- * version compiles cleanly and corrupts every received frame, so it shows up
- * only under a disassembler.
- *
- * Raw framing (SANA2IOF_RAW) is answered S2ERR_NOT_SUPPORTED, so
- * ami_sana2_probe_raw() decides against it and the stack runs its cooked path.
- * That is the path a2065.device drives and the one every measurement in
- * docs/RESEARCH.md was taken through; exercising the raw path here would test
- * code the shipped configuration does not run.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -47,12 +22,8 @@
 
 #include "sana2_device.h"
 
-/* ------------------------------------------------------------ ether bits -- */
-
 #define ETH_HDR         14
 #define ETH_ADDR        6
-
-/* ------------------------------------------------------------- the state -- */
 
 typedef struct TapOpen
 {
@@ -95,13 +66,6 @@ static ULONG            tap_eclock_hz;
 static const char tap_name[] = TAP_DEVICE_NAME;
 static const char tap_id[]   = TAP_DEVICE_NAME " 1.0 (tcpdrill)";
 
-/* --------------------------------------------------------------- eclock --- */
-
-/*
- * ReadEClock() by LVO rather than through <proto/timer.h>: the NDK spells
- * TimerBase as one type and this file holds another.  timer.device LVOs:
- * AddTime -42, SubTime -48, CmpTime -54, ReadEClock -60, GetSysTime -66.
- */
 static ULONG tap_read_eclock(struct EClockVal *dest)
 {
     register struct Device   *a6  __asm("a6") = tap_timer;
@@ -136,8 +100,6 @@ ULONG tap_eclock_now(VOID)
     return ev.ev_lo;
 }
 
-/* ------------------------------------------------ the copy hooks, called --- */
-
 static BOOL tap_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 {
     register APTR  _a2 __asm("a2") = fn;
@@ -157,8 +119,6 @@ static BOOL tap_copy_call(APTR fn, APTR to, APTR from, ULONG len)
 
     return (res != 0) ? TRUE : FALSE;
 }
-
-/* --------------------------------------------------------------- helpers -- */
 
 static VOID tap_bytes(UBYTE *to, const UBYTE *from, ULONG n)
 {
@@ -219,14 +179,6 @@ static VOID tap_complete(struct IOSana2Req *io, LONG err, ULONG wire)
     ReplyMsg(&io->ios2_Req.io_Message);
 }
 
-/* ------------------------------------------------------ transmit capture -- */
-
-/*
- * CMD_WRITE.  The stack hands over an IP-or-ARP payload with no link header
- * (cooked framing), so the 14 bytes are rebuilt here from the fields SANA-II
- * carries them in, the same reconstruction sana2_rx.c performs in the other
- * direction, so one pcap-shaped decoder reads both.
- */
 static VOID tap_capture(TapDevice *dev, struct IOSana2Req *io)
 {
     TapFrame *f;
@@ -266,8 +218,6 @@ static VOID tap_capture(TapDevice *dev, struct IOSana2Req *io)
     dev->tx_count++;
     dev->stats.tx_frames++;
 }
-
-/* ------------------------------------------------------------- device fns - */
 
 static struct Device *tap_open(register struct Device    *dev __asm("a6"),
                                register struct IOSana2Req *io __asm("a1"),
@@ -328,11 +278,6 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
     switch (cmd)
     {
     case CMD_READ:
-        /*
-         * Raw reads are refused on purpose, see the file header.  The
-         * refusal has to happen here, in BeginIO, because that is the only
-         * signal ami_sana2_probe_raw() reads.
-         */
         if ((io->ios2_Req.io_Flags & SANA2IOF_RAW) != 0)
         {
             tap_complete(io, S2ERR_NOT_SUPPORTED, S2WERR_GENERIC_ERROR);
@@ -441,13 +386,6 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
     {
         struct Node *n;
 
-        /*
-         * S2_OFFLINE returns every queued CMD_READ with S2ERR_OUTOFSERVICE.
-         * src/sana2/sana2_rx.c depends on exactly this: it is the only
-         * mechanism that frees the readers on a device which ignores
-         * AbortIO(), as a2065.device 2.16 does.  Implemented here so the
-         * shutdown path under test is the one that ships.
-         */
         Forbid();
         d->online = FALSE;
         while ((n = RemHead(&d->reads)) != NULL)
@@ -490,17 +428,6 @@ static VOID tap_begin_io(register struct Device     *dev __asm("a6"),
         return;
     }
 
-    /*
-     * S2_ONEVENT.  A request that names an event which has already happened
-     * completes at once; anything else is held until it does, which for a
-     * device with no wire means forever.  Returning IOERR_NOCMD instead spins
-     * a stack that polls its link state, and completing an ONLINE request that
-     * has not happened yet tells one it has a link when it has not.  Held
-     * requests are returned by S2_OFFLINE and by tap_remove().
-     *
-     * Our stack never issues this; Roadshow does, and the device has to be
-     * openable by both.
-     */
     case S2_ONEVENT:
     {
         ULONG want = io->ios2_WireError;
@@ -579,8 +506,6 @@ static LONG tap_abort_io(register struct Device     *dev __asm("a6"),
     return rc;
 }
 
-/* ----------------------------------------------------------- the harness -- */
-
 ULONG tap_tx_get(UBYTE *buf, ULONG max, ULONG *stamp)
 {
     TapDevice *d = tap_dev;
@@ -612,12 +537,6 @@ ULONG tap_tx_get(UBYTE *buf, ULONG max, ULONG *stamp)
     return len;
 }
 
-/*
- * Which queued CMD_READ a frame completes.  FALSE, the default, is the first
- * matching one, which is what every driver in the test matrix happens to do.
- * TRUE takes the last, modelling a device whose firmware owns the slots and
- * whose framer hands them back out of order.
- */
 VOID tap_set_rx_lifo(BOOL on)
 {
     if (tap_dev != NULL)
@@ -646,15 +565,6 @@ LONG tap_rx_put(const UBYTE *frame, ULONG len)
         {
             pick = r;
 
-            /*
-             * FIFO is one device's habit, not a SANA-II guarantee, and the
-             * stack must not depend on it.  ZZ9000Net is the case in hand:
-             * its firmware owns the RX slots and a separate process drains
-             * them, so reads come back out of step with the order they were
-             * posted.  In LIFO mode this keeps walking and takes the LAST
-             * matching read, which is the cheapest way to make a reader that
-             * assumes order fail here rather than on somebody's Zorro card.
-             */
             if (!d->rx_lifo)
                 break;
         }
@@ -743,8 +653,6 @@ VOID tap_get_stats(TapStats *out)
     Permit();
 }
 
-/* ------------------------------------------------------------- install ---- */
-
 static const APTR tap_vectors[] =
 {
     (APTR)tap_open,
@@ -756,11 +664,6 @@ static const APTR tap_vectors[] =
     (APTR)-1
 };
 
-/*
- * The timer half of the teardown, on its own because tap_install() acquires it
- * before tap_dev is set and tap_remove() gates on tap_dev: both of the failure
- * returns below used to leave the MsgPort and the open timer.device behind.
- */
 static VOID tap_timer_close(VOID)
 {
     if (tap_timer != NULL)
@@ -858,12 +761,6 @@ VOID tap_remove(VOID)
     Forbid();
     RemDevice(&d->dd);
 
-    /*
-     * Anything still queued belongs to a caller that is about to have the
-     * memory holding this device freed underneath it.  Our stack closes
-     * cleanly before we get here; a foreign stack that keeps the interface up
-     * does not, and an I/O request that is never replied hangs its caller.
-     */
     while ((n = RemHead(&d->reads)) != NULL)
     {
         struct IOSana2Req *r = (struct IOSana2Req *)n;

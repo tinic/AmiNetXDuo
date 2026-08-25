@@ -1,57 +1,12 @@
 /*
- * Every command's ReadArgs template against the enum that indexes it.
+ * Every command's ReadArgs template against the enum that indexes it. A keyword
+ * inserted in the middle of a template without moving the enum shifts every
+ * argument after it by one, and an /N slot read as a pointer takes the machine
+ * down. Runs host-side and parses the sources rather than including them.
  *
- * A command reaches its arguments by position.  ReadArgs() fills an array in
- * template order, and the code says args[ARG_TIMEOUT] to get one out.  The two
- * agree only because somebody kept them in step, and nothing checks it.
- *
- * A keyword inserted in the middle of a template without moving the enum
- * shifts every argument after it by one.  Nothing warns: the types are all
- * LONG, the array is long enough, and the command runs.  QUIET starts reading
- * the number that TIMEOUT was given, and an /S switch reads a pointer and is
- * true whenever the option before it was present.  On a machine with no memory
- * protection, an /N read as a pointer is how a command takes the machine down
- * instead of printing usage.
- *
- * Thirty commands were rewritten wholesale in the 2026-08-04 diagnostics pass
- * with nothing on the host able to catch a mistake in any of them, and the
- * cross build only proves they compile.  Two of them have templates in two
- * halves and one has three aliases on a single keyword.
- *
- * This runs host-side and parses the sources rather than including them, for
- * the reason tests/sockopt/host/test_optnum_host.c gives: they need
- * <exec/types.h> and proto/dos.h, and a table restated here would only ever
- * agree with itself.
- *
- * Four groups, one ctest case each, named by argv[1].  No argument runs all of
- * them.
- *
- *   enums     For each command source holding a TEMPLATE and an ARG_ enum:
- *
- *               1. the template has as many comma-separated items as the enum
- *                  has entries before its count sentinel,
- *               2. item N names the same thing as ARG_ entry N,
- *               3. the -4/-6 pair is spelled one way in every command that
- *                  has it.
- *
- *   contract  What the template promises the code will do with the slot:
- *             every slot cleared before ReadArgs fills it, every /N read
- *             through a dereference and never as a number, no /S ever
- *             dereferenced, no option parsed and then ignored, and the
- *             modifiers themselves well formed.
- *
- *   usage     Every option named in a tool_usage() synopsis exists in the
- *             template it is a synopsis of.
- *
- *   docs      The template as restated in the file's own header comment and
- *             in docs/user/AmiNetXDuo.guide.  Both were stale when this group
- *             was written.
- *
- * A template item is a set of `=`-separated aliases and then modifiers, and
- * ReadArgs accepts any of them: `-c=COUNT` and `DNS=DOMAINNAMESERVERS` and
- * `DEBUG=-d` all appear in this tree, with the enum naming sometimes the first
- * and sometimes the second.  So entry N has to match any alias of item N, not
- * a fixed one.
+ * Four groups, one ctest case each, named by argv[1]; no argument runs all:
+ * enums, contract, usage, docs. A template item is a set of `=`-separated
+ * aliases and then modifiers, so entry N must match ANY alias of item N.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,11 +20,8 @@
 #define AMINETXDUO_SOURCE_DIR "."
 #endif
 
-/*
- * The tree to read.  CMake bakes in the real one.  The environment overrides
- * it, so tests/tools/argtemplates-verdict-selftest.sh can point the same
- * binary at a copy it has broken on purpose.
- */
+/* The tree to read. CMake bakes in the real one; the environment overrides it,
+   so a selftest can point the same binary at a copy it has broken. */
 static const char *source_dir(void)
 {
     const char *env = getenv("AMINETXDUO_SOURCE_DIR");
@@ -93,11 +45,8 @@ static int checks;
 
 /* ------------------------------------------------------------ the files --- */
 
-/*
- * Named rather than globbed.  A command that grows a template is added here
- * deliberately, and a file that disappears fails the test rather than quietly
- * reducing what is checked.
- */
+/* Named rather than globbed: a file that disappears fails the test rather than
+   quietly reducing what is checked. */
 static const char *const commands[] = {
     "addnetinterface", "addnetroute", "arp", "checknetconfig",
     "checknetdevice",
@@ -139,10 +88,8 @@ static char *slurp(const char *path)
 
 /* ---------------------------------------------------------- the template --- */
 
-/*
- * `#define TEMPLATE "a,b," \` continued over lines.  Collect every quoted run
- * from the define to the first line that does not end in a backslash.
- */
+/* `#define TEMPLATE "a,b," \` continued over lines. Collect every quoted run
+   from the define to the first line that does not end in a backslash. */
 static int read_template(const char *from, char *out, size_t outlen)
 {
     const char *p = from;
@@ -194,9 +141,8 @@ static int read_template(const char *from, char *out, size_t outlen)
 }
 
 /*
- * Does `name` match any alias of this template item?  Modifiers are cut first,
- * then the remainder is split on '='.  A leading '-' is kept.  `DEBUG=-d` has
- * aliases DEBUG and -D, and the enum names the first.
+ * Does `name` match any alias of this template item? Modifiers are cut first,
+ * then the remainder is split on '='. A leading '-' is kept.
  */
 static int item_has_alias(const char *item, const char *name, char *first,
                           size_t firstlen)
@@ -230,24 +176,18 @@ static int item_has_alias(const char *item, const char *name, char *first,
 /* -------------------------------------------------------------- the enum --- */
 
 /*
- * The name that sizes the argument array, out of `LONG args[ARG_XXX]`.  That
- * entry is a sentinel and is not an argument.
- *
- * Read from the declaration rather than from a list of likely names, because
- * no list works.  nslookup, onoff and whois size theirs with ARG_COUNT, and
- * ping has ARG_COUNT as a real argument for -c=COUNT with ARG_ARGCOUNT as its
- * sentinel.  How the code uses the name is the only thing that tells them
- * apart.
+ * The name that sizes the argument array, out of `LONG args[ARG_XXX]`; that
+ * entry is a sentinel and is not an argument. Read from the declaration rather
+ * than from a list of likely names, because no list works.
  */
 static int sentinel_of(const char *src, char *out, size_t outlen)
 {
     const char *p = src;
 
     /*
-     * The declaration, not a use.  addnetroute reads args[ARG_DST] hundreds of
-     * lines before anything declares the array, and taking the first
-     * `args[ARG_` in the file made ARG_DST the sentinel and cut its enum to one
-     * entry.  A declaration carries the type on the same line.
+     * The declaration, not a use: addnetroute reads args[ARG_DST] hundreds of
+     * lines before the array is declared. A declaration carries the type on the
+     * same line.
      */
     while ((p = strstr(p, "args[ARG_")) != NULL)
     {
@@ -274,9 +214,7 @@ static int sentinel_of(const char *src, char *out, size_t outlen)
     return 0;
 }
 
-/*
- * The ARG_ enum after the template, minus the sentinel above.
- */
+/* The ARG_ enum after the template, minus the sentinel above. */
 static int read_args(const char *src, const char *from, char names[][64],
                      int max)
 {
@@ -331,10 +269,8 @@ static int read_args(const char *src, const char *from, char names[][64],
 /* ------------------------------------------------------------------ test --- */
 
 /*
- * Every template/enum pair in the file, not just the first.  addnetroute.c is
- * two commands behind #ifdef TOOL_DELETE -- DeleteNetRoute with three
- * arguments and AddNetRoute with six -- and each carries its own pair.  A check
- * of only the first left the six-argument half unchecked.
+ * Every template/enum pair in the file, not just the first: addnetroute.c is
+ * two commands behind #ifdef TOOL_DELETE, each with its own pair.
  */
 static void check_pair(const char *name, int pair, const char *src,
                        const char *from)
@@ -415,15 +351,8 @@ static void check_command(const char *name)
 
 /*
  * Every command that resolves a name and then opens a socket carries
- * `IPV4=-4/S,IPV6=-6/S`, spelled the same way in all of them, and calls
- * tool_arg_family() to read it.  Listed rather than inferred, for the reason
- * `commands` above is listed: a new client command is added here deliberately.
- *
- * httpd and ShowNetServices are deliberately absent.  Neither resolves a name
- * to connect to -- for httpd the flag would say which family to bind, for
- * ShowNetServices which family to report a discovered service in -- so the
- * pair would mean a third and fourth thing under the same spelling.  arp is
- * IPv4 by definition.
+ * `IPV4=-4/S,IPV6=-6/S`, spelled the same way in all of them. Listed rather
+ * than inferred. httpd, ShowNetServices and arp are deliberately absent.
  */
 static const char *const family_commands[] = {
     "fetch", "host", "iperf", "nc", "ping", "sntp", "telnet", "tftp",
@@ -454,10 +383,8 @@ static void check_family(const char *name)
         (void)read_template(p, tmpl, sizeof(tmpl));
 
     /*
-     * The exact spelling, not a -4 somewhere in the template.  nc and iperf
-     * set it and the rest match them.  A command that wrote `-4=IPV4` would
-     * parse the same and read differently in every `?` line and every piece of
-     * documentation.
+     * The exact spelling, not a -4 somewhere in the template: `-4=IPV4` would
+     * parse the same and read differently in every `?` line.
      */
     CHECK(strstr(tmpl, "IPV4=-4/S,IPV6=-6/S") != NULL,
           "%s: template has no IPV4=-4/S,IPV6=-6/S: \"%s\"", name, tmpl);
@@ -551,10 +478,8 @@ static int has_mod(const TmplItem *it, char m)
 
 /* ------------------------------------------------------------- scanning --- */
 
-/*
- * Occurrences of a whole `ARG_NAME` token, so ARG_COUNT does not also count
- * ARG_ARGCOUNT.
- */
+/* Occurrences of a whole `ARG_NAME` token, so ARG_COUNT does not also count
+   ARG_ARGCOUNT. */
 static int token_uses(const char *src, const char *token)
 {
     const char *p = src;
@@ -577,9 +502,8 @@ static int token_uses(const char *src, const char *token)
 }
 
 /*
- * How one `args[ARG_X]` is used.  ReadArgs leaves a /N slot holding a LONG *
- * and a /S slot holding a flag, so the two have opposite correct spellings and
- * each spelling crashes on the other kind of slot.
+ * How one `args[ARG_X]` is used. ReadArgs leaves a /N slot holding a LONG * and
+ * a /S slot holding a flag, so each spelling crashes on the other kind of slot.
  */
 typedef enum ArgUse
 {
@@ -629,10 +553,8 @@ static ArgUse classify_use(const char *src, const char *at, size_t len)
 
 /* ------------------------------------------------------------- contract --- */
 
-/*
- * An option that parses and is then never read.  One exception, named in the
- * file's own header.
- */
+/* An option that parses and is then never read. One exception, named in the
+   file's own header. */
 static int deliberately_ignored(const char *cmd, const char *arg)
 {
     /* host: the timeout is the resolver's, set in DEVS:Internet/resolv.conf. */
@@ -791,9 +713,8 @@ static void check_contract(const char *name)
           "%s: ReadArgs with no FreeArgs", name);
 
     /*
-     * The name in the version tag is what `Version` reports and what a user
-     * types.  tool_name prefixes every diagnostic.  One command per pair, and
-     * addnetroute.c and onoff.c are two commands each.
+     * The name in the version tag is what `Version` reports; tool_name prefixes
+     * every diagnostic. addnetroute.c and onoff.c are two commands each.
      */
     for (p = src; (p = strstr(p, "TOOL_VERSTAG(\"")) != NULL; p += 14)
     {
@@ -831,9 +752,8 @@ static void check_contract(const char *name)
 /* ---------------------------------------------------------------- usage --- */
 
 /*
- * The first argument of tool_usage(), which is the synopsis a user sees when
- * the arguments were wrong.  A synopsis naming an option the template does not
- * have advises the user to type something that fails the same way again.
+ * The first argument of tool_usage(). A synopsis naming an option the template
+ * does not have advises the user to type something that fails the same way.
  */
 static int usage_synopsis(const char *from, char *out, size_t outlen)
 {
@@ -875,8 +795,8 @@ static int usage_synopsis(const char *from, char *out, size_t outlen)
 
 /*
  * An uppercase word is an option where an option can start: at the beginning,
- * after '[', or after a '>' or ']' that closed a placeholder.  After a letter
- * or a '|' it is a value -- `[CONFIGURE DHCP]`, `[MDNS YES|NO]`.
+ * after '[', or after a '>' or ']' that closed a placeholder. After a letter or
+ * a '|' it is a value.
  */
 static int is_option_position(const char *text, const char *at)
 {
@@ -973,10 +893,8 @@ static void check_usage(const char *name)
 
 /* ----------------------------------------------------------------- docs --- */
 
-/*
- * Whitespace and comment furniture removed, so a template restated over three
- * wrapped lines compares equal to the one on a single #define.
- */
+/* Whitespace and comment furniture removed, so a template restated over three
+   wrapped lines compares equal to the one on a single #define. */
 static char *flatten(const char *text, int strip_comment_stars)
 {
     size_t  len = strlen(text);
@@ -1093,12 +1011,9 @@ static void check_docs(const char *name, const char *guide_flat)
                   name, pair, tmpl);
 
             /*
-             * The guide prints netstat's template twice, once as a section
-             * heading and once as what `netstat ?` answers, and an edit to
-             * one of the two leaves the other stale.  So every copy that gets
-             * as far as the last option has to carry it: search on the
-             * template without its last item and require the whole thing at
-             * each hit.
+             * The guide prints netstat's template twice, and an edit to one
+             * leaves the other stale. Search on the template without its last
+             * item and require the whole thing at each hit.
              */
             if (cut != NULL)
             {

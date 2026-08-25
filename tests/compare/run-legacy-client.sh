@@ -31,14 +31,6 @@
 # struct sockaddr_in, which is the 1990s assumption an IPv6 library has to keep
 # working with.
 #
-# Every transfer is checked against the bytes the peer meant to send.  The peer
-# builds its bodies from one seeded buffer, so the host can hash what should
-# have arrived without either side sending a manifest.
-#
-# Commands run under tests/compare/checkrunner.c, which gives each one 512 KB
-# of stack.  A clib2 client with AmiSSL linked in does not survive a Shell
-# default stack, and the failure looks like a hang rather than a crash.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -78,9 +70,6 @@ while getopts "b:A:x:a:P:B:T:t:m:N:EIW" opt; do
     esac
 done
 
-# The peer's address as the guest sees it.  10.0.2.2 is SLIRP's host under
-# FS-UAE; under WinUAE the emulator runs elsewhere and has to come back over
-# the LAN.
 if [ "$WINUAE" = "1" ]; then
     PEER_IP="${AMINETXDUO_PEER_IP:?-W needs AMINETXDUO_PEER_IP set to the LAN address of this machine}"
     PEER_BIND=0.0.0.0
@@ -97,8 +86,6 @@ HOSTNAME_ALIAS=peer.localdomain
 
 # ------------------------------------------------------------- the client --
 
-# Extracted once into build/, from the archive, so the staging is a step
-# somebody can repeat rather than a directory somebody assembled by hand.
 if [ -z "$CLIENT" ]; then
     [ -f "$ARCHIVE" ] || {
         echo "no client archive at $ARCHIVE (-A FILE)" >&2; exit 2; }
@@ -159,9 +146,6 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 [ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
 sana2_stage "$BOARD" "$STAGE/devs"
 
-# The name the client is asked to resolve.  A hosts entry keeps the run off the
-# internet and still goes through gethostbyname(), which is the call that would
-# hand a 16-byte address to a client expecting 4.
 printf '%s\t%s peer\n' "$PEER_IP" "$HOSTNAME_ALIAS" >> "$STAGE/devs/Internet/hosts"
 
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
@@ -170,8 +154,6 @@ cp "$CLIENT" "$STAGE/curl"
 cp "$ADDIF"  "$STAGE/AddNetInterface"
 [ -f "$SHOWSTATUS" ] && cp "$SHOWSTATUS" "$STAGE/ShowNetStatus"
 
-# clib2's startup opens both maths libraries before main(), and they have to be
-# a matched pair or the client sits there forever.
 for lib in mathieeedoubbas mathieeedoubtrans; do
     for c in "$ROOT/build/amissl-mathlibs/$lib.library" \
              "$ROOT/build/$lib-os.library" "$ROOT/build/$lib.library"; do
@@ -181,8 +163,6 @@ for lib in mathieeedoubbas mathieeedoubtrans; do
         echo "no $lib.library; a clib2 client will not start" >&2; exit 2; }
 done
 
-# AmiSSL, opened before main() as well.  Nothing here uses https:, but the
-# client does not know that.
 if [ -d "$AMISSL/Libs/AmigaOS3" ]; then
     A3="$AMISSL/Libs/AmigaOS3"
     cp "$A3/amisslmaster.library" "$STAGE/libs/amisslmaster.library"
@@ -214,9 +194,6 @@ PLAN="$STAGE/checks.txt"
            "$CURL" "$W" "$HOSTPORT" "$SMALL"
     printf 'lit_bulk\t%s %s -o DH0:d/lit_bulk http://%s/bytes/%s\n' \
            "$CURL" "$W" "$HOSTPORT" "$BULK"
-    # Three bulk transfers, not one.  Run-to-run spread on the same build is
-    # about a percent, which is smaller than the gap between some cards, so a
-    # single sample cannot be compared against another card's single sample.
     printf 'lit_bulk2\t%s %s -o DH0:d/lit_bulk2 http://%s/bytes/%s\n' \
            "$CURL" "$W" "$HOSTPORT" "$BULK"
     printf 'lit_bulk3\t%s %s -o DH0:d/lit_bulk3 http://%s/bytes/%s\n' \
@@ -225,12 +202,8 @@ PLAN="$STAGE/checks.txt"
            "$CURL" "$W" "$NAMEPORT" "$SMALL"
     printf 'name_bulk\t%s %s -o DH0:d/name_bulk http://%s/bytes/%s\n' \
            "$CURL" "$W" "$NAMEPORT" "$BULK"
-    # --interface goes through SIOCGIFCONF, the other place a library could
-    # hand back an address family a 1990s client cannot read.
     printf 'iface\t%s %s --interface eth0 -o DH0:d/iface http://%s/bytes/%s\n' \
            "$CURL" "$W" "$HOSTPORT" "$SMALL"
-    # A name with an A and a AAAA record, resolved for real through the SLIRP
-    # forwarder.  Not hermetic, hence -I.
     if [ "$INTERNET" = "1" ]; then
         printf 'dns_dual\t%s %s -o DH0:d/dns_dual http://example.com/\n' \
                "$CURL" "$W"
@@ -263,11 +236,6 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-# For the -e lane only.  tools/enforcer-run.sh is the one runner left that
-# drives fs-uae (Enforcer needs a real MMU), and its base_dir is this
-# directory, so this is where its bsdsocket.library emulation is switched off
-# before it can answer for the library under test.  The Amiberry lane never
-# reads it.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'

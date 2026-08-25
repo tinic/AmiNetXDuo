@@ -1,34 +1,10 @@
 /*
- * nc, netcat.  Copy bytes between a socket and the Shell.
+ * nc, netcat. Copy bytes between a socket and the Shell.
  *
- *     nc HOST,PORT,LISTEN=-l/S,UDP=-u/S,SCAN=-z/S,TIMEOUT=-w/N/K,
- *        LOCALPORT=-p/N/K,HALFCLOSE=-N/S,VERBOSE=-v/S,CRLF/S,
- *        IPV4=-4/S,IPV6=-6/S,KEEP=-k/S
- *
- *   nc HOST PORT      connect, and copy standard input to it and it to
- *                     standard output until one end stops.
- *   nc -l PORT        listen instead, and do the same with the first caller.
- *   nc -l -k PORT     the same, but come back for the next caller. Ctrl-C ends
- *                     it.
- *   nc -z HOST PORT   connect, say whether it worked, and stop.  PORT can be
- *                     a range, "20-25", which is a port scan.
- *   nc -4 / nc -6     pin the family a name resolves to.  Without either, the
- *                     library answers AF_UNSPEC and prefers IPv6 where the
- *                     machine has it and the name has an AAAA, so on a dual
- *                     stack there is otherwise no way to ask for the other one.
- *
- * Every other network command in this tree is a client: socket() and
- * connect().  `nc -l` is the only one calling bind(), listen() and accept(),
- * so outside the conformance probe it is the only coverage of the server half
- * of the socket ABI.
- *
- * No proxy mode and no -e (running a program on the far end of a socket is a
- * remote shell).  Listen mode takes one caller and then exits, unless -k says
- * to come back.  UDP costs two `if`s: connect() on a datagram socket is only a
- * remembered destination, which is all this needs.
- *
- * End of input does not close the connection unless -N says so, following
- * OpenBSD nc, see the comment on -N in nc_shovel().
+ * `nc -l` is the only caller of bind(), listen() and accept() in this tree, so
+ * outside the conformance probe it is the only coverage of the server half of
+ * the socket ABI. No proxy mode and no -e. End of input does not close the
+ * connection unless -N says so, following OpenBSD nc.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -66,8 +42,7 @@ enum
 
 /*
  * Static, not automatic: a Shell command gets whatever stack the Shell has,
- * 4 KB on a stock Kickstart 3.1, and these are 12 KB between them.  Same as
- * src/tools/fetch.c.
+ * 4 KB on a stock Kickstart 3.1, and these are 12 KB between them.
  */
 #define NC_CHUNK        4096
 
@@ -178,16 +153,10 @@ static BOOL parse_range(const char *text, UWORD *lo, UWORD *hi)
 /* --------------------------------------------------------------- shovel --- */
 
 /*
- * The transfer itself: standard input to the socket, the socket to standard
- * output, until one of them stops.
- *
- * The two halves are polled rather than waited on together: WaitSelect()
- * handles sockets and knows nothing about a DOS handle, and no Amiga call
- * waits on both.  A 50 ms poll is imperceptible at a keyboard and costs
- * nothing on a bulk transfer, where the socket is ready every time round.
- *
- * When standard input ends the write half is shut down rather than the whole
- * socket, so `nc host 80 <request.txt` still reads the answer.
+ * The transfer itself. The two halves are polled rather than waited on
+ * together: WaitSelect() knows nothing about a DOS handle, and no Amiga call
+ * waits on both. When standard input ends the write half is shut down rather
+ * than the whole socket, so `nc host 80 <request.txt` still reads the answer.
  */
 static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 {
@@ -225,15 +194,9 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
             if (n == 0 && opt->halfclose)
             {
                 /*
-                 * -N: end of input sends a FIN, so a far end waiting for the
-                 * end of the request can answer it.  Off by default, as in
-                 * OpenBSD nc since 2015. HTTP/1.0 and other "send a file,
-                 * then read the reply" protocols need it.
-                 *
-                 * This switch found the half-close defect in
-                 * bsdsocket.library, where a same-machine shutdown(SHUT_WR)
-                 * wedged the caller past Ctrl-C.  Fixed in the library, not
-                 * here. docs/RESEARCH.md has the bisect.
+                 * -N: end of input sends a FIN, so a far end waiting for
+                 * the end of the request can answer it. Off by default, as in
+                 * OpenBSD nc since 2015.
                  */
                 if (!opt->udp && !wrote_eof)
                 {
@@ -269,8 +232,7 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
                 }
 
                 /* Both modes reach here on a connected socket, datagram
-                   included, where connect() is only a remembered destination,
-                   so one send() covers all four cases. */
+                   included, so one send() covers all four cases. */
                 n = tool_sock_send(sb, sock, out, len);
 
                 if (n != len)
@@ -331,9 +293,8 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 
             /*
              * Ready, and then nothing there: select() can wake for a state
-             * change rather than for data.  A bare `continue` would spin at
-             * full CPU and never wait, so no timeout could end it. This counts
-             * as an idle tick and is paced like one.
+             * change rather than for data. A bare `continue` would spin at
+             * full CPU, so this counts as an idle tick and is paced like one.
              */
             ready = 0;
             (VOID)tool_delay_ticks(2);      /* ~40 ms, near the poll period */
@@ -372,10 +333,8 @@ static LONG nc_shovel(struct Library *sb, LONG sock, const NcOptions *opt)
 /* --------------------------------------------------------------- listen --- */
 
 /*
- * A listener's first caller, a connection for TCP and a datagram for UDP.
- * Neither accept() nor recvfrom() gives the command a place to enforce -w or
- * notice Ctrl-C, so both wait here first.  The elapsed-time comparison avoids
- * multiplying an arbitrary /N argument by 1000 and wrapping it.
+ * A listener's first caller. Neither accept() nor recvfrom() gives the command
+ * a place to enforce -w or notice Ctrl-C, so both wait here first.
  */
 static BOOL nc_wait_listener(struct Library *sb, LONG sock,
                              const NcOptions *opt)
@@ -430,10 +389,8 @@ static BOOL nc_wait_listener(struct Library *sb, LONG sock,
 
 /*
  * bind(), listen(), accept(), the half of the ABI a client never reaches.
- *
  * SO_REUSEADDR goes on first: a listener that has just exited leaves the port
- * in TIME-WAIT, and without it the next `nc -l` on the same port fails with
- * "address already in use" for two minutes.
+ * in TIME-WAIT for two minutes.
  */
 static LONG nc_listen(struct Library *sb, const NcOptions *opt,
                       const ToolAddr *bindaddr, UWORD port, LONG *accepted)
@@ -472,8 +429,8 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
     if (opt->udp)
     {
         /*
-         * A datagram listener has nothing to accept.  It waits for the first
-         * packet, and whoever sent it becomes the peer, as in every netcat.
+         * A datagram listener has nothing to accept: whoever sends the first
+         * packet becomes the peer, as in every netcat.
          */
         LONG n;
 
@@ -536,9 +493,8 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
 
     /*
      * accept() blocks, and a blocked accept() cannot see Ctrl-C, so
-     * WaitSelect() runs first. A listening socket becomes readable exactly
-     * when there is a connection to take, which gives the break a place to be
-     * noticed and TIMEOUT somewhere to apply.
+     * WaitSelect() runs first: a listening socket becomes readable exactly when
+     * there is a connection to take.
      */
     if (!nc_wait_listener(sb, lsock, opt))
     {
@@ -562,8 +518,8 @@ static LONG nc_listen(struct Library *sb, const NcOptions *opt,
                     (LONG)dotted, (LONG)tool_sock_addr_port(&from));
     }
 
-    /* One caller, then done: the listening socket has no further use, and
-       leaving it open would keep the port busy after this command exits. */
+    /* One caller, then done: leaving the listening socket open would keep the
+       port busy after this command exits. */
     (VOID)tool_sock_close(sb, lsock);
 
     return 0;
@@ -683,18 +639,16 @@ int main(int argc, char **argv)
     opt.crlf      = (args[ARG_CRLF]    != 0) ? TRUE : FALSE;
     opt.keep      = (args[ARG_KEEP]    != 0) ? TRUE : FALSE;
 
-    /* -4 and -6 pin the family the name resolves to. Without either, the
-       library's getaddrinfo() answers AF_UNSPEC and prefers IPv6 where the
-       machine has it and the name has an AAAA. */
+    /* -4 and -6 pin the family the name resolves to. Without either,
+       getaddrinfo() answers AF_UNSPEC and prefers IPv6 where there is an AAAA. */
     if (!tool_arg_family(args[ARG_IPV4], args[ARG_IPV6], &opt.family))
     {
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    /* A listener with no host binds the wildcard address.  Its family still
-       comes from -4/-6; leaving the early IPv4 initializer in place made -6
-       a successfully parsed no-op in the common `nc -l -6 PORT` form. */
+    /* A listener with no host binds the wildcard address. Its family still
+       comes from -4/-6. */
     tool_addr_any(&address, opt.family);
 
     opt.timeout = 0;
@@ -733,10 +687,7 @@ int main(int argc, char **argv)
     host     = (const char *)args[ARG_HOST];
     portspec = (const char *)args[ARG_PORT];
 
-    /*
-     * "nc -l 1234" leaves the port sitting in the HOST position.  Nothing
-     * else can be meant there, so take it as the port.
-     */
+    /* "nc -l 1234" leaves the port sitting in the HOST position. */
     if (opt.listen && portspec == NULL)
     {
         portspec = host;
@@ -823,11 +774,9 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
 
-        /* -k serves one caller after another. Each pass rebinds rather than
-           holding the listener open across clients, exactly as the plain mode
-           does, and the only difference is that it comes back. Ctrl-C is how
-           it ends. nc_listen()'s SO_REUSEADDR matters here: without it the
-           rebind meets the previous socket's TIME_WAIT. */
+        /* -k serves one caller after another, rebinding each pass rather than
+           holding the listener open. nc_listen()'s SO_REUSEADDR matters here:
+           without it the rebind meets the previous socket's TIME_WAIT. */
         if (opt.keep)
             tool_break_arm();
 

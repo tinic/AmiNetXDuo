@@ -1,31 +1,5 @@
 /*
  * AmiNetXDuo, whether a name lookup stops when it is told to.
- *
- * A gethostbyname() against a name server that answers nothing used to hold the
- * calling task for minutes with no way out: NetX Duo's DNS client took the
- * thirty-second timeout as a PER-QUERY wait and spent it NX_DNS_MAX_RETRIES
- * times over every configured server, doubling between rounds, with its mutex
- * held for the whole of it.  Nothing sampled the break signal, so Ctrl-C did
- * not arrive, and the second of two concurrent lookups queued behind the first.
- *
- * The ladder is ours now (src/netstack/netstack_retry.c) and this drives it
- * with the DNS client replaced by a table of scripted answers, because the
- * three cases that matter cannot be produced on demand against a real server:
- *
- *   1. a black hole, every attempt uses its whole wait and nothing comes
- *                           back.  The lookup must end inside its budget rather
- *                           than at a multiple of it.
- *   2. Ctrl-C, the break signal arrives mid-lookup.  It must be
- *                           acted on within one rung, not at the end.
- *   3. a fast refusal, a server answers immediately without an address.
- *                           Re-asking cannot change that, so the ladder must
- *                           stop rather than spend the rest of the budget.
- *
- * Real, compiled into this binary: src/netstack/netstack_retry.c, the whole of
- * it.  Stubbed: the clock, which is a variable the scripted attempts advance,
- * so a thirty-second lookup costs no wall time and the intervals are exact
- * rather than approximately right.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -34,18 +8,12 @@
 #include <stdio.h>
 #include <string.h>
 
-
-/* ---------------------------------------------------------- the clock ----- */
-
 static ULONG h_now;
 
 ULONG _tx_time_get(VOID)
 {
     return h_now;
 }
-
-
-/* ------------------------------------------------------------- harness ---- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -61,14 +29,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-
-/* ------------------------------------------------------- scripted queries -- */
-
-/*
- * One name server that may be black-holed, refusing, or answering, and that
- * charges the clock for the time it takes.  `answer_after` is when the address
- * turns up; until then it behaves as `silent` says.
- */
 typedef struct
 {
     ULONG servers;          /* how many the attempt walks                    */
@@ -91,8 +51,6 @@ static AmiNetAskResult h_ask(VOID *arg, ULONG wait)
 
     for (i = 0; i < s->servers; i++)
     {
-        /* A server that never replies burns the whole wait; one that does
-           charges only the round trip. */
         h_now += (s->reply_delay != 0UL && s->reply_delay < wait)
                      ? s->reply_delay : wait;
 
@@ -106,7 +64,6 @@ static AmiNetAskResult h_ask(VOID *arg, ULONG wait)
     return AMI_NET_ASK_SILENT;
 }
 
-/* Ctrl-C at a fixed moment on the simulated clock. */
 static ULONG h_break_at;
 
 static BOOL h_break(VOID *arg)
@@ -116,16 +73,8 @@ static BOOL h_break(VOID *arg)
     return (BOOL)(h_break_at != 0UL && h_now >= h_break_at);
 }
 
-
-/* ---------------------------------------------------------------- cases --- */
-
 #define H_SECOND    ((ULONG)NX_IP_PERIODIC_RATE)
 
-/*
- * A black hole.  Before this change the DNS client spent 5 * (30 + 60 + 64)
- * seconds on the thirty the caller asked for; the requirement is simply that
- * the budget is the budget.
- */
 static void h_case_blackhole(void)
 {
     HostServer         s;
@@ -154,7 +103,6 @@ static void h_case_blackhole(void)
 
     h_check(s.attempts > 1, "a black hole is retried at all");
 
-    /* The ladder doubles and then stops doubling. */
     h_check(s.waits[0] == AMI_NET_ASK_FIRST, "the first query waits one rung");
 
     for (i = 0; i < s.attempts && i < 64; i++)
@@ -181,7 +129,6 @@ static void h_case_break(void)
     /*
      * The break is sampled between queries and never during one, so the worst
      * case is one attempt, a query to each configured server at the ceiling.
-     * With two servers that is four seconds, against the minutes it was.
      */
     h_check(h_now <= h_break_at + s.servers * AMI_NET_ASK_CEILING,
             "Ctrl-C is acted on within one attempt of arriving");
@@ -196,7 +143,6 @@ static void h_case_break_first(void)
     memset(&s, 0, sizeof(s));
     s.servers = 1;
 
-    /* Set before the call is made. */
     h_now      = 1;
     h_break_at = 1;
 
@@ -206,12 +152,6 @@ static void h_case_break_first(void)
     h_check(s.attempts == 0, "a pending break sends no query");
 }
 
-/*
- * A name server that answers immediately without an address, what NXDOMAIN
- * looks like from up here, since a blocking query in addons/dns folds every
- * per-server failure into one status before returning.  Re-asking cannot
- * change the answer, so a mistyped host name must not cost the whole budget.
- */
 static void h_case_fast_refusal(void)
 {
     HostServer         s;
@@ -251,14 +191,6 @@ static void h_case_answer(void)
     h_check(s.attempts >= 2, "the retry is what found it");
 }
 
-/*
- * The loser of a race for the DNS client's mutex.  addons/dns waits the
- * caller's timeout for it and then fails, which reads here as an attempt that
- * used its whole wait and came back with nothing, silence.  It must stay
- * silence all the way out, because "somebody else is resolving" mapped onto
- * "no such host" is what told the second of two programs that the name does
- * not exist.
- */
 static void h_case_contention(void)
 {
     HostServer         s;

@@ -1,30 +1,6 @@
 /*
  * RtProbe, exercises the Roadshow routing API on a running stack.
  *
- * tests/tools/routeprobe.c covers the private NETCTRL_ROUTE_ADD vector.  This
- * covers the published API on top of it: AddRouteTagList(),
- * DeleteRouteTagList(), ChangeRouteTagList(), GetRouteInfo() and
- * FreeRouteInfo(), called at their LVOs by a program that knows only the NDK
- * headers.
- *
- * The next hops are derived from the machine's own subnet rather than written
- * in.  NetX Duo refuses a next hop that is on none of its interfaces, so a
- * fixed address only works on the network this file was written for; .250 and
- * .251 of whatever subnet the interface route reports work everywhere.
- *
- * The shape under test is GetRouteInfo()'s, which a compiler cannot check.
- * The autodoc says the table is "a header followed by a small number of
- * sockadders, interpreted by position", with rtm_addrs as the map and a
- * terminator whose rtm_msglen is zero.  So this walks the table the way a
- * caller must, advance by rtm_msglen, stop at zero, read the sockaddrs by
- * their bit order, rather than indexing an array of rt_msghdr, which the
- * prototype alone would suggest and which walks off the end of the first
- * entry.
- *
- * The default gateway is read and then set to the value it already had.  This
- * run is riding on it; deleting it to exercise DeleteRouteTagList() on default
- * gateways would take the machine off the network for the rest of the test.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -41,8 +17,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_add_route(struct Library *base, struct TagItem *tags)
 {
@@ -89,8 +63,6 @@ static LONG p_change_route(struct Library *base, struct TagItem *tags)
     return res;
 }
 
-/* socket() and sendto(), so this can make the stack ROUTE something rather
-   than only report what it would route.  Same LVO-level calls as the rest. */
 static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -188,8 +160,6 @@ static LONG p_errno(struct Library *base)
     return res;
 }
 
-/* ----------------------------------------------------------- little helpers */
-
 struct sockaddr_in_probe
 {
     UBYTE   sin_len;
@@ -222,11 +192,6 @@ static VOID p_dotted(ULONG addr, char *out)
     out[pos] = '\0';
 }
 
-/*
- * The sockaddr for one RTA_ bit, found the way the routing-socket convention
- * says: walk the bits from least significant, skipping the ones that are not
- * set, and step over each present address by its own sa_len.
- */
 static const struct sockaddr_in_probe *p_route_addr(const struct rt_msghdr *hdr,
                                                     LONG want)
 {
@@ -259,11 +224,6 @@ static ULONG p_route_addr_value(const struct rt_msghdr *hdr, LONG want)
     return (sa != NULL) ? sa->sin_addr : 0;
 }
 
-/*
- * Print the table and return how many entries it had. `label` goes on every
- * line so the shell can count occurrences of one listing without matching
- * another.
- */
 static LONG p_show_table(struct Library *base, const char *label, LONG af,
                          LONG flags)
 {
@@ -314,8 +274,6 @@ static LONG p_show_table(struct Library *base, const char *label, LONG af,
     return count;
 }
 
-/* The default gateway's address, or 0, the entry whose destination and mask
-   are both zero. */
 static ULONG p_default_gateway(struct Library *base)
 {
     struct rt_msghdr *table = p_get_route_info(base, AF_UNSPEC, 0);
@@ -341,16 +299,6 @@ static ULONG p_default_gateway(struct Library *base)
     return gateway;
 }
 
-/*
- * The machine's own subnet, read out of the table rather than assumed.
- *
- * A next hop has to be on it or NetX Duo refuses the route, and this test has
- * to run on whatever network the emulator is bridged onto, which is not
- * knowable from here.  The interface routes are the ones with no gateway and a
- * mask that is neither 0 (the default route) nor all ones (a host route), so
- * the first of those is the answer.  Returns FALSE when the interface is not
- * up yet, which is a different failure from a route being refused.
- */
 static BOOL p_local_network(struct Library *base, ULONG *network, ULONG *mask)
 {
     struct rt_msghdr *table = p_get_route_info(base, AF_INET, 0);
@@ -388,11 +336,6 @@ static BOOL p_local_network(struct Library *base, ULONG *network, ULONG *mask)
     return found;
 }
 
-/*
- * Send one datagram at `dest`, so the stack has to route it.  Nothing waits
- * for a reply: the point is what the stack does with the packet, which is to
- * look the destination up, find the next hop and ARP for it.
- */
 static VOID p_poke(struct Library *base, ULONG dest)
 {
     struct sockaddr_in_probe to;
@@ -427,8 +370,6 @@ static VOID p_poke(struct Library *base, ULONG dest)
     p_close_socket(base, sock);
 }
 
-/* ------------------------------------------------------------------ main -- */
-
 #define PROBE_NET       "192.168.66.0"      /* class C, zero host part */
 #define PROBE_HOST      "192.168.67.7"      /* class C, non-zero host part */
 #define PROBE_TARGET    0xC0A84205UL        /* 192.168.66.5, inside PROBE_NET */
@@ -458,23 +399,8 @@ int main(void)
 
     (VOID)p_show_table(base, "before", AF_UNSPEC, 0);
 
-    /*
-     * The count that the undo at the end is measured against is the STATIC
-     * one, not the whole table.  The whole table carries the ARP cache, and on
-     * a bridged run any machine on the LAN can put an entry in it between two
-     * listings; a run that ended with one more neighbour than it started with
-     * then read as a route this test failed to remove.
-     */
     before = p_show_table(base, "before-static", AF_INET, RTF_STATIC);
 
-    /*
-     * Two next hops on this machine's own subnet, whatever that subnet is.
-     * .250 and .251 rather than fixed addresses, because a next hop off the
-     * subnet is refused and a test that hardcodes one only runs on the
-     * network it was written on.  Neither is expected to answer; a next hop
-     * that answers ARP would prove the same thing, so the assertions do not
-     * depend on either.
-     */
     if (!p_local_network(base, &network, &mask))
     {
         Printf((CONST_STRPTR)"RtProbe: no interface route, is the interface up?\n");
@@ -486,12 +412,6 @@ int main(void)
     p_dotted(network | 251, hop_b);
     Printf((CONST_STRPTR)"next hops: %s then %s\n", (LONG)hop_a, (LONG)hop_b);
 
-    /* ---- a network route, whose mask the grammar has to imply -------------
-     *
-     * There is no netmask tag. 192.168.66.0 has a zero host part under its
-     * classful mask, so "the route is assumed to be a to a network" and the
-     * mask must come back as 255.255.255.0, from nothing but the address.
-     */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_NET;
     tags[1].ti_Tag  = RTA_Gateway;
@@ -503,7 +423,6 @@ int main(void)
     Printf((CONST_STRPTR)"add %s via %s: rc %ld (errno %ld)\n",
            (LONG)PROBE_NET, (LONG)hop_a, rc, p_errno(base));
 
-    /* ---- and a host route, from an address with a non-zero host part ----- */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_HOST;
     tags[1].ti_Tag  = RTA_Gateway;
@@ -517,28 +436,8 @@ int main(void)
 
     (VOID)p_show_table(base, "with", AF_UNSPEC, 0);
 
-    /* ---- the flags filter ------------------------------------------------
-     *
-     * "Flags which have to be set in each routing table entry to be returned"
-     * so RTF_STATIC returns the two just added and nothing else; the count
-     * is the assertion.
-     */
     with = p_show_table(base, "static-only", AF_INET, RTF_STATIC);
 
-    /* ---- ChangeRouteTagList ----------------------------------------------
-     *
-     * There is no autodoc page for this one; what the contract is and where
-     * each part of it comes from is in src/bsdsocket/routing.c's header.  The
-     * three things asserted here are that a change reaches the table, that the
-     * PACKETS follow it, and that it refuses to install a route that is not
-     * already there.
-     *
-     * The poke either side is what makes the second of those visible.  Sending
-     * to 192.168.66.5 can only leave this machine by the route just added, and
-     * the next hop is on the local subnet and unresolved, so the stack emits an
-     * ARP request for it and nothing else.  Before the change that is hop_a and
-     * after it hop_b, on the wire, in that order.
-     */
     p_poke(base, PROBE_TARGET);
     Printf((CONST_STRPTR)"poke 192.168.66.5 while the route is via %s\n",
            (LONG)hop_a);
@@ -586,7 +485,6 @@ int main(void)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* The same exclusion the Add and Delete pages both state. */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_NET;
     tags[1].ti_Tag  = RTA_DefaultGateway;
@@ -615,7 +513,6 @@ int main(void)
 
     (VOID)p_show_table(base, "survived", AF_INET, RTF_STATIC);
 
-    /* ---- the exclusions the autodoc states ------------------------------- */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_NET;
     tags[1].ti_Tag  = RTA_DefaultGateway;
@@ -652,7 +549,6 @@ int main(void)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- the default gateway, set to what it already is ------------------ */
     gateway = p_default_gateway(base);
     if (gateway != 0)
     {
@@ -667,12 +563,6 @@ int main(void)
         Printf((CONST_STRPTR)"set the default gateway to %s again: rc %ld\n",
                (LONG)gw_text, rc);
 
-        /*
-         * And changed to the same address.  RTA_DefaultGateway is the NEW
-         * gateway for ChangeRouteTagList, so any other value would take this
-         * machine off the network for the rest of the run; naming the one
-         * already installed exercises the whole path and moves nothing.
-         */
         tags[0].ti_Tag  = RTA_DefaultGateway;
         tags[0].ti_Data = (ULONG)gw_text;
         tags[1].ti_Tag  = TAG_DONE;
@@ -688,12 +578,6 @@ int main(void)
                           ? ", unmoved, correctly"
                           : ", MOVED, WRONG"));
 
-        /*
-         * Deleting it by naming a gateway that is not the installed one.  The
-         * tag is "the address of the default gateway all packets WERE
-         * forwarded to", so this names no entry and must not take the real one
-         * away, which is what the read-back below checks.
-         */
         tags[0].ti_Tag  = RTA_DefaultGateway;
         tags[0].ti_Data = (ULONG)"10.99.99.99";
         tags[1].ti_Tag  = TAG_DONE;
@@ -717,7 +601,6 @@ int main(void)
         Printf((CONST_STRPTR)"set the default gateway: there is none to read\n");
     }
 
-    /* ---- an address family that is not IPv4 ------------------------------- */
     table = p_get_route_info(base, 23, 0);      /* AF_INET6 in this NDK */
     Printf((CONST_STRPTR)"GetRouteInfo(AF_INET6): %s (errno %ld)%s\n",
            (LONG)((table == NULL) ? "NULL" : "a table"), p_errno(base),
@@ -725,16 +608,6 @@ int main(void)
                                   : ", RETURNED ONE, WRONG"));
     p_free_route_info(base, table);
 
-    /*
-     * Deleting one that was never there.  This has to happen here, while the
-     * two above are still in the static table:
-     * nx_ip_static_route_delete() returns NX_SUCCESS outright when
-     * nx_ip_routing_table_entry_count is zero, without searching, and the
-     * default gateway is not in that table, it lives in
-     * nx_ip_gateway_address.  A machine whose only route is its default
-     * gateway has an empty static table, so run after the two deletes below
-     * this call reports success regardless.
-     */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)"192.168.69.0";
     tags[1].ti_Tag  = TAG_DONE;
@@ -745,12 +618,6 @@ int main(void)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /* ---- and undo ---------------------------------------------------------
-     *
-     * The same destination strings, with no mask given either time: delete
-     * has to derive the same prefix length add did, or the entry can never
-     * be found again.
-     */
     tags[0].ti_Tag  = RTA_Destination;
     tags[0].ti_Data = (ULONG)PROBE_NET;
     tags[1].ti_Tag  = TAG_DONE;

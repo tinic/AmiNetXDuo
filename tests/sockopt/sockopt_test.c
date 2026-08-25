@@ -1,24 +1,6 @@
 /*
  * AmiNetXDuo, the socket option surface, through bsdsocket.library's ABI.
  *
- * setsockopt() and getsockopt() are the part of the library a caller cannot
- * check for itself: an option that is stored, answered back and applied to
- * nothing looks exactly like one that works.  Nothing else in the tree touched
- * SO_RCVBUF, SO_SNDBUF, SO_LINGER, SO_OOBINLINE, TCP_MAXSEG, TCP_NODELAY,
- * IP_TTL, IP_TOS, SIOCATMARK, FIOASYNC, the SIOCGIF* queries or the multicast
- * width paths, and that is where every finding of the audit landed.
- *
- * So each option below has a case, including the ones this library
- * deliberately does not honour, SO_REUSEADDR and SO_BROADCAST are stored and
- * answered and change nothing, and a test that says so is what stops that
- * being rediscovered as a defect.
- *
- * An ordinary AmigaOS program: OpenLibrary("bsdsocket.library") and calls
- * through the LVO table, linked against none of our code, exactly as
- * tests/ipv6/ipv6_socket_test.c and tests/libraries/library_test.c are.  The
- * interface comes from tests/tcpdrill/tapdev.c, a SANA-II device made at run
- * time, so this needs nobody's driver and runs wherever tier 2 runs.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -132,12 +114,6 @@ UBYTE       *d = (UBYTE *)dst;
 
 /* -------------------------------------------------------------- the ABI -- */
 
-/*
- * Taken from the NDK rather than written out.  ipv6_socket_test.c restates its
- * structures because their LAYOUT is what it checks; here the numbers are not
- * under test, the behaviour behind them is, and a hand-copied IP_TTL that is
- * really IP_TOS would test the wrong option and pass.
- */
 #include <stddef.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -158,11 +134,8 @@ UBYTE       *d = (UBYTE *)dst;
 
 /* ------------------------------------------------------------ LVO stubs --- */
 
-/*
- * d0, d1, a0 and a1 are scratch across a library call and GCC has to be told
- * so, or it keeps a "still valid" copy and reads the library's leftovers.  The
- * NDK's own inline headers do exactly this.
- */
+/* d0, d1, a0 and a1 are scratch across a library call and GCC has to be told
+   so, or it keeps a stale copy and reads the library's leftovers. */
 #define BSD_SCRATCH                                                          \
     register LONG _s_d1 __asm("d1");                                         \
     register LONG _s_a0 __asm("a0");                                         \
@@ -340,7 +313,6 @@ LONG        rc;
     return(rc);
 }
 
-/* setsockopt failed with this errno. */
 static BOOL t_set_fails(LONG fd, LONG level, LONG name, LONG value, LONG err)
 {
 LONG rc = t_set_int(fd, level, name, value);
@@ -351,11 +323,6 @@ LONG rc = t_set_int(fd, level, name, value);
 
 /* --------------------------------------------------------- SOL_SOCKET --- */
 
-/*
- * The three that are stored, answered and honoured by nothing.  Pinned rather
- * than left implicit: each has a comment in options.c saying why it cannot be
- * implemented, and a caller reading back what it set has to keep working.
- */
 static VOID t_test_accepted_and_ignored(VOID)
 {
 LONG fd;
@@ -417,11 +384,8 @@ socklen_t odd_len;
     (VOID)t_get_int(fd, SOL_SOCKET, SO_KEEPALIVE, &value);
     (VOID)t_check((BOOL)(value == 1), "SO_KEEPALIVE reads back 1", value);
 
-    /*
-     * SO_OOBINLINE is the one of the four that answers the truth instead:
-     * oob.c delivers the urgent byte in the stream whatever this says, so a 0
-     * that was set reads back as 1.
-     */
+    /* oob.c delivers the urgent byte in the stream whatever this says, so a
+       0 that was set reads back as 1. */
     (VOID)t_check((BOOL)(t_set_int(fd, SOL_SOCKET, SO_OOBINLINE, 0) == 0),
                   "setsockopt SO_OOBINLINE=0", bsd_Errno());
     (VOID)t_get_int(fd, SOL_SOCKET, SO_OOBINLINE, &value);
@@ -461,7 +425,6 @@ LONG value;
     (VOID)t_check(t_set_fails(fd, SOL_SOCKET, SO_SNDBUF, -1, T_EINVAL),
                   "a negative SO_SNDBUF is EINVAL", bsd_Errno());
 
-    /* An unset socket answers with the window it actually got. */
     (VOID)bsd_CloseSocket(fd);
 
     fd = bsd_socket(AF_INET, SOCK_STREAM, 0);
@@ -475,18 +438,8 @@ LONG value;
     }
 }
 
-/*
- * What the packet pool's clamps produced, read back.
- *
- * ami_bsd_tcp_window() and bsd_udp_queue_max() derive a window and a queue
- * from the pool at socket-create time and clamp both.  Nothing read either
- * one, so the machine where the ceilings bind -- an A3000 with 32 MB, where
- * the pool saturates at AMI_POOL_MAX_PACKETS -- proved nothing about them.
- *
- * The literals are written out rather than included.  A gate that computes its
- * expectation from the thing under test cannot fail when that thing changes;
- * tests/tools/run-bigmem.sh says the same about the pool figure.
- */
+/* The literals below are written out rather than included: a gate that computes
+   its expectation from the thing under test cannot fail when that changes. */
 #define T_TCP_WINDOW_FLOOR      8192L       /* BSD_TCP_WINDOW               */
 #define T_TCP_WINDOW_CEILING    100352L     /* (512 / 8) * 1568             */
 #define T_UDP_QUEUE_MIN         11680L      /* 8 datagrams x 1460           */
@@ -527,10 +480,6 @@ LONG queue  = 0;
                          queue <= T_UDP_QUEUE_CEILING),
                   "the UDP queue is between its floor and its ceiling", queue);
 
-    /*
-     * A UDP socket used to answer BSD_TCP_WINDOW here whatever its queue was,
-     * which is inside the band above and would have passed both checks.
-     */
     (VOID)t_check((BOOL)(queue % 1460L == 0L),
                   "the UDP queue answers in whole datagrams", queue);
 }
@@ -560,10 +509,6 @@ socklen_t       len;
                          len == (socklen_t)sizeof(lin)),
                   "SO_LINGER reads back", lin.l_linger);
 
-    /*
-     * A negative l_linger became a tick count of about 497 days in
-     * bsd_socket_close(), so CloseSocket() would never return.
-     */
     lin.l_onoff  = 1;
     lin.l_linger = -1;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, SOL_SOCKET, SO_LINGER, &lin,
@@ -578,14 +523,12 @@ socklen_t       len;
                          bsd_Errno() == T_EINVAL),
                   "and so is one past the 4.4BSD bound", bsd_Errno());
 
-    /* The refused calls must not have replaced the accepted one. */
     t_bzero(&lin, sizeof(lin));
     len = (socklen_t)sizeof(lin);
     (VOID)bsd_getsockopt(fd, SOL_SOCKET, SO_LINGER, &lin, &len);
     (VOID)t_check((BOOL)(lin.l_linger == 5),
                   "a refused SO_LINGER leaves the old one", lin.l_linger);
 
-    /* Too short a buffer is EINVAL in both directions. */
     len = 2;
     (VOID)t_check((BOOL)(bsd_getsockopt(fd, SOL_SOCKET, SO_LINGER, &lin,
                                         &len) < 0 &&
@@ -595,12 +538,6 @@ socklen_t       len;
     (VOID)bsd_CloseSocket(fd);
 }
 
-/*
- * SO_ERROR clears on read, and used to clear on a read that failed: the zero
- * went in before the copy-out, so a bad optval returned EFAULT and destroyed
- * the pending error.  A non-blocking connect() caller has no other way to
- * learn why it failed.
- */
 static VOID t_test_so_error(VOID)
 {
 LONG                 fd;
@@ -631,10 +568,8 @@ LONG                 pending;
 
     (VOID)bsd_connect(fd, &sa, (LONG)sizeof(sa));
 
-    /* Give the stack a moment to refuse it. */
     Delay(25);
 
-    /* A copy-out that cannot fit must fail without taking the error with it. */
     len = 1;
     (VOID)t_check((BOOL)(bsd_getsockopt(fd, SOL_SOCKET, SO_ERROR, &value,
                                         &len) < 0),
@@ -650,7 +585,6 @@ LONG                 pending;
     (VOID)t_check((BOOL)(pending != 0),
                   "the pending error survived both failed reads", pending);
 
-    /* And the successful read is the one that clears it. */
     (VOID)t_get_int(fd, SOL_SOCKET, SO_ERROR, &value);
     (VOID)t_check((BOOL)(value == 0), "SO_ERROR clears on a read that worked",
                   value);
@@ -739,7 +673,6 @@ struct sockaddr_in sa;
 
     (VOID)bsd_CloseSocket(fd);
 
-    /* SO_ACCEPTCONN before and after listen(). */
     fd = bsd_socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
         return;
@@ -805,7 +738,6 @@ LONG value;
     (VOID)t_get_int(fd, IPPROTO_TCP, TCP_MAXSEG, &value);
     (VOID)t_check((BOOL)(value == 1200), "TCP_MAXSEG reads back 1200", value);
 
-    /* A negative went in as a four-billion MSS and was stored. */
     (VOID)t_check(t_set_fails(fd, IPPROTO_TCP, TCP_MAXSEG, -1, T_EINVAL),
                   "a negative TCP_MAXSEG is EINVAL", bsd_Errno());
     (VOID)t_check(t_set_fails(fd, IPPROTO_TCP, TCP_MAXSEG, 0, T_EINVAL),
@@ -824,7 +756,6 @@ LONG value;
 
     (VOID)bsd_CloseSocket(fd);
 
-    /* Level IPPROTO_TCP on a UDP socket answers for neither option. */
     fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0)
         return;
@@ -836,7 +767,6 @@ LONG value;
                               T_ENOPROTOOPT),
                   "TCP_MAXSEG on a UDP socket is ENOPROTOOPT", bsd_Errno());
 
-    /* And reading them there, which used to answer 1 and 0 with success. */
     (VOID)t_check((BOOL)(t_get_int(fd, IPPROTO_TCP, TCP_NODELAY, &value) < 0 &&
                          bsd_Errno() == T_ENOPROTOOPT),
                   "getsockopt TCP_NODELAY on a UDP socket is ENOPROTOOPT",
@@ -846,7 +776,6 @@ LONG value;
                   "getsockopt TCP_MAXSEG on a UDP socket is ENOPROTOOPT",
                   bsd_Errno());
 
-    /* IP_HDRINCL is a raw-socket option and is refused in both directions. */
     (VOID)t_check(t_set_fails(fd, IPPROTO_IP, IP_HDRINCL, 1, T_ENOPROTOOPT),
                   "setsockopt IP_HDRINCL off a raw socket is ENOPROTOOPT",
                   bsd_Errno());
@@ -860,12 +789,6 @@ LONG value;
 
 /* --------------------------------------------------------- IPPROTO_IP --- */
 
-/*
- * IP_TTL 256 read back as 256 and went on the wire as zero, so every packet
- * was dropped at the first hop.  Both options are also applied to the NX
- * socket now, which getsockopt cannot see, what it can see is that the
- * out-of-range value is refused and the in-range one survives.
- */
 static VOID t_test_ip_options(LONG type, const char *what)
 {
 LONG fd;
@@ -921,13 +844,8 @@ LONG value;
 /* ---------------------------------------------------------- multicast --- */
 
 #ifdef AMINETXDUO_MULTICAST
-/*
- * 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
- * since passes an int, so all three widths have to work.  Two bytes did not:
- * m68k is big-endian, a short of 5 is 0x00,0x05, and the one-byte read took
- * the high half, IP_MULTICAST_TTL 0, which keeps the datagram off the link.
- * The reply had the mirror-image fault and answered 5 as 1280.
- */
+/* 4.4BSD types IP_MULTICAST_TTL and IP_MULTICAST_LOOP as u_char and everything
+   since passes an int, so all three optlen widths have to work. */
 static VOID t_test_multicast_widths(VOID)
 {
 LONG        fd;
@@ -942,7 +860,6 @@ socklen_t   len;
     if (!t_check((BOOL)(fd >= 0), "udp socket", bsd_Errno()))
         return;
 
-    /* Four bytes in, four bytes out. */
     value32 = 5;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL,
                                         &value32, 4) == 0),
@@ -953,7 +870,6 @@ socklen_t   len;
     (VOID)t_check((BOOL)(value32 == 5 && len == 4), "reads back 5 as a LONG",
                   value32);
 
-    /* One byte in, one byte out. */
     value8 = 7;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL,
                                         &value8, 1) == 0),
@@ -964,7 +880,6 @@ socklen_t   len;
     (VOID)t_check((BOOL)(value8 == 7 && len == 1), "reads back 7 as a UBYTE",
                   (LONG)value8);
 
-    /* Two bytes in: the one that read the high half and got 0. */
     value16 = 5;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL,
                                         &value16, 2) == 0),
@@ -977,14 +892,12 @@ socklen_t   len;
                   "a WORD of 5 is 5, not 0, the high byte is not the value",
                   value32);
 
-    /* Two bytes out: the one that wrote one byte and answered 1280. */
     value16 = 0;
     len     = 2;
     (VOID)bsd_getsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &value16, &len);
     (VOID)t_check((BOOL)(value16 == 5 && len == 2),
                   "and reads back into a WORD as 5, not 1280", (LONG)value16);
 
-    /* IP_MULTICAST_LOOP takes the same three widths. */
     value16 = 1;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP,
                                         &value16, 2) == 0),
@@ -996,7 +909,6 @@ socklen_t   len;
     (VOID)t_check((BOOL)(value32 == 1),
                   "IP_MULTICAST_LOOP is on, not silently cleared", value32);
 
-    /* The range, and the read-only pair. */
     value32 = 256;
     (VOID)t_check((BOOL)(bsd_setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL,
                                         &value32, 4) < 0 &&
@@ -1024,11 +936,8 @@ UBYTE           buf[512];
     if (!t_check((BOOL)(fd >= 0), "tcp socket", bsd_Errno()))
         return;
 
-    /*
-     * SIOCATMARK: "is the next byte the urgent one?".  This implementation is
-     * always OOBINLINE, so the mark means an urgent byte has arrived and
-     * recv(MSG_OOB) has not taken it; on a socket that never saw one it is 0.
-     */
+    /* This implementation is always OOBINLINE, so the mark means an urgent
+       byte has arrived and recv(MSG_OOB) has not taken it. */
     value = -1;
     (VOID)t_check((BOOL)(bsd_IoctlSocket(fd, SIOCATMARK, &value) == 0 &&
                          value == 0),
@@ -1051,7 +960,6 @@ UBYTE           buf[512];
     (VOID)t_get_int(fd, SOL_SOCKET, SO_EVENTMASK, &value);
     (VOID)t_check((BOOL)(value == 0), "and clearing it clears the mask", value);
 
-    /* FIONBIO and FIONREAD, which the conformance suite also reaches. */
     value = 1;
     (VOID)t_check((BOOL)(bsd_IoctlSocket(fd, FIONBIO, &value) == 0),
                   "IoctlSocket(FIONBIO, 1)", bsd_Errno());
@@ -1066,10 +974,8 @@ UBYTE           buf[512];
                          bsd_Errno() == T_ENOTTY),
                   "an unknown request is ENOTTY", bsd_Errno());
 
-    /*
-     * The interface queries.  They ignore the socket, BSD requires one to be
-     * passed and says nothing about which, and answer out of interfaces.c.
-     */
+    /* The interface queries ignore the socket: BSD requires one to be passed
+       and says nothing about which. */
     t_bzero(&ifc, sizeof(ifc));
     ifc.ifc_len = 1;
     ifc.ifc_buf = buf;
@@ -1115,12 +1021,8 @@ int main(void)
 {
     t_log("AmiNetXDuo, socket options through bsdsocket.library");
 
-    /*
-     * The stack needs an interface to come up on, and this one is made at run
-     * time rather than opened out of DEVS:, see tests/tcpdrill/tapdev.c.  It
-     * has to be installed by this process, because the device lives in the
-     * installer's address space.
-     */
+    /* The interface is made at run time, and has to be installed by this
+       process: the device lives in the installer's address space. */
     {
         static const UBYTE tap_mac[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x08 };
 

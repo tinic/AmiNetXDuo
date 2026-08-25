@@ -2,30 +2,6 @@
  * iperf, a throughput measurement.
  *
  *     iperf HOST,SERVER=-s/S,UDP=-u/S,PORT=-p/N/K,TIME=-t/N/K,SIZE=-n/N/K,
- *           LENGTH=-l/N/K,BANDWIDTH=-b/N/K,QUIET=-q/S,HELP=-h/S,
- *           IPV4=-4/S,IPV6=-6/S
- *
- *   iperf HOST         send to HOST for ten seconds and say how fast it went.
- *   iperf -s           wait for somebody to send here, and say the same.
- *   iperf -u HOST      the same over UDP, which also reports loss.
- *   iperf -s -u        receive UDP, and answer the sender's end-of-test
- *                      marker with the report it is waiting for.
- *
- * This speaks iperf 2, on port 5001.  The far end has to be `iperf` 2.x.
- * iperf 3 is a different protocol on a different port and the two do not
- * interoperate: pointing this at an `iperf3 -s` gets a connection that goes
- * nowhere, not a slow number.  Debian and Ubuntu package 2.x as `iperf` and
- * 3.x as `iperf3`.  Homebrew calls them `iperf` and `iperf3` too.
- *
- * It exists so that a report of this stack being slower than another one can
- * carry a figure from the reporter's own machine and card, which is where the
- * differences we cannot test live.
- * It goes through bsdsocket.library rather than linking any part of the stack,
- * so the same binary runs on Roadshow and AmiTCP and the comparison is one
- * tool against one peer.
- *
- * The measurement is in src/tools/iperfcore.c, which httpd drives too.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -71,13 +47,6 @@ static char iperf_line[192];
 #define IPERF_TCP_DEFAULT_LEN   4096
 #define IPERF_UDP_DEFAULT_RATE  1000UL      /* kbit/s */
 
-/* ------------------------------------------------------------------- help - */
-
-/*
- * One line per option, description at column 34.  Not built from the template:
- * the template is what ReadArgs parses and "?" already prints it, and a table
- * generated from it would name keywords rather than say what they do.
- */
 static VOID iperf_help(VOID)
 {
     tool_printf("Usage: %s [-s] [-u] [<host>]\n", (LONG)tool_name);
@@ -96,8 +65,6 @@ static VOID iperf_help(VOID)
     tool_printf("  The far end must be iperf 2.x, not iperf3, which is a\n");
     tool_printf("  different protocol on port 5201 and will not answer.\n");
 }
-
-/* ---------------------------------------------------------------- reporting - */
 
 static VOID iperf_print_summary(struct Library *sb, const IperfResult *res)
 {
@@ -147,10 +114,6 @@ static VOID iperf_print_summary(struct Library *sb, const IperfResult *res)
     }
 }
 
-/*
- * What went wrong, in words, rather than an errno.  A user who has just been
- * told their stack is slow needs to know whether they reached the peer at all.
- */
 static VOID iperf_print_error(struct Library *sb, const IperfResult *res,
                               const IperfPlan *plan)
 {
@@ -184,8 +147,6 @@ static VOID iperf_print_error(struct Library *sb, const IperfResult *res,
         break;
     }
 }
-
-/* ------------------------------------------------------------------- main - */
 
 int main(int argc, char **argv)
 {
@@ -264,11 +225,6 @@ int main(int argc, char **argv)
     plan.dir = (UBYTE)(server ? (udp ? IPERF_UDP_RX : IPERF_TCP_RX)
                               : (udp ? IPERF_UDP_TX : IPERF_TCP_TX));
 
-    /* The standalone command owns its loop, so the TCP server receives with
-       a plain blocking recv() -- the shape an application uses, and the one
-       the library can complete without a wakeup round trip per chunk.  The
-       break is still honoured: the library's own EINTR machinery interrupts
-       a parked recv, and tool_break() runs between slices. */
     if (server && !udp)
         plan.blocking = 1;
 
@@ -392,13 +348,6 @@ int main(int argc, char **argv)
                         (LONG)(plan.seconds != 0 ? plan.seconds : plan.kbytes),
                         (LONG)(plan.seconds != 0 ? "seconds" : "KBytes"));
 
-            /*
-             * And at what rate, because a UDP send that was given no -b is
-             * paced at 1000 kbit/s all the same, the way iperf 2 is.  A run
-             * that says only "UDP to X for 3 seconds" and reports 1.00 Mbit/s
-             * reads as a machine that could go no faster; it was asked to go
-             * no faster.  That misreading cost a bug report.
-             */
             if (udp)
             {
                 if (plan.rate_kbit != 0)
@@ -438,12 +387,9 @@ int main(int argc, char **argv)
             break;
         }
 
-        /* One sample a second while it runs, PRINTED AFTER.  A single average
-           hides whether the transfer starts slow or falls off part way, but
-           printing from this loop stalls the very task that drains the
-           socket: on a real A1200 each line cost up to 449 ms of zero
-           receive window (measured on the wire, 2026-08-21), an eighth of
-           the whole transfer. */
+        /* Samples must be PRINTED AFTER, never from this loop: printing here
+           stalls the task that drains the socket, costing hundreds of
+           milliseconds of zero receive window per line. */
         if (!quiet && iperf_run.res.ms == 0 &&
             sample_n < (ULONG)IPERF_SAMPLE_MAX)
         {

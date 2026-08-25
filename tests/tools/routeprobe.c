@@ -1,40 +1,6 @@
 /*
  * RouteProbe, checks that NX_ENABLE_IP_STATIC_ROUTING reaches the wire.
  *
- * Rather than stopping at "nx_ip_static_route_add() returned NX_SUCCESS", it
- * adds a route whose next hop is an address nothing else in the run names,
- * sends to a destination only that route can reach, and leaves the consequence
- * where an instrument below this stack can see it.
- *
- *   destination 192.168.77.5      not on any of the guest's own subnets
- *   next hop    .249 of the guest's own subnet, read out of NETSTATUS_ROUTES
- *                                 rather than written in: it has to be on one
- *                                 of the machine's own subnets or NetX Duo
- *                                 refuses the route, and which subnet that is
- *                                 depends on what the emulator is bridged onto
- *
- *   with the route     _nx_ip_route_find() matches the table entry, the next
- *                      hop becomes that address, and the stack emits
- *                          ARP who-has <next hop>
- *                      because it has never resolved it;
- *   without the route  the default gateway is used, whose ARP entry the DHCP
- *                      exchange already resolved, so the frame goes out
- *                      immediately and there is no ARP at all.
- *
- * That ARP request therefore appears if and only if the routing table was
- * consulted.  It is read off the host NIC the emulator is bridged onto, below
- * every line of our code, rather than off a capture this stack took of itself;
- * tests/tools/run-routes.sh takes it.
- *
- * The subject is the stack, not the commands: the table exists, an entry goes
- * into it, the entry is reported back, it governs where a packet goes, and
- * deleting it undoes all of that.  Going through a command's ReadArgs template
- * would make this fail whenever the template changed.
- *
- * Vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, the same
- * way tests/tools/ttlprobe.c and src/tools/toolsock.c do: the NDK inlines
- * assume a global SocketBase.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -49,10 +15,6 @@
 #define PROBE_DEST      0xC0A84D05UL    /* 192.168.77.5 , nothing routes here */
 #define PROBE_NETWORK   0xC0A84D00UL    /* 192.168.77.0                         */
 #define PROBE_MASK      0xFFFFFF00UL    /* /24                                  */
-/* The next hop is derived at run time, not written in: it has to be on one of
-   the guest's own subnets or NetX Duo refuses the route, and what that subnet
-   is depends on what the emulator is bridged onto.  .249 of it, which nothing
-   is expected to answer and which RtProbe's .250/.251 do not collide with. */
 #define PROBE_NEXTHOP_HOST      249
 #define PROBE_ABSENT    0xC0A85800UL    /* 192.168.88.0, never added          */
 #define PROBE_PORT      9999
@@ -68,8 +30,6 @@ typedef struct ProbeAddr
 
 #define P_AF_INET       2
 #define P_SOCK_DGRAM    2
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -171,15 +131,8 @@ static LONG p_control(struct Library *base, ULONG op, NetStatusControl *ctl)
     return res;
 }
 
-/*
- * The LVOs above are written as literals because `jsr a6@(-870:W)` needs one,
- * so the header's own numbers are checked against them here.  A slot that
- * moved would otherwise land on whatever is next.
- */
 _Static_assert(AMI_NETSTATUS_QUERY_LVO   == -870, "NetStackQuery LVO moved");
 _Static_assert(AMI_NETSTATUS_CONTROL_LVO == -876, "NetStackControl LVO moved");
-
-/* ------------------------------------------------------------- reporting -- */
 
 static struct
 {
@@ -187,11 +140,6 @@ static struct
     NetStatusRoute  e[8];
 } probe_routes;
 
-/*
- * Every control block carries the magic and the version.  bsd_NetStackControl()
- * rejects one that does not with EINVAL, the same errno an unreachable next
- * hop produces, so forgetting them looks exactly like the feature not working.
- */
 static VOID probe_ctl_init(NetStatusControl *ctl);
 
 static VOID probe_zero(APTR p, ULONG n)
@@ -275,12 +223,6 @@ static VOID show_routes(struct Library *base, const char *when)
     }
 }
 
-/*
- * The guest's own subnet, out of the same table.  An interface route is the
- * one with no gateway and a mask that is neither 0 (the default route) nor all
- * ones (a host route); loopback is skipped because no frame leaves by it.
- * Returns 0 when there is none, which means the interface is not up.
- */
 static ULONG local_network(struct Library *base)
 {
     LONG n;
@@ -311,10 +253,6 @@ static ULONG local_network(struct Library *base)
     return 0;
 }
 
-/*
- * One datagram at 192.168.77.5.  Nothing will answer it; the measurement is
- * where the stack decided to send it, which only the wire shows.
- */
 static VOID send_one(struct Library *base)
 {
     static const UBYTE payload[8] = { 'r', 'o', 'u', 't', 'e', 'd', '!', '\n' };
@@ -338,18 +276,10 @@ static VOID send_one(struct Library *base)
     sent = p_sendto(base, s, payload, (LONG)sizeof(payload), &sa);
     Printf((CONST_STRPTR)"send to 192.168.77.5: %ld (errno %ld)\n", sent, p_errno(base));
 
-    /*
-     * The ARP for the next hop is issued from the IP thread after sendto()
-     * returns, and the reply never comes, so the queued datagram is dropped
-     * eight retries later. Give the first request time to reach the card
-     * before the program exits and the harness kills the machine.
-     */
     Delay(150);
 
     (VOID)p_close(base, s);
 }
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {
@@ -410,10 +340,6 @@ int main(void)
 
     show_routes(base, "with");
 
-    /*
-     * A next hop on no local subnet must be refused rather than stored: NetX
-     * Duo derives the outgoing interface from it, and there is none.
-     */
     probe_ctl_init(&ctl);
     ctl.nsc_Destination = 0xAC100000UL;         /* 172.16.0.0   */
     ctl.nsc_NetMask     = 0xFFFF0000UL;         /* /16          */
@@ -424,12 +350,6 @@ int main(void)
            rc, p_errno(base),
            (LONG)((rc != 0) ? ", refused, correctly" : ", ACCEPTED, WRONG"));
 
-    /*
-     * Deleting a route that is not there, while the table is not empty.  The
-     * emptiness matters: nx_ip_static_route_delete() returns NX_SUCCESS
-     * outright when nx_ip_routing_table_entry_count is zero, so a delete
-     * attempted on an empty table proves nothing about whether it searched.
-     */
     probe_ctl_init(&ctl);
     ctl.nsc_Destination = PROBE_ABSENT;
     ctl.nsc_NetMask     = PROBE_MASK;

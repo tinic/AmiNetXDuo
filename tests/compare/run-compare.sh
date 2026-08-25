@@ -105,21 +105,11 @@ done
 [ -n "$STACK" ] && [ -n "$WORKLOAD" ] || { sed -n '3,60p' "$0" >&2; exit 2; }
 [ -n "$TAG" ] || TAG="cmp-$STACK-$WORKLOAD"
 
-# -b may be relative to the tree or an absolute path elsewhere.  The second is
-# not a convenience: build/ directory names are shared, and docs/RESEARCH.md
-# 24.9 records two measurements lost to another workstream rebuilding the
-# instrument underneath them.  A controlled arm points at a build directory
-# nothing else writes to.
 case "$BUILD" in
     /*) ;;
     *)  BUILD="$ROOT/$BUILD" ;;
 esac
 
-# --------------------------------------------------------------- the stack --
-#
-# Three things are wanted from each: the library, an AddNetInterface, and a
-# ping.  Every one of them is that stack's own, because a stack that needed
-# somebody else's command to start would not be a stack under test.
 
 LIBBSD=""
 LIBUG=""
@@ -152,9 +142,6 @@ case "$STACK" in
         LIBUG="$NGDIR/Libs/usergroup.library"
         CMD_ADDIF="$NGDIR/C/AddNetInterface"
         CMD_PING="$NGDIR/C/ping"
-        # Its library reads a configuration through an AmiTCP: assign and
-        # falls back to SYS:AmiTCP, which a directory hard drive can supply
-        # without a C:Assign the bare boot shell does not have.
         [ -d "$NGDIR/db" ] && EXTRA_STAGE+=("$NGDIR/db")
         STACK_NOTE="AmiTCP_NG from $NGDIR"
         ;;
@@ -166,17 +153,7 @@ for f in "$CMD_ADDIF" "$CMD_PING"; do
     [ -f "$f" ] || echo "!! $STACK has no $(basename "$f")" >&2
 done
 
-# ------------------------------------------------------------- ingredients --
 
-# The driver runs ON the emulated machine, so it is built FOR it.  It was
-# -m68020 unconditionally, which put `tst.l a0` in its own constructor loop
-# (_callfuncs) and killed every A600 run with an illegal instruction before a
-# single plan step ran: no serial, no stdout.txt, the machine idling at 50 fps.
-# That read as "our stack does not work on a 68000" for as long as anyone
-# looked at it.
-#
-# Keyed by architecture so a driver built for one machine is never reused on
-# another.
 case "$MODEL" in
     A500|A500+|A600) DRIVER_ARCH=68000 ;;
     *)               DRIVER_ARCH=68020 ;;
@@ -205,28 +182,18 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2; exit 2; }
 
-# --------------------------------------------------------------- staging ----
 
 STAGE="$ROOT/build/cmp-stage-$TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs" "$STAGE/w" "$STAGE/d"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 
-# -i replaces DEVS:NetInterfaces/eth0 with a file of the caller's choosing.
-# It exists because "the interface would not come up" has two causes that look
-# identical from the outside, the stack cannot drive the card, or it did not
-# understand the configuration file, and a stack should be measured with a
-# configuration it agrees is well formed.
 if [ -n "${IFCONFIG:-}" ]; then
     [ -f "$IFCONFIG" ] || { echo "no such interface file: $IFCONFIG" >&2; exit 2; }
     cp "$IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
     echo "==> interface configuration: $IFCONFIG"
 fi
 
-# The device goes in BOTH places on purpose: ours opens it out of DEVS:, and
-# both foreign stacks look in DEVS:Networks/.  One copy of a driver in two
-# directories removes a variable that would otherwise look like a bug in
-# somebody's SANA-II handling.
 cp "$A2065" "$STAGE/devs/a2065.device"
 mkdir -p "$STAGE/devs/Networks"
 cp "$A2065" "$STAGE/devs/Networks/a2065.device"
@@ -242,25 +209,8 @@ else
     echo "==> $STACK ships no usergroup.library and none was borrowed (-U)"
 fi
 
-# Roadshow's ping is built against a C library that opens mathieeedoubbas
-# before main(), and a bare directory hard drive has no LIBS: to find it in.
-# Staging it for every stack costs nothing and is not a thumb on the scale:
-# it is a maths library, not a network one.
-# -L stages a whole LIBS: tree of the caller's own, amisslmaster.library and
-# its versioned library under AmiSSL/, which no stack here supplies.
-# Defaulted, because the failure without it is unreadable: a client that opens
-# a library BEFORE main() gives no output at all when it is missing, only a
-# return code, indistinguishable from the stack under test being broken.
-# That cost an hour once, on the third-party curl this harness no longer runs;
-# the trap is the pre-main open, not that client, so the default stays.
-# build/amissl-stage/libs is where the TLS tests leave the tree.
 if [ -z "${EXTRALIBS:-}" ] && [ -d "$ROOT/build/amissl-stage/libs" ]; then
     EXTRALIBS="$ROOT/build/amissl-stage/libs"
-    # echo, NOT say(): say() is defined ~40 lines below this and appends to
-    # $PLAN, so calling it here was "command not found" under set -e, rc 127
-    # for every run that had build/amissl-stage/libs, which is every run after
-    # the TLS tests have been built once. It was committed as a cosmetic change
-    # to where the message goes; it was not, it was a fatal one.
     echo "==> staging $EXTRALIBS into LIBS: (default; -L overrides)"
 fi
 
@@ -268,11 +218,6 @@ if [ -n "${EXTRALIBS:-}" ]; then
     cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 fi
 
-# build/amissl-mathlibs first, and it has to be: the two have to be a matched
-# pair or a clib2 client sits there forever, and tools/amissl-run.sh says why.
-# Loose in build/ they are not a pair, the doubtrans there is the -os one and
-# the doubbas is not, so taking them from a directory that holds both is the
-# difference between a client that runs and a run that times out.
 for lib in mathieeedoubbas mathieeedoubtrans; do
     for cand in "$ROOT/build/amissl-mathlibs/$lib.library" \
                 "$ROOT/build/$lib-os.library" "$ROOT/build/$lib.library"; do
@@ -280,10 +225,6 @@ for lib in mathieeedoubbas mathieeedoubtrans; do
     done
 done
 
-# -c DIR stages every command in a directory at DH0:, which is what a plan
-# line addressed as DH0:<name> then runs.  Diagnosis needs it: when a stack
-# will not come up, its own status commands are the only thing that can say
-# why, and they are not the two this harness knows about by name.
 if [ -n "${CMDDIR:-}" ]; then
     for f in "$CMDDIR"/*; do
         [ -f "$f" ] || continue
@@ -296,7 +237,6 @@ fi
 [ -z "${AMINETXDUO_EXTRA_DRIVER:-}" ] || cp "$AMINETXDUO_EXTRA_DRIVER" "$STAGE/devs/$(basename "$AMINETXDUO_EXTRA_DRIVER")"
 [ -f "$CMD_PING" ]  && cp "$CMD_PING"  "$STAGE/ping"
 
-# AmiTCP_NG's configuration, staged where SYS:AmiTCP finds it.
 for extra in "${EXTRA_STAGE[@]}"; do
     mkdir -p "$STAGE/AmiTCP"
     cp -R "$extra" "$STAGE/AmiTCP/"
@@ -311,10 +251,6 @@ PLAN="$STAGE/checks.txt"
 : > "$PLAN"
 say() { printf '%s\n' "$*" >> "$PLAN"; }
 
-# Every workload starts the network the same way, with the stack's own
-# command, and the driver times it.  That elapsed time IS the DHCP figure:
-# all three commands block until the interface has an address or the attempt
-# has failed.
 say "# generated by tests/compare/run-compare.sh -s $STACK -w $WORKLOAD"
 if [ -f "$STAGE/AddNetInterface" ]; then
     printf 'addif\tDH0:AddNetInterface DEVS:NetInterfaces/eth0\n' >> "$PLAN"
@@ -351,16 +287,10 @@ case "$WORKLOAD" in
         printf 'conf\tDH0:bsdsocktest %s\n' "$CONF_ARGS" >> "$PLAN"
         ;;
     diag)
-        # Bring-up and whatever -X asks for, and nothing else.  A stack that
-        # will not come up is diagnosed here rather than inside a workload
-        # whose failure mode is a four-hundred-second timeout.
         ;;
     *)  echo "unknown workload '$WORKLOAD'" >&2; exit 2 ;;
 esac
 
-# -X appends plan lines of the caller's own, which is how a stack that will
-# not come up gets diagnosed without a new harness: NAME<TAB>COMMAND, run in
-# order after everything above.
 if [ -n "${EXTRA_PLAN:-}" ]; then
     [ -f "$EXTRA_PLAN" ] || { echo "no such plan file: $EXTRA_PLAN" >&2; exit 2; }
     cat "$EXTRA_PLAN" >> "$PLAN"
@@ -369,7 +299,6 @@ fi
 STAGED+=("$PLAN")
 [ ${#STAGED_CMDS[@]} -eq 0 ] || STAGED+=("${STAGED_CMDS[@]}")
 
-# ------------------------------------------------------------------ peers ---
 
 PEER_PID=""
 cleanup() { [ -z "$PEER_PID" ] || kill -TERM "$PEER_PID" 2>/dev/null || true; }
@@ -384,11 +313,6 @@ case "$PEER_KIND" in
         PEER_PID=$!
         ;;
     helper)
-        # The suite derives every helper port from a fixed 8700, with no way
-        # to move it, so two workstreams cannot each have their own.  One
-        # already listening is therefore used rather than fought over: it is
-        # stateless per connection, the emulator lock means only one guest is
-        # ever talking to it, and a second bind would just fail.
         if lsof -nP -iTCP:8700 -sTCP:LISTEN >/dev/null 2>&1; then
             echo "==> a bsdsocktest helper is already listening on 8700; using it"
         else
@@ -406,7 +330,6 @@ if [ -n "$PEER_PID" ]; then
         cat "$ROOT/build/cmp"*"-$TAG.out" >&2; exit 2; }
 fi
 
-# -------------------------------------------------------------------- run ---
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
@@ -437,9 +360,6 @@ done
     grep -E "^# (bsdsocket|Passed|Failed|Skipped|Total)|^1\.\.|^# Roadshow" \
         "$HD/bsdsocktest.log" | head -20
     # TAP counts a skip as `ok N ... # SKIP`, so the passed figure is the ok
-    # lines LESS the skips.  Reporting the raw ok count would have called our
-    # loopback tier 142/142 when the suite's own summary says 130 passed, 12
-    # skipped, the difference between a headline and a wrong headline.
     ok=$(grep -c "^ok " "$HD/bsdsocktest.log" || true)
     sk=$(grep -c "# SKIP" "$HD/bsdsocktest.log" || true)
     nk=$(grep -c "^not ok " "$HD/bsdsocktest.log" || true)

@@ -5,85 +5,6 @@
 #   tests/tools/run-cycledrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                 [-N board] [-B backend] [-n]
 #
-# WHAT THIS IS FOR
-#
-#   tests/soak/ and tests/endurance/ hold the stack in one state and hammer it.
-#   That is not what kills a long-lived Amiga stack.  What kills it is cycling:
-#   interfaces bounced Online and Offline, and the library opened, closed,
-#   expunged and opened again.  There is no MMU, so an unclean expunge is
-#   leaked signals and memory at best and a crash on the next open at worst,
-#   and none of it shows on the first cycle.
-#
-#   CycleDrill (tests/tools/cycledrill.c) is the guest half.  It reads
-#   NETSTATUS_HEALTH between cycles, allocations outstanding, sockets alive,
-#   packet buffers free, and the high-water mark of each, the same numbers
-#   `netstat -h` and `ShowNetStatus MEMORY` print, rather than inventing
-#   instrumentation, and prints the trend rather than a pass/fail on one
-#   reading.
-#
-# WHY THE DRILL RUNS BEFORE AddNetInterface AND NOT AFTER
-#
-#   bsd_lib_expunge() only proceeds at lib_OpenCnt 0, and AddNetInterface
-#   deliberately leaks an OpenLibrary() reference to keep the network up.  Once
-#   that command has run, no expunge on this machine can ever succeed again, so
-#   a drill placed after it would print "declined" every cycle and pass.
-#   CycleDrill is therefore the FIRST command in the list, brings the stack up
-#   itself, the first open starts it, interfaces and all, and leaves one
-#   reference held at the end so the `netstat -h` and `ShowNetStatus MEMORY`
-#   that follow report on the stack it just cycled and not on a fresh one.
-#
-# WHAT IS ASSERTED HERE, AND WHY THE COUNTS MATTER MOST
-#
-#   A drill that stopped cycling would report no drift and look like a pass.
-#   So the assertions are in two halves:
-#
-#     * the guest's own checks all passed (`0 failed`), and
-#     * the guest really did the work: at least CYCLES*2 interface bounces,
-#       CYCLES interface round trips, and EXPUNGES completed expunges.
-#
-#   `-n` is the negative control for exactly that.  It asks the drill for
-#   CYCLES 1 EXPUNGE 0 while leaving the gates at the values they would have
-#   had, a run in which every guest check still passes, and all four count
-#   gates have to fire, and requires this script to REJECT it.  If -n ever
-#   reports PASSED, the gates have stopped gating and the normal run proves
-#   nothing.
-#
-# WHAT IT FOUND
-#
-#   An open/expunge/reopen cycle used to lose 12,612 bytes, dead linear over
-#   eight cycles.  It was the DEVS:Internet netdb: ami_netdb_load() fills four
-#   ami_alloc()ed tables held in file-scope statics, the statics went away with
-#   the segment, and bsd_lib_expunge() never freed them.  The phase L control
-#   is what named it, a close/reopen cycle, same teardown, segment left
-#   loaded, lost nothing, and the gate below now reads zero on both phases.
-#
-# THE KNOWN DEFECT THIS CAN SEE
-#
-#   src/sana2/sana2_rx.c has a last-resort path that logs
-#   `reader N did not stop; leaking its stack` and leaks 32 KB when a SANA-II
-#   driver ignores AbortIO().  Commodore's a2065.device 2.16 genuinely does.
-#   Every expunge cycle passes through that teardown, so the serial log is
-#   grepped for it and the count is always printed.  It is NOT fatal by
-#   default: it is a known driver behaviour, not a regression, and wiring the
-#   normal suite red for it would only teach people to ignore this test.
-#   AMINETXDUO_CYCLE_ORPHAN_FATAL=1 makes it fail, for a run that is
-#   specifically about that path.
-#
-# ENVIRONMENT
-#
-#   AMINETXDUO_CYCLE_CYCLES     cycles       (default 3)
-#   AMINETXDUO_CYCLE_EXPUNGES   expunges     (default 2)
-#   AMINETXDUO_CYCLE_SOCKETS    sockets held across each bounce (default 2)
-#   AMINETXDUO_CYCLE_ORPHAN_FATAL=1  a leaked reader stack fails the run
-#   AMINETXDUO_CYCLE_LEAK_BUDGET     bytes a cycle may lose (1024)
-#
-#   The defaults keep this inside the normal suite.  A soak is
-#   AMINETXDUO_CYCLE_CYCLES=50 AMINETXDUO_CYCLE_EXPUNGES=10, the way
-#   AMINETXDUO_FUZZ_CASES raises the fuzzers.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -91,8 +12,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
-# The orphaned-reader-stack check below is read out of the serial log, and an
-# empty one is a failure rather than a zero.
 # shellcheck source=../../tools/serial-log.sh
 . "$ROOT/tools/serial-log.sh"
 
@@ -100,18 +19,9 @@ MODEL=A1200
 TIMEOUT=0
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 BOARD=a2065
-# BRIDGED, NEVER SLIRP.  This used to default to slirp and -A picked "Amiberry"
-# out of a two-way branch whose other arm ran Amiberry as well -- the only
-# difference between them was that the slirp arm blanked SERIAL, so the
-# orphaned-reader-stack assertion below reported NOT CHECKED on every default
-# run.  A gate whose strongest check is switched off by the default flag is not
-# a gate, so the branch is gone and the backend is named.
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 NEGATIVE=0
 
-# CYCLES and EXPUNGES are what the gates at the bottom demand; GUEST_* is what
-# the drill is actually asked for.  They are the same number in every run but
-# the negative control, which is the point of there being two.
 CYCLES="${AMINETXDUO_CYCLE_CYCLES:-3}"
 EXPUNGES="${AMINETXDUO_CYCLE_EXPUNGES:-2}"
 SOCKETS="${AMINETXDUO_CYCLE_SOCKETS:-2}"
@@ -131,11 +41,6 @@ while getopts "m:t:b:N:B:n" opt; do
 done
 
 if [ "$NEGATIVE" = 1 ]; then
-    # The guest is asked for less than the gates below demand, and the gates
-    # are NOT lowered to match.  Lowering them would make the run
-    # self-consistent again and prove nothing: what is being tested is that a
-    # drill which passes every one of its own checks while doing almost no
-    # cycling still gets rejected, and all four count gates have to fire.
     GUEST_CYCLES=1
     GUEST_EXPUNGES=0
     echo "==> NEGATIVE CONTROL: this run must be REJECTED by the gates below"
@@ -144,9 +49,6 @@ fi
 GUEST_CYCLES="${GUEST_CYCLES:-$CYCLES}"
 GUEST_EXPUNGES="${GUEST_EXPUNGES:-$EXPUNGES}"
 
-# Every cycle is a bounce, a socket round trip and an interface round trip;
-# every expunge is a full stack teardown and bring-up, which is the expensive
-# half.  These are ceilings, not waits: a passing run finishes well inside.
 if [ "$TIMEOUT" = 0 ]; then
     TIMEOUT=$(( 180 + GUEST_CYCLES * 20 + GUEST_EXPUNGES * 60 ))
 fi
@@ -182,16 +84,6 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# STATIC, not DHCP, for the same reason run-ifreadd.sh is static: a DHCP
-# interface has a client that may re-bind and write an address back, so a
-# transcript showing one proves nothing about what the cycle did.  It also
-# takes the DHCP exchange off the clock of every expunge cycle, which is what
-# makes EXPUNGES=10 affordable.  10.0.2.15 and 10.0.2.2 are SLIRP's own
-# numbers, taken statically rather than leased.
-# AMINETXDUO_CYCLE_DRIVER / _CARD point the drill at a different SANA-II
-# driver, which is how anxnet.device gets its open/close/expunge and
-# online/offline exercised: the a2065.device default cycles Commodore's
-# driver and proves nothing about ours.
 CYCLE_DRIVER="${AMINETXDUO_CYCLE_DRIVER:-a2065.device}"
 CYCLE_CARD="${AMINETXDUO_CYCLE_CARD:-}"
 if [ "$CYCLE_DRIVER" != a2065.device ]; then
@@ -215,10 +107,6 @@ cp "$TOOLS/ShowNetStatus"   "$STAGE/ShowNetStatus"
 cp "$TOOLS/NetShutdown"     "$STAGE/NetShutdown"
 cp "$DRILL"                 "$STAGE/CycleDrill"
 
-# CycleDrill first, and nothing that opens bsdsocket.library before it: an
-# expunge needs lib_OpenCnt 0, and any earlier command would have taken it off
-# zero.  The two reports after it read the stack the drill left running.
-# REPORT is last and opens nothing: a fresh open would erase what it reports.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:CycleDrill CYCLES $GUEST_CYCLES EXPUNGE $GUEST_EXPUNGES SOCKETS $SOCKETS
 SYS:netstat -h
@@ -258,10 +146,6 @@ fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
 # ---- one boot (docs/RESEARCH.md 25) --------------------------------------
-#
-# ToolsSmoke reopens the transcript from the top after a reset, so the first
-# command appearing twice is a reboot and not a hang.  CYCLES is in the needle
-# because the REPORT run at the end of the list is CycleDrill too.
 STARTS=$(grep -c "^===== SYS:CycleDrill CYCLES " "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once (no reset)"
@@ -289,9 +173,6 @@ else
 fi
 
 # ---- and it really cycled -------------------------------------------------
-#
-# The half that matters.  Everything above passes on a drill that opened the
-# library once and stopped.
 DID=$(grep -E "^did: [0-9]+ opens" "$REPORT" | tail -1 || true)
 if [ -z "$DID" ]; then
     fail "CycleDrill did not report what it did"
@@ -302,11 +183,6 @@ else
     D_TRIPS=$(printf  '%s' "$DID" | sed -E 's/.*, ([0-9]+) round trips.*/\1/')
     D_EXP=$(printf    '%s' "$DID" | sed -E 's/.*, ([0-9]+) expunges$/\1/')
 
-    # Two bounces per cycle: the standalone one and the one the sockets are
-    # held across.
-    # Phase E and phase L each open EXPUNGES times.
-    # The 4 is cycledrill.c's NEST_OPENS and has to track it: a base costs the
-    # calling Task signal bits, so the drill cannot nest more than a handful.
     WANT_OPENS=$(( CYCLES * 4 + EXPUNGES * 2 + 1 ))
     WANT_BOUNCE=$(( CYCLES * 2 ))
 
@@ -322,8 +198,6 @@ else
         && pass "$D_TRIPS interface remove/re-add round trips (wanted $CYCLES)" \
         || fail "only $D_TRIPS interface round trips, wanted $CYCLES"
 
-    # The one that cannot be waved through: an expunge that never happened is
-    # the whole subject of this file not being tested.
     if [ "$EXPUNGES" -gt 0 ]; then
         [ "$D_EXP" -ge "$EXPUNGES" ] \
             && pass "$D_EXP expunges completed (wanted $EXPUNGES)" \
@@ -334,10 +208,6 @@ else
 fi
 
 # ---- the reports agree with the drill -------------------------------------
-#
-# `netstat -h` reads the stack CycleDrill left running.  It is here because a
-# held reference that is not actually holding anything would print the
-# unavailable message instead, and the drill itself could not tell.
 if grep -q "cannot read it" "$REPORT"; then
     fail "netstat/ShowNetStatus could not read the stack the drill left up"
 else
@@ -345,13 +215,6 @@ else
 fi
 
 # ---- memory not given back by a cycle -------------------------------------
-#
-# The drill reports AvailMem() at the same instant of the first and the last
-# cycle of phase E and of phase L, divided by the cycles between them, so
-# anything paid once cancels and what is left is per-cycle.  Both read zero:
-# an expunge/reopen cycle and a close/reopen cycle each give back everything
-# they took.  Three runs of eight cycles spread -6 to +3 bytes, which is
-# allocator fragmentation and not a trend, so the budget is 1 KB.
 LEAK_BUDGET="${AMINETXDUO_CYCLE_LEAK_BUDGET:-1024}"
 for phase in expunge cold; do
     LEAKLINE=$(grep -E "^$phase leak: -?[0-9]+ bytes per cycle" "$REPORT" \
@@ -365,10 +228,6 @@ for phase in expunge cold; do
             fail "a $phase cycle lost $LEAK bytes, over the $LEAK_BUDGET budget"
         fi
     else
-        # A missing figure used to be accepted whenever the guest had run
-        # fewer than two expunges, so a drill that stopped printing the line
-        # at all passed as long as it also cycled less.  A number that is not
-        # there is not a zero: say so and fail.
         fail "the drill printed no per-cycle $phase leak figure (the guest ran
        $GUEST_EXPUNGES expunge(s)), so nothing measured whether a $phase cycle
        gives its memory back"
@@ -376,10 +235,6 @@ for phase in expunge cold; do
 done
 
 # ---- what the shutdown left standing --------------------------------------
-#
-# The TCP: handler holds no open count, so lib_OpenCnt says nothing about it,
-# and bsd_lib_expunge() declines for as long as it exists. Both lines come from
-# the CycleDrill REPORT at the end of the command list.
 TCPLEFT=$(sed -n 's/^tcp: //p' "$REPORT" | tail -1)
 LIBLEFT=$(sed -n 's/^library: //p' "$REPORT" | tail -1)
 
@@ -392,24 +247,9 @@ else
        succeed on this machine again"
 fi
 
-# Reported, not asserted: the drill leaves the anchor's reference behind, so
-# this run cannot reach a last close.
 [ -n "$LIBLEFT" ] && echo " , bsdsocket.library after NetShutdown: $LIBLEFT"
 
 # ---- the known SANA-II reader leak ----------------------------------------
-#
-# The line looked for here is an AMI_ERROR in src/sana2/sana2_rx.c, and
-# ami_log() has no sink but the serial port, so with no serial log this cannot
-# be looked for at all.
-#
-# It used to test `[ ! -f "$SERIAL" ]`, and tools/amiberry-run.sh CREATES the
-# file before it starts the emulator: the file always exists, so the NOT
-# CHECKED branch never ran and `grep -c` over 0 bytes printed
-# "orphaned SANA-II reader stacks logged: 0" on every run of this harness since
-# it was written.  A ToolsSmoke guest writes nothing to the serial port, and a
-# library built with AMINETXDUO_LOG=OFF -- the default, and what every build
-# this harness is pointed at has had -- writes nothing either, so 0 was never
-# a measurement.  Empty is a FAILURE now, not a zero and not a skip.
 ORPHANS=0
 if serial_log_have "${SERIAL:-}" "$BUILD" \
                    "orphaned SANA-II reader stacks"; then
@@ -424,10 +264,6 @@ fi
 if [ "$ORPHANS" -gt 0 ]; then
     echo "     (src/sana2/sana2_rx.c's last-resort path: a driver ignored AbortIO()."
     echo "      32 KB leaked per occurrence.)"
-    # FATAL BY DEFAULT.  It used to need AMINETXDUO_CYCLE_ORPHAN_FATAL=1, which
-    # nothing in the tree ever set, so 32 KB a time went out as a note nobody
-    # read.  AMINETXDUO_CYCLE_ORPHAN_FATAL=0 is the way to run against a driver
-    # known to ignore AbortIO() without the run going red.
     if [ "${AMINETXDUO_CYCLE_ORPHAN_FATAL:-1}" = 1 ]; then
         fail "$ORPHANS SANA-II reader stack(s) orphaned, 32 KB each, never freed"
     fi
@@ -435,8 +271,6 @@ fi
 
 echo
 if [ "$NEGATIVE" = 1 ]; then
-    # Inverted: the run above asked for one cycle and no expunge, so the gates
-    # had to reject it.  A PASS here would mean they are not gating anything.
     if [ "$FAILED" -ne 0 ]; then
         echo "cycledrill: negative control PASSED, the gates reject a run that did not cycle"
         exit 0

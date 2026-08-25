@@ -1,25 +1,7 @@
 /*
- * AmiNetXDuo, RFC 6724 source address selection, driven directly.
- *
- * src/ipv6/ipv6_srcsel.c reads NX_IP's address and interface tables and calls
- * nothing, so the whole of it can be driven from a hand-built NX_IP with no
- * stack running.  That is the only way to reach most of what it decides: a lab
- * network gives this node one interface, one link-local and one global, which
- * is the case where every ordering rule agrees.  Two globals, a deprecated
- * address, a second interface and a destination that is off-link on both are
- * what separate the rules, and none of them can be arranged on the wire.
- *
- * EVERY RULE HAS A CASE THAT FAILS IF THE RULE IS DELETED.  That is the
- * property this file is built for, and it is why several of the fixtures look
- * contrived: the rules mostly agree, so isolating one means finding the
- * address pair where it disagrees with the rule below it.  Each test says
- * which rule would otherwise decide, and what it would answer.
- *
- * The §2.1 policy table is checked row by row through anx6_policy_lookup()
- * rather than through the address the whole routine picks.  Two of its rows,
- * ::ffff:0:0/96 and ::/96, cannot change a selection on this node -- it holds
- * no IPv4-mapped or IPv4-compatible address, so no candidate ever carries
- * their label -- and reading the row back is the only test they can have.
+ * RFC 6724 source address selection, driven directly against a hand-built
+ * NX_IP with no stack running.  Every rule has a fixture that fails if the
+ * rule is deleted; that is why several fixtures look contrived.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -54,11 +36,8 @@ static void h_check(int ok, const char *what)
 
 /* --------------------------------------------------------------- stubs ---- */
 
-/*
- * NX_ASSERT's failure arm, which on a target is an endless sleep.  The one
- * assert in the routine under test is worth keeping compiled in, so firing it
- * has to end the run rather than hang it.
- */
+/* NX_ASSERT's failure arm, an endless sleep on a target: it must end the run
+   here rather than hang it. */
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
     NX_PARAMETER_NOT_USED(timer_ticks);
@@ -75,8 +54,6 @@ static NX_IP h_ip;
 #define H_ETH0          0
 #define H_ETH1          1
 
-/* Slots in nx_ipv6_address[].  The loopback slot is NetX Duo's own and is
-   written by the fixture exactly as nxd_ipv6_enable() writes it. */
 #define H_SLOT0         0
 #define H_SLOT1         1
 #define H_SLOT2         2
@@ -137,8 +114,6 @@ NXD_IPV6_ADDRESS *a = &h_ip.nx_ipv6_address[slot];
     a -> nxd_ipv6_address[3]            = w3;
 }
 
-/* A default route out of `iface`, which is what makes an off-link destination
-   have an outgoing interface at all. */
 static void h_router(UINT iface)
 {
     h_ip.nx_ipv6_default_router_table[0].nx_ipv6_default_router_entry_flag = 1;
@@ -154,7 +129,7 @@ static void h_set(ULONG *addr, ULONG w0, ULONG w1, ULONG w2, ULONG w3)
     addr[3] = w3;
 }
 
-/* The selection, and which slot it answered with.  -1 when it refused. */
+/* Returns the slot selected, -1 when refused. */
 static int h_select(ULONG *dest, NX_INTERFACE *if_ptr)
 {
 NXD_IPV6_ADDRESS *chosen = NX_NULL;
@@ -169,10 +144,8 @@ NXD_IPV6_ADDRESS *chosen = NX_NULL;
         return -2;
     }
 
-    /* The slot, worked out from the pointer rather than read out of the
-       address: nxd_ipv6_address_index is written by whatever configured the
-       address, and the loopback slot NetX Duo sets up itself does not carry
-       one. */
+    /* From the pointer, not nxd_ipv6_address_index: the loopback slot NetX Duo
+       sets up itself does not carry one. */
     return (int)(chosen - &h_ip.nx_ipv6_address[0]);
 }
 
@@ -187,7 +160,6 @@ UINT  precedence;
 UINT  label;
 int   i;
 
-    /* prefix under test, then the address that lands in it. */
     static const struct
     {
         ULONG       addr[4];
@@ -265,14 +237,6 @@ ULONG a[4];
 
 /* ------------------------------------------------------------ §5, Rule 1 -- */
 
-/*
- * The destination is one of this node's own addresses, and a second address
- * on the same /64 sits ahead of it in the table.
- *
- * Without Rule 1: Rules 2, 3, 5 and 6 all tie, and Rule 8's CommonPrefixLen is
- * capped at the source's own prefix length (§2.2), so both answer 64 and the
- * first in table order wins -- the wrong address.
- */
 static void test_rule1_same_address(void)
 {
 ULONG dest[4];
@@ -292,16 +256,6 @@ ULONG dest[4];
 
 /* ------------------------------------------------------------ §5, Rule 2 -- */
 
-/*
- * A site-scoped multicast destination, with a link-local and a global to
- * choose from.  The link-local is too small for it, so Rule 2 takes the
- * global.
- *
- * Without Rule 2: Rule 8 prefers the link-local -- fe80:: and ff05:: agree on
- * seven leading bits and 2001:db8:: agrees with it on none -- and the answer
- * is then refused outright, because a source of smaller scope than the
- * destination is §4's "no address of appropriate scope".
- */
 static void test_rule2_scope(void)
 {
 ULONG dest[4];
@@ -317,8 +271,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT1,
             "Rule 2: a site-scoped destination does not take a link-local source");
 
-    /* And the other direction: a link-local destination does not take the
-       global, which has scope to spare. */
     h_set(dest, 0xFE800000UL, 0, 0, 0x99);
 
     h_check(h_select(dest, NX_NULL) == H_SLOT0,
@@ -328,15 +280,6 @@ ULONG dest[4];
 
 /* ------------------------------------------------------------ §5, Rule 3 -- */
 
-/*
- * Two globals on the same /64 as the destination, the first deprecated.
- *
- * Without Rule 3: Rules 5 and 6 tie and Rule 8 answers 64 for both, so the
- * deprecated address wins on table order.  This is also the check that a
- * deprecated address is a candidate at all -- the routine this replaced
- * accepted only NX_IPV6_ADDR_STATE_VALID, so it could never be selected even
- * when it was the only address there was.
- */
 static void test_rule3_deprecated(void)
 {
 ULONG dest[4];
@@ -352,8 +295,7 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT1,
             "Rule 3: a deprecated address loses to one that is not");
 
-    /* Alone, it is still the answer: Rule 3 orders candidates, it does not
-       remove them. */
+    /* Rule 3 orders candidates, it does not remove them. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_DEPRECATED);
@@ -365,15 +307,6 @@ ULONG dest[4];
 
 /* ------------------------------------------------------------ §5, Rule 5 -- */
 
-/*
- * Two interfaces, the destination off-link on both, and the default route out
- * of eth1.  The two addresses are chosen so that they agree with the
- * destination on exactly the same number of leading bits: 2001:db8:0:1::1 and
- * 2001:db8:0:2::1 both share 47 bits with 2001:db8:1::99.
- *
- * Without Rule 5: Rule 6 ties, Rule 8 ties at 47, and the address on the
- * interface the packet will not leave by wins on table order.
- */
 static void test_rule5_outgoing_interface(void)
 {
 ULONG dest[4];
@@ -400,15 +333,6 @@ ULONG dest[4];
 
 /* ------------------------------------------------------------ §5, Rule 6 -- */
 
-/*
- * Labels, from the §2.1 table.  The destination 2001:1::1 is native, label 1.
- * 2001:0:ffff::1 is inside 2001::/32, which is Teredo and label 5, and it is
- * numerically NEARER the destination -- 31 leading bits against 30 -- than the
- * native 2001:2::1.
- *
- * Without Rule 6: Rule 8 takes the Teredo address, which is the whole reason
- * the label column exists.
- */
 static void test_rule6_label(void)
 {
 ULONG dest[4];
@@ -431,12 +355,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT1,
             "Rule 6: a Teredo source is not used for a native destination");
 
-    /*
-     * The 2002::/16 row, on the same shape: a 6to4 address is nearer
-     * 2003:102::1 than 2004::1 is, and is still not the source for it.
-     * Deleting that row from §2.1 makes both candidates label 1, Rule 6 ties,
-     * and Rule 8 answers the 6to4 address.
-     */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20020102UL, 0, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -453,13 +371,6 @@ ULONG dest[4];
 
 /* ------------------------------------------------------------ §5, Rule 8 -- */
 
-/*
- * Two globals on one interface, the destination off-link on both, and nothing
- * above Rule 8 separates them.  2001:db8:1:1::1 agrees with 2001:db8:1::99 on
- * 63 leading bits, 2001:db8:0:1::1 on 47.
- *
- * Without Rule 8 there is no rule left, so the first in table order wins.
- */
 static void test_rule8_longest_prefix(void)
 {
 ULONG dest[4];
@@ -484,9 +395,6 @@ static void test_candidate_set(void)
 {
 ULONG dest[4];
 
-    /* Tentative: duplicate address detection has not finished, so it is not
-       this node's address yet.  There is a route -- the default router is
-       there -- so the refusal is the candidate set's and not the route's. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_TENTATIVE);
@@ -497,7 +405,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == -1,
             "a tentative address is not a candidate");
 
-    /* An interface that is down takes its addresses with it. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -509,8 +416,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT0,
             "an address on a down interface is not a candidate");
 
-    /* No on-link prefix covers the destination and there is no default
-       router, so there is no outgoing interface and no source can make one. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -518,7 +423,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == -1,
             "a destination with no route is refused");
 
-    /* A link-local destination is on-link everywhere, so it needs no route. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0xFE800000UL, 0, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -530,9 +434,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT0,
             "a link-local destination takes an address from one link only");
 
-    /* And the outgoing interface for it is the first one that HOLDS an
-       address, not merely the first that is up: eth0 here is up with nothing
-       on it, and answering eth0 would leave the machine with no source. */
     h_reset();
     h_addr(H_SLOT1, H_ETH1, 0xFE800000UL, 0, 0, 2, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -541,8 +442,6 @@ ULONG dest[4];
             "an interface that is up with no address is not the outgoing one");
 
 #ifndef NX_DISABLE_LOOPBACK_INTERFACE
-    /* ::1 is the source for ::1 and for nothing else, and nothing else is the
-       source for ::1.  §4 puts the loopback interface on a link of its own. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -559,8 +458,6 @@ ULONG dest[4];
             "::1 is not the source for anything else");
 #endif /* NX_DISABLE_LOOPBACK_INTERFACE */
 
-    /* The caller's interface constraint narrows the candidate set to one
-       interface, whatever the route would have said. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -575,9 +472,8 @@ ULONG dest[4];
     h_check(h_select(dest, h_if(H_ETH1)) == H_SLOT1,
             "a named interface is the only one searched");
 
-    /* A named interface with nothing on it is a refusal, not a fallback to
-       another interface: nx_icmpv6_send_rs() depends on that, it sends the
-       solicitation from the unspecified address when this fails. */
+    /* nx_icmpv6_send_rs() depends on the refusal: it sends the solicitation
+       from the unspecified address when this fails. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0xFE800000UL, 0, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -596,8 +492,6 @@ static void test_multicast_join(void)
 {
 ULONG dest[4];
 
-    /* A group joined on eth1 leaves by eth1, so §4's same-link rule confines
-       the candidate set to eth1's addresses even though eth0 is first. */
     h_reset();
     h_addr(H_SLOT0, H_ETH0, 0xFE800000UL, 0, 0, 1, 64,
            NX_IPV6_ADDR_STATE_VALID);
@@ -613,10 +507,6 @@ ULONG dest[4];
     h_check(h_select(dest, NX_NULL) == H_SLOT1,
             "a joined group leaves by the interface it was joined on");
 
-    /* A socket zone reaches the selector as an interface constraint.  For a
-       scope wider than link, the source on that interface still has to be
-       wide enough: pinning the interface must not mean blindly taking its
-       link-local address. */
     h_reset();
     h_addr(H_SLOT0, H_ETH1, 0xFE800000UL, 0, 0, 2, 64,
            NX_IPV6_ADDR_STATE_VALID);

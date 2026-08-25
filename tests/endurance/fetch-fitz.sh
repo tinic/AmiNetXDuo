@@ -1,24 +1,5 @@
 #!/usr/bin/env bash
-#
 # Fetch Fitz and unpack it into build/fitz.
-#
-#   tests/endurance/fetch-fitz.sh [-u URL]
-#
-# Fitz is Timm S. Müller's cross-platform network file server and mounter,
-# MIT licensed with full source.  It is not vendored into this tree: it is a
-# third-party program, and the value of testing against it is precisely that
-# it is somebody else's, a copy in third_party/ would be a copy we could
-# drift from, and a stack that only passes against a pinned copy of a client
-# has not been tested against that client at all.
-#
-# What lands in build/fitz:
-#
-#   Fitz/fitz          the RELEASED m68k binary, as a user would install it
-#   Fitz/src/          the sources, from which tests/endurance/build.sh makes
-#                      a second, debug-enabled binary
-#
-# Needs `lha` (brew install lhasa, or apt install lhasa).
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

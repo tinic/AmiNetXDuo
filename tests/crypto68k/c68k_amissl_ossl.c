@@ -1,32 +1,6 @@
 /*
  * AmiNetXDuo, the AmiSSL side of tests/crypto68k/c68k_amissl.
  *
- *   OpenSSL, and nothing of ours except c68k_amissl.h.  The orchestrator holds
- *   the clock, the vectors and the reporting; this file performs the operation
- *   it is asked for and hands back bytes.  Both sides are then called from the
- *   same timing loop, with the same inputs, in the same process.
- *
- *   Every OpenSSL function here is a macro from <inline/amissl.h> that expands
- *   to a jsr through AmiSSLBase or AmiSSLExtBase, AmiSSL v5 spans two library
- *   bases because OpenSSL has more entry points than one LVO table holds.  So
- *   nothing is linked: no libamisslauto.a, no libamisslstubs.a, no object of
- *   AmiSSL's in this binary at all.  That sidesteps the question of whether an
- *   archive built by adtools GCC 2.95.3 links against GCC 15.2 output, and it
- *   means every cycle measured on the AmiSSL side ran inside
- *   amissl_v362.library.  Verified in the disassembly: BN_new() is
- *   `jsr a6@(-2196)`.
- *
- *   AmiSSL_UsesOpenSSLStructs is FALSE, so this file must never dereference an
- *   OpenSSL structure.  It does not: RSA, EC_KEY, EC_POINT, BIGNUM, BN_CTX and
- *   EVP_CIPHER_CTX are all handled through accessors.
- *
- *   RSA_NO_PADDING is used because the comparison is of modular exponentiation
- *   and padding is a memcpy and a memcmp on this scale.  RSA_public_encrypt()
- *   and RSA_private_decrypt() with RSA_NO_PADDING are the shortest route to
- *   "raise this 2048-bit number to this power" through OpenSSL's real RSA path
- *, the same rsa_ossl_mod_exp() a TLS handshake reaches, including its CRT,
- *   its constant-time exponentiation and (unless turned off) its blinding.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -64,9 +38,6 @@ static int      a_errno;
 static char     a_version[128];
 static char     a_libid[128];
 
-
-/* ------------------------------------------------------------ open/close -- */
-
 int a_ossl_open_master(char *err, unsigned long err_len)
 {
 
@@ -93,20 +64,6 @@ struct TagItem  tags[5];
 
     err[0] = '\0';
 
-    /*
-     * AmiSSL_InitAmiSSL FALSE splits the two halves of what OpenAmiSSLTags()
-     * normally does in one call: this one only reaches OpenAmiSSL(), i.e. the
-     * OpenLibrary() of LIBS:AmiSSL/amissl_v362.library, which is 3.5 MB of
-     * hunk file that AmigaDOS has to read and relocate.  a_ossl_init_ssl()
-     * below then does the per-process InitAmiSSLA().  Split because they are
-     * paid at different times by a real program, the library stays resident
-     * after the first opener exits, the per-process init does not, and
-     * because a single number for the pair says nothing about either.
-     *
-     * The tag list is built by hand rather than through the OpenAmiSSLTags()
-     * varargs macro, whose generated array is ULONG and therefore warns on
-     * every pointer argument.
-     */
     tags[0].ti_Tag = AmiSSL_UsesOpenSSLStructs; tags[0].ti_Data = (ULONG)FALSE;
     tags[1].ti_Tag = AmiSSL_InitAmiSSL;         tags[1].ti_Data = (ULONG)FALSE;
     tags[2].ti_Tag = AmiSSL_GetAmiSSLBase;      tags[2].ti_Data = (ULONG)&AmiSSLBase;
@@ -135,12 +92,6 @@ struct TagItem  tags[5];
 
     err[0] = '\0';
 
-    /*
-     * AmiSSL_SocketBase is absent deliberately.  The autodoc says it may be
-     * omitted when the caller needs no networking, which is the case here, and
-     * it keeps bsdsocket.library, ours or anybody's, out of a measurement
-     * of arithmetic.
-     */
     tags[0].ti_Tag = AmiSSL_GetAmiSSLBase;    tags[0].ti_Data = (ULONG)&AmiSSLBase;
     tags[1].ti_Tag = AmiSSL_GetAmiSSLExtBase; tags[1].ti_Data = (ULONG)&AmiSSLExtBase;
     tags[2].ti_Tag = AmiSSL_ErrNoPtr;         tags[2].ti_Data = (ULONG)&a_errno;
@@ -157,12 +108,6 @@ struct TagItem  tags[5];
     strncpy(a_version, (v != NULL) ? v : "?", sizeof(a_version) - 1);
     a_version[sizeof(a_version) - 1] = '\0';
 
-    /*
-     * The library's own $VER string says which CPU build was loaded, which
-     * matters: AmiSSL ships a 68020-40 build with Howard Chu's bignum assembly
-     * and a 68060 build without it.  IdString is what the library node
-     * carries; it is the same string `version` would print.
-     */
     if (AmiSSLBase -> lib_IdString != NULL)
     {
         strncpy(a_libid, (const char *)AmiSSLBase -> lib_IdString,
@@ -223,9 +168,6 @@ const char *a_ossl_library_id(void)
     return(a_libid);
 }
 
-
-/* -------------------------------------------------------------------- RSA -- */
-
 static RSA     *a_rsa;
 
 int a_ossl_rsa_setup(const unsigned char *n, const unsigned char *e,
@@ -259,13 +201,6 @@ int     ok   = 1;
         goto out;
     }
 
-    /*
-     * The CRT exponents.  rsa_ossl_mod_exp() takes the CRT path only when all
-     * three are present, without them OpenSSL falls back to a full-width
-     * BN_mod_exp_mont_consttime over a 2048-bit exponent, about four times the
-     * work and not the comparison intended here.  Computed before
-     * RSA_set0_key() takes over d.
-     */
     t    = BN_new();
     dmp1 = BN_new();
     dmq1 = BN_new();
@@ -292,12 +227,6 @@ int     ok   = 1;
     if (!RSA_set0_crt_params(a_rsa, dmp1, dmq1, iqmp)) { goto out; }
     dmp1 = dmq1 = iqmp = NULL;
 
-    /*
-     * Blinding is OpenSSL's default, and it is what stops a remote attacker
-     * recovering d from the timing of the private operation.  Turning it off
-     * is how the arithmetic gets compared against ours, which has no blinding
-     * at all; the benchmark measures both and labels them.
-     */
     if (!blinding)
     {
         RSA_blinding_off(a_rsa);        /* returns void */
@@ -356,19 +285,6 @@ int a_ossl_rsa_private(const unsigned char *in, unsigned char *out)
     return((RSA_private_decrypt(256, (unsigned char *)in, out, a_rsa,
                                 RSA_NO_PADDING) == 256) ? 0 : 1);
 }
-
-
-/* ---------------------------------------------------- bare exponentiation -- */
-
-/*
- * The same arithmetic without OpenSSL's RSA object around it, which is the
- * only way to compare like with like against c68k_mont_power_modulus().
- *
- * `cached` selects the setup treatment.  Our routine recomputes R^2 mod m on
- * every call; OpenSSL's RSA object caches a BN_MONT_CTX and does not.  Timing
- * both says how much of any difference is the exponentiation and how much is
- * the setup.
- */
 
 static BIGNUM  *a_mx_n;
 static BIGNUM  *a_mx_x;
@@ -461,11 +377,6 @@ int     rc;
         return(1);
     }
 
-    /*
-     * BN_FLG_CONSTTIME on the exponent is what routes BN_mod_exp_mont() into
-     * BN_mod_exp_mont_consttime().  Set here explicitly rather than relying on
-     * an RSA object to set it.
-     */
     BN_set_flags(e, BN_FLG_CONSTTIME);
 
     rc = BN_mod_exp_mont(a_mx_r, a_mx_x, e, a_mx_n, a_mx_ctx,
@@ -480,9 +391,6 @@ int     rc;
 
     return((BN_bn2binpad(a_mx_r, out, 256) == 256) ? 0 : 1);
 }
-
-
-/* ------------------------------------------------------------------ P-256 -- */
 
 static EC_KEY   *a_ec_verify;       /* public key only, for ECDSA verify   */
 static EC_KEY   *a_ec_dh;           /* our ECDH key pair                   */
@@ -515,7 +423,6 @@ int             ok   = 1;
         goto out;
     }
 
-    /* ---- the verify key ---- */
     a_ec_verify = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (a_ec_verify == NULL)
     {
@@ -538,7 +445,6 @@ int             ok   = 1;
     EC_POINT_free(pt);
     pt = NULL;
 
-    /* ---- the ECDH key pair ---- */
     a_ec_dh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (a_ec_dh == NULL)
     {
@@ -705,9 +611,6 @@ int a_ossl_ec_have_precompute(void)
     return(EC_GROUP_have_precompute_mult(a_ec_group) ? 1 : 0);
 }
 
-
-/* ------------------------------------------------------------------- bulk -- */
-
 int a_ossl_aes128_cbc(const unsigned char *key16, const unsigned char *iv16,
                       const unsigned char *in, unsigned char *out,
                       unsigned long len)
@@ -747,11 +650,6 @@ out:
     return(rc);
 }
 
-
-/*
- * The direction a download spends its time in.  Section 15 measured encryption
- * only, which is the direction a client uses for request headers.
- */
 int a_ossl_aes128_cbc_dec(const unsigned char *key16, const unsigned char *iv16,
                           const unsigned char *in, unsigned char *out,
                           unsigned long len)

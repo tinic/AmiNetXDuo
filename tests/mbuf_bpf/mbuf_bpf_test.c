@@ -53,8 +53,6 @@ static char t_bpf_base_b;
 #define T_BPF_OTHER  ((APTR)&t_bpf_base_b)
 
 
-/* ------------------------------------------------------------- logging --- */
-
 #ifndef RawPutChar
 #  define RawPutChar(c) \
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
@@ -74,11 +72,6 @@ static VOID t_put_char(register UBYTE c      __asm("d0"),
     }
 }
 
-/*
- * Every caller is main()'s Process; no ThreadX thread ever logs here, so
- * dos.library is safe and output goes out as it happens instead of being
- * buffered for a replay at the end.
- */
 static VOID t_log(const char *fmt, ...)
 {
 
@@ -108,8 +101,6 @@ ULONG   i;
 }
 
 
-/* -------------------------------------------------------------- results -- */
-
 static ULONG t_checks;
 static ULONG t_failures;
 
@@ -129,8 +120,6 @@ static UINT t_check(UINT ok, const char *what)
 #define CHECK(cond, what)   (VOID) t_check((UINT) ((cond) ? 1 : 0), (what))
 
 
-/* ----------------------------------------------------------- packet pool -- */
-
 #define T_PACKET_PAYLOAD        1568        /* == AMI_POOL_PAYLOAD          */
 #define T_PACKET_COUNT          8
 #define T_PACKET_OVERHEAD       96
@@ -141,8 +130,6 @@ static ULONG            t_pool_memory[(T_PACKET_COUNT *
                                       sizeof(ULONG)];
 static UINT             t_pool_ok;
 
-
-/* -------------------------------------------------------------- helpers -- */
 
 static VOID t_ramp(UBYTE *p, ULONG len, UBYTE start)
 {
@@ -199,8 +186,6 @@ ULONG         i;
     return head;
 }
 
-
-/* ---------------------------------------------------------- frame builder -- */
 
 #define T_ETH_HDR   14
 
@@ -276,8 +261,6 @@ static const struct bpf_insn t_prog_tcp80[] =
 #define T_TCP80_LEN ((ULONG) (sizeof(t_prog_tcp80) / sizeof(t_prog_tcp80[0])))
 
 
-/* ------------------------------------------------------------ mbuf tests -- */
-
 static VOID t_test_layout(VOID)
 {
 
@@ -336,7 +319,6 @@ UINT         aligned = TX_TRUE;
             aligned = TX_FALSE;
         }
 
-        /* The published dtom(), from a pointer anywhere inside the data area. */
         if (dtom((UBYTE *) m->m_dat + MLEN - 1) != m)
         {
             aligned = TX_FALSE;
@@ -367,7 +349,6 @@ UBYTE        out[200];
 
     t_log("mbuf: chain operations at the real MLEN/MHLEN");
 
-    /* adj, both directions. */
     m = t_make_chain(3, 10, 0);
     CHECK(ami_mbuf_length(m) == 30,            "chain is 30 bytes");
     CHECK(ami_mbuf_adj(m, 15) == 0,            "adj +15");
@@ -395,7 +376,6 @@ UBYTE        out[200];
     CHECK(m->m_next == c,                      "spliced, not compacted");
     ami_mbuf_freem(m);
 
-    /* copydata / copyback / copym. */
     m = t_make_chain(3, 10, 0);
     CHECK(ami_mbuf_copydata(m, 7, 16, out) == 0,      "copydata across mbufs");
     CHECK(t_ramp_ok(out, 16, 7),                      "copydata content");
@@ -452,7 +432,6 @@ UBYTE        out[200];
     CHECK(ami_mbuf_pullup(m, 109) == NULL,            "pullup past MLEN fails");
     CHECK(ami_mbuf_outstanding() == 0,                "...and frees the chain");
 
-    /* Clusters, and copym sharing them by reference count. */
     m = ami_mbuf_getcl();
     CHECK(m != NULL,                                  "cluster allocated");
     if (m != NULL)
@@ -514,7 +493,6 @@ UINT         status;
                                     &t_pool, NX_NO_WAIT);
     CHECK(status == NX_SUCCESS, "packet filled");
 
-    /* NX_PACKET -> mbuf chain. */
     m = ami_mbuf_from_packet(packet, TX_TRUE);
     CHECK(m != NULL, "ami_mbuf_from_packet");
     if (m != NULL)
@@ -561,8 +539,6 @@ UINT         status;
     CHECK(ami_mbuf_clusters_outstanding() == 0, "no clusters leaked");
 }
 
-
-/* ------------------------------------------------------------- bpf tests -- */
 
 static APTR t_iface_cookie = (APTR) "iface";
 
@@ -649,19 +625,6 @@ ULONG len;
     }
 }
 
-/*
- * The validator stops a malformed filter program reaching the interpreter,
- * and the interpreter has to survive one anyway. On a machine with no memory
- * protection, "rejected the packet" and "corrupted something" are
- * indistinguishable from inside the process, so this runs under the crash
- * guard, which turns a CPU exception into a readable report instead of a dead
- * emulator.
- *
- * Two batteries: hand-written programs aimed at each thing the interpreter
- * range-checks, then a few thousand pseudo-random instruction arrays. A random
- * `code` word hits undefined encodings in every class, and a random `k` hits
- * offsets far outside any packet.
- */
 static VOID t_test_bpf_hostile(VOID)
 {
 
@@ -684,7 +647,6 @@ UWORD                   i;
     empty.caplen  = 0;
     empty.nsegs   = 0;
 
-    /* Each of these must be rejected by the validator and survive the VM. */
     {
         static const struct bpf_insn bad_abs[] = {
             BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (LONG) 0x7FFFFFFFUL),
@@ -719,14 +681,6 @@ UWORD                   i;
         ULONG                  lens[9];
         ULONG                  n;
 
-        /*
-         * The first three are legal encodings carrying impossible packet
-         * offsets. A packet offset depends on the frame, not the program, so
-         * the validator must let them through and the interpreter must cope.
-         * A validator that refused these would make "ldxb 4*([14]&0xf)"
-         * unloadable, and that is in every filter libpcap emits for a TCP or
-         * UDP port.
-         */
         progs[0] = bad_abs;  lens[0] = 2;
         progs[1] = bad_neg;  lens[1] = 2;
         progs[2] = bad_msh;  lens[2] = 3;
@@ -770,8 +724,6 @@ UWORD                   i;
         CHECK(TX_TRUE, "the interpreter survived every malformed program");
     }
 
-    /* Pseudo-random programs. A 32-bit LCG is plenty for covering undefined
-       encodings. */
     for (trial = 0; trial < 3000; trial++)
     {
         ULONG count;
@@ -799,7 +751,6 @@ UWORD                   i;
             rejected++;
         }
 
-        /* Run it whether or not the validator liked it. */
         (VOID) ami_bpf_filter(prog, count, frame, len, len);
         (VOID) ami_bpf_filter_view(prog, count, &empty);
     }
@@ -875,8 +826,6 @@ ULONG            sigmask = 0;
     hdrlen  = *(const UWORD *) (const void *) (rec + AMI_BPF_OFF_HDRLEN);
     sec     = *(const ULONG *) (const void *) (rec + AMI_BPF_OFF_TSTAMP_SEC);
 
-    /* The fields are also readable through the NDK struct; that is what
-       pinning the offsets buys. */
     {
         const struct bpf_hdr *bh = (const struct bpf_hdr *) (const void *) rec;
 
@@ -927,7 +876,6 @@ ULONG            sigmask = 0;
     CHECK(st.bs_recv == 2,  "two frames seen");
     CHECK(st.bs_drop == 0,  "none dropped");
 
-    /* A real filter over the tap. */
     {
         struct bpf_program prog;
 
@@ -952,11 +900,6 @@ ULONG            sigmask = 0;
     ami_bpf_detach_interface(t_iface_cookie);
 }
 
-/*
- * "The packet filter channel you allocate will be associated with the library
- * base ... It will be automatically closed when the library is closed", plus
- * EPERM for anyone else. Under real Forbid()/Permit(), unlike src/bpf/test/.
- */
 static VOID t_test_bpf_ownership(VOID)
 {
 
@@ -996,7 +939,6 @@ ULONG value;
     ami_bpf_tap_rx(t_iface_cookie, frame, len);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) > 0, "the owner still reads it");
 
-    /* What bsd_child_destroy() runs: the base goes, the channel goes. */
     ami_bpf_close_owner(T_BPF_OWNER);
     CHECK(ami_bpf_data_waiting(T_BPF_OWNER, 0) == AMI_BPF_ENXIO,
           "closing the base closed the channel");
@@ -1053,12 +995,6 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
                                     &t_pool, NX_NO_WAIT);
     CHECK(status == NX_SUCCESS, "packet filled");
 
-    /*
-     * Exactly the call src/sana2/sana2_tx.c must make, with the arguments it
-     * has in hand: cooked mode (has_link_header FALSE), the EtherType from the
-     * driver command, the destination from
-     * nx_ip_driver_physical_address_msw/lsw, and our own MAC.
-     */
     ami_bpf_tap_tx(t_iface_cookie, packet, TX_FALSE, 0x0800,
                    0x00000080UL,            /* 00:80 */
                    0x10112233UL,            /* 10:11:22:33 */
@@ -1076,7 +1012,6 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
 
     data = out + hdrlen;
 
-    /* The header the tap invented, byte for byte. */
     CHECK(data[0] == 0x00 && data[1] == 0x80 && data[2] == 0x10 &&
           data[3] == 0x11 && data[4] == 0x22 && data[5] == 0x33,
           "destination address from msw/lsw");
@@ -1112,8 +1047,6 @@ static const UBYTE our_mac[6] = { 0x00, 0x80, 0x10, 0x44, 0x55, 0x66 };
 }
 
 
-/* ------------------------------------------------------ ThreadX startup --- */
-
 VOID tx_application_define(VOID *first_unused_memory)
 {
 
@@ -1132,8 +1065,6 @@ UINT status;
 }
 
 
-/* ------------------------------------------------------------------ main -- */
-
 int main(void)
 {
 
@@ -1145,11 +1076,6 @@ TX_THREAD   main_thread;
 
     ami_crash_set_reference((APTR) main, "mbuf_bpf_test");
 
-    /*
-     * The mbuf and BPF code needs nothing from ThreadX; only the NX_PACKET
-     * bridge and the transmit tap do. Run the rest first so a kernel problem
-     * cannot hide a layout problem.
-     */
     CHECK(ami_mbuf_init(256, 8) == 0, "mbuf pool configured");
 
     t_test_layout();
@@ -1184,24 +1110,12 @@ TX_THREAD   main_thread;
     t_test_packet_bridge();
     t_test_bpf_tap_tx();
 
-    /* Still adopted: nx_packet_pool_delete() is a NetX Duo call and wants a
-       ThreadX thread to run on.  The pool is the only ThreadX-side object this
-       test makes -- there is no NX_IP here and no thread of its own -- so it is
-       the whole of the teardown tx_amiga_kernel_stop() insists on. */
     if (t_pool_ok)
         CHECK(nx_packet_pool_delete(&t_pool) == NX_SUCCESS,
               "packet pool deleted");
 
     (VOID) tx_amiga_orphan_thread(&main_thread);
 
-    /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  Nothing above can
-     * see that happen: the checks have passed and the exit status is decided by
-     * then, which is what tools/smoke/unloadprobe.c exists to catch.
-     */
     CHECK(tx_amiga_kernel_stop() == TX_SUCCESS, "ThreadX kernel stopped");
 
     ami_bpf_cleanup();

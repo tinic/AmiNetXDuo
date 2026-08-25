@@ -6,28 +6,6 @@
 #                                   [-b BUILDDIR] [-m MODEL] [-B BACKEND]
 #                                   [-d DEPTH] [-H CONSOLEHTML] [-r RUNDIR]
 #
-# THE SERIAL LOG IS THE POINT
-#
-#   A standing guest is the one that wedges, and a wedge with no serial log is
-#   a wedge nobody can read.  One was found stopped after forty minutes with a
-#   47-byte emulator log and nothing else, and the diagnosis had to come out of
-#   the emulator's own memory instead.  So the port is wired here, on a socket
-#   the way tools/amiberry-run.sh does it, and the reader appends to a file
-#   that outlives the guest.
-#
-#   `serial_port=tcp://.../wait` holds the emulator until the reader is on the
-#   far end, so nothing said during the boot is lost to a race with it.
-#
-#   NOT `amiberry --log`.  It writes about 3.3 GB an hour and has filled this
-#   machine once; the serial port carries what the code under test says, which
-#   is the half worth keeping.
-#
-# ONE MACHINE, LEFT UP
-#
-#   Same staging as tests/tools/run-console.sh -- the same Workbench, the same
-#   Startup-Sequence, the same drive -- and then no timeout, no probe and no
-#   cleanup trap.  `stop` is how it ends.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -45,8 +23,6 @@ PORT="${CONSOLE_PORT:-8080}"
 DEPTH="${CONSOLE_DEPTH:-4}"
 RUN="${CONSOLE_RUN:-$ROOT/build/console-instance}"
 PAGE="${AMINETXDUO_CONSOLE_PAGE:-$ROOT/src/tools/web/console.html}"
-# The Shell too, on the same guest, so the two endpoints that hold a
-# single-instance resource can be exercised against one machine.
 SHELLPAGE="${AMINETXDUO_SHELL_PAGE:-$ROOT/src/tools/web/shell.html}"
 
 ACTION="${1:-status}"
@@ -128,7 +104,6 @@ start) ;;
 *) sed -n '3,8p' "$0" >&2; exit 2 ;;
 esac
 
-# ------------------------------------------------------------------- start --
 
 if running; then
     say error "our own guest is already up, pid $(cat "$PIDFILE")"
@@ -136,8 +111,6 @@ if running; then
     exit 2
 fi
 
-# Nothing else may already answer here: a leftover guest at this address would
-# be reported, and driven, as this one.
 if [ "$(curl -s -m 4 -o /dev/null -w '%{http_code}' "http://$ADDRESS:$PORT/" || true)" = "200" ]; then
     say error "something already answers on http://$ADDRESS:$PORT/"
     say RESULT INFRA
@@ -188,13 +161,6 @@ cp "$A2065" "$HD/Devs/Networks/a2065.device"
 cp "$PAGE" "$HD/Console/console.html"
 [ -f "$SHELLPAGE" ] && cp "$SHELLPAGE" "$HD/Console/shell.html"
 
-# AND THE PRECOMPRESSED FORMS.  httpd serves <page>.gz when one is beside the
-# page, and staging the page without it is a guest that answers every request
-# for the terminal with 400 KB where a released archive would send 120.  It is
-# also five failures in tests/tools/httpd-drill.py -- the Content-Encoding, the
-# size, the gzip magic, the Accept-Encoding negotiation and the two forms
-# sharing a validator -- which read as defects in the server and are this line
-# missing.
 [ -f "$PAGE.gz" ] && cp "$PAGE.gz" "$HD/Console/console.html.gz"
 [ -f "$SHELLPAGE.gz" ] && cp "$SHELLPAGE.gz" "$HD/Console/shell.html.gz"
 
@@ -210,21 +176,6 @@ EOF
 echo "Hello from an Amiga." > "$HD/Public/readme.txt"
 wb31_screenmode_prefs "$HD" "$DEPTH"
 
-# DH0:Modes -- one ScreenMode prefs file per mode worth changing to, and a
-# script that walks them.  A mode change can only be asked for from INSIDE the
-# guest, and the Prefs editor is a GUI, so this is the way to drive one from a
-# harness.  Copying a file over ENV:Sys/screenmode.prefs is exactly what the
-# editor's Use button does: IPrefs has a notification on it and applies what it
-# finds.
-#
-# ANY OPEN WINDOW BLOCKS IT.  Intuition cannot reset a screen with windows on
-# it and puts up "Please close all windows, except drawers" instead, so a
-# driver arms the sweep and then ends the boot Shell:
-#
-#   console-probe.py ADDR PORT --type "Run >NIL: <NIL: C:Execute DH0:Modes/sweep"
-#   console-probe.py ADDR PORT --type "EndCLI"
-#
-# The waits in the script are what that dance needs room for.
 mkdir -p "$HD/Modes"
 python3 - "$HD/Modes" <<'MODES'
 import os, struct, sys
@@ -259,21 +210,6 @@ C:Wait 16
 C:Copy DH0:Modes/d4.prefs ENV:Sys/screenmode.prefs
 SWEEP
 
-# THE SERVER'S OWN LOG MAY NOT GO TO A WINDOW ON THE MIRRORED SCREEN
-#
-#   `Run >file C:httpd ... -v` redirects RUN, not httpd: the file gets one
-#   "[CLI n]" line and httpd's -v output goes to the boot CON: window instead.
-#   That window is on the very screen the console is mirroring, and the CON
-#   handler needs the screen's layer lock to draw in it -- so while anybody
-#   holds a mouse button (a menu up, a window being dragged) CON is queued on
-#   that lock, httpd's next log line blocks in DOS behind it, and the whole
-#   single-task server stops answering.  Measured: a held right button takes
-#   plain HTTP from 200 to no answer at all, with no console session involved.
-#
-#   Executed from a script instead, so the redirection binds to httpd, and to
-#   a FILE, whose handler wants nothing from Intuition.  The file is on the
-#   host's own filesystem through the directory mount, so it can be read while
-#   the guest is still up -- which is the whole point of having it.
 sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
 cat >> "$HD/S/Startup-Sequence" <<EOF
 

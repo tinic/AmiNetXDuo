@@ -1,48 +1,5 @@
 #!/usr/bin/env bash
-#
 # Request and response latency, on a link that loses packets.
-#
-#   tests/perf/run-reqresp.sh -H user@host -A addr -g GUESTADDR [-l PERCENT]
-#                             [-D rx|tx|both] [-n COUNT] [-b BUILDDIR]
-#                             [-T TAG] [-t SECONDS] [-p PORT]
-#
-# WHY THIS AND NOT run-lossgate.sh
-#
-#   The loss gate measures a bulk transfer, where the flight is large enough
-#   that three duplicate acknowledgments arrive and fast retransmit recovers a
-#   loss in a round trip.  A request and its response is the other shape: two
-#   segments out, then silence until the answer comes back.  Three duplicate
-#   acknowledgments cannot happen, so before RFC 5827 and RFC 8985 landed here
-#   every lost outbound segment cost the retransmission timeout -- a flat
-#   second -- and no measurement in this tree had ever seen one.
-#
-#   A fetch, a DNS lookup over TCP and an HTTP GET are all this shape.
-#
-# WHAT IT MEASURES
-#
-#   N fetches of one small file from an HTTP server on the peer, each its own
-#   connection.  ToolsSmoke times every command it runs, so the figure is the
-#   distribution of those times: the median is the cost of a fetch that met no
-#   loss, and what the recovery changes is the tail.
-#
-#   THE MEDIAN IS NOT THE FIGURE.  Most fetches lose nothing and take the same
-#   time whatever the recovery does.  Read the count above the stall threshold
-#   and the total, which is what a user waits.
-#
-#   A lost SYN is in here too and is not something either mechanism reaches: a
-#   connection request has nothing outstanding to probe and no data to elicit a
-#   duplicate acknowledgment, so it waits out its own retry.  Those land in the
-#   same bucket in both arms of a comparison and dilute it rather than
-#   flattering it.
-#
-# THE GUEST ADDRESS IS AN ARGUMENT
-#
-#   The peer's filter needs it before the guest has booted, and learning it
-#   from a warm-up arm would double the emulator time.  A DHCP lease follows
-#   the MAC, so it is the same address every run; the script reads the address
-#   back out of the transcript afterwards and refuses the run if it moved,
-#   because a filter that matched nothing reports a clean link as a result.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -67,8 +24,6 @@ IFACE="${AMINETXDUO_EMU_IFACE:-ens18}"
 BOARD="${AMINETXDUO_EMU_BOARD:-a2065}"
 SEED="${AMINETXDUO_LOSSGATE_SEED:-20260811}"
 TXRAND="${AMINETXDUO_LOSSGATE_TXRAND:-determ}"
-# A fetch that met no loss is tens of milliseconds; the timeout it would have
-# waited out is a second.  Anything past this met something.
 STALL_MS="${AMINETXDUO_REQRESP_STALL_MS:-500}"
 
 usage() {
@@ -120,13 +75,8 @@ done
 [ -n "$A2065" ] && [ -f "$A2065" ] || {
     echo "no a2065.device -- set AMINETXDUO_A2065" >&2; exit 2; }
 
-# ------------------------------------------------------------------- peer --
-
 peer_tc() { ssh "$PEER" "$PEER_TC $*"; }
 
-# Only what this run put there.  The peer's root qdisc may belong to somebody
-# else's measurement -- the lab runs several at once -- and a -D tx run does not
-# touch it, so taking it out on the way past would silently unimpair theirs.
 RX_ON=0
 TX_ON=0
 
@@ -142,14 +92,8 @@ trap peer_off EXIT INT TERM HUP
 
 peer_off
 echo "==> peer: http.server on $PORT"
-# setsid and all three descriptors redirected, or ssh waits for the server it
-# just started: a background process that still holds the session's stdout
-# keeps the channel open and the call never returns.
 ssh -n "$PEER" "mkdir -p /tmp/reqresp-$PORT && \
                 head -c 1024 /dev/urandom | od -An -tx1 > /tmp/reqresp-$PORT/probe.txt"
-# The whole background group is redirected, not just the server inside it.  A
-# backgrounded list still holds the session's descriptors however carefully its
-# last member redirects its own, and ssh waits for every holder to let go.
 ssh -n "$PEER" "( cd /tmp/reqresp-$PORT && exec setsid python3 -m http.server \
                   $PORT --bind 0.0.0.0 ) > /tmp/reqresp-$PORT/log 2>&1 \
                   < /dev/null & sleep 1"
@@ -180,8 +124,6 @@ if [ "${LOSS%%.*}" != "0" ]; then
             echo "==> peer $PEER_IF: 1 in $NTH of $GUEST -> peer dropped ($TXRAND)" ;;
     esac
 fi
-
-# ------------------------------------------------------------------- guest --
 
 OUT="$ROOT/build/reqresp-$TAG"
 STAGE="$ROOT/build/reqresp-stage-$TAG"
@@ -220,8 +162,6 @@ HD="$ROOT/build/amiberry-testhd-$TAG"
 [ -f "$HD/tools.txt" ] && cp "$HD/tools.txt" "$OUT/tools.txt"
 [ -f "$OUT/tools.txt" ] || cp "$OUT/run.txt" "$OUT/tools.txt"
 
-# The lease has to be the one the filter was built for.  A guest that took a
-# different address met a clean link and its numbers say nothing.
 SAW=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/tools.txt" | grep -v "^$PEER_ADDR$" |
       sort | uniq -c | sort -rn | head -1 | awk '{print $2}' || true)
 echo "guest_addr=$SAW"
@@ -238,9 +178,6 @@ fi
 
 peer_off
 
-# ToolsSmoke announces every command and closes it with a timing line.  Only
-# the fetches are the measurement; the interface setup and the two counter
-# snapshots around them are not, and one of them costs seconds.
 awk '/^===== /   { isfetch = /fetch/ }
      /^----- rc /{ if (isfetch) for (i = 1; i <= NF; i++)
                        if ($i == "ms,") print $(i - 1) }' \
@@ -265,10 +202,6 @@ awk -v stall="$STALL_MS" -v n="$COUNT" '
         printf "stall_threshold_ms=%d\n", stall
     }' "$OUT/ms.txt"
 
-# The counters are cumulative and snapshotted either side of the fetches, so
-# the difference is what this run did.  `|| true' because a run whose guest
-# never got that far still has a latency distribution worth printing, and under
-# set -e a grep that matches nothing would take the script out silently.
 { grep -E '^[[:space:]]*[0-9]+ retransmitted' "$OUT/tools.txt" || true; } |
     awk 'NR == 1 { r0 = $1; d0 = $3 } { r = $1; d = $3 }
          END { if (NR) printf "retransmitted=%d dropped_rx=%d\n", r - r0, d - d0 }'

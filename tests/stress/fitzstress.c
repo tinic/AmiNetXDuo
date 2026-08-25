@@ -1,72 +1,6 @@
 /*
  * FitzStress, four concurrent AmigaDOS copies over ONE TCP connection.
  *
- * WHOSE TEST THIS IS
- *
- *   The author of Fitz reproduces freezes in Amiga TCP/IP stacks with four
- *   processes at once, described in his own words:
- *
- *     process 1  copies a 10 MB file from a fileserver to RAM:, endlessly
- *     process 2  does the same in the opposite direction
- *     process 3  copies a 100 MB file alternately fileserver -> harddisk
- *                and back
- *     process 4  copies an Amiga system installation to the fileserver
- *
- *   "This all goes through a single TCP connection for the mount, which exerts
- *   considerable stress on the TCP/IP stack and its internal buffers.  I've
- *   written the tests originally for Fitz, but it revealed more problems with
- *   TCP/IP stacks than with the filesystem."
- *
- * WHY IT IS NOT tests/endurance
- *
- *   Endurance opens N sockets and drives each one.  This opens ZERO: every
- *   byte goes through the Fitz handler's one socket, which is the property the
- *   whole test turns on.  Four DOS clients queue packets at one handler, the
- *   handler serialises them onto one connection, and the send and receive
- *   buffers of that connection carry a 10 MB read, a 10 MB write, a 100 MB
- *   transfer and a directory walk interleaved at DOS-packet granularity.  A
- *   window, a buffer or a retransmit queue that only misbehaves under that
- *   interleaving cannot be reached with a socket per workload.
- *
- *   This harness therefore opens no bsdsocket.library at all.  If it ever
- *   needs one, the test has stopped being this test.
- *
- * WHAT IT CHECKS
- *
- *   Correctness is not an afterthought here: another reading of the same
- *   reports is that the stack delivers wrong bytes before it stops delivering
- *   any, and a silent corruption would be worse than the hang.  So every byte
- *   that comes off the share is checked against a position-addressable
- *   pattern as it arrives,
- *
- *       byte(o) = pat[o & 8191] ^ (UBYTE)(o >> 13)
- *
- *, which catches a single altered byte, and, because the period is 2 MB,
- *   a repeated or dropped block as well.  The host side knows the same
- *   pattern and checks everything the guest wrote to the share.  The tree
- *   worker is checked by Fitz's own `comparetree ... crc`, run from the
- *   supervisor against a copy the worker has finished with, at the end by
- *   default, because it is minutes of the same connection and no health
- *   sample is taken while it runs.
- *
- * WHAT IT RECORDS
- *
- *   DH0:stress-timeline.csv   one row per sample: per-worker iterations,
- *                             kilobytes, errors and mismatches, plus AvailMem
- *   DH0:stress-events.txt     every error, with the second it happened
- *   DH0:health.log            `netstat -h` blocks, the leak and pool series
- *   DH0:stress-summary.txt    totals, and which worker was where at the end
- *   serial                    one line per sample, so a machine whose
- *                             filesystem has stopped can still be seen to be
- *                             executing, and a machine that stops emitting
- *                             them has stopped executing
- *
- *   A worker that stops advancing its phase stamp is the freeze, and the
- *   summary names it and the DOS call it was in.  The supervisor writes that
- *   summary on its deadline whether or not the workers came back, and then
- *   parks rather than exiting, because unloading this segment out from under
- *   a wedged child would turn a diagnosable freeze into a crash.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -81,8 +15,6 @@
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: FitzStress 1.0 (29.7.2026)";
-
-/* --------------------------------------------------------------- serial -- */
 
 /* RawPutChar is exec LVO -516; the NDK declares it only for the assembler. */
 #ifndef RawPutChar
@@ -105,14 +37,6 @@ static VOID fs_kprintf(const char *fmt, LONG *args)
     RawDoFmt((STRPTR)fmt, args, (void (*)())fs_putch, NULL);
 }
 
-/* ---------------------------------------------------------- the pattern -- */
-
-/*
- * 8 KB of xorshift32 output, xored with the offset's high bits.  The host
- * side (tests/stress/pattern.py) generates the same bytes from the same seed,
- * so a file can be checked at either end without either end having to send a
- * checksum the stack under test would have to carry.
- */
 #define PAT_SIZE    8192
 
 static UBYTE fs_pat[PAT_SIZE];
@@ -143,7 +67,6 @@ static VOID fs_pat_fill(UBYTE *buf, ULONG off, ULONG len)
     }
 }
 
-/* Returns the offset of the first byte that is wrong, or -1. */
 static LONG fs_pat_check(const UBYTE *buf, ULONG off, ULONG len)
 {
     ULONG i;
@@ -160,18 +83,6 @@ static LONG fs_pat_check(const UBYTE *buf, ULONG off, ULONG len)
     return -1;
 }
 
-/* ------------------------------------------------------------- the clock -- */
-
-/*
- * Wall clock, not accumulated sample steps.
- *
- * The supervisor's loop does more than Delay(): it runs netstat, and it can
- * run comparetree, which walks a 4 MB tree with CRC over the same connection
- * four workers are hammering and takes minutes.  A clock that adds `sample`
- * per iteration therefore reads far behind real time, a run asked for 420
- * seconds sat there for 22 minutes and reported t=300, and the emulator's
- * deadline arrives long before the workload's own.
- */
 static struct DateStamp g_start;
 
 static VOID fs_clock_start(VOID)
@@ -195,8 +106,6 @@ static ULONG fs_elapsed(VOID)
     return (ticks > 0L) ? (ULONG)(ticks / 50L) : 0UL;
 }
 
-/* ------------------------------------------------------------ the config -- */
-
 #define CFG_PATH        "DH0:fitzstress.cfg"
 #define TIMELINE_PATH   "DH0:stress-timeline.csv"
 #define EVENTS_PATH     "DH0:stress-events.txt"
@@ -218,15 +127,6 @@ typedef struct
     ULONG   cf_Sample;
     ULONG   cf_IoBuf;               /* bytes per Read()/Write()              */
     ULONG   cf_Seed;
-    /*
-     * comparetree with CRC reads the whole tree back over the same connection
-     * the four workers are on, and the supervisor is inside SystemTagList()
-     * for as long as it takes, minutes under load, during which no health
-     * sample is taken.  So it is off by default and the run gets one at the
-     * end, once the workers have stopped.  Content is still checked
-     * continuously: workers 1 and 3 verify every byte off the share against
-     * the pattern, and the host checks every surviving tree slot.
-     */
     ULONG   cf_Compare;             /* run comparetree every Nth sample; 0 off*/
     ULONG   cf_Workers;             /* bitmask, for bisecting a freeze       */
 } StressCfg;
@@ -338,8 +238,6 @@ static VOID fs_cfg_load(VOID)
     Close(fh);
 }
 
-/* ------------------------------------------------------------- reporting -- */
-
 /* Opened, appended and closed per line: a run that has to be killed keeps
    everything written up to the moment it was killed. */
 static VOID fs_append(const char *path, const char *fmt, LONG *args)
@@ -362,15 +260,11 @@ static VOID fs_truncate(const char *path)
         Close(fh);
 }
 
-/* ------------------------------------------------------------- the workers */
-
 #define ROLE_DOWN   1       /* share -> RAM:                                  */
 #define ROLE_UP     2       /* RAM: -> share                                  */
 #define ROLE_BIG    3       /* share <-> disk, alternating                    */
 #define ROLE_TREE   4       /* a directory tree -> share, cloned              */
 
-/* Where a worker is right now.  A stamp that stops moving with a phase that
-   stays put names the DOS call the machine died in. */
 #define PH_IDLE     0
 #define PH_OPEN_SRC 1
 #define PH_OPEN_DST 2
@@ -411,9 +305,6 @@ typedef struct
 static StressWorker g_worker[4];
 static volatile ULONG g_stop;
 static volatile ULONG g_secs;
-/* comparetree runs that did not come back 0: a tree on the server that does
-   not match the tree that was written to it.  Counted rather than only
-   logged, because this is what main() returns on. */
 static ULONG g_dirty;
 
 static VOID fs_event(ULONG role, const char *what, LONG a, LONG b)
@@ -428,8 +319,6 @@ static VOID fs_event(ULONG role, const char *what, LONG a, LONG b)
 
     fs_append(EVENTS_PATH, "t=%lu w%lu %s a=%ld b=%ld\n", args);
 }
-
-/* ------------------------------------------------------------ path making -- */
 
 static VOID fs_join(char *out, const char *base, const char *name)
 {
@@ -451,7 +340,6 @@ static VOID fs_join(char *out, const char *base, const char *name)
     out[i] = '\0';
 }
 
-/* "<base>/<stem><n>", worker 4's numbered tree slots. */
 static VOID fs_join_num(char *out, const char *base, const char *stem, ULONG n)
 {
     char  tail[64];
@@ -479,18 +367,6 @@ static VOID fs_join_num(char *out, const char *base, const char *stem, ULONG n)
     fs_join(out, base, tail);
 }
 
-/* ------------------------------------------------------------- file moves -- */
-
-/*
- * One file, source to destination, through the worker's own buffer.
- *
- * `check` means the source is supposed to carry the pattern, and every buffer
- * that comes off it is checked before it is written on.  `fill` means there is
- * no source file at all: the buffer is generated, which is how the RAM: side
- * is seeded without a network in the way.
- *
- * Returns the bytes moved, or -1 on an I/O error (IoErr() is left set).
- */
 static LONG fs_copy_file(StressWorker *w, const char *src, const char *dst,
                          ULONG bytes, BOOL check, BOOL fill)
 {
@@ -538,10 +414,6 @@ static LONG fs_copy_file(StressWorker *w, const char *src, const char *dst,
                 goto out;
             if (got == 0)
             {
-                /* End of file before the length that was asked for.  Not an
-                   I/O error, so IoErr() says nothing, and a copy that
-                   stopped early must not pass for a clean one, which is why
-                   it is recorded here rather than left to the caller. */
                 fs_event(w->w_Role, "short", (LONG)off, (LONG)bytes);
                 goto out;
             }
@@ -555,8 +427,6 @@ static LONG fs_copy_file(StressWorker *w, const char *src, const char *dst,
                     w->w_Bad++;
                     fs_event(w->w_Role, "content", (LONG)(off + (ULONG)bad),
                              (LONG)w->w_Buf[bad]);
-                    /* Keep going: how much of the file is wrong is the
-                       question, and stopping at the first byte cannot say. */
                 }
             }
         }
@@ -596,17 +466,6 @@ out:
     return rc;
 }
 
-/* ---------------------------------------------------------- the tree copy -- */
-
-/*
- * `copy <tree> <share>/testsysN ALL QUIET CLONE`, written out rather than
- * shelled out: this rig's DH0: is a bare directory hard drive with no
- * Workbench on it, so there is no C:Copy to call.  CLONE is the part that
- * matters, the comment, the protection bits and the datestamp are what
- * Fitz carries over the wire for every entry and what comparetree checks,
- * so all three are set, in that order, because SetProtection() can take the
- * write bit away and SetComment() would then fail.
- */
 #define TREE_MAXDEPTH   12
 
 typedef struct
@@ -665,10 +524,6 @@ static LONG fs_tree_copy(StressWorker *w, const char *src, const char *dst,
         goto done;
     }
 
-    /* Examine() on a directory lock describes the DIRECTORY.  Its own three
-       fields are taken here, before ExNext() overwrites them with the first
-       entry, and applied at the bottom: a drawer's datestamp is one of the
-       things comparetree checks and CLONE carries. */
     {
         ULONG c;
 
@@ -704,10 +559,6 @@ static LONG fs_tree_copy(StressWorker *w, const char *src, const char *dst,
 
         if (fib->fib_DirEntryType > 0)
         {
-            /* Every level has its own lock and its own fib, so descending
-               does not disturb this level's ExNext() position.  The fields
-               are copied out above anyway, because the recursion reuses the
-               names while this frame still needs them. */
             LONG sub = fs_tree_copy(w, spath, dpath, depth + 1, tc);
 
             if (sub == -2)
@@ -744,9 +595,6 @@ static LONG fs_tree_copy(StressWorker *w, const char *src, const char *dst,
 
         if (g_stop != 0UL)
         {
-            /* Abandoning the walk leaves a partial tree, and a partial tree
-               compared against the source reads as hundreds of differences.
-               It is not one: say so, so the caller does not publish it. */
             rc = -2;
             goto done;
         }
@@ -771,9 +619,6 @@ done:
     return rc;
 }
 
-/*
- * Recursive delete, for the slots the tree worker retires.  Same depth cap.
- */
 static VOID fs_tree_delete(StressWorker *w, const char *path, LONG depth)
 {
     BPTR                  lock;
@@ -823,21 +668,6 @@ static VOID fs_tree_delete(StressWorker *w, const char *path, LONG depth)
     w->w_Phase = PH_IDLE;
 }
 
-/*
- * Give the source tree Amiga metadata to carry.
- *
- * mktree.py builds it on the host, where a protection bit and a file comment
- * have nowhere to live, so every entry would arrive with the same default
- * ----rwed and no comment, and comparetree would then be checking two
- * fields that are constant, which is no check at all.  This walks the tree
- * once at startup and gives each file a comment of its own and a protection
- * word that varies.
- *
- * ONLY THE HIGH NIBBLE IS TOUCHED.  Archive, Pure, Script and Hold say
- * nothing to AmigaDOS about access; R, W, E and D are inverted-sense, so
- * setting FIBF_READ makes the file unreadable and the copy that is supposed
- * to be under test fails for a reason that has nothing to do with the stack.
- */
 static VOID fs_tree_stamp(StressWorker *w, const char *path, LONG depth,
                           ULONG *idx)
 {
@@ -881,8 +711,6 @@ static VOID fs_tree_stamp(StressWorker *w, const char *path, LONG depth,
                     note[k] = tag[k];
                     k++;
                 }
-                /* A comment whose length varies as well as its content: a
-                   fixed-width one cannot catch an off-by-one in the field. */
                 {
                     char digits[12];
                     ULONG d = 0UL;
@@ -919,9 +747,6 @@ static VOID fs_tree_stamp(StressWorker *w, const char *path, LONG depth,
     UnLock(lock);
 }
 
-/* ------------------------------------------------------- the four bodies -- */
-
-/* 1: the share to RAM:, endlessly, checking every byte on the way in. */
 static VOID fs_body_down(StressWorker *w)
 {
     char src[MAXPATH];
@@ -950,7 +775,6 @@ static VOID fs_body_down(StressWorker *w)
     }
 }
 
-/* 2: RAM: to the share, endlessly.  The host checks what landed. */
 static VOID fs_body_up(StressWorker *w)
 {
     char src[MAXPATH];
@@ -991,7 +815,6 @@ static VOID fs_body_up(StressWorker *w)
     w->w_Phase = PH_IDLE;
 }
 
-/* 3: the big file, share -> disk, then disk -> share, alternating. */
 static VOID fs_body_big(StressWorker *w)
 {
     char remote[MAXPATH];
@@ -1005,7 +828,6 @@ static VOID fs_body_big(StressWorker *w)
 
     while (g_stop == 0UL)
     {
-        /* down: checked byte for byte as it arrives */
         if (fs_copy_file(w, remote, local, bytes, TRUE, FALSE) < 0)
         {
             w->w_Errs++;
@@ -1018,7 +840,6 @@ static VOID fs_body_big(StressWorker *w)
         if (g_stop != 0UL)
             break;
 
-        /* up: the host checks bigback.bin against the same pattern */
         if (fs_copy_file(w, local, back, bytes, FALSE, FALSE) < 0)
         {
             w->w_Errs++;
@@ -1034,15 +855,6 @@ static VOID fs_body_big(StressWorker *w)
     }
 }
 
-/*
- * 4: the system tree to the share, cloned, into numbered slots.
- *
- * Three slots are kept, not one, because the supervisor runs comparetree
- * against the newest FINISHED slot while this worker is filling the next: a
- * single slot would be compared while it was being rewritten, and a
- * difference would say nothing.  Slot n-3 is retired when slot n is done, so
- * whatever the comparison is reading stays put for two more copies.
- */
 static VOID fs_body_tree(StressWorker *w)
 {
     char  dst[MAXPATH];
@@ -1063,16 +875,12 @@ static VOID fs_body_tree(StressWorker *w)
 
         if (rc == -2)
         {
-            /* Told to stop part way.  Not an error, and not publishable. */
             break;
         }
         if (rc < 0)
         {
             w->w_Errs++;
             fs_event(w->w_Role, "tree", (LONG)tc.tc_Errs, (LONG)slot);
-            /* A share that has gone away fails every entry instantly, and a
-               loop with no pause in it fills the event file with the same
-               line for as long as the run has left. */
             Delay(50UL);
         }
         else
@@ -1092,8 +900,6 @@ static VOID fs_body_tree(StressWorker *w)
         slot++;
     }
 }
-
-/* --------------------------------------------------------------- spawning -- */
 
 static VOID fs_worker_entry(VOID)
 {
@@ -1157,8 +963,6 @@ static struct Process *fs_spawn(StressWorker *w, const char *name)
     return p;
 }
 
-/* ------------------------------------------------------------- supervisor -- */
-
 static VOID fs_heartbeat(ULONG t)
 {
     LONG args[16];
@@ -1197,12 +1001,6 @@ static VOID fs_timeline(ULONG t)
               args);
 }
 
-/*
- * `netstat -h` opens no library, allocates nothing and takes no lock, which is
- * why it is safe to run from here while four processes are hammering the
- * machine, and why it still answers when the rest of the stack does not.
- * The block is stamped so the series can be read against the timeline.
- */
 static VOID fs_health(ULONG t)
 {
     LONG args[2];
@@ -1215,11 +1013,6 @@ static VOID fs_health(ULONG t)
                         " <NIL:", NULL);
 }
 
-/*
- * Fitz's own comparetree, run the way its author runs it: every field it
- * carries over the wire, and the file content too.  Slot `ready-1` is the
- * newest one worker 4 has finished with.
- */
 static VOID fs_compare(ULONG t)
 {
     static char line[MAXPATH * 2 + 64];
@@ -1256,8 +1049,6 @@ static VOID fs_compare(ULONG t)
 
     if (args[0] != 0)
     {
-        /* A tree that does not compare is the finding, so it is counted here
-           and not only written down.  The count is what main() returns on. */
         g_dirty++;
         fs_event(4UL, "comparetree", args[0], (LONG)(ready - 1UL));
     }
@@ -1344,7 +1135,6 @@ int main(int argc, char **argv)
               "requested_seconds %lu\nsmall_kb %lu\nbig_kb %lu\nworkers %lu\n",
               args);
 
-    /* A working directory on the real disk for worker 3. */
     {
         BPTR l = CreateDir((CONST_STRPTR)g_cfg.cf_Disk);
 
@@ -1387,8 +1177,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* ---- the run ---------------------------------------------------- */
-
     fs_clock_start();
 
     while (t < g_cfg.cf_Seconds)
@@ -1417,13 +1205,8 @@ int main(int argc, char **argv)
         }
     }
 
-    /* ---- winding down ----------------------------------------------- */
-
     g_stop = 1UL;
 
-    /* A worker is given four minutes to notice, which is longer than the
-       slowest single buffer can take on this link.  Anything still moving is
-       still working; anything not moving is the thing being hunted. */
     for (i = 0; i < 240; i++)
     {
         ULONG done = 0UL;
@@ -1464,14 +1247,6 @@ int main(int argc, char **argv)
 
     if (stuck != 0UL)
     {
-        /*
-         * Do not return.  Returning unloads this segment, and a child still
-         * inside fs_copy_file() would then execute freed memory, turning a
-         * freeze that can be read off the timeline into a crash that cannot.
-         * The emulator's own deadline ends the run; everything worth having
-         * is already on DH0:, and the heartbeat keeps saying whether the
-         * machine is executing at all.
-         */
         for (;;)
         {
             Delay(30UL * 50UL);
@@ -1481,25 +1256,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /*
-     * WHAT THIS RETURN CODE IS ABOUT.
-     *
-     * It used to be RETURN_OK whatever the four workers measured, and
-     * tests/stress/run-fitzstress.sh forwards it, so a run that copied a tree
-     * to the server and read back bytes that did not match exited 0.  It
-     * printed the count and gated on nothing.
-     *
-     * Content is not a matter of degree.  w_Bad is a buffer that came back
-     * different from the one that went out, and g_dirty is Fitz's own
-     * comparetree disagreeing about a whole tree; either one is the finding
-     * this program exists to make, and neither is a load-dependent number
-     * that could be tuned into a threshold.
-     *
-     * A transfer that FAILED is a different thing and is deliberately not
-     * here: w_Errs counts refused connections and short reads, which is what
-     * a stress test on a saturated link is expected to produce, and the
-     * timeline and the events file are where those are read.
-     */
     {
         ULONG bad = 0UL;
 

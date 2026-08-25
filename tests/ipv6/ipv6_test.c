@@ -1,31 +1,6 @@
 /*
  * AmiNetXDuo, milestone 8: the IPv6 dual stack, on 68k.
  *
- * Shaped like tests/ram_driver/ram_driver_test.c, and for the same reason:
- * two NX_IP instances on one simulated wire prove the stack end to end
- * without needing anything outside the emulator.  That matters more here than
- * it did for IPv4, since the emulated network may not carry IPv6 at all,
- * see tests/ipv6/ipv6_link_test.c, which probes that empirically.  This
- * test's result does not depend on it.
- *
- *   1. nxd_ipv6_enable() + nxd_icmp_enable() bring the dual stack up on a
- *      68020, and ::1 is configured by doing so.
- *   2. A link-local address is derived from the interface MAC as RFC 4291
- *      modified EUI-64 requires, and survives duplicate address detection,
- *      which means solicited-node multicast, neighbour solicitations and
- *      neighbour advertisements all work.
- *   3. ICMPv6 echo request/reply works, over loopback and between two
- *      separate NX_IP instances across the link.
- *   4. TCP over IPv6 completes a three-way handshake, moves data both ways
- *      and closes, between an adopted Exec Task and a ThreadX-created one.
- *   5. UDP over IPv6 carries a datagram and reports the source correctly
- *      through nxd_udp_source_extract().
- *   6. The IPv6 text conversions round-trip.
- *
- * None of this runs over a real SANA-II device: the shim's 0x86DD reader has
- * no wire here (that is ipv6_link_test.c's job), nor does bsdsocket.library's
- * AF_INET6 surface (ipv6_socket_test.c's).
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -46,8 +21,6 @@
 #error "tests/ipv6 requires -DAMINETXDUO_IPV6=ON"
 #endif
 
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -104,8 +77,6 @@ BPTR    out;
 }
 
 
-/* -------------------------------------------------------------- results -- */
-
 static volatile ULONG   t_checks;
 static volatile ULONG   t_failures;
 
@@ -135,8 +106,6 @@ static UINT t_check(UINT ok, const char *what, ULONG detail)
 #define T_TX_OK(status, what)   t_check((UINT)((status) == TX_SUCCESS), (what), (ULONG)(status))
 
 
-/* ---------------------------------------------------------- test fabric -- */
-
 #define T_PACKET_PAYLOAD        1568        /* == AMI_POOL_PAYLOAD          */
 #define T_PACKET_COUNT          32
 #define T_PACKET_OVERHEAD       96
@@ -147,10 +116,6 @@ static UINT t_check(UINT ok, const char *what, ULONG detail)
 #define T_IP_STACK_SIZE         4096        /* IPv6 adds ND to the IP thread */
 #define T_SERVER_STACK_SIZE     4096
 
-/*
- * The IPv4 addresses are here only so nx_ip_create() has something to take;
- * nothing in this test uses them. The same NX_IP carries both families.
- */
 #define T_IP0_ADDRESS           IP_ADDRESS(192, 168, 100, 1)
 #define T_IP1_ADDRESS           IP_ADDRESS(192, 168, 100, 2)
 #define T_NETMASK               0xFFFFFF00UL
@@ -180,12 +145,9 @@ static ULONG            t_server_stack[T_SERVER_STACK_SIZE / sizeof(ULONG)];
 static ULONG            t_arp0_cache[1024 / sizeof(ULONG)];
 static ULONG            t_arp1_cache[1024 / sizeof(ULONG)];
 
-/* The two link-local addresses, filled in as each side configures itself. */
 static NXD_ADDRESS      t_addr0;
 static NXD_ADDRESS      t_addr1;
 
-
-/* ------------------------------------------------------- address helpers -- */
 
 static VOID t_log_addr(const char *what, const NXD_ADDRESS *a)
 {
@@ -200,15 +162,6 @@ static VOID t_log_addr(const char *what, const NXD_ADDRESS *a)
            a->nxd_ip_address.v6[3]        & 0xFFFFUL);
 }
 
-/*
- * Configure the link-local address and wait for duplicate address detection.
- *
- * DAD sends NX_IPV6_DAD_TRANSMITS neighbour solicitations to the address's
- * own solicited-node multicast group and declares the address usable only if
- * nothing answers. Until then the address is TENTATIVE and cannot be a
- * source, so a send issued too early either picks another address or fails.
- * The wait rules that race out.
- */
 static UINT t_bring_up_ipv6(NX_IP *ip, NXD_ADDRESS *out, const char *who)
 {
 
@@ -239,15 +192,6 @@ UINT    if_index = 0;
         return(status);
     }
 
-    /*
-     * The address starts TENTATIVE and becomes usable when DAD finishes.
-     * The terminal state is VALID, not PREFERRED: PREFERRED belongs to an
-     * address carrying a preferred lifetime, which stateless autoconfiguration
-     * produces from a router advertisement's prefix option. A link-local or
-     * manually configured address has no lifetime and lands in VALID
-     * (nxd_ipv6_address_set.c). Both are usable as a source; only TENTATIVE
-     * is not.
-     */
     while (waited < (10UL * NX_IP_PERIODIC_RATE))
     {
         UCHAR state =  ip -> nx_ipv6_address[index].nxd_ipv6_address_state;
@@ -283,14 +227,6 @@ UINT    if_index = 0;
                   "address is inside fe80::/10", out -> nxd_ip_address.v6[0]);
     (VOID)t_check((UINT)(out -> nxd_ip_address.v6[1] == 0UL),
                   "link-local subnet id is zero", out -> nxd_ip_address.v6[1]);
-    /*
-     * The interface identifier is the MAC with 0xFFFE inserted in the middle
-     * and the universal/local bit (bit 1 of the first byte) inverted,
-     * RFC 4291 appendix A. The RAM driver's MACs are 00:11:22:33:44:56 and
-     * ...:57, so the identifier must read 0211:22ff:fe33:4456: the ff is the
-     * low byte of word 2, the fe is the high byte of word 3, and the leading
-     * 00 has become 02.
-     */
     (VOID)t_check((UINT)((out -> nxd_ip_address.v6[2] & 0x000000FFUL) == 0x000000FFUL &&
                          (out -> nxd_ip_address.v6[3] & 0xFF000000UL) == 0xFE000000UL),
                   "interface id carries the EUI-64 fffe",
@@ -302,8 +238,6 @@ UINT    if_index = 0;
     return(NX_SUCCESS);
 }
 
-
-/* --------------------------------------------------------- server half --- */
 
 static VOID t_server_entry(ULONG id)
 {
@@ -326,10 +260,7 @@ CHAR        buffer[80];
 
     (VOID)t_bring_up_ipv6(&t_ip1, &t_addr1, "server: link-local");
 
-    /* The client cannot address us until t_addr1 exists. */
     (VOID)tx_semaphore_put(&t_server_ready);
-
-    /* ---- TCP ---------------------------------------------------------- */
 
     status =  nx_tcp_socket_create(&t_ip1, &t_server_socket, "server socket",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -346,11 +277,6 @@ CHAR        buffer[80];
 
     if (status == NX_SUCCESS)
     {
-        /*
-         * The peer must come back as an IPv6 address. nx_tcp_socket_peer_
-         * info_get(), the v4-only entry point, reports zero here, which
-         * is why bsdsocket.library's accept() uses the nxd_ form.
-         */
         peer.nxd_ip_version =  0;
         status =  nxd_tcp_socket_peer_info_get(&t_server_socket, &peer,
                                                &actual);
@@ -394,8 +320,6 @@ CHAR        buffer[80];
     (VOID)nx_tcp_server_socket_unlisten(&t_ip1, T_TCP_PORT);
     (VOID)nx_tcp_socket_delete(&t_server_socket);
 
-    /* ---- UDP ---------------------------------------------------------- */
-
     status =  nx_udp_socket_create(&t_ip1, &t_server_udp, "server udp",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                    NX_IP_TIME_TO_LIVE, 8);
@@ -429,7 +353,6 @@ CHAR        buffer[80];
         (VOID)t_check((UINT)(actual == (ULONG)sizeof(t_datagram)),
                       "server: datagram length", actual);
 
-        /* Bounce it straight back to where it came from. */
         status =  nxd_udp_socket_send(&t_server_udp, packet_ptr, &peer,
                                       peer_port);
         if (!T_OK(status, "server: udp echo send"))
@@ -446,8 +369,6 @@ CHAR        buffer[80];
     (VOID)tx_semaphore_put(&t_server_done);
 }
 
-
-/* --------------------------------------------------------- client half --- */
 
 static VOID t_ping(NXD_ADDRESS *target, const char *what)
 {
@@ -490,13 +411,6 @@ UINT        i;
 
     (VOID)t_bring_up_ipv6(&t_ip0, &t_addr0, "client: link-local");
 
-    /* ---- ICMPv6 over the internal loopback ------------------------------ */
-
-    /*
-     * ::1 is configured by nxd_ipv6_enable() itself, on the interface
-     * nx_ip_create() always makes, so this leg works on a machine with no
-     * network card present.
-     */
     loopback.nxd_ip_version       =  NX_IP_VERSION_V6;
     loopback.nxd_ip_address.v6[0] =  0UL;
     loopback.nxd_ip_address.v6[1] =  0UL;
@@ -505,25 +419,13 @@ UINT        i;
 
     t_ping(&loopback, "client: ICMPv6 echo to ::1");
 
-    /* ---- wait for the far side ------------------------------------------ */
-
     status =  tx_semaphore_get(&t_server_ready, 20UL * NX_IP_PERIODIC_RATE);
     if (!T_TX_OK(status, "client: server configured its address"))
     {
         return(TX_FALSE);
     }
 
-    /* ---- ICMPv6 across the link ----------------------------------------- */
-
-    /*
-     * This is the leg that proves neighbour discovery: ip0 has never seen
-     * ip1's MAC, so the first echo request is queued behind a neighbour
-     * solicitation to ip1's solicited-node multicast group, and only goes out
-     * when the advertisement comes back.
-     */
     t_ping(&t_addr1, "client: ICMPv6 echo to the peer's link-local");
-
-    /* ---- TCP over IPv6 --------------------------------------------------- */
 
     status =  nx_tcp_socket_create(&t_ip0, &t_client_socket, "client socket",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
@@ -598,8 +500,6 @@ UINT        i;
     (VOID)nx_tcp_client_socket_unbind(&t_client_socket);
     (VOID)nx_tcp_socket_delete(&t_client_socket);
 
-    /* ---- UDP over IPv6 --------------------------------------------------- */
-
     status =  nx_udp_socket_create(&t_ip0, &t_client_udp, "client udp",
                                    NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                    NX_IP_TIME_TO_LIVE, 8);
@@ -671,8 +571,6 @@ UINT        i;
     (VOID)nx_udp_socket_unbind(&t_client_udp);
     (VOID)nx_udp_socket_delete(&t_client_udp);
 
-    /* ---- neighbour cache ------------------------------------------------- */
-
     {
         NXD_ADDRESS lookup =  t_addr1;
         ULONG       msw = 0, lsw = 0;
@@ -696,8 +594,6 @@ UINT        i;
     return(TX_TRUE);
 }
 
-
-/* ------------------------------------------------------ ThreadX startup --- */
 
 VOID tx_application_define(VOID *first_unused_memory)
 {
@@ -756,18 +652,6 @@ UINT    status;
 }
 
 
-/* -------------------------------------------------------------- shutdown -- */
-
-/*
- * Everything tx_application_define() created, given back, so the kernel can be
- * stopped before AmigaDOS unloads this hunk.
- *
- * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
- * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
- * own.  The order is creation reversed.  The server thread goes first because
- * it is the one still holding sockets on t_ip1, and the pool goes last because
- * nx_ip_delete() hands packets back to it on the way out.
- */
 static VOID t_shutdown(VOID)
 {
 
@@ -794,8 +678,6 @@ UINT    status;
     (VOID)T_OK(status, "shutdown: packet pool deleted");
 }
 
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {
@@ -832,14 +714,6 @@ UINT    status;
     status =  tx_amiga_orphan_thread(&t_main_thread);
     (VOID)T_TX_OK(status, "main: orphaned this Exec Task");
 
-    /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  That is invisible
-     * from here -- the checks above have already passed and the exit status has
-     * already been decided -- so tools/smoke/unloadprobe.c is what sees it.
-     */
     status =  tx_amiga_kernel_stop();
     (VOID)T_TX_OK(status, "main: ThreadX kernel stopped");
 

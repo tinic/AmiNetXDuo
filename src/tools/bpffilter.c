@@ -1,36 +1,10 @@
 /*
- * bpffilter, the compiler.  See bpffilter.h for what the primitives mean.
+ * bpffilter, the compiler. See bpffilter.h for what the primitives mean.
  *
- * SHAPE OF THE PROGRAM
- *
- * One dispatch on the EtherType, then one straight-line branch per family,
- * then two returns:
- *
- *      ldh   [12]
- *      jeq   0x0800  -> IPV4          (fall through if not)
- *      jeq   0x86dd  -> IPV6
- *      jeq   0x0806  -> ARP    else REJECT
- *  IPV4: <protocol gate> <host gate> <port gate>  ja ACCEPT
- *  IPV6: <protocol gate> <host gate> <port gate>  ja ACCEPT
- *  ARP:  <protocol-type gate> <host gate>         ja ACCEPT
- *  ACCEPT: ret snaplen
- *  REJECT: ret 0
- *
- * Each gate jumps to REJECT the moment it fails, so a branch that runs off its
- * end has passed every gate in it.  The gates are therefore ANDed by
- * construction and nothing has to be optimised afterwards.
- *
- * The per-family duplication is deliberate.  A frame's protocol byte is at
- * offset 23 in IPv4 and 20 in IPv6 and its addresses are 4 bytes in one and 16
- * in the other, so the two branches share no instruction anyway, and merging
- * them would only hide that.  A branch the filter excludes is not emitted at
- * all: the dispatch sends its EtherType straight to REJECT.
- *
- * JUMPS ARE LABELS, RESOLVED AT THE END.  A BPF jump is a count of
- * instructions to skip, so an offset written while emitting is a number that
- * has to be recounted after every later edit.  Every jump here names a label
- * instead and the offsets are computed once, in tool_bpf_fixup(), which is
- * also the one place that can find an unplaced label or an offset past 255.
+ * Each gate jumps to REJECT the moment it fails, so the gates are ANDed by
+ * construction. Jumps name labels and are resolved once in tool_bpf_fixup(),
+ * which is also the one place that can find an unplaced label or an offset
+ * past 255.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -134,10 +108,9 @@ static void tool_bpf_emit(ToolBpfBuild *b, unsigned short code, long k,
 }
 
 /*
- * Labels into offsets.  A jump is a count of instructions to skip from the one
- * after it, so the target must be ahead of the jump -- the encoding has no way
- * to say anything else, and the library's validator rejects a program that
- * tries.
+ * Labels into offsets. A jump is a count of instructions to skip from the one
+ * after it, so the target must be ahead of the jump; the library's validator
+ * rejects a program that tries otherwise.
  */
 static int tool_bpf_fixup(ToolBpfBuild *b)
 {
@@ -246,9 +219,8 @@ static unsigned long tool_bpf_v6_word(const unsigned char *a, int word)
 }
 
 /*
- * "This frame carries the transport the user asked for."  `any_of_two` is the
- * bare-PORT case: no PROTO was given, so TCP and UDP both qualify and nothing
- * else does.
+ * "This frame carries the transport the user asked for." `any_of_two` is the
+ * bare-PORT case: TCP and UDP both qualify and nothing else does.
  */
 static void tool_bpf_gate_proto(ToolBpfBuild *b, int reject, int off,
                                 int want, int tcp, int udp, int any_of_two)
@@ -284,10 +256,8 @@ static void tool_bpf_gate_host4(ToolBpfBuild *b, int reject,
     tool_bpf_place(b, ok);
 }
 
-/*
- * Sixteen bytes as four words.  Any mismatch in the source gives up on the
- * source and tries the destination; any mismatch in the destination rejects.
- */
+/* Sixteen bytes as four words. Any mismatch in the source tries the
+   destination; any mismatch in the destination rejects. */
 static void tool_bpf_gate_host6(ToolBpfBuild *b, int reject,
                                 const unsigned char *host)
 {
@@ -313,10 +283,9 @@ static void tool_bpf_gate_host6(ToolBpfBuild *b, int reject,
 }
 
 /*
- * IPv4 ports.  The header is a variable length and the transport starts after
- * it, so X is loaded from the IHL nibble and the two loads are indexed.  A
- * fragment other than the first carries no transport header at all and is
- * rejected before either load.
+ * IPv4 ports. The header is a variable length, so X is loaded from the IHL
+ * nibble and the two loads are indexed. A fragment other than the first carries
+ * no transport header and is rejected before either load.
  */
 static void tool_bpf_gate_port4(ToolBpfBuild *b, int reject, unsigned long port)
 {
@@ -375,8 +344,8 @@ ToolBpfResult tool_bpf_compile(const ToolBpfFilter *f, ToolBpfInsn *out,
     if (f->have_port && f->port > 65535UL)
         return TOOL_BPF_ERR_PORT;
 
-    /* A port on a protocol that has none is a typing mistake, not a filter
-       that matches nothing quietly. */
+    /* A port on a protocol that has none is a typing mistake, not a filter that
+       matches nothing quietly. */
     if (f->have_port &&
         (f->proto == TOOL_BPF_PROTO_ICMP || f->proto == TOOL_BPF_PROTO_ARP))
         return TOOL_BPF_ERR_IMPOSSIBLE;
@@ -396,9 +365,8 @@ ToolBpfResult tool_bpf_compile(const ToolBpfFilter *f, ToolBpfInsn *out,
     build.overflow = 0;
 
     /*
-     * Nothing to test: one instruction, which is the program NetTrace has
-     * always installed.  A NOT with nothing to invert would be "capture
-     * nothing", which no user means; the caller refuses it before this.
+     * Nothing to test: one instruction. A NOT with nothing to invert would be
+     * "capture nothing", which the caller refuses before this.
      */
     if (f->proto == TOOL_BPF_PROTO_ANY && !f->have_host && !f->have_port)
     {
@@ -523,9 +491,8 @@ ToolBpfResult tool_bpf_compile(const ToolBpfFilter *f, ToolBpfInsn *out,
 
         if (f->have_host)
         {
-            /* ARP for something other than IPv4 has no address here to
-               compare, and an ARP whose protocol type is not IPv4 is not what
-               a HOST filter is asking about. */
+            /* An ARP whose protocol type is not IPv4 has no address here to
+               compare and is not what a HOST filter is asking about. */
             LDH_ABS(ARP_PTYPE_OFF);
             JEQ(ETHERTYPE_IP, LBL_NEXT, reject);
 

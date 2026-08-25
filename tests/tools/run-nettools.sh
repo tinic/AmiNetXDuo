@@ -1,36 +1,5 @@
 #!/usr/bin/env bash
-#
 # Run nc and telnet against real servers, under FS-UAE on SLIRP.
-#
-#   tests/tools/run-nettools.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                               [-o "line;line;..."]
-#
-# tools/amiberry-run.sh starts ONE executable with no arguments, so ToolsSmoke
-# stands in the middle and runs DH0:commands.txt.  Same shape as
-# tests/tls/run-fetch.sh, with two additions ToolsSmoke grew for this run:
-# "&<command>" starts something in the background and "wait <secs>" lets it
-# settle, without which a listener and the thing that connects to it can
-# never be running at the same time, and `nc -l` could not be tested at all.
-#
-# WHAT IS ON THE OTHER END
-#
-#   tests/tools/netpeer.py, on the host: an echo server, a telnet server that
-#   negotiates properly, and tftp and whois servers.  The guest reaches them
-#   at 10.0.2.2, which is what SLIRP calls the host.
-#
-# AND WHAT REACHES THE GUEST
-#
-#   SLIRP is a NAT, so nothing outside can open a connection INTO the Amiga
-#   unless a port is forwarded.  FS-UAE's `slirp_redir` does that, the
-#   option is UAE's, so it goes through the uae_ passthrough, and this
-#   script forwards NC_INBOUND_PORT, so the host can connect to `nc -l` on
-#   the Amiga.
-#
-#   The guest's own address is SLIRP's first DHCP lease, 10.0.2.15.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -54,17 +23,10 @@ while getopts "m:t:c:b:o:" opt; do
     esac
 done
 
-# Ports.  Deliberately above 1024 and out of the way: the host may well have a
-# real ftpd or sshd, and a test that quietly talks to it would be worse than
-# one that fails.
 ECHO_PORT="${AMINETXDUO_ECHO_PORT:-7001}"
 TELNET_PORT="${AMINETXDUO_TELNET_PORT:-7023}"
 NC_INBOUND_PORT="${AMINETXDUO_NC_PORT:-7042}"
-# TFTP's own port is 69, and binding it needs root on this host, a test that
-# asks for a password is a test nobody runs.  The command takes the port as an
-# argument, so the rig uses a high one.
 TFTP_PORT="${AMINETXDUO_TFTP_PORT:-7069}"
-# Same for whois, whose own port is 43.
 WHOIS_PORT="${AMINETXDUO_WHOIS_PORT:-7043}"
 
 SMOKE="$ROOT/$BUILD/src/tools/ToolsSmoke"
@@ -81,7 +43,6 @@ for f in "$SMOKE" "$ADDIF" "$BSD" "$NC" "$TELNET" "$TRACEROUTE" \
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
-# ------------------------------------------------------------- a2065 -----
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -97,7 +58,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/nettools-stage"
 rm -rf "$STAGE"
@@ -112,7 +72,6 @@ cp "$TRACEROUTE" "$STAGE/traceroute"
 cp "$TFTP"       "$STAGE/tftp"
 cp "$WHOIS"      "$STAGE/whois"
 
-# What the scripted sessions feed to standard input.
 printf 'GET / HTTP/1.0\r\n\r\n' > "$STAGE/request.txt"
 printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
 
@@ -210,21 +169,8 @@ wait 15
 EOF
 fi
 
-# The same-machine case is NOT in that list, and the reason is a library bug
-# rather than a gap in the commands: shutdown(SHUT_WR) on a connection whose
-# two ends are on this machine hangs the caller in WaitSelect() forever.
-# tests/tools/commands-samehost.txt reproduces it on its own.
 
-# --------------------------------------------------------------- peers ---
 
-# The peer has to outlive the WAIT, not just the run.  Nothing serialises
-# emulator runs any more and several may be sharing the host, so the
-# wait before a single byte is exchanged can be half an hour, and a peer
-# sized to the run's own timeout exits while the run is still waiting its
-# turn, whereupon every local-server case fails with "connection refused" or
-# "the server stopped answering" and looks exactly like a broken command.
-# Observed exactly that way.  The trap below kills it when the script exits,
-# so a generous lifetime costs nothing.
 PEERLOG="$ROOT/build/netpeer.log"
 python3 "$ROOT/tests/tools/netpeer.py" \
     --echo-port "$ECHO_PORT" --telnet-port "$TELNET_PORT" \
@@ -250,14 +196,6 @@ kill -0 "$PEER_PID" 2>/dev/null || {
 echo "==> netpeer.py: echo $ECHO_PORT, telnet $TELNET_PORT," \
      "tftp $TFTP_PORT, whois $WHOIS_PORT"
 
-# --------------------------------------------------------------- slirp ---
-#
-# Inbound.  Without this the guest can call out and nothing can call in,
-# which is exactly the half `nc -l` exists to test.
-# Whether anything outside can reach the guest, written by the probe below and
-# read by the verdict: `uae_slirp_redir` is FS-UAE's option and Amiberry
-# ignores it, so on that runner the inbound case cannot happen and must be
-# named as a hole rather than scored as a failed command.
 INBOUND_FLAG="$ROOT/build/nettools-inbound.flag"
 echo unknown > "$INBOUND_FLAG"
 
@@ -270,13 +208,8 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-nettools}"
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
 
-# Did the forward actually happen?  `slirp_redir` is accepted by the config
-# parser whether or not the SLIRP build honours it, so the only proof is a
-# host socket in LISTEN.  Checked from the side, while the run is going on.
 (
     # Wait for the emulator itself, not for the clock: the run may sit in the
-    # queue behind another one for minutes, and a probe that fires while it is
-    # still queued proves nothing.
     waited=0
     while [ "$waited" -lt 600 ]; do
         pgrep -f "amiberry-${AMINETXDUO_RUN_TAG:-nettools}.uae" >/dev/null 2>&1 \
@@ -308,17 +241,6 @@ echo
 echo "================ what the host servers saw ================"
 cat "$PEERLOG" 2>/dev/null || true
 
-# --------------------------------------------------------- the verdict ---
-#
-# THIS FILE USED TO END `RC=$?` / `exit "$RC"`, and nothing else.  No grep, no
-# counter, no check of any kind: the verdict was ToolsSmoke's return code,
-# which is the return code of the LAST LINE of the command list, so a run in
-# which nc connected to nothing, telnet negotiated nothing and every tftp
-# transfer arrived empty exited 0 and read as coverage for five commands.
-#
-# The emulator's own status still matters -- it is the difference between a
-# failed assertion and a machine that never booted -- and it is reported
-# beside the verdict rather than being it.
 echo
 echo "---- the verdict ----"
 # shellcheck source=tests/tools/nettools-verdict.sh
@@ -333,9 +255,6 @@ if [ "$RC" != 0 ]; then
     exit 3
 fi
 
-# A custom list is a different run and nothing here knows what it asked for,
-# so it is a SKIP rather than a pass -- the same convention run-fetch.sh uses,
-# for the same reason.
 if [ -n "${AMINETXDUO_NETTOOLS_COMMANDS:-}" ]; then
     printf 'reason=%s\n' "custom_command_list"
     printf 'RESULT=skip\n'

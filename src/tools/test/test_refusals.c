@@ -1,42 +1,6 @@
 /*
  * A refusal that does not say why, and the four shapes it takes here.
  *
- * WHAT WENT WRONG
- *
- *   4d9791be turned three-paragraph diagnostics into one line, which was
- *   right, and took 352 tool_advise() calls out to do it. Some of those calls
- *   were the whole of a message. What was left behind:
- *
- *     AddNetRoute   explain() and explain6() became switch statements whose
- *                   arms are `case ROUTE_ENOSYS: break;`. The command prints
- *                   "the route to fd00:9::/64 was not added" and stops. Which
- *                   of five refusals it was, and that IPv6 has no
- *                   prefix-to-next-hop table at all so no spelling of the
- *                   command would have worked, went with them.
- *     host          `host ::1` says the literal is an address and not that
- *                   nslookup is the command that asks the DNS about one.
- *     no IPv6       the IPv4-only build's refusals name IPv6 and stop, so a
- *                   user cannot tell a machine that is missing an address
- *                   from a library that has no IPv6 in it at all.
- *     a catch-all   ConfigureNetInterface tested one errno out of the DHCP
- *                   lease call and answered every other with "has no DHCP
- *                   client to ask", so EBUSY -- a client that is working on
- *                   this interface right now -- read as a stackless machine.
- *
- *   None of it is anything a compiler sees: an empty case arm is legal, and a
- *   shorter string is a shorter string. The emulator tier caught it in
- *   tests/ipv6/run-tools-amiberry.sh, which runs on a cron and a tag. This is
- *   the same claim in the tier a push runs.
- *
- *   It parses the sources rather than compiling them, for the reason
- *   test_argtemplates.c gives: they reach proto/dos.h, and what is asserted
- *   here is the shape of the source rather than anything a call could return.
- *
- * WHAT IT DOES NOT PROVE
- *
- *   That the sentences are true, or that the command reaches them. That is
- *   tests/ipv6/run-tools-amiberry.sh's, on a real segment, and stays there.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -174,14 +138,7 @@ static char *slurp(const char *rel)
     return buf;
 }
 
-/* ------------------------------------------------------- the empty arms --- */
-
 /*
- * Every `case X:` in a function must reach something that prints before its
- * `break`. `default:` is exempt: an error code nobody enumerated has no
- * sentence to write about it, and inventing one would be worse than the bare
- * refusal above it.
- *
  * The scan runs from the function's opening brace to the first line that is a
  * lone `}` in column one, which is this tree's brace style.
  */
@@ -232,8 +189,6 @@ static void arms_all_speak(const char *file, const char *text,
           file, func, arms);
 }
 
-/* ------------------------------------------------------- the catch-all --- */
-
 /*
  * A refusal whose `else` answers an errno the caller can actually meet. The
  * code has to be tested somewhere in the run of source ending at the
@@ -257,16 +212,6 @@ static void catchall_excludes(const char *file, const char *text,
           " machine", file, sentence, code);
 }
 
-/* --------------------------------------------------------- the no-IPv6 -- */
-
-/*
- * Every refusal that turns an IPv6 address away because the library has none
- * is followed by tool_no_ipv6_note(), which is where "it is a build option"
- * and "ShowNetStatus INTERFACES" live, once. Counted rather than matched to a
- * call site: what went wrong was deletion, and a count catches that without
- * the test having to parse C. The note itself is asserted in t_the_note();
- * an emptied helper would satisfy every caller.
- */
 static void no_ipv6_sites_explain(const char *file, const char *text,
                                   int want)
 {
@@ -283,8 +228,6 @@ static void no_ipv6_sites_explain(const char *file, const char *text,
           "%s: %d of %d \"no IPv6\" refusals say it is a build option",
           file, notes, want);
 }
-
-/* ------------------------------------------------------------- the tests --- */
 
 static void t_addnetroute(void)
 {
@@ -396,10 +339,6 @@ static void t_the_note(void)
     CHECK(strstr(text, "can be switched on") != NULL,
           "tool_util.c: the note no longer says whether it can be switched on");
 
-    /* With the space, and on one printed line. The literals are joined above,
-       so a `\n` between the two words is still a `\n` here: this is what
-       catches a rewrap that puts the command name across two lines, where a
-       reader has to reassemble it before it can be typed. */
     CHECK(strstr(text, "ShowNetStatus INTERFACES") != NULL,
           "tool_util.c: the note does not name ShowNetStatus INTERFACES on"
           " one line");
@@ -407,31 +346,8 @@ static void t_the_note(void)
     free(text);
 }
 
-/* --------------------------------------------------- the log that is not --- */
-
 /*
  * NO SHIPPED STRING MAY SEND ANYBODY TO A LOG.
- *
- * AMI_ERROR, AMI_WARN and AMI_INFO compile to do { if (0) ... } while (0)
- * unless AMINETXDUO_LOG is defined, and it is OFF in every build that ships
- * (include/aminetxduo/compat.h, docs/BACKLOG.md).  So a command that ends its
- * explanation with "check the debug log for what failed" is naming a file that
- * cannot exist on the machine reading the message.
- *
- * tool_devdiag.c did exactly that, on the commonest bring-up failure there is,
- * and it was the last line somebody read before they gave up and spent an
- * evening on their hardware instead.  Nothing in the build could see it: a
- * string is a string, and the advice was well written.  This is the check that
- * sees it.
- *
- * Comments are stripped before this runs, so the paragraph in tool_devdiag.c
- * that quotes the old sentence in order to explain why it is gone does not
- * trip.  That is deliberate -- the record of a defect has to be able to name
- * it -- and it is also why this cannot be a grep.
- *
- * ShowNetStatus EVENTS is the answer a refusal is allowed to give instead: the
- * event ring IS recorded by a shipped build, and read through the published
- * semaphore without opening the library.
  */
 static void t_no_dead_log_advice(void)
 {

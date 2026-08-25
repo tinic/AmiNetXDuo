@@ -2,35 +2,6 @@
  * AmiNetXDuo, Multicast Listener Discovery, driven directly rather than over
  * a wire.
  *
- * tests/ipv6/run-mld.sh proves the wire half on a bridged segment: a report
- * on join, a Done on leave, a query answered in the version it was asked in.
- * Three things it cannot prove there, and they are the reason this exists:
- *
- *   1. REPORT SUPPRESSION.  RFC 2710 section 5 has a host cancel its pending
- *      report when another host answers first, and hand the Done to whoever
- *      did answer.  A switch that snoops MLD consumes reports rather than
- *      flooding them -- RFC 4541 section 3 forwards them to multicast router
- *      ports only -- so on a real segment a second host's report never
- *      reaches the machine under test.  Measured on the lab segment: the
- *      peer's queries to ff02::1 arrive and its reports do not.  That is the
- *      premise of the whole feature confirmed from the other side, and it is
- *      also why MLDv2 removed suppression.
- *
- *   2. THE MESSAGES BYTE FOR BYTE, including the Hop-by-Hop header this port
- *      had to grow an output path for.  A capture says tcpdump agreed; this
- *      says which octet holds what.
- *
- *   3. WHAT IS REFUSED.  A query from off-link, or with the wrong hop limit,
- *      is not something a lab network can be asked to send on cue.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary: the
- * five nx_mld_*.c files, with nx_ipv6_util.c underneath them.
- *
- * Stubbed: the packet pool, the checksum, _nx_ipv6_header_add() and the link
- * driver.  The driver stub keeps the last frame it was handed, which is how
- * "the report carried a Router Alert" is a check on bytes rather than an
- * inference from a function having been called.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -43,8 +14,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
-/* ------------------------------------------------------------- harness ---- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -60,8 +29,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-
-/* --------------------------------------------------------------- stubs ---- */
 
 static TX_THREAD h_caller_thread;
 
@@ -182,7 +149,6 @@ UINT _nx_ipv6_header_add(NX_IP *ip_ptr, NX_PACKET **packet_pptr,
     return NX_SUCCESS;
 }
 
-/* The link driver, which is where a sent message can be read. */
 #define H_SENT_MAX      8
 
 static UINT  h_sent_count;
@@ -220,8 +186,6 @@ static VOID h_driver(NX_IP_DRIVER *request)
     h_sent_count++;
 }
 
-
-/* ------------------------------------------------------------- fixture ---- */
 
 static NX_IP           h_ip;
 static NXD_IPV6_ADDRESS h_linklocal;
@@ -365,7 +329,6 @@ UINT i;
     return h_sent_count - before;
 }
 
-/* Readers for the last message the driver was handed. */
 static UCHAR *h_message(UINT index)
 {
     return h_sent[index];
@@ -396,13 +359,6 @@ UINT  at;
 }
 
 
-/* --------------------------------------------------------------- tests ---- */
-
-/*
- * A join is announced at once, and the message is the one RFC 9777 5.2
- * describes: a Router Alert ahead of a version 2 report whose single record
- * says this host now excludes nothing, which is to say it wants everything.
- */
 static void test_join_reports_immediately(void)
 {
     h_reset(1);
@@ -454,11 +410,6 @@ static void test_join_reports_immediately(void)
 }
 
 
-/*
- * RFC 9777 section 6: no report for the link-scope all-nodes address, and
- * none for anything below scope 2.  Both are held in the table anyway, so
- * that a leave finds them and a query can pass over them knowingly.
- */
 static void test_exemptions(void)
 {
     h_reset(1);
@@ -471,7 +422,6 @@ static void test_exemptions(void)
 
     h_check(h_tick(60) == 0, "and no timer fires for either");
 
-    /* A general query must pass over them too. */
     h_query_v1(h_unspecified, 2000, h_peer_linklocal, 1);
     h_check(h_tick(30) == 0, "a general query is answered for neither");
 
@@ -480,13 +430,6 @@ static void test_exemptions(void)
 }
 
 
-/*
- * The first report this stack ever sends leaves before the address it belongs
- * to is valid: RFC 4862 4.4.2 joins the solicited-node group so that duplicate
- * address detection can run, and RFC 9777 5.2.13 gives that case :: as a
- * source.  Getting this wrong is not a corner: it is every interface, every
- * boot.
- */
 static void test_tentative_address_uses_unspecified(void)
 {
     h_reset(0);
@@ -497,7 +440,6 @@ static void test_tentative_address_uses_unspecified(void)
     h_check(CHECK_UNSPECIFIED_ADDRESS(h_header_src),
             "and it is sent from ::");
 
-    /* Once the address is valid the same join reports from it. */
     h_reset(1);
     (VOID)_nx_mld_group_join(&h_ip, h_solicited, &h_ip.nx_ip_interface[0]);
     h_check(!CHECK_UNSPECIFIED_ADDRESS(h_header_src) &&
@@ -506,10 +448,6 @@ static void test_tentative_address_uses_unspecified(void)
 }
 
 
-/*
- * A query is answered after a delay, in the version it was asked in, and an
- * MLDv1 query holds this host in version 1 afterwards.
- */
 static void test_query_is_answered(void)
 {
     h_reset(1);
@@ -532,17 +470,12 @@ static void test_query_is_answered(void)
             "a version 1 query is answered in version 1");
     h_check(h_group_is(0, h_solicited), "for the group it named");
 
-    /* A query for a group this host does not listen to is not answered. */
     h_sent_count = 0;
     h_query_v1(h_ssdp, 4000, h_peer_linklocal, 1);
     h_check(h_tick(30) == 0, "a query for a group not joined is not answered");
 }
 
 
-/*
- * RFC 9777 section 6.2: hop limit 1, and a source on this link.  Neither is
- * something a lab network can be asked for on cue.
- */
 static void test_refusals(void)
 {
 ULONG global[4] = {0x20010DB8UL, 0, 0, 1};
@@ -566,24 +499,17 @@ ULONG global[4] = {0x20010DB8UL, 0, 0, 1};
 }
 
 
-/*
- * THE ONE A SEGMENT CANNOT SHOW.  Another host answers the query first, so
- * this one says nothing and, having said nothing, owes no Done.
- */
 static void test_suppression(void)
 {
     h_reset(1);
     (VOID)_nx_mld_group_join(&h_ip, h_solicited, &h_ip.nx_ip_interface[0]);
     (VOID)h_tick(60);
 
-    /* Version 1 first: suppression exists only there. */
     h_query_v1(h_unspecified, 8000, h_peer_linklocal, 1);
     h_sent_count = 0;
 
-    /* CONTROL, the same window with nobody else in it. */
     h_check(h_tick(30) == 1, "with no other listener, this host answers");
 
-    /* And now with one. */
     h_query_v1(h_unspecified, 8000, h_peer_linklocal, 1);
     h_sent_count = 0;
     h_report_v1(h_solicited);
@@ -608,10 +534,6 @@ static void test_suppression(void)
 }
 
 
-/*
- * A leave is announced: a Done to ff02::2 in version 1, a state change to
- * include mode in version 2.
- */
 static void test_leave(void)
 {
     h_reset(1);
@@ -625,7 +547,6 @@ static void test_leave(void)
             h_record_type(0) == NX_MLD_CHANGE_TO_INCLUDE_MODE,
             "in version 2 that is a change to include mode");
 
-    /* Now in version 1, where it is a Done. */
     h_reset(1);
     (VOID)_nx_mld_group_join(&h_ip, h_ssdp, &h_ip.nx_ip_interface[0]);
     (VOID)h_tick(60);
@@ -655,10 +576,6 @@ static void test_leave(void)
 }
 
 
-/*
- * Nothing is sent before nx_mld_enable(), and a table that fills up refuses
- * the entry rather than losing track of one it already has.
- */
 static void test_enable_and_capacity(void)
 {
 UINT  i;

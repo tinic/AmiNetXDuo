@@ -1,39 +1,6 @@
 /*
  * AmiNetXDuo, host fuzz driver for the mDNS packet parser.
  *
- * mDNS is the more exposed of the two parsers: 224.0.0.251:5353 takes
- * unauthenticated multicast from any host on the segment, and no query has to
- * have been sent for a packet to arrive.  The parsing is in
- * addons/mdns/nxd_mdns.c, src/netstack/netstack_mdns.c starts the module,
- * picks the host label and maps ".local" onto it, and parses nothing.
- *
- * The entry point is _nx_mdns_thread_entry(), the module's own thread, and it
- * is reached without touching vendored source: nx_mdns_create() registers it
- * with tx_thread_create(), the stub below keeps the function pointer, and the
- * driver calls it.  Its loop then runs for real, event flags, the receive
- * loop, the packet-chain check, the interface lookup, _nx_mdns_packet_process()
- * and the release, with _nx_udp_socket_receive() handing over the fuzz bytes
- * as a packet.  The loop is a `while(1)`, so the escape is a longjmp from the
- * event-flag wait at the top of it, where nothing is in flight.
- *
- * Both halves of the module are compiled, as they are on target: the responder
- * that answers a query for this machine's name, and the client that resolves
- * somebody else's.  So a hostile query reaches the response builder and a
- * hostile response reaches the peer cache.
- *
- * Type widths are the host's, not the target's, and that is forced:
- * nx_mdns_create() passes the instance pointer to tx_thread_create() as a
- * ULONG and the thread casts it back, which needs a ULONG at least as wide as
- * a pointer.  fuzz_dns uses tests/perf/host/shim for the m68k's 32-bit ULONG;
- * this one cannot.  UINT, USHORT and UCHAR are the same width either way, and
- * that is where the name and record arithmetic lives.
- *
- * Usage:
- *   fuzz_mdns -s                 every seed case, named
- *   fuzz_mdns -c NAME            one seed case by name
- *   fuzz_mdns < datagram         one datagram from stdin
- *   fuzz_mdns -r SEED COUNT      seeds plus mutations, no corpus needed
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -73,19 +40,6 @@ static ULONG            fz_wire_area[((FZ_WIRE_PAYLOAD + sizeof(NX_PACKET) +
                                       32) * FZ_WIRE_PACKETS) / sizeof(ULONG)];
 static NX_PACKET_POOL   fz_wire_pool;
 
-/*
- * The caches, at the sizes src/netstack/netstack_internal.h ships, and on the
- * heap rather than in a static so ASan puts a redzone either side: the cache
- * allocator is the one part of this module that does its own address
- * arithmetic, and a static array's neighbour is valid memory that a stride
- * error would silently land in.
- */
-/* Scaled up from the 1024/2048 src/netstack ships, because an NX_MDNS_RR is
-   built from pointers and this is a host build where those are 64 bits: the
-   target's byte counts hold roughly half as many records here, and
-   _nx_mdns_cache_add_string() spins rather than failing when it runs out
-   during nx_mdns_enable(). The sizes are a host-side capacity question, not
-   part of what is under test. */
 #define FZ_LOCAL_CACHE_BYTES    4096
 #define FZ_PEER_CACHE_BYTES     8192
 static ULONG           *fz_local_cache;
@@ -106,9 +60,6 @@ static ULONG            fz_events_pending;
 static int              fz_event_calls;
 
 static ULONG            fz_sends;
-
-
-/* ----------------------------------------------------------- ThreadX ----- */
 
 static TX_THREAD        fz_caller_thread;
 
@@ -263,12 +214,6 @@ UINT _txe_timer_change(TX_TIMER *t, ULONG initial_ticks, ULONG reschedule_ticks)
     return TX_SUCCESS;
 }
 
-/*
- * Reported inactive with nothing remaining.  _nx_mdns_timer_set() then makes
- * nx_mdns_timer_min_count equal to the record's own timer count, so one
- * NX_MDNS_TIMER_EVENT expires whatever was just scheduled, which is how the
- * driver walks probing and announcing forward without a real timer.
- */
 UINT _txe_timer_info_get(TX_TIMER *t, CHAR **name, UINT *active,
                          ULONG *remaining_ticks, ULONG *reschedule_ticks,
                          TX_TIMER **next_timer)
@@ -315,13 +260,6 @@ UINT _txe_event_flags_set(TX_EVENT_FLAGS_GROUP *g, ULONG flags, UINT option)
     return TX_SUCCESS;
 }
 
-/*
- * The top of the module's loop, and the way out of it.  A few iterations, not
- * one: processing a query only *schedules* the answer, so the send the module
- * decided on happens on a later pass.  The timer event is folded in from the
- * second pass onwards because the real one fires on its own.  The escape is
- * here, at the top of the loop, where nothing is allocated.
- */
 #define FZ_PUMP_ITERATIONS  4
 
 UINT _txe_event_flags_get(TX_EVENT_FLAGS_GROUP *g, ULONG requested,
@@ -344,9 +282,6 @@ UINT _txe_event_flags_get(TX_EVENT_FLAGS_GROUP *g, ULONG requested,
 
     return TX_SUCCESS;
 }
-
-
-/* --------------------------------------------------------------- UDP ----- */
 
 UINT _nx_udp_socket_create(NX_IP *ip_ptr, NX_UDP_SOCKET *socket_ptr,
                            CHAR *name, ULONG type_of_service, ULONG fragment,
@@ -454,20 +389,6 @@ UINT _nxd_udp_socket_source_send(NX_UDP_SOCKET *socket_ptr,
     return NX_SUCCESS;
 }
 
-/*
- * The wire.  One datagram per wake-up, then an empty queue.
- *
- * NX_MDNS_ENABLE_ADDRESS_CHECK is on by default in nxd_mdns.h, so the module
- * reads the IP header behind the datagram and the UDP header in front of it
- * before it will look at a byte of the message: RFC 6762 §6 requires the
- * source port to be 5353 and §11 requires the sender to be on-link.  Both
- * headers are supplied here, in the host byte order the IP and UDP receive
- * paths leave them in.
- *
- * The IP header is a separate object rather than bytes in front of
- * nx_packet_prepend_ptr, because NX_IPV4_HEADER's fields are ULONG, eight
- * bytes on this host, four in the space NetX Duo leaves in a packet.
- */
 static NX_IPV4_HEADER   fz_wire_ip_header;
 static ULONG            fz_wire_src = IP_ADDRESS(169, 254, 9, 9);
 static ULONG            fz_wire_dst = IP_ADDRESS(224, 0, 0, 251);
@@ -514,9 +435,6 @@ UINT _nx_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     return NX_SUCCESS;
 }
 
-
-/* -------------------------------------------------------------- IP/IGMP -- */
-
 UINT _nx_ipv4_multicast_interface_join(NX_IP *ip_ptr, ULONG group_address,
                                        UINT interface_index)
 {
@@ -540,15 +458,6 @@ VOID _nx_ip_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
     NX_PARAMETER_NOT_USED(ip_ptr);
     _nx_packet_release(packet_ptr);
 }
-
-
-/* ------------------------------------------------------- mDNS-only seeds -- */
-
-/*
- * The shapes that only mean something on 5353: a query rather than a response,
- * the unicast-response and cache-flush bits, known-answer suppression, a probe,
- * a goodbye, and the service records a browser would send.
- */
 
 static void fzm_query_a(FzwBuf *w, const char *qname)
 {
@@ -588,11 +497,6 @@ static void fzm_query_compressed(FzwBuf *w, const char *qname)
     fzw_u16(w, FZW_TYPE_A);
     fzw_u16(w, FZW_CLASS_IN);
 }
-
-/* The A records below carry 169.254.1.2, and the high first octet is load
- * bearing: a byte >= 128 is what makes NX_MDNS_GET_ULONG_DATA's shift overflow
- * reachable (netxduo 6baec373). Reverting that patch fails `fuzz_mdns -s` on
- * this seed. A 10.x address here would still parse and would test less. */
 
 /* Somebody else answering to this machine's name: the conflict path. */
 static void fzm_conflict(FzwBuf *w, const char *qname)
@@ -841,9 +745,6 @@ static const FzwSeed *fz_seed(int i)
                                 : &fzm_seeds[i - FZW_SEED_COUNT];
 }
 
-
-/* --------------------------------------------------------- the drives ---- */
-
 static void fz_fail(const char *what)
 {
     printf("fuzz_mdns: %s (case '%s', %lu cases in)\n", what, fz_case_name,
@@ -862,11 +763,6 @@ static void fz_pool_check(void)
         fz_fail("a response packet was not released");
 }
 
-/*
- * Run one iteration of the module's own thread with `events` pending.  The
- * longjmp comes from the wait at the top of the second iteration, so the first
- * one has finished and released everything it took.
- */
 static void fz_pump(ULONG events)
 {
     fz_events_pending |= events;
@@ -903,10 +799,6 @@ static void fz_start(void)
     if (nx_mdns_enable(&fz_mdns, 0) != NX_SUCCESS)
         fz_fail("nx_mdns_enable failed");
 
-    /*
-     * Probing, three rounds of it (RFC 6762 §9), so the record set reaches the
-     * state where a query gets answered rather than queued.
-     */
     fz_delivered = 1;
     fz_pump(NX_MDNS_PROBING_SEND_EVENT | NX_MDNS_ANNOUNCING_SEND_EVENT |
             NX_MDNS_TIMER_EVENT);
@@ -921,12 +813,6 @@ static void fz_stop(void)
     fz_thread_entry = NX_NULL;
 }
 
-/*
- * One datagram.  The module is created and deleted around it so a case cannot
- * be shielded by state the previous one left in the caches, and so the
- * caches are exercised from empty every time, which is the state a machine is
- * in when it has just booted onto a hostile segment.
- */
 static void fz_run_once(const unsigned char *data, size_t len)
 {
     if (len > FZW_MAX)
@@ -963,13 +849,6 @@ static void fz_run_seed(int which)
     fz_run_once(w.b, w.len);
 }
 
-/*
- * The harness has to be shown to reach the responder, not merely to survive
- * it.  Two things are checked, and the second is the one that matters: a
- * response claiming this machine's own name has to make the module give the
- * name up and start probing for another.  Nothing but parsing the datagram and
- * acting on its contents produces that.
- */
 static void fz_selftest(void)
 {
     FzwBuf w;
@@ -1005,9 +884,6 @@ static void fz_selftest(void)
     fz_pool_check();
     fz_stop();
 }
-
-
-/* --------------------------------------------------------------- setup --- */
 
 static void fz_setup(void)
 {

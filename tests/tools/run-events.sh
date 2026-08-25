@@ -6,50 +6,6 @@
 #                             [-N board] [-B backend] [-a address]
 #                             [-r TRANSCRIPT]
 #
-# WHAT WENT WRONG, AND WHY NOTHING CAUGHT IT
-#
-#   Every AMI_ERROR, AMI_WARN and AMI_INFO in the tree compiles to
-#   `do { if (0) ... } while (0)` unless AMINETXDUO_LOG is defined
-#   (aminetxduo/compat.h), and no shipped binary defines it, because the format
-#   strings are 12,820 bytes on the 68000 tier.  So
-#
-#       sana2: leaking the interface, the device still holds requests inside it
-#
-#   was written for a user to quote and no user could reach it.  Nothing caught
-#   that because every test either reads a build with the log ON, where the
-#   line is there, or asserts on the commands' own output, which never had it.
-#
-#   The library records numbered events instead (aminetxduo/events.h) and
-#   ShowNetStatus EVENTS turns them into sentences.  This asserts that the
-#   sentences arrive on a real machine, which is the only place the two halves
-#   meet: the ring is inside bsdsocket.library and the words are inside a Shell
-#   command, so no host test and no build check can see them together.
-#
-# THE SHAPE OF THE ASSERTION
-#
-#   Three things, and each needs a live machine:
-#
-#     1  the ring answers with the stack UP.  Bring an interface up, ask, and
-#        the bring-up is in it.
-#     2  the ring answers with the stack DOWN, which is the whole point.  The
-#        run's last two commands are NetShutdown and then ShowNetStatus EVENTS,
-#        and the second must print the shutdown the first performed.  Reading
-#        it must not bring the network back: `netstat -i` afterwards has to
-#        still say the interfaces are gone.  A command that restarted the stack
-#        to report on its teardown would pass every other check here.
-#     3  the sentences are the tool's and the codes are the library's.  The
-#        transcript must carry prose that the library does not contain, which
-#        tools/check-no-diag-strings.sh asserts from the other side, and must
-#        not carry a bare "event <number>", which is what ShowNetStatus prints
-#        for a code its table does not know.
-#
-# BRIDGED, never SLIRP.  The interface has to come up against a real link for
-# the bring-up events to mean anything; a stub NAT would record the same
-# events whether or not a wire existed.
-#
-# GOOD CASE: about 60 s wall, boot to verdict.  A run that reaches -t is a
-# defect to diagnose, not a number to raise.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -68,13 +24,6 @@ NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
 REPLAY=""
 
-# THE GUEST ADDRESS IS CLAIMED, NOT PINNED.  This harness had 192.168.1.243
-# written into it, and .243 is a LIVE MACHINE on the lab LAN -- a ping scan on
-# 2026-08-25 found it answering, along with fourteen other hosts in
-# 192.168.1.200-254.  A pinned address is also two guests at one address the
-# moment two runs overlap.  rig_claim_address locks it against other runs and
-# PINGS it before taking it, so a range may overlap real machines safely: one
-# that answers is skipped.  -a still pins one.
 # shellcheck source=../../tools/emu-rig-lock.sh
 . "$ROOT/tools/emu-rig-lock.sh"
 
@@ -87,17 +36,11 @@ while getopts "m:t:b:N:B:a:g:r:" opt; do
         B) BACKEND="$OPTARG" ;;
         a) ADDRESS="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
-        # Assert a transcript that already exists instead of booting, for
-        # developing the assertions and for showing they fail on one broken on
-        # purpose.  It proves nothing about the product, which is why it says
-        # that it did not run.
         r) REPLAY="$OPTARG" ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
 
-# -r replays a transcript and boots nothing, so it needs no address and must
-# not take one off a rig it is not using.
 if [ -z "$ADDRESS" ] && [ -z "$REPLAY" ]; then
     rig_claim_address "${AMINETXDUO_RIG_ADDR_PREFIX:-192.168.1}" \
                       "${AMINETXDUO_RIG_ADDR_FIRST:-200}" \
@@ -167,8 +110,6 @@ if [ "$BOARD" != a2065 ]; then
     echo "==> $BOARD: $SANA2_DRIVER, opened as '$SANA2_DEVICE'"
 fi
 
-# Static: a lease that arrived late would make the bring-up events a question
-# about the lab's DHCP server rather than about the ring.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<EOF
 DEVICE=$IFDEVICE
 UNIT=0
@@ -178,13 +119,6 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 EOF
 
-# And one that cannot come up, so the bring-up half has a failure in it as
-# well as a success.  A device name no machine has: the open fails, the
-# interface never exists, and NETEVENT_DEVICE_OPEN is the only thing on the
-# machine that says so afterwards.
-# Its ADDRESS is pinned and that is safe: nosuch.device never opens, so the
-# interface never exists and not one frame carrying this address reaches the
-# wire.  It is a string in a file the config parser reads, not a guest.
 cat > "$STAGE/devs/NetInterfaces/eth9" <<EOF
 DEVICE=nosuch.device
 UNIT=0
@@ -197,8 +131,6 @@ for t in AddNetInterface ShowNetStatus NetShutdown netstat Offline Online; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# NetShutdown LAST but one.  Everything after it is being asked of a machine
-# whose stack has gone, which is the state this test exists for.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:AddNetInterface eth9
@@ -213,10 +145,6 @@ EOF
 
 # ------------------------------------------------------------------ run ---
 
-# The transcript of the LAST run goes before this one starts.  A boot that
-# never happens -- no Kickstart, the emulator lock held, a bad backend -- leaves
-# the previous tools.txt in place, and every assertion below then passes
-# against a machine that did not run.  That has happened.
 rm -f "$REPORT"
 
 echo "==> booting $MODEL under Amiberry, $BOARD bridged on $BACKEND"
@@ -282,32 +210,16 @@ EV="SYS:ShowNetStatus EVENTS"
 has "$EV" 1 "the stack came up" \
     "the first read reports the bring-up"
 
-# The card that is not in the machine.  This one sentence is the whole reason
-# the mechanism exists: the AMI_ERROR beside it is in no shipped binary.
 has "$EV" 1 "the SANA-II device did not open" \
     "the interface whose device is absent is named"
 
 # ---- 2: an interface cycle does not reset the history ---------------------
-#
-# Offline then Online, and the bring-up of half a minute ago is still there.
-# The ring belongs to the library, not to the stack or to an interface, and a
-# machine that forgot everything each time a card was cycled would answer every
-# question about a card that is now working.
-#
-# The OTHER wire event, S2ERR_OUTOFSERVICE arriving on a reader and the
-# S2_OFFLINE that is then never issued, is not asserted here: producing it
-# means pulling the cable out of a running guest, which this rig cannot do.
-# src/common/test/test_events.c decodes that sequence, and it is one branch in
-# ami_sana2_offline().
 has "$EV" 2 "the stack came up" \
     "an Offline/Online cycle did not clear the record"
 
 # ---- 3: it answers with the stack DOWN, which is the point ---------------
 has "$EV" 3 "the stack began shutting down" \
     "the shutdown is readable after the stack has gone"
-# The release and not the notify: NetShutdown signals the other programs only
-# when there are any (netshutdown.c, `if (holding > 0)`), and there are none
-# here.  tests/tools/run-netshutdown.sh is the test with services running.
 has "$EV" 3 "the reference that keeps the network standing was given back" \
     "and so is the release half of it"
 
@@ -321,10 +233,6 @@ else
 fi
 
 # ---- the words are the tool's and the codes are the library's ------------
-#
-# A bare "event <number>" is what ShowNetStatus prints for a code its table
-# does not know, so one in the transcript is a code that was added to the
-# library and not to src/tools/tool_events.c.
 if grep -qE '^ *[0-9]+\.[0-9]+ +(interface [0-9]+: )?event [0-9]+,' "$REPORT"
 then
     fail "a code reached the machine with no sentence for it"

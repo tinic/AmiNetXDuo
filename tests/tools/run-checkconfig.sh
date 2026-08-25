@@ -4,39 +4,6 @@
 #
 #   tests/tools/run-checkconfig.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
-# WHAT IT PROVES
-#
-#   CheckNetConfig exists to name a file, a line and a fix.  A checker that
-#   printed "there are problems" would pass any test written against its exit
-#   code and be worth nothing to the person at the keyboard, so every assertion
-#   here is on a SPECIFIC finding against a SPECIFIC file, and one of them is
-#   the reverse: a correct file that must not be complained about, because a
-#   checker that fires on correct configuration gets ignored and then protects
-#   nothing.
-#
-#   The staged DEVS: in tests/tools/checkconfig/devs is wrong in seven ways
-#   that a parser cannot see, because each needs either the rest of the
-#   configuration or the hardware:
-#
-#     bad0    names a driver that is not on this machine
-#     bad1    is the broadcast address of its own network, on eth0's card
-#     bad2    has a netmask whose ones are not contiguous, on a unit that
-#             does not open
-#     routes  points at a router on a network this machine is not on
-#     hosts   has a line whose first column is not an address
-#     services has a line whose port column is not a port
-#     name_resolution is off-network and REACHABLE, and must be left alone
-#
-#   The same boot also runs the four other new commands with no stack running,
-#   which is the state their argument handling has to survive.
-#
-# ONE BOOT, for the reason run-livetools.sh gives: the FS-UAE lock serialises
-# every agent on this machine.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  It is needed even though no network
-# is started, because the probe that separates "wrong driver" from "wrong
-# unit" opens the real device.
 #
 # SPDX-License-Identifier: MIT
 
@@ -90,9 +57,6 @@ for t in CheckNetConfig GetNetStatus NetShutdown AddNetRoute DeleteNetRoute; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# bsdsocket.library is deliberately NOT staged.  Every command below meets a
-# machine with no stack running, which is the state CheckNetConfig is FOR and
-# the state the other four have to answer sensibly rather than crash in.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:CheckNetConfig
 SYS:CheckNetConfig VERBOSE
@@ -145,9 +109,6 @@ block() {
     ' "$REPORT"
 }
 
-# The rc line is "----- rc 5, 12 ms, free 1234 -----", so field 3 is "5,"
-# with the comma still on it and never equal to any number compared against.
-# Take the digits out of the line instead.
 rc_of() {
     awk -v want="===== $1 =====" '
         $0 == want { on = 1; next }
@@ -193,14 +154,8 @@ expect "two interfaces on one card is caught"  "both claim"
 expect "the bad hosts line is caught"          "DEVS:Internet/hosts, line 2"
 expect "the bad services line is caught"       "DEVS:Internet/services, line 2"
 
-# The one that must NOT fire.  8.8.8.8 is not on this machine's network, and a
-# default route exists to reach it through, so it is correct and complaining
-# about it would be the false positive that gets a checker ignored.
 reject "the reachable name server is left alone" "DEVS:Internet/name_resolution"
 
-# The correct interface is not accused of anything.  eth0 may be NAMED (it is
-# half of the "two interfaces, one card" finding); what it must not carry is a
-# complaint about its own address.
 if block "SYS:CheckNetConfig" | grep -q "NetInterfaces/eth0, line"; then
     fail "the correct interface eth0 was complained about"
 else

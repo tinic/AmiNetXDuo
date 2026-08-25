@@ -2,32 +2,14 @@
  * AmiNetXDuo, BPF capture channels: the buffers, the record format, the
  * ioctls and the six data-path vectors.
  *
- * Record format, which is what consumers depend on. Every captured frame is
- * stored as
+ * Wire record: tv_sec/tv_usec/caplen/datalen ULONGs, hdrlen UWORD (always 20),
+ * 2 pad, then caplen bytes; next record at BPF_WORDALIGN(hdrlen + caplen).
+ * The six fields are written individually, never as a `struct bpf_hdr` store,
+ * so no compiler padding can change what goes on the wire.  The trailing
+ * alignment of the LAST record in a read is not counted in the byte returned.
  *
- *     offset  0  bh_tstamp.tv_sec    ULONG
- *     offset  4  bh_tstamp.tv_usec   ULONG
- *     offset  8  bh_caplen           ULONG   bytes of frame stored here
- *     offset 12  bh_datalen          ULONG   bytes the frame had on the wire
- *     offset 16  bh_hdrlen           UWORD   always 20
- *     offset 18  two bytes of pad    (BPF_WORDALIGN(18) == 20)
- *     offset 20  bh_caplen bytes of frame
- *
- * and the next record starts at BPF_WORDALIGN(bh_hdrlen + bh_caplen) from the
- * start of this one. The trailing alignment of the last record in a read is
- * not included in the returned byte count, as in 4.4BSD. Otherwise a consumer
- * that walks records by stride reads one record too many. The six fields are
- * written individually at the offsets above, and not by a store of a
- * `struct bpf_hdr`, so no compiler padding can change what goes on the wire.
- *
- * Buffering: two buffers per channel. The tap appends to `store`, the reader
- * drains `hold`, and they swap when the reader asks for data and `hold` is
- * empty. This is the 4.4BSD design, for the same reason. The copy-out of the
- * reader can be the whole buffer, and inside the critical section that the tap
- * needs it holds off the SANA-II reader threads for milliseconds and costs
- * packets. The copy-out therefore happens outside the lock. The tap rotates
- * only when `hold` is empty, and a `reading` flag covers the unexpected case
- * of two readers.
+ * Two buffers per channel: the tap appends to `store`, the reader drains
+ * `hold`, and the copy-out happens OUTSIDE the lock.
  *
  * No AmigaOS calls here. See bpf_internal.h.
  *
@@ -37,10 +19,9 @@
 #include "bpf_internal.h"
 
 static AmiBpfChan ami_bpf_chan[AMI_BPF_MAX_CHANNELS];
-/* Kept outside AmiBpfChan because closing zeroes that structure.  A slot can
-   be closed and reopened by the same library base while an ioctl is outside
-   the lock allocating memory; owner equality alone cannot distinguish the
-   replacement channel from the one the ioctl started on. */
+/* Kept outside AmiBpfChan because closing zeroes that structure.  Owner
+   equality alone cannot distinguish a replacement channel from the one an
+   ioctl started on; the generation can. */
 static ULONG ami_bpf_chan_generation[AMI_BPF_MAX_CHANNELS];
 volatile UWORD ami_bpf_bound_channels;
 
@@ -51,11 +32,6 @@ static VOID ami_bpf_copy_bytes(void *dst, const void *src, ULONG len)
     UBYTE       *d = (UBYTE *)dst;
     const UBYTE *s = (const UBYTE *)src;
 
-    /*
-     * Longword copy when both ends agree on alignment. Capture records start
-     * word-aligned and the payload starts 20 bytes in, so a frame copied out
-     * of an aligned packet buffer takes this path.
-     */
     if (len >= 8 &&
         (((unsigned long)d & 3UL) == ((unsigned long)s & 3UL)))
     {
@@ -86,11 +62,8 @@ VOID ami_bpf_zero_bytes(void *dst, ULONG len)
         *d++ = 0;
 }
 
-/*
- * Record fields are native-order ULONG and UWORD, the way a consumer reads
- * them through `struct bpf_hdr`. The copy goes byte by byte, so the record
- * needs no alignment.
- */
+/* Native-order ULONG/UWORD, copied byte by byte so the record needs no
+   alignment. */
 static VOID ami_bpf_put32(UBYTE *p, ULONG value)
 {
     ami_bpf_copy_bytes(p, &value, 4);
@@ -120,9 +93,8 @@ UWORD ami_bpf_get16(const UBYTE *p)
 }
 
 /*
- * Resolve a handle on behalf of its owner. `*status` gets ENXIO for a handle
- * that is not an open channel, and EPERM for one that belongs to another
- * library base. The autodoc specifies both for every call in the group.
+ * Resolve a handle on behalf of its owner.  `*status` gets ENXIO for a handle
+ * that is not an open channel, EPERM for one owned by another library base.
  */
 static AmiBpfChan *ami_bpf_chan_get(APTR owner, LONG channel, LONG *status)
 {
@@ -196,12 +168,8 @@ LONG ami_bpf_init(VOID)
     }
     ami_bpf_bound_channels = 0;
 
-    /*
-     * The interface table too. Both are file-scope, so a detach that the last
-     * teardown missed leaves a row with `used` set. That row holds a cookie
-     * into the AmiSana2If of the old stack, and at the next start
-     * ami_bpf_iface_by_cookie() hands it to an injector.
-     */
+    /* The interface table too: a surviving row holds a cookie into the
+       AmiSana2If of the old stack. */
     for (i = 0; i < AMI_BPF_MAX_IFACES; i++)
         ami_bpf_zero_bytes(&ami_bpf_iface[i], (ULONG)sizeof(AmiBpfIf));
 
@@ -211,14 +179,9 @@ LONG ami_bpf_init(VOID)
 }
 
 /*
- * Free the buffers and the filter. Called with the lock not held.
- *
- * `force` says what to do when a copy-out is in flight. ami_bpf_read() drops
- * the lock for the copy and reads `hold` from a pointer captured before that
- * drop, so a free here hands the reader freed memory. There is no MMU to catch
- * it. Without force, the channel leaves its owner at once and only the two
- * frees are deferred. `release_pending` marks the buffers as the ones for the
- * reader to release when it finishes with them.
+ * Free the buffers and the filter.  MUST be called with the lock NOT held.
+ * Without `force`, a copy-out in flight defers the two frees and marks them
+ * `release_pending` for the reader to release.
  */
 static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
                                  APTR expected_owner)
@@ -228,10 +191,9 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
 
     ami_bpf_lock();
 
-    /* close_owner() screens the table before reaching this lock. An ordinary
-       close/reopen can replace the numeric slot in that window, so retire it
-       only if it still belongs to the base being destroyed. NULL is the
-       unconditional form used by final stack cleanup and deferred release. */
+    /* Retire the slot only if it still belongs to the base being destroyed.
+       NULL is the unconditional form, for final cleanup and deferred
+       release. */
     if (expected_owner != NULL &&
         (!ch->open || ch->owner != expected_owner))
     {
@@ -244,10 +206,8 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
 
     if (ch->reading && !force)
     {
-        /* Closed for every purpose the owner can see: ami_bpf_chan_get()
-           matches on `owner`, and no base is NULL. `open` stays set so that
-           ami_bpf_open(-1) does not hand the slot out while a reader still
-           reads the buffer that the slot points at. */
+        /* `open` must stay set so ami_bpf_open(-1) does not hand the slot out
+           while a reader still reads the buffer it points at. */
         ch->owner           = NULL;
         ch->iface           = NULL;
         ch->release_pending = TRUE;
@@ -267,11 +227,8 @@ static VOID ami_bpf_chan_release(AmiBpfChan *ch, BOOL force,
     ami_free(filter);
 }
 
-/*
- * The owner goes away, so its channels go with it: the autodoc
- * "automatically closed when the library is closed". Nothing here blocks. The
- * lock is Forbid()/Permit() and the frees are FreeMem().
- */
+/* Channels close with their owning library base.  Nothing here may block:
+   the lock is Forbid()/Permit(). */
 VOID ami_bpf_close_owner(APTR owner)
 {
     LONG i;
@@ -285,12 +242,8 @@ VOID ami_bpf_close_owner(APTR owner)
     }
 }
 
-/*
- * Last resort, at netstack teardown. Anything still open belongs to a base
- * that never closed, so ownership does not apply. A copy-out in flight is no
- * reason to leave a channel behind: a deferred free here leaves the work to a
- * reader that the teardown outlives.
- */
+/* Last resort, at netstack teardown: ownership does not apply and a copy-out
+   in flight must not defer the free past the teardown. */
 VOID ami_bpf_cleanup(VOID)
 {
     LONG i;
@@ -302,13 +255,8 @@ VOID ami_bpf_cleanup(VOID)
     }
 }
 
-/*
- * A negative channel means any free one, and the claimed channel is the return
- * value. The Roadshow libpcap calls bpf_open(-1) and passes the returned value
- * back in d0 as the channel for bpf_set_interrupt_mask() and every
- * bpf_ioctl() that follows (docs/RESEARCH.md 55). A client cannot know which
- * channels other programs hold, so a request by number is the exception.
- */
+/* A negative channel means any free one; the claimed channel is the return
+   value. */
 LONG ami_bpf_open(APTR owner, LONG channel)
 {
     AmiBpfChan *ch;
@@ -387,12 +335,8 @@ LONG ami_bpf_close(APTR owner, LONG channel)
         return AMI_BPF_EBUSY;   /* a read is copying out of the buffer */
     }
 
-    /*
-     * Validate and retire the slot in the same critical section. If another
-     * close frees it after an unlocked lookup, a different owner can reopen
-     * the numeric channel before ami_bpf_chan_release() takes its lock, and
-     * the stale close then destroys the replacement channel.
-     */
+    /* Validate and retire the slot in the SAME critical section, or a stale
+       close destroys a replacement channel that reopened the number. */
     if (ch->iface != NULL && ami_bpf_bound_channels > 0)
         ami_bpf_bound_channels--;
 
@@ -582,13 +526,9 @@ VOID ami_bpf_capture(APTR cookie, const AmiBpfView *view)
 
         if (wake)
         {
-            /* The task and mask belong to this particular open of the
-               channel.  Keep the channel lock through Signal(): after Permit
-               a close/reopen can reuse the slot, and reading ch here would
-               either lose this wake-up or signal the replacement owner for a
-               packet it never captured.  Signal() does not block and is safe
-               under Forbid(); the woken task runs once the Permit below lets
-               it. */
+            /* Keep the channel lock through Signal(): after Permit a
+               close/reopen can reuse the slot.  Signal() does not block and
+               is safe under Forbid(). */
             ami_bpf_notify(ch->notify_task, ch->notify_mask);
             ami_bpf_notify(ch->irq_task, ch->irq_mask);
         }
@@ -631,15 +571,10 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
            + ch->rtimeout_usec / (1000000UL / AMI_BPF_TICKS_PER_SEC);
 
     /*
-     * BIOCSRTIMEOUT as 4.4BSD reads it: zero is "do not wait", anything else
-     * is how long to wait for the first record. The wait is a sleep in slices
-     * on the calling task, with a new look after each slice. Never on a
-     * MsgPort, which belongs to whichever Process called in (544398f), and
-     * never with the lock that the tap needs in order to deliver anything.
-     *
-     * With no timeout set the loop runs once and returns 0, as it did before
-     * the loop existed.
-    */
+     * BIOCSRTIMEOUT as 4.4BSD reads it: 0 is "do not wait".  The wait sleeps
+     * in slices on the calling task -- never on a MsgPort (it belongs to
+     * whichever Process called in) and never holding the tap's lock.
+     */
     for (;;)
     {
         /* The timeout wait drops the table lock. The owner may close this
@@ -678,11 +613,6 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
         ami_bpf_lock();
     }
 
-    /*
-     * Walk records forward while the next one still fits in the buffer of the
-     * caller. `end` is one past the last byte of the last whole record taken.
-     * `pos` is where the next read starts.
-     */
     pos = ch->hold_pos;
     end = ch->hold_pos;
 
@@ -702,8 +632,7 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
     if (end == ch->hold_pos)
     {
         /* Not one record fits, so consume nothing: a partial record
-           desynchronises the consumer. This is the autodoc EINVAL, "the number
-           of bytes to read does not exactly match the filter's buffer size". */
+           desynchronises the consumer.  EINVAL, per the autodoc. */
         ami_bpf_unlock();
         return AMI_BPF_EINVAL;
     }
@@ -731,9 +660,6 @@ LONG ami_bpf_read(APTR owner, LONG channel, APTR buffer, LONG len)
 
     ami_bpf_unlock();
 
-    /* The owner closed the library during the copy above, so the buffers were
-       left for this task to free. The caller still gets the bytes it asked
-       for, copied out of memory that was still valid. */
     if (pending)
         ami_bpf_chan_release(ch, FALSE, NULL);
 
@@ -813,14 +739,9 @@ LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
         return AMI_BPF_ENXIO;
     }
 
-    /*
-     * Detach clears both the channel binding and the interface row under this
-     * lock. Keep no pointers into either table across the injector call: the
-     * injector can block, and runtime RemoveInterface() is allowed to run on
-     * another task while it does. The netstack injector claims `cookie`
-     * before dereferencing it, so a removal that won this race is rejected
-     * without touching the stale value.
-     */
+    /* Keep NO pointers into the channel or interface table across the
+       injector call: it can block, and RemoveInterface() may run on another
+       task while it does. */
     inject = ifp->inject;
     cookie = ifp->cookie;
     dlt    = ch->dlt;
@@ -841,13 +762,9 @@ LONG ami_bpf_write(APTR owner, LONG channel, APTR buffer, LONG len)
     if (len < AMI_BPF_ETH_HDR_LEN)
         return AMI_BPF_EINVAL;      /* too short to be a link-layer frame */
 
-    /*
-     * Cooked SANA-II builds the link header itself, so the 14 bytes from the
-     * caller must be taken apart and not sent. The destination address and the
-     * EtherType become ios2_DstAddr and ios2_PacketType, and only the
-     * remainder is the payload. A header sent as payload puts two Ethernet
-     * headers on the wire.
-     */
+    /* Cooked SANA-II builds the link header itself: the caller's 14 bytes
+       must become ios2_DstAddr + ios2_PacketType, with only the remainder
+       sent as payload. */
     ether_type = (UWORD)(((UWORD)frame[12] << 8) | (UWORD)frame[13]);
 
     if (mtu != 0 && (ULONG)(len - AMI_BPF_ETH_HDR_LEN) > mtu)
@@ -904,19 +821,13 @@ LONG ami_bpf_set_interrupt_mask(APTR owner, LONG channel, ULONG signal_mask)
 
 /* ------------------------------------------------------------ bpf_ioctl */
 
-/*
- * Dispatch on direction, group and number, and drop the parameter-length field
- * of the encoding. BIOCGBLEN and BIOCSBLEN share a number and differ only in
- * direction, so direction stays. The length must go, or a caller built against
- * a struct ifreq of a different size reaches no handler at all.
- */
+/* Dispatch on direction, group and number.  The parameter-length field MUST
+   be dropped, or a caller built against a differently sized struct ifreq
+   reaches no handler at all. */
 #define AMI_BPF_CMD(c)  ((ULONG)(c) & (IOC_DIRMASK | 0x0000FFFFUL))
 
-/*
- * Take the identity of a channel across an allocation. The caller receives a
- * pointer only as a convenience; the generation is the identity. Closing
- * zeroes the channel and reopening can put the same owner back in it.
- */
+/* Take the identity of a channel across an allocation.  The GENERATION is the
+   identity; the returned pointer is only a convenience. */
 static AmiBpfChan *ami_bpf_ioctl_snapshot(APTR owner, LONG channel,
                                            ULONG *generation, ULONG *blen,
                                            BOOL *has_buffer, LONG *status)
@@ -1018,10 +929,9 @@ static LONG ami_bpf_ioctl_setif(APTR owner, LONG channel, const char *name)
 
     if (base != NULL)
     {
-        /* The bufbase test above was outside the lock, because ami_alloc()
-           must not run under Forbid(). A second BIOCSETIF on this channel can
-           have installed a buffer since then, and an overwrite here drops the
-           only reference to that block. */
+        /* The bufbase test above was outside the lock (ami_alloc() must not
+           run under Forbid()), so a second BIOCSETIF may have installed a
+           buffer since. */
         if (ch->bufbase != NULL)
         {
             stale = base;
@@ -1085,11 +995,8 @@ static LONG ami_bpf_ioctl_setf(APTR owner, LONG channel,
         if (copy == NULL)
             return AMI_BPF_ENOBUFS;
 
-        /*
-         * Copy before the validation. A validation of the caller array,
-         * followed by a run from that same array, leaves a window in which
-         * another task can rewrite it into something the validator rejected.
-         */
+        /* Copy BEFORE validating: validating the caller's array and then
+           running from it lets another task rewrite it in between. */
         for (i = 0; i < count; i++)
             copy[i] = prog->bf_insns[i];
 
@@ -1131,14 +1038,9 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
     if (ch == NULL)
         return status;
 
-    /*
-     * Every command below reads or writes a ULONG or a UWORD through
-     * `buffer`, which belongs to the caller. An odd address is an address
-     * error on a 68000, so it is refused here instead. The three ifreq
-     * commands are the exception. They touch bytes only, including the
-     * sockaddr_in that SIOCGIFADDR writes by hand, so a refusal of an odd
-     * address is a restriction with nothing behind it.
-     */
+    /* An odd `buffer` is an address error on a 68000, so word/long commands
+       refuse it here.  The three ifreq commands touch bytes only and are
+       exempt. */
     switch (AMI_BPF_CMD(command))
     {
     case AMI_BPF_CMD(BIOCGETIF):
@@ -1218,10 +1120,8 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
             return status;
         }
 
-        /* When the interface is set, real BPF refuses this, because the
-           buffers are already allocated. Check under the same lock as the
-           update: otherwise close/reopen can make `ch` name a replacement
-           whose allocation was sized from a different blen. */
+        /* Refused once the interface is set (the buffers exist).  The check
+           must be under the SAME lock as the update. */
         if (ch->bufbase != NULL)
         {
             ami_bpf_unlock();
@@ -1256,13 +1156,9 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
         return 0;
 
     case AMI_BPF_CMD(BIOCPROMISC):
-        /*
-         * Recorded, not honoured: SANA-II has no promiscuous-mode command, and
-         * CMD_READ is per packet type in any case. The return is success and
-         * not failure, because capture tools abandon an interface when this
-         * fails, and a partial capture is better than no capture. See the
-         * coverage note in include/aminetxduo/bpf.h.
-         */
+        /* Recorded, not honoured: SANA-II has no promiscuous-mode command.
+           Must return success -- capture tools abandon an interface when this
+           fails. */
         ami_bpf_lock();
         ch = ami_bpf_chan_get(owner, channel, &status);
         if (ch == NULL)
@@ -1331,12 +1227,8 @@ LONG ami_bpf_ioctl(APTR owner, LONG channel, ULONG command, APTR buffer)
 
     case AMI_BPF_CMD(AMI_BPF_SIOCGIFADDR):
     {
-        /*
-         * struct ifreq: the name occupies the first IFNAMSIZ bytes and a
-         * sockaddr_in follows, so the request is 32 bytes. Written by hand and
-         * not through a struct: this layer has no sockaddr, and the
-         * SIOCGIFADDR of the socket path fills the same 16 bytes.
-         */
+        /* struct ifreq: IFNAMSIZ name bytes then a sockaddr_in, 32 bytes
+           total, written by hand because this layer has no sockaddr. */
         UBYTE *sa;
         APTR   cookie;
         ULONG  addr;

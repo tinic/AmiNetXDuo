@@ -1,29 +1,9 @@
 /*
  * AmiNetXDuo, src/net68k/ checksum, differentially against the vendored one.
  *
- * A faster checksum that is wrong corrupts silently: every packet still goes
- * out, the peer drops some of them, and the symptom is "the network is a bit
- * flaky".  So this does not check that n68k_ip_checksum_compute() computes a
- * correct internet checksum, it checks that it returns exactly what
- * _nx_ip_checksum_compute() returns, for every input shape the stack can
- * produce and several it cannot.
- *
- * Both functions are compiled into this binary from source: the vendored one
- * with -D_nx_ip_checksum_compute=n68k_checksum_reference, which renames the
- * symbol without touching the file.  host/shim/tx_port.h pins the m68k's type
- * widths so the vendored loop reads longwords, not 64-bit words.
- *
- * Covered:
- *   - every data_length from 0 to 96, and a spread up to 8 KB
- *   - TCP and UDP (pseudo header) and ICMP (none)
- *   - prepend offsets 0..7, i.e. every alignment including the odd ones the
- *     packet pool never produces
- *   - chains of 1..5 packets, with per-packet fill chosen so append pointers
- *     land on all four residues mod 4, that is where the vendored code has
- *     its two-byte carry across the boundary
- *   - the trailing 1/2/3-byte cases, which write a zero pad byte into the
- *     packet buffer, so the buffer is restored between the two calls
- *   - data_length shorter than the packet, and longer (chain continues)
+ * It checks not that n68k_ip_checksum_compute() is correct but that it returns
+ * exactly what _nx_ip_checksum_compute() does.  The vendored one is compiled in
+ * under -D_nx_ip_checksum_compute=...; host/shim/tx_port.h pins m68k widths.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -40,11 +20,9 @@ USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
                                ULONG *dest_ip_addr);
 
 /*
- * NX_ASSERT's failure path parks the calling thread in tx_thread_sleep(-1).
- * Both implementations reference it and neither reaches it, every call
- * below passes non-null addresses, but the link needs the symbol.  The stub
- * aborts rather than returns: reaching it would mean the test had stopped
- * testing what it thinks it is.
+ * NX_ASSERT's failure path parks the thread in tx_thread_sleep(-1); the link
+ * needs the symbol.  The stub aborts rather than returns: reaching it would
+ * mean the test had stopped testing what it thinks it is.
  */
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
@@ -86,11 +64,8 @@ static ULONG h_rand(void)
     return (h_rng_state >> 8) & 0x00FFFFFFUL;
 }
 
-/*
- * Build a chain of `count` packets.  Packet i holds `fill[i]` bytes starting
- * at `offset` inside its buffer; NetX Duo keeps that offset longword aligned,
- * but the tests below deliberately do not always.
- */
+/* Packet i holds fill[i] bytes at `offset` inside its buffer.  NetX Duo keeps
+   that offset longword aligned; the tests below deliberately do not. */
 static void h_build(h_chain *c, UINT count, const UINT *fill, UINT offset)
 {
     UINT i, j;
@@ -232,9 +207,8 @@ int main(void)
     /* ---- 4. chains ----------------------------------------------------- */
     /*
      * The interesting axis is the append pointer's residue mod 4 on every
-     * packet but the last: residue 2 makes the vendored code carry two bytes
-     * across the boundary, residues 1 and 3 make it lose the odd byte, and
-     * this has to reproduce all three.
+     * packet but the last: 2 carries two bytes across the boundary, 1 and 3
+     * lose the odd byte.
      */
     for (n = 2; n <= H_MAX_PACKETS; n++)
     {
@@ -254,7 +228,6 @@ int main(void)
 
                 for (p = 0; p < 3; p++)
                 {
-                    /* the whole chain, and a prefix of it */
                     h_compare(&h_c, h_protocols[p], total, h_src, h_dst,
                               "chain, whole");
                     h_compare(&h_c, h_protocols[p], total / 2, h_src, h_dst,
@@ -314,9 +287,8 @@ int main(void)
 
     /* ---- 7. the sum primitive on its own -------------------------------- */
     /*
-     * n68k_sum_longwords() is what the assembly replaces, so it gets checked
-     * against a plain 64-bit sum folded by hand, the property the C caller
-     * relies on is congruence modulo 0xFFFF, plus "zero only when empty".
+     * The property the C caller relies on is congruence modulo 0xFFFF, plus
+     * zero only when empty.
      */
     {
         static ULONG words[257];

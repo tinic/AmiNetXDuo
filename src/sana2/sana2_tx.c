@@ -1,75 +1,6 @@
 /*
  * AmiNetXDuo, SANA-II transmit path.
  *
- * Framing: NetX Duo does not prepend the Ethernet header before calling the
- * driver. It reserves NX_PHYSICAL_HEADER (16) bytes of headroom and leaves the
- * link header to the driver, see nx_ram_network_driver.c, which builds all
- * 14 bytes itself. Cooked mode therefore never builds one, and hands SANA-II
- * what it wants: ios2_PacketType from the driver command, ios2_DstAddr from
- * nx_ip_driver_physical_address_msw/lsw, and the payload from the prepend
- * pointer.
- *
- * A raw write builds a header, and it undoes that before releasing the packet,
- * because TCP hands the same NX_PACKET back for retransmission.
- *
- * Writes are queued, never DoIO: the sending thread is the IP thread or an
- * application thread inside nx_tcp_socket_send, and neither can block on the
- * wire. BeginIO rather than SendIO, for the reason at the post below.
- *
- * Reaping is a lifecycle problem. A mistake in it disables retransmission.
- *
- * nx_packet_transmit_release() does not free a queued TCP segment. It marks it
- * NX_DRIVER_TX_DONE (nx_packet_transmit_release.c), and
- * _nx_tcp_socket_retransmit() only resends a packet carrying that mark.
- * Every NetX Duo reference driver sets it inside NX_LINK_PACKET_SEND, because
- * their sends are synchronous. This one cannot: a SANA-II CMD_WRITE completes
- * long after the driver entry returns, so the release happens in
- * ami_sana2_tx_reap() instead.
- *
- * Calling that only from the transmit path means a packet is released by the
- * next packet. On a link that goes quiet, a lost HTTP GET, a lost TLS
- * ClientHello, any request/response protocol with a single request segment,
- * there is no next packet, so the segment stays un-reaped and TCP believes the
- * driver still has it. docs/RESEARCH.md 27.4 measured eleven seconds of
- * silence after one unacknowledged segment.
- *
- * Completions are therefore reaped when they complete, in two hops:
- *
- *   1. The reply port raises a signal on one of the SANA-II reader threads
- *      (ami_sana2_tx_reap_bind), the only thread in this shim that blocks in
- *      exec Wait() and can therefore be woken by a device.
- *   2. That thread does not touch the packet. It calls
- *      nx_ip_driver_deferred_processing(), NetX Duo's mechanism for a driver
- *      to request a callback on the IP thread, which comes back into
- *      ami_sana2_driver_entry() with NX_LINK_DEFERRED_PROCESSING and reaps.
- *
- * The second hop matters because releasing a packet mutates NetX Duo's
- * transmit queue and the packet's own prepend pointer (transmit_release strips
- * the IP header back off). From a reader thread that interleaves with whatever
- * the IP thread is doing. On the IP thread it runs where every other send
- * runs, under nx_ip_protection.
- *
- * The transmit path pays almost nothing. The reader only asks for deferred
- * processing when the reply port is non-empty, and during a bulk transfer the
- * next ami_sana2_tx_send() has already drained it. The common case is one
- * pointer compare in a thread that was going to wake anyway. The hop only
- * happens when the link goes quiet.
- *
- * The GetMsg() at the top of ami_sana2_tx_send() keeps the shim correct with
- * no reader bound at all: open-time probing, an interface not yet enabled, or
- * a reader that could not get a signal bit.
- *
- * AMINETXDUO_TX_LAZY_COLLECT changes one thing about the arrangement above:
- * while sends are flowing, the completion signal is withheld. During a bulk
- * receive every transmitted frame is an acknowledgment, the device completes
- * it synchronously inside BeginIO, and the ReplyMsg's Signal() wakes the
- * reader, which preempts the sender, defers, and hands the IP thread a reply
- * that the next send's own reap walk was about to collect anyway. Measured on
- * the A1200 that round trip is ~0.7 ms of exec glue and two scheduler
- * transitions per acknowledgment, for collection work that happens either
- * way. See ami_sana2_tx_lazy_tick() for the mechanism and the safety net
- * that keeps the eleven-second story above from coming back.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -77,10 +8,6 @@
 
 #include "aminetxduo/budget.h"
 
-/* _nx_ip_driver_deferred_processing(): the supported way for a driver to ask
-   for a callback on the IP thread. Declared in nx_api.h with no nx_ alias, so
-   it is spelled with the underscore, as sana2_rx.c spells
-   _nx_ip_packet_deferred_receive(). */
 #include "nx_ip.h"
 
 #ifdef AMINETXDUO_BPF
@@ -131,23 +58,9 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 }
 
 /*
- * Hand the reply port a task to signal, so a completion wakes a thread.
- *
- * The alternatives were a periodic sweep and a dedicated thread. A sweep adds
- * latency to every retransmission in exchange for work done when there is
- * none. A thread costs a context switch per frame on a machine where
- * docs/RESEARCH.md 16 budgets 8.0 ms per segment at 14 MHz. A signal costs the
- * reader one extra bit in a Wait() it was making anyway, and the sender one
- * Signal() inside exec's ReplyMsg, the same cost the receive path pays.
- *
- * The task is one of the SANA-II readers because it is the only thread in this
- * shim that blocks in exec rather than in ThreadX: the NX_IP thread waits on
- * ThreadX event flags, which Signal() cannot break. Which reader does not
- * matter, so it is the first one, see ami_sana2_rx_start().
- *
- * Disable() rather than Forbid(): a device can ReplyMsg from its interrupt,
- * and exec's PutMsg reads mp_Flags, mp_SigTask and mp_SigBit as one Disabled
- * unit. Three stores, so the region is a handful of instructions.
+ * The signalled task must be a SANA-II reader: the only thread here that
+ * blocks in exec Wait() rather than on ThreadX event flags, which Signal()
+ * cannot break.  Disable(), not Forbid(): a device may ReplyMsg from interrupt.
  */
 VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 {
@@ -166,9 +79,8 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 }
 
 /*
- * Give it back. Must happen before the task exits or its signal bit is freed.
- * After this the port is inert and completions queue up for the next
- * ami_sana2_tx_reap(), which ami_sana2_tx_drain() runs at shutdown.
+ * Must happen before the task exits or its signal bit is freed.  After this the
+ * port is inert and completions queue for the next ami_sana2_tx_reap().
  */
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface)
 {
@@ -188,16 +100,9 @@ VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface)
 }
 
 /*
- * The reader's whole contribution: if anything has completed, ask NetX Duo to
- * run the driver on the IP thread, where ami_sana2_tx_reap() can touch a
- * packet.
- *
- * The emptiness test is a single pointer compare and needs no Forbid(). It can
- * only be wrong in the safe direction: exec's PutMsg links the message and
- * raises the signal inside one Disable()d region, so a woken reader always
- * sees a non-empty list. A reader that sees an empty one was woken by a
- * completion somebody else has already collected, usually the transmit path,
- * and there is nothing left to defer.
+ * The emptiness test needs no Forbid(): PutMsg links the message and raises the
+ * signal inside one Disable()d region, so it can only be wrong in the safe
+ * direction.
  */
 VOID ami_sana2_tx_defer(AmiSana2If *iface)
 {
@@ -217,44 +122,9 @@ VOID ami_sana2_tx_defer(AmiSana2If *iface)
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
 /*
- * Lazy completion collection: no signal per completed CMD_WRITE while sends
- * are flowing.
- *
- * ami_sana2_tx_send() parks the reply port PA_IGNORE just before BeginIO, so
- * the synchronous completion inside it queues its reply silently, and the
- * next send's reap walk collects it, which is what happens to most replies
- * under the shipped design too -- the signal it fires per completion buys a
- * reader wake, a preemption of the sender and a deferred-processing round
- * whose only purpose is to collect a reply the next send would have
- * collected in ~232 us of walk anyway.
- *
- * What the shipped signal actually protects is the QUIET link: the lost
- * ClientHello of the header comment, one segment, no next send, a reply that
- * sits un-reaped and blocks its own retransmission for eleven seconds. That
- * duty moves to this one-tick TX_TIMER, which runs in the same context as
- * NetX Duo's own periodic timers (the tick task, TX_TIMER_PROCESS_IN_ISR)
- * and does two small things:
- *
- *   1. Collects. If anything is queued on the reply port it asks for
- *      deferred processing, exactly as the reader's wake handler does. A
- *      completed write is therefore always collected within one tick,
- *      ~20 ms, whether or not another send ever happens -- against the
- *      retransmission timer's hundreds of milliseconds that exposure is
- *      noise, against the eleven seconds it is the whole fix.
- *
- *   2. Un-parks. Once the last send is more than a tick old the port gets
- *      PA_SIGNAL back (only if a reader still owns it; unbind's PA_IGNORE
- *      means "no reader" and must stay), so a link that has gone quiet is
- *      back on the shipped arrangement and a lone request/response exchange
- *      pays no added latency at all.
- *
- * The shutdown paths never depended on the signal: ami_sana2_tx_drain()
- * polls ami_sana2_tx_reap() in its own loop, and rx_stop deletes this timer
- * before the readers unwind, so the timer cannot outlive the interface it
- * points into.
- *
- * If the timer cannot be created the parking never engages
- * (tx_lazy_timer_up gates it) and the interface runs the shipped design.
+ * Lazy collection: ami_sana2_tx_send() parks the reply port PA_IGNORE while
+ * sends are flowing, so this one-tick timer is what collects a lone completion
+ * on a quiet link and hands PA_SIGNAL back once the sends stop.
  */
 static VOID ami_sana2_tx_lazy_tick(ULONG argument)
 {
@@ -316,13 +186,9 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
 #endif /* AMINETXDUO_TX_LAZY_COLLECT */
 
 /*
- * Reap finished writes. Non-blocking by construction: GetMsg() on an empty
- * port returns NULL.
- *
- * Callable from any thread and from several at once: GetMsg() is atomic, so a
- * slot belongs to exactly one caller from the moment it is dequeued, and
- * nx_packet_transmit_release() does its own TX_DISABLE. This lets the reader
- * reap concurrently with a transmit in progress on the IP thread.
+ * Non-blocking by construction: GetMsg() on an empty port returns NULL.
+ * Callable from any thread and from several at once: GetMsg() is atomic and
+ * nx_packet_transmit_release() does its own TX_DISABLE.
  */
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
 {
@@ -336,14 +202,6 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
 #ifdef AMINETXDUO_RXPROBE
-        /*
-         * The ack leg's closing stamp.  What it spans is the device's whole
-         * transmit half as the stack experiences it: BeginIO to the moment
-         * the reply is collected and the packet can be released, which is
-         * what gates a queued TCP segment's retransmission.  A reply that
-         * sat un-reaped across a quiet link exceeds the budget ceiling and
-         * is discarded there rather than owning the maximum.
-         */
         if (slot->write_at != 0UL)
         {
             ami_budget_ack(ami_budget_clock() - slot->write_at);
@@ -354,11 +212,9 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
         if (err != 0)
         {
             /*
-             * A raw write this shim asked for on its own initiative, refused.
-             * Latched, so the next frame of that type is cooked again and the
-             * device is never asked twice. The frame itself is lost, which the
-             * retransmission above it covers. iface->raw_mode is the operator
-             * asking for raw framing outright and is not downgraded here.
+             * A raw write this shim asked for on its own initiative, refused:
+             * latch it so the next frame of that type is cooked.  raw_mode is
+             * the operator asking for raw outright and is not downgraded here.
              */
             if (!iface->raw_mode &&
                 (slot->req.ios2_Req.io_Flags & SANA2IOF_RAW) != 0 &&
@@ -416,13 +272,9 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
 }
 
 /*
- * Abort anything still in flight and reap it. Used on shutdown.
- *
- * The deadline is the same admission ami_sana2_rx_teardown() makes: AbortIO()
- * is a request, and a driver can decline it. slot->req and its mn_ReplyPort
- * both live inside AmiSana2If, so a device still holding a CMD_WRITE writes
- * into this allocation whenever it finishes. tx_orphaned stops
- * ami_sana2_close() from freeing it, exactly as rx_orphaned does.
+ * Abort anything still in flight and reap it.  AbortIO() is a request a driver
+ * may decline; slot->req and its reply port live inside AmiSana2If, so
+ * tx_orphaned stops ami_sana2_close() from freeing it.
  */
 VOID ami_sana2_tx_drain(AmiSana2If *iface)
 {
@@ -469,45 +321,9 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 }
 
 /*
- * Ethernet's minimum frame, and which layer supplies it.
- *
- * A frame shorter than 60 bytes before the FCS is a runt and the wire cannot
- * carry one. Nothing in the SANA-II spec says whether the stack or the driver
- * pads, and the drivers disagree: ariadne_ii zero-fills a short CMD_WRITE,
- * a2065 raises its LANCE descriptor to 64 without supplying the bytes, and
- * ariadne 1.50 does neither, handing the chip exactly what it was given and
- * relying on the Am79C960's own APAD_XMT to fill the rest.
- *
- * Eight frames a boot are short enough to need this, all of them 28-byte ARP,
- * so all three of those answers are in use today and none of them belongs to
- * this stack. Each is a driver's private decision about a frame built here:
- * the one that supplies no bytes transmits the tail of its own ring buffer,
- * and the one that defers to APAD_XMT is one CSR4 bit away from a transmitter
- * that shuts down on the first ARP, because an Am79C960 with that bit clear
- * answers a short buffer with TX_BUFF|TX_UFLO and drops CSR0_TXON until the
- * chip is reinitialised.
- *
- * The minimum is not 60 on both arms. Cooked mode hands SANA-II the IP
- * datagram and the driver builds the 14-byte Ethernet header itself, so
- * nx_packet_length is the payload and the minimum is 46. Raw mode has already
- * prepended those 14 bytes above, so nx_packet_length is the whole frame and
- * the minimum is 60. One expression covers both: what goes on the wire is the
- * packet plus the header the driver adds, and the pad is 60 less that.
- *
- * The zeroes are written into the packet. A raise of ios2_DataLength on its
- * own is shorter, and it puts whatever the pool block held last on the wire.
- * That is a2065.device's own descriptor clamp: it lifts the byte count to 64
- * and copies nothing more, so the tail of its ring buffer is transmitted.
- * Padding here keeps that clamp from engaging on a frame from this stack, bar
- * the four bytes between 60 and its 64.
- *
- * Both callers of ami_sana2_tx_send() come through here: the driver entry's
- * NX_LINK_PACKET_SEND, PACKET_BROADCAST, ARP_SEND, ARP_RESPONSE_SEND and
- * RARP_SEND (sana2_driver.c), and ami_sana2_inject() for bpf_write().
- *
- * ami_sana2_tx_reap() takes the zeroes back off before releasing the packet,
- * exactly as it does the raw-mode header, because a queued TCP segment is
- * handed back for retransmission and must carry its own length.
+ * Ethernet's 60-byte minimum frame.  Cooked mode's nx_packet_length is the
+ * payload, so the minimum is 46 and the driver adds 14; raw mode's is the whole
+ * frame.  ami_sana2_tx_reap() takes the zeroes back off before releasing.
  */
 static VOID ami_sana2_tx_pad(AmiSana2If *iface, AmiTxSlot *slot,
                              NX_PACKET *packet)
@@ -558,10 +374,9 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
     UWORD      i;
 
     /*
-     * The driver entry is reachable from the IP thread and from any thread
-     * inside nx_tcp_socket_send, so claiming a slot needs a critical section.
-     * Forbid() rather than Disable(): long Disable() regions break serial,
-     * floppy and audio (docs/RESEARCH.md §6.2).
+     * Reachable from the IP thread and from any thread inside
+     * nx_tcp_socket_send.  Forbid() rather than Disable(): long Disable()
+     * regions break serial, floppy and audio.
      */
     Forbid();
     for (i = 0; i < AMI_SANA2_TX_SLOTS; i++)
@@ -579,9 +394,8 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
 }
 
 /*
- * bpf_write()'s wire end. The payload is copied into a pool packet because the
- * caller's buffer is an application buffer and CMD_WRITE completes long after
- * this returns. ami_sana2_tx_send() releases the packet when it does.
+ * bpf_write()'s wire end.  The payload is copied into a pool packet because the
+ * caller's buffer is an application buffer and CMD_WRITE outlives this call.
  */
 LONG ami_sana2_inject(AmiSana2If *iface, UWORD ether_type, const UBYTE *dst,
                       const UBYTE *payload, ULONG len)
@@ -632,28 +446,6 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     ULONG      length;
     BOOL       raw_write;
 #ifdef AMINETXDUO_RXPROBE
-    /*
-     * The dissection of the old push leg: what one transmitted frame costs
-     * this machine on the CPU, in three named pieces.  During a receive every
-     * frame through here is an ACK, and the ack leg above only spans wall
-     * time to collection; these are the emitting half.
-     *
-     *   reap   the completion reap walk at the top: GetMsg loop, packet
-     *          restore, nx_packet_transmit_release of the previous write.
-     *   stuff  everything between reap and BeginIO: slot claim, the raw
-     *          header when one is built, padding, the slot fill.  The rare
-     *          full-ring spin sleeps land here too.
-     *   post   BeginIO enter to return.  A SANA-II CMD_WRITE calls the
-     *          shim's copy hook from inside BeginIO, so the payload copy
-     *          into the device -- el3's TX FIFO PIO under Forbid -- is in
-     *          this piece, not in stuff.
-     *
-     * Wall-clock deltas like drain, same clock, so an RX interrupt landing
-     * inside a piece still inflates that piece; three smaller windows make
-     * that attribution error three times smaller than the single leg had.
-     * Sampled only on the path that reaches BeginIO, so the three counts
-     * match and their sum reconstructs the old leg.
-     */
     ULONG probe_t0 = ami_budget_clock();
     ULONG probe_t1;
     ULONG probe_t2;
@@ -697,25 +489,9 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     slot->hdr_len = 0;
 
     /*
-     * ariadne.device 1.50 builds the cooked Ethernet header with
-     *
-     *     move.w  38(a2),d0        ; low word of ios2_PacketType
-     *     cmpi.w  #1500,d0
-     *     ble.s   as_802_3         ; SIGNED
-     *
-     * so every type with bit 15 set reads as negative, takes the IEEE 802.3
-     * arm, and gets ios2_DataLength written into the type field instead of the
-     * type. 0x0800 and 0x0806 are positive and come out right, which is why
-     * IPv4 works and IPv6 leaves as a length-framed frame no router answers:
-     * no neighbour solicitation, no router solicitation, no global address, on
-     * a card whose IPv4 works.
-     *
-     * Its raw arm is correct -- it tests io_Flags bit 7 and transmits the
-     * buffer verbatim -- so the header goes on here for the types the cooked
-     * arm cannot carry. Nothing below 0x8000 changes, which leaves IPv4, ARP
-     * and RARP on the path they have always taken. A device that refuses
-     * SANA2IOF_RAW says so on the write and ami_sana2_tx_reap() latches
-     * raw_tx_refused, and everything after it goes back to cooked.
+     * ariadne.device 1.50 compares ios2_PacketType against 1500 SIGNED, so any
+     * type with bit 15 set takes its 802.3 arm and gets a length written into
+     * the type field.  Those go out raw instead; below 0x8000 nothing changes.
      */
     raw_write = iface->raw_mode;
 
@@ -731,19 +507,9 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         UCHAR *eth;
 
         /*
-         * The deferred transmit checksum, before the link header goes on.
-         *
-         * Everything downstream that reads this packet as an IP datagram
-         * starts at nx_packet_prepend_ptr: sana2_copy.c's fusion, and
-         * _nx_ip_packet_checksum_compute() behind it. With fourteen bytes of
-         * Ethernet in front of that, neither finds a datagram. Measured on the
-         * wire: every IPv6 SYN left with cksum 0x0000 and nothing answered
-         * one, while echo replies kept coming back, because ICMPv6 is
-         * checksummed by the stack and TCP is the only thing deferred here.
-         *
-         * The cost is a pass over the segment that the fusion folds into the
-         * copy, and it is paid on IPv6 TCP only. Nothing else reaches this
-         * arm.
+         * The deferred transmit checksum must be computed BEFORE the link
+         * header goes on: everything downstream reads the datagram at
+         * nx_packet_prepend_ptr and finds none behind 14 bytes of Ethernet.
          */
         if ((packet->nx_packet_interface_capability_flag &
              NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0)
@@ -781,12 +547,9 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
 #ifdef AMINETXDUO_BPF
     /*
-     * The transmit tap, after the raw block above so one call site serves both
-     * modes.  `slot->hdr_len` doubles as `has_link_header`: the 14 bytes are
-     * now in the packet, or they exist nowhere and the tap synthesises them
-     * from the three facts the CMD_WRITE below carries.  Nothing is written
-     * into the packet, which is often a queued TCP segment that is handed back
-     * for retransmission.
+     * `slot->hdr_len` doubles as `has_link_header`: either the 14 bytes are in
+     * the packet or the tap synthesises them.  Nothing is written into the
+     * packet, which is often a segment handed back for retransmission.
      */
     ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
                    dst_msw, dst_lsw, iface->mac);
@@ -811,12 +574,9 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     slot->req.ios2_Data           = slot;
 
     /*
-     * Broadcast and multicast both go out as CMD_WRITE with the destination
-     * address the IP layer chose. S2_BROADCAST/S2_MULTICAST exist, but the
-     * spec warns they are "not supported by all networks and/or network
-     * interfaces", and on Ethernet they add nothing over an ff:ff:... write,
-     * which is also the only way ARP requests can go out since NetX Duo sends
-     * those as NX_LINK_ARP_SEND rather than NX_LINK_PACKET_BROADCAST.
+     * Broadcast and multicast go out as CMD_WRITE with the address the IP layer
+     * chose: the spec warns S2_BROADCAST/S2_MULTICAST are "not supported by all
+     * networks and/or network interfaces".
      */
     if (iface->addr_bytes == AMI_ETH_ADDR_SIZE)
     {
@@ -838,13 +598,9 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /*
-     * Park the reply port before BeginIO, because a device is free to
-     * complete the write synchronously inside it and the completion this
-     * send makes silent is its own. The stamp is what the tick's un-park
-     * measures quiet against; the flags flip is once per park, not per
-     * send, so the steady state costs one load and one store here. Only
-     * with the tick net live, and only over a PA_SIGNAL port, so a missing
-     * timer or an unbound reader leaves the shipped behaviour alone.
+     * Park before BeginIO: a device is free to complete the write synchronously
+     * inside it, and that completion is the one this send makes silent.  Only
+     * with the tick live, and only over a PA_SIGNAL port.
      */
     iface->tx_lazy_last_send = tx_time_get();
     if (iface->tx_lazy_timer_up && !iface->tx_lazy_parked)
@@ -861,21 +617,11 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 #endif
 
     /*
-     * BeginIO() and not SendIO(), because SendIO() is
-     *
-     *     ln_Type = NT_MESSAGE; io_Flags = 0; BeginIO()
-     *
-     * and that zero takes SANA2IOF_RAW with it. A raw write posted through
-     * SendIO() arrives at the device as a cooked one, the device builds a
-     * header in front of the header this shim just built, and the frame goes
-     * out with fourteen bytes of Ethernet inside its own payload. Both lines
-     * SendIO() runs are above. IOF_QUICK stays clear, so the request is queued
-     * and replied to iface->tx_port exactly as before.
+     * BeginIO() and not SendIO(): SendIO() zeroes io_Flags, which takes
+     * SANA2IOF_RAW with it, and the device would then build a second Ethernet
+     * header in front of this one.  IOF_QUICK stays clear.
      */
 #ifdef AMINETXDUO_RXPROBE
-    /* The ack leg's opening stamp, as late as it can be taken: everything
-       above is the shim's own framing cost, and the leg is the device's.
-       The same read closes the stuff piece and opens post. */
     probe_t2       = ami_budget_clock();
     slot->write_at = probe_t2;
 #endif

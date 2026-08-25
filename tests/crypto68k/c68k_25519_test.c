@@ -1,35 +1,9 @@
 /*
  * AmiNetXDuo, on-Amiga check for src/crypto68k/c68k_25519.S.
  *
- * The host tier (tests/crypto68k/host/test_c68k_25519.c) cannot cover this
- * file: it runs portable C on x86-64, and the whole point of the assembly is
- * that it is m68k and that it is DIFFERENT code on each part.  So the same
- * class of check has to run on the machine.
- *
- * Two checks, and the first is the one that matters:
- *
- *   1. c68k_25519_fe_mul (shipped) against c68k_25519_fe_mul_ref (portable C)
- *      over random inputs, INCLUDING the saturated ones.  A field multiply
- *      that is wrong in the carry is the failure this tree has already had
- *      once: fe_fold dropped a carry out of the top limb, lost exactly 38,
- *      and passed every published RFC vector, because with lazy reduction 0
- *      is routinely carried as 2^256-38 and adding 38 to it carries straight
- *      through all eight limbs.  Random inputs against a reference is what
- *      found it then and is what this repeats against the assembly.
- *
- *   2. A Diffie-Hellman agreement through the full c68k_x25519, so the check
- *      covers the ladder and the reduction and not only the multiply.  It
- *      needs no published constant: a*(b*G) and b*(a*G) have to be equal, and
- *      a carry bug anywhere below will separate them.
- *
- * IT REPORTS THROUGH c68k_log, NOT printf, and that is not a style choice.
- * The C library's printf drags in the double formatting path, so the linked
- * binary opened mathieeedoubbas.library and every run ended at
- * `mathieeedoubbas.library failed to load` before a single check ran -- a
- * library nothing in this tree stages, and Commodore's rather than ours.  It
- * had never been run on a guest, so nothing had ever said so.  c68k_log is
- * RawDoFmt and needs no library at all; the arguments are longword sized for
- * the reason include/aminetxduo/compat.h gives.
+ * Reports through c68k_log, not printf: printf drags in the double formatting
+ * path, so the binary opens mathieeedoubbas.library, which nothing in this tree
+ * stages.  Arguments are longword sized, see include/aminetxduo/compat.h.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -222,10 +196,9 @@ int main(void)
     }
     c68k_log("fe_sqr vs reference: %ld edge + %ld random", (LONG)6, (LONG)n);
 
-    /* And against the multiply.  Checking fe_sqr against fe_mul on random
-       inputs is what found the original fe_fold carry bug, because two
-       routines that share a broken helper agree with each other and every
-       published vector passes anyway. */
+    /* And against the multiply: two routines that share a broken helper agree
+       with each other and every published vector passes anyway, so fe_sqr
+       against fe_mul on random inputs is the check that finds it. */
     for (i = 0; i < 512; i++) {
         fill(a, 99);
         c68k_25519_fe_sqr(got, a);
@@ -262,10 +235,9 @@ int main(void)
     c68k_25519_fe_mul(b, a, b);              /* r aliases b */
     ck("fe_mul r==b aliasing", fe_eq(b, got));
 
-    /* fe_add and fe_sub.  The saturated inputs matter more here than
-       anywhere: fe_add's carry out and fe_sub's borrow out are each worth 38,
-       and dropping either is silent.  The edge table is every pair, which is
-       where 2^256-38 meets 2^256-37. */
+    /* fe_add and fe_sub.  Saturated inputs matter most here: fe_add's carry out
+       and fe_sub's borrow out are each worth 38, and dropping either is silent.
+       The edge table is every pair, where 2^256-38 meets 2^256-37. */
     for (i = 0; i < 6; i++) {
         for (j = 0; j < 6; j++) {
             fill(a, i);
@@ -342,10 +314,8 @@ int main(void)
     ck("x25519 b*A",    c68k_x25519(s2, skb, pka) == 0);
     ck("DH agreement",  memcmp(s1, s2, 32) == 0);
 
-    /* The trailer tools/test-verdict.sh reads.  It used to print "PASS" and
-       nothing else, so no harness could put a floor under the run: a binary
-       that reached main() and stopped after two checks said the same word as
-       a whole pass. */
+    /* The trailer tools/test-verdict.sh reads.  The counts have to be on it, or
+       a binary that stopped after two checks says the same word as a pass. */
     c68k_log("%lu checks, %lu failures, %s", checks, failures,
              (LONG)(failures ? "FAIL" : "PASS"));
     c68k_flush();

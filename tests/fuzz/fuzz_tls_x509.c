@@ -1,63 +1,6 @@
 /*
  * AmiNetXDuo, host fuzz driver for the X.509 certificate path.
  *
- * A certificate is the largest thing a TLS client parses before it has any
- * reason to trust the sender, and the only one whose grammar is recursive.
- * DER is nested tag-length-value: every length is attacker-chosen, every
- * nesting level subtracts one from another, and the walk is done with UINT
- * arithmetic that wraps. Chain verification happens after all of it. With no
- * MMU, a length that underflows in the middle of that walk is not a crashed
- * process, it is a read, and then a memcpy, wherever the arithmetic landed.
- *
- * WHAT IS DRIVEN
- *
- *   _nx_secure_x509_certificate_parse()      the DER walk itself
- *   _nx_secure_x509_certificate_initialize() the trust-store entry, which is
- *                                            what tls_store.c calls on a root
- *   _nx_secure_tls_process_remote_certificate()
- *                                            the Certificate handshake
- *                                            message: 3-byte total length,
- *                                            then a 3-byte length per cert
- *
- * and, on a certificate that parsed, the consumers the fields flow into:
- * _nx_secure_x509_common_name_dns_check() (tls_conn.c calls it with the
- * hostname), extension_find, key usage, extended key usage, subject alt names,
- * expiration, distinguished name compare. Those run ONLY after a successful
- * parse, their callers only ever see a parsed certificate, and driving them
- * on a half-filled struct reports null dereferences the wire cannot produce.
- * That is not hypothetical: an earlier version of this driver called
- * subject_alt_names_find() on a zeroed extension and UBSan duly complained
- * about a parser that was behaving correctly.
- *
- * THE TWO LENGTH CONTRACTS, WHICH ARE NOT THE SAME
- *
- *   fx_parse()   allocates exactly the DER's length. That is the contract
- *                _nx_secure_x509_certificate_parse() states, it is given a
- *                buffer and a length and must not read past it, so anything
- *                beyond is a real over-read whatever the caller's buffer
- *                happens to be padded with.
- *
- *   fx_message() allocates TLS_RECORD_BUFFER bytes, because
- *                _nx_secure_tls_process_remote_certificate() carves its
- *                NX_SECURE_X509_CERT structures out of the tail of the record
- *                buffer past data_length. It is tls_conn.c's tc_RecordBuffer,
- *                at tls_internal.h's default size, and it has to be the real
- *                thing or the function has nowhere to put the certificates it
- *                parses. Over-reads inside that buffer are invisible here and
- *                are equally invisible on the target; a walk off the end of it
- *                is not.
- *
- * The seed corpus is real DER: the sample leaf and CA from
- * tests/tls/tls_test_certs.h and the ISRG Root X1 that tls_handshake and the
- * fetch test use. A corpus of hand-built certificates would exercise the
- * grammar the author imagined rather than the one certificates are written in.
- *
- * Usage, matching fuzz_dhcp:
- *   fuzz_tls_x509 -s                every seed case, named
- *   fuzz_tls_x509 -c NAME           one seed case by name
- *   fuzz_tls_x509 -r SEED COUNT     seeds plus mutations
- *   fuzz_tls_x509 < der             one certificate from stdin
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -68,13 +11,6 @@
 #include "nx_secure_tls.h"
 #include "nx_secure_x509.h"
 
-/*
- * tls_test_certs.h also carries the leaf's private key, which tls_handshake.c
- * needs for its server side and this driver does not, a private key is not
- * something a peer supplies. GCC's -Wunused-variable would fail the build over
- * the two symbols, so the push/pop is around the include alone; everything
- * below the pop is under the full set.
- */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
@@ -88,19 +24,6 @@ TX_MUTEX _nx_secure_tls_protection;
 
 #define FX_MAX              4096
 
-/*
- * _nx_secure_x509_asn1_tlv_block_parse() reads buffer[0] one statement before
- * it tests *buffer_length < 1, so every caller that reaches the end of its
- * data with nothing left over-reads by one byte. It is reachable from the wire
- * a two-byte certificate through _nx_secure_x509_certificate_parse() gets
- * there, and from tls_store.c's issuer walk, which calls the same function
- * with whatever is left. Found by this driver at FX_KNOWN_SLOP 0, and fixed on
- * the fork by moving the test above the read, in nx_secure.
- *
- * One byte of slop keeps the sweep on the bugs nobody has found yet. It costs
- * the driver the ability to see any other one-byte over-read at the end of a
- * certificate. Set it to 0 to reproduce: `fuzz_tls_x509 -r 1 20000` finds it.
- */
 #define FX_KNOWN_SLOP       0
 
 /* tls_internal.h's TLS_DEFAULT_RECORD_BUFFER. Not included from there,
@@ -132,8 +55,6 @@ static void fx_raw(FxBuf *w, const unsigned char *p, unsigned n)
         fx_u8(w, *p++);
 }
 
-/* --------------------------------------------------------- the seed certs -- */
-
 typedef struct
 {
     const unsigned char *der;
@@ -163,8 +84,6 @@ static FxCert fx_cert_isrg(void)
     c.len = isrg_root_x1_der_len;
     return c;
 }
-
-/* ------------------------------------------------------------- the seeds --- */
 
 static void fxs_leaf(FxBuf *w)
 {
@@ -360,13 +279,6 @@ static const FxSeed fx_seeds[] =
 
 #define FX_SEED_COUNT   (int)(sizeof(fx_seeds) / sizeof(fx_seeds[0]))
 
-/* ------------------------------------------------------------- the driver -- */
-
-/*
- * Everything a parsed certificate is asked for afterwards. Only ever called on
- * a certificate _nx_secure_x509_certificate_parse() accepted, because that is
- * the only kind its callers ever hold.
- */
 static void fx_consume(NX_SECURE_X509_CERT *cert)
 {
     NX_SECURE_X509_EXTENSION extension;
@@ -409,10 +321,6 @@ static void fx_consume(NX_SECURE_X509_CERT *cert)
               &cert->nx_secure_x509_issuer, NX_SECURE_X509_NAME_ALL_FIELDS);
 }
 
-/*
- * The DER walk, on an allocation of exactly the length the parser is told it
- * has. Anything it reads beyond that is out of bounds by its own contract.
- */
 static void fx_parse(const unsigned char *der, unsigned len)
 {
     NX_SECURE_X509_CERT  cert;
@@ -447,10 +355,6 @@ static void fx_parse(const unsigned char *der, unsigned len)
     free(copy);
 }
 
-/* The chain verify a real session would do needs the crypto table and a
-   trusted root. Answering NX_SUCCESS here is "the chain checked out", which is
-   the branch that continues into the endpoint copy, the part of
-   _nx_secure_tls_process_remote_certificate() that moves attacker bytes. */
 static UINT fx_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
                          NX_SECURE_X509_CERT *certificate, ULONG current_time)
 {
@@ -462,13 +366,6 @@ static UINT fx_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
 
 static NX_SECURE_TLS_CRYPTO fx_crypto;
 
-/*
- * The Certificate handshake message, in the buffer tls_conn.c allocates.
- *
- * `chain` certificates are concatenated with their 3-byte lengths, the whole
- * thing behind a 3-byte total, and the record buffer is the real size so the
- * function has somewhere to carve its NX_SECURE_X509_CERT structures from.
- */
 static void fx_message(const unsigned char *der, unsigned len, unsigned chain,
                        unsigned total_fudge)
 {
@@ -505,15 +402,6 @@ static void fx_message(const unsigned char *der, unsigned len, unsigned chain,
         at += len;
     }
 
-    /*
-     * The three buffer fields are set here rather than through
-     * _nx_secure_tls_session_packet_buffer_set(), which rounds the pointer by
-     * casting it to a ULONG, the target's pointer width, and not this
-     * host's. original_size matters: _nx_secure_tls_remote_certificate_free_all()
-     * restores size from it before the endpoint is copied, and leaving it zero
-     * underflows cert_buf_size into a wild memset that is the harness's fault
-     * and not the parser's.
-     */
     memset(&s, 0, sizeof(s));
     s.nx_secure_tls_socket_type                 = NX_SECURE_TLS_SESSION_TYPE_CLIENT;
     s.nx_secure_tls_packet_buffer               = buffer;
@@ -537,17 +425,6 @@ static void fx_run(const unsigned char *der, unsigned len, unsigned chain,
     fx_message(der, len, chain, total_fudge);
 }
 
-/*
- * Proof that the driver reaches the parser.
- *
- * A driver that stopped at the outer SEQUENCE, a length that never cleared,
- * a struct rejected on its first field, would report "clean" for every input
- * and read as coverage. So the sample leaf certificate is parsed at startup
- * and the fields it must have filled are checked: the whole DER consumed, an
- * RSA public key recognised, a common name found in the subject, and the
- * issuer's common name found too. If any of that is missing the sweep does not
- * run.
- */
 static void fx_selftest(void)
 {
     NX_SECURE_X509_CERT cert;
@@ -614,12 +491,6 @@ static unsigned fx_below(unsigned n)
     return (n == 0) ? 0 : (fx_rand() % n);
 }
 
-/*
- * Aimed at DER's structure bytes, a tag, a length, a long-form length count
- * rather than at the payload. A flipped byte in a modulus changes a key
- * nobody uses here; a flipped length byte changes where the next TLV starts
- * and how much of the buffer the rest of the walk believes it has.
- */
 static void fx_mutate(FxBuf *w)
 {
     unsigned rounds = fx_below(6) + 1u;

@@ -1,36 +1,6 @@
 /*
  * AmiNetXDuo, host unit tests for the certificate and signature checks.
  *
- * tests/fuzz/fuzz_tls_x509 answers "does this parser stay inside its buffer".
- * This answers the other question: does it reject what it is supposed to
- * reject, and still accept what it is supposed to accept. Both matter, and a
- * sanitizer cannot see the second one, a verifier that returns success on
- * everything is perfectly memory-safe.
- *
- * Each section is one thing a peer controls:
- *
- *   pkcs1     the RSA signature block, after decryption. Every byte of it is
- *             fixed by RFC 8017 9.2, and a verifier that skims it accepts
- *             Bleichenbacher's e=3 forgery, which needs no private key.
- *
- *   ecdsa     the DER SEQUENCE { INTEGER r, INTEGER s } off the wire, against
- *             a real P-256 signature that must keep verifying.
- *
- *   sigalg    the signature algorithm identifier appears twice in a
- *             certificate and only one copy is signed. They have to agree.
- *
- *   chain     two CAs that have cross-signed each other. The issuer walk has
- *             a cycle in it, and before the depth cap it did not come back.
- *
- *   pss       RSASSA-PSS chains. The digest, the mask generation function and
- *             the salt length are all in the signature parameters and nowhere
- *             else, so a certificate signed this way is unreachable until
- *             they are read.
- *
- * The real certificates from tests/tls are parsed first, as a guard: if a
- * strictness change starts rejecting the sample leaf, the sample CA or ISRG
- * Root X1, that is a regression and not a hardening.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -44,10 +14,6 @@
 #include "nx_crypto_sha5.h"
 #include "nx_crypto_ecdsa.h"
 
-/*
- * tls_test_certs.h also carries the leaf's private key, which nothing here
- * needs; the push/pop is around the include alone, as in fuzz_tls_x509.c.
- */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #include "tls_test_certs.h"
@@ -78,12 +44,6 @@ static void check(int ok, const char *what)
     }
 }
 
-/* ------------------------------------------------------------- pkcs1 ------ */
-
-/*
- * EM = 0x00 || 0x01 || PS || 0x00 || T, where T is the DER DigestInfo for
- * SHA-256 and PS fills the modulus. 256 bytes is RSA-2048.
- */
 #define EM_SIZE     256
 
 static const unsigned char digest_info_sha256[] = {
@@ -177,11 +137,6 @@ unsigned      i;
     em[40] = 0xAB;
     check(em_decode(em) != NX_SECURE_X509_SUCCESS, "a padding byte that is not 0xFF");
 
-    /*
-     * The forgery shape: a short run of padding, the terminator, a DigestInfo,
-     * and whatever the attacker likes after it. Both halves are checked
-     * separately below, because either one alone closes it.
-     */
     (void)em_build(em, 3);
     check(em_decode(em) != NX_SECURE_X509_SUCCESS, "fewer than eight padding bytes");
 
@@ -198,8 +153,6 @@ unsigned      i;
     em[EM_SIZE - 1u] = 0x00;
     check(em_decode(em) != NX_SECURE_X509_SUCCESS, "data after the hash, inside the sequence");
 }
-
-/* ------------------------------------------------------------- ecdsa ------ */
 
 static union
 {
@@ -254,16 +207,6 @@ unsigned      len;
 
     printf("ecdsa\n");
 
-    /*
-     * The one case that reaches the curve arithmetic, and so 32-bit builds
-     * only: nx_crypto_ec.c does pointer arithmetic through ULONG, and ULONG is
-     * the target's 32 bits everywhere in this tree, so on an LP64 host the
-     * curve code truncates every pointer it touches. See this directory's
-     * CMakeLists.txt; tools/ci.sh's host32 stage runs it.
-     *
-     * Every rejection below returns from the DER parse, which is above the
-     * point setup, so those run in every build.
-     */
 #ifdef X509_TEST_ECDSA
     memcpy(sig, x509_p256_sig, x509_p256_sig_len);
     len = x509_p256_sig_len;
@@ -314,8 +257,6 @@ unsigned      len;
     check(ecdsa_verify(sig, x509_p256_sig_len) != NX_CRYPTO_SUCCESS, "the outer tag is SEQUENCE");
 }
 
-/* ------------------------------------------------------------ sigalg ------ */
-
 /* sha256WithRSAEncryption, 1.2.840.113549.1.1.11, as it appears in DER. */
 static const unsigned char oid_sha256_rsa[] = {
     0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b
@@ -348,11 +289,6 @@ unsigned              found = 0;
                                                isrg_root_x1_der_len, &bytes, &cert);
     check(status == NX_SECURE_X509_SUCCESS, "ISRG Root X1 still parses");
 
-    /*
-     * The leaf names sha256WithRSAEncryption twice, and the second one is the
-     * copy outside the signed body. Rewrite that one to sha1WithRSA, the
-     * change a man in the middle can make without touching the signature.
-     */
     memcpy(copy, test_device_cert_der, test_device_cert_der_len);
 
     for (i = 0; i + sizeof(oid_sha256_rsa) <= test_device_cert_der_len; i++)
@@ -374,8 +310,6 @@ unsigned              found = 0;
           "the outer identifier cannot disagree with the inner");
 }
 
-/* ------------------------------------------------------------ modulus ----- */
-
 static void test_modulus(void)
 {
 static unsigned char copy[8192];
@@ -387,13 +321,6 @@ unsigned             at = 0;
 
     printf("modulus\n");
 
-    /*
-     * The leaf's RSA-2048 modulus is a 257-byte INTEGER (256 bytes plus the
-     * DER sign pad). Shrink the INTEGER's declared length to 65, which is 512
-     * bits, factorable on a laptop, and leave the bytes where they are.
-     * Everything after it is then garbage, which is the point: the key is
-     * refused before any of it is used.
-     */
     memcpy(copy, test_device_cert_der, test_device_cert_der_len);
 
     for (i = 0; i + 4 <= test_device_cert_der_len; i++)
@@ -419,8 +346,6 @@ unsigned             at = 0;
     status = _nx_secure_x509_certificate_parse(copy, test_device_cert_der_len, &bytes, &cert);
     check(status != NX_SECURE_X509_SUCCESS, "a 512-bit modulus is refused");
 }
-
-/* ------------------------------------------------------------- chain ------ */
 
 static union
 {
@@ -483,29 +408,10 @@ UINT                                    status;
     (void)_nx_secure_x509_store_certificate_add(&cert_b, &store,
                                                 NX_SECURE_X509_CERT_LOCATION_REMOTE);
 
-    /*
-     * A's issuer is B and B's issuer is A, both are CAs with keyCertSign, and
-     * neither is in the trusted store, so every signature along the way
-     * verifies and the walk never arrives anywhere. Without a depth cap this
-     * call does not return.
-     */
     status = _nx_secure_x509_certificate_chain_verify(&store, &cert_a, 0);
     check(status == NX_SECURE_X509_CHAIN_TOO_LONG, "a cross-signed cycle terminates");
 }
 
-/* --------------------------------------------------------- extensions ----- */
-
-/*
- * What the chain walk does with the extensions it used to skip:
- * extendedKeyUsage, nameConstraints, and the critical bit.
- *
- * Each case is a chain against the same root, so the only difference between a
- * pass and a failure is the extension under test. The two positive cases are
- * not decoration: an extendedKeyUsage check that rejects a serverAuth leaf, or
- * a critical sweep that rejects the critical extendedKeyUsage Let's Encrypt
- * puts on its intermediates, is a regression and not a hardening, and it would
- * take out the whole web rather than one certificate.
- */
 static NX_SECURE_X509_CERT              ext_root;
 static NX_SECURE_X509_CERT              ext_int;
 static NX_SECURE_X509_CERT              ext_leaf;
@@ -601,21 +507,6 @@ UINT status;
           "a name inside excludedSubtrees is refused");
 }
 
-/* ---------------------------------------------------------------- pss ----- */
-
-/*
- * RSASSA-PSS.  A PSS AlgorithmIdentifier is the only signature identifier in
- * X.509 whose parameters are not NULL: RFC 4055 3.1 puts the digest, the mask
- * generation function, the salt length and the trailer field in a SEQUENCE
- * beside the OID.  Before that SEQUENCE was read, the certificate did not fail
- * to verify -- it failed to PARSE, at the tbsCertificate signature field, with
- * NX_SECURE_X509_UNEXPECTED_ASN1_TAG, and the whole chain went with it.
- *
- * So the first check here is that the leaf parses at all, separately from
- * whether it verifies.  The two failures look nothing alike and confusing them
- * sent an earlier reading of this at the verify path, which was already
- * correct.
- */
 static NX_SECURE_X509_CERT              pss_root;
 static NX_SECURE_X509_CERT              pss_int;
 static NX_SECURE_X509_CERT              pss_leaf;
@@ -705,11 +596,6 @@ UINT                       status;
     status = pss_verify(x509_pss_leaf_salt, x509_pss_leaf_salt_len, NX_CRYPTO_NULL, 0);
     check(status == NX_SECURE_X509_SUCCESS, "PSS with a non-digest salt verifies");
 
-    /*
-     * The same certificate with one byte of the signature changed.  Without
-     * this, every check above is also passed by a verifier that returns
-     * success on any PSS certificate at all.
-     */
     if (x509_pss_leaf_len <= sizeof(tampered))
     {
         memcpy(tampered, x509_pss_leaf, x509_pss_leaf_len);
@@ -725,8 +611,6 @@ UINT                       status;
     }
 }
 
-/* ----------------------------------------------------- TLS key usage ------ */
-
 static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
                         NX_SECURE_X509_CERT *certificate, ULONG current_time)
 {
@@ -736,13 +620,6 @@ static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
     return NX_SECURE_X509_SUCCESS;
 }
 
-/*
- * Exercise the TLS endpoint check independently of signature verification.
- * The fixed leaf is copied and only the keyUsage payload byte is changed:
- * 0x80 is digitalSignature and 0x20 is keyEncipherment. Its signature no
- * longer matches after that change, so ku_chain_ok deliberately stands in for
- * the already-separate chain tests above.
- */
 static UINT ku_verify(UCHAR usage, UINT algorithm, UINT tls_1_3,
                       UINT socket_type)
 {
@@ -799,14 +676,6 @@ static UINT ku_verify(UCHAR usage, UINT algorithm, UINT tls_1_3,
     public_cipher.nx_crypto_algorithm = algorithm;
     ciphersuite.nx_secure_tls_public_cipher = &public_cipher;
     session.nx_secure_tls_session_ciphersuite = &ciphersuite;
-    /*
-     * A TLS 1.3 session is one whose nx_secure_tls_1_3 flag is set.  Its
-     * nx_secure_tls_protocol_version is 0x0303 like everything else: that
-     * field is the legacy record version, RFC 8446 5.1 pins it there, and
-     * nx_secure never advances it.  This used to set it to 0x0304 to mean
-     * "1.3", which is a session state the library cannot produce, so the
-     * TLS 1.3 rows below were asserting against a fiction.
-     */
     session.nx_secure_tls_protocol_version = NX_SECURE_TLS_VERSION_TLS_1_2;
     session.nx_secure_tls_1_3 = (UCHAR)(tls_1_3 ? 1u : 0u);
     session.nx_secure_tls_socket_type = socket_type;
@@ -855,8 +724,6 @@ static void test_tls_key_usage(void)
                     NX_SECURE_TLS_SESSION_TYPE_SERVER) == NX_SECURE_X509_KEY_USAGE_ERROR,
           "a client certificate refuses encryption-only key");
 }
-
-/* -------------------------------------------------------------- main ------ */
 
 int main(void)
 {

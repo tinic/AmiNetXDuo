@@ -2,42 +2,6 @@
  * nslookup, ask the DNS for one kind of record.
  *
  *     nslookup NAME/A,SERVER,TYPE/K,TIMEOUT/N/K
- *
- *   TYPE=A       the address                     (the default)
- *   TYPE=AAAA    the IPv6 address
- *   TYPE=PTR     the name of an address
- *   TYPE=CNAME   what this name is an alias for
- *   TYPE=NS      the servers authoritative for a zone
- *   TYPE=MX      where mail for a domain goes, with its preference
- *   TYPE=TXT     the free text, which is where SPF and verification records go
- *   TYPE=SRV     a service: priority, weight, port and host
- *   TYPE=SOA     the start of authority for a zone
- *
- * An address with no TYPE is looked up backwards, as `host` does: a dotted
- * quad through in-addr.arpa and an IPv6 literal through ip6.arpa.
- *
- * This is a DNS client rather than a caller of one: a UDP socket, an RFC 1035
- * query built here and the answer section parsed here. bsdsocket.library
- * offers only gethostbyname(), so there is no way to ask for an MX, and a
- * lookup through the resolver cache diagnoses the cache.
- *
- * Sending our own datagram is also what makes SERVER possible: the machine has
- * one resolver server list, so pointing it elsewhere would move every other
- * program's lookups too. With no SERVER, the first server the stack is using:
- * the DHCP lease's, else DEVS:Internet/name_resolution's.
- *
- * A datagram from port 53 is unvalidated input and this machine has no MMU, so
- * every length in the reply is bounded against the bytes actually received.
- * Message compression (RFC 1035 4.1.4, a label length byte with its top two
- * bits set points to an earlier name) is followed only backwards and at most
- * sixteen times. A forward or self-referential pointer would otherwise let a
- * fourteen-byte reply loop until the machine is reset. Text out of a record is
- * filtered too, because 0x9B is the Amiga console's CSI and a TXT record can
- * carry one.
- *
- * UDP only, no retry over TCP: a truncated answer is reported as truncated
- * rather than silently shortened.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -139,8 +103,6 @@ static const NslType nsl_types[] =
     { "AAAA",   NSL_T_AAAA  }
 };
 
-/* ------------------------------------------------------------- bytes ----- */
-
 static UWORD nsl_get16(const UBYTE *p)
 {
     return (UWORD)(((UWORD)p[0] << 8) | (UWORD)p[1]);
@@ -172,14 +134,9 @@ static char nsl_safe_char(UBYTE c)
     return (char)c;
 }
 
-/* --------------------------------------------------------- names, out ---- */
-
 /*
  * A name in wire form: each label prefixed by its length, a zero label for the
  * root. Returns bytes written, or 0 when the name is not a valid one.
- *
- * "example.com." and "example.com" are the same name. "." alone is the root,
- * which is a legitimate NS or SOA question.
  */
 static ULONG nsl_encode_name(const char *name, UBYTE *out, ULONG outlen)
 {
@@ -295,20 +252,10 @@ static VOID nsl_reverse_name(ULONG addr, char *out, ULONG outlen)
     out[o] = '\0';
 }
 
-/* ---------------------------------------------------------- names, in ---- */
-
 /*
- * A name out of a reply at `pos`, as text in `out` (NULL when only the length
- * is wanted).
- *
  * Returns the offset of the byte after the name as it appears at `pos`, for
  * a compressed name that is two past the pointer, not the end of whatever it
  * pointed at, or -1 when the message will not support one.
- *
- * Every exit from the loop is a bound. `len` is the bytes received, never a
- * length the message claimed. A pointer must go strictly backwards, which is
- * what makes the walk terminate. Sixteen jumps is far past any real message.
- * The 0x40 and 0x80 label types are reserved, so they are rejected.
  */
 static LONG nsl_decode_name(const UBYTE *msg, ULONG len, ULONG pos,
                             char *out, ULONG outlen)
@@ -396,8 +343,6 @@ static LONG nsl_decode_name(const UBYTE *msg, ULONG len, ULONG pos,
     return end;
 }
 
-/* --------------------------------------------------------- the question, */
-
 /* The query message, built into nsl_query. Its length, or 0. */
 static ULONG nsl_build(const char *qname, UWORD type, UWORD id)
 {
@@ -421,12 +366,6 @@ static ULONG nsl_build(const char *qname, UWORD type, UWORD id)
     return NSL_HDR + n + 4;
 }
 
-/*
- * The identifier, checked on the way back. Not a cryptographic number: with
- * the source address it is enough for a one-shot diagnostic to ignore a stale
- * answer to the previous question and a bystander's datagram. A resolver
- * keeping a cache would need more.
- */
 static UWORD nsl_id(VOID)
 {
     ULONG t = ami_millis();
@@ -435,16 +374,6 @@ static UWORD nsl_id(VOID)
     return (UWORD)(((t << 5) ^ (t >> 3) ^ (a >> 2) ^ (a << 7)) & 0xffffUL);
 }
 
-/* ----------------------------------------------------------- the answer, */
-
-/* One record of the answer section, formatted for the type it turned out to
-   be, which is not always the type asked for: an A question is answered with
-   the CNAME chain in front of it.
-
-   FALSE when the payload does not match the type -- a four-byte A, a name
-   that runs past RDLENGTH -- and then nothing was printed for it.  It is not
-   a verdict on the reply, only on this record: the caller says so in place
-   and goes on to the next. */
 static BOOL nsl_print_record(const UBYTE *msg, UWORD type, ULONG rdata,
                              ULONG rdlen)
 {
@@ -596,14 +525,6 @@ static BOOL nsl_print_record(const UBYTE *msg, UWORD type, ULONG rdata,
     return TRUE;
 }
 
-/*
- * Walk the answer section. Returns records printed, or -1 when the reply
- * cannot be walked at all (not the same as an empty one): a name that does
- * not decode, a header that runs off the end, an RDLENGTH past the datagram.
- * A record whose contents are wrong for its type is not that -- it is counted
- * and reported like any other. The question section is walked first to find
- * where the answers start, and its name can itself be compressed.
- */
 static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 {
     UWORD qd = nsl_get16(&msg[4]);
@@ -637,22 +558,6 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
         if (rdata + (ULONG)rdlen > len)
             return -1;
 
-        /*
-         * A record whose payload does not match its type is reported where it
-         * stands and the walk goes on.
-         *
-         * The framing is what decides whether the reply can be read at all,
-         * and it was checked above: the name decoded, the ten fixed bytes are
-         * there, and RDLENGTH is inside the datagram.  So the next record
-         * starts at a known offset whatever this one contains, and abandoning
-         * the answer here would throw away records that are perfectly well
-         * formed because an earlier one is not.
-         *
-         * This is the command whose whole job is looking at DNS that is
-         * broken.  Refusing the reply prints part of it, then an error, then
-         * exits non-zero -- three statements about a reply that differs from
-         * a clean one by one record.  The line below is the finding.
-         */
         if (!nsl_print_record(msg, type, rdata, (ULONG)rdlen))
             tool_printf("  malformed  type %lu, %lu bytes\n",
                         (LONG)type, (LONG)rdlen);
@@ -664,8 +569,6 @@ static LONG nsl_print_answers(const UBYTE *msg, ULONG len)
 
     return printed;
 }
-
-/* --------------------------------------------------------- the exchange, */
 
 /*
  * Send the query and wait for its answer. Returns bytes received into
@@ -760,8 +663,6 @@ static LONG nsl_exchange(struct Library *sb, LONG sock,
     return 0;
 }
 
-/* ------------------------------------------------------------- arguments, */
-
 static LONG nsl_type_from_name(const char *text, UWORD *type_out)
 {
     ULONG i;
@@ -832,11 +733,6 @@ static BOOL nsl_default_server(ToolAddr *out)
         }
     }
 
-    /*
-     * ONE EXIT after the load, because ami_config_load() now allocates the
-     * interface list and this function is its only owner.  The address wanted
-     * is copied into *out before the free, so nothing here outlives it.
-     */
     {
         BOOL found = FALSE;
 
@@ -866,8 +762,6 @@ static const char *nsl_rcode_text(UWORD rcode)
         default: return "the server answered with an error";
     }
 }
-
-/* ------------------------------------------------------------------ main, */
 
 int main(int argc, char **argv)
 {
@@ -932,16 +826,6 @@ int main(int argc, char **argv)
     if (timeout == 0)
         timeout = NSL_DEFAULT_TIMEOUT;
 
-    /*
-     * Which of the three the argument is, before anything is opened.
-     *
-     * tool_parse_ip6() rather than the library's inet_pton(): an IPv4-only
-     * library answers EAFNOSUPPORT for AF_INET6, and a command that took that
-     * for "not an address" asked the DNS for a name spelt "::1" and reported
-     * NXDOMAIN. Nothing about a PTR question needs IPv6 to carry it. The
-     * ip6.arpa query travels to the name server over whatever this machine
-     * has, and the answer is the same either way.
-     */
     is_v4 = ami_config_parse_ip(name, &address) ? TRUE : FALSE;
     is_v6 = FALSE;
 
@@ -1108,14 +992,6 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * TC means the answer did not fit in a datagram and the rest is only
-     * available over TCP, which this command does not do. Checked before the
-     * empty case, because a server with too much to say commonly sets TC and
-     * sends an empty answer section. Reporting "no records of that type" there
-     * would be wrong. Seen with `nslookup google.com TYPE TXT`, whose RRset is
-     * well over 512 bytes.
-     */
     if ((flags & NSL_F_TC) != 0)
     {
         tool_printf("  the answer did not fit in a datagram%s\n",

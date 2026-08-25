@@ -1,98 +1,5 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR TWO PROPERTIES OF THE DNS CLIENT.
-#
-#   tests/tools/run-dnsguard.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                               [-B BACKEND] [-a ADDRESS] [-g GATEWAY]
-#                               [-N BOARD]
-#
-# WHAT IT IS PROVING
-#
-#   1. A NAME THAT DOES NOT EXIST IS ASKED ABOUT ONCE.  RFC 2308 5 says an
-#      NXDOMAIN is an answer and may be held for as long as the SOA in its
-#      authority section says.  The guest looks the same missing name up three
-#      times and the server must see ONE query.  Three is the unfixed number
-#      and the assertion is on the count, not on how long the lookups took.
-#
-#   2. AN ANSWER MUST BE ABOUT THE NAME THAT WAS ASKED.  The server answers
-#      `evil.<zone>` with a NOERROR reply whose only answer-section A record
-#      is owned by `attacker.example`.  Nothing ties that record to the
-#      question but the header ID, and the lookup must FAIL.  Unfixed it
-#      succeeds with 10.6.6.6.
-#
-#   3. AND NAMES BEHIND A CNAME STILL RESOLVE.  `alias.<zone>` is served the
-#      way most of the internet is: a CNAME, and then the target's A record,
-#      whose owner is the target and not the name asked about.  This case
-#      passes both before the change and after it, and that is the point --
-#      it is what fails if the owner-name check lands without the chain
-#      following that has to come with it.
-#
-#   1b. AND THE SAME BACKWARDS.  A reverse lookup reaches the cache by a path
-#      of its own (_nx_dns_host_by_address_get_internal), keyed on the
-#      in-addr.arpa name, and an address with no PTR record is the ordinary
-#      case on a private network.  10.0.0.9 is looked up three times and must
-#      also be asked about once; 10.0.0.1 has a PTR and must still answer.
-#
-#   4. AND A CHAIN A REAL SERVER BUILT.  The made-up CNAME above is one hop
-#      with the owner names spelled out; a real answer compresses them into
-#      pointers back into the CNAME's own rdata, and can be more than one hop.
-#      So everything outside the zone is forwarded to the peer's own resolver,
-#      and a name that is CNAME-hosted for real has to resolve too.  The name
-#      is checked to still BE a CNAME before the run, so this case cannot
-#      quietly decay into "an A record resolved".
-#
-#   `plain.<zone>` is the control.  If an ordinary A record does not resolve,
-#   nothing the other cases say means anything.
-#
-# THE ONE EXTERNAL DEPENDENCY, stated rather than hidden: case 4 needs the
-# peer to be able to resolve $AMINETXDUO_DNSGUARD_REALNAME and to see a CNAME
-# for it.  If it cannot, the script says so and fails.
-#
-# WHY A SERVER OF OUR OWN
-#
-#   None of the three shapes can be ordered from a resolver on the internet.
-#   tests/tools/dnsfake.py is authoritative for four names and counts what it
-#   was asked, so the query count is read off the server rather than
-#   reconstructed from a capture.
-#
-# BRIDGED, AND NOT SLIRP
-#
-#   -B ens18 puts the guest on the host's own LAN, which is the only way it
-#   can reach a name server at all.  SLIRP's 10.0.2.3 forwards to whatever the
-#   host resolves with and cannot be told to lie.
-#
-# THE SERVER MUST BE A THIRD MACHINE
-#
-#   Not the machine running the emulator.  The guest's ARP request for it
-#   reaches the host, the host's reply goes out on the same NIC, and the
-#   emulator's pcap never sees it, so the guest gets no answer and the run
-#   reads as a resolver that asked nobody.  Measured 2026-08-11:
-#
-#     ARP, Request who-has 192.168.1.136 tell 192.168.1.246, length 50
-#     ARP, Request who-has 192.168.1.136 tell 192.168.1.246, length 50
-#
-#   and nothing between them.  -H is therefore required, not a convenience.
-#
-# PORT 53 IS PRIVILEGED
-#
-#   The fake server has to answer on port 53, because NX_DNS_PORT is 53 and a
-#   name server address carries no port.  An unprivileged process cannot bind
-#   it, so the peer needs an interpreter that can:
-#
-#     cp "$(readlink -f "$(command -v python3)")" ~/bin/python3-dns
-#     sudo setcap cap_net_bind_service=+ep ~/bin/python3-dns
-#
-#   ~/bin/python3-dns on the peer is the default, and the script says this
-#   rather than failing to bind inside an ssh nobody reads.
-#
-#   The peer's TX checksum offload must be off, for the same reason
-#   tests/perf/run-fitzbench.sh says so: a reply that leaves with an
-#   uncomputed checksum is correctly dropped by the guest, and the run reads
-#   as our defect.
-#
-# The a2065.device driver is not ours to ship: AMINETXDUO_A2065=<path>, or
-# drop a copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -156,8 +63,6 @@ case "$BACKEND" in
         exit 2 ;;
 esac
 
-# ssh dials a name and the guest dials a number.  Derived from the machine ssh
-# actually landed on, which cannot be wrong about its own interfaces.
 if [ -z "$PEER_ADDR" ]; then
     PEER_ADDR=$(ssh "$PEER" "ip -o -4 addr show scope global |
                              awk '{split(\$4,a,\"/\"); print a[1]}'" |
@@ -175,23 +80,12 @@ export AMINETXDUO_RUN_TAG="$TAG"
 HD="$ROOT/build/amiberry-testhd-$TAG"
 SRVLOG="$ROOT/build/dnsguard-$TAG-server.log"
 
-# A MAC of this run's own.  Two harnesses on one LAN with the emulator's
-# default MAC are two machines with one address, and the failure reads as a
-# dead network rather than as a collision.
 export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:0d:47}"
 
-# ------------------------------------------------------------- the server ---
-#
-# The bracket is not decoration: pkill -f matches the remote shell's own
-# command line, and the zone is in the pattern so that two runs against one
-# peer stop their own server and not each other's.
 
 PEER_LOG="/tmp/dnsguard-$TAG-peer.log"
 KILLPAT="[d]nsfake.py --zone $ZONE"
 
-# The peer's TX checksum offload, stated rather than discovered: a reply that
-# leaves with an uncomputed checksum is correctly dropped by the guest, and
-# the run then reads as a resolver that asked nobody.
 OFFLOAD=$(ssh "$PEER" "/sbin/ethtool -k \$(ip -o -4 route show to default |
                        awk '{print \$5}') 2>/dev/null |
                        awk '/^tx-checksumming/{print \$2}'" || true)
@@ -201,9 +95,6 @@ if [ "$OFFLOAD" != "off" ]; then
     exit 2
 fi
 
-# What the peer resolves with, and whether the real name is still an alias.
-# A name that has stopped being CNAME-hosted turns case 4 into a test of
-# nothing, so it is checked rather than assumed.
 UPSTREAM=$(ssh "$PEER" "awk '/^nameserver/ && \$2 !~ /:/ {print \$2; exit}' /etc/resolv.conf")
 [ -n "$UPSTREAM" ] || {
     echo "$PEER has no IPv4 name server of its own to forward to" >&2; exit 2; }
@@ -244,7 +135,6 @@ done
 echo "==> fake name server on $PEER ($SERVER:53), zone $ZONE"
 echo "==> everything else forwarded to $UPSTREAM; $REALNAME is CNAME $REAL_CNAME"
 
-# ------------------------------------------------------------- staging ---
 
 STAGE="$ROOT/build/dnsguard-stage-$TAG"
 rm -rf "$STAGE"
@@ -267,14 +157,10 @@ NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 EOF
 
-# One server and no domain: a search list would put a second question on the
-# wire for every name that failed, and the counts here are the assertion.
 cat > "$STAGE/devs/Internet/name_resolution" <<EOF
 nameserver $SERVER
 EOF
 
-# -4 because the point is to count queries, and with no family given the
-# resolver's own fallbacks decide how many go out.
 {
     echo "SYS:AddNetInterface eth0"
     echo "SYS:host -4 plain.$ZONE"
@@ -290,7 +176,6 @@ EOF
     echo "SYS:host 10.0.0.9"
 } > "$STAGE/commands.txt"
 
-# ------------------------------------------------------------------ run ---
 
 echo "==> booting $MODEL, $BOARD bridged on $BACKEND, guest $ADDRESS"
 set +e
@@ -325,7 +210,6 @@ pass() { echo "  ok: $*"; }
 
 queries() { grep -c "^Q $1 " "$SRVLOG" 2>/dev/null || true; }
 
-# ---- the control ---------------------------------------------------------
 
 PLAIN_Q=$(queries "plain.$ZONE")
 if grep -q "^plain.$ZONE has address 10.0.0.1$" "$REPORT"; then
@@ -336,7 +220,6 @@ else
     CONTROL=fail
 fi
 
-# ---- 3: a name behind a CNAME still resolves -----------------------------
 
 if grep -q "^alias.$ZONE has address 10.0.0.2$" "$REPORT"; then
     pass "alias.$ZONE followed the CNAME to 10.0.0.2"
@@ -346,7 +229,6 @@ else
     CNAME=fail
 fi
 
-# ---- 4: a chain a real server built --------------------------------------
 
 if grep -q "^$REALNAME has address " "$REPORT"; then
     pass "$REALNAME resolved through its real CNAME ($REAL_CNAME)"
@@ -356,7 +238,6 @@ else
     REAL=fail
 fi
 
-# ---- 2: an answer about somebody else's name is not an answer ------------
 
 if grep -q "^evil.$ZONE has address" "$REPORT"; then
     fail "evil.$ZONE resolved: a record owned by attacker.example was accepted"
@@ -366,7 +247,6 @@ else
     BAILIWICK=ok
 fi
 
-# ---- 1: a name that does not exist is asked about once -------------------
 
 NX_Q=$(queries "nx.$ZONE")
 
@@ -387,7 +267,6 @@ else
     NEGCACHE=fail
 fi
 
-# ---- 1, backwards: the reverse direction has a cache path of its own -----
 
 if grep -q "^10.0.0.1 is plain.$ZONE$" "$REPORT"; then
     pass "10.0.0.1 reversed to plain.$ZONE"

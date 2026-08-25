@@ -1,28 +1,6 @@
 /*
  * AmiNetXDuo, the RFC 6298 round-trip time estimator, as arithmetic.
  *
- * Sections 2.2 and 2.3 are four lines of integer maths, and getting them
- * wrong is quiet: the connection still works, the timeout is merely the wrong
- * length, and no capture shows which of the two weighted averages drifted.
- * The classic way to get it wrong is order, section 2.3 computes RTTVAR
- * against the SRTT this sample has NOT yet moved, and updating SRTT first
- * gives an answer that is close enough to look right and is not.  So the
- * expected values below are worked out by hand in the comments, and one case
- * exists purely to separate the two orders.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_tcp_socket_rtt_sample.c, and around it the whole path that feeds it,
- * nx_tcp_socket_create.c, nx_tcp_socket_send_internal.c,
- * nx_tcp_socket_state_ack_check.c and nx_tcp_socket_retransmit.c, so the
- * second half of this file asserts on the wiring rather than on the formula:
- * which segment gets timed, which acknowledgment ends the measurement, and
- * which one is thrown away because Karn's algorithm says it is ambiguous.
- *
- * Stubbed: everything that would touch a driver, a packet pool or another
- * thread, exactly as test_tcp_retries_host.c stubs them, plus the clock,
- * tx_time_get() reads a variable this file sets, so a round trip of any
- * length costs nothing and is exact.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -355,10 +333,9 @@ static UINT h_ack(ULONG ack_number)
 /* --------------------------------------------------------- the formula ---- */
 
 /*
- * Every expected value below is in ticks.  NX_IP_PERIODIC_RATE is 50 in the
- * shipping nx_user.h, so a tick is 20 ms, the section 2.4 floor is 50 ticks
- * and the section 2.5 ceiling is 3000.  The state is scaled: smoothed by
- * eight, variation by four.
+ * Every expected value below is in ticks: NX_IP_PERIODIC_RATE is 50, so a tick
+ * is 20 ms, the floor is 50 ticks and the ceiling 3000.  The state is scaled --
+ * smoothed by eight, variation by four.
  */
 
 static void h_sample_state(ULONG smoothed, ULONG variation)
@@ -372,11 +349,6 @@ static void formula_cases(void)
     printf("The section 2.2 and 2.3 update\n");
 
     /* ---- the first measurement, section 2.2 --------------------------- */
-    /*
-     * R = 40 ticks (800 ms).  SRTT = R, RTTVAR = R/2, so scaled that is
-     * 40 << 3 = 320 and 40 << 1 = 80.  RTO = SRTT + max(G, 4 RTTVAR)
-     *         = 40 + 80 = 120 ticks, which is 2.4 seconds and above the floor.
-     */
     h_fixture();
     _nx_tcp_socket_rtt_sample(&h_sock, 40);
 
@@ -385,11 +357,6 @@ static void formula_cases(void)
     h_check_eq(h_sock.nx_tcp_socket_timeout_rate, 120, "first sample RTO");
 
     /* ---- and the ones after it, section 2.3 --------------------------- */
-    /*
-     * The same 40 again.  error is 40 - 320/8 = 0, so SRTT does not move and
-     * RTTVAR decays by a quarter: 80 - 20 + 0 = 60.  RTO = 40 + 60 = 100.
-     * Then 60 - 15 = 45 and RTO = 85; then 45 - 11 = 34 and RTO = 74.
-     */
     _nx_tcp_socket_rtt_sample(&h_sock, 40);
     h_check_eq(h_sock.nx_tcp_socket_rtt_smoothed, 320, "steady SRTT holds");
     h_check_eq(h_sock.nx_tcp_socket_rtt_variation, 60, "steady RTTVAR decays");
@@ -404,23 +371,6 @@ static void formula_cases(void)
     h_check_eq(h_sock.nx_tcp_socket_timeout_rate, 74, "RTO follows it down");
 
     /* ---- the order of the two updates --------------------------------- */
-    /*
-     * SRTT 40 (scaled 320), RTTVAR 20 (scaled 80), and a sample of 200 that
-     * is nothing like either.
-     *
-     *   right  error = 200 - 40 = 160, taken against the OLD SRTT
-     *          RTTVAR: 80 - 20 + 160 = 220
-     *          SRTT:   320 + 160 = 480, so 60
-     *          RTO = 60 + 220 = 280
-     *
-     *   wrong  SRTT first: 480, so 60
-     *          then |60 - 200| = 140
-     *          RTTVAR: 80 - 20 + 140 = 200
-     *          RTO = 60 + 200 = 260
-     *
-     * Twenty ticks apart, which is 400 ms of retransmission timeout and is
-     * the whole reason this case exists.
-     */
     h_fixture();
     h_sample_state(320, 80);
     _nx_tcp_socket_rtt_sample(&h_sock, 200);
@@ -432,14 +382,6 @@ static void formula_cases(void)
                "RTO after a sample far from the estimate");
 
     /* ---- a sample below the estimate --------------------------------- */
-    /*
-     * The error is negative and only its magnitude reaches RTTVAR.  From
-     * SRTT 40 (320) and RTTVAR 20 (80), a sample of 8:
-     *   error = 8 - 40 = -32
-     *   RTTVAR: 80 - 20 + 32 = 92
-     *   SRTT:   320 - 32 = 288, so 36
-     *   RTO = 36 + 92 = 128
-     */
     h_fixture();
     h_sample_state(320, 80);
     _nx_tcp_socket_rtt_sample(&h_sock, 8);
@@ -451,8 +393,6 @@ static void formula_cases(void)
 
     /* ---- section 2.4's floor ----------------------------------------- */
     /*
-     * One tick, the shortest the clock can express.  SRTT 8, RTTVAR 2, and
-     * RTO would be 1 + 2 = 3 ticks, 60 ms.  The floor makes it a second.
      * The estimate itself is NOT floored: the next sample has to be able to
      * move it.
      */
@@ -475,9 +415,8 @@ static void formula_cases(void)
 
     /* ---- max(G, K RTTVAR) -------------------------------------------- */
     /*
-     * G is one tick.  With no variation at all the timeout must still be a
-     * tick longer than the estimate, or a path whose delay never varies would
-     * arm a timeout for the exact instant the acknowledgment is due.
+     * G is one tick: with no variation at all the timeout must still be a tick
+     * longer than the estimate.
      */
     h_fixture();
     h_sample_state(800, 0);
@@ -488,11 +427,6 @@ static void formula_cases(void)
                "the granularity term is missing from RTO");
 
     /* ---- section 2.5's ceiling --------------------------------------- */
-    /*
-     * A first sample at the ceiling itself gives RTO = 3 R, which is well
-     * past it.  And a measurement longer than any timeout may be is clamped
-     * on the way in rather than folded in at full size.
-     */
     h_fixture();
     _nx_tcp_socket_rtt_sample(&h_sock, NX_TCP_RTO_MAXIMUM);
     h_check_eq(h_sock.nx_tcp_socket_timeout_rate, NX_TCP_RTO_MAXIMUM,
@@ -504,13 +438,6 @@ static void formula_cases(void)
                "an impossible measurement was folded in at full size");
 
     /* ---- where a steady path settles --------------------------------- */
-    /*
-     * Twenty identical samples at 40 ticks.  SRTT never moves, RTTVAR decays
-     * towards nothing, and the computed timeout walks down until section
-     * 2.4's floor catches it, so a short path ends up with exactly the one
-     * second the stack used to use unconditionally, which is the point: the
-     * estimator costs nothing there and earns its keep on a long path.
-     */
     h_fixture();
     {
         UINT i;
@@ -525,12 +452,6 @@ static void formula_cases(void)
     h_check_eq(h_sock.nx_tcp_socket_timeout_rate, NX_TCP_RTO_MINIMUM,
                "a steady short path did not settle on the floor");
 
-    /*
-     * And a steady LONG path settles above it.  Twenty samples at 200 ticks
-     * (four seconds) leave SRTT at 200 and the timeout above the floor by
-     * more than a factor of four, which a fixed one-second base cannot do
-     * and is the case the estimator exists for.
-     */
     h_fixture();
     {
         UINT i;
@@ -607,11 +528,6 @@ static void wiring_cases(void)
                "a later segment moved the start of the measurement");
 
     /* ---- and the acknowledgment ends it ------------------------------- */
-    /*
-     * Forty ticks after the first segment left, the peer acknowledges both.
-     * That is the 800 ms first measurement from the formula cases, so the
-     * timeout must come out at the same 120 ticks.
-     */
     h_now = 1040;
     (VOID)h_ack(H_ISN + (2 * H_SEG_BYTES));
 
@@ -650,8 +566,7 @@ static void wiring_cases(void)
     /* ---- Karn's algorithm, section 3 ---------------------------------- */
     /*
      * The segment is retransmitted before the acknowledgment arrives, so the
-     * acknowledgment could be answering either copy.  No sample, and the
-     * estimate is left exactly as it was.
+     * acknowledgment could be answering either copy: no sample.
      */
     h_fixture();
     h_now = 3000;
@@ -675,9 +590,8 @@ static void wiring_cases(void)
 
     /* ---- but the next new segment measures again ---------------------- */
     /*
-     * Karn's algorithm suppresses the sample, it does not switch the
-     * estimator off: the segment sent after the recovery has been transmitted
-     * once and its acknowledgment is unambiguous.
+     * Karn's algorithm suppresses the sample, it does not switch the estimator
+     * off: the next segment is transmitted once and is unambiguous.
      */
     h_sock.nx_tcp_socket_timeout_retries = 0;
 

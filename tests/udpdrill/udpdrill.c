@@ -1,27 +1,6 @@
 /*
  * AmiNetXDuo, which datagrams a UDP socket is allowed to receive.
  *
- * RFC 1122 4.1.3.5: a UDP socket that has been connected is identified by the
- * full four-tuple, and a datagram whose source is not the connected peer is
- * not for it.  NetX Duo demultiplexes on the local port alone
- * (_nx_udp_packet_receive) and NX_UDP_SOCKET has no local address and no peer,
- * so nothing under bsdsocket.library can make that distinction.
- *
- * It is live for the resolver: a connected socket waiting for a DNS answer
- * will take one from any host on the wire that gets in first.  That is what
- * these cases inject.
- *
- * The peer is a synthetic SANA-II device made at run time,
- * tests/tcpdrill/tapdev.c, the same interface tests/sockopt uses, so a
- * datagram can carry any source address and port, which is the whole point
- * and is not reachable through a real driver or through SLIRP.
- *
- * The same device is what makes the ICMP cases possible: an ICMP Destination
- * Unreachable has to quote a datagram this machine sent, so the case takes the
- * frame the stack transmitted and builds the error around it.  RFC 1122
- * 4.1.3.3 requires the error be passed to the application; a connected socket
- * is the only one it can be attributed to.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,8 +16,6 @@
 
 #include "tapdev.h"
 
-
-/* ------------------------------------------------------------- the wire -- */
 
 /* DEVS:NetInterfaces/tap0 gives the stack 10.9.9.1/24; 10.9.9.2 is this
    harness.  10.9.9.3 is a second host on the same wire, the one that has no
@@ -63,8 +40,6 @@
 static const UBYTE local_mac[6] = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x09 };
 static const UBYTE peer_mac[6]  = { 0x02, 0x41, 0x4d, 0x49, 0x00, 0x0A };
 
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -138,8 +113,6 @@ UBYTE *b = (UBYTE *)p;
         *b++ = 0;
 }
 
-
-/* -------------------------------------------------------------- the ABI -- */
 
 #include <stddef.h>
 #include <sys/types.h>
@@ -374,8 +347,6 @@ BSD_SCRATCH;
 }
 
 
-/* ----------------------------------------------------------- the frames -- */
-
 static VOID wr16(UBYTE *p, UWORD v)
 {
     p[0] = (UBYTE)(v >> 8);
@@ -410,11 +381,6 @@ static UWORD ones_fold(ULONG sum)
     return((UWORD)(~sum));
 }
 
-/*
- * One UDP datagram from src_ip:src_port to this machine's address, carrying
- * `len` bytes whose first byte is `tag`, so a case can say which datagram
- * came back rather than merely that one did.
- */
 static BOOL t_inject(ULONG src_ip, UWORD src_port, UBYTE tag, ULONG len)
 {
 static UBYTE f[TAP_FRAME_MAX];
@@ -463,12 +429,6 @@ UBYTE        ph[4];
 }
 
 
-/*
- * One IPv4 packet from src_ip carrying protocol `proto` and `len` payload
- * bytes whose first byte is `tag`.  Protocol 253 is RFC 3692's "use for
- * experimentation": nothing in the stack handles it, so every one of these
- * reaches the raw filter in src/bsdsocket/raw.c and nowhere else.
- */
 static BOOL t_inject_proto(ULONG src_ip, UBYTE proto, UBYTE tag, ULONG len)
 {
 static UBYTE f[TAP_FRAME_MAX];
@@ -501,15 +461,6 @@ ULONG        i;
     return((BOOL)(tap_rx_put(f, ETH_HDR + iplen) == 0));
 }
 
-
-/* ------------------------------------------------------- the ICMP peer -- */
-
-/*
- * u01 and u02 only ever inject, so the wire was one-way and nothing had to
- * answer.  An ICMP error has to quote a datagram this machine actually sent,
- * so from here on the harness reads the wire too: it answers the ARP the stack
- * makes to resolve 10.9.9.2, and keeps the datagram that follows.
- */
 
 static UWORD rd16(const UBYTE *p)
 {
@@ -553,15 +504,6 @@ ULONG        i;
     (VOID)tap_rx_put(f, (ULONG)sizeof(f));
 }
 
-/*
- * Drain the device, answering ARP, and keep the first UDP datagram this test's
- * socket sent to the peer.  Returns its frame length, 0 if none came.
- *
- * The source port is part of the filter because the stack under test is a
- * whole stack: mDNS announces itself on 5353 the moment the interface comes
- * up, and taking the first UDP frame on the wire took that one instead --
- * every ICMP case then quoted a datagram no socket in the test had sent.
- */
 static ULONG t_pump(UBYTE *out, ULONG max)
 {
 static UBYTE scratch[TAP_FRAME_MAX];
@@ -600,7 +542,6 @@ ULONG        i;
     return(got);
 }
 
-/* Wait up to `ms` for the datagram the socket sent, answering ARP throughout. */
 static ULONG t_wait_tx(UBYTE *out, ULONG max, ULONG ms)
 {
 ULONG spent = 0;
@@ -618,11 +559,6 @@ ULONG len;
     }
 }
 
-/*
- * An ICMP error from `src_ip` quoting `frame`, an IPv4 frame this machine
- * transmitted.  RFC 792 says the message carries the offending IP header and
- * the first 64 bits of its data, which is what a receiver demultiplexes on.
- */
 static BOOL t_inject_icmp(ULONG src_ip, UBYTE type, UBYTE code,
                           const UBYTE *frame, ULONG frame_len)
 {
@@ -678,8 +614,6 @@ ULONG        i;
 }
 
 
-/* ------------------------------------------------------------- the test -- */
-
 typedef struct sockaddr_in SockAddrIn;
 
 static VOID t_addr(SockAddrIn *a, ULONG ip, UWORD port)
@@ -691,12 +625,6 @@ static VOID t_addr(SockAddrIn *a, ULONG ip, UWORD port)
     a->sin_addr.s_addr = ip;
 }
 
-/*
- * The stack posts its device reads from its own threads, so an injection made
- * the instant after a socket call can find no reader outstanding.  A short
- * settle before each one, and another after, so the datagram has been through
- * the receive path before the recvfrom() that asks about it.
- */
 static VOID t_settle(VOID)
 {
     Delay(5);
@@ -785,7 +713,6 @@ LONG        n;
         return;
     }
 
-    /* The control: the peer's own datagram must arrive. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xB0, 8UL),
                   "the peer sent one", 0);
@@ -796,7 +723,6 @@ LONG        n;
     (VOID)t_check((BOOL)(tag == 0xB0), "and it is the one the peer sent",
                   (LONG)tag);
 
-    /* Right address, wrong port. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, OTHER_PORT, 0xC0, 8UL),
                   "10.9.9.2:9001 sent one", 0);
@@ -807,7 +733,6 @@ LONG        n;
                   "recvfrom() did not return a datagram from the wrong port",
                   n);
 
-    /* Right port, wrong address. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(OTHER_IP, PEER_PORT, 0xD0, 8UL),
                   "10.9.9.3:9000 sent one", 0);
@@ -818,7 +743,6 @@ LONG        n;
                   "recvfrom() did not return a datagram from the wrong host",
                   n);
 
-    /* And the socket still works: this is the answer the resolver wanted. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xE0, 8UL),
                   "the peer sent another", 0);
@@ -833,8 +757,6 @@ LONG        n;
     (VOID)bsd_CloseSocket(fd);
 }
 
-
-/* ---------------------------------------------------------- ICMP errors -- */
 
 #define T_SOL_SOCKET    0xFFFF
 #define T_SO_ERROR      0x1007
@@ -864,7 +786,6 @@ TTimeval tv;
     (VOID)bsd_setsockopt(fd, T_SOL_SOCKET, T_SO_RCVTIMEO, &tv, (LONG)sizeof(tv));
 }
 
-/* Milliseconds between two tap_eclock_now() readings. */
 static ULONG t_ms_since(ULONG t0)
 {
 ULONG rate = tap_eclock_rate();
@@ -883,11 +804,6 @@ LONG len   = (LONG)sizeof(value);
     return(value);
 }
 
-/*
- * Open a connected socket on LOCAL_PORT, send one datagram to the peer, and
- * hand back the frame the stack put on the wire.  Returns 0 on any failure,
- * having already reported it.
- */
 static ULONG t_connected_send(LONG *fd_out, UBYTE *frame, ULONG max)
 {
 LONG        fd;
@@ -962,8 +878,6 @@ LONG         n;
                   "the peer answered port unreachable", 0);
     t_settle();
 
-    /* Blocking, with four seconds to wait in.  Without the error being
-       reported this call has nothing to return until that runs out. */
     t_rcvtimeo(fd, 4);
 
     rate = tap_eclock_rate();
@@ -1093,28 +1007,12 @@ LONG         n;
 }
 
 
-/*
- * u06.  Which datagrams a socket that named a LOCAL address may receive.
- *
- * The four-tuple filter above is about who sent the datagram; this is about
- * where it arrived.  NetX Duo binds a UDP socket to a port and has nowhere to
- * record a local address, so a socket bound to one address is handed every
- * datagram that reaches the port, whichever interface carried it, unless
- * bsd_recv_udp() declines it -- and declining it means releasing the packet
- * and going back to waiting, not failing the call, because someone else's
- * traffic is not this caller's error.
- *
- * 127.0.0.1 is the address to bind for this: the machine has it, the wire
- * cannot reach it, and nothing about the datagram itself changes.  The two
- * arms differ in one argument to bind() and in nothing else.
- */
 static VOID t_case_bind_address(VOID)
 {
 LONG        fd;
 SockAddrIn  a;
 UBYTE       tag = 0;
 
-    /* The address the wire carries.  This datagram is for it. */
     fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
         return;
@@ -1140,7 +1038,6 @@ UBYTE       tag = 0;
 
     (VOID)bsd_CloseSocket(fd);
 
-    /* 127.0.0.1.  The same datagram, on an interface the bind did not name. */
     fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
     if (!t_check((BOOL)(fd >= 0), "socket(SOCK_DGRAM)", bsd_Errno()))
         return;
@@ -1170,23 +1067,6 @@ UBYTE       tag = 0;
     (VOID)bsd_CloseSocket(fd);
 }
 
-/*
- * u07.  The largest datagram that may leave, per destination.
- *
- * RFC 1122 / POSIX: a message too long to pass atomically through the
- * underlying protocol is EMSGSIZE and is NOT transmitted.  Transmit
- * fragmentation is deliberately not used, so the ceiling is the egress
- * interface's IP MTU less 28 bytes of IPv4 and UDP header: 1472 here.
- *
- * The third arm is what makes this a test of bsd_route_mtu() rather than of a
- * constant.  The same 1473 bytes to 127.0.0.1 must be accepted, because the
- * loopback interface carries 65535 -- so a routing lookup that always answered
- * 1500, or always answered the first interface, fails one of the two.
- *
- * "Not transmitted" is asserted on the wire, not inferred from the return
- * value: the failure this replaces was a datagram that was assembled, handed
- * to the driver and dropped there with success already reported.
- */
 static VOID t_case_maxdgram(VOID)
 {
 static UBYTE big[1473];
@@ -1224,7 +1104,6 @@ ULONG        len;
     (VOID)t_check((BOOL)(len == (ULONG)(ETH_HDR + 20 + 8 + 1472)),
                   "and one whole frame carried it", (LONG)len);
 
-    /* One byte more than the path takes. */
     {
         LONG n = bsd_send(fd, big, 1473, 0);
 
@@ -1236,7 +1115,6 @@ ULONG        len;
     (VOID)t_check((BOOL)(len == 0UL),
                   "and the refused datagram reached no wire", (LONG)len);
 
-    /* The same length to a route whose MTU is 65535. */
     t_addr(&a, LOOPBACK_IP, (UWORD)PEER_PORT);
     {
         LONG n = bsd_sendto(fd, big, 1473, 0, &a, (LONG)sizeof(a));
@@ -1249,21 +1127,6 @@ ULONG        len;
     (VOID)bsd_CloseSocket(fd);
 }
 
-/*
- * u08.  A datagram is a record: what a short read discards, and what a peek
- * leaves behind.
- *
- * Two decisions, and the same wire cannot tell them apart from the correct
- * behaviour without asking for the NEXT datagram.  A read shorter than the
- * datagram takes what fits and the rest is gone -- if the remainder were
- * queued instead, the following read would hand back the tail of a datagram
- * the caller has already been told it finished, and every record boundary
- * after that is off by one.  MSG_PEEK is the opposite: the datagram stays, and
- * the read after it must be the same one and not the one behind it.
- *
- * Each datagram carries a different first byte, which is the only way to say
- * which one came back rather than merely that one did.
- */
 #define T_MSG_PEEK      0x02
 
 static VOID t_case_datagram_boundary(VOID)
@@ -1286,8 +1149,6 @@ LONG         n;
     }
     t_rcvtimeo(fd, 1);
 
-    /* 200 bytes, then 8, so a read that keeps the remainder of the first has
-       something visibly wrong to hand back. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xA5, 200UL),
                   "inject a 200-byte datagram", 0);
@@ -1306,7 +1167,6 @@ LONG         n;
     (VOID)t_check((BOOL)(buf[0] == 0x5A), "and it is the one behind it",
                   (LONG)buf[0]);
 
-    /* MSG_PEEK: the same datagram twice, and nothing after it. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xC3, 16UL),
                   "inject a 16-byte datagram", 0);
@@ -1326,33 +1186,6 @@ LONG         n;
     (VOID)bsd_CloseSocket(fd);
 }
 
-/*
- * u09/u10: a read with no room in it still takes a datagram off the queue.
- *
- * A datagram socket delivers one record per read and discards whatever did
- * not fit.  Nothing fits in a zero-byte buffer, so recv(fd, buf, 0) reads a
- * record and discards all of it.  The return value cannot say whether that
- * happened -- it is 0 either way, and it is 0 again when there was nothing to
- * read -- so THE ASSERTION IS NEVER ON THE ZERO.  It is on which datagram the
- * next full-size read gets: the second one if the zero read consumed a
- * record, the first one if it only looked like it did.
- *
- * Three separate claims, and each needs its own datagrams:
- *
- *   1. with a record queued, the zero read consumes exactly one;
- *   2. with nothing queued, it returns 0 at once rather than waiting out the
- *      receive timeout -- so the socket is BLOCKING with a two-second
- *      SO_RCVTIMEO throughout, because "did not wait" is only a claim about a
- *      socket that would otherwise have waited;
- *   3. a zero-LENGTH datagram is a different thing entirely.  It is a real
- *      record carrying no payload, and a full-size read of it returns 0 while
- *      consuming it -- so an implementation that treats "this read returned
- *      0" as "there was nothing there" gets caught here, and the source
- *      address the read filled in is the proof that a record was delivered.
- */
-
-/* Long enough that waiting it out is unmistakable in the transcript, short
-   enough that a regression costs seconds rather than a run. */
 #define T_ZERO_TIMEOUT_MS   2000
 #define T_ZERO_PROMPT_MS    500
 
@@ -1383,10 +1216,8 @@ ULONG        ms;
         return;
     }
 
-    /* Blocking, with a timeout that is long enough to see. */
     t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
 
-    /* ---- recv(fd, buf, 0) with two datagrams queued. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xE1, 32UL),
                   "inject a 32-byte datagram", 0);
@@ -1409,14 +1240,12 @@ ULONG        ms;
                   "and it is the SECOND one -- the zero read consumed the "
                   "first", (LONG)buf[0]);
 
-    /* ---- and nothing is left behind it. */
     t_rcvtimeo_ms(fd, 200);
     n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), 0, NULL, NULL);
     (VOID)t_check((BOOL)(n < 0 && bsd_Errno() == T_EWOULDBLOCK),
                   "the queue is empty afterwards, not one datagram deep",
                   (n < 0) ? bsd_Errno() : n);
 
-    /* ---- an empty queue: 0, and no wait. */
     t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
     t0 = tap_eclock_now();
     n  = bsd_recv(fd, buf, 0, 0);
@@ -1425,7 +1254,6 @@ ULONG        ms;
     (VOID)t_check((BOOL)(ms < T_ZERO_PROMPT_MS),
                   "and it did not wait for a datagram to arrive", (LONG)ms);
 
-    /* ---- recvfrom() is the other vector and has its own zero handling. */
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0xF1, 32UL),
                   "inject a 32-byte datagram", 0);
@@ -1450,7 +1278,6 @@ ULONG        ms;
                   "with nothing left behind it",
                   (n < 0) ? bsd_Errno() : n);
 
-    /* ---- a zero-LENGTH datagram is a record, not an absence. */
     t_rcvtimeo_ms(fd, T_ZERO_TIMEOUT_MS);
     t_settle();
     (VOID)t_check((BOOL)t_inject(PEER_IP, PEER_PORT, 0x00, 0UL),
@@ -1518,7 +1345,6 @@ ULONG        ms;
                   "inject a second one behind it", 0);
     t_settle();
 
-    /* The control: the queue really is two deep before anything reads it. */
     n = bsd_recvfrom(fd, buf, (LONG)sizeof(buf), T_MSG_PEEK, NULL, NULL);
     (VOID)t_check((BOOL)(n == T_RAW_IPHDR + T_RAW_PAYLOAD),
                   "MSG_PEEK sees the IP header and the payload", n);
@@ -1558,8 +1384,6 @@ ULONG        ms;
 
     (VOID)bsd_CloseSocket(fd);
 }
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {

@@ -1,49 +1,8 @@
 /*
  * arp, the address resolution cache: what is at each address on this network.
- *
- *     arp ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S
- *
- * Every packet leaving this machine for the local network needs the ethernet
- * address of its destination, and ARP is how that address is found and
- * remembered. The cache separates "the network does not work" from "that
- * machine is not answering". It needs nothing of the other end but ARP, which
- * a machine that drops pings still answers.
- *
- *   an entry with a hardware address   it answered. The wire is fine, and
- *                                      whatever is wrong is above this layer
- *   an entry with no reply             we asked and nothing came back:
- *                                      wrong address, wrong network, or it
- *                                      is switched off
- *   no entry at all                    nothing here has tried to reach it
- *
- *     arp                     the whole cache
- *     arp 192.168.1.1         one address
- *     arp STATS               how much asking it has taken
- *     arp 192.168.1.1 DELETE  forget it, so the next packet asks again
- *     arp 192.168.1.1 SET=02:11:22:33:44:55
- *                             a permanent entry, for something that does not
- *                             answer ARP or that keeps changing
- *
- * IPv6 is in the same command, in a section of its own. There is no ARP in
- * IPv6. RFC 4861 neighbour discovery does the same job over ICMPv6, and NetX
- * Duo keeps its answers in a separate table. Both families stay in one command
- * here, as they do in ping, nslookup and netstat, so there is one place to ask
- * what is at an address.
- *
- * What the section adds over the ARP one is the state. An ARP entry has
- * answered or it has not. A neighbour entry says what the stack currently
- * believes: INCOMPLETE is asked with nothing back, STALE is answered once and
- * not checked since, PROBE is being re-checked now. Each state that appears is
- * spelled out under the list.
- *
- * Nothing ages out on the IPv4 side. NX_ARP_EXPIRATION_RATE is 0 in this
- * build, so an entry stays until DELETE removes it or the stack stops, and a
- * machine that has since moved is still listed. Neighbour entries do age:
- * that is what STALE and PROBE are.
- *
- * It does not start the network, unlike fetch or nslookup. The cache describes
- * a running stack, so starting one to report an empty cache would make the
- * answer meaningless. ShowNetStatus follows the same rule.
+ * IPv6 is in the same command, in a section of its own -- RFC 4861 neighbour
+ * discovery, kept in a separate table. Nothing ages out on the IPv4 side:
+ * NX_ARP_EXPIRATION_RATE is 0 in this build. It does not start the network.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -82,10 +41,7 @@ static VOID zero_control(NetStatusControl *ctl)
         ((ULONG *)ctl)[i] = 0;
 }
 
-/*
- * "02:11:22:33:44:55". The separator can be ':' or '-' or absent. All three
- * turn up on labels and in documentation.
- */
+/* "02:11:22:33:44:55". The separator can be ':' or '-' or absent. */
 static BOOL parse_mac(const char *text, UBYTE *out)
 {
     UWORD got = 0;
@@ -127,9 +83,7 @@ static BOOL parse_mac(const char *text, UBYTE *out)
 
 /*
  * The interface an entry was learnt on, by the name the rest of the tools use.
- * "interface 0" is a number out of the stack's internals. "a2065.0" is the
- * line from the configuration file, which is what identifies the card on a
- * machine with two of them.
+ * "a2065.0" identifies the card on a machine with two of them.
  */
 static const char *interface_name(UWORD nx_index, BOOL have_snapshot)
 {
@@ -159,9 +113,8 @@ static VOID print_entry(const ToolArpEntry *e, BOOL have_snapshot)
     ami_config_format_ip(e->address, addr, sizeof(addr));
 
     /*
-     * An unresolved entry has an all-zero hardware address. Printing it as
-     * 00:00:00:00:00:00 would read as a machine with a strange address rather
-     * than as silence. The retry count is how many times we asked.
+     * An unresolved entry has an all-zero hardware address; printing it would
+     * read as a strange address rather than as silence.
      */
     if (!e->resolved)
     {
@@ -191,10 +144,7 @@ static VOID print_entry(const ToolArpEntry *e, BOOL have_snapshot)
 
 /* ------------------------------------------------------------- neighbours, */
 
-/*
- * A colon says the user meant an IPv6 address. Nothing else can have one: not
- * a dotted quad, and not a host name, which arp does not take anyway.
- */
+/* A colon says the user meant an IPv6 address. Nothing else can have one. */
 static BOOL is_written_as_ip6(const char *text)
 {
     if (text == NULL)
@@ -236,8 +186,7 @@ static BOOL same_address6(const ULONG a[4], const ULONG b[4])
 
 /*
  * Resolved for display purposes: RFC 4861 7.3.3 says the cached link-layer
- * address can be used in every state but INCOMPLETE, so those are the states
- * with a hardware address to print.
+ * address can be used in every state but INCOMPLETE.
  */
 static BOOL neighbour_resolved(UWORD state)
 {
@@ -250,8 +199,8 @@ static VOID print_neighbour(const ToolNeighbour *e, BOOL have_snapshot)
     char        mac[24];
     const char *ifname = interface_name(e->nx_index, have_snapshot);
 
-    /* 24 rather than 39: it lines up every address short enough to be typed
-       by hand, and a longer one pushes the rest right instead of being cut. */
+    /* 24 rather than 39: it lines up every address short enough to be typed by
+       hand, and a longer one pushes the rest right instead of being cut. */
     tool_printf("  %-24s  ", (LONG)e->text);
 
     if (neighbour_resolved(e->state))
@@ -286,10 +235,8 @@ static VOID print_neighbour(const ToolNeighbour *e, BOOL have_snapshot)
     tool_printf("\n");
 }
 
-/*
- * What each state that appeared means, once, under the list. The names are
- * RFC 4861's and say nothing to a reader who has not read it.
- */
+/* What each state that appeared means, once, under the list. The names are
+   RFC 4861's and say nothing to a reader who has not read it. */
 static VOID explain_states(const ToolNeighbours *nd, const ULONG want[4],
                            BOOL one)
 {
@@ -352,10 +299,9 @@ static BOOL same_prefix6(const ULONG a[4], const ULONG b[4], ULONG bits)
 }
 
 /*
- * TRUE when nothing on this machine can ever put `addr` in the neighbour
- * cache: it is not link-local and no on-link prefix covers it, so packets for
- * it go to a router and the router's own entry is the one to check. The IPv4
- * half says the same thing about an address off this machine's subnet.
+ * TRUE when nothing on this machine can ever put `addr` in the neighbour cache:
+ * not link-local and no on-link prefix covers it, so packets for it go to a
+ * router and the router's own entry is the one to check.
  */
 static BOOL off_link6(const ULONG addr[4], BOOL have_routes)
 {
@@ -365,7 +311,7 @@ static BOOL off_link6(const ULONG addr[4], BOOL have_routes)
         return FALSE;               /* cannot tell, so do not assert otherwise */
 
     /* _nxd_ipv6_search_onlink() answers 1 for every fe80:: address before it
-       looks at any list, so there is no prefix to find and none is needed. */
+       looks at any list, so there is no prefix to find. */
     if ((addr[0] & 0xFFC00000UL) == 0xFE800000UL)
         return FALSE;
 
@@ -403,10 +349,8 @@ static const char *default_router6(BOOL have_routes)
     return NULL;
 }
 
-/*
- * Why an address is not in the neighbour cache. The IPv6 half of
- * explain_absence() below, and the same two reasons.
- */
+/* Why an address is not in the neighbour cache: the IPv6 half of
+   explain_absence() below, and the same two reasons. */
 static VOID explain_absence6(const ULONG addr[4], const char *text,
                              BOOL have_routes)
 {
@@ -429,10 +373,9 @@ static VOID explain_absence6(const ULONG addr[4], const char *text,
     }
 
     /*
-     * On this machine's link, or a machine that could not tell. An entry is
-     * made when something sends to the address, and unlike the ARP side it is
-     * aged out again when nothing does, so an absence here is "nothing has
-     * spoken to it lately" rather than a fault.
+     * On this machine's link, or a machine that could not tell. Neighbour
+     * entries age out, so an absence is "nothing has spoken to it lately"
+     * rather than a fault.
      */
     if (have_routes)
         tool_printf("  It is on this machine's link, so an entry appears as "
@@ -466,13 +409,9 @@ static BOOL on_our_network(ULONG addr, BOOL have_snapshot)
 }
 
 /*
- * Why an address is not in the cache. There are two distinct reasons.
- *
- * ARP is only spoken to machines on this machine's own network. An address
- * anywhere else is reached by handing the packet to the router, so it never
- * appears here however much traffic goes to it. That needs saying rather than
- * "nothing has tried to reach it", which would be wrong after a successful
- * ping.
+ * Why an address is not in the cache, and there are two distinct reasons. ARP
+ * is only spoken to machines on this machine's own network; an address anywhere
+ * else never appears here however much traffic goes to it.
  */
 static VOID explain_absence(ULONG addr, const char *text, BOOL have_snapshot)
 {
@@ -495,11 +434,9 @@ static VOID explain_absence(ULONG addr, const char *text, BOOL have_snapshot)
     }
 
     /*
-     * On this machine's network, or a machine that could not tell. An entry
-     * is made when something sends to the address, and on this side nothing
-     * ages out (NX_ARP_EXPIRATION_RATE is 0, see the top of this file), so an
-     * absence here means nothing has ever sent to it since the stack came up.
-     * That is not a fault, which is why it needs saying.
+     * On this machine's network, or a machine that could not tell. Nothing ages
+     * out on this side, so an absence means nothing has sent to it since the
+     * stack came up. That is not a fault, which is why it needs saying.
      */
     if (have_snapshot)
         tool_printf("  It is on this machine's network, so an entry appears "
@@ -511,9 +448,8 @@ static VOID explain_absence(ULONG addr, const char *text, BOOL have_snapshot)
 }
 
 /*
- * The protocol counters, which say how the cache came to look the way it
- * does. Requests sent with few responses received is a quiet network or a
- * wrong netmask. Invalid messages are somebody else's malformed frames.
+ * The protocol counters. Requests sent with few responses received is a quiet
+ * network or a wrong netmask; invalid messages are somebody else's frames.
  */
 static VOID print_stats(const ToolStats *s)
 {
@@ -617,11 +553,8 @@ int main(int argc, char **argv)
         }
 
         /*
-         * A well-formed address the running stack still has no cache for.
-         * Asked before anything is printed, because every later answer would
-         * be "not in the cache" and read as a fact about the address.
-         * Opening never starts the stack, and arp has nothing to say about
-         * one that is not running.
+         * Asked before anything is printed, because every later answer would be
+         * "not in the cache" and read as a fact about the address.
          */
         /* FALSE: QUIET drops the listing, never the reason there is none. */
         pb = tool_netstatus_open(FALSE);
@@ -636,9 +569,8 @@ int main(int argc, char **argv)
 
         if (!has6)
         {
-            /* The address itself is granted, in the same breath as the
-               refusal: without that the answer reads as a verdict on what was
-               typed, which is what "%s is not an address" above would say. */
+            /* The address itself is granted in the same breath as the refusal,
+               or the answer reads as a verdict on what was typed. */
             tool_error("%s is a well-formed IPv6 address, but the running "
                        "stack has no IPv6", (LONG)address_text);
             tool_no_ipv6_note();
@@ -666,9 +598,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The interface table, for the name column and for deciding whether ARP
-     * can ever have an answer about an address. Wanted on every path. A
-     * failure here only costs detail.
+     * The interface table, for the name column and for deciding whether ARP can
+     * ever have an answer about an address. A failure here only costs detail.
      */
     tool_nx_quiet(TRUE);
     have_snapshot = (BOOL)(tool_snapshot(&arp_snap, FALSE) == 0);
@@ -691,10 +622,8 @@ int main(int argc, char **argv)
             return RETURN_ERROR;
         }
 
-        /* Changing the cache needs the library, but still must not start it:
-           there is no cache to change until something is running. */
-        /* FALSE: QUIET drops the message, never the reason there is
-           nothing to report. */
+        /* Changing the cache needs the library, but still must not start it.
+           FALSE: QUIET drops the message, never the reason there is none. */
         base = tool_netstatus_open(FALSE);
         if (base == NULL)
         {
@@ -705,7 +634,7 @@ int main(int argc, char **argv)
         zero_control(&ctl);
 
         /* One command, two caches: which one is changed follows from how the
-           address was written, exactly as the list below does. */
+           address was written. */
         if (want_one6)
         {
             ctl.nsc_Destination6[0] = want6[0];
@@ -786,8 +715,8 @@ int main(int argc, char **argv)
         tool_printf("\n");
     }
 
-    /* An IPv6 address was asked for: the ARP cache cannot hold one, so the
-       loop below would print a heading over nothing. */
+    /* An IPv6 address was asked for: the ARP cache cannot hold one, so the loop
+       below would print a heading over nothing. */
     if (!want_one6)
     {
         for (i = 0; i < (ULONG)arp_stats.arp_count; i++)
@@ -804,9 +733,8 @@ int main(int argc, char **argv)
     }
 
     /*
-     * The neighbour cache, under the ARP one. Empty on a machine whose
-     * library has no IPv6, so an IPv4-only report is unchanged down to the
-     * blank line.
+     * The neighbour cache, under the ARP one. Empty on a machine whose library
+     * has no IPv6.
      */
     if (!want_one)
     {
@@ -853,26 +781,16 @@ int main(int argc, char **argv)
         }
         else
         {
-            /* The answer, not commentary: an empty cache is what the run
-               found. QUIET drops the headings above it, not this. */
+            /* The answer, not commentary: an empty cache is what the run found.
+               QUIET drops the headings above it, not this. */
             tool_printf("The address cache is empty.\n");
         }
     }
     else if ((arp_stats.arp_truncated || arp_nd.truncated) && !quiet)
     {
         /*
-         * The snapshot holds TOOL_MAX_ARP entries and the stack can report
-         * more in nsh_Available. A list that silently stops reads as complete,
-         * which is worse than a short one: it is the same output a machine
-         * with nothing else in its cache produces.
-         *
-         * Neither cache can currently reach this. AMI_ARP_CACHE_SIZE is 1024
-         * bytes of NX_ARP, which is 19 entries against TOOL_MAX_ARP's 32, and
-         * NX_IPV6_NEIGHBOR_CACHE_SIZE is 8 against TOOL_MAX_ND's 16 --
-         * measured, tests/tools/run-toolsay.sh fills the first with `arp SET=`
-         * and the 20th is refused. So this is what happens when either
-         * ceiling is raised past the other, not something to go looking for
-         * today.
+         * The snapshot holds TOOL_MAX_ARP entries and the stack can report more
+         * in nsh_Available. A list that silently stops reads as complete.
          */
         tool_printf("\n");
 

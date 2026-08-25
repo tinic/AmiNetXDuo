@@ -1,57 +1,7 @@
 /*
- * AmiNetXDuo, RFC 6724 source address selection.
- *
- * WHAT THIS REPLACES.  The top-level CMakeLists drops
- * third_party/netxduo/common/src/nxd_ipv6_interface_find.c from the vendored
- * source glob, so _nxd_ipv6_interface_find() is undefined and every caller
- * inside NetX Duo -- UDP send, TCP connect, the raw send, ICMPv6 echo, error
- * message and router solicitation -- and every caller in src/bsdsocket and
- * src/netstack resolves to this one.  No vendored file is edited and no call
- * site is patched, the same mechanism src/net68k uses for the IP checksum.
- *
- * WHY.  The vendored routine calls itself an RFC 6724 selection and is a
- * per-interface walk that breaks on the first link-local hit when the
- * destination is link-local, on the first address whose own prefix covers the
- * destination otherwise, and on the first non-link-local address on a default
- * router's interface after that.  There is no candidate set, no policy table
- * and none of the rules: the answer depends on the order addresses were
- * configured in.  With one global and one link-local on one interface that is
- * usually the same answer this file gives.  With two globals, with a
- * deprecated address, or with two interfaces, it is not.
- *
- * WHAT THIS IS.  §4 builds the candidate set, §5 orders it.  The comparator
- * below is the rule list in the RFC's order, and each rule that is NOT
- * implemented says at its place in the order why the information it needs
- * does not exist on this machine, rather than being left out silently:
- *
- *   Rule 1  prefer same address                  implemented
- *   Rule 2  prefer appropriate scope             implemented
- *   Rule 3  avoid deprecated addresses           implemented
- *   Rule 4  prefer home addresses                NOT APPLICABLE, see below
- *   Rule 5  prefer outgoing interface            implemented
- *   Rule 5.5 prefer a prefix advertised by the
- *           next hop                             NOT APPLICABLE, see below
- *   Rule 6  prefer matching label                implemented, §2.1 table
- *   Rule 7  prefer temporary addresses           NOT APPLICABLE, see below
- *   Rule 8  use longest matching prefix          implemented
- *
- * The §2.1 policy table is here in full, all nine rows.  Source selection
- * reads the label column only.  The precedence column belongs to destination
- * address ordering (§6), which this machine does not do and cannot: the
- * resolver under getaddrinfo() answers with one address per family (see the
- * header of src/bsdsocket/addrinfo.c), so there is never a set to order.  The
- * column is carried because the table is the table, and because destination
- * ordering becomes possible the day the resolver returns more than one answer.
- *
- * THE CONTRACT IS UNCHANGED.  Same signature, same NX_SUCCESS /
- * NX_NO_INTERFACE_ADDRESS, same meaning for if_ptr (search that interface
- * only).  The one observable difference beyond the ordering is Rule 3: a
- * DEPRECATED address is now a candidate of last resort rather than invisible,
- * which is what §5 says it is.  Nothing in this tree deprecates an address
- * yet -- the preferred lifetime from a router advertisement is not tracked --
- * so today that arm is reached only by a caller that sets the state itself.
- * It is implemented now so that selection is already right when the lifetime
- * work lands, rather than being a second thing to remember then.
+ * AmiNetXDuo, RFC 6724 source address selection.  Replaces the vendored
+ * _nxd_ipv6_interface_find(), which the top-level CMakeLists drops from the
+ * source glob, for every caller in NetX Duo, src/bsdsocket and src/netstack.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -72,12 +22,8 @@
 #define ANX6_SCOPE_GLOBAL       0xEU
 
 /*
- * RFC 6724 §2.1, the default policy table, longest matching prefix wins.
- *
- * The rows are in the RFC's order, which is not the lookup order: the lookup
- * below compares prefix lengths, so ::/0 sitting second is not a catch-all
- * that swallows the rows after it.  Written in the RFC's order so the table
- * can be read against §2.1 line by line.
+ * RFC 6724 2.1, the default policy table, in the RFC's order.  The lookup
+ * below compares prefix lengths, so ::/0 sitting second is not a catch-all.
  */
 typedef struct ANX6_POLICY_STRUCT
 {
@@ -105,10 +51,7 @@ static const ANX6_POLICY anx6_policy_table[] =
     (sizeof(anx6_policy_table) / sizeof(anx6_policy_table[0]))
 
 
-/*
- * RFC 6724 §2.2 CommonPrefixLen, without the cap the caller applies: the
- * number of leading bits the two addresses agree on, 0..128.
- */
+/* RFC 6724 2.2 CommonPrefixLen, uncapped: leading bits a and b agree on. */
 UINT anx6_common_prefix_len(const ULONG *a, const ULONG *b)
 {
 UINT  i;
@@ -146,14 +89,6 @@ static UINT anx6_same_address(const ULONG *a, const ULONG *b)
 }
 
 
-/*
- * Does `prefix`/`length` cover `addr`?  Masked longword compares rather than
- * anx6_common_prefix_len() >= length: this runs nine times per policy lookup
- * and once per address in the on-link walk, and every one of the §2.1 rows
- * but two is answered by the first longword.  The bit position inside the
- * longword, which is what makes CommonPrefixLen expensive, is never needed
- * here.
- */
 static UINT anx6_prefix_covers(const ULONG *prefix, UINT length,
                                const ULONG *addr)
 {
@@ -179,17 +114,9 @@ ULONG mask;
 
 
 /*
- * RFC 4007 §4 scope of a unicast or multicast address.
- *
- * ::1 is link-local: RFC 4007 §4 describes the loopback address as the
- * link-local address of a virtual interface to a link that goes nowhere, and
- * that is what keeps it out of the candidate set for anything but itself.
- *
- * An IPv4-mapped address takes the scope of the address inside it, RFC 6724
- * §3.1: 169.254/16 and 127/8 are link-local, everything else global.  Nothing
- * here ever holds one -- this port does not put IPv4-mapped addresses on an
- * interface -- but the destination can be one, and its scope decides which of
- * our addresses Rule 2 will accept.
+ * RFC 4007 4 scope.  ::1 is link-local -- the loopback link goes nowhere --
+ * and an IPv4-mapped address takes the scope of the address inside it,
+ * RFC 6724 3.1.
  */
 UINT anx6_scope(const ULONG *addr)
 {
@@ -245,10 +172,8 @@ UINT best_len = 0;
     {
     UINT length = anx6_policy_table[i].anx6_policy_length;
 
-        /* Strictly longer, so ::/0 at row 1 never displaces a row that
-           already matched at length 0 -- there is none, ::/0 is the only
-           zero-length row, but the test is written to be about length and
-           not about which row happens to be first. */
+        /* Strictly longer, so ::/0 never displaces a row that already
+           matched. */
         if ((length > best_len) &&
             anx6_prefix_covers(anx6_policy_table[i].anx6_policy_prefix,
                                length, addr))
@@ -283,17 +208,9 @@ UINT label = 0;
 
 
 /*
- * §4, the candidate set.  An address is a candidate when it is one this node
- * holds and may send from:
- *
- *   * assigned and not TENTATIVE.  Duplicate address detection has not
- *     finished on a tentative address, so it is not this node's yet.  UNKNOWN
- *     is an address that failed detection or was withdrawn.
- *   * on an interface that is up.
- *
- * Multicast and unspecified never appear in nx_ipv6_address[]; the test is
- * here because a caller that writes the table by hand can put one there, and
- * §4 excludes both from the candidate set by name.
+ * 4, the candidate set: assigned and not TENTATIVE (duplicate address
+ * detection has not finished on one that is), on an interface that is up,
+ * and neither multicast nor unspecified.
  */
 static UINT anx6_usable(const NXD_IPV6_ADDRESS *addr)
 {
@@ -341,29 +258,9 @@ UINT state;
 
 /*
  * The interface the packet would leave by, which is Rule 5's question and is
- * what §4 means by "the outgoing interface".  RFC 6724 leaves it to the
- * routing table; this is that lookup, in the order the routing table would
- * answer it:
- *
- *   1. the destination is one of ours          -- it leaves by the interface
- *                                                 that address is on
- *   2. ::1                                     -- the loopback interface
- *   3. multicast                               -- the interface the group was
- *                                                 joined on, else the first
- *                                                 interface that is up
- *   4. link-local                              -- on-link everywhere, so the
- *                                                 first interface that is up
- *                                                 and holds an address
- *   5. on-link                                 -- the interface holding an
- *                                                 address whose prefix covers
- *                                                 the destination
- *   6. a default router                        -- its interface
- *
- * NX_NULL when none of those answers, which is a destination with no route and
- * is reported as NX_NO_INTERFACE_ADDRESS.  That refusal is deliberate and is
- * not part of §5: a source address cannot make a destination reachable, and
- * the callers turn the failure into ENETUNREACH, which is the answer a caller
- * can act on.
+ * what 4 means by "the outgoing interface".  RFC 6724 leaves it to the
+ * routing table; NX_NULL is a destination with no route, and the callers turn
+ * that into ENETUNREACH.
  */
 static NX_INTERFACE *anx6_outgoing_interface(NX_IP *ip_ptr, const ULONG *dest)
 {
@@ -395,11 +292,8 @@ NX_INTERFACE     *first_up = NX_NULL;
 #endif /* NX_DISABLE_LOOPBACK_INTERFACE */
 
     /*
-     * The first physical interface that is up AND HOLDS AN ADDRESS.  Up is not
-     * enough: an interface with no usable IPv6 address on it contributes no
-     * candidate, so naming it as the outgoing interface for a link-local or
-     * an unjoined multicast destination turns a machine that has a link-local
-     * on its second card into one with no source at all.
+     * Up is not enough: an interface with no usable IPv6 address contributes
+     * no candidate, so naming it leaves a link-local destination sourceless.
      */
     for (i = 0; (i < (NX_MAX_IPV6_ADDRESSES + NX_LOOPBACK_IPV6_ENABLED)) &&
                 (first_up == NX_NULL); i++)
@@ -450,15 +344,9 @@ NX_INTERFACE     *first_up = NX_NULL;
     }
 
     /*
-     * 5. on-link.  The test is the destination against the prefix of each
-     * address the interface holds, which is what covers both a static address
-     * and one formed from an advertised prefix, because the address carries
-     * the prefix length it was formed with.
-     *
-     * The prefix list (_nxd_ipv6_search_onlink()) is deliberately not consulted
-     * here: its entries carry no interface, so it cannot answer "which one",
-     * and a prefix advertised L=1 A=0 -- the only kind that is on the list and
-     * has no address formed from it -- leaves nothing to select anyway.
+     * 5. on-link: the destination against the prefix of each address the
+     * interface holds.  The prefix list is not consulted -- its entries carry
+     * no interface, so it cannot answer "which one".
      */
     for (i = 0; i < (NX_MAX_IPV6_ADDRESSES + NX_LOOPBACK_IPV6_ENABLED); i++)
     {
@@ -513,16 +401,9 @@ NX_INTERFACE     *first_up = NX_NULL;
 
 
 /*
- * ONE CANDIDATE, WITH EVERYTHING THE RULES ASK ABOUT IT ALREADY WORKED OUT.
- *
- * The rules are a pairwise comparison and the loop below is a pass over the
- * table keeping the best so far, so a field read straight out of
- * NXD_IPV6_ADDRESS would be recomputed for every comparison the incumbent
- * takes part in.  The label is the one that matters: it is a walk of the
- * nine-row policy table, and _nxd_ipv6_interface_find() is on the UDP send
- * path (nxd_udp_socket_send.c) and runs once per datagram.
- *
- * Filling this in is O(candidates); comparing is then field reads.
+ * One candidate, with everything the rules ask about it already worked out:
+ * the comparison is pairwise, and the nine-row label walk is on the UDP send
+ * path and runs once per datagram.
  */
 typedef struct ANX6_CANDIDATE_STRUCT
 {
@@ -566,10 +447,8 @@ UINT length;
 
 
 /*
- * RFC 6724 §5, the rules, in order.  Positive when sa is preferred, negative
- * when sb is, zero when no rule separates them -- in which case the caller
- * keeps the one it already had, so the answer is the first in table order and
- * is stable rather than arbitrary.
+ * RFC 6724 5, the rules, in order.  Positive when sa is preferred, negative
+ * when sb is, zero when no rule separates them.
  */
 static INT anx6_better(UINT dest_scope,
                        const ANX6_CANDIDATE *sa, const ANX6_CANDIDATE *sb)
@@ -607,13 +486,8 @@ UINT b;
         return a ? -1 : 1;
     }
 
-    /*
-     * Rule 4: prefer home addresses.  NOT APPLICABLE.  Mobile IPv6 (RFC 6275)
-     * is the only source of a home address and a care-of address, this stack
-     * implements no part of it, and nothing in NXD_IPV6_ADDRESS can hold the
-     * distinction.  Every address here is a home address by the RFC's own
-     * definition, so the rule cannot separate any two of them.
-     */
+    /* Rule 4: prefer home addresses.  NOT APPLICABLE: Mobile IPv6 (RFC 6275)
+       is not implemented and NXD_IPV6_ADDRESS cannot hold the distinction. */
 
     /* Rule 5: prefer the outgoing interface. */
     a = sa -> anx6_cand_outgoing;
@@ -623,15 +497,9 @@ UINT b;
         return a ? 1 : -1;
     }
 
-    /*
-     * Rule 5.5: prefer addresses in a prefix advertised by the next hop.  NOT
-     * APPLICABLE.  It needs the link from a prefix to the router that
-     * advertised it, and NX_IPV6_PREFIX_ENTRY carries no router: the entry is
-     * the prefix, its length, its lifetime and its L bit, and
-     * nx_icmpv6_process_ra.c does not record which of the (at most two)
-     * default routers put it there.  The information is not merely unread,
-     * it is never written, so the rule cannot be evaluated.
-     */
+    /* Rule 5.5: prefer a prefix advertised by the next hop.  NOT APPLICABLE:
+       NX_IPV6_PREFIX_ENTRY carries no router, so the rule cannot be
+       evaluated. */
 
     /* Rule 6: prefer matching label, from the §2.1 policy table. */
     a = sa -> anx6_cand_label_match;
@@ -641,14 +509,8 @@ UINT b;
         return a ? 1 : -1;
     }
 
-    /*
-     * Rule 7: prefer temporary addresses.  NOT APPLICABLE.  Temporary
-     * addresses are RFC 8981 privacy extensions and this stack forms none:
-     * every autoconfigured address comes from the interface identifier in
-     * nx_icmpv6_process_ra.c, which is derived from the MAC and never
-     * regenerated.  With no temporary address in nx_ipv6_address[] the rule
-     * has nothing to prefer, and there is no field it could read if it had.
-     */
+    /* Rule 7: prefer temporary addresses.  NOT APPLICABLE: RFC 8981 privacy
+       extensions are not implemented, so there is none to prefer. */
 
     /* Rule 8: use longest matching prefix, §2.2 CommonPrefixLen. */
     a = sa -> anx6_cand_prefix_len;
@@ -662,32 +524,12 @@ UINT b;
 }
 
 
-/**************************************************************************/
-/*                                                                        */
-/*  FUNCTION                                                              */
-/*                                                                        */
-/*    _nxd_ipv6_interface_find                                            */
-/*                                                                        */
-/*  DESCRIPTION                                                           */
-/*                                                                        */
-/*    Selects the source address for a datagram to dest_address, by        */
-/*    RFC 6724 sections 4 and 5, and with it the outgoing interface: the   */
-/*    caller reads nxd_ipv6_address_attached off the answer.               */
-/*                                                                        */
-/*  INPUT                                                                 */
-/*                                                                        */
-/*    ip_ptr                                Pointer to IP control block   */
-/*    dest_address                          Destination IP address        */
-/*    ipv6_addr                             Selected source address, out  */
-/*    if_ptr                                Restrict the candidate set to */
-/*                                            this interface, or NX_NULL  */
-/*                                                                        */
-/*  OUTPUT                                                                */
-/*                                                                        */
-/*    NX_SUCCESS, or NX_NO_INTERFACE_ADDRESS when the candidate set is    */
-/*    empty or the destination has no route.                              */
-/*                                                                        */
-/**************************************************************************/
+/*
+ * RFC 6724 4 and 5 source selection for dest_address, and with it the
+ * outgoing interface: the caller reads nxd_ipv6_address_attached off the
+ * answer.  if_ptr restricts the candidate set to one interface, or NX_NULL.
+ * Returns NX_SUCCESS, or NX_NO_INTERFACE_ADDRESS when there is no candidate.
+ */
 UINT _nxd_ipv6_interface_find(NX_IP *ip_ptr, ULONG *dest_address,
                               NXD_IPV6_ADDRESS **ipv6_addr, NX_INTERFACE *if_ptr)
 {
@@ -700,14 +542,11 @@ NXD_IPV6_ADDRESS *addr;
 ANX6_CANDIDATE    best;
 ANX6_CANDIDATE    here;
 
-    /* ipv6_addr must not be NULL. */
     NX_ASSERT(ipv6_addr != NX_NULL);
 
     /*
-     * §4: "the outgoing interface".  When the caller names one it is the
-     * answer -- nx_icmpv6_send_rs() and the multicast arm of
-     * nx_icmpv6_process_echo_request() both do, because the reply has to
-     * leave by the interface the request arrived on.
+     * 4, "the outgoing interface".  When the caller names one it is the
+     * answer: the reply has to leave by the interface the request arrived on.
      */
     if (if_ptr != NX_NULL)
     {
@@ -736,16 +575,10 @@ ANX6_CANDIDATE    here;
         }
 
         /*
-         * §4: "For all multicast and link-local destination addresses, the
-         * set of candidate source addresses MUST only include addresses
-         * assigned to interfaces belonging to the same link as the outgoing
-         * interface."  One SANA-II device is one link, so same link is same
-         * interface here.
-         *
-         * This is also what keeps ::1 out of every other answer and everything
-         * else out of ::1's: the loopback interface is a link of its own and
-         * ::1 is link scope, so a loopback destination admits only loopback
-         * addresses and a link-local destination on eth0 admits only eth0's.
+         * 4: for a multicast or link-local destination the candidate set is
+         * limited to the outgoing interface's link.  One SANA-II device is
+         * one link, so that is the same interface.  This is also what keeps
+         * ::1 out of every other answer and everything else out of ::1's.
          */
         if ((dest_scope <= ANX6_SCOPE_LINK) &&
             (addr -> nxd_ipv6_address_attached != out_if))
@@ -754,11 +587,8 @@ ANX6_CANDIDATE    here;
         }
 
         /*
-         * A destination of larger scope never leaves by loopback, and ::1 is
-         * not a legal source for it.  §4 puts this the other way round -- the
-         * loopback interface is not the outgoing interface, so its addresses
-         * are not in the candidate set -- and this is that, made explicit
-         * because the loopback address lives in the same array as the rest.
+         * The loopback interface is not the outgoing interface for a
+         * wider-scoped destination, so its addresses are not candidates.
          */
 #ifndef NX_DISABLE_LOOPBACK_INTERFACE
         if ((addr -> nxd_ipv6_address_attached ==
@@ -769,8 +599,7 @@ ANX6_CANDIDATE    here;
         }
 #endif /* NX_DISABLE_LOOPBACK_INTERFACE */
 
-        /* The caller's constraint, which §4 does not know about: it narrows
-           the candidate set to one interface and nothing else. */
+        /* The caller's constraint, which the RFC does not know about. */
         if ((if_ptr != NX_NULL) && (addr -> nxd_ipv6_address_attached != if_ptr))
         {
             continue;
@@ -791,13 +620,9 @@ ANX6_CANDIDATE    here;
     }
 
     /*
-     * §4's failure case, "no address of appropriate scope": Rule 2 orders the
-     * candidates but cannot invent one, and the winner of a set that holds
-     * nothing wide enough is still too narrow.  A link-local source on a
-     * datagram to a global destination is discarded by the first router it
-     * reaches, so the caller is told there is no route rather than being given
-     * a source that cannot work -- which is what the routine this replaces
-     * did, by never considering the address at all.
+     * 4's failure case: Rule 2 orders the candidates but cannot invent one,
+     * and a link-local source on a datagram to a global destination is
+     * discarded by the first router.  Report no route instead.
      */
     if (best.anx6_cand_scope < dest_scope)
     {

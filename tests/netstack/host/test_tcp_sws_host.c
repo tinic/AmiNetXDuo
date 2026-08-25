@@ -2,38 +2,6 @@
  * AmiNetXDuo, RFC 1122 4.2.3.4 (MUST-38) sender silly-window avoidance: what
  * this stack puts on the wire when the peer hands its window back in slivers.
  *
- * The vendored send path asked one question about the window -- is it non-zero
- * -- and sent whatever fitted.  A peer whose application reads a few hundred
- * bytes at a time reopens a few hundred bytes at a time, and the connection
- * settles into segments that size: forty bytes of header per two hundred of
- * payload, on a machine whose driver costs half a millisecond a frame.  That
- * is the silly window, from the sending side.
- *
- * This cannot be measured on the rig.  Every peer the lab has is Linux, which
- * runs receiver-side SWS avoidance of its own and therefore never offers the
- * increments this rule is about; producing them means writing a peer that
- * misbehaves on purpose, and then the figure measures the peer.  So the rule
- * is asserted here, against the real send path, where a segment either leaves
- * or does not.
- *
- * IT ALSO PINS THE HALF THAT MUST NOT CHANGE, and that half is the reason the
- * test exists rather than the rule: this must not become Nagle.  Nagle
- * withholds a SMALL WRITE while anything is unacknowledged.  The rule here
- * withholds any write when the WINDOW is a sliver, and c_small_write_is_not_
- * delayed asserts that one byte written into an open window with a segment
- * still in flight leaves immediately.  TCP_NODELAY refuses 0 in
- * src/bsdsocket/options.c on the grounds that there is no Nagle to disable,
- * and that answer has to keep being true.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nx_tcp_socket_send_internal.c, nx_tcp_socket_state_transmit_check.c,
- * nx_tcp_socket_state_ack_check.c and nx_tcp_socket_create.c -- the send path,
- * the path that decides when a blocked sender is worth waking, and the path
- * that records Max(SND.WND).
- *
- * Stubbed: everything that would touch a driver, a packet pool or another
- * thread, the same shim tests/netstack/host/test_tcp_earlyretx_host.c uses.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -44,8 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-/* ---------------------------------------------------------------- shim ---- */
 
 static ULONG h_now = 1000;
 
@@ -283,8 +249,6 @@ VOID _nx_tcp_socket_retransmit_queue_flush(NX_TCP_SOCKET *socket_ptr)
     (void)socket_ptr;
 }
 
-/* ------------------------------------------------------------- fixture ---- */
-
 #define H_MSS           1460UL
 #define H_BUF           2048
 #define H_PACKETS       12
@@ -331,11 +295,6 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_connect_mss  = H_MSS;
     h_sock.nx_tcp_socket_connect_mss2 = H_MSS * H_MSS;
 
-    /* The peer opened with a full window and has not shrunk it yet.  The cases
-       below move nx_tcp_socket_tx_window_advertised and leave
-       nx_tcp_socket_tx_window_advertised_max alone, which is the whole point
-       of keeping the two apart: the sliver being judged is not the number the
-       threshold is derived from. */
     h_sock.nx_tcp_socket_tx_window_advertised     = H_PEER_WINDOW;
     h_sock.nx_tcp_socket_tx_window_advertised_max = H_PEER_WINDOW;
     h_sock.nx_tcp_socket_tx_window_congestion     = H_PEER_WINDOW;
@@ -375,10 +334,6 @@ static UINT h_write(ULONG bytes)
     return _nx_tcp_socket_send_internal(&h_sock, p, 0);
 }
 
-/* Put the socket in the state the rule is about: `flight` bytes unacknowledged
-   and a PEER window that leaves exactly `usable` bytes on top of them.  The
-   congestion window is left wide open, because the rule is not about it --
-   g_congestion_window_is_not_a_sliver is the case that says so. */
 static void h_in_flight(ULONG flight, ULONG usable)
 {
     h_sock.nx_tcp_socket_tx_outstanding_bytes = flight;
@@ -386,17 +341,10 @@ static void h_in_flight(ULONG flight, ULONG usable)
     h_sock.nx_tcp_socket_tx_window_congestion = H_PEER_WINDOW;
 }
 
-/* --------------------------------------------------------------- cases ---- */
-
 static void a_open_window_sends(void)
 {
     UINT status;
 
-    /*
-     * The case that is every bulk transfer, and the one the rule must leave
-     * alone.  A full window, a segment already in flight, and a full-sized
-     * write: rule (1), a maximum-sized segment can be sent.
-     */
     h_fixture();
 
     status = h_write(512);
@@ -418,18 +366,6 @@ static void b_sliver_with_flight_holds(void)
 {
     UINT status;
 
-    /*
-     * The defect.  512 bytes in flight, the peer has handed back 200 bytes of
-     * room, and the application offers 100.  The vendored path asked only
-     * whether the window was non-zero and put a 100-byte segment on the wire;
-     * the next 200-byte reopening would have got another, and so on for as
-     * long as the peer read in that size.
-     *
-     * 100 rather than 512 on purpose: a write LARGER than the sliver is
-     * refused on the old code too, because the fragmenting arm needs a packet
-     * from the pool and this shim has none.  A write that FITS separates the
-     * two builds.
-     */
     h_fixture();
     h_in_flight(512, 200);
 
@@ -441,10 +377,6 @@ static void b_sliver_with_flight_holds(void)
     h_check_eq(status, NX_WINDOW_OVERFLOW,
                "a send the window rule refused did not report the window");
 
-    /* And it must not have been mistaken for a zero window: the persist timer
-       probes a receiver that said zero, and this one said 712.  Arming it here
-       would move the retransmission retry limit onto the probe failure count
-       and stop it ever being reached (nx_tcp_socket_send_internal.c). */
     h_check(h_sock.nx_tcp_socket_zero_window_probe_has_data == NX_FALSE,
             "a non-zero window armed the zero-window persist probe");
 
@@ -456,15 +388,6 @@ static void c_small_write_is_not_delayed(void)
 {
     UINT status;
 
-    /*
-     * NOT NAGLE, asserted.  One byte offered while 512 are unacknowledged, and
-     * a window wide open.  Nagle would hold this until the flight is
-     * acknowledged; rule (1) is measured against the window and not against
-     * the size of the write, so it leaves now.
-     *
-     * If this ever fails, TCP_NODELAY's refusal of 0 in
-     * src/bsdsocket/options.c has become a lie.
-     */
     h_fixture();
     h_in_flight(512, H_PEER_WINDOW - 512);
 
@@ -483,13 +406,6 @@ static void d_nothing_in_flight_always_sends(void)
 {
     UINT status;
 
-    /*
-     * The clause that makes the rule safe to hold with.  200 bytes of window,
-     * nothing outstanding: no acknowledgment is coming to reopen anything, the
-     * persist timer declines to arm because the window is not zero, and a
-     * stack that held here would wait on a window update the peer has no
-     * reason to send.  RFC 1122 4.2.3.4 rule (2), SND.NXT = SND.UNA.
-     */
     h_fixture();
     h_in_flight(0, 200);
 
@@ -510,14 +426,6 @@ static void e_half_the_max_window_releases(void)
 {
     UINT status;
 
-    /*
-     * Rule (3), Fs = 1/2.  A peer that never advertised more than 2400 bytes
-     * is not a silly-window peer at 1200: half of everything it ever offered
-     * is as good as this connection gets, and a stack that waited for a full
-     * segment would wait forever.  Max(SND.WND) rather than the current
-     * window is what makes the two cases here different, because the current
-     * window is the same 1200 in both.
-     */
     h_fixture();
     h_sock.nx_tcp_socket_tx_window_advertised_max = 2400;
     h_in_flight(512, 1200);
@@ -550,11 +458,6 @@ static void f_zero_window_still_persists(void)
 {
     UINT status;
 
-    /*
-     * The path this rule must not have taken over.  A zero window is
-     * RFC 1122 4.2.2.17, not 4.2.3.4, and it is answered by arming the persist
-     * probe.  Nothing about that changes.
-     */
     h_fixture();
     h_sock.nx_tcp_socket_tx_outstanding_bytes = 512;
     h_sock.nx_tcp_socket_tx_window_advertised = 0;
@@ -575,19 +478,6 @@ static void g_congestion_window_is_not_a_sliver(void)
 {
     UINT status;
 
-    /*
-     * THE CASE THAT KEEPS THE RULE OFF THE BULK PATH, and the one that cost
-     * measurable throughput before it existed.  RFC 1122 4.2.3.4's U is
-     * SND.UNA + SND.WND - SND.NXT: the window the RECEIVER advertised.  A
-     * congestion window that happens to leave 200 bytes on top of what is in
-     * flight is not a silly window -- it is the ACK clock, and those 200 bytes
-     * are the segment that keeps the pipe full.
-     *
-     * Judging cwnd by this rule held that segment back once per round trip on
-     * every bulk transfer, and cost 0.3% (a2065), 0.4% (ariadne) and 2.8%
-     * (x-surf-100 Z3) of the write path, n=3 per card on tests/tools/
-     * run-iperf.sh.  Not one of those peers ever had a small window.
-     */
     h_fixture();
     h_sock.nx_tcp_socket_tx_outstanding_bytes = 512;
     h_sock.nx_tcp_socket_tx_window_advertised = H_PEER_WINDOW;   /* peer: wide */
@@ -607,15 +497,6 @@ static void g_congestion_window_is_not_a_sliver(void)
 
 static void i_a_blocked_sender_is_woken_once(void)
 {
-    /*
-     * The other half of the rule, and the reason it is a shared function
-     * rather than four lines in the send path.  A thread suspended on the
-     * transmit list is woken by _nx_tcp_socket_state_transmit_check, which
-     * used to ask only whether the window was non-zero -- so every
-     * acknowledgment that reopened a byte woke it, the send path refused
-     * again, and it suspended again.  On a 68020 each of those is a context
-     * switch and a mutex pair for nothing.
-     */
     h_fixture();
     h_sock.nx_tcp_socket_transmit_suspension_list = &h_waiter;
     h_sock.nx_tcp_socket_transmit_suspended_count = 1;
@@ -640,12 +521,6 @@ static void j_peak_window_is_remembered(void)
 {
     NX_TCP_HEADER hdr;
 
-    /*
-     * Max(SND.WND) is a peak and not a sample.  The peer offers 65535, then
-     * runs down to 300 as its application falls behind; the threshold rule (3)
-     * measures against has to stay 65535/2, because 300/2 would call every
-     * sliver acceptable and the rule would do nothing at all.
-     */
     h_fixture();
     h_sock.nx_tcp_socket_tx_window_advertised     = 0;
     h_sock.nx_tcp_socket_tx_window_advertised_max = 0;
@@ -676,9 +551,6 @@ static void j_peak_window_is_remembered(void)
            (unsigned long)h_sock.nx_tcp_socket_tx_window_advertised_max);
 }
 
-
-/* ---------------------------------------------- the receiving half -------- */
-
 /* One pure ACK out of the real control path, with rx_window_current at
    `current` and the socket's buffer at `dflt`.  Answers the window that
    reached the wire. */
@@ -706,12 +578,6 @@ static ULONG h_advertise(ULONG current, ULONG dflt)
     return h_last_window;
 }
 
-/*
- * RFC 1122 4.2.3.3.  A window below one MSS parks the sender on a runt: it
- * sends the sliver, the window falls back, and the connection walks.  Zero is
- * what the RFC asks for instead -- the peer waits on its persist timer and is
- * released by a window worth filling.
- */
 static void k_a_runt_window_is_advertised_as_zero(void)
 {
 ULONG w;
@@ -743,11 +609,6 @@ ULONG w;
     h_check(w == H_MSS * 2UL, "two segments of window were not advertised");
 }
 
-/*
- * The clause that keeps the rule from deadlocking.  RFC 1122's floor is
- * min(MSS, RCV.BUFF/2), not MSS alone: a socket whose whole buffer is smaller
- * than a segment would otherwise advertise zero for ever and never reopen.
- */
 static void m_a_buffer_below_one_mss_still_opens(void)
 {
 ULONG w;

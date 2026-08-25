@@ -1,51 +1,9 @@
 /*
  * SrcProbe, does a socket send from the address it was bound to?
  *
- * bind() names a local address; the send direction is meant to honour it.
- * NetX Duo has no bind-to-address, so the library maps the bound address to
- * the index nxd_udp_socket_source_send() and, for TCP,
- * nxd_tcp_client_socket_source_connect() take.  None of that is reachable
- * from a host build: it reads NX_IP's live interface table.
- *
- * TWO INTERFACES ARE WHAT THIS WANTS AND THE LAB GUEST HAS ONE.  So what is
- * measured here is the single-interface half:
- *
- *   * a datagram bound to the interface address arrives with that address as
- *     its source, not merely "the send returned len", which was already true
- *     when the source was whatever NetX picked;
- *   * the same on loopback, bound to 127.0.0.1;
- *   * a destination the bound address cannot reach is refused, rather than
- *     sent from another address or dropped inside the stack with the send
- *     reported successful;
- *   * a TCP connect() leaves from the bound address, on the interface and on
- *     loopback, and one whose bound address cannot reach the destination is
- *     refused before the SYN;
- *   * an unbound socket still routes as it always did.
- *
- * AND THE OTHER HALF, WHICH IS RFC 6724.  Everything above is about a source
- * the caller named.  p_ipv6_source() at the end is about the source nothing
- * named: what src/ipv6/ipv6_srcsel.c picks for an unbound AF_INET6 socket, on
- * a real machine, through the real library.  Its four addresses are constants
- * shared with run-srcsel.sh; see the block comment there.
- *
- * EVERY CHECK IS ONE key=value LINE at column zero, and run-srcsel.sh matches
- * the keys exactly.  Nothing in this program's output is meant to be read as
- * prose by anything but a person.
- *
- * argv[1] is the guest's own address (SLIRP's first lease, 10.0.2.15, by
- * default) and argv[2] a destination on the same link (SLIRP's gateway).
- *
- * argv[3] and argv[4] are the two-interface arm and are optional: the guest's
- * address on its SECOND interface, and a host on the same subnet with a
- * listener on port 7805.  Given both, the probe connects from the second
- * address to that host, the case a one-interface guest cannot reach, where
- * the bound address is on one interface and the unconstrained route leaves by
- * the other.  It is the RECEIVER that has to be asked what source it saw; all
- * the guest can say is that the connect was made.
- *
- * The vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, for
- * the reason src/tools/toolsock.c gives: the NDK inlines assume a global
- * SocketBase.
+ * argv: 1 = the guest's own address, 2 = a destination on the same link, and
+ * optionally 3 = the guest's address on a SECOND interface and 4 = a host on
+ * that subnet with a listener on port 7805.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -66,12 +24,9 @@ typedef struct ProbeAddr
     UBYTE   sin_zero[8];
 } ProbeAddr;
 
-/*
- * struct sockaddr_in6, open-coded the same way.  The NDK's is the Linux one:
- * no sin6_len, the family at offset 0 and a byte of padding after it, which is
- * what tests/ipv6/ipv6_socket_test.c already assumes and what
- * src/bsdsocket/addr.c writes.  28 bytes.
- */
+/* struct sockaddr_in6, open-coded the same way.  The NDK's is the Linux one:
+   no sin6_len, the family at offset 0 and a byte of padding after it.  28
+   bytes. */
 typedef struct ProbeAddr6
 {
     UBYTE   sin6_family;
@@ -279,15 +234,6 @@ static LONG p_errno(struct Library *base)
     return res;
 }
 
-/*
- * The four vectors above take an address of any family, so each family gets a
- * typed wrapper rather than a cast at every call site.  There is no p_bind6():
- * RFC 6724 selection is what an UNBOUND socket gets, so the IPv6 arm never
- * binds and a wrapper for it would be a function nothing calls.  Nothing else changes:
- * these are the same LVOs with the same registers, and the length is the only
- * thing sockaddr_in and sockaddr_in6 disagree about.
- */
-
 static LONG p_bind(struct Library *base, LONG s, const ProbeAddr *sa)
 {
     return p_bind_raw(base, s, (CONST_APTR)sa, (LONG)sizeof(*sa));
@@ -331,16 +277,9 @@ static LONG p_checks;
 static LONG p_failures;
 
 /*
- * ONE LINE PER CHECK, key=value, at column zero.
- *
- * `what` is the key and nothing else -- what the check means is in the comment
- * above the call.  run-srcsel.sh matches `<key>=ok` exactly, so a check that
- * is renamed, reworded or removed makes the harness say which key went
- * missing instead of quietly passing on an arm that no longer runs.  It used
- * to match sentences, which meant a sentence could not be improved without
- * breaking the harness and that a near-miss match read as a pass.
- *
- * The failure form carries the detail, usually an errno, in the value.
+ * ONE LINE PER CHECK, key=value, at column zero.  run-srcsel.sh matches
+ * `<key>=ok` exactly, so a renamed key makes the harness say which key went
+ * missing instead of quietly passing on an arm that no longer runs.
  */
 static BOOL p_check(BOOL ok, const char *what, LONG detail)
 {
@@ -370,12 +309,8 @@ static VOID p_addr(ProbeAddr *sa, ULONG host, UWORD port)
         sa->sin_zero[i] = 0;
 }
 
-/*
- * An IPv6 address from four longwords, most significant first, written into
- * the 16 network-order bytes of a sockaddr_in6.  The probe's addresses are
- * constants (below), so there is no text parser here and nothing to get wrong
- * between the harness and the guest.
- */
+/* An IPv6 address from four longwords, most significant first, written into the
+   16 network-order bytes of a sockaddr_in6. */
 static VOID p_addr6(ProbeAddr6 *sa, ULONG w0, ULONG w1, ULONG w2, ULONG w3,
                     UWORD port)
 {
@@ -455,11 +390,8 @@ static ULONG p_parse(const char *s, ULONG fallback)
 
 /* -------------------------------------------------------- the datagrams --- */
 
-/*
- * Send one datagram to a receiver in this process and report the source
- * address it arrived with.  That address is the measurement: a send that
- * returns len proves only that something left.
- */
+/* Send one datagram to a receiver in this process and report the source address
+   it arrived with: a send that returns len proves only that something left. */
 static VOID p_udp_source(struct Library *base, ULONG bind_to, ULONG dest,
                          UWORD port, const char *what)
 {
@@ -523,23 +455,9 @@ done:
 /* -------------------------------------------------- RFC 6724, on target --- */
 
 /*
- * THE SOURCE THE STACK PICKS WHEN NOTHING NAMED ONE.
- *
- * Everything above is bind(): the caller named the source and the send has to
- * honour it.  This is the other half, RFC 6724 source address selection, which
- * decides what an UNBOUND socket sends from.  src/ipv6/ipv6_srcsel.c supplies
- * it for the whole stack, and tests/ipv6/host drives its rules one at a time
- * over a hand-built NX_IP; what this arm adds is that the answer on a real
- * machine, through the real library, with a real interface, is the same.
- *
- * getsockname() on a connected socket bound to in6addr_any reports that
- * selection (src/bsdsocket/options.c), so no peer has to answer for any of
- * these: the guest can say the whole thing itself.
- *
- * The addresses are the RFC 3849 documentation prefix and are constants on
- * both sides -- run-srcsel.sh writes SELF6 into the interface file's ADDRESS6
- * and the four here have to agree with it.  Nothing on a LAN answers for
- * 2001:db8::/32, so the arm is inert on the wire.
+ * getsockname() on a connected socket bound to in6addr_any reports the RFC 6724
+ * selection, so no peer has to answer for any of these.  The addresses below
+ * are RFC 3849 constants and must agree with run-srcsel.sh's ADDRESS6.
  */
 
 /* 2001:db8:6724:1::10/64, the guest's own, from ADDRESS6. */
@@ -560,14 +478,8 @@ done:
 
 /*
  * Duplicate address detection has to finish before either address is this
- * node's, and nothing waits for it: AddNetInterface returns as soon as the
- * interface is configured and the addresses are TENTATIVE for a second or so
- * after that.  A TENTATIVE address is correctly not a candidate, so running
- * the arm too early reads as "no route" -- which is exactly the failure the
- * arm is looking for, and would be indistinguishable from it.
- *
- * So the readiness is its own check with its own key, and the arms below run
- * only after it.  Up to fifteen seconds, in half-second steps.
+ * node's, and nothing waits for it: a TENTATIVE address is correctly not a
+ * candidate, so running the arm too early reads as no route.  Up to 15 s.
  */
 static BOOL p_wait6(struct Library *base)
 {
@@ -619,11 +531,8 @@ static VOID p_ipv6_source(struct Library *base)
     if (!p_wait6(base))
         return;
 
-    /*
-     * A destination on this node's own /64.  Both of the interface's addresses
-     * are candidates and Rule 2 takes the global: the link-local has scope 2
-     * and the destination has scope 14.
-     */
+    /* A destination on this node's own /64: Rule 2 takes the global, since the
+       link-local has scope 2 and the destination scope 14. */
     s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -639,15 +548,9 @@ static VOID p_ipv6_source(struct Library *base)
         (VOID)p_close(base, s);
     }
 
-    /*
-     * A link-local destination.  The same two candidates, and Rule 2 now takes
-     * the link-local, because the global has more scope than the destination
-     * and the link-local has exactly enough.  Which link-local this node holds
-     * is derived from the MAC, so what is asserted is fe80::/10 and not the
-     * global -- picking the global here is the defect, and it is what a
-     * first-match walk over the address list does when the global happens to
-     * be first.
-     */
+    /* A link-local destination: Rule 2 now takes the link-local, because the
+       global has more scope than the destination.  Which link-local this node
+       holds is derived from the MAC, so fe80::/10 is what is asserted. */
     s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -669,12 +572,9 @@ static VOID p_ipv6_source(struct Library *base)
         (VOID)p_close(base, s);
     }
 
-    /*
-     * ::1.  RFC 6724 4 puts the loopback interface on a link of its own, so
-     * the candidate set for a loopback destination holds ::1 and nothing else
-     * -- and the interface's addresses are not candidates for it however near
-     * they are numerically.
-     */
+    /* ::1.  RFC 6724 4 puts the loopback interface on a link of its own, so
+       the candidate set for a loopback destination holds ::1 and nothing
+       else. */
     s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -691,14 +591,9 @@ static VOID p_ipv6_source(struct Library *base)
         (VOID)p_close(base, s);
     }
 
-    /*
-     * A global destination on a prefix that is not on-link, with no default
-     * router configured.  There is no outgoing interface for it, so there is
-     * no source either and the send is refused rather than leaving with an
-     * address that cannot carry it back.  This is the refusal the vendored
-     * routine made by never considering an address of too small a scope, and
-     * it is kept.
-     */
+    /* A global destination that is not on-link, with no default router: there
+       is no outgoing interface for it, so there is no source either and the
+       send is refused. */
     s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -765,11 +660,6 @@ int main(int argc, char **argv)
 
     /* ---- a destination the bound address cannot reach ------------------ */
 
-    /*
-     * The refusal that used to be a silent drop: NetX takes the bound
-     * interface as a constraint on the route, finds none, and discards the
-     * datagram inside _nx_ip_packet_send() with NX_SUCCESS already returned.
-     */
     s = p_socket(base, P_AF_INET, P_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -799,12 +689,9 @@ int main(int argc, char **argv)
                     p_errno(base)))
         {
             /*
-             * Three, not one.  Two arms below connect to this listener and
-             * neither accepts, so each keeps the slot it landed on until the
-             * listener is closed.  With a backlog of one the second connect
-             * has nowhere to land and spends the whole TCP connect timeout
-             * getting there, 191 s of a 300 s run, and reports ETIMEDOUT --
-             * which reads exactly like the defect it is testing for.
+             * Backlog of three, not one: two arms below connect here and
+             * neither accepts, so with a backlog of one the second connect
+             * burns the whole TCP connect timeout and reads like the defect.
              */
             rc = p_listen(base, listener, 3);
             (VOID)p_check((BOOL)(rc == 0), "v4_listen_loopback", p_errno(base));
@@ -835,12 +722,8 @@ int main(int argc, char **argv)
 
             /*
              * INADDR_ANY, which the arm above cannot reach because it binds.
-             *
              * A socket bound to nothing has no local address to report, so
              * getsockname() has to name the interface the packets leave by.
-             * This one leaves by loopback, and it is the case a
-             * single-interface guest can settle: the answer used to be
-             * nx_ip_interface[0], the Ethernet address, whatever the peer was.
              */
             s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
             if (s >= 0)
@@ -880,15 +763,9 @@ int main(int argc, char **argv)
             }
 
             /*
-             * No route from the bound address: 127.0.0.1 leaves by loopback
-             * and the bind names the interface address, so the source cannot
-             * be honoured and the connect is refused before the SYN.
-             *
              * ENETUNREACH and not EADDRNOTAVAIL: the bound address exists, it
-             * just has no route to the destination.  EADDRNOTAVAIL is now
-             * only a bound address the machine does not have, the case that
-             * used to be refused, source on one interface and route out of
-             * the other, is what source_connect() connects.
+             * just has no route to the destination.  EADDRNOTAVAIL is now only
+             * a bound address the machine does not have.
              */
             s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
             if (s >= 0)
@@ -913,13 +790,9 @@ int main(int argc, char **argv)
 
     /* ---- TCP: the interface address is the source it connects from ----- */
 
-    /*
-     * The pinned path on a physical interface rather than on loopback: the
-     * destination is the guest's own interface address, which _nx_ip_route_find()
-     * answers with that same interface, so the bind and the route agree and
-     * the connect goes through nxd_tcp_client_socket_source_connect().  What
-     * the peer end sees is asserted, not just that connect() returned 0.
-     */
+    /* The pinned path on a physical interface rather than loopback: the bind
+       and the route agree, so the connect goes through
+       nxd_tcp_client_socket_source_connect(). */
     listener = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);
     if (listener >= 0)
     {
@@ -987,14 +860,9 @@ int main(int argc, char **argv)
 
     /* ---- TCP: source on one interface, route out of the other ---------- */
 
-    /*
-     * The case the source connect exists for, and the only one that needs a
-     * second interface.  alt is an address on it and dest is reachable from
-     * both, so the unconstrained route leaves by the first interface while
-     * the bind names the second: before nxd_tcp_client_socket_source_connect()
-     * this was EADDRNOTAVAIL.  What source the SYN carried is for the
-     * receiver to say.
-     */
+    /* The case the source connect exists for, and the only one that needs a
+       second interface.  What source the SYN carried is for the receiver to
+       say. */
     if (alt != 0 && dest != 0)
     {
         s = p_socket(base, P_AF_INET, P_SOCK_STREAM, 0);

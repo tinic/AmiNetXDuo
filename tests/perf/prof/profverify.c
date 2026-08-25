@@ -1,42 +1,6 @@
 /*
  * AmiNetXDuo, does the sampler report the PC it thinks it does?
  *
- * A sampling profiler is the one measurement tool that can be comprehensively
- * wrong and still look right.  Read the exception frame two bytes off and
- * every recorded value is half an SR concatenated with half a PC, a number
- * that lands somewhere, resolves to some function, and ranks it convincingly.
- * Nothing downstream can detect that.  So it is established here, first,
- * against kernels whose exact byte ranges are known from the linker.
- *
- * Four phases, each preceded by prof_mark():
- *
- *   spinA/spinB/spinC   assembly loops in profverify.S with explicit _end
- *                       labels.  No calls, so every sample taken during a
- *                       phase must land inside that one function's range.
- *   exec                Forbid()/Permit() in a loop.  Those are ROM code
- *                       reached through exec.library's jump table, so the
- *                       phase tests the other half of the attribution: that
- *                       a Kickstart sample is recognised as Kickstart and
- *                       named from the LVO table rather than dropped.
- *
- * Three things are checked, and all three have to hold:
- *
- *   1. CONTAINMENT.  >= 90% of each spin phase's samples inside that
- *      function's [start, end).  This is the frame-offset test and it is
- *      sharp, a wrong offset scores approximately zero, not a bit less.
- *   2. PROPORTIONALITY.  Each phase's share of samples within four percentage
- *      points of its share of measured wall-clock.  A sampler can be
- *      correctly aimed and still biased, e.g. by only firing when some
- *      periodic thing is also running; this is what catches that.
- *   3. RATE.  Interrupts actually taken within 15% of rate x elapsed, and
- *      every frame format $0 on a 68010 and up.
- *
- * Run it on more than one CPU, because the frame is what is in question:
- *
- *   -m A500  68000   six-byte frame, no format word, VBR fixed at 0
- *   -m A1200 68020   eight-byte frame, format word, VBR readable
- *   -m A3000 68030   as the 68020, different memory system
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -57,9 +21,6 @@ extern UBYTE pv_spin_a_end, pv_spin_b_end, pv_spin_c_end;
 #define PV_MAX_SAMPLES  40000UL
 #define PV_PHASES       4
 
-/* Roughly 6:3:1 of wall clock, and long enough that a phase is thousands of
-   samples rather than hundreds.  The exact figures do not matter, the test
-   compares sampled share against measured share, it does not assume either. */
 static const ULONG pv_reps[PV_PHASES] = { 2700000UL, 900000UL, 220000UL, 0UL };
 
 static const char *pv_names[PV_PHASES] = { "spinA", "spinB", "spinC", "exec" };
@@ -131,8 +92,6 @@ ULONG                    t0, expect;
         }
         else
         {
-            /* Long enough to be comparable with spinC.  Forbid()/Permit() is
-               a jump-table call into ROM either way. */
             for (i = 0UL; i < 120000UL; i++)
             {
                 Forbid();
@@ -162,7 +121,6 @@ ULONG                    t0, expect;
         return(20);
     }
 
-    /* Bucket by phase, using the mark indices as the boundaries. */
     for (p = 0UL; p < PV_PHASES; p++)
     {
     ULONG from = marks[p].pm_Index;
@@ -198,7 +156,6 @@ ULONG                    t0, expect;
     prof_log("");
     prof_log("checks:");
 
-    /* 1. Containment. */
     for (p = 0UL; p < 3UL; p++)
     {
     ULONG pct = pv_count[p] ? (pv_inrange[p] * 100UL / pv_count[p]) : 0UL;
@@ -209,7 +166,6 @@ ULONG                    t0, expect;
                  "sampled PC lands in the function that was running");
     }
 
-    /* 2. Proportionality. */
     for (p = 0UL; p < PV_PHASES; p++)
     {
     LONG ts = total_ms ? (LONG)(pv_ms[p] * 1000UL / total_ms) : 0L;
@@ -224,7 +180,6 @@ ULONG                    t0, expect;
         pv_check((BOOL)(d <= 40L), "sample share tracks measured wall clock");
     }
 
-    /* 3. Rate and frame shape. */
     expect = prof_actual_rate() * total_ms / 1000UL;
     prof_log("  interrupts: %ld taken, %ld expected from %ld ms at %ld Hz",
              (long)prof_hit_count(), (long)expect, (long)total_ms,
@@ -239,10 +194,6 @@ ULONG                    t0, expect;
 
     pv_check((BOOL)(prof_drop_count() == 0UL), "no samples dropped");
 
-    /* The exec phase must not be attributed to our own code at all: those
-       PCs belong in ROM.  A sampler that reported them inside the caller
-       would hide the Forbid()/Signal()/Wait() cost the real profile is
-       hunting for. */
     {
     ULONG from = marks[3].pm_Index;
     ULONG to   = marks[4].pm_Index;

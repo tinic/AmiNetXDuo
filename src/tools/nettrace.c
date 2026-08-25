@@ -1,30 +1,8 @@
 /*
  * NetTrace, capture the stack's own traffic to a pcap file while running a
- * workload underneath it.
- *
- *     NetTrace LOOPBACK/S,WIRE/S,HOST/K,PORT/N/K,PATH/K,BYTES/N/K,OUT/K,
- *              SNAP/N/K,BLEN/N/K,NOCAPTURE/S,IFACE/K
- *
- *   LOOPBACK and WIRE are alternatives, and HOST implies WIRE.
- *
- *   Capture and workload share one process so the throughput number and the
- *   trace come out of the same run.  Draining the capture between socket
- *   operations also bounds the buffer: the channel holds 2 x BLEN, and a
- *   megabyte at 1460 bytes a segment is well over a thousand records.
- *
- *   Nothing from src/.  Every call is a published bsdsocket.library LVO,
- *   including the bpf_* ones; they are in toolbpf.c, with the pcap writer and
- *   the record walk, and NetCapture shares them.  Before this existed the
- *   capture path in src/bpf/ had 201 unit-test checks, no caller anywhere in
- *   the product, and all eight vectors pointing at bsd_enosys().
- *
- *   The bpf ABI has no BIOCSSNAPLEN: a filter program returns the number of
- *   bytes to keep, so `BPF_RET|BPF_K, n` accepts every packet and truncates
- *   it to n.  96 bytes covers Ethernet + IP + TCP with 20 bytes of options,
- *   and was tcpdump's own default for twenty years.  This command installs
- *   that one instruction and nothing else; NetCapture is the one with a
- *   filter, because it is the one recording somebody else's traffic and
- *   therefore the one that has to pick it out.
+ * workload underneath it. Capture and workload share one process, and the
+ * capture is drained between socket operations so the channel's 2 x BLEN
+ * never fills. Every call is a published bsdsocket.library LVO.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -59,14 +37,6 @@ enum
     ARG_COUNT
 };
 
-/*
- * Everything the capture side of this command needs -- the eight published
- * bpf_* LVOs, the ioctls, the record walk and the pcap writer -- is in
- * toolbpf.c, which NetCapture shares.  It used to be four hundred lines here,
- * and the first thing a second capture command would have had to do was copy
- * them.
- */
-
 /* ---------------------------------------------------------- the workloads */
 
 #define NT_CHUNK    4096
@@ -87,11 +57,8 @@ typedef struct NtResult
 
 /*
  * A bulk transfer between two sockets in this one process, over 127.0.0.1.
- *
- * Single-threaded and therefore entirely non-blocking: listener, client and
- * accepted socket all go through one WaitSelect().  The capture is drained on
- * every pass, so the channel never holds more than a few hundred microseconds
- * of traffic.
+ * Entirely non-blocking: listener, client and accepted socket all go through
+ * one WaitSelect(), and the capture is drained on every pass.
  */
 static VOID nt_loopback(struct Library *base, ToolBpfChan *cap, ULONG want,
                         NtResult *res)
@@ -249,11 +216,8 @@ done:
 }
 
 /*
- * One HTTP/1.0 GET over the wire, read to completion.
- *
- * HTTP/1.0 with no keep-alive, so the body ends when the peer closes: the
- * trace covers the shutdown as well, and there is no chunk parser here.  The
- * bytes are counted, not kept. tests/curl checks payloads byte for byte.
+ * One HTTP/1.0 GET over the wire, read to completion. No keep-alive, so the
+ * body ends when the peer closes and there is no chunk parser here.
  */
 static VOID nt_wire(struct Library *base, ToolBpfChan *cap, const ToolAddr *address,
                     UWORD port, const char *path, NtResult *res)
@@ -297,12 +261,8 @@ static VOID nt_wire(struct Library *base, ToolBpfChan *cap, const ToolAddr *addr
     }
 
     /*
-     * PATH comes off the command line and `req` is on the caller's stack,
-     * which a Shell command gets four kilobytes of. Copying it unbounded let
-     * any PATH longer than 462 characters overwrite this frame's return
-     * address, silently, there is no MMU here. The trailer is appended only
-     * if it still fits, so a truncated request is refused by the server rather
-     * than sent as something else.
+     * PATH comes off the command line and `req` is on a 4 KB Shell stack, so
+     * the copy is bounded. The trailer is appended only if it still fits.
      */
     {
         static const char nt_head[]  = "GET ";

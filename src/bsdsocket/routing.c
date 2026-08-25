@@ -1,82 +1,5 @@
 /*
  * bsdsocket.library, the Roadshow routing API.
- *
- *   AddRouteTagList()       a gateway route, or the default one
- *   DeleteRouteTagList()    the same, undone
- *   ChangeRouteTagList()    the same, given a different next hop
- *   GetRouteInfo()          a copy of the whole table, as rt_msghdr entries
- *
- * Same primary source as interfaces.c: NDK 3.2's
- * SANA+RoadshowTCP-IP/doc/bsdsocket.doc, plus libraries/bsdsocket.h and
- * net/route.h from the same NDK, used as an ABI reference only. No Roadshow,
- * AmiTCP, AROSTCP or Miami code was consulted or is present.
- *
- * Three things the autodoc specifies that the prototypes do not show:
- *
- *   1. GetRouteInfo() returns "a header followed by a small number of
- *      sockadders, interpreted by position ... The interpretation of which
- *      address are present is given by a bit mask within the header, and the
- *      sequence is least significant to most significant bit within the
- *      vector", the routing-socket layout, so rtm_addrs is the map and the
- *      sockaddrs follow in RTA_DST, RTA_GATEWAY, RTA_NETMASK order.
- *
- *   2. "The table is terminated by a dummy entry whose 'rtm_msglen' member is
- *      zero." Not a count, not a NULL. A caller loops on rtm_msglen and stops
- *      when it is zero, so a table without that entry never ends.
- *
- *   3. rtm_version is 3: "The 'struct rt_msghdr' layout described above
- *      corresponds to version 3", and RTM_VERSION in net/route.h agrees.
- *
- * The rt_msghdr the autodoc prints has the same eleven members as
- * net/route.h's, in a different order. The document has rtm_pid before
- * rtm_addrs and rtm_flags after rtm_errno. The header has rtm_flags second and
- * rtm_pid fourth. The header is the ABI, since it is what a caller compiles
- * against. Everything below is written against the header and uses member
- * names throughout.
- *
- * There is no netmask tag. AddRouteTagList() takes RTA_Destination,
- * RTA_Gateway, RTA_DefaultGateway, RTA_DestinationHost and RTA_DestinationNet
- * and nothing else, so the prefix length is implied by which of them was used.
- * See bsd_route_mask_for() below.
- *
- * ChangeRouteTagList() is the one of the four with no autodoc page, here or in
- * the copy at wiki.amigaos.net. What the NDK does fix, and all it fixes:
- *
- *   sfd/bsdsocket_lib.sfd:88   LONG ChangeRouteTagList(struct TagItem *tags)
- *                              (a0), listed under "* Route management" between
- *                              DeleteRouteTagList and GetRouteInfo
- *   pragmas/bsdsocket_pragmas.h:78   offset 0x1aa
- *   libraries/bsdsocket.h:360-370    RTA_BASE+1..+5, the five tags that are
- *                              the whole routing-API vocabulary. There is no
- *                              tag for a metric, a flag or an interface
- *
- * The rest comes from the two things the autodoc does say. AddRouteTagList()
- * is "a simplified, specialized front end to the underlying routing socket
- * API", and on that API's own page RTM_CHANGE is "Change Metrics, Flags, or
- * Gateway" of an entry that already exists, with ESRCH reserved for one that
- * does not. Of those three, a next hop is the only one this table holds and
- * the only one the five tags can name. So:
- *
- *   RTA_Destination / -Host / -Net + RTA_Gateway
- *                              the static entry with that destination and its
- *                              implied mask takes a new next hop
- *   RTA_DefaultGateway         the installed default route takes a new one
- *
- * and the difference from AddRouteTagList() is that the entry must already be
- * there. A change that installs is an add, and then ESRCH could never happen.
- *
- * Refused rather than accepted and ignored:
- *
- *   a destination with no RTA_Gateway   nothing to change it to, and no other
- *                                       tag names anything else about it
- *   RTA_Gateway with no destination     names no entry
- *   RTA_DefaultGateway beside either    the exclusion AddRouteTagList()'s and
- *                                       DeleteRouteTagList()'s pages both state
- *
- * All five tags are honoured. Nothing in the routing vocabulary is taken and
- * dropped. Metrics and flags are not refused by name because no tag can carry
- * one; RTM_CHANGE's other two thirds have no expression in this API at all.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -90,24 +13,14 @@
 
 #include <proto/exec.h>
 
-/* How long a name in RTA_Destination or RTA_Gateway is given to resolve: the
-   same thirty seconds resolver.c gives gethostbyname(), same lookup. */
 #define BSD_ROUTE_RESOLVE_TIMEOUT   (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-
-/* --------------------------------------------------------- the mask rule, */
 
 /*
  * "if the destination has a local address part of INADDR_ANY or if the
  * destination is the symbolic name of a network, then the route is assumed to
  * be a to a network", otherwise it is a route to a host. RTA_DestinationHost
  * and RTA_DestinationNet override the guess in either direction.
- *
- * "Network" here means the classful network: the only prefix length an address
- * alone can imply, and the only one the 4.2BSD grammar this inherits from
- * expressed. Classful is coarse, but it is what the published API defines. A
- * route added with one mask must be deletable under the same rule, or
- * DeleteRouteTagList() can never find it.
  */
 #define BSD_ROUTE_DEST_GUESS    0       /* RTA_Destination     */
 #define BSD_ROUTE_DEST_HOST     1       /* RTA_DestinationHost */
@@ -133,7 +46,6 @@ static ULONG bsd_route_mask_for(ULONG addr, UWORD kind)
     if (kind == BSD_ROUTE_DEST_NET)
         return classful;
 
-    /* Guess: a zero host part under the classful mask means a network. */
     return ((addr & ~classful) == 0) ? classful : 0xFFFFFFFFUL;
 }
 
@@ -144,10 +56,6 @@ static NX_IP_ROUTING_ENTRY *bsd_route_find(NX_IP *ip, ULONG dest, ULONG mask);
 /*
  * A destination or gateway string: "a host name to be resolved or an IP
  * address in dotted-decimal notation (see RFC1700)", plus, for a destination
- * "the symbolic name of a network". That is a different database and a
- * different shape: DEVS:Internet/networks holds network numbers (127, not
- * 127.0.0.0), so a hit there is shifted back into an address the way
- * inet_makeaddr() does.
  */
 static BOOL bsd_route_parse(const char *text, BOOL allow_network, ULONG *out)
 {
@@ -182,8 +90,6 @@ static BOOL bsd_route_parse(const char *text, BOOL allow_network, ULONG *out)
     return (netstack_resolve(text, out, BSD_ROUTE_RESOLVE_TIMEOUT) == AMI_NET_OK)
                ? TRUE : FALSE;
 }
-
-/* ---------------------------------------------------------- the tag lists, */
 
 typedef struct BsdRouteReq
 {
@@ -251,12 +157,6 @@ static LONG bsd_route_parse_tags(struct AmiSocketBase *SocketBase,
         }
     }
 
-    /*
-     * "The RTA_DefaultGateway tag excludes the use of the RTA_Destination and
-     * RTA_Gateway tags", and on the delete side the exclusion is spelled out
-     * again in the other direction. Both directions are enforced here, rather
-     * than a silent preference for one.
-     */
     if (req->brr_HaveDefault && (req->brr_HaveDest || req->brr_HaveGateway))
         return bsd_fail(SocketBase, AMI_EINVAL);
 
@@ -300,15 +200,6 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
     }
     else
     {
-        /*
-         * A destination with no gateway. The autodoc allows the combination
-         * "The RTA_Destination tag CAN be used in conjunction with the
-         * RTA_Gateway tag", but every entry NetX Duo's table holds has a
-         * next hop. The routes that do not (the directly attached prefix of
-         * each interface) come from the interface configuration and cannot be
-         * added or removed on their own. EINVAL rather than a success that
-         * stores nothing.
-         */
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EINVAL);
     }
@@ -318,20 +209,6 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
     if (status == NX_SUCCESS)
         return 0;
 
-    /*
-     * "ENOBUFS if insufficient resources were available to install a new
-     * route", the -route- page of the same autodoc. NX_IP_ROUTING_TABLE_SIZE
-     * is small enough that a user can reach it.
-     *
-     * The same page names EEXIST for a duplicate. NetX Duo never produces that
-     * condition. A second add for a destination already in the table updates
-     * its next hop and reports success, which is what a route command does, so
-     * it is reported as success.
-     *
-     * NX_IP_ADDRESS_ERROR means the next hop is on none of this machine's own
-     * subnets. NetX Duo derives the outgoing interface from it and there is
-     * none, so it maps to ENETUNREACH, not a full-table error.
-     */
     switch (status)
     {
         case NX_OVERFLOW:           return bsd_fail(SocketBase, AMI_ENOBUFS);
@@ -357,11 +234,6 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     if (bsd_route_parse_tags(SocketBase, tags, &req) != 0)
         return -1;
 
-    /*
-     * The delete grammar is RTA_Destination or RTA_DefaultGateway and nothing
-     * else. RTA_Gateway is not one of its tags, since the destination alone
-     * identifies the entry.
-     */
     if (!req.brr_HaveDefault && !req.brr_HaveDest)
         return bsd_fail(SocketBase, AMI_EINVAL);
 
@@ -370,16 +242,6 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
 
     if (req.brr_HaveDefault)
     {
-        /*
-         * "The address of the default gateway all packets were forwarded to"
-         * past tense, on the delete page.
-         * The tag names the entry to remove, so it has to be the one
-         * installed. A clear on any address at all lets `route delete default
-         * 10.0.0.1` succeed on a machine whose default gateway is 192.168.1.1,
-         * and takes that one away. ESRCH is the -route- page's code "if
-         * requested to delete a non-existent entry", and no gateway at all is
-         * the same condition.
-         */
         ULONG installed = 0;
 
         if (nx_ip_gateway_address_get(ip, &installed) != NX_SUCCESS ||
@@ -396,9 +258,6 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
         ULONG mask = bsd_route_mask_for(req.brr_Dest, req.brr_DestKind);
 
-        /* NetX reports success without searching when its table is empty.
-           Find the exact entry first so an absent delete is ESRCH in every
-           table state, and so the check and deletion share this bracket. */
         if (bsd_route_find(ip, req.brr_Dest, mask) == NX_NULL)
         {
             bsd_nx_leave(SocketBase);
@@ -417,9 +276,6 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     if (status == NX_SUCCESS)
         return 0;
 
-    /* "ESRCH if requested to delete a non-existent entry", again the -route-
-       page. The preflight above covers NetX's empty-table success; these are
-       the corresponding failures if the table changed under the API call. */
     if (status == NX_NOT_SUCCESSFUL || status == NX_ENTRY_NOT_FOUND)
         return bsd_fail(SocketBase, AMI_ESRCH);
 
@@ -429,15 +285,10 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
     return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
-/* -------------------------------------------------------- ChangeRouteTagList */
-
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
 /*
  * The interface a next hop would leave by, by NetX Duo's own rule: the first
  * valid interface whose network the address falls in. Written against
- * nx_ip_static_route_add()'s loop rather than bsd_route_iface_for()'s so that
- * "no interface" here and NX_IP_ADDRESS_ERROR there are the same condition.
- * NULL when there is none.
  */
 static NX_INTERFACE *bsd_route_nx_iface_for(NX_IP *ip, ULONG next_hop)
 {
@@ -500,12 +351,6 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
 
     if (req.brr_HaveDefault)
     {
-        /*
-         * RTA_DefaultGateway is the new one. The tag set has no second address
-         * to name the old one with, and the default route needs none: there is
-         * one of it. What it does need is to be there already, or this is an
-         * add wearing the wrong name.
-         */
         ULONG installed = 0;
 
         if (nx_ip_gateway_address_get(ip, &installed) != NX_SUCCESS ||
@@ -540,38 +385,11 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
 
         if (now == was || now == NX_NULL)
         {
-            /*
-             * nx_ip_static_route_add() on a destination and mask already in
-             * the table assigns the next hop in place and returns, so this is
-             * the change, not an add. Nothing is removed and no packet is
-             * routed by an absent entry in between.
-             *
-             * now == NX_NULL takes the same path deliberately: that call
-             * checks the next hop before it touches the table and returns
-             * NX_IP_ADDRESS_ERROR having changed nothing, which is the
-             * ENETUNREACH below.
-             */
             status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
                                             req.brr_Gateway);
         }
         else
         {
-            /*
-             * The one case the in-place update gets wrong, and it is the
-             * vendored code's: on an existing entry it writes the next hop and
-             * leaves nx_ip_routing_entry_ip_interface alone
-             * (nx_ip_static_route_add.c:126). nx_ip_route_find() reads that
-             * field to pick the outgoing card, so a next hop moved from one
-             * interface to another would keep sending out the old one.
-             *
-             * So when, and only when, the interface changes, the entry is
-             * removed and put back. That is not atomic. It is also the case
-             * where the old entry was about to become wrong, and a machine
-             * with one interface never reaches it. Delete cannot fail here
-             * (the entry was just found) and the add that follows cannot
-             * overflow (a slot was just freed) or fail on the address (checked
-             * above), so no path here loses the route.
-             */
             (VOID)nx_ip_static_route_delete(ip, req.brr_Dest, mask);
             status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
                                             req.brr_Gateway);
@@ -583,13 +401,6 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
     }
     else
     {
-        /*
-         * Everything else the five tags can spell: a destination with no
-         * gateway, a gateway with no destination, an empty list. RTM_CHANGE
-         * changes "Metrics, Flags, or Gateway" and the gateway is the only one
-         * of the three that has a tag, so a list that does not carry one names
-         * no change. EINVAL rather than a success that did nothing.
-         */
         bsd_nx_leave(SocketBase);
         return bsd_fail(SocketBase, AMI_EINVAL);
     }
@@ -599,8 +410,6 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
     if (status == NX_SUCCESS)
         return 0;
 
-    /* Same mapping as AddRouteTagList(): the next hop reaching none of this
-       machine's own subnets is ENETUNREACH, not a full table. */
     switch (status)
     {
         case NX_OVERFLOW:           return bsd_fail(SocketBase, AMI_ENOBUFS);
@@ -610,15 +419,9 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
     }
 }
 
-/* ------------------------------------------------------------ GetRouteInfo */
-
 /*
  * One table entry: the header, then the three sockaddrs the routing-socket
  * convention puts in RTA_DST, RTA_GATEWAY, RTA_NETMASK order.
- *
- * A struct rather than hand-computed offsets: the convention's padding rule
- * (each sockaddr rounded up to a multiple of sizeof(long)) is a no-op for
- * AF_INET, since sockaddr_in is sixteen bytes.
  */
 typedef struct BsdRouteEntry
 {
@@ -640,12 +443,6 @@ typedef struct BsdRouteEntry
 /*
  * ARP entries are routes on this interface. 4.4BSD keeps the ARP cache in the
  * routing table flagged RTF_LLINFO, and that is what `arp -a` reads. It asks
- * for routes with that flag and formats whatever comes back. With none
- * emitted, Roadshow's arp printed nothing at all (docs/RESEARCH.md 55).
- *
- * The cache is AMI_ARP_CACHE_SIZE bytes of NX_ARP, so this bound is generous
- * rather than exact. When it runs out the list is truncated, and the walk
- * below stops rather than overruns.
  */
 #define BSD_ROUTE_ARP_MAX       32
 
@@ -672,7 +469,6 @@ static VOID bsd_route_sockaddr(struct sockaddr_in *sa, ULONG host_addr)
  * BSD numbers interfaces from 1 and keeps 0 for "no interface", which is the
  * right answer for a gateway that matches none. NetX numbers its array from 0,
  * so every index handed to rtm_index is +1. A caller that compares rtm_index
- * against an if_nametoindex() is otherwise off by one on every route.
  */
 static UWORD bsd_route_iface_for(NX_IP *ip, ULONG next_hop)
 {
@@ -735,15 +531,6 @@ static BOOL bsd_route_emit(BsdRouteEntry *out, LONG want_flags, LONG flags,
 /*
  * An ARP entry, in the space a route entry occupies.
  *
- * The stride stays sizeof(BsdRouteEntry) so the fixed array still works. A
- * destination sockaddr_in plus a gateway sockaddr_dl is 36 bytes against the
- * 48 that three sockaddr_in take. rtm_addrs says only two are present, so
- * nothing reads the remainder. A caller that walks by rtm_msglen sees entries
- * of one size throughout.
- *
- * sockaddr_dl is net/if_dl.h's, from the NDK. sdl_data holds the interface
- * name first and the link address after it, which is what LLADDR() encodes and
- * why sdl_nlen has to be right.
  */
 typedef struct BsdLinkEntry
 {
@@ -773,13 +560,6 @@ static BOOL bsd_route_emit_arp(BsdRouteEntry *slot, LONG want_flags,
     out->ble_Header.rtm_flags   = flags;
     out->ble_Header.rtm_addrs   = RTA_DST | RTA_GATEWAY;
 
-    /*
-     * rtm_rmx.rmx_expire stays 0 and Roadshow's arp prints "permanent" for it.
-     * That is correct: NX_ARP_EXPIRATION_RATE is 0 in this build, NetX Duo's
-     * "entries do not expire". An invented expiry makes arp print a countdown
-     * that never happens.
-     */
-
     bsd_route_sockaddr(&out->ble_Dest, dest);
 
     out->ble_Gateway.sdl_len    = (UBYTE)sizeof(struct sockaddr_dl);
@@ -806,11 +586,6 @@ static BOOL bsd_route_emit_arp(BsdRouteEntry *slot, LONG want_flags,
  * Walk the ARP cache. NetX Duo publishes no enumerator, only
  * nx_arp_hardware_address_find() for one address at a time, so this reads
  * the table the same way bsd_route_fill() reads nx_ip_interface[].
- *
- * Each bucket is a circular list threaded on nx_arp_active_next, so the walk
- * stops when it comes back to the head. A walk until NULL never ends. Entries
- * with no hardware address yet are requests in flight and are skipped, rather
- * than reported as 00:00:00:00:00:00.
  */
 static UWORD bsd_route_fill_arp(NX_IP *ip, BsdRouteTable *table,
                                 LONG want_flags, UWORD used)
@@ -840,7 +615,6 @@ static UWORD bsd_route_fill_arp(NX_IP *ip, BsdRouteTable *table,
                 continue;
             }
 
-            /* Which interface it was learned on, by identity. */
             if (entry->nx_arp_ip_interface != NX_NULL)
             {
                 UINT i;
@@ -944,8 +718,6 @@ struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
     BsdRouteTable *table;
     UWORD          used;
 
-    /* "this can be AF_UNSPEC or AF_INET". The routing table this stack keeps
-       is IPv4's, so there is nothing else to report. */
     if (address_family != AF_UNSPEC && address_family != AF_INET)
     {
         (VOID)bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
@@ -981,9 +753,6 @@ struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
     /*
      * The terminator goes immediately after the last entry used, not at the
      * end of the allocation: a caller walks by rtm_msglen and otherwise reads
-     * the unused entries as routes. A whole zeroed rt_msghdr rather than a
-     * zeroed UWORD, so a caller that reads rtm_version before it checks
-     * rtm_msglen, which the autodoc invites, sees zero.
      */
     if (used < (UWORD)BSD_ROUTE_MAX)
         bsd_bzero(&table->brt_Entry[used].bre_Header,

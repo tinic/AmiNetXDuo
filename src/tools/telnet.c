@@ -2,31 +2,6 @@
  * telnet, the TELNET protocol, RFC 854.
  *
  *     telnet HOST/A,PORT,DEBUG=-d/S,QUIET/S,IPV4=-4/S,IPV6=-6/S
- *
- *   -4 / -6   pin the family the name resolves to.  Without either, the
- *             library answers AF_UNSPEC and the selection rules pick, so on a
- *             dual stack there is otherwise no way to ask for the other one.
- *
- * Most of the stream is data. 0xFF (IAC) introduces two- and three-byte
- * commands that must be stripped and answered before the user sees them.
- *
- * An option is only in effect once both ends agree, and a refusal is a valid
- * answer.  This client accepts two options and refuses the rest:
- *
- *   ECHO (1)                 the server can echo for us, and local echo then
- *                            goes off
- *   SUPPRESS-GO-AHEAD (3)    both directions, and puts a Unix server into
- *                            character-at-a-time mode
- *
- * TERMINAL-TYPE, NAWS, LINEMODE, environment passing and the rest get
- * WONT/DONT.  Half-implementing an option whose subnegotiation we cannot
- * complete hangs the session waiting for a reply that never comes.
- *
- * Both halves of every option's state are remembered, to avoid the
- * negotiation loop where each end answers every DONT with a WONT and every
- * WONT with a DONT forever.  See the note above tn_recv_will() for the exact
- * rule used, which is not quite the one RFC 854 states.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -50,8 +25,6 @@ enum
     ARG_IPV6,
     ARG_COUNT
 };
-
-/* ------------------------------------------------------------- protocol --- */
 
 #define TN_SE       240
 #define TN_NOP      241
@@ -90,15 +63,9 @@ static UBYTE tn_from_user[TN_CHUNK];
 static UBYTE tn_staged[TN_CHUNK * 2];   /* IAC and CR both double a byte */
 
 /*
- * One byte bigger than the read. tn_demux() emits at most one byte per byte
- * consumed, except at the start: a CR held back from the previous segment
- * (st->saw_cr survives between calls) resolves into one byte and then the byte
- * that decided it is emitted as well. A segment ending on a bare CR followed
- * by a full 4096-byte segment with no CR and no IAC therefore produces 4097
- * bytes, a server-controlled one-byte write past the end of a static, which
- * on a machine with no MMU lands in whichever static the linker put next.
- *
- * TN_CHUNK + 1 is exact: no other path in the parser expands.
+ * Must be one byte bigger than the read: a CR held back from the previous
+ * segment resolves into one byte and then the byte that decided it, so a full
+ * segment can emit TN_CHUNK + 1.  No other path in the parser expands.
  */
 static UBYTE tn_clean[TN_CHUNK + 1];
 
@@ -134,8 +101,6 @@ typedef struct TnState
 } TnState;
 
 
-/* ---------------------------------------------------------------- names --- */
-
 static const char *tn_option_name(UBYTE opt)
 {
     switch (opt)
@@ -166,8 +131,6 @@ static const char *tn_verb_name(UBYTE verb)
 }
 
 
-/* --------------------------------------------------------- negotiation --- */
-
 static VOID tn_send_raw(TnState *st, const UBYTE *buf, LONG len)
 {
     if (st->failed)
@@ -197,12 +160,9 @@ static VOID tn_reply(TnState *st, UBYTE verb, UBYTE opt)
 }
 
 /*
- * Alongside "is the option on" there has to be "have we answered a request
- * for it": RFC 854's loop-prevention rule ("do not reply if the reply would
- * not change the state") taken literally means a client that refuses an
- * option never answers at all, and a server waiting for that answer hangs.
- * So the first request always gets a reply. A repeat of one already answered
- * does not.
+ * RFC 854's loop-prevention rule taken literally means a client that refuses
+ * an option never answers at all and the server hangs.  So the first request
+ * always gets a reply; a repeat of one already answered does not.
  */
 static UBYTE tn_him_told[256];
 static UBYTE tn_us_told[256];
@@ -288,8 +248,6 @@ static VOID tn_recv_dont(TnState *st, UBYTE opt)
     tn_reply(st, TN_WONT, opt);
 }
 
-
-/* ------------------------------------------------------------- the flow --- */
 
 /*
  * Take one block off the network: strip the commands, answer them, and leave
@@ -489,8 +447,6 @@ static LONG tn_encode(const UBYTE *buf, LONG len, UBYTE *out, BOOL interactive)
 }
 
 
-/* ------------------------------------------------------------------ main --- */
-
 int main(int argc, char **argv)
 {
     LONG            args[ARG_COUNT];
@@ -630,8 +586,6 @@ int main(int argc, char **argv)
             break;
         }
 
-        /* ---- keyboard --------------------------------------------------- */
-
         if (!in.eof)
         {
             n = tool_input_read(&in, tn_from_user, (LONG)sizeof(tn_from_user),
@@ -656,20 +610,7 @@ int main(int argc, char **argv)
                 continue;
             }
 
-            /*
-             * End of input is not the end of the session.  A shutdown(SHUT_WR)
-             * here, right for nc, breaks telnet, because
-             * negotiation is still going on: the server's WILL ECHO can
-             * arrive after the last line of a script, and the DO ECHO that
-             * answers it then fails with EPIPE on a write half already given
-             * away.  Measured: every option reply after the first was lost.
-             *
-             * So a script that has run out stops typing.  The session
-             * ends when the server closes it, at Ctrl-], or at Ctrl-C.
-             */
         }
-
-        /* ---- network ---------------------------------------------------- */
 
         tool_fd_zero(&readfds);
         tool_fd_add(&readfds, st.sock);

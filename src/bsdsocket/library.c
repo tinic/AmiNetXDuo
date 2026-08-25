@@ -1,10 +1,6 @@
 /*
  * bsdsocket.library, library skeleton and per-opener child bases.
  *
- * The romtag lives here. Every OpenLibrary() returns a distinct base, cloned
- * from the master, carrying that task's descriptor table, errno pointer and tag
- * state (docs/RESEARCH.md S3.1). SocketBase is never shared.
- *
  * Link this file first so the "moveq #-1,d0 / rts" below sits at offset 0 of
  * the first code hunk, which makes the library file harmless when it is run.
  *
@@ -45,33 +41,10 @@ asm("    .text                       \n"
     "    rts                         \n");
 
 static char bsd_lib_name[]  = BSD_LIB_NAME;
-/*
- * The library had no $VER: string at all, so `version full file
- * LIBS:bsdsocket.library` had nothing to read, reported by a user trying to
- * tell which release was installed. It carries the project's, like every
- * command (src/tools/tools.h, TOOL_VERSTAG).
- *
- * lib_Version and lib_Revision are a different thing and are not ours to
- * choose: 4 is what AmiTCP-era software opens us by, and the revision is the
- * vector-table revision a caller checks before reaching the RFC 3493 slots.
- * They stay where the ABI needs them, and lib_IdString says both so that
- * neither question needs the other answered first.
- *
- *   Version full file LIBS:bsdsocket.library
- *   bsdsocket.library 0.16.1 (1.8.2026) AmiNetXDuo f75f058
- *
- * The name is in there because Roadshow's library is also bsdsocket.library
- * and says "Roadshow 1.15 DEMO version" in the same place. Two stacks share
- * one filename, and the product name is what tells them apart.
- */
 #define BSD_STR2(x)         #x
 #define BSD_STR(x)          BSD_STR2(x)
 #define BSD_LIB_ABI_TEXT    BSD_STR(BSD_LIB_VERSION) "." BSD_STR(BSD_LIB_REVISION)
 
-/* AMINETXDUO_VERSION_CPU carries its own leading space, and is empty on a host
-   build.  The archive ships one library per processor and the file said
-   nothing about which.  This is the only place that answers it for a library
-   already installed in LIBS:. */
 static const char bsd_lib_ver[] __attribute__((used)) =
     "$VER: bsdsocket.library " AMINETXDUO_VERSION
     " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH
@@ -108,8 +81,6 @@ const struct Resident bsd_romtag =
     (APTR)bsd_init_table
 };
 
-/* -------------------------------------------------------------- utilities, */
-
 ULONG bsd_strlen(const char *s)
 {
     const char *p = s;
@@ -134,16 +105,6 @@ VOID bsd_strncpy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
-/*
- * bsd_poll_sets() clears a whole BsdFdSets through this, so a select-driven
- * reader pays it once per recv().  A1200 wire transfer, RATE=2000, one build
- * either side of this function:
- *
- *     byte loop    62 samples of 2545    2.4%
- *     longwords    16 samples of 2469    0.6%
- *
- * Throughput did not separate the two at two samples an arm.
- */
 VOID bsd_bzero(APTR p, ULONG size)
 {
     UBYTE *q = (UBYTE *)p;
@@ -158,8 +119,6 @@ VOID bsd_bzero(APTR p, ULONG size)
         size--;
     }
 
-    /* Four at a time: the callers that matter clear a whole BsdFdSets, which
-       is far larger than the loop overhead. */
     l = (ULONG *)((APTR)q);
     while (size >= 16u)
     {
@@ -188,11 +147,6 @@ VOID bsd_bcopy(const APTR src, APTR dst, ULONG size)
         CopyMem((APTR)src, dst, size);
 }
 
-/*
- * Fill in the segment tag for a base, see struct BsdProfSegTag. The sum stops
- * the magic being taken for one of these when it appears by accident in other
- * data, so it is computed rather than written out.
- */
 static VOID bsd_prof_segtag(struct AmiSocketBase *base, APTR seglist)
 {
     struct BsdProfSegTag *t = &base->sb_ProfSegTag;
@@ -213,36 +167,9 @@ static VOID bsd_new_list(struct MinList *list)
     list->mlh_TailPred = (struct MinNode *)&list->mlh_Head;
 }
 
-/* ------------------------------------------------------------------- init, */
-
 /*
  * SBTC_SIG_ADDRESS_CHANGE_MASK: the openers that asked to hear about an
  * interface address arriving, changing or going away.
- *
- * Registered with src/common so the netstack can reach it, the dependency
- * runs the other way and there is no direct call.  It is deregistered in
- * bsd_lib_expunge(), because this function lives in the segment expunge hands
- * to UnLoadSeg() and a stale hook would be called into freed memory.
- *
- * Runs on the IP thread.  Signal() is Exec, does not block and is legal from
- * any Task.  Nothing here calls into NetX Duo: this is a notification NetX Duo
- * is already inside.
- *
- * AttemptSemaphore(), never ObtainSemaphore().  The claim that sb_Lock is only
- * ever held for the two short list operations bsd_child_create() and
- * bsd_child_free() take it for was wrong.  bsd_lib_open() holds it across
- * bsd_netstack_bringup(), which blocks until the stack is up and DHCP has
- * answered.  The first lease then arrives on the IP thread, lands here, waits
- * for a semaphore the opener cannot release until this returns, and the two
- * sit there.  What a user saw was AddNetInterface never returning from its
- * OpenLibrary(), so S:User-Startup never finished and the machine stopped part
- * way through its Startup-Sequence (0.17.0 and 0.17.1, found by
- * install/test/run-workbench.sh).
- *
- * A signal that cannot be delivered is dropped rather than waited for.  That
- * costs nothing: the only caller who can hold the lock long enough to lose one
- * is an opener still inside OpenLibrary(), which has not yet had the chance to
- * ask for the mask, and every later change signals normally.
  */
 static struct AmiSocketBase *bsd_master_base;
 
@@ -285,22 +212,6 @@ static ULONG bsd_dead_task_signals;
 
 /*
  * Signal() a task only if it is still there.
- *
- * sb_Task is the Task that opened the base, and a base can outlive it: a
- * program that exits without CloseLibrary() leaves its child base on the list
- * for good, with a pointer to a struct Task Exec has since freed and probably
- * handed to somebody else.  Signal() on that is a read-modify-write of
- * tc_SigRecvd.  If the bits it sets are waited for, it also does an AddHead()
- * onto the ready list.  Either way it corrupts whatever is there now.
- *
- * The test and the Signal() are inside one Disable() so the task cannot leave
- * between them.  Nothing here dereferences the candidate pointer: the answer
- * comes from the lists, not from the block.
- *
- * What this cannot catch is a struct Task freed and reallocated as another
- * struct Task, which is on the list and is not the one meant.  That needs a
- * generation stamp Exec does not have.  A wrong task then gets a spurious
- * signal, and nothing writes into a freed block.
  */
 static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
 {
@@ -317,8 +228,6 @@ static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
 
     Enable();
 
-    /* Said once: a program that does this does it for the rest of the session,
-       and the log is the only place the fact can appear. */
     if (!alive && bsd_dead_task_signals++ == 0UL)
     {
         AMI_WARN("bsdsocket: an address change was not delivered to task %lx: "
@@ -329,53 +238,6 @@ static VOID bsd_signal_if_alive(struct Task *task, ULONG mask)
 
 /*
  * Once a second, forget the tasks that are gone.
- *
- * bsd_event_post() (select.c) ends in Signal(base->sb_Task, signals) and runs
- * from NetX Duo's receive, transmit and out-of-band callbacks, which is to say
- * on every packet.  It has the same exposure bsd_address_changed() had, and
- * more of it: sb_EventSigMask is allocated before the base joins this list and
- * is never cleared, so its `signals != 0` test is always true and every event
- * on any socket of an orphaned base performs that write.  The client does not
- * have to have asked for a single signal mask.
- *
- * The liveness scan bsd_signal_if_alive() makes cannot go there.  An address
- * change happens when a lease arrives.  A packet happens hundreds of times a
- * second, and a walk of Exec's task lists with interrupts off is not something
- * to do on the receive path.  So the answer is computed here instead, on the
- * netstack's one-second heartbeat, and the two call sites keep the cheap NULL
- * test they already have.  One latch covers both.
- *
- * This must not destroy the base: bsd_child_destroy() is only correct on the
- * owning task. ami_signal_free() would hand the bit back out of the calling
- * task's tc_SigAlloc, which on this sweeper is the ThreadX tick task. The base
- * therefore stays leaked, holding its stack reference and its open count.
- *
- * Its cached ThreadX registration is different. ami_netstack_release() has a
- * foreign-owner path expressly for this case: it takes no semaphore, performs
- * no allocation or Wait(), does not free the dead task's signal, and removes
- * both a pending baton slot and the TX_THREAD registration under Forbid(). It
- * is safe in this interrupt-level hook and necessary before the dead task's
- * stack can be reused.
- *
- * Clearing sb_Task on a task that is alive kills that client's wakeups for the
- * rest of the session, and it would look like the network hanging.  A false
- * negative here costs more than the defect does.  bsd_task_alive() answers from
- * ThisTask plus the two scheduler lists, and that is the whole set for a live
- * task on this system: every blocking point in the ThreadX port is an Exec
- * Wait(), including a caller suspended inside NetX Duo
- * (port/threadx-amiga/src/tx_thread_system_return.c) and including the "park
- * forever" cases, and Wait() leaves the task on TaskWait.  The port never
- * touches TaskReady or TaskWait itself.  The two states that really are off
- * all three lists are a task between allocation and AddTask(), which nobody
- * can yet hold a pointer to, and a task after RemTask(), which is the thing
- * being looked for.
- *
- * What it does not close is the second between an exit and the next
- * heartbeat.  A packet arriving in that window still signals the freed block.
- * The window was the whole session.  It is now bounded by the period above.
- *
- * Runs on the ThreadX tick task inside a Forbid(), so AttemptSemaphore and
- * never ObtainSemaphore, and nothing that can block.  AMI_WARN is RawPutChar.
  */
 static ULONG bsd_latched_tasks;
 
@@ -387,12 +249,6 @@ static VOID bsd_task_sweep(VOID)
     if (master == NULL)
         return;
 
-    /*
-     * AttemptSemaphore(), never ObtainSemaphore(), for the reason given at the
-     * top of this file and one more: this runs at interrupt level and
-     * ObtainSemaphore() would block the tick task.  A second missed costs
-     * nothing, the next heartbeat sweeps the same list.
-     */
     if (!AttemptSemaphore(&master->sb_Lock))
         return;
 
@@ -407,11 +263,6 @@ static VOID bsd_task_sweep(VOID)
         if (child->sb_Task == NULL || bsd_task_alive(child->sb_Task))
             continue;
 
-        /* Once per base, not once per second: the latch below is what stops
-           it repeating, and a program that does this does it for the rest of
-           the session.  (In a green build a base whose gate proxy is
-           mid-flight stays on the list one more beat -- see bsd_nx_orphan()
-           -- so the warning takes its own latch.) */
 #ifdef AMINETXDUO_GREEN_REALM
         if (!child->sb_NxSweepSeen)
         {
@@ -429,11 +280,6 @@ static VOID bsd_task_sweep(VOID)
         child->sb_NxNest = 0;
         ami_netstack_release(&child->sb_NxCaller);
 
-        /* The request gate's proxy is a TX_THREAD the realm may be inside
-           this very tick; bsd_nx_orphan() reaps when that is safe and asks
-           for another pass when it is not.  sb_Task stays set until then,
-           so this base comes back next beat rather than being latched with
-           a live proxy still registered. */
         if (!bsd_nx_orphan(child))
             continue;
 
@@ -446,15 +292,6 @@ static VOID bsd_task_sweep(VOID)
 /*
  * The ARexx port's KILL, and anything else in the netstack that decides the
  * network is finished with.
- *
- * The same two steps NetShutdown takes, minus the grace period: signal every
- * opener, then give the stack hold back so the last CloseLibrary() takes the
- * stack with it. Without this, KILL took the interfaces down and left every
- * program holding a library whose network had gone -- the state NetShutdown
- * was in until 2026-08-11.
- *
- * bsd_master_base and not a caller's base: there is no caller here, so
- * nothing is skipped and every opener is told.
  */
 static VOID bsd_shutdown_requested(VOID)
 {
@@ -470,8 +307,6 @@ static VOID bsd_shutdown_requested(VOID)
         AMI_INFO("bsdsocket: shutdown, %lu program(s) told to stop",
                  (unsigned long)signalled);
 
-    /* Declined when this is the last reference, which is the one case where
-       dropping it would leave the stack running with nobody to close it. */
     (VOID)bsd_stack_unhold(master);
 }
 
@@ -507,19 +342,7 @@ static struct AmiSocketBase *bsd_lib_init(
 {
     SysBase = sysbase;
 
-    /* Before anything can send or receive a packet: which form of the checksum
-       and the copy this machine wants.  In an AMINETXDUO_CPU=any build these
-       are four assemblies of each routine in this one binary and this is the
-       call that picks.  Anywhere else it does nothing.  See
-       src/net68k/n68k_cpu.c. */
     n68k_cpu_select((ULONG)sysbase->AttnFlags);
-
-    /* Not ami_rt_cpu_select() here: this library resolves __mulsi3 and its
-       four siblings from newlib's libc.a, not from src/common/ami_udivdi3.c,
-       so there is nothing of ours to switch.  It would also buy nothing, no
-       object on the data path references them (checked with nm across the
-       whole link), which is why one binary costs this library 0.8% and costs
-       tls.library and ssh much more.  Those two do link ours and do call it. */
 
     /* A shared library gets no C startup: dos.library and the random number
        generator are ours to set up (library_runtime.c). */
@@ -547,9 +370,6 @@ static struct AmiSocketBase *bsd_lib_init(
 
     bsd_master_base = base;
 
-    /* The event ring, published where a command can read it without opening
-       this library -- which would start the network.  It stays for as long as
-       the segment does, so a shutdown's events outlive the stack. */
     ami_event_publish();
 
     ami_set_address_change_hook(bsd_address_changed);
@@ -559,22 +379,6 @@ static struct AmiSocketBase *bsd_lib_init(
     return base;
 }
 
-/* -------------------------------------------------------- child base life, */
-
-/* ------------------------------------------------- closed base poisoning, */
-
-/*
- * A call through a base that was already closed lands here and does nothing.
- * Freeing the block instead means such a call jumps into whatever allocated it
- * next, which is a different guru every time and is what issue #2 looks like.
- * Answering it harmlessly is what the stacks that survive this already do, by
- * not handing the memory back so promptly.
- */
-
-/* How many closed bases keep their poisoned vectors, for as long as the task
-   that can call through one is still running.  Each costs
-   lib_NegSize + lib_PosSize, on the order of a kilobyte.  Past this the oldest
-   is freed for real and a stale call through it is a guru again. */
 #define BSD_DEAD_RING           8
 
 static APTR         bsd_dead_block[BSD_DEAD_RING];
@@ -584,22 +388,8 @@ static UINT         bsd_dead_next;
 
 static ULONG bsd_dead_calls;
 
-/*
- * Returns 0 and nothing else.  Zero rather than -1 because the vectors have
- * assorted shapes and this one handler answers all of them: a caller that
- * expects a pointer gets NULL, which it has to check anyway, where -1 would be
- * an address it can dereference.  A caller expecting a count or a status gets
- * 0, which is the harmless answer for a call that did nothing.
- *
- * The counter is the only evidence left that a program called through a base
- * it had closed, now that doing so no longer announces itself.
- */
 static LONG bsd_dead_base_call(VOID)
 {
-    /*
-     * Once, not every time: a program that does this usually does it in a
-     * loop, and the point is to say that it happened, not to fill the log.
-     */
     if (bsd_dead_calls == 0UL)
     {
         AMI_WARN("bsdsocket: a call arrived through a base that was already "
@@ -620,10 +410,6 @@ ULONG bsd_dead_base_calls(VOID)
  * Overwrite the whole negative half with `JMP bsd_dead_base_call`.  Entry i
  * sits at -(6 * (i + 1)), so the half is exactly lib_NegSize / 6 six-byte
  * slots and filling it covers every vector without knowing how many are real.
- *
- * CacheClearU() for the same reason bsd_child_create() needs it: these are
- * instructions written through the data cache, and on a 68030 and up the
- * instruction cache can still hold the JMPs that used to be here.
  */
 static VOID bsd_poison_vectors(UBYTE *block, ULONG neg)
 {
@@ -648,19 +434,6 @@ static VOID bsd_poison_vectors(UBYTE *block, ULONG neg)
 
 /*
  * Give back the entries whose owner has gone.
- *
- * A base belongs to one task, so the only program that can call through this
- * one after closing it is that task.  Once the task is off Exec's lists there
- * is nobody left to protect, and the ring's reason to hold the block has
- * expired.
- *
- * This is what makes a command that opens the library, closes it and exits
- * cost nothing.  Without it the ring keeps the first BSD_DEAD_RING of them,
- * which reads as a leak of one base per run for eight runs and then stops, and
- * for a command run a handful of times at boot the "and then stops" never
- * arrives.
- *
- * FreeMem() outside Disable(), which is why bsd_task_alive() ends its own.
  */
 static VOID bsd_dead_ring_reap(VOID)
 {
@@ -684,26 +457,6 @@ static VOID bsd_dead_ring_reap(VOID)
 
 /*
  * One retained base per owner, the most recently closed.
- *
- * A base belongs to one task, so this task is the only one that can call
- * through either of them, and what it is about to do is close a second base
- * having already closed a first.  The block held for the first is either still
- * its own, in which case the newer close is the one worth protecting, or the
- * pointer has been handed to a different task since, in which case the first
- * owner is gone and there was nobody left to protect at all.  Both readings
- * give the same answer.
- *
- * This is what a command run repeatedly costs.  Exec hands a freed process
- * block straight back to the next process of the same size, so a command run
- * ten times at boot is usually ten bases with the same sb_Task, and the ring
- * would otherwise hold the first BSD_DEAD_RING of them.  Being alive is not
- * the test that catches it: the pointer is live again, but it belongs to
- * somebody else.
- *
- * A program that closes two bases keeps the poisoned vectors of the newer
- * only.  The ring it replaces was a machine-wide window of eight closes, so an
- * unrelated burst of opens was already able to evict a program's own entry.
- * Per owner, that cannot happen.
  */
 static VOID bsd_dead_ring_drop_owner(struct Task *owner)
 {
@@ -725,7 +478,6 @@ static VOID bsd_dead_ring_drop_owner(struct Task *owner)
     }
 }
 
-/* Poison this block and retain it, freeing whatever it displaces. */
 static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
                             struct Task *owner)
 {
@@ -733,9 +485,6 @@ static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
 
     bsd_poison_vectors(block, neg);
 
-    /* Before choosing a slot, not after: both of these usually empty one, and a
-       ring with a free slot does not have to displace a base whose owner is
-       still running and can still call through it. */
     bsd_dead_ring_drop_owner(owner);
     bsd_dead_ring_reap();
 
@@ -768,8 +517,6 @@ static VOID bsd_retain_dead(UBYTE *block, ULONG neg, ULONG bytes,
     bsd_dead_next        = (UINT)((slot + 1U) % (UINT)BSD_DEAD_RING);
 }
 
-/* Called from the expunge: the segment is going away, so nothing must be left
-   pointing into it, poisoned or not. */
 static VOID bsd_dead_ring_flush(VOID)
 {
     UINT i;
@@ -799,24 +546,10 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     if (mem == NULL)
         return NULL;
 
-    /* Not an ami_alloc(), so the census does not see it on its own.  This is
-       the block of the three leaks of 2026-08-09 that the census exists for:
-       one base per opener, freed by neither the opener nor this function but by
-       the dead ring, later, on somebody else's close. */
     AMI_CENSUS_ADD(mem, neg + pos);
 
-    /* Clone the jump table as well as the data: the child is a library. */
     CopyMem((UBYTE *)master - neg, mem, neg + pos);
 
-    /*
-     * The negative half just copied is code (the LVO jump table). On a 68030
-     * and up with the instruction cache on, the CPU can still hold stale lines
-     * for this block, it was very likely somebody else's freed code a moment
-     * ago, so a call through the child's vectors would run those instead of
-     * the JMPs just written. CacheClearU() flushes both caches. Missing this
-     * is invisible on a 68000/68020 and on emulators that do not model the
-     * I-cache.
-     */
     CacheClearU();
 
     child = (struct AmiSocketBase *)(mem + neg);
@@ -826,16 +559,8 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_Master          = master;
     child->sb_Task            = FindTask(NULL);
 
-    /* The copy names the master as the base it sits in, which is the check
-       that stops a moved record being believed. Same seglist, new base. */
     bsd_prof_segtag(child, master->sb_SegList);
 
-    /*
-     * The clone carries copies of the master-only fields, and a copied
-     * SignalSemaphore holds pointers into the master's wait queue. Children
-     * never touch either, but on a system with no memory protection leaving
-     * live-looking pointers around is a hazard, so they are cleared.
-     */
     bsd_bzero(&child->sb_Lock, sizeof(child->sb_Lock));
     bsd_bzero(&child->sb_Children, sizeof(child->sb_Children));
     bsd_bzero(&child->sb_Handoffs, sizeof(child->sb_Handoffs));
@@ -844,8 +569,6 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_StackHeld          = FALSE;
     child->sb_NextHandoffId      = 0;
 
-    /* Clear the inherited ThreadX bracket state rather than depend on the
-       master never having been inside one. */
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
     child->sb_NxNest = 0;
 
@@ -881,17 +604,10 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_TimerSignal  = -1;
     child->sb_TimerSigMask = 0;
 
-    /* The netdb iterators (netdb.c) start at the top of each table. */
     child->sb_ServCursor  = 0;
     child->sb_ProtoCursor = 0;
     child->sb_NetCursor   = 0;
 
-    /*
-     * The wakeup signal belongs to the opening task, which is the task this
-     * base belongs to. Everything that can make a socket ready, NetX Duo's
-     * receive/connect/disconnect callbacks, signals it, so WaitSelect() can
-     * Wait() on it alongside the caller's own bits.
-     */
     sig = ami_signal_alloc();
     if (sig < 0)
     {
@@ -906,9 +622,6 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     AddTail((struct List *)&master->sb_Children, (struct Node *)&child->sb_Node);
     ReleaseSemaphore(&master->sb_Lock);
 
-    /* One child base per OpenLibrary(), so this is the number of programs
-       holding the network open, the denominator for the socket count in the
-       health report. */
     ami_mem_open_delta(1);
 
     return child;
@@ -922,14 +635,8 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
 
     bsd_close_all(child);
 
-    /* The capture channels this base opened go with it, as the bpf_open()
-       autodoc says. Frees and Forbid()/Permit() only, nothing that can wait,
-       which is what the close path cannot afford (544398f). */
     bsd_bpf_close_all(child);
 
-    /* The timer signal is the opener's, not the library's: WaitSelect() takes
-       it out of the caller's 32 bits and there is no way to recover one, so an
-       open/close cycle that forgot it cost the caller a bit for good. */
     if (child->sb_TimerOpen)
     {
         CloseDevice((struct IORequest *)&child->sb_TimerReq);
@@ -962,21 +669,9 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     bsd_retain_dead((UBYTE *)child - neg, neg, neg + pos, child->sb_Task);
 }
 
-/* --------------------------------------------------- stack bring-up proc, */
 /*
  * netstack_startup() parses DEVS: and runs all of NetX Duo's init on the
  * calling task's stack, it adopts that task (netstack.c, ami_ns_bring_up()).
- * Opened from a command with the ~4 KB startup-sequence Shell stack, which is
- * how AddNetInterface comes up at boot, that overflows and smashes the return
- * path.  With no memory protection it surfaces as an illegal instruction or
- * line-F at a wild address seconds later.
- *
- * So the first open runs the bring-up on a Process of our own with a stack we
- * choose, and waits for its result. Later opens only take a reference. The
- * handshake follows bsd_tcp_handler_start(): a boot record on this stack, a
- * file-scope pointer to it, and a private signal (not SIGF_SINGLE, see
- * bsd_netstack_bringup()), serialised by the master sb_Lock the caller already
- * holds across the whole bring-up.
  */
 #define BSD_STARTUP_STACK   (64UL * 1024UL)
 
@@ -989,12 +684,6 @@ typedef struct
 
 static BsdNetBoot *bsd_net_boot;
 
-/*
- * Take the startup reference only when an opener can inherit it.  This is
- * shared by the normal child and both caller-stack fallbacks: a failed
- * startup can still leave a live, unaddressed stack behind with ns_Refs == 1,
- * and returning that error without shutdown gives the reference to nobody.
- */
 static LONG bsd_netstack_start_owned(VOID)
 {
     LONG result = netstack_startup();
@@ -1009,38 +698,8 @@ static VOID bsd_netstack_boot_main(VOID)
 {
     BsdNetBoot *b = bsd_net_boot;
 
-    /* netstack_startup() blocks until NX_IP has initialised, so signal only
-       after it returns, the parent Wait()s the whole time and `boot` lives
-       on its stack until then. */
     b->nb_Result = bsd_netstack_start_owned();
 
-    /*
-     * A failed startup can still leave a stack standing: netstack_startup()
-     * sets ns_Refs to 1 when ami_ns_bring_up() fails with the NX_IP already
-     * made, on the grounds that a live stack has an owner. Here it has none,
-     * bsd_lib_open() is about to return NULL, so no base will ever be closed
-     * to give that reference back.
-     *
-     * Left alone it is permanent. sb_StackRefs was never incremented, so the
-     * next successful open takes ns_Refs to 2 and the last close only ever
-     * returns it to 1: the stack can never be freed and never be shut down
-     * again.
-     *
-     * The cost is not only the packet pool. A live stack has ThreadX threads
-     * running out of this segment, so the library can never be expunged
-     * either, measured at about 400 KB kept on a 1 MB machine, which is the
-     * segment plus the pool at its AMI_POOL_MIN_PACKETS floor plus the NX_IP
-     * and the thread stacks. On the supported 1 MB floor that is most of the
-     * machine, held by a command that printed an error and exited.
-     *
-     * Given back by bsd_netstack_start_owned() rather than in bsd_lib_open().
-     * In this normal path the helper runs on this 64 KB Process, because
-     * nx_ip_delete() waits for the IP thread and the opener can be a Shell
-     * command with 4 KB. The two emergency fallbacks have no larger stack to
-     * use, but they still must not leak the reference. netstack_shutdown()
-     * returns at once when there is no stack, so the case where bring-up
-     * failed before allocating anything costs nothing.
-     */
     Signal(b->nb_Parent, b->nb_SigMask);
 }
 
@@ -1051,13 +710,8 @@ static LONG bsd_netstack_bringup(VOID)
     struct Process *proc;
     BYTE            sig;
 
-    /* A private signal, not SIGF_SINGLE: the child runs netstack_startup(),
-       which starts the ThreadX kernel, and the port uses SIGF_SINGLE as its
-       thread run-signal. Sharing it would let a stray ThreadX dispatch wake
-       this Wait() early, we would return and pop this stack frame (with
-       `boot` on it), and the child would then write nb_Result into the dead
-       frame, smashing our return address (the Shell Process wild jump to a
-       near-null PC). */
+    /* A private signal, never SIGF_SINGLE: the ThreadX port uses SIGF_SINGLE as
+       its thread run-signal, so sharing it wakes this Wait() early. */
     sig = (BYTE)AllocSignal(-1);
     if (sig < 0)
         return bsd_netstack_start_owned(); /* no signal: caller-stack fallback */
@@ -1076,8 +730,6 @@ static LONG bsd_netstack_bringup(VOID)
     proc = CreateNewProc(tags);
     if (proc == NULL)
     {
-        /* Cannot spawn: fall back to the caller's stack. An opener that came
-           with enough stack still works. One that did not is no worse off. */
         bsd_net_boot = NULL;
         FreeSignal(sig);
         return bsd_netstack_start_owned();
@@ -1089,8 +741,6 @@ static LONG bsd_netstack_bringup(VOID)
 
     return boot.nb_Result;
 }
-
-/* ------------------------------------------------------------ exec vectors, */
 
 struct AmiSocketBase *bsd_lib_open(
     register ULONG                 version    __asm("d0"),
@@ -1110,41 +760,16 @@ struct AmiSocketBase *bsd_lib_open(
 
     master->sb_Lib.lib_Flags &= ~LIBF_DELEXP;
 
-    /* Hold a reference across the (semaphore-blocking) startup below. */
     master->sb_Lib.lib_OpenCnt++;
 
     ObtainSemaphore(&master->sb_Lock);
 
-    /*
-     * The DEVS:Internet netdb backs get{serv,proto,net}by*() (netdb.c).
-     * ami_netdb_load() is idempotent but not re-entrant, so it happens here,
-     * inside the master semaphore and on a Process (it reads files), never
-     * from a lookup: the netstack's own threads resolve names, and they are
-     * not Processes, so the lazy load in netdb_table() would open a file from
-     * a context that cannot. This is the only thing that loads it for the
-     * library -- ami_config_load() used to as a side effect and no longer
-     * does -- and bsd_lib_expunge() below is the matching free.
-     */
     (VOID)ami_netdb_load();
 
-    /*
-     * usergroup.library, held for the life of this library so that its node
-     * is in Exec's library list. That residency is what an ixemul.library
-     * client needs to reach a socket at all; the whole reason is over
-     * bsd_usergroup_open() in library_runtime.c, which also makes the AmiTCP:
-     * assign those clients look under, on the first call and once. Here
-     * rather than in
-     * bsd_lib_init(), which Exec runs from inside RamLib while RamLib is
-     * loading this file: opening a second disk-based library from there
-     * re-enters it. This runs in the opener's own Process, under the
-     * semaphore that already serialises ami_netdb_load() above.
-     */
     bsd_usergroup_open();
 
     if (master->sb_StackRefs == 0)
     {
-        /* Bring the stack up on our own big-stack Process, not the opener's
-           stack, see bsd_netstack_bringup() above. */
         if (bsd_netstack_bringup() != AMI_NET_OK)
         {
             ReleaseSemaphore(&master->sb_Lock);
@@ -1169,18 +794,6 @@ struct AmiSocketBase *bsd_lib_open(
         return NULL;
     }
 
-    /*
-     * TCP: exists from the first OpenLibrary() onwards. That is Roadshow's
-     * rule ("when bsdsocket.library is initialized, it attempts to add a file
-     * system device by the name of TCP:") and the only thing that works: DOS
-     * has to find the device node before it can route an Open("TCP:..."), and
-     * `Type` does not open bsdsocket.library.
-     *
-     * Here rather than in bsd_lib_init() because this runs in the opener's own
-     * Process and the handler is created with CreateNewProc(). Guarded inside
-     * so it runs once. The handler's own OpenLibrary() lands here and finds it
-     * done.
-     */
 #ifdef AMINETXDUO_TCPDEVICE
     bsd_tcp_handler_start(master);
 #else
@@ -1200,12 +813,6 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
     {
         master = base->sb_Master;
 
-        /*
-         * If this is the last opener, nothing can ObtainSocket() again, so
-         * release anything still parked in the hand-off registry rather than
-         * leak it. Before the child base goes: bsd_handoff_flush() needs a
-         * live base for the ThreadX bracket the teardown runs in.
-         */
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs >= master->sb_TransientStackRefs &&
             master->sb_StackRefs - master->sb_TransientStackRefs <= 1)
@@ -1217,10 +824,6 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         /*
          * The teardown runs with the lock held, and has to: the decrement that
          * reaches zero and the shutdown it triggers are one step. If the lock
-         * is dropped between them, an opener arriving in that window sees
-         * sb_StackRefs at zero, calls netstack_startup(), and gets a reference
-         * to a stack that is being dismantled. Nothing on the teardown path
-         * takes this semaphore, so holding it only makes concurrent opens wait.
          */
         ObtainSemaphore(&master->sb_Lock);
         if (master->sb_StackRefs > 0 && --master->sb_StackRefs == 0)
@@ -1230,18 +833,6 @@ APTR bsd_lib_close(register struct AmiSocketBase *SocketBase __asm("a6"))
         }
         ReleaseSemaphore(&master->sb_Lock);
 
-        /*
-         * Outside the lock: the report writes to the serial port, which is not
-         * something to do while holding a semaphore every opener waits on.
-         *
-         * The stack is down but the library is still loaded, so this is the
-         * count for one run of one program, which is the granularity a leak
-         * shows up at.  The netdb tables are deliberately still held here and
-         * are freed by the expunge, which is why there are two scopes.
-         */
-        /* Only once the kernel has actually stopped. A census taken while
-           ThreadX Tasks are still alive counts memory that is still in use
-           and reads as a leak. */
         if (unload_is_safe)
             AMI_CENSUS_REPORT("bsd-stack-down");
     }
@@ -1320,25 +911,6 @@ VOID bsd_stack_transient_release(struct AmiSocketBase *base)
  * NETCTRL_STACK_HOLD: the library takes its own reference to the stack it is
  * running, so the command that started the network can close its base like any
  * other opener and the network still stands afterwards.
- *
- * That used to be a leaked OpenLibrary(): AddNetInterface opened, never closed,
- * and the reference it did not give back was what kept the interface up.  One
- * per invocation, and each one left a child base on the list for good, holding
- * a struct Task that had exited, an Exec signal bit belonging to that task, and
- * a ThreadX registration naming that task's stack, which is the range
- * tx_thread_create() then refuses to overlap (src/sana2/sana2_rx.c).
- *
- * The reference taken here is exactly the pair the leak used to hold, a
- * netstack reference so the last close does not call netstack_shutdown(), and
- * an open count so an expunge is declined while ThreadX threads are running out
- * of this segment, and nothing else.  It costs no memory and it is taken once.
- * The flag is there so the second AddNetInterface of a session does not cost
- * what the first did.
- *
- * There is no release.  That is the same permanence the leak had, and
- * NetShutdown's header says so in as many words.  Giving it back would need
- * an operation that decides the network is finished with, which is a
- * different feature from this one.
  */
 LONG bsd_stack_hold(struct AmiSocketBase *base)
 {
@@ -1355,9 +927,6 @@ LONG bsd_stack_hold(struct AmiSocketBase *base)
 
     if (!master->sb_StackHeld)
     {
-        /* Nothing to hold. The caller has a base open, so this cannot happen
-           from a live opener. It is here so a wrong caller gets an error
-           rather than a reference to a stack that is not running. */
         if (master->sb_StackRefs == 0)
         {
             rc = -1;
@@ -1383,16 +952,6 @@ LONG bsd_stack_hold(struct AmiSocketBase *base)
 
 /*
  * NETCTRL_STACK_RELEASE: give the hold back.
- *
- * The paragraph above says there is no release and that giving it back needs
- * an operation that decides the network is finished with. NetShutdown is that
- * operation, so this is that release.
- *
- * It refuses when the caller is the only reference left, which is the one case
- * that would run netstack_shutdown() from inside this call with the caller's
- * base still live and its next vector call landing in a stack being taken
- * apart. Two references means the hold and the caller, and dropping the hold
- * then leaves the teardown where it belongs, in the caller's CloseLibrary().
  */
 LONG bsd_stack_unhold(struct AmiSocketBase *base)
 {
@@ -1422,8 +981,6 @@ LONG bsd_stack_unhold(struct AmiSocketBase *base)
             master->sb_StackHeld = FALSE;
             Permit();
 
-            /* Non-zero here is a program that has not let go, and the stack
-               stays up until it does. NETSTATUS_OPENERS names it. */
             ami_event(NETEVENT_RELEASE, NETEVENT_NOINDEX,
                       (ULONG)master->sb_Lib.lib_OpenCnt);
         }
@@ -1495,8 +1052,6 @@ LONG bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled)
     return 0;
 }
 
-/* How many sockets a base has open, for the report: the descriptor table with
-   the empty slots taken out. */
 static UWORD bsd_base_sockets(const struct AmiSocketBase *child)
 {
     ULONG i;
@@ -1517,15 +1072,6 @@ static UWORD bsd_base_sockets(const struct AmiSocketBase *child)
 
 /*
  * What to call an opener in a report.
- *
- * tc_Node.ln_Name is "Background CLI" for anything a script started with Run
- * or System(), which is how a service is normally started and is no use to a
- * reader being told which program is holding the network open. A Process from a
- * Shell carries the command's own name in cli_CommandName, which is what the
- * Status command prints, so that comes first and the task name is the
- * fallback for a bare Task or a Process with no CLI.
- *
- * Only for a task that is still there: pr_CLI on a freed Task is a wild read.
  */
 static VOID bsd_opener_name(const struct Task *task, char *out, LONG size)
 {
@@ -1552,10 +1098,6 @@ static VOID bsd_opener_name(const struct Task *task, char *out, LONG size)
                     LONG start = 0;
                     LONG j;
 
-                    /* The command is typed as "SYS:httpd" or "Work:net/httpd".
-                       The drawer is not what identifies the program to somebody
-                       deciding which one to close, so only the last component
-                       is kept. */
                     for (j = 0; j < len; j++)
                     {
                         if (bstr[j + 1] == '/' || bstr[j + 1] == ':')
@@ -1582,8 +1124,6 @@ static VOID bsd_opener_name(const struct Task *task, char *out, LONG size)
 
 /*
  * NETSTATUS_OPENERS: the same list, as a table a command can print.
- *
- * Copied under the semaphore because a task that exits takes its name with it.
  */
 LONG bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
                       LONG max, LONG *available)
@@ -1624,8 +1164,6 @@ LONG bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
             if (child == base)
                 o->nso_Flags |= NETSTATUS_OPENER_SELF;
 
-            /* bsd_task_sweep() clears sb_Task on a base whose task left, and
-               a task that has gone since the last sweep is the same fact. */
             if (child->sb_Task == NULL || !bsd_task_alive(child->sb_Task))
                 o->nso_Flags |= NETSTATUS_OPENER_GONE;
             else
@@ -1642,7 +1180,6 @@ LONG bsd_openers_list(struct AmiSocketBase *base, NetStatusOpener *out,
     return n;
 }
 
-/* The library's own count, for NETSTATUS_SYSTEM. */
 ULONG bsd_open_count(struct AmiSocketBase *base)
 {
     struct AmiSocketBase *master = base;
@@ -1673,13 +1210,6 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         return NULL;
     }
 
-    /*
-     * tx_amiga_kernel_stop() can refuse while an application ThreadX thread
-     * is still alive, or time out after stopping has begun. In either case an
-     * Exec Task may still be executing code or using stacks from this hunk.
-     * netstack_shutdown() logs the refusal; expunge must enforce its "do not
-     * unload" result instead of handing the segment back to UnLoadSeg().
-     */
     if (!netstack_can_unload())
     {
         ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
@@ -1688,14 +1218,6 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         return NULL;
     }
 
-    /*
-     * The TCP: handler process runs code out of the segment this is about to
-     * hand back for UnLoadSeg(), and it holds no OpenCnt reference, it takes
-     * one only while a file handle is open, so OpenCnt at zero means it is
-     * idle, not gone. There is no way to prove it is not running, so the
-     * expunge is declined. ACTION_DIE takes TCP: down, and after that this
-     * succeeds.
-     */
 #ifdef AMINETXDUO_TCPDEVICE
     if (bsd_tcp_handler_alive())
     {
@@ -1706,13 +1228,6 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     }
 #endif
 
-    /*
-     * Same for an address allocation still running: those workers are
-     * Processes of ours running out of this segment. They hold a transient
-     * netstack reference but no OpenCnt reference (see the launch in
-     * addralloc.c). Each is a bounded number of seconds from finishing, since
-     * the API it serves has a mandatory timeout.
-     */
     if (bsd_aam_busy())
     {
         ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
@@ -1721,13 +1236,6 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
         return NULL;
     }
 
-    /*
-     * Same while a monitoring hook is installed. This is documented behaviour,
-     * not a leak: "It must be called before the library is closed, or the
-     * library will stay in memory indefinitely."  Expunging with a hook in the
-     * list would unload the segment out from under a caller that still
-     * believes its hook is live.
-     */
     if (bsd_netmon_busy())
     {
         ami_event(NETEVENT_EXPUNGE_DECLINED, NETEVENT_NOINDEX,
@@ -1738,32 +1246,18 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
 
     /*
      * Deregister before anything is freed.  bsd_address_changed() lives in the
-     * segment about to be handed to UnLoadSeg(), and the netstack calls it
-     * through a pointer src/common holds. Leaving it registered is a call into
-     * unloaded memory the moment an address changes afterwards.
      */
     ami_set_address_change_hook(NULL);
     ami_set_second_hook(NULL);
     ami_set_shutdown_hook(NULL);
     bsd_master_base = NULL;
 
-    /* The mark points into the segment about to be unloaded, and its removal
-       is under Forbid(), which is what a reader holds across its find and its
-       copy. */
     ami_event_unpublish();
 
     seglist = base->sb_SegList;
     neg     = base->sb_Lib.lib_NegSize;
     pos     = base->sb_Lib.lib_PosSize;
 
-    /*
-     * The DEVS:Internet tables are ami_alloc()ed once by the first open and
-     * held in file-scope statics in src/config/netdb.c. Those statics go away
-     * with the segment, so an expunge that does not free them first orphans
-     * every block: 12,616 bytes on a stock DEVS:Internet, gone for good and
-     * again on the next load. Nothing can be in a lookup here, OpenCnt is
-     * zero and the checks above have ruled out our own Processes.
-     */
     ami_netdb_free();
 
     bsd_runtime_close();
@@ -1771,13 +1265,6 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     /* Every retained child points into the segment about to unload. */
     bsd_dead_ring_flush();
 
-    /*
-     * The last moment anything of ours exists.  Everything the library ever
-     * allocated has now been given back -- the netdb tables above, the runtime,
-     * the retained bases -- so anything the census still holds is memory that
-     * survives the segment, which on AmigaOS means until the machine is
-     * rebooted.  tools/alloc-census.sh gates on this line.
-     */
     AMI_CENSUS_REPORT("bsd-expunge");
 
     Remove((struct Node *)base);

@@ -1,40 +1,7 @@
 #!/usr/bin/env bash
-#
 # TLS session resumption, measured on the A1200 profile.
-#
-#   tests/tls/run-resume.sh [-m MODEL] [-t SECONDS] [-c CPU] [-k MHZ]
-#                           [-b BUILDDIR] [-s STAGE] [-p PHASE]
-#
-# THREE PHASES, and each answers a different question.
-#
-#   -p api    tests/tls/tls_resume, in ONE process: cold handshake and resumed
-#             handshake against the same host, back to back, with the same
-#             instrumentation.  That delta is the deliverable.  Also proves a
-#             resumed session carries data, that a ticket the server refuses
-#             falls back to a full handshake rather than failing, and that
-#             TLSA_NoResume means what it says.
-#
-#   -p cross  the shipped `fetch` command, run three times in one boot.  Three
-#             PROCESSES: if the second and third handshakes are fast, the cache
-#             outlived the program that filled it, which is the case a user
-#             actually meets when they run curl twice.
-#
-#   -p boot   two FS-UAE runs with the machine rebooted in between, carrying
-#             DEVS:Internet/tlssessions across.  Proves the disk mirror, and is
-#             the only way to seed a host whose COLD handshake a 14 MHz 68020
-#             cannot finish, the seeding run uses -k to give the arithmetic
-#             enough clock, and the resuming run is the A1200's own 14 MHz.
-#             That is the www.iana.org headline.
-#
-#   -p all    (default) api, then cross, then boot.
-#
-# NOT A BASELINE.  It depends on the internet, on FS-UAE's SLIRP NAT, on third
-# parties' servers, and on those servers' willingness to issue and honour a
-# session ticket.  See tests/tls/run-api.sh for the same disclaimer at length.
-#
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -47,11 +14,6 @@ CLOCK=""
 BUILD="${AMINETXDUO_BUILD:-build/tls}"
 PHASE=all
 
-# The clock the SEEDING run of the boot phase uses.  www.iana.org is three
-# certificates behind Cloudflare, and a cold verification at 14 MHz takes
-# longer than that front end will wait, so the cache has to be filled at a
-# clock where it completes.  The number that matters is the RESUMED one, and
-# that is measured at the A1200's own 14 MHz.
 SEED_CLOCK="${AMINETXDUO_RESUME_SEED_CLOCK:-28}"
 
 while getopts "m:t:c:k:b:p:" opt; do
@@ -81,8 +43,6 @@ for f in "$RESUME" "$SMOKE" "$FETCH" "$ADDIF" "$BSD" "$TLS" "$STORE"; do
     }
 done
 
-# ------------------------------------------------------------- a2065 -----
-
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
     for candidate in \
@@ -97,8 +57,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/resume-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -110,12 +68,6 @@ cp "$STORE"  "$STAGE/devs/Internet/certificates"
 cp "$FETCH"  "$STAGE/fetch"
 cp "$ADDIF"  "$STAGE/AddNetInterface"
 
-# A SECOND trust store: valid, well-formed, and holding one root that signed
-# nothing on the public internet.  It is the acceptance test for the defect
-# where a session verified against one store was resumed by a caller
-# presenting another, the correct answer is the same refusal a cold
-# handshake gives, and the only way to test that is to have a store that is
-# real enough to be opened and wrong enough to be useless.
 OTHER="$ROOT/build/resume-otherstore.pem"
 if [ ! -f "$OTHER" ]; then
     openssl req -x509 -newkey rsa:2048 -keyout /dev/null -out "$OTHER" \
@@ -131,19 +83,6 @@ CPUARG=()
 [ -z "$CPU" ]   || CPUARG+=(-c "$CPU")
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
-# amiberry-run.sh wipes build/amiberry-testhd-<tag> at the start of every run, so anything
-# the Amiga wrote to DEVS: is gone by the next one.  Carrying the session cache
-# forward is therefore an explicit copy, and it is also exactly what makes the
-# boot phase a proof rather than an assertion: the only thing that crosses is
-# that one file.
-# ---------------------------------------------------------- the verdict ---
-#
-# Every phase used to end with the emulator's exit status and nothing else.
-# The deliverable in the header -- that a resumed handshake happens and is
-# cheaper than a cold one -- was never asserted anywhere, so a build in which
-# resumption silently stopped working passed all three phases: `fetch` still
-# fetches, tls_resume still returns 0 for the checks it does run, and a boot
-# phase whose seeding run died was already carrying an empty cache forward.
 . "$ROOT/tools/test-verdict.sh"
 
 FAILED=0
@@ -152,9 +91,6 @@ pass() { echo "  ok: $*"; }
 
 hd_of() { echo "$ROOT/build/amiberry-testhd-$1"; }
 
-# `fetch` prints " (resumed session)" on the handshake line when the session
-# came out of the cache, and nothing there when it did not (src/tools/fetch.c).
-# That string is the only direct evidence a resume happened.
 resumes_in() { grep -c "(resumed session)" "$1" 2>/dev/null || true; }
 
 carry_sessions() {
@@ -167,8 +103,6 @@ carry_sessions() {
         return 1
     fi
     bytes=$(wc -c < "$src" | tr -d ' ')
-    # A zero-byte file is not a cache. It used to be carried forward and the
-    # warm run then did a second cold handshake, which nothing noticed.
     if [ "$bytes" -eq 0 ]; then
         fail "the $tag run wrote a 0-byte session cache, which holds no session"
         return 1
@@ -192,9 +126,6 @@ run_api() {
     AMINETXDUO_RUN_TAG=resume-api verdict_guest "resume-api" 8 "$rc" \
         "$out" "$ROOT/build/amiberry-serial-resume-api.log" || FAILED=$((FAILED + 1))
 
-    # THE DELIVERABLE (see the header): a resumed handshake, and one that costs
-    # less than the cold one it followed.  Without this the phase passes on a
-    # library that quietly does two full handshakes.
     if ! grep -q "DELTA " "$out" 2>/dev/null; then
         fail "no DELTA line: tls_resume never completed a cold/resumed pair"
         return
@@ -241,9 +172,6 @@ EOF
     fi
     cat "$rep"
 
-    # Four fetches, two hosts: the second call to each host is a different
-    # PROCESS and must still find the session the first one left behind.  Two
-    # resumes is the whole point of the phase.
     local n; n=$(resumes_in "$rep")
     if [ "$n" -ge 2 ]; then
         pass "$n resumed handshakes across processes"
@@ -265,9 +193,6 @@ SYS:AddNetInterface eth0
 SYS:fetch https://www.iana.org/ TO DH0:seed.txt
 EOF
 
-    # The seeding run's status used to be thrown away with `|| true`, so a boot
-    # that never reached the network still went on to "carry" a cache that was
-    # not there and the phase reported whatever the second run felt like.
     set +e
     AMINETXDUO_RUN_TAG=resume-seed \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" -k "$SEED_CLOCK" \
@@ -303,8 +228,6 @@ EOF
     fi
     cat "$rep"
 
-    # The claim the phase exists for: the cache survived a power cycle, so the
-    # handshake on the second boot is a resume and not a second cold one.
     local n; n=$(resumes_in "$rep")
     if [ "$n" -ge 1 ]; then
         pass "the handshake after the reboot was resumed from the carried cache"

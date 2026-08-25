@@ -5,21 +5,6 @@
 #
 #   tests/bebbossh/check-term.sh <testhd-dir> <results-dir>
 #
-# THE COMPARISON, AND WHY IT NEEDS BOTH SIDES
-#
-#   BebboSSH asks the AmigaDOS console its size with CSI '0 q', the Window
-#   Bounds Report, and puts the answer in pty-req.  ClientRun asks the same
-#   console the same question before handing it over and prints the answer;
-#   the remote command runs `stty size` and writes it into a file on the build
-#   host.  A wrong size is not an error anywhere, it is `vi` drawing in the
-#   wrong place, so the only way to catch it is to hold the two numbers up
-#   against each other.
-#
-#   Two different, deliberately non-default window sizes are used.  A test that
-#   only ever asked for 640x200 could not tell a working implementation from
-#   one that answers a hardcoded 80x24, because 640x200 in topaz-8 is very
-#   nearly that.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -37,11 +22,6 @@ if [ ! -f "$REPORT" ]; then
     exit 1
 fi
 
-# ClientRun writes, per console command:
-#     --- <command>
-#     --- input: CON:...
-#     --- console rows R, cols C
-# in order, so the Nth "console rows" line belongs to the Nth console command.
 mapfile -t CONSIZES < <(sed -n 's/^--- console rows \([0-9]*\), cols \([0-9]*\)$/\1 \2/p' "$REPORT")
 mapfile -t CONSPECS < <(sed -n 's/^--- input: \(CON:.*\)$/\1/p' "$REPORT")
 
@@ -81,8 +61,6 @@ if [ "$n" = "0" ]; then
     FAIL=1
 fi
 
-# The two windows must differ, or the comparison proves nothing: a hardcoded
-# answer would pass a test that asked the same question twice.
 if [ "$n" -ge 2 ]; then
     if [ "${CONSIZES[0]:-x}" = "${CONSIZES[1]:-y}" ]; then
         echo ""
@@ -110,9 +88,6 @@ show "the pty device"          "$RES/a.tty"
 show "no-pty arm (-T), stty"   "$RES/nopty.stty"
 show "no-pty arm (-T), tty"    "$RES/nopty.tty"
 
-# BebboSSH's pty-req carries a termios block: VINTR ^C, VERASE ^H, VEOF ^D.
-# A host's own default erase is ^?, so `erase = ^H` is the discriminator that
-# says the block arrived and was applied rather than dropped.
 if [ -f "$RES/a.stty_a" ]; then
     echo ""
     echo "the termios BebboSSH asked for, as the remote applied it:"
@@ -130,19 +105,12 @@ if [ -f "$RES/a.stty_a" ]; then
 fi
 
 # ---------------------------------------------------------------- resize ----
-#
-# The remote samples its own size either side of a programmatic
-# ChangeWindowBox().  A client that never notices reports the same size twice;
-# one that notices and sends window-change reports the new one.
 if [ -f "$RES/r1.stty" ] || [ -f "$RES/r2.stty" ]; then
     echo ""
     echo "resize, as the remote saw it:"
     before=$(cat "$RES/r1.stty" 2>/dev/null | tr -d '\n')
     after=$(cat "$RES/r2.stty" 2>/dev/null | tr -d '\n')
     conafter=$(sed -n 's/^--- console rows \([0-9]*\), cols \([0-9]*\)$/\1 \2/p' "$REPORT" | tail -1)
-    # The window's real pixel size either side of the ChangeWindowBox(), from
-    # ClientRun.  Without it, "the remote size did not change" cannot be told
-    # apart from "the window did not change".
     printf '  %-24s %s\n' "the window itself" \
         "$(sed -nE 's/^--- window (before|after): +(.*)$/\1 \2/p' "$REPORT" | tr '\n' ' ')"
     printf '  %-24s %s\n' "before the resize" "${before:-(nothing)}"
@@ -159,16 +127,8 @@ if [ -f "$RES/r1.stty" ] || [ -f "$RES/r2.stty" ]; then
     fi
 fi
 
-# The remote command echoes SESSION-OK, and the piped-shell arm echoes its own
-# markers.  Both arrive over the session and land in the report, which is what
-# says data actually flowed in the terminal direction.
 echo ""
-# The resize arm's session output goes to DH0:server.txt, so both files are
-# searched, see the note in clientrun.c about interleaved appends.
 ALL=$(cat "$REPORT" "$HD/server.txt" 2>/dev/null)
-# RESIZE-ARM-DONE is deliberately not looked for: that arm's stdout IS the
-# console, which is the only way the console gets told to report resizes, so
-# nothing it prints reaches a file.  Its evidence is r1.stty and r2.stty.
 for marker in SESSION-OK SHELL-SESSION-START; do
     if printf '%s' "$ALL" | grep -q "$marker"; then
         printf '  %-24s seen %s time(s)\n' "$marker" "$(printf '%s' "$ALL" | grep -c "$marker")"

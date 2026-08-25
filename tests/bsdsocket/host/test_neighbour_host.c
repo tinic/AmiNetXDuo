@@ -1,39 +1,6 @@
 /*
  * NETSTATUS_NEIGHBOURS on the host: which neighbours carry NETSTATUS_ND_ROUTER.
  *
- * WHY THIS FILE EXISTS
- *
- *   `arp` prints "router" beside a neighbour when the library sets that flag,
- *   and on a real segment it never did: the machine's own IPv6 router listed
- *   as a plain STALE neighbour with nothing to tell it apart from a host.
- *   Intermittently -- one run in two -- which is what kept it unexplained.
- *
- *   The flag came from ND_CACHE_ENTRY.nx_nd_cache_is_router, a back pointer
- *   NetX Duo writes in exactly one place: nx_icmpv6_process_ra.c:701, inside
- *   the arm that handles an RA's Source Link-Layer Address option. An RA
- *   without that option adds the router to nx_ipv6_default_router_table and
- *   leaves the back pointer NULL for ever; the neighbour entry that the first
- *   packet through the router creates is then an ordinary neighbour. Whether
- *   the option was there, and whether the cache already had an entry when it
- *   was, is the segment's business and changes between boots. Hence one run
- *   in two.
- *
- *   ns_neighbour_is_router() now asks the default router table, which is what
- *   "it is a router for this machine" means, and treats the back pointer as
- *   the shortcut it is.
- *
- * WHAT RUNS HERE
- *
- *   The shipping bsd_NetStackQuery(), over the shipping ns_fill_neighbours().
- *   src/bsdsocket/netstatus.c is compiled whole into this binary, so the walk,
- *   the writer and the flag are the ones the Amiga runs. What is faked is the
- *   NX_IP the query reads: the neighbour cache and the default router table
- *   are filled by hand, which is the only way to stage an RA that carried no
- *   link-layer option.
- *
- *   Every other extern netstatus.c names is stubbed below. None of them is on
- *   the NETSTATUS_NEIGHBOURS path.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -50,8 +17,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* --------------------------------------------------------------- reporting */
-
 static unsigned long h_checks;
 static unsigned long h_failures;
 
@@ -64,15 +29,11 @@ static unsigned long h_failures;
         }                                                                     \
     } while (0)
 
-/* ------------------------------------------------------------- the fixture */
-
 static NX_IP           h_ip;
 static NX_INTERFACE   *h_if0;
 static NX_INTERFACE   *h_if1;
 static BOOL            h_ipv6_on = TRUE;
 
-/* Three addresses: the router, a host on the same link, and the same router
-   address seen on a second interface. */
 #define R0  0xFE800000UL
 #define R3  0x00000001UL
 #define H3  0x00000042UL
@@ -98,8 +59,6 @@ static VOID h_reset(VOID)
     h_ipv6_on = TRUE;
 }
 
-/* One neighbour cache entry: address, state, which interface, and whether
-   NetX Duo happened to write the back pointer. */
 static VOID h_neighbour(UINT slot, ULONG last, UCHAR state,
                         NX_INTERFACE *iface,
                         NX_IPV6_DEFAULT_ROUTER_ENTRY *back)
@@ -128,8 +87,6 @@ static NX_IPV6_DEFAULT_ROUTER_ENTRY *h_router(UINT slot, ULONG last,
 
     return r;
 }
-
-/* --------------------------------------------------------------- the query */
 
 #define H_MAX 8
 
@@ -174,8 +131,6 @@ static BOOL h_is_router(ULONG last)
     return (BOOL)(e != NULL && (e->nsn6_Flags & NETSTATUS_ND_ROUTER) != 0);
 }
 
-/* ------------------------------------------------------------- the stubs -- */
-
 NX_IP *netstack_ip(VOID)                    { return &h_ip; }
 BOOL   netstack_ipv6_enabled(VOID)          { return h_ipv6_on; }
 VOID   netstack_dns_absorb_pending(VOID)    { }
@@ -202,11 +157,6 @@ ULONG ami_eclock_rate(VOID) { return 0; }
 
 AmiBatonStats ami_baton_stats;
 
-/*
- * Everything below is named by netstatus.c and reached by no query this file
- * makes. They exist so the translation unit links; a call to one is a test
- * that has wandered off the neighbour path.
- */
 static VOID h_unreachable(const char *what)
 {
     printf("  FAIL %s was called on the neighbour path\n", what);
@@ -284,11 +234,6 @@ LONG bsd_stack_unhold(struct AmiSocketBase *b)
 { (VOID)b; h_unreachable("bsd_stack_unhold"); return -1; }
 
 
-/*
- * The NetX Duo entry points netstatus.c calls, none of them on this path.
- * Prototypes copied from third_party/netxduo/common/inc/nx_api.h; the linker
- * would reject a drift and that is the point of writing them out.
- */
 UINT _nxe_ip_gateway_address_get(NX_IP *ip, ULONG *a)
 { (VOID)ip; (VOID)a; h_unreachable("nx_ip_gateway_address_get"); return 1; }
 UINT _nxe_ip_gateway_address_set(NX_IP *ip, ULONG a)
@@ -345,11 +290,6 @@ UINT _nxe_arp_info_get(NX_IP *ip, ULONG *a, ULONG *b, ULONG *c, ULONG *d,
   (VOID)h; h_unreachable("nx_arp_info_get"); return 1; }
 
 
-/*
- * The mDNS half. The host tier defines AMINETXDUO_MDNS, so NETSTATUS_SERVICES
- * and the MDNS controls are compiled here as they are in the shipping
- * library, and they name these.
- */
 APTR ami_alloc(ULONG n) { (VOID)n; h_unreachable("ami_alloc"); return NULL; }
 VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
 UWORD netstack_mdns_browse_collect(const char *t, AmiMdnsService *o, UWORD max,
@@ -365,14 +305,6 @@ LONG netstack_mdns_browse_start(const char *t)
 LONG netstack_mdns_browse_stop(const char *t)
 { (VOID)t; h_unreachable("netstack_mdns_browse_stop"); return -1; }
 
-/* ------------------------------------------------------------- the tests -- */
-
-/*
- * The defect, exactly: an RA with no Source Link-Layer Address option. The
- * router is in the default router table, the neighbour cache learnt it from
- * traffic, and nx_nd_cache_is_router is NULL. Before the fix this row printed
- * as a plain STALE neighbour.
- */
 static VOID t_router_without_back_pointer(VOID)
 {
     LONG rc;
@@ -390,7 +322,6 @@ static VOID t_router_without_back_pointer(VOID)
     CHECK(!h_is_router(H3), "an ordinary neighbour is not flagged");
 }
 
-/* The path NetX Duo does write. It must still answer, and answer the same. */
 static VOID t_router_with_back_pointer(VOID)
 {
     NX_IPV6_DEFAULT_ROUTER_ENTRY *r;
@@ -404,12 +335,6 @@ static VOID t_router_with_back_pointer(VOID)
     CHECK(h_is_router(R3), "the back pointer still flags a router");
 }
 
-/*
- * A router whose lifetime ran out. nxd_ipv6_prefix_router_timer_tick.c clears
- * the valid bit and the back pointer together, and the neighbour outlives
- * both. Flagging it then would be worse than not flagging it at all: it would
- * say packets still leave that way.
- */
 static VOID t_expired_router_is_not_flagged(VOID)
 {
     NX_IPV6_DEFAULT_ROUTER_ENTRY *r;
@@ -425,10 +350,6 @@ static VOID t_expired_router_is_not_flagged(VOID)
     CHECK(!h_is_router(R3), "an expired router is not flagged");
 }
 
-/*
- * fe80::1 is a different machine on each link, so the interface has to match.
- * Two interfaces, the router on the second, the neighbour on the first.
- */
 static VOID t_other_interface_is_not_flagged(VOID)
 {
     h_reset();
@@ -442,7 +363,6 @@ static VOID t_other_interface_is_not_flagged(VOID)
           "the same address on another interface is not this link's router");
 }
 
-/* An empty router table is the ordinary IPv4-plus-link-local case. */
 static VOID t_no_routers_at_all(VOID)
 {
     h_reset();

@@ -4,23 +4,6 @@
 #
 #   tests/tools/toolpcap-verdict-selftest.sh
 #
-# A file-format test is the easiest kind to write so that it cannot go red.
-# It asserts on bytes it wrote itself, so an assertion that stopped reading the
-# right offset still finds what it put there, and the ctest case stays green
-# while the file NetCapture writes stops being a pcap.  Nothing else in the
-# tree reads that file: the emulator arm does, on a peer, and it runs on one
-# machine with an Amiga attached.
-#
-# Each case below breaks src/tools/toolpcap.c in one named way in a copy of the
-# tree, and requires the test to fail.  The break is then undone, and the last
-# thing this does is check the unbroken copy still passes -- so a case that
-# left the tree damaged is a failure too.
-#
-# Compiles the test itself: this runs before the host cmake configure, so there
-# is no build tree.  Needs cc and python3; about two seconds.
-#
-# Output is key=value plus an exit code.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -44,10 +27,6 @@ build_and_run() {
 cases=0
 wrong=0
 
-# Exact literal replacement, first occurrence, and a hard error when the text
-# a case is built on is gone.  sed would need the pattern escaped and would
-# silently do nothing once it stopped matching, which is the failure this file
-# exists to prevent.
 replace() {
     python3 - "$SRC" "$1" "$2" <<'PY'
 import io, sys
@@ -97,8 +76,6 @@ fi
 
 # --- the file header, which is what a reader believes before anything else --
 
-# The little-endian magic is a VALID pcap header saying every length in the
-# file is byte-swapped, so this produces a file that opens and is nonsense.
 case_red \
     'tool_pcap_u32(o, TOOL_PCAP_MAGIC);' \
     'tool_pcap_u32(o, 0xd4c3b2a1UL);' \
@@ -109,8 +86,6 @@ case_red \
     'tool_pcap_u32(o, 0);' \
     'the link type written as DLT_NULL rather than Ethernet'
 
-# The two-byte fields, which are only the version numbers -- and which nothing
-# else in the file exercises.
 case_red \
     'b[0] = (unsigned char)((v >> 8) & 0xFFUL);
     b[1] = (unsigned char)(v & 0xFFUL);
@@ -124,16 +99,11 @@ case_red \
 
 # --- the record ------------------------------------------------------------
 
-# orig_len is the wire length and incl_len is what was stored.  Writing caplen
-# into both is invisible in any capture where nothing was truncated, which is
-# every capture taken with a snap length nothing reached.
 case_red \
     'tool_pcap_u32(o, datalen);' \
     'tool_pcap_u32(o, caplen);' \
     'the wire length written as the stored length'
 
-# A record longer than the file header promises is where tcpdump stops reading
-# and reports a bogus savefile header, losing every frame after it.
 case_red \
     'if (caplen > o->snaplen)' \
     'if (caplen > o->snaplen + 100000UL)' \
@@ -146,9 +116,6 @@ case_red \
     'o->filelen += 0;' \
     'the file length not counted'
 
-# A writer that carries on after a refused write leaves a file with a hole in
-# the middle, which reads as a valid pcap and is not -- and spends the rest of
-# the capture calling Write() on a full disk.
 case_red \
     'if (n == 0 || o->failed || o->sink == 0)' \
     'if (n == 0 || o->sink == 0)' \

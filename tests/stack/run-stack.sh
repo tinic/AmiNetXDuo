@@ -10,27 +10,6 @@
 #         AllocMem block, so overrunning it lands in MungWall's guard band and
 #         is reported instead of merely corrupting something.
 #
-# WHY THIS IS NOT IN EMULATOR_TESTS
-#
-# The harness reaches bsdsocket.library through its LVOs, so the library and a
-# SANA-II driver both have to be staged, unlike ram_driver_test and soak_test,
-# which link the stack into themselves and need no driver at all. The only
-# driver that brings an interface up under FS-UAE here is a2065.device, which is
-# Commodore's and not redistributable, so this cannot run in public CI for the
-# same reason bsdsocktest and netstack_test cannot.
-#
-# It also needs a real ROM to mean what it says, for two reasons measured here:
-#
-#   * AROS rounds NP_StackSize up to 16 KB, so under the AROS ROM the worker
-#     never gets the 4 KB it asked for. The harness reports the granted size and
-#     holds the bar at 4096 anyway, but it is not measuring a Shell stack.
-#   * the reverse lookup (getnameinfo on an unroutable address) has not been
-#     seen to return under AROS on SLIRP, 600 s and still waiting, where on
-#     Kickstart 3.1 it comes back and is the deepest phase of the run. An AROS
-#     run therefore fails at that phase whatever the library does.
-#
-# Kickstart 3.1 under Enforcer + MungWall (-e) is the run that means something.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -42,11 +21,6 @@ TIMEOUT=900
 BUILD="build/ci/default"
 ENFORCE=0
 
-# BRIDGED, NEVER SLIRP.  -B names the host NIC the guest bridges onto, and
-# tools/amiberry-run.sh defaults to slirp when nobody says.  Nothing here puts
-# a workload on the link, but a run on SLIRP exercises the emulator's own
-# TCP/IP rather than a SANA-II driver, so the backend is named rather than
-# inherited.
 IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
 
 while getopts "m:t:b:B:e" opt; do
@@ -92,11 +66,6 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
 
-# For the -e lane only.  tools/enforcer-run.sh is the one runner left that
-# drives fs-uae (Enforcer needs a real MMU), and its base_dir is this
-# directory, so this is where its bsdsocket.library emulation is switched off
-# before it can answer for the library under test.  The Amiberry lane never
-# reads it.
 BASEDIR="$ROOT/build/fsuae-base-$TAG"
 mkdir -p "$BASEDIR/Configurations"
 cat > "$BASEDIR/Configurations/Host.fs-uae" <<'EOF'
@@ -109,15 +78,6 @@ EOF
 export AMINETXDUO_RUN_TAG="$TAG"
 
 # ---------------------------------------------------------- the verdict ---
-#
-# This used to end in `exec <runner>`, so the script's exit status was the
-# guest's own return code: a guest that measured nothing and returned 0 was a
-# pass, and so was one whose transcript never arrived.  stack_test prints
-# `stack: N checks, M failures`, which is what is read instead.
-#
-# enforcer-run.sh stages under build/testhd-$TAG, amiberry-run.sh under
-# build/amiberry-testhd-$TAG, so both are offered and the first one with a
-# summary in it wins.
 . "$ROOT/tools/test-verdict.sh"
 
 verdict() {

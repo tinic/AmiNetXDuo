@@ -5,28 +5,6 @@
 #   tests/tcpdrill/run-tcpdrill.sh [-m MODEL] [-t SECS] [-b BUILD] [-T TAG]
 #                                  [-s SCRIPT|all] [-A]
 #
-# -s all runs every script under scripts/, one boot each, and prints one line
-# per file plus tcpdrill_all=PASS|FAIL|PARTIAL.  PARTIAL is exit 77: nothing
-# failed and a script did not run.
-#
-# -A PICKS AMIBERRY.  FS-UAE needs an X server and dies in GLAD without one,
-# so on a headless box, which the Amiga lab machine is, the run ends with
-# "fs-uae exited early after 1s" and no results at all.  Amiberry runs
-# genuinely headless.  The flag survives here because this harness is not
-# wired into CI.  The two harnesses that CI runs dropped it with the branch
-# it selected, and both branches ran Amiberry.
-#
-# ONE BOOT PER SCRIPT FILE.  Every case in the file runs inside a single
-# emulator run, because a boot is the expensive part and the host is shared.  Cases are independent, each opens its own socket and each uses a
-# different peer ISN, so the only thing they share is the stack, which is
-# the point.
-#
-# NO NETWORK.  There is no `-n` here and no a2065.device: the guest's only
-# interface is tcpdrill.device, which TcpDrill creates in its own address
-# space, so nothing in this test depends on FS-UAE's SLIRP, on the host's
-# routing, or on anything outside the emulated machine.  See tests/tcpdrill/
-# tapdev.h for why a host-side injector is not possible here at all.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -55,16 +33,8 @@ done
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 DRILL="$ROOT/$BUILD/tests/tcpdrill/TcpDrill"
 
-# -s all runs every script, one boot each, and reports a table.  Not one boot
-# for a concatenation of them: the scripts were written one file per boot and
-# two of them reuse a local port, so joining them would test a listener state
-# nothing else does.  Recursion rather than a loop around the body below, so
-# each arm gets its own stage directory and its own guest files.
 if [ "$SCRIPT" = all ]; then
     rc=0
-    # Scripts that were not run.  `continue` alone printed a line and left the
-    # suite reporting tcpdrill_all=PASS with keepalive untested -- one boot
-    # short of the coverage the name claims, and no exit code that said so.
     nskip=0
     ARM_A=()
     [ "$RUNNER" = amiberry ] && ARM_A=(-A)
@@ -73,10 +43,6 @@ if [ "$SCRIPT" = all ]; then
         name=$(basename "$s" .drill)
         out="$ROOT/build/tcpdrill-$TAG-$name.out"
 
-        # keepalive.drill is written against a build whose idle timer is five
-        # seconds; against the shipping 7200 every probe case times out and is
-        # right to.  Named rather than silently dropped, so the line below is
-        # not read as a suite that covers it.
         if [ "$name" = keepalive ] &&
            ! grep -q '^AMINETXDUO_TCP_KEEPALIVE_INITIAL:STRING=[0-9]' \
                  "$ROOT/$BUILD/CMakeCache.txt" 2>/dev/null; then
@@ -85,16 +51,6 @@ if [ "$SCRIPT" = all ]; then
             continue
         fi
 
-        # rto.drill used to be skipped here.  It measures the RFC 6298
-        # estimator through a round trip it induces with `idle 600`, and the
-        # tail loss probe used to fire 240 ms into that round trip on a
-        # connection with no sample yet -- a probe is a retransmission, so
-        # Karn's algorithm abandoned the sample and the timeout stayed on its
-        # one second floor.  The window the file would have had to fit in was
-        # empty, so the skip was not a bound anybody could widen.  An
-        # unmeasured connection is no longer probed at all, the samples are
-        # taken, and every case has a line for the probe that follows.  The
-        # file's own header has the arithmetic.
 
         arm=0
         "$0" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" -T "$TAG-$name" -s "$s" \
@@ -105,9 +61,6 @@ if [ "$SCRIPT" = all ]; then
         [ "$arm" -eq 0 ] || rc=1
     done
 
-    # Failures first: a suite with both a failed script and a skipped one is a
-    # failed suite, and saying PARTIAL there would send somebody to look at the
-    # build configuration instead of at the defect.
     if [ "$rc" -ne 0 ]; then
         echo "tcpdrill_all=FAIL skipped=$nskip"
         exit "$rc"
@@ -138,12 +91,6 @@ echo "==> script: $SCRIPT ($(grep -c '^case ' "$SCRIPT") cases)"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
-# Both arms run amiberry-run.sh -- fs-uae is gone -- so the guest directory is
-# the one amiberry-run.sh writes, whatever RUNNER says.  It did not used to be:
-# the default RUNNER is still "fsuae", so the else arm looked in
-# build/testhd-<tag>, found no tcpdrill.txt, printed "the run did not get that
-# far" and exited 1.  A drill that passed 28 cases and 227 checks reported as a
-# failure, which is worse than a drill that does not run.
 RUN=("$ROOT/tools/amiberry-run.sh")
 HD="$ROOT/build/amiberry-testhd-$TAG"
 

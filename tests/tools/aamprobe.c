@@ -1,22 +1,6 @@
 /*
  * AamProbe, the address allocation message.
  *
- * BeginInterfaceConfig() returns VOID and reports everything by filling in
- * aam_Result and replying the message, so an ENOSYS stub for it hangs rather
- * than refuses: it returns -1 in a register the caller cannot see and never
- * replies the message the caller is waiting on.  The central assertion is
- * therefore that after BeginInterfaceConfig() returns, the message is back on
- * the port.  The ten error codes CreateAddrAllocMessageA() enumerates, the
- * buffers it carves and the defaults it fills in are checked too.
- *
- * The probe calls DeleteAddrAllocMessage() on a message it built itself, on
- * the stack.  "This routine can only deallocate address allocation messages
- * created by CreateAddrAllocMessageA() and will not work with anything else"
- * so it has to be able to tell, and a library that could not would free a
- * stack frame here and take the machine with it.
- *
- * Vectors are called by hand at their LVOs, as in the other probes.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -34,8 +18,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_create_aam(struct Library *base, LONG version, LONG protocol,
                          const char *name,
@@ -193,8 +175,6 @@ static VOID p_release_interface_list(struct Library *base, struct List *list)
                       : "a1", "cc", "memory");
 }
 
-/* ----------------------------------------------------------------- helpers */
-
 static VOID p_zero(APTR p, ULONG n)
 {
     UBYTE *b = (UBYTE *)p;
@@ -203,11 +183,6 @@ static VOID p_zero(APTR p, ULONG n)
         *b++ = 0;
 }
 
-/*
- * The message, replied or not.  Everything BeginInterfaceConfig() reports goes
- * through this: a result code, and the message being back where the caller can
- * pick it up.
- */
 static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
                                 struct AddressAllocationMessage *aam,
                                 const char *what, LONG expect)
@@ -227,46 +202,6 @@ static VOID p_begin_and_collect(struct Library *base, struct MsgPort *port,
                       ? ", correctly" : ", WRONG"));
 }
 
-/* ------------------------------------------------------- the second caller */
-
-/*
- * "AAMR_Busy, Address allocation is already in progress for this interface."
- *
- * bsd_aam_launch() claims bsd_aam_jobs[index] under Forbid() and answers
- * AAMR_Busy to a launch that finds it taken.  That guard cannot be reached
- * from one Process: BeginInterfaceConfig() is asynchronous, but the caller
- * that already owns the interface is the one holding the job, so a second call
- * has to come from somewhere else while the first is still in flight.
- *
- * So this is a Process of its own with a bsdsocket.library base of its own,
- * an unrelated program asking for the same interface, which is the case the
- * autodoc's AAMR_Busy exists for.  It prints nothing (NP_Cli FALSE, no
- * Output()); everything it saw goes back in the block below and the parent
- * reports it.
- *
- * The interface it asks about is the one the parent has a DHCP worker running
- * on, with no address and the link down, so every check ahead of the guard,
- * version, name, broadcast type, address not already known, protocol, passes
- * for it exactly as it did for the parent.  A result that is not AAMR_Busy is
- * therefore the guard, and not one of those.
- *
- * WHY THE RESULT CODE ALONE IS NOT THE ASSERTION
- *
- *   AAMR_Busy is answered in two places, and only one of them is the guard.
- *   bsd_aam_launch() refuses at the door.  If it did not, the worker would be
- *   created, and netstack_interface_dhcp_start() would then refuse the SECOND
- *   client on an interface that already has one, AMI_NET_ERR_BUSY, which
- *   bsd_aam_worker() also reports as AAMR_Busy.  Deleting the guard therefore
- *   still produces AAMR_Busy, measured, so a probe that read only the result
- *   code would pass a build with no guard in it at all.
- *
- *   What separates them is WHEN.  A refusal is replied inside
- *   BeginInterfaceConfig(), so the message is on the port before the call
- *   returns.  The other answer costs a CreateNewProc(), a PutMsg() and a
- *   worker getting as far as its first DHCP call, it is never there yet.  So
- *   the first GetMsg() is the assertion and the result code only says which
- *   refusal it was.
- */
 static struct
 {
     struct Task *sc_Parent;
@@ -319,16 +254,9 @@ static VOID p_second_caller(VOID)
 
                 p_begin_config(sb, aam);
 
-                /*
-                 * This GetMsg() is the assertion, see the note above the
-                 * block.  A refusal is replied inside the call; a worker that
-                 * was allowed to start cannot have got anywhere yet.
-                 */
                 got = GetMsg(port);
                 second.sc_AtOnce = (got == &aam->aam_Message) ? 1 : 0;
 
-                /* And then long enough for the other answer to arrive, so that
-                   a build with no guard is reported rather than hung on. */
                 if (got == NULL)
                 {
                     ULONG waited;
@@ -344,12 +272,6 @@ static VOID p_second_caller(VOID)
                 second.sc_Replied = (got == &aam->aam_Message) ? 1 : 0;
                 second.sc_Result  = aam->aam_Result;
 
-                /*
-                 * A worker that really started is still holding this message.
-                 * Abort it rather than free it under the worker's feet: the
-                 * broken build is the one that gets here, and it must not take
-                 * the machine down before the parent can report why.
-                 */
                 if (second.sc_Replied == 0)
                 {
                     p_abort_config(sb, aam);
@@ -374,10 +296,6 @@ static VOID p_second_caller(VOID)
     Signal(second.sc_Parent, second.sc_Signal);
 }
 
-/*
- * Run it, and say what it was told.  Called with a DHCP worker in flight on
- * the same interface: the only correct answer is AAMR_Busy, replied.
- */
 static VOID p_ask_again_from_another_process(const char *ifname)
 {
     struct Process *proc;
@@ -454,8 +372,6 @@ static VOID p_ask_again_from_another_process(const char *ifname)
                         "it had to be"));
 }
 
-/* ------------------------------------------------------------------ main -- */
-
 #define PROBE_ROUTERS       4
 #define PROBE_DNS           3
 #define PROBE_STATIC        2
@@ -482,17 +398,6 @@ int main(int argc, char **argv)
 
     (VOID)argv;
 
-    /*
-     * STATE DOWN, passed by the harness when it staged the interface
-     * configured down.  The half of this file that needs a lease is skipped in
-     * that mode, and skipped rather than left to fail: the addressed-interface
-     * assertion below asks for AAMR_AddressKnown, and on an interface that
-     * never got an address that request is in order, so BeginInterfaceConfig()
-     * starts a real allocation, holds the interface's bsd_aam_jobs[] slot for
-     * the ten-second floor, and the ten assertions after it are answered
-     * AAMR_Busy by a stack doing exactly what it should.  Read before the
-     * library is opened, the same as IfProbe.
-     */
     if (argc != 0)
     {
         struct RDArgs *rda;
@@ -527,7 +432,6 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /* The name of the first interface, whatever this machine calls it. */
     ifname[0] = '\0';
     list = p_obtain_interface_list(base);
     if (list != NULL)
@@ -562,8 +466,6 @@ int main(int argc, char **argv)
 
     tags[0].ti_Tag = TAG_DONE;
     tags[0].ti_Data = 0;
-
-    /* ---- every error the autodoc enumerates ------------------------------ */
 
     rc = p_create_aam(base, AAM_VERSION, AAMP_DHCP, ifname, NULL, tags);
     Printf((CONST_STRPTR)"create with no result ptr: %ld%s\n", rc,
@@ -608,8 +510,6 @@ int main(int argc, char **argv)
     Printf((CONST_STRPTR)"create with a 299-character client id: %ld%s\n", rc,
            (LONG)((rc == CAAME_Client_identifier_too_long) ? ", correctly"
                                                           : ", WRONG"));
-
-    /* ---- and one that works, with every buffer asked for ------------------ */
 
     tags[0].ti_Tag  = CAAMTA_Timeout;
     tags[0].ti_Data = 3;                        /* below the minimum */
@@ -678,11 +578,6 @@ int main(int argc, char **argv)
            aam->aam_HostNameSize, aam->aam_DomainNameSize,
            aam->aam_BOOTPMessageSize);
 
-    /*
-     * Every buffer present, longword-aligned and distinct.  Two of them are
-     * arrays of ULONG, and an m68k handed a misaligned one takes an address
-     * error.
-     */
     {
         APTR  bufs[9];
         BOOL  ok = TRUE;
@@ -739,19 +634,10 @@ int main(int argc, char **argv)
            (LONG)((aam->aam_Unicast != 0) ? ", honoured at version 2, correctly"
                                           : ", WRONG"));
 
-    /* ---- BeginInterfaceConfig, and the reply that has to come back -------- */
-
-    /*
-     * This interface already has an address, so the documented answer is
-     * AAMR_AddressKnown.  The assertion is that the message came back: a stub
-     * that returns -1 in d0 leaves a caller waiting on this port forever,
-     * because the call returns VOID and nothing else can tell it.
-     */
     if (!staged_down)
         p_begin_and_collect(base, port, aam, "on an addressed interface",
                             AAMR_AddressKnown);
 
-    /* An interface name nothing answers to. */
     aam->aam_InterfaceName[0] = 'z';
     aam->aam_InterfaceName[1] = 'z';
     aam->aam_InterfaceName[2] = 'z';
@@ -759,7 +645,6 @@ int main(int argc, char **argv)
     p_begin_and_collect(base, port, aam, "on an unknown interface",
                         AAMR_InterfaceNotKnown);
 
-    /* A version this library does not support. */
     aam->aam_Version = 99;
     p_begin_and_collect(base, port, aam, "with a bad version",
                         AAMR_VersionUnknown);
@@ -771,17 +656,6 @@ int main(int argc, char **argv)
     p_abort_config(base, NULL);
     Printf((CONST_STRPTR)"AbortInterfaceConfig(NULL): returned\n");
 
-    /* ---- and now a real allocation ----------------------------------------
-     *
-     * The interface this run is riding on already has an address, so the only
-     * way to ask for one is to take it away first.  RemoveInterface() and
-     * AddInterfaceTagList() do that, "permitting it to be added again with
-     * new parameters", and an interface added that way arrives with no
-     * address at all, which is the state BeginInterfaceConfig() is for.
-     *
-     * SLIRP runs a DHCP server, so this is a real DISCOVER/OFFER/REQUEST/ACK
-     * on the wire and the address that comes back is one a server chose.
-     */
     if (!staged_down)
     {
         struct AddressAllocationMessage *live = NULL;
@@ -814,12 +688,6 @@ int main(int argc, char **argv)
 
         if (rc == CAAME_Success && live != NULL)
         {
-            /*
-             * The call must return promptly, "This routine starts an
-             * asynchronous operation, very much like exec.library/SendIO()".
-             * A synchronous implementation would sit here for the whole
-             * ten-second timeout, so the message must not be on the port yet.
-             */
             p_begin_config(base, live);
 
             got = GetMsg(port);
@@ -828,7 +696,6 @@ int main(int argc, char **argv)
                    (LONG)((got == NULL) ? ", asynchronous, correctly"
                                         : ", SYNCHRONOUS, WRONG"));
 
-            /* Wait for it, with a bound of our own well past the timeout. */
             for (waited = 0; got == NULL && waited < 30UL * 50UL; waited += 10)
             {
                 Delay(10);
@@ -885,12 +752,6 @@ int main(int argc, char **argv)
                        (LONG)waited);
             }
 
-            /*
-             * A second allocation on an interface that now has one: the
-             * documented answer is AAMR_AddressKnown, which shows the first
-             * one configured the interface rather than only reporting an
-             * address.
-             */
             live->aam_Result = AAMR_Ignored;
             p_begin_and_collect(base, port, live, "a second time",
                                 AAMR_AddressKnown);
@@ -903,17 +764,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* ---- the two paths a server that answers can never reach ---------------
-     *
-     * AAMR_Timeout and AAMR_Aborted are the halves of BeginInterfaceConfig()
-     * that a working DHCP server hides: SLIRP answers in about four tenths of
-     * a second, so neither the deadline nor the abort window ever opens.
-     *
-     * Taking the interface down first opens both: nothing can leave the card,
-     * so DISCOVER goes unanswered and the worker runs to its own deadline.
-     * That is the only path that exercises the deadline, and the only one that
-     * exercises releasing a lease that was never granted.
-     */
     {
         struct AddressAllocationMessage *slow = NULL;
         struct Message                  *got;
@@ -934,8 +784,6 @@ int main(int argc, char **argv)
         rc = p_configure_interface(base, ifname, stags);
         Printf((CONST_STRPTR)"slow: take %s down: rc %ld\n", (LONG)ifname, rc);
 
-        /* ---- aborted ------------------------------------------------------ */
-
         stags[0].ti_Tag  = CAAMTA_ReplyPort;
         stags[0].ti_Data = (ULONG)port;
         stags[1].ti_Tag  = TAG_DONE;
@@ -947,8 +795,6 @@ int main(int argc, char **argv)
         {
             p_begin_config(base, slow);
 
-            /* Long enough that the worker is certainly in its poll loop, and
-               far short of the ten-second floor. */
             Delay(50);
 
             got = GetMsg(port);
@@ -956,13 +802,6 @@ int main(int argc, char **argv)
                    (LONG)((got == NULL) ? "yes" : "NO, already replied"),
                    (LONG)((got == NULL) ? ", correctly" : ", WRONG"));
 
-            /*
-             * The only window in this file in which a worker is certainly
-             * running: the interface is down, so DISCOVER goes unanswered and
-             * the job sits in bsd_aam_jobs[] until the ten-second floor.  What
-             * a second caller is told during it is the AAMR_Busy guard, and
-             * nothing else in this probe reaches it.
-             */
             if (got == NULL)
                 p_ask_again_from_another_process(ifname);
 
@@ -981,13 +820,9 @@ int main(int argc, char **argv)
                            slow->aam_Result == AAMR_Aborted)
                               ? ", AAMR_Aborted, correctly" : ", WRONG"));
 
-            /* ---- and timed out -------------------------------------------- */
-
             slow->aam_Result = AAMR_Ignored;
             p_begin_config(base, slow);
 
-            /* The floor is ten seconds; wait half again as long before
-               calling it a failure to reply at all. */
             got = NULL;
             for (waited = 0; got == NULL && waited < 15UL * 50UL; waited += 10)
             {
@@ -1002,11 +837,6 @@ int main(int argc, char **argv)
                            slow->aam_Result == AAMR_Timeout)
                               ? ", AAMR_Timeout, correctly" : ", WRONG"));
 
-            /*
-             * It waited at least the floor.  A worker that gave up early would
-             * report AAMR_Timeout too and be wrong; the elapsed time is what
-             * shows the deadline is the one the caller asked for.
-             */
             Printf((CONST_STRPTR)"slow: waited %s the 10-second floor\n",
                    (LONG)((waited >= 10UL * 50UL) ? "at least, correctly"
                                                   : "LESS THAN, WRONG"));
@@ -1018,7 +848,6 @@ int main(int argc, char **argv)
             Printf((CONST_STRPTR)"slow: could not build a message (%ld)\n", rc);
         }
 
-        /* Put the machine back the way it was found. */
         stags[0].ti_Tag  = IFC_State;
         stags[0].ti_Data = SM_Online;
         stags[1].ti_Tag  = TAG_DONE;
@@ -1026,21 +855,12 @@ int main(int argc, char **argv)
         (VOID)p_configure_interface(base, ifname, stags);
     }
 
-    /* ---- and give it back ------------------------------------------------- */
-
     p_delete_aam(base, aam);
     Printf((CONST_STRPTR)"DeleteAddrAllocMessage: returned\n");
 
     p_delete_aam(base, NULL);
     Printf((CONST_STRPTR)"DeleteAddrAllocMessage(NULL): returned\n");
 
-    /*
-     * A message this library did not allocate, on the stack.  "This routine
-     * can only deallocate address allocation messages created by
-     * CreateAddrAllocMessageA() and will not work with anything else", a
-     * library that could not tell would free a stack frame, and the machine
-     * would not survive the next allocation.
-     */
     p_zero(&by_hand, sizeof(by_hand));
     by_hand.aam_Version  = AAM_VERSION;
     by_hand.aam_Protocol = AAMP_DHCP;

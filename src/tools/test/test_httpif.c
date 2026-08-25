@@ -1,18 +1,8 @@
 /*
  * The tests for src/tools/httpif.c, the If: header, which decides whether a
- * write goes ahead against somebody else's lock.
- *
- * The failure this file exists to catch is silent in both directions.  An
- * evaluator that always says yes answers 201 to a request that named a lock
- * token nobody is holding, which is what the server did before this file
- * existed and which no client reports.  One that says no too often refuses a
- * client that was entitled to write, and that shows up as a mount that cannot
- * save.  Neither is visible in a transcript without knowing the correct
- * answer.
- *
- * So the shapes are written down here, one case each: lists are OR'd, the
- * conditions inside one are AND'd, Not inverts a condition and not a list, and
- * a Resource-Tag redirects the ones after it at another resource.
+ * write goes ahead against somebody else's lock. Lists are OR'd, the conditions
+ * inside one are AND'd, Not inverts a condition and not a list, and a
+ * Resource-Tag redirects the ones after it at another resource.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tools \
  *      src/tools/test/test_httpif.c src/tools/httpif.c -o test_httpif
@@ -40,9 +30,8 @@ static int checks;
 /* ------------------------------------------------------------- the world --- */
 
 /*
- * Two resources.  The untagged one is the request target, and it is locked and
- * has a tag.  "/other" is locked with a different token.  Anything else is a
- * resource this server knows nothing about.
+ * Two resources. The untagged one is the request target, locked and tagged;
+ * "/other" is locked with a different token.
  */
 #define TOKEN  "opaquelocktoken:aabbccdd"
 #define OTHER  "opaquelocktoken:11223344"
@@ -97,9 +86,8 @@ static void test_state_tokens(void)
     CHECK(eval("(<" TOKEN ">)") == 1);
 
     /*
-     * The measured failure this file exists for.  A token nobody is holding
-     * used to be answered as though the condition held, so a PUT behind it was
-     * a 201 where it must be a 412.
+     * A token nobody is holding must not be answered as though the condition
+     * held: a PUT behind it is a 412, not a 201.
      */
     CHECK(eval("(<opaquelocktoken:deadbeef>)") == 0);
 

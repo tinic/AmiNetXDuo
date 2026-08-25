@@ -1,28 +1,6 @@
 /*
  * FitzBench, bulk file throughput over a mounted Fitz share.
  *
- *     FitzBench PATH [KB=<n>] [CHUNK=<n>] [REPS=<n>] [NOVERIFY]
- *
- * The instrument for "how fast does this stack move a file", written because
- * every throughput figure this project had came from curl over SLIRP.  Fitz is
- * bulk transfer in both directions over a thin protocol, which is what the
- * A3000 report that prompted this measures, and AmigaDOS Read()/Write() over a
- * mounted share is the same path a user's `copy` takes with none of `copy`'s
- * directory scanning or console output in the timing.
- *
- * What it does NOT do is subtract the peer.  A run against a local path,
- * FitzBench RAM:, prices AmigaDOS and this program with no network under
- * them, and is the control every network figure should be read against.
- *
- * Timing is ReadEClock(), ~709 kHz PAL, so a one-second transfer is timed to
- * about a part in 700,000 and the quantisation is nowhere near the run-to-run
- * spread.  Each rep re-creates the file, so a write rep never measures an
- * overwrite of blocks the server already has.
- *
- * The three numbers printed per direction are min/mean/max over REPS, because
- * one figure cannot tell a slow stack from an unlucky sample, and every claim
- * this feeds needs a spread.  RESULT lines are the machine-readable ones.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -50,11 +28,6 @@ enum { ARG_PATH, ARG_KB, ARG_CHUNK, ARG_REPS, ARG_NOVERIFY, ARG_COUNT };
 #define DEF_REPS   3
 #define VERIFY_KB  64          /* how much of the readback is compared */
 
-/*
- * VPrintf() rather than Printf(): the m68k va_list is already RawDoFmt's
- * 32-bit argument stream, and it keeps every format string a plain char *.
- * src/tools/tool_util.c carries the long version of this note.
- */
 static VOID fb_printf(const char *fmt, ...)
 {
     va_list args;
@@ -63,8 +36,6 @@ static VOID fb_printf(const char *fmt, ...)
     VPrintf((CONST_STRPTR)fmt, (APTR)args);
     va_end(args);
 }
-
-/* ------------------------------------------------------------- timing --- */
 
 static struct MsgPort    *fb_port;
 static struct timerequest *fb_req;
@@ -117,11 +88,6 @@ static ULONG fb_now(VOID)
     return ev.ev_lo;
 }
 
-/*
- * Kilobytes per second from a tick count.  Everything here is 32-bit: the
- * multiply is done on the kilobyte count rather than the byte count so a
- * megabyte at 709 kHz stays inside a longword (1024 * 709379 is 7.3e8).
- */
 static ULONG fb_kbs(ULONG bytes, ULONG ticks)
 {
     if (ticks == 0UL)
@@ -129,8 +95,6 @@ static ULONG fb_kbs(ULONG bytes, ULONG ticks)
 
     return ((bytes / 1024UL) * fb_rate) / ticks;
 }
-
-/* --------------------------------------------------------------- work --- */
 
 static UBYTE *fb_buf;
 static ULONG  fb_chunk;
@@ -147,7 +111,6 @@ static VOID fb_fill(VOID)
     }
 }
 
-/* Returns ticks, or 0 on failure (and prints why). */
 static ULONG fb_write_once(CONST_STRPTR path, ULONG total)
 {
     BPTR  fh;
@@ -234,12 +197,6 @@ static ULONG fb_read_once(CONST_STRPTR path, ULONG total)
     return t1 - t0;
 }
 
-/*
- * Read the first VERIFY_KB back and compare against what was written.  Not in
- * the timed path: a per-byte comparison on a 68020 is a measurable share of a
- * transfer, and this exists to catch a share that silently truncates, not to
- * be the correctness suite, tests/endurance does that byte for byte.
- */
 static BOOL fb_verify(CONST_STRPTR path, ULONG total)
 {
     UBYTE *ref;
@@ -286,7 +243,6 @@ static BOOL fb_verify(CONST_STRPTR path, ULONG total)
     return ok;
 }
 
-/* Min, mean and max of a tick series, printed as KB/s. */
 static VOID fb_report(CONST_STRPTR what, ULONG *ticks, ULONG reps, ULONG total)
 {
     ULONG i;
@@ -318,8 +274,6 @@ static VOID fb_report(CONST_STRPTR what, ULONG *ticks, ULONG reps, ULONG total)
     fb_printf("fitzbench: RESULT %s kbs_mean=%lu kbs_min=%lu kbs_max=%lu reps=%lu\n",
               (LONG)what, sum / good, lo, hi, good);
 }
-
-/* --------------------------------------------------------------- main --- */
 
 int main(VOID)
 {
@@ -390,13 +344,6 @@ int main(VOID)
 
     fb_fill();
 
-    /*
-     * One untimed pass first.  The first read of a freshly written file is
-     * consistently an order of magnitude slower than the ones after it, 36
-     * KB/s against 344 on the same boot, and averaging that in measures the
-     * first exchange rather than the transfer.  It is a real effect and worth
-     * its own investigation; it is not what a throughput number is for.
-     */
     (VOID)fb_write_once((CONST_STRPTR)file, total);
     (VOID)fb_read_once((CONST_STRPTR)file, total);
 

@@ -1,40 +1,6 @@
 /*
  * AmiNetXDuo, the socket leak of docs/RESEARCH.md 37.5, reduced.
  *
- * 37.5 measured AvailMem falling 1009 bytes/s and 776 AmiSocket structures
- * NetX Duo never released, under a concurrent workload, with
- * `nx_tcp_socket_delete refused (NX_STILL_BOUND)` on the serial log 830 times.
- * Two controls in that section cleared the innocent explanations: 11,915 plain
- * socket lifecycles leak nothing, and a dead listener on its own leaks nothing.
- *
- * This program is a matrix of socket lifecycles, each measured the same way,
- * so the arms that leak can be told from the arms that do not, in one run:
- *
- *   A  dial a port with nothing on it, 37.5's control
- *   B  dial a port whose listener never accept()s, the named suspect
- *   C  the same, with a non-blocking connect()
- *   D  full lifecycle, the client closes first, 37.5's other control
- *   E  full lifecycle, the server closes first
- *   F  full lifecycle, only the client closes at all, a half-open peer
- *   G  three dials, then three accept()s, eight times, 37.4's defect
- *
- * The measurement is AvailMem(MEMF_PUBLIC), the library's own live socket
- * count, and a histogram of what state those sockets are in, all three from
- * NetStackQuery (docs/RESEARCH.md 34), sampled before and after each arm.
- * A leaked AmiSocket shows up in all three: AvailMem is what the machine
- * agrees it has lost, the count is what the library still owns, and the
- * histogram says which TCP state it is stuck in, which names the bug.
- *
- * Arm B uses SO_SNDTIMEO because a SYN sent to a port that has a listen
- * request with no socket parked on it is queued by NetX Duo
- * (nx_tcp_packet_process.c, the "no server socket available" branch) with
- * nothing sent back, so a plain blocking connect() there never returns.
- * SO_SNDTIMEO turns that into the ECONNREFUSED 37.5 recorded, at a rate a
- * short run can accumulate.
- *
- * Exit status is 0 when every arm is clean and 5 when any arm leaked, so a
- * runner can read the result without parsing the output.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -48,22 +14,6 @@
 
 static const char version_tag[] __attribute__((used)) =
     "$VER: refused_leak_test 1.0 (26.7.2026)";
-
-/* ------------------------------------------------------------------ LVOs,
- *
- * Hand-vectored for the same reason tests/endurance/endurance.c does it: the
- * NDK inlines read the base from a global, and nothing here wants that.
- *
- * Every stub declares d1/a0/a1 written.  An AmigaOS library call clobbers d0,
- * d1, a0 and a1.  A register that is only an input operand is one GCC may
- * assume the asm leaves alone, so a stub that passes an argument in d1 and
- * does not also declare d1 written lets GCC keep a value there across the
- * `jsr`, and reuse, or spill, whatever the library left behind.  That turned
- * IoctlSocket(FIONBIO) into a call with a garbage request code and wedged a
- * test for a day (docs/RESEARCH.md 42).  The `_clob_*` dummies bound to those
- * registers and listed as outputs are the NDK's own idiom, from
- * inline/macros.h.
- */
 
 #define L_AF_INET       2
 #define L_SOCK_STREAM   1
@@ -252,8 +202,6 @@ static LONG l_query(struct Library *base, ULONG what, APTR buf, ULONG size)
     return res;
 }
 
-/* ----------------------------------------------------------- the sampler -- */
-
 #define LEAK_MAX_SOCKETS    96
 #define LEAK_STATES         12  /* NX_TCP_* run 1..11 */
 
@@ -333,25 +281,14 @@ static VOID leak_sample(struct Library *base, LeakSample *out)
     }
 }
 
-/* ------------------------------------------------------------- the arms -- */
-
 #define LEAK_PORT_LIVE  7911U   /* a listener that never accepts             */
 #define LEAK_PORT_FULL  7913U   /* a listener that does accept               */
 #define LEAK_PORT_DEAD  7912U   /* nothing at all                            */
 #define LEAK_ROUNDS     32
 
-/*
- * How long an arm waits before its final reading, in Delay() ticks.
- * LEAK_QUICK is just long enough for the round's own traffic to finish.
- * LEAK_DEADLINE is past BSD_CLOSING_DEADLINE (60 s, socket.c): a socket
- * parked by bsd_closing_park() is not a leak until the sweep has had its
- * chance at it, and reading the count before then counts every half-closed
- * socket as a leak.
- */
 #define LEAK_QUICK      25UL
 #define LEAK_DEADLINE   (66UL * 50UL)
 
-/* What a round does after the connect. */
 #define LEAK_DIAL       0       /* nothing: the connect is the whole round   */
 #define LEAK_CLIENT1ST  1       /* accept, close client, close server        */
 #define LEAK_SERVER1ST  2       /* accept, close server, close client        */
@@ -375,16 +312,8 @@ static VOID leak_fill_addr(LeakAddr *sa, UWORD port)
     sa->sin_addr   = 0x7F000001UL;
 }
 
-/*
- * One arm.  Returns the number of rounds whose connect() reported a failure:
- * an arm that expects refusals and gets none is not testing what it claims.
- */
 static VOID leak_kick_sweep(struct Library *base)
 {
-    /* bsd_closing_sweep() is driven by CloseSocket() and by nothing else, so
-       a program that has stopped closing sockets never collects the ones it
-       parked.  Two, because the sweep runs before the socket being closed is
-       itself parked. */
     LONG i;
 
     for (i = 0; i < 2; i++)
@@ -405,7 +334,6 @@ static ULONG leak_arm(struct Library *base, UWORD port, UWORD shape,
 
     *last_errno = 0;
 
-    /* Let the previous arm's traffic finish before the baseline is taken. */
     Delay(25);
     leak_sample(base, before);
 
@@ -478,9 +406,6 @@ static ULONG leak_arm(struct Library *base, UWORD port, UWORD shape,
         }
     }
 
-    /* The closing sweep runs from CloseSocket(), so give the last rounds the
-       same chance to complete that every earlier round had, and, for an arm
-       that is about the sweep's own deadline, wait it out. */
     Delay(settle);
     leak_kick_sweep(base);
     Delay(25);
@@ -518,8 +443,6 @@ static VOID leak_report(const char *name, ULONG refused,
     VPrintf((CONST_STRPTR)"%s: fail %ld/%ld errno %ld | "
             "AvailMem %ld  sockets %ld  poolfree %ld\n", args);
 
-    /* The same arm through the counters netstat -h reports.  A clean arm
-       returns both to where it started; a leaking one does not. */
     args[0] = (LONG)after->ls_Alloc - (LONG)before->ls_Alloc;
     args[1] = (LONG)after->ls_Alloc;
     args[2] = (LONG)after->ls_Live - (LONG)before->ls_Live;
@@ -541,37 +464,9 @@ static VOID leak_report(const char *name, ULONG refused,
     }
 }
 
-/*
- * Whether the listener keeps accepting.  docs/RESEARCH.md 37.4 found one that
- * stopped for good, 1,951 consecutive EINVALs after a single failed
- * relisten, and the trigger for that relisten failure is not established,
- * so this cannot provoke it directly.  It instead drives the path the failure
- * was seen on hardest: three dials before any accept(), so two of them sit in
- * the listen queue and the re-arm after each accept() has to replay a queued
- * connection (nx_tcp_server_socket_relisten's NX_CONNECTION_PENDING branch)
- * rather than park an idle socket.
- *
- * Returns the number of accept() calls that failed.  Anything but zero is the
- * defect, whatever provoked it.
- */
 #define LEAK_BURST      3
 #define LEAK_BURSTS     8
 
-/*
- * This arm used to wedge the calling task, and the cause was in this file, not
- * the library.  Three non-blocking connect() calls issued one after another
- * wedged on the second or the third, three times out of three
- * (docs/RESEARCH.md 41.4).  The LVO stubs above did not declare d1/a0/a1
- * clobbered, so GCC kept the FIONBIO request code in d1 across a library call
- * that overwrites it, IoctlSocket() was handed a stale request, ASF_NONBLOCK
- * was never set, and the dial became a blocking connect() to a listen request
- * with no socket parked on it, which never returns.  Any real call in between
- * forced GCC to rematerialise the constant, which is why interposing a
- * VPrintf() "fixed" it.  docs/RESEARCH.md 42.
- *
- * Build with -DLEAK_BURST_DELAY=OFF to run the dials back to back, the shape
- * that failed.
- */
 #ifndef LEAK_BURST_ARM
 #  define LEAK_BURST_ARM 0
 #endif
@@ -610,12 +505,6 @@ static ULONG leak_accept_burst(struct Library *base, LONG listener,
             leak_fill_addr(&sa, LEAK_PORT_FULL);
             (VOID)l_connect(base, c[i], &sa);
 
-            /*
-             * One tick between dials, no longer load-bearing: with the LVO
-             * clobbers above fixed it only paces the burst.  Build with
-             * -DLEAK_BURST_DELAY=OFF to run the dials back to back.
-             * docs/RESEARCH.md 42.
-             */
 #if LEAK_BURST_DELAY
             Delay(1);
 #endif
@@ -662,7 +551,6 @@ static ULONG leak_accept_burst(struct Library *base, LONG listener,
 }
 #endif /* LEAK_BURST_ARM */
 
-/* Bind and listen on `port`, or -1. */
 static LONG leak_listener(struct Library *base, UWORD port)
 {
     LeakAddr sa;
@@ -711,7 +599,6 @@ int main(VOID)
     args[0] = LEAK_ROUNDS;
     VPrintf((CONST_STRPTR)"refused_leak: 7 arms, %ld lifecycles each\n", args);
 
-    /* ---- A: the control.  Nothing is listening; the RST is immediate. ---- */
     leak_mark("A");
     refused = leak_arm(base, LEAK_PORT_DEAD, LEAK_DIAL, 0, -1, LEAK_QUICK,
                        &before, &after, &err);
@@ -727,12 +614,6 @@ int main(VOID)
         return RETURN_FAIL;
     }
 
-    /*
-     * bsd_listen() parks an armed socket on the port, so the first dial to a
-     * healthy listener is answered.  Spend that one here, outside the arms:
-     * every dial after it finds the listen request with no socket on it,
-     * which is the state 37.5 is about.
-     */
     {
         LeakAddr sa;
         LONG     s = l_socket(base, L_AF_INET, L_SOCK_STREAM, 0);
@@ -745,7 +626,6 @@ int main(VOID)
         }
     }
 
-    /* ---- G: whether the listener keeps accepting.  37.4's defect. ---- */
 #if LEAK_BURST_ARM
     {
         ULONG bad;
@@ -764,7 +644,6 @@ int main(VOID)
     }
 #endif
 
-    /* ---- B: the named suspect. ---- */
     leak_mark("B");
     refused = leak_arm(base, LEAK_PORT_LIVE, LEAK_DIAL, 0, -1, LEAK_QUICK,
                        &before, &after, &err);
@@ -772,7 +651,6 @@ int main(VOID)
     if ((LONG)after.ls_Sockets - (LONG)before.ls_Sockets >= LEAK_ROUNDS / 2)
         failed |= 2;
 
-    /* ---- C: the same, with a non-blocking connect. ---- */
     leak_mark("C");
     refused = leak_arm(base, LEAK_PORT_LIVE, LEAK_DIAL, 1, -1, LEAK_QUICK,
                        &before, &after, &err);
@@ -780,7 +658,6 @@ int main(VOID)
     if ((LONG)after.ls_Sockets - (LONG)before.ls_Sockets >= LEAK_ROUNDS / 2)
         failed |= 4;
 
-    /* ---- D: full lifecycle, client closes first -- 37.5's clean control. -- */
     leak_mark("D");
     refused = leak_arm(base, LEAK_PORT_FULL, LEAK_CLIENT1ST, 1, busy,
                        LEAK_QUICK, &before, &after, &err);
@@ -788,7 +665,6 @@ int main(VOID)
     if ((LONG)after.ls_Sockets - (LONG)before.ls_Sockets >= LEAK_ROUNDS / 2)
         failed |= 8;
 
-    /* ---- E: full lifecycle, server closes first. ---- */
     leak_mark("E");
     refused = leak_arm(base, LEAK_PORT_FULL, LEAK_SERVER1ST, 1, busy,
                        LEAK_QUICK, &before, &after, &err);
@@ -796,16 +672,6 @@ int main(VOID)
     if ((LONG)after.ls_Sockets - (LONG)before.ls_Sockets >= LEAK_ROUNDS / 2)
         failed |= 16;
 
-    /*
-     * ---- F: the server end is never closed at all. ----
-     *
-     * Counted differently from the others: this arm abandons 32 server
-     * descriptors, so 32 more live sockets is the arm working, not leaking.
-     * The clients are the tell, each sent its FIN and waits for one that is
-     * never coming, so after the sweep's deadline every one must be gone.  Any
-     * still in FIN_WAIT_1 or FIN_WAIT_2 is a socket the sweep tried and failed
-     * to collect, the 830 NX_STILL_BOUND of 37.5.
-     */
     leak_mark("F");
     refused = leak_arm(base, LEAK_PORT_FULL, LEAK_HALF, 1, busy,
                        LEAK_DEADLINE, &before, &after, &err);

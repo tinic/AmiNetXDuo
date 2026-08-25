@@ -2,35 +2,6 @@
  * tftp, the trivial file transfer protocol, client half.
  *
  *     tftp HOST/A,GET/K,PUT/K,AS/K,PORT/N/K,TIMEOUT/N/K,QUIET/S,
- *          IPV4=-4/S,IPV6=-6/S
- *
- *   GET      fetch this file from the server.
- *   PUT      send this file to the server.
- *   AS       call it something else at the other end.
- *   PORT     the server's port. Default 69.
- *   TIMEOUT  seconds to wait for a block before asking again. Default 5.
- *   -4 / -6  pin the family the name resolves to. Without either, the library
- *            answers AF_UNSPEC and the selection rules pick, so on a dual
- *            stack there is otherwise no way to ask for the other one.
- *
- * One transfer per command: no interactive prompt and no `mget`, so it can be
- * driven from a script.
- *
- *   Octet mode only. RFC 1350's other mode, netascii, rewrites line endings in
- *   transit, which corrupts any binary moved with it. Every TFTP server
- *   accepts octet.
- *
- *   NetX Duo's TFTP add-on wants FileX, a filesystem this machine does not
- *   have and does not need, having AmigaDOS (docs/RESEARCH.md 5.4). Its client
- *   would build, but the protocol is a couple of hundred lines over the socket
- *   API, and written that way the command runs on Roadshow and AmiTCP too.
- *
- * Transfer identifiers: the request goes to port 69, but the answer comes from
- * a different port the server picked, and every later packet of the transfer
- * belongs to that port alone. The first reply fixes the peer. Anything
- * arriving afterwards from elsewhere is sent an ERROR and otherwise ignored
- * (RFC 1350 section 4). That is how one server runs two transfers at once.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -84,8 +55,6 @@ enum
 static UBYTE tftp_out[TFTP_BLOCK + 4];
 static UBYTE tftp_in[TFTP_BLOCK + 4 + 64];
 
-/* ---------------------------------------------------------------- helpers, */
-
 static VOID tftp_put16(UBYTE *p, UWORD v)
 {
     p[0] = (UBYTE)(v >> 8);
@@ -125,11 +94,6 @@ static const char *tftp_basename(const char *path)
     return (last[0] != '\0') ? last : path;
 }
 
-/*
- * The server's own error, as a sentence. The server's text is printed where
- * there is any, since it is the only thing that says which file or why, but
- * the code is named as well: plenty of servers send an empty string.
- */
 static const char *tftp_error_name(UWORD code)
 {
     switch (code)
@@ -342,12 +306,9 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
         }
 
         /*
-         * A server chooses a new port for the transfer, not a new host.
-         * Before the first valid reply fixes that port, reject a datagram
-         * from any other address.  Otherwise the first machine to guess this
-         * socket's ephemeral port can become the peer: a forged DATA packet
-         * is then written to the GET destination, and a forged ACK makes a
-         * PUT send the local file to the attacker.
+         * A server chooses a new port for the transfer, not a new host, so a
+         * datagram from any other address must be rejected before the first
+         * valid reply fixes the port, or the peer can be forged.
          */
         if (!x->have_peer)
         {
@@ -406,8 +367,6 @@ static LONG tftp_await(TftpXfer *x, UWORD want_op, UWORD want_block)
         }
     }
 }
-
-/* ------------------------------------------------------------------- get --- */
 
 static LONG tftp_get(TftpXfer *x, const char *remote, const char *local)
 {
@@ -505,8 +464,6 @@ static LONG tftp_get(TftpXfer *x, const char *remote, const char *local)
     return RETURN_OK;
 }
 
-/* ------------------------------------------------------------------- put --- */
-
 static LONG tftp_put(TftpXfer *x, const char *local, const char *remote)
 {
     BPTR  in;
@@ -602,8 +559,6 @@ static LONG tftp_put(TftpXfer *x, const char *local, const char *remote)
 
     return RETURN_OK;
 }
-
-/* ------------------------------------------------------------------ main --- */
 
 int main(int argc, char **argv)
 {

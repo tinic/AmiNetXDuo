@@ -1,31 +1,7 @@
 /*
- * CensusProbe, the guest half of the allocation census.
- *
- *     CensusProbe HOST/K,ROUNDS/N/K,NOFLUSH/S
- *
- * Built only when AMINETXDUO_ALLOCCENSUS is on, and it is the reason the
- * census is testable rather than readable: something has to reach the two
- * moments the library reports at, and no existing command reaches the second
- * one.
- *
- *   bsd-stack-down   the last close, when the stack comes down.  Any command
- *                    that opens and closes bsdsocket.library reaches this.
- *   bsd-expunge      the segment being unloaded.  Nothing reaches this on its
- *                    own: AmigaOS expunges a library only when it is short of
- *                    memory, so `avail flush` asks for a block nothing can
- *                    satisfy in order to provoke the sweep, and that is what
- *                    the AllocMem() below is.
- *
- * The expunge is where the answer that matters comes from.  At the last close
- * the library is still loaded and is entitled to hold things -- the parsed
- * DEVS:Internet tables, deliberately, so a second program does not re-read
- * them.  Once the segment goes there is nothing left to own anything, and
- * whatever the census still holds is memory that survives until reboot.
- *
- * TCP has to be off for the expunge to happen.  bsd_lib_expunge() declines
- * while the handler Process is alive, and the handler is started by the first
- * open.  tools/alloc-census.sh writes DEVS:Internet/tcp_handler accordingly,
- * and this program says so when the flush does not take.
+ * CensusProbe, the guest half of the allocation census. Built only when
+ * AMINETXDUO_ALLOCCENSUS is on. TCP has to be off for the expunge to happen:
+ * bsd_lib_expunge() declines while the handler Process is alive.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -68,9 +44,7 @@ static VOID probe_check(const char *what, BOOL ok)
 
 /*
  * One pass of what an ordinary network command does: open the library, make
- * sockets of both kinds, ask the resolver something, give it all back.  This
- * walks the allocation sites a command walks, so the census has something to
- * hold.  Testing any of it is the job of tests/.
+ * sockets of both kinds, ask the resolver something, give it all back.
  */
 static VOID probe_round(const char *host)
 {
@@ -94,23 +68,20 @@ static VOID probe_round(const char *host)
     if (s >= 0)
         (VOID)tool_sock_close(sb, s);
 
-    /* Reads DEVS:Internet/services, which is one of the tables the library
-       parses once and holds until the expunge. */
+    /* Reads DEVS:Internet/services, one of the tables the library parses once
+       and holds until the expunge. */
     se = tool_sock_getservbyname(sb, "http", "tcp");
     probe_check("getservbyname http/tcp", se != NULL);
 
-    /* DEVS:Internet/hosts, then the resolver.  A miss is a fine outcome: the
-       allocation path is the same and a run with no name server still walks
-       it, which is what the census is watching. */
+    /* DEVS:Internet/hosts, then the resolver. A miss is a fine outcome: the
+       allocation path is the same. */
     he = tool_sock_gethostbyname(sb, host);
     (VOID)he;
     probe_checks++;
 
     /*
      * getaddrinfo() is the other resolver, with an allocation surface of its
-     * own (src/bsdsocket/addrinfo.c) and a free the caller has to make.  A
-     * caller that forgets freeaddrinfo() is the leak shape this whole
-     * instrument is for, so it is walked here deliberately.
+     * own and a free the caller has to make.
      */
     if (tool_sock_have_lvo(sb, 0x32aUL))
     {
@@ -125,8 +96,7 @@ static VOID probe_round(const char *host)
     }
 
     /* A datagram that goes out on the wire: the send path takes packets from
-       the pool and mbufs from src/mbuf, neither of which the socket calls
-       above reach. */
+       the pool and mbufs from src/mbuf. */
     s = tool_sock_socket(sb, TOOL_AF_INET, TOOL_SOCK_DGRAM, 0);
     if (s >= 0)
     {
@@ -144,9 +114,8 @@ static VOID probe_round(const char *host)
 }
 
 /*
- * `avail flush`: ask for a block nothing can satisfy.  Exec answers by calling
- * every library's and device's expunge vector and trying again, so the failure
- * is the point and the NULL is the expected return.
+ * `avail flush`: ask for a block nothing can satisfy. Exec answers by calling
+ * every expunge vector and trying again, so the failure is the point.
  */
 static VOID probe_flush(VOID)
 {
@@ -188,11 +157,8 @@ int main(void)
         probe_round(host);
 
     /*
-     * The library is closed now, so the reports it prints have already gone to
-     * the serial port.  This is the command's own census: src/common is linked
-     * into every image separately, so a command has a table of its own and the
-     * two never mix.  Ownership is therefore answered per image, which is the
-     * granularity it has.
+     * The library is closed now. This is the command's own census: src/common
+     * is linked into every image separately, so the two never mix.
      */
     AMI_CENSUS_REPORT("cmd-censusprobe");
 

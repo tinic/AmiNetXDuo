@@ -1,31 +1,6 @@
 /*
  * AmiNetXDuo, host fuzz driver for the DHCP option parser.
  *
- * DHCP is the parser with the shortest path from a hostile LAN to this
- * machine: it runs on every boot, before anything is configured, against
- * whatever answers a broadcast. With no MMU a walk off the end of an option
- * is not a crashed process, it is a write into whatever Exec put next.
- *
- * What is under test is the vendored client's option walk, not our policy.
- * netstack.c only asks for options (nx_dhcp_user_option_request) and reads the
- * results; the bytes are parsed by addons/dhcp/nxd_dhcp_client.c. Its parser
- * is `static`, so the translation unit is #included here rather than linked,
- * the alternative is fuzzing an entry point the wire cannot reach, which
- * proves nothing.
- *
- * THE LENGTH CONTRACT MATTERS. _nx_dhcp_packet_process() refuses anything not
- * longer than NX_BOOTP_OFFSET_OPTIONS (236) before it calls the parser, and
- * the parser then reads the fixed BOOTP header without re-checking. Feeding it
- * less would report an over-read the wire cannot produce, so every case here
- * is at least NX_DHCP_MIN bytes. A fuzzer that manufactures its own false
- * positives gets ignored, which is worse than not having one.
- *
- * Usage, matching fuzz_dns:
- *   fuzz_dhcp -s                every seed case, named
- *   fuzz_dhcp -c NAME          one seed case by name
- *   fuzz_dhcp -r SEED COUNT    seeds plus mutations
- *   fuzz_dhcp < message        one message from stdin
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -33,27 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * The DHCP client stashes back-pointers in ThreadX thread and timer extension
- * slots, and those macros cast the slot, a ULONG, 32-bit from the shim's
- * tx_port.h, to a pointer, which does not survive a 64-bit host. Defined
- * away rather than building this driver 32-bit only: nothing here starts a
- * thread or a timer, the parser is called directly, so the slots are never
- * read. (fuzz_mdns is 32-bit-only for a different reason, its cache really
- * does store pointers in ULONG slots at run time.)
- */
 #define NX_THREAD_EXTENSION_PTR_GET(a, b, c)    { (a) = NX_NULL; }
 #define NX_TIMER_EXTENSION_PTR_GET(a, b, c)     { (a) = NX_NULL; }
 
 #include "nx_api.h"
 
-/*
- * The parser is static; reach it the only way the wire's shape allows.
- *
- * The push/pop is around the vendored file alone, it has unused parameters
- * this build's -Werror would reject, and they are not ours to fix. Everything
- * below the pop is this driver, under the full set.
- */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "nxd_dhcp_client.c"
@@ -127,8 +86,6 @@ static void fd_end(FdBuf *w)
         fd_u8(w, NX_DHCP_OPTION_PAD);
 }
 
-/* ------------------------------------------------------------- the seeds --- */
-
 static void fds_valid_offer(FdBuf *w)
 {
     unsigned char mask[4] = { 255, 255, 255, 0 };
@@ -159,7 +116,6 @@ static void fds_len_past_end(FdBuf *w)
     fd_u8(w, 8);
 }
 
-/* The longest an option can claim, at the very end. */
 static void fds_len_255(FdBuf *w)
 {
     fd_header(w, 0xC0A80164UL);
@@ -180,7 +136,6 @@ static void fds_no_end(FdBuf *w)
         fd_opt(w, NX_DHCP_OPTION_SUBNET_MASK, 4, mask);
 }
 
-/* Nothing but padding after the cookie. */
 static void fds_all_pad(FdBuf *w)
 {
     fd_header(w, 0xC0A80164UL);
@@ -188,7 +143,6 @@ static void fds_all_pad(FdBuf *w)
         fd_u8(w, NX_DHCP_OPTION_PAD);
 }
 
-/* Exactly the shortest message the caller will pass on. */
 static void fds_runt(FdBuf *w)
 {
     fd_header(w, 0xC0A80164UL);
@@ -196,7 +150,6 @@ static void fds_runt(FdBuf *w)
         fd_u8(w, NX_DHCP_OPTION_PAD);
 }
 
-/* The cookie is wrong, so the options are not options. */
 static void fds_bad_cookie(FdBuf *w)
 {
     unsigned char mask[4] = { 255, 255, 255, 0 };
@@ -230,8 +183,6 @@ static void fds_repeat(FdBuf *w)
     fd_end(w);
 }
 
-/* An address the parser is documented to reject, so the early return is
-   covered too. */
 static void fds_bad_yiaddr(FdBuf *w)
 {
     fd_header(w, 0xF0000001UL);     /* class E */
@@ -278,13 +229,6 @@ static const FdSeed fd_seeds[] =
 
 #define FD_SEED_COUNT   (int)(sizeof(fd_seeds) / sizeof(fd_seeds[0]))
 
-/* ------------------------------------------------------------- the driver -- */
-
-/*
- * The parser writes into an NX_DHCP_INTERFACE_RECORD and reads a handful of
- * NX_DHCP fields. Both are zeroed for every run, so a case cannot pass because
- * the one before it left something behind.
- */
 static void fd_run(const unsigned char *msg, unsigned len)
 {
     static NX_DHCP                  dhcp;
@@ -301,15 +245,6 @@ static void fd_run(const unsigned char *msg, unsigned len)
     memset(&rec, 0, sizeof(rec));
     memset(&ip, 0, sizeof(ip));
 
-    /*
-     * The parse is not pure: on a good address it reaches back through
-     * nx_dhcp_ip_ptr to read and clear the interface's current address and the
-     * gateway. So the IP instance has to exist and one interface has to be
-     * valid, or every run stops on a null dereference in the IP layer that the
-     * real client could never reach. Zeroed and valid is what an interface
-     * looks like before DHCP has given it anything, which is exactly the
-     * state a reply arrives in.
-     */
     ip.nx_ip_id = NX_IP_ID;
     ip.nx_ip_interface[0].nx_interface_valid = NX_TRUE;
     ip.nx_ip_interface[0].nx_interface_link_up = NX_TRUE;
@@ -325,15 +260,6 @@ static void fd_run(const unsigned char *msg, unsigned len)
     (void)_nx_dhcp_extract_information(&dhcp, &rec, copy, len);
 }
 
-/*
- * Proof that the driver reaches the parser at all.
- *
- * A fuzzer that silently stopped short, a struct the parser rejects on its
- * first field, a length that never clears the contract, reports "clean"
- * for every input and is worse than not having one, because it reads as
- * coverage. So a known-good OFFER is parsed once at startup and the fields it
- * must have filled are checked. If this fails the sweep does not run.
- */
 static void fd_selftest(void)
 {
     static NX_DHCP                  dhcp;
@@ -378,16 +304,6 @@ static void fd_selftest(void)
         exit(2);
     }
 
-    /*
-     * A renewal time (option 58) longer than the lease it belongs to must not
-     * be stored. Both fields end up in timer ticks, and the guard used to
-     * compare the option's seconds against the lease already converted, so it
-     * admitted a T1 up to NX_IP_PERIODIC_RATE times the lease and scheduled
-     * the renewal for after the lease had expired.
-     *
-     * 3600-second lease, 180000-second T1: fifty times too long, and exactly
-     * the value that slips through a comparison against the lease in ticks.
-     */
     {
         unsigned char type      = 2;
         unsigned char lease[4]  = { 0, 0, 0x0E, 0x10 };         /* 3600     */
@@ -436,9 +352,6 @@ static unsigned fd_below(unsigned n)
     return (n == 0) ? 0 : (fd_rand() % n);
 }
 
-/* Aimed at the bytes that decide how far the walk goes, an option code or a
-   length, not at the payload. A flipped address byte changes an answer; a
-   flipped length byte changes where the next read lands. */
 static void fd_mutate(FdBuf *w)
 {
     unsigned rounds = fd_below(6) + 1u;
@@ -539,8 +452,6 @@ int main(int argc, char **argv)
             unsigned long n;
             int           s;
 
-            /* The seeds first, always: a sweep that never runs the known
-               shapes is a sweep whose coverage nobody can state. */
             for (s = 0; s < FD_SEED_COUNT; s++)
                 fd_run_seed(s);
 
@@ -561,7 +472,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* One message on stdin. */
     {
         unsigned char buf[FD_MAX];
         size_t        got = fread(buf, 1, sizeof(buf), stdin);

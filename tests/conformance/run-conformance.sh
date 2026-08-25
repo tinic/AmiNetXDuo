@@ -5,52 +5,6 @@
 #   tests/conformance/run-conformance.sh [-m MODEL] [-c CPU] [-t SECONDS]
 #                                        [-T TAG] [-a "SUITE ARGS"] [-p] [-b BUILDDIR]
 #
-# It was called run-fsuae.sh and it drove tools/amiberry-run.sh from the day
-# fs-uae left the tree, 2026-08-04.  The name was the only thing left saying
-# otherwise, and it said it where it is read as a decision: the job in
-# .github/workflows/emulator.yml was titled after it.  It is now named for
-# what it tests, like every other wired harness -- run-tls13.sh,
-# run-addifup.sh, run-cardsweep.sh -- so that which emulator boots the guest
-# is a question tools/amiberry-run.sh answers once, for all of them.
-#
-# -b (or AMINETXDUO_BUILD) picks the build tree the library comes from, so the
-# floor build and an -DAMINETXDUO_IPV6=ON build can both be measured.
-#
-# -p runs conf_probe instead of the suite: the hand-written triage walk that
-# prints rc and errno for every call, which is how you find out *why* a
-# category collapsed.
-#
-# -a is the suite's own ReadArgs line, e.g.
-#      -a "LOOPBACK NOPAGE"
-#      -a "CATEGORY socket NOPAGE VERBOSE"
-#      -a "HOST 10.0.2.2 NOPAGE"
-#
-# Stages LIBS:bsdsocket.library and LIBS:usergroup.library from build/cm,
-# DEVS:a2065.device plus the netstack DEVS: config, the suite binary and the
-# argument line, then boots tools/amiberry-run.sh with conf_launcher as the
-# program the Startup-Sequence runs.  See conf_launcher.c for why there is a
-# launcher at all.
-#
-# The emulator ships its own bsdsocket.library emulation, and if it answered
-# OpenLibrary() the whole run would be measuring a host-socket shim instead of
-# our stack.  Turning it off in the config is not how that is settled here: the
-# emulator log says "bsdsocket.library installed" either way, that line is
-# printed when the emulation is *built*, not when it is registered, so a config
-# key is not the proof.  The proof is threefold and checked below / visible in
-# the output:
-#   1. Removing build/cm/.../bsdsocket.library from the staged LIBS: makes the
-#      suite bail with "bsdsocket.library not available", so nothing else on
-#      the machine answers OpenLibrary("bsdsocket.library", 4).
-#   2. The TAP log's "# bsdsocket.library:" line reads AmiNetXDuo, our
-#      SBTC_RELEASESTRPTR.  UAE's emulation answers "UAE <version>".
-#   3. build/serial-<tag>.log fills with our ami_log netstack bring-up
-#      (DHCP lease, resolver) as the library is opened.
-#
-# Results land in:
-#   build/amiberry-testhd-<tag>/bsdsocktest.log  the TAP log, the result
-#   build/amiberry-testhd-<tag>/conf-out.txt     the suite's console summary
-#   build/serial-<tag>.log                       our ami_log output
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -59,12 +13,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 MODEL=A1200
 TIMEOUT=600
 CPU=""
-# -T wins, then AMINETXDUO_RUN_TAG from the environment, then the default. The
-# environment has to be honoured here: this script exports AMINETXDUO_RUN_TAG
-# to tools/amiberry-run.sh, so taking the default unconditionally used to
-# OVERWRITE a caller's tag, two runs started with different
-# AMINETXDUO_RUN_TAG values would silently share build/amiberry-testhd-conformance
-# and clobber each other's results.
 TAG="${AMINETXDUO_RUN_TAG:-conformance}"
 ARGS="NOPAGE"
 PROBE=0
@@ -125,8 +73,6 @@ export AMINETXDUO_RUN_TAG="$TAG"
 
 set +e
 if [ "$PROBE" = "1" ]; then
-    # The probe needs no arguments and no big stack, so it is run directly
-    # instead of through the launcher.
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" ${CPU:+-c "$CPU"} -t "$TIMEOUT" \
         "$ROOT/build/bsdsocktest/conf_probe" "$STAGE/devs" "$STAGE/libs"
     status=$?
@@ -140,12 +86,6 @@ status=$?
 set -e
 
 # ---- which library actually answered -------------------------------------
-#
-# A run against somebody else's bsdsocket.library says nothing about ours,
-# whatever its TAP output claims.  This used to print "results are meaningless"
-# and then exit with the guest's status, so a green run against a foreign
-# library was a pass.  A run that cannot be attributed is not a result: 3, its
-# own status, distinct from the suite failing.
 echo "---- stack under test ----"
 ident=$(grep -m1 "^# bsdsocket.library:" \
         "$ROOT/build/amiberry-testhd-$TAG/bsdsocktest.log" 2>/dev/null || true)
@@ -169,19 +109,6 @@ case "$ident" in
 esac
 
 # ---- the TAP log is the result -------------------------------------------
-#
-# `exit "$status"` alone was a pass on every run that reached the end.  $status
-# is the emulator's, which is the guest's, which is conf_launcher.c:134 --
-# `return RETURN_OK;` unconditional, with the comment "hand the harness a
-# success so the run is scored from the TAP log".  Nothing scored the TAP log.
-# The only read of it above greps one line for attribution.  So the whole
-# bsdsocktest conformance suite, as .github/workflows/emulator.yml runs it, was
-# green however many conformance tests failed.
-#
-# The scorer is in tests/conformance/tap-verdict.sh so that
-# tests/conformance/tap-verdict-selftest.sh can prove it goes red without a
-# ROM, a driver or the submodule.  It returns 3 for "not measured", which is
-# the same distinction the attribution check above makes.
 . "$ROOT/tests/conformance/tap-verdict.sh"
 
 tap_verdict "$ROOT/build/amiberry-testhd-$TAG/bsdsocktest.log" "$status"

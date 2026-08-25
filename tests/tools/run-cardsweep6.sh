@@ -1,73 +1,6 @@
 #!/usr/bin/env bash
-#
 # Every network card, and whether IPv6 reaches anything past the router.
-#
-#   tests/tools/run-cardsweep6.sh [-B IFACE] [-b BUILDDIR] [-t SECONDS]
-#                                 [-c CARD[,CARD...]] [-6 ADDR] [-p PORT]
-#                                 [-4 ADDR] [-l]
-#
-# WHAT IT PROVES, PER CARD
-#
-#   The guest forms a global IPv6 address from a router advertisement, and
-#   then exchanges packets with an address that is NOT on this LAN -- an echo
-#   reply, or a TCP connection, from a host one hop or more past the default
-#   router.  Both halves have to work: the request leaves the card, and the
-#   ANSWER comes back, which is the half that needs the router to be able to
-#   solicit the guest at its solicited-node multicast address.
-#
-# WHY OFF-LAN IS THE WHOLE POINT
-#
-#   x-surf.device and x-surf-100.device answer S2ERR_BAD_ADDRESS to every
-#   S2_ADDMULTICASTADDRESS -- they test bit 7 of ios2_SrcAddr[0], where the
-#   Ethernet group bit is bit 0 -- so the hash filter stayed empty and no
-#   multicast frame was ever delivered to those three cards.  Everything
-#   on-link kept working: DHCP, ARP, ping, and SLAAC too, because the router
-#   advertisement that answers a solicitation comes back unicast.  What broke
-#   is the return path from off-link: the router solicits the guest at
-#   33:33:ff:xx:xx:xx, the card drops it, the neighbour entry never resolves,
-#   and the answer is discarded one hop away.  Three shipping cards had no
-#   off-LAN IPv6 for as long as they were supported.
-#
-#   BUT THIS SWEEP CANNOT SEE THAT DEFECT, and must not be read as proving
-#   a driver takes multicast.  src/sana2/sana2_device.c re-asks for the same
-#   hash bucket with a synthetic 80:00:00:00:00:xx that the bit-7 test
-#   accepts, so those cards pass here through THIS stack and would fail
-#   through Roadshow or AmiTCP.  What discriminates is tests/tools/mcastjoin.c,
-#   which asks the driver with no stack in the way.
-#
-#   An on-LAN IPv6 check passes happily through all of that.  So does
-#   tests/tools/run-cardsweep.sh, which is IPv4 and one segment.  So does
-#   every runner under tests/ipv6/, which is WinUAE or SLIRP -- and SLIRP
-#   answers a router solicitation itself, so it cannot have this defect to
-#   find.  The destination has to be past the router, and the preflight below
-#   refuses to run against one that is not.
-#
-#   The on-link probe is the LAST command the guest runs, not the first.  A
-#   neighbour solicitation the guest sends carries its own link-layer address,
-#   so probing the router first would teach the router what the broken card
-#   cannot tell it, and the off-LAN arm behind it could pass on a card that
-#   fails alone.
-#
-# EVERY CARD, ONE BOOT EACH
-#
-#   The table is tests/tools/cards.sh, shared with run-cardsweep.sh so the two
-#   sweeps cannot disagree about what "every card" is.  Board to driver is
-#   tools/sana2-stage.sh's sana2_select(), the same choice the other sweep
-#   makes: anxnet.device, pinned with CARD=, for the boards it covers and the
-#   vendor driver for the rest, with AMINETXDUO_SANA2_VENDOR=1 forcing the
-#   vendor driver everywhere.  Each card
-#   gets its own AMINETXDUO_RUN_TAG, its own MAC and its own guest name,
-#   because tools/amiberry-run.sh:245-259 derives the drive, the serial log
-#   and the serial PORT from the tag.  Cards run in sequence under a lock, and
-#   NOTHING here pkills anything.
-#
 # NO PEER, AND NO STATIC ADDRESS
-#
-#   Nothing has to call into the guest here, which is what forces a third
-#   machine and a known address on run-cardsweep.sh.  The guest takes a DHCP
-#   lease for IPv4 and forms its IPv6 address from the wire.  A bridge is the
-#   only thing this needs beyond a ROM.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -81,40 +14,12 @@ TIMEOUT=240
 ONLY=""
 LIST=0
 
-# The destination, and why it is a literal address.
-#
-# A name would test the resolver as well, and a lab whose DNS is fine while
-# its uplink is down would read as nine broken cards.  1.1.1.1's v6 answers
-# both ICMPv6 echo and TCP 53, so one host serves both proofs, and the
-# preflight below makes the host demonstrate both before any card is booted.
 TARGET6="${AMINETXDUO_CARDSWEEP6_TARGET:-2606:4700:4700::1111}"
 TARGET6_PORT="${AMINETXDUO_CARDSWEEP6_PORT:-53}"
 TARGET4="${AMINETXDUO_CARDSWEEP6_TARGET4:-1.1.1.1}"
 
-# How long the guest waits after AddNetInterface for the router advertisement
-# and for duplicate address detection.  Bring-up including IPv6 measures about
-# 2.5 s; this is an order of magnitude of slack and it is spent nine times, so
-# it is not free.
 SETTLE=15
 
-# ONE BYTE OF THE MAC IS NEW EVERY RUN, AND IT HAS TO BE.
-#
-# A card's SLAAC address is derived from its MAC, so a fixed MAC gives the
-# same guest address every run -- and the ROUTER remembers it.  A neighbour
-# cache entry it already holds is refreshed by unicast probes, which any card
-# accepts, so the second run of a broken card reaches off-LAN on an entry the
-# first run left behind and the gate reads green.  Measured: with a fixed MAC
-# the three X-Surf cards passed on a build with the multicast fix reverted,
-# fifteen minutes after a run that had passed with it.
-#
-# A fresh byte per sweep means the router has never heard of these addresses
-# and has to solicit them at their solicited-node multicast address, which is
-# the frame the defect drops.  It also keeps two sweeps on one LAN apart.
-# ne2000_pcmcia IS THE EXCEPTION: the emulated PCMCIA card ignores the MAC it
-# is given and comes up with the HOST's, one bit flipped, so its guest address
-# is the same every run and a stale entry in the router can still cover a
-# failure there.  Nothing in this harness can change that; the other eight
-# cards are covered.
 RUNBYTE="${AMINETXDUO_CARDSWEEP6_RUNBYTE:-$(printf '%02x' $((RANDOM % 256)))}"
 
 while getopts "B:b:t:c:6:p:4:l" opt; do
@@ -146,8 +51,6 @@ BSD="$BUILDDIR/src/bsdsocket/bsdsocket.library"
 
 infra() { echo "error=$*"; echo "result=infra"; exit 2; }
 
-# ----------------------------------------------------------------- listing --
-
 if [ "$LIST" = 1 ]; then
     echo "cards this sweep boots:"
     cards_rows "$ONLY" | while read -r board model _addr mac; do
@@ -165,29 +68,17 @@ if [ "$LIST" = 1 ]; then
     exit 0
 fi
 
-# --------------------------------------------------------------- preflight --
-#
-# Everything that is about the LAB rather than about a card, decided once and
-# before any boot.  A lab that cannot do this is exit 2 and nine cards
-# unmeasured; it is never a red card.  The IPv6 delegation here has gone away
-# for an afternoon before, and an outage that reads as a card defect costs a
-# day.
-
 for t in ToolsSmoke AddNetInterface ShowNetStatus ping nc traceroute netstat; do
     [ -x "$TOOLS/$t" ] || infra "no $TOOLS/$t; build $BUILD first"
 done
 [ -x "$MCASTJOIN" ] || infra "no $MCASTJOIN; build $BUILD first"
 [ -f "$BSD" ] || infra "no $BSD; build $BUILD first"
 
-# A tree built with -DAMINETXDUO_IPV6=OFF has no IPv6 to gate, and would
-# report every card red for a reason that is in the build.
 if [ -f "$BUILDDIR/CMakeCache.txt" ] &&
    grep -q '^AMINETXDUO_IPV6:BOOL=OFF' "$BUILDDIR/CMakeCache.txt"; then
     infra "$BUILD was configured with AMINETXDUO_IPV6=OFF"
 fi
 
-# A missing ROM is nine boots that each cost their own rc 2.  It is the lab,
-# it is knowable here, and it is worth one line.
 [ -n "${AMINETXDUO_KICKSTART:-}${AMINETXDUO_KICKSTART_A1200:-}" ] ||
     infra "no boot ROM; export AMINETXDUO_KICKSTART (. ~/amiga-assets/env.sh)"
 
@@ -202,9 +93,6 @@ HOST_GLOBAL=$(ip -6 -o addr show dev "$IFACE" scope global 2>/dev/null |
 [ -n "$HOST_GLOBAL" ] ||
     infra "no global IPv6 address on $IFACE; the delegation is down, not the cards"
 
-# The destination is off this LAN, asserted rather than assumed.  A target
-# that resolves on-link measures the segment, which is the check that was
-# already passing while three cards were broken.
 ROUTE6=$(ip -6 route get "$TARGET6" 2>/dev/null)
 case "$ROUTE6" in
     *" via "*) ;;
@@ -225,11 +113,6 @@ s.close()' "$TARGET6" "$TARGET6_PORT" >/dev/null 2>&1 ||
 ping -c 1 -W 3 "$TARGET4" >/dev/null 2>&1 ||
     infra "this host cannot reach $TARGET4 over IPv4"
 
-# The on-link contrast: a global address on this segment that answers.  The
-# default router's own is the one address guaranteed to be there without a
-# second machine, and it is the SAME box the off-LAN arm goes through, so
-# "on-link works, off-LAN does not" localises the fault to the hop past it.
-# Not having one is not a failure -- the contrast is context, not the gate.
 [ -z "$VIA" ] || ping -6 -c 1 -W 2 "$VIA%$IFACE" >/dev/null 2>&1 || true
 ONLINK6=$(ip -6 neigh show dev "$IFACE" 2>/dev/null |
           awk '$1 !~ /^fe80:/ && /router/ {print $1; exit}')
@@ -250,17 +133,10 @@ fi
 [ -n "$A2065" ] && [ -f "$A2065" ] ||
     infra "no a2065.device; set AMINETXDUO_A2065"
 
-# ---------------------------------------------------------------- the lock --
-#
-# One sweep at a time in this tree: nine guests in sequence on an eight-core
-# host, sharing a serial port derived from the tag.
-
 mkdir -p "$ROOT/build"
 LOCK="$ROOT/build/cardsweep6.lock"
 exec 9>"$LOCK"
 flock -n 9 || infra "another cardsweep6 holds $LOCK"
-
-# ----------------------------------------------------------------- reading --
 
 REPORT=""
 
@@ -279,22 +155,17 @@ rc_of() { # banner
     ' "$REPORT" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'
 }
 
-# How many echo replies came back, out of the guest's own summary line.
 replies_of() { # banner
     block "$1" |
         sed -n 's/^[0-9]* packets transmitted, \([0-9]*\) received.*/\1/p' |
         tail -1
 }
 
-# The non-tentative global address the guest formed, the same read
-# tests/tools/run-multiaddr.sh:273 takes.
 guest_global6() {
     awk '$1 == "address6" && $2 !~ /^fe80:/ && $0 !~ /\(tentative\)/ \
          { print $2; exit }' "$REPORT"
 }
 
-# Distinct addresses that answered a traceroute, which is what says the
-# destination really is past something.
 tr_hops() { # banner
     block "$1" |
         awk '/^traceroute to/ { next }
@@ -302,8 +173,6 @@ tr_hops() { # banner
                    if ($i ~ /^[0-9a-fA-F:]*:[0-9a-fA-F:]+$/) { print $i; break } }' |
         sort -u | grep -c . || true
 }
-
-# -------------------------------------------------------------------- run ---
 
 RESULTS="$ROOT/build/cardsweep6-results.txt"
 : > "$RESULTS"
@@ -319,9 +188,6 @@ NPASS=0; NFAIL=0; NSKIP=0
 echo "==> bridge $IFACE, build $BUILD, ${TIMEOUT}s per card, ${SETTLE}s settle," \
      "MACs 02:41:4d:4b:$RUNBYTE:xx"
 
-# The card list on fd 3, not on stdin: an ssh or an emulator in the loop body
-# with a readable stdin eats the remaining cards, which is how the other sweep
-# once ran one card and called itself complete.
 while read -r -u 3 board model _addr mac; do
     [ -n "$board" ] || continue
 
@@ -360,10 +226,6 @@ while read -r -u 3 board model _addr mac; do
     done
     cp "$MCASTJOIN" "$STAGE/McastJoin"
 
-    # DHCP for IPv4 and AUTO for IPv6: nothing calls in, so no address has to
-    # be known before the boot, and AUTO is what a user gets.  CONFIGURE6 is
-    # AUTO by default too (src/bsdsocket/interfaces.c:1431); it is written out
-    # because a gate should not depend on a default it does not name.
     cat > "$STAGE/devs/NetInterfaces/eth0" <<IFEOF
 DEVICE=a2065.device
 UNIT=0
@@ -379,9 +241,6 @@ IFEOF
     sana2_stage "$board" "$STAGE/devs"
     echo "==> $board: $SANA2_DRIVER, opened as '$SANA2_DEVICE'${SANA2_CARD:+, CARD=$SANA2_CARD}"
 
-    # The commands, in order, and the order is load-bearing: the IPv4 control
-    # first, then the two off-LAN arms, and the on-link probe LAST so it
-    # cannot warm the router's neighbour cache for the arms that matter.
     C_IFUP="SYS:AddNetInterface eth0"
     C_STATUS="SYS:ShowNetStatus ALL"
     C_PING4="SYS:ping $TARGET4 -c 2 -t 8 -n"
@@ -391,12 +250,6 @@ IFEOF
     C_ONLINK="SYS:ping $ONLINK6 -c 3 -t 10 -n"
     C_ROUTES="SYS:netstat -r"
 
-    # BEFORE the interface comes up, and that is the point: McastJoin asks the
-    # DRIVER whether it takes a real group address, with no stack in the way.
-    # Once AddNetInterface has run, src/sana2's workaround has already re-asked
-    # for the same hash bucket with a synthetic address a bit-7 test accepts,
-    # and a driver that refuses every group passes anyway.  This is the only
-    # arm that can see the defect anxnet.device was written to remove.
     C_MCAST="SYS:McastJoin DEVICE=$SANA2_DEVICE UNIT=0"
     {
         echo "$C_MCAST"
@@ -446,20 +299,10 @@ IFEOF
         fi
     fi
 
-    # THE CLAIM: a global address off the wire, and an answer from a machine
-    # past the router.  Either proof of the second is enough -- an echo reply
-    # or a completed TCP handshake -- because both need the identical return
-    # path and the preflight showed this host getting both.  Requiring both
-    # would put a destination's ICMP rate limiting in the gate.
     offlan=no
     [ "${p6:-0}" -gt 0 ] && offlan=yes
     [ "$tcp6" = yes ] && offlan=yes
 
-    # A guest that produced nothing is a FAILURE, not a skip.  run-cardsweep.sh
-    # has always scored both of these as fail; this scored them as skip, so a
-    # card whose guest hung every night was green.  A timeout voids the
-    # artefact it was supposed to produce, which is the same thing as having no
-    # artefact, so the two share a status.
     status=fail; why=""
     if [ ! -f "$REPORT" ]; then
         status=fail_no_transcript
@@ -474,9 +317,6 @@ IFEOF
         status=fail_no_global
         why=" reason=\"online, and no global IPv6 address formed: no router advertisement reached this card\""
     elif [ "$SANA2_SEL_SOURCE" = anxnet ] && [ "$mcast" != PASS ]; then
-        # OUR driver only.  A vendor driver refusing a group address is the
-        # defect this one exists to remove, not a regression in this run, and
-        # gating on it would red the X-Surf row for something already known.
         status=fail_mcast
         why=" reason=\"McastJoin verdict=$mcast: the driver refused a real"
         why="$why group address, which is the whole point of this driver\""
@@ -490,10 +330,6 @@ IFEOF
         why=" reason=\"a global address formed and no IPv6 came back from anywhere\""
     fi
 
-    # skip_offline is the one status here that is a skip on purpose: the claim
-    # "this card comes online" belongs to run-cardsweep.sh, whose exit 1 is
-    # exactly that, so counting it twice would put one defect in two gates.
-    # skip_no_driver above is the other: nothing to boot.
     case "$status" in
         pass)                    NPASS=$((NPASS + 1)) ;;
         skip_offline)            NSKIP=$((NSKIP + 1)) ;;
@@ -509,8 +345,6 @@ done 3<<EOF
 $(cards_rows "$ONLY")
 EOF
 
-# ---------------------------------------------------------------- verdict ---
-
 WALL=$(( $(date +%s) - SWEEP_START ))
 
 echo
@@ -524,12 +358,6 @@ echo "======================================================================"
 printf 'cardsweep6: cards=%d pass=%d fail=%d skip=%d target6=%s wall_s=%d\n' \
        "$((NPASS + NFAIL + NSKIP))" "$NPASS" "$NFAIL" "$NSKIP" "$TARGET6" "$WALL"
 
-# 0  every card formed a global address and reached past the router
-# 1  A CARD DID NOT, or a card's guest produced nothing at all.  The gate.
-# 2  the lab could not run it, and no card was measured
-# 3  nothing failed, and a card was not measured -- read the table.  Only two
-#    things reach it: no driver in the store, and an interface that never came
-#    online, which is run-cardsweep.sh's exit 1 and not a second gate here.
 if [ "$NFAIL" != 0 ]; then echo "result=fail"; exit 1; fi
 if [ "$NSKIP" != 0 ]; then echo "result=partial"; exit 3; fi
 echo "result=ok"

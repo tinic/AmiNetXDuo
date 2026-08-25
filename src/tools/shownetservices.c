@@ -2,50 +2,6 @@
  * ShowNetServices, what else on this network is offering something.
  *
  *     ShowNetServices TYPE,ALL/S,SECONDS/K/N,TXT/S,QUIET/S
- *
- * The other half of mDNS. netstack_mdns.c makes this machine findable by name
- * and advertises whatever DEVS:Internet/service_discovery declares. This asks
- * the same wire what everything else has to offer. No server, no configuration
- * and no address typed by hand: a Mac, a Linux box running Avahi, a network
- * printer and any Windows since 10 all answer.
- *
- * A browse is a subscription, not a lookup. The query goes out, and answers
- * arrive over the following seconds from whatever is awake and listening.
- * mDNS never says that the list is complete, and a machine that boots in a
- * minute answers then. So this command listens for a fixed window and then
- * prints the peer cache, which differs from what is on the network in both
- * directions: shorter, because only what was awake has answered, and longer,
- * because a cache entry outlives the machine that put it there. The output
- * says so. A short list is not proof that nothing else is there, and a listed
- * machine is not proof that it is still up.
- *
- * The window is three seconds. A responder on the same wire answers in well
- * under one, and RFC 6762 6 gives a shared record a 20-120 ms delay before it
- * replies, so three catches the ordinary case with room to spare. A command
- * that sat there for ten would read as hung. SECONDS raises it for a busy or a
- * slow network.
- *
- * With no TYPE, RFC 6763 9's meta-query _services._dns-sd._udp.local
- * enumerates the service types present rather than instances of any one of
- * them. That is how a browser finds out what there is to browse for, and it is
- * what this command does when asked for nothing in particular. A user does not
- * know that a network printer is _ipp._tcp until something says so.
- *
- * ALL lists the types, and then every instance of every one of them. It costs
- * one more window and not one per type: a continuous query per type is
- * registered and they all run at once, so a machine answers whichever of them
- * apply to it in a single response.
- *
- * What ALL does cost is peer cache. Four records land per instance, and the
- * queries themselves take a record each. When the cache fills, the module
- * evicts the least recently used record rather than refusing the new one,
- * which used to mean an SRV outliving the A record it points at, and a row
- * printing "no address". That is now chased: netstack_mdns_browse_collect()
- * asks for an address the browse did not carry. SVC_TYPES_MAX bounds the rest.
- *
- * It does not connect to anything it finds. An SRV record is a claim by the
- * machine that published it, and this command reports the claim.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -74,20 +30,8 @@ enum
 #define SVC_SECONDS_MIN     1
 #define SVC_SECONDS_MAX     60
 
-/*
- * How many rows to ask the library for. The stack's peer cache holds about
- * twenty services, so this is not the limit that binds, but nsh_Available
- * comes back regardless, so a network larger than either is reported as
- * truncated rather than silently cut.
- */
 #define SVC_MAX             48
 
-/*
- * How many types ALL will browse at once. Each is a query record in the peer
- * cache, and each brings back four more records for every instance behind it,
- * so this is what stops a network offering a hundred types from evicting the
- * answers to the first ninety. A house LAN offers around twenty.
- */
 #define SVC_TYPES_MAX       32
 
 static struct
@@ -98,8 +42,6 @@ static struct
 
 /* Off the stack for the same reason svc_answer is. */
 static char svc_types[SVC_TYPES_MAX][NETSTATUS_SVC_TYPE_LEN];
-
-/* ------------------------------------------------------------------ types, */
 
 /*
  * A service type, as RFC 6763 4.1.2 spells one: "_" then one to fifteen
@@ -152,8 +94,6 @@ static const char *plural(ULONG n)
     return (n == 1) ? "" : "s";
 }
 
-/* --------------------------------------------------------------- the list, */
-
 /*
  * A field a responder chose, printed. A TXT record is arbitrary bytes and an
  * instance name is free UTF-8 text (RFC 6763 4.1.1), and either can carry
@@ -187,15 +127,6 @@ static VOID put_address(ULONG addr)
                 (LONG)(addr & 0xFFUL));
 }
 
-/*
- * One service, as two or three lines rather than a row of columns.
- *
- * A table was the first shape and it does not survive contact with a real
- * network: RFC 6763 4.1.1 instance names are free text and the ones on this
- * LAN run to "HIKVISION DS-2CD2085FWD-I - 167921371" with a host name of
- * "DS-2CD2085FWD-I20180113AAWR167921371.local" beside it. Every column past
- * the first was pushed out of line by the first entry.
- */
 static VOID print_instance(const NetStatusService *e, BOOL want_txt)
 {
     tool_printf("  ");
@@ -217,12 +148,6 @@ static VOID print_instance(const NetStatusService *e, BOOL want_txt)
     else
         tool_printf("no address");
 
-    /*
-     * A service with no SRV record has no port either, and printing "port 0"
-     * would look like a fact. That happens when a PTR arrived and the record
-     * it points at has not: the responder answered the browse and nothing has
-     * asked it for the details yet.
-     */
     if (e->nsv_Port != 0)
         tool_printf("  port %lu", (LONG)e->nsv_Port);
 
@@ -263,16 +188,6 @@ static BOOL same_name(const char *a, const char *b)
     }
 }
 
-/*
- * Whether this type has already been listed.
- *
- * NETSTATUS_SERVICES answers with the whole cache, so the type list is every
- * distinct nsv_Type in it, taken from the instances as well as from the
- * meta-query's bare rows, because the two overlap. The module drops a bare
- * type row once it holds an instance of that type, it being the less
- * informative of the two, so a list built from the bare rows alone loses
- * exactly the types that answered best.
- */
 static BOOL type_already_shown(UWORD upto, const char *type)
 {
     UWORD i;
@@ -286,16 +201,6 @@ static BOOL type_already_shown(UWORD upto, const char *type)
     return FALSE;
 }
 
-/* --------------------------------------------------------------- every type, */
-
-/*
- * The types the meta-query turned up, so that one continuous query can be
- * started per type. They are collected from the instances as well as from the
- * bare rows, for the reason type_already_shown() gives.
- *
- * Returns how many were taken. A network offering more than SVC_TYPES_MAX
- * leaves the rest alone.
- */
 static UWORD collect_types(UWORD count)
 {
     UWORD taken = 0;
@@ -368,14 +273,6 @@ static UWORD print_type(UWORD count, const char *type, BOOL want_txt)
     return shown;
 }
 
-/* ------------------------------------------------------------------ browse, */
-
-/*
- * Is any interface actually answering .local?  Distinct from stack_has_mdns():
- * that asks whether this build has a responder at all, this asks whether any
- * interface asked it to run.  MDNS= is per interface and defaults to off, so a
- * responder that is built in and idle is the ordinary case, not a fault.
- */
 static BOOL mdns_enabled_somewhere(struct Library *base)
 {
     struct
@@ -533,10 +430,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Never starts the stack: a machine with no network has nothing to
-       discover, and starting one to say so would be a surprise. FALSE, because
-       QUIET drops the progress lines, never the reason nothing can be
-       discovered. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
@@ -586,19 +479,6 @@ int main(int argc, char **argv)
 
     count = read_services(base);
 
-    /*
-     * ALL is two windows, not one per type. The first is the meta-query above,
-     * which says which types are here. The second asks after all of them at
-     * once, since RFC 6762 5.2 queries run concurrently and a machine answers
-     * whichever of them apply to it in one response.
-     *
-     * The meta-query is retired first: it has said what it had to say, and its
-     * record and its answers are peer cache the instances now need.
-     *
-     * Ctrl-C in the first window drops back to listing the types, which is what
-     * that window collected. Starting a second round of queries to stop them
-     * again is not what the key was pressed for.
-     */
     if (all && broke)
         all = FALSE;
 
@@ -656,12 +536,6 @@ int main(int argc, char **argv)
 
         if (type != NULL)
         {
-            /*
-             * The selector answers with the whole cache, so the type is
-             * matched here. Instances only: a bare type row is the
-             * meta-query's answer and says that something offers the type,
-             * not which machine does.
-             */
             if (!(e->nsv_Flags & NETSTATUS_SVC_INSTANCE))
                 continue;
             if (!same_name(e->nsv_Type, type))
@@ -701,11 +575,6 @@ int main(int argc, char **argv)
     }
     else if (!quiet)
     {
-        /*
-         * A type the meta-query turned up and no instance answered for. The
-         * machine behind it did not reply inside the window, so naming the
-         * types keeps that separate from their not being there.
-         */
         if (all)
         {
             BOOL first = TRUE;

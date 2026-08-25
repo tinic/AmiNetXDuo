@@ -5,29 +5,6 @@
 #   tests/tools/run-wbgrab.sh [-b BUILDDIR] [-m MODEL] [-t SECONDS]
 #                             [-o OUTDIR] [-s SEQUENCE]... [-d DEPTH]
 #
-# The screen has to be Workbench's own, so the guest boots Commodore's
-# Startup-Sequence with LoadWB in it, exactly as install/test/run-workbench.sh
-# does, and the Workbench 3.1 tree is assembled from the same five ADFs by the
-# same code.  tools/amiberry-run.sh cannot drive this: it wipes the staging
-# drive and writes a Startup-Sequence of its own, and the screen under test is
-# the one that script does not create.
-#
-# THREE SEQUENCES, THREE BOOTS.  One boot doing all three would have each
-# sequence capturing the tail of the one before it -- a shell that is still
-# scrolling when the idle capture starts is the case the idle capture exists
-# to disprove.
-#
-#   idle      LoadWB has settled and nothing is running.  50 frames.
-#   windows   shells open and close over each other while the grab runs.
-#             DRAGGING IS NOT DRIVEN: it needs mouse input, nothing here can
-#             script it, and a window that moves itself is not the same event.
-#   scroll    a shell running `dir SYS: ALL` on a loop.  100 frames.
-#
-# DH0: is a host directory, so the .pfs files the guest writes are on this
-# filesystem when it stops; there is nothing to copy off.
-#
-# Output is key=value and the exit code is the verdict.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -67,13 +44,6 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 
 # ------------------------------------------------------------- the machine --
 
-# A Kickstart must match the model: the A1200 40.68 image does not boot an
-# A600 and the machine then never reaches a Shell, which reads as a crash in
-# the thing under test.  Same rule and same variables as tools/amiberry-run.sh.
-#
-# So must the wbgrab in -b BUILDDIR.  It is copied, not rebuilt, so an A500 or
-# an A600 wants a tree configured -DAMINETXDUO_CPU=68000; a 68020 binary takes
-# an illegal instruction before it reaches the screen.
 model_var=$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 model_var=${model_var%_}
 eval "KICKSTART=\${AMINETXDUO_KICKSTART_$model_var:-}"
@@ -93,10 +63,6 @@ fi
 [ -n "$AMIBERRY" ] || { say error "amiberry not found; set AMIBERRY=<path>"; exit 2; }
 
 # ------------------------------------------------------ Workbench 3.1 SYS: --
-#
-# tests/tools/wb31-sys.sh: five floppies into one hard drive, Commodore's own
-# layout, cached.  Shared with tests/tools/run-console.sh, which needs exactly
-# the same tree for exactly the same reason -- a real Workbench SCREEN.
 
 # shellcheck source=tests/tools/wb31-sys.sh
 . "$ROOT/tests/tools/wb31-sys.sh"
@@ -117,17 +83,12 @@ stage() {
     cp "$WBGRAB" "$HD/C/wbgrab"
     chmod 755 "$HD/C/wbgrab"
 
-    # A shell whose FROM script never ends: `dir SYS: ALL` on a loop is the
-    # worst case for anything that diffs tiles, because every row of the
-    # window moves on every frame.
     cat > "$HD/S/scroller" <<'EOF'
 Lab loop
 Dir SYS: ALL
 Skip loop BACK
 EOF
 
-    # Each window this opens lives two seconds and then takes itself away;
-    # EndCLI is what closes a shell's window from inside its own script.
     cat > "$HD/S/winclose" <<'EOF'
 C:Wait 2
 EndCLI
@@ -150,18 +111,12 @@ EOF
     return 0
 }
 
-# The stock 3.1 Startup-Sequence with the tail replaced.  LoadWB stays, since
-# the screen under test is the one it opens; only EndCLI goes, because it would
-# take the boot shell away before the capture line ran.
 startup_with() {
     sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
     printf '\n%s\n' "$1" >> "$HD/S/Startup-Sequence"
     chmod 755 "$HD/S/Startup-Sequence"
 }
 
-# `C:Wait 6` after LoadWB in every arm: Workbench draws its backdrop, its title
-# bar and the disk icons after LoadWB returns, so a capture that started at
-# once would record that as change and the idle arm would measure the boot.
 tail_for() {
     case "$1" in
     idle)
@@ -201,9 +156,6 @@ EOF
 
 # ------------------------------------------------------------- the emulator --
 
-# Amiberry links SDL2 with no driver of its own, so without this it asks for a
-# video device, finds a stale DISPLAY from a failed X11 forward, and aborts in
-# about a second -- which reads as a guest that never booted.
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
 [ "${SDL_VIDEODRIVER}" = "dummy" ] && unset DISPLAY WAYLAND_DISPLAY || true

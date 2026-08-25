@@ -1,21 +1,7 @@
 /*
- * The tests for src/tlslib/tls_expiry.c, which decides whether a cached TLS
- * session can still be offered.
- *
- *   The failure is silent and it is a key on disk.  A cached master secret
- *   lives in DEVS:Internet/tlssessions, and an expiry check that never fires
- *   leaves it offerable for as long as the file exists, which is what an
- *   attacker who takes the disk uses against captured traffic.  That is not a
- *   handshake failure, a log line or anything a user sees.  It looks exactly
- *   like resumption that works well.  The other direction is invisible too.
- *   An entry expired too eagerly costs one round trip and nothing else.
- *
- *   Two of the four rules exist only because the Amiga has machines with no
- *   battery-backed clock.  On those, tls_time_monotonic() counts seconds since
- *   boot instead of seconds since 1970, so a stamp is one kind of number or
- *   the other, and TLS_CLOCK_FLOOR is the only thing that tells them apart.
- *   A subtraction of one kind from the other produces an age that means
- *   nothing, which is how "never expires" happened in the first place.
+ * The tests for src/tlslib/tls_expiry.c.  Two of its four rules exist only
+ * because tls_time_monotonic() returns an uptime on a machine with no clock,
+ * and TLS_CLOCK_FLOOR is the only thing telling the two kinds of stamp apart.
  *
  *   cc -std=c11 -Wall -Wextra -Isrc/tlslib \
  *      src/tlslib/test/test_tls_expiry.c src/tlslib/tls_expiry.c \
@@ -45,11 +31,8 @@ static int checks;
 
 /* ------------------------------------------------------ the ordinary case --- */
 
-/*
- * A server hint below the ceiling is the limit, and the comparison is `age >
- * limit`, so an entry exactly at its lifetime is still good.  One second past
- * it is not.
- */
+/* The comparison is `age > limit`, so an entry exactly at its lifetime is
+   still good and one second past it is not. */
 static void test_lifetime_boundary(void)
 {
     CHECK(tls_expired(WALL, 300UL, WALL) == 0);          /* no age at all */
@@ -58,10 +41,7 @@ static void test_lifetime_boundary(void)
     CHECK(tls_expired(WALL, 300UL, WALL + 301UL) == 1);
 }
 
-/*
- * No hint means the ceiling applies, and so does a hint above it: a server
- * that says "a year" is believed only as far as TLS_RESUME_MAX_AGE.
- */
+/* No hint means the ceiling applies, and so does a hint above it. */
 static void test_ceiling(void)
 {
     CHECK(tls_expired(WALL, 0UL, WALL + TLS_RESUME_MAX_AGE) == 0);
@@ -84,10 +64,8 @@ static void test_ceiling(void)
 
 /* ------------------------------------------------- machines with no clock --- */
 
-/*
- * Uptime stamps.  A machine with no battery-backed clock counts from boot, so
- * both numbers are small, and the ageing rule is the same at those values.
- */
+/* Uptime stamps: a machine with no battery-backed clock counts from boot, so
+   both numbers are small and the ageing rule is the same at those values. */
 static void test_uptime_stamps(void)
 {
     CHECK(tls_expired(100UL, 300UL, 200UL) == 0);
@@ -99,11 +77,8 @@ static void test_uptime_stamps(void)
     CHECK(tls_expired(0UL, 300UL, 301UL) == 1);
 }
 
-/*
- * The rule that matters most.  A stamp written under a real clock and an
- * uptime are different kinds of number, and subtracting one from the other
- * gives an age that means nothing.  Either direction is expired.
- */
+/* A clock stamp and an uptime are different kinds of number, and subtracting
+   one from the other gives an age that means nothing.  Either way is expired. */
 static void test_clock_kind_mismatch(void)
 {
     /* Stored under a clock, asked about with an uptime. */
@@ -123,16 +98,9 @@ static void test_clock_kind_mismatch(void)
 }
 
 /*
- * An uptime from a previous boot.  The machine rebooted, this boot's uptime is
- * lower than the stored one, and the entry is from a session that no longer
- * exists.
- *
- * These assert the verdict rather than the branch that produces it, and no
- * test can do better.  A deletion of `now < stamp` from tls_expired() passes
- * every case below, because the subtraction then wraps to a number far larger
- * than any limit and the answer comes out the same.  The check states the
- * reason, and does not change the answer.  A green run here does not cover
- * it.
+ * An uptime from a previous boot.  These assert the verdict, not the branch:
+ * deleting `now < stamp` from tls_expired() passes every case below, because
+ * the subtraction then wraps to a number larger than any limit.
  */
 static void test_previous_boot(void)
 {
@@ -150,12 +118,9 @@ static void test_previous_boot(void)
 }
 
 /*
- * Far-apart stamps stay a plain subtraction.
- *
- * Nothing here must depend on the width of `unsigned long`.  It is 32 bits on
- * m68k and 64 on the host that runs this, so a case built to wrap asserts two
- * different things in the two builds.  The values below are far from either
- * end.
+ * Far-apart stamps stay a plain subtraction.  Nothing here must depend on the
+ * width of `unsigned long`: it is 32 bits on m68k and 64 on the host that runs
+ * this, so the values below are far from either end.
  */
 static void test_far_apart(void)
 {

@@ -1,26 +1,5 @@
 #!/usr/bin/env bash
-#
 # Is a stalled TCP connection visible, and does TCP_USER_TIMEOUT cut one short.
-#
-#   tests/tcpstall/run-tcpstall.sh -B <host-nic> -P [user@]peerhost [-p port]
-#                                  [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#
-# BRIDGED, AND ONLY BRIDGED.  The stall being measured is a retransmission
-# ladder against a real peer several hops of real hardware away; SLIRP is not
-# a link and cannot answer the question.  -B names the host NIC.
-#
-# THE PEER IS A SINK, AND NEEDS NO ROOT.  This script starts a `socat`/`nc`
-# style listener on the peer over ssh and nothing else.  The stall is induced
-# from INSIDE the guest, by pointing the peer's address at a MAC nobody owns
-# in the guest's own ARP cache, so no firewall rule is added anywhere and no
-# other work sharing this peer is disturbed.  tests/tcpstall/tcpstall_test.c
-# says why at more length.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
-#
-# Output is key=value plus an exit code.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -54,8 +33,6 @@ done
 [ -n "$IFACE" ]    || { echo "result=failed reason=no_bridge_interface" >&2; exit 2; }
 [ -n "$PEER_SSH" ] || { echo "result=failed reason=no_peer" >&2; exit 2; }
 
-# The guest reaches the peer by address, not by the name ssh knows it as, and
-# it is on its own LAN rather than the runner's resolver-of-last-resort.
 PEER_NAME="${PEER_SSH#*@}"
 PEER=$(getent ahostsv4 "$PEER_NAME" 2>/dev/null | awk 'NR==1{print $1}')
 if [ -z "$PEER" ]; then
@@ -98,11 +75,6 @@ cp "$NETSTAT" "$STAGE/netstat"
 UG="$ROOT/$BUILD/src/usergroup/usergroup.library"
 [ -f "$UG" ] && cp "$UG" "$STAGE/libs/usergroup.library"
 
-# ------------------------------------------------------------- the peer ---
-#
-# A sink that accepts and reads and never closes first.  Killed by pid on the
-# way out, so a run that fails does not leave a listener behind for the next
-# one to trip over.
 
 PEER_PIDFILE="/tmp/tcpstall-peer-$TAG.pid"
 
@@ -137,7 +109,6 @@ while True:
 
 sleep 2
 
-# ------------------------------------------------------------------ run ---
 
 export AMINETXDUO_RUN_TAG="$TAG"
 export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-02:41:4d:49:00:57}"
@@ -151,7 +122,6 @@ set +e
 RUN_RC=$?
 set -e
 
-# -------------------------------------------------------------- verdict ---
 
 . "$ROOT/tools/test-verdict.sh"
 
@@ -178,8 +148,6 @@ CHECKS=$(grep -oE 'tcpstall: [0-9]+ checks' "$REPORT" | tail -1 |
 FAILURES=$(grep -oE '[0-9]+ failures' "$REPORT" | tail -1 |
            grep -oE '[0-9]+' || true)
 
-# The stall was observable while it was running: the guest's own poll and the
-# shipped command both have to have said so.
 STALL_SEEN=$(grep -cE 'stalled [0-9]+ms retx [1-9]' "$REPORT" || true)
 NETSTAT_SEEN=$(grep -cE 'stalled [0-9]+s, [1-9][0-9]* retx' "$REPORT" || true)
 

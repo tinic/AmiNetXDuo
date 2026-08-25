@@ -4,70 +4,6 @@
 #
 #   tests/tools/run-mdnsctl.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
-# WHAT THIS IS FOR, AND WHY IT IS NOT tests/tools/run-mdns.sh
-#
-#   run-mdns.sh asks whether the responder is right: the label it derives, the
-#   records it puts on the wire, what SLIRP does with them.  It has one
-#   configuration and it never changes it.
-#
-#   This one asks whether MDNS= is a switch.  Until now it was read once, at
-#   start-up, and an interface added by hand set the flag that NETSTATUS_IF_MDNS
-#   is reported from without ever calling nx_mdns_enable(): the interface joined
-#   no group, probed for no name and answered nothing, while ShowNetStatus said
-#   it was answering .local.  A remove neither disabled it nor cleared the flag.
-#
-#   So the four things below are the whole test, and the third and the fourth
-#   are the ones a flag that only pretends cannot pass:
-#
-#     1. up with no MDNS=      -- reported off, and the name does not resolve
-#     2. MDNS=YES              -- reported on, and the name resolves
-#     3. MDNS=NO               -- reported off, and it STOPS resolving
-#     4. removed and re-added  -- reported off, because the file never asked
-#
-#   Between 2 and 3 the machine is turned on again, so an off/on pair is
-#   exercised as well as an off: the module suspends its records rather than
-#   deleting them and re-announces what it finds, so this is where a second
-#   registration of the same services would show up.
-#
-# HOW "IT RESOLVES" IS DECIDED, AND WHAT IT IS WORTH
-#
-#   On the guest: `host amigatest.local`.  That is not a self-check dressed up
-#   as one.  nx_mdns_host_address_get() walks the ENABLED interfaces and asks on
-#   each, and answers out of the local cache for a name this machine has claimed
-#   -- so with no interface enabled it has nowhere to ask and fails, and it
-#   fails the same way for a name that was never probed for.  The command is
-#   unmodified and reaches the module through gethostbyname() and
-#   netstack_resolve(), which is the path every command shares.
-#
-#   On the host: tests/tools/mdnswatch.py sits on the host's REAL network,
-#   joined to 224.0.0.251, for the whole run.  Whatever it hears got there
-#   through the emulator's NAT, so a line naming this guest is another machine
-#   seeing the name -- and the TTL tells the two events apart, an announcement
-#   carries the RFC 6762 10 TTL and the goodbye that MDNS=NO sends carries zero.
-#
-#   THAT HALF IS REPORTED, NOT ASSERTED, and the reason is measured rather than
-#   assumed: SLIRP is a user-mode NAT and rewrites the source port, and
-#   _nx_mdns_packet_address_check() drops any mDNS datagram whose source port is
-#   not 5353 (RFC 6762 6), so nothing the host sends can be answered by the
-#   guest under this backend.  A bridged run would answer it and is not
-#   available here.  A run that hears nothing exits 3, "not measured", rather
-#   than red: whether a NAT relays multicast is a property of the emulator.
-#
-# ONE BOOT.  ToolsSmoke reopens its transcript from the top after a reset, so a
-# reboot would turn "five reports" into a shorter list that still reads as a
-# pass; the count of adds is asserted for that reason.
-#
-# SLIRP, deliberately: the guest-side half needs no peer, and a second bridged
-# Amiga on this host would take the MAC of one that is already there.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
-#
-# A TIMEOUT IS A DEFECT.  The ceiling below is twice the measured good case,
-# which is stated beside it.  A run that burns it produces a partial transcript
-# and proves nothing; the verdict names the command the transcript stops at.
-# Raising -t is never the fix.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -76,12 +12,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-# THE GOOD CASE IS 28 SECONDS, measured on playhouse3 (Amiberry 68020 A1200 on
-# SLIRP): boot, nineteen commands and thirteen seconds of deliberate waiting for
-# probing.  The ceiling is a little over twice it, the same arithmetic
-# tests/tools/run-ifconfigure.sh uses, because an emulator that costs more than
-# double what it has been seen to cost is hung.  The run prints what it really
-# took, so the number stays checkable.
 TIMEOUT=60
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 
@@ -119,10 +49,6 @@ fi
     exit 2
 }
 
-# The configured name, and the single DNS label mDNS has to derive from it.
-# Deliberately not equal, as run-mdns.sh has it: a responder that used HOSTNAME
-# verbatim would claim "amigatest.home.lan.local" and every assertion below
-# would fail rather than passing by accident.
 CFG_HOSTNAME="amigatest.home.lan"
 LABEL="amigatest"
 
@@ -134,13 +60,6 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# STATIC, and SLIRP's own numbers, for the reason run-ifconfigure.sh is static:
-# a DHCP client is a second writer, and the A record the responder announces is
-# whatever the interface holds, so a lease arriving mid-run would move it.
-#
-# AND NO MDNS= LINE AT ALL.  That is step 1's premise and step 4's: the file
-# never asks for mDNS, so nothing in this run may report it except between the
-# two commands that switch it on and off.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -152,9 +71,6 @@ IFEOF
 
 echo "hostname $CFG_HOSTNAME" >> "$STAGE/devs/Internet/name_resolution"
 
-# One service, so that the off/on pair has something whose double registration
-# would be visible: the responder registers what this file declares the first
-# time an interface is enabled, and must not do it again on the second.
 cat > "$STAGE/devs/Internet/service_discovery" <<'SDEOF'
 # written by tests/tools/run-mdnsctl.sh
 _http._tcp    80
@@ -166,10 +82,6 @@ for t in AddNetInterface RemoveNetInterface ConfigureNetInterface \
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# Every line is asserted below by its position in this list.  The waits are for
-# probing, which is three packets 250 ms apart after a randomised first delay
-# (RFC 6762 8.1): without them a name that had not been claimed yet would be
-# reported as a name that cannot be claimed.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus eth0
@@ -194,16 +106,6 @@ SYS:host $LABEL.local TIMEOUT 5
 EOF
 
 # ------------------------------------------------------- the host watcher ---
-#
-# Sized against the LOCK QUEUE and not against the run: the emulator runs in
-# this tree are serialised, and a watcher that lived for TIMEOUT seconds would
-# routinely be dead before the guest booted, and its silence would then be read
-# as "SLIRP dropped it".  Same lesson as run-mdns.sh and run-sntp.sh.
-#
-# It only listens.  --respond is not passed: nothing the host sends can be
-# answered under SLIRP anyway (the source port is rewritten and RFC 6762 6
-# makes the module drop it), so answering would put packets on somebody's
-# network for no measurement.
 WATCHLOG="$ROOT/build/mdnsctl-watch.log"
 python3 "$ROOT/tests/tools/mdnswatch.py" \
     --log "$WATCHLOG" --seconds "$((TIMEOUT + 3600))" --selftest \
@@ -246,17 +148,9 @@ fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 note() { echo "  --: $*"; }
 
-# An instrument that did not work is not a defect in the thing it was pointed
-# at.  Its own counter and its own exit status, 3, so "could not measure" is
-# never read as "measured and wrong".
 BROKEN=0
 infra() { echo "INFRA: $*" >&2; BROKEN=$((BROKEN + 1)); }
 
-# A TIMEOUT IS A DEFECT, NOT A RESULT.  A partial transcript makes every
-# assertion below read the wrong block, and the first few would still pass.
-#
-# A `wait` gets a banner of its own in the transcript, so the two counts are
-# directly comparable and the shortfall names the line the run stopped at.
 WANTED=$(grep -c . "$STAGE/commands.txt")
 RAN=$(grep -c '^===== ' "$REPORT" || true)
 if [ "$RAN" -lt "$WANTED" ]; then
@@ -344,10 +238,6 @@ says "$LOOKUP" 4 "^$LABEL\.local has address 10\.0\.2\.15" \
                                          "3b: and the name resolves again"
 
 # ---- 4: removed and re-added ---------------------------------------------
-#
-# The interface goes with mDNS on, so this is the flag AND the responder: an
-# add that copied the last occupant's answer, or one that set the flag without
-# enabling anything, both fail here.
 
 says   "$STATUS" 5 '^ *mDNS +no$' \
     "4: an interface removed and re-added does not claim mDNS it was not asked for"
@@ -370,18 +260,6 @@ if [ -z "${WATCHLOG:-}" ] || [ ! -f "$WATCHLOG" ] ||
     infra "the host watcher could not bind UDP 5353, so nothing off this
        machine was measured"
 elif ! grep -q "the instrument SAW its own multicast" "$WATCHLOG"; then
-    # This tested `grep -q "mdnswatch.local"`, and tests/tools/mdnswatch.py:212
-    # writes "selftest: sent a query for mdnswatch.local" unconditionally, at
-    # SEND time, before anything has been received.  So the calibration check
-    # was satisfied by the calibration attempt: it passed on a watcher that
-    # heard nothing at all, which is the one case it exists to catch, and the
-    # assertions below then graded a deaf instrument's silence as the
-    # responder's.
-    #
-    # mdnswatch.py:242 writes the line grepped for here the moment the probe
-    # comes back.  It has to be written there rather than in the summary,
-    # because the watcher is SIGTERMed at :359 long before its deadline, so
-    # the summary that used to carry the verdict never ran.
     infra "the watcher never saw its own calibration query, so it was not
        listening and its silence means nothing"
 else
@@ -408,12 +286,6 @@ else
        250 ms after MDNS=NO and the relay may simply not have carried it"
         fi
 
-        # The off/on pair must not have registered the one declared service a
-        # second time.  nx_mdns_disable() suspends the local records rather
-        # than deleting them and nx_mdns_enable() re-announces what it finds,
-        # so a second nx_mdns_service_add() would put two SRVs for the same
-        # instance in one announcement.  Read off the wire, because the count
-        # in the cache is not something the guest reports.
         DUPE=$(grep -c "SRV=$LABEL\._http\._tcp\.local.*SRV=$LABEL\._http\._tcp\.local" \
                "$WATCHLOG" || true)
         if [ "$DUPE" -eq 0 ]; then

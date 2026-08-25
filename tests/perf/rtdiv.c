@@ -1,22 +1,6 @@
 /*
  * AmiNetXDuo, what libgcc's 64-bit helpers cost against src/common's.
  *
- * The two arms are the SAME source linked twice: rtdiv_libgcc resolves
- * __udivdi3 and its siblings out of libgcc.a, rtdiv_anxd out of
- * libaminetxduo_m68k_rt.a.  Nothing here selects between them and there is no
- * flag to get wrong -- which arm ran is a property of the link line, and the
- * linker map beside each binary says which.
- *
- * NARROW AND WIDE ARE SEPARATE NUMBERS.  Every 64-bit divide this tree
- * actually performs -- nx_crypto's limbs, newlib's %llu, the E-Clock
- * conversions -- has a divisor that fits in 32 bits, and ami_udivdi3.c is
- * written for that case.  The 64-bit-divisor branch is separate code and
- * separately normalised, so an average over both would say nothing about
- * either.
- *
- * The operands are carried between iterations so nothing can be folded, and
- * the accumulator is printed so nothing can be dropped.
- *
  * SPDX-License-Identifier: MIT
  */
 

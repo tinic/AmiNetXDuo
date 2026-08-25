@@ -1,31 +1,7 @@
 #!/usr/bin/env bash
-#
 # Fetch a real HTTPS URL through tls.library, under Amiberry on a bridged card.
-#
-#   tests/tls/run-api.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
-#                        [-N BOARD] [-B IFACE]
-#
-# Unlike tests/tls/run-https.sh this stages the two SHARED LIBRARIES and the
-# trust store, because the program under test is linked against none of our
-# code, it opens LIBS:bsdsocket.library and LIBS:tls.library by name and
-# verifies the chain against DEVS:Internet/certificates.
-#
-# The trust store is built here rather than checked in: a CA bundle changes
-# every few weeks and a stale copy in git would be worse than none.  Set
-# AMINETXDUO_CA_BUNDLE, or drop a cacert.pem in dist/, or let it find the
-# host's.
-#
-# BRIDGED, NEVER SLIRP.  This harness had no -B at all, so it inherited
-# amiberry-run.sh's slirp default and AMINETXDUO_AMIBERRY_BACKEND was the only
-# way to put it on a wire.  It reaches a public HTTPS server, which is the one
-# thing NAT through a stub cannot do: the run could only burn its ceiling.  -B
-# names the host NIC and the string `slirp` is refused by name.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -70,8 +46,6 @@ for f in "$EXE" "$BSD" "$TLS"; do
     }
 done
 
-# ---------------------------------------------------------- trust store --
-
 STORE="$ROOT/$BUILD/certificates"
 if [ ! -f "$STORE" ]; then
     BUNDLE="${AMINETXDUO_CA_BUNDLE:-}"
@@ -98,8 +72,6 @@ EOF
     python3 "$ROOT/tools/mkcertstore.py" --output "$STORE" "$BUNDLE"
 fi
 
-# ------------------------------------------------------------- a2065 -----
-
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
     for candidate in \
@@ -114,8 +86,6 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/tls-api-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
@@ -125,10 +95,6 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TLS" "$STAGE/libs/tls.library"
 cp "$STORE" "$STAGE/devs/Internet/certificates"
 
-# The shared fixture names SLIRP's forwarder, 10.0.2.3, which is nothing on a
-# real segment: the resolver waits it out before it falls back on the server
-# the lease carried, thirty seconds per lookup.  The lease is the only source
-# here, so the file names none.
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 # No nameserver line: the DHCP lease on the bridge carries one, and naming
 # SLIRP's dead 10.0.2.3 here costs the resolver's whole failover time on every
@@ -136,10 +102,6 @@ cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 domain localdomain
 NREOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name
-# in DEVICE=.  Without it the shared interface file keeps DEVICE=a2065.device
-# whatever -N asked for, so every other board opens a2065.device against
-# hardware that is not there.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -153,23 +115,9 @@ echo "==> trust store: $(wc -c < "$STORE" | tr -d ' ') bytes"
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-tlsapi}"
 
-# ---------------------------------------------------------- the verdict ---
-#
-# This used to end in `exec <runner>`, so the script's exit status was the
-# guest's own return code: a guest that opened nothing, ran no checks and
-# returned 0 was a pass, and so was one whose transcript never arrived.
-# tools/test-verdict.sh reads the guest's own counters instead, puts a floor
-# under the number of checks, and fails loudly and by name when there is no
-# transcript at all.
 . "$ROOT/tools/test-verdict.sh"
 
 verdict() {
-    # 0 pass, 1 fail, 77 the guest skipped: all three are carried out.
-    # A FLOOR OF 1 IS NOT A FLOOR: a guest that stopped after its first
-    # assertion cleared it.  26 is the count of a clean bridged run, A1200 on
-    # ens18, 2026-08-20 -- measured, not read off the a_check() calls in
-    # tls_api.c, because not every one of those runs on every path.  A run
-    # that makes fewer stopped somewhere.
     verdict_guest "tls-api" 26 "$1" \
         "$(verdict_hd_amiberry)/stdout.txt" \
         "$(verdict_serial_amiberry)" && exit 0

@@ -1,33 +1,9 @@
 /*
- * NetCapture's filter compiler, run through the real interpreter.
- *
- * The programs bpffilter.c emits are executed here by src/bpf/bpf_filter.c and
- * checked by src/bpf/bpf_validate.c -- the same two files that will run them
- * on the machine.  Nothing is reimplemented: a second interpreter written for
- * a test agrees with the compiler and with nothing else, and both of them
- * could be wrong about the same offset.
- *
- * WHAT THERE IS TO GET WRONG, which is the whole reason this file exists:
- *
- *   A filter that accepts everything reads exactly like one that works.  The
- *   user's capture is full of packets, the counters move, the file opens in
- *   Wireshark, and the answer to "what is this program saying to that machine"
- *   is the whole segment.  So every case below asserts BOTH directions: the
- *   frame that must be kept and the frame that must not.
- *
- *   The other silent failure is the opposite: a filter that matches nothing.
- *   An empty pcap looks like a quiet network.
- *
- *   And a program with a jump that runs off its own end is neither -- it is a
- *   BIOCSETF that fails, or, on a machine with no memory protection and a
- *   validator that let it through, something much worse.  Every program is
- *   handed to ami_bpf_validate() first.
- *
- * Frames are built here rather than captured, so an offset can be moved by one
- * byte and the test says which field stopped matching.
- *
- * Sabotage: tests/tools/bpffilter-verdict-selftest.sh breaks bpffilter.c in
- * six named ways and requires this to fail on each.
+ * NetCapture's filter compiler, run through the real interpreter: the programs
+ * are executed by src/bpf/bpf_filter.c and validated by bpf_validate.c, the
+ * same two files that run them on the machine. Every case asserts BOTH
+ * directions -- the frame that must be kept and the frame that must not --
+ * because a filter that accepts everything reads exactly like one that works.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -58,9 +34,8 @@ static int checks;
 /* -------------------------------------------------------------- the frames */
 
 /*
- * A frame is built field by field.  60 bytes of Ethernet + IPv4 + TCP, or
- * whatever the case needs; the interpreter is told the wire length separately
- * so a truncated capture can be presented as one.
+ * A frame is built field by field. The interpreter is told the wire length
+ * separately, so a truncated capture can be presented as one.
  */
 #define FRAME_MAX   256
 
@@ -102,8 +77,7 @@ static void put16(unsigned char *p, unsigned long v)
 
 /*
  * IPv4 with a header of `ihl` longwords, so the indexed port load is exercised
- * with something other than the usual 5.  `frag` goes straight into the flags
- * and fragment-offset halfword.
+ * with something other than the usual 5.
  */
 static void frame_ip4(Frame *f, unsigned long proto, unsigned long src,
                       unsigned long dst, unsigned long ihl, unsigned long frag)
@@ -185,12 +159,9 @@ static void frame_arp(Frame *f, unsigned long ptype, unsigned long spa,
 static struct bpf_insn prog[TOOL_BPF_MAX_INSNS];
 
 /*
- * Compile, validate, and answer the length.  0 means the compiler refused, and
- * the caller says whether that was the point.
- *
- * ToolBpfInsn is copied into `struct bpf_insn` field by field rather than
- * cast: the two are the same eight bytes on the target and are not on a
- * 64-bit host, where a `long` is eight bytes on its own.
+ * Compile, validate, and answer the length. 0 means the compiler refused.
+ * ToolBpfInsn is copied into `struct bpf_insn` field by field rather than cast:
+ * the two are the same eight bytes on the target and are not on a 64-bit host.
  */
 static unsigned long build(const ToolBpfFilter *f, ToolBpfResult *why)
 {
@@ -276,10 +247,8 @@ static void test_accept_everything(void)
     CHECK(run(n, &arp) == SNAP, "the empty filter dropped an ARP frame");
 }
 
-/*
- * The snap length is the filter's return value, so a wrong one is a capture
- * truncated to the wrong size rather than a capture that fails.
- */
+/* The snap length is the filter's return value, so a wrong one is a capture
+   truncated to the wrong size rather than a capture that fails. */
 static void test_snaplen_is_the_return(void)
 {
     ToolBpfFilter f;
@@ -432,10 +401,8 @@ static void test_host_v6(void)
     both("host6, as destination", &f, &to, &neither);
 
     /*
-     * Two addresses differing in the LAST word only.  The four-word compare
-     * gives up on the source at the first mismatched word and tries the
-     * destination; a compare that stops after the first word matches every
-     * address in the same /32.
+     * Two addresses differing in the LAST word only: a compare that stops after
+     * the first word matches every address in the same /32.
      */
     {
         Frame nearly;
@@ -478,9 +445,8 @@ static void test_port(void)
     }
 
     /*
-     * A header with options in it.  The transport starts at 14 + ihl*4, so a
-     * port read at a fixed 34 finds the options instead and this frame is the
-     * one that catches it.
+     * A header with options in it. The transport starts at 14 + ihl*4, so a
+     * port read at a fixed 34 finds the options instead.
      */
     {
         Frame options;
@@ -494,9 +460,8 @@ static void test_port(void)
     }
 
     /*
-     * A fragment other than the first has no transport header at all.  The
-     * bytes at the port offsets are payload, and a filter that reads them
-     * matches on data.
+     * A fragment other than the first has no transport header at all: the bytes
+     * at the port offsets are payload.
      */
     {
         Frame frag;
@@ -577,9 +542,8 @@ static void test_not(void)
     both("not port 22", &f, &other, &matching);
 
     /*
-     * And the frames the filter could not have matched at all -- an ARP, with
-     * no ports in it -- come back on the accepting side.  An inversion that
-     * only swapped the matching branch would drop them.
+     * The frames the filter could not have matched at all come back on the
+     * accepting side. An inversion that only swapped the branch would drop them.
      */
     {
         ToolBpfResult why;
@@ -694,14 +658,9 @@ static void test_names(void)
 }
 
 /*
- * A short frame must not make the interpreter read past it, and the point at
- * which a filter starts accepting is a fact about the program worth pinning.
- *
  * The deepest byte a `tcp and host and port` program over IPv4 reads is the
- * destination port, at offsets 36 and 37: 14 of Ethernet, a 20-byte header,
- * and the port pair.  So 38 bytes is exactly enough and 37 is not.  A filter
- * whose loads moved -- an off-by-one in an offset, a port read at a fixed 34
- * rather than through the index register -- moves this threshold, and every
+ * destination port, at offsets 36 and 37, so 38 bytes is exactly enough and 37
+ * is not. A filter whose loads moved shifts this threshold, and every
  * whole-frame case in this file would still pass.
  */
 #define RUNT_ENOUGH     38

@@ -1,66 +1,7 @@
 #!/usr/bin/env bash
-#
 # THE REGRESSION TEST FOR ConfigureNetInterface'S DHCP HALF.
-#
-#   tests/tools/run-ifdhcp.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                             [-A [-N board] [-B backend]]
-#
-# WHAT IT IS FOR
-#
-#   Before CONFIGURE and RELEASE, the only way to make a lease happen again was
-#   Offline followed by Online, or NetShutdown, both of which restart every
-#   interface on the machine.  There was no way at all to give a lease back.
-#
-#   Three claims, and each one is checked from OUTSIDE the command:
-#
-#     RELEASE drops the lease        ShowNetStatus stops printing the "lease
-#                                    from" line, and a second RELEASE is
-#                                    refused because there is nothing left to
-#                                    release.  The refusal is the strong half:
-#                                    it is a different invocation reading the
-#                                    state the first one left.
-#
-#     CONFIGURE=DHCP takes one       an interface with no lease ends up
-#                                    addressed, leased and able to ping.
-#
-#     CONFIGURE=DHCP renews one      on an interface that is already bound this
-#                                    is RFC 2131 4.4.5's renewing state entered
-#                                    early, and the command waits for NetX
-#                                    Duo's raw state to come back to BOUND.
-#                                    That only happens on a DHCPACK, so rc 0
-#                                    inside the timeout is the server's answer
-#                                    and not this machine's opinion -- and the
-#                                    address must be the same one afterwards,
-#                                    because a renewal that moved the address
-#                                    is an allocation wearing the wrong name.
-#
-#   Every CONFIGURE=DHCP below carries an explicit TIMEOUT so that a server
-#   which never answers costs a known number of seconds rather than the
-#   60-second default four times over.  The ceiling at the top is sized from
-#   that, and from the measured good case.
-#
-# THE ARGUMENT SURFACE, from the same template:
-#
-#   CONFIGURE/K                 DHCP, and nothing else -- AUTO is refused by
-#                               name because Roadshow has it and this does not
-#   RELEASE=RELEASEADDRESS/S    both spellings, as Roadshow has them
-#   TIMEOUT/K/N                 rejected under ten seconds, and rejected
-#                               without CONFIGURE, because there is nothing
-#                               else here to wait for
-#   NETMASK, GATEWAY            refused WITH CONFIGURE=DHCP: the server decides
-#                               them, so accepting would be accepting something
-#                               that is then written over
-#
-# WHY eth0 IS DHCP HERE, where tests/tools/run-ifconfigure.sh makes it STATIC:
-# this is the half that has no meaning without a server, and SLIRP has one.
-# That harness needs an interface with no second writer and this one needs the
-# writer, so they are two files rather than two sections of one.
-#
-# ONE BOOT, and the count of adds says so.
-#
 # The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
 # or drop a copy in build/a2065.device.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -69,18 +10,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-# THE GOOD CASE IS 21 SECONDS, measured on playhouse3 (Amiberry 68020 A1200 on
-# SLIRP): boot, one add, three pings, four DHCP exchanges and twenty-four
-# commands.  The ceiling is a boot of its own plus twice the measured work,
-# which is what tests/tools/run-toolleak.sh uses and for the same reason: an
-# emulator that costs more than double what it has been seen to cost is hung,
-# and the ceiling is what says so rather than something to raise.  The run
-# prints what it really took.
-#
-# A DHCP server that stops answering does NOT reach this ceiling: every
-# CONFIGURE=DHCP below carries TIMEOUT 20, so it fails with a verdict instead
-# of running out of wall clock, which is the difference between a result and
-# an infrastructure fault.
 TIMEOUT=105
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 RUNNER=slirp
@@ -124,16 +53,12 @@ fi
     exit 2
 }
 
-# ------------------------------------------------------------- staging ---
-
 STAGE="$ROOT/build/ifdhcp-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# DHCP, which is the whole point here.  SLIRP hands out 10.0.2.15 from
-# 10.0.2.2, so both ends of every exchange below are known numbers.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -188,8 +113,6 @@ SYS:ConfigureNetInterface eth0 QUIET RELEASEADDRESS
 SYS:ShowNetStatus eth0
 EOF
 
-# ------------------------------------------------------------------ run ---
-
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-ifdhcp}"
 
 STARTED=$(date +%s)
@@ -226,8 +149,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# A TIMEOUT IS A DEFECT, NOT A RESULT.  A partial transcript makes every
-# assertion below read the wrong block, and the early ones would still pass.
 WANTED=$(grep -c . "$STAGE/commands.txt")
 RAN=$(grep -c '^===== ' "$REPORT" || true)
 if [ "$RAN" -lt "$WANTED" ]; then
@@ -279,7 +200,6 @@ says_not() { # banner nth pattern description
 ifaces() { block "SYS:netstat -i" "$1"; }
 status() { block "SYS:ShowNetStatus eth0" "$1"; }
 
-# The address on eth0 out of the Nth `netstat -i`.
 address() { ifaces "$1" | awk '$1 == "eth0" { print $3; exit }'; }
 
 pinged() { # nth description
@@ -294,7 +214,6 @@ pinged() { # nth description
     fi
 }
 
-# ---- one boot ------------------------------------------------------------
 ADDS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$ADDS" -eq 1 ]; then
     pass "the machine booted once and ran the whole list"
@@ -304,15 +223,10 @@ else
     fail "the run never got as far as bringing eth0 up, something hung"
 fi
 
-# ---- 1. nothing to release, because nothing is up ------------------------
 says "SYS:ConfigureNetInterface eth0 RELEASE" 1 "The network is not running" \
      "releasing before any add says the network is not running"
 want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 1 5 "and returns WARN"
 
-# ---- 2. the lease it booted with -----------------------------------------
-#
-# The control.  If SLIRP does not hand out a lease, nothing below is about
-# this command.
 pinged 1 "eth0 came up by DHCP and the gateway answers over it"
 LEASED=$(address 1)
 if [ "$LEASED" = "10.0.2.15" ]; then
@@ -324,11 +238,6 @@ fi
 says "SYS:ShowNetStatus eth0" 1 "lease +from 10\.0\.2\.2" \
      "and ShowNetStatus says which server it came from"
 
-# ---- 3. CONFIGURE=DHCP on a bound interface is a RENEWAL -----------------
-#
-# rc 0 means the command watched NetX Duo's raw state leave RENEWING and come
-# back to BOUND, which happens on a DHCPACK and on nothing else.  A server that
-# never answered would leave it in RENEWING until the timeout.
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 1 0 \
         "CONFIGURE=DHCP on a bound interface is answered inside the timeout"
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 1 \
@@ -346,23 +255,17 @@ says "SYS:ShowNetStatus eth0" 2 "lease +from 10\.0\.2\.2" \
      "and the interface still holds a lease afterwards"
 pinged 2 "and still carries traffic"
 
-# ---- 4. RELEASE gives it back --------------------------------------------
 want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 2 0 "RELEASE is accepted"
 says "SYS:ConfigureNetInterface eth0 RELEASE" 2 "the lease is released" \
      "and says so"
 
-# The observable half, read by a different command: ShowNetStatus prints a
-# "lease from" line only for an interface that holds one.
 says_not "SYS:ShowNetStatus eth0" 3 "lease +from" \
          "and ShowNetStatus no longer reports a lease on eth0"
 
-# The other observable half, read by a second invocation of the command
-# itself: there is nothing left to release, and it says which.
 says "SYS:ConfigureNetInterface eth0 RELEASE" 3 "has no lease to release" \
      "a second RELEASE is refused because the first one really dropped it"
 want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 3 20 "and returns FAIL"
 
-# ---- 5. CONFIGURE=DHCP on an interface with no lease is an ALLOCATION ----
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 0 \
         "CONFIGURE=DHCP after a release takes a lease again"
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 \
@@ -379,7 +282,6 @@ says "SYS:ShowNetStatus eth0" 4 "lease +from 10\.0\.2\.2" \
      "and ShowNetStatus reports a lease once more"
 pinged 3 "and the gateway answers over the re-acquired lease"
 
-# ---- 6. the argument lines that cannot be acted on -----------------------
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0" 1 \
      "takes its netmask and gateway from the server" \
      "NETMASK with CONFIGURE=DHCP is refused, and says why"
@@ -407,11 +309,9 @@ says "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 \
      "RELEASE on a name that is not there is reported by name"
 want_rc "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 20 "and returns FAIL"
 
-# ...and the interface is still leased after all five refusals.
 says "SYS:ShowNetStatus eth0" 5 "lease +from 10\.0\.2\.2" \
      "and none of the five refusals touched the lease"
 
-# ---- 7. RELEASEADDRESS is the same switch, and QUIET is honoured ---------
 QOUT=$(block "SYS:ConfigureNetInterface eth0 QUIET RELEASEADDRESS" 1 |
        grep -v '^----- rc ' || true)
 if [ -z "$(printf '%s' "$QOUT" | tr -d '[:space:]')" ]; then
@@ -423,8 +323,6 @@ fi
 want_rc "SYS:ConfigureNetInterface eth0 QUIET RELEASEADDRESS" 1 0 \
         "and RELEASEADDRESS was accepted"
 
-# QUIET printed nothing, so the only evidence that RELEASEADDRESS is the same
-# switch as RELEASE is what it left behind.
 says_not "SYS:ShowNetStatus eth0" 6 "lease +from" \
          "and the lease is gone: RELEASEADDRESS is the same switch as RELEASE"
 

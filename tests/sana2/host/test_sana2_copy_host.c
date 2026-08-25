@@ -1,23 +1,6 @@
 /*
  * AmiNetXDuo, the SANA-II buffer-management hooks, on the host.
  *
- * S2_CopyToBuff and S2_CopyFromBuff are the two functions a driver calls with
- * our packet in its hands, at interrupt level, and nothing in the tree tested
- * either of them. tests/tcpdrill's tapdev.c calls them, but it asserts about
- * TCP frames on the wire: a cursor that rewound one segment too far would show
- * up there as a retransmission, if it showed up at all.
- *
- * What is under test is the arithmetic, and it is real: src/sana2/sana2_copy.c
- * is compiled into this binary. Only n68k_copy_bytes() is stubbed, with
- * memcpy, the copy primitive is priced by tests/perf and has its own
- * assembly; the cursor around it has nothing.
- *
- * The awkward part is S2_CopyFromBuff. A device may take a frame in one call
- * or in several, and may restart the whole transfer when it has to retry the
- * wire, with no signal that it has done so. The rewind conditions are what
- * distinguish the two, and getting them wrong sends a frame that is part
- * header and part middle, at interrupt level, on a machine with no MMU.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -26,8 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
-/* --------------------------------------------------------------- harness -- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -42,8 +23,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-
-/* ----------------------------------------------------------------- stubs -- */
 
 /* The real one is src/net68k/n68k_copy.S. Everything below is about which
    bytes are asked for, not how they are moved. */
@@ -88,12 +67,6 @@ VOID _nx_ip_packet_checksum_compute(NX_PACKET *packet_ptr)
 }
 
 
-/* ------------------------------------------------------------- the frame -- */
-
-/*
- * A recognisable 300-byte frame: byte i is (i * 7 + 1) & 0xff, so a copy that
- * is off by one segment or one chunk cannot pass by looking plausible.
- */
 #define FRAME_LEN   300
 
 static UCHAR frame[FRAME_LEN];
@@ -106,21 +79,11 @@ static void frame_init(void)
         frame[i] = (UCHAR)((i * 7 + 1) & 0xFF);
 }
 
-/*
- * NX_PACKETs built by hand. The hooks read exactly three fields,
- * nx_packet_prepend_ptr, nx_packet_append_ptr and nx_packet_next, so a real
- * packet pool would add nothing but a dependency.
- */
 #define MAX_SEGS    6
 
 static NX_PACKET seg[MAX_SEGS];
 static UCHAR     segdata[MAX_SEGS][FRAME_LEN];
 
-/*
- * Cut `frame` into `nsegs` links of the given lengths and return the head.
- * A length of 0 makes an empty link, which is the case the `off >= have` skip
- * in the walk exists for.
- */
 static NX_PACKET *chain(const ULONG *lens, ULONG nsegs)
 {
     ULONG i;
@@ -150,13 +113,6 @@ static void tx_slot_init(AmiTxSlot *slot, NX_PACKET *head, ULONG total)
 }
 
 
-/* ------------------------------------------------------- S2_CopyToBuff --- */
-
-/*
- * Receive. The device has a contiguous frame and writes it where the posted
- * CMD_READ said to. The one thing that must never happen is a write past
- * `capacity`: that is our packet buffer, and past its end is somebody else's.
- */
 static void test_copy_to_buff(void)
 {
     AmiRxSlot slot;
@@ -172,13 +128,11 @@ static void test_copy_to_buff(void)
     slot.dst      = dst;
     slot.capacity = 100;
 
-    /* Nothing to copy into, nothing to copy from. */
     h_check(ami_sana2_copy_to_buff(NULL, frame, 10) == FALSE,
             "a NULL slot is refused");
     h_check(ami_sana2_copy_to_buff(&slot, NULL, 10) == FALSE,
             "a NULL source is refused");
 
-    /* A slot the reader never finished arming. */
     slot.packet = NX_NULL;
     h_check(ami_sana2_copy_to_buff(&slot, frame, 10) == FALSE,
             "a slot with no packet is refused");
@@ -189,7 +143,6 @@ static void test_copy_to_buff(void)
             "a slot with no destination is refused");
     slot.dst = dst;
 
-    /* The overrun, which is the whole point of the capacity field. */
     memset(dst, 0xCD, sizeof(dst));
     h_check(ami_sana2_copy_to_buff(&slot, frame, 101) == FALSE,
             "a frame one byte over capacity is refused");
@@ -210,8 +163,6 @@ static void test_copy_to_buff(void)
             "a zero-length copy succeeds");
     h_check(slot.copied == 0, "and reports zero bytes rather than the last count");
 }
-
-/* ----------------------------------------------------- direct receive --- */
 
 static void test_rx_direct(void)
 {
@@ -261,8 +212,6 @@ static void test_rx_direct(void)
 }
 
 
-/* ----------------------------------------------------- S2_CopyFromBuff --- */
-
 static void test_from_buff_guards(void)
 {
     AmiTxSlot  slot;
@@ -287,11 +236,6 @@ static void test_from_buff_guards(void)
             "a slot with no packet is refused");
     slot.packet = head;
 
-    /*
-     * More than the frame holds. Refused before the cursor is touched: a
-     * device that asks for too much is confused, and moving the cursor for it
-     * would corrupt the transfer it is confused about.
-     */
     (void)ami_sana2_copy_from_buff(out, &slot, 40);
     h_check(slot.consumed == 40, "a good call advances the cursor");
     h_check(ami_sana2_copy_from_buff(out, &slot, FRAME_LEN + 1) == FALSE,
@@ -356,11 +300,6 @@ static void test_from_buff_chain(void)
 
     printf("sana2: S2_CopyFromBuff walks a packet chain\n");
 
-    /*
-     * Four links, one of them empty. A TCP send larger than one packet buffer
-     * arrives as a chain, and nothing stops a link being empty, so the walk
-     * has to step over one rather than stop at it.
-     */
     lens[0] = 100;
     lens[1] = 0;
     lens[2] = 150;
@@ -409,13 +348,6 @@ static void test_from_buff_chain_chunked(void)
     h_check(memcmp(out, frame, FRAME_LEN) == 0, "and reassemble into it");
 }
 
-/*
- * The retry case, and the reason the rewind conditions exist.
- *
- * A device that has to retry the wire starts the transfer again from the top
- * and says nothing. All the hook sees is a request it cannot satisfy from
- * where the cursor stands, so that is what it treats as a restart.
- */
 static void test_from_buff_restart(void)
 {
     AmiTxSlot  slot;
@@ -428,7 +360,6 @@ static void test_from_buff_restart(void)
     lens[1] = 100;
     lens[2] = 100;
 
-    /* Half a transfer, then the device gives up and asks for the whole frame. */
     tx_slot_init(&slot, chain(lens, 3), FRAME_LEN);
     h_check(ami_sana2_copy_from_buff(out, &slot, 150) == TRUE,
             "150 bytes of a first attempt");
@@ -448,11 +379,6 @@ static void test_from_buff_restart(void)
     h_check(memcmp(out, frame, 40) == 0, "begins at the frame again");
     h_check(slot.consumed == 40, "and the count restarts with it");
 
-    /*
-     * The narrow one: 40 bytes taken, 260 left, and the device asks for 261.
-     * It cannot be a continuation, so it is a restart, and the answer must
-     * be the first 261 bytes of the frame, not the last 261.
-     */
     memset(out, 0, sizeof(out));
     h_check(ami_sana2_copy_from_buff(out, &slot, 261) == TRUE,
             "a request one byte longer than the remainder");
@@ -470,12 +396,6 @@ static void test_from_buff_restart(void)
     h_check(slot.consumed == FRAME_LEN, "and finishes the frame");
 }
 
-/*
- * A chain that does not hold what `total` claims. The device is told the frame
- * is FRAME_LEN long by ios2_DataLength, so it may ask for that much; the walk
- * runs out of links and must say so rather than report success on a short
- * frame, which would put uninitialised bytes on the wire.
- */
 static void test_from_buff_short_chain(void)
 {
     AmiTxSlot  slot;
@@ -497,16 +417,6 @@ static void test_from_buff_short_chain(void)
 }
 
 
-/*
- * The transmit checksum fusion, which is the one path through this hook that
- * copies the frame somewhere other than the walk at the bottom.
- *
- * ami_sana2_tx_fuse_checksum() copies the whole frame itself and leaves the
- * cursor at the end of it, so the hook has to answer TRUE there and not fall
- * into a walk that would find the packet already exhausted.  It did fall into
- * it, and answered FALSE for every TCP frame; drivers that test the return
- * value refused to transmit any of them.
- */
 static void test_from_buff_fused_checksum(void)
 {
     static AmiSana2If iface;
@@ -554,21 +464,10 @@ static void test_from_buff_fused_checksum(void)
     h_check(h_deferred_checksums == deferred_before,
             "and NetX Duo was not asked to do it again");
 
-    /* Everything but the checksum field is the datagram. */
     h_check(memcmp(out, dgram, 36) == 0 &&
             memcmp(out + 38, dgram + 38, sizeof(dgram) - 38) == 0,
             "and the bytes are the datagram");
     h_check(out[36] != 0 || out[37] != 0, "and the checksum field was filled");
-
-    /*
-     * What the field is worth is not asserted here.  The sum comes out of
-     * n68k_copy_sum_longwords(), which reads the frame a longword at a time,
-     * so on a little-endian host it accumulates byte-swapped and folds its
-     * carries in a different order; the value is only the wire's value on the
-     * 68000.  tests/tcpdrill checks it where that holds.  What this test is
-     * for is the answer the hook gives the device about a copy it has already
-     * done.
-     */
 
     /* The capability flag is cleared, so a retransmission of the same packet
        is not summed a second time over a segment that now carries one. */
@@ -577,8 +476,6 @@ static void test_from_buff_fused_checksum(void)
             "and the packet no longer claims the checksum is owed");
 }
 
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {

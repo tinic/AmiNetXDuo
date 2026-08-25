@@ -1,41 +1,6 @@
 /*
  * Reading a graphics card's framebuffer back, for the console.
  *
- * This is not the planar path with a different loop.  On the chipset the
- * console's constraint is the CPU: a 68020 comparing 40 KB of chip RAM against
- * a shadow, which is why httpfb.c is arranged to do as little of that as it
- * can.  On a card the machine is a 040 or a 060 with CPU to spare and the
- * constraint moves to readback.  Graphics cards are built to be written to.
- * Reading VRAM back over Zorro III is slow, and how slow depends on the board,
- * on the driver and on which of several routes the read takes.  Nobody has
- * published that number for an Amiga card.
- *
- * So this module is a measurement as much as it is a reader.  It times every
- * readback route the machine offers, once, at session start, uses the fastest,
- * and reports what each one managed.  See http_rtg_word(), which sends the
- * report so the figure can be pasted back.
- *
- * It does not hook, patch or wrap anything.  The BoardInfo route, catching the
- * driver's own drawing primitives, cannot be complete by construction:
- * Picasso96's driver documentation says rtg.library "always provides a safe
- * default which performs the corresponding graphics primitive by the CPU", so
- * every operation a board's driver does not implement is done by the CPU
- * writing VRAM directly, and no API-level hook sees it.  A hooked mirror
- * misses whatever a particular board does not accelerate.
- *
- * It serves 8-bit palette-indexed screens a byte a pixel, which is chunky the
- * way the planar path is planar: a byte is an index, so the encoder's tile
- * grid, PackBits, XOR and copy-rectangle all apply unchanged with the plane
- * count set to one.
- *
- * It serves 15, 16, 24 and 32-bit screens two bytes a pixel, big-endian
- * R5G6B5, which is Picasso96's RGBFB_R5G6B5 on a 68k.  All four depths
- * converge on that one format here, whatever the card holds them in, so the
- * encoder, the wire and the browser have one truecolour path rather than four.
- * The tile grid applies to it unchanged with the tile two bytes wider a pixel.
- * What is still refused by name is a bitmap with no chunky pixels at all, a
- * YUV overlay, and a pixel format the converter does not know.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -60,8 +25,6 @@ typedef struct HttpRtgScreen
                            truecolour one, big-endian R5G6B5 */
 } HttpRtgScreen;
 
-/* Both libraries, if either is there.  TRUE when at least one opened, which
-   is what decides whether an RTG screen can be served at all. */
 BOOL  http_rtg_open(VOID);
 VOID  http_rtg_close(VOID);
 BOOL  http_rtg_present(VOID);
@@ -71,28 +34,12 @@ BOOL  http_rtg_present(VOID);
    are not bitplanes. */
 BOOL  http_rtg_owns(struct BitMap *bm);
 
-/* Shape and format, or FALSE with *why set to a sentence naming what it is.
-   Palette and truecolour both come back TRUE, told apart by `bpp`. */
-/* `visible_w` is the screen's own width, which is NOT the bitmap's: an RTG
-   board rounds an allocation up to its pitch, so a 1368-pixel screen can sit
-   in a 1600-pixel bitmap and the 232 columns past the edge hold whatever was
-   last there. Pass 0 when there is no screen to ask. */
+/* `visible_w` is the screen's own width, NOT the bitmap's: an RTG board rounds
+   an allocation up to its pitch, so columns past the edge hold stale pixels.
+   Pass 0 when there is no screen to ask. */
 BOOL  http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
                         const char **why);
 
-/*
- * Take the session: work out whether the bitmap is in card memory or in
- * system RAM, allocate what the snapshot route needs, then time every readback
- * route this machine offers and keep the fastest.
- *
- * `stride` is the row stride of the caller's staging buffer in BYTES and
- * `width` is in pixels, so a truecolour screen needs a stride of at least
- * twice the width.  That buffer is what every route delivers into.  `probe` is
- * the same buffer, used as scratch here because it holds nothing yet.  FALSE
- * when no route worked at all, and also when the screen's pixel format is not
- * one http_rtg_describe() accepts, which is what a screen re-resolved between
- * the two calls looks like from here.
- */
 BOOL  http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
                       UWORD width, UWORD height, ULONG stride, UBYTE *probe);
 VOID  http_rtg_detach(VOID);
@@ -102,22 +49,8 @@ VOID  http_rtg_detach(VOID);
    different native formats or live on different boards. */
 BOOL  http_rtg_attached_to(struct BitMap *bm);
 
-/* One whole frame into `dst`, contiguous full rows at the attach stride.
-   Rows and not tiles: adjacent reads coalesce and a loop of small rectangles
-   is the shape that does not. */
 BOOL  http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst);
 
-/*
- * What the probe measured, as a control word: which libraries answered,
- * whether the bitmap is on the board, the screen's own depth and pixel format,
- * which route won and what every route managed in KB/s.  Sent once a session
- * and logged by the viewer.
- *
- * The depth and the format are here because they are nowhere else.  Every
- * truecolour screen reaches the wire as R5G6B5, so the geometry word says
- * depth 16 whether the card holds 15, 16, 24 or 32 bits a pixel, and a test
- * that wants to know which of the four paths it exercised has only this line.
- */
 ULONG http_rtg_word(char *out, ULONG cap);
 
 #endif /* AMINETXDUO_HTTPRTG_H */

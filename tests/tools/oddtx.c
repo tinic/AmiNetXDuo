@@ -1,30 +1,7 @@
 /*
- * OddTx, does an odd-length transmit survive the remote DMA?
- *
- * THE QUESTION
- *
- *   ne2000_write_buf() programs RBCR with the frame length and then pushes
- *   (len + 1) & ~1 bytes, because the data port is 16 bits wide.  For an odd
- *   length those two numbers disagree, and what the part does about it decides
- *   whether ISR.RDC ever asserts.  If it does not, the driver's wait times
- *   out, the chip is reset and the write is answered S2ERR_TX_FAILURE -- so
- *   the symptom is visible from outside without any instrumentation:
- *
- *     - a CMD_WRITE that returns S2ERR_TX_FAILURE, and
- *     - "Chip resets" in S2_GETSPECIALSTATS climbing once per odd frame.
- *
- *   Both are read here, before and after, for a spread of odd and even
- *   lengths.  The even ones are the control: if they fail too, the fault is
- *   not the byte count.
- *
- * WHAT A PASS HERE DOES AND DOES NOT SETTLE
- *
- *   Amiberry's NE2000 terminates on count-exhausted rather than count-equals-
- *   zero (qemuvga/ne2000.cpp: "if (s->rcnt <= len) s->rcnt = 0"), so an odd
- *   RBCR still asserts RDC there.  A pass therefore proves no regression on
- *   this rig; it does NOT prove an exact-compare implementation would be
- *   happy.  That is the whole reason the result is worth writing down rather
- *   than assuming either way.
+ * OddTx: does an odd-length transmit survive the NE2000 remote DMA?  A failure
+ * shows as CMD_WRITE returning S2ERR_TX_FAILURE and "Chip resets" in
+ * S2_GETSPECIALSTATS climbing once per odd frame.  Even lengths are the control.
  *
  * A one-off probe rather than a command, so it has no CMake entry:
  *
@@ -85,9 +62,9 @@ struct Sana2SpecialStatHeader
 #define S2_CopyFromBuff         (S2_Dummy + 2)
 
 /*
- * The buffer-management hooks: a0 = to, a1 = from, d0 = len, d0 != 0 on
- * success.  Written out because only d0/d1/a0/a1 may be trashed and a C
- * function with register arguments miscompiles on this toolchain.
+ * Buffer-management hooks: a0 = to, a1 = from, d0 = len, d0 != 0 on success.
+ * Asm because only d0/d1/a0/a1 may be trashed and a C function with register
+ * arguments miscompiles on this toolchain.
  */
 asm("    .text                        \n"
     "    .globl _oddtx_copy           \n"
@@ -163,7 +140,7 @@ static ULONG read_stat(struct IOSana2Req *req, ULONG which)
     return stats.rec[which].Count;
 }
 
-/* Payload lengths.  total = 14 + payload, so an odd payload is an odd frame. */
+/* total = 14 + payload, so an odd payload is an odd frame. */
 static const UWORD lengths[] =
 {
     47, 49, 51, 101, 203, 517, 1001, 1499,      /* odd frames  */
@@ -240,7 +217,6 @@ int main(void)
         return 10;
     }
 
-    /* The factory address, then configure with it and go online. */
     req->ios2_Req.io_Command = S2_GETSTATIONADDRESS;
     req->ios2_Req.io_Error   = 0;
     req->ios2_Req.io_Flags   = 0;
@@ -281,8 +257,7 @@ int main(void)
         LONG  err;
 
         memset(req->ios2_DstAddr, 0, SANA2_MAX_ADDR_BYTES);
-        /* Locally administered, nobody's, and not broadcast: this goes on a
-           real LAN and should bother no one. */
+        /* Locally administered and not broadcast: this goes on a real LAN. */
         req->ios2_DstAddr[0] = 0x02;
         req->ios2_DstAddr[5] = 0x01;
 

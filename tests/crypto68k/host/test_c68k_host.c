@@ -1,43 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k correctness gate, host tier.
  *
- * The same four checks as tests/crypto68k/c68k_test.c, run on the build
- * machine instead of under FS-UAE:
- *
- *   1. Known answers from Python's arbitrary-precision integers, including
- *      the full RSA-2048 public and private operations, straight out of the
- *      generated c68k_vectors.h, the same file the Amiga tier reads.
- *   2. The limb primitive against a straight-line C model, over random limb
- *      counts including 0 and 1, operands biased to 0 and 0xFFFFFFFF.
- *   3. Montgomery multiply and square against the unmodified vendored
- *      _nx_crypto_huge_number_mont().
- *   4. Whole exponentiations against
- *      _nx_crypto_huge_number_mont_power_modulus(), with exponent top-limb
- *      widths swept across the window boundaries.
- *
- * Same seed and same trial counts as the Amiga tier, so a failure here
- * reproduces there on the same inputs.
- *
- * The checks are duplicated here rather than built from c68k_test.c because
- * that file is ILP32 code by construction: it logs through RawDoFmt(), which
- * takes every argument longword sized, so it passes strings as `(LONG)ptr`,
- * lossless on m68k, truncating on any LP64 host.  Retargeting it would mean
- * editing the program the emulator tier runs.
- *
- * The hand-written 68020 assembly (c68k_prim.S, c68k_p256.S) cannot be
- * assembled here, so the host always exercises the portable C, which is why
- * AMINETXDUO_CRYPTO68K_ASM defaults off off-target.  The assembly stays an
- * emulator-tier test: this tier says the algorithm is right, that one says the
- * assembly agrees with it.
- *
- * _nx_crypto_huge_number_mont_power_modulus() compares two pointers by casting
- * both to ULONG, which is 32 bits by definition here and 64 on the host
- * (-Wpointer-to-int-cast, twice).  The two pointers are always into the same
- * small static array, so the truncation is consistent and the comparison is
- * correct in practice; it would only break for a buffer straddling a 4 GiB
- * boundary, which a static a few kilobytes wide does not do.  Vendored code,
- * so it stays as it is.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -45,27 +8,12 @@
 
 #include <stdio.h>
 
-
-/* ------------------------------------------------------------- buffers --- */
-
-/*
- * 128 limbs, not 64: ami_tls_crypto.c gives an RSA context enough scratch for
- * a 4096-bit modulus, so that width reaches this module instead of the
- * vendored fallback, and section 7 is the only thing that checks it.  Every
- * sweep below still runs at the widths it always did.
- */
 #define T_MAX_LIMBS         128u            /* RSA-4096 */
 #define T_POWM_SCRATCH      4096u           /* > C68K_POWM_SCRATCH_LIMBS(64, 6) */
 #define T_HN_SCRATCH        8192u
 
 static c68k_limb    t_m[T_MAX_LIMBS];
 
-/*
- * t_x and t_y are +8 because section 2 sweeps n up to 70 to catch the loop
- * tails, and T_MAX_LIMBS is 64.  Without the slack the test wrote past t_y
- * for n in 65..70 and reported ~8% of its own trials as addmul mismatches,
- * 316 of 4000, against the 6/71 = 8.45% of draws that overrun.
- */
 static c68k_limb    t_x[T_MAX_LIMBS + 8u];
 static c68k_limb    t_y[T_MAX_LIMBS + 8u];
 static c68k_limb    t_exp[T_MAX_LIMBS];
@@ -96,14 +44,6 @@ static void t_fail(const char *what, unsigned long a, unsigned long b)
     t_failures++;
     printf("  FAIL %s (%lu, %lu)\n", what, a, b);
 }
-
-
-/* ----------------------------------------------------------------- RNG --- */
-/*
- * xorshift32, identical to the one in ../c68k_support.c: same constant seed,
- * same sequence, so the two tiers test the same inputs.  Written on uint32_t
- * rather than ULONG because ULONG is 32 bits only on the target.
- */
 
 static c68k_limb    t_rng_state = 0x2026072AUL;
 
@@ -144,9 +84,6 @@ UINT    i;
     }
 }
 
-
-/* --------------------------------------------------------- huge numbers --- */
-
 static void t_hn_set(NX_CRYPTO_HUGE_NUMBER *hn, c68k_limb *data,
                      UINT used_limbs, UINT buffer_limbs)
 {
@@ -178,9 +115,6 @@ const c68k_limb    *d    = hn -> nx_crypto_huge_number_data;
 
     return(1u);
 }
-
-
-/* ----------------------------------------------------- 1. known answers --- */
 
 static void t_known_answers(void)
 {
@@ -238,13 +172,6 @@ UINT    status;
     }
 }
 
-
-/* ----------------------------------------------- 2. the limb primitive --- */
-
-/*
- * A model of c68k_addmul_1 written so plainly that it cannot share a bug with
- * the optimised C: one 64-bit accumulator, no tricks.
- */
 static c68k_limb t_addmul_model(c68k_limb *r, const c68k_limb *b, UINT n,
                                 c68k_limb a)
 {
@@ -331,9 +258,6 @@ UINT        mismatch = 0;
            mismatch);
 }
 
-
-/* ------------------------------- 3. differential vs the vendored code ---- */
-
 static void t_mont_differential(UINT trials)
 {
 UINT                    trial;
@@ -350,10 +274,6 @@ UINT                    bad_sqr = 0;
     {
         m_len = (UINT)(t_rand() % 64u) + 1u;            /* 1..64 limbs */
 
-        /* Forced low so that every even width here goes through Karatsuba and
-           is checked against the vendored routine, not just against our own
-           schoolbook.  Random operands, so the reference is trustworthy,
-           unlike the near-maximal ones in 3b. */
         c68k_karatsuba_limbs = 2u;
 
         t_rand_limbs(t_m, m_len);
@@ -381,7 +301,6 @@ UINT                    bad_sqr = 0;
 
         n0inv = c68k_mont_n0inv(t_m[0]);
 
-        /* multiply */
         t_hn_set(&r_hn, t_ref_result, 0, T_MAX_LIMBS * 2);
         _nx_crypto_huge_number_mont(&m_hn, n0inv, &x_hn, &y_hn, &r_hn);
         c68k_mont_mul(t_mine, t_x, t_y, t_m, m_len, n0inv, t_work);
@@ -393,7 +312,6 @@ UINT                    bad_sqr = 0;
             t_fail("mont_mul", trial, m_len);
         }
 
-        /* square */
         t_hn_set(&r_hn, t_ref_result, 0, T_MAX_LIMBS * 2);
         _nx_crypto_huge_number_mont(&m_hn, n0inv, &x_hn, &x_hn, &r_hn);
         c68k_mont_sqr(t_mine, t_x, t_m, m_len, n0inv, t_work);
@@ -491,9 +409,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
     printf("  %u trials, m 1..12 limbs, e 1..4 limbs, "
            "top limb 1..32 bits: %u mismatches\n", trials, bad);
 }
-
-
-/* ---------------------------------------------------------- 5. edges ----- */
 
 static void t_edge_cases(void)
 {
@@ -607,9 +522,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
            "zero-limb multiply/square\n");
 }
 
-
-/* ---------------------------------------------------------- 6. yields ---- */
-
 static unsigned long    t_yields;
 
 static VOID t_count_yield(VOID)
@@ -617,24 +529,6 @@ static VOID t_count_yield(VOID)
     t_yields++;
 }
 
-/*
- * The yield hook is what keeps the machine on the network while a handshake's
- * arithmetic runs, and it has two properties this checks, because neither is
- * visible from any other test here:
- *
- *   it does not change the answer.  A yield is a suspend and a resume and
- *   touches none of the operands, so the same exponentiation with a hook
- *   installed must produce the same limbs, and the KAT in section 1 is the
- *   reference.
- *
- *   it fires often enough to matter.  Counting it is the only way to say how
- *   long the machine is off the air between two of them: an RSA-2048 public
- *   operation is 22.9 s on an A1200 (tests/tls/tls_bench), so the count here
- *   divides that into the interval, and the floor below is what keeps the
- *   interval inside Linux's three-probe ARP window.  Before the yields went
- *   into the Montgomery loops the count for this operation was 17, one per
- *   exponent bit, which is 1.3 s of silence apiece.
- */
 static void t_yield_granularity(void)
 {
 UINT            status;
@@ -658,13 +552,6 @@ unsigned long   with_hook;
         t_fail("RSA-2048 public with a yield hook installed", status, 0);
     }
 
-    /*
-     * A floor, not an equality: the exact count is a function of the window
-     * width and of C68K_YIELD_PRODUCTS, and pinning it would make every
-     * tuning change a test edit.  The measured count is 469; 200 is well
-     * under it and an order above the 17 this had when only c68k_powm
-     * yielded.
-     */
     t_checks++;
     if (with_hook < 200uL)
     {
@@ -675,22 +562,6 @@ unsigned long   with_hook;
            with_hook, (UINT)C68K_YIELD_PRODUCTS);
 }
 
-
-/* ------------------------------------------------------- 7. RSA-4096 ----- */
-
-/*
- * 128 limbs against the vendored routine.
- *
- * Nothing else here is that wide, and the width is not academic: the root of
- * a Let's Encrypt chain is ISRG Root X1, whose key is 4096 bits, so verifying
- * the intermediate is a 128-limb modular exponentiation on every ordinary
- * https: fetch.  It also takes one more level of the Karatsuba split than an
- * RSA-2048 operation does, 128 -> 64 -> 32, and the recombination carries are
- * where that code goes wrong.
- *
- * e = 65537 rather than a random exponent, because that is the only exponent
- * a client ever raises to at this width.
- */
 static void t_powm_wide(void)
 {
 UINT                    trial;
@@ -747,67 +618,6 @@ NX_CRYPTO_HUGE_NUMBER   m_hn, x_hn, e_hn, r_hn;
     printf("  %u trials at 128 limbs: %u mismatches\n", trial, bad);
 }
 
-
-/* ------------------------------------------------------------------ main -- */
-
-/*
- * Karatsuba at the sizes and shapes the random sweep will not produce often
- * enough to trust.
- *
- * The split's carry and borrow handling is where this kind of code goes wrong,
- * and all of it lives in the recombination: L + H can carry out of n limbs,
- * L + H - u must not borrow (it is 2*x0*x1, so it cannot, and the test is
- * whether the code agrees), and the (x0+x1)*(y0+y1) form of the multiply has
- * two carry bits out of the half-width sums plus their product term.  The
- * operands below drive those to their extremes rather than being random:
- *
- *   all ones      every add carries, every subtract borrows
- *   x1 == x0      |x1 - x0| == 0, so the middle term is a square of zero
- *   x1 == 0       the high half vanishes; L + H == L
- *   x0 == 0       the low half vanishes
- *   1 and 0       the degenerate values every bignum bug survives
- *
- * Checked against the vendored _nx_crypto_huge_number_mont, which knows
- * nothing about Karatsuba, at the widths where the split actually engages.
- */
-/*
- * c68k_mod() against the vendored divider, which, unlike the vendored
- * Montgomery, has no known defect and is what the rest of this suite has
- * always been validated against.
- *
- * Two code paths in algorithm D are almost unreachable by chance and are
- * driven directly, because both are where this kind of routine breaks:
- *
- *   the B-1 clamp   the partial remainder's top limb equal to the divisor's.
- *                   The true quotient digit is B-1, and on a 68020 a DIVU.L
- *                   would trap rather than saturate, so the code must test
- *                   for it before dividing.  Driven by giving u and m the
- *                   same top limb.
- *   the add-back    the estimate one too large, needing the divisor added
- *                   back.  Normalisation makes it rare, textbooks quote
- *                   about one in 2^31 for random operands, so it is driven
- *                   by the classic shape: a divisor just above a power of the
- *                   radix, with a dividend that straddles it.
- *
- * Also swept: an unnormalised divisor (top bit clear, so the shift path runs
- * with s != 0), a single-limb divisor, u shorter than m, and all ones.
- */
-/*
- * c68k_add, c68k_sub and c68k_add_carry against straight-line models.
- *
- * These three had no coverage at all until a carry-in bug shipped.  They went
- * into nx_crypto_huge_number.c's add_unsigned and subtract_unsigned, and
- * c68k_add_carry's C fallback seeded the accumulator's LOW half with the
- * incoming carry where the loop reads the HIGH half, so the carry-in was
- * discarded on the first shift and n == 0 returned 0 where c68k_prim.S
- * returns the carry untouched.  Nothing had ever passed a carry in, so the
- * assembly and the C had never disagreed anywhere it showed: a 68020 build
- * takes the assembly and was fine, a 68060 build takes the C and could not
- * complete a TLS 1.3 handshake.
- *
- * The models below use a 64-bit accumulator so they cannot share a bug with
- * either implementation.
- */
 static void t_addsub(void)
 {
 static c68k_limb    a_r[T_MAX_LIMBS + 2];
@@ -839,7 +649,6 @@ c68k_limb           got;
             a_model[i] = a_r[i];
         }
 
-        /* ---- c68k_add: r += b, returns the carry out ---- */
         acc = 0;
         for (i = 0; i < n; i++)
         {
@@ -871,7 +680,6 @@ c68k_limb           got;
             }
         }
 
-        /* ---- c68k_sub undoes it exactly, borrow chain included ---- */
         (void)c68k_sub(a_r, a_b, n);
 
         t_checks++;
@@ -886,9 +694,6 @@ c68k_limb           got;
             }
         }
 
-        /* ---- c68k_add_carry: dst[j] = src[j] + carry, carry propagating.
-               All-ones plus a carry-in of 1 is every limb zero and a carry
-               out, which is exactly what the broken version got wrong. ---- */
         for (i = 0; i < n; i++)
             a_b[i] = 0xFFFFFFFFUL;
 
@@ -1117,7 +922,6 @@ c68k_limb           n0inv;
                 break;
             }
 
-            /* multiply: schoolbook, then maximum recursion, then compare */
             c68k_karatsuba_limbs = 0xFFFFu;
             c68k_mont_mul(t_ref_result, t_x, t_y, t_m, m_len, n0inv, t_work);
             c68k_karatsuba_limbs = 2u;
@@ -1134,7 +938,6 @@ c68k_limb           n0inv;
                 }
             }
 
-            /* square */
             c68k_karatsuba_limbs = 0xFFFFu;
             c68k_mont_sqr(t_ref_result, t_x, t_m, m_len, n0inv, t_work);
             c68k_karatsuba_limbs = 2u;
@@ -1159,20 +962,6 @@ c68k_limb           n0inv;
            "%u mismatches\n", bad);
 }
 
-
-
-/* ============================================================ the bulk path ==
- *
- * AES-128/256 and SHA-256, against the published vectors, for every portable
- * variant in src/crypto68k/.  The assembly cannot be assembled here and stays
- * an emulator-tier test (tests/crypto68k/crypto68k_bulk), the same split the
- * limb primitives have.
- *
- * This tier runs the vectors on every push, and is the only place the
- * endianness of the message-word load is tested: the SHA-256 fast path loads
- * W[0..15] as longwords, which is correct on the m68k and wrong here, so a
- * mis-set guard around it shows up only here.  It has.
- */
 
 static void t_bytes(const char *what, const unsigned char *got,
                     const unsigned char *want, unsigned n)
@@ -1343,18 +1132,6 @@ static void t_bulk_sha(unsigned variant)
     (void)c68k_sha256_digest_calculate(&ctx, d, 0u);
     t_bytes("SHA-256 of one million 'a'", d, t_sha_million, 32u);
 }
-
-/* ------------------------------------------- ChaCha20-Poly1305, RFC 8439 -- */
-/*
- * The AEAD record path, ciphersuites 0xCCA8 and 0xCCA9.  Here for the same
- * reason as the AES and SHA-256 vectors: this tier runs them on every push.
- *
- * Same endianness trap as SHA-256.  ChaCha20 and Poly1305 read their input
- * little-endian, so the m68k fast path is one MOVE.L and a byte reversal and
- * the portable path is four byte loads; get the guard backwards and one of the
- * two machines produces a self-consistent wrong answer.  These vectors are the
- * only thing that says which.
- */
 
 static const unsigned char t_cc_key[32] =
 { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,

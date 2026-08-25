@@ -1,27 +1,6 @@
 /*
  * AmiNetXDuo, IPv6 over a real SANA-II device.
  *
- * The companion to ipv6_test.c. That one proves the protocol machinery over
- * the in-tree RAM driver, where both ends are ours; this one drives the whole
- * stack, config file, SANA-II shim, 0x86DD reader, neighbour discovery,
- * against whatever is on the wire, and reports what it found.
- *
- * The link is a real one: tests/ipv6/run-link.sh bridges the guest onto a host
- * NIC and refuses SLIRP. What is on that segment is still not ours to depend
- * on, so the checks are limited to the ones that hold with nothing else on the
- * link:
- *
- *   - IPv6 came up;
- *   - the interface configured its fe80::/64 address from the MAC and it
- *     survived duplicate address detection;
- *   - ICMPv6 echo to ::1 works;
- *   - ICMPv6 echo to our own link-local address works, a real round trip
- *     through _nx_ipv6_packet_send and back, not a shortcut.
- *
- * Routers, prefixes and off-link destinations are printed as findings, not
- * counted as checks, so a run on a link with no IPv6 router still passes and
- * still reports that no router answered.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -47,9 +26,6 @@
 #ifdef NX_DISABLE_IPV6
 #error "tests/ipv6 requires -DAMINETXDUO_IPV6=ON"
 #endif
-
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -108,9 +84,6 @@ BPTR    out;
     t_log_flushed =  t_log_used;
 }
 
-
-/* -------------------------------------------------------------- results -- */
-
 static volatile ULONG   t_checks;
 static volatile ULONG   t_failures;
 
@@ -141,9 +114,6 @@ static VOID t_finding(const char *what, UINT yes)
 {
     t_log("  ---> %s: %s", what, yes ? (CHAR *)"YES" : (CHAR *)"no");
 }
-
-
-/* ------------------------------------------------------------- the test --- */
 
 #define T_PING_TIMEOUT      (5UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define T_RA_WAIT_TICKS     (20UL * (ULONG)NX_IP_PERIODIC_RATE)
@@ -228,24 +198,6 @@ UWORD   slot;
     return(TX_FALSE);
 }
 
-/*
- * The same, waited for.
- *
- * Configuring an address does not finish it.  RFC 4862 5.4 has the address
- * TENTATIVE while duplicate address detection runs, and NetX Duo runs it off
- * the IP thread: _nx_icmpv6_perform_DAD() sends the probes on the one-second
- * periodic and promotes the address one periodic after the last of them.
- * AddInterfaceTagList() deliberately does not sit over that -- waiting for it
- * charged the Startup-Sequence two seconds an address and bought a log line --
- * so it returns with the link-local still TENTATIVE and DAD still running.
- *
- * A caller that reads the state the instant configuration returns therefore
- * sees TENTATIVE whatever the stack does, which is not a finding about the
- * stack.  What is a finding is whether DAD ever finishes, so the wait is
- * bounded by what the RFC costs and not by an arbitrary patience: one periodic
- * per DupAddrDetectTransmits probe, one more for 5.4.5's RetransTimer after
- * the last, and one of slack for a periodic that has just been missed.
- */
 #define T_DAD_BUDGET_TICKS \
     (((ULONG)NX_IPV6_DAD_TRANSMITS + 2UL) * (ULONG)NX_IP_PERIODIC_RATE)
 
@@ -295,18 +247,6 @@ ULONG   i;
     dst[i] =  '\0';
 }
 
-/*
- * RemoveInterface()/AddInterfaceTagList() at run time, which is what an
- * operator does to change a card's parameters, and what tests/tools/ifprobe.c
- * exercises from the library side.
- *
- * nx_ip_interface_detach() memsets every NXD_IPV6_ADDRESS on the interface
- * (nx_ip_interface_detach.c), so the address configuration startup did is gone
- * and only the add path can put it back. An interface that comes back without
- * its link-local has no IPv6 at all: RFC 4291 requires one, it is the source
- * address every on-link IPv6 send picks, and its solicited-node multicast
- * membership is what makes the interface answer neighbour solicitations.
- */
 static VOID t_readd(VOID)
 {
 
@@ -358,12 +298,6 @@ LONG            rc;
     (VOID)netstack_interface_up(0);
 }
 
-/*
- * Router solicitations are a finite startup counter in NetX Duo.  Exhaust it
- * deliberately, cycle an AUTO interface, and verify that Online gives the
- * interface a fresh solicitation schedule rather than leaving it dependent
- * on an unsolicited router advertisement.
- */
 static VOID t_reconnect_solicitation(NX_IP *ip)
 {
 const AmiIfConfig  *cfg = netstack_iface_config(0);
@@ -435,16 +369,6 @@ UWORD            slot;
         return;
     }
 
-    /* ---- what address configuration produced ---------------------------- */
-
-    /*
-     * Ahead of the listing, or the listing reports a race.  Bring-up hands the
-     * link-local over TENTATIVE and lets duplicate address detection run on
-     * the IP thread, so how far along it is when this test gets its first
-     * cycle depends on how long everything before it took: on a bridged link
-     * DHCP and a router advertisement cover the second DAD needs, on SLIRP
-     * they are answered instantly and do not.
-     */
     (VOID)t_await_linklocal(0, &dad_ticks);
 
     t_log("interface 0 IPv6 addresses:");
@@ -472,15 +396,6 @@ UWORD            slot;
             linklocal[3] =  addr[3];
             have_linklocal =  TX_TRUE;
 
-            /*
-             * RFC 4291 2.5.1: the low 64 bits are the interface identifier, so
-             * an interface's link-local is a /64.  nxd_ipv6_address_set() is
-             * asked for one by being passed a prefix length of 10 and keeps
-             * that 10, which is fe80::/10, the 2.5.6 allocation the address
-             * comes out of and not the address's own prefix.  Reporting the
-             * stored value put /10 on the ShowNetStatus line while the global
-             * address above it read /64 correctly.
-             */
             (VOID)t_check((UINT)(prefix == 64UL),
                           "the link-local is reported as a /64", prefix);
         }
@@ -500,17 +415,6 @@ UWORD            slot;
         }
     }
 
-    /*
-     * What getaddrinfo() consults before it prefers an AAAA record.
-     *
-     * The question is not "is IPv6 running" -- every interface gets a
-     * link-local unasked, so that is true on a machine no router has ever
-     * spoken to, and preferring an AAAA there resolves a name to an address
-     * with no source to send from.  This asserts the two agree: the answer
-     * must be exactly whether the listing above found a global unicast address
-     * past duplicate address detection.  True on this link, false on one with
-     * no router, and a check either way.
-     */
     (VOID)t_check((UINT)((netstack_ipv6_have_global() != FALSE) ==
                          (have_global != TX_FALSE)),
                   "netstack_ipv6_have_global() agrees with the address list",
@@ -518,8 +422,6 @@ UWORD            slot;
 
     (VOID)t_check(have_linklocal,
                   "interface 0 has a usable fe80::/64 address", dad_ticks);
-
-    /* ---- the two legs that need nothing but us -------------------------- */
 
     (VOID)t_check(t_ping6(ip, t_loopback6, "::1"),
                   "ICMPv6 echo to ::1", 0UL);
@@ -530,14 +432,6 @@ UWORD            slot;
                       "ICMPv6 echo to our own link-local address", 0UL);
     }
 
-    /* ---- what else is on the link --------------------------------------- */
-
-    /*
-     * Router solicitation went out when IPv6 was enabled. Give an
-     * advertisement time to come back before deciding nothing is there,
-     * RFC 4861 puts the first RS up to one second after the interface comes
-     * up, and a router may take a moment more.
-     */
     t_log("waiting %ld ticks for a router advertisement...", T_RA_WAIT_TICKS);
     tx_thread_sleep(T_RA_WAIT_TICKS);
 
@@ -575,31 +469,15 @@ UWORD            slot;
         t_log_addr6("  addr", addr);
     }
 
-    /*
-     * The direct probe. ff02::2 is all-routers, which any IPv6 router on the
-     * link answers. If it does not, the link has no IPv6 on it; that is a
-     * finding, not a failure of the stack.
-     *
-     * There were two more here, fe80::2 and fec0::2, which are libslirp's own
-     * addresses. run-link.sh refuses SLIRP now, so both could only ever report
-     * "no" -- and a finding whose answer is fixed reads in the transcript as
-     * something that failed. The router this run really does find is printed
-     * and pinged a few lines above.
-     */
     t_finding("something answered all-routers ff02::2",
               t_ping6(ip, t_allrouters6, "ff02::2"));
 
     t_reconnect_solicitation(ip);
 
-    /* ---- and the same interface, added after startup --------------------- */
-
     t_readd();
 
     (VOID)tx_amiga_orphan_thread(&t_main_thread);
 }
-
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {
@@ -615,11 +493,6 @@ LONG    status;
     status =  netstack_startup();
     t_log("netstack_startup() = %ld", (ULONG)status);
 
-    /*
-     * A startup that could not get an IPv4 address is not fatal here: IPv6
-     * needs neither DHCP nor a router. AMI_NET_ERR_CONFIG means up but with
-     * no IPv4 address, which is a fine state to test IPv6 in.
-     */
     if (status != AMI_NET_OK && status != AMI_NET_ERR_CONFIG)
     {
         t_log("the stack did not come up; nothing to test");

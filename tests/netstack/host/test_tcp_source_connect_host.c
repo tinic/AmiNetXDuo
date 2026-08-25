@@ -1,26 +1,9 @@
 /*
  * AmiNetXDuo, does a TCP connect leave from the source it was told to?
  *
- * The case is two interfaces on one subnet.  bind() names an address on the
- * second one and the destination is reachable from both, so the route lookup
- * which walks nx_ip_interface[] in order, answers with the FIRST.  Before
- * nxd_tcp_client_socket_source_connect() there was nothing to say otherwise
- * and connect() refused rather than leave from an address nobody asked for.
- *
- * The lab guest has one SANA-II card, so that topology cannot be booted; this
- * builds it out of an NX_IP with two nx_ip_interface[] entries filled in and
- * drives the real connect against it.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary:
- * nxd_tcp_client_socket_connect.c and nxd_tcp_client_socket_source_connect.c
- * the whole source decision, nx_ip_route_find.c, which is what the
- * decision is made of, and nx_tcp_packet_send_syn.c, so the assertion is on
- * the source address the SYN actually carried rather than on a field.
- *
- * Stubbed: the driver and the mutexes.  _nx_ip_packet_send() records the
- * outgoing interface and releases the packet, and _nx_ip_checksum_compute()
- * records the source address handed to the TCP pseudo-header, which is the
- * one the IP header is about to be built with.
+ * The case is two interfaces on one subnet: the route lookup walks
+ * nx_ip_interface[] in order and answers with the FIRST, so a bind to the
+ * second has to override it.  The topology is built by hand out of an NX_IP.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -337,10 +320,9 @@ int main(void)
             "and the socket is left closed");
 
     /*
-     * The same interface, still on another subnet, but now with a default
-     * gateway on ITS network.  _nx_ip_route_find() takes the gateway only
-     * when the constraint allows it, so this is the arm that shows the
-     * constraint is a filter over the whole lookup and not over one loop.
+     * The same interface with a default gateway on ITS network:
+     * _nx_ip_route_find() takes the gateway only when the constraint allows,
+     * so this shows the constraint filters the whole lookup, not one loop.
      */
     h_ip.nx_ip_gateway_address   = H_ELSEWHERE_NET | 1UL;
     h_ip.nx_ip_gateway_interface = &h_ip.nx_ip_interface[1];

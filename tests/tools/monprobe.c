@@ -1,28 +1,6 @@
 /*
  * MonProbe, the network monitoring hooks, and whether they can deny a call.
  *
- * "Monitoring hooks can be used both for inspecting and filtering data that
- * enters the stack, or for denying access to certain APIs."  This exercises
- * the denying half: a hook that returns an errno must make bind() or connect()
- * fail with exactly that errno, before the stack has done anything.
- *
- * Three things here cannot be checked by a build:
- *
- *   1. The register convention.  The hook is entered with the Hook in A0, NULL
- *      in A2 and the message in A1, not the A0/A1 pair a reader would guess,
- *      and not utility.library's usual "object in A2".  A wrong guess passes
- *      the message in the wrong register and the hook reads rubbish.
- *
- *   2. The walk stops at the first refusal.  "unless another hook denies this"
- *, a hook that allows a call cannot overrule one that denied it.  The
- *      probe installs two and counts invocations to show the second is never
- *      consulted once the first has said no.
- *
- *   3. The message is the published shape.  bmm_Size, bmm_Socket and bmm_Name
- *      are checked against what was actually passed to bind().
- *
- * Vectors are called by hand at their LVOs, as in the other probes.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -40,8 +18,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_add_hook(struct Library *base, LONG type, struct Hook *hook,
                        struct TagItem *tags)
@@ -249,15 +225,6 @@ static LONG p_errno(struct Library *base)
     return res;
 }
 
-/* ---------------------------------------------------------------- hooks --- */
-
-/*
- * h_Entry is declared `ULONG (*)()`, no parameters, because a Hook
- * carries whatever shape the installer and the caller agreed on. Reaching the
- * agreed shape is a conversion between function types, which a plain cast
- * cannot express without tripping -Wcast-function-type. The union says the
- * same thing without claiming the two types are compatible.
- */
 typedef LONG (*ProbeHookFn)(register struct Hook *hook __asm("a0"),
                             register APTR reserved __asm("a2"),
                             register APTR message __asm("a1"));
@@ -303,11 +270,6 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
     st->ps_Reserved = reserved;
     st->ps_Hook     = hook;
 
-    /*
-     * BindMonitorMsg and ConnectMonitorMsg have the same first four members
-     * in the same order, size, caller, socket, name, so one reader serves
-     * both.
-     */
     if (message != NULL)
     {
         const struct BindMonitorMsg *bmm =
@@ -317,11 +279,6 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
         st->ps_Socket = bmm->bmm_Socket;
         st->ps_Name   = (APTR)bmm->bmm_Name;
 
-        /*
-         * A SendMonitorMessage is a longer struct that starts with the same
-         * three members.  Its size is the only thing in the message that tells
-         * the two apart, which is why smm_Size exists.
-         */
         if (bmm->bmm_Size == (LONG)sizeof(struct SendMonitorMessage))
         {
             const struct SendMonitorMessage *smm =
@@ -339,13 +296,6 @@ static LONG probe_hook(register struct Hook *hook __asm("a0"),
     return st->ps_Answer;
 }
 
-/*
- * The observations only.  Separate from probe_hook_init() because that one
- * clears h_MinNode, and clearing the MinNode of a hook still in the library's
- * list unlinks it: the list then walks past it and the hook is never called
- * again, which looks exactly like a library bug ("the hook was not
- * consulted").
- */
 static VOID probe_state_reset(ProbeState *st)
 {
     st->ps_Calls    = 0;
@@ -379,21 +329,6 @@ static VOID probe_hook_init(struct Hook *hook, ProbeState *st)
     probe_state_reset(st);
 }
 
-/* -------------------------------------------- the capability probe ------- *
- *
- * A conforming client asks SocketBaseTagList() whether the monitoring API is
- * there before it calls any of it: "this tag must be used prior to calling any
- * of the interface API functions, such as AddNetMonitorHookTagList()".  A
- * library that answers FALSE and then installs hooks is never asked.
- *
- * The tunables are the other half of the same call.  SocketBaseTagList()
- * "returns the index of the first tag it could not service" AND STOPS, so a
- * refused tag silently discards every tag after it in the same list.  The two
- * assertions below are about that: writing a tunable back at the value it
- * already holds is not a change and must not cost the caller the rest of its
- * list, while a real change to something this stack does not implement must
- * still be refused and named.
- */
 static VOID p_capability_phase(struct Library *base)
 {
     struct TagItem tags[4];
@@ -447,8 +382,6 @@ static VOID p_capability_phase(struct Library *base)
                             : ", ACCEPTED, WRONG"));
 }
 
-/* ------------------------------------------------------------------ main -- */
-
 #define P_AF_INET       2
 #define P_SOCK_STREAM   1
 #define P_SOCK_DGRAM    2
@@ -485,8 +418,6 @@ int main(void)
     sa.sin_family = P_AF_INET;
     sa.sin_port   = PROBE_PORT;
 
-    /* ---- the two documented errors --------------------------------------- */
-
     rc = p_add_hook(base, MHT_Bind, NULL, NULL);
     Printf((CONST_STRPTR)"add a NULL hook: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
@@ -499,19 +430,12 @@ int main(void)
            (LONG)((rc == -1 && p_errno(base) == 22) ? ", EINVAL, correctly"
                                                     : ", WRONG"));
 
-    /*
-     * A type the API defines but this library does not dispatch.  It must be
-     * refused: a hook accepted for MHT_Packet and then never called cannot be
-     * told apart from a network with no traffic on it.
-     */
     rc = p_add_hook(base, MHT_Packet, &hook_a, NULL);
     Printf((CONST_STRPTR)"add MHT_Packet: rc %ld (errno %ld)%s\n",
            rc, p_errno(base),
            (LONG)((rc == -1 && p_errno(base) == 22)
                       ? ", refused rather than silently ignored, correctly"
                       : ", WRONG"));
-
-    /* ---- a hook that allows ---------------------------------------------- */
 
     rc = p_add_hook(base, MHT_Bind, &hook_a, NULL);
     Printf((CONST_STRPTR)"add MHT_Bind hook: rc %ld%s\n", rc,
@@ -530,8 +454,6 @@ int main(void)
            rc, state_a.ps_Calls,
            (LONG)((rc == 0 && state_a.ps_Calls == 1)
                       ? ", allowed and seen, correctly" : ", WRONG"));
-
-    /* ---- and what it was handed ------------------------------------------ */
 
     Printf((CONST_STRPTR)"message: size %ld (want %ld), socket %ld (want %ld), "
                          "name %s\n",
@@ -555,8 +477,6 @@ int main(void)
 
     (VOID)p_close(base, s);
 
-    /* ---- a hook that denies ----------------------------------------------- */
-
     state_a.ps_Answer = PROBE_DENY;
     state_a.ps_Calls  = 0;
 
@@ -568,8 +488,6 @@ int main(void)
                       ? ", denied with the hook's errno, correctly"
                       : ", WRONG"));
     (VOID)p_close(base, s);
-
-    /* ---- two hooks, and the walk that stops ------------------------------- */
 
     p_remove_hook(base, &hook_a);
     probe_hook_init(&hook_a, &state_a);
@@ -612,8 +530,6 @@ int main(void)
     p_remove_hook(base, &hook_a);
     p_remove_hook(base, &hook_b);
 
-    /* ---- MHT_Connect ------------------------------------------------------ */
-
     probe_hook_init(&hook_a, &state_a);
     (VOID)p_add_hook(base, MHT_Connect, &hook_a, NULL);
 
@@ -634,8 +550,6 @@ int main(void)
                       : ", WRONG"));
     (VOID)p_close(base, s);
 
-    /* ---- MHT_Send, and the shape each of the three calls produces --------- */
-
     p_remove_hook(base, &hook_a);
     probe_hook_init(&hook_a, &state_a);
     (VOID)p_add_hook(base, MHT_Send, &hook_a, NULL);
@@ -651,14 +565,8 @@ int main(void)
         dest.sin_len    = (UBYTE)sizeof(dest);
         dest.sin_family = P_AF_INET;
         dest.sin_port   = PROBE_PORT;
-        /* Loopback.  What is asserted here is the hook -- that a denied send
-           never reaches the stack and an allowed one returns the whole
-           length -- and loopback gives the same answer on every backend.
-           10.0.2.2 was SLIRP's gateway and made `send allowed` fail with
-           ENETUNREACH on a bridged wire. */
         dest.sin_addr   = 0x7F000001UL;             /* 127.0.0.1 */
 
-        /* ---- send(): neither smm_To nor smm_Msg, because there is neither */
         state_a.ps_Answer = PROBE_DENY;
         state_a.ps_Calls  = 0;
 
@@ -687,9 +595,6 @@ int main(void)
                           ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
-        /* ---- sendto(): smm_To is the caller's, smm_Msg NULL --------------
-         * The hook stays installed across all three; only what it observed is
-         * cleared. See probe_state_reset(). */
         probe_state_reset(&state_a);
         state_a.ps_Answer = PROBE_DENY;
 
@@ -704,7 +609,6 @@ int main(void)
                           ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
-        /* ---- sendmsg(): smm_Msg is the caller's, smm_To NULL ------------- */
         probe_state_reset(&state_a);
         state_a.ps_Answer = PROBE_DENY;
 
@@ -731,12 +635,6 @@ int main(void)
                           ? ", correctly" : ", WRONG"));
         (VOID)p_close(base, s);
 
-        /*
-         * The autodoc states, across all three, that smm_To and smm_Msg are
-         * never both set: "either ... will be NULL".  That excludes them both
-         * being set and does not require exactly one, send() has neither,
-         * because there is neither to report.
-         */
         Printf((CONST_STRPTR)"never both set: yes, correctly\n");
 
         /* And a send that the hook allows must go through untouched. */
@@ -755,8 +653,6 @@ int main(void)
     p_remove_hook(base, &hook_a);
     probe_hook_init(&hook_a, &state_a);
     (VOID)p_add_hook(base, MHT_Connect, &hook_a, NULL);
-
-    /* ---- removed means not consulted -------------------------------------- */
 
     p_remove_hook(base, &hook_a);
     state_a.ps_Calls = 0;

@@ -1,22 +1,9 @@
 /*
  * The words that go with the numbers in the library's event ring.
  *
- * WHY THEY ARE HERE.  bsdsocket.library is resident for the life of the
- * machine and its diagnostics would be resident with it, to be printed at most
- * once; that is why AMINETXDUO_LOG is off in every shipped build and why every
- * AMI_ERROR in the tree is absent from the binary a user has.  So the library
- * records a code and this table turns it into a sentence.  The user never sees
- * a code.  aminetxduo/anxdiag.h and CheckNetDevice are the same arrangement for
- * anxnet.device, and this is deliberately the same one rather than a second.
- *
  * NOT ONE OF THESE STRINGS MAY REACH A SHIPPED LIBRARY OR DEVICE.
- * tools/check-no-diag-strings.sh reads this file, takes every sentence out of
- * it, and fails the build if one is found in any linked image.  Adding a
- * sentence here extends that check by itself; there is no list to keep in step.
- *
- * A code this table does not know is printed as its number.  The numbers are a
- * wire format between two binaries, so an older command against a newer library
- * still says something true rather than dropping the entry.
+ * tools/check-no-diag-strings.sh reads this file and fails the build if one is
+ * found in any linked image. A code this table does not know prints as a number.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -25,12 +12,8 @@
 #include "tool_events.h"
 
 /*
- * One row per code.  The sentence is what happened, in the past tense, with no
- * subject the reader has to supply: these are printed in a list, under a
- * heading, in the order they occurred.
- *
- * ev_Detail says what nse_Value means for this code, or is NULL when the value
- * carries nothing.  The caller prints it after the number.
+ * One row per code. ev_Detail says what nse_Value means for this code, or is
+ * NULL when the value carries nothing.
  */
 typedef struct ToolEventRow
 {

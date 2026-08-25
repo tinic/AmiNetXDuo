@@ -2,46 +2,6 @@
  * NetCapture, capture what is on the wire to a pcap file that Wireshark and
  * tcpdump read.
  *
- *     NetCapture OUT/K,IFACE/K,SNAP/N/K,BLEN/N/K,COUNT/N/K,SECONDS/N/K,
- *                SIZE/N/K,HOST/K,PORT/N/K,PROTO/K,NOT/S,QUIET/S
- *
- *   NetTrace already writes a pcap, and cannot do this.  Its arguments are
- *   LOOPBACK, WIRE, HOST, PORT and BYTES, because it generates the traffic it
- *   records: "capture the stack's own traffic while running a workload
- *   underneath it".  Somebody who wants to know what a browser, an ssh session
- *   or a game's netplay is really saying has the ABI and, until this, no
- *   command.  This one generates nothing.  It opens a channel, reads it, and
- *   writes the file.
- *
- *   It captures every frame the interface handles, whichever program caused
- *   it: the tap is inside bsdsocket.library, on the path every socket in the
- *   machine shares, so a capture is not confined to the process that opened
- *   it.  The stack has to be up first -- AddNetInterface, or User-Startup.
- *
- *   IT STOPS when the packet count, the elapsed time or the file size the user
- *   asked for is reached, and on Ctrl-C.  Every one of those closes the file
- *   properly, so a capture interrupted after ten seconds is a complete pcap of
- *   those ten seconds and not a file Wireshark refuses.  With no limit at all
- *   it runs until Ctrl-C, which is what tcpdump does and what a user watching
- *   for an intermittent fault needs.
- *
- *   THE FILTER is four keywords, not an expression language: HOST, PORT, PROTO
- *   and NOT, ANDed.  bpffilter.c says what each means and why there is no
- *   parser here.  The snap length is part of the same program -- the ABI has
- *   no BIOCSSNAPLEN, and a BPF program's return value is the number of bytes
- *   to keep.
- *
- *   WHAT IT COSTS THE MACHINE is fixed before the first frame: 2 x BLEN inside
- *   the library, one BLEN buffer here, and 16 KB of write buffer.  At the
- *   defaults that is 64 KB and it never grows.  When the reader cannot keep up
- *   -- a slow disk, a fast segment -- both library buffers fill, the tap counts
- *   the frame as dropped and does not block the stack for it.  That count is
- *   printed as it happens and again at the end: a capture with holes in it must
- *   never look like a quiet network.
- *
- *   Nothing from src/.  Every call is a published bsdsocket.library LVO; see
- *   toolbpf.c, which NetTrace shares.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -85,14 +45,6 @@ enum
 #define NC_SNAP_MIN         TOOL_BPF_MIN_SNAP
 #define NC_SNAP_MAX         TOOL_BPF_MAX_SNAP
 
-/*
- * Half of NetTrace's, and deliberately: NetTrace runs for as long as one
- * transfer takes and can afford the largest buffer the ABI allows, while this
- * runs unattended on whatever machine the user has.  16 KB a side is about 140
- * records at the default snap length, which is a second of a busy 10 Mbit
- * segment -- far more than the reader needs, and 32 KB of somebody's pool
- * rather than 64.
- */
 #define NC_BLEN_DEFAULT     16384UL
 
 /* How long bpf_read() waits before coming back with nothing, in microseconds.
@@ -109,14 +61,6 @@ static ToolBpfChan nc_cap;
 
 static ToolBpfInsn nc_prog[TOOL_BPF_MAX_INSNS];
 
-/* ------------------------------------------------------------- the filter */
-
-/*
- * The line that says what is being captured, so a user who mistypes a filter
- * sees it rather than an empty file.  Built into the caller's buffer; there is
- * no allocation here and no format string that takes a string it did not
- * write.
- */
 static VOID nc_describe(char *buf, ULONG buflen, const ToolBpfFilter *f,
                         const char *host_text)
 {
@@ -178,8 +122,6 @@ static VOID nc_describe(char *buf, ULONG buflen, const ToolBpfFilter *f,
     buf[n] = '\0';
 }
 
-/* --------------------------------------------------------------- the loop */
-
 int main(int argc, char **argv)
 {
     LONG            args[ARG_ARGCOUNT];
@@ -224,15 +166,6 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * ReadArgs takes a leading minus, so "SNAP=-5" parses and arrives as a
-     * negative LONG.  Cast to ULONG it becomes an enormous one, which the
-     * range checks below catch for SNAP and BLEN and would not catch for
-     * COUNT: COUNT=-1 is four thousand million packets, which is no limit at
-     * all, and the command would then run until Ctrl-C having been told to
-     * stop.  A limit of zero is the same mistake from the other end -- it
-     * would read as "no limit" and the user meant "nothing".
-     */
     if ((args[ARG_SNAP]  != 0 && *(LONG *)args[ARG_SNAP]  < 0) ||
         (args[ARG_BLEN]  != 0 && *(LONG *)args[ARG_BLEN]  < 0) ||
         (args[ARG_PORT]  != 0 && *(LONG *)args[ARG_PORT]  < 0))
@@ -340,8 +273,6 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /* ------------------------------------------------------- the filter -- */
-
     for (i = 0; i < (UWORD)sizeof(filter.host_v6); i++)
         filter.host_v6[i] = 0;
 
@@ -396,8 +327,6 @@ int main(int argc, char **argv)
 
     nc_describe(what, sizeof(what), &filter, host_text);
 
-    /* ------------------------------------------------------- the channel -- */
-
     nc_cap.open = FALSE;
 
     if (!tool_bpf_start(&nc_cap, base, iface, out, snaplen, blen, nc_prog,
@@ -412,12 +341,6 @@ int main(int argc, char **argv)
     nc_cap.max_records = want_count;
     nc_cap.max_filelen = (want_kb != 0) ? (want_kb * 1024UL) : 0UL;
 
-    /*
-     * A capture of somebody else's traffic ends at a moment, and the segment
-     * does not stop for it: whatever arrives between the last read and the
-     * close is outside what was asked for.  NetTrace's traffic HAS stopped by
-     * the time it closes, so there the same bytes mean a trace that is short.
-     */
     nc_cap.expect_drained = FALSE;
 
     tool_bpf_read_timeout(&nc_cap, NC_READ_TIMEOUT);
@@ -438,8 +361,6 @@ int main(int argc, char **argv)
 
     started  = ami_millis();
     reported = started;
-
-    /* ---------------------------------------------------------- the loop -- */
 
     for (;;)
     {
@@ -476,12 +397,6 @@ int main(int argc, char **argv)
 
         tool_bpf_stats(&nc_cap);
 
-        /*
-         * A drop is announced the moment it happens and not only in the
-         * summary: the user is watching this window, and a capture that
-         * silently loses a third of the segment reads exactly like one that
-         * did not.
-         */
         if (!quiet && nc_cap.drop != said_drop)
         {
             tool_say("capture: %lu frames dropped, the reader is behind\n",
@@ -496,8 +411,6 @@ int main(int argc, char **argv)
             reported = now;
         }
     }
-
-    /* --------------------------------------------------------- the close -- */
 
     tool_bpf_stop(&nc_cap);
 

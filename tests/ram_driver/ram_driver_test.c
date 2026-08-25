@@ -1,25 +1,6 @@
 /*
  * AmiNetXDuo, milestone 2 bring-up test.
  *
- * Proves, on real 68k, that:
- *   - the ThreadX Exec port schedules (baton model, docs/RESEARCH.md 6.2);
- *   - a pre-existing Exec Task can be adopted as a TX_THREAD and be suspended
- *     and resumed by NetX Duo (docs/RESEARCH.md 6.3, option A);
- *   - the periodic tick drives ThreadX timers and NetX Duo's IP timers;
- *   - the NetX Duo packet pool, two NX_IP instances, ARP and TCP work;
- *   - data survives a round trip between the two IP instances over the
- *     in-tree simulated RAM driver.
- *
- * main() is an ordinary AmigaDOS Process.  It starts ThreadX on a private task
- * with tx_amiga_kernel_start(), then adopts itself so it can run the client
- * half of the test in its own context, what bsdsocket.library will have to
- * do for every application task.  The server half runs on a thread that
- * ThreadX created, so both thread flavours are exercised against each other.
- *
- * Output goes to the serial debug port (visible in FS-UAE/WinUAE's serial log)
- * as it happens, and is replayed to stdout at the end, ThreadX threads are
- * Tasks, not Processes, so they cannot use dos.library themselves.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -35,9 +16,6 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
-
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -76,15 +54,6 @@ static VOID t_log(const char *fmt, ...)
 
 va_list args;
 
-
-    /*
-     * No lock.  Every caller is either tx_application_define() (before any
-     * thread exists) or a ThreadX thread, and the baton means only one
-     * ThreadX thread runs at a time, so the log cannot interleave.  Forbid()
-     * around this would be worse than useless: RawPutChar() busy-waits on the
-     * serial port, and 60 characters at 9600 baud would hold off the tick task
-     * for tens of milliseconds and distort the timing the test measures.
-     */
     va_start(args, fmt);
     RawDoFmt((STRPTR) fmt, args, (void (*)()) t_put_char, NULL);
     va_end(args);
@@ -92,11 +61,6 @@ va_list args;
     t_put('\n');
 }
 
-
-/*
- * Replay the captured log to stdout.  Only safe from main(): dos.library
- * requires a Process, and every ThreadX thread here is a bare Exec Task.
- */
 static VOID t_flush(VOID)
 {
 
@@ -109,9 +73,6 @@ BPTR    out;
         (VOID) Write(out, (APTR) t_log_buffer, (LONG) t_log_used);
     }
 }
-
-
-/* -------------------------------------------------------------- results -- */
 
 static volatile ULONG   t_checks;
 static volatile ULONG   t_failures;
@@ -141,9 +102,6 @@ static UINT t_check(UINT ok, const char *what, ULONG detail)
 
 #define T_OK(status, what)      t_check((UINT) ((status) == NX_SUCCESS), (what), (ULONG) (status))
 #define T_TX_OK(status, what)   t_check((UINT) ((status) == TX_SUCCESS), (what), (ULONG) (status))
-
-
-/* ---------------------------------------------------------- test fabric -- */
 
 #define T_PACKET_PAYLOAD        1568        /* == AMI_POOL_PAYLOAD          */
 #define T_PACKET_COUNT          24
@@ -177,9 +135,6 @@ static ULONG            t_ip1_stack[T_IP_STACK_SIZE / sizeof(ULONG)];
 static ULONG            t_server_stack[T_SERVER_STACK_SIZE / sizeof(ULONG)];
 static ULONG            t_arp0_cache[1024 / sizeof(ULONG)];
 static ULONG            t_arp1_cache[1024 / sizeof(ULONG)];
-
-
-/* --------------------------------------------------------- server half --- */
 
 static VOID t_server_entry(ULONG id)
 {
@@ -227,7 +182,6 @@ CHAR        buffer[80];
         buffer[sizeof(buffer) - 1] =  '\0';
         t_log("server: got \"%s\" (%ld bytes)", buffer, actual);
 
-        /* Echo it straight back.  */
         status =  nx_tcp_socket_send(&t_server_socket, packet_ptr,
                                      5UL * NX_IP_PERIODIC_RATE);
         if (!T_OK(status, "server: echo send"))
@@ -249,9 +203,6 @@ CHAR        buffer[80];
 
     /* Falls off the end -> TX_COMPLETED; the Exec Task parks until deleted.  */
 }
-
-
-/* --------------------------------------------------------- client half --- */
 
 static UINT t_client_run(VOID)
 {
@@ -360,9 +311,6 @@ UINT        i;
     return(TX_TRUE);
 }
 
-
-/* ------------------------------------------------------ ThreadX startup --- */
-
 VOID tx_application_define(VOID *first_unused_memory)
 {
 
@@ -411,19 +359,6 @@ UINT    status;
     (VOID) T_TX_OK(status, "define: server thread");
 }
 
-
-/* -------------------------------------------------------------- shutdown -- */
-
-/*
- * Everything tx_application_define() created, given back, so the kernel can be
- * stopped before AmigaDOS unloads this hunk.
- *
- * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
- * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
- * own.  The order is creation reversed.  The server thread goes first because
- * it is the one still holding sockets on t_ip1, and the pool goes last because
- * nx_ip_delete() hands packets back to it on the way out.
- */
 static VOID t_shutdown(VOID)
 {
 
@@ -449,9 +384,6 @@ UINT    status;
     status =  nx_packet_pool_delete(&t_pool);
     (VOID) T_OK(status, "shutdown: packet pool deleted");
 }
-
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {
@@ -492,14 +424,6 @@ UINT    status;
     status =  tx_amiga_orphan_thread(&t_main_thread);
     (VOID) T_TX_OK(status, "main: orphaned this Exec Task");
 
-    /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  That is invisible
-     * from here -- the checks above have already passed and the exit status has
-     * already been decided -- so tools/smoke/unloadprobe.c is what sees it.
-     */
     status =  tx_amiga_kernel_stop();
     (VOID) T_TX_OK(status, "main: ThreadX kernel stopped");
 

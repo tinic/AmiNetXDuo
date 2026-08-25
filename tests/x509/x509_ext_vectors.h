@@ -1,38 +1,5 @@
 /*
- * Fixed inputs for the extension-policy section of tests/x509/test_tls_x509.c.
- * Generated once with OpenSSL and checked in, for the reason
- * x509_test_vectors.h gives: a test that generates its own key material proves
- * whatever the generator did that run.
- *
- * One root, one intermediate under it, and six leaves.  Every leaf is RSA-2048
- * with the same key, so the only thing that differs between them is the
- * extensions, which is what is under test.
- *
- *   x509_ext_root            CA:TRUE critical, keyCertSign critical.  The
- *                            trust anchor for everything below.
- *
- *   x509_ext_leaf_ok         ok.test, extendedKeyUsage serverAuth.  The
- *                            ordinary certificate, and the guard: a
- *                            strictness change that rejects this one is a
- *                            defect, not a hardening.
- *
- *   x509_ext_leaf_clientauth ok.test, extendedKeyUsage clientAuth and
- *                            emailProtection.  A certificate its issuer said
- *                            is not for TLS servers.
- *
- *   x509_ext_leaf_critical   ok.test, plus inhibitAnyPolicy marked CRITICAL.
- *                            A real extension with a real OID that nothing in
- *                            nx_secure acts on.
- *
- *   x509_ext_int             CA:TRUE pathlen 0, with extendedKeyUsage marked
- *                            critical -- the shape Let's Encrypt ships -- and
- *                            nameConstraints permitting permitted.test and
- *                            excluding bad.permitted.test.
- *
- *   x509_ext_leaf_inside     host.permitted.test under that intermediate.
- *   x509_ext_leaf_outside    evil.test under it.
- *   x509_ext_leaf_excluded   host.bad.permitted.test under it.
- *
+ * Extension-policy test vectors for tests/x509/test_tls_x509.c.
  * Regenerate with tests/x509/mkextvectors.sh.
  *
  * SPDX-License-Identifier: MIT

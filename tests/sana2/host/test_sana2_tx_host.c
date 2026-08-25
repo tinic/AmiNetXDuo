@@ -1,23 +1,6 @@
 /*
  * AmiNetXDuo, the SANA-II transmit path's framing, on the host.
  *
- * src/sana2/sana2_tx.c decides three things about a frame before a device
- * sees it: which bytes the Ethernet header is built from in raw mode, how
- * long the frame is, and what is in it. The length is the part with no
- * coverage anywhere and the part a driver disagrees with us about.
- *
- * Ethernet's minimum frame is 60 bytes before the FCS, and the two modes hand
- * SANA-II different things: cooked mode hands the payload and lets the driver
- * add 14 bytes of header, raw mode hands the whole frame. So the minimum this
- * path has to reach is 46 bytes on one arm and 60 on the other, and a test
- * that only checked one number would pass with the other arm wrong.
- *
- * What the tests below assert is what the device is told and what it can read:
- * ios2_DataLength, and then the bytes S2_CopyFromBuff actually hands over,
- * because a length raised without bytes behind it is how a pool block's last
- * tenant ends up on a wire. sana2_copy.c is compiled in beside sana2_tx.c so
- * the copy is the real one.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -29,9 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-
-/* --------------------------------------------------------------- harness -- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -46,15 +26,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-
-/* ------------------------------------------------------------------ exec -- */
-
-/*
- * A device that never finishes: the post records the request and leaves it, so
- * a test can look at what would have gone to the wire before anything reaps
- * it. h_reply() is the completion, and it is explicit because the reap is
- * half of what these tests are about.
- */
 static struct IORequest *h_sent;
 static unsigned long     h_sends;
 
@@ -137,9 +108,6 @@ static void h_reply(void)
 
 static ULONG h_sleeps;
 static ULONG h_reply_on_sleep;
-
-
-/* ------------------------------------------------------------------ stubs -- */
 
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
@@ -245,14 +213,6 @@ VOID ami_log(int level, const char *fmt, ...)
     (VOID)fmt;
 }
 
-
-/* ------------------------------------------------------------- the fixture -- */
-
-/*
- * One interface and one packet, built by hand. ami_sana2_tx_send() reads the
- * interface for its mode, its wire type and its MAC, and the packet for the
- * four pointers the pad and the copy walk move.
- */
 #define POOL_BYTES  256
 
 static AmiSana2If iface;
@@ -278,12 +238,6 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_reply_on_sleep = 0;
 }
 
-/*
- * A frame of `len` bytes at a prepend pointer with room for a link header in
- * front of it, which is the shape NetX Duo hands a driver. The pool is filled
- * with 0xEE first: anything past the frame that reaches a device is that
- * byte, and it is what a pad without bytes behind it would send.
- */
 static void packet_init(const UCHAR *body, ULONG len)
 {
     memset(&pkt, 0, sizeof(pkt));
@@ -332,9 +286,6 @@ static int tail_is_zero(ULONG from, ULONG to)
     return 1;
 }
 
-
-/* ------------------------------------------------------------- the frames -- */
-
 /* 28 bytes, the size of an ARP request, and not IPv4, so nothing on the
    transmit path can mistake it for a datagram to fuse a checksum into. */
 #define ARP_LEN 28
@@ -366,14 +317,6 @@ static void frames_init(void)
     ack_frame[33] = 0x10;                   /* ACK                          */
 }
 
-
-/* ------------------------------------------------------------------ tests -- */
-
-/*
- * Cooked mode. The driver builds the 14-byte header, so what we hand it is
- * the payload and the minimum is 46, not 60. A 28-byte ARP request goes out
- * as a 42-byte frame without this.
- */
 static void test_pad_cooked_no_fusion(void)
 {
     printf("sana2: a short cooked frame is padded to 46 bytes of payload\n");
@@ -410,13 +353,6 @@ static void test_pad_cooked_no_fusion(void)
             "and it counts as sent");
 }
 
-/*
- * The same frame through the checksum fusion, which copies the whole thing
- * itself. The pad is 6 bytes here rather than 18, and the fusion has to copy
- * them: it works from the IP header's own total length, which does not count
- * the pad, so the bytes past the datagram are a separate copy that could
- * quietly be left out.
- */
 static void test_pad_cooked_with_fusion(void)
 {
     printf("sana2: a short cooked frame is padded through the fusion too\n");
@@ -450,11 +386,6 @@ static void test_pad_cooked_with_fusion(void)
             "and the packet goes back at its own length");
 }
 
-/*
- * Raw mode. The 14 bytes are in the packet by the time the pad runs, so the
- * number is 60 and not 46; padding to 46 here would send a 46-byte frame and
- * still be a runt.
- */
 static void test_pad_raw(void)
 {
     printf("sana2: a short raw frame is padded to 60, header included\n");
@@ -484,17 +415,6 @@ static void test_pad_raw(void)
             "and with its prepend pointer back where it was");
 }
 
-/*
- * A cooked interface still builds the header itself for an EtherType with bit
- * 15 set, and posts the write raw.
- *
- * ariadne.device 1.50 decides between an EtherType and an 802.3 length field
- * with `cmpi.w #1500` and a SIGNED branch, so 0x86DD reads as negative, takes
- * the 802.3 arm and puts ios2_DataLength in the type field. The frame leaves
- * the card with no EtherType and nothing answers it: IPv4 is perfect and IPv6
- * never gets a global address. Its raw arm is correct, so the header goes on
- * here instead.
- */
 static void test_high_ethertype_goes_raw(void)
 {
     printf("sana2: a cooked device gets an EtherType over 0x8000 raw\n");
@@ -526,14 +446,6 @@ static void test_high_ethertype_goes_raw(void)
             "and with its prepend pointer back where it was");
 }
 
-/*
- * And the deferred transmit checksum is taken before the header goes on.
- *
- * sana2_copy.c's fusion and _nx_ip_packet_checksum_compute() behind it both
- * read the IP header from nx_packet_prepend_ptr. Fourteen bytes of Ethernet in
- * front of it and neither finds a datagram: every IPv6 SYN left the card with
- * cksum 0x0000 and nothing ever answered one.
- */
 static void test_high_ethertype_checksum_first(void)
 {
     printf("sana2: the deferred checksum is taken before the header goes on\n");
@@ -575,11 +487,6 @@ static void test_low_ethertype_stays_cooked(void)
             "and its length is the payload's, no header of ours");
 }
 
-/*
- * A device that refuses the raw write says so, and is not asked again. The
- * frame is lost, which is what retransmission is for; the type it was refused
- * for goes back to cooked framing for the life of the interface.
- */
 static void test_raw_refused_falls_back_to_cooked(void)
 {
     printf("sana2: a refused raw write puts the interface back on cooked\n");
@@ -637,11 +544,6 @@ static void test_no_pad_when_long_enough(void)
     h_check(pkt.nx_packet_length == sizeof(body), "and it is handed back as it came");
 }
 
-/*
- * A wire that is not Ethernet has its own minimum, or none. Nothing is
- * assumed on its behalf: SLIP and PPP report a hardware type of their own and
- * an address field of zero bytes, and a pad would be corruption there.
- */
 static void test_no_pad_off_ethernet(void)
 {
     printf("sana2: a wire that is not Ethernet is not padded\n");
@@ -679,9 +581,6 @@ static void test_drain_reaps_final_sleep(void)
     h_check(iface.tx[0].busy == FALSE, "and its slot is reusable");
     h_check(h_releases == 1, "and its packet was released");
 }
-
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {

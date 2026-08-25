@@ -48,12 +48,6 @@
 
 #include <string.h>
 
-/*
- * No printf.  newlib's drags mathieeedoubbas.library in, and a probe that
- * dies with "mathieeedoubbas.library failed to load" on a bare test drive
- * reads as a fault in the thing being probed.  Same reason as
- * tests/tcpdrill/tcpdrill.c.
- */
 static VOID p_str(const char *s)
 {
     if (s != NULL)
@@ -116,11 +110,6 @@ struct IOSana2Req
 #define S2_CopyToBuff           (S2_Dummy + 1)
 #define S2_CopyFromBuff         (S2_Dummy + 2)
 
-/*
- * A driver may look at the buffer-management list at OpenDevice() time and
- * refuse an open without one.  These are never called: nothing here reads or
- * writes a packet.
- */
 static ULONG copy_stub(VOID)
 {
     return 0;
@@ -199,12 +188,6 @@ int main(int argc, char **argv)
 
         req->ios2_BufferManagement = buffer_tags;
 
-        /*
-         * A bare name is looked up in DEVS: only.  Third-party card drivers
-         * live in DEVS:Networks, and exec does not look there, so the stack
-         * carries this same fallback (ami_sana2_open_device, and
-         * tools/sana2-stage.sh's note about it).
-         */
         opened = (OpenDevice((CONST_STRPTR)device, unit,
                              (struct IORequest *)req, 0) == 0);
         if (!opened)

@@ -2,21 +2,6 @@
  * ToolsSmoke, run every command-line tool under the emulator and record
  * what it printed.
  *
- * tools/amiberry-run.sh boots a real Kickstart 3.1 A1200, runs one executable
- * from s/Startup-Sequence with no arguments, and prints back anything the
- * Amiga left in DH0:*.txt.  The tools take arguments and write to stdout, so
- * this driver runs each of them through SystemTagList() with the Shell's own
- * redirection, appends the return code, and leaves the lot in DH0:tools.txt
- * for the host to read.
- *
- *   ./tools/amiberry-run.sh -t 120 build/cm/src/tools/ToolsSmoke \
- *       build/cm/src/tools/AddNetInterface build/cm/src/tools/Online ... \
- *       src/tools/testdata/Devs
- *
- * With no stack linked in (the netstack_weak.c stubs) every tool reports that
- * the network stack is not running and exits with a sensible return code.
- * That is what can be tested end to end before src/netstack exists.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -33,52 +18,9 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ToolsSmoke");
 
 #define REPORT      "DH0:tools.txt"
-/*
- * "<NIL:" so that ReadArgs()'s "?" prompt reads EOF instead of waiting for a
- * keyboard nobody is sitting at. No "*>>": the 3.1 Shell does not understand
- * appending stderr redirection and passes it through as an argument, and
- * there is no need, because a child of System() has no separate error stream,
- * so tool_error() and PrintFault() both land on stdout anyway.
- *
- * Each half is added only when the command has not brought its own: NetSetup
- * reads a file of answers with "<", and a command redirected to a file wants
- * its transcript in a file of its own. A second redirection of the same kind
- * makes the Shell take one and silently drop the other.
- */
 #define REDIRECT_IN  " <NIL:"
 #define REDIRECT_OUT " >>DH0:tools.txt"
 
-/*
- * The command list can be staged as DH0:commands.txt, one command per line,
- * '#' and blank lines ignored. Staging different directories lets the harness,
- * which can only start one executable with no arguments, exercise a machine
- * with no configuration, one with a broken configuration, and one whose
- * configuration names a device that is not there.
- *
- * Two prefixes exist because SystemTagList() waits, while a listener and the
- * thing that connects to it must run at the same time. Without them no staged
- * list can test `nc -l`.
- *
- *   &<command>   run it and carry straight on, SYS_Asynch, which is what
- *                the Shell's own `Run` does. Its output must be redirected by
- *                the line itself, because a detached process shares no console
- *                with this one and its Output() is NIL:.
- *   wait <secs>  Delay(), so the next line starts after the background one
- *                has had time to reach its accept().
- *
- *   until <secs> <needle> <not,not,...> <command>
- *                run <command> over and over until one line of its output
- *                holds <needle> and holds none of the comma-separated <not>
- *                substrings, or <secs> have gone.  `-` excludes nothing.
- *                Plain substrings with no spaces in them, one line at a time.
- *
- * `until` exists because `wait` is a guess.  A router advertisement, a lease
- * or a listener arrives on its own schedule, and a delay long enough for this
- * machine is short on a slower one and wasted on a faster one.  The harness
- * that made every IPv6 arm `blocked` was sampling at a fixed moment.  Each
- * attempt is a command of its own in the transcript, header and rc and all,
- * so what was polled and how long it took are both readable afterwards.
- */
 #define COMMANDS    "DH0:commands.txt"
 /*
  * Truncation at this ceiling is silent, so it sits well above what any staged
@@ -170,12 +112,9 @@ static LONG elapsed_ms(const struct DateStamp *from, const struct DateStamp *to)
     return ((days * 1440L + mins) * 60L * 50L + ticks) * 20L;
 }
 
-/* Append a line to the report, opening and closing around every write so the
-   Shell's own >> redirection never competes for the file position.
-
-   The argarray is cast to (APTR), not (CONST_APTR).  NDK 3.2 and NDK 3.9 spell
-   VFPrintf's third parameter differently and only APTR converts to both.  See
-   the long note in src/tools/tool_util.c. */
+/* Opens and closes around every write so the Shell's own >> redirection never
+   competes for the file position.  The argarray must be cast to (APTR), not
+   (CONST_APTR): only APTR converts under both NDK 3.2 and NDK 3.9. */
 static void report(const char *fmt, LONG a, LONG b, LONG c)
 {
     BPTR fh = Open((CONST_STRPTR)REPORT, MODE_READWRITE);
@@ -313,18 +252,6 @@ static int run_command(const char *command)
         return 0;
     }
 
-    /*
-     * Free memory after every command, the same accounting
-     * clients/dropbear/clientrun.c does for ported clients.  AmigaOS reclaims
-     * nothing when a process exits, so anything a command allocated and did
-     * not give back is gone until the next reboot, and a leak reads here as
-     * the same step down run after run.  SystemTagList() above passes no
-     * NP_StackSize, so these run on the Shell's own stack, which is what a
-     * 1 MB machine has.
-     *
-     * And how long it took, which is the only way from out here to see that a
-     * command spent its time waiting rather than working.
-     */
     {
         struct DateStamp finished;
 

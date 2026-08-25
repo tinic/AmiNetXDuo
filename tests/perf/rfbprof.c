@@ -1,33 +1,8 @@
 /*
- * AmiNetXDuo, where the /console frame encoder's time goes, on the machine.
- *
- *   rfbprof [FILE=<pfs>] [REPS=n] [QUIET]
- *
- * WHY THIS AND NOT THE SAMPLING PROFILER
- *
- *   Profile ranks functions.  The questions here are differences between
- *   configurations of the same functions -- what the scroll probe costs on a
- *   screen where nothing moved, what best-of costs, what the shipping
- *   -m68000 codegen costs against -m68020 -- and a ranking cannot answer any
- *   of them.  Each arm is the real rfb_encode_frame() over the real capture,
- *   timed with ReadEClock, and the arms are INTERLEAVED IN ONE RUN so a busy
- *   host cannot separate them.
- *
- *   rfb_encode.c is linked in TWICE: once compiled the way the tree ships it
- *   (-m68000, because AMINETXDUO_CPU=any) and once at -m68020, the second
- *   copy's eight public symbols renamed on the command line.  One binary,
- *   both codegens, same data, same second.
- *
- * WHAT IT READS
- *
- *   A .pfs capture, the same file format tests the host bench uses, so the
- *   frames are the ones the numbers elsewhere in this project were taken on.
- *   Without FILE= it makes a blank screen and a scrolled one, which measures
- *   the idle path exactly (the diff loop has no data-dependent exit) and the
- *   scroll path only approximately.
- *
- *   Every buffer reports TypeOfMem(), because "the shadow is in fast RAM" is
- *   an assumption this exists to remove.
+ * rfbprof [FILE=<pfs>] [REPS=n] [QUIET] -- times /console frame-encoder arms
+ * on the machine.  rfb_encode.c is linked in four times (-m68000/-m68020 x
+ * -Os/-O2), the copies' public symbols renamed on the command line, and the
+ * arms are interleaved in one run so host load cannot separate them.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,7 +23,6 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/rfb_encode.h"
 
-/* The second copy of the encoder, same source, -m68020 codegen. */
 extern rfb_u32 rfb020_shadow_size(const rfb_geom *g);
 extern rfb_u32 rfb020_scratch_size(const rfb_geom *g, rfb_u32 flags,
                                    const rfb_scroll_cfg *cfg);
@@ -60,7 +34,6 @@ extern long    rfb020_encoder_init(rfb_encoder *e, const rfb_geom *g,
 extern long    rfb020_encode_frame(rfb_encoder *e, const rfb_u8 *src,
                                    rfb_u8 *out, rfb_u32 out_cap);
 
-/* And the same source at -O2, on both instruction sets. */
 extern long rfbo2_encoder_init(rfb_encoder *, const rfb_geom *, rfb_u32,
                                const rfb_scroll_cfg *, rfb_u8 *, rfb_u32,
                                rfb_u8 *, rfb_u32);
@@ -72,7 +45,6 @@ extern long rfb220_encoder_init(rfb_encoder *, const rfb_geom *, rfb_u32,
 extern long rfb220_encode_frame(rfb_encoder *, const rfb_u8 *, rfb_u8 *,
                                 rfb_u32);
 
-/* The candidate loops, both codegens. */
 #define KDECL(p)                                                              \
     extern ULONG p##xorstore(const UBYTE *, UBYTE *, ULONG);                  \
     extern ULONG p##xorkeep(const UBYTE *, UBYTE *, UBYTE *, ULONG);          \
@@ -177,10 +149,6 @@ static ULONG r_us(ULONG ticks)
     else
         ticks = 0UL;
 
-    /* Whole seconds first, then the remainder scaled -- (ticks % rate) * 1000
-       is at most 7.1e8 and fits, where ticks * 1000 stops fitting at six
-       seconds.  The first cut of this dropped the remainder entirely and
-       printed every arm over six seconds as a whole number of seconds. */
     return (ticks / r_rate) * 1000000UL
          + (((ticks % r_rate) * 1000UL) / (r_rate / 1000UL));
 }
@@ -222,19 +190,13 @@ static const char *r_memtype(APTR p)
 
 /* ---------------------------------------------------------------- .pfs --- */
 
-/* PFS2: magic, w, h, depth, pad, bytes_per_row, frames, pointers, then
-   3<<depth bytes of palette, then frames * frame_bytes of plane-major pixels.
-   The frame records and the pointer images are after those and this does not
-   read them: it is a profiler for the ENCODER and wants pixels.  See
-   src/tools/web/client/console/pfs.ts for the whole layout. */
+/* PFS2 layout: magic, w, h, depth, pad, bytes_per_row, frames, pointers, then
+   3<<depth palette bytes, then frames * frame_bytes of plane-major pixels.
+   Full layout in src/tools/web/client/console/pfs.ts. */
 static BOOL r_load_pfs(const char *path)
 {
     BPTR  fh;
-    /* Zeroed for -fanalyzer, which cannot see through Read() -- a library call
-       behind an inline stub -- and reads hdr[4] as uninitialised.  Same shape
-       as the EClockVal in tests/perf/cpucal.c, and cheaper than a triage note
-       in tools/analyzer-baseline.txt for a header this file overwrites in the
-       next statement. */
+    /* Zeroed for -fanalyzer, which cannot see through Read(). */
     UBYTE hdr[16] = { 0 };
     ULONG palette, want, i;
     LONG  n;
@@ -317,10 +279,6 @@ static BOOL r_load_pfs(const char *path)
     return TRUE;
 }
 
-/* Two frames with no capture: an empty screen, and the same screen with a
-   band moved up eight rows.  The idle arm is exact -- the diff loop's cost
-   does not depend on the bytes -- and the scroll arm is a lower bound on the
-   real one, which is said where it is printed. */
 static BOOL r_make_synthetic(UWORD depth)
 {
     ULONG i, y, p;
@@ -361,10 +319,6 @@ static BOOL r_make_synthetic(UWORD depth)
 
 /* --------------------------------------------------------------- arms ---- */
 
-/* One encode arm: reset the encoder, then run the sequence `reps` times and
-   report the mean per frame.  `first` is skipped in the timing when the
-   sequence has more than one frame -- frame 0 against a zero shadow is the
-   whole screen and is not what a session spends its time doing. */
 typedef long (*r_encfn)(rfb_encoder *, const rfb_u8 *, rfb_u8 *, rfb_u32);
 typedef long (*r_initfn)(rfb_encoder *, const rfb_geom *, rfb_u32,
                          const rfb_scroll_cfg *, rfb_u8 *, rfb_u32,
@@ -377,10 +331,8 @@ static const r_encfn r_enc_fn[4] = { rfb_encode_frame, rfb020_encode_frame,
 static const r_initfn r_init_fn[4] = { rfb_encoder_init, rfb020_encoder_init,
                                        rfbo2_encoder_init, rfb220_encoder_init };
 
-/* The same arm, but reading the frame out of CHIP RAM through the plane
-   pointers -- which is what httpfb.c does now that there is no grab buffer.
-   The frame is staged into chip OUTSIDE the timed region, because staging it
-   is the copy this exists to show nobody has to make. */
+/* Reads the frame out of CHIP RAM through the plane pointers, as httpfb.c
+   does.  Staging into chip RAM stays outside the timed region. */
 static VOID r_encode_chip_arm(const char *tag, rfb_u32 flags,
                               ULONG from, ULONG to)
 {
@@ -443,8 +395,7 @@ static VOID r_encode_arm(const char *tag, rfb_u32 flags, int use020,
         (VOID)init(&e, &r_g, flags, &cfg, r_shadow, r_shadow_len,
                    r_scratch, r_scratch_len);
 
-        /* Prime: every frame up to `from` runs untimed, so the shadow the
-           timed frames diff against is the one a live session would have. */
+        /* Prime untimed up to `from` so the shadow matches a live session. */
         for (i = 0UL; i <= from; i++)
             n = enc(&e, r_data + i * r_frame_bytes, r_out, r_out_cap);
 
@@ -467,7 +418,6 @@ static VOID r_encode_arm(const char *tag, rfb_u32 flags, int use020,
           r_us(ticks) / nframes, bytes / nframes, nframes);
 }
 
-/* One kernel arm: `n` bytes, `r_reps` times, mean microseconds. */
 #define R_KERN(tag, cpu, call)                                                \
     do {                                                                      \
         ULONG _r, _t0, _t1, _tk = 0UL;                                        \
@@ -488,8 +438,7 @@ static VOID r_kernels(VOID)
     UBYTE *b = r_shadow;
     UBYTE *x = r_grab;
 
-    /* The shadow holds a copy of the source, so every compare arm below is
-       measuring the unchanged case -- the one that matters. */
+    /* Shadow holds a copy of the source: the compare arms measure unchanged. */
     memcpy(b, a, (size_t)plane);
 
     R_KERN("readonly_fast", "68000", rfbk_readonly(a, plane));
@@ -529,9 +478,6 @@ static VOID r_kernels(VOID)
     R_KERN("cmpearly", "68000", rfbk_cmpearly(a, b, plane));
     R_KERN("cmpearly", "68020", rfbk020_cmpearly(a, b, plane));
 
-    /* The fused shape: diff the CHIP RAM planes against the shadow with no
-       grab buffer in between.  The shadow holds the chip frame first, so this
-       is again the unchanged case. */
     memcpy(r_chip, a, (size_t)plane);
     R_KERN("fused_cmponly_chip", "68000", rfbk_cmponly(r_chip, b, plane));
     R_KERN("fused_cmponly_chip", "68020", rfbk020_cmponly(r_chip, b, plane));
@@ -567,8 +513,6 @@ static VOID r_run_sequence(ULONG from, ULONG to, const char *what)
 {
     r_log("rfbprof case=%s from=%lu to=%lu", what, from, to);
 
-    /* Interleaved: the two codegens of each arm are adjacent, so a host that
-       slows down halfway through cannot make one look better than the other. */
     r_encode_arm("shipping", FB_FLAGS, 0, from, to);
     r_encode_chip_arm("shipping_chip", FB_FLAGS, from, to);
     r_encode_arm("shipping", FB_FLAGS, 1, from, to);
@@ -649,10 +593,8 @@ int main(void)
     r_g.tile_w = 16;
     r_g.tile_h = 16;
 
-    /* A short capture is the wrong instrument for the scroll probe: its gate
-       backs off over frames, so a six-frame sequence never lets the backoff
-       develop and charges the probe to every frame.  Sixteen frames, and the
-       repeat count falls so the wall clock does not. */
+    /* The scroll probe's gate backs off over frames, so the sequence must be
+       long enough for the backoff to develop; reps fall to keep wall time. */
     r_reps = 48UL / (r_frames ? r_frames : 1UL);
     if (r_reps == 0UL)
         r_reps = 1UL;
@@ -683,14 +625,9 @@ int main(void)
 
     r_report_setup();
 
-    /* THE IDLE CASE FIRST.  Frame 0 primes the shadow and the timed frame is
-       frame 1, which for an idle capture is byte-identical to it: this is the
-       cost of discovering that nothing happened. */
     if (r_frames >= 2UL)
         r_run_sequence(0UL, 1UL, "second_frame");
 
-    /* And the whole sequence after the first frame, which for a scroll or a
-       windows capture is what a session actually pays. */
     if (r_frames >= 3UL)
         r_run_sequence(0UL, r_frames - 1UL, "sequence");
 

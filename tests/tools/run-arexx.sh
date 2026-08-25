@@ -4,72 +4,6 @@
 #
 #   tests/tools/run-arexx.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #
-# WHAT IT IS PROVING, and why a unit test cannot
-#
-#   docs/RESEARCH.md 75.7: AMITCP is not a flag, it is AmiTCP's ARexx host port,
-#   and 31 of the 2,149 comm/ archives surveyed send commands to it. We
-#   published the port with PA_IGNORE and no signal task, so RexxSysLib found it,
-#   PutMsg()ed a RexxMsg and waited for a reply nothing would ever send. With no
-#   port at all the same script fails at once with "host environment not found",
-#   so the port made a clean failure into a hang.
-#
-#   The only way to show that is fixed is to run the real ARexx interpreter and
-#   watch a real script come back. A unit test of the message handler proves the
-#   handler works and says nothing about whether RexxSysLib is satisfied by it --
-#   which is the entire question, since the hang was in RexxSysLib's wait, not in
-#   our code.
-#
-#   So: RexxMast and RX out of Workbench 3.1, a script that addresses AMITCP,
-#   and assertions on what it wrote down.
-#
-# THE CASES, and why each one is here
-#
-#   WaitForPort AMITCP     the reason the port exists at all. Commodore's own
-#                          command, so this is not our idea of what waiting for
-#                          the port means.
-#   QUERY HOSTNAME         a command we implement: RC 0 and a result string.
-#   QUERY CONNECTIONS      snapshots live TCP/UDP lists from the otherwise
-#                          plain Exec Process that runs this host.
-#   QUERY ROUTES ALL       takes nx_ip_protection and calls a NetX getter.
-#   QUERY ICMP ... UDP ... calls all four NetX information APIs. These three
-#                          prove every live-state query adopts the Process for
-#                          only the snapshot and returns to format the result.
-#   FROBNICATE             a command nobody implements. RC must be non-zero and
-#                          the script must continue, that is the whole fix.
-#   QUERY NOSUCHVARIABLE   a keyword we know with a variable we do not.
-#   READ something         a keyword AmiTCP has and we decline. Distinct from
-#                          FROBNICATE on purpose: "not implemented" and "unknown
-#                          command" are different answers.
-#   ''  (empty)            AmiTCP returns RETURN_OK for an empty line, so we do.
-#   KILL                   last, because it takes the interfaces down. The
-#                          interface is removed immediately before it, leaving
-#                          the stable-index hole runtime removal deliberately
-#                          keeps. KILL must not report that already-down hole
-#                          as a failed live interface. The most commonly sent
-#                          command in the corpus, every stopnet.
-#
-#   The script writes a sentinel line last. A hang is then not "some case
-#   failed", it is "the sentinel is missing", which is the assertion that would
-#   have caught the original bug.
-#
-# WHAT IS NOT COMMITTED
-#
-#   RexxMast, RX, WaitForPort and rexxsyslib.library are Commodore's. They are
-#   located at run time, exactly as the Kickstart ROM, a2065.device and the C:
-#   commands in run-tcphandler.sh already are:
-#
-#     AMINETXDUO_AMIGA_REXX=<dir with RexxMast, RX, WaitForPort,
-#                            rexxsyslib.library>
-#
-#   Workbench 3.1's copies live on the Workbench disk in System/, Rexxc/ and
-#   Libs/.
-#
-#   Note that Workbench 3.1 ships rexxsyslib 37. SetRexxVarFromMsg(), which is
-#   how AMITCP.LASTERROR would be set, is V45 (OS 3.9), so on this run the
-#   variable is deliberately not set and only RC is asserted. Nothing in the
-#   corpus reads LASTERROR (75.7), and src/netstack/netstack_rexx.c gates the
-#   call on lib_Version for exactly this reason.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -144,20 +78,12 @@ mkdir -p "$STAGE/libs" "$STAGE/rexxc"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# QUERY SERVICES browses mDNS, and the responder is per interface and off
-# unless the interface asks for it.  Without this the two SERVICES cases below
-# have no responder to reach, return RETURN_ERROR, and have been failing for
-# as long as this file has existed -- unnoticed, because nothing runs it.
 for cfg in "$STAGE"/devs/NetInterfaces/*; do
     [ -f "$cfg" ] || continue
     printf 'MDNS=YES\n' >> "$cfg"
 done
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 cp "$REXXDIR/rexxsyslib.library" "$STAGE/libs/rexxsyslib.library"
-# ARexx is a floating-point language: RexxMast opens mathieeedoubbas and
-# mathieeedoubtrans at startup and exits with returncode 20 without them. On a
-# bare directory boot there is no LIBS: full of Workbench, so they are staged
-# with the rest.
 for opt in rexxsupport.library mathieeedoubbas.library \
            mathieeedoubtrans.library mathieeesingtrans.library; do
     [ -f "$REXXDIR/$opt" ] && cp "$REXXDIR/$opt" "$STAGE/libs/$opt"
@@ -167,15 +93,9 @@ cp "$REXXDIR/RX"          "$STAGE/RX"
 cp "$REXXDIR/WaitForPort" "$STAGE/WaitForPort"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/RemoveNetInterface" "$STAGE/RemoveNetInterface"
-# A live service and the command that lists it: KILL used to take the
-# interfaces down and leave every program holding a library whose network had
-# gone, and "KILL returned 0" could not tell that apart from a KILL that tells
-# them.  ShowNetStatus USERS can.
 cp "$TOOLS/nc"            "$STAGE/nc"
 cp "$TOOLS/ShowNetStatus" "$STAGE/ShowNetStatus"
 
-# The script. `OPTIONS RESULTS` is what makes rm_Result2 be asked for, so the
-# RXFF_RESULT branch in ami_rx_service() is exercised rather than skipped.
 cat > "$STAGE/amitcptest.rexx" <<'REXX'
 /* AMITCP ARexx host: does a real interpreter get an answer? */
 OPTIONS RESULTS
@@ -247,14 +167,10 @@ REXX
     echo "SYS:AddNetInterface eth0"
     echo "wait 2"
 
-    # Something for KILL to tell.  Detached and listening, which is the shape
-    # of every service a user leaves running.
     echo "&SYS:nc -l 7099 -v -w 90 >DH0:nc.txt"
     echo "wait 3"
     echo "SYS:ShowNetStatus USERS"
 
-    # The barrier, with Commodore's own command. If the port were gone this
-    # would never return and the run would time out.
     echo "SYS:WaitForPort AMITCP"
 
     # RexxMast detaches itself; RX needs it resident.
@@ -317,8 +233,6 @@ else
     fails=$((fails + 1))
 fi
 
-# A known command: rc 0, and a result string, which only arrives if
-# rm_Result2/RXFF_RESULT is handled.
 if grep -qE "case known:.*rc= *0 " "$SCRIPTOUT"; then
     note "PASS: QUERY HOSTNAME returned rc=0"
 else
@@ -365,9 +279,6 @@ else
     fails=$((fails + 1))
 fi
 
-# These are the live NetX snapshots.  The host itself is an Exec Process, so
-# rc=0 here also proves that each path successfully adopted it before taking a
-# ThreadX mutex or entering a NetX information service.
 for case_name in conns routes stats; do
     if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then
         note "PASS: $case_name returned from a live NetX snapshot"
@@ -377,9 +288,6 @@ for case_name in conns routes stats; do
     fi
 done
 
-# SERVICES is the only command that blocks. The assertion is that it comes
-# back at all, what it found is a property of the network the emulator is on,
-# and on SLIRP the answer is nothing.
 for case_name in browse browse1; do
     if grep -qE "case $case_name:.*rc= *0" "$SCRIPTOUT"; then
         note "PASS: $case_name returned from its collection window"
@@ -389,9 +297,6 @@ for case_name in browse browse1; do
     fi
 done
 
-# The type argument is mandatory, for the reason ROUTES' is: getvalue() reads
-# names until the line ends and could not tell an optional one from the next
-# variable.
 if grep -qE "case browsex:.*rc= *[1-9]" "$SCRIPTOUT"; then
     note "PASS: SERVICES with no type is a syntax error"
 else
@@ -413,13 +318,6 @@ else
     fails=$((fails + 1))
 fi
 
-# AND IT TOLD THE PROGRAMS USING THE NETWORK.
-#
-# ShowNetStatus USERS lists one row per program holding bsdsocket.library
-# open, name first.  nc is listening before KILL and must be gone after it:
-# KILL sends every opener SIGBREAKF_CTRL_C and gives back the stack hold, the
-# same pair NetShutdown uses.  Until 2026-08-11 it did neither and only took
-# the interfaces down, which this pair of readings cannot mistake for success.
 users_block() {
     awk -v want="$1" '
         index($0, "===== SYS:ShowNetStatus USERS =====") == 1 { n++; if (n == want) { on = 1; next } }
@@ -444,8 +342,6 @@ else
     note "PASS: KILL told nc to stop and it let go of bsdsocket.library"
 fi
 
-# WaitForPort ran before any of this and the run did not time out, so the
-# barrier still works. Assert that ToolsSmoke got past it.
 if grep -q "WaitForPort" "$REPORT"; then
     note "PASS: WaitForPort AMITCP returned"
 else

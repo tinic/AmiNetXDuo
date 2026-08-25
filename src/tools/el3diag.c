@@ -1,27 +1,9 @@
 /*
  * El3Diag: dump the live registers of a 3c589 in the A1200 PCMCIA slot.
  *
- * A diagnostic for exactly one situation: the card transmits -- frames and
- * link beats reach the switch -- and receives nothing, with every driver
- * counter at zero.  Whether that is a receive engine that was never switched
- * on, a transceiver selected onto the wrong port, or a receive pair that no
- * longer hears the switch, is written in three registers the driver does not
- * report:
- *
- *   window 0, address configuration: bits 15..14 are the active transceiver,
- *     0 twisted pair, 1 AUI, 3 coax.  Loaded from EEPROM word 6 at power-up,
- *     and this driver never writes it.
- *   window 4, media status: bit 11 is the card's OWN link-beat detect -- the
- *     inbound half of the conversation the switch's LED only shows half of.
- *   window 1, RX status: what the receive FIFO holds right now.
- *
- * Raw values are printed; the register window on this card exchanges the
- *  halves of every word, and decoding is done off-machine so the swap cannot
- * hide anything.  Each window excursion runs under Disable() and puts
- * window 1 back, so the driver's server never sees the wrong window.
- *
- * The card's registers are looked for at $A20300, where the driver put them
- * on the machine this exists for.
+ * Every window excursion must run under Disable() and put window 1 back, or
+ * the driver's server sees the wrong window.  Raw values are printed: this
+ * card's register window exchanges the halves of every word.
  */
 #include "tools.h"
 
@@ -114,9 +96,6 @@ int main(void)
                (STRPTR)probe[i].name, (ULONG)raw, (ULONG)swp(raw));
     }
 
-    /* The whole register file, raw, one window per line.  Diffing two of
-       these between a deaf boot and a working one finds every bit that
-       matters without anyone deciding in advance which ones do. */
     {
         UWORD w, o;
 
@@ -154,15 +133,6 @@ int main(void)
     Printf((STRPTR)"phase 3, promiscuous:       %ld/100 saw a frame\n",
            rx_watch());
 
-    /*
-     * The live-activate experiment.  The driver now sets the CONFIG_CTRL
-     * activate bit in el3_init() and the register still reads without it,
-     * so either something later in init clears it or the write never
-     * lands.  Set it here, outside any init sequence, and read it straight
-     * back; then let the statistics phase below say whether the MAC came
-     * alive.  No reboot between the dump above and this write, so the
-     * before and after describe the same deaf state.
-     */
     {
         UWORD before = swp(peek(0, 0x04));
 
@@ -177,15 +147,6 @@ int main(void)
                (ULONG)swp(peek(0, 0x04)));
     }
 
-    /*
-     * Window 6 is the chip's own account of the MAC, kept regardless of what
-     * the FIFO does with the result.  If "good frames received" moves while
-     * the FIFO never holds one, the wire and the PHY are innocent and the
-     * loss is inside the chip; if it stays zero under promiscuous capture on
-     * a chattering LAN, nothing is being decoded off the pair at all.
-     * Statistics registers clear on read, so the delta over the watch is the
-     * count itself.
-     */
     poke_cmd(0x10, 0x0F);            /* promiscuous for the count */
     poke_cmd(0x15, 0);               /* statistics enable */
     Disable();

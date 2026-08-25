@@ -1,91 +1,6 @@
 #!/usr/bin/env bash
-#
 # WHICH INTERFACE GETS THE HARDWARE, when the drawer describes more of them
 # than the stack has slots for.
-#
-#   tests/tools/run-ifslots.sh [-b BUILDDIR] [-t SECONDS] [-N BOARD]
-#                              [-r named|typo|latefail|identity]
-#
-# FOUR BOOTS, SIX CLAIMS AND TWO GUARDS, and the whole arm exists because half of one user's
-# evening was spent on a card that was fine.  They had three files in
-# DEVS:NetInterfaces/ and the one they wanted was third.
-#
-# WHAT IT PROVES
-#
-#   1. A machine with five interface definitions BOOTS -- one more than there
-#      are slots for, which is the configuration a drawer outgrows into.
-#   2. ShowNetStatus LISTS ALL FIVE before anything is attached, the ones that
-#      are not attached in the "defined" state.  (dd4b3cee; this is the half
-#      that already worked, and it is asserted here so the two halves cannot
-#      drift apart.)
-#   3. A DEFINITION THAT IS NOT FIRST IN DIRECTORY ORDER CAN BE BROUGHT UP.
-#      This is the claim the user's machine failed.  `AddNetInterface zeth4`
-#      on a drawer sorted aeth0, beth1, meth2, neth3, zeth4 has to produce
-#      zeth4 online with an address, carrying traffic -- not ENOSPC because the
-#      start-up pass took every slot off the head of the list.
-#   4. FOUR ATTACH AT ONCE, AND THE FIFTH IS REFUSED, BY NAME.  Four slots are
-#      the cap since 2026-08-25 -- an A1200 with a PiStorm32 has two cards plus
-#      genet.device and wifipi.device -- and they are a real limit.  Once all
-#      four are held by interfaces somebody NAMED, the fifth is refused, and
-#      the refusal says which four are holding them and what to type.  Claim 3
-#      must not have been bought by making the cap negotiable.
-#   5. THE SLOT REALLY FREES.  RemoveNetInterface, and the interface that was
-#      refused a moment ago comes up.  Five add/remove cycles must not leak.
-#   6. A LIVE INTERFACE REPORTS ITS OWN NAME.  Another boot, two definitions:
-#      aeth0 names a card that is not in the machine, zeth3 names the one that
-#      is.  The machine comes up on zeth3's card with zeth3's lease, and it has
-#      to SAY zeth3 -- in netstat -i and in ShowNetStatus -- with aeth0 listed
-#      as defined and no "the file was changed after the network started" note
-#      about a file nobody changed.
-#
-#   And two guards on the mechanism claim 3 needs, numbered 4b and 4c because
-#   they are the other half of "the cap is still real".  A FAILED ADD MUST
-#   LEAVE THE MACHINE EXACTLY AS IT FOUND IT, and there are two ways to fail:
-#
-#     4b  the device never opens -- a mistyped DEVICE=.  A slot only changes
-#         hands once the newcomer's device has opened, so this costs a message
-#         and nothing else.
-#     4c  the device opens and the interface fails anyway -- the gateway in the
-#         file is on no interface's network, so the transaction is rolled back
-#         after a slot has already changed hands.  The interface that stood
-#         down has to come back.  Before this was fixed it did not, and the
-#         interface still up went offline with it, because the rolled-back
-#         interface's removal sends S2_OFFLINE to the card they share.
-#
-#   Getting either wrong turns a typo into an outage, which is a worse defect
-#   than the one being fixed.
-#
-# A BOOT THAT DOES NOT FINISH DECIDES NOTHING.  The guest is checked for
-# ToolsSmoke's own "done" line before a single claim is read, and a truncated
-# transcript exits 2 -- the code tools/ci.sh reads as "the rig refused it".
-# Without that check a guest that wedged under host load reported "beth1 was
-# taken down" and "aeth0 is gone" about interfaces it had never reached.
-#
-# HOW THE TWO DEFECTS LOOKED FROM THE OUTSIDE, so a red run can be read
-#
-#   Claim 3 failed with "NETCTRL_INTERFACE_ADD refused zeth3: ENOSPC (28)" on
-#   a machine where nothing else was online, because ami_ns_open_devices()
-#   claimed both NX_IP slots walking the description list from the head.  The
-#   list is sorted, so the alphabet decided which card the machine could use.
-#
-#   Claim 6 failed silently, which is worse: the machine worked, and reported
-#   the working interface under the failed interface's name, because the tools
-#   matched live NX slot N to description index N and the compaction that moves
-#   a surviving description down had already broken that.
-#
-# WHY THE STAGING LOOKS ODD
-#
-#   Every definition names a2065.device unit 0, because there is one emulated
-#   card and the point is to run out of SLOTS rather than out of cards.  The
-#   static ones sit on subnets nothing uses, so they cost no DHCP and attach
-#   immediately; the DHCP one is last in the alphabet, so the definition that
-#   has to prove it reaches the network is the one at the end of the drawer.
-#   That is also why -N refuses any board but the a2065.
-#
-# COST: four boots, about four minutes.  SLIRP is enough -- the gateway answers
-# ICMP and hands out a lease, and nothing here counts bytes off a third
-# machine.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -109,19 +24,12 @@ while getopts "b:t:N:r:" opt; do
     esac
 done
 
-# Every interface file this arm stages names a2065.device, because the point
-# is to run out of SLOTS rather than out of cards.  On any other board none of
-# them opens, nothing comes up, and every claim below reads the absence as a
-# defect -- so the board is refused here rather than proved wrong three boots
-# later.
 if [ "$BOARD" != a2065 ]; then
     echo "run-ifslots.sh stages a2065.device in every interface file, so\
  -N $BOARD would bring nothing up." >&2
     echo "There is nothing board-specific to prove here: run it on a2065." >&2
     exit 2
 fi
-
-# ------------------------------------------------------------------ rig ----
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -160,22 +68,8 @@ claim() { # n verdict text
     printf 'claim %s %-4s %s\n' "$1" "$2" "$3" >> "$CLAIMS"
 }
 
-# A BOOT THAT DID NOT FINISH IS NOT A CLAIM THAT IS FALSE, and telling them
-# apart is the whole of this function.  A guest that hung part way through the
-# command list leaves a transcript with real lines in it, and every assertion
-# below then reads the answers that are missing as answers that are wrong: the
-# arm reported "beth1 was taken down for zbad2" and "aeth0 is gone" for a run
-# in which neither interface had been touched, because the machine never
-# reached netstat -i.  That is an accusation against the code, made by the
-# rig, and it cost a session.
 rig() { echo "  RIG  $*"; RIG=$((RIG + 1)); }
 
-# ------------------------------------------------------------- the boot ----
-#
-# `report` is what ToolsSmoke wrote: one "===== <command> =====" banner per
-# line of commands.txt, then that command's output.  Returns 1 when the guest
-# wrote nothing at all, which is a rig failure rather than a claim failing and
-# is reported as one.
 boot() { # tag stagedir  -> sets REPORT
     local tag="$1" stage="$2" rc
 
@@ -197,9 +91,6 @@ boot() { # tag stagedir  -> sets REPORT
         return 2
     fi
 
-    # ToolsSmoke writes this line last, whatever the commands did.  Without it
-    # the machine stopped part way and the rest of this file would be asking
-    # questions of a transcript that does not contain the answers.
     if ! tr -d '\r' < "$REPORT" | grep -q '^===== done'; then
         echo
         echo "!! the guest did not finish (amiberry-run rc=$rc).  The last of"
@@ -221,10 +112,6 @@ boot() { # tag stagedir  -> sets REPORT
     return 0
 }
 
-# The Nth occurrence of one command's output, without its banner.  Banners are
-# the only structure in the transcript, so every assertion below is scoped to
-# one command rather than grepping the lot -- a later AddNetInterface prints
-# names that would satisfy an earlier clause otherwise.
 block() { # command n
     tr -d '\r' < "$REPORT" |
     awk -v want="$1" -v n="${2:-1}" '
@@ -236,10 +123,6 @@ block() { # command n
         on { print }'
 }
 
-# ===================================================================== A ====
-#
-# FOUR DEFINITIONS, AND THE ONE AT THE END OF THE ALPHABET IS THE ONE ASKED
-# FOR.  Claims 1 to 5.
 round_named() {
     local stage="$ROOT/build/ifslots-stage-named"
     local first third many second_meth n i rc
@@ -254,12 +137,6 @@ round_named() {
     cp "$BSD" "$stage/libs/bsdsocket.library"
     cp "$A2065" "$stage/devs/a2065.device"
 
-    # Sorted, these are aeth0, beth1, meth2, neth3, zeth4 -- ONE MORE THAN
-    # THERE ARE SLOTS, which is what makes the drawer describe more interfaces
-    # than the machine can attach whatever the cap is.  The first four are
-    # static on subnets nothing uses: they attach without asking anyone for
-    # anything, which is what makes them able to hold a slot.  zeth4 is the
-    # DHCP one and is therefore the definition that has to reach the network.
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.77.5\nNETMASK=255.255.255.0\n' \
         > "$stage/devs/NetInterfaces/aeth0"
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.78.5\nNETMASK=255.255.255.0\n' \
@@ -272,24 +149,16 @@ round_named() {
         > "$stage/devs/NetInterfaces/zeth4"
 
     {
-        # Asked of a freshly booted machine, which is when a user asks it.
         echo "SYS:ShowNetStatus INTERFACES"
         echo "SYS:CheckNetConfig"
-        # CLAIM 3.
         echo "SYS:AddNetInterface zeth4"
         echo "SYS:netstat -i"
         echo "SYS:ping 10.0.2.2 -c 2 -t 20"
         echo "SYS:netstat -h"
-        # Naming an interface that is already up is what makes it one somebody
-        # asked for, which is what makes claim 4 a refusal rather than another
-        # slot changing hands.  Three names here plus zeth4 is all four slots
-        # spoken for.
         echo "SYS:AddNetInterface aeth0"
         echo "SYS:AddNetInterface beth1"
         echo "SYS:AddNetInterface meth2"
-        # CLAIM 4: the fifth simultaneous attach.
         echo "SYS:AddNetInterface neth3"
-        # CLAIM 5.
         echo "SYS:RemoveNetInterface aeth0"
         echo "SYS:AddNetInterface neth3"
         echo "SYS:RemoveNetInterface neth3"
@@ -308,7 +177,6 @@ round_named() {
         return 2
     fi
 
-    # ---- CLAIM 1: it booted and ran the whole list ----------------------
     local wanted ran
     wanted=$(grep -c . "$stage/commands.txt")
     ran=$(tr -d '\r' < "$REPORT" | grep -c '^===== ')
@@ -320,7 +188,6 @@ round_named() {
         claim 1 FAIL "boots with 5 definitions ($ran/$wanted commands)"
     fi
 
-    # ---- CLAIM 2: every definition is listed, and listed as defined -----
     first=$(block "SYS:ShowNetStatus INTERFACES" 1 |
             sed -n '/^Interfaces$/,/^$/p' |
             grep -vE '^(Interfaces|Name[[:space:]]+State)')
@@ -344,14 +211,12 @@ round_named() {
         claim 2 FAIL "ShowNetStatus listed $listed of 5 definitions"
     fi
 
-    # CheckNetConfig must not call a full drawer a fault.
     if block "SYS:CheckNetConfig" 1 | grep -qi "drawer holds"; then
         fail "CheckNetConfig still reports the drawer size as a fault"
     else
         pass "CheckNetConfig does not call five interface files a fault"
     fi
 
-    # ---- CLAIM 3: the definition that is not first comes up -------------
     local ok3=1
     if block "SYS:AddNetInterface zeth4" 1 | grep -qiE "ENOSPC|cannot come up"
     then
@@ -383,12 +248,6 @@ round_named() {
     [ "$ok3" = 1 ] && claim 3 PASS "a definition that is not first can be brought up" \
                    || claim 3 FAIL "a definition that is not first can be brought up"
 
-    # ---- CLAIM 4: FOUR AT ONCE, AND THE FIFTH REFUSED BY NAME ----------
-    #
-    # The cap moved from two to four and this is what says four is real in
-    # both directions: the four that are up are up together and carrying
-    # their own addresses, and the fifth attach is refused with all four
-    # holders named in it.
     local ok4=1 named=0 up4=0
     many=$(block "SYS:netstat -i" 1)
     for n in aeth0 beth1 meth2 zeth4; do
@@ -440,7 +299,6 @@ round_named() {
     [ "$ok4" = 1 ] && claim 4 PASS "four attach at once and the fifth is refused by name" \
                    || claim 4 FAIL "four attach at once and the fifth is refused by name"
 
-    # ---- CLAIM 5: the slot frees, and five cycles do not leak -----------
     local ok5=1
     second_meth=$(block "SYS:AddNetInterface neth3" 2)
     if printf '%s\n' "$second_meth" | grep -qi "slots are in use"; then
@@ -475,9 +333,6 @@ round_named() {
     return 0
 }
 
-# ==================================================================== A2 ====
-#
-# A MISTYPED DRIVER NAME MUST COST A MESSAGE AND NOTHING ELSE.  Claim 4b.
 round_typo() {
     local stage="$ROOT/build/ifslots-stage-typo"
     local ok=1 refusal ifaces rc
@@ -525,9 +380,6 @@ round_typo() {
         ok=0
     fi
 
-    # THE POINT OF THE ROUND.  aeth0 was named and cannot yield; the other
-    # three were not, and one of them is the slot a yield would have taken.
-    # All four have to still be here.
     ifaces=$(block "SYS:netstat -i" 1)
     for n in beth1 ceth2 deth3; do
         if printf '%s\n' "$ifaces" | grep -qE "^${n}[[:space:]]"; then
@@ -557,32 +409,6 @@ round_typo() {
     return 0
 }
 
-# =================================================================== A3 ====
-#
-# AND THE OTHER HALF OF IT: AN ADD THAT FAILS AFTER THE DEVICE OPENED.
-# Claims 4c and 4d, one boot.
-#
-# Opening the device before any slot changes hands is only half a guarantee.
-# An interface whose device opens perfectly can still fail afterwards, and by
-# then a slot has already changed hands.  The failure staged here is the one a
-# user reaches by copying an interface file and forgetting to change the
-# address: NetX Duo refuses to attach a second interface carrying an IPv4
-# address the machine already has (NX_DUPLICATED_ENTRY,
-# nx_ip_interface_attach.c:110), which is after the device has opened and
-# after the slot has been taken.
-#
-#   4c  the interface that stood down comes back.  Before the fix it was left
-#       `defined`, and the interfaces still attached went `offline` with it,
-#       because removing the rolled-back interface sends S2_OFFLINE to the card
-#       they all share.  One duplicated ADDRESS line cost the machine its
-#       network.
-#
-#   4d  and the failure that is NOT fatal stays not fatal: a GATEWAY that is on
-#       no interface's network is refused by nx_ip_gateway_address_set(), and
-#       the interface comes up anyway -- which is what start-up has always
-#       done, and what taking the interface down instead disagreed with.  The
-#       command says so in one line rather than leaving a machine with an
-#       address and no way off its own subnet.
 round_latefail() {
     local stage="$ROOT/build/ifslots-stage-latefail"
     local ok=1 ok4d=1 refusal ifaces table rc n
@@ -606,27 +432,19 @@ round_latefail() {
         > "$stage/devs/NetInterfaces/ceth2"
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.80.5\nNETMASK=255.255.255.0\n' \
         > "$stage/devs/NetInterfaces/deth3"
-    # The copied file: aeth0's address, one card, a device that opens.
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.77.5\nNETMASK=255.255.255.0\n' \
         > "$stage/devs/NetInterfaces/ydup4"
-    # And the one that must NOT be fatal: its own subnet, a next hop on
-    # nobody's.
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=192.168.81.5\nNETMASK=255.255.255.0\nGATEWAY=10.55.55.1\n' \
         > "$stage/devs/NetInterfaces/zgw5"
 
     {
         echo "SYS:AddNetInterface aeth0"
         echo "SYS:netstat -i"
-        # CLAIM 4c: fails after the slot has changed hands.
         echo "SYS:AddNetInterface ydup4"
         echo "SYS:netstat -i"
         echo "SYS:ShowNetStatus INTERFACES"
-        # CLAIM 4d: comes up, and says what it did not get.
         echo "SYS:AddNetInterface zgw5"
         echo "SYS:netstat -i"
-        # Not asserted on, printed: the yield and the restore are both events,
-        # and a red run here is unreadable without them.  A shipped build keeps
-        # the ring, which is the whole reason it exists.
         echo "SYS:ShowNetStatus EVENTS"
     } > "$stage/commands.txt"
 
@@ -645,8 +463,6 @@ round_latefail() {
         ok=0
     fi
 
-    # The machine, afterwards.  Every interface that was up before the failed
-    # add is up after it, carrying the address it had.
     ifaces=$(block "SYS:netstat -i" 2)
     for n in aeth0 beth1 ceth2 deth3; do
         if printf '%s\n' "$ifaces" | grep -qE "^${n}[[:space:]]"; then
@@ -666,18 +482,6 @@ round_latefail() {
         ok=0
     fi
 
-    # WHAT IS NOT ASSERTED HERE, AND WHY.  Every interface in this staging is
-    # the SAME a2065.device unit 0, because the emulator has one card -- and
-    # S2_OFFLINE is the DEVICE's command, not the interface's.  So removing the
-    # rolled-back interface marks the link down on the others too, and they
-    # read `offline` afterwards; the restored one comes back up because its
-    # re-attach sends S2_ONLINE.  That is a real defect and it is filed
-    # (docs/BACKLOG.md), but it is not this one: it needs per-device
-    # coordination, because S2_OFFLINE is also the only thing that returns a
-    # queued CMD_READ on a driver that ignores AbortIO(), which is what
-    # Commodore's a2065.device 2.16 does.  A machine with four CARDS never
-    # meets it, and it is why the line above asks about the address rather than
-    # the link.
     if printf '%s\n' "$ifaces" | grep -qE "^aeth0[[:space:]].*[[:space:]]down" &&
        [ "${AMINETXDUO_IFSLOTS_QUIET:-}" != 1 ]; then
         echo "  note aeth0's link is down: one card, four interfaces, and"
@@ -690,8 +494,6 @@ round_latefail() {
         pass "and ydup4 is not a live interface"
     fi
 
-    # ShowNetStatus is where a stood-down interface reads as `defined`, which
-    # is the shape the defect had.
     table=$(block "SYS:ShowNetStatus INTERFACES" 1 |
             sed -n '/^Interfaces$/,/^$/p' |
             grep -vE '^(Interfaces|Name[[:space:]]+State)')
@@ -709,7 +511,6 @@ round_latefail() {
     [ "$ok" = 1 ] && claim 4c PASS "an add that fails after its device opened puts the slot back" \
                   || claim 4c FAIL "an add that fails after its device opened puts the slot back"
 
-    # ---- CLAIM 4d: a refused route is not a refused interface -----------
     refusal=$(block "SYS:AddNetInterface zgw5" 1)
     ifaces=$(block "SYS:netstat -i" 3)
 
@@ -740,9 +541,6 @@ round_latefail() {
     return 0
 }
 
-# ===================================================================== B ====
-#
-# THE FIRST DEFINITION NAMES A CARD THAT IS NOT THERE.  Claim 6.
 round_identity() {
     local stage="$ROOT/build/ifslots-stage-identity"
     local ok6=1 ifaces table detail n
@@ -768,10 +566,6 @@ round_identity() {
         echo "SYS:netstat -i"
         echo "SYS:ShowNetStatus INTERFACES"
         echo "SYS:ShowNetStatus zeth3"
-        # The block for the definition that did NOT come up, which is where the
-        # bogus note was: paired with NX slot 0 by subscript, aeth0's block
-        # printed the live a2065 beside aeth0's nosuchcard.device and called
-        # the difference a file somebody had edited.
         echo "SYS:ShowNetStatus aeth0"
     } > "$stage/commands.txt"
 
@@ -783,7 +577,6 @@ round_identity() {
 
     ifaces=$(block "SYS:netstat -i" 1)
 
-    # The live interface is zeth3's card with zeth3's lease.  It has to say so.
     if printf '%s\n' "$ifaces" | grep -qE "^zeth3[[:space:]]"; then
         pass "netstat -i calls the live interface zeth3"
     else
@@ -804,7 +597,6 @@ round_identity() {
         ok6=0
     fi
 
-    # ShowNetStatus's table: zeth3 attached, aeth0 merely defined.
     table=$(block "SYS:ShowNetStatus INTERFACES" 1 |
             sed -n '/^Interfaces$/,/^$/p' |
             grep -vE '^(Interfaces|Name[[:space:]]+State)')
@@ -822,7 +614,6 @@ round_identity() {
         ok6=0
     fi
 
-    # And the detail block, which is where the bogus note was.
     detail=$(block "SYS:ShowNetStatus zeth3" 1)
     if printf '%s\n' "$detail" | grep -q "a2065.device"; then
         pass "ShowNetStatus zeth3 names the driver it is really running on"
@@ -831,7 +622,6 @@ round_identity() {
         ok6=0
     fi
 
-    # And aeth0's block must not claim the card aeth0 has not got.
     if block "SYS:ShowNetStatus aeth0" 1 | grep -q "a2065.device"; then
         fail "ShowNetStatus aeth0 shows it running on a2065.device, which is\
  zeth3's card"
@@ -853,8 +643,6 @@ round_identity() {
     return 0
 }
 
-# ------------------------------------------------------------------------ --
-
 for r in $ROUNDS; do
     case "$r" in
         named)    round_named ;;
@@ -872,9 +660,6 @@ echo "======================================================================"
 echo "$TOTAL checks, $BAD failures, $RIG round(s) the rig did not finish"
 
 if [ "$RIG" != 0 ]; then
-    # Exit 2, which tools/ci.sh reads as "the rig refused it": a boot that
-    # never finished decides nothing, and reporting it as a claim that is
-    # false is how a wedged emulator gets read as a defect in the stack.
     echo "RIG: $RIG round(s) did not finish.  No verdict -- re-run them quiet."
     exit 2
 fi

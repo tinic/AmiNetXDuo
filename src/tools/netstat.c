@@ -1,27 +1,7 @@
 /*
- * netstat, interfaces, routes and connections.
- *
- *     netstat INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S
- *
- * Every switch carries its Unix spelling as a ReadArgs alias, so "netstat -r"
- * and "netstat ROUTES" do the same thing and "netstat ?" shows both. With no
- * switches it prints everything except -h.
- *
- * -s is per-protocol statistics followed by the SANA-II per-interface counters.
- * No other switch shows the driver's own numbers.
- *
- * -h is the memory and scheduler blocks on their own, and takes a different
- * route to them: the published mark (aminetxduo/health.h) rather than a library
- * call, so it opens nothing, allocates nothing and cannot block. It is
- * therefore usable on a machine halfway into the fault it describes, and it is
- * the one switch that works without a stack answering for itself. It is the
- * command to ask for in a fault report, for a freeze and for a suspected leak
- * alike, docs/FREEZE-DIAGNOSTIC.md.
- *
- * This command covers the same ground as ShowNetStatus: that one has named
- * categories and a diagnosis, this one has switches and columns. Neither reads
- * the stack directly, both take the same two snapshots from tool_nx.c,
- * ToolSnapshot and ToolStats, so they cannot disagree.
+ * netstat, interfaces, routes and connections. Every switch carries its Unix
+ * spelling as a ReadArgs alias. -h reads the published mark (aminetxduo/health.h)
+ * rather than the library, so it opens nothing, allocates nothing, cannot block.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -50,10 +30,8 @@ enum
 /* Static: an AmiConfig is far too big for a Shell command's 4 KB stack. */
 static AmiConfig netstat_config;
 
-/*
- * The IPv6 addresses of one interface, under its line.  Nothing is printed on
- * a machine that has none, so an IPv4-only stack looks exactly as it did.
- */
+/* The IPv6 addresses of one interface, under its line. Nothing is printed on a
+   machine that has none. */
 static VOID show_addresses6(const ToolSnapshot *snap, UWORD nx_index)
 {
     UWORD i;
@@ -79,25 +57,9 @@ static VOID show_addresses6(const ToolSnapshot *snap, UWORD nx_index)
 }
 
 /*
- * THE DEFINITIONS THAT ARE NOT RUNNING, in one line under the table.
- *
- * The table above is the live stack: one row per attached interface. A machine
+ * The definitions that are not running, in one line under the table: a machine
  * may describe more interfaces in DEVS:NetInterfaces than the stack has slots
- * for -- that is allowed and normal, aminetxduo/config.h -- and until now the
- * ones that did not attach appeared in no column of this command at all. A
- * user with four files and two attached read a two-row table and had nothing
- * to tell them the other two exist, let alone why they are not up.
- *
- * ShowNetStatus already answers this properly: every definition gets a row,
- * and the State column says `defined' for one that is described and not
- * attached. This is the same fact in the shape netstat has, which is a line
- * rather than a table: the names, and the command that brings one up. Not a
- * row per definition, because the columns here are Mtu, Address and packet
- * counts and a definition has none of them, and a row of dashes says less
- * than the names on one line.
- *
- * Matched BY IDENTITY, tool_iface_live(), for the reason that function
- * carries: the description at subscript i is not the interface in NX slot i.
+ * for. Matched by identity, tool_iface_live(), never by subscript.
  */
 static VOID show_defined_only(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
@@ -202,18 +164,9 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 }
 
 /*
- * What the stack owns, and the most it has ever owned.
- *
- * This is the half of -h that answers a suspected leak. Each of the three
- * counts is a different fault with a different fix, so they are not one
- * number: allocations are the general heap, sockets are the structure
- * docs/RESEARCH.md 37.5 lost 776 of, and packets are a fixed pool that starves
- * rather than grows. The peak beside each is what makes a single reading
- * usable, because a count on its own cannot say whether it is climbing.
- *
- * AvailMem is read here rather than carried in ToolStats so both routes into
- * this function report the same machine at the same moment. It is the number a
- * user is already watching, and it is only interpretable next to ours.
+ * What the stack owns, and the most it has ever owned: the half of -h that
+ * answers a suspected leak. AvailMem is read here rather than carried in
+ * ToolStats, so both routes into this function report the same moment.
  */
 static VOID show_memory(const ToolStats *st)
 {
@@ -244,25 +197,9 @@ static VOID show_memory(const ToolStats *st)
 
 /*
  * A worst stall in the hundreds of milliseconds beside a service cost in the
- * hundreds of microseconds says the tick task was not dispatched, rather than
- * that it was slow. Anything but zero on the last line is a defect.
- *
- * The stall is the longest gap between two wakeups, whether or not it clipped,
- * so it is non-zero on a healthy machine and is what the skew peak above it
- * has to be read against: a peak worth no more than that stall at 20 ms a tick
- * is one late wakeup, and a larger one accumulated across several.
- *
- * The skew line is the timers, not the clock: tx_time_get() comes from the
- * E-Clock, so a tick the wheel never got made timers late and did not lose any
- * time. The peak counts lateness that was subsequently made good, so it moves
- * on a machine where nothing was ever clipped. Its floor is one wakeup's worth
- * of ticks, 2 on the VBlank source, because a wakeup is sampled owing every
- * period since the last one. Deferred ticks reach the wheel late. Lost ones
- * never reach it.
- *
- * Memory first, then the scheduler. Both routes print through this one
- * function, -h off the published mark and -s -h through the library, so the
- * two cannot disagree about what they found.
+ * hundreds of microseconds says the tick task was not dispatched rather than
+ * that it was slow. The skew line is the timers, not the clock: tx_time_get()
+ * comes from the E-Clock. Anything but zero on the last line is a defect.
  */
 static VOID show_health(const ToolStats *st)
 {
@@ -294,10 +231,8 @@ static VOID show_health(const ToolStats *st)
 
 /*
  * One leg of the receive step budget: mean and max in microseconds, and the
- * histogram as the three fullest power-of-two buckets, which is the whole
- * story when a distribution is bimodal and noise when it is not.  Ticks
- * convert at ~709/ms, so `ticks * 1000 / (rate / 1000)` stays inside 32 bits
- * for every delta the library's ceiling admits.
+ * three fullest power-of-two buckets. Ticks convert at ~709/ms, so
+ * `ticks * 1000 / (rate / 1000)` stays inside 32 bits for every legal delta.
  */
 static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
                             ULONG rate)
@@ -344,11 +279,8 @@ static VOID show_budget_leg(const char *name, const NetStatusBudgetLeg *leg,
 }
 
 /*
- * The baton holder ring: every hold of the ThreadX baton longer than the
- * library's ~50 ms threshold, most recent NETSTATUS_HOLD_RING of them, with
- * the holder's thread name (copied by the library at record time), the hold
- * duration, and where the hold ended.  Printed longest first, because the
- * question the ring answers is "who is the machine waiting on".
+ * The baton holder ring: every hold longer than the library's ~50 ms threshold,
+ * most recent NETSTATUS_HOLD_RING of them, longest first.
  */
 static VOID show_budget_holds(const NetStatusRxBudget *b)
 {
@@ -408,9 +340,8 @@ static VOID show_budget_holds(const NetStatusRxBudget *b)
 
 /*
  * The receive step budget, when the library was built to keep one
- * (AMINETXDUO_RXPROBE).  Any library answers the selector; only an
- * instrumented one has counts, and the difference is said out loud rather
- * than shown as a wall of zeros.
+ * (AMINETXDUO_RXPROBE). Any library answers the selector; only an instrumented
+ * one has counts.
  */
 static VOID show_budget(VOID)
 {
@@ -460,14 +391,13 @@ static VOID show_budget(VOID)
     show_budget_leg("post,   BeginIO to return   ", &b->nrb_Post,
                     b->nrb_EClockRate);
 
-    /* Coverage of the direct-completion fork, not a duration: how many
-       recv() requests the IP thread completed in place against how many
-       packets the classic blocking dequeue fetched. */
+    /* Coverage of the direct-completion fork, not a duration: recv() requests
+       completed in place against packets the blocking dequeue fetched. */
     tool_printf("\tdirect: %lu completed on the IP thread, %lu classic dequeues\n",
                 b->nrb_RxDirect, b->nrb_RxFallback);
 
-    /* The green realm's scheduling census: all zero from a baton build, so
-       the lines only appear when there is a realm to report on. */
+    /* All zero from a baton build, so the lines only appear when there is a
+       realm to report on. */
     if (b->nrb_GreenSwitches != 0 || b->nrb_GreenIdleWaits != 0 ||
         b->nrb_GreenWaitSlow != 0)
     {
@@ -487,10 +417,8 @@ static VOID show_budget(VOID)
     show_budget_holds(b);
 }
 
-/*
- * The per-protocol half of -s: the same ToolStats ShowNetStatus prints under
- * IP, ICMP, TCP and UDP, laid out the way netstat lays things out.
- */
+/* The per-protocol half of -s: the same ToolStats ShowNetStatus prints, laid
+   out the way netstat lays things out. */
 static VOID show_protocol_stats(const ToolStats *st)
 {
     tool_printf("\nip:\n");
@@ -562,15 +490,12 @@ static VOID show_protocol_stats(const ToolStats *st)
         tool_printf("\tnot enabled\n");
     }
 
-    /* The packet pool is reported by show_memory(), below, where the other two
-       things that can run out are. */
+    /* The packet pool is reported by show_memory(), below. */
     show_health(st);
 }
 
-/*
- * The driver half: the SANA-II counters, which say whether a card is seeing
- * traffic at all.
- */
+/* The driver half: the SANA-II counters, which say whether a card is seeing
+   traffic at all. */
 static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
     UWORD i;
@@ -613,15 +538,13 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
                         st->rx_copy_hook, st->rx_copy_summed);
 
         /* Of those fills, the frames the device drained straight into the
-           packet.  Both fill paths fuse a checksum, so only this line says
-           whether the single-copy claim is engaging on this card. */
+           packet. Only this line says whether the single-copy claim engages. */
         if (st->rx_copy_hook != 0)
             tool_printf("  direct fills      %10lu    (claimed at the device)\n",
                         st->rx_direct_fill);
 
         /* Only when there are any: the four causes behind receive errors are
-           nothing alike, and the total on its own does not say which one
-           fired. */
+           nothing alike, and the total does not say which one fired. */
         if (st->rx_errors != 0)
             tool_printf("  of the receive errors: %lu checksum, %lu runt, "
                         "%lu length, %lu device\n",
@@ -643,10 +566,9 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
 }
 
 /*
- * The routing table the stack has, not one derived from the interface list.
+ * The routing table the stack has, not one derived from the interface list:
  * NETSTATUS_ROUTES answers with the connected prefixes, the static table and
- * the default gateway together, in match order, so a route added with
- * AddNetRoute appears here.
+ * the default gateway together, in match order.
  */
 static VOID show_routes(const AmiConfig *cfg)
 {
@@ -666,11 +588,9 @@ static VOID show_routes(const AmiConfig *cfg)
         tool_print_routes6(&routes6, cfg);
 
     /*
-     * The destination cache under the lists it is resolved from, because it
-     * is the routing decision this machine actually made and it is the first
-     * table _nx_ipv6_packet_send() reads. Here as well as in ShowNetStatus,
-     * for the reason routes6 is: both commands print the live routing surface,
-     * and through the same function, so they cannot disagree.
+     * The destination cache under the lists it is resolved from: it is the
+     * first table _nx_ipv6_packet_send() reads. Printed through the same
+     * function as ShowNetStatus, so the two cannot disagree.
      */
     if (tool_dest6(&dest6) == 0)
         tool_print_dest6(&dest6, cfg);
@@ -678,12 +598,8 @@ static VOID show_routes(const AmiConfig *cfg)
 
 /*
  * Ends the connection line, and says so if the connection is going nowhere.
- *
  * Gated on a retransmission having already fired rather than on the stall
- * clock, because that clock is running on every healthy connection with a
- * segment in flight. One retransmit with no acknowledgement in between is the
- * first moment there is anything to report. A machine with nothing wrong
- * prints exactly what it printed before.
+ * clock, which runs on every healthy connection with a segment in flight.
  */
 static VOID show_stall(const ToolSockInfo *s)
 {
@@ -799,8 +715,7 @@ int main(int argc, char **argv)
     /*
      * -h on its own reads the mark and stops. Nothing below this runs: the
      * snapshot would open bsdsocket.library and take the stack's own locks,
-     * which is exactly what a command asking whether the stack is stuck must
-     * not do.
+     * which a command asking whether the stack is stuck must not do.
      */
     if (want_health && !want_if && !want_routes && !want_conn && !want_stats)
     {
@@ -821,10 +736,8 @@ int main(int argc, char **argv)
 
     /*
      * Straight to the running library. Do not add a tool_require_stack() call:
-     * it asks netstack_get(), which in a command is src/tools/netstack_weak.c's
-     * stub and is always NULL, which is what made this command inert in v0.2.0.
-     * tool_snapshot() opens bsdsocket.library, where the stack really is, and
-     * explains itself when it cannot.
+     * it asks netstack_get(), which in a command is netstack_weak.c's stub and
+     * is always NULL. tool_snapshot() opens bsdsocket.library instead.
      */
     if (tool_snapshot(&snap, want_conn) != 0)
     {
@@ -841,8 +754,7 @@ int main(int argc, char **argv)
     /*
      * The interface names come off the disk rather than out of the stack:
      * netstack_config() is another weak stub, and DEVS:NetInterfaces is the
-     * same file the running stack read. The live snapshot carries the name too
-     * (ToolIfInfo.nx_name) and the two agree.
+     * same file the running stack read.
      */
     tool_config_watch();
     cfg = (ami_config_load(&netstat_config) == AMI_CFG_OK) ? &netstat_config

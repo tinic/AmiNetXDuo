@@ -1,40 +1,5 @@
 #!/usr/bin/env python3
-#
 # httpd-drill, the WebDAV assertions that need a socket rather than a client.
-#
-#   tests/tools/httpd-drill.py [--terminal] ADDRESS [PORT]
-#
-# WHY THIS IS NOT curl
-#
-#   Every check here is about what the server does with the SOCKET, and curl
-#   opens a fresh one per request and hides the framing.  The one that matters
-#   most cannot be written any other way: a refused request whose body holds
-#   another request's text, and then the question of whether that text was
-#   executed.  curl would send the body and read the refusal and report
-#   success either way.
-#
-#   So the requests are written out as bytes and the answers read back off the
-#   same connection.  The server is whatever is listening at ADDRESS, the
-#   emulated Amiga that tests/tools/run-httpd.sh puts on the wire.
-#
-# WHAT IT NEEDS OF THE SERVER
-#
-#   A writable document root.  Everything it makes it removes, under a drawer
-#   of its own, so it can be run against a share somebody is using.
-#
-#   --terminal adds the WebSocket half, which needs a server started with
-#   TERMINAL.  It is a flag rather than a probe because "the terminal is off"
-#   and "the terminal is broken" look the same from out here, and a suite that
-#   skips itself when the thing it tests is missing is a suite that passes on a
-#   server with nothing in it.  tests/tools/run-wsterm.sh passes it.
-#
-#   --gz-url=<path> says where the -T page's compressed sibling can be reached
-#   in the SERVED drawer, e.g. /shell.html.gz.  With it, that file is moved
-#   out of the way over WebDAV and put back, which is how the state of a -T
-#   page nobody compressed is produced from out here.  It needs a harness that
-#   put the page inside the document root; tests/tools/run-wsterm.sh does.
-#   Without it that one check is skipped and says so.
-#
 # SPDX-License-Identifier: MIT
 
 import base64
@@ -49,19 +14,11 @@ import time
 argv = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_TERMINAL = "--terminal" in sys.argv or "--ws-only" in sys.argv
 
-# Where the -T page's .gz can be reached in the served drawer, for the one
-# check that has to change what is on the guest's disk.  "" when nobody said.
 GZ_URL = ""
 for _a in sys.argv[1:]:
     if _a.startswith("--gz-url="):
         GZ_URL = _a[len("--gz-url="):]
 
-# --ws-only skips the WebDAV half and its setup.  It exists so the WebSocket
-# assertions can be pointed at something that is NOT this server: every one of
-# them was watched to fail against a stand-in that is deliberately wrong in one
-# named way, and that stand-in answers no PROPFIND, so setup() would exit(2)
-# before a single WebSocket check ran.  run-wsterm.sh does not use it -- it
-# passes --terminal, which runs both halves.
 WS_ONLY = "--ws-only" in sys.argv
 
 ADDR = argv[0] if len(argv) > 0 else "127.0.0.1"
@@ -70,10 +27,6 @@ PORT = int(argv[1]) if len(argv) > 1 else 8080
 BASE = "/httpd-drill"
 TERM = "/shell"
 
-# How long one exchange with the guest may take.  Measured rather than
-# guessed: see tests/tools/run-wsterm.sh for the figures a 68020 produced and
-# the multiple applied to them.  A run that burns one of these has found a
-# defect and says which exchange it was; raising it is never the fix.
 WS_WAIT = float(os.environ.get("AMINETXDUO_WS_WAIT", "20"))
 
 checks = 0
@@ -127,7 +80,6 @@ class Conn:
 
         length = headers.get("content-length")
         if headers.get("transfer-encoding", "").lower() == "chunked":
-            # Read to the terminating zero chunk; the bodies here are small.
             while b"0\r\n\r\n" not in rest:
                 self.buf = rest
                 if not self.fill():
@@ -200,7 +152,6 @@ def req(method, path, headers=None, body=b"", keepalive=True):
     return head + tail
 
 
-# --------------------------------------------------------------- the ground --
 
 def setup():
     once(req("DELETE", BASE))
@@ -218,7 +169,6 @@ def teardown():
     once(req("DELETE", BASE))
 
 
-# ------------------------------------------------------- the refused bodies --
 
 def test_desync():
     """A refused request's body must not be read as the next request.
@@ -245,8 +195,6 @@ def test_desync():
                   "%s with a body is refused, not %s (%s)"
                   % (method, a[0] if a else "?", why))
 
-        # Whatever the server does with the connection, the DELETE in the
-        # body must not have been answered on it.
         second = c.answer()
         check(second is None,
               "%s: nothing after the refusal on that connection (got %s)"
@@ -262,8 +210,6 @@ def test_desync():
             once(req("PUT", BASE + "/keepme.txt",
                      body="this file must survive\n"))
 
-    # An address the server will not open is the third refusal that used to
-    # keep the connection: a colon is an AmigaOS device reference.
     c = Conn()
     head, tail = parts("PUT", "/RAM:drill", body=poison)
     c.send(head)
@@ -297,8 +243,6 @@ def test_refusal_keeps_the_connection():
         check(a[1].get("connection", "") == "keep-alive",
               "and says keep-alive")
 
-    # The body has to be gone from the socket, so this next request is read as
-    # a request and answered.
     c.send(req("HEAD", BASE + "/keepme.txt"))
     a = c.answer()
     check(a is not None and a[0] == 200,
@@ -324,7 +268,6 @@ def test_unframed_refusal_closes():
     c.close()
 
 
-# ------------------------------------------------------------------- etags --
 
 def test_etags():
     print("entity tags")
@@ -345,19 +288,16 @@ def test_etags():
         check(etag.encode("latin-1") in a[2],
               "and it is the same tag")
 
-    # The tag has to change when the bytes do.
     once(req("PUT", BASE + "/keepme.txt", body="this file must survive!!\n"))
     a = once(req("HEAD", BASE + "/keepme.txt"))
     check(a is not None and a[1].get("etag") != etag,
           "and it changes when the file does")
 
 
-# ---------------------------------------------------------------------- If --
 
 def test_if_header():
     print("If: is evaluated")
 
-    # A token nobody is holding.  Both of these answered 201 before.
     a = once(req("PUT", BASE + "/cond.txt",
                  {"If": "(<opaquelocktoken:deadbeef>)"}, body="no"))
     check(a is not None and a[0] == 412,
@@ -368,7 +308,6 @@ def test_if_header():
     check(a is not None and a[0] in (200, 201, 204),
           "Not, against a token nobody holds, goes through")
 
-    # An entity tag that is right, and one that is not.
     a = once(req("HEAD", BASE + "/cond.txt"))
     etag = a[1].get("etag", "") if a else ""
 
@@ -382,8 +321,6 @@ def test_if_header():
                      body="no"))
         check(a is not None and a[0] == 412, "somebody else's tag is 412")
 
-        # The PUT above moved the tag, so read it again rather than asserting
-        # about the one the file no longer has.
         a = once(req("HEAD", BASE + "/cond.txt"))
         etag = a[1].get("etag", "") if a else ""
 
@@ -391,7 +328,6 @@ def test_if_header():
                      {"If": "(Not [%s])" % etag}, body="no"))
         check(a is not None and a[0] == 412, "Not its own tag is 412")
 
-    # A held token, and Not against it.
     lock = once(req("LOCK", BASE + "/cond.txt", {"Timeout": "Second-60"},
                     body='<?xml version="1.0" encoding="utf-8"?>'
                          '<D:lockinfo xmlns:D="DAV:">'
@@ -419,7 +355,6 @@ def test_if_header():
     once(req("DELETE", BASE + "/cond.txt"))
 
 
-# ------------------------------------------------------------------- locks --
 
 def test_delete_destroys_locks():
     print("DELETE destroys the locks on what it removed")
@@ -445,8 +380,6 @@ def test_delete_destroys_locks():
     check(a is not None and a[0] in (204, 207),
           "DELETE with the token goes through")
 
-    # The name has to be usable again.  Before the fix this was 423 for the
-    # whole timeout, for everybody including the client that deleted it.
     a = once(req("PUT", BASE + "/gone.txt", body="new"))
     check(a is not None and a[0] in (200, 201, 204),
           "and the name is usable again, not %s" % (a[0] if a else "?"))
@@ -490,7 +423,6 @@ def test_lock_below_stops_delete():
     once(req("DELETE", BASE + "/tree"))
 
 
-# --------------------------------------------------------------- proppatch --
 
 def test_proppatch_atomic():
     print("PROPPATCH is all or none")
@@ -530,7 +462,6 @@ def test_proppatch_atomic():
     check(modified(before) == modified(after) and modified(before) != b"",
           "and the date did not move")
 
-    # On its own it still works, or PROPPATCH would be useless.
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<D:propertyupdate xmlns:D="DAV:">'
             '<D:set><D:prop>'
@@ -546,7 +477,6 @@ def test_proppatch_atomic():
     once(req("DELETE", BASE + "/props.txt"))
 
 
-# ------------------------------------------------------- overlapping moves --
 
 def test_overlapping_moves():
     """Two MOVEs in flight at once used to share one resolved destination.
@@ -629,7 +559,6 @@ def test_destination_contains_source():
     once(req("DELETE", root))
 
 
-# ------------------------------------------------------ names that collide --
 
 def test_name_truncation():
     """Two addresses that reach one file, which is what a filesystem storing
@@ -651,8 +580,6 @@ def test_name_truncation():
     made = once(req("PUT", a, body="this is A and must survive\n"))
 
     if made is not None and made[0] == 400:
-        # The volume truncates and the server refused to make a name it could
-        # not then serve.  Nothing was created, so nothing can be reached.
         for path, what in ((a, "the name that was asked for"),
                            (b, "the one that would collide with it")):
             got = once(req("GET", path))
@@ -670,7 +597,6 @@ def test_name_truncation():
         once(req("DELETE", a))
         return
 
-    # Two addresses, one file.  Every one of these used to act on A.
     check(got is not None and got[0] == 400,
           "GET of the colliding name is refused, not %s"
           % (got[0] if got else "?"))
@@ -689,7 +615,6 @@ def test_name_truncation():
     once(req("DELETE", a))
 
 
-# --------------------------------------------- oversized listing members --
 
 def test_listing_omission_yields():
     """An unrepresentable child does not turn enumeration into a busy loop.
@@ -734,14 +659,12 @@ def test_listing_omission_yields():
             once(req("DELETE", path))
 
 
-# ------------------------------------------------------- propfind bodies ---
 
 def test_propfind_body():
     print("PROPFIND answers the body it was given")
 
     once(req("PUT", BASE + "/pf.txt", body="body"))
 
-    # <propname/>: the names, and no values.
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<D:propfind xmlns:D="DAV:"><D:propname/></D:propfind>')
     a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0",
@@ -752,7 +675,6 @@ def test_propfind_body():
         check(b"<D:getcontentlength>4</D:getcontentlength>" not in a[2],
               "and does not carry its value")
 
-    # A named list: what was asked for, and nothing else.
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<D:propfind xmlns:D="DAV:"><D:prop>'
             '<D:getcontentlength/></D:prop></D:propfind>')
@@ -764,7 +686,6 @@ def test_propfind_body():
         check(b"getcontenttype" not in a[2],
               "and one that was not named is not")
 
-    # A property this server does not keep is 404, not silence.
     body = ('<?xml version="1.0" encoding="utf-8"?>'
             '<D:propfind xmlns:D="DAV:" xmlns:Z="urn:drill"><D:prop>'
             '<D:getcontentlength/><Z:nosuchprop/></D:prop></D:propfind>')
@@ -774,7 +695,6 @@ def test_propfind_body():
         check(b"404" in a[2], "an unknown named property draws a 404 propstat")
         check(b"nosuchprop" in a[2], "and the propstat names it")
 
-    # No body still means everything, which is what every client sends.
     a = once(req("PROPFIND", BASE + "/pf.txt", {"Depth": "0"}))
     if a is not None:
         check(b"getcontenttype" in a[2] and b"getcontentlength" in a[2],
@@ -803,7 +723,6 @@ def test_depth0_collection_lock():
             token = lock[2][i:j].decode("ascii", "replace").strip()
     check(token != "", "the collection lock hands out a token")
 
-    # Somebody without the token may not add a name to it.
     a = once(req("PUT", BASE + "/locked/intruder.txt", body="x"))
     check(a is not None and a[0] == 423,
           "a PUT into it without the token is 423")
@@ -812,11 +731,6 @@ def test_depth0_collection_lock():
     check(a is not None and a[0] == 423,
           "and so is a MKCOL inside it")
 
-    # The holder may.  The list is TAGGED with the collection: RFC 4918
-    # 10.4.1 evaluates an untagged list against the Request-URI, and the file
-    # being created is not what the token locks, so untagged is a 412 and
-    # correctly so.  This is the form a client that locked a drawer to add to
-    # it actually sends.
     if token:
         tag = "<http://%s:%d%s/locked/>" % (ADDR, PORT, BASE)
         a = once(req("PUT", BASE + "/locked/mine.txt",
@@ -829,7 +743,6 @@ def test_depth0_collection_lock():
                  {"If": "%s (<%s>)" % (tag, token)}))
         once(req("UNLOCK", BASE + "/locked", {"Lock-Token": "<%s>" % token}))
 
-    # And with the lock gone, anybody may again.
     a = once(req("PUT", BASE + "/locked/after.txt", body="x"))
     check(a is not None and a[0] in (201, 204),
           "with the lock released it is open again")
@@ -837,17 +750,9 @@ def test_depth0_collection_lock():
     once(req("DELETE", BASE + "/locked"))
 
 
-# ================================================================= WebSocket ==
-#
-# The terminal, at the level of bytes.  A library client would hide exactly the
-# things that have to be checked here -- the accept value, the mask, where a
-# fragment ends -- so the frames are built and read by hand.
 
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-# RFC 6455 1.3's own pair.  Written out rather than computed, so a server that
-# agreed with this file's arithmetic and not with the specification would still
-# be caught.
 RFC_KEY    = "dGhlIHNhbXBsZSBub25jZQ=="
 RFC_ACCEPT = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 
@@ -950,7 +855,6 @@ class WsConn(Conn):
             n = struct.unpack("!Q", self.buf[2:10])[0]
             at = 10
 
-        # A server frame is never masked, and that is itself an assertion.
         masked = (b1 & 0x80) != 0
         if masked:
             at += 4
@@ -998,7 +902,6 @@ def ws_wait_free(seconds=20.0):
         status = c.status
         c.close()
         if status == 101:
-            # Give it straight back; this was a probe.
             time.sleep(0.3)
             return time.time() - began
         time.sleep(0.5)
@@ -1018,13 +921,10 @@ def test_ws_handshake():
     check(c.headers.get("sec-websocket-accept") == RFC_ACCEPT,
           "and the accept RFC 6455 1.3 prints, %s (got %r)"
           % (RFC_ACCEPT, c.headers.get("sec-websocket-accept")))
-    # A 101 must not claim a body length: there is no body, there is a
-    # protocol.
     check("content-length" not in c.headers,
           "a 101 carries no Content-Length (got %r)"
           % c.headers.get("content-length"))
 
-    # And a second key, so the accept cannot be a constant.
     c.close()
     ws_wait_free()
 
@@ -1064,8 +964,6 @@ def test_ws_refusals():
         c.close()
         time.sleep(0.5)
 
-    # Whatever those did, the terminal must still be free: a refused upgrade
-    # that had already started a Shell would show up here as a 503.
     c = WsConn()
     check(c.status == 101,
           "the terminal is still free after the refusals (got %s)" % c.status)
@@ -1097,9 +995,6 @@ def test_ws_page():
               "and is HTML (got %r)" % a[1].get("content-type"))
         check(b"WebSocket" in a[2],
               "and is the terminal's page rather than something else")
-        # A client that said nothing about encodings gets bytes it can read.
-        # This is the half of the feature that has to keep working, and the
-        # half a compressed sibling could quietly break.
         check("content-encoding" not in a[1],
               "a request that did not ask for gzip gets no Content-Encoding "
               "(got %r)" % a[1].get("content-encoding"))
@@ -1162,20 +1057,16 @@ def test_term_gzip():
               "%d, %s" % (len(same), len(plain[2]),
                           "same bytes" if same == plain[2] else "DIFFERENT"))
 
-    # `q=0` is a refusal, not a preference, and a server that read it as one
-    # more way of saying gzip would send a body the client will not inflate.
     a = term_page({"Accept-Encoding": "gzip;q=0"})
     check(a is not None and "content-encoding" not in a[1],
           "gzip;q=0 is a refusal and gets the plain page (got %r)"
           % (a[1].get("content-encoding") if a else "nothing"))
 
-    # The shape a browser really sends.
     a = term_page({"Accept-Encoding": "deflate, gzip;q=1.0, *;q=0.5"})
     check(a is not None and a[1].get("content-encoding") == "gzip",
           "a real browser's list is read (got %r)"
           % (a[1].get("content-encoding") if a else "nothing"))
 
-    # And one that offers something else entirely.
     a = term_page({"Accept-Encoding": "br, deflate"})
     check(a is not None and "content-encoding" not in a[1],
           "a client offering only codings we do not have gets the page plain "
@@ -1226,15 +1117,12 @@ def test_term_etag():
               "and no-cache survives the 304 (got %r)"
               % b[1].get("cache-control"))
 
-        # A validator that is not the one there must not be believed.
         h["If-None-Match"] = '"0-0-0-0"'
         b = once(req("GET", TERM, headers=h))
         check(b is not None and b[0] == 200 and len(b[2]) > 0,
               "a stale validator gets the %s page and not a 304 (got %s)"
               % (label, b[0] if b else "nothing"))
 
-    # The two forms are different bytes.  A shared validator would let a
-    # browser holding the plain page be told the gzipped one is what it has.
     if "plain" in tags and "gzip" in tags:
         check(tags["plain"] != tags["gzip"],
               "the two forms do not share a validator (both %r)"
@@ -1251,8 +1139,6 @@ def test_ws_shell():
         c.close()
         return
 
-    # The prompt.  A Shell that thought its input was a file would print none,
-    # so this is the ACTION_IS_FILESYSTEM answer being checked from outside.
     banner, _ = c.gather(WS_WAIT, want=">")
     check(b">" in banner,
           "the Shell prints a prompt (got %r)" % banner[-80:])
@@ -1271,7 +1157,6 @@ def test_ws_shell():
     check(b"FRAGMENTED" in said,
           "a fragmented command is one command (got %r)" % said[-120:])
 
-    # A ping, answered with a pong carrying the same payload.
     c.send(ws_frame(0x9, "areyouthere"))
     got = None
     deadline = time.time() + WS_WAIT
@@ -1285,7 +1170,6 @@ def test_ws_shell():
     check(got == b"areyouthere",
           "a ping is answered with its own payload (got %r)" % got)
 
-    # The close handshake: the server echoes the code and then lets go.
     c.send(ws_frame(0x8, struct.pack("!H", 1000) + b"bye"))
     code = None
     deadline = time.time() + WS_WAIT
@@ -1302,9 +1186,6 @@ def test_ws_shell():
     check(ws_wait_free() is not None,
           "and the Shell is free again after a clean close")
 
-    # More than the terminal's 512-byte decoder hold, in the same send as the
-    # upgrade.  The HTTP request buffer can hand almost 2 KB across here; none
-    # of it may disappear merely because normal WebSocket reads are smaller.
     commands = b"".join(
         ("Echo PIPE%03d\n" % i).encode("ascii") for i in range(48))
     c = WsConn(first=ws_frame(0x2, commands))
@@ -1334,9 +1215,6 @@ def test_ws_one_session():
 
     first.close()
 
-    # And with the first gone, the terminal is free again.  This is the check
-    # that a browser closing its tab does not cost the machine its shell -- and
-    # the SECOND time it was run it was the check that found it did.
     took = ws_wait_free()
     check(took is not None,
           "closing the first frees it again, within %.0fs" % WS_WAIT)
@@ -1463,11 +1341,6 @@ def main():
         test_depth0_collection_lock()
 
         if WANT_TERMINAL:
-            # The Shell FIRST.  It is the feature; everything else here is
-            # about the door in front of it.  Run in any other order, a
-            # terminal that never came back from the first session reported
-            # itself as six failures about 503 and said nothing at all about
-            # whether a command works, which is what happened.
             test_ws_shell()
             test_ws_page()
             test_term_gzip()
@@ -1476,10 +1349,6 @@ def main():
             test_ws_refusals()
             test_ws_one_session()
             test_ws_unmasked()
-            # Last, because it is the only one that changes the guest's disk.
-            # A run that dies before it puts the sibling back leaves a state
-            # every later check here would read as a defect, so nothing later
-            # reads it.
             test_term_no_gz()
     finally:
         if not WS_ONLY:

@@ -2,42 +2,6 @@
  * DnsProbe, exercises the resolver half of the Roadshow API on a running
  * stack, through the published LVOs and nothing of ours.
  *
- * Three things a build cannot check:
- *
- *   1. AddDomainNameServer() nests.  "Adding the same address twice will
- *      require two calls RemoveDomainNameServer() to remove it again"
- *      (autodoc).  Two programs sharing a name server is the case: if the
- *      first Remove drops the entry, the second program's resolver dies with
- *      the first program.  Only the use count in the list makes that visible,
- *      and only a running stack has one.
- *
- *   2. dnsn_UseCount distinguishes where an entry came from.  Negative is
- *      "configured statically in the file", positive is the real number of
- *      run-time adds.  A stack that reported -1 for everything passes any
- *      test that only checks the sign of the file's own entry, so the probe
- *      adds one of its own and asserts the sign flips.
- *
- *   3. inet_pton() is not inet_addr().  Its INPUTS are "numbers in the range
- *      0..255", decimal, four of them; inet_addr() keeps the 4.3BSD radixes
- *      and short forms.  Both go through the same LVO table to the same
- *      library, so the probe asks each the same strings and prints both
- *      answers side by side, a shared parser shows up as agreement.
- *
- *   4. gethostname() into a buffer that is too small.  "The returned name is
- *      null-terminated unless insufficient space is provided", and the ERRORS
- *      list is EFAULT and EPERM, a short buffer is not a failure at all.
- *      The probe asks byte by byte and prints what came back and whether it
- *      was terminated; only a stack with a real name can answer that.
- *
- *   5. h_name is the OFFICIAL name.  A DEVS:Internet/hosts entry matches on
- *      its aliases too, so asking for an alias must answer with the entry's
- *      own name and list the alias in h_aliases.  The staged hosts file gives
- *      this machine's own address a name and an alias for exactly this, which
- *      also drives gethostname()'s host-database step.
- *
- * The resolver phase needs a real name server.  Under SLIRP that is 10.0.2.3
- * forwarding to the host's, which is what tests/tools/run-dns.sh arranges.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -48,8 +12,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_errno(struct Library *base)
 {
@@ -152,12 +114,6 @@ static VOID p_release_dns_list(struct Library *base, struct List *list)
                       : "d0", "d1", "a1", "cc", "memory");
 }
 
-/*
- * This one returns BOOL, which is a 16-bit short: the answer is D0.w and the
- * top half of D0 is whatever the callee left there. Reading all 32 bits gets
- * a number like 2621440 for FALSE, so the probe takes the word the ABI
- * defines, as any caller compiled against the published prototype does.
- */
 static LONG p_get_domain(struct Library *base, char *buffer, LONG size)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -230,8 +186,6 @@ static LONG p_gethostname(struct Library *base, char *buffer, LONG size)
     return res;
 }
 
-/* ----------------------------------------------------------- little helpers */
-
 static VOID p_dotted(ULONG net_addr, char *out)
 {
     static const char digits[] = "0123456789";
@@ -266,10 +220,6 @@ static BOOL p_same(const char *a, const char *b)
     return (BOOL)(*a == '\0' && *b == '\0');
 }
 
-/*
- * The use count of one address in the live list, or 0 if it is not there,
- * a slot in use never reports 0, so that is an unambiguous "absent".
- */
 static LONG p_dns_use(struct Library *base, const char *address)
 {
     struct List *list = p_obtain_dns_list(base);
@@ -338,13 +288,6 @@ static VOID p_show_list(struct Library *base, const char *when)
     p_release_dns_list(base, list);
 }
 
-/* --------------------------------------------------------- the pton phase - */
-
-/*
- * Each string goes to both calls. inet_pton() must take only the strict form;
- * inet_addr() must still take everything 4.3BSD took, because that is its own
- * documented behaviour and this stack's own code reads addresses with it.
- */
 static VOID p_pton_phase(struct Library *base)
 {
     static const char *const cases[] =
@@ -395,8 +338,6 @@ static VOID p_pton_phase(struct Library *base)
     }
 }
 
-/* ------------------------------------------------------ the hostname phase - */
-
 static VOID p_lookup(struct Library *base, const char *name, const char *label)
 {
     struct probe_hostent *he = p_gethostbyname(base, name);
@@ -424,12 +365,6 @@ static VOID p_lookup(struct Library *base, const char *name, const char *label)
     }
 }
 
-/*
- * A truncated name may legitimately come back without a terminator, so the
- * buffer is filled with a sentinel first, only the n bytes the call owns are
- * examined, and byte n is stamped with a NUL afterwards purely so Printf has
- * something it can walk.
- */
 static VOID p_hostname_size(struct Library *base, LONG n)
 {
     char  buf[64];
@@ -483,18 +418,6 @@ static VOID p_hostname_phase(struct Library *base, const char *self_name,
     rc = p_gethostname(base, buf, (LONG)sizeof(buf));
     Printf((CONST_STRPTR)"hostname full: rc %ld \"%s\"\n", rc, (LONG)buf);
 
-    /*
-     * Not a buffer at all: EFAULT, the one error the autodoc does list.
-     *
-     * The call and the Errno() read are SEPARATE STATEMENTS, deliberately.
-     * Written as two arguments to one Printf they are unsequenced, and this
-     * compiler evaluates right to left, so Errno() ran BEFORE gethostname and
-     * reported whatever the previous phase left behind. That is the whole of
-     * the "gethostname(NULL) answers errno 47" report: 47 is AMI_EAFNOSUPPORT
-     * from the p_inet_pton(base, 99, ...) above, and bsd_gethostname() had set
-     * EFAULT correctly all along. Every later hostname line in this file
-     * reported 14 because those already assigned rc first.
-     */
     rc = p_gethostname(base, NULL, 32L);
     Printf((CONST_STRPTR)"hostname null: rc %ld errno %ld\n",
            rc, p_errno(base));
@@ -502,21 +425,11 @@ static VOID p_hostname_phase(struct Library *base, const char *self_name,
     for (i = 1; i <= 8; i++)
         p_hostname_size(base, i);
 
-    /* The two lengths that matter: exactly the name, where the terminator is
-       what has to go, and one more, where it fits.
-       MEASURED OFF THE ANSWER ABOVE, not off self_name.  The two are not the
-       same string: src/bsdsocket/resolver.c:460 answers the machine's
-       configured name, which config_hostname.c cuts from the card's hardware
-       address on a machine nothing else names, and self_name is the hosts
-       entry the h_name assertions below use.  Sized from self_name these two
-       lines asked for lengths that had nothing to do with the name being
-       truncated, and the caller could not read them. */
     for (i = 0; i < (LONG)sizeof(buf) && buf[i] != '\0'; i++)
         ;
     p_hostname_size(base, i);
     p_hostname_size(base, i + 1);
 
-    /* The alias and the official name of the same entry. */
     p_official(base, self_alias);
     p_official(base, self_name);
 
@@ -525,13 +438,6 @@ static VOID p_hostname_phase(struct Library *base, const char *self_name,
     p_lookup(base, "255.255.255.255", "broadcast");
 }
 
-/* ------------------------------------------------------- the nesting phase - */
-
-/*
- * 192.0.2.53 is in TEST-NET-1 (RFC 5737): reserved for documentation, routed
- * nowhere, so adding it cannot make this machine query a stranger. It is
- * removed again before the resolver phase either way.
- */
 #define PROBE_EXTRA_DNS     "192.0.2.53"
 
 static VOID p_nesting_phase(struct Library *base, const char *file_server)
@@ -543,17 +449,14 @@ static VOID p_nesting_phase(struct Library *base, const char *file_server)
     Printf((CONST_STRPTR)"static %s use %ld\n",
            (LONG)file_server, p_dns_use(base, file_server));
 
-    /* The file's own entry, added once by a program: still static, deeper. */
     rc = p_add_dns(base, file_server);
     Printf((CONST_STRPTR)"add %s rc %ld use %ld\n", (LONG)file_server, rc,
            p_dns_use(base, file_server));
 
-    /* THE BUG: this used to drop the entry and take the resolver with it. */
     rc = p_remove_dns(base, file_server);
     Printf((CONST_STRPTR)"remove %s rc %ld use %ld\n", (LONG)file_server, rc,
            p_dns_use(base, file_server));
 
-    /* A server this probe owns: positive count, and it goes when it empties. */
     rc = p_add_dns(base, PROBE_EXTRA_DNS);
     Printf((CONST_STRPTR)"add %s rc %ld use %ld\n", (LONG)PROBE_EXTRA_DNS, rc,
            p_dns_use(base, PROBE_EXTRA_DNS));
@@ -578,8 +481,6 @@ static VOID p_nesting_phase(struct Library *base, const char *file_server)
     p_show_list(base, "final");
 }
 
-/* -------------------------------------------------- the default-domain phase */
-
 static VOID p_domain_phase(struct Library *base, const char *host,
                            const char *domain)
 {
@@ -591,11 +492,6 @@ static VOID p_domain_phase(struct Library *base, const char *host,
     ok = p_get_domain(base, original, (LONG)sizeof(original));
     Printf((CONST_STRPTR)"domain initial: rc %ld \"%s\"\n", ok, (LONG)original);
 
-    /*
-     * A 200-character domain. SetDefaultDomainName()'s autodoc allows 255,
-     * and the store used to be 64, so this round trip is the whole assertion
-     * for that cap.
-     */
     {
         char longname[201];
         ULONG i;
@@ -612,15 +508,11 @@ static VOID p_domain_phase(struct Library *base, const char *host,
                (LONG)(p_same(buffer, longname) ? "yes" : "NO"));
     }
 
-    /* Control: no default domain, so the bare name has nothing to fall back
-       on and must fail. Run first, so a pass later cannot be something else
-       resolving it. */
     p_set_domain(base, "");
     ok = p_get_domain(base, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"domain cleared: rc %ld\n", ok);
     p_lookup(base, host, "control");
 
-    /* The reference answer, asked for by its full name. */
     {
         char full[128];
         ULONG n = 0, i;
@@ -640,7 +532,6 @@ static VOID p_domain_phase(struct Library *base, const char *host,
     ok = p_get_domain(base, buffer, (LONG)sizeof(buffer));
     Printf((CONST_STRPTR)"domain set: rc %ld \"%s\"\n", ok, (LONG)buffer);
 
-    /* The feature: a bare name, resolved through the default domain. */
     p_lookup(base, host, "bare");
 
     /* A bare name with no answer under the domain either still fails, and
@@ -649,8 +540,6 @@ static VOID p_domain_phase(struct Library *base, const char *host,
 
     p_set_domain(base, original);
 }
-
-/* ------------------------------------------------------------------- main - */
 
 int main(int argc, char **argv)
 {

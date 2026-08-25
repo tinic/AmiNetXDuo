@@ -1,26 +1,10 @@
 /*
  * AmiNetXDuo, host-side test for the mbuf emulation.
  *
- * Builds and runs on the development host, not on the Amiga. mbuf_alloc.c and
- * mbuf_ops.c contain no AmigaOS calls, so all they need is the <exec/types.h>
- * shim in src/config/test/shim, the four stubs below, and the replica struct
- * layout that -DAMI_MBUF_REPLICA selects in include/aminetxduo/mbuf.h.
- *
- * What this cannot cover, and what covers it instead:
- *   - the exact 68k struct offsets: asserted at compile time against the real
- *     NDK <sys/mbuf.h> by src/mbuf/mbuf_abi_check.c.
- *   - MSIZE 128 and MLEN/MHLEN 108/100: the replica scales those with the
- *     pointer width, so on a 64-bit host they are 256/224/208. Every invariant
- *     the code relies on still holds, and every boundary case below is still a
- *     boundary case at a different number. The on-Amiga test in
- *     tests/mbuf_bpf/ runs the same battery at the real ones.
- *   - Forbid()/Permit(), and the 128-byte alignment AllocVec() does not
- *     promise: also tests/mbuf_bpf/.
- *   - the NX_PACKET bridge: needs a running packet pool, so tests/mbuf_bpf/.
- *
- *   cc -std=c11 -Wall -Wextra -DAMI_MBUF_REPLICA -I../../../include \
- *      -I../../config/test/shim -I.. test_mbuf.c ../mbuf_alloc.c \
- *      ../mbuf_ops.c -o test_mbuf
+ * Host build; -DAMI_MBUF_REPLICA selects the replica struct layout, which
+ * scales MSIZE/MLEN/MHLEN with the pointer width.  The 68k offsets, the real
+ * constants, Forbid()/Permit() and the NX_PACKET bridge are covered by
+ * src/mbuf/mbuf_abi_check.c and tests/mbuf_bpf/ instead.
  *
  * SPDX-License-Identifier: MIT
  */

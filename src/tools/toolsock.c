@@ -1,32 +1,9 @@
 /*
  * toolsock, bsdsocket.library through its published vectors.
  *
- * See toolsock.h for why these are called by hand rather than through the NDK
- * inlines.  Every stub below is written the same way: the arguments go into
- * the registers the ABI names, a6 holds the library base, and the call is a
- * `jsr a6@(-LVO:W)`.  The LVOs are docs/RESEARCH.md 3.2's and the register
- * assignments are src/bsdsocket/bsdsocket_vectors.h's.  A disagreement between
- * the two is a bug, and shows up here.
- *
- * Hazard: every stub must declare d1/a0/a1 written.  An AmigaOS library call
- * clobbers d0, d1, a0 and a1, and GCC can assume an input-only operand is left
- * alone, so a stub passing an argument in d1 without declaring d1 written lets
- * GCC keep a value there across the `jsr` and then reuse or spill whatever the
- * library left behind.  This turned IoctlSocket(FIONBIO) into a call with a
- * garbage request code and wedged a test for a day (docs/RESEARCH.md 42).  The
- * `_clob_*` dummies bound to those registers and listed as outputs are the
- * NDK's own idiom, from inline/macros.h.
- *
- * Hazard, the other half: nothing can be called between the first register
- * variable and the `jsr`.  A local register variable lives in its hard
- * register from its initialiser onwards, and GCC does not reload it after a
- * call, so a call in a later initialiser returns having clobbered d0/d1/a0/a1
- * the earlier arguments, and the library is entered with the callee's
- * leftovers.  bind(), connect() and sendto() each computed the sockaddr
- * length that way.  At -Os tool_sock_len() inlines and nothing shows.  At -O0
- * it is a real `jsr`, and sendto() went to the library with d0 holding 16
- * instead of the descriptor, which the stack answered with EBADF.  Compute
- * anything that needs a call into a plain local first.
+ * Hazard: every stub must declare d1/a0/a1 written (an AmigaOS library call
+ * clobbers d0/d1/a0/a1), and nothing may be called between the first register
+ * variable and the `jsr` -- compute such values into a plain local first.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,8 +11,6 @@
 #include "toolsock.h"
 
 #include "toolbudget.h"
-
-/* ------------------------------------------------------------- fd_set ---- */
 
 VOID tool_fd_zero(ToolFdSet *set)
 {
@@ -62,8 +37,6 @@ BOOL tool_fd_isset(const ToolFdSet *set, LONG fd)
                ? TRUE : FALSE;
 }
 
-/* ---------------------------------------------------------- the library --- */
-
 struct Library *tool_socket_open(VOID)
 {
     struct Library *base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
@@ -79,8 +52,6 @@ struct Library *tool_socket_open(VOID)
 
     return base;
 }
-
-/* ------------------------------------------------------------- vectors ---- */
 
 /* LVO -0x01e */
 LONG tool_sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
@@ -100,8 +71,6 @@ LONG tool_sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 }
 
 /*
- * How long a sockaddr is on the wire, from the sockaddr itself.
- *
  * A sockaddr_in starts with its own length, 16.  This NDK's sockaddr_in6 has
  * no length byte and starts with the family, 23.  So byte 0 tells the two
  * apart and there is no third case to get wrong.
@@ -424,18 +393,8 @@ LONG tool_sock_select(struct Library *base, LONG nfds, ToolFdSet *readfds,
 }
 
 /*
- * The same vector with WaitSelect()'s signal mask, which is what the ABI has
- * always taken in d1 and what tool_sock_select() passes NULL for.
- *
- * A caller that has to watch a MsgPort as well as its sockets needs this and
- * nothing else does: WaitSelect() knows nothing about DOS handles, so the
- * port's signal has to go into the same wait or the two are polled against
- * each other.  src/tools/httpd.c waits on the terminal's pipe this way.
- *
  * The mask is in and out: on return it holds the signals that were received,
  * and those have been cleared from the task.  So a caller passes only the
- * signals it is prepared to consume -- SIGBREAKF_CTRL_C is deliberately not
- * among httpd's, because tool_break() is what reads that one.
  */
 LONG tool_sock_select_sigs(struct Library *base, LONG nfds, ToolFdSet *readfds,
                            ToolFdSet *writefds, ToolTimeval *tv,
@@ -508,9 +467,6 @@ ToolServEnt *tool_sock_getservbyname(struct Library *base, const char *name,
 }
 
 /*
- * The three at the far end of the table.  Register assignment comes from the
- * NDK pragma, not from the C prototype:
- *
  *   pragmas/bsdsocket_pragmas.h  inet_ntop(d0,a0,a1,d1)
  *                                freeaddrinfo(a0)
  *                                getaddrinfo(a0,a1,a2,a3)
@@ -577,8 +533,6 @@ LONG tool_sock_getaddrinfo(struct Library *base, const char *node,
                       : "cc", "memory");
     return ret;
 }
-
-/* ------------------------------------------------------------- helpers ---- */
 
 BOOL tool_sock_have_lvo(struct Library *base, ULONG lvo)
 {
@@ -732,11 +686,6 @@ VOID tool_addr_text(struct Library *base, const ToolAddr *addr,
         return;
     }
 
-    /*
-     * Through the library rather than a formatter of our own: an IPv6 address
-     * only ever gets here from a library that produced it, so the one that
-     * knows RFC 5952 is the one that has it.
-     */
     buf[0] = '\0';
     if (!tool_sock_have_lvo(base, 0x25eUL) ||
         tool_sock_ntop(base, TOOL_AF_INET6, addr->ta_V6, buf, (LONG)buflen)
@@ -865,9 +814,6 @@ static BOOL tool_list_has(const ToolAddrList *list, const ToolAddr *addr)
  * One getaddrinfo(), no output.  Returns 0 with *out filled, or the EAI_ code.
  * An answer with nothing usable in it counts as EAI_NONAME: the caller only
  * tells a name that is not there from one worth asking about again.
- *
- * Every address is kept, up to TOOL_ADDR_TRIES, because the first one is not
- * always the one that answers.
  */
 static LONG tool_gai_list(struct Library *base, const char *host, LONG want,
                           BOOL literal, ToolAddrList *out)
@@ -1006,12 +952,6 @@ BOOL tool_sock_resolve_list(struct Library *base, const char *host, LONG want,
         return FALSE;
     }
 
-    /*
-     * -6 on a machine whose stack has no IPv6 has one answer and it is not
-     * about the name.  Asked first, because otherwise every such run reports
-     * the name as having no AAAA, which sends the user to their DNS over a
-     * fact about their own machine.
-     */
     if (want == TOOL_AF_INET6 && !tool_sock_have_ipv6(base))
     {
         tool_error("%s: this machine's network has no IPv6", (LONG)host);
@@ -1064,8 +1004,6 @@ BOOL tool_sock_resolve(struct Library *base, const char *host, ToolAddr *out)
 {
     return tool_sock_resolve_af(base, host, TOOL_AF_UNSPEC, out);
 }
-
-/* ------------------------------------------------------------ connecting */
 
 LONG tool_sock_connect_timed(struct Library *base, LONG s,
                              const ToolSockAddrAny *sa, ULONG timeout,
@@ -1152,12 +1090,8 @@ LONG tool_sock_connect_timed(struct Library *base, LONG s,
 }
 
 /*
- * Seconds since `t0`.
- *
  * ami_millis() is monotonic and wraps at 2^32, so the unsigned difference is
  * right across the wrap.  It answers 0 throughout on a machine where
- * timer.device did not open, which is the case ToolBudget keeps its own floor
- * under the clock for.
  */
 #define TOOL_ELAPSED(t0)    ((ULONG)((ami_millis() - (t0)) / 1000UL))
 
@@ -1199,9 +1133,6 @@ static LONG tool_connect_one(struct Library *base, const ToolConnect *how,
 
         tool_addr_text(base, address, dotted, sizeof(dotted));
 
-        /* Worded apart from the first line.  The same "Trying <address>"
-           printed twice for one address reads as the list being walked
-           twice. */
         tool_printf(again ? "Retrying %s port %ld...\n"
                           : "Trying %s port %ld...\n",
                     (LONG)dotted, (LONG)how->port);
@@ -1380,11 +1311,6 @@ UWORD tool_sock_port(struct Library *base, const char *text, const char *proto)
     return (UWORD)se->s_port;           /* network order == host order here */
 }
 
-/*
- * The unnamed case gets the number.  The errnos that turn up in bug reports
- * are the ones not in the list below, so the number is printed rather than one
- * generic sentence for all of them.
- */
 static char tool_sock_errbuf[64];
 
 static const char *tool_sock_unnamed(LONG err)
@@ -1455,8 +1381,6 @@ VOID tool_sock_fail(struct Library *base, const char *what,
     tool_sock_fail_why(base, what, addr, port, tool_sock_errno(base));
 }
 
-/* ------------------------------------------------------------- console ---- */
-
 VOID tool_input_open(ToolInput *in, BOOL want_raw)
 {
     in->fh          = Input();
@@ -1467,11 +1391,9 @@ VOID tool_input_open(ToolInput *in, BOOL want_raw)
     if (in->interactive && want_raw)
     {
         /*
-         * SetMode(fh, 1) is the console's RAW mode: no line editing, no local
-         * echo, every keystroke available as it is pressed.  It is a property
-         * of the console, not of this process, so every caller must reach
-         * tool_input_close() on every path including Ctrl-C or the user's Shell
-         * is left unusable.
+         * RAW mode is a property of the console, not of this process: every
+         * caller must reach tool_input_close() on every path including Ctrl-C
+         * or the user's Shell is left unusable.
          */
         if (SetMode(in->fh, 1L) != 0)
             in->raw = TRUE;
@@ -1511,12 +1433,8 @@ LONG tool_input_read(ToolInput *in, UBYTE *buf, LONG len, ULONG micros)
 }
 
 /*
- * Straight to standard output, past dos.library's buffer.
- *
- * These commands print two kinds of thing to the same stream: their own lines
- * through VPrintf(), which dos.library buffers, and socket bytes through
- * Write(), which it does not.  Without the Flush() the second overtakes the
- * first and the transcript comes out interleaved.  Observed.
+ * Straight to standard output, past dos.library's buffer.  VPrintf() is
+ * buffered and Write() is not, so without the Flush() the two interleave.
  */
 LONG tool_output_write(const UBYTE *buf, LONG len)
 {

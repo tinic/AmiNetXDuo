@@ -1,34 +1,6 @@
 /*
  * AmiNetXDuo, a TCP transfer with the PC sampler running over it.
  *
- * WHY THIS WORKLOAD.  tests/perf/perf_test.c prices the primitives and finds
- * about 22% of a transfer in the copy and the checksum, leaving 78% inside
- * NetX Duo with no name on it.  The two cases below are the same two the
- * census runs, cut down to the transfer itself:
- *
- *   loopback   client and server on one NX_IP through 127.0.0.1.  No driver,
- *              no Ethernet header, no emulated NIC, protocol processing and
- *              nothing else.  This is the cleanest possible read on the 78%,
- *              because every sample that is not application code is NetX Duo
- *              or the OS underneath it.
- *   wire       two NX_IPs across _nx_ram_network_driver, so MSS-sized
- *              segments, a link header and a driver that copies the frame.
- *              Closer to the shape of a real interface, and the difference
- *              between the two rankings is what the driver and the segment
- *              size cost.
- *
- * Neither goes near bsdsocket.library, which is deliberate: the library is a
- * separately loaded hunk whose relocation would have to be recovered before
- * any address meant anything, and it is not where the missing time is.  The
- * unaccounted 78% is inside NetX Duo, and NetX Duo is linked into this
- * executable, so prof_scan_segs() walking our own seglist resolves all of it.
- *
- * tests/tcpdrill and tests/perf/fitzbench were the alternatives.  Both drive
- * real transfers through the library over an emulated A2065, and both would
- * have put the interesting code in a hunk this profiler cannot yet locate,
- * on top of a NIC whose own interrupt is level 2 and whose SLIRP backend adds
- * host-side variance to every run.  They answer a different question.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -210,12 +182,6 @@ ULONG       length, moved, off;
     }
 }
 
-
-/*
- * One transfer, with the sampler bracketing the bulk phase only.  Setup and
- * teardown are marked separately rather than excluded, so the report can show
- * how little of the run they are instead of the reader having to trust it.
- */
 static ULONG t_transfer(NX_IP *cip, NX_IP *sip, ULONG peer, UINT port,
                         ULONG bytes)
 {
@@ -411,24 +377,8 @@ static VOID t_shut_ok(UINT status, const char *what)
     }
 }
 
-/*
- * Everything tx_application_define() created, given back, so the kernel can be
- * stopped before AmigaDOS unloads this hunk.
- *
- * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
- * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
- * own.  The order is creation reversed, and the pool goes last because
- * nx_ip_delete() hands packets back to it on the way out.
- */
 static VOID t_shutdown(VOID)
 {
-    /*
-     * The server thread never returns on its own: it parks in
-     * tx_semaphore_get(&t_srv_ready, TX_WAIT_FOREVER) waiting for a case that
-     * is not coming.  That is a ThreadX wait and not an Exec one, so the port
-     * can wake it and reclaim its Task rather than leaving a zombie behind,
-     * and a zombie is the one thing stop cannot be made to accept.
-     */
     (VOID)tx_thread_terminate(&t_srv_thread);
     t_shut_ok(tx_thread_delete(&t_srv_thread), "server thread delete");
 
@@ -475,14 +425,6 @@ UINT status;
 
     (VOID)tx_amiga_orphan_thread(&t_main_thread);
 
-    /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  That is invisible
-     * from here -- the report below has already been decided -- so
-     * tools/smoke/unloadprobe.c is what sees it.
-     */
     t_shut_ok(tx_amiga_kernel_stop(), "ThreadX kernel stop");
 
     prof_log("%ld failures, %s", (long)t_failures,

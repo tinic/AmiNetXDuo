@@ -6,87 +6,6 @@
 #   tests/tools/run-ifreadd.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                              [-N BOARD] [-B IFACE]
 #
-# WHAT THE PUBLISHED API SAYS
-#
-#   AddInterfaceTagList(), "Make a new interface available for network
-#   access ... Each such device must be assigned a unique interface name and
-#   refer to a SANA-II device name and unit number."  Its whole tag set is
-#   device-facing: IFA_IPType, IFA_ARPType, IFA_Num*Requests,
-#   IFA_PacketFilterMode, IFA_PointToPoint, IFA_Multicast, IFA_DownGoesOffline,
-#   IFA_ReportOffline.  There is no address, netmask, gateway or broadcast tag.
-#
-#   ConfigureInterfaceTagList(), "for changing the configuration of an
-#   interface previously added with AddInterfaceTagList(), such as setting
-#   interface addresses, status and routing metrics", IFC_Address,
-#   IFC_NetMask, IFC_DestinationAddress, IFC_BroadcastAddress.
-#
-#   So the add creates a bare interface and the configure addresses it.  An
-#   interface that comes back from a re-add with no address is the contract
-#   being kept, not a fault.
-#
-# WHAT THE ORIGINAL FAULT WAS, AND STILL IS
-#
-#   The routing table went from
-#
-#       10.0.2.0    *          255.255.255.0  U   eth0
-#       default     10.0.2.2   0.0.0.0        UG  eth0
-#
-#   to
-#
-#       10.0.0.0    *          255.0.0.0      U   eth0
-#
-#   A SILENTLY WRONG CLASSFUL /8 where the machine had a /24.  That is the
-#   thing worth a regression test, and it is asserted here against the right
-#   expectation: IfProbe hands ConfigureInterfaceTagList() the address AND the
-#   mask, and the mask that comes out has to be the one it asked for rather
-#   than the class of the address.  A stack that guesses anyway reads /8 in
-#   `netstat -r` and in IFQ_NetMask, and both are checked.
-#
-#   The default route is a separate matter and is NOT put back by either
-#   vector: nx_ip_interface_detach() takes it with the interface it belonged
-#   to, and neither AddInterfaceTagList() nor ConfigureInterfaceTagList() has a
-#   tag for a gateway.  AddRouteTagList() is where a caller puts one back.  Its
-#   absence after the round trip is asserted too, so that anything reinstating
-#   it inside the library vector shows up here.
-#
-# WHY eth0 IS STATIC HERE, AND NOT DHCP
-#
-#   Because a static interface has no second source.  A DHCP interface has a
-#   client that may re-bind and write an address, a mask and a gateway back, so
-#   a transcript showing them proves nothing about what the remove-and-add
-#   did.  Under STATIC, what the routing table says afterwards is the round
-#   trip and IfProbe's own configure, and nothing else.
-#
-# WHY NOT IN run-ifquery.sh, WHICH ALSO RUNS IfProbe
-#
-#   That harness runs IfProbe as its FIRST command, and this stack cannot get
-#   past the `AddNetInterface` that follows the probe, observed hanging there
-#   on more than one build.  That is a separate defect and not this one, which
-#   is why nothing is added to that file: an assertion behind a hang is an
-#   assertion that never runs.
-#
-# WHAT IS ASSERTED
-#
-#   * the routing table before the round trip has the /24 and the default,
-#     so there is something to lose;
-#   * the freshly re-added interface carries NO address and NO mask;
-#   * IFQ_NetMask after the configure is the mask that was asked for;
-#   * the routing table afterwards has the /24 back and no default route.
-#
-#   The mask is asserted from both instruments because neither sees both
-#   halves: no published IFQ_ tag reaches the routing table, and netstat cannot
-#   say what the interface thinks its mask is.
-#
-# BRIDGED, NEVER SLIRP.  -B names the host NIC to bridge onto and the string
-# `slirp` is refused outright.  Nothing on the LAN has to answer -- every
-# assertion is on what the guest prints -- but a board that came up on NAT is
-# not a board, and this measures what a driver hands back.
-#
-# -N PICKS THE BOARD, and its driver is staged to match: see sana2_stage below.
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.  Every other board's driver comes out
-# of AMINETXDUO_SANA2_STORE or ~/amiga-assets/devs.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -150,10 +69,6 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# A static /24 of its own, on a bridge whose LAN is somebody else's numbers, so
-# nothing here is claimed or answered for.  tests/tools/ifprobe.c reconfigures
-# with 10.0.2.15 and the mask the interface left with, so the address and the
-# mask below are the pair it asks for back and they are shared with that file.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -163,10 +78,6 @@ NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
 
-# -N puts a board in the machine; this puts its driver in DEVS: and its name in
-# DEVICE=.  Without it the line above stands whatever -N asked for, so every
-# board but the A2065 opens a2065.device against hardware that is not there and
-# the run reports a stack failure that is really a staging one.
 . "$ROOT/tools/sana2-stage.sh"
 if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ] && [ "$BOARD" != a2065 ]; then
     _want=$(sana2_driver_for "$BOARD")
@@ -217,9 +128,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# The routing table printed by the Nth `netstat -r` in the transcript, one line
-# per route.  Both tables are read the same way so the before and the after
-# cannot be compared by different rules.
 routes() {
     awk -v want="$1" '
         /^===== SYS:netstat -r =====/ { n++; if (n == want) { on = 1; next } }
@@ -229,9 +137,6 @@ routes() {
 }
 
 # ---- one boot (docs/RESEARCH.md 25) --------------------------------------
-#
-# ToolsSmoke reopens the transcript from the top after a reset, so the first
-# command appearing twice is a reboot and not a hang.
 STARTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once (no reset)"
@@ -242,10 +147,6 @@ else
 fi
 
 # ---- what it had ---------------------------------------------------------
-#
-# Asserted rather than assumed: if SLIRP ever stops handing out a /24 and a
-# gateway, the two assertions below would pass on a machine that never had
-# either, and this file would be testing nothing.
 BEFORE=$(routes 1)
 if printf '%s\n' "$BEFORE" | grep -Eq '^10\.0\.2\.0 +\* +255\.255\.255\.0 '; then
     pass "eth0 started on 10.0.2.0/24"
@@ -262,12 +163,6 @@ else
 fi
 
 # ---- bare, as the published API says -------------------------------------
-#
-# AddInterfaceTagList() has no address tag, so the interface it hands back must
-# be carrying nothing.  A library vector that put the old addressing back would
-# read as still addressed here, and would also stop BeginInterfaceConfig()
-# from ever running a DHCP allocation on a re-added interface, which is how it
-# was found.
 if grep -q "^bare after add: address 0\.0\.0\.0 netmask 0\.0\.0\.0, bare, correctly" "$REPORT"; then
     pass "the re-added interface came back with no address and no mask"
 else
@@ -276,10 +171,6 @@ else
 fi
 
 # ---- and the configure addressed it --------------------------------------
-#
-# IfProbe passes IFC_Address AND IFC_NetMask.  The mask that comes back has to
-# be the one it asked for: the classful fallback is for a caller that supplied
-# an address alone, and using it here is the /8 this file exists for.
 if grep -q "^netmask after the round trip: .*, the mask it had, correctly" "$REPORT"; then
     pass "IFQ_NetMask is the mask ConfigureInterfaceTagList() was given"
 else
@@ -295,9 +186,6 @@ else
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2
 fi
 
-# The gateway went with nx_ip_interface_detach() and neither vector has a tag
-# for one, so it stays gone until a caller runs AddRouteTagList().  Asserted
-# rather than ignored: putting it back inside the add is what was wrong before.
 if printf '%s\n' "$AFTER" | grep -Eq '^default +'; then
     fail "a default route reappeared on its own, neither vector may install one"
     printf '%s\n' "$AFTER" | sed 's/^/       /' >&2

@@ -1,46 +1,10 @@
 /*
- * paysum.  Move a deterministic byte pattern and say what actually arrived.
+ * paysum. Move a deterministic byte pattern and say what actually arrived.
  *
- *     paysum HOST/A,PORT/N/A,LEN/N/K,SEED/N/K,SEND/S,CONNS/N/K,
- *            TIMEOUT=-w/N/K,IPV4=-4/S,IPV6=-6/S
- *
- *   paysum HOST PORT LEN n SEED s          connect, receive until the peer
- *                                          closes, and print the CRC of what
- *                                          arrived next to where it first
- *                                          disagreed with the pattern.
- *   paysum HOST PORT LEN n SEED s SEND     the other direction: generate the
- *                                          pattern here and send it.
- *   paysum ... CONNS 3                     the same over three simultaneous
- *                                          connections, ports PORT..PORT+2,
- *                                          seeds SEED..SEED+2, serviced by one
- *                                          select() loop so the streams really
- *                                          interleave on the wire.
- *
- * WHY IT EXISTS
- *
- * Every transfer gate this tree had before it compared BYTE COUNTS.  The
- * receive path computes its own checksum in the same pass that places the
- * bytes, so the one failure a byte count cannot see -- bytes placed wrongly
- * and then certified by a sum taken over the wrongly placed bytes -- passes
- * iperf, passes TCP, and corrupts the payload silently.  Content is the only
- * witness.  So both ends of this tool hash CONTENT: the pattern is
- * position-dependent (byte i is a mix of i and the seed, period 2^32 words),
- * which makes any shift, duplication, skip or cross-connection leak change
- * the bytes, and the CRC is computed over what was actually received, not
- * over what was meant.
- *
- * The peer is tests/tools/paypeer.py, the same pattern and the same CRC in
- * another language, and the harness compares the two ends' lines.
- *
- * Output is one line per connection plus a verdict line, key=value, so a
- * caller parses it without knowing the prose:
- *
- *   paysum dir=rx conn=0 port=23001 bytes=65536 ms=182 crc32=89ABCDEF \
- *   first_bad=-1 seed=17
- *   paysum done conns=1 fails=0
- *
- * Exit code 0 when every connection completed and, where a SEED was given on
- * the receive side, every byte matched the pattern.
+ * Both ends hash CONTENT, not byte counts: the pattern is position-dependent,
+ * so any shift, duplication, skip or cross-connection leak changes the bytes.
+ * The peer is tests/tools/paypeer.py. Output is key=value, one line per
+ * connection plus a verdict line.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -75,7 +39,7 @@ enum
 #define PAY_CHUNK       4096L
 
 /* Static, not automatic: a Shell command gets whatever stack the Shell has,
-   4 KB on a stock Kickstart 3.1.  Same as src/tools/nc.c. */
+   4 KB on a stock Kickstart 3.1. */
 static UBYTE pay_data[PAY_CHUNK];
 static UBYTE pay_want[PAY_CHUNK];
 static ULONG pay_crc_table[256];
@@ -83,12 +47,9 @@ static ULONG pay_crc_table[256];
 /* ------------------------------------------------------------ the pattern --- */
 
 /*
- * Position-dependent and seed-dependent, and the same function paypeer.py
- * computes: word j of the stream is mix32(seed ^ (j * 0x9E3779B9)), bytes
- * big-endian.  The mix is a bias-tested finalizer (lowbias32), so a stream
- * never repeats inside 2^32 words and two seeds disagree everywhere.  A
- * CONSTANT fill would certify a placement bug instead of catching it: bytes
- * landed at the wrong offset hold the right values.
+ * Word j of the stream is mix32(seed ^ (j * 0x9E3779B9)), bytes big-endian --
+ * the same function paypeer.py computes. A CONSTANT fill would certify a
+ * placement bug instead of catching it.
  */
 static ULONG pay_word(ULONG seed, ULONG j)
 {
@@ -188,10 +149,9 @@ static VOID pay_report(const PayConn *c, const PayOptions *opt)
 }
 
 /*
- * Connect with a retry loop rather than one attempt: on a fresh boot the
- * interface -- and on IPv6 the SLAAC address -- settles seconds after the
- * command runs, and the peer may still be coming up.  One new socket per
- * attempt; a socket whose connect() failed is not reusable.
+ * Connect with a retry loop rather than one attempt: the interface, and on
+ * IPv6 the SLAAC address, settles seconds after the command runs. One new
+ * socket per attempt; a socket whose connect() failed is not reusable.
  */
 static LONG pay_connect(struct Library *sb, const ToolAddr *addr,
                         UWORD port, ULONG timeout)
@@ -283,8 +243,7 @@ static VOID pay_rx_chunk(struct Library *sb, PayConn *c,
 }
 
 /* One writable socket: generate the next chunk of its pattern and offer it.
-   send() may take less than a chunk; the cursor only advances by what it
-   took, so nothing is skipped and nothing repeats. */
+   send() may take less than a chunk; the cursor only advances by what it took. */
 static VOID pay_tx_chunk(struct Library *sb, PayConn *c,
                          const PayOptions *opt)
 {
@@ -318,21 +277,16 @@ static VOID pay_tx_chunk(struct Library *sb, PayConn *c,
     c->crc    = pay_crc_run(c->crc, pay_data, (ULONG)n);
     c->moved += (ULONG)n;
 
-    /* Everything is sent.  Half-close, and stay in the loop: the socket moves
-       to the read set, where the peer's own close -- which is its receipt --
-       ends this connection.  The report is then written after the far end has
-       taken delivery, not merely after send() queued it. */
+    /* Everything is sent. Half-close and stay in the loop: the peer's own close
+       is its receipt, so the report follows delivery rather than send(). */
     if (c->moved == opt->len)
         (VOID)tool_sock_shutdown(sb, c->sock, TOOL_SHUT_WR);
 }
 
 /*
- * All the connections under one select().  On a receive every socket sits in
- * the read set; on a send they sit in the write set (and the read set too,
- * once shut down, to see the peer's close).  One loop, so with CONNS > 1 the
- * streams genuinely interleave: a receive placed into the wrong connection's
- * buffer -- the cross-socket injection this tool exists to catch -- lands in
- * a stream whose pattern disagrees with it at every byte.
+ * All the connections under one select(), so with CONNS > 1 the streams
+ * genuinely interleave: a receive placed into the wrong connection's buffer
+ * lands in a stream whose pattern disagrees with it at every byte.
  */
 static LONG pay_run(struct Library *sb, const PayOptions *opt)
 {
@@ -592,8 +546,8 @@ int main(int argc, char **argv)
     for (i = 0; i < PAY_MAX_CONNS; i++)
         pay_conns[i].sock = -1;
 
-    /* Connection i takes port+i and seed+i, which is how one command line
-       names several distinguishable streams. */
+    /* Connection i takes port+i and seed+i, which is how one command line names
+       several distinguishable streams. */
     rc = RETURN_OK;
     for (i = 0; i < opt.conns; i++)
     {

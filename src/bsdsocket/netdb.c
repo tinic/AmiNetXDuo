@@ -1,37 +1,5 @@
 /*
  * bsdsocket.library, the local network database.
- *
- *   get{serv,proto,net}by*()          lookups
- *   set/get/end{serv,proto,net}ent()  iteration
- *
- * The store itself is src/config/netdb.c, which parses
- * DEVS:Internet/{services,protocols,networks} once into memory and answers
- * read-only afterwards. This file is the Amiga-side layer on top of it.
- *
- * Two details the conformance suite has caught in other stacks
- * (third_party/bsdsocktest/src/known_failures.c):
- *
- *   1. The returned struct is per opener, not a file static. Two tasks each
- *      have their own SocketBase (docs/RESEARCH.md S3.1). With a shared
- *      static, task A's getservbyname() overwrites the servent that task B
- *      still holds. That is Amiberry's "getservbyname() returns stale
- *      pointer" bug, test 93.
- *
- *   2. s_port is in network byte order, as BSD specifies, callers do
- *      ntohs(s->s_port). That is identity on m68k, so it is spelled out with
- *      BSD_HTONS() rather than left implicit. The port number a caller passes
- *      to getservbyport() comes back the same way. (Amiberry's test 94
- *      failure is this conversion applied in the wrong direction.)
- *
- * The name/alias/protocol strings point straight into the parsed file buffer.
- * That buffer is allocated once at startup and never freed while the library
- * is open, so nothing here copies strings.
- *
- * ami_netdb_load() is not re-entrant, so it runs exactly once, from
- * bsd_lib_open() under the master base's semaphore (and, before that, from
- * ami_config_load() inside netstack_startup()). Every lookup below is then
- * read-only and lock-free.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -55,8 +23,6 @@ static __STRPTR *bsd_aliases_of(const AmiNetdbEntry *entry)
        and nothing in the library writes through it. */
     return (__STRPTR *)(APTR)entry->aliases;
 }
-
-/* ------------------------------------------------------------- servent, */
 
 static struct servent *bsd_servent_fill(struct AmiSocketBase *base,
                                         const AmiNetdbEntry *entry)
@@ -97,9 +63,6 @@ struct servent *bsd_getservbyport(register LONG port    __asm("d0"),
 VOID bsd_setservent(register LONG stay_open __asm("d0"),
                     register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-    /* stay_open asks the database file to be kept open between calls. The
-       store is parsed into memory once and never closed, so there is nothing
-       to keep open. Only the rewind is observable. */
     (VOID)stay_open;
 
     SocketBase->sb_ServCursor = 0;
@@ -122,8 +85,6 @@ struct servent *bsd_getservent(register struct AmiSocketBase *SocketBase __asm("
 
     return bsd_servent_fill(SocketBase, entry);
 }
-
-/* ------------------------------------------------------------ protoent, */
 
 static struct protoent *bsd_protoent_fill(struct AmiSocketBase *base,
                                           const AmiNetdbEntry *entry)
@@ -176,8 +137,6 @@ struct protoent *bsd_getprotoent(register struct AmiSocketBase *SocketBase __asm
 
     return bsd_protoent_fill(SocketBase, entry);
 }
-
-/* -------------------------------------------------------------- netent, */
 
 static struct netent *bsd_netent_fill(struct AmiSocketBase *base,
                                       const AmiNetdbEntry *entry)

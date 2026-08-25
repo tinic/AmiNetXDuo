@@ -1,45 +1,8 @@
 /*
- * AmiNetXDuo, what the ThreadX adoption bracket costs, measured.
- *
- * docs/RESEARCH.md 29.3 records two instruments disagreeing about this stack's
- * throughput: our own NetTrace makes it 55% faster than Roadshow on the wire
- * and the stack-agnostic prebuilt curl makes it 12% slower, five runs out of
- * five, with the gap scaling with the body rather than sitting in setup.
- * A candidate was named without being changed: bsd_nx_enter()/bsd_nx_leave()
- * bracket every recv(), every send() and every poll pass inside WaitSelect(),
- * and src/bsdsocket/netx_call.c prices one bracket at an AllocSignal(), a
- * _tx_thread_create(), a baton acquire and their inverses.  curl reads small
- * and selects between reads; NetTrace reads 4,096 bytes through one
- * WaitSelect() loop.  A per-call constant would produce exactly that shape.
- *
- * This binary measures:
- *
- *   1. One tx_amiga_adopt_thread() + tx_amiga_orphan_thread() pair, split
- *      into its two halves, from a plain Exec Task with the kernel up and an
- *      NX_IP running, the real bracket in the real population.
- *   2. Its parts, so the fix has somewhere to aim: the AllocSignal()/
- *      FreeSignal() pair, the _tx_amiga_wake_scheduler() poke, and the
- *      already-adopted fast path bsd_nx_enter() takes when tx_thread_identify()
- *      is non-NULL.
- *   3. A 256 KB TCP transfer over loopback drained by the calling task at
- *      four read sizes, in three arms:
- *
- *        per-call   a bracket around every logical recv(), which is what
- *                   src/bsdsocket/transfer.c does today;
- *        on-miss    a bracket only when the parked packet is exhausted and
- *                   nx_tcp_socket_receive() has to be called;
- *        once       one bracket around the whole transfer, the floor.
- *
- *      The difference between the first two is what a recv() satisfied from
- *      already-extracted data pays for nothing.  The difference between the
- *      first and the third is the whole bracket bill for that read size.
- *
- * Only the 68020 profiles mean anything, tests/perf/cpucal.c measures why:
- * FS-UAE charges no cycles at all above a 68020.  Run under -m A1200.
- *
- *   cmake --build build/cm --parallel --target bracket_test
- *   AMINETXDUO_RUN_TAG=brk ./tools/amiberry-run.sh -t 900 -m A1200 \
- *       build/cm/tests/perf/bracket_test
+ * AmiNetXDuo, what the ThreadX adoption bracket costs, measured: the
+ * adopt/orphan pair and its parts, and a 256 KB loopback transfer drained
+ * under each bracket policy.  Only the 68020 profiles mean anything (FS-UAE
+ * charges no cycles above a 68020), so run under -m A1200.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -62,8 +25,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-
-/* ------------------------------------------------------------- logging --- */
 
 #ifndef RawPutChar
 #  define RawPutChar(c) \
@@ -133,8 +94,6 @@ static UINT b_check(UINT ok, const char *what, ULONG detail)
 }
 
 
-/* -------------------------------------------------------------- timing --- */
-
 extern struct Device *TimerBase;        /* src/common/compat.c owns it */
 
 static ULONG    b_rate;
@@ -201,8 +160,6 @@ ULONG            i, t0, t1, total;
 }
 
 
-/* -------------------------------------------------------- test fabric ---- */
-
 #define B_PACKET_PAYLOAD    1568        /* == AMI_POOL_PAYLOAD              */
 #define B_PACKET_COUNT      64
 #define B_PACKET_OVERHEAD   96
@@ -216,23 +173,10 @@ ULONG            i, t0, t1, total;
 #define B_IP_STACK_SIZE     3072
 #define B_SRV_STACK_SIZE    4096
 
-/* Bytes per arm.  256 KB is long enough that the per-call constant under
-   test is hundreds of milliseconds at the small read sizes, and short enough
-   that thirteen arms fit inside one emulator session. */
 #define B_XFER_BYTES        (256UL * 1024UL)
-
-/* What the sender hands NetX Duo per call, the same 8 KB bsd_send_tcp()
-   sees from an application, clamped to the MSS on the way out. */
 #define B_SEND_CHUNK        8192UL
-
-/* The largest read the receiver arms use. */
 #define B_MAX_READ          16384UL
 
-/* The bracket policies under test, and how many arms the sender must serve.
-   Only per-call runs the adopt/orphan pair; the rest use the cached
-   resume/suspend one, which is what bsd_nx_enter() has been since
-   ami_netstack_enter_cached() landed.  Measuring a candidate policy against
-   the old bracket would price the policy and the cache together. */
 #define B_ARM_PER_CALL      0
 #define B_ARM_ON_MISS       1
 #define B_ARM_ONCE          2
@@ -270,15 +214,8 @@ static UINT             b_srv_status;
 static UINT             b_srv_up;
 
 
-/* ---------------------------------------------------------- the bracket -- */
-
-/*
- * The same two calls src/netstack/netstack.c's ami_netstack_enter() /
- * ami_netstack_leave() make, and therefore the same two src/bsdsocket/
- * netx_call.c's bsd_nx_enter() / bsd_nx_leave() make.  Open-coded here rather
- * than linked so this binary needs no netstack singleton, no config file and
- * no SANA-II device.
- */
+/* Open-coded rather than linked so this binary needs no netstack singleton,
+   no config file and no SANA-II device. */
 static UINT     b_cache_live;           /* the cached TX_THREAD exists, dormant */
 static ULONG    b_brackets;             /* real ones, per b_drain() */
 
@@ -312,8 +249,6 @@ static VOID b_leave(VOID)
 }
 
 
-/* --------------------------------------------------- micro benchmarks ----- */
-
 static VOID b_bench_bracket(VOID)
 {
 ULONG   reps = 400UL;
@@ -323,12 +258,6 @@ ULONG   ticks;
 BYTE    sig;
 UINT    status;
 
-    /*
-     * The pair, halves timed separately.  Reading the clock between them
-     * costs one calibrated bracket each, which b_elapsed() subtracts; at
-     * ~1.4 us a tick that is noise against a pair this size, and the two
-     * halves are not symmetric.
-     */
     for (i = 0UL; i < reps; i++)
     {
         t0     = b_now();
@@ -356,7 +285,6 @@ UINT    status;
           (LONG)(b_us_x100(orphan, reps) / 100UL),
           (LONG)(b_us_x100(orphan, reps) % 100UL));
 
-    /* The signal allocation the adoption cannot do on anyone else's behalf. */
     t0 = b_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -371,8 +299,6 @@ UINT    status;
           (LONG)(b_us_x100(ticks, reps) / 100UL),
           (LONG)(b_us_x100(ticks, reps) % 100UL));
 
-    /* The scheduler poke both halves end with.  Signal() to a task that is
-       not waiting is the cheap case; this is that case, so it is a floor. */
     t0 = b_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -383,8 +309,6 @@ UINT    status;
           (LONG)(b_us_x100(ticks, reps) / 100UL),
           (LONG)(b_us_x100(ticks, reps) % 100UL));
 
-    /* And the nested path: bsd_nx_enter() with sb_NxNest > 0 never gets this
-       far, but ami_netstack_enter() does, and this is what it costs. */
     status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for nested measurement",
                 status))
@@ -402,10 +326,6 @@ UINT    status;
         (VOID)tx_amiga_orphan_thread(&b_caller);
     }
 
-    /*
-     * And the cached bracket: the same baton handoff with the registration
-     * kept.  Adopt once, then time resume/suspend pairs, then orphan.
-     */
     status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for cached measurement",
                 status))
@@ -446,8 +366,6 @@ UINT    status;
         (VOID)tx_amiga_orphan_thread(&b_caller);
     }
 
-    /* Forbid()/Permit(), for scale: the uninterruptible section every ThreadX
-       service call on this port opens with. */
     t0 = b_now();
     for (i = 0UL; i < reps * 10UL; i++)
     {
@@ -461,13 +379,6 @@ UINT    status;
 }
 
 
-/* ------------------------------------------------------- the transfer ----- */
-
-/*
- * The sender is a ThreadX thread, so it never brackets anything: the variable
- * under test is what the receiver pays, and putting the sender on a native
- * thread keeps it out of the measurement.
- */
 static VOID b_server_entry(ULONG id)
 {
 UINT        status;
@@ -478,12 +389,8 @@ NX_PACKET  *pkt;
 
     (VOID)tx_semaphore_get(&b_srv_ready, TX_WAIT_FOREVER);
 
-    /*
-     * The listen and the accept happen here, on a native ThreadX thread, and
-     * the client connects from the Exec Task in main(), the shape
-     * tests/perf/perf_test.c uses.  A listen armed from the same task that
-     * then blocks in connect() never completes on this port.
-     */
+    /* A listen armed from the same task that then blocks in connect() never
+       completes on this port, so both live here and main() connects. */
     status = nx_tcp_socket_create(&b_ip, &b_server, "bracket server",
                                   NX_IP_NORMAL, NX_FRAGMENT_OKAY,
                                   NX_IP_TIME_TO_LIVE, 16384, NX_NULL, NX_NULL);
@@ -566,15 +473,6 @@ NX_PACKET  *pkt;
 }
 
 
-/*
- * Drain B_XFER_BYTES with reads of `read_size`, under one of the three
- * bracket policies.  The packet bookkeeping mirrors bsd_recv_tcp()'s: a
- * partially drained packet is parked and the next call continues out of it.
- *
- * Returns elapsed E-Clock ticks; *calls_out and *misses_out report how many
- * logical recv() calls were made and how many of them had to reach
- * nx_tcp_socket_receive().
- */
 static ULONG b_drain(ULONG read_size, UINT arm, ULONG *calls_out,
                      ULONG *misses_out)
 {
@@ -641,20 +539,6 @@ UINT        status;
 
                 offset = 0UL;
 
-                /*
-                 * The first read after a miss is the only place the arms
-                 * differ, so on-miss gives the context back here rather than
-                 * holding it for the copy, nx_packet_data_extract_offset()
-                 * and nx_packet_release() are among the nx_packet_* helpers
-                 * with no caller check at all.
-                 *
-                 * lazy keeps it to the end of the call instead.  A read big
-                 * enough to span packets misses more than once (16 KB reads
-                 * miss 32 times over 16 calls), and on-miss pays a bracket for
-                 * each of those, which is how it loses to cached at 16 KB.
-                 * Holding caps the bill at one bracket per call, so lazy is
-                 * never worse than cached and never worse than on-miss.
-                 */
                 if (arm == B_ARM_ON_MISS)
                 {
                     b_leave();
@@ -749,8 +633,6 @@ static const char *b_arm_name(UINT arm)
     return("once    ");
 }
 
-/* Every arm but per-call gets the cached TX_THREAD; per-call is the
-   adopt/orphan control that -DAMINETXDUO_NXCACHE=OFF restores. */
 static UINT b_arm_is_cached(UINT arm)
 {
     return((UINT)(arm != B_ARM_PER_CALL));
@@ -828,8 +710,6 @@ UINT    status;
 }
 
 
-/* ------------------------------------------------------ ThreadX startup --- */
-
 VOID tx_application_define(VOID *first_unused_memory)
 {
 UINT    status;
@@ -848,17 +728,8 @@ UINT    status;
                           (VOID *)b_ip_stack, (ULONG)sizeof(b_ip_stack), 1);
     (VOID)b_check((UINT)(status == NX_SUCCESS), "ip create", status);
 
-    /*
-     * A second NX_IP, which nothing in this test addresses.
-     *
-     * _nx_ram_network_driver keeps a fixed table of attached instances and
-     * decides where a frame goes by walking it.  With one instance in the
-     * table it accepts the frame and delivers it nowhere, and a loopback
-     * connect() on the sole instance times out with its SYN counted as
-     * received and never matched, measured, five SYN attempts and zero TCP
-     * packets received, before this line existed.  tests/perf/perf_test.c
-     * creates two for the same reason.
-     */
+    /* _nx_ram_network_driver delivers nowhere with one instance in its table,
+       and a loopback connect() then times out.  Hence this second NX_IP. */
     status = nx_ip_create(&b_ip2, "ip2", B_IP2_ADDRESS, B_NETMASK, &b_pool,
                           _nx_ram_network_driver,
                           (VOID *)b_ip2_stack, (ULONG)sizeof(b_ip2_stack), 1);
@@ -882,16 +753,9 @@ UINT    status;
 }
 
 
-/* -------------------------------------------------------------- shutdown -- */
-
-/*
- * Everything tx_application_define() created, given back, and then the kernel.
- *
- * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
- * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
- * own.  The order is creation reversed, and the pool goes last because
- * nx_ip_delete() hands packets back to it on the way out.
- */
+/* tx_amiga_kernel_stop() refuses while any application TX_THREAD is alive, and
+   nx_ip_create() runs one; delete in reverse creation order, pool last because
+   nx_ip_delete() hands packets back to it. */
 static VOID b_shutdown(VOID)
 {
 
@@ -899,25 +763,18 @@ UINT    status;
 UINT    adopted;
 
 
-    /* Every measurement above ended orphaned, so adopt once more: these are
-       NetX Duo calls and want a ThreadX thread to run on.  Stop orphans the
-       caller itself once it has decided to go ahead. */
     status  = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     adopted = b_check((UINT)(status == TX_SUCCESS), "adopt for shutdown",
                       status);
 
     if (adopted)
     {
-        /* It suspended itself at the end of its entry rather than returning,
-           and a suspended ThreadX thread is one the port can reclaim. */
         (VOID)tx_thread_terminate(&b_srv_thread);
         (VOID)b_check((UINT)(tx_thread_delete(&b_srv_thread) == TX_SUCCESS),
                       "shutdown: server thread deleted", 0);
 
-        /* b_client is unbound and deleted only on the path where the transfer
-           actually ran.  A socket the IP instance still counts as created
-           makes nx_ip_delete() refuse, and all three of these are harmless on
-           a socket that was never created or is already gone. */
+        /* A socket the IP instance still counts as created makes nx_ip_delete()
+           refuse; all three are harmless on one never created or already gone. */
         (VOID)nx_tcp_socket_disconnect(&b_client, 2UL * NX_IP_PERIODIC_RATE);
         (VOID)nx_tcp_client_socket_unbind(&b_client);
         (VOID)nx_tcp_socket_delete(&b_client);
@@ -935,24 +792,13 @@ UINT    adopted;
                       "shutdown: packet pool deleted", 0);
     }
 
-    /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  That is invisible
-     * from here -- the checks have passed and the exit status is decided by
-     * then -- so tools/smoke/unloadprobe.c is what sees it.
-     *
-     * Called even when the adoption above failed: stop then refuses, and a
-     * refusal reported as a failed check is the point.  Passing over it
-     * silently is how this went unnoticed in the first place.
-     */
+    /* The kernel must come down before main() returns: tx_amiga_kernel_start()
+       leaves a VERTB server whose is_Code is in this hunk, and AmigaDOS frees
+       the hunk the instant main() returns. */
     (VOID)b_check((UINT)(tx_amiga_kernel_stop() == TX_SUCCESS),
                   "ThreadX kernel stopped", 0);
 }
 
-
-/* ------------------------------------------------------------------ main -- */
 
 static const ULONG  b_read_sizes[] = { 512UL, 1460UL, 4096UL, 16384UL };
 #define B_READ_COUNT    (sizeof(b_read_sizes) / sizeof(b_read_sizes[0]))
@@ -978,7 +824,6 @@ ULONG   i;
     b_log("E-Clock %ld Hz, %ld ns/tick, measurement bracket %ld ticks",
           (LONG)b_rate, (LONG)b_tick_ns, (LONG)b_bracket);
 
-    /* Everything below runs from a plain Exec Task. */
     status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     if (!b_check((UINT)(status == TX_SUCCESS), "first adoption", status))
     {
@@ -996,7 +841,6 @@ ULONG   i;
     b_log("");
     b_log("-- 256 KB over loopback, drained by an Exec Task ---------------");
 
-    /* Let the server thread arm its listen and park in accept() first. */
     status = tx_amiga_adopt_thread(&b_caller, (CHAR *)"bracket caller", 16);
     if (b_check((UINT)(status == TX_SUCCESS), "adopt for setup", status))
     {

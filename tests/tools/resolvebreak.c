@@ -2,32 +2,6 @@
  * ResolveBreak, how long a name lookup blocks, and whether Ctrl-C gets it
  * back.
  *
- * The Roadshow autodoc requires a blocking operation to be abortable:
- * SetSocketSignals says SIGINT "is the signal to send to the process which
- * owns the socket in order to abort a blocking operation".  recv() and its
- * neighbours honour that; gethostbyname() did not, and the wait it could not
- * be taken out of was minutes rather than the seconds the caller asked for.
- *
- * Neither half can be shown by a build or by a lookup against a working name
- * server.  It needs a server that answers nothing, a clock, and something to
- * press Ctrl-C in the middle, so this points the resolver at an address on a
- * network reserved for documentation (RFC 5737 TEST-NET-1, 192.0.2.0/24), which
- * nothing routes and nothing answers, and times three arms:
- *
- *   1  the whole lookup, uninterrupted.  What the caller asked for is the
- *      ceiling; anything above it is somebody else's retry loop.
- *   2  the same lookup with the break signal already set.  It must come back
- *      without querying anything.
- *   3  the same lookup with the break signal arriving in the middle, sent by a
- *      child process.  The gap between sending it and the lookup returning is
- *      the number that decides whether Ctrl-C feels like it works.
- *
- * Everything goes through the published LVOs.  Nothing of ours is linked, so
- * the same binary measures any bsdsocket.library, which is the point: the
- * before and after numbers come from one probe.
- *
- *   ResolveBreak [blackhole-address] [name] [seconds-before-break]
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -39,8 +13,6 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_errno(struct Library *base)
 {
@@ -125,12 +97,6 @@ static VOID p_release_dns_list(struct Library *base, struct List *list)
                       : "a1", "cc", "memory");
 }
 
-/* ---------------------------------------------------------------- clock --- */
-
-/*
- * DateStamp() rather than the VBlank counter: ds_Tick is 1/50 s and the
- * intervals here are seconds, and it is the same clock on every model.
- */
 static ULONG p_ticks(VOID)
 {
     struct DateStamp ds;
@@ -148,13 +114,6 @@ static VOID p_report(const char *what, ULONG start, ULONG end)
            (LONG)(ticks / 50UL), (LONG)((ticks % 50UL) * 2UL), (LONG)ticks);
 }
 
-/* --------------------------------------------------------- the Ctrl-C ----- */
-
-/*
- * A child process that waits and then signals the parent, which is what a user
- * pressing Ctrl-C does.  A process rather than a task: Delay() needs a
- * pr_MsgPort, and a bare task has none.
- */
 static struct Task *p_parent;
 static ULONG        p_delay;
 
@@ -163,8 +122,6 @@ static VOID p_breaker(VOID)
     Delay((LONG)p_delay);
     Signal(p_parent, SIGBREAKF_CTRL_C);
 }
-
-/* ----------------------------------------------------------------- main --- */
 
 int main(int argc, char **argv)
 {
@@ -197,11 +154,6 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    /*
-     * Leave exactly one name server, and let it be one that cannot answer.
-     * The list has to be walked to a private copy first, removing from it
-     * while holding it would be walking a list that is being changed.
-     */
     {
         struct List *list = p_obtain_dns_list(base);
         char         found[8][32];
@@ -251,8 +203,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* ---- 1: the whole lookup ------------------------------------------- */
-
     Printf((CONST_STRPTR)"\n1  uninterrupted\n");
 
     (VOID)SetSignal(0UL, SIGBREAKF_CTRL_C);
@@ -268,8 +218,6 @@ int main(int argc, char **argv)
         Printf((CONST_STRPTR)"FAIL a black-holed server answered, pick another address\n");
         failures++;
     }
-
-    /* ---- 2: the break already set --------------------------------------- */
 
     Printf((CONST_STRPTR)"\n2  break already pending\n");
 
@@ -287,18 +235,12 @@ int main(int argc, char **argv)
         failures++;
     }
 
-    /*
-     * The signal is read and not consumed, so the program's own Ctrl-C
-     * handling still sees it.  Clear it here or arm 3 measures nothing.
-     */
     if ((SetSignal(0UL, 0UL) & SIGBREAKF_CTRL_C) == 0)
     {
         Printf((CONST_STRPTR)"FAIL the break signal was consumed by the lookup\n");
         failures++;
     }
     (VOID)SetSignal(0UL, SIGBREAKF_CTRL_C);
-
-    /* ---- 3: the break arriving in the middle ---------------------------- */
 
     Printf((CONST_STRPTR)"\n3  break after %ld s\n", (LONG)delay);
 

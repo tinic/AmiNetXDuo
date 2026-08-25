@@ -2,41 +2,6 @@
  * AmiNetXDuo, whether a broadcast this host sends reaches this host's own
  * sockets.
  *
- * Reported from an A3000 running Fitz 1.21: `fitz serve ram: name ramdisk` in
- * one shell and `fitz query` in another, and the machine does not list its own
- * share.  Every other machine on the LAN lists it.  `fitz query` broadcasts
- * "LIST\n" to 255.255.255.255:17710 (fitz-common-client.c, fitz_pms_list_udp)
- * and `fitz serve` binds that port on INADDR_ANY, so the two are on the same
- * machine and never meet.
- *
- * Ethernet is simplex, a card does not hear its own transmissions, so the
- * copy has to be made in software.  _nx_ip_driver_packet_send() makes it for a
- * unicast to our own address and, on request, for a multicast, and did not
- * make it for a broadcast.  4.4BSD copies one back in ether_output() and Linux
- * in ip_mc_output(), which is why the same program works everywhere else.
- *
- * Real, compiled from third_party/netxduo/common/src into this binary: the
- * whole path from nx_udp_socket_send() to nx_udp_socket_receive(),
- * nx_udp_socket_send.c, nxd_udp_socket_send.c, nx_ip_packet_send.c,
- * nx_ip_header_add.c, nx_ip_route_find.c, nx_ip_driver_packet_send.c (the
- * function under test), nx_packet_copy.c, nx_ipv4_packet_receive.c,
- * nx_ip_dispatch_process.c, nx_udp_packet_receive.c and nx_udp_socket_receive.c
- * plus the packet pool and the UDP port table underneath them.
- *
- * Stubbed: the link driver, which counts what would have gone on the wire and
- * releases the packet, and the IP thread.  _nx_ip_packet_deferred_receive()
- * normally queues the copy for that thread; here it runs the receive inline,
- * which is the same work in the caller's stack frame and lets one send be
- * checked before the next.
- *
- * Four destinations are sent to, because the fix must not turn into "loop
- * everything back":
- *
- *   255.255.255.255   the limited broadcast Fitz uses
- *   10.0.0.255        a directed broadcast for the interface's own prefix
- *   10.0.0.17         our own address, which looped back before the fix too
- *   10.0.0.42         another host, which must not be delivered locally
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -47,9 +12,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-
-/* ------------------------------------------------------------- harness ---- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -85,17 +47,9 @@ static NX_UDP_SOCKET   h_client;            /* the one that broadcasts      */
 static ULONG h_pool_memory[((H_POOL_PAYLOAD + sizeof(NX_PACKET) + 32) *
                             H_POOL_PACKETS) / sizeof(ULONG)];
 
-/* What the stubbed driver saw. */
 static UINT h_wire_sends;
 static UINT h_wire_broadcasts;
 
-
-/* --------------------------------------------------------------- stubs ---- */
-
-/*
- * The caller.  NetX Duo's _nxe_ wrappers refuse a call made from no thread at
- * all (NX_THREADS_ONLY_CALLER_CHECKING), so main() lends itself an identity.
- */
 static TX_THREAD  h_caller_thread;
 
 TX_THREAD         *_tx_thread_current_ptr = &h_caller_thread;
@@ -195,11 +149,6 @@ ULONG _tx_time_get(VOID)
     return 0;
 }
 
-/*
- * The link driver.  A SANA-II device cannot hear its own transmission, and
- * neither can this: it counts the frame and hands the packet back, which is
- * exactly the behaviour that makes the software copy necessary.
- */
 static VOID h_driver(NX_IP_DRIVER *request)
 {
     switch (request -> nx_ip_driver_command)
@@ -222,17 +171,10 @@ static VOID h_driver(NX_IP_DRIVER *request)
     request -> nx_ip_driver_status = NX_SUCCESS;
 }
 
-/*
- * The IP thread.  The real one wakes on an event flag and calls
- * _nx_ip_packet_receive(); running the receive inline is the same work and
- * keeps one send from overlapping the next.
- */
 VOID _nx_ip_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     _nx_ipv4_packet_receive(ip_ptr, packet_ptr);
 }
-
-/* ---------------------------------------------------------------- setup --- */
 
 static VOID h_interface_setup(VOID)
 {
@@ -251,13 +193,6 @@ static VOID h_interface_setup(VOID)
     if_ptr -> nx_interface_physical_address_lsw    = 0x00112233UL;
 }
 
-
-/* ------------------------------------------------------------- the send --- */
-
-/*
- * Send H_PAYLOAD from the client socket to `destination`, then drain the
- * server socket.  Returns the number of datagrams the server got.
- */
 static UINT h_send_and_drain(ULONG destination, const char *label,
                              UINT expect_wire)
 {
@@ -322,9 +257,6 @@ static UINT h_send_and_drain(ULONG destination, const char *label,
 
     return delivered;
 }
-
-
-/* ----------------------------------------------------------------- main --- */
 
 int main(void)
 {
@@ -396,11 +328,6 @@ int main(void)
            delivered, h_wire_sends);
     h_check(delivered == 1, "a unicast to ourselves still loops back");
 
-    /*
-     * Another host on the same prefix.  There is no ARP entry, so the packet
-     * is queued for one and never reaches the driver, which is the point:
-     * nothing about it is delivered locally.
-     */
     h_wire_sends = 0;
     h_wire_broadcasts = 0;
 

@@ -60,25 +60,6 @@
 #   -m MODEL    emulator profile (default A3000)
 #   -t SECS     timeout (default 500)
 #   -L DIR      extra files staged into LIBS:
-#
-#   AMINETXDUO_NETSTAT_ARGS overrides the arguments NetStat is run with,
-#   which is how a specific query gets exercised against a live mount.
-#   -w          capture the peer's own egress and report the inbound loss
-#               rate from it with tests/perf/lossrate.py.  This is the
-#               comparison that survives a rig: throughput is downstream of
-#               everything and moves on its own, while retransmissions over
-#               data segments sent is one number taken where the counts are
-#               exact.  It also separates a segment that was LOST from one
-#               that merely arrived late, a distinction that decides which
-#               of two stacks is actually doing better and that a rate cannot
-#               make.
-#   -W PCT      -w, and fail above PCT raw loss
-#   -E PCT      -w, and fail above PCT with spurious retransmissions removed
-#   -M "ARGS"   extra arguments to `fitz mount`, `-M "BUFS 262144"`.  This
-#               is NOT part of a matched stack comparison: it changes the
-#               client, so a run using it is a diagnostic arm of its own and
-#               has to be labelled as one.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -90,10 +71,6 @@ cd "$ROOT"
 STACK=""
 TAG=""
 PROFILE=1
-# No default: with -H it is asked of the peer below, and with neither it is the
-# one thing this script cannot guess.  A hardcoded address is a second, silently
-# unvalidated spelling of the machine -H already names -- run-fitzbench.sh's
-# default outlived a peer move and pointed at the host its own guard refuses.
 PEER_ADDR="${AMINETXDUO_FITZ_PEER_ADDR:-}"
 PEER="${AMINETXDUO_FITZ_PEER:-}"
 PEER_DIR="${AMINETXDUO_FITZ_PEER_DIR:-}"
@@ -145,33 +122,17 @@ while getopts "s:T:pdci:A:P:k:C:r:b:R:G:B:m:t:L:M:wW:E:" opt; do
     esac
 done
 
-# The share is per-port, as the server and its kill pattern already are.  One
-# fixed /tmp/fitzbench-share left two runs on two ports writing one
-# fitzbench.dat on the peer, and the second run's write truncated it under the
-# first run's read: `Read() gave 0 of 32768` mid-transfer on a clean link, with
-# the connection itself never closed or lost.
 PEER_DIR="${PEER_DIR:-/tmp/fitzbench-share-$PORT}"
 
 [ -n "$STACK" ] || { sed -n '3,50p' "$0" >&2; exit 2; }
 [ -n "$TAG" ] || TAG="sp-$STACK$([ "$PROFILE" = 1 ] || echo -plain)$([ "$DIAG" = 0 ] || echo -diag)"
 
-# The peer port, when nobody asked for one.  A run that shares a port with
-# another run does not fail: it reports a number measured against somebody
-# else's traffic, which is worse.
-#
-# This one is a LISTENING PORT ON THE PEER, not on this host, so the bind probe
-# in tools/emu-rig-lock.sh cannot answer for it -- it can only ask the kernel
-# it is running on.  The flock still can, and it is the half that keeps two
-# runs on this rig apart, which is the case that bites.  The old derivation is
-# kept as the fallback for a host with no flock(1).
 if [ -z "$PORT" ]; then
     # shellcheck source=../../tools/emu-rig-lock.sh
     . "$ROOT/tools/emu-rig-lock.sh"
     if rig_claim_port "stackprof-peer $TAG" 17000 700 2> /dev/null; then
         PORT="$RIG_PORT"
     else
-        # TAG and the pid: two runs with the same tag -- both instances asking
-        # for -s ours with no -T -- would otherwise still share a port.
         PORT=$((17000 + ($(printf %s "$TAG" | cksum | cut -d" " -f1) + $$) % 700))
     fi
 fi
@@ -216,9 +177,6 @@ case "$STACK" in
         NOTE="AmiTCP_NG from $NGDIR"
         ;;
     none)
-        # The baseline: no bsdsocket.library at all, nothing brought up.  Only
-        # meaningful with -c, and it is what says whether a gap between two
-        # stacks is either stack's doing or the rig's.
         [ "$CTLONLY" = 1 ] || {
             echo "-s none measures a machine with no stack, so it only makes" >&2
             echo "sense with -c; there is nothing to transfer over." >&2
@@ -251,19 +209,12 @@ A2065="${AMINETXDUO_A2065:-$ROOT/build/a2065.device}"
 # ------------------------------------------------------------- the server ---
 
 if [ "$CTLONLY" = 1 ] || [ "$DIAG" = 1 ]; then
-    # Neither -c nor -d transfers anything over the wire, so there is no server
-    # to start and nothing to check.  -d in particular exists to bring an
-    # interface up and stop, which is exactly the run that wants no peer, and
-    # refusing it for the want of one made the diagnostic unusable.
     if [ "$DIAG" = 1 ]; then
         echo "==> diagnostic only: bring the interface up and report"
     else
         echo "==> control only: RAM: arm, stack up, no traffic"
     fi
 elif [ -n "$PEER" ]; then
-    # Ask the machine ssh landed on for its own address; it cannot be wrong
-    # about that, whereas this host's resolver can be stale and on a Mac does
-    # not answer for the lab's names at all.
     PEER_ADDRS=$(ssh "$PEER" \
         "ip -4 -o addr show scope global 2>/dev/null | awk '{print \$4}' | cut -d/ -f1" \
         2>/dev/null)
@@ -284,8 +235,6 @@ elif [ -n "$PEER" ]; then
     fi
 
     PEERLOG="$ROOT/build/stackprof-$TAG-peer.log"
-    # The bracket is not decoration: pkill -f matches the remote shell's own
-    # command line, so an unbracketed pattern kills the connection issuing it.
     ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true
     ssh "$PEER" "rm -rf $PEER_DIR; mkdir -p $PEER_DIR;
                  nohup $PEER_BIN $PEER_DIR PORT $PORT > /tmp/fitzbench-peer.log 2>&1 &
@@ -294,9 +243,6 @@ elif [ -n "$PEER" ]; then
     cleanup() { ssh "$PEER" "pkill -f '[f]itz-serve .* PORT $PORT\$' || true" >/dev/null 2>&1 || true; }
     trap cleanup EXIT INT TERM HUP
 
-    # A forked child outlives the TERM its parent took and keeps the port, so
-    # the server started just above may never have bound it.  Nothing later in
-    # the run distinguishes that from a stack that cannot transfer.
     PEER_BOUND=0
     for _try in 1 2 3 4 5 6 7 8 9 10; do
         if ssh "$PEER" "ss -lnt 2>/dev/null | grep -q ':$PORT '" 2>/dev/null; then
@@ -313,13 +259,6 @@ elif [ -n "$PEER" ]; then
         exit 2
     }
 else
-    # No -H and no AMINETXDUO_FITZ_PEER: nothing here starts a server, so the
-    # only thing that makes the run mean anything is one already listening.
-    #
-    # The check above is thorough and was unreachable without a peer, so the
-    # run booted the emulator, brought the interface up, mounted nothing and
-    # reported "RESULT read FAILED" -- a stack verdict for a missing server,
-    # indistinguishable from a stack that cannot transfer.
     [ -n "$PEER_ADDR" ] || {
         echo "no peer and no -A: give -A <addr> for a server already listening," >&2
         echo "or -H <user@host> to have this script start one" >&2; exit 2; }
@@ -346,9 +285,6 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 
-# The device goes in BOTH places: ours opens it out of DEVS:, both foreign
-# stacks look in DEVS:Networks/.  One driver in two directories removes a
-# variable that would otherwise look like a bug in somebody's SANA-II code.
 if [ -n "$IFCONFIG" ]; then
     [ -f "$IFCONFIG" ] || { echo "no such interface file: $IFCONFIG" >&2; exit 2; }
     cp "$IFCONFIG" "$STAGE/devs/NetInterfaces/eth0"
@@ -375,26 +311,16 @@ fi
 [ -z "$EXTRALIBS" ] || cp -R "$EXTRALIBS"/* "$STAGE/libs/"
 
 if [ -n "$CMD_ADDIF" ]; then cp "$CMD_ADDIF" "$STAGE/AddNetInterface"; fi
-# Optional: a stack that ships no status tool is still measurable, and the
-# plan tests for NetStat before naming it.  As an && list this aborted the
-# whole run under set -e, with no message, for a file nothing needed.
 if [ -n "$CMD_STAT" ] && [ -f "$CMD_STAT" ]; then cp "$CMD_STAT" "$STAGE/NetStat"; fi
 cp "$FITZ"  "$STAGE/fitz"
 cp "$BENCH" "$STAGE/FitzBench"
 [ "$PROFILE" = 0 ] || cp "$PROF" "$STAGE/Profile"
 
-# AmiTCP_NG reads its configuration through an AmiTCP: assign and falls back
-# to SYS:AmiTCP, which a bare directory hard drive can supply without the
-# assign the boot shell does not make.
 if [ "$STACK" = amitcpng ] && [ -d "$NGDIR/db" ]; then
     mkdir -p "$STAGE/AmiTCP"
     cp -R "$NGDIR/db" "$STAGE/AmiTCP/"
 fi
 
-# `&` is SYS_Asynch: a fitz mount stays resident as a DOS handler and never
-# returns, so the line after it would never run otherwise.  Profile wraps
-# FitzBench rather than the mount, because the sampler records every task
-# anyway and a handler that never returns never writes a profile.
 {
     if [ "$STACK" != none ]; then
         echo "SYS:AddNetInterface DEVS:NetInterfaces/eth0"
@@ -402,10 +328,6 @@ fi
     fi
     # A `{ }` group is not a subshell, so an `exit` here would end the run
     # rather than the plan.  DIAG stops by writing nothing more.
-    # AMINETXDUO_PROF_WATCH=<library>/<hexoff>/<hexlen> asks the sampler for a
-    # caller window over that range; see prof.h.  AMINETXDUO_PROF_VERBOSE=1
-    # drops QUIET so Profile reports each stage, for diagnosing a run that
-    # produces no profile.
     PROF_QUIET=QUIET
     [ -z "${AMINETXDUO_PROF_VERBOSE:-}" ] || PROF_QUIET=
     PROF_PREFIX="SYS:Profile $PROF_QUIET OUT=DH0:fitz.prof FOLDED=DH0:fitz.folded${AMINETXDUO_PROF_WATCH:+ WATCH=$AMINETXDUO_PROF_WATCH}"
@@ -413,13 +335,6 @@ fi
     if [ "$DIAG" = 1 ]; then
         [ ! -f "$STAGE/NetStat" ] || echo "SYS:NetStat $STATARGS"
     elif [ "$CTLONLY" = 1 ]; then
-        # The RAM: arm alone: the stack is up, its threads are running and no
-        # traffic passes.  It prices local FitzBench and memory-copy work
-        # without the filesystem handler or network path.  It is not an
-        # idle-time baseline: true idle comes from samples whose saved SR is
-        # $2000 in Exec's STOP loop.  AddNetInterface still runs, because a
-        # library nobody opened costs nothing and measuring that would answer
-        # a different question.
         if [ "$PROFILE" = 1 ]; then
             echo "$PROF_PREFIX SYS:FitzBench RAM: KB=$KB CHUNK=$CHUNK REPS=$REPS"
         else
@@ -460,8 +375,6 @@ if [ "$LOSSCAP" = "1" ] && [ "$DIAG" = "0" ]; then
              "AMINETXDUO_FITZ_PEER" >&2
         exit 2
     fi
-    # Fatal, and before the boot: see tests/perf/run-fitzbench.sh.  A capture
-    # that never started leaves the -W/-E gate unrun and the script exiting 0.
     peercap_start "$PEER" "$PORT" "$CAPDIR" "$TAG" || exit 2
     CAPTURING=1
 fi
@@ -481,10 +394,6 @@ HD="$ROOT/build/amiberry-testhd-$TAG"
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: no $REPORT (rc=$RUN_RC)" >&2; exit 1; }
 
-# Same as tests/perf/run-fitzbench.sh: the backend assertion in
-# tools/amiberry-run.sh reports through the exit status and nothing else, so a
-# run that came up on SLIRP instead of the bridge otherwise prints a profile
-# and returns 0.
 if [ "$RUN_RC" != "0" ]; then
     echo "FAIL: the emulator run failed (rc=$RUN_RC); the profile it left" >&2
     echo "describes a run its own harness refused." >&2

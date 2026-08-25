@@ -10,52 +10,6 @@
 #
 # WHY THIS EXISTS
 #
-#   Every transfer gate before this one compared byte counts.  The receive
-#   path computes its checksum in the same pass that places the bytes
-#   (single-copy claim, fused drain-and-sum), so the one failure a byte count
-#   cannot see -- bytes placed at the wrong offset, a word duplicated or
-#   skipped, a tail mishandled, and the whole thing then CERTIFIED by a sum
-#   taken over the wrongly placed bytes -- passes TCP, passes iperf, and
-#   corrupts the payload without a symptom.  Content is the only witness.
-#
-#   So: src/tools/paysum.c on the guest and tests/tools/paypeer.py on the
-#   peer each derive the same position-dependent pattern from (seed, offset)
-#   and each hash what actually crossed on their own side.  This script
-#   writes both ends' case tables from one matrix, runs them, and joins the
-#   two reports port by port.  A placement bug changes the bytes, the bytes
-#   change a CRC on exactly one side, and the join fails with the case named.
-#
-# THE MATRIX
-#
-#   Both directions.  Sizes sweep every tail residue (len mod 4 = 0..3, the
-#   class the three-byte-tail bug lived in) at several magnitudes, the MSS
-#   edges (1460 +/- and the doubles), and 1 byte to a megabyte.  One
-#   concurrency case per direction runs three simultaneous sockets carrying
-#   three different seeds through one select() loop, so a chunk leaked
-#   across connections lands in a stream whose pattern disagrees with it
-#   everywhere.  -F both appends the same matrix again over IPv6, which is
-#   an independent CONTROL, not just coverage: the v4 receive verifier
-#   consumes the fused sum, the v6 path never does (the stack walks the
-#   delivered buffer itself), so v4-bad-with-v6-clean is the signature of
-#   self-certified placement corruption, and a v6 drop-count climbing during
-#   clean v4 hashes is the same bug seen from the other side.
-#
-#   -S runs the whole matrix under an mDNS storm from the peer host
-#   (/tmp/mdnsstorm.py, unicast -- multicast never reaches a pcap-bridged
-#   guest), which is the arm where the responder's bursts interleave with
-#   the claim lane's drains.
-#
-# WHAT IT NEEDS
-#
-#   Bridged, always: -B and -P are required.  A SLIRP transfer terminates
-#   TCP inside the emulator's NAT and the frames the guest drains are not
-#   the frames the peer sent, which makes its content proof worth less; and
-#   the guest-as-receiver direction wants a peer that can be reached from a
-#   THIRD machine anyway (docs/RESEARCH.md 63).  The claim lane itself only
-#   exists on ne2000_pcmcia (DP8390) among the emulated boards; a2065 runs
-#   the classic CopyToBuff lane and is the cross-lane control: same matrix,
-#   same hashes expected, different placement code.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -134,7 +88,6 @@ STAGE="$ROOT/build/payverify-stage-$AMINETXDUO_RUN_TAG"
 PEERLOG="$ROOT/build/payverify-peer-$AMINETXDUO_RUN_TAG"
 RUN_RC=0
 
-# ---------------------------------------------------------------- the peer ---
 
 PEERNAME="${PEERHOST#*@}"
 PEERADDR=$(getent ahostsv4 "$PEERNAME" 2>/dev/null | awk 'NR==1{print $1}')
@@ -146,9 +99,6 @@ if [ -z "$PEERADDR" ]; then
     esac
 fi
 
-# The guest calls the peer's global v6 address for the v6 arms.  Asked for,
-# or read off the peer itself; without one the v6 arms are skipped and the
-# verdict says so rather than quietly passing half the matrix.
 if [ "$FAMILIES" != v4 ] && [ -z "$PEERV6" ]; then
     PEERV6=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
         "ip -6 addr show scope global 2>/dev/null" 2>/dev/null |
@@ -163,25 +113,12 @@ fi
 
 echo "==> peer $PEERHOST: v4 $PEERADDR${PEERV6:+, v6 $PEERV6}"
 
-# --------------------------------------------------------------- the matrix ---
-#
-# One table writes both ends.  Each row: direction (the GUEST's), length,
-# connections.  Ports and seeds are handed out sequentially, so every
-# CONNECTION in the run has a unique port and a unique seed, and the join at
-# the end is port -> (guest line, peer line) with nothing shared to agree by
-# accident.
-#
-# The receive rows are the campaign: every tail residue at four magnitudes,
-# the MSS edges, one byte to a megabyte.  The transmit rows cover the same
-# residues once; the sending side has no fused sum, but a transmit placement
-# bug corrupts the wire the same way.
 
 RX_LENS="1 2 3 4 5 1459 1460 1461 1462 1463 4095 4096 4097 65535 65536 65537 1048573 1048574 1048575 1048576"
 TX_LENS="1 3 1460 1461 65537 1048575"
 CONC_RX_LEN=262144
 CONC_TX_LEN=131072
 
-# -Q is the smoke form: residues and edges once, no megabyte class.
 if [ "$QUICK" = yes ]; then
     RX_LENS="1 3 331 1460 1461 65537"
     TX_LENS="3 1461"
@@ -189,12 +126,6 @@ if [ "$QUICK" = yes ]; then
     CONC_TX_LEN=65536
 fi
 
-# -L narrows the matrix instead of running the full sweep under fire: with
-# the ring being overrun on purpose every transfer crawls (the first attempt
-# ran the full matrix and timed out 14 cases in), and the megabyte class
-# proves nothing about retransmission that 256 KB does not.  What matters
-# here is bytes ARRIVING TWICE: enough length for many drops, every tail
-# residue once, both directions.
 if [ "$LOSS" = yes ] || [ -n "$NETEM" ]; then
     RX_LENS="1461 65534 65535 65536 65537 262144"
     TX_LENS="65537"
@@ -212,7 +143,6 @@ port=$PORT_BASE
 seed=$SEED_BASE
 case_no=0
 
-# emit_case dir len conns family
 emit_case() {
     local dir="$1" len="$2" conns="$3" fam="$4" host flag=""
     if [ "$fam" = v6 ]; then host="$PEERV6"; flag=" -6"; else host="$PEERADDR"; fi
@@ -221,10 +151,6 @@ emit_case() {
     local extra=""
     [ "$dir" = tx ] && extra=" SEND"
     [ "$conns" -gt 1 ] && extra="$extra CONNS $conns"
-    # The idle bound is generous on purpose: a shared emulator host can
-    # stall a transfer into deep RTO backoff for minutes without a byte
-    # being wrong, and a bail that fires inside one recovery reads as a
-    # truncated case.  Content decides this tier; time only bounds it.
     echo "SYS:paysum$flag $host $port LEN $len SEED $seed$extra TIMEOUT 240" \
         >> "$CMDS"
     port=$((port + conns))
@@ -246,15 +172,12 @@ for fam in $FAMS; do
     for l in $TX_LENS; do emit_case tx "$l" 1 "$fam"; done
     emit_case rx "$CONC_RX_LEN" 3 "$fam"
     emit_case tx "$CONC_TX_LEN" 3 "$fam"
-    # The claim counters, read after each family's cases so the numbers
-    # bracket what just ran.
     echo "SYS:netstat -s" >> "$CMDS"
 done
 
 CONN_TOTAL=$((port - PORT_BASE))
 echo "==> $case_no cases, $CONN_TOTAL connections, ports $PORT_BASE..$((port - 1)), seeds from $SEED_BASE"
 
-# ----------------------------------------------------------------- staging ---
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/paysum" \
          "$TOOLS/netstat" "$BSD"; do
@@ -294,7 +217,6 @@ cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/paysum"          "$STAGE/paysum"
 cp "$TOOLS/netstat"         "$STAGE/netstat"
 
-# ------------------------------------------------------------- peer + storm ---
 
 rm -rf "$PEERLOG"
 mkdir -p "$PEERLOG"
@@ -315,23 +237,6 @@ ssh -o ConnectTimeout=10 "$PEERHOST" \
     > "$PEERLOG/peer.out" 2> "$PEERLOG/peer.err" &
 PEER_PID=$!
 
-# ------------------------------------------------------------------ netem ---
-#
-# -E puts a netem discipline on the PEER's egress, which is where a loss
-# arm belongs: frames the guest never sees, ACKs that never come back, and
-# the retransmissions that follow are the injection-prone path -- partial
-# re-delivery placing bytes into a stream whose earlier bytes are already
-# placed, with the fused sum computed over whatever landed.
-#
-# SURGICAL BY CONSTRUCTION.  The peer is a shared machine and other agents
-# measure through it, so this never shapes the interface as a whole: a prio
-# root sends everything to its ordinary bands and TWO filters -- the guest's
-# v4 address and its v6 address -- divert only guest-bound traffic into the
-# netem band.  Everything else on that NIC is untouched.
-#
-# The teardown is in stop_peers(), which is trapped on EXIT INT TERM HUP, and
-# verified again after the verdict: a netem qdisc left behind would silently
-# poison every later measurement on that box.
 NETEM_ON=no
 NETEM_IFACE=""
 GUEST6=""
@@ -343,11 +248,6 @@ netem_apply() {
         echo "cannot work out which interface $PEERHOST reaches $ADDRESS on" >&2
         exit 2; }
 
-    # The guest's v6 address, needed for the second filter.  Read off the
-    # peer's own neighbour table, where a previous v6 arm left it, and
-    # derived from the guest's MAC if it is not there.  Without it the v6
-    # arm would run UNSHAPED and quietly report a clean pass for a case
-    # nothing lossy ever touched, so a v6 run without it is refused.
     GUEST6=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
         "ip -6 neigh show nud all 2>/dev/null" |
         awk '/^2/ && !/router/ {print $1; exit}')
@@ -412,20 +312,9 @@ if [ "$STORM" = yes ]; then
     fi
 fi
 
-# -L: the loss arm, without the tc netem this rig cannot have (~/tc-cap on
-# the peer is staged but not setcap'd).  Bursty UDP at the guest overruns
-# the emulated NIC's receive ring mid-drain, which is REAL loss in the exact
-# layer under test: frames vanish between the wire and the claim, TCP
-# retransmits, and the retransmission overlap path -- partial re-delivery
-# into a stream whose earlier bytes are already placed -- runs for real.
-# The hashes must still match; the overrun counter in the guest's
-# netstat -s is the witness that loss actually happened.
 LOSS_PID=""
 [ -z "$NETEM" ] || netem_apply
 
-# The retransmission witness, for either lossy arm.  A clean run with zero
-# retransmissions proves nothing about this path, so the number is read back
-# in the verdict and the run says so when it never moved.
 if [ -n "$NETEM" ] && [ "$LOSS" != yes ]; then
     ssh -o ConnectTimeout=10 "$PEERHOST" \
         "timeout $PEER_LIFE sh -c 'while :; do ss -tino 2>/dev/null | grep -A1 \"$ADDRESS\\|${GUEST6:-no-v6-address}\" | grep -o \"retrans:[0-9]*/[0-9]*\"; sleep 2; done'" \
@@ -449,12 +338,6 @@ while time.time() < end:
 print(\"blast sent\", n, file=sys.stderr)
 '" > "$PEERLOG/blast.out" 2> "$PEERLOG/blast.err" &
     LOSS_PID=$!
-    # The retransmission witness.  The guest's overrun counter only sees the
-    # NIC ring; under Amiberry the drop happens in the host's bridge queue
-    # and the ring never fills, so the loss is real and the guest counter
-    # stays 0.  The peer's kernel knows: ss -ti keeps a per-socket lifetime
-    # retransmission count, sampled here every two seconds for every socket
-    # talking to the guest.
     ssh -o ConnectTimeout=10 "$PEERHOST" \
         "timeout $PEER_LIFE sh -c 'while :; do ss -tino 2>/dev/null | grep -A1 \"$ADDRESS\" | grep -o \"retrans:[0-9]*/[0-9]*\"; sleep 2; done'" \
         > "$PEERLOG/ss.log" 2>/dev/null &
@@ -469,7 +352,6 @@ kill -0 "$PEER_PID" 2>/dev/null || {
     exit 2
 }
 
-# --------------------------------------------------------------------- run ---
 
 set +e
 echo "==> booting $MODEL under Amiberry, $BOARD bridged on $IFACE"
@@ -480,8 +362,6 @@ echo "==> booting $MODEL under Amiberry, $BOARD bridged on $IFACE"
 RUN_RC=$?
 set -e
 
-# The peer's report is written as connections finish; give the last one a
-# moment, then take the log as it stands.
 wait "$PEER_PID" 2>/dev/null || true
 PEER_PID=""
 stop_peers
@@ -500,12 +380,6 @@ sed 's/^/       /' "$PEERLOG/peer.err" 2>/dev/null || true
 echo "====================================================================="
 echo
 
-# ----------------------------------------------------------------- verdict ---
-#
-# The join: every connection appears once in the guest's transcript and once
-# in the peer's log, keyed by port.  bytes must agree, crc32 must agree, and
-# neither side may have found a first_bad.  Counted, so a line that never
-# appeared fails rather than not being checked.
 
 FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
@@ -516,8 +390,6 @@ PEER_LINES="$STAGE/peer-lines.txt"
 grep '^paysum dir='   "$REPORT"           > "$GUEST_LINES" || true
 grep '^paypeer case=' "$PEERLOG/peer.out" > "$PEER_LINES"  || true
 
-# Case-folded: the guest's RawDoFmt prints hex in upper case, python in
-# lower, and 2FF815EF and 2ff815ef are the same number.
 gv() { grep -o "$2=[^ ]*" <<< "$1" | head -1 | cut -d= -f2 |
        tr '[:upper:]' '[:lower:]'; }
 
@@ -558,9 +430,6 @@ done < "$SPEC"
 [ "$CHECKED" = "$CONN_TOTAL" ] ||
     fail "checked $CHECKED of $CONN_TOTAL connections"
 
-# The claimed lane must have CARRIED the frames it is being credited with.
-# DP8390 boards claim; the a2065 classic lane must show zero claims, which
-# is what makes it the control.
 DIRECT=$(grep -o 'direct fills[[:space:]]*[0-9]*' "$REPORT" |
          awk '{n=$3} END {print n+0}')
 if [ "$BOARD" = a2065 ]; then
@@ -578,9 +447,6 @@ else
     fi
 fi
 
-# The loss arm's witness: the run only means what it claims if frames were
-# actually dropped under it.  Overruns live in the guest's own interface
-# stats; said out loud either way.
 if [ "$LOSS" = yes ] || [ -n "$NETEM" ]; then
     OVR=$(grep -io 'overrun[s]*[[:space:]]*[0-9]*' "$REPORT" |
           grep -o '[0-9]*' | sort -n | tail -1)
@@ -597,14 +463,8 @@ if [ "$LOSS" = yes ] || [ -n "$NETEM" ]; then
     fi
 fi
 
-# The shaping comes off before the verdict is printed, and the removal is
-# CHECKED rather than assumed: a qdisc left on a shared peer poisons every
-# later measurement on it, and the failure paths above reach here too.
 if [ -n "$NETEM" ]; then
     netem_remove
-    # `grep -c` exits 1 when the count is zero, which is the GOOD case here,
-    # so the count is taken inside the remote shell and the exit status
-    # thrown away -- otherwise a clean removal reports itself as a failure.
     LEFT=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
         "~/tc-cap qdisc show dev $NETEM_IFACE 2>/dev/null | grep -c netem; exit 0")
     LEFT=${LEFT:-unknown}

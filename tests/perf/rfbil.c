@@ -1,38 +1,8 @@
 /*
- * AmiNetXDuo, the frame encoder against a REAL interleaved BitMap.
- *
- *   rfbil
- *
- * WHY THIS EXISTS
- *
- *   The encoder used to read a plane-major copy the grab made, so an
- *   interleaved screen was de-interleaved before it ever saw one and
- *   RFB_F_INTERLEAVED could not be needed.  It reads the bitplanes where they
- *   are now, which means it depends on being told the truth about the layout,
- *   and the layout arithmetic -- a plane advances by bytes_per_row, a row by
- *   bytes_per_row * depth -- is the kind of thing that produces a sheared or
- *   repeated picture rather than an error.
- *
- *   Every .pfs capture in the tree is a plane-major screen.  The host round
- *   trip can interleave one synthetically, and does, but that proves the
- *   arithmetic against our own idea of interleaving.  This asks
- *   graphics.library for a real one.
- *
- * WHAT IT CHECKS
- *
- *   1. What layout the Workbench screen on this machine ACTUALLY has, printed
- *      rather than assumed, because that is the question of whether the live
- *      path has ever run interleaved at all.
- *
- *   2. AllocBitMap(..., BMF_INTERLEAVED | BMF_DISPLAYABLE, NULL), a pattern
- *      drawn into it through the same Planes[] the encoder will read, then
- *      encode -> decode -> compare EVERY BYTE of the decoded frame against
- *      the bitmap.  A wrong stride shears the picture, and a comparison of
- *      the pixels is the only thing that catches that; a byte count would
- *      pass.
- *
- *   3. The same against a plane-major bitmap, so a pass on the interleaved
- *      one cannot be a test that passes on anything.
+ * rfbil -- proves the frame encoder's plane/row stride arithmetic against a
+ * REAL graphics.library BMF_INTERLEAVED BitMap (and a plane-major one), by
+ * encode -> decode -> compare of every byte.  Also reports the Workbench
+ * screen's actual layout.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -99,9 +69,7 @@ static VOID il_say(const char *fmt, ...)
 
 /* --------------------------------------------------------- the decoder --- */
 
-/* The receiver's side, so what is checked is the picture and not the byte
- * count.  Plane-major output whatever the source layout was, which is also
- * what the browser draws. */
+/* The receiver's side: plane-major output whatever the source layout was. */
 typedef struct {
     rfb_u8 *fb;                 /* depth * IL_BPR * IL_H, plane-major */
     rfb_u32 depth;
@@ -219,8 +187,6 @@ static int il_decode(il_dec *d, const rfb_u8 *in, rfb_u32 n)
 
 /* ------------------------------------------------------------- the test --- */
 
-/* The bitmap, read the way the encoder reads it, flattened plane-major so it
- * can be compared with what the decoder produced. */
 static VOID il_flatten(struct BitMap *bm, ULONG depth, ULONG row_stride,
                        rfb_u8 *out)
 {
@@ -244,9 +210,8 @@ static VOID il_pattern(struct BitMap *bm, ULONG depth, ULONG row_stride,
         for (y = 0; y < IL_H; y++) {
             UBYTE *row = dst + y * row_stride;
             for (x = 0; x < IL_BPR; x++) {
-                /* Depends on the plane AND the row AND the column, so a
-                   stride that mixes planes or rows up cannot come out
-                   looking right. */
+                /* Must depend on plane AND row AND column, so a wrong stride
+                   cannot come out looking right. */
                 row[x] = (UBYTE)(p * 37UL + y * 11UL + x * 7UL + salt);
             }
         }
@@ -327,7 +292,6 @@ static VOID il_one(ULONG depth, ULONG bmflags, const char *what)
         goto done;
     }
 
-    /* The receiver starts from an all-zero screen, and so does the shadow. */
     memset(d.fb, 0, (size_t)(plane_bytes * depth));
 
     for (pass = 0; pass < 4UL; pass++) {
@@ -335,8 +299,6 @@ static VOID il_one(ULONG depth, ULONG bmflags, const char *what)
         ULONG p;
         long  n;
 
-        /* A different pattern every pass, so the second and later frames are
-           deltas against a shadow rather than a first frame. */
         il_pattern(bm, depth, row_stride, pass * 53UL);
         il_flatten(bm, depth, row_stride, want);
 
@@ -379,7 +341,6 @@ done:
     FreeBitMap(bm);
 }
 
-/* What the live path actually gets on this machine. */
 static VOID il_workbench(VOID)
 {
     struct Screen *sc = LockPubScreen((CONST_STRPTR)"Workbench");
@@ -410,10 +371,7 @@ int main(void)
     char *args = (char *)GetArgStr();
     int   wb_only = 0;
 
-    /* `rfbil WB` reports the Workbench screen's layout and stops.  The console
-       harness runs it that way during a live measurement, where the question
-       is which arithmetic the server is about to use and the bitmap tests
-       below would only be time the guest spends not serving. */
+    /* `rfbil WB` reports the Workbench screen's layout and stops. */
     if (args != NULL) {
         const char *p = args;
         while (*p == ' ' || *p == '\t')

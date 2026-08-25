@@ -1,23 +1,7 @@
 /*
  * AmiNetXDuo, host regression for the DHCP lease-timer extraction and the
- * RENEWING -> REBINDING -> EXPIRED lifecycle.
- *
- * A server (buggy or hostile) can ACK a finite lease while sending T2 (the
- * rebind time) as the infinity sentinel 0xFFFFFFFF. Taken at face value the
- * Client sets rebind_time = 0xFFFFFFFF; when T1 fires it computes
- * renewal_remain_time = rebind_time - renewal_time = 0xFFFFFFFF - renewal,
- * which never counts down to the rebind transition, so the Client sits in
- * RENEWING for the life of the process and keeps an address the server is
- * free to reallocate. The lease-time and T1 sentinels are legitimate only
- * under an infinite lease; T2 must obey the same rule.
- *
- * This is a plain unit driver, not a fuzzer: the client's option parser and
- * its timeout state machine are both static, so the translation unit is
- * #included exactly as fuzz_dhcp.c does. The state machine is driven directly
- * by calling _nx_dhcp_timeout_process(): the packet pool is left empty so
- * every _nx_dhcp_send_request_internal() fails at allocation and touches no
- * driver (a silent server, which is the case that hangs), and the ThreadX
- * mutex calls are the no-op host stubs.
+ * RENEWING -> REBINDING -> EXPIRED lifecycle: an infinite T2 sentinel under a
+ * finite lease must not survive into rebind_time.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,10 +20,6 @@
 #include "nxd_dhcp_client.c"
 #pragma GCC diagnostic pop
 
-/* The shipping config defines NX_DHCP_CLIENT_SEND_ARP_PROBE, so the timeout
-   state machine references the ARP prober. This driver keeps the probe
-   countdown at zero throughout, so the prober is never called; the stub only
-   satisfies the linker without pulling in the driver-backed ARP path. */
 UINT _nx_arp_probe_send(NX_IP *ip_ptr, UINT interface_index, ULONG probe_address)
 {
     NX_PARAMETER_NOT_USED(ip_ptr);
@@ -109,8 +89,6 @@ static void m_end(Msg *m)
         m_u8(m, NX_DHCP_OPTION_PAD);
 }
 
-/* Build an ACK carrying the given lease / T1 / T2 seconds. A sentinel of
-   INFINITY32 is written as-is; a value of 0 omits that option. */
 static void build_ack(Msg *m, unsigned long lease, unsigned long t1, unsigned long t2)
 {
     m_header(m);
@@ -146,8 +124,6 @@ static NX_DHCP        g_dhcp;
 static NX_IP          g_ip;
 static NX_PACKET_POOL g_pool;       /* zeroed: allocation always fails */
 
-/* Zero the world and hand back interface record 0, wired so that
-   _nx_dhcp_timeout_process() will find it. */
 static NX_DHCP_INTERFACE_RECORD *fresh(void)
 {
     NX_DHCP_INTERFACE_RECORD *rec;
@@ -176,9 +152,6 @@ static UINT extract(NX_DHCP_INTERFACE_RECORD *rec, Msg *m)
     return _nx_dhcp_extract_information(&g_dhcp, rec, copy, m->len);
 }
 
-/* Drive the timeout state machine from BOUND with no server answering.
-   Returns 1 if INIT was reached (lease abandoned), 0 if the cap was hit.
-   *saw_renewing / *saw_rebinding record the intermediate transitions. */
 static int drive_to_init(NX_DHCP_INTERFACE_RECORD *rec, unsigned long cap,
                          int *saw_renewing, int *saw_rebinding)
 {
@@ -186,9 +159,6 @@ static int drive_to_init(NX_DHCP_INTERFACE_RECORD *rec, unsigned long cap,
 
     *saw_renewing = *saw_rebinding = 0;
 
-    /* Enter BOUND exactly as the acquisition path does: the renewal time is
-       what BOUND holds in nx_dhcp_timeout, and address 0 keeps the
-       reinitialize on expiry from calling into the (driverless) IP layer. */
     rec->nx_dhcp_record_valid = NX_TRUE;
     rec->nx_dhcp_state        = NX_DHCP_STATE_BOUND;
     rec->nx_dhcp_ip_address   = 0;
@@ -215,9 +185,6 @@ int main(void)
     Msg m;
     UINT status;
 
-    /* 1. The defect and its fix: a finite lease with T2 = 0xFFFFFFFF must not
-          leave rebind_time at the sentinel. It falls back to the RFC 2131
-          default of 0.875 * lease that the lease block derived. */
     rec = fresh();
     build_ack(&m, 8, 4, INFINITY32);
     status = extract(rec, &m);
@@ -231,10 +198,6 @@ int main(void)
           (unsigned long)rec->nx_dhcp_rebind_time,
           (unsigned long)(8 * RATE - (8 * RATE) / 8));
 
-    /* 2. The stuck state is now unreachable, and the lifecycle completes:
-          RENEWING -> REBINDING -> INIT with no server answering. On the
-          unfixed source rebind_time = 0xFFFFFFFF and this never reaches INIT
-          within the cap. */
     {
         int reached, saw_renewing, saw_rebinding;
 
@@ -244,8 +207,6 @@ int main(void)
         CHECK(reached,       "never reached INIT/EXPIRED (address never released: the defect)");
     }
 
-    /* 3. A well-formed finite lease is unaffected: T1 and T2 present and sane
-          are taken verbatim, and the lifecycle still runs to INIT. */
     rec = fresh();
     build_ack(&m, 8, 4, 7);
     status = extract(rec, &m);
@@ -263,8 +224,6 @@ int main(void)
               saw_renewing, saw_rebinding, reached);
     }
 
-    /* 4. A genuinely infinite lease still keeps an infinite rebind time: the
-          guard blocks only an infinite T2 under a finite lease. */
     rec = fresh();
     build_ack(&m, INFINITY32, 0, INFINITY32);
     status = extract(rec, &m);
@@ -275,8 +234,6 @@ int main(void)
           "infinite lease dropped its infinite rebind_time: %lu",
           (unsigned long)rec->nx_dhcp_rebind_time);
 
-    /* 5. The T1 sibling (already guarded upstream of this fix) is intact: an
-          infinite T1 under a finite lease keeps the derived finite renewal. */
     rec = fresh();
     build_ack(&m, 8, INFINITY32, 0);
     status = extract(rec, &m);

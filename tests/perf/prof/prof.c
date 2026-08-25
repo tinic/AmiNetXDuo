@@ -2,34 +2,6 @@
  * AmiNetXDuo, timer-driven PC sampling.  See prof.h for why the sample is
  * taken in the autovector rather than in an Exec interrupt server.
  *
- * This file does the parts that need AmigaOS rather than 68k: getting a CIA
- * timer without stealing one the OS is using, swapping the vector, and
- * recording everything the host needs to turn a raw address back into a name.
- *
- * THE THREE THINGS THE HOST NEEDS, and where each comes from:
- *
- *   1. Where our own code was loaded.  LoadSeg() puts each hunk wherever it
- *      likes, so a sampled PC means nothing until it is mapped back to the
- *      link-time addresses in the executable.  prof_scan_segs() walks the
- *      seglist out of the CLI that started us and records every hunk's base
- *      and length in load order, which is the same order as the hunks in the
- *      file.
- *
- *   2. Which library or device a ROM sample belongs to.  Every AmigaOS
- *      library is a jump table: LVO -6*n of a base is a JMP to the real
- *      entry point.  prof_scan_libs() resolves all of them for every library,
- *      device and resource on Exec's lists, so a PC in Kickstart can be named
- *      by the nearest preceding entry, "exec.library/Forbid" rather than
- *      "$00f8xxxx".  This is not decoration.  A separate probe measured the
- *      ThreadX bracket at ~270 us per socket call, ~790 us on a base whose
- *      TX_THREAD is not yet cached, and that time is spent in
- *      Exec; a profile that lumped Kickstart into one bucket would hide the
- *      largest known cost in the system.
- *
- *   3. Which task was running.  ThreadX threads are Exec Tasks in this port,
- *      so SysBase->ThisTask splits the profile by thread for the cost of one
- *      indirection in the handler.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -54,26 +26,6 @@
 #include <string.h>
 
 #include "aminetxduo/compat.h"   /* ami_millis(): the probe needs to poke timer.device */
-
-
-/* --------------------------------------------------------- cia.resource --- */
-
-/*
- * Called through stubs written here rather than through <proto/cia.h>, for the
- * reason netdev_pcmcia.c does the same with card.resource: the two toolchains'
- * generated inlines disagree.  sfdc 1.11f emits LPnNB, which passes the
- * resource in a6 and wants no library base.  sfdc 1.11e emits the base-taking
- * form, which expands CIA_BASE_NAME -- a symbol a resource does not have and
- * neither NDK declares -- so the file does not compile there at all.
- *
- * What both inline headers agree on exactly is the LVOs and their registers,
- * so those are spelled out.  hardware/cia.h and resources/cia.h stay: they are
- * structures and constants, no calls.
- *
- *   AddICRVector  -0x06  a6 resource, d0 bit, a1 interrupt -> d0 owner
- *   RemICRVector  -0x0c  a6 resource, d0 bit, a1 interrupt -> void
- *   AbleICR       -0x12  a6 resource, d0 mask              -> d0 mask before
- */
 
 static struct Interrupt *prof_add_icr_vector(struct Library *res, WORD bit,
                                              struct Interrupt *intr)
@@ -116,14 +68,6 @@ static WORD prof_able_icr(struct Library *res, WORD mask)
     return (WORD)_d0;
 }
 
-
-/* ------------------------------------------------------------- logging --- */
-
-/*
- * Straight to the serial port, which is what tools/amiberry-run.sh captures.
- * Same route perf_test.c uses and for the same reason: stdout goes to the
- * emulated screen and nowhere the host can read it.
- */
 #ifndef RawPutChar
 #  define RawPutChar(c) \
       LP1NR(0x204, RawPutChar, UBYTE, (c), d0, , EXEC_BASE_NAME)
@@ -155,9 +99,6 @@ VOID prof_log_flush(VOID)
        buffered; the entry point exists so callers do not have to know that. */
 }
 
-
-/* ------------------------------------------------- shared with the .S ---- */
-
 /* Non-static: prof_vector.S addresses all of these absolute. */
 ULONG   prof_next;          /* write cursor                                 */
 ULONG   prof_limit;         /* one past the last usable record              */
@@ -172,9 +113,6 @@ extern VOID  prof_cia_stub(VOID);
 extern VOID  prof_audio_stub(VOID);
 extern ULONG prof_read_vbr(VOID);
 
-
-/* --------------------------------------------------------------- state --- */
-
 #define PROF_MAX_LIBS   192
 #define PROF_MAX_LVOS   8192
 #define PROF_MAX_SEGS   64
@@ -186,10 +124,6 @@ extern ULONG prof_read_vbr(VOID);
 
 #define PROF_ECLOCK_PAL 709379UL
 
-/* The probe runs eight windows of 160 ms and requires EVERY one of them to
-   come out at the programmed rate.  Both CIA-B timers pass a single 400 ms
-   window and then stop, so a probe shorter than about a second, or one that
-   only checks the average, accepts a timer that will not survive the run. */
 #define PROF_PROBE_WINDOWS  8UL
 #define PROF_PROBE_TICKS    8UL
 
@@ -206,36 +140,6 @@ struct ProfSource
     const char *src_Name;
 };
 
-/*
- * Audio first, and the CIA only as a fallback, because a CIA timer at kHz
- * rates does not survive on AmigaOS.  This was measured, at length:
- *
- *   AddICRVector() arbitrates the ICR *vector*, not the timer, so both CIA-B
- *   timers were handed over and programmed cleanly.  Timer B then stopped at
- *   the first ami_millis(), which opens timer.device's MICROHZ unit and takes
- *   the timer back.  Timer A ran at a correct 1000 Hz for anything from 0.4
- *   to 1.5 seconds and then stopped dead, vector still ours, INTENA's EXTER
- *   still set, control register still $01, counter still counting, with the
- *   chip's ICR reading $85: an interrupt raised and never acknowledged.
- *   Reading the ICR by hand restarted it immediately.
- *
- *   That is the Exec EXTER race, not a bug here.  Exec clears INTREQ's EXTER
- *   bit around the CIA ICR read that acknowledges the chip; a CIA interrupt
- *   landing in that window leaves INTREQ clear and the CIA's IR bit set, and
- *   because the CIA holds its interrupt line asserted until the ICR is read,
- *   no further edge is ever produced.  At 50 Hz the window is essentially
- *   never hit.  At 1000 Hz it is hit within a second or two, every run.
- *
- *   What made this worth chasing rather than shrugging at: every failure
- *   produced a handful of real, correctly sampled PCs.  Eight samples over
- *   1.4 seconds ranks functions perfectly happily, and the ranking is noise.
- *
- * Audio DMA has no second chip latching anything.  The chipset raises the
- * interrupt, Exec's dispatcher clears INTREQ, and that is the whole
- * acknowledgement path, so the race above cannot occur.  Level 4 also beats
- * the CIA-A fallback's level 2: it can sample inside a level-2 or level-3
- * handler, which is where a SANA-II driver's receive path runs.
- */
 static const struct ProfSource prof_sources[] =
 {
     { PROF_SRC_AUDIO, NULL, NULL, 0, 4, "audio channel 3" },
@@ -271,15 +175,6 @@ static ULONG                prof_nlvos;
 static struct ProfMark      prof_marks[PROF_MAX_MARKS];
 static ULONG                prof_nmarks;
 
-
-/* ------------------------------------------------------ where we loaded --- */
-
-/*
- * The seglist of the program that is running, not of the shell running it:
- * pr_CLI's cli_Module is the BPTR LoadSeg() returned for THIS executable.
- * Each segment is [size][next][code...], the size longword sitting four bytes
- * below BADDR() and covering the eight-byte header as well.
- */
 static VOID prof_scan_segs(VOID)
 {
 struct Process              *me;
@@ -313,15 +208,6 @@ BPTR                         seg;
     }
 }
 
-
-/* --------------------------------------------- where Kickstart's code is --- */
-
-/*
- * Resolve one jump table.  Entry n of a library sits at base - 6*n and is
- * normally `JMP abs.l`; a few are `JMP d16(PC)`.  Anything else is left out
- * rather than guessed at, a wrong target here would pull unrelated samples
- * onto a name, which is precisely the failure this whole tool exists to avoid.
- */
 static VOID prof_scan_one(struct Library *lib, UWORD type)
 {
 ULONG   n, count;
@@ -414,9 +300,6 @@ struct ExecBase *eb = (struct ExecBase *)SysBase;
     Permit();
 }
 
-
-/* --------------------------------------------------------- the CIA timer -- */
-
 /* The control register of whichever timer a source names. */
 static UBYTE prof_read_cr(const struct ProfSource *src)
 {
@@ -462,20 +345,6 @@ struct CIA *cia = prof_src->src_CIA;
     }
 }
 
-
-/* ------------------------------------------------------------- audio ------ */
-
-/*
- * Channel 3 as a bare interval timer: two bytes of silence on repeat, volume
- * zero, and the only thing wanted from it is the interrupt the DMA raises
- * each time it reloads the pointer.  Period is in colour clocks, so the
- * interval is 2 * AUDxPER * (1 / 3.546895 MHz) with a one-word length.
- *
- * The channel is taken directly rather than through audio.device.  Nothing in
- * this tree opens audio.device, the tool is not something the library ships,
- * and everything touched, DMACON, INTENA, the AUD3 interrupt vector, is
- * saved and put back by prof_audio_stop().
- */
 #define PROF_CUSTOM     0xDFF000UL
 #define PROF_DMACONR    ((volatile UWORD *)(PROF_CUSTOM + 0x002UL))
 #define PROF_INTENAR    ((volatile UWORD *)(PROF_CUSTOM + 0x01CUL))
@@ -564,9 +433,6 @@ static VOID prof_audio_stop(VOID)
     }
 }
 
-
-/* ------------------------------------------------- install and validate --- */
-
 static BOOL prof_install(VOID);
 static VOID prof_uninstall(VOID);
 static BOOL prof_probe(VOID);
@@ -641,28 +507,6 @@ static VOID prof_uninstall(VOID)
     }
 }
 
-/*
- * Does this source actually sample at the rate it was told to, WHILE the
- * things the workload does are being done?
- *
- * Every static test passes for timers that do not work.  AddICRVector()
- * arbitrates the ICR vector and not the hardware, so both CIA-B timers were
- * handed over, programmed cleanly, read back exactly what was written, and
- * then stopped:
- *
- *   timer B  ran at a correct 1000 Hz until the first ami_millis(), which
- *            opens timer.device's MICROHZ unit and takes the timer back.
- *   timer A  ran at a correct 1000 Hz until the first line of serial output,
- *            and then never fired again, vector still ours, INTENA's EXTER
- *            still set, control register still $01, and no interrupts.
- *
- * Both failures produced a handful of real, correctly sampled PCs over more
- * than a second, which is exactly the shape of an answer and none of the
- * substance.  So the probe does both of those things inside its own window
- * and measures what comes out.  A source that cannot survive asking the time
- * and printing a line is rejected here rather than at the end of a
- * measurement, where nothing would have noticed.
- */
 static BOOL prof_probe(VOID)
 {
 ULONG w, h, t, ms, got, expect, worst_num = 1UL, worst_den = 1UL;
@@ -726,9 +570,6 @@ ULONG total = 0UL, total_ms = 0UL, total_cia = 0UL;
 
     return(TRUE);
 }
-
-
-/* --------------------------------------------------------------- public --- */
 
 const char *prof_error(VOID)  { return(prof_err); }
 ULONG prof_hit_count(VOID)    { return(prof_hits); }
@@ -865,13 +706,6 @@ ULONG            i;
         prof_vbr = (ULONG)Supervisor((ULONG (*)())prof_read_vbr);
     }
 
-    /*
-     * Make the OS take what it wants before asking for what is left.
-     * ami_millis() opens timer.device's MICROHZ unit, which claims a CIA
-     * timer; do it here and AddICRVector() gives an honest answer, rather
-     * than handing over a timer that is repossessed the first time anything
-     * asks the time.
-     */
     (VOID)ami_millis();
 
     prof_res = NULL;
@@ -892,10 +726,6 @@ ULONG            i;
                 continue;
             }
 
-            /* A running timer belongs to somebody, whether or not they took
-               the ICR vector.  Reprogramming it would break them silently,
-               there is no way to read a CIA latch back and put it as it
-               was. */
             if ((prof_read_cr(cand) &
                  (UBYTE)(cand->src_Bit == CIAICRB_TA ? CIACRAF_START
                                                      : CIACRBF_START)) != 0U)
@@ -950,7 +780,6 @@ ULONG            i;
         return(FALSE);
     }
 
-    /* Discard the probe's own samples. */
     prof_next     = (ULONG)prof_buf;
     prof_hits     = 0UL;
     prof_dropped  = 0UL;
@@ -979,9 +808,6 @@ VOID prof_free(VOID)
         prof_buf = NULL;
     }
 }
-
-
-/* ---------------------------------------------------------------- output -- */
 
 static BOOL prof_put(BPTR fh, const VOID *data, ULONG len)
 {

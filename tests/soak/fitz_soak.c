@@ -1,79 +1,6 @@
 /*
  * AmiNetXDuo, Fitz connection-drop soak.
  *
- * A report from a real A3000 running Fitz 1.21: "I've seen Fitz connections
- * dropping, I would need to investigate this further."  No reproduction, no
- * frequency, no correlation.  This harness is the attempt to turn that into
- * something reproducible, and to leave enough state behind that a drop which
- * does happen can be diagnosed from the files rather than guessed at.
- *
- * WHAT IT IS NOT
- *
- * tests/endurance/ already soaks Fitz with the Amiga as the CLIENT: `fitz
- * mount` here, `fitz-serve` on the host, files in and out over the A2065.
- * docs/RESEARCH.md 37.10 ran it for eleven minutes and moved 224 MB.  That
- * arm is not repeated here.
- *
- * WHAT IS NEW
- *
- *   1. The Amiga is also the SERVER.  The report's machine is serving a share
- *      that a Linux client mounts, and no harness in this tree has ever run
- *      `fitz serve` at all.  The server path is the one that calls accept(),
- *      and 37.4 found a listener in this library that dies permanently when a
- *      relisten does not take, intermittently, trigger not established.  A
- *      soak that accepts thousands of connections is the way to hit it again.
- *   2. Hours, with idle in them.  A drop after twenty minutes of silence and
- *      a drop under load are different bugs and every earlier run was load
- *      from end to end.
- *   3. A snapshot at the moment of failure rather than a count at the end.
- *      Every error takes the pool free count, AvailMem total and largest,
- *      every live TCP socket's state, the interface counters and the TCP
- *      statistics with it, into DH0:soak-events.txt.
- *
- * WHY THE SERVER IS DRIVEN OVER LOOPBACK
- *
- * FS-UAE 3.2.35's SLIRP has no inbound port forwarding, so the host cannot
- * open a connection into the guest and cannot be the client.  Measured, not
- * assumed: uae_slirp_redir is accepted by the config parser ("set option
- * slirp_redir to T:17820:17820 (result: 1)") and binds nothing on the host,
- * in all of T:/TCP:/t: and with an explicit 10.0.2.15 target, and
- * uae_a2065 = slirp_inbound binds nothing either.  So the guest's own
- * `fitz serve` is driven from the guest, through 127.0.0.1, and the wire arm
- * runs at the same time in the other direction.  The loopback path is a
- * different path from the A2065 one, it does not touch the driver, and
- * this file says so wherever it reports a result.
- *
- * THE SHAPE OF A RUN
- *
- * Six phases on a cycle, `phase` seconds each, for `seconds` in total:
- *
- *   WIRE    filers on the host-served volume only
- *   IDLE    no traffic at all; both mounts stay up
- *   LOCAL   filers on the guest-served volume only
- *   IDLE
- *   BOTH    every filer at once
- *   CHURN   no file traffic; `fitz query` back to back against both ends,
- *           which is a connect, a hello, a capability exchange and a close,
- *           one accept per iteration on whichever server is being asked
- *
- * The first operation after each IDLE is timed and recorded separately.  That
- * is the measurement the report needs and no earlier run made: whether the
- * thing that breaks is provoked by traffic or by the absence of it.
- *
- * WHAT COMES BACK, all on DH0: and therefore on the host as the run goes:
- *
- *   soak-timeline.csv   one row per sample: pool, memory, sockets, TCP stats
- *   soak-events.txt     every error and every phase change, with a snapshot
- *   soak-summary.txt    totals, written at the end
- *
- * Every line is opened, appended and closed, so a run killed at hour three
- * keeps everything it had written by then.
- *
- * bsdsocket.library is reached through its published LVOs and the stack
- * through NetStackQuery() at -0x366, the same way tests/endurance does it: a
- * harness that linked src/netstack would get its own NX_IP with no interfaces
- * in it and report zeroes.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -96,11 +23,6 @@ _Static_assert(AMI_NETSTATUS_QUERY_LVO == -870, "NetStackQuery LVO moved");
 
 /* ------------------------------------------------------------------ LVOs -- */
 
-/*
- * Only Errno and the status query are needed: this harness makes no socket
- * calls of its own.  Fitz makes them, which is the point, the traffic under
- * test is a third party's use of the library, not ours.
- */
 static LONG s_query(struct Library *base, ULONG what, APTR buf, ULONG size)
 {
     register struct Library *a6  __asm("a6") = base;
@@ -151,12 +73,10 @@ static ULONG s_secs(VOID)
 #define S_PATH          64
 #define S_NAME          96
 
-/* Which server a filer or a query is talking to. */
 #define ARM_WIRE        0   /* host fitz-serve, over the A2065        */
 #define ARM_LOCAL       1   /* the guest's own fitz serve, loopback   */
 #define ARM_COUNT       2
 
-/* Phases, in cycle order. */
 #define PH_WIRE         0
 #define PH_IDLE1        1
 #define PH_LOCAL        2
@@ -247,10 +167,6 @@ static SoakState *SS;
 
 static struct SignalSemaphore s_out_sem;
 
-/*
- * Append one formatted line and close.  One open/close per line costs, and it
- * is what makes a run that has to be killed still worth reading.
- */
 static VOID s_emit(const char *file, const char *fmt, LONG *args)
 {
     BPTR out;
@@ -304,13 +220,6 @@ static LONG s_ask(struct Library *base, ULONG what, APTR buf, ULONG size)
     return s_query(base, what, buf, size);
 }
 
-/*
- * Every socket the library holds, with its TCP state number, written one line
- * per socket.  This is the half of a failure snapshot that says whether the
- * listener is still a listener, 37.4's dead listener is a socket that stays
- * in state 2 while every accept() on it returns EINVAL, and nothing else in
- * this harness would show it.
- */
 static VOID s_dump_sockets(struct Library *base, const char *why)
 {
     SoakSockBuf sk;
@@ -343,27 +252,13 @@ static VOID s_dump_sockets(struct Library *base, const char *why)
     }
 }
 
-/*
- * The whole stack in one place, at the moment something went wrong.  A soak
- * that reports "it dropped" without saying what the stack looked like then is
- * worth very little, so every error path in this file comes through here.
- */
-/* Defined below; s_snapshot() reports an allocation failure through it. */
 static VOID s_note(const char *what, LONG detail);
 
 static VOID s_snapshot(struct Library *base, const char *why)
 {
-    /*
-     * Heap, not stack.  These four are about 2.4 KB together, this runs on the
-     * 4 KB an AmigaDOS CLI hands a program, and s_dump_sockets() nests another
-     * buffer of its own below it.  As locals they overran the stack: the run
-     * reached this function, returned from NETSTATUS_SYSTEM and NETSTATUS_STATS,
-     * and never came back from the third call -- which read as the stack hanging
-     * and was this frame.
-     *
-     * Not `static`: s_fail() reaches here from the filers and s_churn_entry()
-     * from the churner, so one shared buffer would be two snapshots at once.
-     */
+    /* Heap, not stack: 2.4 KB of buffers on the 4 KB stack an AmigaDOS CLI
+       gives a program.  Not `static`: s_fail() and s_churn_entry() can both
+       be in here at once. */
     struct { SoakSysBuf sys; SoakStatBuf st; SoakIfBuf ifb; SoakSockBuf sk; } *b;
     LONG        args[16];
     ULONG       socks = 0UL;
@@ -419,13 +314,6 @@ static VOID s_snapshot(struct Library *base, const char *why)
            "connDropped=%lu ipSendDrop=%lu ipRecvDrop=%lu sanaAlloc=%lu "
            "sanaErr=%lu\n", args);
 
-    /*
-     * The tick, every snapshot.  A soak on this stack exists to catch the
-     * clock drifting, and skew is the number that says so: what the wheel has
-     * yet to be given plus what was taken off it for good.  Reported here so a
-     * run can be compared end to end rather than inferred from "nothing
-     * crashed".
-     */
     {
         SoakHealthBuf *h = (APTR)AllocVec((ULONG)sizeof(*h), MEMF_ANY);
 
@@ -457,11 +345,6 @@ static VOID s_snapshot(struct Library *base, const char *why)
     s_dump_sockets(base, why);
 }
 
-/*
- * An error, with the snapshot behind it.  `arm` and `what` say which half of
- * the run it came from; a Fitz mount that has lost its connection reports
- * through IoErr() and nothing else, so that is what is recorded.
- */
 static VOID s_fail(struct Library *base, ULONG arm, const char *what,
                    LONG ioerr, ULONG detail)
 {
@@ -518,8 +401,6 @@ static VOID s_pat_fill(UBYTE *dst, ULONG off, ULONG len)
         *dst++ = s_pat[(off++) & PAT_MASK];
 }
 
-/* Bytes that came back wrong.  A file that reads back short is a different
-   failure and is reported by the caller. */
 static ULONG s_pat_check(const UBYTE *src, ULONG off, ULONG len)
 {
     ULONG bad = 0UL;
@@ -718,12 +599,6 @@ static BOOL s_filer_read(SoakFiler *f, const char *name, ULONG len)
     return TRUE;
 }
 
-/*
- * One file, written and read back, then deleted.  Deliberately not held open
- * across a phase boundary: an open file handle on a Fitz mount is server-side
- * state, and the question here is what happens to the connection, not what
- * happens to a handle across one.
- */
 static VOID s_filer_cycle(SoakFiler *f)
 {
     char  name[S_NAME];
@@ -803,17 +678,6 @@ static VOID s_filer_entry(VOID)
 
 /* ---------------------------------------------------------- the churner --- */
 
-/*
- * `fitz query host:port` is a whole connection lifecycle in one command: it
- * connects, reads the hello, exchanges capabilities, prints what it found and
- * closes.  Run back to back it is one accept per iteration on the server
- * being asked, which is what 37.4's listener needs to be pushed at, and it is
- * Fitz's own code doing it rather than a reimplementation of the handshake.
- *
- * Output goes to NIL:, the return code is the result.  A query that fails
- * is a connection that could not be made, which is the failure this whole
- * harness exists to catch, so it takes a snapshot with it.
- */
 #define CHURN_STACK     (128UL * 1024UL)
 
 static struct TagItem s_churn_tags[] =
@@ -890,9 +754,6 @@ static VOID s_churn_body(VOID)
     {
         if (SS->ss_ChurnRun == 0U)
         {
-            /* Off-phase the churner still dials, slowly: a listener that has
-               died silently during a quiet period must be found before the
-               next load phase blames the load for it. */
             if (SS->ss_ChurnEvery != 0UL && idle >= SS->ss_ChurnEvery)
             {
                 idle = 0UL;
@@ -1044,12 +905,6 @@ static VOID s_sample(struct Library *base, ULONG t)
            "%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", args);
 }
 
-/*
- * A filer inside one DOS call for longer than this has not merely slowed
- * down: every call here has a Fitz server on the other end trying to satisfy
- * it, and a mount whose connection has gone reports nothing at all until its
- * own timeout fires.  Reported once per filer, with a snapshot.
- */
 #define S_STALL_TICKS   (180UL * 50UL)
 
 static ULONG s_in_call(ULONG start)
@@ -1100,13 +955,6 @@ static VOID s_check_stalls(struct Library *base, UWORD *reported)
 
 /* --------------------------------------------------------- the post-idle -- */
 
-/*
- * The first operation after a quiet period, timed on its own.  A mount that
- * has silently lost its connection looks exactly like a healthy one until
- * something is asked of it, and by the time a filer notices, the phase it is
- * in gets the blame.  Asking here, once, immediately after idle, is what
- * separates "dropped under load" from "dropped while nothing was happening".
- */
 static VOID s_post_idle_probe(struct Library *base, ULONG arm)
 {
     char           name[S_NAME];
@@ -1272,12 +1120,8 @@ static struct TagItem s_fg_tags[] =
     { TAG_DONE,     0           }
 };
 
-/*
- * 512 KB, and it is not decoration: tests/compare/run-legacy-client.sh
- * records that a third-party Amiga binary on a Shell default stack fails in a
- * way that looks like a network fault rather than a crash.  Fitz gets the
- * same treatment here, for both its server and its mounts.
- */
+/* 512 KB: on a Shell default stack a third-party Amiga binary fails in a way
+   that looks like a network fault rather than a crash. */
 static LONG s_run_bg(const char *cmd)
 {
     BPTR in  = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
@@ -1317,8 +1161,6 @@ static VOID s_note(const char *what, LONG detail)
     s_emit(F_EVENTS, "%lu NOTE %s %ld\n", args);
 }
 
-/* Wait for eth0 to be online, so a mount is not attempted at a stack that
-   has no address yet and blamed for the timeout. */
 static BOOL s_wait_online(struct Library *base, ULONG limit_s)
 {
     SoakIfBuf ifb;
@@ -1447,16 +1289,8 @@ static VOID s_summary(struct Library *base, ULONG ran)
            "pool_free_end %lu\npool_total %lu\n", args);
 }
 
-
-/*
- * Give SoakState back on the way out.
- *
- * AmigaOS does not reclaim AllocVec() memory when a process exits, and this
- * command leaves main() from three places, so atexit(), not a free before
- * each return.  Every filer lives inside SS, so a filer still stuck in a DOS
- * call keeps it: freeing here would pull the structure out from under a live
- * Process.  Each filer's own f_Buf is allocated and freed by the filer.
- */
+/* AmigaOS does not reclaim AllocVec() memory when a process exits, and every
+   filer lives inside SS, so this frees only once no worker is left running. */
 static VOID s_release(VOID)
 {
     ULONG live = 0UL;
@@ -1629,8 +1463,6 @@ int main(void)
             LONG args[3];
             ULONG k;
 
-            /* The first thing asked of a mount after a quiet phase is the
-               measurement that separates the two failure modes. */
             if (last_phase == (ULONG)PH_IDLE1 || last_phase == (ULONG)PH_IDLE2)
             {
                 s_post_idle_probe(base, ARM_WIRE);
@@ -1741,21 +1573,8 @@ int main(void)
 
     CloseLibrary(base);
 
-    /*
-     * Nonzero only for a failure of the harness itself.  A drop is a result,
-     * not a broken run, and the caller reads soak-events.txt for it: a
-     * harness that exits 20 because the stack misbehaved cannot be told from
-     * one that exits 20 because it could not start.
-     *
-     * That reasoning stands, and it was being used to return RETURN_OK for
-     * three things that are not results at all.  A soak whose workers are
-     * still inside a DOS call ten minutes after being asked to stop is a
-     * machine that did not come back, not a machine that dropped something.
-     * A soak that spawned no filer, or that completed no query in either arm,
-     * measured nothing whatever and exited 0 saying so to nobody.  Those are
-     * failures OF THE HARNESS, which is exactly what the paragraph above
-     * reserves a nonzero code for.
-     */
+    /* Nonzero is reserved for a failure of the harness itself; a drop is a
+       result and is read out of soak-events.txt. */
     if (wedged != 0UL || SS->ss_ChurnDone == 0U)
     {
         PutStr((CONST_STRPTR)"FitzSoak: workers are still inside a call\n");

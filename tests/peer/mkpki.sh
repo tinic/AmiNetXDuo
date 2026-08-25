@@ -1,54 +1,5 @@
 #!/usr/bin/env bash
-#
 # The test PKI the hermetic TLS half of the curl verification suite runs on.
-#
-#   tests/peer/mkpki.sh [OUTDIR]        (default build/peer-pki)
-#
-# WHY A LOCAL PKI AND NOT badssl.com
-#
-#   Because a suite that needs the internet is not a baseline.  Every TLS
-#   property the brief asks for, chain depth 2, 3 and 4, RSA and ECDSA,
-#   expired, self-signed, wrong host, --cacert, is a property of the
-#   certificates, and certificates are free.  badssl is still worth pointing at
-#   occasionally against a real server, but it is a
-#   different kind of test: it tells you the internet still works, not that the
-#   stack does.
-#
-# WHAT IS GENERATED
-#
-#   root-rsa          RSA-2048 CA, self-signed, in the trust store
-#     int-rsa-1       RSA-2048 CA, signed by root-rsa
-#       leaf rsa2.test                                     chain: leaf,int1
-#       leaf expired.test        notAfter in 2020          chain: leaf,int1
-#       leaf pss2.test           RSASSA-PSS SHA-256        chain: leaf,int1
-#       int-rsa-2     signed by int-rsa-1
-#         leaf rsa3.test                                   chain: leaf,int2,int1
-#         int-rsa-3   signed by int-rsa-2
-#           leaf rsa4.test                                 chain: leaf,int3,int2,int1
-#   root-ec           P-256 CA, self-signed, in the trust store
-#     int-ec-1
-#       leaf ec2.test                                      chain: leaf,int1
-#       int-ec-2
-#         leaf ec3.test                                    chain: leaf,int2,int1
-#   root-other        RSA-2048 CA, self-signed, NOT in the store,
-#                                                             for --cacert tests
-#   selfsigned.test   its own issuer, in nobody's store
-#
-#   teststore         tools/mkcertstore.py of root-rsa + root-ec, which is what
-#                     --cacert names on the Amiga side
-#   otherstore        tools/mkcertstore.py of root-other alone: a --cacert that
-#                     is a valid store and the wrong one
-#
-#   Every leaf carries the name in BOTH the subject CN and a SAN dNSName.
-#   nx_secure checks the SAN when there is one, and a certificate with only a
-#   CN is a 2010 artefact that would test the wrong path.
-#
-#   The depth counts are the number of certificates the SERVER SENDS, which is
-#   what curl reports and what tls.library walks.  The root is never sent.
-#
-# All of it is regenerated only when OUTDIR/.stamp is missing, because a
-# handshake measurement wants the same keys from run to run.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -56,11 +7,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 OUT="${1:-$ROOT/build/peer-pki}"
 
-# Regenerated when this script changes, as well as when the stamp is missing.
-# Without the -nt test, adding a certificate here left every machine that had
-# already run once serving the OLD set: httppeer.py skips a chain file it
-# cannot find, so the new arm's port simply never opened and the run failed as
-# a handshake that did not happen.
 STAMP="$OUT/.stamp"
 if [ -f "$STAMP" ] && [ "$STAMP" -nt "${BASH_SOURCE[0]}" ]; then
     echo "==> test PKI already in $OUT (delete $STAMP to regenerate)"
@@ -71,28 +17,10 @@ command -v openssl >/dev/null || { echo "no openssl on PATH" >&2; exit 2; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-# Absolute from here on: the script cd's into $OUT and then keeps writing to
-# "$OUT/ext.cnf", so a relative argument stops resolving after the cd and the
-# run dies one file in.  Callers pass an absolute path, which is
-# why it never showed.
 OUT=$(cd "$OUT" && pwd)
 STAMP="$OUT/.stamp"
 cd "$OUT"
 
-# FIXED DATES, NOT -days, AND THE REASON IS THE GUEST'S CLOCK.
-#
-#   AmigaOS DateStamp() is local time and has no timezone concept at all, so
-#   an emulated machine synchronised to this host reads whatever the host's
-#   wall clock says, and tls.library compares that against a certificate's
-#   notBefore, which is UTC.  West of Greenwich the Amiga is therefore hours
-#   BEHIND every certificate issued today, and `-days 7300` (notBefore = now,
-#   in UTC) produced a whole PKI that the guest rejected as "not yet valid".
-#   Measured, not guessed: host 04:09 UTC, guest 21:09, every leaf refused.
-#
-#   So both ends are pinned.  notBefore is after tls.library's clock floor
-#   (2026-01-01, src/tls_time.c) so the validity check still RUNS, pinning it
-#   to 1990 would make the library treat the clock as unset and skip the very
-#   check the expired-certificate case exists to prove.
 NOT_BEFORE=20260201000000Z
 NOT_AFTER=20450101000000Z
 
@@ -116,7 +44,6 @@ subjectKeyIdentifier=hash
 EOF
 }
 
-# $1 name  $2 alg (rsa|ec)
 newkey()
 {
     if [ "$2" = "ec" ]; then
@@ -126,7 +53,6 @@ newkey()
     fi
 }
 
-# $1 name  $2 alg  $3 CN
 selfsigned_ca()
 {
     newkey "$1" "$2"
@@ -139,7 +65,6 @@ selfsigned_ca()
             -out "$1.cert.pem" 2>/dev/null
 }
 
-# $1 name  $2 alg  $3 CN  $4 issuer-name  $5 ext-kind (ca|leaf)  [$6 notAfter]
 issue()
 {
     newkey "$1" "$2"
@@ -160,15 +85,6 @@ issue()
     rm -f "$1.csr"
 }
 
-# $1 name  $2 CN  $3 issuer-name
-#
-# An RSASSA-PSS leaf.  Same shape as issue() with alg rsa and ext leaf, and
-# the padding mode is the only difference, which is the point: nothing about
-# the chain, the key or the extensions changes, so an arm that fails against
-# this one and passes against rsa2.test failed on the signature encoding.
-#
-# saltlen digest, which is what OpenSSL 3 picks by default and what every CA
-# issuing PSS uses.
 issue_pss()
 {
     newkey "$1" rsa

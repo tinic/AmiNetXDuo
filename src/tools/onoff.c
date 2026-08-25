@@ -1,42 +1,10 @@
 /*
- * Online / Offline, switch a network interface up or down.
+ * Online / Offline, switch a network interface up or down. One source, two
+ * executables: TOOL_OFFLINE picks which.
  *
- *     Online  NAME/A,UNIT/N,TIMEOUT/N
- *
- * NAME is either a configured interface or a SANA-II driver. Commands like
- * these are usually given a driver and a unit, "Offline a2065.device UNIT 0",
- * because that is the level at which a driver can be switched off to run
- * hardware diagnostics. This stack acts on a configured interface: a file in
- * DEVS:NetInterfaces naming a driver and a unit. That name is the handle
- * ShowNetStatus prints, AddNetInterface takes, and the netstack indexes by.
- *
- * NAME is resolved in this order, and both spellings work:
- *
- *   1. a configured interface, if DEVS:NetInterfaces/<NAME> parses. UNIT is
- *      then checked against the unit that file already names rather than being
- *      allowed to contradict it.
- *   2. otherwise a driver name, matched against the DEVICE and UNIT of every
- *      configured interface, and the command operates on the interface found.
- *   3. otherwise the message says so and lists what this machine does have,
- *      with the driver and unit of each. A driver name that no interface uses
- *      can mean the card is installed but nothing here has been told to use
- *      it, so there is nothing to switch.
- *
- * A name that is both, an interface file called the same thing as a driver, is
- * taken as the interface, and the command says so.
- *
- * TIMEOUT is how many seconds to wait for the interface to reach the state that
- * was asked for, with 0 meaning wait for as long as it takes. Ctrl-C aborts the
- * wait either way. The transition here is synchronous, so the state is normally
- * reached before the wait begins.
- *
- * One source, two executables: TOOL_OFFLINE picks which. If the network is not
- * running, Online starts it, because AddNetInterface need not have been run
- * first. Offline never starts it, because taking an interface down on a machine
- * with no stack is a no-op.
- *
- * Both resolve NAME before they touch anything, so a mistyped name is answered
- * with the list of interfaces that do exist.
+ * NAME is resolved as a configured interface first, then as a driver name
+ * matched against the DEVICE and UNIT of every configured interface. TIMEOUT 0
+ * waits for as long as it takes. Online starts the network; Offline never does.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -66,10 +34,8 @@ enum
 /* As many interface files as the drawer is scanned for. */
 #define ONOFF_MAX_FILES     16
 
-/*
- * Read DEVS:NetInterfaces/<name>. `loud` FALSE is a probe: nothing is printed
- * and the caller decides what the answer means.
- */
+/* Read DEVS:NetInterfaces/<name>. `loud` FALSE is a probe: nothing is printed
+   and the caller decides what the answer means. */
 static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
 {
     LONG err;
@@ -102,8 +68,8 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL loud)
 
 /*
  * Every interface file in the drawer, whether or not a stack is running.
- * netstack_config() is empty in the shipped build, where the stack lives in
- * bsdsocket.library, so the files are the only list there is.
+ * netstack_config() is empty in the shipped build, so the files are the only
+ * list there is.
  */
 static ULONG list_interfaces(char names[][TOOL_NAME_LEN])
 {
@@ -113,8 +79,7 @@ static ULONG list_interfaces(char names[][TOOL_NAME_LEN])
 
 /*
  * Find the configured interface that uses SANA-II driver `device` on `unit`.
- * The comparison is on the last path component of each, so
- * "DEVS:Networks/a2065.device" and "a2065.device" are the same driver.
+ * The comparison is on the last path component of each.
  */
 static BOOL find_by_device(const char *device, ULONG unit, char *name_out,
                            ULONG name_len, AmiIfConfig *ifc)
@@ -171,14 +136,9 @@ static VOID explain_unknown_name(const char *given, ULONG unit, BOOL had_unit)
 
 /* ------------------------------------------------- the running stack -----
  *
- * Switching an interface while the stack runs uses NetStackControl() at
- * AMI_NETSTATUS_CONTROL_LVO (include/aminetxduo/netstatus.h). docs/RESEARCH.md
- * 22.
- *
  * The index is looked up by name out of the live snapshot rather than computed
- * from the order of DEVS:NetInterfaces. The two happen to agree, because
- * src/netstack attaches the configured interfaces in configuration order, but
- * that agreement is a coincidence and must not be relied on.
+ * from the order of DEVS:NetInterfaces. The two happen to agree, but that
+ * agreement is a coincidence and must not be relied on.
  */
 
 static struct
@@ -194,14 +154,9 @@ static struct
 } onoff_addr6;
 
 /*
- * The first usable IPv6 address of that interface, as text.
- *
- * An interface carrying no IPv4 reported "online but has no address yet"
- * forever, and offered DHCP advice about a family it was not using. The
- * addresses live in their own table, joined on the interface index.
- *
- * TENTATIVE is skipped, because RFC 4862 5.4 says an address still running
- * duplicate address detection is not one anything may use.
+ * The first usable IPv6 address of that interface, as text. TENTATIVE is
+ * skipped: RFC 4862 5.4 says an address still running duplicate address
+ * detection is not one anything may use.
  */
 static BOOL live_address6(struct Library *base, UWORD nx_index,
                           char *text, ULONG text_len)
@@ -233,9 +188,8 @@ static BOOL live_address6(struct Library *base, UWORD nx_index,
 }
 
 /*
- * The same answer for a build with src/netstack linked in rather than reached
- * through the library.  FALSE in every shipped build, where
- * netstack_ipv6_address_get() is the weak stub in netstack_weak.c.
+ * The same answer for a build with src/netstack linked in. FALSE in every
+ * shipped build, where netstack_ipv6_address_get() is the weak stub.
  */
 #ifndef TOOL_OFFLINE
 static BOOL linked_address6(UWORD index, char *text, ULONG text_len)
@@ -296,11 +250,8 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
 
         /*
          * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE: LINKUP is the flag
-         * these two commands set. NETCTRL_INTERFACE_UP/DOWN reach
-         * nx_ip_driver_interface_direct_command(NX_LINK_ENABLE/DISABLE),
-         * which is what nx_interface_link_up records. The SANA-II shim's own
-         * online flag is a layer below and does not follow in step, so
-         * waiting on it would wait forever.
+         * these two commands set. The SANA-II shim's own online flag is a layer
+         * below and does not follow in step, so waiting on it would hang.
          */
         if (online != NULL)
             *online = (nsi->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
@@ -346,10 +297,8 @@ static BOOL wait_for_live_state(struct Library *base, const char *name,
 }
 
 /*
- * Switch one interface of the running stack, and report what happened. Both
- * commands end up here whenever bsdsocket.library has the network up, which on
- * a machine that has run AddNetInterface is always. Calls FreeArgs(): this is
- * the tail of main() for this path.
+ * Switch one interface of the running stack and report what happened. Calls
+ * FreeArgs(): this is the tail of main() for this path.
  */
 static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
                         ULONG timeout, struct RDArgs *rda)
@@ -567,10 +516,7 @@ int main(int argc, char **argv)
     timeout  = (args[ARG_TIMEOUT] != 0)
                    ? (ULONG)*(const LONG *)args[ARG_TIMEOUT] : 0UL;
 
-    /*
-     * Resolve NAME: interface first, then driver. See the note at the top of
-     * this file for that order.
-     */
+    /* Resolve NAME: interface first, then driver. */
     if (load_interface(given, &ifc, FALSE))
     {
         tool_copy_string(resolved, sizeof(resolved), given);
@@ -627,11 +573,8 @@ int main(int argc, char **argv)
     if (err == AMI_NET_ERR_STATE)
     {
         /*
-         * No stack in this command: it lives in bsdsocket.library and comes
-         * up on first open (tool_stack_start(), which then asks the library to
-         * hold it). That brings every configured interface up at once, which is
-         * what Online was asked for, but it also means a single interface
-         * cannot be toggled once the stack is already running.
+         * No stack in this command: it lives in bsdsocket.library and comes up
+         * on first open, which brings every configured interface up at once.
          */
         if (tool_stack_library_running())
         {
@@ -716,8 +659,8 @@ int main(int argc, char **argv)
 
     if (err != AMI_NET_OK)
     {
-        /* The operation, then the symbol, then the number: the first line
-           is the one a user can quote and a maintainer can grep for. */
+        /* The operation, then the symbol, then the number: the first line is
+           the one a user can quote and a maintainer can grep for. */
         tool_error("netstack_startup: %s (%s, %ld)",
                    (LONG)tool_net_error(err), (LONG)tool_code_net(err), err);
 

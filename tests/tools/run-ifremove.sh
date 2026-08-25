@@ -8,50 +8,6 @@
 # The command shipped in 0.20.0 with nothing exercising it.  A compile proves
 # it links; it does not prove the claim in its own header, that removing an
 # interface "releases its configuration slot, so the same name can be added
-# again with a different file behind it".  Freeing a slot in name only fails
-# on the second add and nowhere earlier.
-#
-# What its template offers, and so what is checked here:
-#
-#   INTERFACE/M/A   more than one name in a call, and one is required
-#   FORCE/S         remove an interface that still has connections
-#   QUIET/S         say nothing
-#
-# plus the four ways it can end -- OK, WARN when there was nothing to remove,
-# ERROR on a bad argument line, FAIL when the network would not answer -- and
-# the two spellings of an interface, its name or the path of the file it was
-# configured from.
-#
-# ONE BOOT.  ToolsSmoke reopens its transcript from the top after a reset, so a
-# reboot would quietly turn "added twice" into "added once, twice"; the count
-# of adds is asserted for that reason.  The steps are ordered so each leaves
-# the machine in the state the next one needs, and the no-network case runs
-# first because it is the only one that needs the stack down.
-#
-# THE RE-ADD IS CHECKED FOR USABILITY, NOT ONLY FOR BEING LISTED.  The failure
-# this test was written for leaves the interface in netstat -i with its address
-# on it and the link DOWN: NX_LINK_ENABLE calls ami_sana2_rx_start(), whose
-# tx_thread_create() returns TX_PTR_ERROR (src/sana2/sana2_rx.c:1317, the
-# workaround at :1196-1240), so an assertion on the address alone passes
-# through it.  Hence the Link column and a ping that has to get its replies
-# back, once on the first add as a control and once after the re-add.
-#
-# NOT CREATED HERE: the TX_PTR_ERROR precondition, which needs a process that
-# opened bsdsocket.library and exited, leaving an adopted stack range cached.
-# Nothing in this file arranges that, so these assertions are a net that will
-# catch the fault when something else creates it -- they do not reproduce it.
-# That leak is a separate piece of work.
-#
-# NOT COVERED HERE: EBUSY, an interface refused because it still carries TCP
-# connections, and the FORCE that overrides it.  That needs a live connection
-# and therefore a peer, so it belongs with the tests that have one; FORCE is
-# exercised below only to prove it is accepted and does not change the outcome
-# when there is nothing to override.
-#
-# SLIRP by default, which needs no peer: this is the shim's own bookkeeping.
-# -A runs it bridged, where a real driver and a real backend sometimes disagree
-# with SLIRP about when a unit is closed.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -110,9 +66,6 @@ mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
-# Static, and SLIRP's own numbers, so the address after a re-add can be
-# compared with the address before it.  A lease would make "came back
-# addressed" depend on a server answering every time.
 cat > "$STAGE/devs/NetInterfaces/eth0" <<'IFEOF'
 DEVICE=a2065.device
 UNIT=0
@@ -122,10 +75,6 @@ NETMASK=255.255.255.0
 GATEWAY=10.0.2.2
 IFEOF
 
-# The board's own driver, when -A named one that is not the A2065. Staged the
-# way tests/netstack/run-amiberry.sh stages it, DEVS:Networks with DEVICE= left
-# as the bare name, so that -N xsurf100z2 runs against x-surf-100.device rather
-# than against a card with nothing able to open it.
 if [ "$RUNNER" = amiberry ]; then
     . "$ROOT/tools/sana2-stage.sh"
 
@@ -146,10 +95,6 @@ cp "$TOOLS/RemoveNetInterface" "$STAGE/RemoveNetInterface"
 cp "$TOOLS/netstat"            "$STAGE/netstat"
 cp "$TOOLS/ping"               "$STAGE/ping"
 
-# Step by step, and each line is asserted below by its position in this list.
-# The two pings are the pair: the first one says the machine can reach the
-# gateway at all, the second says the interface it was removed from and added
-# back to can still carry a packet.
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:RemoveNetInterface eth0
 SYS:AddNetInterface eth0
@@ -208,8 +153,6 @@ FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
 
-# The Nth block for a given command banner: its output and nothing else, so
-# every assertion below reads the transcript by the same rule.
 block() {
     awk -v banner="$1" -v want="$2" '
         index($0, "===== " banner " =====") == 1 { n++; if (n == want) { on = 1; next } }
@@ -218,8 +161,6 @@ block() {
     ' "$REPORT"
 }
 
-# The rc ToolsSmoke recorded for that block.  RETURN_OK 0, WARN 5, ERROR 10,
-# FAIL 20, which is what the command returns and what a script calling it sees.
 rc_of() { block "$1" "$2" | sed -n 's/^----- rc \([0-9-]*\),.*/\1/p'; }
 
 want_rc() { # banner nth expected description
@@ -232,16 +173,10 @@ want_rc() { # banner nth expected description
 
 ifaces() { block "SYS:netstat -i" "$1"; }
 
-# netstat -i prints "Name Mtu Address Link ...", so eth0 carrying its address
-# with the link up is one line: the address alone is what a stranded interface
-# also shows.
 up_on_10_0_2_15() {
     ifaces "$1" | grep -Eq '^eth0 +[0-9]+ +10\.0\.2\.15 +up( |$)'
 }
 
-# The nth ping, which must have got both replies back.  ping returns non-zero
-# when nothing came back, so the rc and the count are both read: a count
-# printed by a command that then failed is not a delivery.
 pinged() { # nth description
     local out
     out=$(block "SYS:ping 10.0.2.2 -c 2 -t 20" "$1")
@@ -275,10 +210,6 @@ fi
 want_rc "SYS:RemoveNetInterface eth0" 1 5 "and returns WARN, not a failure"
 
 # ---- 2. it was there to begin with ---------------------------------------
-#
-# The control for section 5: if the first add does not produce a link that
-# carries traffic, the same assertions after the re-add say nothing about
-# RemoveNetInterface.
 if up_on_10_0_2_15 1; then
     pass "eth0 came up on 10.0.2.15 with the link up"
 else
@@ -315,8 +246,6 @@ else
 fi
 
 # ---- 5. the slot was genuinely free --------------------------------------
-#
-# The claim in the command's own header, and the reason this file exists.
 want_rc "SYS:AddNetInterface eth0" 2 0 "the same name can be added again"
 if ifaces 3 | grep -Eq '^eth0 .*10\.0\.2\.15'; then
     pass "and it came back carrying its address"
@@ -325,10 +254,6 @@ else
     ifaces 3 | sed 's/^/       /' >&2
 fi
 
-# Listed and addressed is not the same as usable.  A re-add whose
-# ami_sana2_rx_start() could not create its reader stack leaves exactly the
-# line asserted above and a link that is down, so the Link column and a real
-# exchange are both required before the re-add counts as having worked.
 if up_on_10_0_2_15 3; then
     pass "and the link came up again"
 else
@@ -352,9 +277,6 @@ else
 fi
 
 # ---- 7. more than one name in a call -------------------------------------
-#
-# INTERFACE/M.  One good and one bad: the good one must still go, and the call
-# must report the failure rather than swallow it.
 MULTI=$(block "SYS:RemoveNetInterface eth0 nosuch0" 1)
 if printf '%s\n' "$MULTI" | grep -q "eth0: removed"; then
     pass "a multiple-name call removes the ones that exist"

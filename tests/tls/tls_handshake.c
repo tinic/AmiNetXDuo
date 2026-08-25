@@ -1,49 +1,6 @@
 /*
  * AmiNetXDuo, a real TLS 1.2 handshake, on a real 68k, end to end.
  *
- * tls_bench.c times the primitives.  This times the thing itself: a complete
- * TLS 1.2 handshake between an nx_secure client and an nx_secure server, over
- * real TCP, on one Amiga, including everything the primitive benchmark leaves
- * out, ClientHello/ServerHello negotiation, X.509 DER parsing, certificate
- * chain verification against a trust store, key derivation, Finished hashing
- * and the record layer.
- *
- *   tls_handshake   one round in the shipping configuration: crypto68k
- *                   arithmetic, CRT on every private-key path.  This is the
- *                   correctness gate and the headline number.
- *
- *   tls_decompose   four rounds, {reference, crypto68k} x {no CRT, CRT},
- *                   so the before number, the after number and the two levers
- *                   in between are measured through identical instrumentation
- *                   in one process.  Composing a decomposition out of separate
- *                   runs on an inexact emulator gives a total that does not
- *                   add up.
- *
- *   tls_interop     the same handshake with our fast crypto on one side and
- *                   the unmodified vendored ciphersuite table on the other,
- *                   both ways round, plus vendored-on-both.  If both ends
- *                   change together a mutual arithmetic error is invisible;
- *                   this round makes it visible.
- *
- *   Reaching a real HTTPS server from the emulator is possible in principle
- *   (SLIRP gives outbound internet, and tests/netstack proves DNS and routing
- *   work), but it makes the measurement depend on a certificate chain we do
- *   not control, a trust store we would have to ship, and a server's patience.
- *   Running both halves locally measures the same arithmetic with none of that
- *   variance.  The cost is that one Amiga does both sides' work, so the wall
- *   time here is a client handshake plus a server handshake; the two are
- *   reported separately.
- *
- *   A client fetching a page never performs the private-key operation, and
- *   after this work the server's private-key operation is most of the loopback
- *   total, so the per-role arithmetic breakdown below is the figure to read
- *   for what a client costs.
- *
- *   Same fabric as tests/ram_driver: ThreadX on Exec, two NX_IP instances
- *   talking over the in-tree simulated RAM driver, the server on a
- *   ThreadX-created thread and the client on this process's own adopted Exec
- *   Task.  On top of that, one NX_SECURE_TLS_SESSION each, per round.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -165,11 +122,8 @@ static UINT h_check(UINT ok, const char *what, ULONG detail)
 
 /* ------------------------------------------------------------- the rounds -- */
 
-/*
- * The vendored tables, still exported by nx_crypto even though we no longer
- * use them by default.  They are what "unmodified nx_secure" means in the
- * interop rounds.
- */
+/* The vendored tables, still exported by nx_crypto: they are what unmodified
+   nx_secure means in the interop rounds. */
 extern const NX_SECURE_TLS_CRYPTO       nx_crypto_tls_ciphers_ecc;
 extern const USHORT                     nx_crypto_ecc_supported_groups[];
 extern const NX_CRYPTO_METHOD          *nx_crypto_ecc_curves[];
@@ -241,20 +195,9 @@ static volatile UINT    h_round;
 #define H_SERVER_STACK_SIZE     8192        /* TLS state machine is deep    */
 
 /*
- * TLS working memory, per session.
- *
- * nx_secure_tls_metadata_size_calculate() computes the exact requirement from
- * the ciphersuite table, and the value is printed at run time so the memory
- * figure in the report is measured rather than assumed.
- *
- * It grew when src/tls/ami_tls_crypto.c was wired in: our RSA method carries
- * 6 KB of sliding-window scratch on top of the vendored NX_CRYPTO_RSA, and a
- * session allocates a public-cipher slot and a public-auth slot at the largest
- * size in the table, so that is ~12 KB.
- *
- * The packet reassembly buffer must hold the largest single handshake message,
- * which here is the Certificate message carrying the chain.  8 KB holds a
- * two-certificate RSA-2048 chain with room to spare.
+ * TLS working memory, per session.  The packet reassembly buffer must hold the
+ * largest single handshake message, which here is the Certificate message
+ * carrying the chain; 8 KB holds a two-certificate RSA-2048 chain.
  */
 #define H_METADATA_SIZE         32768
 #define H_PACKET_BUFFER_SIZE    8192
@@ -283,11 +226,9 @@ static TX_THREAD                h_main_thread;
 static TX_SEMAPHORE             h_server_done;
 
 /*
- * Signals that the server is listening and the client may connect.  Without it
- * the two halves race, and nx_tcp_client_socket_connect() against a port with
- * no listener does not wait, it comes straight back NX_NOT_CONNECTED.  The
- * client only won before the rounds became a loop, when the server's setup
- * happened once at thread start.
+ * Signals that the server is listening.  Without it the two halves race:
+ * nx_tcp_client_socket_connect() against a port with no listener does not
+ * wait, it comes straight back NX_NOT_CONNECTED.
  */
 static TX_SEMAPHORE             h_server_ready;
 
@@ -304,7 +245,6 @@ static ULONG    h_server_metadata[H_METADATA_SIZE / sizeof(ULONG)];
 static ULONG    h_client_packet_buffer[H_PACKET_BUFFER_SIZE / sizeof(ULONG)];
 static ULONG    h_server_packet_buffer[H_PACKET_BUFFER_SIZE / sizeof(ULONG)];
 
-/* Per-round results, filled in by whichever half measured them. */
 static ULONG    h_server_handshake_us[H_ROUND_COUNT];
 static ULONG    h_client_handshake_us[H_ROUND_COUNT];
 static ULONG    h_whole_us[H_ROUND_COUNT];
@@ -354,14 +294,9 @@ ULONG       start;
 
 #if (NX_SECURE_TLS_TLS_1_3_ENABLED)
     /*
-     * The server half stays on TLS 1.2.  A 1.3 server signs CertificateVerify
-     * with RSA-PSS (RFC 8446 4.4.3) and nx_crypto has _nx_crypto_rsa_pss_verify
-     * but no matching sign, so the server cannot produce one: it fails in
-     * nx_secure_tls_send_certificate_verify.c:213 with
-     * NX_SECURE_TLS_UNKNOWN_CERT_SIG_ALGORITHM and the client sees the alert.
-     * That is a server-side gap only.  The client half is left at 1.3, which is
-     * the direction that matters here, and a client never signs
-     * CertificateVerify unless it presents a client certificate.
+     * The server half stays on TLS 1.2: a 1.3 server signs CertificateVerify
+     * with RSA-PSS and nx_crypto has no matching sign, so it fails with
+     * NX_SECURE_TLS_UNKNOWN_CERT_SIG_ALGORITHM.  Server-side gap only.
      */
     (VOID) nx_secure_tls_session_protocol_version_override(&h_server_session,
                                                     NX_SECURE_TLS_VERSION_TLS_1_2);
@@ -398,11 +333,9 @@ ULONG       start;
     (VOID) H_OK(status, "server: leaf certificate + RSA key parsed");
 
     /*
-     * ami_tls_local_certificate_add() is nx_secure_tls_local_certificate_add()
-     * plus ami_tls_rsa_key_register().  The registration is what lets the
-     * ECDHE_RSA ServerKeyExchange signature use CRT: nx_secure only ever calls
-     * NX_CRYPTO_SET_PRIME_P from nx_secure_process_client_key_exchange.c, so
-     * on this path the primes have to arrive from the certificate instead.
+     * ami_tls_local_certificate_add() adds ami_tls_rsa_key_register(), which is
+     * what lets the ECDHE_RSA ServerKeyExchange signature use CRT: nx_secure
+     * only calls NX_CRYPTO_SET_PRIME_P from the client key exchange path.
      */
     status =  ami_tls_local_certificate_add(&h_server_session,
                                             &h_server_certificate);
@@ -425,11 +358,6 @@ ULONG       start;
         return;
     }
 
-    /*
-     * The handshake.  On this side it costs one RSA-2048 private operation
-     * (the ServerKeyExchange signature under an ECDHE_RSA suite) plus an ECDHE
-     * key pair, the expensive half.
-     */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_server_session, &h_server_socket,
                                          600UL * NX_IP_PERIODIC_RATE);
@@ -532,13 +460,9 @@ ULONG       start;
                                                       (ULONG)sizeof(h_client_packet_buffer));
     (VOID) H_OK(status, "client: packet buffer set");
 
-    /*
-     * The trust store, and the buffers the incoming chain is parsed into.
-     * Without the remote-certificate allocation nx_secure has nowhere to put
-     * what the server sends and the handshake fails with a buffer error
-     * rather than a verification error, a distinction that matters when
-     * debugging this.
-     */
+    /* Without the remote-certificate allocation nx_secure has nowhere to put
+       what the server sends, and the handshake fails with a buffer error
+       rather than a verification error. */
     status =  nx_secure_x509_certificate_initialize(&h_trusted_certificate,
                                                     test_ca_cert_der,
                                                     test_ca_cert_der_len,
@@ -577,14 +501,8 @@ ULONG       start;
     }
 
     /*
-     * The measurement: everything from ClientHello to Finished, negotiation,
-     * the server's certificate chain parsed and verified against the trust
-     * store, the key exchange, key derivation and the handshake hash.
-     *
-     * This wall time includes the server's own arithmetic, because the server
-     * is another thread on the same 68k and the client is blocked waiting for
-     * it.  It is a whole-machine figure; the per-role arithmetic totals below
-     * separate the two.
+     * This wall time includes the server's own arithmetic: the server is
+     * another thread on the same 68k and the client is blocked waiting for it.
      */
     start =  ami_tls_eclock();
     status = nx_secure_tls_session_start(&h_client_session, &h_client_socket,
@@ -652,16 +570,10 @@ ULONG   actual;
 ULONG   metadata_needed = 0;
 ULONG   start;
 
-
     /*
-     * Ask nx_secure how much crypto metadata this ciphersuite table really
-     * needs, rather than trusting a round number, the memory figure in the
-     * report should be measured.
-     *
      * This has to happen here and not in tx_application_define(): the nxe_
      * error-checking wrappers apply NX_THREADS_ONLY_CALLER_CHECKING, so a call
-     * from initialization context comes back NX_CALLER_ERROR (0x11) with the
-     * output untouched.
+     * from initialization context returns NX_CALLER_ERROR with no output.
      */
     status =  nx_secure_tls_metadata_size_calculate(&ami_crypto_tls_ciphers_ecc,
                                                     &metadata_needed);
@@ -841,14 +753,9 @@ UINT    i;
 /* -------------------------------------------------------------- shutdown -- */
 
 /*
- * Everything tx_application_define() created, given back, so the kernel can be
- * stopped before AmigaDOS unloads this hunk.
- *
  * tx_amiga_kernel_stop() refuses while any application TX_THREAD is still
- * alive, and an NX_IP is one of those: nx_ip_create() runs an IP thread of its
- * own.  The order is creation reversed.  The TLS sessions and their sockets are
- * already gone -- each round ends by deleting its own -- so what is left is the
- * server thread, the two semaphores, the two IP instances and the pool.
+ * alive, and an NX_IP is one of those, so everything tx_application_define()
+ * created is given back here, in creation order reversed.
  */
 static VOID h_shutdown(VOID)
 {
@@ -910,11 +817,9 @@ UINT    status;
     (VOID) H_OK(status, "main: crypto68k tables built");
 
     /*
-     * The comb table in c68k_p256_table.c is generated, so a table built for
-     * the wrong curve would produce points that are self-consistent and wrong.
-     * Two generic scalar multiplications settle it.  Nothing else here would
-     * catch it: such a table still completes a handshake against a peer that
-     * has the same one.
+     * The comb table in c68k_p256_table.c is generated, and one built for the
+     * wrong curve is self-consistent, wrong, and still completes a handshake
+     * against a peer that has the same table.
      */
     status =  c68k_p256_self_check();
     (VOID) h_check((UINT)(status == NX_CRYPTO_SUCCESS),
@@ -950,12 +855,9 @@ UINT    status;
     (VOID) tx_amiga_orphan_thread(&h_main_thread);
 
     /*
-     * The kernel comes down before the program does.  tx_amiga_kernel_start()
-     * leaves a VERTB interrupt server whose struct Interrupt, and whose
-     * is_Code, are in this hunk, and AmigaDOS frees the hunk the instant main()
-     * returns; the next VBlank 20 ms later calls into it.  That is invisible
-     * from here -- the checks above have already passed and the exit status has
-     * already been decided -- so tools/smoke/unloadprobe.c is what sees it.
+     * The kernel comes down before the program does: tx_amiga_kernel_start()
+     * leaves a VERTB interrupt server whose is_Code is in this hunk, and
+     * AmigaDOS frees the hunk the instant main() returns.
      */
     status =  tx_amiga_kernel_stop();
     (VOID) H_TX_OK(status, "main: ThreadX kernel stopped");

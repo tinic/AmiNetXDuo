@@ -5,60 +5,6 @@
 #   tests/tools/run-arpretry.sh -P PEERHOST [-B IFACE] [-a ADDR] [-b BUILDDIR]
 #                               [-N BOARD] [-m MODEL] [-t SECONDS] [-T TAG]
 #
-# WHAT IT PROVES
-#
-#   The guest's FIRST ARP request for a peer is lost, and the connection still
-#   completes inside the window the application is waiting -- because the stack
-#   retransmits the request about a second later rather than ten seconds later.
-#
-#   The failure it exists for is intermittent in the field and was seen in
-#   tests/tools/run-cardsweep.sh on every card: "a TCP send against a live peer
-#   succeeds: expected rc 0, got '10'", with the guest's first ARP unanswered
-#   and nothing retransmitted.  src/tools/iperfcore.c gives a connect
-#   plan.seconds + IPERF_IDLE_MS, which is 5 s for the sweep's `-t 3` arm.  An
-#   ARP retransmit at 10 s is outside it; one at 1 s is not.  Nothing else in
-#   the tree exercises a lost ARP, so the defect could only ever be waited for.
-#
-# HOW THE LOSS IS MADE DETERMINISTIC
-#
-#   netem on the PEER, at 100%, behind two u32 filters, installed before the
-#   guest boots and removed a fraction of a second after the guest's first ARP
-#   request is seen on the wire:
-#
-#     prio 1   any ARP frame whose target protocol address is the guest.  This
-#              is the reply to the guest's first request, and it is what gets
-#              lost.
-#     prio 2   any ARP REQUEST the peer originates.  Not decoration:
-#              NX_DISABLE_ARP_AUTO_ENTRY is deliberately left off in
-#              port/netxduo-amiga/inc/nx_user.h, so the guest creates a cache
-#              entry from the sender of any broadcast ARP it sees.  One request
-#              from the peer for anything at all would hand the guest the
-#              mapping for free and the drill would pass without ever testing a
-#              retransmit.
-#
-#   The window closes on the guest's request, not on a clock: the host cannot
-#   know when inside a 60 s boot the guest reaches the connect.  A second
-#   tcpdump waits for that request and drops the qdisc HOLD seconds later.  The
-#   margin is three orders of magnitude -- the peer's kernel answers in
-#   microseconds, so the reply is inside the window; the earliest retransmit
-#   the stack can make is a second away, so the retry is outside it.
-#
-# IT REPORTS THE INTERVAL, NOT JUST A VERDICT
-#
-#   arp_reqs and first_retry_ms come from the peer's own capture, so the run
-#   says what the stack actually did rather than what the exit code implies.
-#
-#   arp_reqs=0 IS NOT A PASS.  It means the guest never asked -- it already had
-#   the mapping, so nothing was measured.  That is exit 2, the rig, in the same
-#   sense tests/tools/run-iperf.sh spends 2.
-#
-# EXIT CODES
-#
-#   0  the first ARP was lost and the connect completed anyway
-#   1  it was lost and the connect did not recover
-#   2  the drill measured nothing, or this box cannot run it
-#   3  the guest reached no verdict at all
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -73,9 +19,6 @@ BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 PEER_IF="${AMINETXDUO_PEER_IFACE:-ens18}"
 PEERHOST="${AMINETXDUO_FITZ_PEER:-}"
 
-# Not run-iperf.sh's 192.168.1.240: that one and this one may be on the same
-# LAN at the same time, and two guests at one address is a debugging session
-# nobody wants.
 ADDRESS="${AMINETXDUO_ARPRETRY_ADDRESS:-192.168.1.239}"
 GATEWAY="${AMINETXDUO_ARPRETRY_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
@@ -87,9 +30,6 @@ SECS=3
 TC="${AMINETXDUO_PEER_TC:-\$HOME/tc-cap}"
 TCPDUMP="${AMINETXDUO_PEER_TCPDUMP:-\$HOME/tcpdump-cap}"
 
-# How long the drop stays up after the guest's first request.  Long enough to
-# cover the peer's reply, which is microseconds away, and far short of the
-# earliest retransmit the stack can make, which is a second away.
 HOLD="${AMINETXDUO_ARPRETRY_HOLD:-0.3}"
 
 while getopts "P:B:a:g:b:N:m:t:T:h" opt; do
@@ -159,16 +99,11 @@ peer_sh "test -x $TC && test -x $TCPDUMP" || {
     echo "  cp /usr/bin/tcpdump ~/tcpdump-cap && sudo setcap cap_net_admin,cap_net_raw+ep ~/tcpdump-cap" >&2
     exit 2; }
 
-# The qdisc is machine-wide.  Two of these at once, or one of these against a
-# live tests/perf/run-lossgate.sh, and each is measuring the other's link.
 peer_sh "$TC qdisc show dev $PEER_IF" | grep -q '^qdisc prio 1: root' && {
     echo "$PEERHOST:$PEER_IF already has a prio root qdisc.  Something else" >&2
     echo "is shaping this interface -- lossgate, or another arpretry run." >&2
     exit 2; }
 
-# 192.168.1.239 -> c0a801ef, and the peer's halves for the second filter,
-# which cannot use a u32 match: the sender address sits at offset 14 and a
-# u32 match must be four-byte aligned.  tc answers "Illegal \"match\"".
 ip_hex() { local IFS=.; set -- $1; printf '0x%02x%02x%02x%02x' "$1" "$2" "$3" "$4"; }
 ip_hi()  { local IFS=.; set -- $1; printf '0x%02x%02x' "$1" "$2"; }
 ip_lo()  { local IFS=.; set -- $1; printf '0x%02x%02x' "$3" "$4"; }
@@ -205,9 +140,6 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TOOLS/AddNetInterface" "$STAGE/AddNetInterface"
 cp "$TOOLS/iperf"           "$STAGE/iperf"
 
-# STATIC, so nothing resolves the peer before the arm does: a DHCP exchange is
-# broadcast and never puts the peer in the guest's cache.  Then the sweep's own
-# command, unchanged, because that is the failure being reproduced.
 TCPCMD="SYS:iperf $PEERADDR -p $PORT_TCP -t $SECS"
 {
     echo "SYS:AddNetInterface eth0"
@@ -243,8 +175,6 @@ ssh -o ConnectTimeout=10 -n "$PEERHOST" \
     > "$OUT/peer.out" 2> "$OUT/peer.err" &
 PEER_PID=$!
 
-# The record.  -tt for a unix timestamp, which is what first_retry_ms is
-# derived from; the verdict reads this file and nothing else for the ARP facts.
 ssh -o ConnectTimeout=10 -n "$PEERHOST" \
     "timeout $((TIMEOUT + 60)) $TCPDUMP -i $PEER_IF -n -tt -l arp \
      > $RTMP-arp.txt 2> $RTMP-arp.err; exit 0" &
@@ -267,9 +197,6 @@ peer_sh "$TC qdisc add dev $PEER_IF root handle 1: prio bands 3 && \
              match u16 $PHI 0xffff at 14 match u16 $PLO 0xffff at 16 flowid 1:3" || {
     echo "could not install the drop on $PEERHOST" >&2; exit 2; }
 
-# Closes on the guest's request, not on a clock.  `tc -s qdisc` is read before
-# the delete because the netem counter is the proof that something was actually
-# dropped, and deleting the qdisc takes it away.
 ssh -o ConnectTimeout=10 -n "$PEERHOST" \
     "timeout $((TIMEOUT + 30)) $TCPDUMP -i $PEER_IF -n -c 1 \
         'arp[6:2] = 1 and src host $ADDRESS and dst host $PEERADDR' \
@@ -320,9 +247,6 @@ if [ -f "$REPORT" ]; then
     CONNECT_RC="${CONNECT_RC:-none}"
 fi
 
-# The guest's requests for the peer, in order, from the peer's own capture.
-# first_retry_ms is the gap between the first two: that number IS the defect,
-# and it is what a change to NX_ARP_UPDATE_RATE moves.
 read -r ARP_REQS FIRST_RETRY_MS <<EOF
 $(awk -v peer="$PEERADDR" -v guest="$ADDRESS" '
     $0 ~ ("Request who-has " peer " tell " guest) {
@@ -346,14 +270,9 @@ grep -E "Request who-has $PEERADDR tell $ADDRESS|Reply $PEERADDR is-at" \
 echo "==================================================================="
 echo
 
-# "failed" and "never ran" are different values, and 3 is the one the rest of
-# the tree spends on a run that reached no verdict.  A guest that never wrote a
-# transcript did not fail the drill; it did not take it.
 if [ ! -f "$REPORT" ]; then
     STATUS=no_verdict
     RC=3
-# arp_reqs=0 is the rig, not the stack: the guest already had the mapping and
-# no retransmit was exercised.  See the header.
 elif [ "$ARP_REQS" = 0 ]; then
     STATUS=skip_setup
     RC=2

@@ -1,76 +1,5 @@
 /*
  * TCP:, an AmigaDOS handler that makes a socket a file handle.
- *
- * AmigaOS has no socket-as-file-handle. A descriptor belongs to a SocketBase,
- * a SocketBase belongs to one task, and there is no way to hand either to
- * Open(), Read(), Write() or SystemTagList(). A DOS handler avoids that: DOS
- * routes Open("TCP:...") here, this file makes the connection, and the caller
- * gets an ordinary BPTR.
- *
- * What that allows:
- *
- *   Type TCP:host/daytime          every AmigaDOS command that reads a file
- *   Copy TCP:host/1234 TO RAM:x    can now read a socket, unmodified
- *   Echo >TCP:host/1234 "hi"       shell redirection into a connection
- *   Open("TCP:OBTAIN=<id>")        the other half of handoff.c: a program
- *                                  accepts a connection, releases a copy of
- *                                  the socket, and opens it as a file handle
- *                                  that SystemTagList() will take as
- *                                  SYS_Input/SYS_Output.
- *
- * Name syntax, taken from Roadshow's tcp-handler.doc:
- *
- *   TCP:<host>/<service>           connect to <service> on <host>
- *   TCP:<service>                  listen on <service>, accept one connection
- *   TCP:HOST=<h>/PORT=<p>          the same, spelled out. H=/P=/S=/SERVICE=
- *   TCP:OBTAIN=<id>                ObtainSocket() a socket someone parked
- *
- * Components are separated by '/'. A component with an '=' is a keyword. A
- * bare component fills SERVICE first and HOST second, which makes
- * "TCP:<service>" a listener and "TCP:<host>/<service>" a connection, as the
- * Roadshow document's two examples require.
- *
- * A handler answers a DOSPACKET when it can and not before, and the packet's
- * sender is asleep in the meantime. A single-process handler would have to
- * hold every unanswerable packet in a queue driven from one WaitSelect(),
- * which covers the packets but not the two blocking calls that are not
- * sockets: gethostbyname() and connect(). One name lookup would stall every
- * other file handle the handler owns.
- *
- * So this is shaped like console.handler: a control process owns the device
- * node and answers ACTION_FINDINPUT/FINDOUTPUT/FINDUPDATE by starting a
- * session process, handing it the packet, and forgetting about it. The session
- * opens its own bsdsocket.library, every opener gets its own child base
- * (library.c), which is how it gets a descriptor table, connects, points the
- * FileHandle's fh_Type at its own port, and replies. Every later packet for
- * that handle goes straight to the session, which can block in recv() for as
- * long as it likes because nobody else is behind it.
- *
- * Changing fh_Type is allowed: dos.library sets it to the device's port before
- * sending the packet and re-initialises it on every retry "in case handler
- * played with it" (v40 dos, bcplio.c findstream). It is also what makes
- * ACTION_WAIT_CHAR usable, WaitForChar() sends only a timeout, not the file
- * handle, so a handler with one port for many files cannot tell which file is
- * being asked about. One port per file resolves that.
- *
- * Neither process uses its pr_MsgPort for DOS packets. Both do their own DOS
- * and library I/O (CreateNewProc, the resolver reading DEVS:Internet), and
- * dos.library's DoPkt replies arrive on pr_MsgPort. Sharing the two would put
- * a reply and an incoming packet in the same queue and need a pr_PktWait hook
- * to tell them apart. A second MsgPort costs nothing.
- *
- *   peer closed, all data delivered   Read() returns 0. Ordinary EOF.
- *   connection reset                  Read() returns -1, IoErr() set. Not 0:
- *                                     a reset means the transfer was cut
- *                                     short, and reporting that as EOF turns
- *                                     a truncated file into a successful copy.
- *   nothing to read yet               Read() blocks, with no idle timeout.
- *   name lookup or connect failed     Open() fails, so Read() never happens.
- *
- * AmigaDOS has no error code for "connection reset by peer", so the mapping
- * table below picks the nearest thing DOS can print and the real errno goes to
- * the serial log.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -87,15 +16,8 @@
 #include <dos/dostags.h>
 #include <dos/filehandler.h>
 
-/* ------------------------------------------------------------- constants, */
-
 #define TCP_DEVICE_NAME     "TCP"
 
-/*
- * Session stacks. A session runs the resolver and, if it is the first opener
- * on the machine, netstack_startup(), both of which run NetX Duo code on the
- * calling task's stack through the bsd_nx_enter() bracket.
- */
 #define TCP_CTRL_STACK      8192UL
 #define TCP_SESSION_STACK   16384UL
 
@@ -108,8 +30,6 @@
 
 /* fd_set words, matching select.c's layout: bit (fd%32) of word (fd/32). */
 #define TCP_FD_WORDS        ((BSD_MAX_DTABLESIZE + 31) / 32)
-
-/* ----------------------------------------------------------------- state, */
 
 typedef struct TcpBoot
 {
@@ -146,8 +66,6 @@ typedef struct TcpName
 
 static VOID tcp_ctrl_main(VOID);
 static VOID tcp_session_main(VOID);
-
-/* ------------------------------------------------------------- utilities, */
 
 static BOOL tcp_ci_equal(const char *a, const char *b)
 {
@@ -216,8 +134,6 @@ static VOID tcp_bstr_to_c(BSTR bs, char *out, ULONG size)
 /*
  * Reply a packet. Not ReplyPkt(): that stamps dp_Port with the current
  * process's pr_MsgPort, and neither of our processes takes DOS packets there
- * (see the header comment). dp_Port means "the port to send this packet back
- * to", so it must be the port this handle listens on.
  */
 static VOID tcp_reply(struct DosPacket *pkt, LONG res1, LONG res2,
                       struct MsgPort *from)
@@ -234,13 +150,6 @@ static VOID tcp_reply(struct DosPacket *pkt, LONG res1, LONG res2,
     PutMsg(reply, msg);
 }
 
-/* --------------------------------------------------------- errno -> DOS, */
-
-/*
- * There is no DOS error for most of these, so the table records what each one
- * is reported as rather than pretending to be a translation. The socket errno
- * is logged alongside at every site that uses this.
- */
 typedef struct TcpErrorMap
 {
     LONG    tem_Errno;
@@ -274,24 +183,12 @@ static LONG tcp_dos_error(LONG err)
             return tcp_error_map[i].tem_DosError;
     }
 
-    /*
-     * ECONNREFUSED, ECONNRESET, ETIMEDOUT, EPIPE, ENOTCONN and the rest all
-     * mean the same thing to a program holding a file handle: the other end is
-     * not there. "Object not found" is the closest AmigaDOS gets, and Fault()
-     * has a sentence for it.
-     */
     return ERROR_OBJECT_NOT_FOUND;
 }
-
-/* ---------------------------------------------------------- name parsing, */
 
 /*
  * "TCP:host/service" -> TcpName. Returns 0, or a DOS error code.
  *
- * dp_Arg3 carries the whole path including the device name, because the lock
- * in dp_Arg2 is NULL (v40 dos, bcplio.c findstream: the BSTR it sends is the
- * caller's string verbatim). Skipping to past the first ':' is what every
- * handler does with it.
  */
 static LONG tcp_parse(const char *path, TcpName *out)
 {
@@ -379,12 +276,6 @@ static LONG tcp_parse(const char *path, TcpName *out)
         }
     }
 
-    /*
-     * Bare components. The Roadshow document requires both
-     * "TCP:localhost/daytime" (a connection) and "TCP:<service name>" alone
-     * (equivalent to "TCP:service=<service name>", a listener). So two bare
-     * components are host then service, and a single one is a service.
-     */
     if (bares == 2)
     {
         if (out->tn_Host[0] != '\0' || out->tn_Service[0] != '\0')
@@ -412,8 +303,6 @@ static LONG tcp_parse(const char *path, TcpName *out)
     return 0;
 }
 
-/* --------------------------------------------------------- socket set-up, */
-
 /* A service name or a port number -> a port. 0 means "no such service". */
 static UWORD tcp_service_port(struct AmiSocketBase *base, const char *service)
 {
@@ -433,13 +322,6 @@ static UWORD tcp_service_port(struct AmiSocketBase *base, const char *service)
 /*
  * Wait until `fd` is ready. `timeout` NULL means wait indefinitely. Returns >0
  * ready, 0 timed out, -1 failed.
- *
- * Every wait in this file goes through WaitSelect() rather than a blocking
- * socket call: a blocking accept() was once observed under this emulator not
- * to return after a connection had been established (the peer's Open() had
- * already succeeded). The same connection made the descriptor readable to
- * WaitSelect() immediately. Waiting on readiness and then taking the socket in
- * a call that cannot block has never stalled.
  */
 static LONG tcp_wait_ready(struct AmiSocketBase *base, LONG fd,
                            struct timeval *timeout)
@@ -509,12 +391,6 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
 
     if (name->tn_HasObtain)
     {
-        /*
-         * The other half of handoff.c. The socket was parked by
-         * ReleaseSocket()/ReleaseCopyOfSocket() in some other task's base.
-         * ObtainSocket() moves it into ours and this process becomes the one
-         * NetX Duo's callbacks signal.
-         */
         fd = bsd_ObtainSocket(name->tn_Obtain, AF_INET, SOCK_STREAM, 0, base);
         if (fd < 0)
         {
@@ -567,12 +443,6 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
             return 0;
         }
 
-        /*
-         * No host: Roadshow's "allow other networked hosts to open a
-         * connection to the local machine on the port specified here". One
-         * connection, then the listener is closed, a DOS file handle is one
-         * stream, so there is nowhere to put a second.
-         */
         {
             LONG on = 1;
             LONG client;
@@ -615,8 +485,6 @@ static LONG tcp_open_socket(struct AmiSocketBase *base, const TcpName *name,
     }
 }
 
-/* ---------------------------------------------------------- the session, */
-
 static VOID tcp_session_read(TcpSession *s, struct DosPacket *pkt)
 {
     APTR buffer = (APTR)pkt->dp_Arg2;
@@ -658,11 +526,6 @@ static VOID tcp_session_write(TcpSession *s, struct DosPacket *pkt)
         return;
     }
 
-    /*
-     * DOS wants "all of it, or an error". send() on a blocking socket can
-     * still come back short when the window closes mid-transfer, so this
-     * loops rather than trusting one call.
-     */
     while (done < length)
     {
         LONG sent = bsd_send(s->ts_Fd, buffer + done, length - done, 0,
@@ -708,10 +571,6 @@ static VOID tcp_session_wait_char(TcpSession *s, struct DosPacket *pkt)
 
     ready = tcp_wait_ready(s->ts_Base, s->ts_Fd, &tv);
 
-    /*
-     * A closed connection counts as ready: the next Read() returns
-     * immediately, which is what WaitForChar() reports on.
-     */
     tcp_reply(pkt, (ready > 0) ? DOSTRUE : DOSFALSE, 0, s->ts_Port);
 }
 
@@ -770,12 +629,6 @@ static BOOL tcp_session_open(TcpSession *s, struct DosPacket *pkt)
         return FALSE;
     }
 
-    /*
-     * fh_Type moves the handle off the device's port and onto ours. fh_Port is
-     * dos.library's "interactive" flag: a connection is a stream with no length
-     * and no seek, which is what interactive means to DOS, and it is what
-     * allows WaitForChar().
-     */
     fh->fh_Arg1 = (LONG)s;
     fh->fh_Type = s->ts_Port;
     fh->fh_Port = s->ts_Port;
@@ -795,13 +648,6 @@ static VOID tcp_session_close(TcpSession *s)
     /*
      * A socket taken through TCP:OBTAIN= can outlive this session: the program
      * that released a copy of it still holds the original descriptor. Its
-     * as_Owner points at this base, which is about to be freed, so the next
-     * receive or disconnect callback must not Signal() through freed memory.
-     * bsd_socket_release() handles that while the socket is still live: when
-     * another reference remains, it clears an owner matching the closing base.
-     * Nothing here may inspect the socket after CloseSocket(), because a
-     * concurrent close of the other reference can make this one the last and
-     * the call will free the AmiSocket.
      */
     (VOID)bsd_CloseSocket(s->ts_Fd, s->ts_Base);
 
@@ -821,11 +667,6 @@ static VOID tcp_session_main(VOID)
     s.ts_Base = NULL;
     s.ts_Fd   = -1;
 
-    /*
-     * The control process forwarded the FIND packet to our pr_MsgPort. It is
-     * the only message that ever arrives there. From here on pr_MsgPort is
-     * dos.library's, for the DOS calls the resolver makes.
-     */
     WaitPort(&me->pr_MsgPort);
     msg = GetMsg(&me->pr_MsgPort);
     pkt = (struct DosPacket *)msg->mn_Node.ln_Name;
@@ -870,13 +711,10 @@ static VOID tcp_session_main(VOID)
                     break;
 
                 case ACTION_SEEK:
-                    /* A connection has no position and nothing to go back to. */
                     tcp_reply(pkt, -1, ERROR_SEEK_ERROR, s.ts_Port);
                     break;
 
                 case ACTION_EXAMINE_FH:
-                    /* ExamineFH() wants a size, a date and a name. A socket
-                       has none of the three, so the packet is refused. */
                     tcp_reply(pkt, DOSFALSE, ERROR_OBJECT_WRONG_TYPE,
                               s.ts_Port);
                     break;
@@ -906,8 +744,6 @@ static VOID tcp_session_main(VOID)
     Forbid();
     tcp_sessions--;
 }
-
-/* ---------------------------------------------------------- the control, */
 
 static VOID tcp_ctrl_find(struct DosPacket *pkt)
 {
@@ -961,12 +797,6 @@ static BOOL tcp_ctrl_publish(VOID)
     if (tcp_ctrl_port == NULL)
         return FALSE;
 
-    /*
-     * Roadshow adds TCP: "unless there already is an assignment, a volume or a
-     * file system device of that name". AddDosEntry refuses a duplicate device
-     * or volume by itself. An ASSIGN of the same name it shadows instead, so
-     * that one is checked here.
-     */
     list = LockDosList(LDF_ASSIGNS | LDF_READ);
     taken = (FindDosEntry(list, (STRPTR)TCP_DEVICE_NAME, LDF_ASSIGNS) != NULL);
     UnLockDosList(LDF_ASSIGNS | LDF_READ);
@@ -1016,8 +846,6 @@ static VOID tcp_ctrl_main(VOID)
 
     if (!ok)
     {
-        /* tcp_ctrl_publish() has already undone whatever it managed. The latch
-           is dropped too, or no later open can retry. */
         tcp_started = FALSE;
         return;
     }
@@ -1044,11 +872,6 @@ static VOID tcp_ctrl_main(VOID)
 
                 /*
                  * DOSFALSE with dp_Res2 == 0 is load-bearing, not a failure.
-                 * dos.library's MatchFirst() (v40, patternhack.c) asks this
-                 * about any path containing a ':' and, when the answer is no
-                 * with no error, returns the path verbatim rather than trying
-                 * to Lock() it.  That is why `Type TCP:...` works without this
-                 * handler implementing locks.
                  */
                 case ACTION_IS_FILESYSTEM:
                     tcp_reply(pkt, DOSFALSE, 0, tcp_ctrl_port);
@@ -1058,14 +881,6 @@ static VOID tcp_ctrl_main(VOID)
                  * Refused, which is what keeps TCP: out of `Info` and off the
                  * Workbench.  Both walk the DOS list and ask each device for
                  * its disk info.  A device that answers is drawn as a drive and
-                 * listed as one.  CON: and PIPE: refuse for the same reason,
-                 * and TCP: is the same kind of thing: a stream, with no blocks,
-                 * no volume and nothing to be full of.
-                 *
-                 * Answering was also what made `Info TCP:` read a name out of
-                 * low memory, because InfoData has nowhere to put "there is no
-                 * volume" except a zero BPTR, and BADDR(0) is the exception
-                 * vector table.
                  */
                 case ACTION_DISK_INFO:
                     tcp_reply(pkt, DOSFALSE, ERROR_ACTION_NOT_KNOWN,
@@ -1077,11 +892,6 @@ static VOID tcp_ctrl_main(VOID)
                     break;
 
                 /*
-                 * Lock("TCP:...") does get sent: `Copy` locks its source to
-                 * compare it against C: before deciding what kind of copy this
-                 * is (v40 copy.c). Refusing is enough. Copy carries on and
-                 * opens the stream instead.
-                 *
                  * The error code is load-bearing and is not the accurate one.
                  * ERROR_OBJECT_WRONG_TYPE describes TCP: better, a stream is
                  * not a thing that can be locked, and Copy stops on it:
@@ -1094,12 +904,6 @@ static VOID tcp_ctrl_main(VOID)
                               tcp_ctrl_port);
                     break;
 
-                /*
-                 * Reachable only from a program holding a lock on TCP:, and
-                 * nothing hands one out. Here so that the refusal names the
-                 * reason, TCP: is not a directory, rather than arriving in
-                 * the log as a packet nobody considered.
-                 */
                 case ACTION_EXAMINE_OBJECT:
                 case ACTION_EXAMINE_NEXT:
                 case ACTION_PARENT:
@@ -1138,12 +942,6 @@ static VOID tcp_ctrl_main(VOID)
                         tcp_ctrl_port = NULL;
                         DeleteMsgPort(port);
 
-                        /* The segment can stay loaded, ACTION_DIE is
-                           accepted with openers still holding the library, and
-                           the expunge only runs once the last one goes. Leaving
-                           the latch set means every later OpenLibrary() gets a
-                           library with no TCP: device. Inside the Forbid(), so
-                           no opener can see the pair half-cleared. */
                         tcp_started = FALSE;
                     }
 
@@ -1167,8 +965,6 @@ static VOID tcp_ctrl_main(VOID)
        process. */
 }
 
-/* ----------------------------------------------------------------- entry, */
-
 VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
 {
     TcpBoot         boot;
@@ -1176,21 +972,9 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     struct TagItem  tags[6];
     struct Task    *me = FindTask(NULL);
 
-    /*
-     * CreateNewProc() needs a Process to inherit from. Every real opener is
-     * one. A bare Task that opens the library gets no TCP: device instead of
-     * crashing.
-     */
     if (me == NULL || me->tc_Node.ln_Type != NT_PROCESS)
         return;
 
-    /*
-     * DEVS:Internet/tcp_handler can turn the device off. Checked before the
-     * latch, so nothing is started and nothing published, a handler that
-     * came up and was then removed would still have taken the name for as
-     * long as it took to remove it. A machine with no configuration at all
-     * keeps the device, which is the Roadshow-compatible default.
-     */
     {
         const AmiConfig *cfg = netstack_config();
 

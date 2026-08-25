@@ -1,58 +1,5 @@
 #!/usr/bin/env bash
-#
 # WHAT THE SYN DEFENCE COSTS WHEN NOTHING IS ATTACKING.
-#
-#   tests/tools/run-syncost.sh -A BUILDDIR -B BUILDDIR [-n ROUNDS] [-N BOARD]
-#                              [-I IFACE] [-m MODEL] [-t SECONDS] [-T TAG]
-#
-# WHAT IT MEASURES
-#
-#   Two numbers a listening server has, on an idle LAN, with no flood
-#   anywhere:
-#
-#     handshake_ms   connect plus a GET of a 20-byte file, ten times.  This is
-#                    the number the SYN cache could plausibly move: every
-#                    inbound connection now takes a cache entry, a keyed hash
-#                    and a table insert before the SYN-ACK goes out.
-#     throughput_bps a GET of a 512 KB file, three times.  Nothing in the
-#                    defence touches an established connection, so this is the
-#                    control: it should not move at all, and if it does the
-#                    change is somewhere it was not supposed to reach.
-#
-#   -A is the tree with the defence, -B the tree without it.  Both are booted
-#   on the same card, at the same address, from the same httpd.
-#
-# INTERLEAVED, BECAUSE THE HOST IS NOT IDLE
-#
-#   A B A B A B, not AAA BBB.  Amiberry's speed follows the load on the host
-#   it runs on, and the host is a VM sharing a Proxmox box; a run of three A's
-#   followed by three B's measures whatever else started in between as if it
-#   were the change.  Alternating puts that drift in both arms.  Each round is
-#   a fresh boot of each tree, so nothing carries over.
-#
-#   Report the MEDIAN of the rounds, not the mean: one boot that lands while
-#   something else is compiling is an outlier, not a distribution.
-#
-# BRIDGED, FRESH MAC, STATIC ADDRESS
-#
-#   The two arms take different MACs, so the LAN's neighbour cache never has
-#   to decide which of them is at the address.
-#
-# EXIT CODES
-#
-#   0  both arms produced figures for every round
-#   1  an arm regressed past the band (see BAND below)
-#   2  the rig could not run
-#   3  no round produced figures at all
-#
-# THE BAND
-#
-#   A handshake is a few milliseconds and the measurement is a connect from
-#   another machine over a bridge, so the noise floor is not small.  The gate
-#   is 25% on the median handshake and 10% on the median throughput -- wide
-#   enough that scheduling noise does not fail it, narrow enough that a per
-#   connection hash showing up in the handshake would.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -134,8 +81,6 @@ ssh -o ConnectTimeout=10 -n "$PEERHOST" "rm -f $PTMP-*; exit 0" || {
 scp -q "$ROOT/tests/tools/synprobe.py" "$PEERHOST:$PTMP-synprobe.py" || {
     echo "cannot copy the probe to $PEERHOST" >&2; exit 2; }
 
-# A probe run on the peer.  Echoes "ok median" for handshakes, or with
-# want_bytes set, "ok bps".  See tests/tools/synprobe.py.
 peer_probe() {
     local address="$1" path="$2" count="$3" want="$4" line ok med bps
     line=$(ssh -o ConnectTimeout=10 -n "$PEERHOST" \
@@ -155,15 +100,10 @@ RUNNER=""
 cleanup() { [ -n "$RUNNER" ] && kill "$RUNNER" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM HUP
 
-# ------------------------------------------------------------- one boot ---
-#
-# Sets ARM_HANDSHAKE_MS and ARM_BPS, or leaves them `none`.
-
 ARM_HANDSHAKE_MS=none
 ARM_BPS=none
 
 median() {
-    # Values on stdin, one per line.  Empty in, `none` out.
     sort -n | awk '{ v[n++] = $1 }
                    END { if (n == 0) { print "none"; exit }
                          if (n % 2) print v[int(n/2)]
@@ -198,8 +138,6 @@ IFEOF
 
     cp "$build/src/bsdsocket/bsdsocket.library" "$stage/libs/bsdsocket.library"
     echo "twenty bytes here." > "$stage/Public/small.txt"
-    # The same bytes every round and both arms, so a throughput figure is not
-    # a compressibility figure.
     dd if=/dev/zero bs=1024 count=512 2>/dev/null | tr '\0' 'A' > "$stage/Public/blob.bin"
 
     set +e
@@ -227,13 +165,9 @@ IFEOF
         return 0
     fi
 
-    # The handshake cost: the median of SMALL_N connect+GETs from the peer.
-    # synprobe drops nothing for a first-connection ARP because the boot poll
-    # above already made one.
     read -r i ARM_HANDSHAKE_MS <<<"$(peer_probe "$ADDRESS" /small.txt "$SMALL_N" 0)"
     [ "$i" -ge 1 ] || ARM_HANDSHAKE_MS=none
 
-    # The control: the median transfer rate of a 512 KB GET, BIG_N times.
     read -r i ARM_BPS <<<"$(peer_probe "$ADDRESS" /blob.bin "$BIG_N" 524288)"
     [ "$i" -ge 1 ] || ARM_BPS=none
 
@@ -243,12 +177,9 @@ IFEOF
     return 0
 }
 
-# -------------------------------------------------------------- the runs ---
-
 : > "$OUT/rounds.txt"
 
 for ((r = 1; r <= ROUNDS; r++)); do
-    # A then B, every round.  See the header.
     run_arm "$BUILD_A" "02:41:4d:63:0a:$(printf '%02x' "$r")" "a-$r"
     printf 'syncost_round: round=%s arm=defended handshake_ms=%s bps=%s\n' \
            "$r" "$ARM_HANDSHAKE_MS" "$ARM_BPS" | tee -a "$OUT/rounds.txt"
@@ -288,8 +219,6 @@ if [ "$A_HS" = none ] || [ "$B_HS" = none ] ||
     STATUS=no_verdict
     RC=3
 else
-    # 25% on the handshake, 10% on throughput.  Integer arithmetic: no bc on
-    # these hosts.
     HS_CEIL=$(( B_HS * 125 / 100 + 1 ))
     BPS_FLOOR=$(( B_BPS * 90 / 100 ))
     HS_PCT=$(( (A_HS - B_HS) * 100 / (B_HS > 0 ? B_HS : 1) ))

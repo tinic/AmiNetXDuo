@@ -2,37 +2,6 @@
  * GetNetStatus, report network readiness as a return code, for scripts.
  *
  *     GetNetStatus CHECK/K,QUIET/S,VERSION/S
- *
- *     C:GetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET
- *     IF WARN
- *         echo "The network is not ready; not starting the server."
- *         SKIP done
- *
- * Return codes:
- *
- *     0  (RETURN_OK)     every condition asked about is satisfied
- *     5  (RETURN_WARN)   at least one is not, this is what IF WARN tests
- *    10  (RETURN_ERROR)  the command could not find out: a name in CHECK that
- *                        is not a condition, or a bsdsocket.library that is
- *                        not this stack's
- *
- * Nothing here starts the network. Starting it would make the answer true.
- *
- * With no CHECK it lists every condition, says which are satisfied, and returns
- * the answer to INTERFACES alone, an interface that is up and has an address.
- *
- * The conditions are Roadshow's, so a script written for one stack works on the
- * other. Two mean something specific here:
- *
- *   PTPINTERFACES is never satisfied. A point-to-point interface is SLIP or
- *   PPP. Every interface this stack attaches is a SANA-II Ethernet device with
- *   a hardware address.
- *
- *   ROUTES asks the routing table first and falls back to the routes that
- *   exist without one: the directly-attached prefix of each interface and the
- *   default gateway.  NX_ENABLE_IP_STATIC_ROUTING is on
- *   (port/netxduo-amiga/inc/nx_user.h:592), so the table is normally there.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -53,8 +22,6 @@ enum
     ARG_VERSION,
     ARG_COUNT
 };
-
-/* ------------------------------------------------------------ conditions, */
 
 enum
 {
@@ -84,8 +51,6 @@ static const struct ConditionName
     { "ROUTES",          "there is somewhere to send packets"       },
     { "DEFAULTROUTE",    "there is a route off this network"        }
 };
-
-/* --------------------------------------------------------------- the run, */
 
 static BOOL gns_quiet;
 
@@ -119,10 +84,6 @@ static VOID measure(BOOL satisfied[COND_COUNT])
     if (!tool_stack_library_running())
         return;
 
-    /*
-     * Quietly: this command's output is a verdict, and an explanation block in
-     * the middle of it would be read as one of the answers.
-     */
     tool_nx_quiet(TRUE);
 
     if (tool_snapshot(&gns_snap, FALSE) != 0)
@@ -261,16 +222,6 @@ int main(int argc, char **argv)
     gns_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
     check     = (const char *)args[ARG_CHECK];
 
-    /*
-     * VERSION reports the version of the library, not the version of this
-     * command. C: and LIBS: are updated separately, and the copy in memory is
-     * the one a script wants to know about. `Version C:GetNetStatus` answers
-     * the other question. A user with no way to tell installed versions apart
-     * asked for this.
-     *
-     * It does not open the library: a script asking what is running must not
-     * start the network by asking.
-     */
     if (args[ARG_VERSION] != 0)
     {
         char id[64];
@@ -329,8 +280,6 @@ int main(int argc, char **argv)
     }
 
     measure(satisfied);
-
-    /* ---- the report ----------------------------------------------------- */
 
     if (check == NULL)
     {

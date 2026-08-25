@@ -6,36 +6,6 @@
 #   . "$ROOT/tests/stress/fitzstress-verdict.sh"
 #   fitzstress_verdict <stress-summary.txt> <compare.log> <emulator-rc>
 #
-# WHAT IT REPLACED
-#
-#   The harness printed
-#
-#     comparetree (guest, Fitz's own): 12 clean, 3 not
-#
-#   and then exited with the guest's own status, which was RETURN_OK whatever
-#   those three were.  So a run with confirmed corruption on the share exited
-#   0.  The count was on the screen and in nobody's gate.
-#
-# WHAT IS A FAILURE HERE, AND WHAT IS NOT
-#
-#   Content is not a matter of degree.  A buffer that came back different from
-#   the one that went out (`bad_total`) and a tree that does not compare
-#   (`dirty_total`) are the findings this harness exists to make, and one of
-#   either is a red line.  Neither is a load-dependent number that could be
-#   turned into a threshold.
-#
-#   A transfer that FAILED is a different thing and is deliberately not
-#   scored: refused connections and short reads are what a stress test on a
-#   saturated link is for, they are counted per worker as `errs`, and the
-#   timeline is where they are read.
-#
-#   A stuck worker is the freeze the harness is named for, so it is a failure.
-#   A host deadline (rc 124) is neither a pass nor a fail: it voids the
-#   artefact, because the summary was written by a supervisor that may never
-#   have reached its wind-down, and it is reported as broken.
-#
-# Output is key=value on stdout.  0 pass, 1 fail, 3 nothing to read.
-#
 # SPDX-License-Identifier: MIT
 
 # fitzstress_verdict SUMMARY COMPARELOG RUN_RC -> 0 pass, 1 fail, 3 broken
@@ -77,10 +47,6 @@ fitzstress_verdict() {
         [ "$stuck" = 0 ] || _fv_fail "${stuck}_workers_never_came_back"
     fi
 
-    # bad_total and dirty_total are written by fitzstress.c's fs_summary().  A
-    # summary without them was produced by a guest binary from before the
-    # counters existed, and the honest answer to "was the data correct" from
-    # that artefact is "this cannot tell", not "yes".
     if [ -z "$bad" ] || [ -z "$dirty" ]; then
         echo "fitzstress_totals=absent"
         _fv_fail the_summary_predates_bad_total_and_dirty_total
@@ -93,13 +59,7 @@ fitzstress_verdict() {
             _fv_fail "${dirty}_trees_did_not_compare"
     fi
 
-    # The guest's counter and the log it wrote have to agree, and the question
-    # has to have been asked at least once: a run in which comparetree never
-    # ran says nothing about the data whatever the counters read.
     if [ -s "$comparelog" ]; then
-        # `|| true` on both: grep -c exits 1 when the count is zero, and a
-        # caller with `set -e` would take the whole harness down on the run
-        # this file most needs to read.
         clean=$(grep -ac '^----- rc 0 ' "$comparelog" || true)
         dirty_seen=$(grep -a '^----- rc ' "$comparelog" | grep -vc 'rc 0 ' || true)
         echo "fitzstress_compares=$((clean + dirty_seen))"

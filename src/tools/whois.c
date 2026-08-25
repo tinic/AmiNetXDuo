@@ -2,26 +2,6 @@
  * whois, ask a registry what it knows about a name or an address.
  *
  *     whois QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S,IPV4=-4/S,IPV6=-6/S
- *
- *   SERVER   ask this one instead of whois.iana.org.
- *   PORT     its port. Default 43.
- *   FOLLOW   chase the referral automatically instead of printing it.
- *   -4 / -6  pin the family the SERVER resolves to, and with FOLLOW every
- *            server in the chain, not only the first. The query itself is a
- *            string the registry parses and is untouched by this: `whois -6
- *            192.0.2.1` asks over IPv6 about an IPv4 address.
- *
- * The protocol is one line long: connect, send the query, read until the other
- * end hangs up, print what came back. RFC 3912 specifies no request format, no
- * reply format and no character set, so the reply is written out exactly as it
- * arrived rather than parsed.
- *
- * The default server is whois.iana.org because no server knows everything and
- * whois.internic.net has known only .com and .net for twenty years. IANA's
- * knows which registry to ask, so it answers for any TLD, any IP range and any
- * AS number, naming the server that has the detail. FOLLOW chases that
- * referral. Without it the line to type next is printed instead.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -58,21 +38,8 @@ static char  whois_line[WHOIS_LINE_MAX];
 static char  whois_referral[WHOIS_NAME_MAX];
 static char  whois_request[WHOIS_NAME_MAX + 4];
 
-/* ---------------------------------------------------------------- referrals */
-
 /*
- * The four spellings a referral comes in.
- *
- *   refer:                   IANA
- *   whois:                   IANA, for a TLD record
- *   Registrar WHOIS Server:  the gTLD registries, since ICANN required it
- *   ReferralServer:          the RIRs, and it carries a whois:// scheme
- *
  * Matched case-insensitively at the start of a line, after any indentation.
- * IANA writes its fields hard against the left margin while the gTLD
- * registries indent theirs by three spaces, so a matcher anchored at column
- * zero finds IANA's referral and silently misses the registry-to-registrar
- * one. Observed against whois.verisign-grs.com.
  */
 static const char *const whois_keys[] =
 {
@@ -103,11 +70,6 @@ static BOOL whois_starts_with(const char *line, const char *key)
 
 /*
  * Pull a host name out of a referral line, if that is what it is.
- *
- * "ReferralServer: whois://whois.arin.net" and
- * "refer:          whois.verisign-grs.com" both reduce to a bare host. The
- * scheme is dropped, and so is any :port: the port comes from this command's
- * PORT argument, and a name with a colon in it would not resolve.
  */
 static BOOL whois_referral_from(const char *line, char *out, ULONG outlen)
 {
@@ -179,8 +141,6 @@ static VOID whois_finish_line(ULONG *fill, BOOL *referred)
     *fill = 0;
 }
 
-/* ------------------------------------------------------------ the exchange */
-
 /*
  * One server, one query. Everything that arrives goes straight to standard
  * output. The reply is also scanned a line at a time for a referral, which is
@@ -201,12 +161,6 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
     *referred = FALSE;
     whois_referral[0] = '\0';
 
-    /*
-     * Build the request before opening the connection, and reject a key that
-     * does not fit.  Truncating it asks the registry about a different name,
-     * address or handle and presents that unrelated record as the answer to
-     * what the user typed.
-     */
     for (i = 0; query[i] != '\0'; i++)
     {
         if (len >= (LONG)sizeof(whois_request) - 2)
@@ -285,12 +239,6 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
             return RETURN_FAIL;
         }
 
-        /*
-         * The same bytes again, a line at a time, looking for the referral.
-         * Only the first one is kept: in an answer that mentions several
-         * servers the one nearest the top is meant, and the last is likely to
-         * be inside the free-text legal notice.
-         */
         for (i = 0; i < (ULONG)n; i++)
         {
             UBYTE c = whois_buf[i];
@@ -313,8 +261,6 @@ static LONG whois_ask(struct Library *sb, const char *server, UWORD port,
 
     return RETURN_OK;
 }
-
-/* ------------------------------------------------------------------ main --- */
 
 int main(int argc, char **argv)
 {

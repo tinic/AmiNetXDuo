@@ -1,17 +1,6 @@
 /*
  * bsdsocket.library, send/sendto/sendmsg and recv/recvfrom/recvmsg.
  *
- * NetX Duo is packet-oriented: a send allocates an NX_PACKET from the stack
- * pool, appends the caller's bytes to it and hands it over. A receive returns
- * a packet the caller has to drain. A BSD stream read need not consume a whole
- * packet, so a partially drained one is parked on the socket
- * (as_RxPending/as_RxOffset) until it runs out.
- *
- * Every path here works on an iovec list, and the flat-buffer calls hand it a
- * one-element list on the stack, so sendmsg()/recvmsg() are the same code as
- * send()/recv(). No bounce buffer is needed: nx_packet_data_append() called
- * once per iovec builds one packet, and nx_packet_data_extract_offset()
- * scatters straight into each destination.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -36,14 +25,6 @@
 /*
  * struct msghdr / struct iovec are ABI. The definitions come from the Roadshow
  * netinclude headers in the toolchain's ndk-include (sys/socket.h, sys/uio.h),
- * the only ones on the include path. This toolchain's newlib tree has neither,
- * so the wrong lineage cannot be picked up the way ndk-include/pwd.h shadows
- * the usergroup struct passwd.
- *
- * That header carries the POSIX / 4.4BSD-Lite msghdr with ancillary data
- * (msg_control / msg_controllen / msg_flags), not the older 4.3BSD form with
- * msg_accrights. Pinned below so a header swap is a build error rather than a
- * silent 8-byte shift from msg_control onwards.
  */
 _Static_assert(sizeof(struct iovec) == 8, "iovec is not 8 bytes");
 _Static_assert(offsetof(struct iovec, iov_base) == 0, "iov_base moved");
@@ -57,8 +38,6 @@ _Static_assert(offsetof(struct msghdr, msg_iovlen)     == 12, "msg_iovlen moved"
 _Static_assert(offsetof(struct msghdr, msg_control)    == 16, "msg_control moved");
 _Static_assert(offsetof(struct msghdr, msg_controllen) == 20, "msg_controllen moved");
 _Static_assert(offsetof(struct msghdr, msg_flags)      == 24, "msg_flags moved");
-
-/* ------------------------------------------------------------- iovec ------ */
 
 /*
  * A position in a scatter/gather list: which entry, and how far into it.
@@ -165,8 +144,6 @@ static VOID bsd_iov_advance(BsdIovCursor *cur, ULONG bytes)
     }
 }
 
-/* ---------------------------------------------------------------- packet, */
-
 static ULONG bsd_packet_len(NX_PACKET *packet)
 {
     ULONG length = 0;
@@ -212,8 +189,6 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         status = nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
-            /* The caller decides what an append failure means, so it needs
-               the status. */
             if (why != NULL)
                 *why = status;
 
@@ -227,13 +202,6 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
     return (LONG)done;
 }
 
-/* ------------------------------------------------------------------- send, */
-
-/* The two blocking points of a TCP send: waiting for a free packet (pool
-   empty -> NX_NO_PACKET) and waiting for send-window room (peer not reading ->
-   NX_WINDOW_OVERFLOW / NX_TX_QUEUE_DEPTH).  Both are statuses bsd_wait_sliced()
-   retries on, so Ctrl-C breaks a send stalled on either.  Global rather than
-   static, for the reason bsd_recv_once (below) gives. */
 typedef struct
 {
     NX_PACKET_POOL *pool;
@@ -262,22 +230,6 @@ UINT bsd_send_once(VOID *arg, ULONG wait)
 
 /*
  * How much of the packet nx_tcp_socket_send() took before it failed.
- *
- * It is not all-or-nothing. _nx_tcp_socket_send_internal() segments the packet
- * itself, to min(peer window, congestion window, MSS), in a loop. Each pass
- * copies that many bytes into a segment, queues it on the socket's transmit
- * list and hands it to _nx_ip_packet_send(), which puts it on the wire. It
- * then trims those bytes off the caller's packet before looking at the window
- * again. When a later pass finds no room and cannot wait, it returns
- * NX_WINDOW_OVERFLOW or NX_TX_QUEUE_DEPTH with the earlier segments long gone.
- *
- * So the packet that comes back holds only what did not go, and `filled` less
- * that is what the peer has already seen. Releasing the packet and reporting
- * only the chunks that completed tells the caller to send those bytes a second
- * time, which duplicates data in the middle of the stream.
- *
- * Safe on every error return in that function: none of them releases the
- * caller's packet.
  */
 static LONG bsd_send_consumed(NX_PACKET *packet, LONG filled)
 {
@@ -296,14 +248,6 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG           mss  = 0;
     LONG            sent = 0;
     ULONG           wait;
-    /*
-     * Why the loop stopped. Every first-iteration failure below breaks out and
-     * lands on the "sent == 0" test at the bottom, which used to answer
-     * EWOULDBLOCK whatever had happened, so a signalled thread
-     * (NX_WAIT_ABORTED, EINTR) and a stack under teardown (NX_POOL_DELETED,
-     * ENOBUFS) both came back as EAGAIN on a blocking socket.
-     * docs/RESEARCH.md 37.2.
-     */
     UINT            why  = NX_NO_PACKET;
 
     if (pool == NULL)
@@ -371,7 +315,6 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                                      &aborted);
             if (aborted)
             {
-                /* A slice before the break can already have sent part. */
                 sent += bsd_send_consumed(packet, filled);
                 nx_packet_release(packet);
                 if (sent > 0)
@@ -398,7 +341,6 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
 
         sent += filled;
 
-        /* A non-blocking socket takes what fits and reports the rest short. */
         if ((sock->as_Flags & ASF_NONBLOCK) != 0)
             wait = NX_NO_WAIT;
     }
@@ -409,30 +351,6 @@ static LONG bsd_send_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     return sent;
 }
 
-/*
- * The largest UDP payload that can leave here in one datagram, from the three
- * things that fix it:
- *
- *   1. Transmit fragmentation is available, src/netstack/ calls
- *      nx_ip_fragment_enable() for the receive side, and is not used here.
- *      A UDP datagram larger than the path is reassembled by whatever
- *      receives it, out of a pool as small as ours, and BSD returning
- *      EMSGSIZE for it is an answer the caller can act on. The cap is the
- *      egress interface's nx_interface_ip_mtu_size.
- *   2. That field is the IP-layer MTU, link header excluded: sana2_device.c
- *      sets it from the SANA-II S2_GetGlobalStats MTU, defined the same way.
- *   3. The IP and UDP headers in front of the payload are what NetX Duo's own
- *      NX_IPv{4,6}_UDP_PACKET offsets reserve, less the NX_PHYSICAL_HEADER
- *      they also carry: 28 bytes for IPv4, 48 for IPv6. No IPv4 options and no
- *      IPv6 extension headers go on a UDP send, so both are exact.
- *
- * That is 1472 and 1452 on a 1500-byte Ethernet interface, 65507 on NetX Duo's
- * loopback.  source_interface is the interface already named by bind(), a
- * scope, PKTINFO or a multicast-interface option; when it is null the route is
- * found the way _nxd_udp_socket_send() finds it.  The MTU measured is therefore
- * the one the datagram meets. -1 means no interface was found, and the send
- * then reports the routing error itself.
- */
 LONG bsd_route_mtu(NX_IP *ip, const NXD_ADDRESS *addr,
                    const NX_INTERFACE *source_interface)
 {
@@ -495,14 +413,6 @@ static LONG bsd_udp_maxdgram(NX_IP *ip, const NXD_ADDRESS *addr,
 
 /*
  * The interface a received datagram arrived on.
- *
- * nx_packet_ip_interface is one arm of a union, and the IPv6 receive path
- * overwrites the other with the NXD_IPV6_ADDRESS the datagram matched,
- * nx_ipv6_packet_receive.c, "Set the matching address to the packet address".
- * Reading it as an NX_INTERFACE * after that dereferences an address structure
- * as an interface, so the version has to decide which arm to read. This was
- * wrong once, and a socket bound to a specific IPv6 address dropped
- * everything.
  */
 static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 {
@@ -521,12 +431,6 @@ static const NX_INTERFACE *bsd_packet_interface(const NX_PACKET *packet)
 
 /*
  * Does this datagram belong to the local address the socket named?
- *
- * NetX demultiplexes UDP on the port alone.  The interface gate shared with
- * TCP is enough when an interface owns one address, but not for IPv6's many
- * addresses per interface or IPv4 loopback's whole 127/8.  Compare the
- * destination in the IP header as well, leaving a wildcard bind deliberately
- * able to receive either family on a dual-stack socket.
  */
 static BOOL bsd_udp_to_local(const AmiSocket *sock, const NX_PACKET *packet)
 {
@@ -593,14 +497,6 @@ static BOOL bsd_udp_to_local(const AmiSocket *sock, const NX_PACKET *packet)
     return FALSE;
 }
 
-/*
- * The zone of a received non-global peer.  Unlike a connected socket's
- * as_PeerScopeId, this is per datagram: an unbound socket can receive the same
- * fe80:: address on two different interfaces, and recvfrom()/recvmsg() must
- * tell the caller which one it was.  NetX records the arrival interface in
- * the packet, and its interface index is zero based where sin6_scope_id is
- * one based.
- */
 static ULONG bsd_packet_scope_id(const NX_PACKET *packet,
                                  const NXD_ADDRESS *source)
 {
@@ -631,23 +527,6 @@ static ULONG bsd_packet_scope_id(const NX_PACKET *packet,
 
 /*
  * Is this datagram from the peer a connected socket named?
- *
- * RFC 1122 4.1.3.5: once connect() names a peer, the socket is identified by
- * the whole four-tuple, and a datagram from anywhere else is not for it.
- * NetX Duo cannot enforce that. _nx_udp_packet_receive() demultiplexes on the
- * local port alone, and NX_UDP_SOCKET has neither a local address nor a peer
- * to compare against. "connected" is a notion of this layer, so the test is
- * this layer's to make.
- *
- * The resolver is what pays when this test is absent. netstack_dns sends a
- * query from a connected socket and waits. Without this test, the first host
- * on the wire to answer is believed, whoever it is.
- *
- * TRUE for a socket that never connected: an unbound peer takes datagrams from
- * anybody, which is what recvfrom() is for.
- *
- * Not static: select.c asks the same question of an ICMP error's peer, which
- * is the only unambiguous way to attribute one to a UDP socket.
  */
 BOOL bsd_udp_from_peer(const AmiSocket *sock, const NXD_ADDRESS *src,
                        UINT src_port, ULONG src_scope)
@@ -705,22 +584,6 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
     if (!bsd_udp_to_local(sock, packet))
         return FALSE;
 
-    /*
-     * The port comes out of the queued packet's own UDP header, not out of
-     * nxd_udp_source_extract().  That helper reads two longwords BEFORE
-     * nx_packet_prepend_ptr, which is the UDP header only after
-     * nx_udp_socket_receive() has stripped it (nx_udp_socket_receive.c:420).
-     * A packet still on the receive queue has prepend_ptr AT the header, so
-     * the helper reads inside the IP header and answers a port that matches
-     * no peer -- which made every connected UDP socket unreadable.
-     *
-     * The queued header is in host byte order: nx_udp_packet_receive.c:125
-     * swaps it on the way in and only the ICMP-error paths swap it back.
-     *
-     * The address half of the helper works on a queued packet, because it
-     * reads nx_packet_ip_header rather than the prepend pointer, so it is
-     * still used for that and its port answer discarded.
-     */
     if (nxd_udp_source_extract((NX_PACKET *)packet, &source, &port) !=
         NX_SUCCESS)
         return FALSE;
@@ -733,12 +596,6 @@ BOOL bsd_udp_accepts_packet(const AmiSocket *sock, const NX_PACKET *packet)
     return bsd_udp_from_peer(sock, &source, port, scope);
 }
 
-/* The same endpoint test after nx_udp_socket_receive() has removed the UDP
-   header. nxd_udp_source_extract() is deliberately correct at this stage: it
-   reads the source port from the header immediately before prepend_ptr. The
-   queued predicate above cannot be reused here, because its header parser
-   would instead interpret the first eight payload bytes as UDP fields (and
-   reject every payload shorter than eight bytes). */
 BOOL bsd_udp_accepts_received_packet(const AmiSocket *sock,
                                      const NX_PACKET *packet)
 {
@@ -771,12 +628,6 @@ ULONG bsd_udp_available(const AmiSocket *sock)
         {
             ULONG length = 0;
 
-            /* A queued packet still carries its UDP header, and recv() will
-               not: nx_udp_socket_receive() strips it before returning. NetX's
-               own nx_udp_socket_bytes_available() subtracts the same eight
-               bytes, and so does the MSG_PEEK arm of this ioctl in options.c,
-               which measures a packet that has already been through the
-               strip. All three have to answer the same number. */
             if (bsd_udp_queue_info(packet, NX_NULL, &length) == NX_SUCCESS)
                 return length;
 
@@ -823,11 +674,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
      * bound one, the one the zone names, or NetX's pick. Settled before the
      * packet is allocated so a send that cannot be honoured costs nothing and
      * sends nothing.
-     *
-     * PKTINFO wins over bind() and over the zone because it is the narrower
-     * statement: bind() is standing and this one was supplied for this
-     * datagram. A source the machine does not have is refused either way,
-     * rather than replaced by the stack's own choice.
      */
     if (src != NULL && src->cs_Have)
     {
@@ -862,9 +708,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
 #ifdef AMINETXDUO_MULTICAST
-    /* A per-message PKTINFO is the only source choice above the standing
-       multicast-interface option.  Account for that same precedence here so
-       the MTU preflight and the send below cannot choose different cards. */
     if ((src == NULL || !src->cs_Have) &&
         addr->nxd_ip_version == NX_IP_VERSION_V4 &&
         (addr->nxd_ip_address.v4 & 0xF0000000UL) == 0xE0000000UL &&
@@ -883,14 +726,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 #endif
 #endif
 
-    /*
-     * "If the message is too long to pass atomically through the underlying
-     * protocol, the error EMSGSIZE is returned, and the message is not
-     * transmitted." Checked before the packet is allocated, so a refused
-     * datagram sends nothing. It used to be assembled, handed over and dropped
-     * in the driver send path with NX_SUCCESS already returned, or to run the
-     * pool dry first and come back as ENOBUFS.
-     */
     maxdgram = bsd_udp_maxdgram(ip, addr, source_interface);
     if (maxdgram >= 0 && len > maxdgram)
         return bsd_fail(base, AMI_EMSGSIZE);
@@ -906,28 +741,13 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 
 #ifdef AMINETXDUO_MULTICAST
-    /*
-     * Puts IP_MULTICAST_TTL on the socket for this send and answers with the
-     * IP_MULTICAST_IF interface, or -1 when the route can choose. Called for
-     * every destination and not only a group, because it is also what puts
-     * the TTL back for a unicast one.
-     */
     mcast_if = bsd_mcast_prepare_send(sock, addr);
 #ifdef AMINETXDUO_IPV6
-    /*
-     * The v6 half. It answers with an address index, not an interface one,
-     * IPV6_MULTICAST_IF names an interface and the source send wants the
-     * link-local address on it, and it puts IPV6_MULTICAST_HOPS on the
-     * NX_IP, which bsd_mcast6_finish_send() takes back off below. Every path
-     * between the two reaches that call.
-     */
     mcast6_src = bsd_mcast6_prepare_send(sock, addr, &mcast6_hops);
 
     /*
      * IPV6_MULTICAST_HOPS is 0 for this group: RFC 3493 5.2 makes that "this
      * host only", and there is nothing here to deliver it to. So it is
-     * consumed rather than put on the link, and the caller is told the whole
-     * write was accepted.
      */
     if (mcast6_src == BSD_MCAST6_NO_LINK)
     {
@@ -936,8 +756,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
 #endif
 #else
-    /* What bsd_mcast_prepare_send() does for a unicast destination when
-       multicast is compiled in: IP_TTL and IPV6_UNICAST_HOPS reach the wire. */
     sock->as_Nx.udp.nx_udp_socket_time_to_live = (UINT)(sock->as_Ttl & 0xFF);
 #endif
 
@@ -970,12 +788,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_ENOBUFS);
     }
 
-    /*
-     * Four ways to name where this leaves from, most specific first. A
-     * per-message (or sticky) PKTINFO source overrides the standing multicast
-     * interface option. The two multicast choices only answer for a group of
-     * their own family, and the remaining source index is bind()/scope state.
-     */
     if (src != NULL && src->cs_Have && source == BSD_SOURCE_INDEX)
     {
         status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -984,7 +796,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
 #ifdef AMINETXDUO_MULTICAST
-    /* IP_MULTICAST_IF named an interface, so the route does not choose. */
     if (mcast_if >= 0)
     {
         status = nx_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -993,7 +804,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
 #ifdef AMINETXDUO_IPV6
-    /* IPV6_MULTICAST_IF, same statement one family over. */
     if (mcast6_src >= 0)
     {
         status = nxd_udp_socket_source_send(&sock->as_Nx.udp, packet,
@@ -1011,7 +821,6 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        /* nxd_, not nx_: the v4 wrapper wraps the address and calls this. */
         status = nxd_udp_socket_send(&sock->as_Nx.udp, packet,
                                      (NXD_ADDRESS *)addr, port);
     }
@@ -1084,9 +893,6 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
     return len;
 }
 
-/* ---------------------------------------------------------------- receive, */
-
-/* bsd_wait_sliced() drives this. See select.c for why the wait is sliced. */
 typedef struct
 {
     NX_TCP_SOCKET *tcp;
@@ -1104,8 +910,6 @@ UINT bsd_recv_once(VOID *arg, ULONG wait)
     return nx_tcp_socket_receive(a->tcp, a->packet, wait);
 }
 
-/* The UDP and raw receives slice the same way, see bsd_recv_once's note on
-   why these are global rather than static. */
 typedef struct
 {
     NX_UDP_SOCKET *udp;
@@ -1136,18 +940,10 @@ UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
     *a->packet  = packet;
     a->why      = why;
 
-    /* bsd_raw_receive() leaves `why` at NX_NO_PACKET when nothing is queued,
-       the status bsd_wait_sliced() retries on. */
     return (packet != NX_NULL) ? NX_SUCCESS : why;
 }
 
 
-/*
- * Take the bracket unless this call already holds it, so a path that reaches
- * NetX Duo after bsd_recv_parked() said it would not is slow rather than
- * wrong. That is what makes the predicate below safe as an optimisation.
- * Returns FALSE only if the bracket cannot be had at all.
- */
 static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
 {
     if (*held)
@@ -1163,27 +959,6 @@ static BOOL bsd_nx_need(struct AmiSocketBase *base, BOOL *held)
 
 /*
  * Can this stream read be answered out of the parked packet alone?
- *
- * bsd_recv_tcp() reaches a THREADS_ONLY entry point in exactly one place,
- * bsd_wait_sliced() -> nx_tcp_socket_receive(), and only when as_RxPending
- * is empty. A read strictly shorter than what the parked packet still holds
- * never empties it, so it never receives and never releases: it reads a length
- * out of the packet header and memcpys out of the chain, on a packet
- * nx_tcp_socket_receive() already handed over and that the IP thread no longer
- * references. None of that needs the bracket.
- *
- * Strictly shorter, not "at least as long as": a read that drains the packet
- * exactly calls nx_packet_release(), which puts it back in the shared pool.
- * That is the one nx_packet_* helper here that touches state the IP thread
- * also touches. It is cheap to stay away from, because the case is one read
- * length in a packet's worth, and the call that would have hit it takes the
- * bracket for its receive anyway.
- *
- * Worth a predicate because netx_call.c prices the bracket at ~270 us on a
- * 14 MHz 68020 with the TX_THREAD cached, ~790 us without, either of which is
- * more than copying and checksumming a whole MTU packet.
- * tests/perf/bracket_test.c's lazy arm measures the ceiling over 256 KB:
- * 512-byte reads 598 -> 482 ms, 1460-byte reads 496 -> 460 ms.
  */
 static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
 {
@@ -1192,8 +967,6 @@ static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
     if ((sock->as_Flags & (ASF_TCP | ASF_RAW)) != ASF_TCP)
         return FALSE;
 
-    /* bsd_recv_tcp() returns 0 before it looks at the packet. Stated here
-       rather than left to the caller's ordering. */
     if ((sock->as_Flags & ASF_RDSHUT) != 0)
         return FALSE;
 
@@ -1213,30 +986,9 @@ static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
  * The completer half of the pending-receive descriptor.  Runs wherever the
  * baton is: on the IP thread inside the receive notify (protection mutex
  * held), or on the caller inside its bracket before it parks.  Either way no
- * other ThreadX thread can be mid-anything, which is the whole protection
- * story for the as_RxD* fields.
- *
- * Dequeues with the real nx_tcp_socket_receive(), so the receive-window
- * credit and the SWS window-update ACK happen exactly as the classic path's
- * dequeue does them -- just at settle time instead of fetch time.  NX_NO_WAIT
- * everywhere: on the IP thread the :244 guard in nx_tcp_socket_receive.c
- * turns an empty queue into NX_NO_PACKET rather than a suspension, so the
- * select.c callback rule holds.
- *
- * The parking rule: the packet whose dequeue EMPTIES the queue is the segment
- * that fired this notify, and nx_tcp_socket_state_data_check.c reads that
- * segment's TCP header again after the notify returns (the FIN bit, :1222).
- * Releasing it here would hand it to the allocator underneath that read --
- * the ACK this pump's own window update sends allocates a packet and could
- * recycle it.  So the queue-emptying packet is parked on as_RxPending,
- * drained, exactly the shape bsd_recv_tcp() already handles ("leave it
- * parked and drained, the next call releases it"); intermediate packets are
- * older segments and are released freely.
  */
 VOID bsd_rxdirect_pump(AmiSocket *sock)
 {
-    /* A parked packet with the descriptor still armed is the failed-extract
-       corner below; a second notify must not park over it. */
     if (sock->as_RxPending != NULL)
         return;
 
@@ -1268,8 +1020,6 @@ VOID bsd_rxdirect_pump(AmiSocket *sock)
 
         if (moved < length)
         {
-            /* The buffer is full (or the extract failed): park the rest for
-               the next call, as the classic loop would have. */
             sock->as_RxPending = packet;
             sock->as_RxOffset  = moved;
             break;
@@ -1277,7 +1027,6 @@ VOID bsd_rxdirect_pump(AmiSocket *sock)
 
         if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_head == NX_NULL)
         {
-            /* Fully consumed AND it emptied the queue: the parking rule. */
             sock->as_RxPending = packet;
             sock->as_RxOffset  = length;
             break;
@@ -1291,8 +1040,6 @@ VOID bsd_rxdirect_pump(AmiSocket *sock)
         sock->as_RxDState = BSD_RXD_DONE;
 
 #ifdef AMINETXDUO_RXPROBE
-        /* The fetch leg closes at the moment the data is in the caller's
-           buffer -- which is now here, before its owner even wakes. */
         ami_budget_fetch(ami_budget_clock());
         ami_budget_rx_direct();
 #endif
@@ -1303,11 +1050,6 @@ VOID bsd_rxdirect_pump(AmiSocket *sock)
  * The caller half: publish the buffer, park in a plain Wait() on the base's
  * event signal, and return what the IP thread copied -- without re-entering
  * NetX Duo on the way out.  Everything that is not the plain blocking stream
- * read has already been declined by the caller's eligibility test; what this
- * function still declines (scattered buffers, a borrowed base, a nested
- * bracket) it declines by returning unhandled, descriptor unarmed, so the
- * classic path below it is always the answer.
- *
  * Entered with the bracket held.  On the handled returns the bracket may or
  * may not still be held; *held says which, and bsd_recv_iov() leaves only
  * what is held.
@@ -1322,9 +1064,6 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
 
     *handled = FALSE;
 
-    /* One contiguous run must cover the whole request: the descriptor is a
-       flat buffer, and recv() with one iovec -- the case that matters -- is
-       exactly that. */
     if (dst == NULL || chunk < (ULONG)len)
         return 0;
 
@@ -1334,11 +1073,6 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
     if (FindTask(NULL) != base->sb_Task || base->sb_NxNest != 1)
         return 0;
 
-    /* Clear, then arm, then look: the WaitSelect() pattern.  Anything the
-       completer posts after this clear sets the signal again and the Wait()
-       below returns immediately.  Consuming the event signal here is what
-       WaitSelect() does before every poll; it is level-triggered state, not
-       a message. */
     SetSignal(0UL, base->sb_EventSigMask);
 
     sock->as_RxDDst    = dst;
@@ -1347,17 +1081,11 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
     sock->as_RxDStatus = NX_NO_PACKET;
     sock->as_RxDState  = BSD_RXD_ARMED;
 
-    /* Data can already be queued -- its notify came and went before this
-       call.  Pump it out now, under the bracket, rather than sleeping on a
-       notify that will never repeat. */
     bsd_rxdirect_pump(sock);
 
     if (sock->as_RxDState == BSD_RXD_ARMED &&
         (sock->as_RxDStatus != NX_NO_PACKET || sock->as_RxPending != NULL))
     {
-        /* Not receivable (reset, closing), or the freak parked-unfilled
-           corner: the classic path knows how to tell every one of those
-           stories, so unhook and let it. */
         sock->as_RxDState = BSD_RXD_IDLE;
         return 0;
     }
@@ -1373,14 +1101,10 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
 
         if ((received & base->sb_BreakMask) != 0)
         {
-            /* Ctrl-C, or whatever SBTC_BREAKMASK was set to.  The signal is
-               the caller's: Wait() consumed it, so it goes back, the way the
-               classic path leaves it standing. */
             Signal(base->sb_Task, received & base->sb_BreakMask);
 
             if (!bsd_nx_need(base, held))
             {
-                /* No kernel, no completer left to race with. */
                 Forbid();
                 sock->as_RxDState = BSD_RXD_IDLE;
                 Permit();
@@ -1397,17 +1121,9 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_EINTR);
             }
 
-            /* The completer won the race: the data is already in the
-               caller's buffer and dequeued from the socket.  Return it; the
-               break stays posted for the caller's own check. */
         }
         else if (sock->as_RxDState != BSD_RXD_DONE)
         {
-            /* Woken with nothing completed: an event on another descriptor,
-               this socket closing, an urgent byte -- every one of them a
-               story the classic path already tells.  Unhook under the
-               bracket (ARMED means the completer is not mid-copy once we
-               hold it) and fall back rather than retell them here. */
             if (!bsd_nx_need(base, held))
             {
                 Forbid();
@@ -1426,9 +1142,6 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
         }
     }
 
-    /* BSD_RXD_DONE: the IP thread copied into the caller's buffer and this
-       task owns the descriptor again -- the completer set DONE last and
-       never comes back to it. */
     sock->as_RxDState = BSD_RXD_IDLE;
 
     bsd_iov_advance(cur, sock->as_RxDFilled);
@@ -1461,23 +1174,10 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
         {
             NX_PACKET *packet = NX_NULL;
 
-            /*
-             * Only the first read of a call can block. After that, a stream
-             * receive returns whatever the socket buffer holds. MSG_WAITALL
-             * asks for the opposite, and waits until the caller's buffers are
-             * full or the connection ends.
-             */
             ULONG now = (first || (flags & MSG_WAITALL) != 0) ? wait
                                                               : NX_NO_WAIT;
 
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
-            /*
-             * The direct-completion arm, for the plain blocking stream read
-             * only: an untimed wait, no partial result yet, none of the
-             * flags that change what a read means, and a live connection.
-             * Everything else declines here and the classic path below is
-             * the answer, correct as it always was.
-             */
             if (now == NX_WAIT_FOREVER && copied == 0 && len > 0 &&
                 (flags & (MSG_PEEK | MSG_WAITALL | MSG_OOB |
                           MSG_DONTWAIT)) == 0 &&
@@ -1516,10 +1216,6 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                                          &aborted);
                 if (aborted)
                 {
-                    /* Ctrl-C, or whatever SBTC_BREAKMASK was set to. The
-                       signal is left set: it is the caller's, and a program
-                       that polls SetSignal() after an EINTR must still see
-                       it. */
                     if (copied > 0)
                         break;
                     return bsd_fail(base, AMI_EINTR);
@@ -1529,9 +1225,6 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             if (status == NX_SUCCESS)
             {
 #ifdef AMINETXDUO_RXPROBE
-                /* The fetch leg closes: the notify's data is in the caller's
-                   hands.  Taken on the dequeue and not after the copy-out,
-                   because the copy is already on the profiler's ledger. */
                 ami_budget_fetch(ami_budget_clock());
                 ami_budget_rx_fallback();
 #endif
@@ -1556,9 +1249,6 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                     return bsd_fail(base, AMI_ENOTCONN);
                 }
 
-                /* `now`, not `wait`: only the first read of a call can block,
-                   so a later one that came up empty is a caller that asked not
-                   to wait. */
                 return bsd_fail(base, bsd_wait_errno(now, status));
             }
         }
@@ -1639,9 +1329,6 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else
     {
-        /* A zero-capacity datagram read consumes one queued record but does
-           not wait for a new one. This is distinct from a zero-length
-           datagram, which is still a queued record and reaches this call. */
         ULONG          wait = (len == 0)
                                   ? NX_NO_WAIT
                                   : bsd_wait_option(sock, sock->as_RcvTimeout,
@@ -1652,17 +1339,6 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         args.udp    = &sock->as_Nx.udp;
         args.packet = &packet;
 
-        /*
-         * A socket bound to one local address must not be handed datagrams
-         * that arrived for another, and a connected one must not be handed
-         * datagrams from anybody but its peer. NetX binds a UDP socket to a
-         * port only, so both filters are here: a datagram that matches neither
-         * the bind nor the peer is released and the wait resumed, which is
-         * what the caller sees if the datagram never arrives.
-         *
-         * This loops rather than fails, because a mismatch is not an error for
-         * this caller. It is someone else's traffic.
-         */
         for (;;)
         {
             status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
@@ -1731,12 +1407,10 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         bsd_sockaddr_put(sock, from, fromlen, &src_ip, src_port,
                          bsd_packet_scope_id(packet, &src_ip));
 
-    /* Before the release below: everything it answers is in the packet. */
     bsd_cmsg_build(sock, packet, msg);
 
     if (peek)
     {
-        /* Keep the datagram queued for the next call. */
         sock->as_RxPending = packet;
         sock->as_RxOffset  = 0;
     }
@@ -1754,8 +1428,6 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 /*
  * One raw datagram in. IPv4 includes the IP header, which is what 4.4BSD
  * delivers and what ping and traceroute parse. IPv6 does not, per RFC 3542.
- * See the header of raw.c. As with UDP, whatever does not fit the caller's
- * buffers is discarded.
  */
 static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          BsdIovCursor *cur, LONG len, LONG flags,
@@ -1847,10 +1519,6 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
     return (LONG)taken;
 }
 
-/* --------------------------------------------------- the shared entry paths */
-
-/* Everything below funnels into these two so send/sendto/sendmsg and
-   recv/recvfrom/recvmsg cannot drift apart. */
 static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
                          const struct iovec *iov, LONG iovcnt, LONG len,
                          LONG flags, const NXD_ADDRESS *addr, UINT port,
@@ -1890,9 +1558,6 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     LONG         result;
     BOOL         held = FALSE;
 
-    /* A connected datagram or raw socket accepts shutdown(), and its read
-       half has the same observable EOF as a stream. It has no NetX receive
-       operation that can express that state, so answer it here. */
     if ((sock->as_Flags & (ASF_TCP | ASF_RDSHUT)) == ASF_RDSHUT)
     {
         if (truncated != NULL)
@@ -1905,10 +1570,6 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
 
     bsd_iov_init(&cur, iov, iovcnt);
 
-    /* A stream read the parked packet already covers touches nothing
-       THREADS_ONLY, so it skips the bracket. bsd_nx_need() takes it if that
-       turns out to be wrong. A nested call inside one that took it stays
-       covered either way, sb_NxNest is still up. */
     if (!bsd_recv_parked(sock, len))
     {
         if (bsd_nx_enter(base) != 0)
@@ -1930,7 +1591,6 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
         if (truncated != NULL)
             *truncated = FALSE;         /* a stream never truncates */
 
-        /* A stream has no per-datagram anything, so nothing to attach. */
         if (msg != NULL)
             msg->msg_controllen = 0;
     }
@@ -1949,10 +1609,6 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
 /*
  * The destination a sendto()/sendmsg() supplied has to belong to the same
  * family as the socket. 0 = ok, -1 = errno set.
- *
- * For a v4-mapped destination on a dual-stack socket, bsd_addr_normalise()
- * turns ::ffff:a.b.c.d into a plain IPv4 address. Without that, NetX Duo puts
- * the mapped form in an IPv6 header and sends it to a host that has no IPv6.
  */
 static LONG bsd_dest_check(struct AmiSocketBase *base, AmiSocket *sock,
                            NXD_ADDRESS *addr)
@@ -2000,9 +1656,6 @@ static LONG bsd_transfer_check(struct AmiSocketBase *base, AmiSocket *sock,
 
 /*
  * send(..., MSG_OOB): every byte goes and the last one is the urgent one.
- * That is 4.4BSD's rule, and what telnet and ftp rely on: they write a short
- * command whose final byte is the signal. The leading bytes take the ordinary
- * path. Only the last needs oob.c.
  */
 static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
                          const UBYTE *buf, LONG len, LONG flags)
@@ -2064,38 +1717,8 @@ static LONG bsd_recv_oob(struct AmiSocketBase *base, AmiSocket *sock,
     return 1;
 }
 
-/* ---------------------------------------------------------------- vectors, */
-
 /*
  * MHT_Send: the hook that can refuse a send before any of it happens.
- *
- * "The hook function will be invoked before dropping into the kernel 'send()',
- * 'sendto()' or 'sendmsg()' calls ... any error value > 0 will cause the call
- * to be aborted and the errno variable to be set to this value."
- *
- * It runs after the descriptor and the arguments are checked, so a monitor
- * cannot be used to probe which descriptors exist, and before anything is
- * queued, resolved or transmitted.
- *
- * On smm_To and smm_Msg: "Depending upon the type of function to perform, the
- * contents of the SendMonitorMessage may look different. For example, either
- * the 'smm_To' or the 'smm_Msg' field will be NULL." That is an exclusion, not
- * a requirement that exactly one be set. The three calls give:
- *
- *   send()      smm_To NULL, smm_Msg NULL, no destination and no msghdr,
- *                                              the peer is implied
- *   sendto()    smm_To the caller's, smm_Msg NULL   (smm_To is NULL too when
- *                                              the caller passed none, which
- *                                              is legal on a connected socket)
- *   sendmsg()   smm_To NULL, smm_Msg the caller's
- *
- * So the two are never both set, and that is what the probe asserts. "Exactly
- * one is always set" is stronger than the document states, and a plain send()
- * has nothing to put in either field.
- *
- * smm_Buffer is the caller's buffer for send()/sendto() and NULL for
- * sendmsg(), where the buffers are the msghdr's scatter list. smm_Len is the
- * total either way.
  */
 static LONG bsd_send_monitor(struct AmiSocketBase *base, LONG sock_fd,
                              APTR buf, LONG len, LONG flags,
@@ -2154,7 +1777,6 @@ LONG bsd_send(register LONG sock_fd __asm("d0"),
     iov.iov_base = buf;
     iov.iov_len  = (size_t)len;
 
-    /* Connected: the zone is the one connect() was given. */
     return bsd_send_iov(SocketBase, sock, &iov, 1, len, flags,
                         &sock->as_PeerAddr, sock->as_PeerPort,
                         sock->as_PeerScopeId, &sock->as_CmsgSticky);
@@ -2266,9 +1888,6 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
     if (buf == NULL && len > 0)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    /* A source-address buffer without its value-result length cannot be
-       filled.  Reject it before receiving anything so a bad argument does
-       not silently consume a datagram. */
     if (addr != NULL && addrlen == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
@@ -2282,20 +1901,9 @@ LONG bsd_recvfrom(register LONG sock_fd          __asm("d0"),
                         NULL, NULL);
 }
 
-/* ------------------------------------------------------ sendmsg / recvmsg, */
-
 /*
  * msg_control carries the RFC 3542 subset in cmsg.c: PKTINFO and HOPLIMIT in,
  * PKTINFO out. That file has the shapes and the option numbers.
- *
- * SCM_RIGHTS has no meaning here: it passes a file descriptor, and a socket
- * goes to another task on AmigaOS through ObtainSocket()/ReleaseSocket()
- * (handoff.c). It is refused rather than ignored, along with every other
- * ancillary type this library does not implement. bsd_cmsg_parse() answers
- * EINVAL, so a caller that asks for something it will not get is told so.
- *
- * MSG_CTRUNC means the caller's msg_control was too small for what was going
- * into it.
  */
 LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
                  register struct msghdr *msg  __asm("a0"),
@@ -2312,8 +1920,6 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
     if (bsd_transfer_check(SocketBase, sock, 0, flags) != 0)
         return -1;
 
-    /* MSG_OOB is a send()/sendto() shape here: the urgent byte is the last one
-       written, and a caller can do that with one more send(). */
     if ((flags & MSG_OOB) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
@@ -2325,8 +1931,6 @@ LONG bsd_sendmsg(register LONG sock_fd        __asm("d0"),
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     {
-        /* smm_Buffer is NULL here: the data is the msghdr's scatter list, and
-           a pointer to the first iovec describes only part of the send. */
         LONG denied = bsd_send_monitor(SocketBase, sock_fd, NULL, total, flags,
                                        NULL, 0, msg);
 

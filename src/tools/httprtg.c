@@ -1,40 +1,10 @@
 /*
- * Reading a graphics card's framebuffer back.  See httprtg.h for what this is
- * and what it deliberately is not.
+ * Reading a graphics card's framebuffer back. See httprtg.h.
  *
- * The library calls are hand-declared.  Picasso96 and CyberGraphX are
- * third-party libraries and their headers are not in the NDK the toolchain
- * ships, so a build machine either has them or does not and the answer differs
- * between the Mac tree and the pinned Linux one.  What is needed is nine
- * functions and a dozen constants, so they are declared here against
- * inline/macros.h, the NDK's own LPn call macros, present in every toolchain
- * this builds with.  The library offsets and register assignments are taken
- * from Picasso96API_lib.fd and cybergraphics.fd, and each offset is beside its
- * call.
- *
- * Neither library is required to be present.  Each is opened if it is there,
- * and a machine with neither cannot have an RTG screen in front of it in the
- * first place.
- *
- * The read is whole rows rather than tiles.  The encoder's tile pass compares
- * against its shadow and reads nothing where nothing changed, which on the
- * chipset is right.  It cannot be done here, because the compare would be the
- * readback.  So the whole frame is fetched into a staging buffer in Fast RAM
- * and the encoder is pointed at that buffer, which puts every one of its
- * comparisons on ordinary memory and leaves exactly one readback a frame.
- *
- * That readback is contiguous full rows.  x11vnc measures adjacent rectangles
- * read together as up to twice the rate of the same bytes read separately, and
- * a card can be down at single-figure MB/s on reads, so the shape of the fetch
- * is most of its cost.  A loop of tile-sized rectangles is the wrong shape by
- * an order of magnitude and is not offered here.
- *
- * Two output formats leave here and no more.  A palette screen is a byte a
- * pixel, as it always was.  A 15, 16, 24 or 32-bit screen is two bytes a
- * pixel, big-endian R5G6B5, whatever the card holds it in, so the encoder, the
- * wire and the browser have one truecolour path rather than four.  The
- * converters and the two tables that drive them are under "pixel formats"
- * below, and every route delivers through them.
+ * Picasso96 and CyberGraphX headers are not in the NDK, so the nine calls used
+ * here are hand-declared against inline/macros.h; each library offset is beside
+ * its call, from Picasso96API_lib.fd and cybergraphics.fd. Neither library is
+ * required to be present.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -58,7 +28,7 @@
 
 /* ------------------------------------------------- Picasso96API.library --- */
 
-/* struct RenderInfo, as libraries/Picasso96.h has it.  BytesPerRow is a WORD,
+/* struct RenderInfo, as libraries/Picasso96.h has it. BytesPerRow is a WORD,
    which is what bounds the staging stride below. */
 struct RtgRenderInfo
 {
@@ -68,9 +38,8 @@ struct RtgRenderInfo
     ULONG RGBFormat;
 };
 
-/* p96GetBitMapAttr attributes, in the order libraries/Picasso96.h enumerates
-   them.  BYTESPERROW, MEMORY and ISONBOARD are the three that are only valid
-   while the bitmap is locked, which is why ISONBOARD is asked inside one. */
+/* p96GetBitMapAttr attributes. BYTESPERROW, MEMORY and ISONBOARD are valid
+   only while the bitmap is locked, which is why ISONBOARD is asked inside one. */
 #define P96BMA_WIDTH         0UL
 #define P96BMA_HEIGHT        1UL
 #define P96BMA_DEPTH         2UL
@@ -80,9 +49,8 @@ struct RtgRenderInfo
 #define P96BMA_ISP96         8UL
 #define P96BMA_ISONBOARD     9UL
 
-/* RGBFTYPE, in the order libraries/Picasso96.h enumerates it.  A "PC" name is
-   the same channel order with the two bytes of a 16-bit pixel the other way
-   round, which is what a card wired for a little-endian host hands back. */
+/* RGBFTYPE, in libraries/Picasso96.h's order. A "PC" name is the same channel
+   order with the two bytes of a 16-bit pixel the other way round. */
 #define RGBFB_NONE           0UL    /* planar, under P96's historical name   */
 #define RGBFB_CLUT           1UL    /* palette indexed, one byte a pixel     */
 #define RGBFB_R8G8B8         2UL
@@ -91,10 +59,8 @@ struct RtgRenderInfo
 #define RGBFB_R5G5B5PC       5UL
 #define RGBFB_A8R8G8B8       6UL
 #define RGBFB_A8B8G8R8       7UL
-/* 8 is RGBA and 9 is BGRA, in that order.  Taken from the RGBFTYPE enum
-   itself and not from memory: they are easy to write down the other way
-   round, and a card reporting either would then have its red and blue
-   exchanged in every pixel, which is a picture that looks deliberate. */
+/* 8 is RGBA and 9 is BGRA, in that order, taken from the RGBFTYPE enum itself:
+   the other way round exchanges red and blue in every pixel. */
 #define RGBFB_R8G8B8A8       8UL
 #define RGBFB_B8G8R8A8       9UL
 #define RGBFB_R5G6B5        10UL
@@ -164,9 +130,8 @@ static VOID rtg_p96_free(struct BitMap *bm)
 #define CYBRMATTR_ISCYBERGFX  0x80000008UL
 #define CYBRMATTR_ISLINEARMEM 0x80000009UL
 
-/* CyberGraphX numbers its pixel formats separately from Picasso96 and puts
-   them in a different order, so the two are kept apart and each is put on the
-   same footing by its own table below. */
+/* CyberGraphX numbers its pixel formats separately from Picasso96 and in a
+   different order, so each has its own table below. */
 #define PIXFMT_LUT8           0UL
 #define PIXFMT_RGB15          1UL
 #define PIXFMT_BGR15          2UL
@@ -188,8 +153,8 @@ static VOID rtg_p96_free(struct BitMap *bm)
 #define LBMI_BYTESPERROW      0x84001006UL
 #define LBMI_BASEADDRESS      0x84001007UL
 
-/* graphics.library AllocBitMap's extended flags, which is how a CyberGraphX
-   bitmap of a named pixel format is asked for. */
+/* graphics.library AllocBitMap's extended flags: how a CyberGraphX bitmap of a
+   named pixel format is asked for. */
 #define CGX_BMF_SPECIALFMT    (1UL << 7)
 #define CGX_SHIFT_PIXFMT(f)   (((ULONG)(f)) << 24)
 
@@ -223,18 +188,10 @@ static ULONG rtg_cgx_read(APTR dst, UWORD dx, UWORD dy, UWORD dmod,
 /* ------------------------------------------------------- pixel formats --- */
 
 /*
- * A palette screen is delivered a byte a pixel, as it always was.  A 15, 16,
- * 24 or 32-bit screen is delivered two bytes a pixel, big-endian R5G6B5, which
- * is Picasso96's own RGBFB_R5G6B5 on a 68k.  All four truecolour depths
- * converge on that one output, so the encoder, the wire and the browser have a
- * single truecolour path rather than four.
- *
- * p96ReadPixelArray converts for itself and asks nothing of this.  The two
- * lock routes hand back the card's pixels in the screen's own format, and the
- * blit route reads a copy in that same format, so those three come through
- * here.  A format neither table names is not converted and not guessed at: the
- * route fails, the probe passes over it, and http_rtg_describe() refuses the
- * screen rather than serving colours that are not on it.
+ * A palette screen is delivered a byte a pixel; 15, 16, 24 and 32-bit screens
+ * all become big-endian R5G6B5, so the encoder, the wire and the browser have
+ * one truecolour path. A format neither table names is not converted and not
+ * guessed at: the route fails and the screen is refused.
  */
 
 #define RTG_L_R565  0U          /* rrrrrggg gggbbbbb */
@@ -242,10 +199,9 @@ static ULONG rtg_cgx_read(APTR dst, UWORD dx, UWORD dy, UWORD dmod,
 #define RTG_L_B565  2U          /* bbbbbggg gggrrrrr */
 #define RTG_L_B555  3U          /* xbbbbbgg gggrrrrr */
 
-/* One source pixel, once both libraries' numbering has been put on the same
-   footing.  `step` is the source bytes a pixel and 0 means a format this does
-   not read.  `layout` and `swap` describe a 16-bit pixel; r, g and b are the
-   byte offsets of the channels of a 24 or 32-bit one. */
+/* One source pixel, once both libraries' numbering is on the same footing.
+   `step` is source bytes a pixel, 0 meaning a format this does not read;
+   r, g, b are the byte offsets in a 24 or 32-bit pixel. */
 typedef struct RtgSrcFmt
 {
     UBYTE step;
@@ -310,9 +266,8 @@ static BOOL rtg_fmt_cgx(ULONG fmt, RtgSrcFmt *out)
     return TRUE;
 }
 
-/* A 16-bit pixel, already assembled the right way round, repacked as R5G6B5.
-   Five bits of green become six by repeating the top bit at the bottom, so
-   0x1F stays full scale rather than landing one step short of it. */
+/* A 16-bit pixel repacked as R5G6B5. Five bits of green become six by repeating
+   the top bit at the bottom, so 0x1F stays full scale. */
 static UWORD rtg_565_from16(UWORD v, UBYTE layout)
 {
     UWORD r = 0, g = 0, b = 0;
@@ -346,9 +301,8 @@ static UWORD rtg_565_from16(UWORD v, UBYTE layout)
     return (UWORD)((r << 11) | (g << 5) | b);
 }
 
-/* Byte loads throughout.  A card's mapping is word aligned in every 16-bit
-   mode there is, but a 24-bit one puts two pixels in three words and the odd
-   pixel on an odd address, and a 68000 traps on that. */
+/* Byte loads throughout: a 24-bit mode puts the odd pixel on an odd address,
+   and a 68000 traps on that. */
 static VOID rtg_row16(UBYTE *dst, const UBYTE *src, UWORD pixels,
                       UBYTE layout, UBYTE swap)
 {
@@ -403,8 +357,7 @@ static VOID rtg_cvt_row(UBYTE *dst, const UBYTE *src, UWORD pixels,
         return;
     }
 
-    /* A screen already in the wire format is the common case on a 68k, and
-       there is nothing for the loop above to do to it. */
+    /* A screen already in the wire format is the common case on a 68k. */
     if (f->layout == RTG_L_R565 && f->swap == 0)
         memcpy(dst, src, (size_t)pixels * 2u);
     else
@@ -513,13 +466,9 @@ BOOL http_rtg_present(VOID)
 /* ------------------------------------------------------------ describing -- */
 
 /*
- * Asked before BMF_STANDARD.  The planar path's first question is whether the
- * bitmap carries BMF_STANDARD, and on a chipset machine that is the right
- * question.  A card's bitmap can carry it too, since that flag is what makes
- * the OS treat the bitmap normally, and its Planes[] are not eight bitplanes.
- * So the owner is asked first.  Both libraries answer for any bitmap,
- * including one that belongs to neither of them, which is what makes the
- * question safe to put first.
+ * Asked before BMF_STANDARD: a card's bitmap can carry that flag too, and its
+ * Planes[] are not eight bitplanes. Both libraries answer for any bitmap,
+ * including one that belongs to neither, which makes this safe to ask first.
  */
 BOOL http_rtg_owns(struct BitMap *bm)
 {
@@ -581,12 +530,9 @@ BOOL http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
     }
 
     /*
-     * The pixel format decides this, not the depth.  A palette screen goes out
-     * a byte a pixel and every truecolour format the converter names goes out
-     * as R5G6B5, so what is left to refuse is a bitmap that has no chunky
-     * pixels at all, a YUV overlay, and a format nobody here has seen.  The
-     * refusal names what it found, so the reason does not have to be looked up
-     * here.
+     * The pixel format decides this, not the depth. What is left to refuse is
+     * a bitmap with no chunky pixels, a YUV overlay, and a format nobody here
+     * has seen. The refusal names what it found.
      */
     if (!(is_p96 ? rtg_fmt_p96(native, &fmt) : rtg_fmt_cgx(native, &fmt)))
     {
@@ -607,16 +553,9 @@ BOOL http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
     }
 
     /*
-     * THE BITMAP IS NOT THE SCREEN. P96BMA_WIDTH and CYBRMATTR_WIDTH answer
-     * for the allocation, which a board rounds up to its own pitch: a
-     * CyberGraphX 1368x768x8 screen reported 1600 here, and the console served
-     * 1600 columns, so every frame carried 232 columns of whatever the board
-     * had off the right-hand edge and cost 17% more bytes to send. It never
-     * showed in the lab because every resolution we test is pitch-aligned --
-     * 1024/8 is exactly 128 bytes and has nothing to pad.
-     *
-     * The screen's own width wins whenever it is smaller. Larger is not
-     * honoured: the bitmap is what can actually be read.
+     * THE BITMAP IS NOT THE SCREEN. P96BMA_WIDTH and CYBRMATTR_WIDTH answer for
+     * the allocation, which a board rounds up to its own pitch. The screen's
+     * own width wins whenever it is smaller; larger is not honoured.
      */
     if (visible_w != 0 && (ULONG)visible_w < w)
         w = (ULONG)visible_w;
@@ -630,11 +569,9 @@ BOOL http_rtg_describe(struct BitMap *bm, UWORD visible_w, HttpRtgScreen *s,
 
 /* -------------------------------------------------------- the five reads -- */
 
-/* One strip through one route: rows [y0, y0+rows) of the full width, into
-   `dst` at the attach stride.  Every route delivers exactly `rtg_row_bytes` a
-   row, in the one format the session settled on, and leaves the padding past
-   it alone, so which route a session picked cannot show up as a difference in
-   the bytes. */
+/* One strip through one route: rows [y0, y0+rows) of the full width, into `dst`
+   at the attach stride. Every route delivers exactly `rtg_row_bytes` a row and
+   leaves the padding past it alone. */
 
 static BOOL rtg_read_p96_rpa(UBYTE *dst, UWORD y0, UWORD rows)
 {
@@ -646,9 +583,8 @@ static BOOL rtg_read_p96_rpa(UBYTE *dst, UWORD y0, UWORD rows)
     ri.Memory      = (APTR)dst;
     ri.BytesPerRow = (WORD)rtg_stride;
     ri.pad         = 0;
-    /* The destination format, not the screen's.  p96ReadPixelArray converts
-       between the two, whatever the screen turns out to be, which is what
-       makes this the one route with no conversion of its own. */
+    /* The destination format, not the screen's: p96ReadPixelArray converts
+       between the two, so this is the one route with no conversion of its own. */
     ri.RGBFormat   = (rtg_bpp == 2) ? RGBFB_R5G6B5 : RGBFB_CLUT;
 
     rtg_p96_read(&ri, 0, 0, rtg_rp, 0, y0, rtg_w, rows);
@@ -676,9 +612,8 @@ static BOOL rtg_read_p96_lock(struct BitMap *bm, UBYTE *dst,
         return FALSE;
     }
 
-    /* The mapping is in the screen's format.  A format the converter does not
-       name, or one that disagrees with what the session was attached for,
-       fails the route rather than producing a picture nobody can check. */
+    /* The mapping is in the screen's format. A format the converter does not
+       name, or one that disagrees with the attach, fails the route. */
     if (!rtg_fmt_p96(ri.RGBFormat, &fmt) ||
         (fmt.step == 1) != (rtg_bpp == 1))
     {
@@ -702,17 +637,10 @@ static BOOL rtg_read_p96_lock(struct BitMap *bm, UBYTE *dst,
 }
 
 /*
- * THE COUNT IS THE ONLY THING THAT SAYS IT READ ANYTHING.
- *
- * ReadPixelArray() returns the number of pixels it moved, and this discarded
- * it and reported success.  On Picasso96's cybergraphics emulation the call
- * declines RECTFMT_LUT8 and returns 0 at once, so the route came back
- * instantly having copied nothing -- 436540 KB/s against 5890 for the P96
- * route on the same board, seventy times every other route, which is not a
- * fast read but no read at all.  It therefore WON the probe above, and the
- * console then streamed the buffer's first contents for the life of the
- * session: a frozen Workbench that answers the keyboard, changes nothing, and
- * passes every assertion the harness makes on an idle screen.
+ * THE COUNT IS THE ONLY THING THAT SAYS IT READ ANYTHING. Picasso96's
+ * cybergraphics emulation declines RECTFMT_LUT8 and returns 0 at once, so a
+ * route that ignored the count came back instantly having copied nothing and
+ * won the probe.
  */
 static BOOL rtg_read_cgx_rpa(UBYTE *dst, UWORD y0, UWORD rows)
 {
@@ -721,11 +649,8 @@ static BOOL rtg_read_cgx_rpa(UBYTE *dst, UWORD y0, UWORD rows)
     if (RtgCgxBase == NULL)
         return FALSE;
 
-    /* Not offered for a truecolour screen at all, so it is neither probed nor
-       chosen there.  cybergraphics has no big-endian R5G6B5 rectangle format
-       to ask for, and the one rectangle format this route does ask for is
-       already documented above as something Picasso96's cybergraphics
-       emulation reports having moved without moving it. */
+    /* Not offered for a truecolour screen: cybergraphics has no big-endian
+       R5G6B5 rectangle format to ask for. */
     if (rtg_bpp != 1)
         return FALSE;
 
@@ -748,8 +673,8 @@ static BOOL rtg_read_cgx_lock(struct BitMap *bm, UBYTE *dst,
     if (RtgCgxBase == NULL)
         return FALSE;
 
-    /* Asked of the bitmap rather than carried in from attach, because the
-       blit route brings its own offscreen through here. */
+    /* Asked of the bitmap rather than carried in from attach, because the blit
+       route brings its own offscreen through here. */
     if (!rtg_fmt_cgx(rtg_cgx_attr(bm, CYBRMATTR_PIXFMT), &fmt) ||
         (fmt.step == 1) != (rtg_bpp == 1))
         return FALSE;
@@ -782,15 +707,10 @@ static BOOL rtg_read_cgx_lock(struct BitMap *bm, UBYTE *dst,
 }
 
 /*
- * BltBitMap to an offscreen bitmap and read the copy.
- *
- * This does not reduce how many bytes cross the bus.  What it gains is that
- * the slow read comes off a buffer nothing is drawing into.  The console reads
- * the screen with the layer lock only attempted, never waited for, so a frame
- * read straight out of VRAM can carry half of somebody else's redraw.  The
- * blit is the card's own, and one call, so what it snapshots is one moment.
- *
- * ScreenRecorder does the same thing for the same reason.
+ * BltBitMap to an offscreen bitmap and read the copy. The layer lock is only
+ * attempted, never waited for, so a frame read straight out of VRAM can carry
+ * half of somebody else's redraw. The blit is one card-side call, so what it
+ * snapshots is one moment.
  */
 static BOOL rtg_read_blit(struct BitMap *bm, UBYTE *dst, UWORD y0, UWORD rows)
 {
@@ -801,9 +721,8 @@ static BOOL rtg_read_blit(struct BitMap *bm, UBYTE *dst, UWORD y0, UWORD rows)
               0xC0, 0xFF, NULL);
     WaitBlit();
 
-    /* The copy is a plain memory bitmap in the screen's own format, so
-       reading it is a lock and the same conversion a direct lock does,
-       through whichever library allocated it. */
+    /* The copy is a plain memory bitmap in the screen's own format, so reading
+       it is a lock and the same conversion a direct lock does. */
     if (rtg_off_is_p96)
         return rtg_read_p96_lock(rtg_off, dst, 0, rows);
     return rtg_read_cgx_lock(rtg_off, dst, 0, rows);
@@ -844,18 +763,9 @@ static BOOL rtg_off_take(UWORD w, UWORD rows)
     rtg_off_free();
 
     /*
-     * BMF_USERPRIVATE is Picasso96's "never displayed, never moved", which is
-     * what a snapshot buffer is, and the one kind of P96 bitmap the
-     * documentation says does not have to be locked before it is touched.  It
-     * is still locked below, because the matched lock costs two library calls
-     * a frame and keeps this caller on the ordinary path.
-     *
-     * It is allocated in the screen's own pixel format.  BltBitMap between two
-     * bitmaps of different formats moves bits, not colours, and is not a
-     * conversion, so a 16-bit screen blitted into an 8-bit offscreen would
-     * come back as half a picture with no way to tell.  The conversion belongs
-     * to the read of the copy, which goes through the same converter every
-     * other lock route does.
+     * BMF_USERPRIVATE is Picasso96's "never displayed, never moved". Allocated
+     * in the screen's own pixel format: BltBitMap between two bitmaps of
+     * different formats moves bits, not colours, and is not a conversion.
      */
     if (RtgP96Base != NULL && rtg_native_p96 >= 0)
     {
@@ -888,25 +798,11 @@ static BOOL rtg_off_take(UWORD w, UWORD rows)
 /* ----------------------------------------------------------- the measure -- */
 
 /*
- * A ROUTE THAT ANSWERS IS NOT A ROUTE THAT READ THE SCREEN.
- *
- * The band a route just read, against the same band read through a route that
- * can only be a memcpy out of mapped board memory.  ReadPixelArray() reports
- * how many pixels it moved and Picasso96's cybergraphics emulation reports the
- * whole band for RECTFMT_LUT8 while leaving the buffer as it found it: the
- * route came back in no time at all, won the probe below at 429926 KB/s
- * against 5890 for the P96 route on the same board, and the console then
- * served one frame for the life of the session.  A Workbench that takes the
- * keyboard, runs what is typed at it and never changes on screen is what that
- * looks like from a browser, and every assertion an idle-screen harness makes
- * passes on it.  Neither the return count nor the clock catches it.  Reading
- * the same pixels twice, two ways, does.
- *
- * ref holds the reference band, packed; dst is the caller's staging buffer and
- * is strided.  The screen is live, so a disagreement is only evidence when the
- * reference agrees with ITSELF across the same interval: if the second
- * reference read differs from the first, something drew while this was
- * looking, and the route keeps the benefit of the doubt.
+ * A ROUTE THAT ANSWERS IS NOT A ROUTE THAT READ THE SCREEN. The same band, read
+ * through the route and through a reference route that can only be a memcpy out
+ * of mapped board memory. `ref` is packed, `dst` is strided. The screen is live,
+ * so a disagreement only counts when the reference agrees with itself across
+ * the same interval.
  */
 static BOOL rtg_verify(int route, int ref_route, struct BitMap *bm,
                        UBYTE *dst, UWORD rows, UBYTE *ref)
@@ -920,12 +816,9 @@ static BOOL rtg_verify(int route, int ref_route, struct BitMap *bm,
                (size_t)rtg_row_bytes);
 
     /*
-     * POISONED FIRST, or the check checks nothing.  The reference was just
-     * read into this same buffer, so a route that writes nothing leaves the
-     * reference's own pixels behind and compares equal to them -- which is
-     * how the first version of this passed the very route it was written to
-     * catch.  A byte no read can leave behind is what makes a silent route
-     * visible.
+     * POISONED FIRST, or the check checks nothing: the reference was just read
+     * into this same buffer, so a route that writes nothing would compare equal
+     * to it.
      */
     for (r = 0; r < rows; r++)
         memset(dst + (ULONG)r * rtg_stride, 0xA5, (size_t)rtg_row_bytes);
@@ -952,19 +845,11 @@ static BOOL rtg_verify(int route, int ref_route, struct BitMap *bm,
 }
 
 /*
- * Every route the machine offers reads the same band, three times, and the
- * fastest pass is kept.  A slow pass can be the scheduler and a fast one can
- * only be the hardware.  The rate is recorded for every route rather than for
- * the winner alone, because the spread is the unknown: which route a
- * particular board and driver make cheap is what nobody has published, and one
- * report of five numbers answers it for that board.
- *
- * Every route is then read against a reference route before it may be chosen,
- * because the fastest is the one most likely not to have read anything.
- *
- * The EClock is ~709 kHz, so a band that takes eight milliseconds is measured
- * to about a part in five thousand.  DateStamp() ticks are fiftieths and would
- * have made every one of these numbers a guess.
+ * Every route reads the same band three times and the fastest pass is kept: a
+ * slow pass can be the scheduler, a fast one can only be the hardware. Every
+ * route is then read against a reference route before it may be chosen, because
+ * the fastest is the one most likely not to have read anything. The EClock is
+ * ~709 kHz; DateStamp() ticks are fiftieths and would make these a guess.
  */
 static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
 {
@@ -986,10 +871,8 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
     (VOID)ami_millis();                 /* opens timer.device, sets TimerBase */
     if (TimerBase == NULL)
     {
-        /* No clock to measure with.  Every route still works, and the order
-           below is the one to prefer when nothing can be timed.  A mapping and
-           a memcpy beats a driver call on every board considered here, and the
-           snapshot beats both when there is one. */
+        /* No clock to measure with. The order below is the one to prefer when
+           nothing can be timed: a mapping and a memcpy beats a driver call. */
         static const int fallback[RTG_N_ROUTE] =
             { RTG_R_BLIT, RTG_R_P96_LOCK, RTG_R_CGX_LOCK,
               RTG_R_P96_RPA, RTG_R_CGX_RPA };
@@ -1031,9 +914,8 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
             if (took == 0UL)
                 took = 1UL;
 
-            /* KB a second, without overflowing on the way: the band is at
-               most two megabytes, so bytes/1024 is at most 2048, and 2048
-               times a 709 kHz rate is well inside 32 bits. */
+            /* KB a second without overflowing: the band is at most two
+               megabytes, so bytes/1024 times a 709 kHz rate stays in 32 bits. */
             {
                 ULONG kbs = (bytes / 1024UL) * rate / took;
                 if (kbs > best)
@@ -1045,16 +927,9 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
     }
 
     /*
-     * THE REFERENCE, and it is a mapping and a memcpy rather than a driver
-     * call.  A lock route hands back the address of the pixels the card is
-     * displaying; there is nowhere for it to be wrong that would not also make
-     * the screen wrong.  The blit route is last because it goes through an
-     * offscreen bitmap, which is one more place for a copy to be stale.
-     *
-     * The cybergraphics ReadPixelArray route was never a candidate here, so a
-     * machine with only that library still finds its reference in the CGX lock
-     * route on a truecolour screen, where the ReadPixelArray one is not
-     * offered at all.
+     * THE REFERENCE is a mapping and a memcpy rather than a driver call: a lock
+     * route hands back the address of the pixels the card is displaying. The
+     * blit route is last, because an offscreen is one more place to be stale.
      */
     {
         static const int prefer[3] =
@@ -1069,8 +944,7 @@ static VOID rtg_probe(struct BitMap *bm, UBYTE *dst)
             }
     }
 
-    /* No reference, or no room to hold one: choose on the clock alone, which
-       is what this did before there was a check at all. */
+    /* No reference, or no room to hold one: choose on the clock alone. */
     ref = (ref_route < 0) ? NULL : (UBYTE *)AllocVec(bytes, MEMF_ANY);
 
     for (r = 0; r < RTG_N_ROUTE; r++)
@@ -1110,12 +984,9 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
         return FALSE;
 
     /*
-     * The screen's own pixel format, resolved once.  It settles how many bytes
-     * a pixel the staging buffer holds, which of the two output paths every
-     * route takes, and what format the snapshot offscreen is allocated in.
-     * Both attributes are answered without the bitmap locked, and both
-     * libraries are asked, because a Picasso96 screen answers CyberGraphX's
-     * questions too and either answer can be the one the offscreen needs.
+     * The screen's own pixel format, resolved once. Both attributes are
+     * answered without the bitmap locked, and both libraries are asked, because
+     * a Picasso96 screen answers CyberGraphX's questions too.
      */
     if (RtgP96Base != NULL && rtg_p96_attr(bm, P96BMA_ISP96) != 0UL)
     {
@@ -1145,8 +1016,7 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
         cgxf = -1;
 
     /* http_rtg_describe() refused anything this cannot place, so reaching here
-       means the screen changed under the caller.  Nothing is read rather than
-       something read in the wrong format. */
+       means the screen changed under the caller. */
     if (bpp == 0UL)
         return FALSE;
     if (depth == 0UL)
@@ -1171,16 +1041,10 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
     rtg_native_cgx = cgxf;
 
     /*
-     * Whether the bitmap is really in card memory is the first branch.
-     * Picasso96 keeps a bitmap in system RAM whenever it decides to, and when
-     * it has, the read is ordinary Fast RAM at Fast RAM speed and none of the
-     * rest of this matters.  It also decides whether the snapshot buffer is
-     * worth its memory, since blitting Fast RAM to Fast RAM to read it back is
-     * a copy for nothing.
-     *
-     * P96 only answers while the bitmap is locked, which is why it is asked
-     * here and not in http_rtg_describe().  That one runs under LockIBase()
-     * and this one does not.
+     * Whether the bitmap is really in card memory is the first branch: P96 may
+     * keep it in system RAM, in which case the read is Fast RAM speed and the
+     * snapshot buffer is a copy for nothing. P96 only answers while the bitmap
+     * is locked, which is why it is asked here and not in http_rtg_describe().
      */
     rtg_on_board = 0;
     rtg_on_board_known = 0;
@@ -1201,15 +1065,13 @@ BOOL http_rtg_attach(struct BitMap *bm, struct RastPort *rp,
     }
     else if (RtgCgxBase != NULL)
     {
-        /* CyberGraphX answers no on-the-board attribute.  ISLINEARMEM is the
-           nearest one it has, and a bitmap that is linearly addressable is the
-           one whose lock route can be a memcpy. */
+        /* CyberGraphX has no on-the-board attribute. ISLINEARMEM is the nearest
+           one, and a linearly addressable bitmap is one a memcpy can read. */
         rtg_on_board = (UBYTE)(rtg_cgx_attr(bm, CYBRMATTR_ISLINEARMEM) != 0UL);
         rtg_on_board_known = 1;
     }
 
-    /* One strip's worth rather than a whole screen, because the snapshot is
-       per fetch. */
+    /* One strip's worth rather than a whole screen: the snapshot is per fetch. */
     if (rtg_on_board)
     {
         UWORD rows = (UWORD)((rtg_h < RTG_STRIP_ROWS) ? rtg_h : RTG_STRIP_ROWS);
@@ -1275,17 +1137,9 @@ BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst)
 /* ------------------------------------------------------------ the report -- */
 
 /*
- * THE CARD'S OWN FORMAT, BY NAME, and it is the one thing the wire cannot say.
- * A 15, 24 or 32-bit screen is downsampled to R5G6B5 before it is sent, so the
- * geometry word reads depth 16 and format 2 for all four truecolour depths and
- * a session on a 32-bit screen is indistinguishable from one on a 16-bit
- * screen by anything a client can see.  That is not a small gap: the two
- * four-byte RGBFTYPE codes whose alpha is last were transposed here until
- * 49ef2137, and a harness that could not tell which path ran could not have
- * told that the fix was reached either.
- *
- * So the depth and the format go out in the readback word, where a test reads
- * them off one line.
+ * The card's own depth and format go out in the readback word: everything is
+ * downsampled to R5G6B5 before it is sent, so the geometry word reads depth 16
+ * for all four truecolour depths and a client cannot tell which path ran.
  */
 static const char *const rtg_rgbfb_name[RGBFB_N] =
 {
@@ -1354,9 +1208,8 @@ ULONG http_rtg_word(char *out, ULONG cap)
     at = rtg_put(out, cap, at,
                  rtg_on_board_known ? (rtg_on_board ? "1" : "0") : "?");
 
-    /* The screen's own depth and format, whichever library claims it.  Both
-       are what the session attached to and neither survives the downsample, so
-       this is the only place either appears. */
+    /* The screen's own depth and format, whichever library claims it. Neither
+       survives the downsample, so this is the only place either appears. */
     at = rtg_put(out, cap, at, " depth=");
     at = rtg_put_num(out, cap, at, (ULONG)rtg_depth);
 
@@ -1372,8 +1225,7 @@ ULONG http_rtg_word(char *out, ULONG cap)
     at = rtg_put(out, cap, at,
                  (rtg_route >= 0) ? rtg_route_name[rtg_route] : "none");
 
-    /* KB/s per route, and only the ones that answered.  This is the figure the
-       probe exists to produce.  See httprtg.h. */
+    /* KB/s per route, and only the ones that answered. See httprtg.h. */
     for (r = 0; r < RTG_N_ROUTE; r++)
     {
         if (rtg_kbs[r] == 0UL)
@@ -1384,9 +1236,8 @@ ULONG http_rtg_word(char *out, ULONG cap)
         at = rtg_put_num(out, cap, at, rtg_kbs[r]);
     }
 
-    /* And the ones that answered with something other than the screen.  Named
-       rather than dropped: a board whose fastest route reads nothing is worth
-       knowing about from one line of a log, and the rate above says why. */
+    /* And the ones that answered with something other than the screen. Named
+       rather than dropped: the rate above says why. */
     for (r = 0; r < RTG_N_ROUTE; r++)
     {
         if ((rtg_stale & (1UL << (ULONG)r)) == 0UL)

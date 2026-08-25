@@ -1,51 +1,6 @@
 /*
  * mcastprobe, exercises group membership the way an SSDP client does.
  *
- * Both families, one pass each.  The order matters and is the point: an SSDP
- * receiver binds the group, joins it, and only then reads.  Each step is
- * checked and reported, so a failure says which one broke rather than
- * "nothing arrived".
- *
- *   1. multicast TTL / hops, LOOP and IF set and read back
- *   2. bind to the group, refused by every build before 0.15.2
- *   3. join, then again (must be EADDRINUSE)
- *   4. one M-SEARCH to the group
- *   5. read for a few seconds, printing whatever answers
- *   6. leave, then again (must be EADDRNOTAVAIL)
- *
- * IPv4 uses 239.255.255.250:1900, IPv6 the link-local ff02::c:1900.  The v6
- * pass is skipped, not failed, on a build without IPv6: socket(AF_INET6)
- * fails and there is nothing to test.
- *
- * IPV6_MULTICAST_LOOP reads back 0 whatever is set, on purpose, this stack
- * has no IPv6 multicast loopback, and the option says so rather than storing
- * a value it will not honour.
- *
- * Step 5 needs something on the LAN that answers SSDP, a router, a printer,
- * a TV.  Steps 1-4 and 6 do not, and are the ones that test this stack.
- *
- * The wire side used to be read out of FS-UAE's A2065 frame dump through
- * tests/trace/a2065pcap.py, and there is no such dump under Amiberry.  What is
- * left is a bridged run watched from another machine, or tools/winuae-run.sh
- * with -a2065log2 and a2065pcap.py --winuae.  What to look for either way is
- * an IGMP v2 report for 239.255.255.250.
- *
- * On the v6 side the thing to look for is a Multicast Listener Report for
- * ff02::c, and a Done or a CHANGE_TO_INCLUDE_MODE record when the leave
- * happens.  tests/ipv6/run-mld.sh drives this program for exactly that and
- * reads the answer out of a capture on the segment.
- *
- * A one-off probe rather than a command or a test, so it has no CMake entry.
- * Compile it by hand and stage it like any other executable:
- *
- *   . tools/amiga-toolchain.sh
- *   "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o McastProbe \
- *       tests/tools/mcastprobe.c
- *
- * The vectors are called by hand at the LVOs docs/RESEARCH.md 3.2 lists, for
- * the same reason src/tools/toolsock.c does it: the NDK inlines assume a
- * global SocketBase.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -64,10 +19,6 @@ typedef struct ProbeAddr
     UBYTE   sin_zero[8];
 } ProbeAddr;
 
-/*
- * struct sockaddr_in6 on this NDK: 28 bytes, family at offset 0 and NO length
- * byte.  See aminetxduo/in6.h, it is not a sockaddr_in with a wider address.
- */
 typedef struct ProbeAddr6
 {
     UBYTE   sin6_family;
@@ -122,8 +73,6 @@ static const UBYTE p_ssdp6_group[16] =
 {
     0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0c
 };
-
-/* ------------------------------------------------------------- vectors ---- */
 
 static LONG p_socket(struct Library *base, LONG domain, LONG type, LONG proto)
 {
@@ -274,10 +223,6 @@ static LONG p_errno(struct Library *base)
     return res;
 }
 
-/*
- * WaitSelect(nfds, read, write, except, timeout, signals), so the read in
- * step 5 gives up instead of blocking for ever on a LAN with no UPnP on it.
- */
 static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
                          struct timeval *tv)
 {
@@ -303,8 +248,6 @@ static LONG p_waitselect(struct Library *base, LONG nfds, ULONG *readfds,
                       : "cc", "memory");
     return res;
 }
-
-/* --------------------------------------------------------------- probes --- */
 
 static const char p_msearch[] =
     "M-SEARCH * HTTP/1.1\r\n"
@@ -470,8 +413,6 @@ static VOID p_probe_v4(struct Library *sb)
 
     (VOID)p_close(sb, s);
 }
-
-/* --------------------------------------------------------------- IPv6 ----- */
 
 static VOID p_probe_v6(struct Library *sb)
 {

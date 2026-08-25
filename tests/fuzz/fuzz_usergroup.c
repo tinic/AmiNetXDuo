@@ -1,25 +1,5 @@
 /*
  * AmiNetXDuo, host fuzz driver for DEVS:Internet/passwd and .../group.
- *
- * Both files are read on the first getpwnam()/getgrnam() of every program
- * that opens usergroup.library, and neither is written by us, an ftp or
- * ssh port hands them to whatever the machine's owner, or whatever unpacked
- * an archive into DEVS:, left there. There is no MMU underneath, so a write
- * past an arena is not a fault but somebody else's memory.
- *
- * The group parser sizes an arena in one pass and fills it in another, which
- * is the shape the netdb alias pool had when it overran: a disagreement
- * between the two passes is invisible on the Amiga and immediate here. Its
- * particular disagreement was line endings, ug_next_line() ends a line on
- * '\r' as well as '\n', and the sizing pass counted only '\n', so a
- * CR-terminated file sized for one line and parsed dozens.
- *
- * Usage:
- *   fuzz_usergroup < case         the bytes as both files
- *   fuzz_usergroup -g < case      the group file alone
- *   fuzz_usergroup -p < case      the passwd file alone
- *   fuzz_usergroup -s             the seed cases, including the CR regression
- *   fuzz_usergroup -r SEED COUNT  built-in random generator, no corpus needed
  */
 
 #include "ug_parse.h"
@@ -30,8 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ stubs */
-
 static ULONG stub_outstanding;
 
 APTR ami_alloc(ULONG size)
@@ -41,11 +19,6 @@ APTR ami_alloc(ULONG size)
     if (size == 0)
         return NULL;
 
-    /*
-     * malloc, not calloc: the arena must arrive dirty, so that a gr_mem
-     * vector the parser failed to terminate is walked off the end under
-     * ASan rather than stopping on a zero somebody else paid for.
-     */
     p = malloc(size);
     if (p != NULL)
     {
@@ -82,17 +55,9 @@ VOID ami_log(int level, const char *fmt, ...)
     (void)fmt;
 }
 
-/* ------------------------------------------------------------- the drives */
-
 /* Every string the parser produced is read into this, so nothing is elided. */
 static volatile size_t fz_sink;
 
-/*
- * Walking every gr_mem vector is the assertion, not decoration: the arena
- * overrun this driver exists for corrupts memory during the parse but leaves
- * the records looking fine, and it is the walk to the NULL terminator that
- * reads the slots ASan is guarding.
- */
 static void fz_run_group(const char *data, size_t len)
 {
     struct UgDatabase *db = (struct UgDatabase *)calloc(1, sizeof(*db));
@@ -174,14 +139,6 @@ static void fz_run_once(const char *data, size_t len, int which)
         abort();
 }
 
-/* ------------------------------------------------------------- seed cases */
-
-/*
- * The regression case is first and is the reason this file exists. Sixty-four
- * CR-terminated member-less groups contain no '\n' at all, so the sizing pass
- * that counted '\n' alone allocated four pointers while the parse wrote
- * sixty-four NULL terminators, 240 bytes past a 16-byte block on the target.
- */
 static void fz_seeds(void)
 {
     static const char *const cases[] =
@@ -229,8 +186,6 @@ static void fz_seeds(void)
     fz_run_once(big, strlen(big), 'g');
 }
 
-/* ------------------------------------------------------- random generator */
-
 static unsigned long fz_state;
 
 static unsigned fz_rand(void)
@@ -239,11 +194,6 @@ static unsigned fz_rand(void)
     return (unsigned)(fz_state >> 33);
 }
 
-/*
- * Atoms rather than uniform noise, for the same reason fuzz_config uses them:
- * this grammar is line breaks, colons and commas, and random bytes reach
- * almost none of it. All four terminators are in the set on purpose.
- */
 static const char *const fz_atoms[] =
 {
     "\n", "\r", "\r\n", "\n\r", ":", ",", "#", " ", "\t", "*",

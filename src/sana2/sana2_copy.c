@@ -1,15 +1,10 @@
 /*
- * AmiNetXDuo, SANA-II buffer-management hooks.
+ * AmiNetXDuo, SANA-II buffer-management hooks.  The device calls them in m68k
+ * register convention (a0 = to, a1 = from, d0 = length) to move packet data in
+ * and out of the NX_PACKET reached through ios2_Data.
  *
- * OpenDevice() is handed a tag list carrying these two functions. The device
- * calls them in m68k register convention (a0 = to, a1 = from, d0 = length),
- * whenever it moves packet data in or out of "the abstract data structure".
- * Here that is an NX_PACKET reached through the AmiRxSlot or AmiTxSlot that
- * ios2_Data points at. One copy, straight into the packet, no bounce buffer.
- *
- * Constraints from copybuff.doc: these run at interrupt level. No exec memory
- * calls, no logging, no stack checking, nothing that Forbid()s. They are pure
- * pointer arithmetic and a copy loop.
+ * copybuff.doc: these run at interrupt level.  No exec memory calls, no
+ * logging, no stack checking, nothing that Forbid()s.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -27,24 +22,8 @@
 /*
  * The copy loop is not newlib's memcpy: this runs at interrupt level, and a
  * shared library must not depend on the C library's implementation there.
- *
- * The earlier loop took its fast path only when source and destination agreed
- * mod 2, and copied one byte per iteration otherwise.  Measured on the
- * emulated 68020 over 1460 bytes (tests/perf/perf_test.c):
- *
- *     parities agree     240.3 ns/B
- *     parities differ   1203.4 ns/B, a 5.0x cliff
- *
- * on every frame whose driver buffer landed on the wrong parity, and SANA-II
- * promises nothing about a device's buffer parity.  For comparison, the
- * libm020 memcpy this toolchain links costs 216 ns/B aligned and 252-260
- * misaligned: an 18% penalty with no cliff.
- *
  * n68k_copy_bytes() brings the destination to a longword boundary and then
- * moves longwords whatever the source is doing, which is what the 68020
- * supports: 179.5 ns/B when the parities agree (1.34x the old fast path) and
- * 228.7 when they differ (5.3x the old slow path), because movem.l moves
- * eight longwords per instruction pair.  See src/net68k/n68k_copy.S.
+ * moves longwords whatever the source is doing.  See src/net68k/n68k_copy.S.
  */
 VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
@@ -52,14 +31,10 @@ VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 }
 
 /*
- * S2_CopyToBuff: the device hands over `len` bytes of freshly received frame
- * in contiguous memory. `to` is this CMD_READ's ios2_Data, that is the
- * AmiRxSlot, whose NX_PACKET was allocated and positioned before the read was
- * posted.
- *
- * In cooked mode dst already points 14 bytes into the packet, leaving room for
- * the Ethernet header sana2_rx.c synthesises from ios2_SrcAddr/DstAddr/
- * PacketType. In raw mode dst is the start of the frame.
+ * S2_CopyToBuff.  `to` is this CMD_READ's ios2_Data, that is the AmiRxSlot,
+ * whose NX_PACKET was allocated and positioned before the read was posted.  In
+ * cooked mode dst already points 14 bytes into the packet, leaving room for the
+ * synthesised Ethernet header; in raw mode dst is the start of the frame.
  */
 BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
@@ -75,31 +50,11 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
 
 #ifdef AMINETXDUO_RX_VERIFY
     /*
-     * Sum while copying, when both ends are WORD aligned.  The device has to
-     * be copied out of anyway, so the sum comes out of loads already being
-     * paid for.  ami_sana2_rx_deliver() then checks from it instead of walking
-     * the frame a second time.
-     *
-     * WORD, not longword.  The two ends are permanently two bytes out of
-     * phase: ami_sana2_rx_arm() puts the destination at data_start +
-     * AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE, 2 + 14, which is longword
-     * aligned and is what the pad is for, while the device hands over its
-     * payload from behind a 14-byte header in an aligned ring entry, two off.
-     * A gate of `& 3` therefore never passed in cooked mode: tools/profiler
-     * over an A600 fitz transfer, 2026-08-06, put n68k_copy_bytes() at 12.9%
-     * of the machine and n68k_copy_sum_longwords() at zero samples, with the
-     * frame walked again afterwards for a sum the copy itself can produce.
-     *
-     * A 68000 raises an address error on an odd word or longword access, not
-     * on a merely 4-misaligned one, and its bus is 16 bits wide, so a longword
-     * move is two word cycles whatever its alignment.  68020 and 68030 take
-     * misaligned accesses in hardware.  `& 1` is therefore the real
-     * requirement, and a device that hands over an odd pointer still declines
-     * to the byte copy.
-     *
-     * The answer goes in the slot, not in the packet: the drain holds the same
-     * slot when it delivers, and the slot is re-armed before it is reused, so
-     * there is no lifetime here that is not already the reader's.
+     * Sum while copying, when both ends are WORD aligned.  WORD, not longword:
+     * the two ends are permanently two bytes out of phase, so a `& 3` gate
+     * never passes in cooked mode.  A 68000 raises an address error on an odd
+     * word or longword access but not on a merely 4-misaligned one, so `& 1` is
+     * the real requirement.  The answer goes in the slot, not in the packet.
      */
     slot->summed = FALSE;
 
@@ -126,9 +81,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
             /*
              * Past `len` the device's buffer holds the previous frame, so the
              * last longword is built from the bytes that arrived and padded
-             * with zeroes, which is what a walk does with a partial trailing
-             * longword.  Assembled through the byte array, so the result
-             * depends on where the bytes sit.
+             * with zeroes, which is what a walk does.  Assembled through the
+             * byte array, so the result depends on where the bytes sit.
              */
             w.l = 0UL;
             for (i = 0UL; i < tail; i++)
@@ -159,9 +113,8 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
 
 /*
  * Copy `len` bytes and return the ones-complement accumulator of what was
- * copied, in the convention n68k_copy_sum_longwords() uses: the caller folds,
- * and a partial trailing longword is padded with zeroes exactly as a walk
- * over the same bytes pads it.
+ * copied, in n68k_copy_sum_longwords()'s convention: the caller folds, and a
+ * partial trailing longword is padded with zeroes as a walk over it pads.
  */
 static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 {
@@ -172,8 +125,7 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
     {
         /* Odd on one side, where a 68000 permits no word access at all.  The
            pools this driver copies between are longword aligned, so this is
-           unreachable today and exists so the answer does not depend on that
-           staying true. */
+           unreachable today. */
         ami_sana2_copy_bytes(to, from, len);
 
         sum = 0UL;
@@ -222,13 +174,9 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 
 /*
  * Copy one whole TCP frame into `out`, summing as it goes, and write the
- * checksum into the device's buffer.  TRUE if it did. FALSE leaves the packet
- * untouched for the caller to hand to NetX Duo.
- *
- * The pseudo-header is the source and destination addresses, the protocol and
- * the TCP length, which is what RFC 793 puts in front of the segment. The
- * segment itself is summed with its checksum field still zero, which is the
- * identity for a ones-complement sum and is what the send path left there.
+ * checksum into the device's buffer.  FALSE leaves the packet untouched for the
+ * caller to hand to NetX Duo.  The pseudo-header is RFC 793's; the segment is
+ * summed with its checksum field zero, the identity for a ones-complement sum.
  */
 static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 {
@@ -310,15 +258,10 @@ static BOOL ami_sana2_tx_fuse_checksum(AmiTxSlot *slot, UCHAR *out, ULONG len)
 }
 
 /*
- * S2_CopyFromBuff: the device wants `len` bytes of the frame being sent.
- * `from` is this CMD_WRITE's ios2_Data, that is the AmiTxSlot.
- *
- * A device can take the frame in one call or several, and can restart the
- * whole transfer if it has to retry the wire. The cursor below handles the
- * chunked case. The reset conditions handle the retry case, and rewind to the
- * start of the packet for any request the cursor cannot satisfy from its
- * current position. For the common single-buffer, single-call frame both are
- * no-ops, and this reduces to one copy from the prepend pointer.
+ * S2_CopyFromBuff.  `from` is this CMD_WRITE's ios2_Data, the AmiTxSlot.  A
+ * device may take the frame in one call or several and may restart the whole
+ * transfer on a retry, so the cursor rewinds to the start of the packet for any
+ * request it cannot satisfy from its current position.
  */
 BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                               register APTR from __asm("a1"),
@@ -345,14 +288,11 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     }
 
     /*
-     * The transmit checksum, out of the loads the copy is about to do.
-     *
-     * Only at the start of a frame, and only when this one call takes all of
-     * it from one unchained packet: the answer has to be written into the
-     * device's buffer at a fixed offset, and a chunked or chained copy cannot
-     * promise that the chunk holding the field is still addressable when the
-     * last byte arrives.  Everything else is handed to NetX Duo's own deferred
-     * path, which fills the field into the packet before the copy reads it.
+     * The transmit checksum, out of the loads the copy is about to do.  Only at
+     * the start of a frame, and only when this one call takes all of it from
+     * one unchained packet: the field is written at a fixed offset, and a
+     * chunked or chained copy cannot promise the chunk holding it is still
+     * addressable when the last byte arrives.
      */
     if (slot->consumed == 0 && slot->packet != NULL &&
         (slot->packet->nx_packet_interface_capability_flag &
@@ -364,10 +304,8 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
                 (ULONG)(~NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM);
 
             /* It copied the whole frame and moved the cursor to the end of it.
-               A fall through to the walk below finds nothing left to copy,
-               exhausts the chain with `len` still unsatisfied, and reports a
-               failed copy for a frame that is complete in the device's
-               buffer. */
+               Falling through to the walk would exhaust the chain with `len`
+               still unsatisfied and report a failed copy for a complete frame. */
             return TRUE;
         }
         else
@@ -417,11 +355,9 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
 /* ---- the private direct-receive pair, aminetxduo/anxs2ext.h ---------- */
 
 /*
- * ANXD_S2_RX_DIRECT.  The device asks where this CMD_READ's payload would
- * land.  Saying yes costs nothing beyond the same checks
- * ami_sana2_copy_to_buff() would make later; saying no makes the device take
- * the staging path, so a slot that cannot answer safely just declines.
- * Interrupt level, copybuff.doc constraints.
+ * ANXD_S2_RX_DIRECT.  The device asks where this CMD_READ's payload would land.
+ * A slot that cannot answer safely declines and the device takes the staging
+ * path.  Interrupt level, copybuff.doc constraints.
  */
 UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 {
@@ -438,9 +374,7 @@ UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 /*
  * ANXD_S2_RX_FILLED.  The device wrote the payload itself, straight off the
  * hardware.  `summed` carries whether `sum` is the longword ones-complement
- * running sum the verifier expects; a drain without a sum leaves the
- * verifier to walk the frame at task level, which it already knows how to
- * do for the paths that decline the fused sum.
+ * running sum the verifier expects; without it the verifier walks the frame.
  */
 VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
 {
@@ -456,10 +390,9 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
        is the direct path's version of the hook running. */
     slot->copied = len;
 
-    /* Count completion, not the earlier claim.  A core may claim a slot and
-       then put it back when its hardware drain fails; that frame was neither
-       filled nor summed.  These ABI-stable counter names predate the private
-       direct pair, so "copy hook" now means either receive-fill path. */
+    /* Count completion, not the earlier claim: a core may claim a slot and then
+       put it back when its hardware drain fails.  These ABI-stable counter
+       names predate the direct pair, so "copy hook" means either fill path. */
     if (slot->owner != NULL && slot->owner->iface != NULL)
     {
         slot->owner->iface->stats.rx_copy_hook++;

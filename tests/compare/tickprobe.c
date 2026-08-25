@@ -3,67 +3,6 @@
  * measured from outside, with no knowledge of its internals and nothing of its
  * code inspected.
  *
- * docs/RESEARCH.md 29.5 measured Roadshow's ICMP round trip at 4.32 ms
- * minimum against ours at 7 ms, and two explanations fit that equally well:
- *
- *   * Roadshow runs a faster periodic timer than our 50 Hz (16.6), so
- *     everything it does on a timer happens on a finer grid; or
- *   * Roadshow's per-packet receive path is simply cheaper.
- *
- * The two are distinguishable on the wire and nowhere else, so this program
- * is a wire.  Both came back no.  Our timer-driven frames resolve to a
- * 20.031 ms grid, R = 0.992; Roadshow's to 220.32 ms, eleven times coarser.
- * And through this device our echo turnaround is 1.79 ms against their 2.22
- * at 56 bytes, 2.57 against 4.21 at 1400.  The 2.7 ms on the real wire is
- * not above SANA-II.
- *
- * A packet a stack sends because a timer fired leaves at the instant that
- * timer fires.  Sample enough of them and their timestamps lie on a grid whose
- * spacing is the tick period: t mod T is concentrated for T = the tick and
- * spread for every other T.  That measures the periodic rate without ever
- * opening the binary.
- *
- * The delayed ACK is the event to sample: it is timer-driven on every TCP
- * implementation there has ever been, it can be provoked once per round trip
- * rather than once per minute, and the harness controls exactly when the
- * segment that arms it arrives.  Phase II below collects a few hundred.
- *
- * The interval between one injection and the next is drawn from 0..400 ms and
- * not from 0..20: the analyser looks for a grid in the intervals between
- * departures, and intervals that are all nearly equal are congruent modulo
- * almost anything.  A spread of twenty ticks makes the comb sharp; a spread of
- * one makes it meaningless.
- *
- * The phase has to be randomised.  If the harness injected each segment
- * immediately after seeing the previous ACK, the injections would themselves
- * be locked to whatever grid the harness polls on, every measured delay would
- * come out identical, and a stack with no periodic timer at all would look
- * perfectly quantised.  So each injection is preceded by a timer.device
- * UNIT_MICROHZ sleep of a pseudo-random length, Delay() is one 20 ms
- * AmigaDOS tick and sleeping on it would alias the experiment into agreeing
- * with whatever the system tick is.  The analyser checks the control as well
- * as the result: the injection intervals must show no concentration at any
- * period, or the run says nothing.
- *
- * The competing explanation is measured in the same run.  An ICMP echo reply
- * is not timer-driven, it is generated when the request arrives, so the
- * time from handing an echo request to the device to the stack handing the
- * reply back is the whole receive-and-reply path with the wire, the emulator's
- * SLIRP and the application all taken out of it.  Phase I measures it at two
- * sizes, which separates per-packet cost from per-byte.
- *
- * The stack under test is a parameter: anything with a bsdsocket.library.
- * Every call into the stack is a published LVO and every packet is seen
- * through a SANA-II device this program installs in its own address space
- * (tests/tcpdrill/tapdev.c, linked unchanged).  With a foreign stack,
- * DH0:tickif.txt holds the command line that brings its interface up, our
- * own library configures DEVS:NetInterfaces itself when it opens, and Roadshow
- * needs its own AddNetInterface to be run.
- *
- * DH0:tickprobe.txt holds one line per sample, all times in raw E-Clock ticks
- * so the analyser and not the Amiga decides what a millisecond is.  Flushed
- * line by line (16.9).
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -80,8 +19,6 @@
 
 #include "tapdev.h"
 
-/* ------------------------------------------------------------ the network - */
-
 #define LOCAL_IP        0x0A090901UL            /* 10.9.9.1, the stack       */
 #define PEER_IP         0x0A090902UL            /* 10.9.9.2, this harness    */
 #define PEER_PORT       9000
@@ -92,8 +29,6 @@ static const UBYTE peer_mac[6]  = { 0x02, 0x00, 0x54, 0x49, 0x43, 0x02 };
 #define ETYPE_IP        0x0800
 #define ETYPE_ARP       0x0806
 #define ETH_HDR         14
-
-/* --------------------------------------------------------------- sockets -- */
 
 #define AF_INET_        2
 #define SOCK_STREAM_    1
@@ -188,8 +123,6 @@ static LONG s_close(LONG s)
     return r;
 }
 
-/* ------------------------------------------------------------- reporting -- */
-
 static BPTR out_file;
 
 static ULONG d_len(const char *s)
@@ -206,8 +139,6 @@ static VOID emit(const char *s)
     if (out_file != (BPTR)0)
     {
         Write(out_file, (APTR)s, (LONG)n);
-        /* Flushed line by line: a diagnostic that loses its tail to a reboot
-           is not a diagnostic (docs/RESEARCH.md 16.9). */
         Flush(out_file);
     }
     Write(Output(), (APTR)s, (LONG)n);
@@ -266,8 +197,6 @@ static VOID say(const char *fmt, ...)
     emit(line);
 }
 
-/* ---------------------------------------------------------- packet bytes -- */
-
 static ULONG rd32(const UBYTE *p) { return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
                                            ((ULONG)p[2] << 8) | (ULONG)p[3]; }
 static UWORD rd16(const UBYTE *p) { return (UWORD)(((UWORD)p[0] << 8) | p[1]); }
@@ -298,14 +227,6 @@ static UWORD ones_fold(ULONG sum)
         sum = (sum & 0xFFFFUL) + (sum >> 16);
     return (UWORD)(~sum);
 }
-
-/* ----------------------------------------------------------- fine sleeps -- */
-/*
- * Delay() is one AmigaDOS tick, 20 ms, which is the same order as the grid
- * being measured, sleeping on it would alias the experiment into agreeing
- * with whatever the system tick is.  UNIT_MICROHZ is CIA-derived and
- * independent of it.
- */
 
 static struct MsgPort     *tmr_port;
 static struct timerequest *tmr_req;
@@ -344,18 +265,6 @@ static VOID usleep_(ULONG usec)
     DoIO((struct IORequest *)tmr_req);
 }
 
-/* ------------------------------------------------------- the time bases -- */
-/*
- * What the machine offers, measured rather than assumed, because whether a
- * grid is 11 wakeups or 22 turns on it.  An Amiga has two periodic sources a
- * stack can ride: the vertical blank interrupt, whose rate is the display's
- * and is 49.92 Hz on PAL, and the CIA, which timer.device's UNIT_MICROHZ
- * divides to whatever was asked for.  A grid that is an exact multiple of the
- * first cannot have come from the second, and vice versa.
- *
- * Both are timed here with the same E-Clock that timestamps every frame, on
- * the same machine, in the same run.
- */
 static VOID measure_timebases(ULONG rounds)
 {
     struct MsgPort     *port;
@@ -413,9 +322,6 @@ static VOID measure_timebases(ULONG rounds)
     DeleteMsgPort(port);
 }
 
-/* xorshift32, seeded from the E-Clock so two boots do not sample the same
-   phases.  The sequence itself does not matter; only its lack of correlation
-   with anything the stack does. */
 static ULONG rng_state = 2463534242UL;
 
 static ULONG rnd(VOID)
@@ -425,8 +331,6 @@ static ULONG rnd(VOID)
     rng_state ^= rng_state << 5;
     return rng_state;
 }
-
-/* -------------------------------------------------------------- the wire -- */
 
 typedef struct Ev
 {
@@ -503,7 +407,6 @@ static BOOL ev_pop(Ev *out)
     return TRUE;
 }
 
-/* Drain the device, answering ARP, classifying everything else. */
 static VOID pump(VOID)
 {
     ULONG stamp;
@@ -580,12 +483,6 @@ static VOID pump(VOID)
     }
 }
 
-/*
- * Wait for an event, polling.  The poll interval does not enter any
- * measurement: every stamp comes from ReadEClock() inside the device's
- * BeginIO, i.e. the instant the stack handed the frame over.  It is short
- * anyway so that the next sample starts promptly.
- */
 static BOOL wait_ev(Ev *out, ULONG ms)
 {
     ULONG spent = 0;
@@ -610,8 +507,6 @@ static VOID drain(VOID)
     while (ev_pop(&e))
         ;
 }
-
-/* ------------------------------------------------------------- injection -- */
 
 static UBYTE injf[TAP_FRAME_MAX];
 
@@ -728,14 +623,6 @@ static ULONG inject_tcp(const Tcp4 *in)
     return t;
 }
 
-/* ==================================================== PHASE I: ICMP echo == */
-/*
- * The arrival-driven half of the experiment.  Nothing here is on a timer:
- * every reply is generated by the stack because a request turned up, so the
- * number is the receive path, the ICMP code and the transmit path, and
- * nothing else.  ping's 4.32 ms and 7 ms are this plus a wire.
- */
-
 #define ICMP_ID 0x7469
 
 static VOID phase_icmp(ULONG count, ULONG dlen)
@@ -751,9 +638,6 @@ static VOID phase_icmp(ULONG count, ULONG dlen)
         ULONG arp_before = n_arp_answered;
         Ev    e;
 
-        /* 0..30 ms, so the request does not land on the same phase of
-           whatever the stack's tick is every time.  Nothing here is grid
-           analysis, so it does not need the wide spread phase II uses. */
         usleep_(rnd() % 30000UL);
         drain();
 
@@ -786,14 +670,6 @@ static VOID phase_icmp(ULONG count, ULONG dlen)
 
     say("# phase icmp done replies=%u", got);
 }
-
-/* =============================================== PHASE II: the delayed ACK = */
-/*
- * The timer-driven half.  One byte arrives on an established connection with
- * nothing else outstanding; every TCP implementation holds the acknowledgement
- * back and lets a periodic timer release it.  The instant it is released is a
- * sample of the timer's grid.
- */
 
 static LONG  sock = -1;
 static UWORD local_port;
@@ -904,8 +780,6 @@ static VOID phase_dack(ULONG count)
             continue;
         }
 
-        /* An ACK covering the byte just sent.  Nothing else should appear;
-           anything that does is reported rather than silently skipped. */
         while (waited < 3)
         {
             if (!wait_ev(&e, 1200))
@@ -939,15 +813,6 @@ static VOID phase_dack(ULONG count)
     say("# phase dack done acks=%u", got);
 }
 
-/* ========================================== PHASE III: the retransmit grid = */
-/*
- * A second, independent population of timer-driven frames, on a much longer
- * period.  A SYN to a peer that never answers is retransmitted by the
- * retransmission timer, and every one of those departures is another sample of
- * the same grid; the gaps also say what the stack's RTO is and whether it
- * backs off.
- */
-
 static VOID phase_retransmit(ULONG ms)
 {
     SockAddrIn sa;
@@ -977,9 +842,6 @@ static VOID phase_retransmit(ULONG ms)
     t_end = tap_eclock_now() + (hz / 1000UL) * ms;
     (VOID)s_connect(s2, &sa);
 
-    /* The window is closed against the E-Clock and not against a count of
-       poll intervals, because wait_ev() returns early whenever a frame turns
-       up and a retransmission series would otherwise cut its own window short. */
     while ((LONG)(t_end - tap_eclock_now()) > 0)
     {
         Ev e;
@@ -996,14 +858,6 @@ static VOID phase_retransmit(ULONG ms)
     say("# phase retransmit done frames=%u", n);
 }
 
-/* ------------------------------------------------------------------ main -- */
-
-/*
- * DH0:tickif.txt, if present, holds one command line to run once the library
- * is open.  Our own bsdsocket.library configures DEVS:NetInterfaces when it
- * starts; Roadshow does not, and its own AddNetInterface is the only thing
- * that should ever bring a Roadshow interface up.
- */
 static VOID run_interface_command(VOID)
 {
     BPTR  fh;
@@ -1030,9 +884,6 @@ static VOID run_interface_command(VOID)
 
     say("# interface command: %s", line);
 
-    /* Its output goes to a file rather than to NIL:.  "AddNetInterface
-       returned 0 and nothing came online" is not a diagnosis, and the reason
-       a foreign stack refused a configuration is a line it printed. */
     {
         BPTR log = Open((STRPTR)"DH0:tickif.out", MODE_NEWFILE);
 
@@ -1067,7 +918,6 @@ int main(void)
     if (!fine_timer_open())
         say("!! no UNIT_MICROHZ timer, phases will alias, results are void");
 
-    /* Before the stack is even open, so nothing it does is in the figure. */
     measure_timebases(100);
 
     SockBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
@@ -1107,8 +957,6 @@ int main(void)
     say("# online ipreads=%u arpreads=%u", tap_reads_for(ETYPE_IP),
         tap_reads_for(ETYPE_ARP));
 
-    /* One throwaway exchange resolves the peer's hardware address, so the
-       first timed sample is not an ARP round trip in disguise. */
     {
         Ev e;
         (VOID)inject_echo(ICMP_ID, 0xFFFF, 56);

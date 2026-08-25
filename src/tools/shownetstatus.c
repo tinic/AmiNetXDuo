@@ -1,44 +1,7 @@
 /*
  * ShowNetStatus, report the stack's view of the network, and what is wrong
- * with it.
- *
- *     ShowNetStatus INTERFACE/M,INTERFACES/S,ARPCACHE=ARP/S,ROUTES/S,
- *                   DNS=DOMAINNAMESERVERS/S,ICMP/S,IP/S,MB=MEMORY/S,TCP/S,
- *                   UDP/S,TCPSOCKETS/S,UDPSOCKETS/S,USERS/S,EVENTS/S,
- *                   NAMES/S,ALL/S,REPEAT/S
- *
- * One category switch per subject. With no category it prints a general
- * summary.
- *
- * ShowNetStatus and netstat both exist because their presentation differs:
- * named categories, a default summary and a closing diagnosis here, against
- * -i/-r/-a/-s and columns of data there. Both take their numbers from the
- * same two snapshots in tool_nx.c (ToolSnapshot and ToolStats), so they
- * cannot report different values for one fact, and a counter added there
- * serves both.
- *
- * The summary prints the parsed Roadshow configuration (netstack_config(), or
- * the files themselves when nothing is running) as the intent, and the live
- * NX_IP plus the SANA-II shim as the reality. Where they disagree, a DHCP
- * lease against the static address in the file, the live values are shown.
- *
- * The diagnosis at the end covers states where every field printed above is
- * individually correct and the machine still cannot reach anything: interface
- * down, interface with no address, missing default route, missing name
- * server. Each is named along with the command that fixes it. Summary mode
- * only.
- *
- * It works with the stack down, which is the state that most needs explaining.
- *
- * Three categories the interface carries elsewhere are absent: IGMP (the
- * groups are joined and reported, but only four of igmpstat's nine members
- * have anything behind them, see NETSTATUS_igmp in src/bsdsocket/
- * netstats.c), MULTICASTROUTING (no multicast router to have statistics
- * about) and ROUTING as a statistics category (NetX Duo keeps no routing
- * counters).  ROUTES prints the routing table itself: the connected routes,
- * the default gateway, and whatever AddNetRoute has put there --
- * NX_ENABLE_IP_STATIC_ROUTING is defined (nx_user.h:704), so static routes
- * exist even though no configuration file can express one.
+ * with it. One category switch per subject; with none it prints a general
+ * summary and a closing diagnosis. It works with the stack down.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -84,10 +47,8 @@ enum
     ARG_COUNT
 };
 
-/*
- * What the run was asked for. A struct rather than sixteen parameters, because
- * REPEAT calls the whole report again.
- */
+/* What the run was asked for. A struct rather than sixteen parameters, because
+   REPEAT calls the whole report again. */
 typedef struct Wanted
 {
     STRPTR *interface;              /* NULL-terminated, or NULL             */
@@ -121,12 +82,8 @@ static VOID problem_head(VOID)
 
 /* ------------------------------------------------------------------ names, */
 
-/*
- * NAMES prints symbolic names instead of numbers: two lookups, first the local
- * DEVS:Internet files (which work with no network at all), then the running
- * stack's resolver. Loaded once on first use, so a report without NAMES never
- * touches the disk.
- */
+/* NAMES prints symbolic names instead of numbers: the local DEVS:Internet
+   files first, then the running stack's resolver. Loaded once on first use. */
 static BOOL names_wanted;
 static BOOL netdb_loaded;
 
@@ -137,10 +94,9 @@ static VOID names_prepare(BOOL wanted)
     if (wanted && !netdb_loaded)
     {
         /*
-         * AmigaOS does not reclaim AllocVec() memory when a process exits, and
-         * ami_alloc() is AllocVec(), so the twelve blocks ami_netdb_load() builds
-         * out of DEVS:Internet outlive this command, 12,616 bytes per run on a
-         * stock netdb, gone until reboot.  main() frees it on the way out.
+         * AmigaOS does not reclaim AllocVec() memory when a process exits, so
+         * the blocks ami_netdb_load() builds outlive this command. main()
+         * frees it on the way out.
          */
         (VOID)ami_netdb_load();
         netdb_loaded = TRUE;
@@ -192,8 +148,7 @@ static const char *service_name(UWORD port, BOOL is_tcp)
 /* ---------------------------------------------------------------- report, */
 
 /* The running stack's own name for an NX slot, never the description at that
-   array position: see tool_iface_name() in tool_nx.c, which is the one copy of
-   that rule and which this used to have a second, wrong version of. */
+   array position: see tool_iface_name() in tool_nx.c. */
 static const char *iface_name(const AmiConfig *cfg, UWORD index)
 {
     return tool_iface_name(cfg, index);
@@ -214,9 +169,8 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
 }
 
 /*
- * A lease time in the largest whole unit: servers hand out round numbers of
- * seconds (86400, 3600) and printing those makes the reader do the division.
- * Returns the unit and writes the count, or NULL when the lease never expires.
+ * A lease time in the largest whole unit. Returns the unit and writes the
+ * count, or NULL when the lease never expires.
  */
 static const char *lease_duration(ULONG seconds, ULONG *value_out)
 {
@@ -243,11 +197,8 @@ static const char *lease_duration(ULONG seconds, ULONG *value_out)
     return "second";
 }
 
-/*
- * One line of the "it offered" block. The label is printed once for the whole
- * block and the remaining lines align under it, so the group reads as one
- * statement rather than as four unrelated adjacent fields.
- */
+/* One line of the "it offered" block. The label is printed once for the whole
+   block and the remaining lines align under it. */
 static VOID offered_line(BOOL *first, const char *what, const ULONG *addr,
                          UWORD count, const char *text)
 {
@@ -276,13 +227,9 @@ static VOID offered_line(BOOL *first, const char *what, const ULONG *addr,
 }
 
 /*
- * What the DHCP server said. The lease is applied at bring-up and then
- * discarded, so who handed the address out and how long it is good for were
- * previously not recorded anywhere on the machine.
- *
- * The offered lists are shown whether or not they were taken up: a server
- * offering a name server this machine is not using usually explains the
- * symptom being investigated.
+ * What the DHCP server said. The offered lists are shown whether or not they
+ * were taken up: a server offering a name server this machine is not using
+ * usually explains the symptom being investigated.
  */
 static VOID show_lease(const ToolDhcpInfo *d)
 {
@@ -339,14 +286,8 @@ static VOID show_lease(const ToolDhcpInfo *d)
         offered_line(&first, "the name   ", NULL, 0, d->host_name);
 }
 
-/*
- * The interface's IPv6 addresses, under its IPv4 line.  A machine with none
- * prints nothing, so an IPv4-only stack reads exactly as it did.
- *
- * An interface with IPv6 running always has a link-local fe80::/64 address it
- * gave itself.  A global one comes from CONFIGURE6.  Until this, the only way
- * to see either was a debug build and a serial console.
- */
+/* The interface's IPv6 addresses, under its IPv4 line. A machine with none
+   prints nothing, so an IPv4-only stack reads exactly as it did. */
 static VOID show_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
 {
     UWORD i;
@@ -407,9 +348,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
 
     /*
      * The driver the stack has open, when it can be read, and the
-     * configuration file only as a fallback. When the two differ the file is
-     * the stale one, and printing it would point the reader at a card that is
-     * not in use.
+     * configuration file only as a fallback: when the two differ the file is
+     * the stale one.
      */
     if (live != NULL && live->nx_device[0] != '\0')
     {
@@ -447,8 +387,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     {
         /*
          * The stack is up but inside another program's library, where no
-         * per-interface flag can be read from here. "offline" would be a
-         * guess, and usually the wrong one.
+         * per-interface flag can be read from here.
          */
         tool_printf("  state       running, but this command cannot read it\n");
     }
@@ -466,9 +405,8 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         tool_format_mac(live->mac, mac, sizeof(mac));
 
         /*
-         * An IPv6-only interface has no IPv4 address and never will, so the
-         * three IPv4 lines said 0.0.0.0 three times over. One line saying so
-         * is the truth; three zero addresses read as a fault.
+         * An IPv6-only interface has no IPv4 address and never will; three
+         * zero addresses read as a fault.
          */
         if (live->address == 0UL &&
             !ami_config_iface_wants_ipv4(cfg))
@@ -516,11 +454,6 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                                                            : "static"));
 
     /*
-     * The IPv6 mode, which this report never printed. A machine whose
-     * interface file says CONFIGURE6 had no way of confirming that the stack
-     * had read it, and an IPv6-only machine had nothing on screen saying so at
-     * all -- only an address line reading 0.0.0.0.
-     *
      * Printed only when there is something to say: the floor build always
      * reports OFF and would gain a line that means nothing there.
      */
@@ -543,19 +476,11 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     }
 }
 
-/* INTERFACES: one line per interface. */
 /*
- * Whether the interface is switched on, read from the running stack.
- *
- * Was netstack_interface_is_up(), one of src/tools/netstack_weak.c's weak
- * stubs, which answered FALSE for every interface in every shipped build, so
- * this column read "offline" beside an interface carrying traffic.
- * docs/RESEARCH.md 22.
+ * INTERFACES: one line per interface, and whether it is switched on.
  *
  * link_up, not sana2_online: link_up (nx_interface_link_up) is the field Online
- * and Offline set, and the one netstack_interface_is_up() read. The SANA-II
- * shim's online flag is a different layer, and using it would make "Offline
- * eth0" followed by ShowNetStatus disagree.
+ * and Offline set. The SANA-II shim's online flag is a different layer.
  */
 static BOOL iface_online(const ToolIfInfo *live)
 {
@@ -565,14 +490,8 @@ static BOOL iface_online(const ToolIfInfo *live)
     return live->link_up;
 }
 
-/*
- * Whether a responder is running somewhere.  The system flag beside it only
- * says the library was built with mDNS.  MDNS= is per interface and
- * defaults to off, so a stack with no interface asking for it has no name to
- * report and is not in the middle of claiming one either.  Reading the system
- * flag alone printed "still claiming a name" for ever on every machine that
- * had simply not turned it on.
- */
+/* Whether a responder is running somewhere. The system flag beside it only says
+   the library was built with mDNS; MDNS= is per interface and defaults to off. */
 static BOOL mdns_answering(const ToolSnapshot *snap)
 {
     UWORD i;
@@ -605,11 +524,8 @@ static VOID list_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
 }
 
 /*
- * The IPv6 default router, as text, or NULL.
- *
- * The ::/0 entry of the routing table, which is where both a GATEWAY6 line and
- * a router advertisement's own address end up.  A route with no next hop is
- * on-link and is not a router, so it does not count.
+ * The IPv6 default router, as text, or NULL: the ::/0 entry of the routing
+ * table. A route with no next hop is on-link and is not a router.
  */
 static const char *default_router6(void)
 {
@@ -670,18 +586,9 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
             tool_copy_string(addr, sizeof(addr), "-");
 
         /*
-         * EVERY DEFINITION IS LISTED, however many there are, and the State
-         * column says which of three things each one is.
-         *
-         * "defined" is the state that had nowhere to be shown before.  A
-         * machine may describe more interfaces than NetX Duo has slots for --
-         * that is allowed and normal, see aminetxduo/config.h -- and one that
-         * was never attached has no live entry at all.  It used to fall
-         * through to "offline", which says an interface was up and was taken
-         * down.  Printing them apart is the visible half of the fix: an
-         * interface the user wrote a file for now APPEARS on this list instead
-         * of silently not existing, which is what sent somebody looking at
-         * their card for an evening.
+         * Every definition is listed, and State says which of three things it
+         * is. "defined" is a description that was never attached, which is not
+         * the same as an interface that was up and was taken down.
          */
         tool_printf("%-15s %-8s %-8s %s\n",
                     (LONG)cfg->interfaces[i].name,
@@ -782,8 +689,7 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
     /*
      * The live table from NETSTATUS_ROUTES rather than derived from the
      * interface list: with NX_ENABLE_IP_STATIC_ROUTING there are routes the
-     * interface list does not show. netstat prints the same rows through the
-     * same function.
+     * interface list does not show.
      */
     if (tool_routes(&routes) != 0)
         return;
@@ -796,11 +702,8 @@ static VOID show_routes(const AmiConfig *cfg, BOOL have_live)
         tool_print_routes6(&routes6, cfg);
 
     /*
-     * The destination cache under the two lists it is resolved from, because
-     * it is the routing decision this machine made and it is the first table
-     * _nx_ipv6_packet_send() reads. It is a fixed-size cache, and a full one
-     * used to fail a send with nothing said anywhere. This report is where a
-     * reader finds out that it is full and what is holding the slots.
+     * The destination cache under the two lists it is resolved from: it is the
+     * first table _nx_ipv6_packet_send() reads, and it is fixed-size.
      */
     if (tool_dest6(&dest6) == 0)
         tool_print_dest6(&dest6, cfg);
@@ -840,9 +743,8 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
     }
 
     /*
-     * Say where the list came from: a DHCP lease supplies name servers that
-     * replace the file's, so a list read off disk can name a server the
-     * machine is not using.
+     * Say where the list came from: a DHCP lease's name servers replace the
+     * file's, so a list read off disk can name a server nothing is using.
      */
     if (from_files && r->nameserver_count > 0)
         tool_printf("                (from DEVS:Internet. A DHCP interface is\n"
@@ -850,18 +752,9 @@ static VOID show_resolver(const AmiResolverConfig *r, BOOL from_files)
 }
 
 /*
- * What a name with no dot in it is looked up under. This used to be printed
- * only when the stack was not running: the live branch below returns as soon
- * as it has the name servers, so a working machine reported neither its domain
- * nor its search list, and the report could not say why `ssh shortname` fails
- * to resolve.
- *
- * The domain comes from the running stack when there is one, through
- * GetDefaultDomainName(): a lease's option 15 and a router advertisement's RFC
- * 8106 5.2 list both name one, neither is on disk, and on an IPv6-only link the
- * advertisement is the only source there is. The search list below it is still
- * the file's, and says so. Handing that back needs a NETSTATUS query and an
- * AMI_NETSTATUS_VERSION bump.
+ * What a name with no dot in it is looked up under. The domain comes from the
+ * running stack when there is one, through GetDefaultDomainName(); the search
+ * list below it is still the file's, and says so.
  */
 static VOID show_search(const AmiResolverConfig *r)
 {
@@ -883,28 +776,18 @@ static VOID show_search(const AmiResolverConfig *r)
 }
 
 /*
- * Name servers, from the running stack when it can be asked. A DHCP lease
- * replaces whatever the file says, so reading the file alone reports a server
- * the machine is not using, or "none configured" on a machine whose lookups
- * work. Returns TRUE when at least one is in use.
+ * Name servers, from the running stack when it can be asked: a DHCP lease
+ * replaces whatever the file says. TRUE when at least one is in use.
  */
 static BOOL show_dns(const AmiConfig *cfg, BOOL elsewhere, BOOL from_disk)
 {
     (VOID)elsewhere;
 
     /*
-     * Always ask the running stack first, whether or not the snapshot worked.
-     *
-     * This was once gated on `elsewhere`, so it asked the stack only when the
-     * snapshot had failed, which is the wrong way round, because the snapshot
-     * does not carry name servers at all. A DHCP machine reported "none
-     * configured" while resolving through the server its lease supplied, which
-     * is the disagreement netstack_dns.c's note on recording DHCP servers
-     * exists to prevent.
-     *
+     * Always ask the running stack first, whether or not the snapshot worked:
+     * the snapshot does not carry name servers at all.
      * tool_stack_name_servers() returns 0 when nothing is running, so the file
-     * remains the fallback and a stopped machine still reports what it is
-     * configured to use.
+     * remains the fallback.
      */
     {
         char  live_ns[TOOL_NAME_SERVERS_MAX][AMI_CFG_IP6_STRLEN];
@@ -1017,10 +900,8 @@ static VOID show_udp_stats(const ToolStats *st)
     tool_printf("  dropped on receipt%10lu\n", st->udp_receive_dropped);
 }
 
-/*
- * MEMORY is the packet pool, which is all the memory the network has here. A
- * free count of zero is what a stall looks like from outside.
- */
+/* MEMORY is the packet pool, which is all the memory the network has here. A
+   free count of zero is what a stall looks like from outside. */
 static VOID show_memory(const ToolStats *st)
 {
     tool_printf("\nMemory buffers\n");
@@ -1041,9 +922,8 @@ static VOID show_memory(const ToolStats *st)
 }
 
 /*
- * TCPSOCKETS / UDPSOCKETS. Without ALL only sockets with a peer are listed.
- * ALL adds the merely bound ones, every listener and every idle datagram
- * socket.
+ * TCPSOCKETS / UDPSOCKETS. Without ALL only sockets with a peer are listed;
+ * ALL adds every listener and every idle datagram socket.
  */
 static VOID show_tcp_sockets(const ToolSnapshot *snap, BOOL all)
 {
@@ -1132,19 +1012,15 @@ static VOID show_udp_sockets(const ToolSnapshot *snap, BOOL all)
 
 /* ------------------------------------------------------------- diagnosis, */
 
-/*
- * States that are individually correct field values and collectively a machine
- * that cannot reach anything.
- */
+/* Field values that are individually correct and collectively a machine that
+   cannot reach anything. */
 static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                                const ToolSnapshot *snap,
                                BOOL up, BOOL stack_running, BOOL readable)
 {
     /*
-     * Only diagnose what can be seen. Every check below reads live interface
-     * state, and guessing it for an unreadable stack reported an interface as
-     * offline, with the advice to run Online on it, while that interface was
-     * up and holding a DHCP lease.
+     * Only diagnose what can be seen: every check below reads live interface
+     * state, and guessing it for an unreadable stack gives wrong advice.
      */
     if (!stack_running || !readable)
         return;
@@ -1160,22 +1036,6 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
 
     if (live == NULL || !live->attached)
     {
-        /*
-         * THE BRANCH THE MISSING INTERFACE NOW REACHES.
-         *
-         * It could not be reached before, for the interfaces it matters most
-         * for: the parser stopped at two, so a third interface file was
-         * dropped and never became a description at all.  This report then
-         * had nothing to say about it, because as far as the configuration
-         * was concerned there was nothing there.  Every definition is read
-         * now, so an interface that exists on disk and is not running is
-         * VISIBLE here, which is the whole point of the change.
-         *
-         * The advice names the two things that can be looked at rather than
-         * asking the user to run the whole bring-up again and watch it go by:
-         * the event ring has the call that refused, and if the answer is that
-         * every slot is taken then something has to come down first.
-         */
         problem_head();
         tool_printf("  * %s is described in DEVS:NetInterfaces but was never "
                     "attached, so it is not part of the running network.\n",
@@ -1196,10 +1056,8 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     }
 
     /*
-     * "No address" is a question about the machine, not about IPv4.  An
-     * IPv6-only interface has no IPv4 address by design, and this block told
-     * such a machine it could not be used yet and to run NetSetup and give it
-     * one -- advice that would have switched off the only addressing it had.
+     * "No address" is a question about the machine, not about IPv4: an
+     * IPv6-only interface has no IPv4 address by design.
      */
     if (tool_iface_has_address(snap, live))
         return;
@@ -1238,26 +1096,9 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
 
 /* --------------------------------------------------------- the host name,
  *
- * The reported fault: a machine renamed to a1200 by an interface file went on
- * calling itself a3000.local. Two things were wrong with the report itself.
- *
- * ".local" is the mDNS suffix, and RFC 6762 3 makes a .local name link-local
- * in scope and explicitly not globally unique, so it is never this machine's
- * name. It is the name the machine answers to on this wire, and it is reported
- * on its own line. When a domain is known, it goes after the host name
- * instead.
- *
- * Composing host and domain into a fully-qualified name is convention rather
- * than conformance. RFC 2132 3.17 calls option 15 the domain to use "when
- * resolving host names via the Domain Name System", which is a resolver search
- * domain and not an instruction to take that name. dhclient and its kind do it
- * anyway, and it is what somebody who set DOMAIN= expects to see. (RFC 4702's
- * option 81 is the mechanism that specifies a client's FQDN. It is not
- * implemented here.)
- *
- * A name also says nothing about where it came from, and here it came from a
- * leftover ENV:HOSTNAME, which is the one source a reader would never think to
- * check. So the source is named.
+ * ".local" is the mDNS suffix, and RFC 6762 3 makes a .local name link-local in
+ * scope and explicitly not globally unique, so it is never this machine's name.
+ * It is reported on its own line, and where the name came from is named too.
  */
 
 /* The domain to show after the host name, or FALSE for none. */
@@ -1318,9 +1159,7 @@ static VOID show_host_name(const char *host, UWORD source,
         tool_printf(".%s", (LONG)domain);
 
     /* No source means nothing configured one, so the stack named the machine
-       after its card's hardware address, "amiga-490007", or "amiga" if no
-       card would give one. `hostname` tells the two apart in words. Here it
-       is a footnote to a line the reader can already see. */
+       after its card's hardware address. `hostname` tells the two apart. */
     if (from != NULL)
         tool_printf(" (from %s)\n", (LONG)from);
     else
@@ -1348,14 +1187,7 @@ static BOOL interface_selected(STRPTR *list, const char *name)
 }
 
 /*
- * The programs using the network.
- *
- * Nothing else on the Amiga reports this. Roadshow's ShowNetStatus lists
- * sockets and not the programs that own them, and AmiTCP kept its
- * socketBaseList private, so which program has to be closed before the network
- * can shut down has always been guesswork. NetShutdown answers that for the
- * programs that did not let go. This answers it beforehand.
- *
+ * The programs using the network, which nothing else on the Amiga reports.
  * Static: 16 rows is most of a Shell command's stack on its own.
  */
 static struct
@@ -1426,30 +1258,9 @@ static VOID show_users(BOOL stack_running)
 
 /* ------------------------------------------------------------------ events,
  *
- * What the library did, out of the ring it keeps for the purpose.
- *
- * THE FAULT THIS ANSWERS.  Every AMI_ERROR in the tree compiles away unless
- * AMINETXDUO_LOG is defined, and no shipped binary defines it, so a machine
- * that refused to shut down or came up with a dead card said nothing a user
- * could quote.  The library records numbers; the sentences are in
- * src/tools/tool_events.c and nowhere in any library or device.
- *
- * READ THROUGH THE PUBLISHED MARK, NOT THROUGH NetStackQuery().  Both work
- * while the stack is up and only one works afterwards, which is when this is
- * worth printing: OpenLibrary("bsdsocket.library") calls netstack_startup(),
- * so a command that opened the library to ask about a teardown would restart
- * the network and report on a machine that no longer exists.  After a
- * NetShutdown the library is still resident with an open count of zero, and
- * FindSemaphore() finds the mark there.  aminetxduo/health.h is the same
- * arrangement for the same reason.
- *
- * The record is copied whole under Forbid() and printed afterwards.  The
- * library removes the mark under Forbid() in its expunge, before the memory
- * holding the ring can go, so a reader that holds Forbid() across the find and
- * the copy cannot be reading a freed one.  The semaphore is never obtained: a
- * diagnostic must not block on the thing that may be broken.
- *
- * Static: 32 rows of 16 bytes is more than a Shell command's stack.
+ * Read through the published mark, NOT NetStackQuery(): OpenLibrary() would
+ * call netstack_startup() and restart the network. Copied whole under Forbid();
+ * the semaphore is never obtained. Static: 32 rows exceed a Shell stack.
  */
 static struct
 {
@@ -1463,10 +1274,7 @@ static struct
 #define SNS_EV_ABSENT       1
 #define SNS_EV_BAD_VERSION  2
 
-/*
- * Oldest first, into sns_events.e.  Returns how many were copied, or -1 and
- * sets *status.
- */
+/* Oldest first, into sns_events.e. How many were copied, or -1 and *status. */
 static LONG sns_events_read(UWORD *status)
 {
     const AmiEventMark   *mark;
@@ -1484,8 +1292,7 @@ static LONG sns_events_read(UWORD *status)
     {
         /*
          * The header's shape and one entry's, and not the whole object's size:
-         * the ring's length is a build option, so a command and a library that
-         * disagree about it agree about everything that matters here.
+         * the ring's length is a build option.
          */
         if (mark->em_Version   == (UWORD)AMI_EVENTS_VERSION &&
             mark->em_Size      == (UWORD)sizeof(AmiEventMark) &&
@@ -1585,9 +1392,8 @@ static VOID show_events(VOID)
         {
             const char *detail = tool_event_detail(e->nse_Code);
 
-            /* Signed: an OpenDevice error is negative, and a count is
-               small and positive, so one form reads correctly for both.
-               -2 printed as 4294967294 is a number nobody can act on. */
+            /* Signed: an OpenDevice error is negative and a count is small and
+               positive, so one form reads correctly for both. */
             if (detail != NULL)
                 tool_printf(", %s %ld", (LONG)detail, (LONG)e->nse_Value);
         }
@@ -1600,10 +1406,8 @@ static VOID show_events(VOID)
         tool_printf("(list truncated at %ld)\n", (LONG)n);
 }
 
-/*
- * One pass of the whole report. REPEAT calls it again every second, so nothing
- * here allocates and everything it needs is passed in.
- */
+/* One pass of the whole report. REPEAT calls it again every second, so nothing
+   here allocates and everything it needs is passed in. */
 static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 {
     static ToolSnapshot snap;
@@ -1630,13 +1434,6 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     /*
      * Two states: the stack runs inside bsdsocket.library and NetStackQuery()
      * reads it, or it is not running and the files on disk are all there is.
-     *
-     * There used to be a third, a stack linked into this command, which was
-     * never true in a shipped build. No tool links aminetxduo_netstack, so
-     * netstack_get() is src/tools/netstack_weak.c's stub and returns NULL.
-     * That left the running-but-unreadable case, which made this report print
-     * the configuration and nothing else while the network worked.
-     * docs/RESEARCH.md 21.
      */
     if (tool_stack_library_running())
     {
@@ -1644,9 +1441,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         (VOID)tool_stack_query(&ext_addr, ext_host, sizeof(ext_host));
 
         /*
-         * Failure is silent here: the line saying the stack is up and cannot
-         * be read is printed further down, rather than as an error block in
-         * the middle of a table.
+         * Failure is silent here: the line saying the stack is up and cannot be
+         * read is printed further down rather than in the middle of a table.
          */
         if (tool_snapshot(&snap, want_sockets) == 0)
             have_live = TRUE;
@@ -1679,12 +1475,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                     (LONG)(stack_running ? "running" : "not started"));
 
         /*
-         * Which stack, and which build of it. Asked for by a user who could
-         * not tell installed versions apart: C: and LIBS: are updated
-         * separately, so the library in memory is the one worth reporting and
-         * it is not necessarily the same age as this command. Nothing is said
-         * when no library is loaded, there is no version to report, and the
-         * line above has already said the stack is not started.
+         * Which stack, and which build of it: C: and LIBS: are updated
+         * separately, so the library in memory is the one worth reporting.
          */
         {
             char id[64];
@@ -1694,10 +1486,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         }
 
         /*
-         * The running stack's name, and the running stack's account of where
-         * it came from: DHCP can rename the machine after the files on disk
-         * were read, and a library too old to answer leaves the source at
-         * AMI_HOSTNAME_NONE, which reads as "derived" rather than as a guess.
+         * The running stack's name, and its account of where it came from: DHCP
+         * can rename the machine after the files on disk were read.
          */
         if (ext_host[0] != '\0')
             show_host_name(ext_host,
@@ -1709,12 +1499,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
             show_host_name(cfg->hostname, cfg->hostname_source, cfg, &dhcp,
                            have_lease);
 
-        /*
-         * The name other machines can use, which differs from the host name
-         * and was reported nowhere, netstack_mdns_hostname() had no caller.
-         * Without it a user hands out the address instead, which DHCP will
-         * change.
-         */
+        /* The name other machines can use, which differs from the host name. */
         if (have_live && snap.have_mdns && mdns_answering(&snap))
         {
             if (snap.mdns_name[0] != '\0')
@@ -1744,11 +1529,9 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         else
         {
             /*
-             * The IPv6 default router, before giving up.  This line read
-             * "none" on a machine whose only route off its own network was
-             * one a router advertisement had given it, which is every
-             * IPv6-only machine, and "no default route" is the first thing
-             * anyone reads it for.
+             * The IPv6 default router, before giving up: an IPv6-only
+             * machine's only route off its own network is one a router
+             * advertisement gave it.
              */
             const char *router6 = default_router6();
 
@@ -1765,9 +1548,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
         show_interface_list(cfg, &snap, have_live, (BOOL)!elsewhere);
 
     /*
-     * The per-interface blocks: every interface in summary mode, or the ones
-     * INTERFACE named. The named form is the detailed one and carries the
-     * SANA-II counters.
+     * Every interface in summary mode, or the ones INTERFACE named. The named
+     * form is the detailed one and carries the SANA-II counters.
      */
     if (w->summary || (w->interface != NULL && w->interface[0] != NULL))
     {
@@ -1781,15 +1563,9 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
                 continue;
 
             /*
-             * BY IDENTITY, never by subscript.  A description is a file in
-             * DEVS:NetInterfaces and an NX slot is a piece of hardware the
-             * stack has open; the drawer may hold more descriptions than there
-             * are slots, and a card that did not open moves everything behind
-             * it down one.  Pairing them by position reported a working card's
-             * address under the name of the interface that failed.
-             *
-             * The lease table is per NX slot, so it is subscripted by the
-             * interface that was found rather than by the description.
+             * By identity, never by subscript: the drawer may hold more
+             * descriptions than there are slots, and a card that did not open
+             * moves everything behind it down one. The lease table is per slot.
              */
             if (have_live)
                 live = tool_iface_live(&snap, &cfg->interfaces[i]);
@@ -1843,15 +1619,15 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
     /*
      * No stack_running argument: this one reads the published mark rather than
-     * the library, so it answers after a shutdown, which is the case it is for.
+     * the library, so it answers after a shutdown.
      */
     if (w->events)
         show_events();
 
     /* ---- the diagnosis --------------------------------------------------
      *
-     * Summary mode only, and all of it after the report rather than
-     * interleaved, so "What to look at" is one list in one place.
+     * Summary mode only, and all of it after the report, so "What to look at"
+     * is one list in one place.
      */
 
     if (!w->summary)
@@ -1873,8 +1649,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     {
         /*
          * Nothing is set up. Adding the missing default route and the missing
-         * name server would be three complaints about one fact, so this is the
-         * only one.
+         * name server would be three complaints about one fact.
          */
         problem_head();
         tool_explain_no_interfaces();
@@ -1892,10 +1667,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     }
 
     /*
-     * A DHCP interface gets a router and a name server with its address, and a
-     * stack visible only from outside reports neither. The route and
-     * name-server checks therefore run only when nothing else supplies them,
-     * to avoid a false alarm on the commonest setup.
+     * A DHCP interface gets a router and a name server with its address, so the
+     * route and name-server checks run only when nothing else supplies them.
      */
     {
         BOOL any_dhcp = FALSE;
@@ -1951,10 +1724,9 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 }
 
 /*
- * The body, so that ami_netdb_free() has one place to run.  atexit() is not
- * free here: libnix satisfies it out of an object that also references malloc
- * and __errno, which pulls in the C++ AVL allocator and the stdio FILE
- * machinery, about 7.7 KB nothing in this command calls.
+ * The body, so that ami_netdb_free() has one place to run. atexit() is not free
+ * here: libnix satisfies it out of an object that drags in about 7.7 KB of
+ * malloc and stdio machinery nothing in this command calls.
  */
 static int shownetstatus_main(int argc, char **argv);
 
@@ -2014,7 +1786,7 @@ static int shownetstatus_main(int argc, char **argv)
 
     /*
      * ALL and NAMES modify the other categories rather than selecting one, so
-     * neither counts here: "ShowNetStatus ALL" is still the summary.
+     * neither counts here.
      */
     w.summary = (BOOL)!(w.interfaces || w.arp || w.routes || w.dns ||
                         w.icmp || w.ip || w.memory || w.tcp || w.udp ||
@@ -2025,8 +1797,7 @@ static int shownetstatus_main(int argc, char **argv)
 
     /*
      * This command prints its own line for a stack that is up and cannot be
-     * read, in its own place. tool_snapshot()'s error block is for netstat,
-     * which has nothing else to print.
+     * read. tool_snapshot()'s error block is for netstat.
      */
     tool_nx_quiet(TRUE);
 
@@ -2034,9 +1805,8 @@ static int shownetstatus_main(int argc, char **argv)
     if (cfg == NULL)
     {
         /*
-         * Read the files here. ami_config_load() is what the stack calls at
-         * startup, so this is the same view it would get, including every
-         * complaint it would make via tool_config_watch().
+         * ami_config_load() is what the stack calls at startup, so this is the
+         * same view it would get, including every complaint it would make.
          */
         from_disk = (AmiConfig *)ami_alloc((ULONG)sizeof(AmiConfig));
         if (from_disk == NULL)
@@ -2050,14 +1820,6 @@ static int shownetstatus_main(int argc, char **argv)
         (VOID)ami_config_load(from_disk);
         tool_config_unwatch();
 
-        /*
-         * ami_config_load() loads the netdb too (src/config/config_file.c),
-         * and this branch is taken on every run, because netstack_config()
-         * above is the weak stub in netstack_weak.c and is always NULL in a
-         * command. So the twelve blocks leak without NAMES as well as with it,
-         * and names_prepare() covers only its own load.
-         */
-
         cfg = from_disk;
     }
 
@@ -2069,9 +1831,8 @@ static int shownetstatus_main(int argc, char **argv)
             break;
 
         /*
-         * REPEAT: once a second until Ctrl-C, screen cleared first so the
-         * numbers stay in place and changes show. Form feed is what an Amiga
-         * console clears on.
+         * REPEAT: once a second until Ctrl-C, screen cleared first. Form feed is
+         * what an Amiga console clears on.
          */
         if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
             break;

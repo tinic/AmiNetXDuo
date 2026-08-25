@@ -5,28 +5,7 @@
 #
 #     tests/tools/smb2-testserver.py [PORT]        default 4445
 #
-# It serves ~/smbshare as RETRO to amiga/bantha, so the harness mounts
-#
-#     smb://amiga:bantha@<this host>:4445/RETRO
-#
-# WHY NOT SAMBA.  Samba wants root and a package; this needs neither, and the
-# lab machines have no sudo.  The cost is that impacket's SMB2 server is not
-# conformant, and libsmb2 -- which is what smb2-handler is -- notices.  The
-# three hooks below are the three places it is wrong; each one was found by
-# reading the guest's serial log, where smb2fs KPrintF()s the libsmb2 error
-# before it opens the requester that blocks the handler.
-#
-# THE EMULATING HOST CANNOT BE THIS MACHINE: with uaenet_pcap on a shared NIC
-# a frame the guest sends to the host's own MAC does not come back round to
-# that NIC, so run this on a third machine on the same LAN.
-#
 # SPDX-License-Identifier: MIT
-#
-# impacket answers a FILESYSTEM QueryInfo for FileFsFullSizeInformation (class
-# 7) with four zero bytes, because smbserver.py's SMB2_0_INFO_FILESYSTEM branch
-# tests FileInfoClass against SMB2_FILE_EA_INFO, which is also 7.  libsmb2 then
-# says "could not decode file fs full size info" and smb2fs opens a blocking
-# requester.  The hook below returns the 32 bytes the structure actually is.
 import binascii, os, sys, logging, struct
 from impacket import smbserver
 from impacket import smb3structs as smb2
@@ -69,10 +48,6 @@ def query_info(connId, smbServer, recvPacket):
     return cmds, pkts, err
 
 
-# MS-SMB2 2.2.2: an error response with ByteCount 0 still carries one byte of
-# ErrorData, so the body is 9 bytes.  impacket emits 8 and libsmb2 says
-# "Unexpected size of Error reply.  Expected 9, got 8" and gives up, which
-# smb2fs turns into a blocking requester.
 _orig_error_getData = smb2.SMB2Error.getData
 
 
@@ -94,13 +69,6 @@ s.addCredential("amiga", 0, "", binascii.hexlify(compute_nthash("bantha")).decod
 srv = s._SimpleSMBServer__server
 srv.hookSmb2Command(smb2.SMB2_QUERY_INFO, query_info)
 
-# MS-SMB2 2.2.2 again: when a command fails, the response body IS the error
-# structure.  impacket returns the command's own success-shaped body with a
-# failure status on it -- a CLOSE reply with StructureSize 60 and status
-# STATUS_INVALID_HANDLE, for instance.  libsmb2 reads StructureSize, does not
-# find 9, and reports "Unexpected size of Error reply", which smb2fs turns
-# into a blocking requester.  Every command handler is wrapped so a failure
-# carries an error body.
 NOT_REALLY_ERRORS = (0x00000000, 0xC0000016, 0x80000005, 0x00000103)
 
 

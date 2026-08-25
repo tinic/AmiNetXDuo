@@ -1,24 +1,5 @@
 #!/usr/bin/env bash
-#
 # Prove src/tools/test/test_argtemplates.c can fail.
-#
-#   tests/tools/argtemplates-verdict-selftest.sh
-#
-# It is a checker that reads the tree it is checking, so it has the failure
-# mode every such checker has: a parser that quietly stops matching passes
-# everything for the same reason it passes a clean tree, and the ctest case
-# stays green while the thing it guards rots.  Twenty-five of the commands it
-# covers have no other host test at all, so nothing else would notice.
-#
-# Each case below breaks one file in a copy of the tree and asserts the group
-# that owns it turns red, then puts the file back and asserts green.  Six of
-# them are defects that were really in the tree on 2026-08-11 -- three stale
-# restatements of a template, one dead switch -- so those are regression tests
-# for the checker and for the fixes at once.
-#
-# Compiles the checker itself: this runs before the host cmake configure, so
-# there is no build tree yet.  Needs cc and python3; about two seconds.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail
@@ -43,10 +24,6 @@ cp "$ROOT/docs/user/AmiNetXDuo.guide" "$TREE/docs/user/"
 cases=0
 wrong=0
 
-# Exact literal replacement, first occurrence, and a hard error if the text
-# this case is built on is not there any more.  sed would need the pattern
-# escaped and would silently do nothing when it stopped matching, which is the
-# failure this whole file exists to prevent.
 replace() {
     python3 - "$TREE/$1" "$2" "$3" <<'PY'
 import io, sys
@@ -91,7 +68,6 @@ if ! AMINETXDUO_SOURCE_DIR="$TREE" "$CHECKER" > "$T/out" 2>&1; then
     exit 1
 fi
 
-# --- enums: the template and the enum that indexes it ---------------------
 
 case_red enums src/tools/netstat.c \
     '"INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S"' \
@@ -103,7 +79,6 @@ case_red enums src/tools/whois.c \
     '#define TEMPLATE    "QUERY/A,SERVER/K,PORT/N/K,FOLLOW/S,-4=IPV4/S,-6=IPV6/S"' \
     'the -4/-6 pair respelled in one command'
 
-# --- contract: what the code does with the slot ---------------------------
 
 case_red contract src/tools/sntp.c \
     '    args[ARG_TIMEOUT] = 0;
@@ -143,13 +118,10 @@ case_red contract src/tools/telnet.c \
     'TOOL_VERSTAG("telnet")' 'TOOL_VERSTAG("Telnet")' \
     'the version tag and tool_name disagreeing'
 
-# NetTrace shipped exactly this: LOOPBACK in the template, ARG_LOOPBACK read
-# nowhere, so LOOPBACK next to HOST ran a wire capture and said nothing.
 case_red contract src/tools/nettrace.c \
     '    if (args[ARG_LOOPBACK] != 0 && wire)' '    if (0 && wire)' \
     'an option parsed and never read (the NetTrace LOOPBACK defect)'
 
-# --- usage: the synopsis printed when the arguments were wrong ------------
 
 case_red usage src/tools/removenetinterface.c \
     '"<interface> [FORCE] [QUIET]"' '"<interface> [FORCED] [QUIET]"' \
@@ -160,15 +132,12 @@ case_red usage src/tools/httpd.c \
     'tool_usage("<drawer> [<port>] [-x] [TRACE]' \
     'a synopsis short flag the template does not have'
 
-# --- docs: the template restated for a reader -----------------------------
 
-# GetNetStatus grew VERSION/S and its header comment did not follow.
 case_red docs src/tools/getnetstatus.c \
     ' *     GetNetStatus CHECK/K,QUIET/S,VERSION/S' \
     ' *     GetNetStatus CHECK/K,QUIET/S' \
     'a header comment behind its template (the GetNetStatus VERSION defect)'
 
-# ping grew the -4/-6 pair and neither its header nor the guide followed.
 case_red docs src/tools/ping.c \
     ' *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
  *          IPV4=-4/S,IPV6=-6/S' \
@@ -180,8 +149,6 @@ case_red docs docs/user/AmiNetXDuo.guide \
     '      host NAME/A,TIMEOUT/N/K' \
     'the guide behind the template (the host -4/-6 defect)'
 
-# netstat's template is in the guide twice, as a heading and as what "?"
-# answers, and only one of the two had HEALTH=-h/S.
 case_red docs docs/user/AmiNetXDuo.guide \
     '      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S:' \
     '      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S:' \

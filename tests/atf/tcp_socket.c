@@ -54,15 +54,9 @@ ATF_TC_BODY(implied_connect, tc)
 	sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	ATF_REQUIRE(listen(s, -1) == 0);
 #if 0
-	/*
-	 * The disabled code is that you would normally do.
-	 */
 	ATF_REQUIRE(connect(c, (struct sockaddr *)&sin, sizeof(sin)) == 0);
 	ATF_REQUIRE(send(c, &buf, sizeof(buf), 0) == sizeof(buf));
 #else
-	/*
-	 * And this is implied connect.
-	 */
 	ATF_REQUIRE(sendto(c, &buf, sizeof(buf), 0, (struct sockaddr *)&sin,
 	    sizeof(sin)) == sizeof(buf));
 #endif
@@ -72,10 +66,6 @@ ATF_TC_BODY(implied_connect, tc)
 	ATF_REQUIRE(strcmp(buf, repl) == 0);
 }
 
-/*
- * A disconnected TCP socket shall return the local address it used before
- * it was disconnected.
- */
 ATF_TC_WITHOUT_HEAD(getsockname_disconnected);
 ATF_TC_BODY(getsockname_disconnected, tc)
 {

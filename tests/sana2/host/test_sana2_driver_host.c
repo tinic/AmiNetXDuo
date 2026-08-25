@@ -1,33 +1,6 @@
 /*
  * AmiNetXDuo, the NX_IP driver entry, on the host.
  *
- * src/sana2/sana2_driver.c is the whole of what NetX Duo can ask a SANA-II
- * device to do: twenty-odd NX_LINK_* commands, the binding table that finds
- * the interface each one is about, and the EtherType the send path is framed
- * with.  It had no test.
- *
- * It is a good host target for the reason the transmit test is: it is
- * dispatch, arithmetic and state, and every device-facing call it makes is an
- * extern this file can define.  What runs below is the real
- * ami_sana2_driver_entry(), the real ami_sana2_attach() and the real binding
- * table; only the things on the other side of the device -- the six SANA-II
- * entry points and four nx_ip_interface_* setters -- are answered here.
- *
- * The three that would be silent in the field:
- *
- *   A packet handed to an interface with no binding.  The driver still has to
- *   fail, and it has to release the packet first; a leak here is a packet the
- *   pool never gets back, on a machine with 1 MB and no way to notice.
- *
- *   The EtherType.  ARP and RARP come from the COMMAND, everything else from
- *   the packet's IP version.  Getting it from the packet for an ARP request
- *   puts 0x0800 on an ARP frame, which no peer answers and nothing logs.
- *
- *   The link-up flag.  It is the only thing NetX Duo knows about the wire, and
- *   AMI_LINK_STACK_DISABLE exists precisely to clear it WITHOUT stopping the
- *   readers.  A case that fell through to NX_LINK_DISABLE would take the wire
- *   away and look identical from the stack's side.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,8 +10,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-/* --------------------------------------------------------------- harness -- */
 
 static unsigned long h_checks;
 static unsigned long h_failures;
@@ -53,14 +24,6 @@ static void h_check(int ok, const char *what)
     }
 }
 
-/* ------------------------------------------------------------------ exec -- */
-
-/*
- * Counted rather than empty.  ami_sana2_attach() and ami_sana2_unbind() write
- * the binding table under Forbid(), and the table is read with no lock at all
- * by ami_sana2_lookup() on the IP thread.  A Forbid() that is left standing
- * stops multitasking on the whole machine.
- */
 static int h_forbid_nest;
 static int h_forbid_max;
 
@@ -75,8 +38,6 @@ VOID Permit(VOID)
 {
     h_forbid_nest--;
 }
-
-/* ------------------------------------------------- what NetX Duo answers -- */
 
 static ULONG h_mtu_set;
 static ULONG h_phys_msw;
@@ -137,14 +98,6 @@ UINT _nxe_packet_transmit_release(NX_PACKET **packet_ptr_ptr)
     return NX_SUCCESS;
 }
 
-/* -------------------------------------------------- what SANA-II answers -- */
-
-/*
- * Every device-facing call the entry makes, recorded in order.  The order is
- * half of what several of these cases are: NX_LINK_DISABLE has to stop the
- * readers before it takes the wire away, and NX_LINK_ENABLE has to put the
- * wire back if the readers will not start.
- */
 static char h_log[256];
 
 static void h_note(const char *what)
@@ -262,13 +215,6 @@ VOID ami_log(int level, const char *fmt, ...)
     (VOID)fmt;
 }
 
-/*
- * src/sana2/sana2_copy.c is linked in for ami_sana2_copy_bytes(), which
- * NX_LINK_SET_PHYSICAL_ADDRESS uses to publish the new address.  Its other two
- * entry points are the interrupt-time hooks and are not reached from here, but
- * they are in the same object, so their two net68k primitives and the vendored
- * checksum have to resolve.  Same three stubs as test_sana2_tx_host.c.
- */
 VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 {
     if (len != 0)
@@ -299,8 +245,6 @@ VOID _nx_ip_packet_checksum_compute(NX_PACKET *packet_ptr)
 {
     packet_ptr->nx_packet_interface_capability_flag = 0;
 }
-
-/* ------------------------------------------------------------- fixtures -- */
 
 static AmiSana2If   iface;
 static NX_IP        ip;
@@ -360,14 +304,6 @@ static ULONG drive(UINT command)
     return ret;
 }
 
-/* =============================================== the binding table ======= */
-
-/*
- * Interface 0 is attached by nx_ip_create() itself, before anything can reach
- * its NX_INTERFACE, so the binding is recorded first and folded into
- * nx_interface_additional_link_info the first time the driver runs.  The
- * memoisation is what keeps every later command off the table walk.
- */
 static void test_lookup_and_memoise(void)
 {
     printf("sana2: a binding is found once and then memoised\n");
@@ -508,12 +444,6 @@ static void test_reattach_updates_existing_binding(void)
     ami_sana2_unbind(&blocker);
 }
 
-/*
- * The leak.  An interface with no binding is a state the stack can reach
- * during teardown, and NX_LINK_PACKET_SEND carries a packet the pool is owed
- * back.  Failing the command without releasing it loses one packet per send,
- * silently, until the pool is empty and the machine stops networking.
- */
 static void test_unbound_send_releases_the_packet(void)
 {
     printf("sana2: an unbound interface does not keep the packet\n");
@@ -569,13 +499,6 @@ static void test_unbound_control_ignores_stale_packet(void)
     h_check(h_releases == 0, "and the stale packet pointer is not released");
 }
 
-/* =================================================== the EtherType ======= */
-
-/*
- * ARP and RARP are named by the COMMAND; everything else by the packet's IP
- * version.  An ARP frame framed as 0x0800 is answered by nobody and logged by
- * nothing: the machine simply cannot resolve an address.
- */
 static void test_ether_type(void)
 {
     static const struct {
@@ -667,13 +590,6 @@ static void test_send_status_is_passed_up(void)
     ami_sana2_unbind(&iface);
 }
 
-/* ================================================= initialise / enable === */
-
-/*
- * NX_LINK_INITIALIZE publishes the MAC to NetX Duo as two words.  The split is
- * not obvious and is easy to get one byte out: the top two bytes are the msw
- * and the bottom four the lsw, both big-endian in the MAC's own order.
- */
 static void test_initialize_publishes_the_mac(void)
 {
     printf("sana2: initialise publishes the MTU and the MAC\n");
@@ -690,14 +606,6 @@ static void test_initialize_publishes_the_mac(void)
     h_check(h_mapping == NX_TRUE, "and an Ethernet wire wants address mapping");
 
 #ifdef AMINETXDUO_RX_VERIFY
-    /*
-     * The checksum offload NetX Duo is told about.  Receive is five protocols
-     * because ami_sana2_rx_deliver() publishes a per-packet flag as well and
-     * the stack requires both; transmit is TCP and ONLY TCP, because
-     * ami_sana2_copy_from_buff() has a walk to fall back on for that one and
-     * for nothing else.  Every extra bit advertised here is another way to put
-     * a bad checksum on a wire.
-     */
     h_check(h_caps_calls == 1, "the offload is advertised once");
     h_check(h_caps_set == (NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
                            NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM |
@@ -711,11 +619,6 @@ static void test_initialize_publishes_the_mac(void)
     ami_sana2_unbind(&iface);
 }
 
-/*
- * An addressless wire, SLIP or PPP, reports AddrFieldSize 0.  ARP has nothing
- * to resolve to there, and leaving mapping on means every send waits for an
- * ARP reply that cannot come.
- */
 static void test_initialize_addressless(void)
 {
     printf("sana2: an addressless wire gets no address mapping\n");
@@ -731,12 +634,6 @@ static void test_initialize_addressless(void)
     ami_sana2_unbind(&iface);
 }
 
-/*
- * Enable brings the wire up, then the readers.  If the readers will not start
- * the wire has to go back down, or the device is left online with nothing
- * reading it: every frame it receives is dropped by the driver and the stack
- * is told the link is up.
- */
 static void test_enable_unwinds_on_a_failed_reader(void)
 {
     printf("sana2: enable puts the wire back if the readers will not start\n");
@@ -776,13 +673,6 @@ static void test_enable_unwinds_on_a_failed_reader(void)
     ami_sana2_unbind(&iface);
 }
 
-/*
- * The distinction AMI_LINK_STACK_DISABLE exists for.  SM_Down means "stop
- * transmitting", not "take the wire away": stopping the readers means
- * S2_OFFLINE, which is the only thing that returns a queued CMD_READ on a
- * device that ignores AbortIO.  A case that fell through to NX_LINK_DISABLE
- * would look the same from the stack and would put the device offline.
- */
 static void test_stack_disable_leaves_the_readers(void)
 {
     printf("sana2: SM_Down stops transmitting and nothing else\n");
@@ -851,14 +741,6 @@ static void test_detach_unbinds(void)
             "so nothing can reach it afterwards");
 }
 
-/* ==================================================== multicast ========== */
-
-/*
- * A multicast join that the device refuses is logged and swallowed: many
- * SANA-II devices answer S2ERR_NOT_SUPPORTED and pass multicast through
- * anyway, and failing the join would break IGMP and IPv6 ND on hardware that
- * works.
- */
 static void test_multicast(void)
 {
     printf("sana2: a refused multicast join does not fail the command\n");
@@ -896,14 +778,6 @@ static void test_multicast(void)
     ami_sana2_unbind(&iface);
 }
 
-/* ==================================================== the counters ======= */
-
-/*
- * Every NX_LINK_GET_* writes through nx_ip_driver_return_ptr.  The three that
- * report device counters refresh them first, and the transmit count reaps the
- * ring first: a count read without that is the count as of the last frame the
- * stack happened to notice.
- */
 static void test_counters(void)
 {
     printf("sana2: the GET commands answer, and refresh what they must\n");
@@ -982,8 +856,6 @@ static void test_unhandled_command(void)
     ami_sana2_unbind(&iface);
 }
 
-/* ============================================= set physical address ====== */
-
 static void test_set_physical_address(void)
 {
     printf("sana2: setting the physical address packs the two words\n");
@@ -1027,8 +899,6 @@ static void test_set_physical_address(void)
 
     ami_sana2_unbind(&iface);
 }
-
-/* ------------------------------------------------------------------ main -- */
 
 int main(void)
 {

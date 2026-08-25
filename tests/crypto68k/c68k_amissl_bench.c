@@ -1,35 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k against AmiSSL, one process, identical inputs.
  *
- *   src/crypto68k/ has only ever been measured against the vendored nx_crypto
- *   it replaces, which answers "did the change work" but not "is this stack
- *   worth having": the Amiga already has an OpenSSL in AmiSSL, which the
- *   prebuilt curl links against and every other TLS client on the machine uses.
- *   This program runs both on the same numbers, back to back, in one process,
- *   and checks that they agree before it believes any timing.
- *
- *   Two runs of one binary under FS-UAE agree to about one part in ten
- *   thousand on register kernels (tests/perf/cpucal), but a handshake-scale
- *   measurement drifts with disk state, library load order and whatever else
- *   the emulator is doing.  Timing both sides inside a single run removes all
- *   of it: the only difference between an "ours" number and a "theirs" number
- *   is the code that ran.
- *
- *   FS-UAE's A1200 model charges MULU.L 32.14 cycles where a real 68020
- *   charges 45 for the 64-bit form, measured, tests/perf/cpucal, and
- *   reproduced by a_calibrate() below in this very run.  That is a 29%
- *   discount on the one instruction bignum arithmetic is made of, and it does
- *   not cancel between two implementations that issue different numbers of it:
- *   it flatters whichever side multiplies more.  So every row carries a
- *   statically derived MULU.L count and a corrected time beside the measured
- *   one; a ratio quoted without that correction compares two differently
- *   flattered numbers.
- *
- *   No whole handshake is timed.  A handshake includes a network round trip,
- *   certificate parsing and record framing, and the question here is
- *   arithmetic.  The primitives below are where a handshake spends its time
- *   and what a change to either side would move.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -66,9 +37,6 @@
    nx_crypto_generic_ciphersuites.c and no header exports it. */
 extern NX_CRYPTO_METHOD crypto_method_hmac_sha256;
 
-
-/* --------------------------------------------------------------- state --- */
-
 #define A_MAX_LIMBS         64u
 #define A_POWM_SCRATCH      4096u
 #define A_HN_SCRATCH        4096u
@@ -93,7 +61,6 @@ static c68k_limb    a_e_copy[A_MAX_LIMBS];
 
 static NX_CRYPTO_HUGE_NUMBER a_x_hn, a_e_hn, a_m_hn, a_p_hn, a_q_hn, a_r_hn;
 
-/* Karatsuba crossover sweep */
 static c68k_limb    a_kx[64];
 static c68k_limb    a_km[64];
 static c68k_limb    a_kr[(64 * 2) + 8];
@@ -113,7 +80,6 @@ static const UCHAR  a_be_e[3] = { 0x01, 0x00, 0x01 };
 static UCHAR        a_ossl_out[256];
 static UCHAR        a_ours_out[256];
 
-/* P-256 */
 static NX_CRYPTO_EC        *a_ref_curve;
 static NX_CRYPTO_EC         a_our_curve;
 static NX_CRYPTO_ECDH       a_ecdh;
@@ -128,7 +94,6 @@ static UCHAR                a_ours_g[65];
 static UCHAR                a_theirs_g[65];
 static UCHAR                a_kg_scalar[32];
 
-/* bulk */
 static UCHAR                a_bulk_in[A_BULK_BYTES];
 static UCHAR                a_bulk_ours[A_BULK_BYTES];
 static UCHAR                a_bulk_theirs[A_BULK_BYTES];
@@ -158,51 +123,6 @@ typedef struct
 static A_ROW    a_rows[A_MAX_ROWS];
 static UINT     a_row_count;
 
-
-/* =========================================== the emulator's MULU.L discount ==
- *
- * FS-UAE's A1200 model charges MULU.L 32.1 cycles where an MC68020 charges 43
- * (Dn,Dm) or 45 (Dn,Dh:Dl), measured, tests/perf/cpucal, and reproduced by
- * a_calibrate() below in this very run.  Every other instruction the model
- * charges is faithful to under 2%.
- *
- * That is a 29% discount on the single instruction multi-precision arithmetic
- * is made of, and it does not cancel between two implementations that issue
- * different numbers of it.  It flatters whichever side does more multiplying.
- * So each row carries a statically derived count of 32x32->64 multiplies and
- * the report prints a corrected time beside the measured one:
- *
- *     corrected = measured + count * t_mulu * (45 - 32.14) / 32.14
- *
- * where t_mulu is measured in this process.  The fraction is 0.400.  Working
- * from a measured t_mulu rather than an assumed clock keeps this independent
- * of -k: the same expression is right at 14 MHz and at 28.
- *
- * Both sides are deterministic given the operands, so the counts below are
- * derived rather than sampled.
- *
- *   crypto68k, SOS Montgomery over s limbs (src/crypto68k/c68k_mont.c):
- *     multiply  s^2 (product) + s^2 (reduction) + s (the u = t[i]*n0inv)
- *               = 2s^2 + s
- *     square    s(s+1)/2 (triangle + diagonal) + s^2 + s = 1.5s^2 + 1.5s
- *     s = 32 -> 2080 / 1584      s = 64 -> 8256 / 6240
- *
- *   AmiSSL: OPENSSL_BN_ASM_MONT is not defined for amiga-os3-68020, so
- *   bn_mul_mont_fixed_top() falls through to bn_mul_fixed_top()/
- *   bn_sqr_fixed_top() plus bn_from_montgomery_word().  That means Karatsuba
- *   above 16 limbs and Comba at 8, and it means OpenSSL gets a real squaring
- *   shortcut here.  M(8/16/32/64) = 64/192/576/1728, S = 36/108/324/972;
- *   the reduction is N calls to bn_mul_add_words(N) plus N single multiplies:
- *     multiply  M(N) + N^2 + N     square  S(N) + N^2 + N
- *     N = 32 -> 1632 / 1380      N = 64 -> 5888 / 5132
- *
- *   P-256 field operations cost the same on both sides, 64 multiplies for a
- *   multiply, 36 for a square, because AmiSSL reaches bn_mul_comba8 /
- *   bn_sqr_comba8 (hand-written 68020 assembly, one mulu.l per product) and
- *   ours reaches eight c68k_addmul_1 rows and a triangle.  The whole
- *   difference is how many field operations each scalar multiplication needs.
- */
-
 #define A_M_MUL32       2080UL      /* our Montgomery multiply, 32 limbs   */
 #define A_M_SQR32       1584UL
 #define A_M_MUL64       8256UL      /* ... 64 limbs                        */
@@ -212,95 +132,18 @@ static UINT     a_row_count;
 #define A_O_MUL64       5888UL      /* ... 64 limbs                        */
 #define A_O_SQR64       5132UL
 
-/*
- * RSA-2048 public, e = 65537 (17 bits, one leading 1 then fifteen 0s then 1).
- *
- *   ours   c68k_window_for(17) = 1, so: acc = x (loaded, not squared), 15
- *          squarings for the zero bits, then 1 squaring + 1 multiply for the
- *          low bit = 16 S + 1 M.  Plus entering the Montgomery domain and
- *          leaving it: 2 M.  Plus the vendored R^2 setup, one 64-limb square
- *          = 64*65/2 = 2080.
- *   AmiSSL BN_mod_exp_mont, window also 1 (BN_window_bits_for_exponent_size),
- *          the same 16 S, 2 M in loop (Shay Gueron's trick makes the initial
- *          r free), 1 M for bn_to_mont_fixed_top and one bare
- *          BN_from_montgomery = N^2 + N.
- */
-/*
- * With Karatsuba at the default threshold of 64 limbs a 2048-bit operand
- * splits once, into 32-limb schoolbook halves, so the product costs 3x what a
- * 32-limb one does: a square 3*528 = 1584 instead of 2080, a multiply
- * 3*1024 = 3072 instead of 4096.  The reduction is untouched at 4160 either
- * way, because Karatsuba cannot apply to it.  The setup's square goes through
- * the vendored code and is schoolbook.
- *
- * AmiSSL reaches 103,936 by recursing three levels, to bn_sqr_comba8.  We stop
- * at one because the measurement says deeper loses, see the crossover sweep
- * this program prints before the RSA rows.
- */
 #define A_M_SQR64_KAR   ((3UL * 528UL) + 4160UL)        /* 5744 */
 #define A_M_MUL64_KAR   ((3UL * 1024UL) + 4160UL)       /* 7232 */
 
-/*
- * The setup used to contribute only its 2080-product square, because the
- * reduction around it was the vendored divider working in 16-bit half-limbs
- * different instructions entirely.  c68k_mod() does the same job in 32-bit
- * limbs, so its multiply-subtract passes show up here now: 67 quotient digits
- * across the two reductions, 64 limbs each, is 4,288 more MULU.L.
- *
- * The count therefore goes up while the time goes down: a great many 16-bit
- * operations replaced by far fewer 32-bit ones.
- *
- * The 136 is those 67 DIVU.L expressed as their MULU.L equivalent, so the one
- * correction covers both.  The emulator charges DIVU.L 51.8 cycles against the
- * MC68020UM's 78, a 34% discount and larger than MULU.L's 29%, so it does need
- * correcting, it is just small: 61 us of an 11.9 ms setup.
- */
 #define A_MULU_RSAPUB_OURS      ((16UL * A_M_SQR64_KAR) + (3UL * A_M_MUL64_KAR) + 2080UL + 4288UL + 136UL)
 #define A_MULU_RSAPUB_THEIRS    ((16UL * A_O_SQR64) + (3UL * A_O_MUL64) + 4160UL)
 
-/*
- * RSA-2048 private, CRT: two 1024-bit exponentiations modulo 32-limb primes.
- *
- *   ours   sliding window w = 6 (OpenSSL's own crossover table, and the
- *          scratch is large enough): 31 table multiplies + 1 table squaring,
- *          about 1018 squarings and 146 window multiplies for 1024 bits, and
- *          2 domain conversions.  Plus the R^2 setup twice (2 * 32*33/2).
- *   AmiSSL BN_mod_exp_mont_consttime, fixed window 6, no zero skipping:
- *          exactly 1021 squarings and 232 multiplies per half (170 windows of
- *          6 squarings + 1 multiply each, a 61-entry table build, and one
- *          bn_to_mont), plus a from_mont.
- *
- * Both then recombine, which is a handful of 32x32 and 64x32 limb products;
- * counted as one 64-limb multiply's worth, which is the right order and is
- * under 0.2% of the total either way.
- */
 #define A_MULU_RSACRT_OURS \
     ((2UL * ((1019UL * A_M_SQR32) + (179UL * A_M_MUL32))) + 6000UL)
 #define A_MULU_RSACRT_THEIRS \
     ((2UL * ((1021UL * A_O_SQR32) + (233UL * A_O_MUL32))) + 6000UL \
      + A_MULU_RSAPUB_THEIRS)     /* rsa_ossl.c's unconditional verify tail */
 
-/*
- * P-256.  A field multiply is 64 and a field square 36 on both sides, so
- * these are (doublings, additions) priced at the coordinate formulas each
- * side uses.
- *
- *   ours   doubling dbl-2001-b   3M + 5S = 372
- *          mixed add madd-2007-bl 7M + 4S = 592
- *          k*G   Lim-Lee comb, 26 doublings and (on average) 50 additions
- *          k*Q   width-5 wNAF, 256 doublings and about 43 additions, plus an
- *                8-entry affine table (1 doubling, 7 additions, 2 inversions)
- *   AmiSSL ossl_ec_GFp_simple_dbl      4M + 4S = 400
- *          ossl_ec_GFp_simple_add, Z2=1 8M + 3S = 620
- *          ladder step (ecp_smpl.c)   13M + 7S = 1084, and there are exactly
- *                256 of them, one per bit of the group order, no skipping
- *          k*G and ECDH both take the ladder: ec_mult.c forces it whenever
- *                the scalar could be secret, ignoring BN_FLG_CONSTTIME
- *          ECDSA verify takes interleaved wNAF, width 3 for a 256-bit scalar,
- *                so 256 doublings and about 128 mixed additions, with no
- *                generator precomputation unless the application asked for
- *                it, which nothing in OpenSSL's own ECDSA code does
- */
 #define A_P256_D_OURS       372UL
 #define A_P256_A_OURS       592UL
 #define A_P256_D_THEIRS     400UL
@@ -319,16 +162,6 @@ static UINT     a_row_count;
 /* AES and SHA-256 contain no multiplies at all on either side. */
 #define A_MULU_NONE         0UL
 
-
-/*
- * Emulated cost of one MULU.L Dn,Dh:Dl, in picoseconds, measured here.
- *
- * The kernel is inline assembly for the same reason tests/perf/cpucal has a
- * .S file: a C loop that "should" compile to a multiply is a measurement of
- * the compiler, not of the emulator.  Sixteen multiplies per iteration keeps
- * the DBRA out of the answer, and an identical loop with the multiplies
- * removed is subtracted.
- */
 static ULONG    a_mulu_ps;
 
 static ULONG a_cal_run(ULONG reps, UINT with_mulu)
@@ -409,11 +242,6 @@ ULONG   ticks;
     {
         register ULONG r_n __asm("d0") = reps;
 
-        /*
-         * d1:d2 / d3 with d1 < d3, so the quotient always fits and DIVU.L
-         * never traps.  Sixteen per iteration keeps the DBRA out of the
-         * answer, exactly as the MULU.L kernel above.
-         */
         __asm__ __volatile__(
             "       movem.l %%d2-%%d4,-(%%sp)\n"
             "       moveq   #1,%%d1\n"
@@ -556,9 +384,6 @@ static ULONG a_corrected(ULONG measured_us, ULONG mulu)
     return(measured_us + ((((mulu + 999UL) / 1000UL) * a_mulu_ps * 2UL) / 5000UL));
 }
 
-
-/* -------------------------------------------------------------- timing --- */
-
 typedef VOID (*A_OP)(VOID);
 
 static ULONG a_time_n(A_OP op, ULONG n)
@@ -579,11 +404,6 @@ ULONG   ticks;
     return(c68k_eclock_micros(ticks) / n);
 }
 
-/*
- * ours / theirs, to one decimal, printed in whichever direction makes it a
- * number above 1: "0.4x" and "2.5x" are the same fact, and only one of them
- * reads at a glance.
- */
 static VOID a_ratio_line(const char *what, const char *name,
                          ULONG ours, ULONG theirs)
 {
@@ -660,15 +480,6 @@ UINT    i;
     }
 }
 
-
-/* ------------------------------------------------------- limb <-> bytes --- */
-
-/*
- * The vectors are little-endian 32-bit limbs because that is HN_UBASE order;
- * OpenSSL wants big-endian bytes.  One place for the conversion, because
- * getting it backwards produces a number that is still 2048 bits long and
- * still exponentiates, and the only symptom is that nothing agrees.
- */
 static VOID a_limbs_to_be(UCHAR *out, const c68k_limb *v, UINT limbs)
 {
 
@@ -688,21 +499,6 @@ c68k_limb   w;
     }
 }
 
-
-/* ====================================================== Karatsuba crossover ==
- *
- * docs/RESEARCH.md 9 measured Karatsuba at ~5% and rejected it at 32 limbs,
- * which is what an RSA-2048 CRT half runs and where that conclusion still
- * holds.  An RSA-2048 public operation is 64 limbs, where the split removes
- * more than twice as many limb products.  So the threshold is measured here
- * rather than inherited from another project.
- *
- * The reduction half of a Montgomery step is a chain of scalar-by-vector
- * products that Karatsuba cannot touch, so the ratios below are always much
- * smaller than the ratio of the products alone; that dilution is why the
- * crossover is measured on the whole step.
- */
-
 static VOID a_kar_sqr(VOID)
 {
 
@@ -714,13 +510,6 @@ static VOID a_kar_mul(VOID)
 
     c68k_mont_mul(a_kr, a_kx, a_kx, a_km, a_klen, a_kn0, a_scratch);
 }
-
-/* ============================================== R^2 mod m, the setup cost ==
- *
- * 22% of an RSA-2048 public operation went here, in the reduction inside
- * c68k_mont_setup_rr().  Both dividers are timed on the same modulus in the
- * same process; c68k_fast_modulus is the only thing that differs.
- */
 
 static c68k_limb    a_rr[64];
 static c68k_limb    a_setup_area[(7 * 64) + 8];
@@ -829,9 +618,6 @@ ULONG               reps;
              (ULONG)c68k_karatsuba_limbs);
 }
 
-
-/* ============================================================ RSA public == */
-
 static VOID a_ours_rsa_public(VOID)
 {
 
@@ -911,9 +697,6 @@ ULONG   viarsa;
     c68k_log("    ours rebuilds R^2 mod m on every call, so the "
              "per-call column is the like-for-like one");
 }
-
-
-/* =========================================================== RSA private == */
 
 static VOID a_ours_rsa_private(VOID)
 {
@@ -1002,20 +785,11 @@ ULONG   plain;
 
     if (a_full)
     {
-        /*
-         * The path nx_secure takes when it hands over a full 2048-bit private
-         * exponent with no primes, what our own tree does on two of its
-         * three private-key call sites (see c68k_crt.c).  Measured on the
-         * AmiSSL side to put a number on the cost of skipping CRT.
-         */
         plain = a_time_n(a_theirs_modexp_priv, 1UL);
         c68k_log("    AmiSSL, no CRT, BN_FLG_CONSTTIME, 2048-bit exponent: "
                  "%lu us", plain);
     }
 }
-
-
-/* ================================================================= P-256 == */
 
 static VOID a_ours_ecdsa(VOID)
 {
@@ -1122,13 +896,11 @@ HN_UBASE  *sp;
     c68k_log("");
     c68k_log("3. P-256");
 
-    /* ---- ECDSA verify ---- */
     ours   = a_time_n(a_ours_ecdsa,   2UL);
     theirs = a_time_n(a_theirs_ecdsa, 2UL);
     a_report("ECDSA P-256 verify (RFC 6979 A.2.5)", ours, theirs,
              A_MULU_ECDSA_OURS, A_MULU_ECDSA_THEIRS, 1u);
 
-    /* ---- ECDH shared secret ---- */
     ours   = a_time_n(a_ours_ecdh,   2UL);
     theirs = a_time_n(a_theirs_ecdh, 2UL);
     a_check("ECDH shared secret", a_ours_secret, a_theirs_secret, 32u);
@@ -1136,7 +908,6 @@ HN_UBASE  *sp;
     a_report("ECDH P-256 shared secret           ", ours, theirs,
              A_MULU_ECDH_OURS, A_MULU_ECDH_THEIRS, 1u);
 
-    /* ---- k*G, which is what a key generation costs ---- */
     sp = a_ec_store;
     NX_CRYPTO_EC_POINT_INITIALIZE(&a_point, NX_CRYPTO_EC_POINT_AFFINE, sp, 32);
     NX_CRYPTO_HUGE_NUMBER_INITIALIZE(&a_d, sp, 32);
@@ -1170,9 +941,6 @@ HN_UBASE  *sp;
              (LONG)(a_ossl_ec_have_precompute() ? "yes" : "no"));
 }
 
-
-/* ================================================================== bulk == */
-
 static VOID a_ours_aes(VOID)
 {
 
@@ -1188,11 +956,6 @@ UINT    i;
                          A_BULK_BYTES / 16UL);
 }
 
-/*
- * And the other direction, which is where a download spends its time and which
- * section 15 did not measure at all.  A client that fetches a megabyte
- * decrypts a megabyte and encrypts a request header.
- */
 static VOID a_ours_aes_dec(VOID)
 {
 
@@ -1317,11 +1080,6 @@ UINT    i;
     c68k_log("    ours %lu KB/s, AmiSSL %lu KB/s",
              a_kbs(ours), a_kbs(theirs));
 
-    /*
-     * HMAC is nx_crypto's framing with our compression function underneath,
-     * which is exactly what src/tls/ami_tls_crypto.c wires, so this measures
-     * what the TLS stack runs rather than a standalone hash.
-     */
     _nx_crypto_hmac_metadata_set(&a_hmac_meta, &a_hmac_ctx,
                                  NX_CRYPTO_AUTHENTICATION_HMAC_SHA2_256,
                                  64u, 32u,
@@ -1341,14 +1099,6 @@ UINT    i;
              a_kbs(ours), a_kbs(theirs));
 }
 
-
-/* =============================================================== summary == */
-
-/*
- * Row lookup by name, so the composition below names what it adds instead of
- * summing whatever happened to be flagged.  A handshake is a specific
- * combination of these rows.
- */
 static const A_ROW *a_find(const char *prefix)
 {
 
@@ -1447,13 +1197,6 @@ ULONG           theirs;
     aes    = a_find("AES-128-CBC");
     mac    = a_find("HMAC-SHA256");
 
-    /*
-     * The asymmetric half of a TLS 1.2 client handshake against a
-     * two-certificate chain, which is what docs/RESEARCH.md 11.6 costed:
-     * three public-key verifications (leaf, intermediate, ServerKeyExchange
-     * signature), one ephemeral key generation, one shared secret.  Composed
-     * from the rows above rather than from memory.
-     */
     c68k_log("  the asymmetric half of a TLS 1.2 handshake, 2-cert chain:");
     a_compose("ECDHE_RSA   (3 x RSA-2048 verify + keygen + ECDH)",
               rsapub, 3UL, kg, ecdh);
@@ -1461,11 +1204,6 @@ ULONG           theirs;
               ecdsa, 3UL, kg, ecdh);
     c68k_log("    (arithmetic only, no network, no parsing, no framing)");
 
-    /*
-     * And the half a large transfer pays.  RESEARCH.md 11 measured https at
-     * 16,464 B/s against http at 114,598 B/s on this machine, so the record
-     * path is worth more per megabyte than the handshake is per connection.
-     */
     if ((aes != NX_CRYPTO_NULL) && (mac != NX_CRYPTO_NULL))
     {
         ours   = aes -> ours_us   + mac -> ours_us;
@@ -1481,9 +1219,6 @@ ULONG           theirs;
         }
     }
 }
-
-
-/* ================================================================== body == */
 
 static int a_body(VOID)
 {
@@ -1509,26 +1244,10 @@ ULONG   start;
     a_calibrate();
     a_calibrate_divu();
 
-    /*
-     * Timed and logged in two stages.  The first version of this program sat
-     * silent for minutes here with no way to tell whether it was LoadSeg on a
-     * 3.5 MB library, OpenSSL 3.x's own initialisation, or a hang.  On this
-     * machine a program that opens AmiSSL pays all of it before it does any
-     * crypto.
-     */
     c68k_log("");
     c68k_log("0. Opening AmiSSL (LoadSeg of a 3.5 MB library, then OpenSSL "
              "3.x init)");
 
-    /*
-     * Read the library file first, and throw the bytes away.
-     *
-     * The first run of this program sat inside OpenAmiSSLTagList for minutes,
-     * with two candidate explanations: AmigaDOS reading and relocating 3.4 MB
-     * of hunk file through FS-UAE's directory filesystem, an artefact of the
-     * harness, or OpenSSL 3.x initialising itself, a fact about the machine.
-     * This measures the first, so the difference is the second.
-     */
     {
         BPTR    fh;
         LONG    n;
@@ -1609,8 +1328,6 @@ ULONG   start;
     a_bench_karatsuba();
     a_bench_setup();
 
-    /* ------------------------------------------------------------ RSA -- */
-
     for (i = 0; i < 64u; i++)
     {
         a_m[i] = t_n[i];
@@ -1644,8 +1361,6 @@ ULONG   start;
         a_bench_rsa_public();
         a_bench_rsa_private();
     }
-
-    /* ---------------------------------------------------------- P-256 -- */
 
     a_ref_curve = NX_CRYPTO_NULL;
     status = _nx_crypto_ec_get_named_curve(&a_ref_curve, NX_CRYPTO_EC_SECP256R1);
@@ -1688,13 +1403,9 @@ ULONG   start;
         }
     }
 
-    /* ----------------------------------------------------------- bulk -- */
-
     a_bench_bulk();
 
     a_summary();
-
-    /* ------------------------------------------------------------ end -- */
 
     a_ossl_ec_free();
     a_ossl_rsa_free();
@@ -1714,17 +1425,6 @@ ULONG   start;
     return(20);
 }
 
-
-/* ================================================================== main == */
-
-/*
- * OpenSSL cannot run on a boot Shell's 4 KB stack, and this toolchain's crt0
- * exports no __stack hook to ask for more (docs/RESEARCH.md 11.5).  So the
- * work happens in a process created with NP_StackSize and main() waits for it.
- * Everything AmiSSL touches, InitAmiSSL is per process, happens inside
- * that process, which is also what the autodoc requires.
- */
-
 #define A_CHILD_STACK   262144UL
 
 static struct Task *a_parent;
@@ -1737,29 +1437,8 @@ static VOID a_child(VOID)
 struct Process *me = (struct Process *)FindTask(NULL);
 BPTR            lock;
 
-
-    /*
-     * pr_WindowPtr = -1 means "fail, do not ask".
-     *
-     * AmiSSL is configured with OPENSSL_DIR = AmiSSL: (its own Makefile:
-     * OPENSSLDIR=AmiSSL: ENGINESDIR=AmiSSL:engines MODULESDIR=AmiSSL:modules),
-     * so OpenSSL 3.x's configuration and provider loading opens
-     * AmiSSL:openssl.cnf on the first API call anybody makes.  On a machine
-     * with no AmiSSL: assign, AmigaDOS does not return an error, it puts up
-     * "Please insert volume AmiSSL: in any drive", and on a bare boot with no
-     * Workbench and no user there is nobody to cancel it.  The benchmark sat
-     * there for twenty minutes looking like a slow library.
-     *
-     * The assign below is the fix; this line makes the next missing assign
-     * fail in a second instead of hanging until the harness timeout.
-     */
     me -> pr_WindowPtr = (APTR)-1;
 
-    /*
-     * AmiSSL: itself.  The release's installer does this (Assign AmiSSL: <dir>
-     * plus Assign LIBS: AmiSSL:Libs ADD); a staged test rig has to do it too.
-     * AssignLock takes the lock over, so it is not freed here.
-     */
     lock = Lock((STRPTR)"DH0:AmiSSL", SHARED_LOCK);
     if (lock != (BPTR)0)
     {
@@ -1790,12 +1469,6 @@ char            var[16];
         return(20);
     }
 
-    /*
-     * The slow extras are opt-in through an environment variable rather than
-     * an argument, because the harness's Startup-Sequence runs the executable
-     * with no command line and this toolchain hands main() the wrong argv
-     * anyway (docs/RESEARCH.md 11.3).  Stage an env/ directory to set it.
-     */
     a_full = 0;
     if (GetVar((STRPTR)"C68K_AMISSL", (STRPTR)var, sizeof(var), 0UL) > 0)
     {

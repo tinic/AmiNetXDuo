@@ -1,89 +1,6 @@
 /*
  * Endurance, hours of mixed TCP traffic, with the pool on a timeline.
  *
- *   The other harnesses in this tree run for seconds or minutes: tests/compare
- *   moves a few megabytes, tests/trace moves 512 KB, tests/tcpdrill moves a few
- *   hundred bytes and watches the packets.  None of them can see a defect
- *   whose argument is "bytes" or "hours".
- *
- *   A report on English Amiga Board (thread 122501) says both AmiTCP 4 and
- *   Roadshow fail after several hours of a TCP connection driven with wildly
- *   varying read/write sequences: they return EAGAIN on a *blocking* socket,
- *   which should be impossible, after which the socket is finished and the
- *   only thing left is to close it.  The reporter blames mbuf fragmentation
- *   and sequence-number overrun.  Neither claim has ever been tested here.
- *
- *   N concurrent TCP connections, each driven by a pair of AmigaOS Processes
- *   (a driver and a responder, each with its own bsdsocket.library base,
- *   because the library is per-opener).  Every transaction picks:
- *
- *     - a direction, PUT (driver writes), GET (driver reads) or ECHO
- *                        (driver writes and reads the same bytes back);
- *     - a length, log-uniform from 1 byte to `maxxfer`, so the mix is
- *                        mostly small with a long tail, which is what copying
- *                        a directory of files over a share looks like;
- *     - a chunk size , redrawn log-uniform for every send() and recv() on
- *                        both sides independently, so the two ends never
- *                        agree about framing and the stack has to.
- *
- *   Occasional short-lived connections are opened and closed alongside the
- *   long-lived ones, because a per-socket leak only shows under churn.
- *
- *   The payload is a position-addressable pattern:
- *
- *       byte(o) = pat[o & 8191] ^ (UBYTE)(o >> 13)
- *
- *   `pat` is 8 KB of xorshift output, so any single altered byte is caught,
- *   and the high-bits term makes the period 2 MB, so a splice that repeats or
- *   drops a block is caught too unless the displacement is an exact multiple
- *   of 2 MB.  Every payload carries its own pattern offset in its header, so
- *   the receiver never has to trust its own bookkeeping, and a framing desync
- *   shows up immediately as a header whose magic is wrong.
- *
- *   Every `sample` seconds the supervisor appends one CSV row: packet-pool
- *   free count and the pool's own empty-request and empty-suspension counters,
- *   AvailMem total and largest contiguous block (a heap that fragments holds
- *   the first and loses the second), live socket count, TCP retransmissions,
- *   receive drops, checksum errors, interface allocation failures, and the
- *   workers' byte counters.  A timeline is what makes "it broke after forty
- *   minutes" useful: it says what the machine looked like at minute
- *   thirty-nine.
- *
- *   Every errno any worker sees is appended to a second file with the
- *   socket's blocking state at the time: EWOULDBLOCK on a non-blocking socket
- *   is the API working, and the same answer on a blocking one is the defect
- *   being hunted.
- *
- *   Both files are opened, appended and closed per line, so a run that has to
- *   be killed does not lose its last twenty lines (the reasoning in
- *   tests/compare/checkrunner.c, and in docs/RESEARCH.md 16.9).
- *
- *   The probes run first and take under a minute:
- *
- *   P1  a blocking recv() on an idle established socket must wait, not answer
- *   P2  a blocking send() into a peer that is not reading must wait, and must
- *       not come back short
- *   P3  the same blocking send() while the packet pool is exhausted by
- *       connections nobody reads, the specific suspect, because
- *       NX_NO_PACKET means both "nothing to read" and "the pool is empty",
- *       and src/bsdsocket/errno.c maps it to EWOULDBLOCK either way
- *   P4  the same three on a non-blocking socket, as the control: EWOULDBLOCK
- *       there is correct, and a probe suite that never sees it is not testing
- *       anything
- *
- *   P3 is supervised from the main Process rather than timed inside the
- *   worker, because it distinguishes three outcomes, "returned EAGAIN" (the
- *   reported defect), "waited and then succeeded" (correct) and "never
- *   returned at all" (a deadlock), and only an observer outside the call can
- *   tell the third from the second.
- *
- *   bsdsocket.library is reached through its published LVOs, as a third-party
- *   program reaches it, and the packet pool through NetStackQuery() at -0x366,
- *   which exists so that a program that has not linked src/netstack can still
- *   read the running stack (include/aminetxduo/netstatus.h).  A harness that
- *   linked the stack would get its own NX_IP with no interfaces in it and
- *   report zeroes.
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -101,14 +18,6 @@
 static const char version_tag[] __attribute__((used)) =
     "$VER: Endurance 1.0 (26.7.2026)";
 
-/* ------------------------------------------------------------------ LVOs -- */
-
-/*
- * Straight out of the NDK's bsdsocket_lib.fd.  Hand-vectored rather than
- * inlined because the NDK inlines take the library base from one global, and
- * this program runs socket calls from a dozen Processes that each hold their
- * own.
- */
 #define LVO_socket      (-30)
 #define LVO_bind        (-36)
 #define LVO_listen      (-42)
@@ -349,8 +258,6 @@ static LONG e_query(struct Library *base, ULONG what, APTR buf, ULONG size)
     return res;
 }
 
-/* ----------------------------------------------------------- the pattern -- */
-
 #define PAT_BYTES   8192UL
 #define PAT_MASK    (PAT_BYTES - 1UL)
 #define PAT_SHIFT   13              /* log2(PAT_BYTES) */
@@ -378,7 +285,6 @@ static VOID end_pat_init(ULONG seed)
         end_pat[i] = (UBYTE)(end_xs(&s) >> 19);
 }
 
-/* Write `len` pattern bytes for stream offset `off`. */
 static VOID end_pat_fill(UBYTE *dst, ULONG off, ULONG len)
 {
     while (len > 0UL)
@@ -401,11 +307,6 @@ static VOID end_pat_fill(UBYTE *dst, ULONG off, ULONG len)
     }
 }
 
-/*
- * Check `len` bytes against the pattern.  Returns the count of mismatched
- * bytes and, when there is at least one, reports the stream offset of the
- * first through `first`.
- */
 static ULONG end_pat_check(const UBYTE *buf, ULONG off, ULONG len,
                            ULONG *first, UBYTE *got, UBYTE *want)
 {
@@ -446,8 +347,6 @@ static ULONG end_pat_check(const UBYTE *buf, ULONG off, ULONG len,
     return bad;
 }
 
-/* ------------------------------------------------------------- the clock -- */
-
 static ULONG end_t0_ticks;
 
 /* Ticks (1/50 s) since the program started.  DateStamp() needs no device and
@@ -471,17 +370,7 @@ static ULONG end_secs(VOID)
     return end_ticks() / 50UL;
 }
 
-/* -------------------------------------------------------- shared results -- */
-
 #define END_MAX_CONNS       6
-/*
- * Ten pairs, not six.  A hog pair pins about a socket's transmit queue
- * (NX_TCP_MAXIMUM_TX_QUEUE, 20) plus the receiver's advertised window
- * (5 to 20 packets, per S24.3), so six pairs took the pool from 256 free to
- * 171 and P3 had nothing to test.  Ten pairs, with the transmitter blocking
- * so it parks holding a full queue rather than backing off, is the smallest
- * arrangement that reaches the floor.
- */
 #define END_MAX_HOGS        10
 #define END_MAX_WORKERS     (2 * END_MAX_CONNS + 2 * END_MAX_HOGS + 2)
 
@@ -493,7 +382,6 @@ static ULONG end_secs(VOID)
 #define ROLE_FILER      5
 #define ROLE_LEAKER     6
 
-/* mode= */
 #define MODE_LOOP       0       /* synthetic, both ends in this machine     */
 #define MODE_WIRE       1       /* synthetic, the far end is a host peer    */
 #define MODE_FITZ       2       /* files over a mounted Fitz share          */
@@ -549,7 +437,6 @@ typedef struct EndState
     EndWorker       es_W[END_MAX_WORKERS];
     UWORD           es_Workers;
 
-    /* Config. */
     UWORD           es_Mode;
     UWORD           es_Wire;        /* derived: es_Mode == MODE_WIRE         */
     UWORD           es_Filers;
@@ -572,18 +459,12 @@ typedef struct EndState
 
 static EndState *ES;
 
-/* --------------------------------------------------------------- output --- */
-
 #define F_TIMELINE  "DH0:end-timeline.csv"
 #define F_EVENTS    "DH0:end-events.txt"
 #define F_SUMMARY   "DH0:end-summary.txt"
 
 static struct SignalSemaphore end_out_sem;
 
-/*
- * Append one formatted line and close.  One open/close per line is expensive,
- * but a run that has to be killed keeps everything written so far.
- */
 static VOID end_emit(const char *file, const char *fmt, LONG *args)
 {
     BPTR out;
@@ -609,11 +490,6 @@ static VOID end_truncate(const char *file)
         Close(out);
 }
 
-/*
- * One errno, with the socket's blocking state next to it: that pairing is the
- * question this harness answers, so it is recorded rather than reconstructed
- * later.
- */
 static VOID end_event(EndWorker *w, const char *what, LONG rc, LONG err,
                       UWORD blocking, ULONG detail)
 {
@@ -631,8 +507,6 @@ static VOID end_event(EndWorker *w, const char *what, LONG rc, LONG err,
     end_emit(F_EVENTS, "%ld role=%ld conn=%ld %s rc=%ld errno=%ld blocking=%ld "
                        "detail=%lu\n", args);
 }
-
-/* ------------------------------------------------------------ statistics -- */
 
 typedef struct
 {
@@ -677,8 +551,6 @@ static LONG end_query(struct Library *base, ULONG what, APTR buf, ULONG size)
     return e_query(base, what, buf, size);
 }
 
-/* ------------------------------------------------------------- protocol --- */
-
 #define END_MAGIC       0xE7D1U
 #define END_HDR         12
 
@@ -713,8 +585,6 @@ static VOID end_hdr_put(UBYTE *p, UWORD op, ULONG len, ULONG off)
     end_put32(p + 8, off);
 }
 
-/* ------------------------------------------------------- socket plumbing -- */
-
 static VOID end_bump_tx(EndWorker *w, ULONG n)
 {
     ULONG before = w->w_BytesTx;
@@ -733,7 +603,6 @@ static VOID end_bump_rx(EndWorker *w, ULONG n)
         w->w_MegaRx = w->w_MegaRx + 1UL;
 }
 
-/* A log-uniform draw in 1..limit: mostly small, with a long tail. */
 static ULONG end_pick(ULONG *seed, ULONG limit)
 {
     ULONG r    = end_xs(seed);
@@ -749,10 +618,6 @@ static ULONG end_pick(ULONG *seed, ULONG limit)
     return v;
 }
 
-/*
- * send() the whole buffer, however many calls that takes, with a fresh chunk
- * size per call.  Returns 0, or -1 with the event already recorded.
- */
 static LONG end_send_all(EndWorker *w, LONG s, const UBYTE *buf, ULONG len,
                          UWORD blocking)
 {
@@ -800,11 +665,6 @@ static LONG end_send_all(EndWorker *w, LONG s, const UBYTE *buf, ULONG len,
     return 0;
 }
 
-/*
- * recv() exactly `len` bytes, with a fresh chunk size per call.  Returns 0,
- * or -1 (event recorded).  A clean end-of-file mid-record is a failure here:
- * the peer promised these bytes in a header it already sent.
- */
 static LONG end_recv_all(EndWorker *w, LONG s, UBYTE *buf, ULONG len,
                          UWORD blocking)
 {
@@ -859,7 +719,6 @@ static LONG end_recv_all(EndWorker *w, LONG s, UBYTE *buf, ULONG len,
     return 0;
 }
 
-/* Receive `len` bytes and verify them against the pattern at `off`. */
 static LONG end_recv_verify(EndWorker *w, LONG s, ULONG len, ULONG off,
                             UWORD blocking)
 {
@@ -903,7 +762,6 @@ static LONG end_recv_verify(EndWorker *w, LONG s, ULONG len, ULONG off,
     return 0;
 }
 
-/* Send `len` pattern bytes starting at stream offset `off`. */
 static LONG end_send_pattern(EndWorker *w, LONG s, ULONG len, ULONG off,
                              UWORD blocking)
 {
@@ -947,13 +805,6 @@ static LONG end_new_socket(EndWorker *w)
     return s;
 }
 
-/* ------------------------------------------------------------- responder -- */
-
-/*
- * Serve one connection until the driver says goodbye.  Every read and every
- * write picks its own size, independently of whatever the driver chose, which
- * is the "wildly varying read/write sequences" half of the reported workload.
- */
 static VOID end_serve(EndWorker *w, LONG s)
 {
     ULONG out_off = 0UL;
@@ -1006,12 +857,6 @@ static VOID end_serve(EndWorker *w, LONG s)
         }
         else if (op == OP_ECHO)
         {
-            /*
-             * Drain the whole record before echoing a byte of it.  Echoing as
-             * it arrives would deadlock: the driver is still writing, and two
-             * blocking sockets whose windows are both full never recover.
-             * es_MaxEcho bounds the buffer.
-             */
             if (len > ES->es_MaxEcho)
                 len = ES->es_MaxEcho;
 
@@ -1097,8 +942,6 @@ static VOID end_responder_body(EndWorker *w)
     (VOID)e_close(w->w_Base, ls);
 }
 
-/* ---------------------------------------------------------------- driver -- */
-
 static LONG end_dial(EndWorker *w)
 {
     EndAddr sa;
@@ -1133,11 +976,6 @@ static LONG end_dial(EndWorker *w)
     return s;
 }
 
-/*
- * One transaction.  Returns 0 to carry on, -1 to drop the connection and
- * redial (which is itself recorded, because a connection this harness had to
- * abandon is the reported symptom).
- */
 static LONG end_transact(EndWorker *w, LONG s, ULONG *out_off, UWORD blocking)
 {
     UBYTE hdr[END_HDR];
@@ -1231,7 +1069,6 @@ static VOID end_driver_body(EndWorker *w)
     ULONG since   = 0UL;
     LONG  s;
 
-    /* Give the responder time to bind and listen. */
     Delay(25);
 
     for (;;)
@@ -1250,12 +1087,6 @@ static VOID end_driver_body(EndWorker *w)
         {
             UWORD blocking = 1;
 
-            /*
-             * A non-blocking excursion every so often, as the control:
-             * EWOULDBLOCK here is the API working, and a run in which it never
-             * appears has not exercised the path the blocking case is compared
-             * against.
-             */
             if (ES->es_NbEvery != 0UL && (since % ES->es_NbEvery) == 0UL &&
                 since != 0UL)
             {
@@ -1275,12 +1106,6 @@ static VOID end_driver_body(EndWorker *w)
 
             since++;
 
-            /*
-             * A short-lived connection alongside the long-lived one: open,
-             * one small transaction, close.  Socket churn is the only thing
-             * that makes a per-socket leak visible, and the reported workload
-             * (many small files over a share) is mostly this.
-             */
             if (ES->es_Churn != 0UL && (since % ES->es_Churn) == 0UL)
             {
                 LONG t = end_dial(w);
@@ -1301,19 +1126,6 @@ static VOID end_driver_body(EndWorker *w)
     }
 }
 
-/* ------------------------------------------------------------------ hogs -- */
-
-/*
- * The pool-exhaustion pair.  HOGRX accepts and then reads nothing; HOGTX
- * blasts at it.  The bytes pile up in the receiver's socket queue, and since
- * NX_TCP_MAXIMUM_RX_QUEUE is not defined in port/netxduo-amiga/inc/nx_user.h
- * (docs/RESEARCH.md 24.7) the only bound on that queue is the advertised
- * window, so a handful of these takes the packet pool down.
- *
- * That is the state in which the suspect mapping matters: NX_NO_PACKET means
- * both "nothing to read" and "the pool is empty", and src/bsdsocket/errno.c
- * maps it to EWOULDBLOCK without asking which.
- */
 static VOID end_hogrx_body(EndWorker *w)
 {
     EndAddr sa;
@@ -1352,7 +1164,6 @@ static VOID end_hogrx_body(EndWorker *w)
 
         w->w_Conns = w->w_Conns + 1UL;
 
-        /* Hold it open, read nothing, until told to let go. */
         while (!ES->es_HogStop && !ES->es_Stop)
             Delay(10);
 
@@ -1390,14 +1201,6 @@ static VOID end_hogtx_body(EndWorker *w)
         return;
     }
 
-    /*
-     * Blocking, deliberately: a non-blocking hog backs off the moment the
-     * peer's window closes and gives its packets straight back, while a
-     * blocking one suspends inside nx_tcp_socket_send() holding a full
-     * transmit queue, which keeps packets out of the pool.  Measured: six
-     * non-blocking pairs reached a floor of 171 free of 256 and P3 had
-     * nothing to test.
-     */
     end_pat_fill(w->w_Buf, 0UL, 4096UL);
 
     while (!ES->es_HogStop && !ES->es_Stop)
@@ -1410,33 +1213,12 @@ static VOID end_hogtx_body(EndWorker *w)
             break;              /* the connection is gone; stop, do not spin */
     }
 
-    /* Hold the queue until told to let go. */
     while (!ES->es_HogStop && !ES->es_Stop)
         Delay(10);
 
     (VOID)e_close(w->w_Base, s);
 }
 
-/* -------------------------------------------------------------- the leaker -- */
-
-/*
- * One socket lifecycle, over and over, and nothing else.
- *
- * The first run of the loopback arm showed AvailMem falling by a steady
- * 1009 bytes a second and NETSTATUS_SOCKETS climbing by two a second and
- * never coming down, while the workload was also failing for an unrelated
- * reason, so that run said only that something in it leaked.
- *
- * This mode narrows it to the smallest repeatable step: create a socket, put
- * it through one lifecycle, close it.  Two kinds, chosen so the difference
- * between them isolates the cause:
- *
- *   conn 0  connect() to a port with nothing on it (ECONNREFUSED), close
- *   conn 1  connect() to a listener, exchange four bytes, close both ends
- *
- * If both leak, closing leaks.  If only the refused one does, a connection
- * that was never established is the case that leaks.
- */
 static VOID end_leaker_body(EndWorker *w)
 {
     UWORD refused = (w->w_Conn == 0);
@@ -1508,27 +1290,6 @@ static VOID end_leaker_body(EndWorker *w)
     }
 }
 
-/* --------------------------------------------------------------- the filer -- */
-
-/*
- * The Fitz workload: files of wildly varying size, written to a mounted share
- * and read back, in a loop, for hours.
- *
- * AmigaDOS calls on a mounted volume rather than sockets, deliberately.
- * Fitz's Amiga client is a DOS handler that turns each Read()/Write() into
- * blocking send()/recv() pairs on one TCP connection (src/amiga-client.c,
- * send_all()/recv_all()), so the traffic this generates is the reported
- * workload: many small requests, occasional large ones, both directions,
- * driven by a program that has no idea a network is involved.
- *
- * checkretry() in amiga-client.c treats EAGAIN on its blocking socket as
- * retryable, waits 20 ms and tries again, but only MAXRETRY = 10 times per
- * call, after which send_all()/recv_all() fail and the connection is
- * abandoned.  So a stack that answers EAGAIN on a blocking socket loses the
- * connection past ten in a row, which is the symptom the EAB report describes.
- * Every I/O error below is recorded with its DOS error code and the time.
- */
-
 #define FILER_NAMES     16
 
 static VOID end_filer_name(char *dst, const char *dir, ULONG idx, ULONG slot)
@@ -1581,10 +1342,6 @@ static VOID end_filer_fail(EndWorker *w, const char *what, ULONG detail)
              args);
 }
 
-/*
- * Write `len` pattern bytes to `name`, in chunks of a size redrawn per call.
- * Returns TRUE on success.
- */
 static BOOL end_filer_write(EndWorker *w, const char *name, ULONG len,
                             ULONG off)
 {
@@ -1635,7 +1392,6 @@ static BOOL end_filer_write(EndWorker *w, const char *name, ULONG len,
     return TRUE;
 }
 
-/* Read `name` back and check every byte of it against the pattern. */
 static BOOL end_filer_verify(EndWorker *w, const char *name, ULONG len,
                              ULONG off)
 {
@@ -1742,12 +1498,6 @@ static VOID end_filer_body(EndWorker *w)
 
         off += len;
 
-        /*
-         * Every so often, delete rather than overwrite.  A share that is only
-         * ever rewritten in place never exercises create/delete, and the
-         * reported workload, copying directories back and forth, is
-         * mostly create and delete.
-         */
         if ((round % 7UL) == 6UL)
         {
             if (DeleteFile((CONST_STRPTR)remote) == 0)
@@ -1760,15 +1510,6 @@ static VOID end_filer_body(EndWorker *w)
     }
 }
 
-/* ----------------------------------------------------------- the P3 probe -- */
-
-/*
- * A healthy connection, held open beside the hogs, on which one blocking
- * send() is attempted once the pool has been driven down.  The Process
- * publishes "in call" and "returned" so the supervisor can tell a wait from
- * an answer from a wedge; it does not time itself, because a wedged Process
- * cannot report that it is wedged.
- */
 static VOID end_probe_body(EndWorker *w)
 {
     EndAddr sa;
@@ -1859,8 +1600,6 @@ static VOID end_probe_body(EndWorker *w)
     (VOID)e_close(w->w_Base, ls);
 }
 
-/* -------------------------------------------------------- Process fabric -- */
-
 static VOID end_worker_entry(VOID)
 {
     struct Process *me = (struct Process *)FindTask((STRPTR)0);
@@ -1925,8 +1664,6 @@ static struct Process *end_spawn(EndWorker *w, const char *name)
 
     return p;
 }
-
-/* ------------------------------------------------------------ the config -- */
 
 static ULONG end_atoi(const char *s)
 {
@@ -2043,12 +1780,6 @@ static VOID end_read_config(VOID)
 
         if (end_key(line, "mode", &v))
         {
-            /*
-             * loop | wire | fitz | watch | leak.  Matched on two letters:
-             * "loop" and "leak" share their first, and matching on one ran
-             * the wrong workload for ten minutes and produced a timeline that
-             * could not be read correctly.
-             */
             if      (v[0] == 'w' && v[1] == 'i') ES->es_Mode = MODE_WIRE;
             else if (v[0] == 'w' && v[1] == 'a') ES->es_Mode = MODE_WATCH;
             else if (v[0] == 'f')                ES->es_Mode = MODE_FITZ;
@@ -2087,8 +1818,6 @@ static VOID end_read_config(VOID)
     if (ES->es_MaxIo  < 64UL)          ES->es_MaxIo = 64UL;
     if (ES->es_MaxEcho > ES->es_MaxIo) ES->es_MaxEcho = ES->es_MaxIo;
 }
-
-/* -------------------------------------------------------- the supervisor -- */
 
 static ULONG end_total(const volatile ULONG *lo, const volatile ULONG *hi)
 {
@@ -2178,24 +1907,8 @@ static VOID end_sample(struct Library *base, ULONG t)
              args);
 }
 
-/*
- * A worker inside one socket call for longer than this has not merely slowed
- * down: every call in this harness has a peer trying to satisfy it.  Reported
- * once per worker, with the call and the blocking flag, because a blocking
- * call that never returns on an exhausted pool is a distinct failure from one
- * that returns EAGAIN.
- */
 #define END_STALL_TICKS     (120UL * 50UL)
 
-/*
- * The elapsed time inside a call, in ticks, or 0 when it has not started yet.
- *
- * w_CallStart is stamped `end_ticks() | 1` so that 0 can mean "not in a call",
- * which puts it up to one tick in the future; without the guard below,
- * `now - start` underflows to 0xFFFFFFFF and the stall detector reports every
- * healthy worker as stalled for 85899345 seconds.  Observed on the first run
- * that used it.
- */
 static ULONG end_in_call(ULONG start)
 {
     ULONG now = end_ticks();
@@ -2235,8 +1948,6 @@ static VOID end_check_stalls(ULONG t, UWORD *reported)
         }
     }
 }
-
-/* ------------------------------------------------------------- the probes -- */
 
 static ULONG end_pool_free(struct Library *base)
 {
@@ -2279,7 +1990,6 @@ static VOID end_p3(struct Library *base)
 
     ES->es_ProbeGo = 1;
 
-    /* Watch the probe from outside it. */
     waited = 0UL;
     while (waited < 3000UL && ES->es_ProbeState != 2)
     {
@@ -2306,8 +2016,6 @@ static VOID end_p3(struct Library *base)
 
     ES->es_HogStop = 1;
 }
-
-/* ----------------------------------------------------------------- main --- */
 
 static VOID end_summary(struct Library *base, ULONG ran, ULONG avail_end)
 {
@@ -2376,15 +2084,6 @@ static VOID end_worker_buf(EndWorker *w, ULONG size)
     w->w_BufSize = (w->w_Buf != NULL) ? size : 0UL;
 }
 
-/*
- * Give the memory back on the way out.
- *
- * AmigaOS does not reclaim AllocMem() memory when a process exits, and this
- * command leaves main() from six places, so atexit(), not a free before each
- * return.  A worker that never set w_Done is still running on its buffer, and
- * on ES, which is where every worker lives: those stay, and the leak is the
- * price of not freeing a stack out from under a Process that would not stop.
- */
 static VOID end_release(VOID)
 {
     ULONG live = 0UL;
@@ -2493,8 +2192,6 @@ int main(void)
                (LONG)ES->es_Seconds, (LONG)mn, (LONG)ES->es_Conns,
                (LONG)ES->es_Filers, (LONG)ES->es_Port, (LONG)ES->es_Path);
     }
-
-    /* ---- workers ---------------------------------------------------- */
 
     if (ES->es_Mode == MODE_FITZ)
     {
@@ -2606,8 +2303,6 @@ int main(void)
         }
     }
 
-    /* ---- the probes, then the soak ---------------------------------- */
-
     if (ES->es_Probes && ES->es_Mode == MODE_LOOP)
     {
         Delay(150);                 /* let the ordinary traffic get going */
@@ -2634,8 +2329,6 @@ int main(void)
 
         Delay(50);
     }
-
-    /* ---- stop ------------------------------------------------------- */
 
     ES->es_Stop    = 1;
     ES->es_HogStop = 1;
