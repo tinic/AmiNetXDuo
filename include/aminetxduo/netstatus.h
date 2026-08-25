@@ -1102,6 +1102,18 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Defer;      /* deliver -> IP thread pickup       */
     NetStatusBudgetLeg  nrb_Demux;      /* pickup -> the segment's socket    */
     NetStatusBudgetLeg  nrb_State;      /* socket entry -> receive notify    */
+    /* The green realm's scheduling census (AMINETXDUO_GREEN_REALM builds;
+       all zero from a baton build).  Appended at the end for the same
+       offset-stability reason as the settle sub-legs.  What each counts:
+       port/threadx-amiga/inc/tx_amiga.h, TX_AMIGA_GREEN_STATS. */
+    ULONG               nrb_GreenSwitches;
+    ULONG               nrb_GreenExternal;
+    ULONG               nrb_GreenIdleWaits;
+    ULONG               nrb_GreenWaitFast;
+    ULONG               nrb_GreenWaitSlow;
+    ULONG               nrb_GreenStray;     /* MUST be zero; a nonzero count
+                                               is an unconverted Exec block
+                                               inside the realm              */
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

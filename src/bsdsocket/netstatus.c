@@ -1603,6 +1603,20 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                 }
             }
 #endif
+            {
+                /* The green realm's census.  Not under RXPROBE: the counters
+                   exist in every green build, and the accessor answers zeros
+                   from a baton one. */
+                TX_AMIGA_GREEN_STATS gs;
+
+                tx_amiga_green_stats(&gs);
+                out->nrb_GreenSwitches  = gs.gs_switches;
+                out->nrb_GreenExternal  = gs.gs_external;
+                out->nrb_GreenIdleWaits = gs.gs_idle_waits;
+                out->nrb_GreenWaitFast  = gs.gs_wait_fast;
+                out->nrb_GreenWaitSlow  = gs.gs_wait_slow;
+                out->nrb_GreenStray     = gs.gs_stray_wait;
+            }
         }
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;
