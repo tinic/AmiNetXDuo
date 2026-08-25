@@ -491,6 +491,15 @@ set_source_files_properties(
 aminetxduo_add_tool(tool_iperf   iperf    SOURCES iperf.c iperfcore.c
                                           iperfwire.c toolsock.c toolbudget.c)
 
+# paysum is iperf's content-verifying sibling: iperf proves how many bytes
+# crossed, paysum proves they were the RIGHT bytes.  The receive path computes
+# its checksum in the same pass that places the bytes, so a placement bug is
+# certified by its own sum and only content can convict it.  The pattern and
+# the CRC are reimplemented in tests/tools/paypeer.py, and
+# tests/tools/run-payverify.sh compares the two ends line by line.
+aminetxduo_add_tool(tool_paysum  paysum   SOURCES paysum.c toolsock.c
+                                          toolbudget.c)
+
 # sntp is config-only in the same sense as fetch: it reaches bsdsocket.library
 # through its published vectors and sets the machine's clock through
 # timer.device and battclock.resource.  It does NOT link the vendored NetX Duo

@@ -256,7 +256,11 @@ for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 # measured byte-order quirk, and its capture-watch phases read 0/100 on a
 # HEALTHY machine (the driver drains frames faster than the tool samples).
 # A specialist's instrument for a bench, not a command for a drawer.
-NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag)
+# paysum is the guest half of the payload-integrity harness: it moves a
+# seeded pattern and prints content CRCs for tests/tools/paypeer.py to be
+# compared against, and without that peer and run-payverify.sh's join it
+# proves nothing a user can read.  A harness half, like ToolsSmoke.
+NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 for path in "$CMD_BUILD"/src/tools/*; do
     [ -f "$path" ] && [ -x "$path" ] || continue
