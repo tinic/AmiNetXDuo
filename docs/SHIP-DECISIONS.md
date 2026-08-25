@@ -335,9 +335,10 @@ One session, in this order.  Nothing here needs a second visit.
               build/lto/src/netdev/anxnet.device \
               build/lto/src/tools/*
 
-    must report `check=ok` for everything the deploy carries.  If either
-    complains, stop: the answer is in the image and the machine is not
-    needed.
+    must report `check=ok` for everything the deploy carries -- it says
+    `check=skip` for the maps and the HTML in the same directory, so the
+    glob is safe to use.  If either complains, stop: the answer is in the
+    image and the machine is not needed.
 
 2.  Park a known-good pair on DH0: FIRST, from the Shell, not from the
     host: `copy LIBS:bsdsocket.library DH0:bsdsocket.library.known` and

@@ -438,10 +438,25 @@ def check(paths):
     """
     bad = 0
     for p in paths:
+        # A build directory holds maps, HTML and subdirectories beside the
+        # images, so `--check <dir>/*` has to be usable: anything that does
+        # not START with HUNK_HEADER is not a load file and is not this
+        # tool's business.  A file that IS one and then fails to parse is a
+        # different matter and counts.
+        try:
+            with open(p, "rb") as fh:
+                head = fh.read(4)
+        except (IOError, OSError):
+            print("check=skip file=%s reason=not-readable" % p)
+            continue
+        if (len(head) < 4
+                or struct.unpack_from(">L", head, 0)[0] != HUNK_HEADER):
+            print("check=skip file=%s reason=not-a-hunk-loadfile" % p)
+            continue
         try:
             img = parse(p)
         except (Bad, IOError) as e:
-            print("hunk=BAD file=%s reason=%s" % (p, e))
+            print("check=BAD file=%s reason=%s" % (p, e))
             bad += 1
             continue
         n = sum(h.reloc_total() for h in img.hunks)
