@@ -5,10 +5,7 @@ comment beside the code, not an entry here.
 **ONE LINE PER ROW.** What is wrong and where. Not how it was found.
 | Item | Why it is open | Cite |
 |---|---|---|
-| `NetShutdown` leaves the card live and re-adding fails until reboot | close refuses on queued reads, `device_open` stays TRUE, count zeroed anyway | `src/sana2/sana2_device.c:843` |
-| Opening any application after `NetShutdown` gurus the machine | the close succeeded, so a live registration points into freed memory | `tests/tools/run-cycledrill.sh` |
-| One `S2ERR_OUTOFSERVICE` clears `iface->online` for good | every later teardown then skips `S2_OFFLINE` and the close refuses | `src/sana2/sana2_device.c:398`, `src/sana2/sana2_rx.c:845` |
-| The `TCP:` handler survives `NetShutdown` and blocks every later expunge | nothing ever sends `ACTION_DIE`; a task and 371,648 bytes stay gone | `src/bsdsocket/library.c:1663` |
+| The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
 | The first `SetMode()` or `WaitForChar()` of a console session is refused | `term_shell_task` is set after the switch that gates them | `src/tools/httpterm.c:463`, `:1439` |
