@@ -39,10 +39,14 @@
 *.out
 *.app
 
-# Build directories
-build/
-Build/
-build-*/
+# Build directories.  The glob covers every name that STARTS with "build" and
+# not merely build/ and build-*/: a tree configured into buildrp/ and buildt/
+# fell through those two patterns and 18 MB of libraries, tools and .map files
+# went into a commit behind a `git add -A`.  Removed again in the commit that
+# widened this.  Anything a person plausibly types for a build directory
+# begins with these six letters.
+build*/
+Build*/
 
 # CMake generated files
 CMakeFiles/
