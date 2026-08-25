@@ -1010,6 +1010,20 @@ typedef struct NetStatusOpener
 #define NETEVENT_ATTACH_YIELD   16  /* an unasked-for interface gave up its
                                        slot; value = interfaces described    */
 
+/*
+ * The interface is UP and its default route is not.
+ *
+ * nx_ip_gateway_address_set() refuses a next hop on no interface's network,
+ * which is what a mistyped GATEWAY line looks like.  Bringing the interface
+ * up anyway is what start-up has always done, and taking it down instead cost
+ * a user a working card and told them about the SANA-II device.  A new event
+ * id and nothing else: the record shape is unchanged, so AMI_NETSTATUS_VERSION
+ * and AMI_NETSTATUS_MIN_REVISION stay where they are, and an older command
+ * prints the row as an unnamed code rather than refusing the table.
+ */
+#define NETEVENT_GATEWAY_REFUSED 17 /* the default route was refused;
+                                       value = NetX Duo status               */
+
 /* --- the wire ----------------------------------------------------------- */
 /*
  * The mechanism behind "the card's LED still blinks after NetShutdown", in two

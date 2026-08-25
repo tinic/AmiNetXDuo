@@ -208,8 +208,17 @@ CROSS_CONFIGS=(
     # part with instructions REMOVED.  Nothing built it, so nothing noticed
     # that src/common/ami_udivdi3.c left the assembler in 68000 mode for the
     # rest of the file and the whole tree stopped building for it.  One arm,
-    # ~18 s of the cross stage on a 24-core host, one in fourteen.
+    # ~18 s of the cross stage on a 24-core host, one arm among the rest.
     "cpu68060:-DAMINETXDUO_CPU=68060"
+    # THE SMALL-MACHINE INTERFACE TIER, and it is here for the same reason
+    # norxverify and nosack are: the option changes a LAYOUT.
+    # NX_MAX_PHYSICAL_INTERFACES sizes the NX_INTERFACE array inside every
+    # NX_IP and NX_MAX_IPV6_ADDRESSES follows it, AMI_CFG_MAX_ATTACHED sizes
+    # our own per-slot tables, and the two have to agree in every translation
+    # unit or an index runs off the end of an array.  The shipped number is
+    # four; nothing else would ever compile two, and a build option nothing
+    # compiles is a build option that has stopped working.
+    "if2:-DAMINETXDUO_MAX_INTERFACES=2"
     # The second drawer in the archive, and the only arm here that turns more
     # than one thing off at once.  Every option above is a separate arm because
     # each has its own compile-time surface; this one exists because the
@@ -798,7 +807,7 @@ stage_cross() {
 
     # AMINETXDUO_CI_CROSS=default builds just one, what the emulator tier
     # needs, and what you want when bisecting.  A NAME THAT MATCHES NOTHING IS
-    # AN ERROR: it used to skip all fourteen configurations and report green,
+    # AN ERROR: it used to skip every configuration and report green,
     # so `AMINETXDUO_CI_CROSS=deafult tools/ci.sh cross` compiled nothing at
     # all and said so nowhere.
     if [ -n "${AMINETXDUO_CI_CROSS:-}" ]; then
@@ -1561,13 +1570,15 @@ stage_cards6() {
 #              board.  NOTHING in this tree had ever booted a CPU other than
 #              the A1200's 68EC020.
 #   multidef   three, four and eight files in DEVS:NetInterfaces/.  Nothing
-#              had ever staged more than two, so AMI_CFG_MAX_INTERFACES has
-#              never been reached by a test and the branch that drops the rest
-#              has never executed in CI.  Its `compat' round is the same
-#              question inverted: a file carrying keywords this stack ignores
-#              by design must produce NO output from ordinary commands and a
-#              full report from CheckNetConfig, while a real fault beside it
-#              is still reported by both.
+#              had ever staged more than two, so the parser's old cap was
+#              never reached by a test and the branch that dropped the rest
+#              never executed in CI.  There is no parse cap now (dd4b3cee):
+#              any number may be DESCRIBED, and what is finite is how many
+#              attach at once, which ifslots below is about.  Its `compat'
+#              round is the same question inverted: a file carrying keywords
+#              this stack ignores by design must produce NO output from
+#              ordinary commands and a full report from CheckNetConfig, while
+#              a real fault beside it is still reported by both.
 #   bringupfail  what a user is TOLD when bring-up fails, per cause.  Several
 #              selftests assert the wording of a success; none asserted the
 #              wording of a failure, which is the half a user reads.
@@ -1650,10 +1661,10 @@ stage_matrix() {
         0) note "PASS  every definition is visible and every refusal names a\
  reason" ;;
         2) skip "multidef: the rig refused it before any round booted" ;;
-        *) fail "multidef: an interface file in DEVS:NetInterfaces/ is DROPPED\
- SILENTLY -- AMI_CFG_MAX_INTERFACES is 2, the survivors are whichever two the\
- directory scan returns first, and the rest go behind an AMI_WARN that\
- compiles out of a shipping build"
+        *) fail "multidef: an interface file in DEVS:NetInterfaces/ is\
+ DROPPED SILENTLY, or a definition that cannot attach is not refused with a\
+ reason -- and an AMI_WARN is not a reason, it compiles out of every shipping\
+ build"
            bad=$((bad + 1)) ;;
     esac
 

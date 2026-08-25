@@ -3903,6 +3903,59 @@ static LONG ami_ns_take_interface_slot(AmiNetStack *ns, LONG victim)
     return ami_ns_vacant_interface_slot(ns);
 }
 
+/* Defined below, with the rest of what an interface needs to arrive the way a
+   booted one does.  Forward, because the restore below is one of its
+   callers. */
+static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
+                                          UWORD *index_out, BOOL wanted);
+
+/*
+ * PUT THE INTERFACE THAT STOOD DOWN BACK, because the one it stood down for
+ * did not come up after all.
+ *
+ * The yield is the only thing this stack does that takes something away from a
+ * user without being asked to, and it is only defensible while the thing it
+ * buys actually happens.  Opening the device before any slot changes hands
+ * covers the commonest way an add fails and NOT the rest of them: the attach
+ * can be refused, the memory for the description can run out, and everything
+ * netstack_interface_start() does after the attach -- the DHCP client,
+ * STATE=down, the gateway -- can fail on an interface whose device opened
+ * perfectly.  Every one of those used to leave the machine with one interface
+ * fewer than it had, and no message beyond the one about the interface that
+ * failed.
+ *
+ * `wanted` is FALSE: the interface is going back to being one the boot brought
+ * up and nobody asked for, which is what it was a moment ago.  It comes back
+ * through the same door it left by, addresses, DHCP and all, because a
+ * restored interface that is attached but unaddressed is not the machine the
+ * user had.
+ *
+ * BOUNDED, NOT RECURSIVE IN PRACTICE: this runs only after the newcomer's slot
+ * has been given back, so ami_ns_vacant_interface_slot() answers and
+ * ami_ns_yield_candidate() is never reached -- the restore cannot itself
+ * displace an interface and so cannot ask for a restore of its own.
+ */
+static VOID ami_ns_restore_stood_down(const AmiIfConfig *cfg)
+{
+    LONG rc;
+
+    if (cfg == NULL || cfg->name[0] == '\0')
+        return;
+
+    rc = ami_ns_interface_start_locked(cfg, NULL, FALSE);
+    if (rc == AMI_NET_OK)
+    {
+        AMI_INFO("netstack: '%s' has its interface slot back", cfg->name);
+        return;
+    }
+
+    /* The one failure this mechanism cannot repair, so it is recorded where a
+       shipped build can read it back: ShowNetStatus EVENTS. */
+    ami_event(NETEVENT_ATTACH_FAILED, NETEVENT_NOINDEX, (ULONG)rc);
+    AMI_ERROR("netstack: '%s' gave up its slot and could not be put back (%ld)",
+              cfg->name, (long)rc);
+}
+
 /*
  * `wanted` says somebody NAMED this interface, as against the start-up pass
  * finding it in the drawer.  Every caller of this function is a naming one --
@@ -3910,20 +3963,32 @@ static LONG ami_ns_take_interface_slot(AmiNetStack *ns, LONG victim)
  * start-up pass has its own loop, so it is passed as TRUE throughout and is a
  * parameter rather than a constant only so that the rule is stated where the
  * slot is taken.
+ *
+ * `stood_down` is how the caller learns that a slot changed hands, and it is
+ * only ever filled in on SUCCESS: an add that fails restores the interface it
+ * displaced before it returns, so a caller that fails later has one thing to
+ * undo and not two.  NULL when the caller has nothing to undo.
  */
 static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
-                                        UWORD *index_out, BOOL wanted)
+                                        UWORD *index_out, BOOL wanted,
+                                        AmiIfConfig *stood_down)
 {
     AmiNetStack  *ns = ami_ns;
     AmiNetCaller *caller;
     AmiIfConfig  *slot_cfg;
     AmiIfConfig   open_cfg;
+    AmiIfConfig   victim_cfg;
     AmiSana2If   *iface;
     LONG          slot;
     LONG          victim;
     LONG          err = AMI_NET_OK;
     UINT          status;
     UWORD         i;
+
+    if (stood_down != NULL)
+        stood_down->name[0] = '\0';
+
+    victim_cfg.name[0] = '\0';
 
     if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
         return AMI_NET_ERR_STATE;
@@ -4001,12 +4066,19 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
 
     if (slot < 0)
     {
+        /* Before the take and not after it: the newcomer's configuration is
+           written into the description this points at, so the copy has to be
+           made while it still describes the interface that is standing down. */
+        victim_cfg = ns->ns_Config.interfaces[victim];
+
         slot = ami_ns_take_interface_slot(ns, victim);
         if (slot < 0)
         {
             /* The candidate would not come down -- it is carrying
                connections -- so this is the ordinary no-slot refusal after
-               all, and the device just opened is closed again. */
+               all, and the device just opened is closed again.  Nothing was
+               taken, so there is nothing to put back. */
+            victim_cfg.name[0] = '\0';
             ami_sana2_close(iface);
             ami_event(NETEVENT_ATTACH_LIMIT, (UWORD)AMI_CFG_MAX_ATTACHED,
                       (ULONG)ns->ns_Config.interface_count);
@@ -4024,6 +4096,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     if (!ami_config_reserve(&ns->ns_Config, (UWORD)(slot + 1)))
     {
         ami_sana2_close(iface);
+        ami_ns_restore_stood_down(&victim_cfg);
         return AMI_NET_ERR_NOMEM;
     }
 
@@ -4062,6 +4135,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ami_sana2_close(iface);
         ns->ns_Iface[slot] = NULL;
         slot_cfg->configured = FALSE;
+        ami_ns_restore_stood_down(&victim_cfg);
         return AMI_NET_ERR_KERNEL;
     }
 
@@ -4072,6 +4146,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ami_sana2_close(iface);
         ns->ns_Iface[slot] = NULL;
         slot_cfg->configured = FALSE;
+        ami_ns_restore_stood_down(&victim_cfg);
         return AMI_NET_ERR_STATE;
     }
 
@@ -4117,6 +4192,7 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
         ami_sana2_close(iface);
         ns->ns_Iface[slot] = NULL;
         slot_cfg->configured = FALSE;
+        ami_ns_restore_stood_down(&victim_cfg);
         return AMI_NET_ERR_STATE;
     }
 
@@ -4153,6 +4229,14 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     if (index_out != NULL)
         *index_out = (UWORD)slot;
 
+    /* The add is done, so the yield stands -- and the caller is told, because
+       whatever it does next may still fail, and putting the displaced
+       interface back is then its business.  Copied only when there was one:
+       the rest of victim_cfg is untouched storage when no slot changed
+       hands. */
+    if (stood_down != NULL && victim_cfg.name[0] != '\0')
+        *stood_down = victim_cfg;
+
     AMI_INFO("netstack: interface \'%s\' added as %ld", slot_cfg->name,
              (long)slot);
 
@@ -4173,7 +4257,9 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
 
     ami_ns_lock_init();
     ObtainSemaphore(&ami_ns_lock);
-    rc = ami_ns_interface_add_locked(cfg, index_out, TRUE);
+    /* No stand-down to report: this add is the whole transaction, so there is
+       nothing after it that could fail and want the slot given back. */
+    rc = ami_ns_interface_add_locked(cfg, index_out, TRUE, NULL);
     ReleaseSemaphore(&ami_ns_lock);
 
     return rc;
@@ -4188,11 +4274,20 @@ LONG netstack_interface_add(const AmiIfConfig *cfg, UWORD *index_out)
  * AddInterfaceTagList() promises a bare interface its caller addresses with
  * ConfigureInterfaceTagList(). AddNetInterface has a file rather than a tag
  * list, so its interface has to arrive the way a booted one does.
+ *
+ * `wanted` is TRUE for every caller from outside; it is FALSE only when
+ * ami_ns_restore_stood_down() brings an interface back that gave up its slot
+ * to an add that then failed, because such an interface goes back to being one
+ * the boot brought up and nobody asked for.  That is also the only reason this
+ * is split from netstack_interface_start(): the restore already holds the
+ * lock.
  */
-LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
+static LONG ami_ns_interface_start_locked(const AmiIfConfig *cfg,
+                                          UWORD *index_out, BOOL wanted)
 {
     AmiNetStack  *ns;
     AmiNetCaller *caller;
+    AmiIfConfig   stood_down;
     UWORD         index                  = 0;
     ULONG         gateway                = 0UL;
     BOOL          autoip_created_before  = FALSE;
@@ -4200,20 +4295,16 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
     BOOL          added                  = FALSE;
     LONG          rc;
 
-    ami_ns_lock_init();
-    ObtainSemaphore(&ami_ns_lock);
+    stood_down.name[0] = '\0';
 
     ns = ami_ns;
     if (ns == NULL || !ns->ns_IpCreated || cfg == NULL)
-    {
-        ReleaseSemaphore(&ami_ns_lock);
         return AMI_NET_ERR_STATE;
-    }
 
     autoip_created_before = ns->ns_AutoIpCreated;
     autoip_running_before = ns->ns_AutoIpRunning;
 
-    rc = ami_ns_interface_add_locked(cfg, &index, TRUE);
+    rc = ami_ns_interface_add_locked(cfg, &index, wanted, &stood_down);
     if (rc != AMI_NET_OK)
         goto out;
     added = TRUE;
@@ -4304,9 +4395,38 @@ LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
 
         if (status != NX_SUCCESS)
         {
-            AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
-            rc = AMI_NET_ERR_STATE;
-            goto rollback;
+            /*
+             * A ROUTE THAT WAS REFUSED IS NOT A REASON TO DESTROY AN
+             * INTERFACE, and this used to be one.
+             *
+             * nx_ip_gateway_address_set() refuses a next hop that is on no
+             * interface's network, which is what a mistyped GATEWAY line in
+             * DEVS:NetInterfaces looks like -- and the interface itself is
+             * fine: it has its address, its subnet is reachable, and taking it
+             * away leaves the user with less than they had and a message about
+             * the SANA-II device that had nothing to do with it.  Worse, on a
+             * machine at its slot cap the rollback took a WORKING interface
+             * down with it, because the one that stood down to make room went
+             * with the interface it made room for.
+             *
+             * START-UP HAS ALWAYS DONE IT THIS WAY (ami_ns_create_ip(): warn
+             * and carry on), and this function's own link-local block gives
+             * the same argument for the same reason -- a card present at boot
+             * and a card added afterwards must not come up differently.
+             *
+             * Recorded rather than only warned about, because AMI_WARN is in
+             * no shipped binary: NETEVENT_GATEWAY_REFUSED, which ShowNetStatus
+             * EVENTS reads, and AddNetInterface says it in one line by
+             * comparing the gateway the file asked for with the one the stack
+             * ended up with.
+             */
+            ami_event(NETEVENT_GATEWAY_REFUSED, index, (ULONG)status);
+            AMI_WARN("netstack: '%s' is up, and the default route %lu.%lu.%lu."
+                     "%lu it asked for was refused (%ld)", cfg->name,
+                     (unsigned long)((gateway >> 24) & 0xFFUL),
+                     (unsigned long)((gateway >> 16) & 0xFFUL),
+                     (unsigned long)((gateway >> 8) & 0xFFUL),
+                     (unsigned long)(gateway & 0xFFUL), (long)status);
         }
     }
 
@@ -4363,7 +4483,28 @@ rollback:
                       (long)index, (long)remove_rc);
     }
 
+    /*
+     * And the interface that was displaced to make room for the one that has
+     * just been rolled back.  AFTER the removal above, which is what makes its
+     * slot free again -- and the slot it goes back into is the same one,
+     * because ami_ns_yield_candidate() only ever offers a slot that is now
+     * vacant.  A failed AddNetInterface leaves the machine as it found it or
+     * it says why not; it does not quietly take a working card off the user.
+     */
+    ami_ns_restore_stood_down(&stood_down);
+
 out:
+    return rc;
+}
+
+LONG netstack_interface_start(const AmiIfConfig *cfg, UWORD *index_out)
+{
+    LONG rc;
+
+    ami_ns_lock_init();
+    ObtainSemaphore(&ami_ns_lock);
+    rc = ami_ns_interface_start_locked(cfg, index_out, TRUE);
     ReleaseSemaphore(&ami_ns_lock);
+
     return rc;
 }

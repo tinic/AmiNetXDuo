@@ -269,6 +269,11 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
 }
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface) { (VOID)iface; }
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
+/* The real one counts the driver bindings, which live in sana2_driver.c and
+   need an NX_IP.  ami_sana2_rx_start() is the only caller and this harness
+   does not start readers; the plan is called directly, with the interface
+   count as an argument, which is the whole reason it is one. */
+UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
 LONG ami_sana2_do_io(struct IORequest *req) { (VOID)req; return 0; }
@@ -667,14 +672,22 @@ static void test_verify_uses_the_carried_sum(void)
 /* Enough packets that the budget never binds: the ladder alone decides. */
 #define PLAN_BIG_POOL   512UL
 
-static void plan_at(ULONG bps, ULONG pool, BOOL dual, AmiRxDepths *d)
+static void plan_for(ULONG bps, ULONG pool, BOOL dual, UWORD ifaces,
+                     AmiRxDepths *d)
 {
     /* Poisoned first, so a plan that writes nothing fails rather than reading
        as "the floors". */
     d->ipv4 = 0xEEEE;
     d->arp  = 0xEEEE;
     d->ipv6 = 0xEEEE;
-    ami_sana2_rx_plan(bps, pool, dual, d);
+    ami_sana2_rx_plan(bps, pool, dual, ifaces, d);
+}
+
+/* One interface, which is what every case below this line means and what the
+   measured table was taken on. */
+static void plan_at(ULONG bps, ULONG pool, BOOL dual, AmiRxDepths *d)
+{
+    plan_for(bps, pool, dual, 1, d);
 }
 
 static void test_plan_ladder(void)
@@ -947,6 +960,87 @@ static void test_plan_arp_is_flat(void)
     }
 }
 
+/*
+ * FOUR INTERFACES SHARE ONE POOL, and the budget is the machine's rather than
+ * each interface's.
+ *
+ * NX_MAX_PHYSICAL_INTERFACES went from two to four, and the arithmetic that
+ * had to be re-checked for it is this one: every outstanding read pins a
+ * packet, the packets come out of one pool, and a quarter of the pool EACH
+ * would have let four interfaces pin all of it -- leaving the sockets and the
+ * transmit path drawing on nothing.  The first assertion is the one that
+ * matters most, though: a machine with one interface must be exactly where it
+ * was, because that is the machine every depth in the table above was
+ * measured on.
+ */
+static void test_plan_shares_one_pool(void)
+{
+    AmiRxDepths one;
+    AmiRxDepths two;
+    AmiRxDepths four;
+    ULONG       pool;
+    UWORD       n;
+
+    printf("sana2: the read budget is the machine's, not each interface's\n");
+
+    /* Unchanged for one interface, at every pool size, on the fastest wire and
+       on a slow one. */
+    for (pool = 0UL; pool <= 600UL; pool += 3UL)
+    {
+        AmiRxDepths implicit;
+
+        plan_for(10000000UL, pool, TRUE, 1, &one);
+        plan_for(10000000UL, pool, TRUE, 0, &implicit);
+
+        h_check(one.ipv4 == implicit.ipv4 && one.arp == implicit.arp &&
+                one.ipv6 == implicit.ipv6,
+                "a caller that did not count is planned as one interface");
+    }
+
+    /* The lab's 8 MB A1200, 368 packets: alone it reaches both ceilings.
+       Four interfaces on that pool may not each do so. */
+    plan_for(10000000UL, 368UL, TRUE, 1, &one);
+    plan_for(10000000UL, 368UL, TRUE, 2, &two);
+    plan_for(10000000UL, 368UL, TRUE, 4, &four);
+
+    h_check(one.ipv4 == AMI_SANA2_RX_MAX_DEPTH,
+            "368 packets, one interface: the ceiling, as before");
+    h_check(two.ipv4 <= one.ipv4 && four.ipv4 <= two.ipv4,
+            "and more interfaces never plan a deeper queue than fewer");
+
+    /* The property, stated as the pool arithmetic and not as a number: what
+       all the interfaces pin together stays inside the share, once the pool
+       is big enough to pay the floors at all. */
+    for (pool = 0UL; pool <= 600UL; pool += 1UL)
+    {
+        for (n = 1; n <= (UWORD)AMI_SANA2_RX_MAX_DEPTH; n *= 2)
+        {
+            ULONG floors = (ULONG)AMI_SANA2_RX_DEPTH_IPV4 +
+                           (ULONG)AMI_SANA2_RX_DEPTH_ARP +
+                           (ULONG)AMI_SANA2_RX_DEPTH_IPV6;
+            ULONG share  = pool / (ULONG)AMI_SANA2_RX_BUDGET_SHARE;
+            ULONG total;
+
+            plan_for(0xFFFFFFFFUL, pool, TRUE, n, &four);
+            total = ((ULONG)four.ipv4 + four.arp + four.ipv6) * (ULONG)n;
+
+            h_check(total <= ((share > floors * (ULONG)n)
+                                  ? share : floors * (ULONG)n),
+                    "all the interfaces together stay inside the share, or "
+                    "inside their floors");
+        }
+    }
+
+    /* And the floors are still every interface's own, on the machine where
+       they are the whole answer: 2 MB of chip RAM and no Fast RAM is 47
+       packets, which cannot pay two interfaces anything above them. */
+    plan_for(10000000UL, 47UL, TRUE, 2, &two);
+    h_check(two.ipv4 == AMI_SANA2_RX_DEPTH_IPV4 &&
+            two.arp  == AMI_SANA2_RX_DEPTH_ARP &&
+            two.ipv6 == AMI_SANA2_RX_DEPTH_IPV6,
+            "47 packets and two interfaces: each keeps its floors and no more");
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -963,6 +1057,7 @@ int main(void)
     test_plan_floors();
     test_plan_single_stack();
     test_plan_arp_is_flat();
+    test_plan_shares_one_pool();
 
 #ifdef AMINETXDUO_RX_VERIFY
     test_verify_publishes_only_what_it_checked();

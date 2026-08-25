@@ -143,6 +143,35 @@
  *
  * Twice the window share above, so a machine can hold a window's worth of
  * reads on one protocol and still have the same again for the other.
+ *
+ * AND IT IS A QUARTER FOR THE MACHINE, NOT A QUARTER EACH.  There is one
+ * packet pool and there may now be four interfaces
+ * (NX_MAX_PHYSICAL_INTERFACES), so the plan divides this budget by how many
+ * interfaces are attached when the readers start: four interfaces each taking
+ * a quarter would leave the pool with nothing for the sockets or the transmit
+ * path, which is the same turnover the floor-of-eight measurement below ran
+ * into, one interface at a time.  A machine with ONE interface divides by one
+ * and its numbers are unchanged -- every depth in the table in
+ * tests/sana2/host/test_sana2_rx_host.c is the depth it was.
+ *
+ * THE FLOORS ARE STILL NEVER GIVEN UP, and on the smallest machine they are
+ * the whole answer: a 47-packet pool with two interfaces has a budget of five
+ * against floors of eight, so each interface gets exactly 4/2/2 and the
+ * division changes nothing it could have had.  That is the intended shape --
+ * what four interfaces share is the discretionary part, and what each is
+ * guaranteed is the burst it cannot work below.
+ *
+ * WHICH LEAVES ONE ARITHMETIC LIMIT WORTH WRITING DOWN RATHER THAN CODING
+ * AGAINST.  The floors are 8 packets an interface, so four interfaces would
+ * pin 32 -- more than AMI_POOL_MIN_PACKETS, which is 16.  That combination is
+ * a machine under about 1 MB free running FOUR cards, and no such machine
+ * exists: the reference floor -- 2 MB of chip RAM, no Fast RAM -- makes a
+ * 57-packet pool, which pays four sets of floors and a little over.  Nothing
+ * clamps it because nothing needs to: a reader that cannot get a packet takes
+ * the NX_NO_WAIT refusal, counts it in stats.alloc_failures -- `netstat -h`
+ * prints the pool's side of the same event as "found the pool empty" -- and
+ * arms the slots it did get.  The shape of the failure is a shallower queue,
+ * not an interface that will not start.
  */
 #ifndef AMI_SANA2_RX_BUDGET_SHARE
 #define AMI_SANA2_RX_BUDGET_SHARE   4
@@ -239,12 +268,18 @@ typedef struct AmiRxDepths
  * `bps` is what S2_DEVICEQUERY reported, 0 when the device did not say.
  * `pool_total` is nx_packet_pool_total, 0 when there is no pool yet.
  * `dual_stack` says whether an IPv6 reader will be started at all.
+ * `ifaces` is how many interfaces are sharing that pool, 0 read as 1.
  *
  * Extern, and taking scalars rather than the interface, so the arithmetic runs
  * under tests/sana2/host with no device and no pool behind it.
  */
 VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
-                       AmiRxDepths *out);
+                       UWORD ifaces, AmiRxDepths *out);
+
+/* How many interfaces are bound to an NX_IP right now, which is how many
+   readers' worth of pool packets are already spoken for.  In sana2_driver.c,
+   where the bindings are. */
+UWORD ami_sana2_bound_count(VOID);
 
 /* ---------------------------------------------------------- receive probe */
 

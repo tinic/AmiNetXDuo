@@ -2373,14 +2373,14 @@
        particular network through a second gateway is added with
        AddNetRoute. Specific routes in DEVS:Internet/routes are read
        and skipped, so nothing here survives a reboot by itself.
-    o  @{b}At most two interfaces@{ub} are online at once, however many
+    o  @{b}At most four interfaces@{ub} are online at once, however many
        interface files DEVS:NetInterfaces holds -- and it may hold as
-       many as you like; every one of them is read and listed by
-       ShowNetStatus. The two that are online are the two you name.
+       many as you like; every one is read and listed by ShowNetStatus.
        An interface the boot brought up on its own gives its slot to
        one you ask for by name, and says so; an interface you named
-       keeps its slot, and a third AddNetInterface is refused with the
-       names of the two holding them. RemoveNetInterface frees one.
+       keeps its slot, and a fifth AddNetInterface is refused with the
+       names of the four holding them. RemoveNetInterface frees one, and
+       an AddNetInterface that FAILS puts back whatever stood down.
     o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
        point-to-point driver such as ppp.device or slip.device is not
        refused, but none has been tested, so a modem or DSL connection

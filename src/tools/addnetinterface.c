@@ -259,13 +259,57 @@ static struct
     NetStatusInterface  e[NX_MAX_PHYSICAL_INTERFACES];
 } addif_ifaces;
 
-/* And its IPv6 counterpart, for the same reason.  Six entries, because
-   NX_MAX_IPV6_ADDRESSES is three per interface. */
+/* And its IPv6 counterpart, for the same reason.  Three entries per
+   interface, because that is what NX_MAX_IPV6_ADDRESSES is. */
 static struct
 {
     NetStatusHeader     hdr;
     NetStatusAddress6   e[NX_MAX_PHYSICAL_INTERFACES * 3];
 } addif_addr6;
+
+static struct
+{
+    NetStatusHeader hdr;
+    NetStatusSystem e;
+} addif_system;
+
+/*
+ * THE ROUTE THE FILE ASKED FOR, AND THE ONE THE MACHINE HAS.
+ *
+ * nx_ip_gateway_address_set() refuses a next hop that is on no interface's
+ * network, and the interface comes up anyway -- which is right, and used to
+ * be a rollback that took the interface down and, at the slot cap, took
+ * another interface with it (src/netstack/netstack.c).  Coming up anyway must
+ * not mean coming up silently: a machine with an address and no default route
+ * reaches its own subnet and nothing else, and the GATEWAY line in the file is
+ * where the user would look last.
+ *
+ * Asked of the stack rather than remembered, and compared rather than
+ * assumed: the gateway is machine-wide, so this is true whether the refusal
+ * was this interface's GATEWAY line or the machine's.
+ */
+static VOID report_refused_gateway(struct Library *base, const char *name,
+                                   ULONG asked_for)
+{
+    char text[16];
+
+    if (asked_for == 0UL)
+        return;
+
+    if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &addif_system,
+                             sizeof(addif_system), sizeof(NetStatusSystem)) < 1)
+        return;
+
+    if (addif_system.e.nss_Gateway == asked_for)
+        return;
+
+    ami_config_format_ip(asked_for, text, sizeof(text));
+    tool_printf("%s: is up, and the default route %s was refused: that "
+                "address is on no network this machine is on.\n",
+                (LONG)name, (LONG)text);
+    tool_printf("%s: check the GATEWAY line in DEVS:NetInterfaces/%s.\n",
+                (LONG)name, (LONG)name);
+}
 
 /*
  * Has the running stack given this interface a usable IPv6 address.
@@ -350,14 +394,16 @@ static LONG running_index(struct Library *base, const char *name,
  * WHICH INTERFACES WERE UP BEFORE THE ADD, so that one going down over it can
  * be reported rather than merely happening.
  *
- * There are two interface slots and a drawer may describe more interfaces than
- * that. An interface the boot brought up on its own initiative gives its slot
- * to one a user asks for by name (src/netstack/netstack.c,
- * ami_ns_yield_candidate()), which is the whole reason `AddNetInterface
- * wifi0` works on a machine whose drawer also holds eth0 and eth1. It is still
- * an interface that was carrying traffic and now is not, so it is said out
- * loud. An interface somebody named never yields, so this line cannot appear
- * for one the user asked for.
+ * There are NX_MAX_PHYSICAL_INTERFACES interface slots and a drawer may
+ * describe more interfaces than that. An interface the boot brought up on its
+ * own initiative gives its slot to one a user asks for by name
+ * (src/netstack/netstack.c, ami_ns_yield_candidate()), which is the whole
+ * reason `AddNetInterface wifi0` works on a machine whose drawer also holds
+ * eth0, eth1, eth2 and eth3. It is still an interface that was carrying
+ * traffic and now is not, so it is said out loud. An interface somebody named
+ * never yields, so this line cannot appear for one the user asked for -- and
+ * neither can it appear for an add that FAILED, because the library puts the
+ * interface that stood down back before it returns the failure.
  */
 static char  addif_was_up[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_NAME_LEN];
 static UWORD addif_was_up_count;
@@ -916,6 +962,10 @@ int main(int argc, char **argv)
                     else
                         tool_printf("%s: online, address %s\n", (LONG)name,
                                     (LONG)text);
+
+                    /* An interface with an address and no route off its own
+                       subnet is the one failure that looks like success. */
+                    report_refused_gateway(base, name, ifc.gateway);
                 }
             }
             else if (text6[0] != '\0')

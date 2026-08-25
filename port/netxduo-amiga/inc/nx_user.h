@@ -61,12 +61,97 @@
 /* ----------------------------------------------------------- interfaces --- */
 
 /*
- * Two physical interfaces: one SANA-II device plus room for a second, which is
- * a normal Amiga configuration.  Each costs an NX_INTERFACE in every NX_IP;
- * raise it only with a measurement.  The loopback interface is separate and
- * always present.
+ * FOUR physical interfaces, and the measurement the old comment here asked for
+ * before anybody raised it.  The loopback interface is separate and always
+ * present.
+ *
+ * WHY FOUR IS THE REAL NUMBER.  It was two -- one SANA-II device plus room for
+ * a second -- and that is no longer a whole Amiga.  An A1200 with a PiStorm32
+ * has two conventional cards (a 3c589 in the PCMCIA slot, and room for
+ * another) AND two interfaces the accelerator supplies: genet.device, the
+ * Pi's gigabit Ethernet, measured at 76.9 Mbit/s through this stack, and
+ * wifipi.device, its WiFi.  Four is what that machine has, and it is the
+ * machine this project is aimed at.
+ *
+ * WHAT THE SECOND TWO COST, measured on m68k with the shipping configuration
+ * (IPv6, mDNS and TLS on), 2 against 4:
+ *
+ *   sizeof(NX_INTERFACE)          84       84
+ *   sizeof(NX_IP)             46,206   46,766     +560   (280 an interface:
+ *                                                         the NX_INTERFACE and
+ *                                                         the three
+ *                                                         NX_MAX_IPV6_ADDRESSES
+ *                                                         slots it is given)
+ *   sizeof(NX_DHCP)            8,508    9,388     +880   (NX_DHCP_CLIENT_MAX_
+ *                                                         RECORDS follows this
+ *                                                         constant; a record is
+ *                                                         440 bytes)
+ *   our own per-slot tables                     +2,592   (ns_Iface[] and the
+ *                                                         rest, most of it the
+ *                                                         per-interface DHCP
+ *                                                         name-server and
+ *                                                         search-domain leases
+ *                                                         and the router-
+ *                                                         advertisement handoff)
+ *   sizeof(AmiNetStack)      114,820  118,852   +4,032
+ *   interface-list floor                          +808   (AMI_CFG_IFACE_FLOOR
+ *                                                         reserves one
+ *                                                         AmiIfConfig, 404
+ *                                                         bytes, per slot)
+ *
+ * So 4,840 bytes, on every machine, including a machine with one card.  That
+ * is what a running stack costs; the images either side of it were measured
+ * too, `m68k-amigaos-size` on the two cross arms:
+ *
+ *   bsdsocket.library BSS       5,576    5,608      +32   (and no text, no
+ *                                                          data: the tables
+ *                                                          this constant sizes
+ *                                                          are all inside the
+ *                                                          one allocation)
+ *   anxnet.device, usergroup.library, tls.library     0    (none of the three
+ *                                                          reads it)
+ *   the ten commands that read the interface tables, together     +6,460
+ *                                                         (TOOL_MAX_IF and
+ *                                                          TOOL_MAX_ADDR6:
+ *                                                          ShowNetStatus is
+ *                                                          the largest at
+ *                                                          +1,424, netstat
+ *                                                          +1,052, and
+ *                                                          RemoveNetInterface
+ *                                                          the smallest at
+ *                                                          +320)
+ *
+ * The command figure is NOT a resident cost and must not be added to the one
+ * above: a Shell command's BSS exists while it runs, one command at a time,
+ * and the largest of them is 1.4 KB of a machine that has just been asked to
+ * print a table.  What a machine carries all the time is 4,872 bytes.
+ *
+ * Against the ~450 KB the stack is resident and the ~1.4 MB a 2 MB A1200 has
+ * free, that is a third of one per cent, and the floor machine was measured
+ * with it rather than reasoned about: AMINETXDUO_FASTMEM=0
+ * tests/tools/run-ifdhcp.sh boots 2 MB of chip RAM and no Fast RAM -- 1.88 MB
+ * free at the prompt, 1.21 MB with the stack up -- brings an interface up and
+ * carries traffic over it with four slots compiled in.  Taken unconditionally
+ * on that evidence, with the smaller tier below for a machine that would
+ * rather have the bytes.
+ *
+ * A SMALLER MACHINE CAN STILL HAVE THE OLD NUMBER, and needs no patch for it:
+ *
+ *   cmake -DAMINETXDUO_MAX_INTERFACES=2 ...
+ *
+ * builds the two-slot stack, and it is one option because this is one number
+ * wearing two names -- CMakeLists.txt sets NX_MAX_PHYSICAL_INTERFACES and
+ * AMI_CFG_MAX_ATTACHED together, and src/netstack/netstack.c has a
+ * _Static_assert that they agree, so a hand-written define of one of them is a
+ * compile error rather than a wrong binary.  Both are #ifndef here so that the
+ * option can reach them.  It is a GLOBAL define deliberately: this constant
+ * changes the layout of NX_IP, so every translation unit has to see the same
+ * value.  Nothing is defined at the default of four, so the shipped build's
+ * compile lines are unchanged by the option existing.
  */
-#define NX_MAX_PHYSICAL_INTERFACES              2
+#ifndef NX_MAX_PHYSICAL_INTERFACES
+#define NX_MAX_PHYSICAL_INTERFACES              4
+#endif
 
 
 /* ------------------------------------------------------------------ ARP --- */
@@ -685,7 +770,7 @@
  *     gateway.
  *
  * One gateway is enough for a machine on one Ethernet, but not for a second
- * interface (the reason NX_MAX_PHYSICAL_INTERFACES is 2 above) reachable only
+ * interface (NX_MAX_PHYSICAL_INTERFACES above allows four) reachable only
  * through its own next hop, or for a VPN or second subnet behind a router that
  * is not the default one.  Both need "this prefix goes via that address", which
  * cannot be expressed as a gateway.  With the enable, _nx_ip_route_find()
@@ -846,12 +931,13 @@
 #define NX_IPV6_PREFIX_LIST_TABLE_SIZE          4
 
 /*
- * Addresses per NX_IP.  The default is NX_MAX_PHYSICAL_INTERFACES * 3, which
- * with two interfaces is 6: link-local + one autoconfigured global + one
- * static per interface.  That is the budget AmiNetXDuo needs, so the default
- * stands and is spelled out rather than redefined.
+ * Addresses per NX_IP.  The default is NX_MAX_PHYSICAL_INTERFACES * 3: three
+ * per interface, link-local + one autoconfigured global + one static.  That is
+ * the budget AmiNetXDuo needs, so the default stands and is spelled out rather
+ * than redefined -- and it is why raising the interface count costs 280 bytes
+ * of NX_IP an interface rather than the 84 an NX_INTERFACE is.
  *
- *   NX_MAX_IPV6_ADDRESSES  == NX_MAX_PHYSICAL_INTERFACES * 3 == 6
+ *   NX_MAX_IPV6_ADDRESSES  == NX_MAX_PHYSICAL_INTERFACES * 3 == 12
  *
  * ::1 lives in a slot of its own (NX_LOOPBACK_IPV6_ENABLED) and is not
  * counted here; nxd_ipv6_enable() configures it unconditionally, which is why

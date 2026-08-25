@@ -85,6 +85,39 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
     return AMI_NET_ERR_STATE;
 }
 
+/*
+ * How many interfaces are attached, counted off the same table the driver
+ * entry looks itself up by.
+ *
+ * It is what ami_sana2_rx_plan() divides the pool budget by, and the count
+ * includes the interface that is asking: ami_sana2_attach() publishes the
+ * binding before nx_ip_interface_attach() calls the driver, so the first
+ * interface on a machine counts one and is planned exactly as it was before
+ * this existed.
+ *
+ * A plan is made when an interface's readers START, so an interface that was
+ * planned when it was alone keeps the depths it was given when a second one
+ * arrives.  That is deliberate rather than overlooked: re-planning would mean
+ * stopping and restarting the readers of a working interface, and the reason
+ * for the division is to stop the LAST interface up from over-committing a
+ * pool the earlier ones are already drawing on.
+ */
+UWORD ami_sana2_bound_count(VOID)
+{
+    UWORD count = 0;
+    UWORD i;
+
+    Forbid();
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+    {
+        if (ami_sana2_bindings[i].iface != NULL)
+            count++;
+    }
+    Permit();
+
+    return count;
+}
+
 VOID ami_sana2_unbind(AmiSana2If *iface)
 {
     UWORD i;

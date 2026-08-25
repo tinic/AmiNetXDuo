@@ -22,6 +22,7 @@
 #     wrong unit         the right driver, a unit it does not have
 #     unusable address   CONFIGURE=STATIC with an ADDRESS that is not one
 #     attach cap         more interfaces asked for than the stack can hold
+#                        (four; see NX_MAX_PHYSICAL_INTERFACES)
 #     no memory          the pool cannot be allocated
 #
 #   and assert, per cause, that the FIRST line names the failing operation and
@@ -163,10 +164,13 @@ if [ "$RIG_OK" = 1 ]; then
         > "$STAGE/devs/NetInterfaces/badunit"
     printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=STATIC\nADDRESS=300.1.1.1\nNETMASK=255.255.255.0\n' \
         > "$STAGE/devs/NetInterfaces/badaddr"
-    # Three valid definitions of the one card there is.  The first attaches;
-    # by the third the stack has no room, which is the attach cap reached as a
-    # configuration rather than as an argument.
-    for n in cap0 cap1 cap2; do
+    # Five valid definitions of the one card there is: one more than
+    # NX_MAX_PHYSICAL_INTERFACES, which is four.  The first four attach; by the
+    # fifth the stack has no room, which is the attach cap reached as a
+    # configuration rather than as an argument.  The count follows the cap --
+    # a drawer with fewer definitions than slots never reaches it, and this
+    # arm would then be grading a success.
+    for n in cap0 cap1 cap2 cap3 cap4; do
         printf 'DEVICE=a2065.device\nUNIT=0\nCONFIGURE=DHCP\n' \
             > "$STAGE/devs/NetInterfaces/$n"
     done
@@ -178,6 +182,8 @@ SYS:AddNetInterface badaddr
 SYS:AddNetInterface cap0
 SYS:AddNetInterface cap1
 SYS:AddNetInterface cap2
+SYS:AddNetInterface cap3
+SYS:AddNetInterface cap4
 SYS:ShowNetStatus INTERFACES
 EOF
 
@@ -234,7 +240,7 @@ EOF
 missing_device    nodev
 wrong_unit        badunit
 unusable_address  badaddr
-attach_cap        cap2
+attach_cap        cap4
 EOF
     fi
 else

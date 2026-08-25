@@ -79,6 +79,10 @@ static const ToolEventRow tool_event_rows[] =
       "this interface was brought up on its own and gave its slot back to an "
       "interface that was asked for by name",
       "interfaces described" },
+    { NETEVENT_GATEWAY_REFUSED,
+      "the interface is up and the default route it asked for was refused, "
+      "because that address is on no network this machine is on",
+      "NetX Duo status" },
 
     { NETEVENT_OUT_OF_SERVICE,
       "the device went out of service and the link was marked down",

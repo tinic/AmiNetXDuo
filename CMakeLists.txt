@@ -261,6 +261,42 @@ endif()
 # option that changes an image it does not belong to is a measurement nobody
 # can trust afterwards.
 
+# HOW MANY INTERFACES CAN BE ONLINE AT ONCE.  Four, which is what an A1200 with
+# a PiStorm32 has: two conventional cards plus genet.device and wifipi.device
+# from the accelerator.  port/netxduo-amiga/inc/nx_user.h carries the
+# measurement -- 4,032 bytes of the one allocation the stack makes and 808 more
+# of interface-list floor, against 2 -- and the argument for taking it on every
+# machine.
+#
+# A SMALLER MACHINE CAN HAVE FEWER, and this is the knob rather than a patch:
+#
+#   cmake -DAMINETXDUO_MAX_INTERFACES=2 ...
+#
+# It is one number wearing two names -- NX_MAX_PHYSICAL_INTERFACES sizes the
+# NX_INTERFACE array inside every NX_IP, AMI_CFG_MAX_ATTACHED sizes our own
+# per-slot tables -- so both are set here together and src/netstack/netstack.c
+# has a _Static_assert that they agree.  A user who defines one by hand gets a
+# compile error rather than a wrong binary.
+#
+# add_compile_definitions() DELIBERATELY, against the caution written just
+# above: this constant changes the layout of NX_IP, so a translation unit that
+# saw a different value would index past the end of an array.  Every TU has to
+# see the same number, which is exactly what a global define is for.  Nothing
+# is defined at the default, so the shipped build's compile lines -- and its
+# LTO options record -- are the bytes they were before this option existed.
+set(AMINETXDUO_MAX_INTERFACES "4" CACHE STRING
+    "Interfaces that can be online at once (1 or more; 4 ships)")
+if(AMINETXDUO_MAX_INTERFACES LESS 1)
+    message(FATAL_ERROR
+        "AMINETXDUO_MAX_INTERFACES=${AMINETXDUO_MAX_INTERFACES} is below the\
+ floor of 1: a stack with no interface slot cannot bring anything up")
+endif()
+if(NOT AMINETXDUO_MAX_INTERFACES EQUAL 4)
+    add_compile_definitions(
+        NX_MAX_PHYSICAL_INTERFACES=${AMINETXDUO_MAX_INTERFACES}
+        AMI_CFG_MAX_ATTACHED=${AMINETXDUO_MAX_INTERFACES})
+endif()
+
 # The TCP: AmigaDOS handler, a socket opened as a file handle, so a program
 # that speaks DOS files speaks the network without knowing this library
 # exists, and `Type TCP:host/port` works from the Shell.  AmiTCP and Roadshow

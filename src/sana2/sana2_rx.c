@@ -1389,7 +1389,7 @@ static UWORD ami_sana2_rx_window_depth(ULONG pool_total)
 }
 
 VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
-                       AmiRxDepths *out)
+                       UWORD ifaces, AmiRxDepths *out)
 {
     UWORD want;
     UWORD cap;
@@ -1401,6 +1401,11 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
     if (out == NULL)
         return;
 
+    /* Nought interfaces is the caller that has not counted, and it is this
+       interface asking, so there is at least one. */
+    if (ifaces == 0)
+        ifaces = 1;
+
     want = ami_sana2_rx_window_depth(pool_total);
     cap  = ami_sana2_rx_wire_depth(bps);
     if (want > cap)
@@ -1410,7 +1415,10 @@ VOID ami_sana2_rx_plan(ULONG bps, ULONG pool_total, BOOL dual_stack,
     out->arp  = (UWORD)AMI_SANA2_RX_DEPTH_ARP;
     out->ipv6 = dual_stack ? (UWORD)AMI_SANA2_RX_DEPTH_IPV6 : (UWORD)0;
 
-    budget = pool_total / (ULONG)AMI_SANA2_RX_BUDGET_SHARE;
+    /* The share is the machine's and it is divided here, not multiplied
+       elsewhere: one interface gets exactly what it always got. */
+    budget = pool_total /
+             ((ULONG)AMI_SANA2_RX_BUDGET_SHARE * (ULONG)ifaces);
     floors = (ULONG)out->ipv4 + (ULONG)out->arp + (ULONG)out->ipv6;
     spare  = (budget > floors) ? (budget - floors) : 0UL;
 
@@ -1507,12 +1515,14 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
      * and bring-up is not asked for one more answer than it was.
      */
     ami_sana2_rx_plan(iface->bps, iface->pool->nx_packet_pool_total,
-                      (BOOL)(AMI_SANA2_RX_READERS == 3), &depths);
+                      (BOOL)(AMI_SANA2_RX_READERS == 3),
+                      ami_sana2_bound_count(), &depths);
 
     AMI_INFO("sana2: read queues ip %ld arp %ld ip6 %ld "
-             "(pool %ld packets, %ld bps)",
+             "(pool %ld packets, %ld bps, %ld interface(s))",
              (long)depths.ipv4, (long)depths.arp, (long)depths.ipv6,
-             (long)iface->pool->nx_packet_pool_total, (long)iface->bps);
+             (long)iface->pool->nx_packet_pool_total, (long)iface->bps,
+             (long)ami_sana2_bound_count());
 
     for (i = 0; i < AMI_SANA2_RX_READERS; i++)
     {

@@ -31,6 +31,16 @@ extern "C" {
  * the ATTACH path is where it is refused -- out loud, naming what is already
  * up.  It is the only limit on interfaces anywhere in this tree.
  *
+ * FOUR since 2026-08-25, up from two, and priced before it was raised: nx_user.h
+ * carries the measurement.  The short version is 4,872 bytes resident -- 4,032
+ * of the one allocation the stack makes, 808 of interface-list floor and 32 of
+ * bsdsocket.library's BSS -- on every machine, whatever it attaches.  Four is
+ * what an A1200 with a PiStorm32 has -- two conventional cards plus
+ * genet.device and wifipi.device from the accelerator -- so it is not a round
+ * number, it is a machine.  A smaller one builds fewer slots with
+ * -DAMINETXDUO_MAX_INTERFACES=2, which sets this constant and
+ * NX_MAX_PHYSICAL_INTERFACES together.
+ *
  * HOW MANY MAY BE DESCRIBED: any number.  A file in DEVS:NetInterfaces is a
  * description on disk.  It opens no device, creates no NetX Duo object and
  * costs nothing until somebody attaches it, so a machine that keeps five card
@@ -80,7 +90,9 @@ extern "C" {
  * into this list at the NetX Duo slot number it was handed, by index -- always
  * has that index available even on a machine whose drawer was empty.
  */
-#define AMI_CFG_MAX_ATTACHED        2
+#ifndef AMI_CFG_MAX_ATTACHED
+#define AMI_CFG_MAX_ATTACHED        4
+#endif
 #define AMI_CFG_IFACE_FLOOR         AMI_CFG_MAX_ATTACHED
 #define AMI_CFG_MAX_NAMESERVERS     4
 #define AMI_CFG_MAX_SEARCH          6

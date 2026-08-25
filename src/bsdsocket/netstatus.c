@@ -1930,8 +1930,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 case AMI_NET_ERR_DEVBAD: return bsd_fail(SocketBase, AMI_EIO);
                 case AMI_NET_ERR_NOMEM:  return bsd_fail(SocketBase, AMI_ENOBUFS);
                 /* A name the stack already has, as against no slot left to put
-                   it in: NX_MAX_PHYSICAL_INTERFACES is 2, so a user can reach
-                   the second without there being a bug. */
+                   it in: NX_MAX_PHYSICAL_INTERFACES is a small number, so a
+                   user can reach the last of them without there being a bug. */
                 case AMI_NET_ERR_CONFIG: return bsd_fail(SocketBase, AMI_EEXIST);
                 /* Explicitly, rather than through the default: everything
                    else that reaches here is a stack in the wrong state, and

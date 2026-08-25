@@ -57,7 +57,6 @@ comment beside the code, not an entry here.
 | `nc -l` from outside has never been exercised under Amiberry | it forwards with `uae_slirp_redir`, an FS-UAE option; a bridged guest needs none | `tests/tools/run-nettools.sh` |
 | DHCPv6 server selection by preference is untested | no lab server can send OPTION_PREFERENCE, so a two-server link picks by arrival | `tests/ipv6/run-dhcpv6.sh` |
 | The on-target source-selection arm cannot separate Rule 6 | one `ADDRESS6` per interface, so no guest holds a ULA and a global | `src/config/config_parse.c:906`, `tests/tools/run-srcsel.sh` |
-| `checkconfig` reports four findings short because only two interfaces fit | `AMI_CFG_MAX_INTERFACES` is 2, the fixture stages four | `include/aminetxduo/config.h:28`, `tests/tools/run-checkconfig.sh` |
 | A release followed by a DHCP restart was observed silent on the wire | no DISCOVER where one was due, and the harness grades verdicts not the wire | `tests/tools/run-ifdhcp.sh:165` |
 | A legacy one-shot mDNS query drew no observable answer | proper 5353-sourced queries are answered; ephemeral-port one-shots are not | `third_party/netxduo/addons/mdns/nxd_mdns.c:8871` |
 | Nothing guards the usergroup.library hold ixemul clients depend on | no caller in our tree, so a tidy-up would silently close the stack for ixnet | `src/bsdsocket/library_runtime.c:111` |
@@ -89,3 +88,5 @@ comment beside the code, not an entry here.
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:463` |
 | `docs/SHIP-DECISIONS.md` is exempt from the doc budget | it goes when the 0.25.3 LTO re-release lands; that release was pulled | `tools/check-doc-budget.sh:23` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
+| Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:438` |
+| `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
