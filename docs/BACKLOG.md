@@ -33,7 +33,7 @@ comment beside the code, not an entry here.
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:275` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
-| The pool clamps the 32 MB arm reaches are read by nothing | the TCP and UDP ceilings first bind there and that guest only pings | `src/bsdsocket/socket.c:126`, `:231` |
+| The TCP window ceiling has never been observed binding | it needs a saturated pool; the A3000 32 MB arm of `run-bigmem` was queued and did not report | `tests/tools/run-bigmem.sh:152` |
 | The DHCP/RA absorb runs on the caller's stack with 680 bytes to spare | a 1280-byte frame on any task that resolves or reads live config | `src/netstack/netstack_dns.c:1092` |
 | `ami_rx_service` has a 2508-byte frame and nothing states its stack | it runs on the ARexx host's process and nothing records that process's size | `src/netstack/netstack_rexx.c:294` |
 | 13 of 20 serial logs come back empty, so their assertions cannot fire | a harness with an empty input passes vacuously | `tools/amiberry-run.sh`, `tests/ipv6/run-bringup.sh` |
