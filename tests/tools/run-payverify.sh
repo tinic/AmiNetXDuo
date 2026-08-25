@@ -73,13 +73,14 @@ PEERV6="${AMINETXDUO_PAY_PEER6:-}"
 FAMILIES=both
 STORM=no
 LOSS=no
+NETEM=""
 QUICK=no
 
 ADDRESS="${AMINETXDUO_PAY_ADDRESS:-192.168.1.240}"
 GATEWAY="${AMINETXDUO_PAY_GATEWAY:-192.168.1.1}"
 NETMASK=255.255.255.0
 
-while getopts "m:t:b:B:P:a:g:N:6:F:SLQ" opt; do
+while getopts "m:t:b:B:P:a:g:N:6:F:SLE:Q" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -93,6 +94,7 @@ while getopts "m:t:b:B:P:a:g:N:6:F:SLQ" opt; do
         F) FAMILIES="$OPTARG" ;;
         S) STORM=yes ;;
         L) LOSS=yes ;;
+        E) NETEM="$OPTARG" ;;
         Q) QUICK=yes ;;
         *) sed -n '3,12p' "$0" >&2; exit 2 ;;
     esac
@@ -193,7 +195,7 @@ fi
 # proves nothing about retransmission that 256 KB does not.  What matters
 # here is bytes ARRIVING TWICE: enough length for many drops, every tail
 # residue once, both directions.
-if [ "$LOSS" = yes ]; then
+if [ "$LOSS" = yes ] || [ -n "$NETEM" ]; then
     RX_LENS="1461 65534 65535 65536 65537 262144"
     TX_LENS="65537"
     CONC_RX_LEN=65536
@@ -313,8 +315,81 @@ ssh -o ConnectTimeout=10 "$PEERHOST" \
     > "$PEERLOG/peer.out" 2> "$PEERLOG/peer.err" &
 PEER_PID=$!
 
+# ------------------------------------------------------------------ netem ---
+#
+# -E puts a netem discipline on the PEER's egress, which is where a loss
+# arm belongs: frames the guest never sees, ACKs that never come back, and
+# the retransmissions that follow are the injection-prone path -- partial
+# re-delivery placing bytes into a stream whose earlier bytes are already
+# placed, with the fused sum computed over whatever landed.
+#
+# SURGICAL BY CONSTRUCTION.  The peer is a shared machine and other agents
+# measure through it, so this never shapes the interface as a whole: a prio
+# root sends everything to its ordinary bands and TWO filters -- the guest's
+# v4 address and its v6 address -- divert only guest-bound traffic into the
+# netem band.  Everything else on that NIC is untouched.
+#
+# The teardown is in stop_peers(), which is trapped on EXIT INT TERM HUP, and
+# verified again after the verdict: a netem qdisc left behind would silently
+# poison every later measurement on that box.
+NETEM_ON=no
+NETEM_IFACE=""
+GUEST6=""
+
+netem_apply() {
+    NETEM_IFACE=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "ip -o route get $ADDRESS 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p'")
+    [ -n "$NETEM_IFACE" ] || {
+        echo "cannot work out which interface $PEERHOST reaches $ADDRESS on" >&2
+        exit 2; }
+
+    # The guest's v6 address, needed for the second filter.  Read off the
+    # peer's own neighbour table, where a previous v6 arm left it, and
+    # derived from the guest's MAC if it is not there.  Without it the v6
+    # arm would run UNSHAPED and quietly report a clean pass for a case
+    # nothing lossy ever touched, so a v6 run without it is refused.
+    GUEST6=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "ip -6 neigh show nud all 2>/dev/null" |
+        awk '/^2/ && !/router/ {print $1; exit}')
+
+    if [ "$FAMILIES" != v4 ] && [ -z "$GUEST6" ]; then
+        echo "no guest IPv6 address on $PEERHOST's neighbour table: the v6" >&2
+        echo "arm would run unshaped.  Run a v6 arm without -E first, or" >&2
+        echo "pass -F v4." >&2
+        exit 2
+    fi
+
+    ssh -o ConnectTimeout=10 "$PEERHOST" "
+        ~/tc-cap qdisc del dev $NETEM_IFACE root 2>/dev/null
+        ~/tc-cap qdisc add dev $NETEM_IFACE root handle 1: prio &&
+        ~/tc-cap qdisc add dev $NETEM_IFACE parent 1:3 handle 30: netem $NETEM &&
+        ~/tc-cap filter add dev $NETEM_IFACE protocol ip parent 1: prio 1 u32 \
+            match ip dst $ADDRESS/32 flowid 1:3" || {
+        echo "cannot put netem on $PEERHOST:$NETEM_IFACE" >&2; exit 2; }
+
+    if [ -n "$GUEST6" ]; then
+        ssh -o ConnectTimeout=10 "$PEERHOST" "
+            ~/tc-cap filter add dev $NETEM_IFACE protocol ipv6 parent 1: \
+                prio 2 u32 match ip6 dst $GUEST6/128 flowid 1:3" || {
+            echo "cannot add the v6 netem filter" >&2; NETEM_ON=yes; exit 2; }
+    fi
+
+    NETEM_ON=yes
+    echo "==> netem on $PEERHOST:$NETEM_IFACE toward the guest only: $NETEM"
+    echo "    (v4 $ADDRESS${GUEST6:+, v6 $GUEST6})"
+}
+
+netem_remove() {
+    [ "$NETEM_ON" = yes ] || return 0
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "~/tc-cap qdisc del dev $NETEM_IFACE root 2>/dev/null; exit 0" \
+        >/dev/null 2>&1 || true
+    NETEM_ON=no
+}
+
 STORM_PID=""
 stop_peers() {
+    netem_remove
     [ -n "$PEER_PID" ]  && kill "$PEER_PID"  2>/dev/null || true
     [ -n "$STORM_PID" ] && kill "$STORM_PID" 2>/dev/null || true
     [ -n "${LOSS_PID:-}" ] && kill "$LOSS_PID" 2>/dev/null || true
@@ -346,6 +421,18 @@ fi
 # The hashes must still match; the overrun counter in the guest's
 # netstat -s is the witness that loss actually happened.
 LOSS_PID=""
+[ -z "$NETEM" ] || netem_apply
+
+# The retransmission witness, for either lossy arm.  A clean run with zero
+# retransmissions proves nothing about this path, so the number is read back
+# in the verdict and the run says so when it never moved.
+if [ -n "$NETEM" ] && [ "$LOSS" != yes ]; then
+    ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "timeout $PEER_LIFE sh -c 'while :; do ss -tino 2>/dev/null | grep -A1 \"$ADDRESS\\|${GUEST6:-no-v6-address}\" | grep -o \"retrans:[0-9]*/[0-9]*\"; sleep 2; done'" \
+        > "$PEERLOG/ss.log" 2>/dev/null &
+    SS_PID=$!
+fi
+
 if [ "$LOSS" = yes ]; then
     ssh -o ConnectTimeout=10 "$PEERHOST" \
         "timeout $PEER_LIFE python3 -c '
@@ -494,7 +581,7 @@ fi
 # The loss arm's witness: the run only means what it claims if frames were
 # actually dropped under it.  Overruns live in the guest's own interface
 # stats; said out loud either way.
-if [ "$LOSS" = yes ]; then
+if [ "$LOSS" = yes ] || [ -n "$NETEM" ]; then
     OVR=$(grep -io 'overrun[s]*[[:space:]]*[0-9]*' "$REPORT" |
           grep -o '[0-9]*' | sort -n | tail -1)
     RETR=$(grep -o 'retrans:[0-9]*/[0-9]*' "$PEERLOG/ss.log" 2>/dev/null |
@@ -510,10 +597,30 @@ if [ "$LOSS" = yes ]; then
     fi
 fi
 
+# The shaping comes off before the verdict is printed, and the removal is
+# CHECKED rather than assumed: a qdisc left on a shared peer poisons every
+# later measurement on it, and the failure paths above reach here too.
+if [ -n "$NETEM" ]; then
+    netem_remove
+    # `grep -c` exits 1 when the count is zero, which is the GOOD case here,
+    # so the count is taken inside the remote shell and the exit status
+    # thrown away -- otherwise a clean removal reports itself as a failure.
+    LEFT=$(ssh -o ConnectTimeout=10 "$PEERHOST" \
+        "~/tc-cap qdisc show dev $NETEM_IFACE 2>/dev/null | grep -c netem; exit 0")
+    LEFT=${LEFT:-unknown}
+    if [ "$LEFT" = 0 ]; then
+        pass "netem removed from $PEERHOST:$NETEM_IFACE, verified clean"
+    else
+        fail "netem may still be on $PEERHOST:$NETEM_IFACE ($LEFT netem" \
+             "qdiscs still there) -- remove it before trusting any later" \
+             "measurement from that machine"
+    fi
+fi
+
 echo
 if [ "$FAILED" = 0 ]; then
     echo "PASS: $CHECKED/$CONN_TOTAL connections content-verified on $BOARD" \
-         "($FAMILIES, storm=$STORM, loss=$LOSS)"
+         "($FAMILIES, storm=$STORM, loss=$LOSS${NETEM:+, netem: $NETEM})"
     exit 0
 fi
 echo "FAIL: content verification did not hold; the lines above name the cases"

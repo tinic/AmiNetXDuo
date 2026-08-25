@@ -306,8 +306,12 @@ appeared.
 | payloss5 | ne2000_pcmcia, claim lane | v4+v6 | UDP burst blast + retrans witness | 26/26 hashes matched, 23,049 direct fills, up to 91 retransmissions on one socket |
 | payfull2 | ne2000_pcmcia, claim lane | v4+v6 | repeat, contended host | 62/64 matched; 2 idle-bail truncations (stalls, not corruption -- every delivered byte pattern-perfect), rerun below |
 | payfull3 | ne2000_pcmcia, claim lane | v4+v6 | repeat, fresh seeds | 64/64 hashes matched, direct fills cumulative 37,075 |
+| paynetem05 / 05b | ne2000_pcmcia, claim lane | v4+v6 | **netem loss 0.5%** | 26/26 each, retrans 26 / 21, 1,719 / 1,735 fills |
+| paynetem2 | ne2000_pcmcia, claim lane | v4+v6 | **netem loss 2%** | 26/26, retrans 18, 1,702 fills |
+| paynetem5 | ne2000_pcmcia, claim lane | v4+v6 | **netem loss 5%** | 26/26, retrans 21, 1,661 fills |
+| paynetemrd | ne2000_pcmcia, claim lane | v4+v6 | **netem delay 20ms + reorder 10% 50% + duplicate 2%** | 26/26, retrans 17, 1,748 fills |
 
-Six runs, 370 content-verified connections, zero content divergences.
+Twelve runs, 500 content-verified connections, zero content divergences.
 Every failure ever seen by this tier was a truncation with the delivered
 prefix pattern-perfect -- the failure mode of a stalled rig, not of a
 placement bug, and the two are distinguishable at a glance because the
@@ -320,16 +324,44 @@ matrix, same hashes, different placement code.  There is no claim-off build
 switch -- the claim has been unconditional since it landed -- so the
 cross-lane pair is the comparison.
 
-### The loss arm, and the tc gate
+### The loss and retransmission arm (netem, 2026-08-25)
 
 Retransmission overlap is the injection-prone path content tests most need:
 partial re-delivery placing bytes into a stream whose earlier bytes are
-already placed.  The intended tool -- `tc netem` loss via `~/tc-cap` on the
-peer -- is staged but not granted (`cap_net_admin` not set; one-time
-`sudo setcap cap_net_admin+ep ~/tc-cap` on the peer unblocks it).  The
-substitute needs no privilege: bursty UDP from the peer floods the bridged
-path, frames vanish, TCP retransmits, and the overlap path runs for real.
-One finding about WHERE they vanish: the guest's ring-overrun counter
+already placed, with the fused sum computed over whatever landed.  The
+`cap_net_admin` grant on the peer's `~/tc-cap` arrived, so this arm now
+runs with real shaping instead of the improvised substitute below, driven
+by `run-payverify.sh -E '<netem spec>'`.
+
+**Result: five shaped runs, 130 connections, every hash matched and no end
+ever reported a first divergence.**  Loss at 0.5%, 2% and 5%, and a
+reorder-plus-duplicate arm (`delay 20ms reorder 10% 50% duplicate 2%`)
+chosen because reordering and duplication are the shapes a plain-loss arm
+would not reach -- they put out-of-order and repeated segments into the
+placement path, which is exactly where a fused-sum fault could certify
+itself.  Every run witnessed retransmissions on the peer's own kernel
+counters (17 to 26 on the busiest socket per run, sampled from `ss -ti`
+every two seconds), so none of them is a clean run proving nothing, and
+every run kept `direct fills` in the thousands, so the claimed lane
+carried the traffic that was being shaped.
+
+The shaping is SURGICAL, because the peer is shared and other agents
+measure through it: a `prio` root leaves ordinary traffic in its normal
+bands, and two `u32` filters -- the guest's v4 address and its v6 /128 --
+divert only guest-bound traffic into the netem band.  Both filters were
+read back from `tc filter show` before the first run rather than assumed,
+which is what makes the v6 arm meaningful: without the v6 filter installed
+those cases would have run unshaped and reported a clean pass for
+something nothing lossy ever touched, so the harness refuses a v6 netem
+run when it cannot find the guest's v6 address.  The qdisc is removed on
+every exit path including failures, the removal is verified by reading the
+qdisc back, and the peer was confirmed returned to `noqueue` with zero
+filters after the last arm.
+
+The earlier improvised arm is kept below because it found a rig fact worth
+keeping.  Bursty UDP from the peer floods the bridged path, frames vanish,
+TCP retransmits, and the overlap path runs for real.  One finding about
+WHERE they vanish: the guest's ring-overrun counter
 stayed 0 through every blast -- under Amiberry the drop happens in the
 host's bridge queue before the emulated NIC ever sees the frame, so the
 guest cannot witness its own loss.  The witness is the peer's kernel
@@ -398,8 +430,9 @@ this campaign's artifacts stay the audited pin.
 PROVEN, emulated: application-visible payload content survives the dp8390
 claim lane and the classic lane byte-exactly -- both directions, both
 families, every tail residue, 1 byte to 1 MB, under concurrency, under an
-mDNS storm, and across real bridge-drop loss with retransmission -- and
-the fused-sum asm places bytes and sums what it placed at instruction
+mDNS storm, and under netem loss at 0.5/2/5% and a reordering,
+duplicating link, with the retransmissions witnessed rather than assumed
+-- and the fused-sum asm places bytes and sums what it placed at instruction
 level under every adversarial shape the drill can pose without real
 hardware.
 
@@ -414,7 +447,8 @@ evidence for content integrity remains the indirect pair of IoSumDrill's
 instruction-level checks and the task-#6 landing's rx_err_verify=0 over
 ~10k live frames.  Also outside this tier: a truly sequenced port (word
 ORDER within a drain is invisible to both a constant port and a
-commutative sum), and tc-shaped loss until tc-cap is granted.
+commutative sum).  The loss and retransmission path is no longer on that
+list -- it was shaped for real and it held.
 
 ## Reproducing
 
