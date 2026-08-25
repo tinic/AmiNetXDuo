@@ -713,7 +713,16 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
             }
         }
     }
+
+    /* One past the highest slot still occupied, which is what the number means
+       everywhere that walks ns_Iface[]. A retained interface keeps its slot,
+       so an unconditional zero here disagrees with the slots for ever. */
     ns->ns_IfaceCount = 0;
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+    {
+        if (ns->ns_Iface[i] != NULL)
+            ns->ns_IfaceCount = (UWORD)(i + 1);
+    }
 
     /*
      * An orphaned SANA-II request reaches farther than AmiSana2If. RX slots
