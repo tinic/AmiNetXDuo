@@ -1374,6 +1374,90 @@ else
     fi
 fi
 
+# -------------------------------------------------- the drawers have icons --
+#
+# THE SAME SHAPE AS THE anxnet.device ASSERTION ABOVE, and for the same reason:
+# a thing was in the archive, was never copied, and every listing of both sides
+# looked right.  Docs.info, Examples.info and Terminal.info were packed by every
+# release and installed by none of them, so the Examples and Terminal drawers
+# arrived on the user's disk as real drawers holding the right files that
+# Workbench does not draw.  Invisible to anyone who does not open a Shell.
+#
+# WHY IT WAS MISSED FOR SO LONG.  A drawer's icon is a sibling of the drawer,
+# not a member of it -- Examples.info sits BESIDE Examples/ -- and every copy in
+# the installer that handles a drawer copies that drawer's CONTENTS.  `(all)`
+# and `(infos)` between them cover every file in the drawer and neither can
+# reach the icon one level up.
+#
+# The bytes, not the name, exactly as the driver is checked: an icon of the
+# right name that is not this archive's is a different failure and passes every
+# weaker check.
+#
+# Docs.info is NOT in this list, and that is a decision rather than an
+# oversight: the installer copies the CONTENTS of Docs/ straight into the
+# AmiNetXDuo drawer, so no Docs drawer exists here to give an icon to.  It is
+# recorded that way in install/ARCHIVE-MANIFEST, which is what
+# tools/check-archive-installed.sh reads, and printed below so a reader of this
+# transcript can see all three were considered.
+#
+# DOCDIR is SYS:AmiNetXDuo on this run -- the harness answers the askdir with
+# the default -- and DOCPARENT is the volume root, which is where the drawer's
+# own icon goes.
+_icon_check() { # archive-relative-path  installed-relative-path
+    local arch="$HD/Unpacked/AmiNetXDuo/$1" got want bytes
+    local real
+    real=$(amiga_path "$2" 2>/dev/null || true)
+    if [ ! -f "$arch" ]; then
+        echo "  MISSING $1 IN THE ARCHIVE"
+        echo "!! the archive carries no $1, so what the installer did with it"
+        echo "   cannot be asserted here.  dist/make-dist.sh stages it."
+        fail=1
+        return
+    fi
+    if [ -z "$real" ] || [ ! -f "$real" ]; then
+        printf '  MISSING %s\n' "$2"
+        echo "!! THE INSTALLER DID NOT INSTALL THE DRAWER ICON."
+        echo "   The archive carries $1 and nothing of that name is at $2 on"
+        echo "   the installed volume, so the drawer is there, holds the right"
+        echo "   files, and Workbench does not draw it."
+        fail=1
+        return
+    fi
+    want=$(shasum "$arch" | cut -d' ' -f1)
+    got=$(shasum  "$real" | cut -d' ' -f1)
+    bytes=$(wc -c < "$real" | tr -d ' ')
+    if [ "$want" = "$got" ]; then
+        printf '  ok      %-32s %s bytes\n' "$2" "$bytes"
+    else
+        printf '  WRONG   %-32s %s bytes\n' "$2" "$bytes"
+        echo "!! $2 is not the icon in the archive."
+        echo "   archive   $want"
+        echo "   installed $got"
+        fail=1
+    fi
+}
+
+_icon_check AmiNetXDuo.info  AmiNetXDuo.info
+_icon_check Examples.info    AmiNetXDuo/Examples.info
+_icon_check Terminal.info    AmiNetXDuo/Terminal.info
+
+if [ -f "$HD/Unpacked/AmiNetXDuo/Docs.info" ]; then
+    echo "  --      Docs.info: packed, not installed by decision (no Docs"
+    echo "          drawer is created; see install/ARCHIVE-MANIFEST)"
+fi
+
+# The drawers those icons name have to be there too, or an icon is a picture of
+# nothing.  Cheap, and it is the half that says the icon was put beside the
+# right object rather than merely copied somewhere.
+for _d in AmiNetXDuo/Examples AmiNetXDuo/Terminal; do
+    if [ -n "$(amiga_path "$_d" 2>/dev/null || true)" ]; then
+        printf '  ok      %-32s drawer present\n' "$_d"
+    else
+        printf '  MISSING %s -- its icon names a drawer that is not there\n' "$_d"
+        fail=1
+    fi
+done
+
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.
 for f in Libs/tls.library Devs/Internet/certificates; do

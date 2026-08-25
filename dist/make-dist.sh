@@ -636,6 +636,32 @@ fi
 
 echo "==> including $(basename "$DOCSRC")/: $(cd "$TREE/Docs" && echo *)"
 
+# ------------------------------------- everything packed has been decided --
+#
+# BEFORE THE ARCHIVE IS MADE, so a release cannot be built with a file in it
+# that nobody decided about.  The layout above is complete at this point and
+# nothing after this line adds to it.
+#
+# Two lists describe a release -- what this script packs and what
+# install/Install-AmiNetXDuo copies -- and until now nothing compared them.
+# anxnet.device was in the first for eleven releases and in the second for
+# none: every machine kept whatever SANA-II driver it already had through
+# every reinstall, and no listing, checksum or round-trip check could see it,
+# because each list was correct about itself.  install/ARCHIVE-MANIFEST is the
+# second list, and this is what reads it.
+#
+# The `need` checks above are the same idea one level down and only in the easy
+# direction: they catch a name in a list with no file.  This catches the hard
+# one, a file with no decision.
+"$ROOT/tools/check-archive-installed.sh" "$OUTDIR" || {
+    echo "!! Something in the archive has no decision recorded against it." >&2
+    echo "!! install/ARCHIVE-MANIFEST is where it goes: 'installed' with the" >&2
+    echo "!! Installer token that copies it, or 'not-installed' with the" >&2
+    echo "!! reason.  A release is not built until one of those is true of" >&2
+    echo "!! every file." >&2
+    exit 2
+}
+
 # ------------------------------------------------------------ the archive --
 
 # Versioned filename, unversioned drawer: the .lha says which release it is,

@@ -455,6 +455,25 @@ stage_host() {
         return 1
     fi
 
+    # THAT EVERY ROW IN install/ARCHIVE-MANIFEST STILL NAMES A REAL COPY.  The
+    # other half of that gate needs a staged tree and runs inside
+    # dist/make-dist.sh, before the archive is made; this half is source
+    # against source and belongs here, where it goes red on the commit that
+    # deletes a copyfiles rather than on the release that ships without it.
+    #
+    # The gate exists because nothing compared the archive to the installer:
+    # anxnet.device was packed by eleven releases and installed by none, and
+    # three drawer icons after it.
+    if tools/check-archive-installed.sh > "$BUILD/archive-installed.log" 2>&1; then
+        note "archive manifest: $(sed -n 's/^archive_rows=/rows /p' \
+              "$BUILD/archive-installed.log")"
+    else
+        cat "$BUILD/archive-installed.log"
+        fail "install/ARCHIVE-MANIFEST claims an install the Installer script\
+ no longer performs (tools/check-archive-installed.sh)"
+        return 1
+    fi
+
     # The same argument one level down, for the harnesses that grade a
     # transcript rather than a check count.  run-addifup.sh is the gate for
     # "AddNetInterface never came back" and runs on one self-hosted runner, so

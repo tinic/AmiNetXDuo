@@ -63,6 +63,23 @@
 (set S_TERM  (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Terminal") "Terminal"))
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 
+; A DRAWER'S ICON IS NOT IN THE DRAWER, it is beside it -- Examples.info sits
+; next to Examples/, not inside it.  Every copy below that installs a drawer
+; copies that drawer's CONTENTS, so `(all)' never saw these two and the
+; Examples and Terminal drawers arrived on the user's disk as objects Workbench
+; does not draw: real drawers, holding the right files, invisible to anybody
+; who does not open a Shell.  Eleven releases.
+;
+; There is no S_DOCSICON to go with them, and that is a decision rather than an
+; omission: Docs/ CONTENTS are copied into the AmiNetXDuo drawer itself, which
+; already has AmiNetXDuo.info, so no Docs drawer exists on this side to give an
+; icon to.  install/ARCHIVE-MANIFEST carries that reason where the gate reads
+; it.
+(set S_EXAMICON (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "Examples.info") "Examples.info"))
+(set S_TERMICON (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "Terminal.info") "Terminal.info"))
+
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
 ; carry both a (prompt) and a (help); a missing one is a script error at the
@@ -1567,6 +1584,21 @@
       (all)
       (optional "nofail")))
 
+; And its icon, beside the drawer the copy above just filled.  (newname) rather
+; than a bare copy, because what the drawer is called here is what the icon has
+; to be called; the two are one object to Workbench and a mismatch shows as
+; nothing at all.
+(if (exists S_EXAMICON (noreq))
+    (copyfiles
+      (prompt "Giving the Examples drawer its icon")
+      (help   "Without this the drawer is still there and still holds the "
+              "example files, and Workbench does not draw it: a drawer with "
+              "no icon is invisible to anyone who does not open a Shell.")
+      (source S_EXAMICON)
+      (dest    DOCDIR)
+      (newname "Examples.info")
+      (optional "nofail")))
+
 ; httpd's terminal page.  It goes beside the examples rather than into C: or
 ; DEVS: because it is neither a command nor configuration: it is a file the
 ; server reads and hands to a browser.  A drawer here is somewhere they can
@@ -1583,6 +1615,17 @@
       (source S_TERM)
       (dest   (tackon DOCDIR "Terminal"))
       (all)
+      (optional "nofail")))
+
+; Its icon, for the reason beside Examples above.
+(if (exists S_TERMICON (noreq))
+    (copyfiles
+      (prompt "Giving the Terminal drawer its icon")
+      (help   "Without this the drawer is still there and still holds the "
+              "pages httpd serves, and Workbench does not draw it.")
+      (source S_TERMICON)
+      (dest    DOCDIR)
+      (newname "Terminal.info")
       (optional "nofail")))
 
 ; ssh (Dropbear's dbclient) rides into C: with the other network commands

@@ -1,0 +1,122 @@
+# WHAT THE ARCHIVE CARRIES, AND WHAT BECOMES OF IT.
+#
+# One row per thing dist/make-dist.sh packs, saying whether
+# install/Install-AmiNetXDuo installs it or deliberately does not, and why.
+# tools/check-archive-installed.sh reads this file and checks it BOTH WAYS,
+# against the staged tree and against the Installer script.  A file that
+# reaches the archive without a row here is a FAILURE, not a warning.
+#
+# THIS FILE IS THE RECORD.  The reason a thing is not installed lives here, in
+# the data the gate reads, and nowhere else -- a reason in a document is a
+# reason nothing checks.
+#
+# WHAT IT EXISTS TO CATCH.  anxnet.device was packed into eleven releases and
+# installed by none of them.  A machine kept whatever driver it already had
+# through every reinstall, and the archive listing looked correct the whole
+# time, because the file was in it.  Nothing compared the two lists; there was
+# no second list.
+#
+# WHY A MANIFEST AND NOT A PARSE OF THE INSTALLER
+#
+#   Install-AmiNetXDuo is 1700 lines of Installer script and what it copies
+#   depends on answers: MINPICK swaps S_LIBS to the minimal drawer, DO_ANXNET
+#   gates the driver, an (if (exists ...)) gates tls.library and the trust
+#   store.  A grep cannot tell a copy that runs from a copy in a branch nobody
+#   takes, and a naive parse that got it wrong would be worse than no check --
+#   a green light nobody could read.  So the decision is recorded here, once,
+#   by a person, and the parse is reduced to the one question a grep CAN
+#   answer: does the script still mention the thing this row says installs it.
+#   The third direction, that the copy actually lands, is
+#   install/test/run-workbench.sh's, on a real Workbench.
+#
+# ------------------------------------------------------------- the format --
+#
+#   glob | disposition | presence | via-or-reason
+#
+# glob          matched against every regular file in the staged tree, path
+#               relative to the directory the archive is packed FROM -- so
+#               `AmiNetXDuo.info` is the loose drawer icon beside the drawer
+#               and `AmiNetXDuo/AmiNetXDuo.info` is the one inside it.
+#               `*` does not cross a slash; `**` does.
+#
+#               FIRST MATCHING ROW WINS, so a narrow row goes ABOVE the wide
+#               one it sits inside.  Get that backwards and the narrow row
+#               matches nothing, which the stale-row check below reports.
+#
+# disposition   installed      the installer puts this on the user's disk
+#               not-installed  it deliberately does not
+#
+# presence      always     every archive this tree can build has it, so a row
+#                          matching nothing is a stale row -- FAILURE
+#               sometimes  a build option or an optional ingredient decides:
+#                          the minimal drawer, tls.library, the trust store,
+#                          ssh, the profiler
+#
+# via-or-reason for `installed`: a literal string that must appear in the CODE
+#               of install/Install-AmiNetXDuo -- comments are stripped before
+#               the search, since the prose in that file names every drawer it
+#               ever copied.
+#
+#               Name the whole `(source ...)`, not the bare variable.  S_EXAM
+#               is a substring of S_EXAMICON, so a row saying `S_EXAM` would
+#               still pass with its own copyfiles deleted and the icon's left
+#               behind; `(source S_EXAM)` names one statement and breaks when
+#               that statement goes.
+#
+#               for `not-installed`: the reason, in a sentence.  Required.
+#               A blank one is refused: "not installed", unexplained, is the
+#               shape three drawer icons shipped in for eleven releases.
+#
+# ------------------------------------------------------ the loose top level --
+
+AmiNetXDuo.info                     | not-installed | always    | The archive's OWN drawer icon, unpacked beside the drawer so a download is one object on Workbench rather than a scattering.  The installer creates its own drawer wherever the user asked and gives it AmiNetXDuo/AmiNetXDuo.info; this copy never leaves the download.
+AmiNetXDuo/AmiNetXDuo.info          | installed     | always    | (newname "AmiNetXDuo.info")
+AmiNetXDuo/Install-AmiNetXDuo       | not-installed | always    | The installer itself.  Nothing installs an installer.
+AmiNetXDuo/Install-AmiNetXDuo.info  | not-installed | always    | Its icon, whose default tool is Installer.  Same reason.
+AmiNetXDuo/Installer                | not-installed | always    | Commodore's Installer, bundled beside the script so a double-click works with nothing fetched first.  It belongs to the download, not to the machine.
+
+# ------------------------------------------------------------ the software --
+#
+# C/ IS ONE ROW ON PURPOSE.  The installer copies that drawer wholesale --
+# `(source S_C) (dest "C:") (all)` -- so a command that reaches the drawer is
+# installed by construction and a per-command row here would assert nothing.
+# Whether a command BELONGS in the drawer is a different question with its own
+# check one level up: dist/make-dist.sh walks the build's src/tools and refuses
+# a binary that is in neither CMDS nor NOT_SHIPPED, which is how iperf was
+# caught after being merged and left out of the archive.
+
+AmiNetXDuo/C/*                      | installed     | always    | (source S_C)
+AmiNetXDuo/Libs/minimal/*           | not-installed | sometimes | The user-chosen alternative, and exactly one of the two drawers ships to the disk.  Answering "minimal" in section 4 points S_LIBS at this drawer (MINPICK, S_LIBSBASE) and the top of Libs/ becomes the drawer that is not installed.  Which one is left behind is the user's answer, not a defect.
+AmiNetXDuo/Libs/bsdsocket.library   | installed     | always    | (tackon S_LIBS "bsdsocket.library")
+AmiNetXDuo/Libs/usergroup.library   | installed     | always    | (tackon S_LIBS "usergroup.library")
+AmiNetXDuo/Libs/tls.library         | installed     | sometimes | (tackon S_LIBS "tls.library")
+AmiNetXDuo/Devs/Networks/*          | installed     | always    | (source S_ANXNET)
+AmiNetXDuo/Devs/Internet/certificates | installed   | sometimes | (tackon (tackon S_DEVS "Internet") "certificates")
+AmiNetXDuo/Devs/Internet/*          | installed     | always    | (tackon (tackon S_DEVS "Internet") NDB_F)
+
+# ---------------------------------------------- the documentation drawers --
+#
+# Their icons are why this file exists.  Docs.info, Examples.info and
+# Terminal.info were packed for every release and copied by none: the installer
+# copies the CONTENTS of each drawer, and a drawer's icon sits BESIDE the
+# drawer rather than inside it, so `(all)` never saw them.  Examples and
+# Terminal landed on the user's disk as drawers Workbench does not draw.
+
+AmiNetXDuo/ReadMe                   | installed     | always    | (source S_README)
+AmiNetXDuo/ReadMe.info              | installed     | always    | (source S_README)
+AmiNetXDuo/Docs/*                   | installed     | always    | (source S_DOCS)
+AmiNetXDuo/Docs.info                | not-installed | always    | The icon for the archive's own Docs drawer, and there is no Docs drawer on the installed side to give it to: the installer copies Docs/ CONTENTS straight into the AmiNetXDuo drawer it created, which already has AmiNetXDuo.info.  Installing this would put an icon beside a drawer that does not exist.  Examples.info and Terminal.info ARE installed, because those two drawers do get created.
+AmiNetXDuo/Examples/**              | installed     | always    | (source S_EXAM)
+AmiNetXDuo/Examples.info            | installed     | always    | (source S_EXAMICON)
+AmiNetXDuo/Terminal/*               | installed     | always    | (source S_TERM)
+AmiNetXDuo/Terminal.info            | installed     | always    | (source S_TERMICON)
+
+# --------------------------------------------------------- the Developer --
+#
+# One decision for the drawer and a second for the profiler under it, and both
+# are real choices rather than oversights.  Profile first: it sits inside
+# Developer/ and the narrower row has to win.
+
+AmiNetXDuo/Developer/Profile/**     | not-installed | sometimes | The sampling profiler and its self-test.  It profiles ANY AmigaOS program, depends on nothing else in this archive, and a network stack has no business putting a developer tool in somebody's C:.  It ships here because a real machine is the only place its answer can come from -- no emulator above a 68020 has a usable cycle model.
+AmiNetXDuo/Developer.info           | not-installed | always    | Its drawer is not installed, so neither is its icon.
+AmiNetXDuo/Developer/**             | not-installed | always    | Headers and compiler glue for the vectors past the end of the NDK's SFD.  Where an NDK lives is a property of the compiler somebody has, not of this machine, so a fixed destination would be a guess.  They are in the archive to be copied wherever that NDK is.
