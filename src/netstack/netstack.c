@@ -552,6 +552,20 @@ static ULONG ami_ns_pool_packets(VOID)
 
     packets = (avail / divisor) / ami_ns_packet_stride();
 
+    /* A machine with no Fast RAM lands here: a sixteenth of what is free is a
+       pool too small to hold the window this stack then advertises, and the
+       transfer is spent at a zero window.  See AMI_POOL_WORKING_PACKETS. */
+    if (packets < (ULONG)AMI_POOL_WORKING_PACKETS)
+    {
+        ULONG afford = (avail / (ULONG)AMI_POOL_MEM_DIVISOR_LOW) /
+                       ami_ns_packet_stride();
+
+        if (afford > (ULONG)AMI_POOL_WORKING_PACKETS)
+            afford = (ULONG)AMI_POOL_WORKING_PACKETS;
+        if (afford > packets)
+            packets = afford;
+    }
+
     if (packets < (ULONG)AMI_POOL_MIN_PACKETS)
         packets = (ULONG)AMI_POOL_MIN_PACKETS;
     if (packets > (ULONG)AMI_POOL_MAX_PACKETS)

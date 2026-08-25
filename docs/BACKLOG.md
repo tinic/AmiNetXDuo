@@ -24,7 +24,7 @@ comment beside the code, not an entry here.
 | TARGET: X-Surf-100 reads 412 KB/s where AmiTCP_NG reads 906 | same machine, card and driver, never measured here; the A1200 half is answered | `src/netstack/netstack.c:451` |
 | Real X-Surf hardware trails other stacks where emulation says we lead | 699 against 1103 KB/s, worst arm -37%; ACK-clock starvation is the hypothesis | `src/netdev/netdev_cards.c` |
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |
-| At `FASTMEM=0` TCP collapses its window and UDP drops in the socket queue | 39200 to 8192, 108 zero-window events in 10 s: buffer starvation | `src/bsdsocket/socket.c:231`, `src/netstack/netstack.c:451` |
+| The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:205` |
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
 | The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
 | Shipping `-m68000` codegen was justified on a loopback measurement | on the wire at v0.21.3 `-m68020` reads 476 KB/s against 449, -5.5% | `cmake/toolchain-m68k-amigaos.cmake:261` |
