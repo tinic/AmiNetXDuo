@@ -482,6 +482,13 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
                                ULONG *state_out);
 
 /*
+ * How the address in `slot` was obtained, NX_IPV6_ADDRESS_* in nx_api.h.
+ * Separate from the getter above so its callers keep their signature.
+ */
+BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
+                                  ULONG *origin_out);
+
+/*
  * TRUE when some interface holds a global unicast address (2000::/3, RFC 4291
  * 2.5.4) that has finished duplicate address detection: that is, when this
  * machine can be a source for a destination out on the IPv6 internet.

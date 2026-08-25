@@ -244,6 +244,10 @@ LONG netstack_interface_dhcp_lease(UWORD i, AmiDhcpLease *out)
 BOOL netstack_ipv6_address_get(UWORD i, UWORD slot, ULONG a[4], ULONG *p, ULONG *st)
 { (VOID)i; (VOID)slot; (VOID)a; (VOID)p; (VOID)st;
   h_unreachable("netstack_ipv6_address_get"); return FALSE; }
+
+BOOL netstack_ipv6_address_origin(UWORD i, UWORD slot, ULONG *origin)
+{ (VOID)i; (VOID)slot; (VOID)origin;
+  h_unreachable("netstack_ipv6_address_origin"); return FALSE; }
 UINT netstack_ipv6_route_add(const ULONG d[4], ULONG len, const ULONG nh[4], UWORD i)
 { (VOID)d; (VOID)len; (VOID)nh; (VOID)i;
   h_unreachable("netstack_ipv6_route_add"); return 1; }

@@ -12,10 +12,8 @@ comment beside the code, not an entry here.
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
 | The first `SetMode()` or `WaitForChar()` of a console session is refused | `term_shell_task` is set after the switch that gates them | `src/tools/httpterm.c:463`, `:1439` |
-| The IPv6 default router table stays empty on a segment that advertises | RAs arrive but nothing reaches `nx_ipv6_default_router_table` | `src/netstack` |
 | `CheckNetConfig`'s IPv4 router and DNS checks are dead by default | all four sit behind `any_dynamic()`, TRUE on the default `ip6type` | `src/tools/checknetconfig.c:248`, `src/config/config_parse.c:619` |
-| The stack advertises receive windows below one MSS | 68 of 1442 on a healthy link, 104 bytes on PCMCIA; RFC 1122 wants zero | `src/bsdsocket/socket.c`, `tests/perf/run-ackscope.sh` |
-| Five things cannot be done to a live IPv6-only interface | no live global-address writer, DHCPv6/SLAAC verb, `NETSTATUS_DHCP6`, origin or Release | `src/netstack/netstack_ipv6.c:277` |
+| A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1983` |
 | An RSA-PSS-signed certificate cannot be verified | no `id-RSASSA-PSS` OID and no PSS row in the type set, so the link fails closed | `src/tls/ami_tls_crypto.c:1551` |
 | `tls.library` runs only on our own `bsdsocket.library` | a hand-coded private LVO, so Roadshow, AmiTCP and Miami get `TLS_ERR_NOSTACK` | `src/tlslib/tls_netx.c:61` |
 | `tls.library` is callable from exactly one compiler | GCC extended-asm stubs, no `.fd` and no pragmas, so SAS/C and vbcc cannot | `include/aminetxduo/tlslib.h`, `developer/sfd/` |

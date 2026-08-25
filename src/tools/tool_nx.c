@@ -207,6 +207,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         a6->nx_index = src->nsn_Interface;
         a6->state    = src->nsn_State;
         a6->prefix   = src->nsn_PrefixLength;
+        a6->origin   = src->nsn_Origin;
 
         tool_format_ip6(src->nsn_Address, a6->text, sizeof(a6->text));
 
@@ -279,6 +280,18 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
     tool_netstatus_close(base);
 
     return 0;
+}
+
+/* NULL for a manually configured address: a static address is what the file
+   said and needs no note. */
+const char *tool_addr6_origin(ULONG origin)
+{
+    switch (origin)
+    {
+        case NETSTATUS_IP6_ORIGIN_SLAAC:  return "advertised";
+        case NETSTATUS_IP6_ORIGIN_DHCPV6: return "dhcpv6";
+        default:                          return NULL;
+    }
 }
 
 const char *tool_addr6_state(UWORD state)

@@ -101,6 +101,15 @@ TOOL_WEAK BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
     (VOID)state_out;
     return FALSE;
 }
+
+TOOL_WEAK BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
+                                            ULONG *origin_out)
+{
+    (VOID)interface_index;
+    (VOID)slot;
+    (VOID)origin_out;
+    return FALSE;
+}
 #endif
 
 TOOL_WEAK LONG netstack_resolve(const char *name, ULONG *addr_out,

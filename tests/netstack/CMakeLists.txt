@@ -296,6 +296,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # path.
     add_executable(test_tcp_sws
         host/test_tcp_sws_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_control.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_transmit_check.c"

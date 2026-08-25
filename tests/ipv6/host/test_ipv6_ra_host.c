@@ -105,7 +105,6 @@ static UINT  h_prefix_deletes;
 static ULONG h_prefix_added[4];
 static ULONG h_prefix_added_length;
 static UINT  h_multicast_joins;
-static UINT  h_router_adds;
 static UINT  h_packets_released;
 static UINT  h_prefix_add_full;       /* make the next add fail */
 
@@ -164,32 +163,25 @@ UINT _nx_ipv6_multicast_join(NX_IP *ip_ptr, ULONG *group, NX_INTERFACE *if_ptr)
     return NX_SUCCESS;
 }
 
-UINT _nxd_ipv6_default_router_add_internal(NX_IP *ip_ptr, ULONG *router_addr,
-                                           ULONG router_lifetime,
-                                           NX_INTERFACE *if_ptr, INT router_type,
-                                           NX_IPV6_DEFAULT_ROUTER_ENTRY **entry)
-{
-    NX_PARAMETER_NOT_USED(ip_ptr);
-    NX_PARAMETER_NOT_USED(router_addr);
-    NX_PARAMETER_NOT_USED(router_lifetime);
-    NX_PARAMETER_NOT_USED(if_ptr);
-    NX_PARAMETER_NOT_USED(router_type);
-
-    h_router_adds++;
-
-    if (entry)
-    {
-        *entry = NX_NULL;
-    }
-
-    return NX_SUCCESS;
-}
-
 UINT _nxd_ipv6_default_router_delete(NX_IP *ip_ptr, NXD_ADDRESS *router_address)
 {
     NX_PARAMETER_NOT_USED(ip_ptr);
     NX_PARAMETER_NOT_USED(router_address);
     return NX_SUCCESS;
+}
+
+VOID _nx_invalidate_destination_entry(NX_IP *ip_ptr, ULONG *next_hop_address)
+{
+    NX_PARAMETER_NOT_USED(ip_ptr);
+    NX_PARAMETER_NOT_USED(next_hop_address);
+}
+
+VOID _nx_ipv6_prefix_list_delete_entry(NX_IP *ip_ptr,
+                                       NX_IPV6_PREFIX_ENTRY *entry)
+{
+    NX_PARAMETER_NOT_USED(ip_ptr);
+    NX_PARAMETER_NOT_USED(entry);
+    h_prefix_deletes++;
 }
 
 UINT _nx_nd_cache_find_entry(NX_IP *ip_ptr, ULONG *dest_ip,
@@ -303,6 +295,23 @@ static NX_IPV6_HEADER  h_ipv6_header;
 static NX_PACKET       h_packet;
 static UCHAR           h_message[256];
 
+/* The real _nxd_ipv6_default_router_add_internal is linked, so the checks read
+   the table it writes rather than a stub's counter. */
+static UINT h_routers_in_table(VOID)
+{
+UINT i;
+UINT n = 0;
+
+    for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+        if (h_ip.nx_ipv6_default_router_table[i].nx_ipv6_default_router_entry_flag &
+            NX_IPV6_ROUTE_TYPE_VALID)
+            n++;
+    }
+
+    return n;
+}
+
 /* 00:80:10:49:00:01, so the modified EUI-64 is 0280:10ff:fe49:0001. */
 #define H_MAC_MSW       0x00000080UL
 #define H_MAC_LSW       0x10490001UL
@@ -325,7 +334,6 @@ static VOID h_reset(VOID)
     h_prefix_deletes = 0;
     h_prefix_added_length = 0;
     h_multicast_joins = 0;
-    h_router_adds = 0;
     h_packets_released = 0;
     h_prefix_add_full = 0;
     h_rdnss_count = 0;
@@ -452,6 +460,19 @@ NX_ICMPV6_OPTION_MTU *option = (NX_ICMPV6_OPTION_MTU *)(message + *length);
     NX_CHANGE_ULONG_ENDIAN(option -> nx_icmpv6_option_mtu_path_mtu);
 
     *length += (UINT)sizeof(NX_ICMPV6_OPTION_MTU);
+}
+
+/* RFC 4861 4.6.1, type 1: two header octets then the six MAC octets. */
+static VOID h_add_slla_option(UCHAR *message, UINT *length)
+{
+UCHAR *option = message + *length;
+
+    option[0] = ICMPV6_OPTION_TYPE_SRC_LINK_ADDR;
+    option[1] = 1;                      /* 1 * 8 == 8 bytes */
+    option[2] = 0xE4; option[3] = 0x3A; option[4] = 0x6E;
+    option[5] = 0x03; option[6] = 0xD5; option[7] = 0xBA;
+
+    *length += 8U;
 }
 
 /*
@@ -1165,6 +1186,69 @@ char  what[128];
         h_check(h_ip.nx_ipv6_retrans_timer_ticks == 7 &&
                 h_ip.nx_ipv6_reachable_timer == 7,
                 "an unspecified timer changes nothing");
+    }
+
+    /* --- the default router table, RFC 4861 6.3.4 --- */
+    {
+    UINT length;
+
+        /* What a home router actually sends: SLLA, MTU, prefix. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_add_slla_option(h_message, &length);
+        h_add_mtu_option(h_message, &length, 1500);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_routers_in_table() == 1,
+                "a full advertisement puts its sender in the router table");
+        h_check(h_is_expected_address(h_formed_address()),
+                "and the same advertisement still forms an address");
+
+        /* No SLLA: the ND cache back pointer cannot be set, and the router
+           must reach the table anyway. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_routers_in_table() == 1,
+                "an advertisement with no source link-layer address still "
+                "reaches the router table");
+
+        /* Options this stack parses must not consume the router either. */
+        h_reset();
+        h_ip.nx_ipv6_rdnss_notify = h_rdnss_notify;
+        h_build_ra(h_message, &length, 1800);
+        h_add_slla_option(h_message, &length);
+        h_add_rdnss_option(h_message, &length, 2, 600, 0);
+        h_add_prefix_option(h_message, &length, H_ONLINK | H_AUTONOMOUS,
+                            3600, 3600, 64);
+        h_deliver(h_message, length);
+
+        h_check(h_routers_in_table() == 1,
+                "an advertisement carrying RDNSS still reaches the router "
+                "table");
+
+        /* A bare advertisement, no options at all. */
+        h_reset();
+        h_build_ra(h_message, &length, 1800);
+        h_deliver(h_message, length);
+
+        h_check(h_routers_in_table() == 1,
+                "an advertisement with no options at all reaches the router "
+                "table");
+
+        /* Lifetime zero is a withdrawal, RFC 4861 4.2: never an add. */
+        h_reset();
+        h_build_ra(h_message, &length, 0);
+        h_add_slla_option(h_message, &length);
+        h_deliver(h_message, length);
+
+        h_check(h_routers_in_table() == 0,
+                "a zero router lifetime adds nothing");
     }
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);

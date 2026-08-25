@@ -348,12 +348,20 @@ typedef struct NetStatusInterface
 #define NETSTATUS_IP6_DEPRECATED    3
 #define NETSTATUS_IP6_VALID         4
 
+/* nsn_Origin, how the address was obtained.  A report that cannot say this
+   cannot tell an advertised address from one a DHCPv6 server leased. */
+#define NETSTATUS_IP6_ORIGIN_NONE      0
+#define NETSTATUS_IP6_ORIGIN_MANUAL    1
+#define NETSTATUS_IP6_ORIGIN_SLAAC     2
+#define NETSTATUS_IP6_ORIGIN_DHCPV6    3
+
 typedef struct NetStatusAddress6
 {
     UWORD   nsn_Interface;              /* NX_IP interface index             */
     UWORD   nsn_State;                  /* NETSTATUS_IP6_*                   */
     ULONG   nsn_Address[4];             /* host byte order, four words       */
     ULONG   nsn_PrefixLength;
+    ULONG   nsn_Origin;                 /* NETSTATUS_IP6_ORIGIN_*            */
 } NetStatusAddress6;
 
 /* ----------------------------------------------------- NETSTATUS_DHCP --- */

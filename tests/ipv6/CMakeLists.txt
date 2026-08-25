@@ -104,6 +104,9 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_validate_ra.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv6_validate_options.c"
         "${AMINETXDUO_NETXDUO}/common/src/nxd_ipv6_router_solicitation_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_ipv6_default_router_add_internal.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_ipv6_find_max_prefix_length.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxd_ipv6_prefix_router_timer_tick.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ipv6_util.c")
 
     target_include_directories(test_ipv6_ra PRIVATE

@@ -363,6 +363,8 @@ static VOID show_addresses6(const ToolSnapshot *snap, const ToolIfInfo *live)
             continue;
 
         note = tool_addr6_state(a6->state);
+        if (note == NULL)
+            note = tool_addr6_origin(a6->origin);
 
         if (note != NULL)
             tool_printf("  address6    %s/%lu (%s)\n", (LONG)a6->text,

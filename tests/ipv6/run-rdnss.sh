@@ -12,6 +12,8 @@
 #   ra_dnssl        and an RFC 8106 5.2 option
 #   guest_global    the guest formed a global IPv6 address from the same
 #                   advertisement
+#   ra_default_route  netstat -r shows ::/0 via the router that advertised
+#   ns6_origin      the address formed from it is reported as advertised
 #   ns6_reported    ShowNetStatus lists the advertised name server
 #   short_resolved  a name with no dot in it resolved, which it can only have
 #                   done through the advertised search domain
@@ -107,8 +109,9 @@ BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 ADDIF="$BUILD/src/tools/AddNetInterface"
 SHOW="$BUILD/src/tools/ShowNetStatus"
 HOSTC="$BUILD/src/tools/host"
+NETSTAT="$BUILD/src/tools/netstat"
 SMOKE="$BUILD/src/tools/ToolsSmoke"
-for f in "$BSD" "$ADDIF" "$SHOW" "$HOSTC" "$SMOKE"; do
+for f in "$BSD" "$ADDIF" "$SHOW" "$HOSTC" "$NETSTAT" "$SMOKE"; do
     [ -f "$f" ] || { echo "result=badinvocation reason=nobuild missing=$f" >&2; exit 2; }
 done
 
@@ -137,6 +140,7 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 cp "$ADDIF" "$STAGE/AddNetInterface"
 cp "$SHOW"  "$STAGE/ShowNetStatus"
 cp "$HOSTC" "$STAGE/host"
+cp "$NETSTAT" "$STAGE/netstat"
 
 # No DHCP and no DEVS:Internet: see the note at the top.  CONFIGURE6 is spelled
 # out although AUTO is also the default, because this test is about that path
@@ -153,6 +157,7 @@ cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 wait $SETTLE
 SYS:ShowNetStatus
+SYS:netstat -r
 SYS:host $NAME
 EOF
 
@@ -191,7 +196,8 @@ AMINETXDUO_RUN_TAG="$TAG" AMINETXDUO_AMIBERRY_MAC="$MAC" \
     "$ROOT/tools/amiberry-run.sh" \
     -N a2065 -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
-    "$STAGE/ShowNetStatus" "$STAGE/host" "$STAGE/commands.txt" \
+    "$STAGE/ShowNetStatus" "$STAGE/host" "$STAGE/netstat" \
+    "$STAGE/commands.txt" \
     > "$OUT" 2>&1
 run_rc=$?
 set -e
@@ -217,8 +223,13 @@ ra_dnssl=$(sed -n 's/.*dnssl option (31).*domain(s): \([^ ,]*\)\.$/\1/p' "$CAP" 
 ra_prefix=$(sed -n 's|.*prefix info option (3).*: \([0-9A-Fa-f:]*\)::/64.*|\1:|p' \
             "$CAP" | head -1)
 
+# The advertisement's own source: the link-local address that must end up in
+# the guest's default router table.  RFC 4861 4.2 requires it be link-local.
+ra_router=$(sed -n 's/.*[^0-9A-Fa-f:]\(fe80::[0-9A-Fa-f:]*\) > .*router advertisement.*/\1/p' \
+            "$CAP" | head -1)
+
 echo "ra_count=$ra_count ra_rdnss=${ra_rdnss:-none} ra_dnssl=${ra_dnssl:-none}"
-echo "ra_prefix=${ra_prefix:-none}"
+echo "ra_prefix=${ra_prefix:-none} ra_router=${ra_router:-none}"
 
 if [ "$ra_count" -eq 0 ]; then
     echo "result=nolink reason=no_ra_during_run run_rc=$run_rc"
@@ -230,6 +241,10 @@ if [ -z "$ra_rdnss" ]; then
 fi
 if [ -z "$ra_dnssl" ]; then
     echo "result=nolink reason=ra_carries_no_dnssl run_rc=$run_rc"
+    exit 4
+fi
+if [ -z "$ra_router" ]; then
+    echo "result=nolink reason=ra_source_unreadable run_rc=$run_rc"
     exit 4
 fi
 
@@ -308,7 +323,27 @@ sed -n "/^===== SYS:host $NAME/,/^----- rc/p" "$OUT" 2>/dev/null \
 echo "ns6_reported=$ns6_reported ns6_absorbed=$ns6_absorbed"
 echo "dnssl_absorbed=$dnssl_absorbed short_resolved=$short_resolved"
 
+# An address formed from an advertisement must be reported as one: ShowNetStatus
+# marks it (advertised), which is what tells it apart from a static address.
+ns6_origin=no
+sed -n '/^===== SYS:ShowNetStatus/,/^----- rc/p' "$OUT" 2>/dev/null \
+    | grep -E "^  address6 +${ra_prefix}[0-9A-Fa-f:]+/[0-9]+ \(advertised\)" \
+    | grep -q . && ns6_origin=yes
+
+echo "ns6_origin=$ns6_origin"
+
+# The advertisement's sender must be in the default router table, and netstat
+# prints that table as `::/0` with the next hop beside it.
+ra_default_route=no
+sed -n '/^===== SYS:netstat -r/,/^----- rc/p' "$OUT" 2>/dev/null \
+    | grep -E '(^|[[:space:]])::/0[[:space:]]' | grep -qiF "$ra_router" &&
+    ra_default_route=yes
+
+echo "ra_default_route=$ra_default_route ra_router=${ra_router:-none}"
+
 fail=0
+[ "$ra_default_route" = yes ] || { echo "FAIL ra_default_route: netstat -r shows no ::/0 via $ra_router"; fail=1; }
+[ "$ns6_origin" = yes ] || { echo "FAIL ns6_origin: ShowNetStatus does not mark the advertised address (advertised)"; fail=1; }
 [ "$ns6_reported"   = yes ] || { echo "FAIL ns6_reported: ShowNetStatus does not list $ra_rdnss"; fail=1; }
 [ "$short_resolved" = yes ] || { echo "FAIL short_resolved: '$NAME' did not resolve through $ra_dnssl"; fail=1; }
 

@@ -180,11 +180,32 @@ UINT _nx_packet_release(NX_PACKET *packet_ptr)
     return NX_SUCCESS;
 }
 
+/* The receiver-side cases need a real packet to build an ACK in; the
+   sender-side ones must keep seeing NX_NO_PACKET. */
+static int       h_alloc_ok;
+static NX_PACKET h_ack_pkt;
+static UCHAR     h_ack_buf[256];
+static ULONG     h_last_window;
+static UINT      h_acks;
+
 UINT _nx_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
                          ULONG packet_type, ULONG wait_option)
 {
-    (void)pool_ptr; (void)packet_ptr; (void)packet_type; (void)wait_option;
-    return NX_NO_PACKET;
+    (void)pool_ptr; (void)packet_type; (void)wait_option;
+
+    if (!h_alloc_ok)
+        return NX_NO_PACKET;
+
+    memset(&h_ack_pkt, 0, sizeof(h_ack_pkt));
+    memset(h_ack_buf, 0, sizeof(h_ack_buf));
+
+    h_ack_pkt.nx_packet_data_start  = h_ack_buf;
+    h_ack_pkt.nx_packet_data_end    = h_ack_buf + sizeof(h_ack_buf);
+    h_ack_pkt.nx_packet_prepend_ptr = h_ack_buf + 64;
+    h_ack_pkt.nx_packet_append_ptr  = h_ack_buf + 64;
+
+    *packet_ptr = &h_ack_pkt;
+    return NX_SUCCESS;
 }
 
 UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start, ULONG data_size,
@@ -220,6 +241,15 @@ VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
     (void)time_to_live; (void)protocol; (void)fragment; (void)next_hop_address;
 
     h_datagrams++;
+
+    {
+    NX_TCP_HEADER *hdr = (NX_TCP_HEADER *)packet_ptr -> nx_packet_prepend_ptr;
+    ULONG          word_3 = hdr -> nx_tcp_header_word_3;
+
+        NX_CHANGE_ULONG_ENDIAN(word_3);
+        h_last_window = word_3 & 0xFFFFUL;
+        h_acks++;
+    }
 
     packet_ptr -> nx_packet_queue_next = (NX_PACKET *)NX_DRIVER_TX_DONE;
 }
@@ -646,6 +676,99 @@ static void j_peak_window_is_remembered(void)
            (unsigned long)h_sock.nx_tcp_socket_tx_window_advertised_max);
 }
 
+
+/* ---------------------------------------------- the receiving half -------- */
+
+/* One pure ACK out of the real control path, with rx_window_current at
+   `current` and the socket's buffer at `dflt`.  Answers the window that
+   reached the wire. */
+static ULONG h_advertise(ULONG current, ULONG dflt)
+{
+    h_fixture();
+
+    h_sock.nx_tcp_socket_rx_window_default = dflt;
+    h_sock.nx_tcp_socket_rx_window_current = current;
+    h_sock.nx_tcp_socket_rx_window_last_sent = current;
+
+    h_last_window = 0xFFFFFFFFUL;
+    h_acks        = 0;
+    h_alloc_ok    = 1;
+
+    _nx_tcp_packet_send_control(&h_sock, NX_TCP_ACK_BIT,
+                                h_sock.nx_tcp_socket_tx_sequence,
+                                h_sock.nx_tcp_socket_rx_sequence,
+                                0, 0, NX_NULL, 0, NX_NULL);
+
+    h_alloc_ok = 0;
+
+    h_check(h_acks == 1, "the control path sent no acknowledgment");
+
+    return h_last_window;
+}
+
+/*
+ * RFC 1122 4.2.3.3.  A window below one MSS parks the sender on a runt: it
+ * sends the sliver, the window falls back, and the connection walks.  Zero is
+ * what the RFC asks for instead -- the peer waits on its persist timer and is
+ * released by a window worth filling.
+ */
+static void k_a_runt_window_is_advertised_as_zero(void)
+{
+ULONG w;
+
+    w = h_advertise(68UL, 8192UL);
+    h_check(w == 0UL, "68 bytes of window was advertised rather than zero");
+
+    w = h_advertise(104UL, 8192UL);
+    h_check(w == 0UL, "104 bytes of window was advertised rather than zero");
+
+    w = h_advertise(H_MSS - 1UL, 8192UL);
+    h_check(w == 0UL, "one byte short of an MSS was advertised rather than "
+                      "zero");
+}
+
+/* And the rule stops exactly at one MSS: a window a sender can fill is never
+   suppressed. */
+static void l_a_full_segment_is_advertised(void)
+{
+ULONG w;
+
+    w = h_advertise(H_MSS, 8192UL);
+    h_check(w == H_MSS, "a window of exactly one MSS was not advertised");
+
+    w = h_advertise(8192UL, 8192UL);
+    h_check(w == 8192UL, "a full buffer was not advertised");
+
+    w = h_advertise(H_MSS * 2UL, 8192UL);
+    h_check(w == H_MSS * 2UL, "two segments of window were not advertised");
+}
+
+/*
+ * The clause that keeps the rule from deadlocking.  RFC 1122's floor is
+ * min(MSS, RCV.BUFF/2), not MSS alone: a socket whose whole buffer is smaller
+ * than a segment would otherwise advertise zero for ever and never reopen.
+ */
+static void m_a_buffer_below_one_mss_still_opens(void)
+{
+ULONG w;
+
+    /* Half of a 1000-byte buffer is 500, so 600 is above the floor. */
+    w = h_advertise(600UL, 1000UL);
+    h_check(w == 600UL, "a small-buffer socket advertised zero and could "
+                        "never reopen");
+
+    /* Below half of it, the rule still applies. */
+    w = h_advertise(100UL, 1000UL);
+    h_check(w == 0UL, "a runt below half a small buffer was still advertised");
+}
+
+/* A window that is genuinely zero is still zero, and is not confused with one
+   the rule closed. */
+static void n_zero_stays_zero(void)
+{
+    h_check(h_advertise(0UL, 8192UL) == 0UL, "a zero window did not stay zero");
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -667,6 +790,13 @@ int main(void)
     g_congestion_window_is_not_a_sliver();
     i_a_blocked_sender_is_woken_once();
     j_peak_window_is_remembered();
+
+    printf("RFC 1122 4.2.3.3 receiver silly-window avoidance, against the real "
+           "control path\n");
+    k_a_runt_window_is_advertised_as_zero();
+    l_a_full_segment_is_advertised();
+    m_a_buffer_below_one_mss_still_opens();
+    n_zero_stays_zero();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

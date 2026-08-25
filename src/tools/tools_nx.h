@@ -93,10 +93,12 @@ typedef struct ToolAddr6Info
     UWORD   nx_index;
     UWORD   state;                   /* NETSTATUS_IP6_*                      */
     ULONG   prefix;
+    ULONG   origin;                  /* NETSTATUS_IP6_ORIGIN_*               */
     char    text[48];
 } ToolAddr6Info;
 
 /* "valid", "tentative", or NULL when the state needs no comment. */
+const char *tool_addr6_origin(ULONG origin);
 const char *tool_addr6_state(UWORD state);
 
 

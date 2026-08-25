@@ -477,7 +477,8 @@ BOOL netstack_ipv6_enabled(VOID)
 /* The caller holds the ThreadX bracket. */
 static BOOL ami_ns6_address_get(AmiNetStack *ns, UWORD interface_index,
                                 UWORD slot, ULONG addr_out[4],
-                                ULONG *prefix_out, ULONG *state_out)
+                                ULONG *prefix_out, ULONG *state_out,
+                                ULONG *origin_out)
 {
     NXD_IPV6_ADDRESS *entry;
     UWORD             seen = 0;
@@ -516,6 +517,9 @@ static BOOL ami_ns6_address_get(AmiNetStack *ns, UWORD interface_index,
                         (ULONG)entry->nxd_ipv6_address_prefix_length);
                 if (state_out != NULL)
                     *state_out = (ULONG)entry->nxd_ipv6_address_state;
+                if (origin_out != NULL)
+                    *origin_out =
+                        (ULONG)entry->nxd_ipv6_address_ConfigurationMethod;
 
                 return TRUE;
             }
@@ -551,7 +555,7 @@ BOOL netstack_ipv6_have_global(VOID)
             ULONG addr[4];
             ULONG state = 0;
 
-            if (!ami_ns6_address_get(ns, i, slot, addr, NULL, &state))
+            if (!ami_ns6_address_get(ns, i, slot, addr, NULL, &state, NULL))
                 break;
 
             /* 2000::/3.  A link-local is not a source for the internet, and
@@ -591,7 +595,28 @@ BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,
         return FALSE;
 
     found = ami_ns6_address_get(ns, interface_index, slot, addr_out,
-                                prefix_out, state_out);
+                                prefix_out, state_out, NULL);
+
+    ami_netstack_leave_free(caller);
+    return found;
+}
+
+BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
+                                  ULONG *origin_out)
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    BOOL          found;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return FALSE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return FALSE;
+
+    found = ami_ns6_address_get(ns, interface_index, slot, NULL, NULL, NULL,
+                                origin_out);
 
     ami_netstack_leave_free(caller);
     return found;

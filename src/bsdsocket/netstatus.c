@@ -444,6 +444,24 @@ static const AmiIfConfig *ns_config_for(UINT nx_index)
  * an empty table, which is what a caller compiled against the same header
  * expects: no entries, not an error.
  */
+#ifdef AMINETXDUO_IPV6
+/* NetX Duo's own numbering is not this interface's, so it is mapped and not
+   passed through. */
+static ULONG ns_origin_of(ULONG method)
+{
+    switch (method)
+    {
+    /* An advertised prefix reaches nx_icmpv6_process_ra.c as BASED_ON_INTERFACE;
+       STATELESS_AUTO_CONFIG is the notify code, not the stored method. */
+    case NX_IPV6_ADDRESS_BASED_ON_INTERFACE:    return NETSTATUS_IP6_ORIGIN_SLAAC;
+    case NX_IPV6_ADDRESS_STATELESS_AUTO_CONFIG: return NETSTATUS_IP6_ORIGIN_SLAAC;
+    case NX_IPV6_ADDRESS_STATEFUL_AUTO_CONFIG:  return NETSTATUS_IP6_ORIGIN_DHCPV6;
+    case NX_IPV6_ADDRESS_MANUAL_CONFIG:         return NETSTATUS_IP6_ORIGIN_MANUAL;
+    default:                                    return NETSTATUS_IP6_ORIGIN_NONE;
+    }
+}
+#endif /* AMINETXDUO_IPV6 */
+
 static VOID ns_fill_addresses6(NsWriter *w)
 {
 #ifdef AMINETXDUO_IPV6
@@ -461,10 +479,16 @@ static VOID ns_fill_addresses6(NsWriter *w)
             ULONG              addr[4];
             ULONG              prefix = 0;
             ULONG              state = 0;
+            ULONG              origin = 0;
             NetStatusAddress6 *out;
 
             if (!netstack_ipv6_address_get(i, slot, addr, &prefix, &state))
                 break;
+
+            if (netstack_ipv6_address_origin(i, slot, &origin))
+                origin = ns_origin_of(origin);
+            else
+                origin = NETSTATUS_IP6_ORIGIN_NONE;
 
             out = (NetStatusAddress6 *)ns_writer_next(w);
             if (out == NULL)
@@ -477,6 +501,7 @@ static VOID ns_fill_addresses6(NsWriter *w)
             out->nsn_Address[2]   = addr[2];
             out->nsn_Address[3]   = addr[3];
             out->nsn_PrefixLength = prefix;
+            out->nsn_Origin       = origin;
         }
     }
 #else
