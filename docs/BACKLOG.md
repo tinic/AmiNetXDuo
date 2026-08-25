@@ -10,8 +10,8 @@ comment beside the code, not an entry here.
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
 | A process the Shell spawned cannot `SetMode()`, `WaitForChar()` or `Open("*")` | its own `pr_MsgPort` is neither the break port nor the Shell's task | `src/tools/httpterm.c:458` |
-| A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1983` |
-| An RSA-PSS-signed certificate cannot be verified | no `id-RSASSA-PSS` OID and no PSS row in the type set, so the link fails closed | `src/tls/ami_tls_crypto.c:1551` |
+| A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1723` |
+| An RSA-PSS-signed certificate cannot be verified | no `id-RSASSA-PSS` OID and no PSS row in the type set, so the link fails closed | `src/tls/ami_tls_crypto.c:1411` |
 | `tls.library` runs only on our own `bsdsocket.library` | a hand-coded private LVO, so Roadshow, AmiTCP and Miami get `TLS_ERR_NOSTACK` | `src/tlslib/tls_netx.c:61` |
 | `tls.library` is callable from exactly one compiler | GCC extended-asm stubs, no `.fd` and no pragmas, so SAS/C and vbcc cannot | `include/aminetxduo/tlslib.h`, `developer/sfd/` |
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
@@ -24,7 +24,7 @@ comment beside the code, not an entry here.
 | TARGET: X-Surf-100 reads 412 KB/s where AmiTCP_NG reads 906 | same machine, card and driver, never measured here; the A1200 half is answered | `src/netstack/netstack.c:451` |
 | Real X-Surf hardware trails other stacks where emulation says we lead | 699 against 1103 KB/s, worst arm -37%; ACK-clock starvation is the hypothesis | `src/netdev/netdev_cards.c` |
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |
-| The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:205` |
+| The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:141` |
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
 | The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
 | `-m68000` ships on compatibility alone | wire 2026-08-25: `any` 417.8, 68020 426.4 (+2.1%), 68060 441.7 KB/s; 68020 also smaller. Spread tracks zero-windows, not CPU | `cmake/toolchain-m68k-amigaos.cmake:261` |
@@ -80,10 +80,10 @@ comment beside the code, not an entry here.
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:3` |
 | A pending recv is never completed on the IP thread | priced +2-5% in src/bsdsocket alone; the realm was built instead and is rate-neutral | `src/bsdsocket/transfer.c:1210` |
 | The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:542` |
-| The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:463` |
+| The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
 | Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:438` |
 | `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:185` |
-| Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:354` |
+| Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:322` |
 | Five files still carry over-long comment blocks | round 2 proved and landed 412 of 417; these five were still being edited at the deadline | `src/common/crashguard.c`, `src/netdev/test/` |
