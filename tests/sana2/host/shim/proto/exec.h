@@ -16,9 +16,14 @@
 #include <exec/ports.h>
 #include <exec/io.h>
 
-/* exec/nodes.h's node types; NT_MESSAGE is the only one this path sets. */
+/* exec/nodes.h's node types.  NT_MESSAGE is what the request paths set;
+   NT_MSGPORT is ami_sana2_port_init()'s, which sana2_device.c builds by hand
+   because NewList() lives in amiga.lib and a shared library cannot reach it. */
 #ifndef NT_MESSAGE
 #define NT_MESSAGE  5
+#endif
+#ifndef NT_MSGPORT
+#define NT_MSGPORT  4
 #endif
 
 VOID            Disable(VOID);

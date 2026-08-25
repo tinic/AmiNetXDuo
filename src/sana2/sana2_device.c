@@ -440,25 +440,11 @@ LONG ami_sana2_offline(AmiSana2If *iface)
     struct IOSana2Req req = iface->templ;
     LONG              err;
 
-    if (!iface->online)
-    {
-        /*
-         * Half of "the LED still blinks after NetShutdown", and recorded only
-         * in that half: the interface was marked offline by something other
-         * than this function -- a reader taking S2ERR_OUTOFSERVICE -- so the
-         * device never receives S2_OFFLINE and goes on running its receiver.
-         *
-         * Once.  AMI_SANA2_OFFLINE_ISSUED after it, so the six further calls
-         * a teardown makes are silent; see offline_state in
-         * sana2_internal.h.
-         */
-        if (iface->offline_state == AMI_SANA2_OFFLINE_UP)
-        {
-            iface->offline_state = AMI_SANA2_OFFLINE_ISSUED;
-            ami_event(NETEVENT_OFFLINE_SKIPPED, (UWORD)iface->index, 0UL);
-        }
+    /* offline_state, not iface->online: online is what the STACK believes and
+       any reader clears it on one S2ERR_OUTOFSERVICE; offline_state is what
+       the DEVICE has been told, which is what decides whether to tell it. */
+    if (iface->offline_state != AMI_SANA2_OFFLINE_UP)
         return 0;
-    }
 
     iface->online        = FALSE;
     /* Before the command rather than after it: the device has it either way,

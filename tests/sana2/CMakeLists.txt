@@ -174,3 +174,40 @@ if(AMINETXDUO_RX_VERIFY)
 endif()
 
 add_test(NAME sana2_driver COMMAND test_sana2_driver)
+
+# The device lifecycle, sana2_device.c, against one fake SANA-II unit that
+# queues CMD_READs, ignores AbortIO() and CMD_FLUSH, and answers only
+# S2_OFFLINE.  sana2_copy.c is not linked: only its hooks' addresses are used.
+add_executable(test_sana2_device
+    host/test_sana2_device_host.c
+    "${CMAKE_SOURCE_DIR}/src/sana2/sana2_device.c")
+
+target_compile_options(test_sana2_device PRIVATE
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h")
+# -Wno-pointer-to-int-cast: a function pointer in a ULONG ti_Data.
+target_compile_options(test_sana2_device PRIVATE
+    -UAMINETXDUO_IPV6 -UAMINETXDUO_BPF -Wno-pointer-to-int-cast)
+
+target_include_directories(test_sana2_device PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+    "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+    "${CMAKE_SOURCE_DIR}/src/config/test/shim"
+    "${CMAKE_SOURCE_DIR}/src/sana2"
+    "${CMAKE_SOURCE_DIR}/src/net68k"
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
+    "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+    "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
+    "${AMINETXDUO_NETXDUO}/common/inc"
+    "${AMINETXDUO_THREADX}/common/inc")
+
+target_compile_definitions(test_sana2_device PRIVATE
+    NX_INCLUDE_USER_DEFINE_FILE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+# It changes the layout of AmiRxSlot, which AmiSana2If contains.
+if(AMINETXDUO_RX_VERIFY)
+    target_compile_definitions(test_sana2_device PRIVATE AMINETXDUO_RX_VERIFY)
+endif()
+
+add_test(NAME sana2_device COMMAND test_sana2_device)
