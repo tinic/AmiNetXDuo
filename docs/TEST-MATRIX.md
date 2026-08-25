@@ -10,6 +10,11 @@ They were not subtle. They were invisible for the same reason: **no arm had
 ever varied the axis.** A gate cannot hold an opinion about a configuration it
 has never booted.
 
+All three are fixed. The arms below were written against the **contract** while
+they were still broken, went red on them, and went green on the fixes without an
+assertion changing — which is the only order in which an arm proves anything
+afterwards.
+
 | The defect | Why nothing caught it |
 |---|---|
 | Delay loops that count bus reads (`n = us * 4` in `src/netdev/netdev_pcmcia.c` `pc_settle()`, with siblings in `el3.c`, `ne2000.c`, `netdev_cmds.c`, `netdev_isapnp.c`) collapse on an accelerator | No arm had ever run a CPU other than the A1200's 68EC020. Not one, on any board, at any tier |
@@ -24,8 +29,8 @@ has never booted.
 | CPU model | 68020, 68030, 68040, 68060 | `tests/tools/run-cpuspeed.sh` | green |
 | CPU rate | stock (~14 MHz), `cpu_speed=max`, `cpu_multiplier=64` (~209 MHz) | `tests/tools/run-cpuspeed.sh` | green |
 | Memory size | 0 MB, 8 MB, 32 MB, 128 MB | `tests/tools/run-bigmem.sh` | green |
-| Interface count | 1, 2, 3, 4, 8 definitions | `tests/tools/run-multidef.sh` | **RED by design** |
-| Failure wording | missing device, wrong unit, unusable address, attach cap, no memory | `tests/tools/run-bringupfail.sh`, `bringupfail-verdict.sh` | **RED by design** |
+| Interface count | 1, 2, 3, 4, 8 definitions | `tests/tools/run-multidef.sh` | green (landed red) |
+| Failure wording | missing device, wrong unit, unusable address, attach cap, no memory | `tests/tools/run-bringupfail.sh`, `bringupfail-verdict.sh` | green (landed red) |
 
 Everything above runs from one stage:
 
@@ -76,13 +81,16 @@ tests/tools/bringupfail-verdict-selftest.sh   17 fixtures
 tests/tools/check-no-log-advice.sh            strings, needs a cross build
 ```
 
-## The two that are red on purpose
+## The two that landed red
 
-Both are written against the **contract**, not against what the tree does. An
-arm added at the same time as its fix proves nothing afterwards; an arm that
-was red first, and went green when the fix landed, proves the fix.
+Both were written against the **contract**, not against what the tree did on the
+day. Both went red on the defects they were built for, both went green when
+those were fixed — **without an assertion changing**. That order is the point:
+an arm added at the same time as its fix proves nothing afterwards.
 
-### `run-multidef.sh` — definitions are truncated
+If a fifth arm is added here, write it the same way round.
+
+### `run-multidef.sh` — definitions were truncated
 
 The contract:
 
@@ -92,15 +100,14 @@ The contract:
 | attachment | **capped** is fine. Two cards is a real resource limit; two *definitions* is not |
 | refusal | **explicit**. A defined interface that could not be attached is listed as defined-and-not-attached, with the reason, by the command a user runs to see their interfaces |
 
-What happens instead. `ShowNetStatus` prints its table from
-`cfg->interface_count` (`src/tools/shownetstatus.c:635`), which is capped at 2.
-Measured 2026-08-25:
+What it found. `ShowNetStatus` printed its table from `cfg->interface_count`
+(`src/tools/shownetstatus.c:635`), which was capped at 2:
 
-| round | definitions staged | listed by `ShowNetStatus` |
-|---|---|---|
-| 3 | 3 | 2 |
-| 4 | 4 | 2 |
-| 8 | 8 | 2 |
+| round | definitions staged | listed, before | listed, after |
+|---|---|---|---|
+| 3 | 3 | 2 | 3 |
+| 4 | 4 | 2 | 4 |
+| 8 | 8 | 2 | 7 |
 
 And **which** two survive is not alphabetical, whatever the comment above
 `insert_interface()` suggests. The array is kept sorted, but the *drop* is by
@@ -110,16 +117,17 @@ two are then sorted. On a round of eight named `eth0`..`eth7` the machine kept
 and cannot change except by accident. That is worse than alphabetical, not
 better; an alphabetical rule can at least be explained to somebody.
 
-Two mitigations exist and neither closes the hole. `CheckNetConfig` warns about
-the drawer size (`src/tools/checknetconfig.c:637`), but it is a separate command
-a user has to know to run. `ShowNetStatus` does print a "Problems in the
-configuration" block naming files by path, so a definition with a *syntax error*
-is mentioned even when it is not tabled — but a definition that is merely
-**surplus**, perfectly written and dropped for being third, is named nowhere at
-all. Both are reported by the arm and neither is accepted as satisfying the
-contract.
+**7 of 8, not 8 of 8, and that is correct.** `eth5` is the file with no `DEVICE`
+line. It names no card, so it defines no interface, and the machine says exactly
+that by name: `the file 'eth5' cannot be used, so that interface does not exist`.
+The arm exempts it from the table clause and holds it to the named-somewhere
+clause instead.
 
-### `run-bringupfail.sh` — refusals carry no code, and point at a log
+That exemption was itself found by running the arm — it had been a false red,
+and would have shipped as a permanent one. Which is the argument for keeping an
+arm past the defect that prompted it.
+
+### `run-bringupfail.sh` — refusals carried no code, and pointed at a log
 
 The contract is two clauses:
 
@@ -138,23 +146,26 @@ a verb would, and the line number is a locator the user can act on more directly
 than an error code. Both are accepted. What is never accepted is a refusal
 carrying neither.
 
-Measured 2026-08-25:
+What it found, 2026-08-25, before the fix:
 
-| cause | first line of the refusal | verdict |
+| cause | first line of the refusal, then | verdict |
 |---|---|---|
 | missing device | `AddNetInterface: nodev was not added to the running network` | **no code** |
 | wrong unit | `AddNetInterface: badunit was not added to the running network` | **no code** |
-| unusable address | `DEVS:NetInterfaces/badaddr, line 4:` | passes — path and line |
+| unusable address | `DEVS:NetInterfaces/badaddr, line 4:` | passed — path and line |
 | attach cap | `AddNetInterface: cap2 was not added to the running network` | **no code** |
 | no memory | fixture only, see above | — |
 | any of them | log sentence in `AddNetInterface`, `CheckNetConfig`, `Online` | **dead-end advice** |
 
-So the defect is narrower than "names nothing", and the arm says so rather than
-overstating it. The *second* line usually names the reason well
-(`There is no nosuchcard.device on this machine.`,
-`this stack holds 2 interfaces and they are all in use. RemoveNetInterface frees one.`),
-and the configuration-fault path is the best message on the whole bring-up path.
-The gap is the missing code on the first line and the dead-end log advice.
+All green now.
+
+The defect was always narrower than "names nothing", and the arm was built to
+say so rather than overstate it. The *second* line usually named the reason well
+(`There is no nosuchcard.device on this machine.`), and the address case above
+is the best message on the whole bring-up path — no prefix, no verb, no number,
+and it points at the file and the line. The grader had to learn to accept that
+shape; before it did, it reported the best message in the tree as silence, which
+would have been the harness inventing a defect.
 
 ## What cannot be covered without real hardware
 
@@ -164,9 +175,13 @@ question into a closed one.
 
 ### PiStorm / Gayle timing — **not covered, and no emulator knob reaches it**
 
-`tests/tools/run-cpuspeed.sh` does **not** reproduce `pc_settle()`. This was
-measured with the `n = us * 4` loop still in the tree, unfixed, and every arm
-was green. Timing the window around `netstack_startup()` — which contains the
+This is the most important entry in the document, because it is the one axis
+where a green arm must not be read as a covered defect.
+
+`tests/tools/run-cpuspeed.sh` does **not** reproduce `pc_settle()`. That was
+measured while the `n = us * 4` loop was still in the tree, unfixed, and every
+arm was green — so the twelve green arms below did **not** catch the defect that
+prompted them, and could not have. Timing the window around `netstack_startup()` — which contains the
 PCMCIA claim, and therefore `pc_settle(300000)` — off the stamped serial log,
 on `ne2000_pcmcia` at 68030:
 

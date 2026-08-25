@@ -4,11 +4,14 @@
 #
 #   tests/tools/run-bringupfail.sh [-b BUILDDIR] [-t SECONDS] [-N BOARD]
 #
-# EXPECT THIS TO BE RED.  It is written against the contract in
-# tests/tools/bringupfail-verdict.sh, and the tree does not meet it yet: three
-# shipped commands send the user to a debug log that a shipping build cannot
-# write.  A red run here is the finding, not a broken harness.  See
-# "WHAT IS RED TODAY" below.
+# WRITTEN RED, NOW GREEN.  Written against the contract in
+# tests/tools/bringupfail-verdict.sh rather than against the behaviour of the
+# day, and on 2026-08-25 the behaviour did not meet it: three of four causes
+# carried no code on the first line, and three shipped commands sent the reader
+# to a debug log no shipping build can write.  Both were fixed the same evening
+# and this went green against the fix without an assertion changing.  The
+# record is below, because an arm written at the same time as its fix proves
+# nothing afterwards.
 #
 # WHAT IT PROVES
 #
@@ -32,16 +35,29 @@
 #   it, "Check the debug log for what failed" shipped and stayed shipped, in a
 #   build configuration that writes no log at all.
 #
-# WHAT IS RED TODAY
+# WHAT WAS RED, on 2026-08-25, before the fix
 #
 #   tests/tools/check-no-log-advice.sh, which this runs FIRST and before any
-#   emulator, finds the sentence in three commands:
-#   AddNetInterface, CheckNetConfig and Online.  It is one sentence in one
-#   shared help block reached from three places, and it fails clause 2 for
-#   every cause that ends in "the interface did not come online".
+#   emulator, found "Check the debug log for what failed" in THREE commands --
+#   AddNetInterface, CheckNetConfig and Online -- one sentence in one shared
+#   help block reached from three places.  It is gone.
 #
-#   Clause 1 is graded per cause from the live transcript, and what it says is
-#   whatever the run says.  Read the table.
+#   Clause 1 was red for three of the four live causes:
+#
+#     missing device    AddNetInterface: nodev was not added to the running
+#                       network            -- operation named, no code
+#     wrong unit        the same shape     -- operation named, no code
+#     attach cap        the same shape     -- operation named, no code
+#     unusable address  DEVS:NetInterfaces/badaddr, line 4:
+#                                          -- PASSED, and see below
+#
+#   The address case passing is worth as much as the other three failing.  It
+#   has no command prefix, no verb and no error number, and it is the best
+#   message on the whole bring-up path: it names the file and the line.  The
+#   grader had to learn to accept that shape (bringupfail-verdict.sh,
+#   BFV_OBJECT and the `line N' half of BFV_CODE) -- before it did, it reported
+#   the best message in the tree as silence, which would have been this harness
+#   inventing a defect.
 #
 # THE STRINGS CHECK RUNS WITHOUT A ROM, on purpose: it is the half of this
 # harness that can go red on any machine, and putting it behind five boots

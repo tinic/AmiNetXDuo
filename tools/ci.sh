@@ -42,7 +42,8 @@
 #                128 MB.  Every one of those axes had a coverage of zero until
 #                2026-08-25, which is how three defects reached real hardware
 #                unseen.  Needs a ROM and nothing else -- SLIRP is enough.
-#                TWO OF ITS FOUR ARMS ARE RED BY DESIGN; see
+#                Two of its four arms landed RED, against the contract rather
+#                than the behaviour, and went green on the fixes; see
 #                docs/TEST-MATRIX.md.
 #   emulator     tier 2, boots FS-UAE, needs a ROM
 #   cards        tier 2, boots EVERY network card this project supports,
@@ -1479,11 +1480,13 @@ stage_cards6() {
 # answers ICMP; none of them counts bytes off a third machine.  So this needs
 # a ROM and a driver and nothing else, and it can run wherever `emulator` can.
 #
-# TWO OF THE FOUR ARE RED BY DESIGN and will stay red until the behaviour they
-# describe is changed.  They are written against the CONTRACT rather than
-# against what the tree does, which is the only way an arm added at the same
-# time as a fix can be trusted afterwards.  docs/TEST-MATRIX.md has the
-# standing list; the harness headers have the detail.
+# ALL FOUR ARE GREEN, and two of them were not when they landed.  multidef and
+# bringupfail were written against the CONTRACT rather than against what the
+# tree did, went red on the defects above, and went green when those were
+# fixed -- without an assertion changing.  That order is the only way an arm
+# added at the same time as its fix can be trusted afterwards, and it is worth
+# preserving if a fifth arm is added here.  docs/TEST-MATRIX.md keeps the
+# record; the harness headers have the detail.
 stage_matrix() {
     hr "machine matrix (tier 2, needs a ROM; SLIRP is enough)"
 

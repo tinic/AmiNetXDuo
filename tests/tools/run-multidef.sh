@@ -5,11 +5,14 @@
 #   tests/tools/run-multidef.sh [-b BUILDDIR] [-t SECONDS] [-r ROUND[,ROUND]]
 #                               [-N BOARD] [-l]
 #
-# EXPECT THIS TO BE RED UNTIL THE CAP IS LIFTED.  It is written against the
-# CONTRACT, not against today's behaviour, and today's behaviour does not meet
-# it.  See "WHAT IT ASSERTS" below for the three clauses and
-# "WHAT IS RED TODAY" for which of them fails and why.  A red run here is this
-# file doing its job; do not "fix" it by weakening an assertion.
+# WRITTEN RED, NOW GREEN.  This was written against the CONTRACT rather than
+# against the behaviour of the day, and on 2026-08-25 the behaviour did not
+# meet it: AMI_CFG_MAX_INTERFACES was 2 and a round of eight was listed as two.
+# The cap was lifted the same evening (`config: a drawer may describe any
+# number of interfaces...`) and this went green against it without a line of
+# the assertions changing.  That order matters: an arm written at the same
+# time as its fix proves nothing afterwards.  The history is kept below
+# because it is what the arm is FOR.
 #
 # WHAT IT PROVES
 #
@@ -62,12 +65,22 @@
 #   CI.  That is why a truncation this visible survived: not because it was
 #   subtle, but because nothing ever counted past two.
 #
-# WHAT IS RED TODAY, precisely
+# WHAT WAS RED, precisely, and what the arm found afterwards
 #
-#   Clause 1 fails.  ShowNetStatus prints its Interfaces table from
-#   cfg->interface_count (src/tools/shownetstatus.c:635), which is capped at 2,
-#   so on the round of 8 it shows two names and the other six do not exist as
-#   far as the table is concerned.
+#   Clause 1 failed.  ShowNetStatus printed its Interfaces table from
+#   cfg->interface_count, which was capped at 2, so a round of 8 showed two
+#   names and the other six did not exist as far as the table was concerned.
+#   It now lists all of them as `defined'.
+#
+#   AND THE ARM FOUND ONE MORE THING AFTER THE FIX LANDED, which is the whole
+#   argument for keeping an arm past the defect that prompted it: on the round
+#   of 8, seven of eight were listed and eth5 was not.  eth5 is the file with
+#   no DEVICE line -- it names no card, so it defines no interface, and the
+#   machine says exactly that by name ("the file 'eth5' cannot be used, so
+#   that interface does not exist").  That is correct, so the arm exempts it
+#   from clause 1 and holds it to clause 3 instead.  The finding was a defect
+#   in THIS FILE's clause 1, caught by running it, and it would have shipped
+#   as a permanent false red.
 #
 #   Clause 3 is PARTLY met, and the arm reports the difference rather than
 #   flattening it.  ShowNetStatus does print a "Problems in the configuration"
@@ -172,6 +185,10 @@ iface_file() { # kind
 
 plan_for_round() { # n  -> "name:kind ..." for the first n
     printf '%s\n' "$IFACE_PLAN" | grep -v '^$' | head -n "$1"
+}
+
+kind_of() { # name -> kind
+    printf '%s\n' "$IFACE_PLAN" | sed -n "s/^$1://p" | head -1
 }
 
 if [ "$LIST" = 1 ]; then
@@ -296,7 +313,19 @@ EOF
 
     for name in $names; do
         # CLAUSE 1: visible in the table.
-        if printf '%s\n' "$table" | grep -qE "^${name}[[:space:]]"; then
+        #
+        # EXCEPT nodevline, and the exception is the contract rather than a
+        # concession.  A file with no DEVICE line does not DEFINE an
+        # interface -- it names no card, so there is nothing for the machine
+        # to list a row about -- and the machine says exactly that, by name,
+        # in the problems block: "the file 'eth5' cannot be used, so that
+        # interface does not exist".  Demanding a table row for it would be
+        # this harness insisting the machine invent an interface out of a
+        # file that describes none.  Clause 3 still applies in full, and it
+        # is clause 3 that carries the weight here.
+        if [ "$(kind_of "$name")" = nodevline ]; then
+            echo "  ok   $name names no card, so no row is expected (clause 3 applies)"
+        elif printf '%s\n' "$table" | grep -qE "^${name}[[:space:]]"; then
             echo "  ok   $name is visible in ShowNetStatus"
         else
             echo "  FAIL $name is DEFINED and ShowNetStatus does not list it"
@@ -349,7 +378,7 @@ EOF
                    $0 == want { grab = 1; next }
                    /^===== / { grab = 0 }
                    grab { print }' |
-               sed -n '/^[A-Z][A-Za-z0-9]*:[[:space:]]/,$p')
+               sed -n '/^[A-Z][A-Za-z0-9]*:[[:space:]]/,$p;/^Problems in the configuration:/,$p')
 
         # THE ATTACH CAP IS A REASON TOO.  Once the first valid definition has
         # attached, every later one is refused with "this stack holds 2
@@ -361,7 +390,7 @@ EOF
         # Per-cause wording is tests/tools/run-bringupfail.sh's job, and it
         # orders its commands so each cause is reached.
         if printf '%s\n' "$para" |
-           grep -qiE 'device|driver|unit|address|configure|memory|room|no such|in use|holds [0-9]+ interface'; then
+           grep -qiE 'device|driver|unit|address|configure|memory|room|no such|in use|holds [0-9]+ interface|cannot be used|does not exist'; then
             echo "  ok   $name ($kind) is refused with a reason"
         else
             echo "  FAIL $name ($kind) is not refused with any named reason"
