@@ -153,14 +153,13 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # here.
 CROSS_CONFIGS=(
     "default:"
-    # WHAT THE ARCHIVE IS BUILT WITH.  LTO is the cross default and `default`
-    # above compiles it; the release archive is built with it OFF, because
-    # docs/SHIP-DECISIONS.md (d) is unresolved -- an LTO Release boot-locked
-    # the physical A1200 once, was never reproduced or named, and every
-    # physical hour of this project was bought on non-LTO images.  So the
-    # shipping shape is a configuration in its own right and gets an arm,
-    # under fatal warnings like every other one.  When (d) is closed one way
-    # or the other, this arm and release.yml's flag go together.
+    # NOT WHAT THE ARCHIVE IS BUILT WITH.  docs/SHIP-DECISIONS.md (d) is
+    # DECIDED: every shipped drawer is built with -flto, `default` above is
+    # the shipping arm, and dist/make-dist.sh refuses to pack a build that
+    # has the option off or the flag missing.  This arm is coverage only --
+    # -DAMINETXDUO_LTO=OFF is a configuration a user can select, so it has to
+    # keep compiling under fatal warnings like every other one.  It is not a
+    # shipping shape and nothing may read it as one.
     "nolto:-DAMINETXDUO_LTO=OFF"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
     # mDNS off is a real code path and not only a smaller library: the browse
@@ -219,7 +218,7 @@ CROSS_CONFIGS=(
     # BPF=OFF appears nowhere else at all, and the interactions between five
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-minimal.
-    "minimal:-DAMINETXDUO_LTO=OFF -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
+    "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
 )
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.

@@ -7,8 +7,11 @@ hardware/PIO ceiling and satisfies the match-or-beat rule
 (docs/RECEIVE_BUDGET.md, the two calibration sections).  Everything the
 campaign proved is on main; every flag it added preserves the shipped
 default.  What is left is a set of RELEASE decisions -- defaults, presets,
-packaging -- and none of them is taken here.  Each entry below is the
-evidence and a recommendation; the decision belongs to the release.
+packaging.  Each entry below is the evidence and a recommendation; the
+decision belongs to the release.  One has been taken and is marked DECIDED
+at the top of its section, in a table row rather than in prose: **(d) LTO
+ships, always**.  A recommendation is not a decision, and reading one as a
+decision is what pulled the first 0.25.3.
 
 ## (a) TX_LAZY_COLLECT: default ON, and for which tier
 
@@ -79,24 +82,28 @@ Recommendation: have the installer DETECT and PROPOSE (default the choice by
 AvailMem, say what the small tier gives up in one sentence), never silently
 select.  The detection is one AvailMem call; the sentence is the work.
 
-## (d) LTO and the physical boot-lock -- OPEN
+## (d) LTO -- DECIDED: LTO ships, always
 
-A clean LTO Release build of main (08fe2a21 era) boot-locked the physical
-A1200; a non-LTO build of the same tree ran.  The campaign never
-root-caused it -- an unproven LTO miscompile somewhere in the image -- and
-every physical deployment since has been non-LTO by rule, while LTO remains
-the cross-build default and every emulated configuration runs it happily.
+| entry | status | decided | by | rule |
+| --- | --- | --- | --- | --- |
+| (d) LTO | **DECIDED** | 2026-08-25 | user | Every shipped drawer is built with `-flto`. There is no non-LTO archive, in this release or any other. |
 
-This is the one entry with an unresolved fact at its centre.  The release
-cannot close it by policy: either the shipped image is LTO (smaller,
-faster, and the shape that locked a real machine once), or it is non-LTO
-(the shape every physical hour of the campaign actually ran).
+Not a per-release judgement and not open to a recommendation.
+`dist/make-dist.sh` aborts unless `AMINETXDUO_LTO=ON` and `-flto` is in
+`CMAKE_C_FLAGS_RELEASE`; `tools/ci.sh`'s `nolto` arm is compile coverage
+for an option a user may select, not a shipping shape.
 
-Recommendation: ship non-LTO until the 08fe2a21 lock-up is reproduced and
-named, and keep non-LTO as the documented diagnostic build shape
-regardless.  The size cost is real but the campaign bought all its physical
-evidence on non-LTO images; shipping the untested-on-hardware shape to save
-KB inverts the burden of proof.
+Why the status is a row: 0.25.3 was first cut non-LTO because the
+recommendation below -- prose, in this file -- was read as a decision.  The
+archive was larger and slower than 0.25.2's and was pulled.
+
+SUPERSEDED, kept for the record: *"ship non-LTO until the 08fe2a21 lock-up
+is reproduced and named"*.  The fact behind it stands and is not a reason to
+ship: a clean LTO Release build of the 08fe2a21-era tree boot-locked the
+physical A1200 once, a non-LTO build of the same tree ran, and nothing has
+reproduced or named it since.  That is a bug to find -- the test for it is
+still written out at the end of this section -- not a shape to ship.  The
+evidence below is history now, not an argument.
 
 ### What was tested off-hardware, 2026-08-25
 
