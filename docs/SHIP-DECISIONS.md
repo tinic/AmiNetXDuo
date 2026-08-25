@@ -239,37 +239,60 @@ completely -- two arms run on top of run.sh's six:
 against non-LTO's 964 bytes, 2 hunks, 19 relocations.  The guarded LTO
 library and the non-LTO library are the same shape.
 
-EMULATED BOOT STRESS, playhouse3, own clone, own build directories, own
-`AMINETXDUO_RUN_TAG`s.  The rig's bridge was in use by another agent
-throughout, so the pcmcia arm ran on SLIRP rather than share a
-host-derived MAC with it, and every arm was matched by a non-LTO control
-run in the same sitting.  Sixteen cold boots of the LTO
-bsdsocket.library + anxnet.device, no boot-time hang in any of them:
+EMULATED BOOT STRESS, playhouse3: own clone, own build directories, own
+`AMINETXDUO_RUN_TAG`s, and every arm matched by a non-LTO control run in
+the same sitting.  Sixteen cold boots of the LTO bsdsocket.library, eleven
+of them over the LTO anxnet.device as well, and no boot-time hang in any of
+them:
 
-    a2065, SLIRP, run-ifdhcp x5     PASS, 35 ok, 0 fail, every boot;
-                                    non-LTO control PASS, 35 ok
-    a2065, bridged, run-ifdhcp x5   boots clean in 53 s, lease taken from
-                                    the LAN router, IPv6 SLAAC and DHCPv6
-                                    up, 122 frames in / 34 out, 0 errors,
-                                    0 buffer failures, RELEASE and
-                                    RELEASEADDRESS accepted.  The nine
-                                    assertion failures are run-ifdhcp's
-                                    SLIRP literals under a bridge, already
-                                    a backlog row, and not LTO's
-    ne2000_pcmcia, SLIRP, x5        boots clean in 17 s, 15 ok every time;
-                                    the DHCP half does not complete on this
-                                    board over SLIRP and the non-LTO
-                                    control fails IDENTICALLY, so that is
-                                    the board and the backend, not the flag
+    a2065, bridged, LTO x5      every boot clean in ~55 s, our device
+                                opened (`sana2_staged ...
+                                driver=anxnet.device source=anxnet
+                                card=a2065`), a real lease from the LAN
+                                router each time (.147/.175/.131/.181/.138),
+                                66-127 frames in and 21-22 out, 26 ok.
+                                Non-LTO control identical (.128, 70 in,
+                                22 out, 26 ok).  The nine assertion
+                                failures every run shares are run-ifdhcp's
+                                SLIRP literals under a bridge, already a
+                                backlog row, and are not LTO's
+    ne2000_pcmcia, SLIRP, LTO x5  PASS, 35 ok, 0 fail, every boot, our
+                                device on `card pcmcia`, 10.0.2.15 taken
+                                each time.  Non-LTO control PASS, 35 ok
+    a2065, SLIRP, LTO x5        PASS, 35 ok, every boot; this pair ran the
+                                VENDOR a2065.device and so speaks for the
+                                library only.  Non-LTO control PASS
 
-And one bridged transfer to go with the boots: run-poolshare on the a2065,
-peer on a third machine, the LTO library carrying it -- 9,232,384 bytes in
-15 s, 4.92 Mbit/s, 2,254 packets, lost=0, out-of-order=0, zero_windows=2.
-That is the first arm's result after moving the guest off 192.168.1.240,
-which is contested on this LAN: on .240 the peer got RST then timeouts and
-the arm read "the guest never accepted" while the guest sat in `iperf -s`.
-Rig lore, not a stack fact -- .243 already cost this campaign two runs the
-same way, and .240 belongs beside it.
+And one bridged transfer to go with the boots: run-poolshare on the a2065
+with our LTO device, peer on a third machine -- 9,232,384 bytes in 15 s,
+4.92 Mbit/s, 2,254 packets, lost=0, out-of-order=0, zero_windows=2.
+
+The bridged pcmcia combination specifically could not be run: another agent
+held the bridge with its own ne2000_pcmcia guests throughout, and Amiberry
+ignores `mac=` for that board, so two bridged pcmcia guests carry one MAC.
+The SLIRP pcmcia arm above covers the board and the driver; what it does
+not cover is that board over a real segment, which is a rig-availability
+gap and not a result.
+
+READING NOTE ON THE STAGING, because it decides what these runs prove.
+`run-ifdhcp` stages whatever `AMINETXDUO_SANA2_DRIVER` points at and never
+consults `sana2_select`, so an arm that does not set the SANA2 variables
+boots the VENDOR driver for the board.  The first pass of these arms did
+exactly that -- `driver=a2065.device source=vendor card=none` -- and was
+rerun with `AMINETXDUO_SANA2_DRIVER=<build>/src/netdev/anxnet.device`,
+`_DRIVER_NAME` and `_DEVICE` = `anxnet.device`, `_DIR=Networks` and
+`_CARD=<card>`, the set `tests/tools/run-netcapture.sh:249` uses.  Teaching
+`run-ifdhcp` to call `sana2_select` the way the sweeps do would close the
+trap; until then an arm that does not print `source=anxnet` is measuring
+the library alone.
+
+Two rig facts worth carrying, neither a stack fact: 192.168.1.240 is
+contested on this LAN -- on it the poolshare peer got RST then timeouts and
+the arm read "the guest never accepted" while the guest sat in `iperf -s`,
+and .243 already cost this campaign two runs the same way.  And
+`run-poolshare.sh` derives its own tag `poolshare16`, so two agents running
+it at once share a serial port AND a guest address; pass `-a` and check
+`pgrep -af amiberry` first.
 
 VERDICT: BOUNDED, WITH ONE LIVE DEFECT NAMED.  Every structural check that
 can be made off-hardware passes on the LTO shipping images, at main and at
@@ -305,8 +328,15 @@ One session, in this order.  Nothing here needs a second visit.
               build/lto/src/netdev/anxnet.device \
               build/nolto/src/netdev/anxnet.device
 
-    The differ must report no findings before anything is copied.  If it
-    reports any, stop: the answer is in the image and the machine is not
+    The differ must report no findings before anything is copied, and
+
+        python3 tools/hunkdiff.py --check \
+              build/lto/src/bsdsocket/bsdsocket.library \
+              build/lto/src/netdev/anxnet.device \
+              build/lto/src/tools/*
+
+    must report `check=ok` for everything the deploy carries.  If either
+    complains, stop: the answer is in the image and the machine is not
     needed.
 
 2.  Park a known-good pair on DH0: FIRST, from the Shell, not from the
