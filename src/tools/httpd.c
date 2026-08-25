@@ -1,100 +1,4 @@
-/*
- * httpd, an HTTP server with read-write WebDAV, so that a drawer on this
- * machine appears as a drive on Windows, macOS and Linux with nothing
- * installed at the far end.  Finder's Connect to Server, Explorer's Map
- * network drive and gvfs all speak WebDAV natively.  None of them speaks
- * anything else an Amiga can serve without a client on the other machine.
- *
- *     httpd ROOT/A,PORT/N,ADDRESS=-a/K,CONNECTIONS=-m/N/K,TIMEOUT=-w/N/K,
- *           VERBOSE=-v/S,TRACE/S,TERMINAL=-T/S,PAGE/K,CONSOLE=-C/S,
- *           CONSOLEPAGE/K
- *
- *   httpd Work:Public            serve that drawer on port 80
- *   httpd DH0:Docs 8080 -v       another port, one log line per request
- *   httpd RAM: 8080 TRACE        every header, in the order it arrived
- *   httpd Work:Public 80 -T      and a Shell in a browser, on the same port
- *   httpd Work:Public 80 -C      and the frontmost screen, live, in a browser
- *
- * It answers OPTIONS, PROPFIND (Depth 0 and 1), GET, HEAD, PUT, DELETE, MKCOL,
- * COPY, MOVE, PROPPATCH, LOCK and UNLOCK: WebDAV class 2, the class that has
- * locking.  The class matters more than the verbs do.  Finder mounts a `DAV: 1`
- * server read-only however many write methods it answers, so class 2 and a lock
- * table is the price of a writable mount rather than an extra.
- *
- * -T turns on /shell, which serves an HTML page, and a WebSocket upgrade to the
- * same address gets an AmigaDOS Shell: RFC 6455 in src/tools/httpws.c, the
- * Shell itself in src/tools/httpterm.c.  It takes no value.  The page is looked
- * for in httpd_term_places[] below, and PAGE= names one somewhere else.  It
- * used to be TERMINAL=<file>, which meant the terminal could not be turned on
- * without knowing where the installer had put a 400 KB HTML file.
- *
- * If a file of the same name with `.gz` on the end sits beside it, that is
- * served instead to a browser that offered `Accept-Encoding: gzip`.  It is read
- * and sent, never made: there is no compressor here and there is not going to
- * be one.  The page we ship has such a sibling, built by tools/web/build.mjs
- * and committed with it.  A page somebody wrote themselves has none and is
- * served as it always was.
- *
- * Anyone who can reach the port gets that Shell.  There is no credential and
- * nothing to configure, the same shape as the write methods above: this server
- * has never had authentication.  The endpoint is off unless -T was given, so
- * the decision is made once, on the command line.  /shell is reserved while it
- * is on, and shadows an entry of that name in the served drawer.  The banner
- * says so when there is one, because a file that stops being reachable without
- * a word gets diagnosed as a network fault.
- *
- * -C turns on /console, which serves an HTML page, and a WebSocket upgrade to
- * the same address gets the frontmost screen itself: what shape it is, what
- * colours it has, and then a frame per grab carrying only what changed.  The
- * grab and the session are in src/tools/httpfb.c, the wire format in
- * include/aminetxduo/rfb_encode.h.  It takes no value, CONSOLEPAGE= names the
- * page somewhere other than the places searched, the address is reserved only
- * while it is on, it is one viewer at a time, and anyone who can reach the port
- * sees that screen.  Off unless -C was given.
- *
- * -C DOES NOT NEED A SCREEN TO START.  `httpd <drawer> -C' in S:User-Startup
- * runs before LoadWB, so Intuition's screen list is empty and there is nothing
- * to preflight; it comes up serving, says so in the banner once, and the
- * console begins working by itself when Workbench opens, because the front
- * screen is read again for every session.  It used to refuse outright and take
- * the whole server with it, which is why the rig's own boot line had to drop
- * -C.
- *
- * Whatever is in front, whole, and nothing behind it, the way a screen owns the
- * display on RTG.  No compositing of a dragged-down screen over what is under
- * it, and no RTG: a non-planar BitMap has no bitplanes to read, and that case
- * is refused with a sentence rather than read anyway.
- *
- * A PUT goes to a temporary name in the destination drawer and is renamed over
- * the target once the last byte has arrived, so a transfer that stops half way
- * leaves the old file untouched.  Nothing else here writes into a file a client
- * can already see.
- *
- * Not ported from anything.  The small C servers all assume a socket is a file
- * descriptor and that select() is select().  Here a socket is an index into
- * bsdsocket.library's own table and select() is WaitSelect() at LVO -0x0d2, so
- * their event loop is the part that would have to be rewritten, and none of
- * them serves files.  What is left is the listen/accept idiom, which
- * src/tools/nc.c already has.
- *
- * `nc -l` takes one caller and exits, so before this the server half of the ABI
- * had no user that ever held two connections open.  Every socket here is
- * non-blocking and every wait is one WaitSelect() over the listener plus the
- * live connections, so one client reading a file slowly cannot stop another
- * from being answered.  Finder and the Windows redirector both open several and
- * expect all of them to progress.
- *
- * The floor is a 1 MB machine, so a connection that says nothing must not cost
- * anything.  The request head, the count of headers, each line, the request
- * body and the time a connection can spend making no progress are all capped,
- * so a client can open the connection limit's worth of sockets and stay silent
- * without the machine noticing.  Everything is static: the buffers are
- * HTTPD_CONN_MAX * ~7.5 KB, allocated once, and a Shell command gets 4 KB of
- * stack on a stock Kickstart 3.1 (src/tools/nc.c says the same at its own
- * buffers).  Writing added nothing to that: a tree walk carries two paths, one
- * FileInfoBlock and two bytes a level rather than a stack of blocks, and the
- * lock table is a fixed array.
- *
+/* httpd: an HTTP server with read-write WebDAV, serving a drawer as a drive.
  * SPDX-License-Identifier: MIT
  */
 
@@ -114,8 +18,7 @@
 
 const char *const tool_name = "httpd";
 
-/* proto/locale.h's inlines read this, the same way src/tools/sntp.c declares
-   it for the same call. */
+/* proto/locale.h's inlines require this symbol. */
 struct LocaleBase *LocaleBase;
 
 static const char version_tag[] __attribute__((used)) =
@@ -142,20 +45,8 @@ enum
     ARG_COUNT
 };
 
-/*
- * Where a bare -T looks for its page, in order.  Short on purpose: a long list
- * is a long failure message, and PAGE= is the answer for anywhere else.
- *
- *   AmiNetXDuo:  the assign Install-AmiNetXDuo writes into S:User-Startup
- *                beside the httpd line, pointing at the drawer it put the
- *                documentation and the page in.  The drawer is the user's
- *                choice, so the assign is the only stable name for it.
- *   PROGDIR:     httpd and the page unpacked into the same drawer, and the
- *                Terminal subdrawer the archive carries.
- *
- * The page is 400 KB of HTML.  Compiling it in would remove the search and
- * five-fold the binary, which is not a trade on a 1 MB machine.
- */
+/* Where a bare -T looks for its page, in order.  The AmiNetXDuo: assign must
+   match the one Install-AmiNetXDuo writes into S:User-Startup. */
 static const char *const httpd_term_places[] = {
     "AmiNetXDuo:Terminal/shell.html",
     "PROGDIR:Terminal/shell.html",
@@ -165,14 +56,8 @@ static const char *const httpd_term_places[] = {
 #define HTTPD_TERM_PLACES                                               \
     ((ULONG)(sizeof(httpd_term_places) / sizeof(httpd_term_places[0])))
 
-/*
- * The same three places for -C's page, and the same drawer: the archive puts
- * both pages in Terminal/ and the installer copies that drawer whole, so a page
- * anywhere else is a page nothing installs.  The drawer holds httpd's pages and
- * is named after the first one.  A machine that has one page and not the other
- * still gets the right refusal, because each search is over its own file name
- * and says which one it could not find.
- */
+/* The same three places for -C's page.  Both pages live in Terminal/, which is
+   the drawer the installer copies whole. */
 static const char *const httpd_console_places[] = {
     "AmiNetXDuo:Terminal/console.html",
     "PROGDIR:Terminal/console.html",
@@ -185,14 +70,6 @@ static const char *const httpd_console_places[] = {
 
 /* --------------------------------------------------------------- limits --- */
 
-/*
- * The connection ceiling is a memory decision before it is a concurrency one.
- * A slot is 7.5 KB of buffers, so the default eight is 60 KB taken at startup,
- * and CONNECTIONS lowers it.  Eight is what the clients ask for: Finder opens
- * four to six and the Windows redirector two to four.  A client that finds no
- * free slot waits in the listen backlog rather than failing, so a lower number
- * costs latency and not function.
- */
 #define HTTPD_CONN_MAX      16
 #define HTTPD_CONN_DEFAULT   8
 
@@ -203,65 +80,19 @@ static const char *const httpd_console_places[] = {
 #define HTTPD_BODY_MAX     65536UL  /* a buffered request body: the XML     */
 #define HTTPD_TIMEOUT_DEF     30UL  /* seconds of no progress               */
 
-/*
- * The same question for the two endpoints that hold a single-instance resource,
- * the Shell and the console screen.  Shorter than HTTPD_TIMEOUT_DEF, because
- * what is held is not a connection slot but the only Shell or the only screen,
- * and everybody else is refused while a peer that has already gone still holds
- * it.
- *
- * Ten seconds is the ceiling for a peer that vanished without saying so: half
- * of it is spent waiting quietly, the ping goes out at the halfway mark and the
- * answer is due by the end.  A peer that closes cleanly is acted on in the pass
- * it happens, which is the ordinary navigate-away.
- */
 #define HTTPD_WS_IDLE_DEF     10UL  /* seconds before a quiet viewer loses it */
 #define HTTPD_BACKLOG          8
 
-/* A walk a client can ask for, DELETE and COPY of a drawer, has to stop
-   somewhere, and a filesystem that keeps reporting the drawer as not empty is
-   the shape a loop here would take.  A tree that needs more steps than this is
-   refused half-done and said so in the multistatus. */
 #define HTTPD_WALK_MAX     20000UL
 
-/*
- * How much of a walk one pass of the event loop does.  This is why the walks
- * are a state machine: a DELETE of a thousand files is about a thousand passes
- * and every other connection is served between them, where doing it in one go
- * would stop the server for as long as the tree took.
- *
- * One entry, because a single AmigaDOS operation cannot be interrupted and is
- * already longer than a network round trip.  DeleteFile() measured 150 ms on a
- * directory filesystem under emulation, so a slice of eight was 1.2 seconds
- * during which nothing else was answered.  A slice costs one extra
- * WaitSelect(), which is nothing beside the packet it is wrapped around.
- *
- * Copying a file is different.  Read() and Write() of a scratch-full are fast,
- * so those go eight at a time.
- */
 #define HTTPD_WALK_SLICE       1    /* directory entries acted on          */
 #define HTTPD_COPY_SLICE       8    /* scratch-fulls of a file copied      */
 
-/* How deep a walk can go below the request path.  24 levels is deeper than a
-   path 256 bytes long can usefully reach. */
 #define HTTPD_WALK_DEPTH      24
 
-/*
- * What a partial DELETE can name.  RFC 4918 9.6.1 wants every failure in the
- * multistatus, and a drawer of a thousand delete-protected files would then be
- * a thousand-element answer on a machine with a megabyte.
- *
- * So the answer names the first eight, and at most 768 bytes of them, whichever
- * runs out first, which for a long name is the bytes.  Everything past the
- * bound is deleted or not deleted exactly the same way and is only unnamed.  A
- * client that wants the rest asks again.
- */
 #define HTTPD_FAILS_MAX        8
 #define HTTPD_FAIL_MAX       768
 
-/* Locks.  Fixed, like everything else: eight is more than the clients hold at
-   once, Finder locks the file it is writing and nothing else, and a ninth asker
-   is told the server is busy rather than costing memory. */
 #define HTTPD_LOCK_DEF      180UL   /* seconds granted when none was asked  */
 #define HTTPD_LOCK_CAP     3600UL   /* the longest this server will hold one */
 #define HTTPD_HOST_MAX        80    /* Host:, which decides a Destination   */
@@ -276,12 +107,7 @@ static const char *const httpd_console_places[] = {
    it wants and LOCK names an owner, and nothing here needs more. */
 #define HTTPD_PROPS_MAX        8    /* properties reported on in one 207    */
 
-/*
- * What a PROPFIND body asked for, RFC 4918 9.1.  The body used to be read and
- * thrown away, so every request was answered as <allprop/>: a client asking for
- * two properties got all of them, one asking for <propname/> got values it had
- * said it did not want, and a property we do not have drew no 404 at all.
- */
+/* What a PROPFIND body asked for, RFC 4918 9.1. */
 #define HTTPD_PF_ALLPROP       0
 #define HTTPD_PF_PROPNAME      1
 #define HTTPD_PF_NAMED         2
@@ -289,17 +115,6 @@ static const char *const httpd_console_places[] = {
 #define HTTPD_NS_MAX           3    /* xmlns: bindings carried to the reply */
 #define HTTPD_NSURI_MAX       48
 #define HTTPD_TEXT_MAX        48    /* an element's character data          */
-
-/*
- * The lock owner is its own size because it is the one piece of client text
- * this server stores and hands back, and 47 characters did not hold the
- * <D:owner><D:href>mailto:...</D:href></D:owner> that clients send.  The
- * address alone is longer than that.
- *
- * The cost is (128 - 48) bytes on each of HTTPD_LOCK_MAX locks and
- * HTTPD_CONN_MAX connections: about 2.5 KB, taken once, on a machine that can
- * have a megabyte.
- */
 
 /* How long WaitSelect() can sleep with nothing happening.  It is what makes
    Ctrl-C and the connection timeout noticed, and nothing else depends on it. */
@@ -315,11 +130,8 @@ static const char *const httpd_console_places[] = {
 
 /* ------------------------------------------------------------- terminal --- */
 
-/*
- * The one address the terminal answers on.  Checked before the path is
- * resolved, so it never reaches the served drawer and cannot be escaped from
- * with an encoding trick: there is no path to escape.
- */
+/* The one address the terminal answers on.  Checked before the path is
+   resolved, so it never reaches the served drawer. */
 #define HTTPD_TERM_URL      "/shell"
 
 /* And the console's, on the same rule.  A second reserved name and not a
@@ -396,11 +208,8 @@ enum
     CONN_FB             /* the console: a screen grab per pass, and frames */
 };
 
-/*
- * Where a tree walk has got to.  DELETE and COPY of a drawer are the only
- * unbounded work this server does, so they are the only things that carry a
- * position between passes of the loop rather than running to completion.
- */
+/* Where a tree walk has got to.  DELETE and COPY of a drawer are the only work
+   here that carries a position between passes of the loop. */
 enum
 {
     WALK_NONE = 0,
@@ -557,17 +366,9 @@ struct HttpConn
     struct FileInfoBlock *fib;
     UBYTE   dir_stage;
 
-    /*
-     * The terminal.  Present on every connection because the WebSocket is a
-     * state a connection enters rather than a second kind of connection: the
-     * same slot, the same buffers and the same event loop carry it, and only
-     * the state says which of the two it is now.
-     *
-     * It costs HTTPD_CONN_MAX slots' worth whether the terminal was asked for
-     * or not, which is about 700 bytes on the default eight.  The rings and the
-     * Shell's Process are taken only when TERMINAL was given, and they are the
-     * part that has size to it.  See httpterm.c.
-     */
+    /* The terminal.  Present on every connection because the WebSocket is a
+       state a connection enters rather than a second kind of connection: the
+       same slot, the same buffers and the same event loop carry it. */
     UBYTE   is_term;                /* this request is for /shell          */
     UBYTE   is_console;             /* this request is for /console        */
     UBYTE   fb_owner;               /* this connection holds the console   */
@@ -583,26 +384,11 @@ struct HttpConn
     HttpTermSock ws;
 };
 
-/*
- * Taken from the heap and not declared as an array of HTTPD_CONN_MAX, because a
- * static one is the whole ceiling whether it is used or not: at 7.5 KB a slot
- * that is 120 KB of BSS in every copy of the command, an eighth of a 1 MB
- * machine reserved for connections nobody asked for.  Allocating it makes
- * CONNECTIONS mean something, `-m 2` is 15 KB, and takes the command's own BSS
- * down to the shared scratches and the locks.
- */
 static HttpConn *httpd_conn;
 
-/*
- * Static, not automatic, and for the reason src/tools/nc.c gives at its own
- * buffers: a Shell command gets whatever stack the Shell has, which is 4 KB on
- * a stock Kickstart 3.1.  Between them these are 4.7 KB, and the parse and the
- * answer would otherwise have most of that on the stack at once.
- *
- * Sharing them is safe because exactly one request is parsed and one answer
- * produced per pass of the loop.  The connections interleave between passes,
- * never inside one.
- */
+/* Shared scratches, static because a Shell command has 4 KB of stack.  Safe
+   only because exactly one request is parsed and one answer produced per pass:
+   the connections interleave between passes, never inside one. */
 static char httpd_scratch[HTTPD_CHUNK_MAX];
 static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 3];
 static char httpd_text[HTTP_URL_MAX * 6];
@@ -611,25 +397,14 @@ static char httpd_target[HTTP_URL_MAX];
 static char httpd_value[HTTP_URL_MAX];
 static char httpd_page[512];
 
-/*
- * A path to ask a question about, and the one a Resource-Tag in an If: names.
- * Shared for the reason the scratches above are: both are filled and finished
- * with inside one dispatch, and the connections interleave between passes of
- * the loop and never inside one.
- *
- * A path that outlives its handler must not be here.  A walk spans passes, so
- * its two paths are in the connection, and so is a COPY or MOVE's resolved
- * destination, which the walk reads back after the handler has returned.  It
- * was here once, and two overlapping moves then wrote over each other's.
- */
+/* Filled and finished with inside one dispatch.  A path that outlives its
+   handler must not be here: a walk spans passes, so its two paths and a COPY
+   or MOVE's resolved destination live in the connection instead. */
 static char     httpd_probe[HTTP_PATH_MAX];
 static HttpPath httpd_ifpath;
 
-/*
- * The lock table is in httplock.c.  Static rather than allocated with the
- * connections: it is 3 KB whatever CONNECTIONS says, because a lock outlives
- * the connection that took it, that is the whole point of one.
- */
+/* The lock table is in httplock.c.  Static rather than allocated with the
+   connections: a lock outlives the connection that took it. */
 static ULONG    httpd_token_seed;
 static ULONG    httpd_token_start;      /* the clock when the server started   */
 
@@ -652,14 +427,9 @@ static char   httpd_term_gz[HTTP_PATH_MAX];
 static char   httpd_console_page[HTTP_PATH_MAX];
 static char   httpd_console_gz[HTTP_PATH_MAX];
 
-/*
- * Which connection holds the console, or NULL.  A pointer and not a scan over
- * fb_owner, for the same reason httpd_iperf_owner is one: the 101 goes out a
- * pass before the session starts, and in between http_fb_available() is still
- * true.  Two upgrades arriving in one pass of the loop would then both be
- * answered 101, and the second would fail to start with the socket already
- * switched to a protocol it cannot speak.
- */
+/* Which connection holds the console, or NULL.  A pointer and not a scan over
+   fb_owner: the 101 goes out a pass before the session starts, and in between
+   http_fb_available() is still true. */
 static HttpConn *httpd_fb_owner;
 static LONG   httpd_gmt_west = 0;       /* minutes west of GMT, from locale */
 static struct Library *httpd_sb = NULL;
@@ -769,14 +539,8 @@ static VOID hs_copy(char *dst, ULONG dstlen, const char *src)
 
 /* ------------------------------------------------------------------ time --- */
 
-/*
- * AmigaOS keeps local time and HTTP dates are GMT, so the offset has to come
- * from somewhere.  locale.library has it and is the same source
- * src/tools/sntp.c uses.  It is V38, so a 2.04 machine has none and the dates
- * are then local time labelled GMT.  A client then shows a file an hour out,
- * which is what every Amiga HTTP server does and is better than refusing to
- * serve it.
- */
+/* AmigaOS keeps local time and HTTP dates are GMT.  locale.library is V38, so
+   a 2.04 machine has none and the dates are then local time labelled GMT. */
 static VOID httpd_read_gmt_offset(VOID)
 {
     struct Locale *locale;
@@ -825,10 +589,9 @@ static ULONG httpd_stamp_secs(const struct DateStamp *ds)
     return secs;
 }
 
-/* Seconds of local time since the Amiga epoch.  ds_Days is in the sum, so it
-   does not wrap at midnight.  It can still step backwards if the clock is set,
-   which the caller handles by treating any backwards step as the present moment
-   rather than as an expiry.  Progress deadlines and lock expiry both read it. */
+/* Seconds of local time since the Amiga epoch.  It can step backwards if the
+   clock is set, which the caller handles by treating any backwards step as the
+   present moment rather than as an expiry. */
 static ULONG httpd_now(VOID)
 {
     struct DateStamp ds;
@@ -839,9 +602,8 @@ static ULONG httpd_now(VOID)
            (ULONG)ds.ds_Tick / (ULONG)TICKS_PER_SECOND;
 }
 
-/* Seconds since 1970 to a calendar date.  Nothing in this tree did this: the
-   only conversions are DateStamp to seconds and seconds to a localised string
-   through DateToStr(), and an HTTP date must not be localised. */
+/* Seconds since 1970 to a calendar date.  An HTTP date must not be localised,
+   so DateToStr() cannot answer this. */
 static VOID httpd_civil(ULONG secs, LONG *y, LONG *mo, LONG *d,
                         LONG *h, LONG *mi, LONG *s, LONG *dow)
 {
@@ -963,28 +725,9 @@ static VOID httpd_iso8601(ULONG secs, char *out)
 
 /* ------------------------------------------------------------------- log --- */
 
-/*
- * `-v` started from a Shell on Workbench writes through the console handler,
- * and CON: needs the layer lock of the screen its window is on before it can
- * draw.  Intuition holds that lock for the whole of a menu or a window drag.
- * httpd serves every connection from one task, so a log line written while a
- * button is down waits inside DOS and nothing is answered: not WebDAV, not
- * /shell, not clients who never opened the console.
- *
- * A person holding a menu open lets go, so that is a pause.  A button held by
- * the console is a deadlock that needs the machine restarted: the only thing
- * that can release it is this task reading the release word off the console
- * socket, and this task is inside the Write.  Measured: a viewer holding the
- * right button over the menu bar for fifteen seconds left httpd answering
- * nothing at all, still nothing four minutes later.
- *
- * So the log is dropped for as long as the console holds a button, and how many
- * lines went is said once when it lets go.  Dropped rather than buffered: a
- * buffer would have to be drained by the same task and sized for a drag nobody
- * has bounded, and this is a diagnostic, not a record.  Only when the output is
- * interactive.  `-v >file` goes through a handler that wants nothing from
- * Intuition, cannot take the lock, and loses no line here.
- */
+/* CON: needs the layer lock of its screen, which the console holds for as long
+   as a mouse button is down, so a log line written then deadlocks this task
+   inside Write().  Dropped instead, and only when Output() is a console. */
 static BOOL   httpd_log_console;        /* Output() is a console handler   */
 static ULONG  httpd_log_dropped;
 
@@ -1025,9 +768,7 @@ static VOID httpd_log(const HttpConn *c, const char *fmt, LONG a, LONG b)
     (VOID)Flush(Output());
 }
 
-/* Every line the client sent, in the order it sent it.  This is what TRACE is
-   for: the client quirks are the expensive part of WebDAV, and what Finder and
-   the Windows redirector ask for has to be seen exactly. */
+/* Every line the client sent, in the order it sent it. */
 static VOID httpd_trace_head(const HttpConn *c, const UBYTE *head, ULONG len)
 {
     ULONG i = 0;
@@ -1064,8 +805,7 @@ static const char *httpd_reason(ULONG status)
     switch (status)
     {
         case 100: return "Continue";
-        /* The upgrade writes its own status line, so this is for the log,
-           which said 101 Unknown for every terminal that ever started. */
+        /* The upgrade writes its own status line, so this is for the log. */
         case 101: return "Switching Protocols";
         case 200: return "OK";
         case 201: return "Created";
@@ -1191,12 +931,9 @@ static VOID httpd_finish_head(HttpConn *c)
     c->state = CONN_SEND;
 }
 
-/*
- * A body whose length nobody knows until it has been produced, a directory read
- * entry by entry.  HTTP/1.1 gets chunked framing, which keeps the connection
- * usable afterwards.  HTTP/1.0 has no chunked encoding, so the end of the body
- * has to be the end of the connection.
- */
+/* A body whose length is not known until it has been produced.  HTTP/1.1 gets
+   chunked framing; HTTP/1.0 has none, so the end of the body has to be the end
+   of the connection. */
 static VOID httpd_begin_stream(HttpConn *c)
 {
     c->chunked = c->http11;
@@ -1266,10 +1003,8 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
     if (!ok)
         hs_copy(httpd_page, sizeof(httpd_page), "error\r\n");
 
-    /* An error ends the conversation unless it is one the client can recover
-       from mid-connection.  405 and 404 are recoverable.  A framing failure is
-       not, because what follows in the stream is no longer known to be a
-       request. */
+    /* A framing failure is not recoverable mid-connection: what follows in the
+       stream is no longer known to be a request. */
     if (status == 400 || status == 413 || status == 414 || status == 431 ||
         status == 500 || status == 408)
         c->keepalive = 0;
@@ -1285,12 +1020,8 @@ static VOID httpd_error(HttpConn *c, ULONG status, const char *detail)
 static VOID httpd_walk_release(HttpConn *c);
 static VOID httpd_iperf_release(HttpConn *c);
 
-/*
- * A PUT that never finished.  The temporary is deleted rather than left, so an
- * abandoned upload costs nothing and does not appear in a listing.  That is the
- * other half of writing to a temporary name: the client sees the old file or
- * the new one, and never a third thing.
- */
+/* A PUT that never finished.  The temporary is deleted rather than left, so the
+   client sees the old file or the new one and never a third thing. */
 static VOID httpd_put_abandon(HttpConn *c)
 {
     if (c->put != (BPTR)0)
@@ -1387,12 +1118,8 @@ static VOID httpd_reset(HttpConn *c)
     c->chunked   = 0;
     c->head_only = 0;
     c->has_range = 0;
-    /*
-     * RFC 4918 says a PROPFIND with no Depth means infinity, and infinity is
-     * refused here, so a client that omits it would get a 403 for asking the
-     * ordinary question.  Every client sends one, and the ones that do not mean
-     * the collection itself, so that is what an absent header gets.
-     */
+    /* RFC 4918 makes an absent Depth mean infinity, which is refused here, so
+       an absent header gets 1: the collection itself. */
     c->depth     = 1;
     c->body_left = 0;
     c->file_left = 0;
@@ -1455,18 +1182,14 @@ static VOID httpd_reset(HttpConn *c)
 
 /* ------------------------------------------------------------ the volume --- */
 
-/* One extra FileInfoBlock and one InfoData, taken once at startup for the same
-   reason the per-connection ones are: a Shell command has 4 KB of stack and
-   these are 260 and 224 bytes of it.  Both are only ever used inside a
-   handler, which runs to completion in one pass of the loop. */
+/* One extra FileInfoBlock and one InfoData, taken once at startup: a Shell
+   command has 4 KB of stack.  Both are only ever used inside a handler, which
+   runs to completion in one pass of the loop. */
 static struct FileInfoBlock *httpd_fib2;
 static struct InfoData      *httpd_info;
 
-/*
- * An AmigaDOS error as an HTTP status.  One table, because every write method
- * wants the same answer to the same failure, and it decides whether the client
- * reports a full disk or a refusal.
- */
+/* An AmigaDOS error as an HTTP status.  One table, so every write method gives
+   the same answer to the same failure. */
 static ULONG httpd_dos_status(LONG err)
 {
     switch (err)
@@ -1520,17 +1243,9 @@ static BOOL httpd_parent(const char *path, char *out, ULONG outlen)
     return TRUE;
 }
 
-/*
- * TRUE when something is at `path` under a different name to the one asked for.
- * The filesystem did not refuse a name it cannot hold, it truncated it, and the
- * request is about to land on somebody else's file.
- *
- * Measured: an OFS floppy took a 40-character name, cut it to 30 and answered
- * success.  So a name that cannot be represented has to be caught by asking
- * what is really there rather than by trusting the create.  Two long names that
- * differ only after the cut are the same file to the filesystem, and without
- * this a PUT of the second silently replaces the first.
- */
+/* TRUE when something is at `path` under a different name to the one asked
+   for: the filesystem truncated the name and answered success, so the request
+   would land on somebody else's file. */
 static BOOL httpd_name_differs(const struct FileInfoBlock *fib,
                                const char *name)
 {
@@ -1560,23 +1275,9 @@ static BOOL httpd_name_cut(const char *path, const char *name)
     return cut;
 }
 
-/*
- * TRUE when creating something called `name` at `path` would leave it under a
- * different name.  Asked by doing it, because there is no call that says how
- * long a name a filesystem will carry and the answer differs per filesystem.
- *
- * httpd_name_cut() above catches a collision, something already there under the
- * cut name.  It cannot catch the first one, where nothing is there and the
- * create succeeds shortened, because it starts by locking a name that does not
- * exist yet and reads that as nothing to collide with.
- *
- * PUT and MKCOL catch that afterwards and undo it, one file, one create.  COPY
- * and MOVE cannot: by the time the destination exists the walk has copied a
- * tree into it, and undoing that is a second walk.  So they ask first.
- *
- * Only ever called with nothing at `path`.  MODE_NEWFILE would truncate a file
- * that was.
- */
+/* TRUE when creating something called `name` at `path` would leave it under a
+   different name, asked by doing it.  Only ever called with nothing at `path`:
+   MODE_NEWFILE would truncate a file that was. */
 static BOOL httpd_name_survives(const char *path, const char *name)
 {
     BPTR probe;
@@ -1598,29 +1299,17 @@ static BOOL httpd_name_survives(const char *path, const char *name)
     return cut ? FALSE : TRUE;
 }
 
-/*
- * A directory entry that stands for something somewhere else.  ExNext() is the
- * only place one is visible: Lock() follows a link, so Examine() of the result
- * reports what it points at and never that it was reached through one.
- *
- * ST_LINKFILE is deliberately not here.  A hard link to a file is one file, the
- * machine's owner put it in the served drawer on purpose, and copying it copies
- * bytes rather than walking anywhere.
- */
+/* A directory entry that stands for something somewhere else.  ST_LINKFILE is
+   deliberately not here: a hard link to a file is one file, and copying it
+   copies bytes rather than walking anywhere. */
 static BOOL httpd_entry_is_link(LONG type)
 {
     return (type == ST_SOFTLINK || type == ST_LINKDIR) ? TRUE : FALSE;
 }
 
-/*
- * The entity tag for something the filesystem has already been asked about: its
- * size and the three fields of its DateStamp, which between them are everything
- * a FileInfoBlock knows that changes when the bytes do.  No I/O and no state,
- * the caller has the block in hand.
- *
- * Collections have none.  A listing's bytes change when a file inside it is
- * written, and the drawer's own date does not say so.
- */
+/* The entity tag: the size and the three DateStamp fields, which between them
+   are everything a FileInfoBlock knows that changes when the bytes do.
+   Collections have none. */
 static VOID httpd_etag(ULONG size, const struct DateStamp *ds,
                        char *out, ULONG outlen)
 {
@@ -1683,11 +1372,7 @@ static LONG httpd_kind(const char *path)
     return kind;
 }
 
-/*
- * Free bytes on the volume `path` is on, or 0 when it cannot be told.  A PUT
- * that will not fit is refused before the upload rather than after it, which
- * is the difference between a 507 and a floppy full of a temporary file.
- */
+/* Free bytes on the volume `path` is on, or 0 when it cannot be told. */
 static ULONG httpd_free_bytes(const char *path)
 {
     BPTR  lock;
@@ -1723,18 +1408,8 @@ static ULONG httpd_free_bytes(const char *path)
     return blocks * per;
 }
 
-/*
- * The walk's three primitives, http_path_join(), http_path_up() and
- * http_path_within(), are in src/tools/httppath.c for the reason the resolver
- * is: between them they decide which file a DELETE removes, and there they are
- * compiled for the host and driven by src/tools/test/test_httppath.c.
- */
-
-/*
- * The URL a walked path corresponds to, escaped for an href.  Every path a
- * walk produces was built by pushing onto the resolved one, so it begins with
- * the document root and the rest of it is the URL.
- */
+/* The URL a walked path corresponds to, escaped for an href.  Every path a walk
+   produces begins with the document root, and the rest of it is the URL. */
 static const char *httpd_url_of(const char *path)
 {
     ULONG rootlen = hs_len(httpd_root);
@@ -1762,37 +1437,9 @@ static const char *httpd_url_of(const char *path)
 
 /* --------------------------------------------------------------- walking --- */
 
-/*
- * DELETE and COPY of a drawer are the only unbounded work this server does, and
- * a walk that ran to completion inside one dispatch would stop every other
- * connection for as long as the tree took.  So a walk is a state machine that
- * advances by a slice per pass, and everything it is in the middle of lives in
- * the connection: the two paths, the depth, and one open lock per level.
- *
- * ExNext() carries its position in the FileInfoBlock, and there is one of those
- * per connection, so descending into a subdrawer and examining it overwrites
- * the position in the drawer above.  One block per level would be 260 bytes a
- * level, too much on a machine with a megabyte, and holding a lock per level
- * does not help, because it is the block and not the lock that remembers.
- *
- * So a level remembers by ordinal: how many subdrawers of it have already been
- * walked.  Coming back up re-reads the drawer from the start and takes the next
- * one, which costs a rescan per subdrawer, ExNext() and no more with the files
- * already gone, and needs two bytes a level.  Without it a walk descends once,
- * comes back to a scan that reports the drawer as empty, and stops: the first
- * version of this created every drawer of a tree and copied almost no files.
- *
- * No filesystem promises the scan survives the deletions it is making, so
- * whether the drawer is empty now is asked of DeleteFile() and not of the scan.
- * A drawer is finished when deleting it succeeds.  ERROR_DIRECTORY_NOT_EMPTY
- * with nothing having failed inside means the scan missed something, and sends
- * it round again.  With something having failed inside it means what it says,
- * and the walk goes up instead, which is what `walk_dirty` is for, one bit per
- * level.
- */
-
-/* The lock table is below, and a walk that removed something has to be able to
-   say so, the same reason httpd_walk_release() is declared above. */
+/* A walk advances by a slice per pass, so its position lives in the connection.
+   There is one FileInfoBlock per connection, so a level remembers by ordinal
+   and re-reads its drawer; walk_dirty is one bit per level. */
 
 /* Everything below this level failed with it, so no drawer above can go and
    none of them can be retried. */
@@ -1801,12 +1448,8 @@ static VOID httpd_walk_mark(HttpConn *c)
     c->walk_dirty |= (1UL << (ULONG)(c->walk_depth + 1)) - 1UL;
 }
 
-/*
- * One <D:response> for something that would not go.  Bounded twice over,
- * HTTPD_FAILS_MAX of them and HTTPD_FAIL_MAX bytes of them, because a drawer
- * of a thousand delete-protected files must not become a thousand-element
- * answer on a machine with a megabyte.
- */
+/* One <D:response> for something that would not go.  Bounded twice over,
+   HTTPD_FAILS_MAX of them and HTTPD_FAIL_MAX bytes of them. */
 static VOID httpd_walk_failed(HttpConn *c, const char *path, ULONG status)
 {
     ULONG used = c->fails_len;
@@ -1900,14 +1543,9 @@ static VOID httpd_walk_answer(HttpConn *c, ULONG plain)
     httpd_body_text(c, "text/xml; charset=utf-8", httpd_scratch);
 }
 
-/*
- * The copy half of a COPY or a MOVE, once the destination is out of the way.
- * A MOVE tries the rename first: within a volume nothing is copied, which is
- * what makes moving a 50 MB drawer instant.  Between volumes it cannot be, and
- * AmigaDOS says which it was rather than leaving it to be guessed from the
- * device names.  An assign makes that guess wrong, and guessing wrong means
- * either copying a whole tree for a rename or renaming across a boundary.
- */
+/* The copy half of a COPY or a MOVE, once the destination is out of the way.  A
+   MOVE tries Rename() first and falls back on ERROR_RENAME_ACROSS_DEVICES:
+   guessing from the device names is wrong across an assign. */
 static VOID httpd_walk_copy_stage(HttpConn *c)
 {
     LONG kind;
@@ -2004,11 +1642,9 @@ static VOID httpd_walk_end(HttpConn *c)
             break;
 
         case WALK_FOR_COPY:
-            /* A per-entry failure is nonfatal to an ordinary COPY, which can
-               report a 207 for what did and did not land.  It is fatal to the
-               second half of a MOVE: deleting the source after even one link,
-               deep drawer, or long path was skipped turns a partial copy into
-               data loss. */
+            /* Nonfatal to an ordinary COPY, which can report a 207.
+               Fatal to the second half of a MOVE: deleting the source
+               after even one skipped entry turns this into data loss. */
             if (c->walk_status != 0 || c->fails != 0)
             {
                 httpd_walk_answer(c, 500);
@@ -2039,10 +1675,8 @@ static VOID httpd_walk_end(HttpConn *c)
         httpd_log_status(c);
 }
 
-/*
- * One slice.  Called once per pass of the event loop for every connection that
- * is walking, and it does a bounded amount of AmigaDOS and returns.
- */
+/* One slice.  Called once per pass of the event loop for every connection that
+   is walking: a bounded amount of AmigaDOS, then return. */
 static VOID httpd_walk_slice(HttpConn *c)
 {
     ULONG n;
@@ -2112,11 +1746,9 @@ static VOID httpd_walk_slice(HttpConn *c)
                                        : (const char *)c->fib->fib_FileName;
                 BPTR made;
 
-                /* The root was checked before the walk, but every child can
-                   cross onto a filesystem with a shorter name limit too.  A
-                   successful CreateDir() there can mean a different, cut
-                   name, and the rest of the walk would then fill it and
-                   answer success. */
+                /* Every child can cross onto a filesystem with a shorter
+                   name limit, where a successful CreateDir() can mean a
+                   different, cut name. */
                 if (!httpd_name_survives(c->walk_dst, name))
                 {
                     c->walk_status = 400;
@@ -2193,16 +1825,9 @@ static VOID httpd_walk_slice(HttpConn *c)
                     break;
                 }
 
-                /*
-                 * A link is not walked through, whatever it points at.  This
-                 * is the only place one can be recognised.  A hard-linked
-                 * drawer inside the served tree used to be descended into, so
-                 * a DELETE of the tree deleted what was on the far side of it,
-                 * outside the document root.
-                 *
-                 * The entry itself still goes on a DELETE.  Removing a link
-                 * removes the link.
-                 */
+                /* A link is not walked through, whatever it points at, and
+                   this is the only place one can be recognised.  The entry
+                   itself still goes on a DELETE. */
                 if (httpd_entry_is_link((LONG)c->fib->fib_DirEntryType))
                 {
                     if (!http_path_join(c->walk_src, sizeof(c->walk_src),
@@ -2299,11 +1924,9 @@ static VOID httpd_walk_slice(HttpConn *c)
 
                     dst_kind = httpd_kind(c->walk_dst);
 
-                    /* A drawer is read again once per subdrawer, so a file
-                       that is already at the far end was copied on an earlier
-                       pass over this level.  It still has to be there under
-                       this exact name: a cut-name collision is somebody
-                       else's file, not a completed copy. */
+                    /* A drawer is read again once per subdrawer, so a
+                       file already at the far end was copied on an earlier
+                       pass.  It must be there under this exact name. */
                     if (dst_kind >= 0)
                     {
                         if (httpd_name_cut(
@@ -2361,10 +1984,9 @@ static VOID httpd_walk_slice(HttpConn *c)
                 if (err == ERROR_DIRECTORY_NOT_EMPTY &&
                     (c->walk_dirty & (1UL << (ULONG)c->walk_depth)) == 0UL)
                 {
-                    /* The scan said empty and the filesystem says otherwise,
-                       so the scan is what is wrong, ExNext() is not promised
-                       across the deletions it just made.  Nothing here failed,
-                       so going round again terminates. */
+                    /* ExNext() is not promised across the deletions it
+                       just made, so the scan is what is wrong.  Nothing
+                       here failed, so going round again terminates. */
                     c->walk_skip[c->walk_depth] = 0;
                     c->walk = WALK_ENTER;
                     break;
@@ -2470,8 +2092,7 @@ static VOID httpd_walk_slice(HttpConn *c)
 
                 c->put_temp[0] = '\0';
 
-                /* The date and the protection bits follow the file: a copy
-                   that loses them is a copy every client shows as changed.
+                /* The date and the protection bits follow the file.
                    httpd_fib2 and not c->fib, which is holding the place in
                    the drawer this file came out of. */
                 lock = Lock((CONST_STRPTR)c->walk_src, ACCESS_READ);
@@ -2589,11 +2210,8 @@ static ULONG httpd_digits(const char **p, ULONG count)
     return value;
 }
 
-/*
- * "Tue, 05 Aug 2025 12:00:00 GMT" back to a DateStamp in local time, which
- * is what SetFileDate() takes, and the reason httpd_read_gmt_offset() is read
- * at startup rather than only on the way out.
- */
+/* "Tue, 05 Aug 2025 12:00:00 GMT" back to a DateStamp in local time, which is
+   what SetFileDate() takes. */
 static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
 {
     LONG  day;
@@ -2676,20 +2294,9 @@ static BOOL httpd_parse_rfc1123(const char *text, struct DateStamp *ds)
 
 /* --------------------------------------------------------------- locking --- */
 
-/*
- * Class 2 is not an extra.  Finder asks for a lock before it writes and reads a
- * `DAV: 1` answer as a share it cannot write to, so it mounts read-only however
- * many write methods the server answers.  The lock table is what makes macOS
- * write at all, and stopping two clients writing one file is the second thing
- * it does rather than the first.
- *
- * Exclusive write locks only.  Nothing that mounts a drive asks for a shared
- * one, and granting an exclusive lock to a client that did is the safe half.
- *
- * The table and the rules are in httplock.c so they can be asked questions
- * without a socket.  See src/tools/test/test_httplock.c.  What stays here is
- * the answer a refusal turns into, which needs the connection.
- */
+/* Class 2 is not an extra: Finder reads a `DAV: 1` answer as a share it cannot
+   write to, so the lock table is what makes macOS write at all.  Exclusive
+   write locks only.  The table and the rules are in httplock.c. */
 
 /* The 423 that tells a client to take a lock rather than to keep retrying. */
 static VOID httpd_locked(HttpConn *c)
@@ -2721,12 +2328,9 @@ static BOOL httpd_lock_allows(HttpConn *c, const char *path)
     return FALSE;
 }
 
-/*
- * The same question asked downwards as well.  DELETE and MOVE take everything
- * below the address with them, so a lock on something inside stops them,
- * RFC 4918 9.6.1, where a write to the address itself does not care what is
- * locked underneath it.
- */
+/* The same question asked downwards as well.  DELETE and MOVE take everything
+   below the address with them, so a lock on something inside stops them,
+   RFC 4918 9.6.1. */
 static BOOL httpd_lock_allows_tree(HttpConn *c, const char *path)
 {
     if (httplock_allows_tree(c->iftoken[0], c->iftoken[1], path, httpd_now()))
@@ -2748,22 +2352,9 @@ static BOOL httpd_lock_allows_parent(HttpConn *c, const char *path)
     return FALSE;
 }
 
-/*
- * "opaquelocktoken:" and 32 hex digits.
- *
- * There is no authentication in this server, so anybody who can reach it can
- * already write to anything that is not locked.  A lock is coordination between
- * clients that are cooperating, not a boundary, and a guessed token buys an
- * attacker nothing they did not already have.  RFC 4918 6.5 asks for
- * unguessable anyway, and on a machine with no RTC, no entropy pool and no
- * randomness in its timings there is nothing here to make one out of.
- *
- * So two properties are aimed at instead.  A token is never issued twice in a
- * run, which the counter guarantees and eight hex digits out of one LCG word
- * did not, and a token from a previous run does not name a lock in this one.
- * Eight digits was also short enough to collide by accident at 2^-32 per pair,
- * which on a table of 16 is not worth carrying for 24 bytes.
- */
+/* "opaquelocktoken:" and 32 hex digits.  There is no entropy source on this
+   machine, so two properties are aimed at instead: a token is never issued
+   twice in a run, and one from a previous run names no lock in this one. */
 static VOID httpd_make_token(char *out, ULONG outlen)
 {
     static const char hex[] = "0123456789abcdef";
@@ -2807,11 +2398,8 @@ static VOID httpd_make_token(char *out, ULONG outlen)
     }
 }
 
-/*
- * One <D:activelock>: what LOCK answers with and what PROPFIND reports about a
- * resource somebody is holding.  Appended rather than returned, so the caller
- * decides what element it goes inside.
- */
+/* One <D:activelock>.  Appended rather than returned, so the caller decides
+   what element it goes inside. */
 static BOOL httpd_activelock(const HttpLock *l, char *out, ULONG outlen,
                              ULONG *used)
 {
@@ -2848,17 +2436,9 @@ static BOOL httpd_activelock(const HttpLock *l, char *out, ULONG outlen,
 
 /* -------------------------------------------------------------- skimming --- */
 
-/*
- * What the write methods need out of a request body, without an XML parser.
- * PROPPATCH names the properties it wants and LOCK names an owner: both are
- * element names and the text between them, both are bounded, and a tree is
- * the right answer on a machine with room for one.
- *
- * The namespace declarations are carried through as they arrived rather than
- * resolved, because the 207 has to name the properties back and a prefix
- * rebound to the wrong URI is a property the client does not recognise as
- * the one it asked about.
- */
+/* What the write methods need out of a request body, without an XML parser:
+   element names and the text between them, both bounded.  The namespace
+   declarations are carried through as they arrived rather than resolved. */
 
 static const char *httpd_local(const char *qname)
 {
@@ -2877,8 +2457,7 @@ static VOID httpd_note_property(HttpConn *c)
 {
     if (c->props >= (UBYTE)HTTPD_PROPS_MAX)
     {
-        /* Without props_cut the answer reported on the ones that fitted and
-           the client read that as an answer about all of them. */
+        /* An answer about the ones that fitted reads as one about all. */
         c->props_cut = 1;
         return;
     }
@@ -2989,11 +2568,8 @@ static VOID httpd_xml_tag(HttpConn *c, BOOL closing, BOOL selfclose)
     }
 }
 
-/*
- * Feed the body through.  Called from the sinks, so it must survive being
- * handed one byte at a time: everything it is in the middle of is in the
- * connection and not on the stack.
- */
+/* Feed the body through.  Must survive being handed one byte at a time:
+   everything it is in the middle of is in the connection, not on the stack. */
 static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
 {
     LONG i;
@@ -3016,17 +2592,9 @@ static VOID httpd_xml_feed(HttpConn *c, const UBYTE *data, LONG len)
                 {
                     ULONG n = hs_len(c->owner);
 
-                    /*
-                     * Markup inside <owner> contributes nothing and its text
-                     * does, which is what an <owner> holding an <href> needs:
-                     * the address, and not the element around it.
-                     *
-                     * Everything from 0x20 up but DEL, so a UTF-8 owner keeps
-                     * its bytes.  This used to stop at 0x7f, which turned
-                     * every non-English name into the ASCII that was left of
-                     * it, Björn became Bjrn, and the body is declared UTF-8 on
-                     * the way back out.
-                     */
+                    /* Markup inside <owner> contributes nothing and its
+                       text does.  Everything from 0x20 up but DEL, so a
+                       UTF-8 owner keeps its bytes. */
                     if (n + 1UL < sizeof(c->owner) && ch >= 0x20 && ch != 0x7f)
                     {
                         c->owner[n]     = (char)ch;
@@ -3141,12 +2709,9 @@ static VOID httpd_sink_xml(HttpConn *c, const UBYTE *data, LONG len)
 
 /* ------------------------------------------------------------- the answer --- */
 
-/*
- * A collection's href always ends in a slash.  Finder and the Windows
- * redirector both treat the trailing slash as part of the identity of a
- * collection, and a multistatus whose self-href disagrees with the URL that was
- * asked about is what makes them report an unexpected response.
- */
+/* A collection's href always ends in a slash: Finder and the Windows
+   redirector both treat the trailing slash as part of the identity of a
+   collection. */
 static const char *httpd_href(const HttpPath *p, const char *child, BOOL dir)
 {
     ULONG used = 0;
@@ -3178,22 +2743,9 @@ static const char *httpd_href(const HttpPath *p, const char *child, BOOL dir)
     return httpd_escape;
 }
 
-/*
- * One <D:response> for a file or a collection, into the shared scratch.
- *
- * `path` is the AmigaOS path, which is here only so the lock can be looked up:
- * a client that has taken a lock reads lockdiscovery to check it is still held,
- * and one that has not reads supportedlock to decide whether to ask.
- */
-/*
- * Whether this property belongs in the 207, and a note that it was asked for.
- *
- * <allprop/> and an empty body take everything.  <propname/> takes everything
- * too, because the names are the answer, and the emitter leaves the values out.
- * A named list takes what it named, and marking each one here is what lets the
- * caller put the rest in a 404 propstat, which RFC 4918 9.1.1 requires and
- * which a client uses to learn what this server does not keep.
- */
+/* Whether this property belongs in the 207, and a note that it was asked for.
+   Marking each one is what lets the caller put the rest in a 404 propstat,
+   which RFC 4918 9.1.1 requires. */
 static BOOL httpd_pf_want(HttpConn *c, const char *name)
 {
     UBYTE i;
@@ -3333,12 +2885,9 @@ static ULONG httpd_propfind_entry(HttpConn *c, const char *href, const char *nam
                          "</D:prop><D:status>HTTP/1.1 200 OK</D:status>"
                          "</D:propstat>");
 
-    /*
-     * RFC 4918 9.1.1: a named property this server does not keep is reported in
-     * its own propstat with 404, not left out.  Leaving it out tells the client
-     * the property is absent from the resource.  Saying 404 tells it the
-     * property is absent from the server.
-     */
+    /* RFC 4918 9.1.1: a named property this server does not keep is reported in
+       its own propstat with 404, not left out.  Leaving it out would say the
+       property is absent from the resource rather than from the server. */
     if (c->pf_mode == (UBYTE)HTTPD_PF_NAMED)
     {
         UBYTE i;
@@ -3399,12 +2948,8 @@ static ULONG httpd_index_entry(const char *href, const char *name,
     return ok ? used : 0UL;
 }
 
-/*
- * Frame whatever is in the scratch as one chunk of a chunked response.  The
- * generated answers have no length anybody can know in advance, a directory is
- * read entry by entry, and chunking is what lets them be streamed without
- * either buffering the whole thing or closing the connection to mark the end.
- */
+/* Frame whatever is in the scratch as one chunk of a chunked response.  The
+   generated answers have no length anybody can know in advance. */
 static VOID httpd_emit_chunk(HttpConn *c, ULONG len)
 {
     static const char hex[] = "0123456789abcdef";
@@ -3416,12 +2961,8 @@ static VOID httpd_emit_chunk(HttpConn *c, ULONG len)
     if (len == 0UL)
         return;
 
-    /*
-     * An HTTP/1.0 client has no chunked encoding to decode, so for one the body
-     * is sent as it comes and the end of it is the end of the connection.
-     * Emitting chunk framing at a 1.0 client puts the hex counts in the file it
-     * saves.
-     */
+    /* An HTTP/1.0 client has no chunked encoding to decode, so the body is sent
+       as it comes and the end of it is the end of the connection. */
     if (!c->chunked)
     {
         httpd_out(c, httpd_scratch);
@@ -3450,14 +2991,9 @@ static VOID httpd_emit_chunk(HttpConn *c, ULONG len)
     httpd_out(c, "\r\n");
 }
 
-/*
- * The next piece of a streamed answer.  TRUE while there is more to come.
- *
- * Called only when out[] has been fully sent, so it can fill it from scratch
- * each time.  The connection carries the position it left off at, which for a
- * directory is an open lock and a FileInfoBlock and for a file is an open
- * handle and a remaining count.
- */
+/* The next piece of a streamed answer.  TRUE while there is more to come.
+   Called only when out[] has been fully sent, so it can fill it from scratch
+   each time; the connection carries the position it left off at. */
 static BOOL httpd_produce(HttpConn *c)
 {
     c->out_len  = 0;
@@ -3571,11 +3107,9 @@ static BOOL httpd_produce(HttpConn *c)
                                 continue;
                             }
 
-                            /* The status and the chunked response have already
-                               started, so no second HTTP error can be sent.
-                               Omitting the terminating chunk makes the client
-                               reject the incomplete listing instead of
-                               believing an I/O error was end-of-directory. */
+                            /* The status has already gone, so no
+                               second HTTP error can be sent.  Omitting the
+                               terminating chunk makes the client reject it. */
                             c->keepalive = 0;
                             c->producer  = PROD_NONE;
                             return FALSE;
@@ -3607,60 +3141,24 @@ static BOOL httpd_produce(HttpConn *c)
                                       name, is_dir,
                                       (ULONG)c->fib->fib_Size);
 
-                        /*
-                         * One entry that does not fit the scratch is skipped
-                         * and the listing carries on.
-                         *
-                         * Whether it fits is a property of the NAME, and any
-                         * client can choose one: an href is percent-escaped,
-                         * three bytes per byte, and a displayname is XML
-                         * escaped, five for '&', so about a hundred '&' in a
-                         * file name is already past HTTPD_CHUNK_MAX.  There
-                         * is no authentication, so failing the whole answer
-                         * here lets anyone who can reach the port PUT one
-                         * file that makes the drawer holding it permanently
-                         * unlistable, for every client, over PROPFIND and
-                         * over plain GET alike.  One row missing from a
-                         * listing is a smaller lie than a drawer that cannot
-                         * be read at all, and it is the row nobody can name
-                         * anyway.
-                         *
-                         * A skipped entry still has to consume one producer
-                         * pass.  This server services every connection from
-                         * one task; looping straight to ExNext() would let a
-                         * drawer full of oversized names monopolise that task
-                         * until the entire drawer had been scanned.  A small
-                         * HTML/XML comment is therefore emitted for the
-                         * omitted member.  It is invisible to both kinds of
-                         * client, but returning its chunk gives the event loop
-                         * the same scheduling point a normal row provides.
-                         *
-                         * It is logged because a WebDAV client treats an
-                         * absent member as a deleted one, so the operator has
-                         * to be able to see that the server dropped it.
-                         */
+                        /* An entry that does not fit is skipped and the
+                           listing carries on, but must still consume one
+                           producer pass or a drawer of them stops the task. */
                         if (len == 0UL)
                         {
                             ULONG used = 0;
 
-                            /* Escaped rather than raw.  This is the one name
-                               in the drawer that somebody chose to be
-                               awkward, AmigaOS allows 0x9B in a file name,
-                               and 0x9B is the console's CSI: logging it as it
-                               stands hands the operator's Shell to whoever
-                               created the file.  Percent-encoding leaves
-                               nothing outside the unreserved set.
-                               httpd_escape held the href, which this entry no
-                               longer needs, and the next one rewrites. */
+                            /* Escaped rather than raw: AmigaOS
+                               allows 0x9B in a file name, and 0x9B is
+                               the console's CSI. */
                             (VOID)http_url_escape(name, httpd_escape,
                                                   sizeof(httpd_escape));
                             httpd_log(c, "listing entry does not fit and was "
                                          "skipped: %s", (LONG)httpd_escape, 0);
 
-                            /* Valid between elements in both the HTML index
-                               and the XML multistatus.  The text contains no
-                               attacker-controlled bytes, including the rule
-                               that XML comments may not contain "--". */
+                            /* Valid between elements in both the
+                               HTML index and the XML multistatus,
+                               and contains no "--". */
                             (VOID)hs_append(httpd_scratch,
                                             sizeof(httpd_scratch), &used,
                                             "<!-- listing entry omitted: "
@@ -3694,20 +3192,9 @@ static BOOL httpd_produce(HttpConn *c)
                         return (c->out_len > 0UL) ? TRUE : FALSE;
                 }
 
-                /*
-                 * Only DIR_SELF and DIR_TRAILER reach here with nothing to
-                 * say, and neither is a row that can be left out.  DIR_SELF
-                 * is the resource the request named, so an answer without it
-                 * is not an answer to this request; DIR_TRAILER closes the
-                 * document, and a body that cannot be closed has no truthful
-                 * end.  Omitting the final chunk makes the client reject
-                 * what it has rather than believe a truncated listing.
-                 *
-                 * The damage is confined to the resource named: a drawer
-                 * whose own name cannot be formatted cannot be listed, while
-                 * the drawer above it still lists it as a skipped child.
-                 * That is what keeps one pathological name from spreading.
-                 */
+                /* Only DIR_SELF and DIR_TRAILER reach here with nothing to
+                   say, and neither can be left out.  Omitting the final
+                   chunk makes the client reject what it has. */
                 if (len == 0UL)
                 {
                     c->keepalive = 0;
@@ -3733,14 +3220,9 @@ static VOID httpd_do_options(HttpConn *c)
 {
     httpd_begin(c, 200);
 
-    /*
-     * DAV: 1,2.  Class 2 is locking, and it is here because of macOS: Finder
-     * mounts a class 1 share read-only whatever else the server answers, since
-     * it asks for a lock before it writes and reads the absence of the class as
-     * a share it cannot write to.  The 2 is what decides whether the drive is
-     * writable rather than a claim about how much of RFC 4918 is implemented,
-     * so LOCK has to exist for it to be true.
-     */
+    /* DAV: 1,2.  Finder mounts a class 1 share read-only whatever else the
+       server answers, so the 2 is what decides whether the drive is writable
+       and LOCK has to exist for it to be true. */
     httpd_header(c, "DAV", "1,2");
     httpd_allow_header(c);
     /* The Windows redirector looks for this before it will treat an http://
@@ -3752,13 +3234,9 @@ static VOID httpd_do_options(HttpConn *c)
     c->producer = PROD_NONE;
 }
 
-/*
- * The document root itself, or a file or drawer under it.  Locks it, and
- * leaves the lock open when the answer is going to be a listing, because the
- * listing is produced across later passes of the loop.
- *
- * FALSE when it has already answered with the reason.
- */
+/* The document root itself, or a file or drawer under it.  Leaves the lock open
+   when the answer is going to be a listing, because the listing is produced
+   across later passes.  FALSE when it has already answered with the reason. */
 static BOOL httpd_examine(HttpConn *c, BOOL *is_dir, BOOL keep_lock)
 {
     BPTR lock;
@@ -3808,12 +3286,8 @@ static VOID httpd_do_propfind(HttpConn *c)
 {
     BOOL is_dir = FALSE;
 
-    /*
-     * Depth: infinity is refused, as RFC 4918 8.1 allows.  A recursive PROPFIND
-     * over a hard drive is an unbounded amount of work on a 14 MHz machine and
-     * the client cannot cancel it.  Every real server refuses it and every
-     * client copes.
-     */
+    /* Depth: infinity is refused, as RFC 4918 8.1 allows: a recursive PROPFIND
+       over a hard drive is unbounded work the client cannot cancel. */
     if (c->depth < 0)
     {
         httpd_begin(c, 403);
@@ -3870,11 +3344,9 @@ static VOID httpd_do_get(HttpConn *c)
 
     if (is_dir)
     {
-        /*
-         * A collection without the trailing slash is redirected rather than
-         * served, because every relative link in the listing would otherwise
-         * be resolved against the parent.
-         */
+        /* A collection without the trailing slash is redirected rather than
+           served, or every relative link in the listing would be resolved
+           against the parent. */
         if (!c->path.trailing_slash && c->path.segments > 0)
         {
             const char *href = httpd_href(&c->path, NULL, TRUE);
@@ -4012,34 +3484,11 @@ static VOID httpd_do_get(HttpConn *c)
 
 /* -------------------------------------------------------------- terminal --- */
 
-/*
- * The page, served through the ordinary file producer: it is a file on disk
- * like any other and the only thing special about it is which address it
- * answers on.  It is measured with Seek() rather than Examine(), because the
- * path comes from the command line and not from a resolved HttpPath, so there
- * is no FileInfoBlock already filled in for it.
- *
- * The page is 400 KB, and an A1200 spends over three seconds putting it on the
- * wire.  Nothing here compresses it: a deflate on a 68020 would spend the time
- * it saved, on every request.  What is served instead is a file compressed on
- * the machine that built it, shell.html.gz beside shell.html, chosen by the
- * request saying `Accept-Encoding: gzip`.
- *
- * The sibling is looked for by spelling, and looked for here rather than once
- * at startup, so there is no remembered answer to be wrong.  -T pointing at
- * somebody's own page finds nothing beside it and is served exactly as it was,
- * and a compressed copy that is deleted, renamed or unreadable is the same case
- * and not a 503.
- *
- * Cache-Control stays no-cache, because the page is the client half of this
- * server's own protocol and a stale copy in a browser is a version mismatch
- * nobody can see.  no-cache asks the browser to revalidate rather than to keep
- * nothing, so with an ETag the browser still asks, and what it gets back when
- * nothing has changed is 304 and no body.
- */
+/* The page, served through the ordinary file producer.  A `.gz` sibling is
+   looked for by spelling per request rather than remembered at startup, so a
+   page with none is served exactly as it is.  Cache-Control stays no-cache. */
 /* One page server, two pages.  `what` is the word that goes in the two
-   diagnostics, which is the only thing that differs between the terminal's page
-   and the console's. */
+   diagnostics. */
 static VOID httpd_app_page_get(HttpConn *c, const char *plain, const char *gz,
                                const char *what)
 {
@@ -4143,31 +3592,9 @@ static VOID httpd_console_page_get(HttpConn *c)
                        "the console's page will not open");
 }
 
-/*
- * Take the terminal off whoever has it.  TRUE when somebody was let go of.
- *
- * There is one Shell, and one session at a time was a rule with no exit.  A
- * browser that goes away cleanly sends a close frame, or at worst a FIN, and
- * httpd_close() ends the Shell.  A browser that goes away because the network
- * did sends neither, and nothing downstream of a silent socket ever concludes
- * anything.  Measured on a live machine: every later visitor was told somebody
- * else had the terminal, indefinitely, and it took a restart.
- *
- * A session that has been pinged and did not answer is not somebody, so taking
- * it needs no permission and costs the next visitor one retry.  A session that
- * is answering is a person, and two tabs both reconnecting would evict each
- * other for ever, so a live one is taken only when the request asked,
- * `?take=1`, which the refused page offers as a button.  Refusing outright
- * protects nothing: this server has no credential of any kind, and whoever can
- * reach the port already has the machine.
- *
- * Nothing here starts a Shell.  Ending the old session is not instant, the
- * Shell has to notice its end of file, and inside a command that takes a Ctrl-C
- * and a moment, so the answer is still 503, with a Retry-After of one second
- * instead of five.  The alternative was blocking the whole server in a wait
- * loop to answer 101 on the first try, and httpd is one process, so every other
- * connection would stop with it.
- */
+/* Take the terminal off whoever has it.  TRUE when somebody was let go of.  A
+   session that has stopped answering is taken with no permission; a live one
+   only when the request asked, `?take=1`.  Nothing here starts a Shell. */
 static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
 {
     ULONG i;
@@ -4193,21 +3620,13 @@ static BOOL httpd_term_reclaim(HttpConn *asking, ULONG now)
         return TRUE;
     }
 
-    /*
-     * Nobody holds it and it is still not available: the last Shell is on its
-     * way out and has not finished.  Not a takeover, so the caller asks the
-     * client to come back rather than saying the terminal is released, because
-     * the difference is whether one more second will help.
-     */
+    /* Nobody holds it and it is still not available: the last Shell is on its
+       way out.  Not a takeover, so the caller asks the client to come back. */
     return FALSE;
 }
 
-/*
- * The upgrade.  Everything RFC 6455 4.2.1 requires of the request is checked
- * here and each failure has its own answer, because one 400 for all of them
- * tells a client nothing it can act on, and this is the one exchange in the
- * protocol a person debugs by hand.
- */
+/* The upgrade.  Everything RFC 6455 4.2.1 requires of the request is checked
+   here, and each failure has its own answer. */
 static VOID httpd_do_terminal(HttpConn *c)
 {
     char accept[HTTPD_WS_ACC_MAX];
@@ -4230,10 +3649,8 @@ static VOID httpd_do_terminal(HttpConn *c)
         return;
     }
 
-    /* RFC 6455 4.1: the Upgrade header alone is not the request.  A client
-       that sends one without the Connection token is talking to a proxy that
-       will not forward it, so answering 101 would leave both ends holding a
-       connection the middle does not know has changed protocol. */
+    /* RFC 6455 4.1: the Upgrade header alone is not the request.  Without the
+       Connection token a proxy in the middle will not forward it. */
     if (!c->ws_connection)
     {
         httpd_error(c, 400, "an upgrade needs Connection: Upgrade too");
@@ -4251,10 +3668,8 @@ static VOID httpd_do_terminal(HttpConn *c)
         return;
     }
 
-    /* The key is a nonce and not a credential: what it proves is that the
-       answer was computed and not replayed from a cache.  A missing or
-       malformed one is refused before anything is started, so nothing is
-       spawned on the strength of a request this server could not read. */
+    /* The key is a nonce and not a credential: it proves the answer was
+       computed and not replayed.  Refused before anything is started. */
     if (!http_ws_accept(c->ws_key, accept, sizeof(accept)))
     {
         httpd_error(c, 400, "that is not a Sec-WebSocket-Key");
@@ -4263,16 +3678,9 @@ static VOID httpd_do_terminal(HttpConn *c)
 
     if (!http_term_available())
     {
-        /*
-         * One Shell at a time.  See httpterm.h.  503 rather than 409 because it
-         * is a resource this server has one of, and a client that waits and
-         * asks again is doing the right thing.
-         *
-         * Until the reclaim above there was no way out of the refusal.  A tab
-         * that goes away when the network does sends no FIN and no close frame,
-         * so the session it held stayed held, every later visitor was refused
-         * for ever, and the machine had to be restarted to get a Shell back.
-         */
+        /* One Shell at a time.  See httpterm.h.  503 rather than 409: it is a
+           resource this server has one of, and a client that waits and asks
+           again is doing the right thing. */
         BOOL took = httpd_term_reclaim(c, httpd_now());
 
         httpd_begin(c, 503);
@@ -4289,13 +3697,8 @@ static VOID httpd_do_terminal(HttpConn *c)
         return;
     }
 
-    /*
-     * The 101, by hand.  httpd_begin() is not used: it carries Date and Server,
-     * which are harmless, and httpd_finish_head() then decides about
-     * Content-Length and Connection, and both of those are wrong on a 101.
-     * There is no body whose length can be stated, and the connection is not
-     * being kept alive, it is becoming something else.
-     */
+    /* The 101, by hand.  httpd_begin() and httpd_finish_head() would decide
+       about Content-Length and Connection, and both are wrong on a 101. */
     c->out_len  = 0;
     c->out_sent = 0;
     c->overflow = 0;
@@ -4319,25 +3722,16 @@ static VOID httpd_do_terminal(HttpConn *c)
     c->keepalive = 0;               /* there is no next request on this one */
     c->producer  = PROD_NONE;
 
-    /*
-     * Anything the client pipelined behind the head is the first frames.  It
-     * is already in c->in and must not be thrown away: a browser that opens
-     * the socket and sends a frame in the same segment is ordinary, and
-     * losing it loses the first thing typed.
-     */
+    /* Anything the client pipelined behind the head is the first frames.  It
+       is already in c->in and must not be thrown away. */
     c->state = CONN_SEND;
 }
 
 /* --------------------------------------------------------------- console --- */
 
-/*
- * Take the console off whoever has it.  The terminal's rule, for the terminal's
- * reason: a tab that goes away because the network did sends neither a close
- * frame nor a FIN, and nothing downstream of a silent socket ever concludes
- * anything.  A session that has been pinged and did not answer is not somebody
- * and is taken with no permission.  A live one is taken only when the request
- * asked for it with `?take=1`.
- */
+/* Take the console off whoever has it, on the terminal's rule: a session that
+   has stopped answering is taken with no permission, a live one only when the
+   request asked for it with `?take=1`. */
 static BOOL httpd_console_reclaim(HttpConn *asking, ULONG now)
 {
     ULONG i;
@@ -4365,13 +3759,9 @@ static BOOL httpd_console_reclaim(HttpConn *asking, ULONG now)
     return FALSE;
 }
 
-/*
- * The upgrade, and everything RFC 6455 4.2.1 requires of the request, checked
- * exactly as httpd_do_terminal() checks it.  The two are deliberately not one
- * function with a flag: what they refuse is the same, what they then start is a
- * Shell in one case and 160 KB of screen buffers in the other, and the failures
- * either can have do not overlap at all.
- */
+/* The upgrade, checked exactly as httpd_do_terminal() checks it.  Deliberately
+   not one function with a flag: what they start and what can fail differ
+   entirely. */
 static VOID httpd_do_console(HttpConn *c)
 {
     char accept[HTTPD_WS_ACC_MAX];
@@ -4425,15 +3815,9 @@ static VOID httpd_do_console(HttpConn *c)
         return;
     }
 
-    /*
-     * The 101, by hand, for httpd_do_terminal()'s reason: httpd_begin() would
-     * decide about Content-Length and Connection and both are wrong on a 101.
-     *
-     * The session itself is not started here.  It is started once the 101 has
-     * actually left, in httpd_flush(), because the first thing it does is queue
-     * a geom word and there is nowhere to put one while the handshake is still
-     * in the buffer.
-     */
+    /* The 101, by hand, for httpd_do_terminal()'s reason.  The session is
+       started once the 101 has actually left, in httpd_flush(): its first
+       act is to queue a geom word and there is nowhere to put one yet. */
     c->out_len  = 0;
     c->out_sent = 0;
     c->overflow = 0;
@@ -4461,11 +3845,8 @@ static VOID httpd_do_console(HttpConn *c)
 
 /* --------------------------------------------------------------- writing --- */
 
-/*
- * What every write goes through first.  The document root itself is not a
- * resource a client can replace or remove, and a lock somebody else holds stops
- * the request here rather than half way through it.
- */
+/* What every write goes through first.  The document root itself is not a
+   resource a client can replace or remove. */
 static BOOL httpd_may_write(HttpConn *c)
 {
     if (c->path.segments == 0)
@@ -4474,12 +3855,9 @@ static BOOL httpd_may_write(HttpConn *c)
         return FALSE;
     }
 
-    /*
-     * On a filesystem that truncates, the address resolves to a file with a
-     * different name, so a DELETE of one long name removes another, and the
-     * loss is not recoverable.  Refused for every write rather than only for
-     * the ones that create a name.
-     */
+    /* On a filesystem that truncates, the address resolves to a file with a
+       different name, so a DELETE of one long name removes another.  Refused
+       for every write rather than only the ones that create a name. */
     if (httpd_name_cut(c->path.path, c->path.name))
     {
         httpd_error(c, 400,
@@ -4526,15 +3904,9 @@ static BOOL httpd_spare_name(HttpConn *c, const char *stem,
     return FALSE;
 }
 
-/*
- * The temporary a PUT is written to.  It goes in the destination drawer and not
- * in T:, because a rename between volumes is a copy, and the point of the
- * temporary is that the last step is a rename and nothing else.
- *
- * Everything that can refuse the transfer refuses it here, before the client
- * has sent a byte: a 507 now stops the upload, and a 507 at the end means the
- * file crossed the network for nothing.
- */
+/* The temporary a PUT is written to.  It goes in the destination drawer and not
+   in T:, because a rename between volumes is a copy.  Everything that can
+   refuse the transfer refuses it here, before the client has sent a byte. */
 static BOOL httpd_begin_put(HttpConn *c)
 {
     if (!httpd_may_write(c))
@@ -4546,11 +3918,9 @@ static BOOL httpd_begin_put(HttpConn *c)
         return FALSE;
     }
 
-    /*
-     * A PUT that creates the file adds a name to the drawer above and needs
-     * that drawer's token.  A PUT over a file that is already there does not,
-     * because it changes content rather than membership.  RFC 4918 7.1.
-     */
+    /* A PUT that creates the file adds a name to the drawer above and needs
+       that drawer's token.  A PUT over a file already there does not, RFC
+       4918 7.1. */
     if (httpd_kind(c->path.path) < 0 &&
         !httpd_lock_allows_parent(c, c->path.path))
         return FALSE;
@@ -4563,15 +3933,9 @@ static BOOL httpd_begin_put(HttpConn *c)
         return FALSE;
     }
 
-    /*
-     * Measured before the client sends a byte, which is the difference
-     * between a 507 and a floppy full of a temporary file.
-     *
-     * A chunked upload cannot be measured here: it does not say how long it is
-     * until it has finished, which is why a client chunks in the first place.
-     * It is bounded on the way in instead, httpd_sink_put() turns a short write
-     * into a 507, and that is the whole of what can be done.
-     */
+    /* A chunked upload cannot be measured here: it does not say how long
+       it is until it has finished.  It is bounded on the way in instead,
+       where httpd_sink_put() turns a short write into a 507. */
     if (c->body_left > 0UL)
     {
         ULONG room = httpd_free_bytes(c->put_temp);
@@ -4725,16 +4089,9 @@ static VOID httpd_do_put(HttpConn *c)
                   (LONG)c->walk_dst, 0);
     }
 
-    /*
-     * What landed can carry a different name to the one asked for.  The check
-     * above catches a collision, something already there under the cut name,
-     * and this catches the first one, where nothing was there and the create
-     * succeeded under a name the filesystem shortened.
-     *
-     * It has to be undone rather than reported: the file is now reachable under
-     * two different addresses, and every read of it is refused, so leaving it
-     * would be a 201 for a file nobody can GET.
-     */
+    /* What landed can carry a different name to the one asked for.  It has
+       to be undone rather than reported: the file would be reachable under
+       two addresses and every read of it refused. */
     if (httpd_name_cut(c->path.path, c->path.name))
     {
         (VOID)DeleteFile((CONST_STRPTR)c->path.path);
@@ -4746,13 +4103,8 @@ static VOID httpd_do_put(HttpConn *c)
     httpd_empty(c, existed ? 204 : 201);
 }
 
-/*
- * DELETE on a collection is Depth infinity and nothing else.  The walk starts
- * here and finishes some passes of the loop later, in httpd_walk_end(), which
- * is what answers: 204 when the whole tree went, and the multistatus RFC 4918
- * 9.6.1 asks for when part of it did not.  The client's picture of the tree is
- * then wrong in a place it has no other way to find.
- */
+/* DELETE on a collection is Depth infinity and nothing else.  The walk finishes
+   some passes of the loop later, in httpd_walk_end(), which is what answers. */
 static VOID httpd_do_delete(HttpConn *c)
 {
     if (!httpd_may_write(c))
@@ -4842,17 +4194,10 @@ static VOID httpd_do_mkcol(HttpConn *c)
     httpd_empty(c, 201);
 }
 
-/*
- * COPY and MOVE carry the other end of the operation in a header, so the
- * Destination goes through http_path_resolve() exactly as the request target
- * did, same decode, same colon check, same root.  A destination trusted any
- * less than the target is a way out of the document root that only writes.
- */
-/*
- * The authority of an absolute-form URL, the host and port between "//" and the
- * path, or NULL when there is none, which is the ordinary case of a Destination
- * written as a bare path.
- */
+/* COPY and MOVE carry the other end in a header, so the Destination goes
+   through http_path_resolve() exactly as the request target did.  One trusted
+   any less is a way out of the document root that only writes. */
+/* The authority of an absolute-form URL, or NULL when there is none. */
 static const char *httpd_authority(const char *url, ULONG *len)
 {
     ULONG i;
@@ -4880,19 +4225,9 @@ static const char *httpd_authority(const char *url, ULONG *len)
     return url;
 }
 
-/*
- * Does the Destination name this server?
- *
- * The host is compared and the port is not.  A client reaching a machine on a
- * LAN writes the Host: and the Destination: with whatever name it resolved, an
- * mDNS name, a NetBIOS name or a dotted address, and the two agreeing is the
- * whole of what can be checked.  Whether they agree about ":80" says nothing
- * about whether they mean this machine.
- *
- * TRUE when there is no authority to compare, and TRUE when the client sent no
- * Host:.  An HTTP/1.0 client need not, and refusing it would be refusing on no
- * evidence.
- */
+/* Does the Destination name this server?  The host is compared and the port is
+   not.  TRUE when there is no authority to compare, and TRUE when the client
+   sent no Host: an HTTP/1.0 client need not send one. */
 static ULONG httpd_hostlen(const char *s, ULONG len)
 {
     ULONG i = 0;
@@ -4941,15 +4276,9 @@ static BOOL httpd_resolve_dest(HttpConn *c)
         return FALSE;
     }
 
-    /*
-     * A Destination naming another machine.  http_path_resolve() throws the
-     * authority away, which is right for the request target, where the only
-     * host it can name is this one, so a COPY to http://elsewhere/x used to be
-     * answered 201 for a file written on this machine, and the client was told
-     * a copy it never asked for had succeeded.
-     *
-     * RFC 4918 9.8.4: this server does not copy between hosts, so it says so.
-     */
+    /* http_path_resolve() throws the authority away, which is right for the
+       request target but would make a COPY to another host land on this one.
+       RFC 4918 9.8.4: this server does not copy between hosts. */
     if (!httpd_dest_is_local(c))
     {
         httpd_error(c, 502, "that destination is on another server");
@@ -5000,12 +4329,9 @@ static BOOL httpd_resolve_dest(HttpConn *c)
     return httpd_lock_allows(c, c->dest.path);
 }
 
-/*
- * COPY and MOVE do at most three things, and each of them is a walk that runs
- * across passes of the loop: clear the destination, put the source there, and
- * for a MOVE remove the original.  httpd_walk_end() is what strings them
- * together, so this only has to decide which of them are needed.
- */
+/* COPY and MOVE do at most three things, each a walk that runs across passes of
+   the loop: clear the destination, put the source there, and for a MOVE remove
+   the original.  httpd_walk_end() is what strings them together. */
 static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
 {
     LONG dst_kind;
@@ -5053,14 +4379,9 @@ static VOID httpd_copy_or_move(HttpConn *c, BOOL moving)
     if (dst_kind < 0 && !httpd_lock_allows_parent(c, c->dest.path))
         return;
 
-    /*
-     * The check above catches a name the filesystem would shorten onto
-     * something that is already there.  With nothing there it says nothing, it
-     * locks a name that does not exist yet, and the destination is created
-     * shortened, answering to two addresses with reads refused under both.  PUT
-     * and MKCOL undo that afterwards.  A copied tree is too much to undo, so it
-     * is asked before the walk starts.
-     */
+    /* With nothing at the destination the check above says nothing, and the
+       destination is created shortened.  PUT and MKCOL undo that afterwards;
+       a copied tree is too much to undo, so it is asked before the walk. */
     if (dst_kind < 0 && !httpd_name_survives(c->dest.path, c->dest.name))
     {
         httpd_error(c, 400,
@@ -5103,23 +4424,9 @@ static VOID httpd_do_move(HttpConn *c)
     httpd_copy_or_move(c, TRUE);
 }
 
-/*
- * A file on this machine has one date and no other property anybody can set.
- *
- * RFC 4918 9.2: "Instructions MUST either all be executed or none executed."
- * The date used to be set before the answer was built, so a request naming
- * getlastmodified and one other property applied the timestamp and refused its
- * sibling, in one 207.  So the settable ones are counted first and the call is
- * only made when every name in the request is one of them.
- *
- * When one is not, the unsettable names get the 403 and the rest get 424: they
- * would have gone through, and did not, because of another one.  This is the
- * one place in 4918 where 424 belongs, 9.6.1 and 9.8.3 say it SHOULD NOT appear
- * in a DELETE's or a COPY's multistatus.
- *
- * The namespace declarations come back out as they arrived, so the prefixes in
- * the answer mean what they meant in the question.
- */
+/* A file on this machine has one date and no other settable property.  RFC 4918
+   9.2 wants every instruction executed or none, so the settable ones are
+   counted first and the rest get 403 while their siblings get 424. */
 static VOID httpd_do_proppatch(HttpConn *c)
 {
     ULONG used = 0;
@@ -5137,27 +4444,17 @@ static VOID httpd_do_proppatch(HttpConn *c)
         return;
     }
 
-    /*
-     * No property named at all.  The answer used to be a 207 holding a
-     * <D:response> with an href and nothing else, which RFC 4918 14.24 does not
-     * allow: a response carries either a status or at least one propstat, and a
-     * client that checks the multistatus rejects it.
-     *
-     * There is nothing to report on, so this is a request that did not say what
-     * to do: an empty body, a <propertyupdate> with no <prop>, or a body the
-     * skimmer could not follow.  All three are 400.
-     */
+    /* No property named at all.  RFC 4918 14.24: a response carries either a
+       status or at least one propstat, so an empty <D:response> is not a legal
+       answer.  400 covers all three ways of getting here. */
     if (c->props == 0)
     {
         httpd_error(c, 400, "that PROPPATCH names no property");
         return;
     }
 
-    /*
-     * More names than there is room to report on.  RFC 4918 9.2 wants all of
-     * them executed or none, and a partial answer that does not mention the
-     * ones it dropped reads as a complete one.
-     */
+    /* More names than there is room to report on.  RFC 4918 9.2 wants all of
+       them executed or none, and a partial answer reads as a complete one. */
     if (c->props_cut)
     {
         httpd_error(c, 400, "that PROPPATCH names more properties than this "
@@ -5274,12 +4571,9 @@ static VOID httpd_do_lock(HttpConn *c)
     BOOL      created;
     BOOL      ok;
 
-    /* The served drawer itself is lockable, unlike everything else about it.  A
-       client cannot replace or remove the root, and an exclusive lock on it is
-       how a client keeps everybody else from writing in there while it works.
-       LOCK therefore does not go through httpd_may_write(), so the truncation
-       check that every other method gets from there is made here instead: a
-       lock taken on a name the filesystem cut is a lock on a different file. */
+    /* The served drawer itself is lockable, so LOCK does not go through
+       httpd_may_write(): the truncation check every other method gets from
+       there is made here instead. */
     if (httpd_name_cut(c->path.path, c->path.name))
     {
         httpd_error(c, 400,
@@ -5306,14 +4600,8 @@ static VOID httpd_do_lock(HttpConn *c)
             return;
         }
 
-        /*
-         * And it has to be a lock on the resource this request is about.  The
-         * token was the whole of the check, so any client holding any token
-         * could keep any lock in the table alive by refreshing it through a URL
-         * it had nothing to do with, including one whose owner had stopped and
-         * left it to expire.  UNLOCK has asked this since it was written and
-         * LOCK did not.
-         */
+        /* And it has to be a lock on the resource this request is about, or any
+           client holding any token could refresh any lock in the table. */
         if (!httplock_covers(l, c->path.path))
         {
             httpd_error(c, 412, "that lock is not on that resource");
@@ -5330,8 +4618,7 @@ static VOID httpd_do_lock(HttpConn *c)
         if (held != NULL && !httpd_holds(c, held))
         {
             /* RFC 4918 9.10.6 names the precondition: a lock is already there
-               and this one would conflict with it.  It used to be an HTML
-               page, which a WebDAV client parses as nothing. */
+               and this one would conflict with it. */
             httpd_begin(c, 423);
             httpd_body_text(c, "text/xml; charset=utf-8",
                             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
@@ -5365,12 +4652,9 @@ static VOID httpd_do_lock(HttpConn *c)
         hs_copy(l->owner, sizeof(l->owner), c->owner);
     }
 
-    /*
-     * A LOCK on a name that is not there yet is how Finder starts an upload,
-     * and RFC 4918 7.3 answers it 201 with a lock and no resource: the PUT
-     * that follows carries the token and creates the file.  Nothing is
-     * created here, so a lock the client abandons leaves no empty file.
-     */
+    /* A LOCK on a name that is not there yet is how Finder starts an upload,
+       and RFC 4918 7.3 answers it 201 with a lock and no resource.  Nothing
+       is created here, so a lock the client abandons leaves no empty file. */
     created = (httpd_kind(c->path.path) < 0) ? TRUE : FALSE;
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -5399,9 +4683,7 @@ static VOID httpd_do_unlock(HttpConn *c)
     HttpLock *l;
 
     /* No header at all is a malformed request, RFC 4918 9.11: the Lock-Token is
-       what an UNLOCK consists of.  It used to be indistinguishable from a token
-       this server has never heard of, and both were 409, so a client whose
-       header this server failed to parse was told the lock was gone. */
+       what an UNLOCK consists of. */
     if (c->unlock_token[0] == '\0')
     {
         httpd_error(c, 400, "UNLOCK needs a Lock-Token");
@@ -5429,11 +4711,8 @@ static VOID httpd_do_unlock(HttpConn *c)
     httpd_empty(c, 204);
 }
 
-/*
- * The table.  A ladder of strcmp would have been shorter and would have had to
- * be unpicked the moment PUT landed.  The Allow header is generated from this
- * table, so the two cannot disagree.
- */
+/* The table.  The Allow header is generated from it, so the two cannot
+   disagree. */
 static const HttpMethod httpd_methods[] =
 {
     { "GET",      HTTPD_M_GET,      0,            httpd_do_get,      NULL,
@@ -5443,9 +4722,7 @@ static const HttpMethod httpd_methods[] =
     { "OPTIONS",  HTTPD_M_OPTIONS,  0,            httpd_do_options,  NULL,
       NULL },
     /* The body goes through the skimmer, which is where <allprop/>,
-       <propname/> and a named <prop> list are told apart.  It used to be
-       discarded, and every PROPFIND was answered as though it said
-       <allprop/>. */
+       <propname/> and a named <prop> list are told apart. */
     { "PROPFIND", HTTPD_M_PROPFIND, HTTPD_F_BODY, httpd_do_propfind,
       httpd_sink_xml, NULL },
     { "PUT",      HTTPD_M_PUT,      HTTPD_F_BODY | HTTPD_F_WRITE |
@@ -5547,13 +4824,9 @@ static BOOL httpd_parse_range(HttpConn *c, const char *value)
     return TRUE;
 }
 
-/*
- * The tokens inside an If:, which is a different question from whether the
- * header holds, RFC 4918 10.4.1 asks both.  These are the tokens the request
- * submits, and a lock whose token is among them is one this client can write
- * through.  src/tools/httpif.c evaluates the conditions.  Two tokens is as many
- * as a request needs, which is a MOVE with both ends locked.
- */
+/* The tokens inside an If:, which is a different question from whether the
+   header holds; RFC 4918 10.4.1 asks both.  httpif.c evaluates the conditions.
+   Two tokens is as many as a request needs: a MOVE with both ends locked. */
 static VOID httpd_parse_if(HttpConn *c, const char *value)
 {
     ULONG n = 0;
@@ -5618,14 +4891,9 @@ static ULONG httpd_parse_timeout(const char *value)
     return 0;
 }
 
-/*
- * Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4 defines a comma list
- * of codings, each with an optional quality.  A quality of 0 refuses the
- * coding outright, it does not rank it low.
- *
- * `*` is deliberately not honoured.  The only compressed form this server has
- * is a file compressed at build time, and the plain page always works.
- */
+/* Does this Accept-Encoding offer gzip?  RFC 7231 5.3.4: a quality of 0 refuses
+   the coding outright rather than ranking it low.  `*` is deliberately not
+   honoured: the plain page always works. */
 static BOOL httpd_offers_gzip(const char *v)
 {
     while (*v != '\0')
@@ -5674,13 +4942,9 @@ static BOOL httpd_offers_gzip(const char *v)
     return FALSE;
 }
 
-/*
- * The request head, from the first byte to the blank line.  Returns FALSE
- * having already answered.
- *
- * Everything a header can say that this server acts on is picked out here, so
- * adding one is a case in this switch and not a second pass over the buffer.
- */
+/* The request head, from the first byte to the blank line.  FALSE when it has
+   already answered.  Everything a header can say that this server acts on is
+   picked out here, in one pass over the buffer. */
 static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 {
     char   method[24];
@@ -5727,9 +4991,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     while (i < headlen && c->in[i] == ' ')
         i++;
 
-    /* The version is part of the framing, not a prefix hint.  A missing one or
-       `HTTP/1.1anything` used to be accepted and kept alive, leaving this end
-       and a stricter intermediary with different ideas about the stream. */
+    /* The version is part of the framing, not a prefix hint: a missing one or
+       `HTTP/1.1anything` must not be accepted and kept alive. */
     {
         ULONG            start = i;
         HttpFrameVersion version;
@@ -5856,9 +5119,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Depth"))
         {
-            /* RFC 4918 10.2 has three values and no others.  "2" used to be
-               read as 0, so a client asking for two levels got one and no
-               indication that it had not been understood. */
+            /* RFC 4918 10.2 has three values and no others.  Anything else
+               is refused rather than read as the nearest one. */
             if (hs_nicmp(httpd_value, "infinity", 8) == 0 &&
                 httpd_value[8] == '\0')
                 c->depth = -1;
@@ -5875,9 +5137,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         else if (hs_equal(name, "Connection"))
         {
             /* Connection is a comma-separated token list, and several field
-               lines are one combined list.  In particular, `close` wins
-               wherever it appears and cannot be undone by a later
-               `keep-alive` line. */
+               lines are one combined list: `close` wins wherever it appears
+               and cannot be undone by a later `keep-alive` line. */
             if (http_frame_has_token(httpd_value, "close"))
             {
                 seen_close = TRUE;
@@ -5917,8 +5178,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         else if (hs_equal(name, "Transfer-Encoding"))
         {
             /* Finder does not know how long a file it is uploading is until
-               it has sent it, so it chunks, which makes this the difference
-               between PUT working from macOS and not working at all. */
+               it has sent it, so it chunks. */
             HttpFrameCoding te = http_frame_coding(httpd_value);
 
             /* Two of these is the same list written on two lines, and this
@@ -5958,12 +5218,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Accept-Encoding"))
         {
-            /* Read for the terminal's and the console's pages and nothing else,
-               because those are the only files here with a compressed copy
-               beside them, made at build time on a machine that has a
-               compressor.  A value too long to fit was cut, and a cut list can
-               have lost the coding that was refused, so it is read as no offer
-               at all. */
+            /* Read for the terminal's and the console's pages and nothing
+               else.  A cut list can have lost the coding that was refused,
+               so it is read as no offer at all. */
             c->gzip_ok = (!cut && httpd_offers_gzip(httpd_value)) ? 1 : 0;
         }
         else if (hs_equal(name, "If-None-Match"))
@@ -5998,12 +5255,8 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         }
         else if (hs_equal(name, "Destination"))
         {
-            /*
-             * A Destination that did not fit used to be truncated into a
-             * shorter path that still resolved, and Overwrite defaults to T, so
-             * a COPY of a deep tree landed on, and replaced, whatever happened
-             * to be at the cut.  Nothing is guessed here.
-             */
+            /* A truncated Destination still resolves, to a shorter path,
+               and Overwrite defaults to T.  Nothing is guessed here. */
             if (cut || hs_len(httpd_value) + 1UL >= sizeof(c->dest_url))
             {
                 httpd_error(c, 414, "that destination is longer than this "
@@ -6085,13 +5338,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
     /* ---- what to do with it ------------------------------------------ */
 
-    /*
-     * RFC 7230 3.3.3: both together is a request whose length two ends of a
-     * connection can read differently, which is the whole of request smuggling.
-     * A proxy in front of this server can disagree with the precedence rule
-     * that Transfer-Encoding wins, so the request is refused rather than
-     * resolved.
-     */
+    /* RFC 7230 3.3.3: both together is a request whose length two ends can
+       read differently, which is the whole of request smuggling.  Refused
+       rather than resolved: a proxy in front can disagree about precedence. */
     if (seen_te && seen_len)
     {
         httpd_error(c, 400, "a body cannot have both a length and an "
@@ -6118,11 +5367,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
     c->had_body  = (c->body_left > 0UL ||
                     c->chunk.state != HTTP_CHUNK_OFF) ? 1 : 0;
 
-    /*
-     * The ceiling is on a body this server holds.  A PUT's goes to a file as it
-     * arrives and is the client's business, so an upload is not measured
-     * against a buffer it never occupies.
-     */
+    /* The ceiling is on a body this server holds.  A PUT's goes to a file as
+       it arrives, so an upload is not measured against a buffer it never
+       occupies. */
     if (c->body_left > HTTPD_BODY_MAX &&
         (c->method->flags & HTTPD_F_UPLOAD) == 0)
     {
@@ -6148,16 +5395,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
         return TRUE;
     }
 
-    /*
-     * The terminal's own address, decided before the path is resolved.  It
-     * names no file, so there is nothing under the document root for a relative
-     * segment or an encoding to reach: the request is either this address or an
-     * ordinary one.
-     *
-     * A query string is allowed and ignored, because a browser reloading the
-     * page can append one and refusing it would look like the endpoint had
-     * gone.
-     */
+    /* The terminal's own address, decided before the path is resolved.  It
+       names no file, so there is nothing under the document root a relative
+       segment or an encoding can reach.  A query string is allowed. */
     if (httpd_term_page[0] != '\0')
     {
         ULONG n = 0;
@@ -6173,16 +5413,9 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             c->path.path[0] = '\0';
             c->path.name[0] = '\0';
 
-            /*
-             * With one exception: `?take=1` is a request to take the terminal
-             * off whoever has it.  Read here, where the query already has to be
-             * found and skipped, rather than by parsing it again somewhere
-             * else.
-             *
-             * A whole query parser would be four functions for one flag, so
-             * this looks for the parameter anywhere in the string.  Nothing
-             * else can be got wrong, because no other parameter is read.
-             */
+            /* `?take=1` is a request to take the terminal off whoever has it.
+               Looked for anywhere in the string, because no other parameter
+               is read. */
             if (httpd_target[n] == '?')
                 c->ws_take = httpd_query_take(httpd_target, n) ? 1 : 0;
 
@@ -6222,9 +5455,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
                       (LONG)http_path_error(why));
 
         /* 403 rather than 404 for every one of them: whether the path exists is
-           exactly what a caller probing for an escape wants told, and the
-           answer is the same for a device reference that resolves to a real
-           drawer and one that does not. */
+           exactly what a caller probing for an escape wants told. */
         httpd_error(c, 403, "that address is not one this server will open");
         return FALSE;
     }
@@ -6234,10 +5465,7 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
 
 /* --------------------------------------------------------------- driving --- */
 
-/* What was answered, whatever answered it.  Refusals go through here too: they
-   used to be the one thing the log did not record, so a transcript showed a
-   client's PUT and then nothing, and the 405 that made it give up had to be
-   inferred from the byte count. */
+/* What was answered, whatever answered it.  Refusals go through here too. */
 static VOID httpd_log_status(HttpConn *c)
 {
     if (httpd_verbose || httpd_trace)
@@ -6245,15 +5473,9 @@ static VOID httpd_log_status(HttpConn *c)
                   (LONG)httpd_reason(c->status));
 }
 
-/*
- * The state a condition in an If: is asking about: the lock this server is
- * holding on the resource and the tag its bytes have.  `tag` is a Resource-Tag
- * out of the header, or "" for the request target.
- *
- * A tag naming something outside this document root leaves both fields empty,
- * which is a list that cannot hold, the same answer as a resource with no lock
- * and no tag.  This server cannot speak for it.
- */
+/* The state a condition in an If: is asking about.  `tag` is a Resource-Tag out
+   of the header, or "" for the request target.  A tag outside this document
+   root leaves both fields empty, which is a list that cannot hold. */
 static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
 {
     HttpConn       *c = (HttpConn *)ctx;
@@ -6275,21 +5497,9 @@ static VOID httpd_if_lookup(void *ctx, const char *tag, HttpIfState *out)
     httpd_etag_of(path, out->etag, sizeof(out->etag));
 }
 
-/*
- * If-Match and If-None-Match, RFC 7232 3.1 and 3.2.
- *
- * Writes only, deliberately.  "If-None-Match: *" is how a client asks for a PUT
- * that creates and does not replace, an atomic create, and it is the reason the
- * header is read at all.  On a server with no authentication it is the only way
- * two clients can avoid overwriting each other without taking a lock first.
- *
- * On a GET the same header means something else: it asks for a 304 and a saved
- * transfer, which this server does not do.  Answering a read request 412
- * because a cache validator matched would break every browser, so a read is
- * left alone.
- *
- * FALSE when it has answered.
- */
+/* If-Match and If-None-Match, RFC 7232 3.1 and 3.2.  Writes only, deliberately:
+   on a read the same headers ask for a 304, and answering a GET 412 because a
+   validator matched would break every browser.  FALSE when it has answered. */
 static BOOL httpd_preconditions(HttpConn *c)
 {
     char  etag[HTTPD_ETAG_MAX];
@@ -6346,31 +5556,11 @@ static BOOL httpd_preconditions(HttpConn *c)
     return TRUE;
 }
 
-/* ---------------------------------------------------------------- iperf ----
- *
- * The same measurement the `iperf` command runs, driven from here so that a
- * user with a browser and no Shell can produce a figure.  src/tools/iperfcore.c
- * is the whole of it, and this is the presentation.
- *
- * It is iperf 2, on port 5001 by default, and the far end has to be `iperf`
- * 2.x.  The page says so, because the first thing somebody does otherwise is
- * point it at the iperf3 their distribution ships and read the silence as a
- * fault here.
- *
- * No query string: http_path_resolve() throws one away and httpd_target is
- * shared between connections, so the parameters are path segments instead,
- * /iperf/<direction>/<seconds>[/<host>].  That also keeps this out of the
- * method table, so OPTIONS still advertises exactly what it did before.
- *
- * One at a time, in a file-scope run rather than per connection: the machine
- * has one network path and two measurements would be measuring each other.  A
- * second request while one is in flight is refused rather than queued.
- *
- * A slice per pass of the loop, never a blocking call, for the reason CONN_WALK
- * exists.  A handler that sat inside a ten-second measurement would stop the
- * server answering anybody, and its own connection timeouts would then drop the
- * clients that were waiting.
- */
+/* ----------------------------------------------------------------- iperf --- */
+
+/* One at a time, in a file-scope run: the machine has one network path and two
+   measurements would be measuring each other.  A slice per pass of the loop and
+   never a blocking call, for the reason CONN_WALK exists. */
 
 static IperfRun  httpd_iperf;
 static UBYTE     httpd_iperf_buf[IPERF_BUF_MAX];
@@ -6419,12 +5609,8 @@ static LONG httpd_iperf_num(const char *s, ULONG len)
     return (LONG)v;
 }
 
-/*
- * A dotted quad, and nothing else.  Deliberately not tool_sock_resolve(): that
- * can reach the resolver, and a resolver call inside this loop stops the server
- * answering anybody for as long as it takes.  The Shell command has a process
- * of its own to wait in and does resolve names.  This does not.
- */
+/* A dotted quad, and nothing else.  Deliberately not tool_sock_resolve(): a
+   resolver call inside this loop stops the server answering anybody. */
 static BOOL httpd_iperf_dotted(const char *s, ULONG *out)
 {
     ULONG addr = 0;
@@ -6470,9 +5656,7 @@ static VOID httpd_iperf_release(HttpConn *c)
     }
 }
 
-/* The answer, as JSON.  Built with the same hs_append the rest of this file
-   builds its bodies with.  There is no JSON helper in the tree and one number
-   per key needs none. */
+/* The answer, as JSON, built with the same hs_append as every other body. */
 static VOID httpd_iperf_answer(HttpConn *c, const IperfResult *res)
 {
     char  addr[TOOL_ADDR_STRLEN];
@@ -6516,10 +5700,8 @@ static VOID httpd_iperf_answer(HttpConn *c, const IperfResult *res)
     httpd_body_text(c, "application/json", httpd_page);
 }
 
-/*
- * /iperf, or /iperf/<dir>/<seconds>[/<host>].  TRUE when this answered or
- * took the connection over, FALSE to let the ordinary handler have it.
- */
+/* /iperf, or /iperf/<dir>/<seconds>[/<host>].  TRUE when this answered or took
+   the connection over. */
 static BOOL httpd_iperf_hook(HttpConn *c)
 {
     const char *u = c->path.url;
@@ -6568,10 +5750,6 @@ static BOOL httpd_iperf_hook(HttpConn *c)
 
     iperf_plan_init(&plan);
 
-    /* Six characters, not five.  "tcp-rx" is six, and asking for dirlen == 5
-       while comparing five made every direction fall through to the 404, so
-       the run endpoint never worked until a request from another machine said
-       so. */
     if (dirlen == 6 && hs_nicmp(dir, "tcp-tx", 6) == 0)
         plan.dir = IPERF_TCP_TX;
     else if (dirlen == 6 && hs_nicmp(dir, "tcp-rx", 6) == 0)
@@ -6681,12 +5859,9 @@ static VOID httpd_dispatch(HttpConn *c)
     if (httpd_verbose && !httpd_trace)
         httpd_log(c, "%s %s", (LONG)c->method->name, (LONG)c->path.url);
 
-    /*
-     * The terminal, before anything WebDAV.  It is not a resource: there is no
-     * entity tag to compare, nothing to lock, and an If: header naming it names
-     * something that does not exist.  Evaluating those first would answer 412
-     * for a condition about a file this address does not have.
-     */
+    /* The terminal, before anything WebDAV.  It is not a resource: no entity
+       tag to compare and nothing to lock, so evaluating an If: first would
+       answer 412 about a file this address does not have. */
     if (c->is_term)
     {
         httpd_do_terminal(c);
@@ -6703,12 +5878,8 @@ static VOID httpd_dispatch(HttpConn *c)
         return;
     }
 
-    /*
-     * RFC 4918 10.4.  The header used to be skimmed for tokens and never
-     * evaluated, so `If: (<opaquelocktoken:deadbeef>)` on a file nobody had
-     * locked was answered 201.  The client's condition was not a condition at
-     * all, and neither was `Not`.
-     */
+    /* RFC 4918 10.4.  The header is evaluated and not merely skimmed for
+       tokens. */
     if (c->ifhdr[0] != '\0' && !http_if_eval(c->ifhdr, httpd_if_lookup, c))
     {
         httpd_error(c, 412, "the If header's condition did not hold");
@@ -6750,23 +5921,9 @@ static VOID httpd_chunk_sink(void *ctx, const UBYTE *data, LONG len)
         c->method->sink(c, data, len);
 }
 
-/*
- * A chunked request body, decoded as it arrives by httpframe.c.  Everything
- * the decoder is in the middle of lives in the connection, because a chunk
- * boundary falls wherever the network put it and not where the framing wanted
- * it.
- *
- * A ceiling applies to a body this server holds, exactly as Content-Length's
- * does.  The methods that read XML have fixed buffers, and a chunked body used
- * to reach them without being measured at all, because Content-Length's 413 was
- * on `body_left`, which a chunked request never sets.  An upload is still the
- * client's business and is not measured.
- *
- * Returns how much of `data` belonged to the body.  Anything after that is the
- * next request.  A body that failed has answered by the time this returns, and
- * says so through HTTP_CHUNK_ERROR: the caller must stop reading rather than
- * ask whether the body is finished, because a failed one never will be.
- */
+/* A chunked request body, decoded as it arrives.  Returns how much of `data`
+   belonged to the body; anything after that is the next request.  A failed body
+   has answered already and says so through HTTP_CHUNK_ERROR: stop reading. */
 static LONG httpd_feed_chunked(HttpConn *c, const UBYTE *data, LONG len)
 {
     LONG took = http_chunk_feed(&c->chunk, data, len, httpd_chunk_sink, c);
@@ -6794,15 +5951,9 @@ static LONG httpd_feed_chunked(HttpConn *c, const UBYTE *data, LONG len)
     return took;
 }
 
-/*
- * Feed the body to the method's sink.  A method with no sink throws the bytes
- * away, but they are still read.  A request body left in the socket is the next
- * request as far as the parser is concerned, which is how a server that ignores
- * bodies answers the wrong question on a kept-alive connection.
- *
- * Returns how much was taken, which is not `len` when the body ended inside it
- * and the rest is another request.
- */
+/* Feed the body to the method's sink.  A method with no sink throws the bytes
+   away, but they are still read: a body left in the socket is the next request
+   as far as the parser is concerned.  Returns how much was taken. */
 static LONG httpd_consume_body(HttpConn *c, const UBYTE *data, LONG len)
 {
     LONG take;
@@ -6860,20 +6011,9 @@ static BOOL httpd_body_failed(const HttpConn *c)
     return (c->chunk.state == HTTP_CHUNK_ERROR) ? TRUE : FALSE;
 }
 
-/*
- * A body still arriving, and whether it is arriving at all.
- *
- * The no-progress timeout asks whether anything came, and one byte answers it,
- * so a client sending a byte every 29 seconds held its slot for as long as it
- * liked and HTTPD_CONN_MAX of them held the whole table.  This asks the other
- * question, at what rate.
- *
- * The floor is far below any real transfer.  A 7 MHz machine writing to a
- * floppy manages some tens of kilobytes a second, and the attack above is a
- * thirtieth of a byte.  The grace period is there so that a client which pauses
- * to think, Expect: 100-continue, or a Finder that opens the connection before
- * the user has chosen a file, is not counted against it.
- */
+/* A body still arriving, and whether it is arriving at all.  The no-progress
+   timeout is answered by one byte, so this asks the other question, at what
+   rate.  The grace period covers a client that pauses to think. */
 #define HTTPD_BODY_RATE     32UL    /* bytes a second, averaged             */
 #define HTTPD_BODY_GRACE    60UL    /* seconds before the average is asked  */
 
@@ -6906,36 +6046,9 @@ static VOID httpd_drop_head(HttpConn *c, ULONG headlen)
     c->in_len = left;
 }
 
-/*
- * A request refused before its body was read.
- *
- * A body left in the socket is the next request as far as the parser is
- * concerned.  Three refusals, 405 for a verb this server has not, 501 for one
- * too long to be one, and 403 for an address it will not open, used to answer
- * with keep-alive still on and the body still there, so a POST refused 405
- * whose body held a `DELETE /file HTTP/1.1` line had that DELETE run as the
- * next request.  A client that POSTs to a WebDAV share does this to itself, no
- * attacker needed.
- *
- * Clearing keep-alive everywhere would have fixed it and cost a reconnect per
- * 405, which is a request a client is meant to recover from.  So a body this
- * server can bound is read away and the connection survives, and one it cannot
- * bound closes:
- *
- *   no body            nothing to do, and anything pipelined behind it is a
- *                      real request that must not be thrown away.
- *   Content-Length     drained, up to the ceiling a held body would have been
- *                      measured against.
- *   larger than that   closed.  It is the same length the 413 refuses.
- *   chunked            closed.  The length is not knowable in advance, so there
- *                      is no bound on what draining would cost.
- *   Expect: 100        closed.  The client is waiting for a 100 that is not
- *                      coming and will not send the body, so a drain would wait
- *                      for bytes nobody is going to send.
- *   head not framed    closed.  A refusal before the headers were read does not
- *                      know whether there is a body at all, which is what made
- *                      the 501 path the worst of the three.
- */
+/* A request refused before its body was read.  A body left in the socket is the
+   next request as far as the parser is concerned, so one this server can bound
+   is read away and the connection survives; one it cannot bound closes. */
 static VOID httpd_refuse_drain(HttpConn *c)
 {
     ULONG i;
@@ -6984,17 +6097,14 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
     httpd_drop_head(c, headlen);
     left = c->in_len;
 
-    /*
-     * Nothing reaches the sink until the method has said it can take it.  A PUT
-     * that cannot be started, for no drawer, no room or somebody else's lock,
-     * is refused here, before the client has sent the file rather than after.
-     */
+    /* Nothing reaches the sink until the method has said it can take it, so
+       a PUT that cannot be started is refused before the client sends the
+       file. */
     if (c->method->begin != NULL && !c->method->begin(c))
     {
-        /* What the client is about to send belongs to a request that will not
-           be read.  A PUT is the only method with a begin(), so the body is
-           usually a file and the connection ends.  A small one is read away
-           instead and the client keeps its socket. */
+        /* What the client is about to send belongs to a request that will
+           not be read.  A small body is read away instead and the client
+           keeps its socket. */
         httpd_refuse_drain(c);
         httpd_log_status(c);
         return;
@@ -7032,11 +6142,9 @@ static VOID httpd_after_head(HttpConn *c, ULONG headlen)
 
         if (c->expect)
         {
-            /* The client is waiting for this before it sends anything: curl
-               waits a second and then sends regardless, the Windows redirector
-               waits.  It goes out through the ordinary write path rather than
-               being pushed at the socket here, because a blocking write is the
-               one thing this loop must not do. */
+            /* The client is waiting for this before it sends anything.
+               It goes out through the ordinary write path, because a
+               blocking write is the one thing this loop must not do. */
             static const char go[] = "HTTP/1.1 100 Continue\r\n\r\n";
 
             hs_copy((char *)c->out, sizeof(c->out), go);
@@ -7166,11 +6274,8 @@ static BOOL httpd_readable(HttpConn *c)
     c->in_len   += (ULONG)got;
     c->progress  = httpd_now();
 
-    /*
-     * The end of the head, found from the bytes in the buffer.  Bare LF is
-     * accepted as well as CRLF, the same way src/tools/fetch.c accepts it on
-     * the answering side: something always sends it.
-     */
+    /* The end of the head, found from the bytes in the buffer.  Bare LF is
+       accepted as well as CRLF: something always sends it. */
     {
         ULONG i;
 
@@ -7232,15 +6337,9 @@ static BOOL httpd_writable(HttpConn *c)
             sent = tool_sock_send(httpd_sb, c->sock, &c->out[c->out_sent],
                                   want);
 
-            /*
-             * What send() says it took, totalled per answer.  One line under
-             * TRACE, and the only way to tell this program's mistakes from the
-             * library's: put it next to the distinct sequence space in a
-             * capture and the two must agree.  They did not, and the fault was
-             * in send() rather than in the loop below.  bsd_send_consumed() in
-             * src/bsdsocket/transfer.c is what that cost and why the counter
-             * stays.
-             */
+            /* What send() says it took, totalled per answer.  One line
+               under TRACE, and the only way to tell this program's
+               mistakes from the library's. */
             if (sent > 0)
                 c->wrote += (ULONG)sent;
 
@@ -7275,20 +6374,15 @@ static BOOL httpd_writable(HttpConn *c)
                 continue;
         }
 
-        /* Nothing left to say.  The counter is reported here, before the two
-           paths part.  A client sending `Connection: close` is the one that
-           downloads a large file, and it used to be the one whose total was
-           never printed. */
+        /* Nothing left to say.  The counter is reported here, before the
+           two paths part. */
         if (httpd_trace)
             httpd_log(c, "send() accepted %lu bytes for this answer",
                       (LONG)c->wrote, 0);
 
-        /*
-         * The console's 101 has gone, and the session starts here for the same
-         * reason the terminal's socket is handed over below: what is in out[]
-         * until this moment is the handshake, and the first thing the session
-         * does is queue a word.
-         */
+        /* The console's 101 has gone.  The session starts here because
+           what is in out[] until this moment is the handshake, and the
+           first thing the session does is queue a word. */
         if (c->fb_owner && c->state == CONN_SEND)
         {
             ULONG first = c->in_len;
@@ -7299,29 +6393,9 @@ static BOOL httpd_writable(HttpConn *c)
 
             if (!http_fb_start(httpd_sb, c->sock, c->in, first, httpd_now()))
             {
-                /*
-                 * The refusal, to the browser and to the log, and it used to
-                 * reach neither.
-                 *
-                 * The 101 has gone by this point, so the socket is a
-                 * WebSocket and the only thing on it a browser reports to the
-                 * page is a close frame.  Returning FALSE alone drops the
-                 * connection with a FIN, which every browser shows as the
-                 * server having closed and nothing more, so the sentence
-                 * http_fb_fault() holds -- which names the depth of the
-                 * screen it would not serve -- went nowhere.  The log line
-                 * was behind -v as well, so a guest started without it
-                 * recorded nothing either, and a person with a truecolour
-                 * screen in front had two silences and no reason.
-                 *
-                 * Best effort, like http_fb_evict(): out[] is empty here and
-                 * belongs to this connection, the frame is at most 127 bytes,
-                 * and the connection is going either way.  A close frame
-                 * longer than a control frame may be is truncated by
-                 * http_ws_close_frame() rather than dropped, so a long
-                 * sentence still arrives short instead of not at all, and the
-                 * whole of it goes to the log below.
-                 */
+                /* The refusal, to the browser and to the log.  The 101 has
+                   gone, so a bare FIN reads to a browser as the server
+                   closing with no reason.  Best effort: out[] is empty. */
                 unsigned long n =
                     http_ws_close_frame(c->out, sizeof(c->out),
                                         HTTP_WS_CLOSE_GOING, http_fb_fault());
@@ -7338,20 +6412,16 @@ static BOOL httpd_writable(HttpConn *c)
             return TRUE;
         }
 
-        /*
-         * The terminal's 101 has gone.  From here the socket carries frames,
-         * and the bytes the client pipelined behind the head are the first of
-         * them.  A browser that opens the socket and types in the same segment
-         * is ordinary, and dropping that would drop the first thing said.
-         */
+        /* The terminal's 101 has gone.  From here the socket carries
+           frames, and the bytes the client pipelined behind the head are
+           the first of them. */
         if (c->ws_owner && c->state == CONN_SEND)
         {
             c->state = CONN_WS;
 
-            /* out[] is handed over: from here httpterm.c frames into it, and
-               nothing in this file writes to it again until the connection is
-               reset.  Borrowed rather than duplicated, so a terminal costs a
-               connection no second send buffer. */
+            /* out[] is handed over: from here httpterm.c frames into it,
+               and nothing in this file writes to it again until the
+               connection is reset. */
             http_term_sock_begin(&c->ws, httpd_sb, c->sock,
                                  c->out, sizeof(c->out),
                                  c->in, c->in_len, httpd_now());
@@ -7458,11 +6528,8 @@ static VOID httpd_accept(LONG lsock)
     if (sock < 0)
         return;
 
-    /*
-     * Every socket here is non-blocking.  A blocking send() to a client that
-     * has stopped reading would stop the whole server, which is the failure
-     * this design exists to avoid.
-     */
+    /* Every socket here is non-blocking.  A blocking send() to a client that
+       has stopped reading would stop the whole server. */
     if (tool_sock_ioctl(httpd_sb, sock, TOOL_FIONBIO, &nonblock) != 0)
     {
         /* Every send and receive below relies on this.  Keeping a socket when
@@ -7546,14 +6613,9 @@ static VOID httpd_serve(LONG lsock)
             }
             else if (c->state == CONN_FB)
             {
-                /*
-                 * Both halves, like a terminal, and counted as walking so the
-                 * wait is the short one: a viewer that is not typing still
-                 * wants the next frame, and a 250 ms tick would cap the console
-                 * at four frames a second whatever the machine can do.  Short
-                 * and not zero, which WaitSelect() reads as a poll and answers
-                 * without ever yielding.
-                 */
+                /* Both halves, counted as walking so the wait is the short
+                   one: a 250 ms tick would cap the console at four frames a
+                   second, and zero is a poll WaitSelect() never yields on. */
                 walking++;
 
                 tool_fd_add(&readfds, c->sock);
@@ -7563,12 +6625,8 @@ static VOID httpd_serve(LONG lsock)
             }
             else if (c->state == CONN_WS)
             {
-                /*
-                 * The one state that wants both halves.  Every other connection
-                 * is either reading a request or writing an answer.  A terminal
-                 * does both at once, and a session where the person types while
-                 * a command prints is the ordinary case.
-                 */
+                /* The one state that wants both halves: a terminal reads
+                   and writes at once. */
                 if (http_term_sock_wants_read(&c->ws))
                     tool_fd_add(&readfds, c->sock);
 
@@ -7589,41 +6647,21 @@ static VOID httpd_serve(LONG lsock)
                 nfds = c->sock + 1;
         }
 
-        /*
-         * The listener is offered only when there is somewhere to put the
-         * caller.  Leaving it in the set with every slot busy would make
-         * WaitSelect() return immediately and for ever, which is a spin, not
-         * a wait, so the backlog holds the caller instead and the machine
-         * stays idle.
-         */
+        /* The listener is offered only when there is somewhere to put the
+           caller.  Leaving it in the set with every slot busy would make
+           WaitSelect() return immediately and for ever. */
         if (live < httpd_conns)
             tool_fd_add(&readfds, lsock);
 
         tv.tv_secs  = 0;
-        /*
-         * A pending walk shortens the wait to the smallest one there is rather
-         * than removing it.  A zero timeout is a poll, and WaitSelect() answers
-         * a poll without ever reaching Wait(), so the loop then never yields.
-         * Measured on a real machine, the other connections went from being
-         * answered in 20 ms to 1.7 seconds while a tree was walked.  The work
-         * was interleaved, and the stack never got the processor to notice what
-         * had arrived.
-         *
-         * So the walk gets a slice per pass and the pass still blocks, for the
-         * shortest time the timer will carry.
-         */
+        /* A pending walk shortens the wait rather than removing it.  A
+           zero timeout is a poll, which WaitSelect() answers without ever
+           reaching Wait(), so the loop would never yield. */
         tv.tv_micro = (walking > 0UL) ? HTTPD_WALK_MICROS : HTTPD_TICK_MICROS;
 
-        /*
-         * The terminal's pipe is a MsgPort and WaitSelect() knows nothing about
-         * DOS handles, so its signal goes into the same wait as the sockets.
-         * Without it a keystroke would be echoed on the next 250 ms tick.
-         *
-         * The Shell's own runner adds CTRL_E when it publishes its return code.
-         * CTRL_C is deliberately not here: tool_break() is what reads that one,
-         * and a signal WaitSelect() reports has been cleared from the task, so
-         * asking for it would consume the Ctrl-C that stops the server.
-         */
+        /* The terminal's pipe is a MsgPort and WaitSelect() knows nothing
+           about DOS handles, so its signal goes into the same wait.
+           CTRL_C is not here: WaitSelect() would consume tool_break()'s. */
         sigs = http_term_sigmask() | SIGBREAKF_CTRL_E;
 
         ready = tool_sock_select_sigs(httpd_sb, nfds, &readfds, &writefds, &tv,
@@ -7675,12 +6713,8 @@ static VOID httpd_serve(LONG lsock)
 
             if (c->state == CONN_FB)
             {
-                /*
-                 * Read, then produce, then write.  Reading first is what lets a
-                 * `refresh` get through while a frame is going out.  The
-                 * producer below would otherwise fill the buffer again before
-                 * the word was looked at.
-                 */
+                /* Read, then produce, then write.  Reading first is what
+                   lets a `refresh` get through while a frame is going out. */
                 if (ready > 0 && tool_fd_isset(&readfds, c->sock))
                     keep = http_fb_read(now);
 
@@ -7695,15 +6729,9 @@ static VOID httpd_serve(LONG lsock)
 
                 if (!keep)
                 {
-                    /*
-                     * Whatever the log level, when this end is the one that
-                     * ended it.  fb_close_code is set by nothing but a close
-                     * this server sent, and http_ws_close_reason() renders
-                     * every one of those as "going away", so the sentence
-                     * http_fb_fault() holds is the only record of what the
-                     * screen did.  A session the browser closed is ordinary
-                     * and stays behind -v.
-                     */
+                    /* Whatever the log level, when this end is the one
+                       that ended it: fb_close_code is set by nothing but a
+                       close this server sent, so fb_fault() is the record. */
                     if (http_fb_why() != 0)
                         httpd_log(c, "console ended: %s",
                                   (LONG)http_fb_fault(), 0);
@@ -7730,12 +6758,8 @@ static VOID httpd_serve(LONG lsock)
 
             if (c->state == CONN_WS)
             {
-                /*
-                 * Both halves, in that order.  Reading first is what lets a
-                 * Ctrl-C typed while a command is printing get through.  The
-                 * writer below would otherwise keep the pass to itself for as
-                 * long as the command had output.
-                 */
+                /* Both halves, in that order.  Reading first is what lets
+                   a Ctrl-C typed while a command is printing get through. */
                 if (ready > 0 && tool_fd_isset(&readfds, c->sock))
                     keep = http_term_sock_read(&c->ws, now);
 
@@ -7778,15 +6802,9 @@ static VOID httpd_serve(LONG lsock)
                 continue;
             }
 
-            /*
-             * A connection that has made no progress for TIMEOUT seconds is
-             * dropped.  This is what stops a client that opens sockets and says
-             * nothing from holding every slot on a 1 MB machine, the cheapest
-             * denial there is and the one a server with a fixed connection
-             * table is most exposed to.
-             *
-             * `now` going backwards is midnight, not an expiry.
-             */
+            /* A connection that has made no progress for TIMEOUT seconds
+               is dropped.  `now` going backwards is midnight, not an
+               expiry. */
             if (httpd_timeout > 0UL && now >= c->progress &&
                 now - c->progress >= httpd_timeout)
             {
@@ -7943,16 +6961,9 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * The terminal's page, if there is to be one.  Checked here rather than on
-     * the first request for the same reason the document root is: a server that
-     * starts on a misspelled path answers 503 to the one address the person is
-     * going to try and looks like a network fault.
-     *
-     * A -T with nowhere to serve from refuses to start rather than starting
-     * without the endpoint, and the refusal names every place that was looked
-     * in.
-     */
+    /* The terminal's page, if there is to be one.  Checked here rather than
+       on the first request: a -T with nowhere to serve from refuses to start,
+       and the refusal names every place that was looked in. */
     if (args[ARG_TERMINAL] != 0)
     {
         const char *named = (args[ARG_PAGE] != 0)
@@ -8014,14 +7025,9 @@ int main(int argc, char **argv)
         (VOID)Close(page);
         hs_copy(httpd_term_page, sizeof(httpd_term_page), named);
 
-        /*
-         * The name of the compressed copy, which is the page's own with .gz on
-         * the end.  A name and not a decision: whether there is a file of that
-         * name is asked when a browser asks for one, not here.  Built from the
-         * page actually chosen, so a -T that searched and a PAGE= that named
-         * one both get the sibling beside the file being served.  Left empty
-         * when it would not fit, the only way this can fail.
-         */
+        /* The compressed copy's name, which is the page's own with .gz on
+           the end.  A name and not a decision: whether a file of it exists
+           is asked per request.  Left empty when it would not fit. */
         {
             ULONG used = 0;
             BOOL  fits;
@@ -8042,12 +7048,8 @@ int main(int argc, char **argv)
         tool_printf("Terminal page: %s\n", (LONG)httpd_term_page);
     }
 
-    /*
-     * The console's page, on exactly the -T rule above: found before anything
-     * is served, named in the refusal when it is not there, and a -C with
-     * nowhere to serve from refuses to start rather than starting without the
-     * endpoint.
-     */
+    /* The console's page, on exactly the -T rule above: found before anything
+       is served, and a -C with nowhere to serve from refuses to start. */
     if (args[ARG_CONSOLE] != 0)
     {
         const char *named = (args[ARG_CONSOLEPAGE] != 0)
@@ -8146,14 +7148,9 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /*
-     * No ADDRESS means every address, and on this stack that is spelled as
-     * ONE listener on the IPv6 wildcard: bsd_bind_accepts() makes a [::]
-     * listener deliberately dual-stack, and NetX keys its listen table by
-     * port alone, so a second socket for the other family is not merely
-     * redundant, it is EADDRINUSE.  A named ADDRESS keeps its family; that
-     * is what naming one asks for.
-     */
+    /* No ADDRESS means every address, which on this stack is ONE listener on
+       the IPv6 wildcard: a [::] listener is dual-stack and NetX keys its
+       listen table by port alone, so a second socket is EADDRINUSE. */
     if (args[ARG_ADDRESS] == 0 && tool_sock_have_ipv6(httpd_sb))
     {
         UWORD b;
@@ -8186,12 +7183,8 @@ int main(int argc, char **argv)
         httpd_conn[i].walk_lock   = (BPTR)0;
     }
 
-    /*
-     * One FileInfoBlock per slot, taken once.  260 bytes each, and a stack one
-     * does not fit: a Shell command has 4 KB of stack and this is not the only
-     * thing on it (src/tools/tool_diag.c makes the same call for the same
-     * reason).
-     */
+    /* One FileInfoBlock per slot, taken once.  260 bytes each, and a stack
+       one does not fit: a Shell command has 4 KB of stack. */
     for (i = 0; i < httpd_conns; i++)
     {
         httpd_conn[i].fib = (struct FileInfoBlock *)
@@ -8209,12 +7202,9 @@ int main(int argc, char **argv)
         }
     }
 
-    /*
-     * The two the write methods share.  A walk asks about one path while a
-     * handler is holding what it learned about another, and a COPY examines the
-     * source and then asks what is at the destination, so there is one of each
-     * here rather than one borrowed from the connection.
-     */
+    /* The two the write methods share.  A walk asks about one path while a
+       handler holds what it learned about another, so there is one of each
+       here rather than one borrowed from the connection. */
     httpd_fib2 = (struct FileInfoBlock *)
         ami_alloc((ULONG)sizeof(struct FileInfoBlock));
     httpd_info = (struct InfoData *)ami_alloc((ULONG)sizeof(struct InfoData));
@@ -8282,15 +7272,9 @@ int main(int argc, char **argv)
         http_term_announce(httpd_root, dotted, port, HTTPD_TERM_URL);
     }
 
-    /*
-     * The screen, and the only cost -C has until somebody connects: three
-     * OpenLibrary() calls and one look at the front screen.  Without -C not one
-     * of them happens.
-     *
-     * Here rather than beside the page search, for the reason http_term_init()
-     * is here: everything between the two has a failure path of its own, and
-     * the libraries must not be left open across any of them.
-     */
+    /* The screen, and the only cost -C has until somebody connects.  Here
+       rather than beside the page search, for the reason http_term_init() is:
+       the libraries must not be left open across the failure paths. */
     if (httpd_console_page[0] != '\0')
     {
         UWORD sw = 0, sh = 0, sd = 0;
@@ -8312,12 +7296,9 @@ int main(int argc, char **argv)
 
         http_fb_geometry(&sw, &sh, &sd);
 
-        /* SAID ONCE, AND NOT AN ERROR.  Out of S:User-Startup there is no
-           screen open yet -- LoadWB is at the end of the Startup-Sequence --
-           and -C used to refuse to start over it, which took the whole server
-           down with it.  It serves; the console picks up whichever screen is
-           in front when a browser first asks, so it starts working when
-           Workbench does and nobody has to restart httpd. */
+        /* Said once, and not an error.  Out of S:User-Startup there is no
+           screen open yet, and the console picks up whichever screen is in
+           front when a browser first asks. */
         if (http_fb_screenless())
             tool_printf("The console is at http://%s:%ld%s  (no screen is "
                         "open yet: it serves whichever screen is in front "
@@ -8347,9 +7328,7 @@ int main(int argc, char **argv)
     }
 
     /* After the connections, so a session still running has already given its
-       buffers back and this is only the libraries.  AmigaOS reclaims nothing at
-       process exit: what is not given back here is gone until the machine is
-       restarted (docs/ALLOCATIONS.md). */
+       buffers back.  AmigaOS reclaims nothing at process exit. */
     http_fb_close();
     ami_free(httpd_conn);
     ami_free(httpd_info);

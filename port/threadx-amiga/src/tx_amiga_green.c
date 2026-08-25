@@ -5,39 +5,9 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/**************************************************************************/
-/*                                                                        */
-/*    tx_amiga_green                                    AmigaOS/m68k       */
-/*                                                                        */
-/*  DESCRIPTION                                                           */
-/*                                                                        */
-/*    Everything the green realm adds to the port that is not a rewrite    */
-/*    of one of the eight port files: the initial stack frame, the first-  */
-/*    activation shim, the Exec-signal wait that replaces the baton's      */
-/*    release-around-Wait() bracket, and the counters the prototype is     */
-/*    measured by.                                                         */
-/*                                                                        */
-/*    The model: threads the stack creates through tx_thread_create()     */
-/*    no longer get an Exec Task each.                                    */
-/*    Their context is their ThreadX stack plus a saved SP, and the realm  */
-/*    Task -- the master Task sitting in tx_kernel_enter() -- enters and   */
-/*    leaves those contexts with _tx_green_switch().  A ThreadX handoff    */
-/*    between two such threads is a stack switch, not an Exec              */
-/*    Signal/Wait/dispatch round trip.  Adopted threads (application       */
-/*    Tasks entering through bsdsocket) keep their own Exec Task and the   */
-/*    baton protocol; the realm hands them the baton exactly the way the   */
-/*    old scheduler Task did, and takes it back at their next yield.       */
-/*                                                                        */
-/*    A green thread MUST NOT block in Exec: its Wait() would put the      */
-/*    whole realm Task to sleep with every other green thread's work on    */
-/*    it.  The sites that used to do so (the SANA-II reader loop, the      */
-/*    synchronous device commands) call tx_amiga_green_wait() instead,     */
-/*    which suspends only the green thread and leaves the one real Wait()  */
-/*    to the realm's idle loop.  The probe build turns any stray Exec      */
-/*    Wait() from green context into a counted, logged green wait (see     */
-/*    ami_green_checked_wait in src/netstack/netstack_baton.c).            */
-/*                                                                        */
-/**************************************************************************/
+/* The green realm: threads the stack creates get no Exec Task of their own and run
+   as coroutines inside the realm Task.  A green thread MUST NOT block in Exec --
+   its Wait() sleeps the whole realm -- and calls tx_amiga_green_wait() instead.  */
 
 #define TX_SOURCE_CODE
 
@@ -59,14 +29,8 @@ struct _tx_green_counters   _tx_green_counters;
 
 /* ------------------------------------------------------ signal waiters --- */
 
-/*
- * One slot per green thread currently inside tx_amiga_green_wait().  The
- * realm has few green threads (three readers, IP, mDNS, AutoIP, two DHCPv6),
- * and only the readers and the occasional control command wait on signals,
- * so a small fixed table under the port's own Forbid() discipline is enough.
- *
- * All fields are touched only under Forbid().
- */
+/* One slot per green thread currently inside tx_amiga_green_wait().  All fields
+   are touched only under Forbid().  */
 
 #define TX_GREEN_WAIT_SLOTS     16
 
@@ -100,16 +64,9 @@ UINT    i;
 }
 
 
-/*
- * Hand latched Exec signals to the green threads waiting on them, resuming
- * each one so the dispatch pass that follows can pick it by priority.  Call
- * under Forbid().  The received bits accumulate in the slot; the woken
- * thread collects them (and frees the slot) when it runs.
- *
- * The resume uses the adoption files' shape: _tx_thread_system_state is
- * raised so _tx_thread_system_resume() defers every context switch back to
- * the caller -- the realm loop, which is about to run its own dispatch.
- */
+/* Hand latched Exec signals to the green threads waiting on them, resuming each
+   one so the dispatch pass that follows can pick it by priority.  Call under
+   Forbid(); the raised system_state defers every context switch to the caller. */
 VOID _tx_green_deliver(ULONG sigs)
 {
 
@@ -129,12 +86,9 @@ UINT    i;
         if ((gw -> gw_thread != TX_NULL) && ((gw -> gw_mask & sigs) != 0UL))
         {
 
-            /* A slot whose thread was terminated or completed under it can
-               never collect: purge it here rather than deliver into it, or
-               its mask would stay in the union and the realm would keep
-               consuming those bits -- blind, and once the bit is recycled,
-               out from under the new owner.  The terminate extension purges
-               too; this is the net under the net.  */
+            /* A slot whose thread was terminated or completed can never collect:
+               purge it, or its mask stays in the union and the realm consumes
+               those bits blind -- and, once recycled, from their new owner.  */
             if ((gw -> gw_thread -> tx_thread_state == ((UINT) TX_TERMINATED)) ||
                 (gw -> gw_thread -> tx_thread_state == ((UINT) TX_COMPLETED)))
             {
@@ -160,10 +114,9 @@ UINT    i;
 }
 
 
-/* TX_THREAD_TERMINATED_EXTENSION: a thread terminated while registered in
-   a green wait leaves its slot -- and with it, its mask's claim on the
-   realm's Wait() -- unless it is purged here.  The core lock is held, and
-   the core lock IS the Forbid() the purge wants.  */
+/* TX_THREAD_TERMINATED_EXTENSION: a thread terminated while registered in a green
+   wait leaves its slot, and its mask's claim on the realm's Wait(), unless it is
+   purged here.  The core lock is held, and it IS the Forbid() the purge wants.  */
 VOID _tx_amiga_thread_terminated(TX_THREAD *thread_ptr)
 {
 
@@ -192,11 +145,8 @@ UINT    i;
 
 /* ---------------------------------------------------------- green wait --- */
 
-/*
- * TX_TRUE while the calling code runs in a green context: on the realm Task,
- * with a green thread holding the baton.  The tick Task, adopted callers and
- * plain Exec Tasks all answer TX_FALSE.
- */
+/* TX_TRUE while the calling code runs in a green context: on the realm Task, with
+   a green thread holding the baton.  */
 UINT tx_amiga_green_active(VOID)
 {
 
@@ -223,23 +173,9 @@ UINT         answer;
 }
 
 
-/*
- * Sleep the calling GREEN thread until one of `sigmask`'s Exec signals is
- * latched on the realm Task, and return the bits that arrived.  The green
- * replacement for ami_sana2_block_enter(); Wait(mask); ami_sana2_block_leave().
- *
- * The signals belong to the realm Task (a green thread's CreateMsgPort() and
- * AllocSignal() ran on it), so a latched bit is consumed here with
- * SetSignal() when it is already pending, and otherwise by the realm's
- * Wait()/SetSignal() and routed through the waiter slot.  Bits belonging to
- * a thread that is NOT registered are never consumed by the scheduler --
- * _tx_green_pending_union() covers registered waiters only -- so a signal
- * that arrives while its thread is busy stays latched until that thread
- * waits again.  No lost wakeups.
- *
- * Must not be called holding a ThreadX mutex (same discipline the baton
- * bracket demanded), and only from a green thread.
- */
+/* Sleep the calling GREEN thread until one of `sigmask`'s Exec signals is latched
+   on the realm Task; returns the bits.  Bits of a thread that is NOT registered are
+   never consumed by the scheduler.  Must not be called holding a ThreadX mutex.  */
 ULONG tx_amiga_green_wait(ULONG sigmask)
 {
 
@@ -293,23 +229,18 @@ UINT                     i;
     if (gw == (struct _tx_green_waiter *) 0)
     {
 
-        /* Table full -- cannot happen with the stack's thread census, but a
-           spin here would hang the realm.  Back off through the scheduler
-           -- yield a tick, then run the WHOLE test again from the top (the
-           signal may have latched while we slept) -- iteratively, so a
-           full table sustained for minutes deepens no stack.  */
+        /* Table full.  Back off through the scheduler and run the WHOLE test
+           again from the top, iteratively, so a sustained full table deepens no
+           stack.  */
         Permit();
         (VOID) _tx_thread_sleep(1);
         continue;
     }
 
 #ifdef AMINETXDUO_RXPROBE
-    /* The signal-bit audit's tripwire: two waiters on OVERLAPPING masks
-       would mean one thread's SetSignal()/delivery consumes bits the other
-       is owed -- exactly the blind consumption the design forbids.  Every
-       legitimate waiter owns its bits (its own MsgPort, its own AllocSignal
-       on the realm), so masks are disjoint by construction; say so loudly
-       the day one is not.  */
+    /* Tripwire: two waiters on OVERLAPPING masks would mean one thread's delivery
+       consumes bits the other is owed.  Every legitimate waiter owns its bits, so
+       masks are disjoint by construction; say so loudly the day one is not.  */
     for (i = 0U; i < (UINT) TX_GREEN_WAIT_SLOTS; i++)
     {
         if ((_tx_green_waiter[i].gw_thread != TX_NULL) &&
@@ -329,15 +260,12 @@ UINT                     i;
 
     _tx_green_counters.gc_wait_slow++;
 
-    /* Off the ready list, without switching (interrupt-context shape, the
-       same one netstack_baton.c and tx_amiga_adopt.c use).  */
+    /* Off the ready list, without switching (interrupt-context shape).  */
     _tx_thread_system_state++;
     (VOID) _tx_thread_suspend(thread);
     _tx_thread_system_state--;
 
-    /* Release the baton and give the machine back to the realm loop.  The
-       hold that ends here ends at a would-be driver bracket, which is the
-       site tag the holder ring already names.  */
+    /* Release the baton and give the machine back to the realm loop.  */
     ami_budget_hold_end((APTR) thread, thread -> tx_thread_name,
                         (ULONG) thread -> tx_thread_state,
                         AMI_HOLD_SITE_BRACKET);
@@ -346,10 +274,8 @@ UINT                     i;
     _tx_green_switch(&thread -> tx_thread_stack_ptr, _tx_green_scheduler_sp);
 
     /* Dispatched again: the scheduler delivered our signals, resumed us and
-       switched in, holding the protocol Forbid().  Collect and free.  A
-       resume that was NOT a delivery -- tx_thread_wait_abort(), or any
-       foreign resume -- collects zero, which is the documented contract:
-       callers own a loop around their condition, never this return.  */
+       switched in, holding the protocol Forbid().  A resume that was NOT a
+       delivery collects zero -- callers own a loop around their condition.  */
     got =  gw -> gw_received;
     gw -> gw_thread   =  TX_NULL;
     gw -> gw_mask     =  0UL;
@@ -365,38 +291,9 @@ UINT                     i;
 
 /* ------------------------------------------------- relinquish delivery --- */
 
-/*
- * TX_THREAD_RELINQUISH_PORT_PREPARE: make a green thread's relinquish mean
- * something.
- *
- * The regression this repairs: the mDNS
- * thread's per-record _nx_mdns_yield() calls tx_thread_relinquish(), which
- * yields only if the ready lists show someone of equal or higher priority.
- * Under the baton model they did: a device reply signalled the reader's own
- * Exec Task directly, the reader resumed its TX_THREAD, and the next
- * relinquish saw it and switched.  Inside the realm the reader suspends in
- * tx_amiga_green_wait() and its signals LATCH on the realm Task, delivered
- * only at the top of the realm's scheduler loop -- which cannot run while
- * the mDNS pass holds the machine.  So relinquish compared against lists
- * frozen at pass entry and no-opped for the whole 100-536 ms pass; the
- * yield bound held under baton and silently stopped holding under green.
- *
- * The repair delivers here what the realm loop would have delivered: latched
- * waiter signals (the reader's reply port, the TX reap bit), and the owed
- * ticks once the VERTB server targets the realm -- which also bounds the
- * tick-merge's wheel-walk skew by the yield cadence instead of the longest
- * pass.  Both run under one Forbid(), the same shapes the scheduler loop
- * uses; _tx_green_deliver() raises _tx_thread_system_state around its
- * resumes, so preemption stays deferred to the relinquish decision that
- * follows, exactly where the baton build honoured it (priorities at ThreadX
- * API boundaries, tx_thread_context_restore.c).  If delivery makes a
- * higher-priority thread ready, the stock relinquish logic now sees it and
- * system_return's green arm rotates the realm; if not, the pass continues
- * undisturbed, one SetSignal() poorer.
- *
- * Ordinary contexts (adopted callers, the tick task, foreign tasks) pass
- * straight through: their wakeups really are asynchronous.
- */
+/* TX_THREAD_RELINQUISH_PORT_PREPARE.  A green thread's wakeups latch on the realm
+   Task and are delivered only at scheduler passes, so relinquish must deliver them
+   here or it compares against lists frozen at pass entry and no-ops.  */
 VOID _tx_amiga_relinquish_prepare(VOID)
 {
 
@@ -432,18 +329,9 @@ ULONG   pending;
 
 /* ------------------------------------------------------- first activation --- */
 
-/*
- * Where a green thread's initial frame "returns" to.  The dispatcher's
- * protocol Forbid() is still held; give it back, then enter the thread the
- * way every ThreadX port does.
- *
- * _tx_thread_shell_entry() is not supposed to return (a completed thread
- * suspends itself, and the green _tx_thread_system_return() parks its
- * context on the scheduler).  If it does return -- the preempt-disable /
- * system-state guard declined the suspend -- there is no Exec Task to
- * destroy here and no caller to unwind to: park the context on the
- * scheduler for good.
- */
+/* Where a green thread's initial frame "returns" to.  The dispatcher's protocol
+   Forbid() is still held; give it back, then enter the thread.  If shell_entry ever
+   returns there is no Exec Task to destroy: park the context for good.  */
 VOID _tx_green_thread_begin(VOID)
 {
 
@@ -476,12 +364,9 @@ TX_THREAD   *thread;
 
 /* --------------------------------------------------------- initial frame --- */
 
-/*
- * Lay a first-activation frame on a green thread's stack: the 44-byte
- * d2-d7/a2-a6 image (zeroed -- the tree is not -fbaserel, no register
- * carries an ambient base) under _tx_green_thread_begin as the return
- * address.  Must mirror _tx_green_switch()'s pop exactly; both files say 44.
- */
+/* Lay a first-activation frame on a green thread's stack: the 44-byte d2-d7/a2-a6
+   image (zeroed) under _tx_green_thread_begin as the return address.  Must mirror
+   _tx_green_switch()'s pop exactly; both files say 44.  */
 VOID _tx_green_stack_build(TX_THREAD *thread_ptr)
 {
 
@@ -507,16 +392,9 @@ UINT    i;
 
 /* -------------------------------------------------------- stray-Wait net --- */
 
-/*
- * The probe build's net under the whole realm: netstack_internal.h and
- * sana2_internal.h #define Wait() to this in GREEN_REALM+RXPROBE builds, so
- * any Exec Wait() still reachable from a green thread -- the one defect
- * class that hangs the realm outright -- is caught, counted (gs_stray_wait,
- * MUST read zero) and converted into the green wait it should have been.
- * Ordinary contexts pass straight through.  It lives here and not in the
- * netstack because this file never sees that macro, so the passthrough
- * below calls the real Wait().
- */
+/* The probe build's net: netstack_internal.h and sana2_internal.h #define Wait() to
+   this, so an Exec Wait() reachable from a green thread is counted (gs_stray_wait,
+   MUST read zero) and converted.  Here, so the passthrough calls the real Wait(). */
 #ifdef AMINETXDUO_RXPROBE
 
 ULONG ami_green_checked_wait(ULONG sigmask)
@@ -538,22 +416,9 @@ ULONG ami_green_checked_wait(ULONG sigmask)
 
 /* ------------------------------------------------------- the request gate --- */
 
-/*
- * The client boundary: an application
- * Task's bracket becomes "submit the continuation, park, one Signal back".
- * The continuation is captured by _tx_green_switch() itself -- what it saves
- * on the caller's stack IS the request -- and the same switch moves the
- * caller onto its side stack, where the parker resumes the proxy and sleeps.
- * The realm then dispatches the proxy like any green thread: the vector body
- * resumes at the capture point, on the caller's stack memory, under the
- * realm's feet, free to suspend in NetX at stack-switch cost.
- *
- * What the parked owner still owns is its Exec signal state: Ctrl-C lands on
- * the OWNER, so the parker's Wait() covers the break mask too and collects
- * what arrives for the body to poll through tx_amiga_gate_breaks().  The
- * bits are re-posted to the owner at gate_return, preserving the "EINTR
- * leaves the signal set" contract.
- */
+/* The client boundary: a caller's bracket becomes "submit the continuation, park,
+   one Signal back", the continuation being what _tx_green_switch() saves on its
+   stack.  Ctrl-C lands on the parked OWNER, which collects it for gate_breaks().  */
 
 #ifndef TX_GATE_SIDE_BYTES
 #define TX_GATE_SIDE_BYTES      1024UL
@@ -649,10 +514,8 @@ UINT         status;
     Forbid();
 
     /* Interrupt context across the create, the adopt handshake's shape.  The
-       internal create is used on purpose: _txe_thread_create() would refuse
-       the owner's stack region as overlapping when a second base on the same
-       Task binds, and the region really is shared -- serially, one bracket
-       at a time, which the nest counter already guarantees.  */
+       internal create is deliberate: _txe_thread_create() would refuse the owner's
+       stack region as overlapping, and it is shared serially, one bracket at a time. */
     _tx_thread_system_state++;
     _tx_amiga_gate_bind_pending =  1U;
 
@@ -733,11 +596,9 @@ UINT     i;
 
     _tx_green_counters.gc_gate_calls++;
 
-    /* The capture: everything from here to gate_return becomes the proxy's
-       context.  First continuation: the parker, on the side stack, with this
-       Forbid() still held.  Second continuation: the realm dispatches the
-       proxy and execution RESUMES RIGHT HERE on the realm Task, holding the
-       dispatcher's Forbid(), per the switch protocol.  */
+    /* The capture: everything from here to gate_return becomes the proxy's context.
+       It continues first in the parker, on the side stack, with this Forbid() held;
+       then the realm dispatches the proxy and execution RESUMES RIGHT HERE.  */
     _tx_green_switch(&gate -> ag_Thread.tx_thread_stack_ptr,
                      (APTR) frame);
 
@@ -747,10 +608,9 @@ UINT     i;
 }
 
 
-/* The side-stack half of the owner: resume the proxy, wake the realm, then
-   sleep in the ONE boundary Wait() collecting break bits, and finally jump
-   back into the leave-side context gate_return left behind.  Entered from
-   __tx_gate_park_entry with the capture Forbid() held; never returns.  */
+/* The side-stack half of the owner: resume the proxy, wake the realm, sleep in the
+   ONE boundary Wait() collecting break bits, then jump back into the leave-side
+   context gate_return left.  Entered with the capture Forbid() held; no return. */
 VOID _tx_gate_park(TX_AMIGA_GATE *gate)
 {
 
@@ -833,10 +693,9 @@ UINT         dead;
         gate -> ag_Active =  0U;
     }
 
-    /* Store the leave-side context and give the machine to the realm loop.
-       The parked owner resumes it -- execution continues after this call on
-       the OWNER Task -- once the realm lets the machine go and the owner's
-       Wait() returns.  */
+    /* Store the leave-side context and give the machine to the realm loop.  The
+       parked owner resumes it, so execution continues after this call on the
+       OWNER Task.  */
     _tx_green_switch(&gate -> ag_ResumeSP, _tx_green_scheduler_sp);
 
     /* === On the owning Task again, under the parker's Forbid(). === */
@@ -1000,12 +859,8 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
     stats -> gs_gate_fallback =  _tx_green_counters.gc_gate_fallback;
     stats -> gs_gate_fast     =  _tx_green_counters.gc_gate_fast;
 
-    /* The signal-bit audit's live figure: how many of the 16 allocatable
-       bits (16..31; Exec pre-allocates the low half) the realm Task has
-       out.  Every green thread's CreateMsgPort()/AllocSignal() draws from
-       this one budget -- the scheduler signal, two bits per interface
-       (reader reply port + TX reap), and a transient bit per in-flight
-       synchronous device command.  */
+    /* How many of the 16 allocatable bits (16..31) the realm Task has out.  Every
+       green thread's CreateMsgPort()/AllocSignal() draws from this one budget.  */
     stats -> gs_realm_sigbits =  0UL;
     if (_tx_amiga_scheduler_task != (VOID *) 0)
     {

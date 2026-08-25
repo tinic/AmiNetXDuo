@@ -1,45 +1,5 @@
 /*
- * anxnet.device: what the probe did, published where a command can read it.
- *
- * THE FAULT THIS EXISTS FOR.  A card that does not attach produces no unit, so
- * there is nothing to OpenDevice() and nothing to ask.  Everything the driver
- * knows about why -- which window it wrote, what the chip answered, which CIS
- * tuples were there -- happened inside the device's romtag init and was
- * reachable only by rebuilding with NETDEV_TRACE and attaching a serial cable.
- * That is not a thing a user can be asked to do, so the questions the audit
- * could not settle stayed open.
- *
- * So the probe records itself into this structure whatever the outcome, and
- * the structure is published under a public semaphore name.  CheckNetDevice
- * finds it and prints it.  Nothing about that path needs a unit, an open
- * device, a running stack, or a filesystem.
- *
- * WHY A SEMAPHORE AND NOT A MESSAGE PORT.  This is a snapshot a reader copies,
- * not a conversation: there is no request the tool could make that the device
- * could answer better than "here is what happened".  A public MsgPort would
- * buy request/response and cost a message loop inside a driver that has no
- * task of its own -- the probe runs in the romtag init, on whatever process
- * called OpenDevice(), and there is nobody left afterwards to serve a port.
- * The semaphore is also what this tree already does for the same shape of
- * problem: AmiHealthMark in aminetxduo/health.h is published exactly this way,
- * with the SignalSemaphore first so FindSemaphore() returns the record.
- *
- * NOBODY OBTAINS THE SEMAPHORE.  It is a name to be found, and the reader
- * copies the whole record under Forbid().  The device removes it under
- * Forbid() in its expunge, before the memory holding it can go away, so a
- * reader that holds Forbid() across find and copy cannot be reading a freed
- * one.  Blocking on the semaphore would mean waiting on a driver that may be
- * the thing that is broken.
- *
- * WHY THE RECORD IS CODES AND THE PROSE IS IN THE TOOL.  The device is
- * resident and the strings are long -- a whole sentence per step, because a
- * user has to be able to read the output without a table.  Putting them in the
- * driver would keep every one of them in memory forever to be printed at most
- * once.  The user never sees a code: CheckNetDevice turns each one into the
- * sentence.  ad_Version and ad_Size are what stop a tool and a device that
- * disagree about this file from misreading each other, since once both are in
- * C: and DEVS: they are upgraded separately.
- *
+ * anxnet.device probe record, published under a public semaphore name.
  * SPDX-License-Identifier: MIT
  */
 
@@ -58,24 +18,14 @@ extern "C" {
 #define ANXDIAG_MAGIC       0x414E5844UL      /* 'ANXD' */
 #define ANXDIAG_VERSION     1
 
-/*
- * How many steps are kept.  The probe walks every ConfigDev on the bus and
- * then every fixed/PCMCIA row, and the PCMCIA row alone contributes about
- * fifteen; 64 covers a machine with four boards and the slot with room to
- * spare, and the recorder counts what it had to drop rather than wrapping.
- */
 #define ANXDIAG_STEPS       64
 
 /* ad_Card for a step that is about the machine rather than one card. */
 #define ANXDIAG_NOCARD      0xffffu
 
 /*
- * The steps.  Numbers are a wire format between two binaries and are never
- * reused or renumbered; a value CheckNetDevice does not know is printed as
- * itself rather than dropped, so an older tool against a newer device still
- * says something true.
- *
- * The comment on each is what the tool prints, in short.
+ * Step codes are a wire format between device and tool: never reuse or
+ * renumber one.
  */
 
 /* --- the machine ------------------------------------------------------- */
@@ -103,12 +53,7 @@ extern "C" {
                                        detection; value = the byte            */
 #define ANXDIAG_ODD_RETRY      21   /* odd registers failed a byte read and
                                        the CNet16 word path was tried         */
-#define ANXDIAG_CHIP           22   /* value = NETDEV_CHIP_*.  Recorded before
-                                       attach, so a card that never attaches
-                                       still says what it was taken for -- and
-                                       so the reader does not claim a transfer
-                                       mode for a LANCE, which has no data
-                                       port to have one                       */
+#define ANXDIAG_CHIP           22   /* value = NETDEV_CHIP_*                 */
 #define ANXDIAG_EL3_MFG        23   /* EtherLink III: the window 0 manufacturer
                                        ID exactly as read, before any swap    */
 #define ANXDIAG_EL3_ORDER      24   /* EtherLink III: 0 = the register window
@@ -148,15 +93,10 @@ extern "C" {
 #define ANXDIAG_PC_IRQSKIP     48   /* pre-V39 resource, bits not meaningful */
 #define ANXDIAG_PC_CLAIMED     49   /* slot claimed; value = register base   */
 #define ANXDIAG_PC_CARD        50   /* which row the CIS picked; value = the
-                                       netdev_cards[] index.  The steps above
-                                       this one are recorded against the
-                                       MACHINE and not a card, because until
-                                       this step there is no card yet         */
+                                       netdev_cards[] index                   */
 #define ANXDIAG_PC_CFTABLE     51   /* the first configuration table entry's
                                        leading body bytes, 2 << 24 | 3 << 16 |
-                                       4 << 8 | 5 -- the I/O descriptor this
-                                       driver does not parse, so that a report
-                                       can say what it would have said        */
+                                       4 << 8 | 5                             */
 #define ANXDIAG_PC_MISC        52   /* CardMiscControl()'s answer to the
                                        I/O-mode call; a bit cleared in it is a
                                        bit this machine does not support      */
@@ -168,21 +108,10 @@ extern "C" {
 #define ANXDIAG_PC_RESET       68   /* CardResetCard() at claim, 1 = pulsed   */
 #define ANXDIAG_CLOCK          69   /* iterations of a bare spin per raster
                                        line, measured against the beam once at
-                                       claim; 0 = no readable beam, so every
-                                       wait in the driver is a counted loop
-                                       again.  Tens on a 14 MHz 68020, tens of
-                                       thousands behind an accelerator, and
-                                       that ratio is why a counted delay is
-                                       not a delay -- see netdev_clock.h      */
-#define ANXDIAG_CLOCK_LINE     70   /* microseconds a scan line was costed at,
-                                       from counting the lines in one field:
-                                       63 on any 15 kHz mode, 31 on any 31 kHz
-                                       one, 30 when the field was in neither
-                                       band and the driver fell back to
-                                       assuming.  0 = no beam.  Beside the
-                                       figure above so that a machine timing
-                                       its waits WRONGLY can be told from one
-                                       that cannot time them at all           */
+                                       claim; 0 = no readable beam            */
+#define ANXDIAG_CLOCK_LINE     70   /* microseconds a scan line was costed at:
+                                       63 at 15 kHz, 31 at 31 kHz, 30 when the
+                                       field was in neither band.  0 = no beam */
 
 /* --- the ISA Plug and Play bridge, netdev_isapnp.c --------------------- */
 #define ANXDIAG_PNP_VENDOR     60   /* isolation serial identifier bytes 0..3,
@@ -249,14 +178,8 @@ typedef struct AnxDiagMark
     UWORD   ad_Dropped;                 /* supported boards with no unit     */
 
     /*
-     * The card names, so the tool never has to agree with netdev_cards.c
-     * about row order: index by ds_Card.
-     *
-     * COPIED IN, not pointed at.  A pointer here would be into the device's
-     * own segment, and the reader prints after it has let Forbid() go -- the
-     * one moment the segment may be expunged out from under it.  The whole
-     * record is copied by value for that reason, and a record with pointers
-     * in it cannot be.
+     * Card names, indexed by ds_Card.  Copied in, never pointed at: the whole
+     * record is read by value, so it must hold no pointer into the device.
      */
     UWORD   ad_Cards;                   /* how many ad_Name entries are set  */
     UWORD   ad_Pad;

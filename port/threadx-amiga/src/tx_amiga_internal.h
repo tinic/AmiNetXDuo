@@ -1,12 +1,6 @@
-/*
- * AmiNetXDuo, private glue shared between the ThreadX Exec port sources.
- * Not installed; not visible to the ThreadX or NetX Duo cores.
- *
- * Include order matters: "tx_api.h" (and therefore tx_port.h) must come first
- * so that ThreadX's VOID/ULONG typedefs beat <exec/types.h>'s macros.
- *
- * SPDX-License-Identifier: MIT
- */
+/* AmiNetXDuo, private glue shared between the ThreadX Exec port sources.
+   Include "tx_api.h" first: ThreadX's VOID/ULONG typedefs must beat those of
+   <exec/types.h>.  SPDX-License-Identifier: MIT  */
 
 #ifndef TX_AMIGA_INTERNAL_H
 #define TX_AMIGA_INTERNAL_H
@@ -25,8 +19,7 @@
 #include <proto/exec.h>
 
 /* The baton-holder side of the receive step budget (a no-op outside
-   AMINETXDUO_RXPROBE builds).  The port links aminetxduo_common already, for
-   ami_log(); this adds nothing a shipped build carries.  */
+   AMINETXDUO_RXPROBE builds).  */
 #include "aminetxduo/budget.h"
 
 
@@ -40,26 +33,9 @@ static __inline VOID _tx_amiga_newlist(struct List *list)
 }
 
 
-/*
- * Per-Task control block for every Exec Task the port creates.
- *
- * The teardown state lives here and not in the TX_THREAD, because a dying task
- * must be able to destroy itself using only memory it owns.  If the reaper gave
- * up on it (see _tx_amiga_reap()) the TX_THREAD may already have been deleted,
- * reused or freed by the application by the time the task finally unblocks;
- * reading tx_thread_amiga_flags at that point would be a use-after-free.  This
- * block is registered in tc_MemEntry, so it stays valid for as long as the Task
- * does.
- *
- * ctrl_task is at offset 0, so the struct Task * the rest of the port passes
- * around is the control block.
- *
- * Identifying one from a bare struct Task * has to be safe on a foreign task
- * too, _tx_amiga_thread_completed() runs before the port knows whose task it
- * is on.  The test therefore never reads past the struct Task: tc_UserData
- * points back at the Task itself, which no other task does, and only once that
- * holds is ctrl_magic (our own memory by then) consulted.
- */
+/* Per-Task control block, registered in tc_MemEntry so it outlives the TX_THREAD:
+   a task the reaper gave up on must be able to destroy itself from memory it
+   owns.  ctrl_task is at offset 0, so a struct Task * IS the control block.  */
 
 #define TX_AMIGA_CTRL_MAGIC     0x54584143UL        /* 'TXAC'  */
 
@@ -76,21 +52,9 @@ struct _tx_amiga_ctrl
 };
 
 
-/*
- * Create an Exec Task on a caller-supplied stack.
- *
- * Two allocations, because RemTask() hands each MemList in tc_MemEntry to
- * FreeEntry(), which frees both the entries the list describes and the MemList
- * structure itself.  A MemList that lives inside the block it describes is
- * therefore freed twice, Guru 01000009, AN_FreeTwice, on every task that
- * exits.  The Task (inside its control block) and the MemList are separate
- * blocks for that reason.
- *
- * The stack is not owned by the task: for ThreadX threads it belongs to whoever
- * called tx_thread_create().
- *
- * Returns the struct Task * or NULL.
- */
+/* Create an Exec Task on a caller-supplied stack.  The MemList is a SEPARATE
+   allocation: RemTask() hands it to FreeEntry(), which frees both the entries it
+   describes and the MemList itself.  The stack is not owned by the task.  */
 struct Task *_tx_amiga_task_create(CHAR *name, BYTE priority, VOID (*entry)(VOID),
                                    APTR stack, ULONG stack_size, APTR user_data);
 
@@ -129,35 +93,14 @@ static __inline UINT _tx_amiga_forbidden(VOID)
 }
 
 
-/*
- * Set by tx_amiga_kernel_stop() once its preconditions are met, and cleared
- * only when the kernel is fully down again.
- *
- *   - _tx_thread_schedule() returns instead of dispatching, which is the only
- *     way the master Task ever leaves tx_kernel_enter();
- *   - tx_amiga_adopt_thread() refuses, so nothing new joins a kernel that is
- *     on its way out.
- */
+/* Set by tx_amiga_kernel_stop() once its preconditions are met, cleared only when
+   the kernel is fully down: _tx_thread_schedule() returns instead of dispatching,
+   and tx_amiga_adopt_thread() refuses.  */
 extern volatile UINT    _tx_amiga_kernel_stopping;
 
-/*
- * Hand the baton straight to the next thread, instead of poking the scheduler
- * Task and letting it do it.  Must be called with the core lock held and with
- * the baton already released.  TX_TRUE if a thread was dispatched.
- *
- * Every ThreadX handoff used to be three Exec context switches: the yielding
- * Task signalled the scheduler and blocked, Exec dispatched the scheduler, the
- * scheduler signalled the target and blocked, Exec dispatched the target.  The
- * middle two exist only to run the ten lines below, which the yielding Task can
- * run itself.  A 1 MB transfer took 2634 handoffs and cost 5844 Exec dispatches
- * (docs/RESEARCH.md 89), and the scheduler Task was 8.1% of it.
- *
- * The guard is the scheduler loop's own, so the two cannot both dispatch: both
- * test _tx_thread_current_ptr under Forbid(), and only one can find it TX_NULL.
- * A caller that gets TX_FALSE must fall back to _tx_amiga_wake_scheduler(),
- * because the reason may be a raised _tx_thread_system_state that will clear
- * later.
- */
+/* Hand the baton straight to the next thread instead of poking the scheduler
+   Task.  Call with the core lock held and the baton already released.  TX_TRUE if
+   a thread was dispatched; TX_FALSE means fall back to _tx_amiga_wake_scheduler(). */
 static __inline UINT _tx_amiga_dispatch_inline(VOID)
 {
 TX_THREAD   *thread_ptr;
@@ -174,11 +117,9 @@ TX_THREAD   *thread_ptr;
     }
 
 #ifdef AMINETXDUO_GREEN_REALM
-    /* A green thread's context can only be entered by a stack switch, and
-       only the realm Task's scheduler loop may perform one -- this inline
-       runs on whatever Task is yielding.  Decline, so the caller pokes the
-       realm (see _tx_amiga_wake_needed: dispatched FALSE, execute set,
-       current NULL is exactly the poke case) and the realm dispatches.  */
+    /* A green thread's context can only be entered by a stack switch, and only
+       the realm Task's scheduler loop may perform one -- this inline runs on
+       whatever Task is yielding.  Decline, so the caller pokes the realm.  */
     if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_GREEN) != 0U)
     {
         return((UINT) TX_FALSE);
@@ -202,33 +143,9 @@ TX_THREAD   *thread_ptr;
 }
 
 
-/*
- * Does a failed _tx_amiga_dispatch_inline() need the scheduler Task poking?
- *
- * Only when the scheduler could do something the caller could not, and there is
- * exactly one such case.  _tx_thread_schedule() dispatches under the same three
- * conditions the inline tests, so a failure means one of:
- *
- *   - nothing is ready.  The scheduler has nothing to dispatch either, and
- *     whatever makes a thread ready next either dispatches it or pokes.
- *   - somebody holds the baton.  The scheduler REFUSES to dispatch while
- *     _tx_thread_current_ptr is non-NULL -- that refusal is the model, see the
- *     loop in tx_thread_schedule.c -- and the holder hands the baton on itself
- *     at its next release.  The poke is a wake, a Forbid, a compare and a
- *     Wait: two Exec context switches that cannot change anything.
- *   - _tx_thread_system_state is raised (a tick, or an adopt window).  The
- *     poke is kept: the window closes on another Task, and this is the
- *     insurance against the site that closes it losing the wake.
- *
- * The second case is the one the receive path lives in.  Over a 46.7 s bulk
- * read the scheduler Task was woken thousands of times and dispatched NOTHING
- * (TX_AMIGA_SC_SCHED_DISPATCH 0, every handoff TX_AMIGA_SC_DIRECT).  The wakes
- * are not free: the scheduler Task sits at TX_AMIGA_TASK_PRIORITY like every
- * other ThreadX task, so each one puts a competitor on Exec's ready list at the
- * moment the woken thread is trying to be dispatched.
- *
- * Call with the core lock held: both pointers are only meaningful under it.
- */
+/* Does a failed _tx_amiga_dispatch_inline() need the scheduler Task poking?  Only
+   when the scheduler could do what the caller could not -- a held baton is handed
+   on by its holder.  Call with the core lock held.  */
 static __inline UINT _tx_amiga_wake_needed(UINT dispatched)
 {
     if (dispatched != ((UINT) TX_FALSE))
@@ -247,54 +164,35 @@ static __inline UINT _tx_amiga_wake_needed(UINT dispatched)
 }
 
 
-/*
- * Park the calling Exec Task until it holds the ThreadX baton (defined in
- * tx_thread_system_return.c).
- *
- * Returns TX_TRUE when the thread has been dispatched.  Returns TX_FALSE only
- * for an adopted thread that was torn down under it, the Task must then
- * unwind out of ThreadX.  For a Task that ThreadX created, teardown is handled
- * in place and the function does not return at all.
- */
+/* Park the calling Exec Task until it holds the ThreadX baton (defined in
+   tx_thread_system_return.c).  TX_FALSE only for an adopted thread torn down
+   under it, which must then unwind; for a port-created Task it never returns.  */
 UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr);
 
 
-/*
- * Destroy the calling Exec Task (one the port created).  Never returns.
- * Touches only the task's own control block, so it is safe even for a task the
- * reaper had to abandon.
- */
+/* Destroy the calling Exec Task (one the port created).  Never returns.  Touches
+   only the task's own control block, so it is safe even for a task the reaper had
+   to abandon.  */
 VOID _tx_amiga_task_destroy(struct _tx_amiga_ctrl *ctrl);
 
 
-/*
- * TX_THREAD_COMPLETED_EXTENSION.  Runs on the thread's own Exec Task the
- * instant its entry function returns, before _tx_thread_system_suspend() does
- * any ready-list surgery.  That is the only place a detached zombie can be
- * caught before it corrupts ThreadX with a TX_THREAD that no longer exists.
- */
+/* TX_THREAD_COMPLETED_EXTENSION.  Runs on the thread's own Exec Task the instant
+   its entry function returns, before _tx_thread_system_suspend() does any
+   ready-list surgery.  */
 VOID _tx_amiga_thread_completed(VOID);
 
 
-/*
- * Add `ticks` to _tx_timer_system_clock without walking the timer wheel
- * (tx_timer_interrupt.c).  The only writer of the ThreadX clock in this port:
- * _tx_timer_interrupt() walks the wheel and nothing else.
- */
+/* Add `ticks` to _tx_timer_system_clock without walking the timer wheel
+   (tx_timer_interrupt.c).  The only writer of the ThreadX clock in this port.  */
 VOID _tx_amiga_timer_clock_advance(ULONG ticks);
 
-/*
- * The shared tick service (tx_initialize_low_level.c): everything one tick
- * wakeup does, E-Clock-based and idempotent, callable from the tick task
- * (every build) and from the realm's scheduler loop (green builds, once
- * tr_realm says the VERTB server targets the realm).  Runs under its own
- * Forbid(); a caller already holding one nests.
- */
+/* The shared tick service (tx_initialize_low_level.c): everything one tick wakeup
+   does, E-Clock-based and idempotent, called by the tick task (every build) and by
+   the realm's scheduler loop (green builds).  Runs under its own Forbid().  */
 VOID _tx_amiga_tick_deliver(UINT from_realm);
 
-/* Its state, one instance in tx_initialize_low_level.c.  The scheduler loop
-   reads tr_realm (under Forbid()) to know whether tick servicing is its
-   job; everything else is the service's own.  */
+/* Its state, one instance in tx_initialize_low_level.c.  The scheduler loop reads
+   tr_realm under Forbid(); everything else is the service's own.  */
 struct _tx_amiga_tick_run
 {
     ULONG   tr_eclock_hz;
@@ -320,16 +218,9 @@ extern volatile UINT    _tx_amiga_kernel_up;
 extern volatile UINT    _tx_amiga_timer_stop;
 extern volatile ULONG   _tx_amiga_zombies;
 
-/*
- * Zombies that have not yet unblocked and destroyed themselves.
- *
- * _tx_amiga_zombies counts every zombie ever declared and never goes down, so
- * it only tells the caller of tx_thread_delete() that this happened.  This one
- * goes back down when the zombie finally reaches _tx_amiga_task_destroy(), and
- * is what tx_amiga_kernel_stop() consults: a program may exit safely once its
- * zombies are gone, but not while one is still parked in Exec with its entry
- * point in a code hunk that is about to be unloaded.
- */
+/* Zombies that have not yet unblocked and destroyed themselves.  Goes back down as
+   each reaches _tx_amiga_task_destroy(); tx_amiga_kernel_stop() requires zero, and
+   a program cannot be unloaded while one is still parked in Exec.  */
 extern volatile ULONG   _tx_amiga_zombies_live;
 
 
@@ -337,13 +228,9 @@ extern volatile ULONG   _tx_amiga_zombies_live;
 
 /* ------------------------------------------------------- the green realm --- */
 
-/*
- * The green realm (tx_amiga_green.c, tx_green_switch.S): every ThreadX thread
- * the stack creates runs as a coroutine INSIDE the realm Task (the master Task
- * that called tx_kernel_enter()), on the stack tx_thread_create() supplied,
- * with a real m68k context switch instead of an Exec Signal/Wait handoff.
- * Adopted threads keep their own Exec Task and the baton protocol unchanged.
- */
+/* The green realm (tx_amiga_green.c, tx_green_switch.S): every ThreadX thread the
+   stack creates runs as a coroutine INSIDE the realm Task, with a real m68k
+   context switch.  Adopted threads keep their Exec Task and the baton protocol. */
 
 /* TX_TRUE if the thread's context is a green (realm-internal) one.  */
 static __inline UINT _tx_amiga_thread_green(TX_THREAD *thread_ptr)
@@ -352,40 +239,26 @@ static __inline UINT _tx_amiga_thread_green(TX_THREAD *thread_ptr)
            ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE));
 }
 
-/*
- * The realm scheduler's saved context.  A green thread yields by saving its
- * own SP into tx_thread_stack_ptr and loading this one; the scheduler loop is
- * then running again, right after the _tx_green_switch() that dispatched.
- */
+/* The realm scheduler's saved context.  A green thread yields by saving its own
+   SP into tx_thread_stack_ptr and loading this one.  */
 extern APTR     _tx_green_scheduler_sp;
 
-/*
- * The switch itself (tx_green_switch.S): save d2-d7/a2-a6 and the return
- * address on the current stack, store SP through save_slot, load new_sp, pop
- * the same frame, return.  PROTOCOL: called with exactly one Forbid() held;
- * the code at the resumed side's switch call site (or the thread begin shim)
- * performs the matching Permit().  Holding the Forbid across the switch makes
- * the _tx_thread_current_ptr surgery and the switch one atom.
- */
+/* The switch itself (tx_green_switch.S): saves d2-d7/a2-a6 and the return address,
+   stores SP through save_slot, loads new_sp.  PROTOCOL: called with exactly one
+   Forbid() held; the resumed side performs the matching Permit().  */
 VOID    _tx_green_switch(APTR *save_slot, APTR new_sp);
 
 /* First activation target of a green thread (tx_amiga_green.c): the initial
    frame's return address.  Permit()s the dispatcher's Forbid, then runs
-   _tx_thread_shell_entry(); if that ever returns, the context parks itself
-   on the scheduler for good.  */
+   _tx_thread_shell_entry().  */
 VOID    _tx_green_thread_begin(VOID);
 
 /* Build the initial switch frame on a green thread's stack (tx_amiga_green.c).  */
 VOID    _tx_green_stack_build(TX_THREAD *thread_ptr);
 
-/*
- * Green Exec-signal waits.  A green thread that must sleep on Exec signals
- * (its MsgPort lives on the realm Task, so the bits land there) registers its
- * mask and suspends; the realm's idle Wait() covers the union of registered
- * masks and the scheduler delivers latched bits before every dispatch pass.
- * _tx_green_pending_union() and _tx_green_deliver() are the scheduler's half;
- * tx_amiga_green_wait() (public, tx_amiga.h) is the thread's half.
- */
+/* Green Exec-signal waits.  A green thread registers its mask and suspends; the
+   realm's idle Wait() covers the union of registered masks and the scheduler
+   delivers latched bits before every dispatch pass.  */
 ULONG   _tx_green_pending_union(VOID);          /* call under Forbid()        */
 VOID    _tx_green_deliver(ULONG sigs);          /* call under Forbid()        */
 VOID    _tx_green_forget(TX_THREAD *thread_ptr);/* call under Forbid()        */
@@ -406,14 +279,9 @@ struct _tx_green_counters
 };
 extern struct _tx_green_counters    _tx_green_counters;
 
-/*
- * The request gate's create handshake (tx_amiga_gate_bind() ->
- * _tx_thread_stack_build()): non-zero while the TX_THREAD being created is a
- * gate proxy, which gets the green identity fields but NO initial frame --
- * its context is written by the capture switch at every tx_amiga_gate_call().
- * A pair of globals for the reason the adopt handshake is one: create zeroes
- * the control block before stack_build sees it.
- */
+/* Non-zero while the TX_THREAD being created is a gate proxy: green identity
+   fields but NO initial frame (the capture switch writes its context).  A global
+   because _tx_thread_create() zeroes the control block before stack_build runs. */
 extern volatile UINT    _tx_amiga_gate_bind_pending;
 
 /* The C half of the side-stack parker (tx_amiga_green.c); entered through
@@ -421,9 +289,8 @@ extern volatile UINT    _tx_amiga_gate_bind_pending;
    Forbid() still held.  Never returns.  */
 VOID    _tx_gate_park(TX_AMIGA_GATE *gate);
 
-/* The asm shim the side frame returns into (tx_green_switch.S): moves the
-   gate out of the a2 slot and calls _tx_gate_park().  Only its address is
-   taken.  */
+/* The asm shim the side frame returns into (tx_green_switch.S): moves the gate out
+   of the a2 slot and calls _tx_gate_park().  Only its address is taken.  */
 VOID    _tx_gate_park_entry(VOID);
 
 #endif /* AMINETXDUO_GREEN_REALM */

@@ -1,63 +1,6 @@
-/*
- * clients/dropbear/localoptions.h, what is compiled into the AmigaOS
- * dbclient, and why each thing is off.
- *
- * Dropbear reads this from the BUILD directory if it exists; clients/dropbear/
- * build.sh copies it there.  Everything not named here keeps the value in
- * third_party/dropbear/src/default_options.h, so this file is the whole
- * difference between upstream's defaults and ours.
- *
- * These need fork(), which AmigaOS does not have:
- *
- *   DROPBEAR_CLI_PROXYCMD   -J: runs a helper program and talks to it over a
- *                           pipe.  fork() + exec() + pipe(), none of which
- *                           AmigaOS has.
- *   DROPBEAR_CLI_NETCAT     -B: same machinery.
- *   DROPBEAR_CLI_ASKPASS_HELPER
- *                           forks $SSH_ASKPASS.  clients/dropbear/
- *                           amiga_dropbear.c has a getpass() over dos.library
- *                           instead.
- *
- * With these three off, a linked dbclient calls fork() from nowhere: the SSH
- * client does not need a process model, only the server does.
- *
- * These need a Unix socket or a listening socket:
- *
- *   DROPBEAR_CLI_AGENTFWD   talks to ssh-agent over AF_UNIX.  bsdsocket.library
- *                           has no AF_UNIX and there is no agent to talk to.
- *   DROPBEAR_CLI_LOCALTCPFWD / REMOTETCPFWD
- *                           -L / -R.  These work in principle, listen() and
- *                           accept() are published vectors, and are off only
- *                           because nothing has tested them yet.  First line to
- *                           turn back on.
- *
- * These are too big or too slow for a 14 MHz 68020:
- *
- *   DROPBEAR_SNTRUP761 / DROPBEAR_MLKEM768
- *                           post-quantum hybrid key exchange.  ML-KEM-768 is
- *                           ~2,400 bytes of public key and a lattice
- *                           multiplication; sntrup761 is worse.  Both are
- *                           preferred over curve25519 when offered, so leaving
- *                           them in would make every handshake pay for them.
- *                           OpenSSH still offers curve25519-sha256, so nothing
- *                           is lost in reachability.
- *
- *   DROPBEAR_SMALL_CODE 0   the opposite of upstream's default.
- *                           docs/RESEARCH.md §18 measured this machine: no
- *                           data cache, so a 4 KB table costs the same per
- *                           lookup as a 1 KB one (159.845 ns against 159.847),
- *                           and the small-table layouts pay rotates to save a
- *                           footprint that is free here.  Small code is a
- *                           pessimisation on this part.
- *
- * Server options appear here because sysoptions.h checks them unconditionally.
- * DROPBEAR_SVR_PASSWORD_AUTH must be 0: it is `#error ... requires crypt()`
- * and this toolchain has no crypt().  DROPBEAR_SVR_MULTIUSER must be 0: it
- * needs setresgid().  Both fire while building dbclient, which compiles none
- * of the server, and say nothing about what a future server would do.
- *
- * SPDX-License-Identifier: MIT
- */
+/* clients/dropbear/localoptions.h: the whole difference between upstream's
+ * default_options.h and this build.  build.sh copies it into the BUILD
+ * directory, which is where Dropbear reads it from.  SPDX-License-Identifier: MIT */
 
 #ifndef DROPBEAR_AMIGA_LOCALOPTIONS_H
 #define DROPBEAR_AMIGA_LOCALOPTIONS_H
@@ -79,34 +22,13 @@
 #define DROPBEAR_DSS 0
 #define DROPBEAR_X11FWD 0
 
-/* no data cache: see the note above */
+/* no data cache on this part, so a small table costs the same per lookup as a
+   large one and small-code layouts only pay rotates: a pessimisation here */
 #define DROPBEAR_SMALL_CODE 0
 
-/*
- * The optimistic key exchange guess costs this machine a whole scalar
- * multiplication and saves it one round trip.
- *
- * With DROPBEAR_KEX_FIRST_FOLLOWS on (upstream's default), dbclient sends a
- * KEXDH_INIT for its own first-preference kex before it has seen the server's
- * KEXINIT, betting the server prefers the same one.  When the bet is wrong the
- * server discards the packet, `proposal mismatch: my mlkem768x25519-sha256
- * peer curve25519-sha256`, `skipped packet (type 30)` in its log, and
- * cli-kex.c's send_msg_kexdh_init() runs again, starting with
- * cli_kex_free_param() and a fresh gen_kexcurve25519_param().
- *
- * A modern OpenSSH always wins that bet, because it prefers an ML-KEM hybrid
- * and we do not offer one (see above), so the guess always loses here.
- *
- * Measured on the emulated 14 MHz A1200, same binary otherwise, same server,
- * timed by the guest's own clock:
- *
- *     guess on   96.06  95.88  96.06  95.92 s   (mean 95.98)
- *     guess off  84.18  83.96 s                (mean 84.07)
- *
- * Just under twelve seconds, one curve25519 scalar multiplication on this
- * part.  The guess buys one round trip, a few milliseconds on any link this
- * machine can saturate.
- */
+/* The optimistic kex guess sends a KEXDH_INIT before the server's KEXINIT, on
+   the bet that the server prefers our first choice.  A modern OpenSSH prefers an
+   ML-KEM hybrid, off above, so the bet always loses and costs a scalar multiply. */
 #define DROPBEAR_KEX_FIRST_FOLLOWS 0
 
 /* no ~/.ssh/config to read, and no MOTD worth printing over a serial-speed
@@ -114,31 +36,14 @@
 #define DROPBEAR_USE_SSH_CONFIG 0
 #define DO_MOTD 0
 
-/*
- * The entropy device.  dbrandom.c's seedrandom() opens this path, reads 32
- * bytes and dropbear_exit()s if it cannot; there is no build without one.
- * AmigaOS has no /dev/urandom, so the name is changed to something shaped like
- * an AmigaOS device, and clients/dropbear/amiga_dropbear.c intercepts open()
- * for exactly this string and answers it from src/common/ami_random.c.  The
- * string must match AMIGA_URANDOM_DEV there.  See the entropy note in that
- * file: the pool credits itself about 21 bits and reports itself unseeded.
- */
+/* dbrandom.c's seedrandom() has no fallback and there is no build without a
+   device.  This string must match AMIGA_URANDOM_DEV in clients/dropbear/
+   amiga_dropbear.c, which intercepts open() for exactly it. */
 #define DROPBEAR_URANDOM_DEV "RANDOM:"
 
-/*
- * The server halves sysoptions.h insists on having an answer for.
- *
- * DROPBEAR_SVR_PASSWORD_AUTH must be 0: `#error ... requires crypt()`.
- * DROPBEAR_SVR_MULTIUSER must be 0: DROPBEAR_SVR_DROP_PRIVS follows it and
- * needs setresgid().
- *
- * The second one is not free: with it at 0, common-session.c:71 arms a runtime
- * guard in every binary including the client.  It calls getgroups(0, NULL) and
- * exits unless the answer is -1 with ENOSYS, so the option cannot be set by
- * accident on a machine that does have users.  AmigaOS 3.x has neither users
- * nor groups, so clients/dropbear/amiga_dropbear.c answers ENOSYS and the
- * guard passes for the true reason rather than by being defeated.
- */
+/* sysoptions.h insists on an answer.  PASSWORD_AUTH must be 0 (`#error ...
+   requires crypt()`); MULTIUSER must be 0 (DROP_PRIVS needs setresgid()), and at
+   0 it arms common-session.c:71's getgroups()-must-answer-ENOSYS guard. */
 #define DROPBEAR_SVR_PASSWORD_AUTH 0
 #define DROPBEAR_SVR_MULTIUSER 0
 #define DROPBEAR_SVR_AGENTFWD 0

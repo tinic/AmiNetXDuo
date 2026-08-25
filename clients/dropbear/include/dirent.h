@@ -1,8 +1,6 @@
-/* clients/dropbear/include, see clients/dropbear/build.sh.
- * newlib's <dirent.h> on this toolchain is `#error "<dirent.h> not supported"`.
- * Dropbear's includes.h includes it unconditionally and dbclient never opens a
- * directory, so this is the declaration nothing calls.
- * SPDX-License-Identifier: MIT */
+/* clients/dropbear/include, see clients/dropbear/build.sh.  newlib's <dirent.h>
+ * is `#error "not supported"` and Dropbear's includes.h includes it
+ * unconditionally; nothing here is ever called.  SPDX-License-Identifier: MIT */
 #ifndef AMIGA_DIRENT_H
 #define AMIGA_DIRENT_H
 #include <sys/types.h>

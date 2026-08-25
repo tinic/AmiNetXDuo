@@ -1,71 +1,6 @@
 /*
- * AmiNetXDuo, 4.4BSD mbuf emulation behind the mbuf_* LVOs.
- *
- * NetX Duo has no mbuf. An NX_PACKET is one header plus one payload window
- * (prepend_ptr..append_ptr) inside a fixed-size pool block, chained through
- * nx_packet_next. An mbuf is a 128-byte object that either carries its data
- * inside itself or points at external storage, and whose head can be trimmed,
- * extended and re-spliced. The two shapes do not overlap, so this is an
- * emulation written from scratch rather than a wrapper.
- *
- * An mbuf does not own, wrap or reference an NX_PACKET.
- *
- * mbufs come out of a private slab allocator (see src/mbuf/mbuf_alloc.c) and
- * carry their own storage: the internal 108/100-byte data area, or an M_EXT
- * cluster of MCLBYTES from a private cluster pool. Three reasons, in order of
- * how load-bearing they are:
- *
- *   1. dtom(x) is `(struct mbuf *)((ULONG)(x) & ~(MSIZE-1))`. It is part of
- *      the published header, so a caller may use it. That only works if every
- *      mbuf is MSIZE-aligned and its data lives inside itself. Data pointing
- *      into an NX_PACKET payload would make dtom() return garbage.
- *   2. NX_PACKETs are a pinned, fixed-count pool resource sized for the 1 MB
- *      floor (AMI_POOL_MIN_PACKETS is 16, and the SANA-II readers already pin
- *      6-8 of them). Handing one to an application that may never free it
- *      would starve the receive path.
- *   3. mbuf_prepend/mbuf_adj/mbuf_pullup/mbuf_cat mutate a chain in ways an
- *      NX_PACKET cannot express, splitting one buffer into two, growing the
- *      front past data_start, splicing foreign storage in with M_EXT.
- *
- * Conversion is therefore an explicit copy at the boundary:
- * ami_mbuf_from_packet() and ami_mbuf_to_packet() (declared at the bottom of
- * this header when nx_api.h is in scope).
- *
- * Clusters / M_EXT:
- *
- *   Supported:
- *     - Reading, copying, trimming and freeing M_EXT mbufs correctly, because
- *       mbuf_copym / mbuf_copydata / mbuf_adj / mbuf_free must handle them.
- *     - Our own MCLBYTES clusters, reference-counted so mbuf_copym can share
- *       rather than copy them (there is no refcount field in `struct m_ext`,
- *       so the count lives in a private header in front of ext_buf; ours are
- *       identified by pointer identity against the cluster list, never by
- *       reading memory we do not own).
- *     - Foreign M_EXT storage attached by a caller: ext_free is honoured when
- *       the last reference goes, and mbuf_copym deep-copies rather than
- *       sharing, because a foreign buffer has no refcount we may touch.
- *
- *   Not supported:
- *     - There is no MCLGET LVO, so applications cannot ask for a cluster
- *       through the ABI at all. ami_mbuf_clget() exists for our own use
- *       (mostly ami_mbuf_from_packet on a large frame).
- *     - No mbuf "wait" mode. The BSD `how` argument (M_WAIT/M_DONTWAIT) is not
- *       in any of these LVO signatures; every allocation here is non-blocking
- *       and returns NULL on exhaustion. mbstat.m_wait therefore stays 0.
- *     - No m_devget/m_pullup2/m_split/m_dup; not in the ABI.
- *
- * ABI provenance: the layout below is the Roadshow netinclude `<sys/mbuf.h>`
- * (Olaf Barthel, 2001-2016, over the 4.4BSD `@(#)mbuf.h 8.5 (Berkeley)
- * 2/19/95` header), as shipped in this toolchain's ndk-include. That is the
- * Amiga lineage, not newlib's, newlib has no <sys/mbuf.h> at all, so the
- * pwd.h substitution trap (docs/RESEARCH.md 3.3) cannot happen here.
- *
- * On the Amiga this header includes that NDK header directly, so the ABI is the
- * real one by construction. AMI_MBUF_REPLICA builds a byte-identical replica
- * for the host test instead. Either way every offset is pinned below with
- * _Static_assert, and src/mbuf/mbuf_abi_check.c re-pins them against the NDK
- * header in a translation unit of its own.
- *
+ * AmiNetXDuo, 4.4BSD mbuf emulation behind the mbuf_* LVOs.  An mbuf never
+ * owns, wraps or references an NX_PACKET; conversion is an explicit copy.
  * SPDX-License-Identifier: MIT
  */
 
@@ -96,16 +31,9 @@ extern "C" {
 #ifdef AMI_MBUF_REPLICA
 
 /*
- * Host-test replica: structurally the NDK struct, field for field, in the same
- * order.
- *
- * It cannot be byte-identical on a 64-bit host, because three of the six m_hdr
- * fields are pointers. MSIZE therefore scales with the pointer width and MLEN /
- * MHLEN follow, which keeps every property the code relies on (MSIZE a power of
- * two, the internal data area ending exactly at the end of the mbuf, dtom()
- * meaningful) while the arithmetic constants differ. The exact 68k offsets are
- * asserted only on the Amiga, where they are the ABI, see the assert block
- * below and src/mbuf/mbuf_abi_check.c.
+ * Host-test replica: the NDK struct field for field. MSIZE scales with pointer
+ * width here, so the constants differ from 68k's; the exact offsets are
+ * asserted only on the Amiga, where they are the ABI.
  */
 
 #if defined(__LP64__) || defined(_LP64) || defined(_WIN64)
@@ -197,11 +125,8 @@ struct mbstat {
 
 #else /* !AMI_MBUF_REPLICA, the real thing */
 
-/*
- * <sys/mbuf.h> reaches <net/if.h> -> <sys/socket.h>, which uses ssize_t
- * without declaring it on this newlib-based toolchain. <sys/types.h> first,
- * or the include fails.
- */
+/* <sys/mbuf.h> reaches <sys/socket.h>, which uses ssize_t without declaring
+   it on this toolchain: <sys/types.h> first, or the include fails. */
 #include <sys/types.h>
 #include <sys/mbuf.h>
 
@@ -209,11 +134,7 @@ struct mbstat {
 
 /* ------------------------------------------------------- pinned constants */
 
-/*
- * Measured 2026-07-24 with m68k-amigaos-gcc 15.2.0 -m68020 against the NDK
- * <sys/mbuf.h>. Both the replica above and mbuf_abi_check.c assert against
- * these.
- */
+/* The 68k ABI. Both the replica above and mbuf_abi_check.c assert on these. */
 #define AMI_MBUF_SIZE           128     /* == MSIZE                          */
 #define AMI_MBUF_HDR_SIZE        20
 #define AMI_MBUF_PKTHDR_SIZE      8
@@ -233,11 +154,9 @@ struct mbstat {
 #define AMI_MBUF_OFF_PKTDAT      28
 
 /*
- * These hold in both builds and the implementation leans on all three. MSIZE
- * must be a power of two or dtom() is meaningless, and the internal data area
- * must end exactly at the end of the mbuf, because ami_mbuf_cat/prepend/pullup
- * use ((UBYTE *)m + MSIZE) as the limit for both m_dat and m_pktdat without
- * caring which one m_data points into.
+ * MSIZE must be a power of two or dtom() is meaningless, and the internal data
+ * area must end exactly at the end of the mbuf: cat/prepend/pullup use
+ * ((UBYTE *)m + MSIZE) as the limit for both m_dat and m_pktdat.
  */
 AMI_STATIC_ASSERT((MSIZE & (MSIZE - 1)) == 0,            "MSIZE must be a power of two");
 AMI_STATIC_ASSERT(sizeof(struct mbuf) == MSIZE,          "mbuf must be exactly MSIZE");
@@ -247,11 +166,8 @@ AMI_STATIC_ASSERT(sizeof(struct m_hdr) + sizeof(struct pkthdr) + MHLEN == MSIZE,
 AMI_STATIC_ASSERT(MCLBYTES == 2048,                      "MCLBYTES");
 
 #ifndef AMI_MBUF_REPLICA
-/*
- * The real 68k ABI. These run against the NDK <sys/mbuf.h> itself, so a
- * silent header substitution of the kind that bit <pwd.h> (docs/RESEARCH.md
- * 3.3) cannot get past this point.
- */
+/* Run against the NDK <sys/mbuf.h> itself, so a silent header substitution
+   cannot get past this point. */
 AMI_STATIC_ASSERT(sizeof(struct mbuf)   == AMI_MBUF_SIZE,        "mbuf size");
 AMI_STATIC_ASSERT(sizeof(struct m_hdr)  == AMI_MBUF_HDR_SIZE,    "m_hdr size");
 AMI_STATIC_ASSERT(sizeof(struct pkthdr) == AMI_MBUF_PKTHDR_SIZE, "pkthdr size");
@@ -263,10 +179,8 @@ AMI_STATIC_ASSERT(MHLEN == AMI_MBUF_MHLEN,  "MHLEN");
 /* ------------------------------------------------------------ mbuf types */
 
 /*
- * The NDK header defines mh_type but not the MT_* constants that go in it,
- * they live in the 4.4BSD <sys/mbuf.h> section Roadshow dropped. These are the
- * 4.4BSD values; only MT_FREE, MT_DATA and MT_HEADER are used by this code.
- * Inferred from 4.4BSD, not confirmed against any Amiga header.
+ * The NDK header defines mh_type but not these. 4.4BSD values, inferred and
+ * not confirmed against any Amiga header.
  */
 #define MT_FREE         0
 #define MT_DATA         1
@@ -287,27 +201,14 @@ AMI_STATIC_ASSERT(MHLEN == AMI_MBUF_MHLEN,  "MHLEN");
 /* ------------------------------------------------------------- lifecycle */
 
 /*
- * Optional. Sets the ceilings and pre-creates nothing; every entry point
- * below self-initialises with the defaults if this was never called. Pass 0
- * for either argument to keep the default (AMI_MBUF_DEFAULT_MBUFS /
- * AMI_MBUF_DEFAULT_CLUSTERS in src/mbuf/mbuf_internal.h).
- *
- * Returns 0, or -1 if the pool is already up with different ceilings.
+ * Optional; every entry point below self-initialises with the defaults. Pass 0
+ * for either argument to keep the default. Returns 0, or -1 if the pool is
+ * already up with different ceilings.
  */
 LONG ami_mbuf_init(ULONG max_mbufs, ULONG max_clusters);
 
-/*
- * Release every slab and cluster. Only safe when no mbuf is outstanding; it
- * does not chase live chains.
- *
- * Nothing in production calls this, and nothing can: the eleven mbuf_* LVOs
- * are bsd_enosys stubs and aminetxduo_mbuf is not linked into
- * bsdsocket.library at all, so the pool never comes up and there is nothing to
- * release. Wiring any of those LVOs to this pool is three steps, not one,
- * link the library, and call this from ami_ns_destroy() after nx_ip_delete()
- * and the SANA-II closes, which is where ami_bpf_cleanup() is called from for
- * the same reason. Do all three or the slabs are resident until reboot.
- */
+/* Release every slab and cluster. Only safe when no mbuf is outstanding; it
+   does not chase live chains. */
 VOID ami_mbuf_cleanup(VOID);
 
 /* Fill in a 4.4BSD mbstat. m_spare, m_wait and m_drain are always 0. */
@@ -320,24 +221,8 @@ ULONG ami_mbuf_clusters_outstanding(VOID);
 /* ------------------------------------------------------ the eleven vectors */
 
 /*
- * These map 1:1 onto the bsdsocket.library LVOs. Register assignments, from
- * the NDK pragmas/bsdsocket_pragmas.h and confirmed against amitools'
- * bsdsocket_lib.fd and ndk-include/interfaces/bsdsocket.h:
- *
- *   0x28e mbuf_get      (), no arguments
- *   0x294 mbuf_gethdr   (), no arguments
- *   0x282 mbuf_free     (m)            a0
- *   0x288 mbuf_freem    (m)            a0
- *   0x2a6 mbuf_adj      (mp,req_len)   a0/d0
- *   0x2a0 mbuf_cat      (m,n)          a0/a1
- *   0x276 mbuf_copyback (m,off,len,cp) a0/d0/d1/a1
- *   0x27c mbuf_copydata (m,off,len,cp) a0/d0/d1/a1
- *   0x270 mbuf_copym    (m,off,len)    a0/d0/d1
- *   0x29a mbuf_prepend  (m,len)        a0/d0
- *   0x2ac mbuf_pullup   (m,len)        a0/d0
- *
- * The bsdsocket vector for each is a one-line forward to the function below;
- * argument order and return type already match.
+ * 1:1 with the bsdsocket.library LVOs; each vector is a one-line forward to
+ * the function below, argument order and return type already matching.
  */
 
 /* Plain mbuf, MT_DATA, m_len 0, data at m_dat. NULL when the pool is out. */
@@ -353,18 +238,15 @@ struct mbuf *ami_mbuf_free(struct mbuf *m);
 VOID ami_mbuf_freem(struct mbuf *m);
 
 /*
- * Trim req_len bytes off the front (req_len > 0) or the tail (req_len < 0).
- * Never frees mbufs: emptied ones stay in the chain with m_len 0, as 4.4BSD
- * m_adj does. Updates m_pkthdr.len when M_PKTHDR is set.
- * Returns 0, or -1 if mp is NULL.
+ * Trim req_len bytes off the front (> 0) or the tail (< 0). Never frees mbufs:
+ * emptied ones stay in the chain with m_len 0. Updates m_pkthdr.len when
+ * M_PKTHDR is set. Returns 0, or -1 if mp is NULL.
  */
 LONG ami_mbuf_adj(struct mbuf *mp, LONG req_len);
 
 /*
- * Append chain n to chain m, compacting n's data into m's trailing free space
- * where it fits (4.4BSD m_cat). n is consumed either way. Returns 0, or -1 if
- * either argument is NULL. Does not update m's pkthdr.len; 4.4BSD m_cat does
- * not either, and callers that care fix it up themselves.
+ * 4.4BSD m_cat: n is consumed either way. Returns 0, or -1 if either argument
+ * is NULL. Does NOT update m's pkthdr.len; the caller must.
  */
 LONG ami_mbuf_cat(struct mbuf *m, struct mbuf *n);
 
@@ -383,20 +265,15 @@ LONG ami_mbuf_copyback(struct mbuf *m, LONG off, LONG len, APTR cp);
 LONG ami_mbuf_copydata(struct mbuf *m, LONG off, LONG len, APTR cp);
 
 /*
- * Copy len bytes starting at off into a fresh chain (4.4BSD m_copym).
- * len may be M_COPYALL. Clusters we own are shared by reference count;
- * foreign M_EXT storage is deep-copied. If off is 0 and m has M_PKTHDR the
- * copy gets one too, with pkthdr.len set to the number of bytes copied.
- * Returns NULL on bad arguments or exhaustion; m is left untouched.
+ * 4.4BSD m_copym; len may be M_COPYALL. Clusters we own are shared by
+ * reference count, foreign M_EXT storage deep-copied. Returns NULL on bad
+ * arguments or exhaustion; m is left untouched.
  */
 struct mbuf *ami_mbuf_copym(struct mbuf *m, LONG off, LONG len);
 
 /*
- * Make room for len bytes at the front of the chain (4.4BSD m_prepend), by
- * moving m_data back if there is leading space in a buffer we own, otherwise
- * by pushing a new head mbuf on. The new bytes are not initialised.
- * Returns the new head, or NULL; on failure the whole chain is freed, as in
- * 4.4BSD, which is the usual way callers leak if they forget.
+ * 4.4BSD m_prepend. The new bytes are not initialised. Returns the new head,
+ * or NULL; on failure the WHOLE CHAIN is freed.
  */
 struct mbuf *ami_mbuf_prepend(struct mbuf *m, LONG len);
 
@@ -418,20 +295,14 @@ LONG ami_mbuf_clget(struct mbuf *m);
 /* ami_mbuf_get() + ami_mbuf_clget(); frees the mbuf if the cluster fails. */
 struct mbuf *ami_mbuf_getcl(VOID);
 
-/*
- * Build a chain holding `len` bytes copied from `src` (may be NULL to leave
- * the bytes uninitialised). Uses clusters above MINCLSIZE. NULL on failure.
- * This is the workhorse behind ami_mbuf_from_packet().
- */
+/* Build a chain holding `len` bytes copied from `src` (NULL leaves the bytes
+   uninitialised). Uses clusters above MINCLSIZE. NULL on failure. */
 struct mbuf *ami_mbuf_build(const void *src, ULONG len, BOOL want_pkthdr);
 
 /* -------------------------------------------------------- NX_PACKET bridge */
 
-/*
- * Declared only when nx_api.h is already in scope: include "tx_api.h" and
- * "nx_api.h" (in that order, before any exec header) ahead of this one to get
- * them. Both are copies; see the top of this file.
- */
+/* Declared only when nx_api.h is already in scope: include "tx_api.h" then
+   "nx_api.h", before any exec header, ahead of this one. */
 #ifdef NX_API_H
 
 /*

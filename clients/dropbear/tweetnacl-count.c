@@ -1,28 +1,6 @@
-/*
- * clients/dropbear/tweetnacl-count.c, how many field multiplications an SSH
- * handshake costs, counted on the build host.
- *
- * The emulator queue is deep and every timing run has to hold the machine
- * alone, so anything that does not need a 68020 should not take a slot.  An operation count does not: 2^255-19 arithmetic executes
- * the same number of multiplies on any machine, and the count is the half of
- * the cost model a wall clock cannot give.  The guest measures milliseconds
- * per primitive, this measures multiplies per primitive, and dividing one by
- * the other gives the cost of one field multiply on this part.
- *
- * Reaching a `static` function without patching third_party/dropbear:
- * clients/dropbear/tweetnacl-count.sh derives a copy of
- * third_party/dropbear/src/curve25519.c into build/, renaming the two
- * definitions `M` and `S` and inserting counting macros of the same names
- * directly after them.  Every later use in the file, and every use is later,
- * because TweetNaCl defines bottom-up, goes through the counter.  The
- * submodule is untouched; the derived file is a build artifact the script
- * regenerates, so it cannot drift from the pinned tag unnoticed.
- *
- * The counts are therefore of the same code the Amiga runs, not of a
- * re-implementation.
- *
- * SPDX-License-Identifier: MIT
- */
+/* clients/dropbear/tweetnacl-count.c: field-multiply counts per handshake
+ * primitive, counted on the build host inside a derived copy of Dropbear's own
+ * curve25519.c (tweetnacl-count.sh).  SPDX-License-Identifier: MIT */
 
 #include <stdio.h>
 #include <string.h>
@@ -41,13 +19,9 @@ int  dropbear_ed25519_verify(const unsigned char *m, unsigned long mlen,
                              const unsigned char *s, unsigned long slen,
                              const unsigned char *pk);
 
-/*
- * RFC 8032 section 7.1, test 2.  A real key pair and a real signature, so the
- * counts are of a correct operation and the harness checks itself before it
- * reports anything.  The 1-byte message is what makes this test 2 rather than
- * test 1; SSH signs a 32-byte exchange hash, and the message length moves only
- * the SHA-512, never the curve arithmetic.
- */
+/* RFC 8032 section 7.1, test 2: a real key pair and a real signature, so the
+   harness checks itself before it reports anything.  Message length moves only
+   the SHA-512, never the curve arithmetic. */
 static const unsigned char sk2[32] = {
     0x4c,0xcd,0x08,0x9b,0x28,0xff,0x96,0xda,0x9d,0xb6,0xc3,0x46,0xec,0x11,0x4e,0x0f,
     0x5b,0x8a,0x31,0x9f,0x35,0xab,0xa6,0x24,0xda,0x8c,0xf6,0xed,0x4f,0xb8,0xa6,0xfb
@@ -75,11 +49,9 @@ static const unsigned char x25519_pk_expect[32] = {
 };
 static const unsigned char basepoint[32] = { 9 };
 
-/* dropbear_ed25519_make_key() is compiled into curve25519.c and reaches
-   dbrandom.c, which reaches an entropy device this program has no business
-   opening.  It is never called here, key generation is not part of a
-   handshake, so one stub satisfies the linker without pulling in a random
-   pool.  If it is ever reached, it says so rather than returning zeros. */
+/* dropbear_ed25519_make_key() reaches dbrandom.c and an entropy device this
+   program has no business opening.  Key generation is not part of a handshake,
+   so this stub satisfies the linker and exits loudly if it is ever reached. */
 void genrandom(unsigned char *buf, unsigned int len);
 void genrandom(unsigned char *buf, unsigned int len)
 {

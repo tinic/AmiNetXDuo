@@ -8,38 +8,18 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/**************************************************************************/
-/*                                                                        */
-/*    _tx_thread_system_return                         AmigaOS/m68k       */
-/*                                                                        */
-/*  DESCRIPTION                                                           */
-/*                                                                        */
-/*    Returns the baton to the scheduler and parks the calling Exec Task   */
-/*    on its run signal until the scheduler picks it again.                */
-/*                                                                        */
-/*    The core always calls this with the critical section already         */
-/*    restored (every call site is preceded by TX_RESTORE), so the Wait()  */
-/*    below happens at Forbid() nesting zero.  Even if it did not, Exec    */
-/*    saves SysBase->TDNestCnt into tc_TDNestCnt when a task blocks and    */
-/*    restores it on redispatch, so a Forbid() held across Wait() neither  */
-/*    stops the machine nor is lost.  That is what makes Forbid()/Permit() */
-/*    a legal TX_DISABLE/TX_RESTORE for a port whose threads block inside  */
-/*    critical sections.                                                   */
-/*                                                                        */
-/**************************************************************************/
+/* _tx_thread_system_return, AmigaOS/m68k: returns the baton and parks the calling
+   Exec Task on its run signal.  Exec saves TDNestCnt when a task blocks and puts it
+   back on redispatch, which is what makes Forbid() a legal TX_DISABLE here.  */
 
 #define TX_SOURCE_CODE
 
 #include "tx_amiga_internal.h"
 
 
-/*
- * Destroy the calling Exec Task, which the port created.
- *
- * Touches nothing but the task's own control block, so it is correct even when
- * the reaper gave up on this task long ago and the TX_THREAD it used to back
- * has since been deleted, reused or freed.  Never returns.
- */
+/* Destroy the calling Exec Task, which the port created.  Touches nothing but the
+   task's own control block, so it is correct even when the reaper gave up on this
+   task and its TX_THREAD has since been deleted or reused.  Never returns.  */
 VOID _tx_amiga_task_destroy(struct _tx_amiga_ctrl *ctrl)
 {
 
@@ -67,9 +47,8 @@ TX_THREAD       *owner;
     ctrl -> ctrl_reaped        =  (volatile ULONG *) 0;
     ctrl -> ctrl_magic         =  0UL;
 
-    /* A zombie stops being one here: this is the moment it can no longer touch
-       the application's code or data.  tx_amiga_kernel_stop() waits for this
-       count to reach zero before it will call an exit safe.  */
+    /* A zombie stops being one here: the moment it can no longer touch the
+       application's code or data.  tx_amiga_kernel_stop() waits for zero.  */
     if (ctrl -> ctrl_zombie != 0U)
     {
         ctrl -> ctrl_zombie =  0U;
@@ -79,12 +58,9 @@ TX_THREAD       *owner;
         }
     }
 
-    /* The flag lives on the reaper's stack and it is blocked in Wait(), so it
-       is alive.  Set it before the Signal, so a reaper that wakes on its
-       timeout in the same instant still sees a completed handshake rather than
-       declaring a zombie.  Signalling and dying both happen inside the
-       Forbid(), and Exec discards the forbid nesting of a task it removes, so
-       the pair is atomic: the reaper cannot observe a half-removed task.  */
+    /* Set the flag before the Signal, so a reaper waking on its timeout in the same
+       instant still sees a completed handshake.  Both happen inside the Forbid()
+       whose nesting RemTask() discards, so the pair is atomic.  */
     if (reaped != (volatile ULONG *) 0)
     {
         *reaped =  1UL;
@@ -106,20 +82,9 @@ TX_THREAD       *owner;
 }
 
 
-/*
- * TX_THREAD_COMPLETED_EXTENSION.
- *
- * _tx_thread_shell_entry() calls this the moment a thread's entry function
- * returns, and before _tx_thread_system_suspend() unlinks the thread from the
- * ready lists.  For a thread the reaper had to abandon (see _tx_amiga_reap())
- * that unlinking would be done with a TX_THREAD that has already been deleted
- * tx_thread_ready_next/previous still point at live threads, so it splices a
- * dead node's stale neighbours into the live list and the next dispatch jumps
- * through whatever that leaves behind.  Dying here avoids that.
- *
- * shell_entry has already done _tx_thread_preempt_disable++ on the assumption
- * that _tx_thread_system_suspend() will undo it, so undo it here instead.
- */
+/* TX_THREAD_COMPLETED_EXTENSION, before _tx_thread_system_suspend() unlinks the
+   thread: for an abandoned thread that unlinking splices a dead node's stale
+   neighbours into the live list.  It also undoes shell_entry's preempt_disable++. */
 VOID _tx_amiga_thread_completed(VOID)
 {
 
@@ -142,14 +107,9 @@ struct _tx_amiga_ctrl   *ctrl;
 }
 
 
-/*
- * Park the calling Exec Task until it is the ThreadX baton holder.
- *
- * Never returns if the thread has been marked for teardown and it is a Task
- * that ThreadX created, in that case the task destroys itself here.
- * Returns TX_FALSE if the thread was torn down but the Task is the
- * application's (an adopted thread), so the caller must unwind.
- */
+/* Park the calling Exec Task until it is the ThreadX baton holder.  Never returns
+   if a Task ThreadX created has been marked for teardown -- it destroys itself
+   here.  TX_FALSE means an adopted Task was torn down and the caller must unwind. */
 UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr)
 {
 
@@ -165,47 +125,15 @@ UINT                     raised;
     run_signal =  thread_ptr -> tx_thread_amiga_run_signal;
     adopted    =  thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED;
 
-    /* Cache the control block once, while the TX_THREAD is still ours.
-       Everything the teardown below touches lives in it, so a task that the
-       reaper gave up on can still destroy itself safely long after the
-       TX_THREAD has been deleted and reused.  An adopted Task has no control
-       block, its teardown is a return, not a RemTask().  */
+    /* Cache the control block once, while the TX_THREAD is still ours: a task the
+       reaper gave up on can then destroy itself long after the TX_THREAD has been
+       deleted and reused.  An adopted Task has no control block.  */
     ctrl =  (adopted != 0U) ? ((struct _tx_amiga_ctrl *) 0)
                             : _tx_amiga_ctrl_of(me);
 
-    /*
-     * Wait for the baton one Exec priority up, and give that back the moment the
-     * baton arrives.
-     *
-     * Every Task ThreadX creates runs at TX_AMIGA_TASK_PRIORITY, so the Signal()
-     * that hands the baton over goes to a Task at the SAME Exec priority as the
-     * one giving it.  Exec reschedules on a Signal() only for a STRICTLY higher
-     * priority, so the handoff did not preempt at the Exec level either: the
-     * woken thread was merely ready, behind whatever else sat at that priority,
-     * until the giver blocked of its own accord.
-     *
-     * Raising only the WAITER, and only while it waits, is the narrow form of
-     * that fix.  It needs no cross-task state, it is the one number Exec looks
-     * at when it picks the next Task, and it puts back exactly what the Task
-     * had.
-     *
-     * RAISE ONLY, never lower.  SetTaskPri() is absolute, and an ADOPTED Task's
-     * priority is the application's: a program that runs itself at 5 and calls
-     * recv() would be dropped to 2 for the length of every receive if this
-     * assigned unconditionally.
-     *
-     * Nothing can invert on it: a Task parked here holds no baton and no Exec
-     * resource, and it is one step above the ThreadX band and far below
-     * TX_AMIGA_TIMER_PRIORITY, so the tick still preempts it.
-     *
-     * Not raised at all when the baton is already this thread's, which is the
-     * common case on the receive path: ami_netstack_baton_acquire() dispatches
-     * itself and only then parks, so the Wait() below returns on a signal that
-     * is already latched and nothing was ever waited for.  Paying two
-     * SetTaskPri() calls there would put a cost on the fast path to buy
-     * something only the slow path uses.  The test is a hint, not a lock: losing
-     * the race costs exactly what raising unconditionally would have cost.
-     */
+    /* Wait for the baton one Exec priority up: Exec reschedules on a Signal() only
+       for a STRICTLY higher priority.  RAISE ONLY, never lower -- SetTaskPri() is
+       absolute and an adopted Task's priority is the application's.  */
     Forbid();
     raised =  (_tx_thread_current_ptr != thread_ptr) ? ((UINT) TX_TRUE)
                                                      : ((UINT) TX_FALSE);
@@ -297,11 +225,8 @@ UINT         wake;
         (thread_ptr -> tx_thread_amiga_task != (VOID *) me))
     {
 
-        /* Not the baton holder, so there is nothing to release.  The port keeps
-           _tx_thread_system_state non-zero over every window in which a
-           non-ThreadX Exec Task touches ThreadX state (tx_amiga_adopt.c, the
-           tick task), so this should be unreachable; returning quietly is still
-           better than corrupting the ready list.  */
+        /* Not the baton holder, so there is nothing to release.  Should be
+           unreachable; returning quietly beats corrupting the ready list.  */
         Permit();
         return;
     }
@@ -316,15 +241,9 @@ UINT         wake;
 
     thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
 
-    /*
-     * A thread that never comes back looks identical from the outside to a
-     * task the port failed to wake.  This trace distinguishes them: TX_TCP_IP
-     * is NetX Duo suspending its own caller, the cleanup routine names the
-     * service it is parked in, and the timeout says whether anything will ever
-     * end the wait.  Subtract the address of this function from the cleanup
-     * pointer and look the difference up in `nm` on the library to get the
-     * symbol.  docs/RESEARCH.md 42.
-     */
+    /* Tells a thread that never comes back apart from a task the port failed to
+       wake: TX_TCP_IP is NetX Duo suspending its own caller, and the cleanup
+       routine names the service it is parked in.  */
     if (thread_ptr -> tx_thread_state == ((UINT) TX_TCP_IP))
     {
         TXTRACE("TXT nxsusp thr=%08lx sock=%08lx cleanup=%08lx timeout=%08lx here=%08lx",
@@ -338,12 +257,9 @@ UINT         wake;
 #ifdef AMINETXDUO_GREEN_REALM
     if (_tx_amiga_thread_green(thread_ptr) != TX_FALSE)
     {
-
         /* A green thread yields by switching straight back into the realm
-           scheduler's context -- no Signal, no Wait, no Exec dispatch.  The
-           protocol Forbid() is the one taken above; the scheduler loop
-           resumes holding it.  When this thread is next dispatched the
-           switch returns here, again under the dispatcher's Forbid().  */
+           scheduler's context.  The protocol Forbid() is the one taken above; the
+           scheduler loop resumes holding it, and the next dispatch returns here. */
         ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                             (ULONG) thread_ptr -> tx_thread_state,
                             AMI_HOLD_SITE_YIELD);
@@ -357,10 +273,8 @@ UINT         wake;
     }
 #endif
 
-    /* Release the baton, and give it straight to whoever is next rather than
-       waking the scheduler Task to do it.  tx_thread_state already names what
-       the holder is about to block on, which is the site hint the holder ring
-       wants.  */
+    /* Release the baton and give it straight to whoever is next rather than waking
+       the scheduler Task to do it.  */
     ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
                         (ULONG) thread_ptr -> tx_thread_state,
                         AMI_HOLD_SITE_YIELD);

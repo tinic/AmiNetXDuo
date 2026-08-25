@@ -1,12 +1,6 @@
 /*
- * The receive step budget's shared half: the settle and fetch legs, stamped
- * from three different tasks and aggregated in one place.  src/common/budget.c
- * says why the shape is a single latest-stamp, and src/sana2/sana2_rx.c holds
- * the drain leg this completes.
- *
- * Everything here exists only under AMINETXDUO_RXPROBE; a shipped build
- * carries neither the code nor the calls.
- *
+ * The receive step budget's shared half.  Everything here exists only under
+ * AMINETXDUO_RXPROBE; a shipped build carries neither the code nor the calls.
  * SPDX-License-Identifier: MIT
  */
 #ifndef AMINETXDUO_BUDGET_H
@@ -19,10 +13,8 @@ extern "C" {
 #endif
 
 /*
- * Where a baton hold ended, for the holder ring below.  Site constants live
- * outside the probe guard so the call sites compile in every build; the
- * NETSTATUS_HOLDSITE_* names in aminetxduo/netstatus.h mirror these values
- * and must stay in step.
+ * Where a baton hold ended.  Outside the probe guard so call sites compile in
+ * every build; NETSTATUS_HOLDSITE_* in netstatus.h must stay in step.
  */
 #define AMI_HOLD_SITE_YIELD    1   /* _tx_thread_system_return: blocked in TX */
 #define AMI_HOLD_SITE_SUSPEND  2   /* tx_amiga_adopt_suspend: call returning  */
@@ -37,13 +29,9 @@ extern "C" {
 #define AMI_BUDGET_BUCKETS  20
 
 /*
- * The holder's side of the baton leg.  The waiter's leg above records how
- * long acquisition took; this records who HELD the baton and for how long,
- * for every hold that exceeds ~50 ms -- the episodic 250-930 ms holds the
- * stall investigation measured from the outside.  One global stamp is
- * enough because the baton model admits exactly one holder at a time, and
- * every stamp and note happens under the Forbid() the port already holds
- * at its dispatch and release sites.
+ * The holder's side of the baton leg.  One global stamp, because the baton
+ * model admits exactly one holder at a time and every stamp happens under the
+ * Forbid() the port already holds at its dispatch and release sites.
  */
 #define AMI_BUDGET_HOLD_RING   16
 #define AMI_BUDGET_HOLD_NAME   16
@@ -75,10 +63,8 @@ typedef struct AmiBudget
     AmiBudgetLeg    drain;          /* reader: reply dequeued -> delivered */
     AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
-    /* The settle leg told in parts: three chained sub-legs whose stamps
-       ride between the same deliver and the same notify, so their sum is
-       settle whenever the chain stays on one frame.  src/common/budget.c
-       says where each boundary is witnessed. */
+    /* Three chained sub-legs between the same deliver and notify, so their
+       sum is settle whenever the chain stays on one frame. */
     AmiBudgetLeg    defer;          /* deliver -> the IP thread picks it up */
     AmiBudgetLeg    demux;          /* pickup -> the segment's own socket  */
     AmiBudgetLeg    state;          /* socket entry -> receive notify      */
@@ -88,11 +74,8 @@ typedef struct AmiBudget
     AmiBudgetLeg    stuff;          /* tx_send: claim + framing + slot fill */
     AmiBudgetLeg    post;           /* tx_send: BeginIO enter -> return    */
 
-    /* Which side of the direct-completion fork a receive took: rx_direct
-       counts recv() requests the IP thread completed into the caller's own
-       buffer (AMINETXDUO_RX_DIRECT_COMPLETE), rx_fallback the packets the
-       classic blocking dequeue in bsd_recv_tcp() fetched.  Plain counters,
-       not legs: the question they answer is coverage, not duration. */
+    /* Which side of the direct-completion fork a receive took.  Plain
+       counters, not legs: they answer coverage, not duration. */
     ULONG           rx_direct;
     ULONG           rx_fallback;
 
@@ -127,10 +110,9 @@ VOID ami_budget_post(ULONG dt);
 VOID ami_budget_rx_direct(VOID);
 VOID ami_budget_rx_fallback(VOID);
 
-/* Baton dispatched: stamp the new holder's acquisition.  Baton released:
-   note the hold, and ring it if it crossed the threshold.  Both must be
-   called under Forbid(), which every dispatch and release site already
-   holds; name and state are passed in so this header needs no TX_THREAD. */
+/* Both must be called under Forbid(), which every dispatch and release site
+   already holds; name and state are passed in so this header needs no
+   TX_THREAD. */
 VOID ami_budget_hold_start(VOID);
 VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site);
 

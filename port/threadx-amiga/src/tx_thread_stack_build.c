@@ -8,26 +8,9 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/**************************************************************************/
-/*                                                                        */
-/*    _tx_thread_stack_build                           AmigaOS/m68k       */
-/*                                                                        */
-/*  DESCRIPTION                                                           */
-/*                                                                        */
-/*    There is no stack frame to build in a hosted port.  Instead this     */
-/*    creates the Exec Task that will execute the thread, using the stack  */
-/*    tx_thread_create() was given, so a ThreadX thread costs one struct   */
-/*    Task plus one MemList over and above its ThreadX stack.              */
-/*                                                                        */
-/*    For an adopted thread there is nothing to create: the Exec Task      */
-/*    already exists and already owns a stack.  tx_amiga_adopt_thread()    */
-/*    leaves the task and its run signal in _tx_amiga_adopt_task /         */
-/*    _tx_amiga_adopt_signal and we bind to those.  The handshake is a     */
-/*    pair of globals rather than an argument because _tx_thread_create()  */
-/*    zeroes the whole control block, extension fields included, before it */
-/*    calls us, anything staged in the TX_THREAD would be wiped.         */
-/*                                                                        */
-/**************************************************************************/
+/* No stack frame to build in a hosted port: this creates the Exec Task that will
+   run the thread.  Adoption binds to the globals _tx_amiga_adopt_task/_signal,
+   because _tx_thread_create() zeroes the whole control block before calling us. */
 
 #define TX_SOURCE_CODE
 
@@ -88,11 +71,9 @@ CHAR        *name;
 
 #ifdef AMINETXDUO_GREEN_REALM
 
-    /* A request-gate proxy: green identity, but NO initial frame.  Its
-       context is the caller's captured continuation, written directly into
-       tx_thread_stack_ptr by the capture switch in tx_amiga_gate_call(); a
-       frame laid at stack_end here would scribble on the top of the owning
-       Task's live stack, which is what the "stack" of a gate proxy is.  */
+    /* A request-gate proxy: green identity, but NO initial frame.  A frame laid at
+       stack_end here would scribble on the top of the owning Task's live stack,
+       which is what the "stack" of a gate proxy is.  */
 
     if (_tx_amiga_gate_bind_pending != 0U)
     {
@@ -103,20 +84,9 @@ CHAR        *name;
         return;
     }
 
-    /* Green realm: no Exec Task at all.  The thread's context is an initial
-       switch frame on the ThreadX-owned stack, entered and left only by the
-       realm Task's scheduler loop (tx_thread_schedule.c).
-
-       tx_thread_amiga_task points at the realm Task so that every identity
-       test in the tree -- "is the calling Task the baton holder", in
-       _tx_thread_system_return(), tx_amiga_caller_is_thread(), the baton
-       bracket -- answers correctly while this thread's context is active:
-       the code IS running on the realm Task then.  The run signal is the
-       scheduler's own, so anything that pokes it (a stray
-       _tx_amiga_signal_task) wakes the realm, which is always harmless and
-       always the right recipient.  _tx_amiga_dispatch_inline() never
-       dispatches a green thread (it declines and wakes the realm), so the
-       signal is never used as a baton handoff.  */
+    /* Green realm: no Exec Task.  tx_thread_amiga_task points at the realm Task so
+       every "is the caller the baton holder" test answers correctly while this
+       context runs; the run signal is the scheduler's, so a stray poke wakes it. */
 
     thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
     thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
@@ -129,11 +99,9 @@ CHAR        *name;
 
 #else /* !AMINETXDUO_GREEN_REALM */
 
-    /* SIGF_SINGLE is the run signal for tasks we create.  It is permanently
-       allocated by Exec and is private to the task, so there is no window
-       between AddTask() and the task's first AllocSignal() during which the
-       scheduler could poke a bit that does not exist.  Exec signals latch, so
-       a dispatch that beats the task to its first Wait() is not lost.  */
+    /* SIGF_SINGLE is the run signal for tasks we create: permanently allocated by
+       Exec and private to the task, so there is no window between AddTask() and the
+       task's first AllocSignal() in which the scheduler could poke a missing bit. */
     thread_ptr -> tx_thread_amiga_run_signal =  SIGF_SINGLE;
 
     task =  _tx_amiga_task_create(name,
@@ -150,11 +118,9 @@ CHAR        *name;
 
 
 #ifndef AMINETXDUO_GREEN_REALM
-/*
- * Entry point of every Exec Task that backs a ThreadX thread.  The TX_THREAD
- * comes out of the task's own control block, which tc_UserData identifies and
- * which is set up before AddTask().
- */
+/* Entry point of every Exec Task that backs a ThreadX thread.  The TX_THREAD comes
+   out of the task's own control block, which tc_UserData identifies and which is
+   set up before AddTask().  */
 static VOID _tx_amiga_thread_entry(VOID)
 {
 
@@ -178,13 +144,9 @@ struct _tx_amiga_ctrl   *ctrl;
 
     _tx_thread_shell_entry();
 
-    /* _tx_thread_shell_entry() is not supposed to return: a completed thread
-       suspends itself and _tx_thread_system_return() parks it here forever.
-       It does return if _tx_thread_system_suspend() declines to switch (the
-       preempt-disable / system-state guard), and falling off the end of an
-       Exec task entry point lands in Exec's default finaliser, which removes
-       the task without telling the port, leaving tx_thread_amiga_task
-       pointing at freed memory.  Go through the port's own teardown instead.  */
+    /* _tx_thread_shell_entry() does return if _tx_thread_system_suspend() declines
+       to switch, and falling off an Exec entry point lands in Exec's finaliser,
+       which removes the task without telling the port.  Use the port's teardown. */
 
     TXTRACE("TXT shell_entry returned task=%08lx", (LONG) FindTask((STRPTR) 0));
 

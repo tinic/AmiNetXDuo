@@ -1,64 +1,6 @@
-/*
- * AmiNetXDuo, the nx_secure crypto table that routes through src/crypto68k/.
- *
- *   src/crypto68k/ made RSA-2048 2.9x/2.2x faster and P-256 3.6-3.9x faster,
- *   measured, and none of it reached a handshake.  Nothing outside
- *   src/crypto68k/ referenced the module, so tests/tls/tls_handshake ran
- *   entirely on the vendored arithmetic.  This file connects the two.
- *
- *   nx_secure already has the extension point needed.
- *   nx_secure_tls_session_create() takes a `const NX_SECURE_TLS_CRYPTO *`, a
- *   table of NX_CRYPTO_METHOD pointers, and nx_secure_tls_ecc_initialize()
- *   takes an application-supplied array of curve methods.  Every path that
- *   reaches a big-number operation goes through one of those two, so
- *   replacement tables redirect all of them with no vendored source touched:
- *
- *     - RSA:  ami_crypto_method_rsa replaces crypto_method_rsa in both the
- *             ciphersuite table (public cipher and public auth) and the X.509
- *             signature table.  Its operation is the vendored dispatch with
- *             _nx_crypto_rsa_operation() replaced by one that calls
- *             c68k_crt_power_modulus() / c68k_huge_number_mont_power_modulus().
- *
- *     - P-256: ami_crypto_method_ec_secp256 replaces crypto_method_ec_secp256
- *             in the curve array.  ECDH and ECDSA obtain their curve only by
- *             calling NX_CRYPTO_EC_CURVE_GET on the curve method they were
- *             handed (checked: every _nx_secure_tls_find_curve_method and
- *             _nx_secure_x509_find_curve_method site indexes the array the
- *             application passed to nx_secure_tls_ecc_initialize).  They hold
- *             the returned pointer rather than copying the struct.  So a
- *             curve method that returns a private, mutable copy of
- *             _nx_crypto_ec_secp256r1 with nx_crypto_ec_multiple swapped is
- *             the whole integration.
- *
- *   Casting away the `const` on _nx_crypto_ec_secp256r1 and writing to it was
- *   rejected.  That is undefined behaviour, the object is shared by every
- *   session in the process, and it silently defeats the differential tests
- *   against the vendored path.  A private copy costs one NX_CRYPTO_EC (about
- *   200 bytes) and leaves the reference intact, which tests/crypto68k and the
- *   interop test below both need.
- *
- *   NX_CRYPTO_SET_PRIME_P appears exactly once in all of nx_secure/src, in
- *   nx_secure_process_client_key_exchange.c.  The ECDHE_RSA ServerKeyExchange
- *   signature (nx_secure_tls_ecc_generate_keys.c:773) and
- *   nx_secure_tls_send_certificate_verify.c:670 both hand the full 2048-bit
- *   private exponent to the RSA method with p and q left NULL.  So they take
- *   the non-CRT path, a measured 3.6x penalty on the operation that is most
- *   of a server handshake.
- *
- *   The two missing nx_crypto_operation() calls need edits to vendored
- *   sources, so the primes are supplied from the other end instead.
- *   ami_tls_rsa_key_register() records (modulus, p, q) from a parsed
- *   certificate.  The RSA operation here, when asked for a private-key
- *   exponentiation with no p/q set, looks the modulus up and uses CRT anyway.
- *   The pairing comes from one certificate object, so it cannot be mismatched
- *   any more than the vendored CRT path's can.
- *
- * Not constant time, see the note above c68k_mont_power_modulus().  This
- * changes nothing about that.  Both the vendored and the fast exponentiation
- * branch on exponent bits.
- *
- * SPDX-License-Identifier: MIT
- */
+/* AmiNetXDuo: nx_secure crypto tables routing RSA and P-256 through src/crypto68k/
+ * as replacement NX_CRYPTO_METHOD tables; the vendored const curve object is
+ * shared process-wide and must never be written.  SPDX-License-Identifier: MIT */
 
 #ifndef AMINETXDUO_TLS_CRYPTO_H
 #define AMINETXDUO_TLS_CRYPTO_H
@@ -71,23 +13,16 @@ extern "C" {
 #endif
 
 /*
- * RFC 7905's two ciphersuite numbers.  nx_secure_tls.h has a define for every
- * suite the vendored tables mention, and these were never among them, because
- * nx_secure has no ChaCha20-Poly1305 at all.  It comes from
- * src/crypto68k/c68k_chacha20.c.
+ * RFC 7905's two ciphersuite numbers.  nx_secure has no ChaCha20-Poly1305 at
+ * all, so nx_secure_tls.h defines neither; the cipher is src/crypto68k's.
  */
 #define TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     0xCCA8
 #define TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   0xCCA9
 
 /*
- * The drop-in replacements for the vendored ECC ciphersuite tables, with
- * crypto_method_rsa and crypto_method_ec_secp256 swapped for ours and the two
- * ChaCha20-Poly1305 suites added at the head of the list.
- *
- *     nx_secure_tls_session_create(&session, &ami_crypto_tls_ciphers_ecc, ...)
- *     nx_secure_tls_ecc_initialize(&session, ami_crypto_ecc_supported_groups,
- *                                  ami_crypto_ecc_supported_groups_size,
- *                                  ami_crypto_ecc_curves);
+ * Drop-in replacements for the vendored ECC tables: ami_crypto_tls_ciphers_ecc
+ * goes to nx_secure_tls_session_create(), and the ami_crypto_ecc_* trio to
+ * nx_secure_tls_ecc_initialize().
  */
 extern const NX_SECURE_TLS_CRYPTO   ami_crypto_tls_ciphers_ecc;
 extern const USHORT                 ami_crypto_ecc_supported_groups[];
@@ -96,36 +31,24 @@ extern const UINT                   ami_crypto_ecc_supported_groups_size;
 
 /*
  * The subset the ClientHello offers.  nx_secure_tls_ecc_initialize() sets the
- * TLS list and the X.509 list from one argument.  A client wants them apart,
- * because offering a group costs a key generation and recognising a curve in
- * a certificate costs nothing.
+ * TLS and X.509 lists from one argument; a client wants them apart, because
+ * offering a group costs a key generation and recognising one does not.
  */
 extern const USHORT                 ami_crypto_ecc_offered_groups[];
 extern const NX_CRYPTO_METHOD      *ami_crypto_ecc_offered_curves[];
 extern const UINT                   ami_crypto_ecc_offered_groups_size;
 
 /*
- * Build the private secp256r1 curve and, if AMINETXDUO_TLS_CRYPTO68K_SELFCHECK
- * is set, check that the generated comb table belongs to it.  Call once,
- * before any session is created.  Idempotent but not thread safe, matching
- * nx_secure_tls_initialize().
- *
- * Returns NX_SUCCESS, or NX_NOT_SUCCESSFUL if the curve was not found or the
- * self check failed.  The tables still work in that case, and fall through to
- * the vendored arithmetic.
+ * Build the private secp256r1 curve.  Call once, before any session is created;
+ * idempotent but not thread safe, matching nx_secure_tls_initialize().  On
+ * failure the tables still work and fall through to the vendored arithmetic.
  */
 UINT ami_tls_crypto_initialize(VOID);
 
 /*
- * Record a certificate's RSA primes so that private-key operations against its
- * modulus can use CRT.  Call after nx_secure_x509_certificate_initialize() and
- * before the handshake.  The certificate must outlive the sessions that use
- * it, because nothing is copied (the vendored CRT path aliases the same
- * memory).
- *
- * Returns NX_SUCCESS, NX_NOT_SUCCESSFUL if the certificate carries no RSA
- * private primes (an EC certificate, or a PKCS#1 key without p and q), or
- * NX_NO_MORE_ENTRIES if the table is full.
+ * Record a certificate's RSA primes so private-key operations on its modulus
+ * can use CRT.  Call after nx_secure_x509_certificate_initialize() and before
+ * the handshake; nothing is copied, so the certificate must outlive the sessions.
  */
 UINT ami_tls_rsa_key_register(const NX_SECURE_X509_CERT *certificate);
 
@@ -134,10 +57,8 @@ UINT ami_tls_rsa_key_register(const NX_SECURE_X509_CERT *certificate);
 VOID ami_tls_rsa_key_reset(VOID);
 
 /*
- * nx_secure_tls_local_certificate_add() plus ami_tls_rsa_key_register(), what
- * a server or a client with a client certificate wants.  Returns the
- * certificate-add status.  A failure to register the primes is not an error,
- * only slower.
+ * nx_secure_tls_local_certificate_add() plus ami_tls_rsa_key_register().  Returns
+ * the certificate-add status; failing to register the primes is only slower.
  */
 UINT ami_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
                                    NX_SECURE_X509_CERT *certificate);
@@ -145,11 +66,8 @@ UINT ami_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
 /* ------------------------------------------------ measurement and modes --- */
 
 /*
- * Which arithmetic the methods above use.  Both settings compute the same
- * values.  REFERENCE lets "before" and "after" be measured through identical
- * instrumentation in one process, rather than composed from separate runs.
- *
- * Not for production use.  The shipping configuration is C68K, the default.
+ * Which arithmetic the methods above use; both settings compute the same values.
+ * Not for production use -- the shipping configuration is C68K, the default.
  */
 #define AMI_TLS_ARITH_C68K          0u
 #define AMI_TLS_ARITH_REFERENCE     1u
@@ -157,19 +75,15 @@ UINT ami_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
 VOID ami_tls_crypto_set_arithmetic(UINT mode);
 
 /*
- * Whether a private-key operation with no primes set can recover them from
- * ami_tls_rsa_key_register().  On by default.  Off reproduces stock nx_secure
- * behaviour, which isolates the CRT win from the crypto68k win.
+ * Whether a private-key operation with no primes set may recover them from
+ * ami_tls_rsa_key_register().  On by default.
  */
 VOID ami_tls_crypto_set_crt(UINT enable);
 
 /*
- * Per-operation counters and elapsed microseconds, so a test can show which
- * path ran and how long it took, rather than infer both from a single
- * elapsed time.
- *
- * Timing comes from ami_tls_eclock().  If ami_tls_timer_open() was never
- * called, the counts are still right and the microseconds are zero.
+ * Per-operation counters and elapsed microseconds.  Timing comes from
+ * ami_tls_eclock(): if ami_tls_timer_open() was never called the counts are
+ * still right and the microseconds are zero.
  */
 typedef struct AMI_TLS_CRYPTO_COUNTERS_STRUCT
 {
@@ -184,14 +98,9 @@ typedef struct AMI_TLS_CRYPTO_COUNTERS_STRUCT
 } AMI_TLS_CRYPTO_COUNTERS;
 
 /*
- * Split the counters by role.  `client` accumulates work done on the thread
- * registered with ami_tls_crypto_set_client_thread().  `other` is everything
- * else, which in the loopback handshake is the server.  Either pointer can be
- * NX_NULL.
- *
- * This produces the client-only figure.  A client that fetches a page never
- * performs the private-key operation, so the whole-machine wall time of a
- * loopback handshake overstates its cost by an order of magnitude.
+ * Split by role: `client` accumulates work done on the thread registered with
+ * ami_tls_crypto_set_client_thread(), `other` is everything else.  Either
+ * pointer can be NX_NULL.
  */
 VOID ami_tls_crypto_counters_get(AMI_TLS_CRYPTO_COUNTERS *client,
                                  AMI_TLS_CRYPTO_COUNTERS *other);

@@ -1,37 +1,4 @@
-/*
- * The frontmost screen down a WebSocket.  See httpfb.h for what this is and
- * what it deliberately is not.
- *
- * IntuitionBase->FirstScreen is what is in front, and that is what is served.
- * It used to be LockPubScreen("Workbench") and nothing else, which meant the
- * Palette and Overscan editors, each of which opens a screen of its own that
- * is not public, locked a remote viewer out: the screen opened in front on the
- * machine and the browser went on showing an unchanged Workbench with no way
- * to see or dismiss it.
- *
- * The whole front screen goes out at its own origin, with nothing behind it,
- * the way RTG works: on a graphics card the front screen owns the display and
- * screen dragging does not exist.  It is deliberately not a composite of a
- * dragged-down screen over what is behind it.  sc->LeftEdge and sc->TopEdge
- * are read for one purpose only, aiming injected pointer events at rows that
- * have been dragged away from the top of the view.  They do not move the
- * picture.
- *
- * open_libraries(), geometry_of(), read_palette() and grab_frame() are
- * src/tools/wbgrab.c's, lifted rather than rewritten.  That file is the grab
- * half of this and is already right about the things that are easy to get
- * wrong: BMF_STANDARD before Planes[] is read at all, an interleaved BitMap's
- * BytesPerRow spanning every plane, a ColorMap shorter than the screen's
- * depth, and the screen being re-examined on every grab because the one it
- * locked can differ from the one it was told about.
- *
- * There is one transmit buffer and it holds one WebSocket frame.  Nothing is
- * produced while it still has bytes in it, which is the whole of the flow
- * control in this direction, and is what a framebuffer needs rather than a
- * queue.  When the LAN cannot carry 25 frames a second, what gets dropped is
- * the frames that were never grabbed, rather than a backlog of pictures of
- * what the screen looked like a second ago.
- *
+/* The frontmost screen down a WebSocket.  See httpfb.h.
  * SPDX-License-Identifier: MIT
  */
 
@@ -67,107 +34,42 @@
 #define FB_MAX_DEPTH        RFB_MAX_DEPTH
 #define FB_MAX_COLOURS      (1U << FB_MAX_DEPTH)
 
-/*
- * The encoder's shipping configuration.  BASELINE is PackBits, XOR, the plane
- * mask and best-of.  COPYRECT is the scroll detector, and SCROLL_ADAPTIVE is
- * what keeps it from probing on a frame where nothing moved.  Measured on real
- * captures: 5 bytes for an idle frame, 272 for windows opening, 1412 for a
- * shell scrolling.
- *
- * RFB_F_INTERLEAVED is added at run time, in fb_take_buffers(), when the
- * screen's BitMap is interleaved.  It used to be impossible to need, because
- * the grab de-interleaved into a plane-major buffer and the encoder only ever
- * saw that.  The encoder now reads the bitplanes where they are, so the layout
- * it is told about has to be the layout they are in.  The flag is what lays
- * the shadow out to match, since the two are walked with one stride.
- */
+/* The encoder's shipping configuration.  RFB_F_INTERLEAVED is added at run
+   time, in fb_take_buffers(), because the encoder reads the bitplanes where
+   they lie and the layout it is told about has to be the layout they are in. */
 #define FB_FLAGS    (RFB_F_BASELINE | RFB_F_COPYRECT | RFB_F_SCROLL_ADAPTIVE)
 
 /* The most a text frame from a viewer can be worth reading.  Every word in the
    vocabulary is a keyword and at most three small numbers. */
 #define FB_WORD_MAX         48
 
-/* How often the session says what it is costing.  Frames, because a count is
-   what the arithmetic afterwards divides by.  32 and not 128: a screen that is
-   scrolling costs half a second a frame, so a twenty-second run of the case
-   the figure is most wanted for produces thirty-five frames. */
+/* How often the session says what it is costing, in frames. */
 #define FB_STAT_EVERY       32
 
-/* The floor between grabs, in fiftieths.  One tick, so a screen nothing is
- * drawing on does not have 40 KB of chip RAM read on every pass of a loop
- * whose wait is two milliseconds.  It is a floor rather than a frame rate: the
- * point past which grabbing again cannot produce anything a viewer can see. */
+/* The floor between grabs, in fiftieths.  A floor rather than a frame rate: the
+   point past which grabbing again cannot produce anything a viewer can see. */
 #define FB_GRAB_FLOOR       1
 
-/*
- * The share of the machine this may take, as the divisor of the idle owed
- * after a frame.
- *
- * A frame that cost T ticks is followed by at least T / FB_IDLE_DIVISOR of
- * doing nothing, so the console settles at T / (T + T/3), which is 75%.  The
- * machine has to stay usable for whatever its owner is doing while somebody
- * watches it, and on a 68030 a 640x480 frame is a fifth of a second of solid
- * work: without this the console takes everything it can get and the guest
- * belongs to the browser rather than to the person sitting at it.
- *
- * It is enforced against MEASURED cost and not against a frame rate, because
- * the cost is what varies -- an idle screen is a few milliseconds and a
- * scrolling one is hundreds -- and a fixed rate would either throttle the
- * cheap case for nothing or fail to cap the expensive one at all.
- *
- * Task priority is not the mechanism.  A lower priority yields to a task that
- * wants to run and caps nothing when the machine is otherwise idle, which is
- * exactly when a long encode still makes the pointer stutter.  This is a
- * duty cycle and it holds whether or not anything else is runnable.
- */
+/* The share of the machine this may take, as the divisor of the idle owed after
+   a frame: a frame costing T ticks is followed by at least T/3 of nothing, so
+   the console settles at 75%.  Enforced against measured cost, not a rate. */
 #define FB_IDLE_DIVISOR     3
 
-/*
- * How often a `refresh` can force a full frame, in fiftieths.
- *
- * A refresh is expensive and asymmetric.  The answer is a whole screen, about
- * 7 KB at 640x256x4, against the 5 bytes an idle frame costs.  A viewer that
- * asks once, having lost sync or seen a sequence gap, gets one at once: the
- * floor only applies to the second and later ask inside a second.  A viewer
- * that asks on every frame degrades to one re-sync a second rather than
- * saturating the link.
- *
- * The number is one second because that is well above the grab rate and well
- * below anything a person notices as a stall in a picture that is already
- * correct.
- */
+/* How often a `refresh` can force a full frame, in fiftieths.  The first ask is
+   answered at once; the floor applies to the second and later inside a second,
+   so a viewer that asks every frame degrades to one re-sync a second. */
 #define FB_RESYNC_FLOOR     50UL
 
-/*
- * How long a run with no screen at all is allowed to last, in fiftieths.
- *
- * A resolution change closes the Workbench screen and opens a new one, and
- * between the two Intuition's screen list is empty.  With no other screen
- * open, no Shell window holding one and nothing else running, that is a real
- * moment with nothing to serve, and it used to end the session with "there are
- * no screens left" on a machine that was about to show a bigger screen.
- * Reproduced first time by copying a lace prefs file over
- * ENV:Sys/screenmode.prefs with the boot Shell ended.  A depth change does not
- * do it, because Intuition rebuilds the bitmap without closing the screen.
- *
- * So an empty list is a moment to wait through rather than an error.  Measured
- * over eight resolution changes and two overscan changes, the gap is one or two
- * passes of this loop, tens of milliseconds, and gn= counted 2 across two
- * reopens.  Ten seconds is three orders of magnitude beyond that, and it is the
- * same order as the session's own liveness timeout, so a viewer never waits
- * longer to find out the screen is gone for good than it waits to find out its
- * peer is dead.
- */
+/* How long a run with no screen at all is allowed to last, in fiftieths.  A
+   resolution change closes one screen and opens another, and between the two
+   Intuition's screen list is empty: a moment to wait through, not an error. */
 #define FB_GONE_GRACE       500UL
 
 struct GfxBase       *GfxBase;
 struct IntuitionBase *IntuitionBase;
 
-/*
- * What the header says and what the copy loop needs.  row_stride and row_bytes
- * differ only on an interleaved bitmap, where BytesPerRow spans every plane
- * and one plane's row is that divided by the depth.
- */
+/* What the header says and what the copy loop needs.  row_stride and row_bytes
+   differ only on an interleaved bitmap, where BytesPerRow spans every plane. */
 typedef struct FbGeometry
 {
     UWORD width;
@@ -177,32 +79,9 @@ typedef struct FbGeometry
     ULONG row_stride;
     ULONG frame_bytes;
     UWORD interleaved;      /* BMF_INTERLEAVED, as the BitMap reported it */
-    /*
-     * What a pixel is, as one of the RFB_FMT_ values, and it is the field the
-     * whole of the rest of this file branches on.
-     *
-     * RFB_FMT_PLANAR is the chipset: depth one-bit planes read where they
-     * lie.  The two chunky ones are a graphics card, one plane of bytes,
-     * where the bitplanes cannot be read where they are at all -- a staging
-     * buffer in Fast RAM stands in for them and httprtg.c fills it, see
-     * fb_grab_frame().  RFB_FMT_CLUT8 is a byte a pixel and a palette;
-     * RFB_FMT_RGB565 is two bytes a pixel and no palette, which is what a 15,
-     * 16, 24 or 32-bit card screen is converted to before it gets here.
-     *
-     * RFB_FMT_HAM6, RFB_FMT_HAM8 and RFB_FMT_EHB are the chipset too, and this
-     * file treats them exactly as it treats RFB_FMT_PLANAR: the same planes at
-     * the same stride, read where they lie.  What they change is one number
-     * here -- how long the `pal` word is -- and what the browser does with an
-     * index after it has one.  The decode is the receiver's because HAM runs
-     * along a scanline, each pixel from the one before it, and that is a
-     * per-pixel chain on a 68000 for a picture the browser is going to walk
-     * anyway.  fb_planar_format() is where the mode is read.
-     *
-     * row_bytes is bytes either way, so everything downstream that counts in
-     * bytes is unchanged by any of this.  Only three things ask: how many
-     * planes there are, how wide a row is, and whether there is a palette to
-     * send.
-     */
+    /* What a pixel is, as one of the RFB_FMT_ values.  PLANAR, HAM6, HAM8 and
+       EHB are the same planes at the same stride and differ only in how long
+       `pal` is; the chunky ones come through fb_stage, not the bitplanes. */
     UWORD format;
 } FbGeometry;
 
@@ -213,16 +92,9 @@ static char fb_why[200];
 
 static FbGeometry fb_open_geom;
 
-/*
- * TRUE when -C started on a machine that had no screen open at all.
- *
- * Not a failure and not an error: it is what `httpd <drawer> -C` out of
- * S:User-Startup meets every time, because Intuition's screen list is empty
- * until something opens one and LoadWB is at the END of the Startup-Sequence.
- * The server comes up serving anyway and http_fb_start() reads the front
- * screen again per session, so the console starts working by itself the moment
- * Workbench arrives.  httpd.c asks so that the banner can say so once.
- */
+/* TRUE when -C started on a machine that had no screen open at all.  Not a
+   failure: http_fb_start() reads the front screen again per session, so the
+   console starts working by itself when Workbench arrives. */
 static BOOL fb_open_screenless;
 
 /* ------------------------------------------------------------ the session -- */
@@ -244,20 +116,9 @@ static char            fb_word[FB_WORD_MAX + 1];
 static UWORD           fb_word_n;
 static UBYTE           fb_word_over;    /* the message is longer than is read  */
 
-/*
- * Why the last geometry was refused, for the close frame.
- *
- * Every refusal sets it, and that is the point of it.  It used to be set by
- * the RTG refusals alone, because they were the ones with a name to give, so
- * the depth a planar refusal names -- "the front screen is 16 planes deep" --
- * reached fb_why() and no further, and the person watching was closed on with
- * a generic sentence that named nothing.  A close that cannot say what it
- * found is a defect in its own right: the screen it would not read is the one
- * fact needed to work out why.
- *
- * It points either at a string literal or at fb_why, which is filled by the
- * same call that sets this and read by the close frame in the same pass.
- */
+/* Why the last geometry was refused, for the close frame.  It points either at
+   a string literal or at fb_why, which is filled by the same call that sets
+   this and read by the close frame in the same pass. */
 static const char     *fb_refuse_why;
 
 static FbGeometry      fb_geom;
@@ -269,17 +130,9 @@ static rfb_u32         fb_flags;        /* FB_FLAGS, plus the layout's own */
 static UBYTE          *fb_shadow;
 static UBYTE          *fb_scratch;
 static UBYTE          *fb_tx;
-/*
- * Where a card's screen lands before it is encoded.
- *
- * The chipset path points the encoder straight at the bitplanes and lets it
- * read nothing where nothing changed, which is right when the source is chip
- * RAM.  On a card it cannot be done, because the compare would itself be the
- * readback and the readback is the expensive part.  So a card's screen is
- * fetched whole, once a frame, into this buffer in ordinary Fast RAM, and the
- * encoder is pointed at that, which leaves one read of VRAM a frame and puts
- * every comparison on memory that is cheap to read.
- */
+/* Where a card's screen lands before it is encoded.  A card cannot be compared
+   in place, because the compare would itself be the readback, so the screen is
+   fetched whole once a frame into Fast RAM and the encoder reads that. */
 static UBYTE          *fb_stage;
 static ULONG           fb_stage_len;
 static ULONG           fb_shadow_len;
@@ -293,27 +146,16 @@ static UBYTE           fb_want_geom;
 static UBYTE           fb_want_pal;
 static UBYTE           fb_want_stat;
 
-/* httprtg.c has measured this screen's readback routes and picked one, and
-   the `rtg` word saying what it measured is queued.  Cleared with the buffers,
-   so a screen change re-probes rather than carrying a figure for a card
-   configuration that is not the one in front. */
+/* httprtg.c has measured this screen's readback routes and picked one.  Cleared
+   with the buffers, so a screen change re-probes. */
 static UBYTE           fb_rtg_ready;
 static UBYTE           fb_want_rtg;
 
 static ULONG           fb_next_tick;
 
-/*
- * The duty cycle, in ticks.
- *
- * fb_frame_t0 is when the work for the frame in flight began, which is the
- * grab and not the send: the cost this has to cap is everything the task does
- * on the console's account, and the send is part of it.  fb_busy_ticks is the
- * running total of that cost and is what fbstat reports, so the share taken
- * can be checked from outside rather than trusted.
- *
- * fb_frame_t0 is 0 when no frame is in flight, and a tick of 0 is therefore
- * nudged to 1 by its writer the way fb_next_tick's is.
- */
+/* The duty cycle, in ticks.  fb_frame_t0 is when the work for the frame in
+   flight began, which is the grab and not the send, and is 0 when no frame is
+   in flight: a tick of 0 is nudged to 1 by its writer, as fb_next_tick's is. */
 static ULONG           fb_frame_t0;
 static ULONG           fb_busy_ticks;
 
@@ -322,21 +164,9 @@ static ULONG           fb_busy_ticks;
    last band happened to round to. */
 static ULONG           fb_idle_given;
 
-/*
- * Which tile row the next band starts at, and 0 means the next pass begins a
- * fresh screen.
- *
- * A whole frame is one uninterruptible piece of work, and on a 68030 that is
- * around a fifth of a second in which this task reads no socket -- so a click
- * or a keystroke sent while a frame is being built is not looked at until the
- * frame is finished.  Producing a band at a time puts the server's read back
- * on the path between them, at the cost of five bytes of message header per
- * band and nothing else.
- *
- * The screen is re-resolved and its geometry re-checked on every band, so a
- * screen that changes shape half way through a pass is caught there rather
- * than producing bands of two different pictures.
- */
+/* Which tile row the next band starts at; 0 means the next pass begins a fresh
+   screen.  Producing a band at a time puts the server's read back on the path
+   between them, at five bytes of message header per band. */
 static UWORD           fb_band_ty0;
 
 /* Whether the band just produced closed a screen pass.  Only that one counts
@@ -352,51 +182,20 @@ static ULONG           fb_pass_ticks;
    at a time. */
 static ULONG           fb_pass_acc;
 
-/*
- * Tile rows in a band.
- *
- * A 640x480 screen at 16-row tiles is 30 tile rows, so four rows is eight
- * bands and bounds one uninterrupted encode at an eighth of a screen.  Small
- * enough to keep the socket answered on a 68030, large enough that the five
- * bytes of header a band costs stay lost in the noise -- an idle 640x480
- * screen measured 1840 bytes a pass whole and 1875 in eight bands.
- */
+/* Tile rows in a band.  Four rows bounds one uninterrupted encode at an eighth
+   of a 640x480 screen. */
 #ifndef FB_BAND_ROWS
 #define FB_BAND_ROWS        4
 #endif
 
-/*
- * How expensive a screen pass has to have been for the next one to be banded,
- * in fiftieths.
- *
- * Banding is not free and it is not always worth it.  A band boundary buys a
- * read of the socket, which is only worth having when there is a long stretch
- * of work to interrupt; and it costs a pass that is spread over more turns of
- * the server loop, which on a cheap screen is all cost.  Measured on the
- * A3000 with an idle screen: worst keystroke-to-frame 42.0 ms with the frame
- * whole against 82.5 ms banded into eight, because a change is only encoded
- * when its own band comes round and eight bands of nothing take longer to
- * come round than one pass over everything.
- *
- * So the previous pass decides.  Two ticks is 40 ms, which is about where a
- * pass stops being something a person would not notice; a Workbench doing
- * nothing sits far below it and is never banded, and a screen that is
- * scrolling sits far above it and always is.
- */
+/* How expensive a screen pass has to have been for the next one to be banded,
+   in fiftieths.  Banding a cheap pass is all cost: a change is only encoded
+   when its own band comes round. */
 #define FB_BAND_WHEN        2
 
-/*
- * A resync is a sequence, and asking twice must not restart it.
- *
- * Honouring a refresh queues geom, then pal, then a full frame, and clears the
- * shadow so that frame is decodable from zero.  A second refresh arriving
- * inside that sequence has nothing to add, since the shadow is already zero
- * and the full frame is already coming, and acting on it would re-queue geom
- * and re-clear a shadow the viewer has not yet been given a frame from.  A
- * client that asks on every geom would then be answered with a geom, ask
- * again, and never get past the handshake.  No client here does that.  The
- * guard is on this side because this side answers every client.
- */
+/* A resync is a sequence, and asking twice must not restart it: a second
+   refresh inside one would re-queue geom and re-clear a shadow the viewer has
+   not yet been given a frame from. */
 static UBYTE           fb_resync;      /* the sequence is under way        */
 static UBYTE           fb_resync_due;  /* asked under the floor, so owed one */
 static UBYTE           fb_resync_ever; /* fb_resync_at means something     */
@@ -418,12 +217,8 @@ static ULONG           fb_torn;
    picture stopping has a number behind it. */
 static ULONG           fb_nolock;
 
-/*
- * The screen list was empty on the last pass, and when it first was.  A screen
- * being reopened in another resolution is the ordinary reason.  See
- * FB_GONE_GRACE.  `fb_gone_passes` is reported in `fbstat` as gn=, so that a
- * report of connections being lost has a number behind it.
- */
+/* The screen list was empty on the last pass, and when it first was.  See
+   FB_GONE_GRACE.  `fb_gone_passes` is reported in `fbstat` as gn=. */
 static UBYTE           fb_gone;
 static ULONG           fb_gone_at;
 static ULONG           fb_gone_passes;
@@ -434,45 +229,17 @@ static UBYTE           fb_reset;
 
 /* ------------------------------------------------------------------ input -- */
 
-/*
- * input.device, opened with -C and held for the server's life.  One port, one
- * request and one event, taken once: an event is written per mouse move and
- * allocating for each would be a thousand AllocMem/FreeMem pairs a minute.
- *
- * The event is static rather than automatic for the reason every buffer here
- * is: a Shell command has 4 KB of stack on a stock Kickstart 3.1, and this one
- * is also what io_Data points at while DoIO() runs.
- */
+/* input.device, opened with -C and held for the server's life.  One port, one
+   request and one event, taken once.  The event is static because io_Data
+   points at it while DoIO() runs and a Shell command has 4 KB of stack. */
 static struct MsgPort   *fb_in_port;
 static struct IOStdReq  *fb_in_req;
 static BOOL              fb_in_open;
 static struct InputEvent fb_event;
 
-/*
- * ie_X and ie_Y are not measured in screen pixels.
- *
- * IECLASS_POINTERPOS carries a position in mouse units, and Intuition turns
- * one into a pixel with two numbers that both come out of the display
- * database.  It multiplies ie_X by the monitor's ticks-per-mouse-unit and
- * divides by the screen mode's ticks-per-pixel.  A tick is 1/44 of a lores
- * pixel on a 15 kHz monitor.  A hires pixel is 22 of them, superhires 11, and
- * a PAL row is 44 non-interlaced or 22 interlaced.
- *
- * The mode bits cannot answer this.  A Multiscan Productivity screen is
- * 640x480 with the SUPERHIRES and LACE bits both set, which is how the chipset
- * makes it, and its pixels are 22 ticks wide and 22 high, exactly a PAL
- * hires-interlaced pixel.  Reading the bits gave it half the width and twice
- * the height, which is a pointer that reaches the middle of the screen at the
- * right edge of the browser and is pinned to the bottom for the lower half of
- * it.  Measured, on Multiscan:ProductivityLace: sending (320,480) put the
- * pointer at (160,959).  Every doublescan, productivity and multisync mode is
- * that shape, which is what a reporter on a 1024x768 Super-High Res Laced
- * screen was seeing.
- *
- * So they are read from the database instead, per mode, and kept here because
- * the injectors have a word from a viewer and no screen in hand.  A screen
- * that changes mode under a live session changes them on the next grab.
- */
+/* ie_X and ie_Y are not screen pixels: IECLASS_POINTERPOS carries mouse units,
+   and the conversion is ticks-per-pixel over ticks-per-mouse-unit.  Both come
+   from the display database; the mode bits cannot answer it. */
 static UWORD             fb_res_x  = 22;    /* ticks per screen pixel        */
 static UWORD             fb_res_y  = 44;
 static UWORD             fb_tick_x = 22;    /* ticks per POINTERPOS unit     */
@@ -482,26 +249,15 @@ static UWORD             fb_spr_y  = 44;
 static UWORD             fb_pixel_ns = 70;  /* what one screen pixel lasts   */
 static ULONG             fb_mode_id  = INVALID_ID;
 
-/*
- * Where the front screen sits in the view, in its own pixels.
- *
- * Zero for every screen nobody has dragged, which is every screen this
- * normally sees.  The picture is sent whole at the screen's own origin
- * whatever these are, because the front screen owns the display the way it
- * does on RTG, so they change nothing about what is drawn.  They exist because
- * an injected IECLASS_POINTERPOS is a position in the view, and a screen
- * dragged down by fifty rows has its row 0 fifty rows into the view.  Without
- * this the picture would be right and every click in it fifty rows high.  The
- * unit is the screen's own pixels, because that is the unit Intuition scales
- * them in.
- */
+/* Where the front screen sits in the view, in its own pixels.  They change
+   nothing about what is drawn: an injected IECLASS_POINTERPOS is a position in
+   the view, so a dragged screen's row 0 is not the view's row 0. */
 static WORD              fb_left;
 static WORD              fb_top;
 
 /* What the far end is holding down, as IEQUALIFIER_ bits.  Intuition reads the
-   button state off the qualifier of every RAWMOUSE event rather than off a
-   history of the codes, so a button that goes down and is not carried in the
-   qualifier of what follows reads as released. */
+   button state off the qualifier of every RAWMOUSE event, so a button not
+   carried in the qualifier of what follows reads as released. */
 static UWORD             fb_buttons;
 
 /* ------------------------------------------------------------ diagnostics -- */
@@ -515,10 +271,8 @@ static VOID fb_say(const char *text)
     fb_why[i] = '\0';
 }
 
-/* Decimal, into a caller's buffer, returning where it ended.  Two callers: a
-   sentence for a person, and the `fbstat` word.  No printf, because this
-   module has to build the same message into a close frame and a Shell command
-   has 4 KB of stack to do it on. */
+/* Decimal, into a caller's buffer, returning where it ended.  No printf: this
+   module builds the same message into a close frame on a 4 KB stack. */
 static ULONG fb_put_num(UBYTE *out, ULONG cap, ULONG at, ULONG v)
 {
     char  digits[12];
@@ -558,13 +312,8 @@ const char *http_fb_fault(VOID)
     return fb_why;
 }
 
-/*
- * The same sentence to the log and to the close frame.  fb_say() alone leaves
- * the reason in a file nobody reads, and the two refusals that set
- * fb_refuse_why by hand were the only ones a person ever saw.  Every refusal
- * goes through one of these two, so the generic fallback in the close is
- * unreachable while that stays true.
- */
+/* The same sentence to the log and to the close frame.  Every refusal goes
+   through one of these two. */
 static VOID fb_refuse(const char *text)
 {
     fb_say(text);
@@ -600,10 +349,8 @@ static BOOL fb_open_libraries(VOID)
     IntuitionBase = (struct IntuitionBase *)
         OpenLibrary((CONST_STRPTR)"intuition.library", 39);
 
-    /* Neither is required and neither is an error: a machine with no graphics
-       card has neither, and one with a card has whichever its driver installed.
-       What this decides is only whether an RTG screen in front can be read at
-       all -- see fb_geometry_of(). */
+    /* Neither is required and neither is an error: what this decides is only
+       whether an RTG screen in front can be read at all. */
     (VOID)http_rtg_open();
 
     if (GfxBase != NULL && IntuitionBase != NULL)
@@ -632,12 +379,9 @@ static VOID fb_close_libraries(VOID)
 
 /* --------------------------------------------------- which screen is front -- */
 
-/*
- * TRUE when `sc` is still one of Intuition's screens.  The caller must hold
- * LockIBase().  CloseScreen() takes IntuitionBase to unlink a screen before it
- * frees it, so a screen found in the list under that lock cannot be freed for
- * as long as the lock is held.
- */
+/* TRUE when `sc` is still one of Intuition's screens.  The caller must hold
+   LockIBase(): CloseScreen() takes IntuitionBase to unlink a screen before it
+   frees it, so one found under that lock cannot be freed while it is held. */
 static BOOL fb_listed(struct Screen *sc)
 {
     struct Screen *s;
@@ -651,25 +395,9 @@ static BOOL fb_listed(struct Screen *sc)
     return FALSE;
 }
 
-/*
- * The frontmost screen, locked when a lock is available.
- *
- * IntuitionBase->FirstScreen is a field rather than a function, so it is read
- * under LockIBase() and the lock is dropped at once.  Intuition is blocked for
- * as long as it is held and this runs many times a second.
- *
- * A real lock is taken whenever one exists.  A public screen can be held by
- * name for the whole of a grab, and the screen then cannot close underneath,
- * which is the guarantee the Workbench-only version had for the case that is
- * nearly always in front.  Its name comes off the public screen list rather
- * than being assumed to be "Workbench", so any public screen in front gets the
- * same treatment.
- *
- * A screen that is not public has no such handle in 3.1.  The Palette and
- * Overscan editors open one each, which is why LockPubScreen() could not reach
- * them.  Such a screen comes back unlocked and fb_grab_frame() reads it under
- * the shorter guarantee LockIBase() gives instead.
- */
+/* The frontmost screen, locked when a lock is available.  FirstScreen is read
+   under LockIBase() and the lock dropped at once, since Intuition is blocked
+   while it is held.  A screen that is not public comes back unlocked. */
 static struct Screen *fb_lock_front(BOOL *pub)
 {
     /* Static for the reason every buffer in this file is: a Shell command has
@@ -734,15 +462,9 @@ static struct Screen *fb_lock_front(BOOL *pub)
 
 /* --------------------------------------------------------------- geometry -- */
 
-/*
- * What a screen's bitmap is, or why it is not one that can be read.
- *
- * Three answers rather than two.  FB_GEOM_NO is a bitmap this cannot read
- * correctly, and none of those must fall through to a grab of something else.
- * FB_GEOM_UNSURE is the answer that used to be missing: a bitmap this could
- * not identify from where it was standing, which is not the same finding and
- * must not end a session.  See `blind` below.
- */
+/* What a screen's bitmap is, or why it is not one that can be read.  Three
+   answers: FB_GEOM_UNSURE is a bitmap this could not identify from where it
+   was standing, which is not a refusal and must not end a session. */
 enum
 {
     FB_GEOM_OK = 0,
@@ -757,31 +479,9 @@ static int fb_unsure(VOID)
     return FB_GEOM_UNSURE;
 }
 
-/*
- * Which of the planar pixel meanings a chipset screen carries.
- *
- * The answer is on the ViewPort and not in the bitmap.  HAM6, HAM8 and extra
- * half-brite are ordinary planar bitmaps -- the same planes, the same stride,
- * the same bytes -- and nothing in the BitMap says what the display hardware
- * does with an index once it has assembled one.  Only the mode does.
- *
- * Read from GetVPModeID(), which is the display database's answer and the one
- * Intuition asks itself.  The ViewPort's own Modes word is the fallback for a
- * viewport the database does not know; it carries the same two bits at the
- * same two values, which is why the mode id can be masked with them directly.
- *
- * Not inferred from the depth, in either direction.  Six planes is a plain
- * 64-colour screen far more often than it is either of the two modes that are
- * also six deep, and a plain screen drawn as HAM6 is three quarters of the
- * picture turned into a modify of the pixel to its left.
- *
- * A mode bit at a depth the mode does not have is ignored rather than
- * honoured.  Extra half-brite below six planes cannot reach the half-bright
- * half at all, so it is the plain screen it already behaves as, and HAM at
- * anything other than six or eight planes is not a HAM screen.  Neither is
- * refused: the planes are readable and a plain palette draw is the honest
- * reading of them.
- */
+/* Which of the planar pixel meanings a chipset screen carries.  The answer is
+   on the ViewPort and not in the bitmap, so it is read from GetVPModeID() with
+   the ViewPort's Modes word as the fallback.  Never inferred from the depth. */
 static UWORD fb_planar_format(struct ViewPort *vp, ULONG depth)
 {
     ULONG id;
@@ -829,32 +529,9 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
         return FB_GEOM_NO;
     }
 
-    /*
-     * The card is asked before BMF_STANDARD is read.  The planar path's first
-     * question has always been whether the bitmap carries BMF_STANDARD, and on
-     * a chipset machine that is the right one.  A Picasso96 or CyberGraphX
-     * bitmap can carry it too, since that flag is what makes the rest of the
-     * OS treat the bitmap normally, and its Planes[] are not eight bitplanes.
-     * So whoever owns the bitmap is asked first.  http_rtg_owns() answers
-     * FALSE for every bitmap that is not a card's, and on a machine with
-     * neither library open it does not run at all, so the chipset path reaches
-     * BMF_STANDARD exactly as it did.
-     *
-     * `may_ask_rtg` is why the question is not always asked.  The two library
-     * calls behind it are documented as ownership queries that need no lock,
-     * and every program that touches a card makes them freely, but they are
-     * still calls into Picasso96, and this file has one caller that runs under
-     * LockIBase(): the pass that resolves a screen nothing can lock.  Whether
-     * p96GetBitMapAttr() can take a semaphore is not settled by the autodoc,
-     * and a global scan of the binary does not settle it either, so it is not
-     * relied on.
-     *
-     * Nothing is lost by not asking there.  A card's screen is read only while
-     * a real screen lock is held, see fb_grab_frame(), so the answer for a
-     * screen that offers none is discarded anyway.  What is left is the
-     * behaviour the planar path has always had for a bitmap it cannot
-     * identify.
-     */
+    /* The card is asked before BMF_STANDARD is read, because a Picasso96 or
+       CyberGraphX bitmap can carry that flag too.  `may_ask_rtg` is FALSE on
+       the pass under LockIBase(): those calls must not be made there. */
     if (may_ask_rtg && http_rtg_owns(bm))
     {
         HttpRtgScreen rs;
@@ -869,19 +546,9 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
             return FB_GEOM_NO;
         }
 
-        /*
-         * The staging buffer's row, and therefore the tile grid's.  The card's
-         * own stride is not used, so nothing here depends on a value that is
-         * only valid while the bitmap is locked.  Rounded up to a longword so
-         * the encoder's word-at-a-time compare stays on the fast path.
-         *
-         * rs.bpp is what httprtg.c will deliver into that buffer, a byte a
-         * pixel for a palette screen and two for a truecolour one, and it is
-         * the only thing that differs between the two here.  The depth
-         * follows it rather than the card's own: a 24 or 32-bit screen
-         * arrives as RGB565 and 16 is what the receiver is told, because 16
-         * is what the bytes are.
-         */
+        /* The staging buffer's row, and therefore the tile grid's.  Not the
+           card's own stride, which is only valid while the bitmap is locked,
+           and rounded up to a longword for the encoder's compare. */
         g->interleaved = 0;
         g->width       = rs.width;
         g->height      = rs.height;
@@ -903,24 +570,9 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
         return FB_GEOM_OK;
     }
 
-    /*
-     * Whether a refusal below is a finding or a guess.
-     *
-     * The two library calls above are the only way to tell a card's bitmap
-     * from a planar one, and on the pass that resolves a screen nothing can
-     * lock they are not made -- see may_ask_rtg.  Everything that follows is a
-     * planar test, and a card's bitmap fails those tests for reasons that say
-     * nothing about whether it can be read: it carries no BMF_STANDARD, or it
-     * carries it and answers BMA_DEPTH with 16.
-     *
-     * That is the defect this names.  A truecolour screen coming to the front
-     * of a live session was refused as a planar screen 16 planes deep, on the
-     * pass that caught it before it was lockable, and the session ended on a
-     * screen a fresh connection then served without trouble.  So on a machine
-     * with a card in it, a planar refusal made blind is FB_GEOM_UNSURE, the
-     * pass produces nothing, and the next one resolves the screen with the
-     * card asked and follows it.
-     */
+    /* Whether a refusal below is a finding or a guess.  Without the two calls
+       above, a card's bitmap fails every planar test for reasons that say
+       nothing about whether it can be read, so a blind refusal is UNSURE. */
     blind = (BOOL)(!may_ask_rtg && http_rtg_present());
 
     flags  = GetBitMapAttr(bm, BMA_FLAGS);
@@ -1012,11 +664,9 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
         }
     }
 
-    /* Same rule as the RTG path: BMA_WIDTH answers for the allocation, which
-       a planar screen rounds up to 16, so a 1368-wide screen sits in a
-       1376-wide bitmap and the last 8 columns are not the screen's. Every
-       resolution in the lab is a multiple of 16, which is why this never
-       showed here. */
+    /* BMA_WIDTH answers for the allocation, which a planar screen rounds up
+       to 16, so a 1368-wide screen sits in a 1376-wide bitmap and the last
+       8 columns are not the screen's. */
     if (vp != NULL && vp->DWidth > 0 && (ULONG)vp->DWidth < width)
         width = (ULONG)vp->DWidth;
 
@@ -1026,11 +676,9 @@ static int fb_geometry_of(struct BitMap *bm, struct ViewPort *vp,
     g->row_stride  = stride;
     g->frame_bytes = (ULONG)g->row_bytes * (ULONG)g->height * depth;
 
-    /* Last, because it is the only thing here that is not a property of the
-       bitmap, and because it needs the depth the checks above have settled.
-       It changes nothing this function has just measured -- a HAM screen is
-       the same planes at the same stride -- only what the receiver is told to
-       make of them. */
+    /* Last, because it needs the depth the checks above have settled.  It
+       changes nothing measured here, only what the receiver is told to make
+       of it. */
     g->format = fb_planar_format(vp, depth);
 
     return FB_GEOM_OK;
@@ -1059,15 +707,9 @@ BOOL http_fb_screenless(VOID)
 
 /* ---------------------------------------------------------------- palette -- */
 
-/*
- * How many colours this screen's `pal` word carries, and 0 when it has none.
- *
- * Asked of the wire format rather than computed here, because 1 << depth is
- * right on a plain planar screen and on nothing else: a truecolour screen is
- * 16 deep with no palette at all, and the chipset modes coming after it are
- * deeper than their base palette rather than equal to it.  One rule, in
- * rfb_pal_colours(), and both ends read it.
- */
+/* How many colours this screen's `pal` word carries, and 0 when it has none.
+   Asked of rfb_pal_colours() rather than computed here, because 1 << depth is
+   right on a plain planar screen and on nothing else. */
 static ULONG fb_colours(const FbGeometry *g)
 {
     rfb_geom q;
@@ -1079,13 +721,9 @@ static ULONG fb_colours(const FbGeometry *g)
     return (ULONG)rfb_pal_colours(&q);
 }
 
-/*
- * 3 * `colours` bytes whatever the ColorMap holds.  A screen whose map is
- * shorter than that leaves the tail black rather than shortening the word, so
- * the receiver's arithmetic is fb_colours() and nothing else.
- *
- * TRUE when it changed, which is what decides whether a `pal` word goes out.
- */
+/* 3 * `colours` bytes whatever the ColorMap holds; a shorter map leaves the
+   tail black rather than shortening the word.  TRUE when it changed, which is
+   what decides whether a `pal` word goes out. */
 static BOOL fb_read_palette(struct ColorMap *cm, ULONG colours, UBYTE *pal)
 {
     /* Static rather than automatic: 768 bytes at depth 8, and a Shell command
@@ -1141,45 +779,9 @@ static BOOL fb_read_palette(struct ColorMap *cm, ULONG colours, UBYTE *pal)
 
 /* ---------------------------------------------------------- the pointer -- */
 
-/*
- * The mouse pointer is a sprite, so it is in no frame.
- *
- * Every frame this sends is the screen's bitplanes.  The pointer is drawn by
- * the hardware from a sprite that is not in them, so a viewer that showed only
- * what arrives has no pointer at all.  That is why the browser drew an arrow of
- * its own, at the local mouse, and why that arrow was never the Amiga's.
- *
- * The image is sent as its own word, once, and again only if it changes.  The
- * position is not sent at all.  The viewer puts the Amiga's pointer where the
- * browser's is, so the browser already knows where it is, and drawing it
- * locally is what keeps it moving without a round trip.
- *
- * The image cannot come from the pointer on screen.  There is no way to read
- * the pointer that is being displayed.  struct Window's Pointer, PtrWidth and
- * PtrHeight are filled by SetPointer() and are not touched by
- * SetWindowPointer(), so a window that used the newer call leaves them stale
- * from an earlier SetPointer() or zero, and 3.1's Workbench, the busy pointer
- * and every pointer wider than 16 pixels all use the newer call.  Reading them
- * as sprite data reads memory somebody else freed.  The pointerclass object
- * that does hold the imagery answers no OM_GET, so there is nothing to ask it
- * either.
- *
- * So this reads what the pointer was configured to be, which is a file:
- * ENV:Sys/pointer.prefs, an IFF PREF with a PNTR chunk, written by the Pointer
- * editor and read by IPrefs.  A machine that has never had one saved has no
- * such file, and the pointer there came from devs:system-configuration
- * instead.  GetPrefs() hands that over as PointerMatrix, a 16x16 two-plane
- * sprite with its hotspot and its three colours.  Both are read, and the file
- * wins when it is there, because it is the newer answer.
- *
- * The busy pointer cannot be shown, nor any pointer an application set for
- * itself.  Both live in pointerclass objects that cannot be read back, so the
- * browser goes on showing the configured arrow while the machine shows a
- * stopwatch.  That disagreement lands during a long operation.  The file has a
- * second PNTR chunk carrying the busy pointer's image, with pp_Which set to
- * WBP_BUSY, and it is deliberately not read: the picture is no use without
- * knowing when it is up, and nothing here can know that.
- */
+/* The mouse pointer is a sprite, so it is in no frame, and the one on screen
+   cannot be read back: SetWindowPointer() leaves struct Window's Pointer
+   fields stale and pointerclass answers no OM_GET.  So the prefs are read. */
 
 /* An IFF PREF file for a pointer is a few hundred bytes.  This is room for a
    64x64 four-plane pointer twice over and then some.  Static, for the reason
@@ -1217,16 +819,8 @@ static UBYTE     fb_ptr_have;   /* fb_ptr holds something         */
 static UBYTE     fb_want_ptr;   /* a `ptr` word is queued         */
 static ULONG     fb_ptr_next;   /* when to look at the prefs again */
 
-/*
- * How often the preferences are re-read, in fiftieths.
- *
- * IPrefs rewrites the file when somebody changes the configuration, so
- * noticing means looking at the file again, and looking means a Lock, an
- * Examine and an UnLock on ENV:, which is RAM: and therefore fast but is still
- * three DOS calls on the one task that also serves every connection.  Once a
- * second is far more often than a person changes their pointer and is a
- * rounding error against the twenty grabs a second beside it.
- */
+/* How often the preferences are re-read, in fiftieths.  Looking means three DOS
+   calls on the one task that also serves every connection. */
 #define FB_PTR_EVERY        50UL
 
 /* Big-endian, out of a byte buffer, because that is how the file is and
@@ -1242,26 +836,9 @@ static ULONG fb_be32(const UBYTE *p)
            ((ULONG)p[2] << 8) | p[3];
 }
 
-/*
- * The four numbers the display database has and the mode bits do not.
- *
- * A tick is graphics.library's unit of displayed distance, 1/44 of a lores
- * pixel across and 1/44 of a PAL row down, and the database gives three
- * lengths in it per mode: what a screen pixel is worth (DisplayInfo's
- * Resolution), what a sprite pixel is worth (SpriteResolution), and what one
- * unit of the mouse is worth (MonitorInfo's MouseTicks, per monitor rather
- * than per mode).  Everything below is a ratio of two of those.
- *
- * Re-read only when the mode changes.  The position of the screen in the view
- * is re-read every time, because a screen can be dragged without changing
- * mode, and an injected position that ignored that would be right in the
- * picture and wrong on the machine.
- *
- * A monitor whose file predates 3.01 has no MouseTicks, and Intuition then
- * uses 22 across and 22 down, 26 down on an NTSC-rate monitor.  The same
- * fallback is used here, or the pointer would be scaled by one number and read
- * back by another.
- */
+/* The four numbers the display database has and the mode bits do not, each a
+   ratio of two lengths in ticks.  Re-read only when the mode changes; the
+   screen's position in the view is re-read every time. */
 static VOID fb_display_units(struct Screen *sc)
 {
     struct DisplayInfo di;
@@ -1327,10 +904,8 @@ static VOID fb_display_units(struct Screen *sc)
         }
     }
 
-    /* The two halves of the position have to come from the same place.  A
-       monitor's ticks against a mode's guessed pixels is a ratio of two
-       different things, so a mode with no record of its own keeps the pair
-       that was there before. */
+    /* The two halves of the position must come from the same place, so a mode
+       with no record of its own keeps the pair that was there before. */
     if (!have_disp)
         return;
 
@@ -1358,22 +933,9 @@ static VOID fb_display_units(struct Screen *sc)
     }
 }
 
-/*
- * How many screen pixels one sprite pixel covers.
- *
- * A sprite pixel is not always a lores pixel.  That assumption would put the
- * pointer at half width on a superhires screen.  It is not always two screen
- * rows on an interlaced screen either: a Productivity screen carries the LACE
- * bit and its sprite rows are one row each.  Both ratios come off the
- * database, in ticks.
- *
- * The one thing the database cannot answer is a sprite whose resolution was
- * changed, by the Pointer editor's preference or by an application.  That
- * lives in the V39 ColorMap, as SpriteResolution or SpriteResDefault under it,
- * and it is in nanoseconds rather than ticks, so it divides the screen's own
- * pixel speed instead.  This is Intuition's own arithmetic for the same
- * question.
- */
+/* How many screen pixels one sprite pixel covers.  Both ratios come off the
+   database, in ticks.  A sprite whose resolution was changed is in the V39
+   ColorMap instead, in nanoseconds, so it divides the pixel speed. */
 static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
 {
     struct ColorMap *cm = sc->ViewPort.ColorMap;
@@ -1410,19 +972,9 @@ static VOID fb_pointer_scale(struct Screen *sc, UWORD *xs, UWORD *ys)
     *ys = (UWORD)((fb_spr_y >= fb_res_y) ? (fb_spr_y / fb_res_y) : 1);
 }
 
-/*
- * The sprite's own colours, which are not the screen's first four.
- *
- * The pointer is sprite 0 and its three pens are colour registers 17, 18 and
- * 19, with 16 transparent.  Those registers carry the live values, because a
- * program that recoloured the pointer moved them and moved nothing in any
- * prefs file, so they are preferred.  The configured colours are the fallback
- * for a ColorMap too short to hold them.
- *
- * Only at depth 2.  A deeper sprite is an attached pair and which registers it
- * lands on cannot be worked out here, so those keep the colours the file
- * supplied.
- */
+/* The sprite's own colours: pens 17, 18 and 19, with 16 transparent.  The
+   registers carry the live values and are preferred.  Only at depth 2: a
+   deeper sprite is an attached pair whose registers cannot be told here. */
 static VOID fb_pointer_colours(struct Screen *sc, FbPointer *p)
 {
     struct ColorMap *cm = sc->ViewPort.ColorMap;
@@ -1442,16 +994,9 @@ static VOID fb_pointer_colours(struct Screen *sc, FbPointer *p)
     }
 }
 
-/*
- * devs:system-configuration's pointer, through GetPrefs().  The stock answer:
- * a 16x16 two-plane sprite in PointerMatrix, its hotspot in XOffset/YOffset
- * and its colours in color17..19 as RGB4.
- *
- * PointerMatrix is (1 + 16 + 1) word pairs: a control pair, sixteen rows of
- * one word per plane, and a terminating pair.  The rows are interleaved and
- * everything downstream of here is plane-major, so this is where they are
- * separated.
- */
+/* devs:system-configuration's pointer, through GetPrefs(): a 16x16 two-plane
+   sprite.  PointerMatrix is (1 + 16 + 1) word pairs, a control pair, sixteen
+   interleaved rows and a terminator, and here is where the planes separate. */
 static BOOL fb_pointer_from_prefs(FbPointer *p)
 {
     /* Static, because struct Preferences is over 300 bytes and this runs on
@@ -1505,15 +1050,8 @@ static BOOL fb_pointer_from_prefs(FbPointer *p)
     return TRUE;
 }
 
-/*
- * ENV:Sys/pointer.prefs, if it is there.  An IFF FORM PREF holding one PNTR
- * chunk per pointer.  The one wanted is pp_Which == WBP_NORMAL, and the busy
- * one is stepped over for the reason in the block at the top of this section.
- *
- * The whole file is read and then walked, rather than seeking around it.  It
- * is a few hundred bytes on RAM:, and one Read is one DOS call instead of a
- * dozen.
- */
+/* ENV:Sys/pointer.prefs, if it is there: an IFF FORM PREF holding one PNTR
+   chunk per pointer.  The one wanted is pp_Which == WBP_NORMAL. */
 static BOOL fb_pointer_from_env(FbPointer *p)
 {
     static UBYTE buf[FB_PREFS_MAX];
@@ -1592,25 +1130,9 @@ static BOOL fb_pointer_from_env(FbPointer *p)
     return found;
 }
 
-/*
- * The hotspot, kept inside the sprite.
- *
- * devs:system-configuration's stock arrow carries XOffset -1 with its tip in
- * column 0.  The field has two readings, that the hotspot is at (XOffset,
- * YOffset) in the sprite, or that the sprite is drawn at the mouse plus
- * (XOffset, YOffset), and they put the tip one lores pixel either side of the
- * mouse.  Neither can be settled from here, because the sprite is not in any
- * bitmap this can see and there is nothing to measure the drawn position
- * against.
- *
- * A hotspot outside the image is not a hotspot for anything this draws, so it
- * is clamped in.  For the stock arrow that lands it on (0,0), which is the tip
- * an arrow points from.
- *
- * A wrong hotspot costs nothing, because a click goes to the coordinate the
- * viewer sends rather than to where the image was drawn.  The worst it
- * produces is the picture of the pointer sitting one lores pixel off.
- */
+/* The hotspot, kept inside the sprite.  A hotspot outside the image is not a
+   hotspot for anything this draws.  A wrong one costs nothing: a click goes to
+   the coordinate the viewer sends, not to where the image was drawn. */
 static VOID fb_pointer_hotspot(FbPointer *p)
 {
     if (p->hot_x < 0)                       p->hot_x = 0;
@@ -1619,18 +1141,9 @@ static VOID fb_pointer_hotspot(FbPointer *p)
     if (p->hot_y > (WORD)(p->height - 1))   p->hot_y = (WORD)(p->height - 1);
 }
 
-/*
- * The current pointer, whatever it takes.  TRUE when `p` holds one.
- *
- * The file first, because it is the newer answer and the one the Pointer
- * editor writes.  devs:system-configuration when there is no file, which is a
- * machine nobody has changed the pointer on.
- *
- * No screen is touched here and nothing is locked, because this opens a file
- * and a DOS call must not be made with Intuition stopped.  The scale and the
- * live sprite colours are added afterwards, in fb_pointer_poll(), which is
- * where a screen is resolved.
- */
+/* The current pointer, whatever it takes.  No screen is touched and nothing is
+   locked, because this opens a file and a DOS call must not be made with
+   Intuition stopped; the scale and colours are added in fb_pointer_poll(). */
 static BOOL fb_pointer_read(FbPointer *p)
 {
     memset(p, 0, sizeof(*p));
@@ -1659,17 +1172,9 @@ static BOOL fb_pointer_same(const FbPointer *a, const FbPointer *b)
     return (BOOL)(memcmp(a->bits, b->bits, (size_t)a->bits_len) == 0);
 }
 
-/*
- * Look again, and queue a word if the picture moved.
- *
- * Once a second rather than once a pass, because this opens a file and three
- * DOS calls twenty times a second on the task that also answers every
- * connection is a cost with nothing to show for it.
- *
- * The file is read with nothing held.  The screen is resolved afterwards and
- * only the scale and the sprite's live colours come out of it, which is a
- * short lock rather than one held across DOS.
- */
+/* Look again, and queue a word if the picture moved.  The file is read with
+   nothing held; the screen is resolved afterwards and only the scale and the
+   sprite's live colours come out of it. */
 static VOID fb_pointer_poll(ULONG now)
 {
     /* Static, and 2 KB of it.  This is the second of these buffers and it does
@@ -1724,24 +1229,9 @@ static VOID fb_pointer_poll(ULONG now)
 
 /* ------------------------------------------------------------------- grab -- */
 
-/*
- * The screen is not copied.  The encoder reads the bitplanes where they are.
- *
- * There used to be a frame_bytes buffer here and a CopyMem per 80-byte row
- * into it, and then the encoder read that copy: 40 KB of chip RAM read, 40 KB
- * written, 40 KB read again, to answer whether anything changed, which on a
- * live Workbench is no 49 frames out of 50.  Measured on an A1200, two planes:
- * the copy 14.9 ms and the encode 56.9 ms, against 13.6 ms for one pass that
- * compares the planes against the shadow and stops.
- *
- * This reads the planes without holding a drawing lock, and the encoder
- * answers that by reading a tile it decides has changed once, into a buffer,
- * so that one copy is both what updates the shadow and what goes on the wire.
- * A screen being drawn on underneath can therefore produce a torn frame, as it
- * always could, but it cannot produce a shadow here that disagrees with the
- * bytes the far end was sent.  That failure would not correct itself on the
- * next frame.
- */
+/* The screen is not copied: the encoder reads the bitplanes where they are,
+   without a drawing lock, and reads a tile it decides has changed once into a
+   buffer, so the shadow cannot disagree with what the far end was sent. */
 static LONG fb_encode_planes(const UBYTE **planes, UBYTE *out, ULONG out_cap,
                              UWORD ty0, UWORD ty1)
 {
@@ -1759,18 +1249,9 @@ enum
     FB_GRAB_UNREADABLE  /* an RTG screen nothing here can safely read       */
 };
 
-/*
- * Everything that dereferences the Screen, its BitMap or its ColorMap.  The
- * caller holds either a public screen lock or LockIBase(), so this must not
- * block and must not call Intuition.  It does neither: GetBitMapAttr() and
- * GetRGB32() are reads of structures the screen already owns, and
- * GetVPModeID() and GetDisplayInfoData() are reads of the display database,
- * which is the order Intuition takes them in itself.
- *
- * What leaves here is the geometry, the palette, the display units and the
- * bitplane addresses.  The encode that follows touches nothing but those
- * addresses, which is what lets it run with the lock given back.
- */
+/* Everything that dereferences the Screen, its BitMap or its ColorMap.  The
+   caller holds a public screen lock or LockIBase(), so this must not block and
+   must not call Intuition.  What leaves is geometry, palette, units, planes. */
 static int fb_examine(struct Screen *sc, const FbGeometry *want,
                       FbGeometry *now, const UBYTE **planes,
                       BOOL *palette_moved, BOOL locked)
@@ -1780,10 +1261,8 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
 
     what = fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort, now, locked);
 
-    /* Nothing this pass, rather than the end of the session.  The bitmap could
-       not be identified from here, so the next pass resolves the front screen
-       again and asks the card about it, and the geometry that comes back is
-       what FB_GRAB_CHANGED then follows. */
+    /* Nothing this pass, rather than the end of the session: the next pass
+       resolves the front screen again with the card asked. */
     if (what == FB_GEOM_UNSURE)
         return FB_GRAB_UNREADABLE;
 
@@ -1803,10 +1282,8 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     if (*palette_moved)
         return FB_GRAB_OK;
 
-    /* A card's pixels are not addressable from here and the fetch is a
-       library call, so they are read in fb_grab_frame() where the lock that
-       makes the call safe is still held.  planes[0] is the staging buffer and
-       is filled there. */
+    /* A card's pixels are not addressable from here, so they are read in
+       fb_grab_frame() where the lock that makes the call safe is still held. */
     if (RFB_FMT_IS_CHUNKY(want->format))
         return FB_GRAB_OK;
 
@@ -1816,59 +1293,9 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
     return FB_GRAB_OK;
 }
 
-/*
- * One frame into `buf`, and the palette.  Everything downstream, the encode
- * and the socket, runs with nothing held.
- *
- * The layer lock is attempted, never waited for, and not required.
- * LockLayers() was here and it wedged the whole server.  The lock it takes is
- * sc->LayerInfo.Lock, and it is held for as long as a mouse button is down.
- * Intuition holds it while a menu is up or a window is being dragged or sized,
- * and the Workbench task holds it through an icon drag or a rubber-band
- * selection.  Those last as long as a person holds a button, and httpd serves
- * every connection from one task, so for that whole time nothing was answered,
- * not the console and not plain HTTP.  A guest was found forty minutes into
- * exactly that, with ss_Owner the Workbench task and the one SemaphoreRequest
- * queued on it httpd's own stack.
- *
- * Waiting is out, and so is giving up.  A grab that returned empty-handed
- * whenever the lock was busy would freeze the picture for the whole of every
- * drag, so the console would stop moving at the moment there is something to
- * watch.  So the lock is attempted, and the frame is read either way.
- *
- * Reading it unlocked is safe.  The planes are memory, the lock serialises the
- * tasks drawing into them rather than the reading of them, and the screen lock
- * above is what keeps the screen and its bitmap in existence.  The cost is that
- * a frame read while somebody is drawing can carry half of a change, and the
- * encoder diffs the next grab against what it sent, so the next frame that
- * differs puts it right.  A torn frame for two milliseconds is the price of a
- * console that keeps up during a drag and a server that never stops.
- *
- * A screen nothing can lock is kept in existence a different way.  A public
- * screen is held for the whole of this and cannot close.  The Palette and
- * Overscan editors' screens are not public and 3.1 has no handle for one, so
- * the guarantee is shorter: everything read out of the Screen is read under
- * LockIBase() with the screen checked as still listed, which is enough because
- * CloseScreen() has to take IntuitionBase to unlink it before it frees
- * anything.
- *
- * What is left outside that is the encode, which reads the bitplane addresses
- * and nothing else.  A screen that closes in that window leaves those pointing
- * at freed chip RAM, which on a machine with no MMU is bytes, so the worst it
- * produces is one wrong frame.  The pass after it resolves the front screen
- * again and the geom barrier corrects the viewer.  Making that window zero
- * would mean holding LockIBase() across a 15 ms encode ten times a second,
- * which is Intuition stopped for a sixth of the time.
- *
- * Such a screen is also read without the layer lock, counted in tn=.  Taking
- * it would mean releasing it after the encode, and the only way to know the
- * screen is still there to release it on is LockIBase(), while holding a layer
- * lock.  That is a deadlock, and it was measured: Intuition holds
- * IntuitionBase and wants the layer lock, this holds the layer lock and wants
- * IntuitionBase.  The guest stopped dead, the whole GUI frozen with a gadget
- * stuck in its selected state and httpd answering nothing, on the click that
- * was closing an Overscan editor screen.
- */
+/* One frame into `buf`.  The layer lock is attempted and never waited for: it
+   is held for as long as a mouse button is down.  A screen with no public lock
+   is read under LockIBase() and never layer-locked -- that pair deadlocks. */
 static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
                          BOOL *palette_moved, UBYTE *out, ULONG out_cap,
                          LONG *encoded, UWORD ty0, UWORD ty1)
@@ -1883,34 +1310,9 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
     *palette_moved = FALSE;
     *encoded = -1L;                     /* nothing encoded this pass */
 
-    /*
-     * A band after the first of a chunky pass never touches the screen.
-     *
-     * The fetch above took the whole frame into fb_stage once, and every band
-     * of the pass encodes that copy -- so resolving the front screen again,
-     * locking it, asking the card to describe its bitmap and reading the
-     * ColorMap buys nothing at all.  It is the same screen by construction,
-     * because the copy the bands are reading was taken from it.
-     *
-     * That work was not free.  A 800x600x16 screen is ten bands and paid ten
-     * LockPubScreen / p96 describe / display-unit / semaphore rounds a pass,
-     * which is where most of the difference between an 8-bit pass and a
-     * truecolour one had gone: the 8-bit screen is cheap enough not to be
-     * banded at all (see FB_BAND_WHEN) and so paid it once.
-     *
-     * What it did buy was catching a screen that changes shape half way
-     * through a pass, one band earlier than the next pass would.  That is no
-     * longer worth a lock a band: a changed screen is caught by the pass that
-     * follows, through FB_GEOM_UNSURE and FB_GRAB_UNREADABLE, and the geom
-     * barrier corrects the viewer.  The cost of not catching it here is the
-     * rest of one pass encoded from a copy of the screen that has gone, which
-     * is a stale picture for a fraction of a second and not a wrong one --
-     * the bands still agree with each other, because they are all the same
-     * copy.
-     *
-     * The planar path has no copy: its planes point into the screen's own
-     * bitmap, so it holds the screen for every band and is left alone.
-     */
+    /* A band after the first of a chunky pass never touches the screen: the
+       fetch took the whole frame into fb_stage once and every band encodes
+       that copy.  The planar path has no copy and holds the screen for each. */
     if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format))
     {
         const UBYTE *stage = fb_stage;
@@ -1940,32 +1342,16 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         if (pub && rc == FB_GRAB_OK && !*palette_moved)
             locked = (BOOL)(AttemptSemaphore(&sc->LayerInfo.Lock) != 0);
 
-        /*
-         * A card's screen is read only while a real lock is held.
-         *
-         * The planar path deliberately reads the bitplanes with nothing but
-         * LockIBase() behind it on a screen that cannot be locked, and a
-         * screen closing in that window costs one wrong frame.  The planes are
-         * bytes, and reading freed memory on a machine with no MMU produces a
-         * bad picture and nothing worse.  Here the fetch is a library call
-         * against the screen's RastPort, and handing a graphics driver a
-         * RastPort whose screen has just closed costs more than one bad frame.
-         *
-         * So an RTG screen that offers no lock is not read.  The picture stops
-         * until something lockable is in front again and the count comes out
-         * in fbstat as nl=.  That is a real limitation.  A non-public screen
-         * on a card is rare, and a frozen picture is recoverable where a guru
-         * is not.
-         */
+        /* A card's screen is read only while a real lock is held: the fetch is
+           a library call against the RastPort, and handing a driver one whose
+           screen has just closed costs more than a bad frame. */
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format) && !pub)
             rc = FB_GRAB_UNREADABLE;
 
-        /* Equal wire geometry does not make two RTG bitmaps interchangeable.
-           The chosen readback route and the snapshot offscreen belong to the
-           bitmap that was probed; a same-sized screen can use another native
-           format or another board.  Make that screen change an attach barrier
-           even though it does not require new encoder buffers. */
+        /* Equal wire geometry does not make two RTG bitmaps interchangeable:
+           the readback route and the snapshot offscreen belong to the bitmap
+           that was probed.  So that screen change is an attach barrier. */
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format) && fb_rtg_ready &&
             !http_rtg_attached_to(sc->RastPort.BitMap))
@@ -1994,22 +1380,9 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format))
         {
-            /*
-             * Once a screen pass and not once a band.  The fetch is the whole
-             * frame in contiguous rows because that is the shape a card reads
-             * back fastest -- see httprtg.c, where a loop of small rectangles
-             * is measured as the wrong shape by an order of magnitude -- so
-             * the bands that follow encode the copy this one took rather than
-             * going back to the board four more times.
-             *
-             * The staging buffer therefore holds one moment of the screen for
-             * the whole pass, which is if anything better than re-reading:
-             * the bands cannot disagree with each other about what the screen
-             * was.
-             *
-             * Only the first band of a pass arrives here.  The rest never
-             * reach this function -- see the top of it.
-             */
+            /* Once a screen pass and not once a band.  The whole frame in
+               contiguous rows is the shape a card reads back fastest, and
+               the copy holds one moment of the screen for the whole pass. */
             if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
                 planes[0] = fb_stage;
             else
@@ -2071,12 +1444,8 @@ static VOID fb_free_buffers(VOID)
     fb_scratch_len = 0;
 }
 
-/*
- * Everything the session holds, sized from one geometry.  Called again when
- * the screen changes shape under a live session, which is why it frees first.
- * A 640x256x4 screen becoming 640x480x8 needs a different four buffers, and
- * keeping the old ones would read a frame into two thirds of one.
- */
+/* Everything the session holds, sized from one geometry.  Called again when the
+   screen changes shape under a live session, which is why it frees first. */
 static BOOL fb_take_buffers(const FbGeometry *g)
 {
     ULONG worst;
@@ -2096,10 +1465,9 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     rfb_scroll_defaults(&fb_cfg);
 
-    /* Straight off what the BitMap said, rather than inferred from the
-       strides.  The encoder walks the real bitplanes, so this flag has to be
-       the screen's own answer, GetBitMapAttr(BMA_FLAGS) & BMF_INTERLEAVED, in
-       fb_geometry_of() and nowhere else. */
+    /* Straight off what the BitMap said.  The encoder walks the real bitplanes,
+       so this has to be GetBitMapAttr(BMA_FLAGS) & BMF_INTERLEAVED and nothing
+       inferred from the strides. */
     fb_flags = (rfb_u32)FB_FLAGS;
     if (g->interleaved)
         fb_flags |= RFB_F_INTERLEAVED;
@@ -2159,14 +1527,9 @@ static BOOL fb_take_buffers(const FbGeometry *g)
 
     fb_geom = *g;
 
-    /*
-     * The shape is queued and the colours are not.  Zeroing the remembered
-     * palette is what makes the next grab's comparison report a change, and
-     * that is where the `pal` word comes from.  Queueing one here would send
-     * 3 << depth zeroes, which a viewer draws as a black screen until the real
-     * one arrives a frame later.  http_fb_start() reads the ColorMap itself,
-     * because it is the one caller that still holds the screen.
-     */
+    /* The shape is queued and the colours are not.  Zeroing the remembered
+       palette is what makes the next grab report a change; queueing one here
+       would send 3 << depth zeroes, which a viewer draws as a black screen. */
     memset(fb_pal, 0, sizeof(fb_pal));
     fb_want_geom = 1;
     fb_want_pal  = 0;
@@ -2174,15 +1537,8 @@ static BOOL fb_take_buffers(const FbGeometry *g)
     return TRUE;
 }
 
-/*
- * Forget the shadow.  This is what `refresh` asks for.  The receiver has lost
- * a frame, and every XOR after it would be applied to bytes that are not what
- * the encoder thought were there, so the next frame has to be a full one.
- *
- * The sequence number is not reset.  It is what the receiver checks for gaps
- * with, and taking it back to zero would look like the fault this is
- * recovering from.
- */
+/* Forget the shadow, which is what `refresh` asks for.  The sequence number is
+   not reset: it is what the receiver checks for gaps with. */
 static VOID fb_forget_shadow(VOID)
 {
     rfb_u16 seq;
@@ -2201,14 +1557,9 @@ static VOID fb_forget_shadow(VOID)
 
 /* ------------------------------------------------------------ the framing -- */
 
-/*
- * Queue one control frame.  There is room for exactly one, so nothing must
- * overtake a close.  A browser sends a ping on a timer, so one arriving after
- * the session has decided to end is ordinary, and answering it would write a
- * pong over the close frame.  http_fb_write() would then see fb_closing and
- * shut the socket with the reason still in the buffer, so the viewer would be
- * told the connection dropped rather than why.
- */
+/* Queue one control frame.  There is room for exactly one, so nothing must
+   overtake a close: a pong written over it would leave the viewer told the
+   connection dropped rather than why. */
 static VOID fb_control(HttpWsEvent ev, const UBYTE *payload, ULONG len)
 {
     unsigned long head;
@@ -2231,12 +1582,8 @@ static VOID fb_control(HttpWsEvent ev, const UBYTE *payload, ULONG len)
     fb_ctl_at = 0;
 }
 
-/*
- * The other half of fb_close_saying(): a close this end sends because the far
- * end broke the framing, where the code's own name is the whole reason.  It
- * goes to fb_why as well, because fb_close_code is what the log keys off and
- * a stale sentence there would name the wrong fault.
- */
+/* A close this end sends because the far end broke the framing.  It goes to
+   fb_why as well, because fb_close_code is what the log keys off. */
 static VOID fb_close_session(UWORD code)
 {
     if (fb_closing)
@@ -2251,16 +1598,9 @@ static VOID fb_close_session(UWORD code)
     fb_close_code = code;
 }
 
-/* A close carrying this module's own sentence rather than the codec's, for the
-   refusals a person has to be able to read: a screen that went away, a mode
-   change this could not follow. */
-/*
- * `reason` is what the browser is told.  What the log is told is fb_why, which
- * every caller here leaves holding the finding behind the close: the sentence
- * itself where the two are the same, and the specific one where the browser
- * gets a short sentence and the detail is longer than a close frame carries.
- * So nothing passed here overwrites fb_why.
- */
+/* A close carrying this module's own sentence rather than the codec's.
+   `reason` is what the browser is told; the log is told fb_why, so nothing
+   passed here overwrites fb_why. */
 static VOID fb_close_saying(UWORD code, const char *reason)
 {
     if (fb_closing)
@@ -2339,16 +1679,8 @@ static VOID fb_input_close(VOID)
     }
 }
 
-/*
- * One event into the input stream.
- *
- * Synchronous.  IND_WRITEEVENT hands the event to the input task and returns.
- * It is not a transfer and there is nothing to wait for the far end of, so the
- * asynchronous form would only add a second trip through the loop for a call
- * that has already finished.  Nothing is locked here, since input is read in
- * http_fb_read() and the screen is locked only inside the grab, so no lock is
- * held across this.
- */
+/* One event into the input stream.  Synchronous: IND_WRITEEVENT hands the event
+   to the input task and returns.  No lock is held across this. */
 static VOID fb_write_event(VOID)
 {
     if (!fb_in_open)
@@ -2369,18 +1701,15 @@ static VOID fb_write_event(VOID)
 }
 
 /* The pointer, absolutely.  IECLASS_POINTERPOS is the one class that takes a
-   screen coordinate rather than a delta, which is what a viewer has: a browser
-   knows where in the canvas the mouse is and has no idea how far it moved on
-   the far side of a coalesced frame. */
+   screen coordinate rather than a delta, which is what a viewer has. */
 static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
 {
     memset(&fb_event, 0, sizeof(fb_event));
     fb_event.ie_Class     = IECLASS_POINTERPOS;
     fb_event.ie_Code      = IECODE_NOBUTTON;
     fb_event.ie_Qualifier = fb_buttons;
-    /* Screen pixels in, mouse units out: ticks per pixel over ticks per unit,
-       see fb_display_units().  The screen's own origin goes in first, which is
-       zero unless somebody dragged it, and is in the screen's pixels because
+    /* Screen pixels in, mouse units out: ticks per pixel over ticks per unit.
+       The screen's own origin goes in first, in the screen's pixels, because
        that is what Intuition scales it as. */
     fb_event.ie_X         = (WORD)(((x + (rfb_s32)fb_left) *
                                     (rfb_s32)fb_res_x) / (rfb_s32)fb_tick_x);
@@ -2389,13 +1718,9 @@ static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
     fb_write_event();
 }
 
-/*
- * The buttons, as the difference between what is held now and what was held
- * before.  A viewer sends the whole mask on every move, so a press and a
- * release both arrive as a changed bit rather than as events of their own.  A
- * mask that arrives with two bits changed at once produces two events, because
- * IECODE carries one button.
- */
+/* The buttons, as the difference between what is held now and what was held
+   before.  A mask that arrives with two bits changed produces two events,
+   because IECODE carries one button. */
 static VOID fb_inject_buttons(rfb_s32 mask)
 {
     static const struct {
@@ -2426,11 +1751,8 @@ static VOID fb_inject_buttons(rfb_s32 mask)
         fb_event.ie_Class = IECLASS_RAWMOUSE;
         fb_event.ie_Code  = now ? map[i].code
                                 : (UWORD)(map[i].code | IECODE_UP_PREFIX);
-        /*
-         * RELATIVEMOUSE with no movement.  Without it ie_X and ie_Y are read
-         * as an absolute position, and a button event carrying (0,0) would
-         * take the pointer to the top left corner on every click.
-         */
+        /* RELATIVEMOUSE with no movement.  Without it ie_X and ie_Y read as
+           an absolute position and every click would jump to the corner. */
         fb_event.ie_Qualifier = (UWORD)(fb_buttons |
                                         IEQUALIFIER_RELATIVEMOUSE);
         fb_event.ie_X = 0;
@@ -2453,18 +1775,9 @@ static VOID fb_inject_key(rfb_s32 raw, rfb_s32 qual, BOOL down)
     fb_write_event();
 }
 
-/*
- * A refresh, honoured, coalesced or deferred.
- *
- * The shadow goes and the viewer is told, because a full frame is not
- * distinguishable from an ordinary one and the tiles in it are XOR against the
- * shadow.  A viewer that still has the last picture when one arrives XORs the
- * two together and gets the all-zero screen, which is grey on a stock
- * Workbench, and it stays grey because an idle desktop produces no more tiles
- * to correct it.  geom is the barrier that already exists for that, since
- * everything the viewer had is discarded when one arrives, so re-queuing geom
- * and pal puts a known zero on both sides at the same point in the stream.
- */
+/* A refresh, honoured, coalesced or deferred.  The shadow goes and geom and pal
+   are re-queued: a full frame is XOR against the shadow, so both ends need a
+   known zero at the same point in the stream. */
 static VOID fb_ask_resync(VOID)
 {
     ULONG now = fb_ticks();
@@ -2528,14 +1841,9 @@ static VOID fb_take_word(const char *w, ULONG len)
         break;
 
     case RFB_IN_WHEEL:
-        /*
-         * Dropped, deliberately.  AmigaOS 3.1 has no wheel: there is no input
-         * class for one and nothing in a stock Workbench reads the rawkey
-         * codes a third-party driver invented for it, so injecting those would
-         * send keystrokes that some programs would act on as keystrokes.  The
-         * word is read and refused rather than left to fail as a framing
-         * error, so a viewer that sends it costs nothing.
-         */
+        /* Dropped, deliberately.  AmigaOS 3.1 has no wheel, and the rawkey
+           codes a third-party driver invented for one would be acted on as
+           keystrokes.  Read and refused rather than left to fail. */
         break;
 
     default:
@@ -2622,31 +1930,9 @@ BOOL http_fb_open(VOID)
         return FALSE;
     }
 
-    /*
-     * NO SCREEN IS NOT NO, IT IS NOT YET.
-     *
-     * This look at the front screen is a preflight, and its unstated
-     * assumption was that whatever is in front when the server starts is the
-     * kind of thing that will be in front later.  Out of S:User-Startup that
-     * assumption is simply false: Intuition's screen list is empty until
-     * something opens a screen, and LoadWB is at the end of the
-     * Startup-Sequence -- so `httpd <drawer> -C` at boot refused to start at
-     * all, took the whole server down with it, and the machine that most wants
-     * a remote console is exactly the one that has not got a screen yet.
-     * Measured under Amiberry with no Workbench: rc 10, "there are no screens",
-     * while the same command with -T in the same boot served fine.
-     *
-     * So it comes up serving and remembers that it did.  Nothing is papered
-     * over, because nothing here is broken: http_fb_start() reads the front
-     * screen again for every session and refuses THAT with a reason of its own
-     * when there is still nothing to serve, which is what a browser asking too
-     * early should get.  The console starts working by itself the moment
-     * Workbench opens, with nobody restarting anything.
-     *
-     * What stays fatal is the machine that can never serve one: graphics and
-     * intuition below V39, above.  That is a property of the machine.  An
-     * empty screen list is a property of the minute.
-     */
+    /* No screen is not no, it is not yet.  Out of S:User-Startup the screen
+       list is empty until LoadWB, so this comes up serving and remembers that
+       it did; http_fb_start() reads the front screen again per session. */
     sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
@@ -2687,12 +1973,8 @@ BOOL http_fb_open(VOID)
         return FALSE;
     }
 
-    /*
-     * And the input stream.  Held for the server's life beside the libraries
-     * and for the same reason: a machine that cannot be typed at says so
-     * before it is serving anything, rather than showing a screen that does
-     * not answer the mouse.
-     */
+    /* And the input stream, held for the server's life beside the libraries: a
+       machine that cannot be typed at says so before it is serving anything. */
     if (!fb_input_open())
     {
         fb_input_close();
@@ -2717,12 +1999,9 @@ BOOL http_fb_enabled(VOID)
     return fb_on;
 }
 
-/*
- * The button state the far end is holding, as a yes or no.  Set before the
- * event that makes Intuition take the layer lock is written, see
- * fb_inject_buttons(), and cleared before the release is written, so it is
- * never FALSE while Intuition is holding the lock on this server's account.
- */
+/* The button state the far end is holding.  Set before the event that makes
+   Intuition take the layer lock is written and cleared before the release is
+   written, so it is never FALSE while Intuition holds it on our account. */
 BOOL http_fb_buttons_held(VOID)
 {
     return (BOOL)(fb_live && fb_buttons != 0);
@@ -2786,19 +2065,9 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     if (!fb_take_buffers(&g))
         return FALSE;
 
-    /*
-     * The colours, before the first grab.  fb_take_buffers() clears the
-     * remembered palette so that grab's comparison is against nothing, and
-     * without this the first `pal` word out is 3 << depth zeroes, a black
-     * palette, which is what a viewer draws until the second one arrives a
-     * frame later.
-     *
-     * The front screen is resolved a second time rather than kept from above,
-     * and the read is skipped if anything about it has changed in between.
-     * That leaves fb_pal at zero, the first grab finds the colours moved, and
-     * the viewer gets them one frame late rather than getting a screen's
-     * geometry with another screen's palette.
-     */
+    /* The colours, before the first grab.  fb_take_buffers() cleared the
+       remembered palette, and without this the first `pal` word out is a black
+       palette.  The screen is resolved again and skipped if it changed. */
     sc = fb_lock_front(&pub);
     if (sc != NULL)
     {
@@ -2850,10 +2119,9 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_want_stat  = 0;
     fb_want_rtg   = 0;
     fb_reset      = 0;
-    /* A session opens with geom, pal and a full frame already queued, which is
-       the same sequence a resync produces.  A refresh arriving before that
-       frame has gone, which is what a viewer asking on `geom` produces, must
-       not restart it. */
+    /* A session opens with geom, pal and a full frame already queued, which
+       is the sequence a resync produces.  A refresh arriving before that frame
+       has gone must not restart it. */
     fb_resync      = 1;
     fb_resync_due  = 0;
     fb_resync_ever = 0;
@@ -2868,9 +2136,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
         (VOID)http_ws_feed(&fb_in, first, (long)first_len, fb_sink, NULL);
 
         /* The bytes behind the upgrade are already WebSocket input and can
-           fail framing just like a later recv().  Without this check a bad
-           first frame leaves the decoder dead, but the screen producer keeps
-           running because no second read is needed to discover the failure. */
+           fail framing.  Without this the decoder is dead but the screen
+           producer keeps running, because no second read is needed. */
         if (fb_in.failed != 0)
             fb_close_session((UWORD)fb_in.failed);
     }
@@ -2878,25 +2145,9 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     return TRUE;
 }
 
-/*
- * ACTION_FLUSH to every mounted volume, and then the machine goes.
- *
- * ColdReboot() on its own can lose work.  AmigaDOS filesystems hold dirty
- * buffers for about half a second, and httpd is a WebDAV server, so a file
- * written a moment ago can be one of them.  ACTION_FLUSH is the packet that
- * empties them and it is what a handler answers when a person clicks the
- * disk's icon and chooses to flush.
- *
- * The ports are collected under the DosList lock and the packets sent with it
- * given back.  DoPkt() waits for the handler to answer, the handler can want
- * the DosList to do so, and a caller that held it across the packet would
- * deadlock.
- *
- * A program holding unsaved work in memory loses it.  There is no Amiga
- * convention for asking every task to save, and NetShutdown's CTRL_C is about
- * network resources rather than documents.  The viewer's dialog says so before
- * it sends the word.
- */
+/* ACTION_FLUSH to every mounted volume, and then the machine goes.  The ports
+   are collected under the DosList lock and the packets sent with it given
+   back: DoPkt() waits, and the handler can want the DosList to answer. */
 #define FB_FLUSH_MAX    16
 
 static VOID fb_reboot(VOID)
@@ -2944,9 +2195,8 @@ VOID http_fb_stop(VOID)
     fb_sock = -1;
 
     /* A viewer that goes away mid-drag leaves a button down, and the machine
-       then behaves as if somebody were holding the mouse: menus stay up and
-       nothing else can be clicked.  Released here, which is the only place
-       that knows the far end has gone. */
+       then behaves as if somebody held the mouse.  Released here, the only
+       place that knows the far end has gone. */
     if (fb_buttons != 0)
         fb_inject_buttons(0);
 
@@ -3024,14 +2274,9 @@ BOOL http_fb_read(ULONG now)
     return TRUE;
 }
 
-/*
- * One grab and one encode, or one control word, per pass of the server's loop.
- *
- * Nothing is produced while the transmit buffer still holds bytes, so a slow
- * client cannot make this build a backlog.  Nothing is grabbed twice inside
- * one tick, so an idle screen does not have 40 KB of chip RAM read on every
- * pass of a loop whose wait is two milliseconds.
- */
+/* One grab and one encode, or one control word, per pass of the server's loop.
+   Nothing is produced while the transmit buffer still holds bytes, so a slow
+   client cannot make this build a backlog. */
 BOOL http_fb_slice(ULONG now)
 {
     ULONG      t0;
@@ -3076,13 +2321,9 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
-    /*
-     * A format with no palette never has one to send, and every place that
-     * raises the flag -- a refresh, a screen change, the start of a session --
-     * raises it without asking what the format is.  Dropped here, in the one
-     * place that would act on it, and the pass then carries on to the grab
-     * below rather than spending itself on a word that does not exist.
-     */
+    /* A format with no palette never has one to send, and every place that
+       raises the flag raises it without asking what the format is.  Dropped
+       here, in the one place that would act on it. */
     if (fb_want_pal && fb_colours(&fb_geom) == 0UL)
         fb_want_pal = 0;
 
@@ -3103,16 +2344,9 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
-    /*
-     * What the readback probe measured, once a screen.
-     *
-     * Nobody has published what an Amiga graphics card costs to read back,
-     * which is the number the whole RTG design turns on, so the probe's
-     * findings are sent rather than kept.  The viewer logs every word it does
-     * not know, so this lands in front of somebody who can report it.  An
-     * unrecognised word is ignored at the far end, which is what lets it go
-     * down the same channel without the viewer being taught it.
-     */
+    /* What the readback probe measured, once a screen.  Sent rather than
+       kept, because nobody has published what an Amiga graphics card costs
+       to read back.  An unrecognised word is ignored at the far end. */
     if (fb_want_rtg)
     {
         ULONG len = http_rtg_word((char *)&fb_tx[10], fb_tx_cap - 10UL);
@@ -3188,10 +2422,8 @@ BOOL http_fb_slice(ULONG now)
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
-        /* The floor stands only until the frame this pass is about to produce
-           has been sent and its real cost is known.  http_fb_write() replaces
-           it then with the idle the duty cycle owes, which on anything but a
-           trivial frame is the larger of the two. */
+        /* The floor stands only until the frame this pass produces has been
+           sent and its real cost is known.  http_fb_write() replaces it. */
         fb_next_tick = tick + ((fb_band_ty0 == 0) ? (ULONG)FB_GRAB_FLOOR : 0UL);
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
@@ -3203,21 +2435,11 @@ BOOL http_fb_slice(ULONG now)
             fb_frame_t0 = 1UL;          /* 0 means no frame is in flight */
     }
 
-    /*
-     * gt= is what is left of the grab, locking the public screen, checking the
-     * geometry and reading the ColorMap, now that there is no copy of the
-     * screen to make.  et= is the pass that reads the bitplanes.  The two used
-     * to be a 40 KB copy and then a walk over the copy.  slice (gt+et) is the
-     * figure that stayed comparable across that change.
-     */
+    /* gt= is the rest of the grab; et= is the pass that reads the planes. */
     {
-        /*
-         * The band to produce this pass.  FB_BAND_ROWS tile rows of it, so
-         * the work between two reads of the socket is bounded by a strip and
-         * not by a screen.  The last band of a pass is whatever is left, and
-         * a grid shorter than one band is a single band covering all of it,
-         * which is what a small screen gets.
-         */
+        /* The band to produce this pass: FB_BAND_ROWS tile rows, so the work
+           between two reads of the socket is bounded by a strip.  A grid
+           shorter than one band is a single band covering all of it. */
         UWORD rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
                              ? FB_BAND_ROWS : fb_enc.tiles_y);
         UWORD ty1 = (UWORD)(fb_band_ty0 + rows);
@@ -3234,8 +2456,7 @@ BOOL http_fb_slice(ULONG now)
         t1 = fb_ticks();
 
         /* Where the next one starts.  Anything but a clean band restarts the
-           pass, because whatever went wrong resolved a different screen or
-           none, and half of one picture followed by half of another is worse
+           pass: half of one picture followed by half of another is worse
            than a repeated frame. */
         if (rc == FB_GRAB_OK && !palette_moved)
             fb_band_ty0 = fb_band_last ? 0 : ty1;
@@ -3251,16 +2472,9 @@ BOOL http_fb_slice(ULONG now)
         break;
 
     case FB_GRAB_GONE:
-        /*
-         * No screen this pass, which is what a resolution change looks like.
-         *
-         * The session is not ended and the viewer is told nothing.  It stops
-         * receiving frames for as long as the gap lasts and then gets the geom
-         * that announces the screen that came back.  Ending it here is the
-         * defect this replaces: a person changing the screen mode from the
-         * browser lost the browser, at the one moment it cannot be recovered
-         * by hand.
-         */
+        /* No screen this pass, which is what a resolution change looks like.
+           The session is not ended and the viewer is told nothing; it gets
+           the geom that announces the screen that came back. */
         fb_gone_passes++;
 
         if (!fb_gone)
@@ -3278,36 +2492,21 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
 
     case FB_GRAB_UNREADABLE:
-        /*
-         * A card's screen that could not be read this pass, because nothing
-         * would lock it or the readback route failed.  Not fatal and not a
-         * geom.  The viewer keeps the picture it has and the next pass tries
-         * again, which is what happens while a non-public screen is in front.
-         * The count is what says the picture stopped on purpose.
-         */
+        /* A card's screen that could not be read this pass.  Not fatal and
+           not a geom: the viewer keeps the picture it has and the next pass
+           tries again. */
         fb_nolock++;
         return TRUE;
 
     case FB_GRAB_VANISHED:
-        /* The screen closed while it was being resolved.  Nothing this pass.
-           The next one resolves whatever is in front now, which is either the
-           same shape, and the stream carries on, or a different one, which
-           comes back as FB_GRAB_CHANGED below. */
+        /* The screen closed while it was being resolved.  Nothing this pass;
+           the next one resolves whatever is in front now. */
         return TRUE;
 
     case FB_GRAB_CHANGED:
-        /*
-         * The screen changed shape under a live session, or another screen of
-         * a different shape came to the front.  Everything the receiver has is
-         * now about a screen it is not being shown, so the buffers are retaken
-         * at the new geometry and the receiver is told again.  That is what
-         * stops a frame going out that disagrees with the last geometry it was
-         * given.
-         *
-         * This is also how a session comes back from an empty screen list.  The
-         * screen that reopens in the new resolution is a different shape, so
-         * the barrier that already existed is the one that carries it.
-         */
+        /* The screen changed shape under a live session.  Everything the
+           receiver has is about a screen it is not being shown, so the
+           buffers are retaken and it is told again. */
         fb_gone = 0;
 
         if (!fb_take_buffers(&seen))
@@ -3327,20 +2526,9 @@ BOOL http_fb_slice(ULONG now)
         return TRUE;
     }
 
-    /*
-     * A screen came back into an empty list at the same shape, after an
-     * overscan change that did not move the bitmap, or a reopen caught between
-     * two grabs.  Nothing above fires, because nothing about the geometry
-     * changed, and yet this is a different screen with a different bitmap and
-     * the shadow describes a picture that is not there any more.  So the
-     * barrier is raised by hand, which is the same three things
-     * fb_ask_resync() does, without its floor, because this is not a viewer
-     * asking twice.
-     *
-     * The frame just encoded is dropped.  It cost a pass, and the shadow it
-     * updated is zeroed on the line below, so the full frame that follows the
-     * geom is a delta from zero at both ends.
-     */
+    /* A screen came back into an empty list at the same shape, so nothing above
+       fires and yet the shadow describes a picture that is not there.  The
+       barrier is raised by hand, and the frame just encoded is dropped. */
     if (fb_gone)
     {
         fb_gone = 0;
@@ -3370,9 +2558,7 @@ BOOL http_fb_slice(ULONG now)
     fb_resync = 0;
 
     /* Screens and not messages, so f= keeps meaning what it meant before the
-       frame was broken into bands and the rate derived from it stays
-       comparable across the change.  Bytes are every band's, because every
-       band's went on the wire. */
+       frame was broken into bands.  Bytes are every band's. */
     if (fb_band_last)
         fb_frames++;
     fb_bytes += (ULONG)n;
@@ -3420,38 +2606,17 @@ BOOL http_fb_write(ULONG now)
         fb_tx_len  = 0;
         fb_tx_sent = 0;
 
-        /*
-         * The frame is out, so what it cost is now known: everything from the
-         * grab to this byte.  The idle owed against it is that over
-         * FB_IDLE_DIVISOR, and setting the next grab that far out is the whole
-         * of the duty cycle.  Charged here and not after the encode because
-         * the send is work this task did too.
-         *
-         * Only a frame is charged.  A word queued by the slice -- geom, pal,
-         * the pointer, fbstat -- leaves fb_frame_t0 at zero and passes
-         * through, so a session that is only talking is not throttled as if
-         * it were drawing.
-         */
+        /* The frame is out, so what it cost is known: everything from the
+           grab to this byte.  Only a frame is charged -- a word queued by
+           the slice leaves fb_frame_t0 at zero and passes through. */
         if (fb_frame_t0 != 0UL)
         {
             ULONG done = fb_ticks();
             ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
             int   pass_done = (fb_band_ty0 == 0);
-            /*
-             * Against the running totals rather than against this band alone.
-             *
-             * A tick is a fiftieth and a band costs a handful of them, so
-             * dividing one band's cost by three and rounding is wrong in
-             * whichever direction the rounding goes: truncating measured
-             * 78.5% on the A3000 and rounding up measured 53.9%, against the
-             * 75% both were aiming at.  The error is a whole tick either way
-             * on a quantity of two or three.
-             *
-             * So the idle owed is computed from every tick charged so far,
-             * and what has already been granted is subtracted.  Whatever a
-             * single band rounds to, the session converges on the share, and
-             * a band that is owed nothing waits for nothing.
-             */
+            /* Against the running totals rather than against this band
+               alone: a band costs a handful of ticks and dividing one by
+               three rounds wrong either way.  What was granted is taken off. */
             ULONG owed;
             ULONG idle;
 
@@ -3459,23 +2624,9 @@ BOOL http_fb_write(ULONG now)
             fb_pass_acc += cost;
             fb_frame_t0 = 0;
 
-            /*
-             * At the end of a screen pass and not between its bands.
-             *
-             * Waiting after every band stretches a pass across as many gated
-             * slices as it has bands, and on a screen where a frame is cheap
-             * that is all cost and no benefit: there is no long encode to
-             * interrupt, and the wait is simply added to how long input takes
-             * to be acted on.  Measured on the A3000 with an idle screen, the
-             * worst keystroke-to-frame delay was 95.8 ms banded against 42.0
-             * ms whole -- the banding made the thing it exists to improve
-             * more than twice as bad.
-             *
-             * Between bands the server still reads its socket, because that
-             * is what the band boundary is for, and it costs no wait at all.
-             * The share is a statement about the machine over time, so taking
-             * what is owed once a pass holds it just as well.
-             */
+            /* At the end of a screen pass and not between its bands.
+               Waiting after every band adds the wait to how long input
+               takes to be acted on, with no long encode to interrupt. */
             if (!pass_done)
                 return TRUE;
 
@@ -3488,15 +2639,9 @@ BOOL http_fb_write(ULONG now)
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
             fb_idle_given += idle;
 
-            /*
-             * The floor is about not re-reading a screen nobody drew on, so
-             * it belongs between screen passes and not between the bands of
-             * one.  fb_band_ty0 is zero exactly when the pass just finished,
-             * which is where a whole tick of waiting is the right answer;
-             * mid-pass the duty cycle is the only thing pacing, and a floor
-             * there would add a tick per band and quarter the frame rate for
-             * no reason.
-             */
+            /* The floor is about not re-reading a screen nobody drew on,
+               so it belongs between screen passes and not between the
+               bands of one: mid-pass it would add a tick per band. */
             if (fb_band_ty0 == 0 && idle < (ULONG)FB_GRAB_FLOOR)
                 idle = (ULONG)FB_GRAB_FLOOR;
 
@@ -3557,25 +2702,9 @@ BOOL http_fb_idle(ULONG now, ULONG timeout)
     return TRUE;
 }
 
-/*
- * A close frame can only go at a frame boundary.
- *
- * This writes to the socket itself rather than queueing, because the caller
- * closes the connection on the next line and there is no later pass to drain
- * anything in.  So it has to look at what is already half out.  A frame here
- * is up to a whole screen, 7 KB at 640x256x4 and four times that at depth 8,
- * and a viewer on a link whose window is smaller than one of them has the rest
- * of it still to come.  Writing the close after those bytes splices it into
- * somebody's payload, and everything the receiver reads from there on is a
- * mis-framed stream, so the browser reports a protocol error rather than the
- * sentence saying who took the screen.
- *
- * The rest of the frame is pushed first, as far as the socket will take it in
- * one go and no further, because this is called from the middle of the
- * server's loop and nothing here must block.  If it will not all go, the close
- * is not sent at all.  A truncated frame and a FIN is an abnormal close, which
- * is what the far end concludes anyway.
- */
+/* A close frame can only go at a frame boundary, so what is already half out is
+   pushed first, as far as the socket will take it in one go and no further.  If
+   it will not all go, the close is not sent at all. */
 VOID http_fb_evict(UWORD code)
 {
     UBYTE         frame[HTTP_FB_CTL];

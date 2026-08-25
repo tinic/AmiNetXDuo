@@ -1,29 +1,7 @@
-/*
- * clients/dropbear/amiga_25519.c, give Dropbear src/crypto68k's 25519
- * instead of TweetNaCl's, without patching third_party/dropbear.
- *
- * docs/RESEARCH.md 35 profiled a connection and found the whole of it here.
- * Dropbear's curve25519.c is TweetNaCl: sixteen 16-bit limbs in an i64[16],
- * one field multiply is 256 software 64x64 multiplies, and a handshake is
- * 21,482 of them.  src/crypto68k/c68k_25519.c is the same mathematics over
- * eight 32-bit limbs, one MULU.L per partial product on a part that has one.
- *
- * -Wl,--wrap on the four functions curve25519.c exports.  Every reference from
- * ed25519.c and kex-x25519.c lands here instead; the TweetNaCl bodies are
- * still linked and never called, which makes the A/B one linker flag
- * (clients/dropbear/build.sh -S) rather than two source trees.
- *
- * __real_* is not referenced.  Naming it would keep a route back into the code
- * being replaced, and a fallback nobody exercises is a fallback nobody knows
- * is broken.
- *
- * third_party/dropbear/src/curve25519.h declares the interface, down to
- * `unsigned long` where c68k_25519.h says the same thing.  It is included
- * rather than retyped so that a change at the pinned tag is a compile error
- * here and not a silently mismatched call.
- *
- * SPDX-License-Identifier: MIT
- */
+/* clients/dropbear/amiga_25519.c: src/crypto68k's 25519 in place of Dropbear's
+ * TweetNaCl, by -Wl,--wrap on the four functions curve25519.c exports.  Its
+ * header is included so a change at the pinned tag is a compile error here.
+ * SPDX-License-Identifier: MIT */
 
 #include "includes.h"
 #include "curve25519.h"
@@ -32,14 +10,9 @@
 #include "c68k_25519.h"
 
 /*
- * ONE ssh FOR EVERY CPU.  A C68K_MV build of c68k_25519.c carries both field
- * multiplies -- the MULU.L one a 68020 to a 68040 has, and the four-MULU.W one
- * a 68000 never grew out of and a 68060 gave back -- and something has to pick
- * before the first handshake.  tls.library does it in its init; a client has no
- * init, so the four entry points below do it once between them.
- *
- * The test costs a compare and a branch per SCALARMULT, which is one per
- * handshake against tens of thousands of field multiplies inside it.
+ * A C68K_MV build carries both field multiplies and something must pick before
+ * the first handshake.  tls.library does it in its init; a client has no init,
+ * so the four entry points below do it once between them.
  */
 #ifdef C68K_MV
 
@@ -70,11 +43,9 @@ static void amiga_25519_pick(void)
 #define amiga_25519_pick()      ((void)0)
 #endif
 
-/*
- * Ed25519's SHA-512, taken from the libtomcrypt already in this binary.
- * c68k_25519.c has no hash of its own: this program has one, a TLS build has
- * nx_crypto's, and a second copy would be a second thing to keep right.
- */
+/* Ed25519's SHA-512, from the libtomcrypt already in this binary: c68k_25519.c
+   has no hash of its own, and a second copy would be a second thing to keep
+   right. */
 static void amiga_sha512_3(unsigned char out[64],
                            const unsigned char *a, unsigned long alen,
                            const unsigned char *b, unsigned long blen,
@@ -100,12 +71,9 @@ void __wrap_dropbear_curve25519_scalarmult(unsigned char *q,
                                            const unsigned char *n,
                                            const unsigned char *p)
 {
-    /*
-     * The return value is dropped because Dropbear's interface has nowhere to
-     * put it: kex-x25519.c's kexcurve25519_comb_key() takes no status from
-     * this call.  RFC 7748 section 6.1's all-zero check is still performed by
-     * c68k_x25519(), as it was in the TweetNaCl version being replaced.
-     */
+    /* The return value is dropped because kexcurve25519_comb_key() takes no
+       status from this call.  RFC 7748 6.1's all-zero check still happens inside
+       c68k_x25519(), as it did in the TweetNaCl version being replaced. */
     amiga_25519_pick();
 
     (void)c68k_x25519(q, n, p);

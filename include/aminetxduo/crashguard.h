@@ -1,35 +1,6 @@
 /*
- * AmiNetXDuo, crash guard.
- *
- * AmigaOS has no memory protection, so a bad pointer produces a Guru and takes
- * the whole machine down. Under the test harness that means the emulator dies
- * with no output at all: no serial log, no exit status, nothing to debug from.
- *
- * The crash guard installs a tc_TrapCode handler that catches CPU exceptions,
- * dumps the exception number, PC, SR and every register to the serial debug
- * port, and then resumes in user mode at a bail-out routine so the process can
- * exit cleanly. A crash becomes a readable report plus a nonzero exit status
- * instead of a dead emulator.
- *
- * Use it in any test or tool:
- *
- *     ami_crash_set_reference((APTR)main, "main");
- *     ami_crash_install();
- *     ... code under test ...
- *     ami_crash_remove();
- *
- * The report is reliable. A caught exception is dumped to the serial port with
- * the exception name, PC, SR and every register, and a one-line summary is
- * written to DH0:crash.txt, which the harness stages from a host directory and
- * prints after the run.
- *
- * Resuming is not. The handler patches the exception frame to return into a
- * user-mode bail-out routine, which then longjmp()s back to the install site,
- * but that unwind has been observed under FS-UAE resuming *after* the call site
- * rather than at it, so ami_crash_install() cannot be relied on to return a
- * second time. Treat a caught crash as fatal: use the guard to find out what
- * died and where, not to keep running afterwards.
- *
+ * AmiNetXDuo, crash guard: a tc_TrapCode handler that reports a caught CPU
+ * exception.  Resuming is unreliable -- treat a caught crash as fatal.
  * SPDX-License-Identifier: MIT
  */
 
@@ -67,25 +38,16 @@ typedef struct AmiCrashInfo
 
 const AmiCrashInfo *ami_crash_info(VOID);
 
-/*
- * Record the load address of the program's code hunk so the report can print
- * PC-relative offsets. Without it, a PC is only useful if you know where the
- * hunk was loaded. Pass any function in the code hunk (main is fine); the
- * reporter prints both the raw PC and PC minus this reference.
- */
+/* Pass any function in the program's code hunk (main is fine) so the report
+   can print PC-relative offsets. */
 VOID ami_crash_set_reference(APTR code_address, const char *label);
 
 /* The exception name for a trap number, e.g. 4 -> "illegal instruction". */
 const char *ami_crash_name(ULONG number);
 
 /*
- * Exec Alert (Guru) interception. A Guru is not a CPU exception, Exec calls
- * its own Alert() when it detects corruption, so the trap handler never sees
- * it. These hook exec's Alert vector so a double free, corrupt memory list or
- * reused IORequest gets logged with a decoded reason before the Guru appears.
- *
- * This patches Exec machine-wide: use it in tests and tools under the emulator,
- * and always remove it before exiting.
+ * Exec Alert (Guru) interception; the trap handler never sees an Alert.
+ * Patches Exec machine-wide: always remove it before exiting.
  */
 BOOL ami_crash_install_alert_hook(VOID);
 VOID ami_crash_remove_alert_hook(VOID);

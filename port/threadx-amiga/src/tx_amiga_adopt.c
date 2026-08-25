@@ -4,107 +4,18 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/**************************************************************************/
-/*                                                                        */
-/*    tx_amiga_adopt_thread / tx_amiga_orphan_thread   AmigaOS/m68k       */
-/*                                                                        */
-/*    NetX Duo suspends the calling thread.  nx_tcp_socket_receive(),      */
-/*    nx_packet_allocate(), nx_tcp_socket_send() and ~40 other core files  */
-/*    reach into the TX_THREAD control block of whoever called them and    */
-/*    park it on a suspension list (docs/RESEARCH.md 5.2).  On AmigaOS the */
-/*    callers are application Exec Tasks that ThreadX never created, so    */
-/*    either they become ThreadX threads (this file) or every socket call  */
-/*    is marshalled to a worker pool (docs/RESEARCH.md 6.3, option B).     */
-/*                                                                        */
-/*    tx_amiga_adopt_thread() allocates one Exec signal in the calling     */
-/*    Task, then drives the ordinary _tx_thread_create() path with         */
-/*    _tx_amiga_adopt_task set, which makes _tx_thread_stack_build() bind  */
-/*    to the existing Task instead of spawning one.  The thread is created */
-/*    TX_AUTO_START, so it is ready the moment it exists, and the call     */
-/*    does not return until the Task holds the baton: until it is          */
-/*    _tx_thread_current_ptr and no other ThreadX thread is running.       */
-/*                                                                        */
-/*    Both create and delete happen with _tx_thread_system_state raised.   */
-/*    _tx_thread_system_resume() ends in _tx_thread_system_return()        */
-/*    whenever the new thread outranks _tx_thread_execute_ptr, and at that */
-/*    instant the calling Task is not yet a ThreadX thread and does not    */
-/*    hold the baton.  Raising system_state turns those windows into       */
-/*    "interrupt" context, where ThreadX defers every context switch to    */
-/*    the caller.                                                          */
-/*                                                                        */
-/*    What holding the baton closes:                                       */
-/*                                                                        */
-/*    - concurrent mutation of ThreadX ready lists, suspension lists and   */
-/*      _tx_thread_current_ptr by Exec's preemptive scheduler.  Every      */
-/*      access is inside Forbid(), which stops all task switching, and     */
-/*      only the baton holder executes ThreadX code at all.                */
-/*    - an adopted Task being preempted by Exec mid-update.  Exec can      */
-/*      still preempt it (Forbid is not held between ThreadX calls), but   */
-/*      the preempting task cannot enter ThreadX unless it too holds the   */
-/*      baton, and it cannot while we do.                                  */
-/*                                                                        */
-/*    What it does not close:                                              */
-/*                                                                        */
-/*    - an adopted Task that blocks on something other than ThreadX while  */
-/*      holding the baton.  Wait() on an Intuition port, a DOS packet or a */
-/*      device IORequest leaves the baton held by a task that is not       */
-/*      runnable, and the entire stack, IP thread, timer thread, every   */
-/*      other socket user, stops behind it.  Nothing in the port can     */
-/*      detect this; the caller must adopt on entry to a stack call,       */
-/*      orphan on exit, and never hold the baton across application code.  */
-/*    - a Task terminated by Exec (or crashing) while adopted cannot       */
-/*      release the baton itself. bsdsocket.library detects dead openers   */
-/*      on its heartbeat and discards their registration, but users of the */
-/*      adoption API outside that library still need an equivalent owner   */
-/*      liveness and teardown policy.                                      */
-/*    - priority is bounded rather than closed.  A higher-priority         */
-/*      ThreadX thread made ready by the tick does not preempt the baton   */
-/*      holder asynchronously (see tx_thread_context_restore.c); it runs   */
-/*      at the holder's next ThreadX service call.                         */
-/*                                                                        */
-/*    The alternative (docs/RESEARCH.md 6.3, option B) is a worker pool:  */
-/*                                                                        */
-/*      - N ThreadX threads created by tx_thread_create(), each looping   */
-/*        on a tx_queue_receive() of request blocks;                      */
-/*      - a request block per call: opcode, arguments, result, plus the   */
-/*        caller's struct Task * and a signal mask;                       */
-/*      - a bsdsocket entry stub that fills a request, tx_queue_send()s   */
-/*        it, and Wait()s on its own Exec signal, which the worker pokes  */
-/*        on completion;                                                  */
-/*      - a cancellation path, because WaitSelect() must abort on an Exec */
-/*        break signal while a worker is parked inside                    */
-/*        nx_tcp_socket_receive(), tx_thread_wait_abort() on the worker */
-/*        plus a protocol for what the worker does next.                  */
-/*                                                                        */
-/*    It buys: no application task ever holds the baton, so the "adopted  */
-/*    task blocks outside ThreadX" hazard disappears and a crashing       */
-/*    application cannot wedge the stack.                                 */
-/*                                                                        */
-/*    It costs: two extra Exec context switches and a queue round-trip    */
-/*    per socket call; one worker tied up for the whole duration of every */
-/*    blocking call, so N bounds the number of concurrently blocked       */
-/*    sockets in the machine; WaitSelect() over M sockets becomes an      */
-/*    M-worker problem or needs a second, callback-driven mechanism; and  */
-/*    a 4 KB stack per worker as a standing cost on a 1 MB machine, where */
-/*    adoption borrows the caller's existing stack for free.              */
-/*                                                                        */
-/*    Adoption is the better trade provided the "never block outside      */
-/*    ThreadX while adopted" rule is kept inside bsdsocket.library, where */
-/*    it is one library's discipline rather than every application's.     */
-/*                                                                        */
-/**************************************************************************/
+/* tx_amiga_adopt_thread / tx_amiga_orphan_thread.  NetX Duo suspends the calling
+   thread, so an application Exec Task becomes a TX_THREAD here.  While adopted it
+   must not block outside ThreadX: the whole stack stalls behind the held baton. */
 
 #define TX_SOURCE_CODE
 
 #include "tx_amiga_internal.h"
 
 
-/*
- * Entry function recorded in the TX_THREAD of an adopted thread.  It is never
- * invoked: an adopted Task enters ThreadX through tx_amiga_adopt_thread(), not
- * through _tx_thread_shell_entry().  If it ever were called, parking is the
- * only safe thing to do.
- */
+/* Entry function recorded in the TX_THREAD of an adopted thread.  Never invoked:
+   an adopted Task enters ThreadX through tx_amiga_adopt_thread(), not through
+   _tx_thread_shell_entry().  */
 static VOID _tx_amiga_adopted_entry(ULONG id)
 {
 
@@ -131,22 +42,9 @@ BYTE    bit;
 }
 
 
-/*
- * TX_TRUE if the calling Task is the ThreadX baton holder.
- *
- * NetX Duo's caller checks ask "is a thread calling me" and the generic answer
- * is _tx_thread_system_state == 0, which on a target means "no ISR is running"
- * a property of the CPU, and therefore the same answer for everybody.  Here
- * interrupt context is a Task holding the core lock, and the teardown paths in
- * this file raise the counter with switching enabled because
- * _tx_thread_delete() can Wait() in the reaper.  So the generic answer is
- * whatever some other Task happens to be doing.
- *
- * This is the question the port can answer exactly, and it rejects everything
- * the generic one rejects: the tick task, the scheduler task and any Task
- * ThreadX has never adopted all fail it, because none of them backs
- * _tx_thread_current_ptr.  See port/netxduo-amiga/inc/nx_port.h.
- */
+/* TX_TRUE if the calling Task is the ThreadX baton holder.  The generic answer,
+   _tx_thread_system_state == 0, is wrong here: interrupt context is a Task
+   holding the core lock, so that counter is whatever some other Task is doing.  */
 UINT tx_amiga_caller_is_thread(VOID)
 {
 
@@ -276,10 +174,8 @@ VOID        *stack_start;
         return(status);
     }
 
-    /* Fast path: the baton is free and we are the chosen thread, so take it
-       here instead of round-tripping through the scheduler task.  Saves two
-       Exec context switches on every adoption, which matters if a library
-       adopts per socket call.  */
+    /* Fast path: the baton is free and we are the chosen thread, so take it here
+       instead of round-tripping through the scheduler task.  */
     if ((_tx_thread_current_ptr == TX_NULL) &&
         (_tx_thread_execute_ptr == thread_ptr) &&
         (_tx_thread_system_state == ((ULONG) 0)))
@@ -303,16 +199,9 @@ VOID        *stack_start;
 }
 
 
-/*
- * Release the baton and go dormant, keeping the TX_THREAD.
- *
- * The baton is dropped first, so that by the time _tx_thread_suspend() runs the
- * thread is an ordinary ready thread rather than the running one and
- * _tx_thread_system_suspend() has nothing to switch away from.
- * _tx_thread_system_state is raised across it for the same reason
- * tx_amiga_orphan_thread() raises it: a suspend that decides to switch would do
- * so on behalf of a Task that is no longer a ThreadX thread.
- */
+/* Release the baton and go dormant, keeping the TX_THREAD.  The baton is dropped
+   first, so the suspend has nothing to switch away from, and system_state is raised
+   so nothing switches on behalf of a Task that is no longer a thread.  */
 UINT tx_amiga_adopt_suspend(TX_THREAD *thread_ptr)
 {
 
@@ -352,31 +241,16 @@ UINT         wake;
 
     _tx_thread_system_state++;
 
-    /* The core lock stays held across the suspend.  _tx_thread_system_state is
-       one global counter and every Task reads it, NetX Duo's caller checks
-       included, so a window in which it is raised with task switching enabled
-       makes every other Task look like an ISR, and a socket call in flight on
-       one comes back NX_CALLER_ERROR.  Nothing under _tx_thread_suspend() can
-       Wait() while it is raised: every _tx_thread_system_return() in
-       tx_thread_system_suspend.c is behind TX_THREAD_SYSTEM_RETURN_CHECK, which
-       tests exactly this counter.  */
+    /* The core lock stays held across the suspend: _tx_thread_system_state is one
+       global that every Task reads, so a window with it raised and task switching
+       enabled makes other Tasks look like ISRs and fails their socket calls.  */
     (VOID) _tx_thread_suspend(thread_ptr);
 
     _tx_thread_system_state--;
 
-    /*
-     * Wake the scheduler only if there is something for it to dispatch.
-     *
-     * _tx_thread_execute_ptr == TX_NULL means no ThreadX thread is ready, so
-     * the poke would wake the scheduler Task, have it find nothing and put it
-     * back to sleep, two Exec context switches, measured at 202 us on a
-     * 14 MHz 68020, a quarter of what this bracket used to cost.  Skipping it
-     * cannot lose a dispatch: every path that makes a thread ready afterwards
-     * wakes the scheduler itself, from an interrupt
-     * (tx_thread_context_restore.c) or from whoever holds the baton
-     * (_tx_thread_system_return).  Read under the core lock so the answer cannot
-     * be stale by the time it is used.
-     */
+    /* Wake the scheduler only if there is something to dispatch: an empty execute
+       pointer means the poke would wake it to find nothing, and no dispatch is lost
+       -- whatever makes a thread ready next wakes it.  Read under the core lock. */
     wake =  (_tx_amiga_dispatch_inline() == ((UINT) TX_FALSE)) &&
             (_tx_thread_execute_ptr != TX_NULL)
             ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
@@ -396,11 +270,8 @@ UINT         wake;
 }
 
 
-/*
- * Come back out of dormancy and acquire the baton.  The tail is the same
- * fast-path-or-park as tx_amiga_adopt_thread(); only the registration is
- * skipped, because the thread is still registered.
- */
+/* Come back out of dormancy and acquire the baton.  Same fast-path-or-park tail
+   as tx_amiga_adopt_thread(); only the registration is skipped.  */
 UINT tx_amiga_adopt_resume(TX_THREAD *thread_ptr)
 {
 
@@ -459,8 +330,8 @@ struct Task *me;
     if (_tx_amiga_thread_park(thread_ptr) != TX_TRUE)
     {
 
-        /* Torn down under us while we waited.  Tell the caller to start over
-           with a fresh adoption rather than pretend it holds the baton.  */
+        /* Torn down under us while we waited.  Tell the caller to start over with
+           a fresh adoption rather than pretend it holds the baton.  */
         return(TX_CALLER_ERROR);
     }
 
@@ -470,29 +341,9 @@ struct Task *me;
 
 #ifdef AMINETXDUO_GREEN_REALM
 
-/*
- * The free-baton fast path of the request gate: resume the cached adopted
- * thread ONLY if that gets the baton immediately -- the same condition the
- * resume fast path above takes -- and otherwise back out completely, so the
- * caller can submit through the gate instead of parking.
- *
- * Take-or-back-out is one atom.  Everything that mutates ThreadX state in
- * this port runs in task context under the core Forbid() (interrupt servers
- * and device ISRs only Signal(); the tick's wheel walk runs on the tick
- * task or the realm, both under Forbid()), so between the resume and the
- * decision below nothing can interleave: either the fast-path condition
- * holds and the take is exactly tx_amiga_adopt_resume()'s, or it does not
- * and the suspend puts the ready lists back -- _tx_thread_suspend()
- * recomputes _tx_thread_execute_ptr under the same lock, so no other task
- * ever observes the transient resume.  No Signal() is posted on either
- * path, so there is no wake to lose and none to leak: a decline leaves the
- * machine exactly as it found it.
- *
- * _tx_thread_system_state is raised across both the resume and the
- * back-out suspend for the reason tx_amiga_adopt_suspend() gives: a resume
- * or suspend that decided to switch would do so on behalf of a Task that
- * does not hold the baton.
- */
+/* The free-baton fast path of the request gate: resume the cached thread ONLY if
+   that takes the baton immediately, and otherwise back the resume out entirely,
+   both under one Forbid(), so a decline posts no Signal and leaves no trace.  */
 UINT tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr)
 {
 
@@ -524,9 +375,8 @@ UINT         taken;
         return(TX_CALLER_ERROR);
     }
 
-    /* A cheap refusal before touching the lists: somebody holds the baton,
-       or something is already ready (every green thread outranks a caller,
-       so a non-empty execute pointer means the realm has work).  */
+    /* A cheap refusal before touching the lists: somebody holds the baton, or
+       something already ready outranks us.  */
     if ((_tx_thread_current_ptr != TX_NULL) ||
         (_tx_thread_execute_ptr != TX_NULL) ||
         (_tx_thread_system_state != ((ULONG) 0)))
@@ -548,10 +398,8 @@ UINT         taken;
     if (taken == ((UINT) TX_FALSE))
     {
 
-        /* The resume surfaced somebody who outranks us.  Put the thread
-           back and let the caller gate; execute_ptr is recomputed by the
-           suspend, under this same Forbid(), so the transient was never
-           visible.  */
+        /* The resume surfaced somebody who outranks us.  Put the thread back;
+           execute_ptr is recomputed by the suspend under this same Forbid().  */
         (VOID) _tx_thread_suspend(thread_ptr);
         _tx_thread_system_state--;
         Permit();
@@ -571,14 +419,9 @@ UINT         taken;
 }
 
 
-/*
- * Whether the baton is immediately takeable, for the policy decision that
- * precedes a first-ever adoption (no cached thread to try-resume yet).  A
- * hint, not a lock: the answer can be stale by the time it is used, and
- * both outcomes remain correct -- tx_amiga_adopt_thread() parks under
- * contention, the gate submits under none.  Only the try-resume above is
- * the atomic form.
- */
+/* Whether the baton is immediately takeable, for the policy decision before a
+   first-ever adoption.  A hint, not a lock: the answer can be stale, and both
+   outcomes remain correct.  Only the try-resume above is the atomic form.  */
 UINT tx_amiga_baton_free(VOID)
 {
 
@@ -622,9 +465,8 @@ BYTE         sig;
         return(TX_THREAD_ERROR);
     }
 
-    /* Somebody else's Task must not be left as the baton holder.  This should
-       be unreachable, since a dormant cached thread never is, but a stale baton
-       stops the whole stack and costs nothing to rule out.  */
+    /* Somebody else's Task must not be left as the baton holder.  Should be
+       unreachable, but a stale baton stops the whole stack.  */
     if (_tx_thread_current_ptr == thread_ptr)
     {
         ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
@@ -637,21 +479,16 @@ BYTE         sig;
     _tx_thread_system_state++;
 
     /* The core lock stays held, for the reason tx_amiga_adopt_suspend() gives.
-       _tx_amiga_reap() is the one thing under delete that Wait()s, and it
-       returns at its first test for an adopted thread, which this is, checked
-       above, so nothing here blocks.  */
+       _tx_amiga_reap() is the one thing under delete that Wait()s, and it returns
+       at its first test for an adopted thread, so nothing here blocks.  */
     (VOID) _tx_thread_terminate(thread_ptr);
     (VOID) _tx_thread_delete(thread_ptr);
 
     _tx_thread_system_state--;
 
-    /* Discard exists for the case where somebody ELSE is tearing this down:
-       FreeSignal() only works on the Task that allocated the bit, so a foreign
+    /* Only the Task that allocated a signal bit may FreeSignal() it, so a foreign
        caller can only drop the registration and leave the bit to die with its
-       owner.  When the owner is the one calling, the bit is recoverable and
-       leaving it is a permanent loss out of that Task's 32, netstack.c
-       reaches here on the owning Task from both ami_netstack_enter_cached()
-       and ami_netstack_release().  */
+       owner.  When the owner is calling, leaving it loses one of its 32.  */
     sigmask =  0UL;
     if (thread_ptr -> tx_thread_amiga_signal_owner == (VOID *) me)
     {
@@ -704,15 +541,9 @@ UINT         wake;
 
     sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
 
-    /* The already-torn-down case is tested BEFORE the tx_thread_amiga_task
-       check, and against tx_thread_amiga_signal_owner rather than against it.
-       _tx_amiga_reap() zeroes tx_thread_amiga_task for an adopted thread on the
-       way through _tx_thread_delete(), so a caller arriving here after that ran
-       failed the old ownership test, took TX_CALLER_ERROR, and this branch,
-       the one written to recover the bit, could never be reached.  Thirty-two
-       adoptions of a torn-down thread on one Task and no adoption on it ever
-       succeeds again.  netstack.c's ami_netstack_enter_cached() is the path
-       that does exactly this.  */
+    /* Tested BEFORE the tx_thread_amiga_task check, and against signal_owner:
+       _tx_amiga_reap() zeroes tx_thread_amiga_task under delete, so an ownership
+       test here could never reach this branch and would leak one of the 32 bits. */
     if (thread_ptr -> tx_thread_id != TX_THREAD_ID)
     {
 
@@ -753,8 +584,7 @@ UINT         wake;
     }
 
     /* Interrupt context again: terminate/delete must not try to switch on our
-       behalf now that we are nobody.  The core lock stays held across it, same
-       rule and same reasoning as tx_amiga_discard_thread().  */
+       behalf now that we are nobody.  Core lock held across it, as in discard.  */
     _tx_thread_system_state++;
 
     (VOID) _tx_thread_terminate(thread_ptr);
@@ -772,10 +602,8 @@ UINT         wake;
             ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
     Permit();
 
-    /* Whoever is next may run now, if there is anybody.  Handed on directly
-       when the baton was free; the poke is the fallback.  See the note in
-       tx_amiga_adopt_suspend() for why an empty execute pointer means it can
-       be skipped altogether, and what makes that safe.  */
+    /* Handed on directly when the baton was free; the poke is the fallback.  See
+       tx_amiga_adopt_suspend() for why an empty execute pointer skips it.  */
     if (wake == (UINT) TX_TRUE)
     {
         _tx_amiga_wake_scheduler();
@@ -793,27 +621,9 @@ UINT         wake;
 }
 
 
-/**************************************************************************/
-/*                                                                        */
-/*    tx_amiga_stack_in_use                             AmigaOS/m68k       */
-/*                                                                        */
-/*    Whether a block of memory falls inside the stack of a thread that is */
-/*    still on ThreadX's created list.  _txe_thread_create() refuses such  */
-/*    a block with TX_PTR_ERROR, so a caller that allocates a stack can    */
-/*    ask first and take another block instead of failing.                 */
-/*                                                                        */
-/*    It is not a hypothetical.  An adopted thread's stack is its Exec     */
-/*    Task's own, and a Task that exits without orphaning leaves the       */
-/*    TX_THREAD registered (see tx_amiga_adopt_resume() above): the memory */
-/*    goes back to the system and the allocator hands it out again, while  */
-/*    ThreadX still reads it as somebody's stack.  bsdsocket.library is    */
-/*    kept open on purpose by the command that starts the network, so its  */
-/*    cached adoption outlives the command every time.                     */
-/*                                                                        */
-/*    The comparison is _txe_thread_create()'s, so an answer of TX_FALSE   */
-/*    is the same answer that call will give.                              */
-/*                                                                        */
-/**************************************************************************/
+/* Whether a block of memory falls inside the stack of a thread still on ThreadX's
+   created list, which _txe_thread_create() refuses with TX_PTR_ERROR.  The
+   comparison is that call's, so TX_FALSE is the answer it will give.  */
 
 UINT tx_amiga_stack_in_use(const VOID *start, ULONG size)
 {

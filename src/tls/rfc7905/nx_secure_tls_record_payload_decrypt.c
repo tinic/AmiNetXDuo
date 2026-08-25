@@ -9,15 +9,9 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/*
- * AmiNetXDuo: a copy of nx_secure/src/nx_secure_tls_record_payload_decrypt.c
- * with the RFC 7905 record framing added.  See src/tls/rfc7905/README for why
- * this file is a copy rather than a hook, and for the whole of the diff
- * against the vendored original.
- *
- * Both trees are MIT, so copying raises no licensing question.  It does raise
- * a maintenance one, and the README is what lets a submodule bump find this.
- */
+/* AmiNetXDuo: a copy of nx_secure/src/nx_secure_tls_record_payload_decrypt.c
+ * with the RFC 7905 record framing added.  src/tls/rfc7905/README carries the
+ * diff against the vendored original; a submodule bump must revisit it. */
 
 
 /**************************************************************************/
@@ -164,11 +158,9 @@ UCHAR                                 nonce[13];
         (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305) ||
         NX_SECURE_AEAD_CIPHER_CHECK(session_cipher_method -> nx_crypto_algorithm))
     {
-        /* AmiNetXDuo, RFC 7905.  The mirror of the branch in
-           nx_secure_tls_record_payload_encrypt.c: no nonce_explicit precedes
-           the ciphertext, so nothing is extracted from the record and the
-           offset does not move; the nonce is the twelve-byte write IV
-           exclusive-ored with the left-padded sequence number. */
+        /* AmiNetXDuo, RFC 7905: no nonce_explicit precedes the ciphertext, so
+           nothing is extracted and the offset does not move.  The nonce is the
+           12-byte write IV xored with the left-padded sequence number. */
         if (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305)
         {
 

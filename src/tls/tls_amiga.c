@@ -1,16 +1,10 @@
-/*
- * AmiNetXDuo, nx_secure glue: entropy seeding and an E-Clock microsecond
- * timer.
- *
- * SPDX-License-Identifier: MIT
- */
+/* AmiNetXDuo, nx_secure glue: entropy seeding and an E-Clock microsecond timer.
+ * SPDX-License-Identifier: MIT */
 
 /*
- * Use a private library base for the timer inlines.  src/common/compat.c
- * defines the conventional `TimerBase` for its own ami_millis().  With
- * -fno-common (the GCC 15 default) a second definition here is a duplicate
- * symbol as soon as anything links both.  The NDK inlines are parameterised
- * for this.
+ * src/common/compat.c already defines the conventional `TimerBase`; with
+ * -fno-common a second definition here is a duplicate symbol as soon as
+ * anything links both.  The NDK inlines are parameterised for exactly this.
  */
 #define TIMER_BASE_NAME ami_tls_timer_base
 
@@ -36,20 +30,16 @@ static ULONG                       ami_tls_hz;
 
 /*
  * The open is lazy and the request is a file-scope static, so it must be
- * serialised.  ami_tls_eclock(), ami_tls_eclock_hz() and
- * ami_tls_eclock_micros() reach it with no lock of their own, from whatever
- * task is doing crypto.  Two tasks racing the ami_tls_timer_base test both
- * OpenDevice() the same timerequest.  Same reasoning and same shape as
- * src/common/compat.c.
+ * serialised: ami_tls_eclock() and friends reach it with no lock of their own,
+ * from whatever task is doing crypto.  Same shape as src/common/compat.c.
  */
 static struct SignalSemaphore      ami_tls_timer_lock;
 static volatile BOOL               ami_tls_timer_lock_ready;
 
 /*
- * A separate flag, and not ami_tls_timer_base itself.  ReadEClock() is an
- * inline that resolves the library base through that variable, so the base
- * must be set before the rate is read.  Without the flag, a caller on the
- * fast path sees a live base with ami_tls_hz still at zero.
+ * A separate flag, not ami_tls_timer_base itself: ReadEClock() is an inline that
+ * resolves the base through that variable, so the base must be published before
+ * the rate is read, or a fast-path caller sees a live base and ami_tls_hz zero.
  */
 static volatile BOOL               ami_tls_timer_ready;
 
@@ -192,12 +182,9 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
     }
 
     /*
-     * 64-bit intermediate: at ~709 kHz a one-second measurement is ~709,000
-     * ticks, and ticks * 1,000,000 overflows 32 bits after ~4,295 ticks (6 ms).
-     * This is a report path, so the __udivdi3 call is acceptable here.  It
-     * resolves to AmiNetXDuo's CPU-dispatched implementation in
-     * src/common/ami_udivdi3.c.  It is not acceptable inside a timed region,
-     * so every measurement there accumulates raw ticks and converts once.
+     * 64-bit intermediate: ticks * 1,000,000 overflows 32 bits after ~6 ms at
+     * 709 kHz.  A report path, so the __udivdi3 call is acceptable here; it is
+     * not inside a timed region, which accumulates raw ticks and converts once.
      */
     return (ULONG)(((unsigned long long)ticks * 1000000ULL) /
                    (unsigned long long)ami_tls_hz);
@@ -210,9 +197,9 @@ ULONG ami_tls_seed_rng(VOID)
     ami_random_init();
 
     /*
-     * The pool's own collection already samples the E-Clock and the beam
-     * position.  This second sample credits nothing.  It only lets a caller
-     * that opened the timer before the pool did contribute its phase.
+     * The pool's own collection already samples the E-Clock and the beam, so
+     * this second sample credits nothing.  It only lets a caller that opened the
+     * timer before the pool did contribute its phase.
      */
     eclock = ami_tls_eclock();
     ami_random_add_entropy(&eclock, sizeof(eclock), 0);

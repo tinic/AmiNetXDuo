@@ -1,63 +1,15 @@
 /*
- * RFC 3542, ancillary data, and the options that ride it.
- *
- * sendmsg()/recvmsg() already carry msg_control, and this is what goes in it.
- * No new LVOs: everything here is a socket option number, a struct shape or a
- * macro, and the calls that move it are the ones already in the table.
- *
- * WHAT THE NDK ALREADY HAS, which is more than it looks like from a grep,
- * ndk-include is Latin-1, so `grep -r` reads it as binary and finds nothing.
- * `LC_ALL=C grep -a`.
- *
- * <sys/socket.h> defines `struct cmsghdr` (socklen_t + two __LONGs, 12 bytes),
- * CMSG_DATA, CMSG_FIRSTHDR and CMSG_NXTHDR, and <netinet/in.h> defines
- * IP_RECVDSTADDR as 7.  Two of those three macros are unusable as shipped:
- *
- *   - CMSG_NXTHDR expands to ALIGN(), which no NDK header defines, so any
- *     translation unit that uses it fails to compile ("implicit declaration of
- *     function 'ALIGN'");
- *   - CMSG_FIRSTHDR returns msg_control without testing msg_controllen, which
- *     RFC 3542 section 20.3.1 calls out by name, recvmsg() reports "no
- *     ancillary data" by setting msg_controllen to 0, and the unguarded macro
- *     turns that into a pointer at an uninitialised buffer.
- *
- * So both are replaced here, along with CMSG_LEN and CMSG_SPACE, which the NDK
- * does not have at all.  Including this header after <sys/socket.h> is what a
- * caller wants; it undefines what it replaces.
- *
- * Replaced rather than repaired by defining ALIGN: that name is unprefixed and
- * common enough to collide with the caller's own code, and supplying it would
- * still leave CMSG_NXTHDR refusing the NULL second argument RFC 3542 5.1
- * requires.  CMSG_FIRSTHDR has to be replaced whatever happens, so one
- * mechanism for both is the smaller surface.
- *
- * CMSG_BUFFER() is ours and has no BSD counterpart: a control buffer has to be
- * aligned for a socklen_t and the usual `char buf[CMSG_SPACE(n)]` is not, so
- * the union every portable program writes by hand is written once here.
- *
- * `struct cmsghdr` itself is NOT redefined here.  It is the NDK's, it is
- * already the right shape, and a second definition would be an ODR-style trap
- * for anyone who included the two headers in the other order.  cmsg.c pins
- * every offset of it with _Static_assert instead.
- *
- * CMSG_ALIGN IS 4 BYTES, and that is ABI.  Every 32-bit BSD used 4, it keeps
- * struct cmsghdr at 12 bytes with no padding before the data, and nothing
- * about m68k argues for more, wider alignment would only waste buffer.  A
- * caller that sizes its buffer with CMSG_SPACE() never has to know.
- *
+ * RFC 3542 ancillary data: CMSG_* macros, option numbers and payloads.
+ * Include after <sys/socket.h>; it undefines the NDK's CMSG_* and replaces
+ * them.  CMSG_ALIGN is 4 and that is ABI.  struct cmsghdr stays the NDK's.
  * SPDX-License-Identifier: MIT
  */
 
 #ifndef AMINETXDUO_CMSG_H
 #define AMINETXDUO_CMSG_H
 
-/*
- * Self-sufficient, as aminetxduo/in6.h next door now is: everything here is
- * built out of `struct cmsghdr`, `struct in6_addr` and `struct in_addr`, so
- * there is no version of this header that leaves the include order to its
- * includer.  <sys/socket.h> uses size_t and ssize_t without declaring them,
- * hence the two before it.
- */
+/* <sys/socket.h> uses size_t and ssize_t without declaring them, hence the
+   two includes before it. */
 #include <exec/types.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -108,26 +60,9 @@ extern "C" {
 
 /* ------------------------------------------------------------ the buffer,
  *
- * cmsg_len is a socklen_t, so reading one is a 32-bit load, and a 68000 takes
- * an address error on an odd address.  `char buf[CMSG_SPACE(n)]` does not
- * promise more than byte alignment, so it is the wrong way to declare a
- * control buffer and compiles anyway.  CMSG_BUFFER() is the right way and is
- * the same three lines every caller would otherwise write:
- *
- *     CMSG_BUFFER(cbuf, CMSG_SPACE(sizeof(struct in6_pktinfo)));
- *
- *     msg.msg_control    = CMSG_BUFFER_PTR(cbuf);
- *     msg.msg_controllen = CMSG_BUFFER_LEN(cbuf);
- *
- * THE ALIGNED ATTRIBUTE IS NOT DECORATION.  m68k gives every scalar an
- * alignment of 2, not its width, `__alignof__(long)` is 2 and so is
- * `__alignof__(struct cmsghdr)`, so a union over a cmsghdr lands on an even
- * address and no better.  Half of them are 2 mod 4, which is what the library
- * used to refuse.  Nothing in the language gets this union to 4; the attribute
- * is the only mechanism, and cmsg.c asserts the result.
- *
- * An odd msg_control is not faulted on either way: recvmsg() reports
- * MSG_CTRUNC and writes nothing, sendmsg() answers EINVAL.
+ * cmsg_len is a socklen_t and a 68000 faults on an odd 32-bit load; `char
+ * buf[CMSG_SPACE(n)]` promises only byte alignment.  m68k aligns a cmsghdr to
+ * 2, so the attribute is the only way to reach 4; cmsg.c asserts it.
  */
 #if defined(__GNUC__)
 #define CMSG_BUFFER_ALIGN4  __attribute__((aligned(4)))
@@ -154,33 +89,18 @@ extern "C" {
 
 /* ----------------------------------------------------------- the options,
  *
- * Two numberings exist for the IPv6 options and this NDK picks neither.  The
- * numbers below are 4.4BSD/KAME's, which is the lineage the rest of this
- * header set belongs to, and they are the only ones the library answers to at
- * this level.
- *
- * The Linux alternates 49, 50, 51 and 52 are NOT accepted, and they used to
- * be.  In the BSD numbering those four are IPV6_HOPOPTS, IPV6_DSTOPTS,
- * IPV6_RTHDR and IPV6_PKTOPTIONS, three of them the extension-header options
- * this library refuses by name.  So a caller spelling IPV6_DSTOPTS (50) out of
- * in6.h and handing over its own option buffer had it taken for
- * IPV6_PKTINFO, read as a struct in6_pktinfo, and the socket's sticky source
- * address set from whatever those twenty bytes held.  Unlike the IPV6_V6ONLY /
- * IPV6_CHECKSUM collision, which is only on a raw socket, this one is on every
- * socket, so the aliases go rather than being withdrawn for one kind.
- *
- * Nothing is lost: the numbers below reach every ancillary option this library
- * offers.
+ * 4.4BSD/KAME numbering, the only one the library answers to at this level.
+ * The Linux alternates 49-52 are NOT accepted: in BSD numbering those are
+ * IPV6_HOPOPTS/DSTOPTS/RTHDR/PKTOPTIONS and would alias onto these.
  */
 
 #define IPV6_RECVPKTINFO            36
 #define IPV6_PKTINFO                46
 
 /*
- * IPV6_HOPLIMIT is ancillary only, in both directions: a LONG in a cmsg, never
- * a setsockopt, IPV6_UNICAST_HOPS is the sticky spelling and answers that.
- * On sendmsg it is 0..255, or -1 for "whatever IPV6_UNICAST_HOPS says"; any
- * other value is EINVAL.
+ * IPV6_HOPLIMIT is ancillary only: a LONG in a cmsg, never a setsockopt.  On
+ * sendmsg it is 0..255, or -1 for "whatever IPV6_UNICAST_HOPS says"; any other
+ * value is EINVAL.
  */
 #define IPV6_RECVHOPLIMIT           37
 #define IPV6_HOPLIMIT               47
@@ -189,16 +109,9 @@ extern "C" {
 #define ICMP6_FILTER                1
 
 /*
- * The IPv4 half.  IP_RECVDSTADDR is the NDK's own 7 and carries a bare
- * struct in_addr; IP_PKTINFO is Linux's 8 and carries a struct in_pktinfo.
- * They are separate options, not spellings of one, because the payloads
- * differ, a socket may have either, both or neither.
- *
- * 8 is IP_RETOPTS in this NDK.  That is a 4.3BSD get/set of the IP options a
- * datagram arrived with; it is refused here and always has been, and no
- * AmigaOS stack ever answered it.  Taking the number is the same trade
- * IPV6_TCLASS made against IPV6_PATHMTU: an option this library does not
- * offer loses to one it does.
+ * Separate options with different payloads, not spellings of one:
+ * IP_RECVDSTADDR (7) carries a bare struct in_addr, IP_PKTINFO (8) a struct
+ * in_pktinfo.  8 is IP_RETOPTS in this NDK and is taken over here.
  */
 #ifndef IP_RECVDSTADDR
 #define IP_RECVDSTADDR              7
@@ -208,15 +121,9 @@ extern "C" {
 /* ---------------------------------------------------------- the payloads, */
 
 /*
- * RFC 3542 section 6.6.  On receive, ipi6_addr is the destination address out
- * of the arriving header, which may be a multicast address, not one of this
- * machine's, and ipi6_ifindex is the arrival interface, numbered as
- * if_nametoindex() numbers it, loopback ("lo0") included.  On send, ipi6_addr
- * picks the source address and ipi6_ifindex the outgoing interface; either may
- * be zero to leave that half to the stack.
- *
- * On a datagram or raw socket.  A stream's source is fixed when the connection
- * opens, so a TCP sendmsg() carrying one is EINVAL.
+ * RFC 3542 6.6.  ipi6_ifindex is numbered as if_nametoindex() numbers it; on
+ * send either field may be zero to leave that half to the stack.  Datagram or
+ * raw sockets only: a TCP sendmsg() carrying one is EINVAL.
  */
 struct in6_pktinfo
 {
@@ -242,10 +149,8 @@ struct in_pktinfo
 #endif
 
 /*
- * RFC 3542 section 3.2.  Opaque to a caller: allocate one, hand it to
- * setsockopt(IPPROTO_ICMPV6, ICMP6_FILTER, ...), and use the six macros.
- * A raw ICMPv6 socket passes every type until one is installed, and a
- * setsockopt with optlen 0 puts it back that way.
+ * RFC 3542 3.2.  Opaque: use the six macros.  A raw ICMPv6 socket passes every
+ * type until one is installed; a setsockopt with optlen 0 puts it back.
  */
 struct icmp6_filter
 {

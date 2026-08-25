@@ -9,15 +9,9 @@
  * SPDX-License-Identifier: MIT
  **************************************************************************/
 
-/*
- * AmiNetXDuo: a copy of nx_secure/src/nx_secure_tls_record_payload_encrypt.c
- * with the RFC 7905 record framing added.  See src/tls/rfc7905/README for why
- * this file is a copy rather than a hook, and for the whole of the diff
- * against the vendored original.
- *
- * Both trees are MIT, so copying raises no licensing question.  It does raise
- * a maintenance one, and the README is what lets a submodule bump find this.
- */
+/* AmiNetXDuo: a copy of nx_secure/src/nx_secure_tls_record_payload_encrypt.c
+ * with the RFC 7905 record framing added.  src/tls/rfc7905/README carries the
+ * diff against the vendored original; a submodule bump must revisit it. */
 
 
 /**************************************************************************/
@@ -467,15 +461,9 @@ UINT                                  message_length;
         (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305) ||
         NX_SECURE_AEAD_CIPHER_CHECK(session_cipher_method -> nx_crypto_algorithm))
     {
-        /* AmiNetXDuo, RFC 7905.  ChaCha20-Poly1305 in TLS 1.2 does not use the
-           partially explicit nonce the GCM and CCM suites do: there is no
-           nonce_explicit on the wire, and the per-record nonce is the
-           twelve-byte write IV exclusive-ored with the sequence number padded
-           on the left, the TLS 1.3 construction, arrived at two years
-           earlier.  The additional data stays TLS 1.2's thirteen bytes.
-
-           The record is therefore eight bytes shorter than a GCM one and this
-           branch cannot be shared with it. */
+        /* AmiNetXDuo, RFC 7905: no nonce_explicit on the wire, and the
+           per-record nonce is the 12-byte write IV xored with the left-padded
+           sequence number.  The record is 8 bytes shorter than a GCM one. */
         if (session_cipher_method -> nx_crypto_algorithm == NX_CRYPTO_ENCRYPTION_CHACHA20_POLY1305)
         {
 
@@ -692,14 +680,8 @@ UINT                                  message_length;
             }
 
             /* Draw the explicit IV fresh.  RFC 5246 6.2.3.2 requires it to be
-               "chosen at random ... and MUST be unpredictable"; what `iv` holds
-               on entry is the last ciphertext block of the previous record,
-               which the attacker has already watched go past.  That is the
-               TLS 1.0 chaining the explicit IV exists to replace, and leaving
-               it in place puts a TLS 1.1 or 1.2 connection back inside BEAST's
-               reach: an attacker who can get chosen plaintext into the stream
-               and knows the next IV can test a guess at a secret byte one
-               block at a time. */
+               unpredictable, and `iv` on entry is the previous record's last
+               ciphertext block, which puts the connection back inside BEAST. */
             status = NX_CRYPTO_RBG((UINT)(iv_size << 3), iv);
 
             if (status != NX_CRYPTO_SUCCESS)
