@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: [noipv6, nomdns, notls, nomcast, noasm, norxverify,
+        config: [nolto, noipv6, nomdns, notls, nomcast, noasm, norxverify,
                  nosack, nots, nowscale, census, minimal]
     steps:
       - uses: actions/checkout@v4
@@ -234,11 +234,22 @@ jobs:
       # device and command is built -m68000 and picks its own inner loops from
       # AttnFlags at init.  The directory names are what make-dist.sh derives
       # from -b, so they are not free-form.
+      #
+      # NON-LTO, and deliberately not the cross default.  docs/SHIP-DECISIONS.md
+      # (d): a clean LTO Release boot-locked the physical A1200 at 08fe2a21 and
+      # a non-LTO build of the same tree ran, the lock-up has never been
+      # reproduced or named, and every physical hour this project has spent was
+      # on non-LTO images.  The off-hardware sweep narrowed it -- the shipped
+      # images are structurally sound under LTO -- but narrowing is not
+      # closing, and shipping the shape that has never been booted on the
+      # hardware to save kilobytes inverts the burden of proof.  Take this off
+      # when the physical test in SHIP-DECISIONS (d) has been run, and not
+      # before.
       - name: Build the shipping configuration
         run: |
           cmake -S . -B build/release \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF
           cmake --build build/release --parallel
 
           # The second drawer: everything optional compiled out, for somebody
@@ -253,7 +264,7 @@ jobs:
           # which on the 1 MB machine this drawer exists for is the point.
           cmake -S . -B build/release-minimal \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF \
                 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
                 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
                 -DAMINETXDUO_MULTICAST=OFF \
@@ -357,6 +368,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A RELEASE THAT ALREADY EXISTS BELONGS TO WHOEVER CUT IT.  A release
+          # cut by hand carries things this step cannot know -- which gates it
+          # was held against, what is still open, which known issues it ships
+          # with -- and `gh release create` on an existing tag fails, so a
+          # hand-cut release used to redden the very run that was validating
+          # it.  The archive is uploaded as a workflow artefact above either
+          # way, so nothing is lost by standing down here.
+          if gh release view "${GITHUB_REF#refs/tags/}" > /dev/null 2>&1; then
+            echo "::notice::${GITHUB_REF#refs/tags/} is already published; leaving it alone"
+            exit 0
+          fi
+
           notes=$(mktemp)
           {
             echo "$(tools/version.sh --long)"

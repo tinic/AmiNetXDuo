@@ -97,7 +97,7 @@ def ci_cross_configs():
 # workflow passes -b build/release, so the suffixes are the same.
 DRAWERS = [
     #  drawer      release.yml dir           ci.sh arm
-    ("full",      "build/release",          "default"),
+    ("full",      "build/release",          "nolto"),
     ("minimal",   "build/release-minimal",  "minimal"),
 ]
 
@@ -130,8 +130,12 @@ def main():
             bad += 1
             continue
 
-        # The default arm carries no -D at all, and neither does the full
-        # drawer: there is no CPU to name any more.
+        # The full drawer used to be the `default` arm, which carries no -D at
+        # all: the CPU drawers were gone and nothing else distinguished them.
+        # It is `nolto` now -- the archive is built -DAMINETXDUO_LTO=OFF while
+        # LTO stays the cross default, per docs/SHIP-DECISIONS.md (d) -- so the
+        # two sides carry the same one flag and are compared like any other
+        # pair.  Kept for a mapping that names `default` again.
         if arm == "default":
             want = {}
 
