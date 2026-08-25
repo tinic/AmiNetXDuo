@@ -6,6 +6,8 @@
 #   tools/ci.sh host                 # just the host tests
 #   tools/ci.sh cross                # just the cross builds
 #   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
+#   tools/ci.sh matrix               # tier 2: CPU speed, interface count,
+#                                    #         refusal wording, memory size
 #   tools/ci.sh cards                # tier 2: every network card, one boot each
 #   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
 #   tools/ci.sh capture              # tier 2: NetCapture, every card
@@ -32,6 +34,16 @@
 #                vendored xterm.js is untouched
 #   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
 #   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
+#   matrix       tier 2, THE MACHINE THE USER HAS rather than the one this
+#                tree was written on: the same bring-up at 68030/68040/68060
+#                and at two emulator speed settings, three to eight files in
+#                DEVS:NetInterfaces/, what a user is told when bring-up fails
+#                for each cause, and the packet-pool arithmetic at 32 and
+#                128 MB.  Every one of those axes had a coverage of zero until
+#                2026-08-25, which is how three defects reached real hardware
+#                unseen.  Needs a ROM and nothing else -- SLIRP is enough.
+#                TWO OF ITS FOUR ARMS ARE RED BY DESIGN; see
+#                docs/TEST-MATRIX.md.
 #   emulator     tier 2, boots FS-UAE, needs a ROM
 #   cards        tier 2, boots EVERY network card this project supports,
 #                one guest each, and proves each one carries bytes in
@@ -1440,6 +1452,109 @@ stage_cards6() {
 
 # --------------------------------------------------------------- bridged ----
 #
+# ---------------------------------------------------------------- matrix ----
+#
+# THE MACHINE THE USER HAS, RATHER THAN THE MACHINE THIS TREE WAS WRITTEN ON.
+#
+# Four arms, all of which cover a class that had a coverage of exactly zero
+# until 2026-08-25, and each of which exists because a defect of its shape was
+# found by hand on real hardware after every gate here walked past it:
+#
+#   cpuspeed   the same bring-up at 68030/68040/68060 and at two emulator
+#              speed settings, on the PCMCIA claim path and on a control
+#              board.  NOTHING in this tree had ever booted a CPU other than
+#              the A1200's 68EC020.
+#   multidef   three, four and eight files in DEVS:NetInterfaces/.  Nothing
+#              had ever staged more than two, so AMI_CFG_MAX_INTERFACES has
+#              never been reached by a test and the branch that drops the rest
+#              has never executed in CI.
+#   bringupfail  what a user is TOLD when bring-up fails, per cause.  Several
+#              selftests assert the wording of a success; none asserted the
+#              wording of a failure, which is the half a user reads.
+#   bigmem     the pool arithmetic at 32 MB and 128 MB.  It has only ever run
+#              at 0 MB and 8 MB.
+#
+# SLIRP IS ENOUGH, which is why this is not in `cards` or `bridged`.  Every
+# arm asks whether the machine came up and moved a packet, and SLIRP's gateway
+# answers ICMP; none of them counts bytes off a third machine.  So this needs
+# a ROM and a driver and nothing else, and it can run wherever `emulator` can.
+#
+# TWO OF THE FOUR ARE RED BY DESIGN and will stay red until the behaviour they
+# describe is changed.  They are written against the CONTRACT rather than
+# against what the tree does, which is the only way an arm added at the same
+# time as a fix can be trusted afterwards.  docs/TEST-MATRIX.md has the
+# standing list; the harness headers have the detail.
+stage_matrix() {
+    hr "machine matrix (tier 2, needs a ROM; SLIRP is enough)"
+
+    local rc=0 bad=0
+
+    if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
+        skip "machine matrix: no AMINETXDUO_KICKSTART, so no arm can boot." \
+             "CPU speed, interface count, refusal wording and memory size are" \
+             "all unproven on this runner."
+        return "$NOTHING"
+    fi
+
+    # The strings half of the refusal arm needs no emulator at all, so it runs
+    # first and its verdict survives a rig that cannot boot anything.
+    if "$ROOT/tests/tools/check-no-log-advice.sh" "$BUILD/default"; then
+        note "PASS  no shipped command sends the user to a log"
+    else
+        fail "a shipped command tells the user to read a debug log that a\
+ shipping build does not produce (tests/tools/check-no-log-advice.sh)"
+        bad=$((bad + 1))
+    fi
+
+    "$ROOT/tests/tools/run-cpuspeed.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  every CPU arm came up and carried a packet" ;;
+        2) skip "cpuspeed: the rig refused it before any arm booted" ;;
+        *) fail "cpuspeed: an interface did not reach the network on a CPU\
+ this tree does not normally run -- the table names which"
+           bad=$((bad + 1)) ;;
+    esac
+
+    rc=0
+    "$ROOT/tests/tools/run-bigmem.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  bring-up works and the pool clamp holds at every size" ;;
+        2) skip "bigmem: the rig refused it before any arm booted" ;;
+        *) fail "bigmem: bring-up or the packet-pool sizing does not survive a\
+ machine with 32 MB or more in it"
+           bad=$((bad + 1)) ;;
+    esac
+
+    # THE TWO THAT ARE EXPECTED RED.  Reported by name and counted as
+    # failures, because a known defect that stops being counted stops being
+    # fixed -- and this is a stage a person names deliberately, so it cannot
+    # turn anyone's push red by surprise.
+    rc=0
+    "$ROOT/tests/tools/run-multidef.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  every definition is visible and every refusal names a\
+ reason" ;;
+        2) skip "multidef: the rig refused it before any round booted" ;;
+        *) fail "multidef: an interface file in DEVS:NetInterfaces/ is DROPPED\
+ SILENTLY -- AMI_CFG_MAX_INTERFACES is 2, the survivors are whichever two the\
+ directory scan returns first, and the rest go behind an AMI_WARN that\
+ compiles out of a shipping build"
+           bad=$((bad + 1)) ;;
+    esac
+
+    rc=0
+    "$ROOT/tests/tools/run-bringupfail.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  every refusal names its operation and its code" ;;
+        2) skip "bringupfail: the rig refused it before it could boot" ;;
+        *) fail "bringupfail: a refusal does not name the failing operation\
+ and its code, or sends the user to a log a shipping build cannot write"
+           bad=$((bad + 1)) ;;
+    esac
+
+    return "$bad"
+}
+
 # The two harnesses that are ordinary pass/fail regression tests and happen to
 # need a real link.  Both existed, both were green, and neither was invoked by
 # anything: run-netshutdown.sh is the regression test for a defect a user
@@ -1841,7 +1956,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb)
+        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -1869,6 +1984,7 @@ for s in "${WANT[@]}"; do
         conformance) stage_conformance || srrc=$? ;;
         emulator)    stage_emulator || srrc=$? ;;
         cards)       stage_cards || srrc=$? ;;
+        matrix)      stage_matrix || srrc=$? ;;
         cards6)      stage_cards6 || srrc=$? ;;
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;

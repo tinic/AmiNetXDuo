@@ -183,6 +183,11 @@ a second, because the session is kept on disk and survives a reboot.
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** covers the build, its options, the
 test suites, continuous integration and the measurement method.
 
+**[docs/TEST-MATRIX.md](docs/TEST-MATRIX.md)** covers which axes of "the machine
+a user actually has" are asserted — board, CPU model and rate, memory size,
+interface count, refusal wording — what runs them (`tools/ci.sh matrix`), and
+which axes still cannot be reached without real hardware.
+
 ### CPU profiling
 
 `tools/profiler/Profile` is the interrupt-driven m68k sampler.  Its complete

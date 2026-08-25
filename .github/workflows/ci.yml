@@ -270,6 +270,15 @@ jobs:
             tests/tools/run-arpretry.sh \
             tests/tools/run-cardsweep.sh \
             tests/tools/cards.sh \
+            tests/tools/run-cpuspeed.sh \
+            tests/tools/run-bigmem.sh \
+            tests/tools/run-multidef.sh \
+            tests/tools/run-bringupfail.sh \
+            tests/tools/bringup-verdict.sh \
+            tests/tools/bringup-verdict-selftest.sh \
+            tests/tools/bringupfail-verdict.sh \
+            tests/tools/bringupfail-verdict-selftest.sh \
+            tests/tools/check-no-log-advice.sh \
             tests/tools/run-cardsweep6.sh \
             tools/emu-mac.sh \
             tools/emu-board.sh \
