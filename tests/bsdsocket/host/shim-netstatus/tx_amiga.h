@@ -49,6 +49,26 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
 
 VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
 
+/* The green realm's census, mirrored for the same reason as the tick stats:
+   netstatus.c copies it into NETSTATUS_RXBUDGET.  The host tier has no green
+   realm, so the shim in host/shim-netstatus/tx_amiga_green_stub.c answers
+   zeros, which is also what a baton build on the Amiga answers.  */
+typedef struct TX_AMIGA_GREEN_STATS_STRUCT
+{
+    ULONG   gs_switches;
+    ULONG   gs_external;
+    ULONG   gs_idle_waits;
+    ULONG   gs_wait_fast;
+    ULONG   gs_wait_slow;
+    ULONG   gs_stray_wait;
+    ULONG   gs_gate_calls;
+    ULONG   gs_gate_fallback;
+    ULONG   gs_realm_sigbits;
+    ULONG   gs_gate_fast;
+} TX_AMIGA_GREEN_STATS;
+
+VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
+
 static __inline ULONG tx_amiga_uptime_ms(const TX_AMIGA_TICK_STATS *t)
 {
     ULONG hz = t->tx_amiga_tick_eclock_hz;

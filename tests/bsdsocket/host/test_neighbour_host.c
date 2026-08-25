@@ -197,6 +197,7 @@ VOID bsd_nx_leave(struct AmiSocketBase *b)  { (VOID)b; }
 LONG bsd_fail(struct AmiSocketBase *b, LONG code) { (VOID)b; (VOID)code; return -1; }
 
 VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *s) { memset(s, 0, sizeof(*s)); }
+VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *s) { memset(s, 0, sizeof(*s)); }
 ULONG ami_eclock_rate(VOID) { return 0; }
 
 AmiBatonStats ami_baton_stats;

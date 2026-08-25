@@ -319,6 +319,10 @@ typedef struct NetStatusInterface
     /* Frames filled by the copy/direct hooks, and those summed in the fill. */
     ULONG   nsi_RxCopyHook;
     ULONG   nsi_RxCopySummed;
+    /* Of nsi_RxCopyHook, fills that came through the private direct-receive
+       pair: the device drained the wire straight into the packet.  The
+       summed counter cannot answer this -- both fill paths fuse a sum. */
+    ULONG   nsi_RxDirectFill;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */
@@ -1102,6 +1106,33 @@ typedef struct NetStatusRxBudget
     NetStatusBudgetLeg  nrb_Defer;      /* deliver -> IP thread pickup       */
     NetStatusBudgetLeg  nrb_Demux;      /* pickup -> the segment's socket    */
     NetStatusBudgetLeg  nrb_State;      /* socket entry -> receive notify    */
+    /* The green realm's scheduling census (AMINETXDUO_GREEN_REALM builds;
+       all zero from a baton build).  Appended at the end for the same
+       offset-stability reason as the settle sub-legs.  What each counts:
+       port/threadx-amiga/inc/tx_amiga.h, TX_AMIGA_GREEN_STATS. */
+    ULONG               nrb_GreenSwitches;
+    ULONG               nrb_GreenExternal;
+    ULONG               nrb_GreenIdleWaits;
+    ULONG               nrb_GreenWaitFast;
+    ULONG               nrb_GreenWaitSlow;
+    ULONG               nrb_GreenStray;     /* MUST be zero; a nonzero count
+                                               is an unconverted Exec block
+                                               inside the realm              */
+    /* The request gate (the adopted-caller boundary): brackets migrated
+       into the realm against brackets that fell back to the adopted-baton
+       path.  Appended at the end, offsets hold. */
+    ULONG               nrb_GateCalls;
+    ULONG               nrb_GateFallback;
+    /* The signal-bit audit: Exec signal bits allocated on the realm Task,
+       of its 16 allocatable -- the one budget every green thread's MsgPort
+       and AllocSignal draws from. */
+    ULONG               nrb_RealmSigBits;
+    /* The gate's free-baton fast path: brackets that took an idle realm's
+       baton directly, against nrb_GateCalls that submitted through the
+       gate and nrb_GateFallback that fell back to the adopted path.  The
+       three partition the brackets; the fast share is what attributes the
+       physical baton-leg numbers.  Appended at the end, offsets hold. */
+    ULONG               nrb_GateFast;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

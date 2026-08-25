@@ -335,6 +335,28 @@ UINT         wake;
                 (LONG) &_tx_thread_system_return);
     }
 
+#ifdef AMINETXDUO_GREEN_REALM
+    if (_tx_amiga_thread_green(thread_ptr) != TX_FALSE)
+    {
+
+        /* A green thread yields by switching straight back into the realm
+           scheduler's context -- no Signal, no Wait, no Exec dispatch.  The
+           protocol Forbid() is the one taken above; the scheduler loop
+           resumes holding it.  When this thread is next dispatched the
+           switch returns here, again under the dispatcher's Forbid().  */
+        ami_budget_hold_end((APTR) thread_ptr, thread_ptr -> tx_thread_name,
+                            (ULONG) thread_ptr -> tx_thread_state,
+                            AMI_HOLD_SITE_YIELD);
+        _tx_thread_current_ptr =  TX_NULL;
+
+        _tx_green_switch(&thread_ptr -> tx_thread_stack_ptr,
+                         _tx_green_scheduler_sp);
+
+        Permit();
+        return;
+    }
+#endif
+
     /* Release the baton, and give it straight to whoever is next rather than
        waking the scheduler Task to do it.  tx_thread_state already names what
        the holder is about to block on, which is the site hint the holder ring

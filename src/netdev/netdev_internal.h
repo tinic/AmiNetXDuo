@@ -209,6 +209,15 @@ BOOL netdev_copy_call(APTR fn, APTR to, APTR from, ULONG len);
 BOOL netdev_hook_call(APTR hook, APTR object, APTR message);
 VOID netdev_rebuild_filter(NetdevUnit *unit);
 VOID netdev_tx_pump(NetdevUnit *unit);
+/* netdev_direct.c: the private single-copy receive transaction, kept apart
+   from the romtag so it can run as an ordinary host test.  There is no
+   unclaim: neither supported port core has a recoverable error once its
+   drain has begun, so a claim commits (netdev_nic.h states the contract). */
+NetdevTrack *netdev_track_find(NetdevOpener *op, ULONG type);
+struct IOSana2Req *netdev_take(struct List *list, ULONG type);
+UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
+                       APTR *token);
+VOID netdev_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed);
 
 /* Every request that stops being quick and enters a list must be prepared the
    same way, whether it goes at the head or tail. */

@@ -34,13 +34,17 @@
 #include "tx_amiga_internal.h"
 
 
+#ifndef AMINETXDUO_GREEN_REALM
 static VOID _tx_amiga_thread_entry(VOID);
+#endif
 
 
 VOID _tx_thread_stack_build(TX_THREAD *thread_ptr, VOID (*function_ptr)(VOID))
 {
 
+#ifndef AMINETXDUO_GREEN_REALM
 struct Task *task;
+#endif
 CHAR        *name;
 
 
@@ -82,6 +86,49 @@ CHAR        *name;
 
     /* ---- ThreadX-created thread ----------------------------------------- */
 
+#ifdef AMINETXDUO_GREEN_REALM
+
+    /* A request-gate proxy: green identity, but NO initial frame.  Its
+       context is the caller's captured continuation, written directly into
+       tx_thread_stack_ptr by the capture switch in tx_amiga_gate_call(); a
+       frame laid at stack_end here would scribble on the top of the owning
+       Task's live stack, which is what the "stack" of a gate proxy is.  */
+
+    if (_tx_amiga_gate_bind_pending != 0U)
+    {
+        thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
+        thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
+        thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_GREEN;
+        (VOID) name;
+        return;
+    }
+
+    /* Green realm: no Exec Task at all.  The thread's context is an initial
+       switch frame on the ThreadX-owned stack, entered and left only by the
+       realm Task's scheduler loop (tx_thread_schedule.c).
+
+       tx_thread_amiga_task points at the realm Task so that every identity
+       test in the tree -- "is the calling Task the baton holder", in
+       _tx_thread_system_return(), tx_amiga_caller_is_thread(), the baton
+       bracket -- answers correctly while this thread's context is active:
+       the code IS running on the realm Task then.  The run signal is the
+       scheduler's own, so anything that pokes it (a stray
+       _tx_amiga_signal_task) wakes the realm, which is always harmless and
+       always the right recipient.  _tx_amiga_dispatch_inline() never
+       dispatches a green thread (it declines and wakes the realm), so the
+       signal is never used as a baton handoff.  */
+
+    thread_ptr -> tx_thread_amiga_task       =  _tx_amiga_scheduler_task;
+    thread_ptr -> tx_thread_amiga_run_signal =  _tx_amiga_scheduler_signal;
+    thread_ptr -> tx_thread_amiga_flags      =  TX_AMIGA_THREAD_GREEN;
+
+    _tx_green_stack_build(thread_ptr);
+
+    (VOID) name;
+    return;
+
+#else /* !AMINETXDUO_GREEN_REALM */
+
     /* SIGF_SINGLE is the run signal for tasks we create.  It is permanently
        allocated by Exec and is private to the task, so there is no window
        between AddTask() and the task's first AllocSignal() during which the
@@ -97,9 +144,12 @@ CHAR        *name;
                                   (APTR) thread_ptr);
 
     thread_ptr -> tx_thread_amiga_task =  (VOID *) task;
+
+#endif /* AMINETXDUO_GREEN_REALM */
 }
 
 
+#ifndef AMINETXDUO_GREEN_REALM
 /*
  * Entry point of every Exec Task that backs a ThreadX thread.  The TX_THREAD
  * comes out of the task's own control block, which tc_UserData identifies and
@@ -140,3 +190,4 @@ struct _tx_amiga_ctrl   *ctrl;
 
     _tx_amiga_task_destroy(ctrl);                    /* never returns */
 }
+#endif /* !AMINETXDUO_GREEN_REALM */

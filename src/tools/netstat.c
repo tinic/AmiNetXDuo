@@ -383,6 +383,24 @@ static VOID show_budget(VOID)
     tool_printf("\tdirect: %lu completed on the IP thread, %lu classic dequeues\n",
                 b->nrb_RxDirect, b->nrb_RxFallback);
 
+    /* The green realm's scheduling census: all zero from a baton build, so
+       the lines only appear when there is a realm to report on. */
+    if (b->nrb_GreenSwitches != 0 || b->nrb_GreenIdleWaits != 0 ||
+        b->nrb_GreenWaitSlow != 0)
+    {
+        tool_printf("\tgreen:  %lu switches, %lu external handoffs, "
+                    "%lu idle waits\n",
+                    b->nrb_GreenSwitches, b->nrb_GreenExternal,
+                    b->nrb_GreenIdleWaits);
+        tool_printf("\tgreen:  %lu waits latched, %lu slept, %lu STRAY\n",
+                    b->nrb_GreenWaitFast, b->nrb_GreenWaitSlow,
+                    b->nrb_GreenStray);
+        tool_printf("\tgreen:  %lu fast takes, %lu gated brackets, "
+                    "%lu fell back, %lu of 16 realm signal bits out\n",
+                    b->nrb_GateFast, b->nrb_GateCalls,
+                    b->nrb_GateFallback, b->nrb_RealmSigBits);
+    }
+
     show_budget_holds(b);
 }
 
@@ -510,6 +528,13 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         if (st->packets_received != 0)
             tool_printf("  copy/direct fill  %10lu    summed while filling %7lu\n",
                         st->rx_copy_hook, st->rx_copy_summed);
+
+        /* Of those fills, the frames the device drained straight into the
+           packet.  Both fill paths fuse a checksum, so only this line says
+           whether the single-copy claim is engaging on this card. */
+        if (st->rx_copy_hook != 0)
+            tool_printf("  direct fills      %10lu    (claimed at the device)\n",
+                        st->rx_direct_fill);
 
         /* Only when there are any: the four causes behind receive errors are
            nothing alike, and the total on its own does not say which one

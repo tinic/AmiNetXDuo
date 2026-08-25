@@ -938,6 +938,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_RxErrIo          = stats.rx_err_io;
             out->nsi_RxCopyHook       = stats.rx_copy_hook;
             out->nsi_RxCopySummed     = stats.rx_copy_summed;
+            out->nsi_RxDirectFill     = stats.rx_direct_fill;
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 
@@ -1603,6 +1604,24 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                 }
             }
 #endif
+            {
+                /* The green realm's census.  Not under RXPROBE: the counters
+                   exist in every green build, and the accessor answers zeros
+                   from a baton one. */
+                TX_AMIGA_GREEN_STATS gs;
+
+                tx_amiga_green_stats(&gs);
+                out->nrb_GreenSwitches  = gs.gs_switches;
+                out->nrb_GreenExternal  = gs.gs_external;
+                out->nrb_GreenIdleWaits = gs.gs_idle_waits;
+                out->nrb_GreenWaitFast  = gs.gs_wait_fast;
+                out->nrb_GreenWaitSlow  = gs.gs_wait_slow;
+                out->nrb_GreenStray     = gs.gs_stray_wait;
+                out->nrb_GateCalls      = gs.gs_gate_calls;
+                out->nrb_GateFallback   = gs.gs_gate_fallback;
+                out->nrb_RealmSigBits   = gs.gs_realm_sigbits;
+                out->nrb_GateFast       = gs.gs_gate_fast;
+            }
         }
         ns_writer_finish(&w);
         return (LONG)hdr->nsh_Count;

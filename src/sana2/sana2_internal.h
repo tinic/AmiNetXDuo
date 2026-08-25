@@ -574,6 +574,7 @@ VOID ami_sana2_block_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags);
+LONG ami_sana2_do_io(struct IORequest *req);
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
 LONG ami_sana2_online(AmiSana2If *iface);
 LONG ami_sana2_offline(AmiSana2If *iface);
@@ -609,5 +610,20 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface);
 VOID ami_sana2_tx_drain(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);
+
+/* The probe build's stray-Wait() net over the realm's sources; the wrapper
+   and the rationale live with netstack_internal.h's copy of this block.
+   <proto/exec.h> is forced FIRST: the NDK's inline Wait macro must be
+   expanded (once, behind its own guard) BEFORE ours is defined, or a TU
+   that includes it after this header has ours silently replaced -- the
+   NDK path is -isystem, so the redefinition never even warns.  The
+   injected-stray drill of 2026-08-25 caught this net hanging dead: every
+   Wait() in the sana2 sources compiled to the raw inline.  */
+#if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+#include <proto/exec.h>
+ULONG ami_green_checked_wait(ULONG sigmask);
+#undef Wait
+#define Wait(sigmask) ami_green_checked_wait(sigmask)
+#endif
 
 #endif /* AMINETXDUO_SANA2_INTERNAL_H */

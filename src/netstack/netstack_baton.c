@@ -324,6 +324,29 @@ VOID ami_netstack_baton_release(VOID)
         return;
     }
 
+#ifdef AMINETXDUO_GREEN_REALM
+    if ((thread->tx_thread_amiga_flags & TX_AMIGA_THREAD_GREEN) != 0U)
+    {
+        /*
+         * A GREEN thread inside the release/acquire bracket is a converted
+         * site that was missed: green code must sleep in
+         * tx_amiga_green_wait(), never around an Exec Wait().  Suspending it
+         * here would strand its context (the bracket's Wait() runs on the
+         * REALM Task and stops every green thread at once), so do nothing --
+         * the probe build's Wait() interception downstream converts the
+         * actual sleep into a green wait -- and count it, loudly: this
+         * counter must read zero.
+         */
+        tx_amiga_green_stray_wait_note();
+        Permit();
+        AMI_WARN("green realm: baton bracket entered from green thread '%s'. "
+                 "An unconverted Exec-blocking site is still in the realm",
+                 (thread->tx_thread_name != TX_NULL) ? thread->tx_thread_name
+                                                     : (CHAR *)"?");
+        return;
+    }
+#endif
+
     if (slot == NULL)
         slot = ami_baton_claim(me);
 
@@ -458,3 +481,4 @@ VOID ami_netstack_baton_acquire(VOID)
        again. */
     (VOID)_tx_amiga_thread_park(thread);
 }
+

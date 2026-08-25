@@ -400,6 +400,10 @@ char   *execbase;
 #define TX_AMIGA_THREAD_ADOPTED                 0x0001U   /* pre-existing Exec Task  */
 #define TX_AMIGA_THREAD_DIE                     0x0002U   /* teardown requested      */
 #define TX_AMIGA_THREAD_ORPHANED                0x0004U   /* woken but no longer ours */
+#define TX_AMIGA_THREAD_GREEN                   0x0008U   /* green: no Exec Task, its
+                                                             context is a saved stack
+                                                             inside the realm Task
+                                                             (AMINETXDUO_GREEN_REALM) */
 
 
 #define TX_BLOCK_POOL_EXTENSION
@@ -433,7 +437,16 @@ char   *execbase;
 #define TX_TIMER_DELETE_EXTENSION(timer_ptr)
 #define TX_THREAD_CREATE_EXTENSION(thread_ptr)
 #define TX_THREAD_DELETE_EXTENSION(thread_ptr)
-#define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)
+
+/* A terminated thread may be sitting in a green signal wait; its waiter
+   slot must go with it or the realm would keep consuming its mask's bits
+   for a thread that can never collect them -- and once the bit is
+   recycled, consume them out from under the new owner.  Runs under the
+   core lock, which in this port is the Forbid() the purge wants.  A baton
+   build's hook is an empty function (tx_amiga_green.c).  */
+struct TX_THREAD_STRUCT;
+void    _tx_amiga_thread_terminated(struct TX_THREAD_STRUCT *thread_ptr);
+#define TX_THREAD_TERMINATED_EXTENSION(thread_ptr)    _tx_amiga_thread_terminated(thread_ptr);
 #define TX_THREAD_STACK_BUILD_STATUS(thread_ptr)      \
     (((thread_ptr) -> tx_thread_amiga_task != (VOID *) 0) ? TX_SUCCESS : TX_NO_MEMORY)
 #define TX_TIMER_INITIALIZE_EXTENSION(a)
@@ -469,6 +482,21 @@ void _tx_thread_reset_port_completion(struct TX_THREAD_STRUCT *thread_ptr, UINT 
 void    _tx_amiga_thread_completed(void);
 
 #define TX_THREAD_COMPLETED_EXTENSION(thread_ptr)     _tx_amiga_thread_completed();
+
+
+/* In a green build, wakeup delivery happens at the realm's scheduling points
+   rather than asynchronously, so a relinquishing green thread must deliver
+   the realm's latched Exec signals (and owed ticks) BEFORE the generic code
+   inspects the ready lists -- or the yield compares against stale lists and
+   no-ops for the whole pass.  See _tx_amiga_relinquish_prepare() in
+   tx_amiga_green.c for the mechanism and the mDNS bound it restores.  Baton
+   builds keep the stock (whitespace) hook: their wakeups are asynchronous
+   Exec signals to sibling Tasks and their ready lists are already true.  */
+
+#ifdef AMINETXDUO_GREEN_REALM
+void    _tx_amiga_relinquish_prepare(void);
+#define TX_THREAD_RELINQUISH_PORT_PREPARE             _tx_amiga_relinquish_prepare();
+#endif
 
 
 /* Start the periodic tick task once the kernel is initialised but before the

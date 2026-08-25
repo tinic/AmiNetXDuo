@@ -935,11 +935,11 @@ static VOID ami_sana2_rx_flush(AmiSana2Rx *rx)
     req.ios2_Req.io_Error                   = 0;
     req.ios2_WireError                      = 0;
 
-    /* DoIO() blocks in exec Wait(). Nothing inside the bracket can touch
-       ThreadX or NetX Duo state. */
-    ami_sana2_block_enter();
-    (VOID)DoIO((struct IORequest *)&req);
-    ami_sana2_block_leave();
+    /* Runs on the reader. Baton build: DoIO() inside the bracket, nothing in
+       there touching ThreadX or NetX Duo state. Green build: the reader is a
+       green thread, so the helper submits with SendIO() and sleeps only this
+       thread (ami_sana2_do_io picks the shape). */
+    (VOID)ami_sana2_do_io((struct IORequest *)&req);
 
     DeleteMsgPort(port);
 }
@@ -1162,6 +1162,17 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             continue;
         }
 
+#ifdef AMINETXDUO_GREEN_REALM
+        /*
+         * The reader is a green thread: only IT sleeps, on its reply port's
+         * (and the TX reap bit's) signals, while the realm keeps running the
+         * IP thread and everyone else.  The baton release/reacquire bracket
+         * -- and with it the probe's "baton" leg, which timed exactly that
+         * reacquisition -- does not exist on this path; the leg reads zero
+         * in a green build by design, not by omission.
+         */
+        (VOID)tx_amiga_green_wait(rx->wake_mask | rx->reap_mask);
+#else
         ami_sana2_block_enter();
         Wait(rx->wake_mask | rx->reap_mask);
 #ifdef AMINETXDUO_RXPROBE
@@ -1182,6 +1193,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
         ami_sana2_block_leave();
 #endif
+#endif /* AMINETXDUO_GREEN_REALM */
 
         ami_sana2_rx_drain(rx);
 

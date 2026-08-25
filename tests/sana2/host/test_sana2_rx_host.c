@@ -271,6 +271,7 @@ VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface) { (VOID)iface; }
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
+LONG ami_sana2_do_io(struct IORequest *req) { (VOID)req; return 0; }
 
 /* ------------------------------------------------------------- fixtures -- */
 

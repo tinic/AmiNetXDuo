@@ -353,6 +353,95 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
     return AMI_NET_OK;
 }
 
+#ifdef AMINETXDUO_GREEN_REALM
+
+/*
+ * The free-baton fast path: the cached bracket, entered only when that costs
+ * no round trip.  Declining is the normal case under load and must stay
+ * cheap and side-effect free -- the caller submits through the request gate
+ * instead, and a decline that mutated anything would race the gate's own
+ * bookkeeping.
+ *
+ * Policy lives here; atomicity lives in the port.  For a live cached thread
+ * tx_amiga_adopt_try_resume() is take-or-back-out under one Forbid(), so
+ * the takeability check and the take cannot be separated by anything.  For
+ * a task with no cached thread yet, tx_amiga_baton_free() is only a hint
+ * and tx_amiga_adopt_thread() is the same call enter_cached makes: correct
+ * under contention (it parks), merely slower, and paid once per opener.
+ */
+LONG ami_netstack_try_enter_cached(AmiNetCaller *caller)
+{
+    struct Task *me;
+    UINT         status;
+
+    caller->nc_Adopted = FALSE;
+
+    if (tx_amiga_kernel_running() != TX_TRUE)
+        return AMI_NET_ERR_STATE;
+
+    /* Ours, not merely somebody's, see ami_netstack_enter(). */
+    if (tx_amiga_caller_is_thread() != (UINT) TX_FALSE)
+        return AMI_NET_OK;                  /* nested */
+
+    me = FindTask(NULL);
+
+    if (caller->nc_Live && caller->nc_Task == me)
+    {
+        status = tx_amiga_adopt_try_resume(&caller->nc_Thread);
+
+        if (status == TX_SUCCESS)
+        {
+            caller->nc_Adopted = TRUE;
+            return AMI_NET_OK;
+        }
+        if (status == TX_NOT_DONE)
+            return AMI_NET_ERR_BUSY;        /* contended; gate instead */
+
+        /* The cached thread is unusable (torn down elsewhere, or a state
+           resume does not take).  Same recovery as enter_cached: drop it
+           and fall through to a fresh adoption below. */
+        if (tx_amiga_orphan_thread(&caller->nc_Thread) != TX_SUCCESS)
+            (VOID)tx_amiga_discard_thread(&caller->nc_Thread);
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+    }
+
+    if (caller->nc_Live)
+    {
+        /* Another task's cache; the second-task rule, see enter_cached. */
+        AMI_ERROR("netstack: bracket used from a second task");
+        return AMI_NET_ERR_STATE;
+    }
+
+    /* No cached thread yet.  Only build one when the baton looks free, so
+       the once-per-opener adoption lands on an idle realm and later
+       brackets have a thread to try-resume; under load the gate carries the
+       call and this stays a decline. */
+    if (tx_amiga_baton_free() != (UINT) TX_TRUE)
+        return AMI_NET_ERR_BUSY;
+
+    /* Publish the owner before adoption, see enter_cached. */
+    caller->nc_Live = TRUE;
+    caller->nc_Task = me;
+
+    status = tx_amiga_adopt_thread(&caller->nc_Thread,
+                                   (CHAR *)"aminetxduo caller",
+                                   AMI_CALLER_PRIORITY);
+    if (status != TX_SUCCESS)
+    {
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+        AMI_ERROR("netstack: cannot adopt calling task (%ld)", (long)status);
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    caller->nc_Adopted = TRUE;
+
+    return AMI_NET_OK;
+}
+
+#endif /* AMINETXDUO_GREEN_REALM */
+
 VOID ami_netstack_leave_cached(AmiNetCaller *caller)
 {
     netstack_pool_mark_low();           /* see ami_netstack_leave() */

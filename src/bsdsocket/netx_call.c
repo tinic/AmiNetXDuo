@@ -60,6 +60,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/budget.h"
+#include "../thread_priorities.h"
 
 #include <proto/exec.h>
 
@@ -100,6 +101,84 @@ static ULONG bsd_nx_eclock(VOID)
 }
 #endif
 
+#ifdef AMINETXDUO_GREEN_REALM
+
+/*
+ * The request gate, docs/THREADING-OPTIONS.md option 4's client boundary.
+ *
+ * In a green build the bracket does not adopt the calling Task; it MIGRATES
+ * the rest of the vector into the realm.  tx_amiga_gate_call() captures the
+ * caller's continuation (what a context switch saves IS the request), hands
+ * it to a cached green proxy thread, and parks the Task in one Wait() on the
+ * completion signal.  From that point to bsd_nx_leave() the vector body runs
+ * inside the realm: a NetX suspension is a stack switch among green threads
+ * instead of an Exec Signal/Wait round trip per wake, and the realm's idle
+ * Wait() stays the only place the stack sleeps.  bsd_nx_leave() completes
+ * the request -- one boundary Signal back -- and the vector's epilogue runs
+ * on the owner again.
+ *
+ * The region is migratable because the bracket discipline already demanded
+ * it: "Inside one, nothing must block on anything except ThreadX"
+ * (bsdsocket_internal.h).  The one piece of owner state a body consults is
+ * the break mask, and that goes through bsd_break_signals() below.
+ *
+ * Everything that cannot gate -- a foreign task, a bind that failed, the
+ * stack going down, a nested stack context -- falls back to the adopted
+ * baton bracket, which remains fully wired.  The fall-backs are counted
+ * (netstat "green:" gate line) so a run whose gate is quietly dead shows.
+ */
+static LONG bsd_gate_enter(struct AmiSocketBase *base)
+{
+    TX_AMIGA_GATE *gate = &base->sb_NxGate;
+
+    if (base->sb_NxGateDead)
+        return -1;
+
+    if (tx_amiga_kernel_running() != (UINT)TX_TRUE)
+        return -1;
+
+    /* A stack-side context (a green thread, the realm) arriving here is
+       already a ThreadX thread; the plain path answers it with a no-op. */
+    if (tx_amiga_caller_is_thread() != (UINT)TX_FALSE)
+        return -1;
+
+    if (gate->ag_Live == 0U)
+    {
+        if (tx_amiga_gate_bind(gate, (CHAR *)"aminetxduo proxy",
+                               AMI_CALLER_PRIORITY) != TX_SUCCESS)
+        {
+            /* Latched: a machine that cannot gate keeps the baton bracket
+               and does not retry an AllocMem per socket call. */
+            base->sb_NxGateDead = TRUE;
+            return -1;
+        }
+    }
+
+    if (tx_amiga_gate_call(gate, base->sb_BreakMask) != TX_SUCCESS)
+        return -1;
+
+    /* On the realm, as the proxy, from here to bsd_nx_leave(). */
+    return 0;
+}
+
+ULONG bsd_break_signals(struct AmiSocketBase *base)
+{
+    if (base->sb_NxGated)
+        return tx_amiga_gate_breaks(&base->sb_NxGate);
+
+    return SetSignal(0UL, 0UL);
+}
+
+BOOL bsd_nx_orphan(struct AmiSocketBase *base)
+{
+    return (tx_amiga_gate_orphan(&base->sb_NxGate) != (UINT)TX_FALSE)
+           ? TRUE : FALSE;
+}
+
+#endif /* AMINETXDUO_GREEN_REALM (baton builds inline both helpers in
+          bsdsocket_internal.h, so the host tier's per-file test builds link
+          without this file) */
+
 LONG bsd_nx_enter(struct AmiSocketBase *base)
 {
 #ifdef AMINETXDUO_NXCENSUS
@@ -117,6 +196,57 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 #endif
         return 0;
     }
+
+#ifdef AMINETXDUO_GREEN_REALM
+    {
+#ifdef AMINETXDUO_RXPROBE
+        ULONG gt0 = ami_budget_clock();
+#endif
+        /*
+         * The free-baton fast path first (cycle 3's verdict: mid-transfer
+         * the baton is takeable far more often than not, and the gate's
+         * unconditional submission was ~1 ms per bracket of pure cost
+         * there).  The try is take-or-back-out under one Forbid() in the
+         * port, so there is no window between "the realm is idle" and
+         * holding the baton; a decline touched nothing and the gate
+         * carries the call exactly as cycle 2 built it.  Either way the
+         * realm's one Wait() stays the only idle point: a fast take means
+         * the realm had nothing ready and it still wakes on its waiters'
+         * signals while we hold the baton; a gated call pokes it
+         * unconditionally from the parker.
+         */
+        LONG fast = ami_netstack_try_enter_cached(&base->sb_NxCaller);
+
+        if (fast == AMI_NET_OK)
+        {
+            /* The baton leg is the fast take, clocked like the old adopt
+               entry so control and green numbers stay comparable. */
+#ifdef AMINETXDUO_RXPROBE
+            ami_budget_baton(ami_budget_clock() - gt0);
+#endif
+            if (base->sb_NxCaller.nc_Adopted)
+                tx_amiga_gate_fast_note();
+            base->sb_NxGated = FALSE;
+            base->sb_NxNest  = 1;
+            return 0;
+        }
+
+        if (bsd_gate_enter(base) == 0)
+        {
+            /* The baton leg is the gate handoff: submission to the
+               proxy's first instruction, clocked across the migration. */
+#ifdef AMINETXDUO_RXPROBE
+            ami_budget_baton(ami_budget_clock() - gt0);
+#endif
+            base->sb_NxGated = TRUE;
+            base->sb_NxNest  = 1;
+            return 0;
+        }
+    }
+    if (tx_amiga_kernel_running() == (UINT)TX_TRUE &&
+        tx_amiga_caller_is_thread() == (UINT)TX_FALSE)
+        tx_amiga_gate_fallback_note();
+#endif
 
 #ifdef AMINETXDUO_NXCENSUS
     t0 = bsd_nx_eclock();
@@ -176,6 +306,19 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
     if (--base->sb_NxNest > 0)
         return;
 
+#ifdef AMINETXDUO_GREEN_REALM
+    if (base->sb_NxGated)
+    {
+        /* Cleared first: gated must imply "the body is on the realm", and
+           past this point it is not.  gate_return() completes the request
+           -- proxy suspended, one Signal to the owner -- and RETURNS ON THE
+           OWNER, which then runs the vector epilogue as itself. */
+        base->sb_NxGated = FALSE;
+        tx_amiga_gate_return(&base->sb_NxGate);
+        return;
+    }
+#endif
+
 #ifdef AMINETXDUO_NXCENSUS
     t0 = bsd_nx_eclock();
 #endif
@@ -214,6 +357,14 @@ VOID bsd_nx_release(struct AmiSocketBase *base)
 #endif
 
     base->sb_NxNest = 0;
+
+#ifdef AMINETXDUO_GREEN_REALM
+    /* The gate goes first: it holds a TX_THREAD of its own, and this runs on
+       the owning task with no bracket open, which is the one context where
+       the completion signal bit can be recovered. */
+    tx_amiga_gate_release(&base->sb_NxGate);
+    base->sb_NxGated = FALSE;
+#endif
 
     ami_netstack_release(&base->sb_NxCaller);
 }

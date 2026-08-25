@@ -15,7 +15,22 @@ add_library(threadx_port STATIC
     src/tx_thread_stack_build.c
     src/tx_thread_interrupt_control.c
     src/tx_timer_interrupt.c
-    src/tx_amiga_adopt.c)
+    src/tx_amiga_adopt.c
+    src/tx_amiga_green.c)
+
+# The green realm's m68k context switch.  The .S is #ifdef'd end to end on
+# AMINETXDUO_GREEN_REALM (a global compile definition when the option is ON),
+# and m68k-only, so it joins the target only on a cross build with the realm
+# selected.
+if(AMINETXDUO_GREEN_REALM AND CMAKE_CROSSCOMPILING)
+    target_sources(threadx_port PRIVATE src/tx_green_switch.S)
+    # The define must reach the .S through the preprocessor the same way the
+    # net68k assembly gets its own (src/net68k/CMakeLists.txt): a source
+    # property, so the file assembles identically whatever the global
+    # definition set happens to be.
+    set_source_files_properties(src/tx_green_switch.S PROPERTIES
+        COMPILE_DEFINITIONS AMINETXDUO_GREEN_REALM)
+endif()
 
 target_include_directories(threadx_port
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/inc"

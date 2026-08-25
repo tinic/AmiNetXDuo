@@ -463,6 +463,7 @@ VOID ami_sana2_rx_filled(APTR ios2_data, ULONG len, ULONG sum, UBYTE summed)
     if (slot->owner != NULL && slot->owner->iface != NULL)
     {
         slot->owner->iface->stats.rx_copy_hook++;
+        slot->owner->iface->stats.rx_direct_fill++;
         if (summed != 0)
             slot->owner->iface->stats.rx_copy_summed++;
     }

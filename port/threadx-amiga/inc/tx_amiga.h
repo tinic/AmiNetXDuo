@@ -360,6 +360,24 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
 
+#ifdef AMINETXDUO_GREEN_REALM
+/*
+ * The take-or-back-out form of tx_amiga_adopt_resume(), for the request
+ * gate's free-baton fast path: resume the cached thread ONLY if that takes
+ * the baton without a round trip (baton free, nothing ready that outranks),
+ * and otherwise undo the resume entirely -- both under one Forbid(), so the
+ * takeability check and the take are one atom and a decline leaves no trace.
+ * TX_SUCCESS took the baton; TX_NOT_DONE declined (submit through the gate);
+ * TX_CALLER_ERROR means what resume's does (fall back to a fresh adoption).
+ */
+UINT    tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr);
+
+/* Whether the baton looks immediately takeable.  A policy hint for the
+   first-ever adoption on a task (no cached thread to try-resume yet); it can
+   be stale by the time it is acted on, and both outcomes stay correct.  */
+UINT    tx_amiga_baton_free(VOID);
+#endif
+
 /*
  * Deregister a thread adopted by some other Task, the teardown path for a
  * cached adoption whose owner is gone or is not the one closing.  The Exec
@@ -434,6 +452,156 @@ typedef struct TX_AMIGA_SCHED_STATS_STRUCT
 VOID    tx_amiga_sched_stats(TX_AMIGA_SCHED_STATS *stats);
 
 #endif /* AMINETXDUO_SCHEDCOUNT */
+
+/* ------------------------------------------------------------------------ */
+/* The green realm (AMINETXDUO_GREEN_REALM)                                  */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Built with -DAMINETXDUO_GREEN_REALM=ON, every thread the stack creates is
+ * a coroutine inside the realm Task (real m68k stack switching) instead of
+ * an Exec Task of its own; docs/GREEN-REALM.md is the design and state
+ * document.  These entry points exist in every build so callers need no
+ * conditional code: in a baton build tx_amiga_green_active() is always
+ * FALSE, tx_amiga_green_wait() is a plain Wait(), and the stats read zero.
+ */
+
+/* TX_TRUE while the caller runs in a green context (on the realm Task with a
+   green thread holding the baton).  */
+UINT    tx_amiga_green_active(VOID);
+
+/*
+ * Sleep the calling green thread until one of sigmask's Exec signals is
+ * latched on the realm Task; returns the bits that arrived.  This is the
+ * green replacement for "release the baton, Wait(), reacquire": only the
+ * calling thread sleeps, the realm keeps running everything else.  From a
+ * non-green context it degrades to Wait(sigmask).  Must not be called
+ * holding a ThreadX mutex.
+ */
+ULONG   tx_amiga_green_wait(ULONG sigmask);
+
+typedef struct TX_AMIGA_GREEN_STATS_STRUCT
+{
+    ULONG   gs_switches;        /* green contexts entered (stack switches)   */
+    ULONG   gs_external;        /* baton handoffs to adopted Exec Tasks      */
+    ULONG   gs_idle_waits;      /* times the realm slept in its one Wait()   */
+    ULONG   gs_wait_fast;       /* green waits satisfied by a latched signal */
+    ULONG   gs_wait_slow;       /* green waits that suspended the thread     */
+    ULONG   gs_stray_wait;      /* Exec Wait()s caught arriving from green
+                                   context (probe builds; must stay zero)    */
+    ULONG   gs_gate_calls;      /* bracket calls carried through the gate    */
+    ULONG   gs_gate_fallback;   /* bracket calls the gate declined (adopted) */
+    ULONG   gs_realm_sigbits;   /* Exec signal bits allocated on the realm
+                                   Task, of the 16 allocatable: every green
+                                   thread's MsgPort and AllocSignal draws
+                                   from this one budget (the signal-bit
+                                   audit's live figure)                      */
+    ULONG   gs_gate_fast;       /* bracket calls that took a free baton
+                                   directly (the fast path) instead of
+                                   submitting through the gate; fast+gated
+                                   +fallback partitions the brackets, and
+                                   the fast share is what attributes the
+                                   physical baton-leg numbers               */
+} TX_AMIGA_GREEN_STATS;
+
+VOID    tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
+
+/* Count one intercepted Exec Wait() from green context (the probe build's
+   assert path in src/netstack/netstack_baton.c).  */
+VOID    tx_amiga_green_stray_wait_note(VOID);
+
+/* Count one gate decline (the caller fell back to the adopted-baton path;
+   the counter lives in the port so it sits beside the calls it divides).  */
+VOID    tx_amiga_gate_fallback_note(VOID);
+
+/* Count one free-baton fast-path take (the caller entered without the gate
+   because the realm was idle; same home as the other two for the same
+   reason).  */
+VOID    tx_amiga_gate_fast_note(VOID);
+
+/* ------------------------------------------------------------------------ */
+/* The request gate (AMINETXDUO_GREEN_REALM)                                 */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * The adopted-caller request gate, docs/THREADING-OPTIONS.md option 4's
+ * client boundary.  An application Task entering a bsdsocket vector no
+ * longer becomes a ThreadX thread itself: its continuation -- the rest of
+ * the vector body, captured at the bracket -- is handed to a cached GREEN
+ * proxy thread and executes inside the realm, where a NetX suspension is a
+ * stack switch instead of an Exec round trip.  The Task itself parks on a
+ * small side stack in one plain Wait() until the vector completes: request
+ * submission in, one boundary Signal back.
+ *
+ * The capture trick is that the request IS the continuation.  The vector
+ * body between bsd_nx_enter() and bsd_nx_leave() runs unchanged, on the
+ * caller's own stack memory, but under the realm Task's feet; the bracket
+ * discipline the tree already enforces ("nothing inside a bracket blocks on
+ * anything except ThreadX", include/aminetxduo/netstack.h) is exactly the
+ * property that makes the region migratable.  Anything the body must know
+ * about the parked owner's Exec state -- the Ctrl-C break bits -- is
+ * collected by the parked Task and read through tx_amiga_gate_breaks().
+ *
+ * One gate per owner Task, bound on first use, torn down by the owner
+ * (tx_amiga_gate_release) or by the heartbeat when the owner died
+ * (tx_amiga_gate_orphan).  Green builds only; the baton build never
+ * references these.
+ */
+typedef struct TX_AMIGA_GATE_STRUCT
+{
+    TX_THREAD        ag_Thread;     /* the green proxy: the caller's
+                                       captured continuation                 */
+    VOID            *ag_ResumeSP;   /* leave-side context, resumed by the
+                                       parked owner                          */
+    VOID            *ag_Side;       /* the parked owner's side stack         */
+    VOID            *ag_Task;       /* owner (struct Task *); only it calls  */
+    ULONG            ag_DoneMask;   /* completion signal, owner's bit        */
+    ULONG            ag_BreakMask;  /* watched while parked, per call        */
+    volatile ULONG   ag_Breaks;     /* break bits the parker collected       */
+    volatile UINT    ag_Done;       /* completion flag; the signal's truth   */
+    UINT             ag_Live;       /* the proxy exists                      */
+    UINT             ag_Active;     /* between gate_call and gate_return     */
+    volatile UINT    ag_OwnerDead;  /* heartbeat: owner exited uncleanly     */
+} TX_AMIGA_GATE;
+
+/* Bind the gate to the calling Task: allocate the side stack and the
+   completion signal, create the dormant green proxy.  TX_SUCCESS or why not
+   (TX_NO_MEMORY, TX_NOT_DONE with no kernel).  Owner's context only.  */
+UINT    tx_amiga_gate_bind(TX_AMIGA_GATE *gate, CHAR *name, UINT priority);
+
+/*
+ * Submit the caller's continuation.  On success the call RETURNS ON THE
+ * REALM, as the green proxy, and everything until tx_amiga_gate_return()
+ * runs there; the owning Task is parked collecting break bits.  On any
+ * refusal (foreign task, dead proxy, kernel down, proxy mid-teardown) it
+ * returns the error on the calling Task and nothing happened: fall back to
+ * the adopted-baton bracket.
+ */
+UINT    tx_amiga_gate_call(TX_AMIGA_GATE *gate, ULONG break_mask);
+
+/* Complete the request: suspend the proxy, post the boundary Signal, and
+   resume the parked owner at this exact point.  Returns on the OWNER.  */
+VOID    tx_amiga_gate_return(TX_AMIGA_GATE *gate);
+
+/* Break bits the parked owner has collected so far this call (observed, not
+   consumed; they are re-posted to the owner at gate_return).  The gated
+   replacement for SetSignal(0,0) & breakmask inside a bracket.  */
+ULONG   tx_amiga_gate_breaks(const TX_AMIGA_GATE *gate);
+
+/* Owner-context teardown (bsd_nx_release): destroy the dormant proxy, free
+   the side stack and the signal bit.  */
+VOID    tx_amiga_gate_release(TX_AMIGA_GATE *gate);
+
+/*
+ * Heartbeat teardown for a dead owner.  Marks the gate ownerless, and reaps
+ * the proxy when that is safe: dormant, or suspended mid-flight (the realm
+ * is not inside its context).  A proxy the realm is EXECUTING right now is
+ * only marked; gate_return() then completes without signalling the corpse
+ * and the next heartbeat reaps.  TX_TRUE once fully reaped, TX_FALSE while
+ * deferred -- the sweeper must call again next beat.  Safe at the tick
+ * task's interrupt level: no Wait(), no allocation.
+ */
+UINT    tx_amiga_gate_orphan(TX_AMIGA_GATE *gate);
 
 #ifdef __cplusplus
 }

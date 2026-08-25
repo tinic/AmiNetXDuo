@@ -158,6 +158,19 @@ VOID          ami_netstack_leave_free(AmiNetCaller *caller);
  */
 LONG ami_netstack_enter_cached(AmiNetCaller *caller);
 VOID ami_netstack_leave_cached(AmiNetCaller *caller);
+
+#ifdef AMINETXDUO_GREEN_REALM
+/*
+ * The bracket's free-baton fast path (green builds): enter ONLY if the baton
+ * is immediately takeable -- the realm idle, nothing ready that outranks a
+ * caller -- and decline otherwise, so the caller can submit through the
+ * request gate instead of parking.  AMI_NET_OK means the bracket is open
+ * exactly as ami_netstack_enter_cached() would have left it (leave with
+ * ami_netstack_leave_cached()); AMI_NET_ERR_BUSY means nothing happened and
+ * the caller must take another path.  Errors mean what enter_cached's do.
+ */
+LONG ami_netstack_try_enter_cached(AmiNetCaller *caller);
+#endif
 VOID ami_netstack_release(AmiNetCaller *caller);
 
 /*
