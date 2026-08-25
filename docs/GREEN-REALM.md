@@ -175,14 +175,68 @@ baton like the old adopt path when the realm is idle, submit only when
 the stack is contended -- the correctness architecture (one idle Wait)
 is unaffected by where the fast path lands.
 
+## THE PHYSICAL A/B (cycle 3, 2026-08-25) -- the verdict
+
+Artifact: green-realm @23defc0c, netxduo dd0d8e64, RXPROBE ON, LTO OFF,
+TS OFF, TX_LAZY_COLLECT ON, MDNS ON, GREEN_REALM ON -- bsdsocket.library
+404564 B + netstat 43520 B (build/cmgp on playhouse3).  Emulator gate of
+the EXACT artifact first: ifdhcp SLIRP PASS 22 s all-ok; three clean
+bridged poolshare runs 2.699/2.713/2.651 Mbit/s, lost=0, STRAY=0, ~1300
+gated brackets/run with 0 fallbacks, 5/16 realm bits.  Deployed under the
+hard rules (PUT + size-verify + staged ladder); **the green realm BOOTED
+FIRST TRY on the real A1200** (back in 22 s) and survived two boots, six
+transfers, and every census clean.
+
+Control = the settle/baton build (400580), 4 warm runs the same evening,
+same tool, same LAN; green 6 warm runs.  Per-run leg means by
+counter-weighted netstat deltas:
+
+| | control (4) | green (6) | delta |
+|---|---:|---:|---:|
+| rate, Mbit/s | 1.113/1.136/1.141/1.121 = **1.128** | 1.122/1.097/1.123/1.126/1.130/1.116 = **1.119** | **-0.8%** |
+| defer leg | 2469 us | 2704 us | +9.5% |
+| settle leg | 3371 us | 3569 us | +5.9% |
+| fetch leg | 6347 us | 8876 us | +40% |
+| baton leg (bracket entry) | 941 us | 1910 us | +103% |
+| ack leg (wall) | 13715 us | 11198 us | -18% |
+| post leg | 1495 us | 1117 us | -25% |
+| drain leg | ~609 us | ~591 us | flat |
+| sched handoffs/frame | 0.53 | **0.00** (7 boot-time total) | eliminated |
+| lost / STRAY / fallbacks | 0 / - / - | 0 / 0 / 0 | clean |
+
+The four pre-registered criteria: (a) defer did NOT shrink -- it grew
+9.5%; (b) handoffs per frame PASSED, 0.53 -> 0.00, the realm really does
+internalize every transition; (c) rate -0.8%, inside the +-2 noise band,
+nowhere near the +5 gate; (d) lost=0, STRAY=0, 0 fallbacks throughout.
+
+**VERDICT: NO-GO as built; the fallback is the finding.**  The hardware
+sided with the emulator, and for the emulator's stated reason: the
+unconditional gate submission costs ~1 ms at every bracket entry (baton
+941 -> 1910 us) and stretches fetch by ~2.5 ms (the recv caller now pays a
+submission round trip where the adopt fast path often took a free baton),
+which exactly cancels the real wins (ack wall -2.5 ms, post -0.4 ms,
+handoffs -> 0).  Mid-transfer the baton is takeable far more often than
+the 94%-busy model assumed.  The **free-baton fast path** (take a free
+baton like old adopt when the realm is idle, submit only under
+contention) is therefore the discriminating next item -- the correctness
+architecture (realm, one idle Wait, tick merge, census) is proven on
+Gayle hardware and keeps criterion (b)'s clean sweep.
+
+**Regression found and filed: the mDNS per-record yield bound does not
+hold inside the realm.**  Holds ring on hardware showed mDNS Thread
+passes of 100-536 ms again (site yield, states 0/7; +1..+26 over-50 ms
+per run) versus the fix's <=74 ms bound under baton.  Rates stayed
+healthy and lost=0 this session (ambient LAN only), but under a burst
+storm the old stall mode would be back: either _nx_mdns_yield's
+tx_thread_relinquish does not actually rotate the realm the way baton
+preemption did, or the hold instrument mis-spans green tenure.  Must be
+root-caused before any green build ships.
+
 ## Known-unfinished list (next cycle resumes here)
 
-1. **Physical A/B** (explicitly out of scope this cycle): non-LTO probe
-   build, artifact-size verified, recovery ladder staged; judge by the
-   budget legs (defer must SHRINK, not move), transitions/s, and rate over
-   >=4 warm runs per arm.  The soak/cards story is now days-equivalent on
-   the emulator; FREEZE-DIAGNOSTIC.md stays the checklist if the machine
-   wedges.
+0. **The free-baton fast path** (the cycle-3 verdict's next item), then
+   re-run the physical A/B.  And root-cause the mDNS yield-bound
+   regression above first -- it gates any green deployment.
 2. **Lossgate rung** once the peer has tc-cap (one setcap command, above).
 3. **Owner-death edges of the gate**: the heartbeat reap is built and
    exercised only by inspection; a targeted test (kill an opener mid-recv
