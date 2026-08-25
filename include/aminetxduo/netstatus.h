@@ -319,6 +319,10 @@ typedef struct NetStatusInterface
     /* Frames filled by the copy/direct hooks, and those summed in the fill. */
     ULONG   nsi_RxCopyHook;
     ULONG   nsi_RxCopySummed;
+    /* Of nsi_RxCopyHook, fills that came through the private direct-receive
+       pair: the device drained the wire straight into the packet.  The
+       summed counter cannot answer this -- both fill paths fuse a sum. */
+    ULONG   nsi_RxDirectFill;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */

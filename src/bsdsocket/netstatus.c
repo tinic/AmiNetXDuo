@@ -938,6 +938,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_RxErrIo          = stats.rx_err_io;
             out->nsi_RxCopyHook       = stats.rx_copy_hook;
             out->nsi_RxCopySummed     = stats.rx_copy_summed;
+            out->nsi_RxDirectFill     = stats.rx_direct_fill;
             out->nsi_AllocFailures    = stats.alloc_failures;
         }
 
