@@ -98,6 +98,259 @@ regardless.  The size cost is real but the campaign bought all its physical
 evidence on non-LTO images; shipping the untested-on-hardware shape to save
 KB inverts the burden of proof.
 
+### What was tested off-hardware, 2026-08-25
+
+The A1200 is out of reach this cycle, so this is what could be established
+without it.  It does not close (d).  It narrows what is left to ask the
+machine, and it names one real relocation-class LTO defect that is NOT in
+the shipped set.
+
+METHOD.  A fresh clone of main at ffed8d1d, built twice from one tree with
+one flag between them: `-DCMAKE_BUILD_TYPE=Release` against
+`cmake/toolchain-m68k-amigaos.cmake`, `AMINETXDUO_LTO` ON (the cross
+default) and OFF.  Every hunk image in both builds was then walked block by
+block with `tools/hunkdiff.py`, which this work adds; `lto-repro/run.sh` was
+run against the pinned toolchain; and the LTO library was cold-booted
+repeatedly under Amiberry.  08fe2a21 itself was checked out into a worktree
+and rebuilt with LTO, so the era that locked the machine was examined and
+not only its descendant.
+
+THE FOUR SHIPPED IMAGES ARE STRUCTURALLY SOUND UNDER LTO.  Same three
+hunks, same block sequence, same relocation form, nothing present in one
+image and absent in the other:
+
+    image                LTO bytes / hunks / relocs   non-LTO
+    bsdsocket.library      356,324 / 3 / 6,281        398,628 / 3 / 8,211
+    anxnet.device           32,572 / 3 /   407         35,312 / 3 /   597
+    tls.library            189,440 / 3 / 2,628        243,380 / 3 / 2,861
+    usergroup.library        7,172 / 3 /   208          7,684 / 3 /   259
+
+Both arms are CODE/RELOC32/END, DATA[/RELOC32]/END, BSS/END and nothing
+else: no HUNK_DEBUG, no HUNK_SYMBOL, no HUNK_DREL32 and no
+HUNK_RELOC32SHORT in either, no memory-attribute flags, no resident name
+list, no bytes past the last HUNK_END.  No loadable hunk carries
+relocations in one arm and none in the other.  The counts differ the way
+inlining makes them differ, not the way a dropped table does, and the
+parser was checked against BFD's own reader
+(`m68k-amigaos-objdump -r`), which agrees exactly on all eight images.
+
+RELOCATION COMPLETENESS WAS CHECKED PER SITE, not per image.  Every
+absolute-long operand in the disassembly was located in the raw instruction
+bytes and looked up in the relocation table: 5,206 sites in the LTO
+bsdsocket.library, 27 in anxnet.device, 5 in usergroup.library, ZERO
+unrelocated in each.  tls.library has two, at the same two addresses in
+both arms, and both are constant tables the disassembler read as code.
+
+THE ROMTAG CHAIN SURVIVES LTO IN ALL FOUR, followed in the image rather
+than trusted from `nm`: RTC_MATCHWORD found, and rt_MatchTag, rt_EndSkip,
+rt_Name, rt_IdString and rt_Init all carrying RELOC32; the RTF_AUTOINIT
+table's vector-table and init-function pointers relocated, its NULL
+structure pointer correctly not; and every entry of every LVO vector table
+relocated -- 150 in bsdsocket.library, 43 in usergroup.library, 14 in
+tls.library, 6 in anxnet.device.  The offset-0 entry guard and the `$VER:`
+string survive in both arms of both shipped binaries.  The
+`-Wl,-u,_<x>_romtag` each target carries is doing exactly the job its
+comment claims.
+
+08fe2a21 REBUILT WITH LTO LOOKS THE SAME: bsdsocket.library 354,108 / 3
+hunks / 6,049 relocations, anxnet.device 32,572 / 3 / 407, tls.library and
+usergroup.library identical to the main figures.  The instrumented shape of
+that era was checked too, since the reported artefact was around 354 KB and
+carried probes: 08fe2a21 with `-DAMINETXDUO_RXPROBE=ON` under LTO comes out
+355,428 / 3 hunks / 6,052 relocations, and the device is byte-identical to
+the clean arm.  Whatever locked that machine, the shipped images of that
+build are not missing their relocations.
+
+WHAT LTO DOES BREAK HERE, TODAY: TEN TEST IMAGES LOAD UNRELOCATED.  The
+sweep found them in the main LTO build and in the 08fe2a21 LTO build and in
+neither non-LTO build -- `tests/tls/{tls_handshake,tls_https,tls_interop,
+tls_decompose,tls_bench}` and all five `tests/crypto68k/` programs -- each
+at 10 or 12 loadable hunks and ZERO relocation entries, against 3 hunks and
+thousands in the non-LTO arm.  (`tests/atf/AtfTcpSocket` is an eleventh
+image of the same shape and is NOT an LTO effect: 12 hunks and 0
+relocations in both arms, so it has been unloadable all along and belongs
+in its own row.)  This is 9fb69360's failure exactly: LoadSeg relocates
+nothing, and the program jumps into low memory before its first line of
+output.  Confirmed in a guest, one flag apart, same source:
+
+    crypto68k_25519_test, LTO      10 hunks, 0 relocs -- TIMEOUT at 180 s,
+                                   "NOT ONE BYTE reached the serial port",
+                                   zero-byte stdout, no done file
+    crypto68k_25519_test, non-LTO   3 hunks, 518 relocs -- PASS, 16,636
+                                   checks, 0 failures, exit 0
+
+So Amiberry DOES reproduce this class.  It is not one of the things only
+hardware can see, which is part of why the shipped library is unlikely to
+have been carrying it.
+
+The mechanism is the LTRANS-late libcall that `src/common/CMakeLists.txt`
+already documents at length, arriving by a second route.  Under `-flto` the
+64-bit helpers are synthesised during LTRANS, after
+`libaminetxduo_m68k_rt.a` has been scanned, so
+`libgcc.a(_muldi3.o,_udivdi3.o,_umoddi3.o)` are pulled in instead -- and
+those three carry DWARF.  ld's amiga backend gives every `.debug_*` section
+its own LOADABLE data hunk, and an image that has one comes out with no
+HUNK_RELOC32 at all.  The non-LTO link of the same program pulls
+`ami_udivdi3.c.obj`, pulls no libgcc member, has zero `.debug` sections and
+loads correctly.
+
+One flag decides it, and the four shipped targets already pass it.  Same
+objects, same `-flto`, `--gc-sections` the only difference:
+
+    tls_handshake without --gc-sections   12 hunks,     0 relocations
+    tls_handshake with    --gc-sections    3 hunks, 5,399 relocations
+
+`src/tools/`, `tools/profiler/`, the three libraries and the device all
+link `--gc-sections`; `tests/` does not.  That is why the release set is
+clean and the test set is not -- by a property of a link line, checked by
+nothing.
+
+THE REDUCED REPRODUCER, EVERY ARM (`lto-repro/run.sh`, pinned toolchain,
+gcc 16.2.0b, ld 2.39):
+
+    arm=nolto_nogc    bytes=964 entry=ok  vertag=ok   romtag=ok   vectable=ok
+    arm=nolto_gc      bytes=964 entry=ok  vertag=ok   romtag=ok   vectable=ok
+    arm=lto_nogc      bytes=544 entry=ok  vertag=ok   romtag=ok   vectable=ok
+    arm=lto_gc        bytes=480 entry=BAD vertag=GONE romtag=ok   vectable=ok
+    arm=lto_gc_keep   bytes=436 entry=BAD vertag=GONE romtag=GONE vectable=GONE
+    arm=lto_nogc_keep bytes=952 entry=ok  vertag=ok   romtag=ok   vectable=ok
+    arm=exe_nolto     bytes=66000
+    arm=exe_lto       bytes=61552
+
+Read with the hunk walker rather than with `nm`, those arms say something
+sharper than they print.  `lto_nogc` has 72 bytes of code and no
+relocations and `lto_gc` has 32, against 324 bytes and 19 relocations
+non-LTO: the library was REMOVED, and `romtag=ok` on those lines is a FALSE
+NEGATIVE -- the names are still in HUNK_SYMBOL, pointing at an image that
+no longer contains them.  `nm` cannot answer this question; size and
+relocation count can, and run.sh would be worth teaching that.
+
+What the arms demonstrate is the trap CMakeLists.txt already describes,
+not a new one: none of them passes `-Wl,-u,_min_romtag`, nothing references
+a romtag, so the whole-program view deletes the chain and the link still
+exits 0.  `__attribute__((used))` alone holds it without `--gc-sections`
+(`lto_nogc_keep`, 952 bytes) and does NOT hold it with (`lto_gc_keep`,
+436).  Adding the keep the tree actually ships restores the image
+completely -- two arms run on top of run.sh's six:
+
+    arm=u_nogc lto=1 gc=0 keep_u=yes bytes=952 entry=ok vertag=ok  2 hunks, 18 relocs
+    arm=u_gc   lto=1 gc=1 keep_u=yes bytes=952 entry=ok vertag=ok  2 hunks, 18 relocs
+
+against non-LTO's 964 bytes, 2 hunks, 19 relocations.  The guarded LTO
+library and the non-LTO library are the same shape.
+
+EMULATED BOOT STRESS, playhouse3, own clone, own build directories, own
+`AMINETXDUO_RUN_TAG`s.  The rig's bridge was in use by another agent
+throughout, so the pcmcia arm ran on SLIRP rather than share a
+host-derived MAC with it, and every arm was matched by a non-LTO control
+run in the same sitting.  Sixteen cold boots of the LTO
+bsdsocket.library + anxnet.device, no boot-time hang in any of them:
+
+    a2065, SLIRP, run-ifdhcp x5     PASS, 35 ok, 0 fail, every boot;
+                                    non-LTO control PASS, 35 ok
+    a2065, bridged, run-ifdhcp x5   boots clean in 53 s, lease taken from
+                                    the LAN router, IPv6 SLAAC and DHCPv6
+                                    up, 122 frames in / 34 out, 0 errors,
+                                    0 buffer failures, RELEASE and
+                                    RELEASEADDRESS accepted.  The nine
+                                    assertion failures are run-ifdhcp's
+                                    SLIRP literals under a bridge, already
+                                    a backlog row, and not LTO's
+    ne2000_pcmcia, SLIRP, x5        boots clean in 17 s, 15 ok every time;
+                                    the DHCP half does not complete on this
+                                    board over SLIRP and the non-LTO
+                                    control fails IDENTICALLY, so that is
+                                    the board and the backend, not the flag
+
+And one bridged transfer to go with the boots: run-poolshare on the a2065,
+peer on a third machine, the LTO library carrying it -- 9,232,384 bytes in
+15 s, 4.92 Mbit/s, 2,254 packets, lost=0, out-of-order=0, zero_windows=2.
+That is the first arm's result after moving the guest off 192.168.1.240,
+which is contested on this LAN: on .240 the peer got RST then timeouts and
+the arm read "the guest never accepted" while the guest sat in `iperf -s`.
+Rig lore, not a stack fact -- .243 already cost this campaign two runs the
+same way, and .240 belongs beside it.
+
+VERDICT: BOUNDED, WITH ONE LIVE DEFECT NAMED.  Every structural check that
+can be made off-hardware passes on the LTO shipping images, at main and at
+08fe2a21 both; the emulator boots them repeatedly without a hang; and the
+one relocation-class defect LTO does introduce in this tree lands on test
+binaries that no deployment carries.  The 08fe2a21 lock-up is therefore NOT
+explained by a missing relocation table in the library or the device, and it
+is not reproduced here.  It stays an unexplained fact about one physical
+boot, and only the machine can settle it.
+
+Two things that are decisions rather than findings, and are left where they
+belong: whether `tests/` should link `--gc-sections` or the tree should
+gate on `tools/hunkdiff.py --check` (which fails exactly those eleven
+images -- the ten LTO ones and AtfTcpSocket -- and passes every other
+image in both builds); and (d) itself.
+
+### The physical test for (d), when the machine comes back
+
+One session, in this order.  Nothing here needs a second visit.
+
+1.  Build both arms from one tree, one flag apart, and keep both:
+
+        cmake -S . -B build/lto \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+              -DCMAKE_BUILD_TYPE=Release
+        cmake -S . -B build/nolto \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+              -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF
+        python3 tools/hunkdiff.py \
+              build/lto/src/bsdsocket/bsdsocket.library \
+              build/nolto/src/bsdsocket/bsdsocket.library
+        python3 tools/hunkdiff.py \
+              build/lto/src/netdev/anxnet.device \
+              build/nolto/src/netdev/anxnet.device
+
+    The differ must report no findings before anything is copied.  If it
+    reports any, stop: the answer is in the image and the machine is not
+    needed.
+
+2.  Park a known-good pair on DH0: FIRST, from the Shell, not from the
+    host: `copy LIBS:bsdsocket.library DH0:bsdsocket.library.known` and
+    `copy DEVS:Networks/anxnet.device DH0:anxnet.device.known`.  Recovery
+    depends on these existing before the LTO pair is installed.
+
+3.  Install the LTO pair -- `build/lto/src/bsdsocket/bsdsocket.library` to
+    `LIBS:`, `build/lto/src/netdev/anxnet.device` to `DEVS:Networks/` --
+    and reboot.  Nothing else changes: same startup-sequence, same C:
+    commands, same card, same everything the non-LTO ladder ran on.
+
+4.  Watch the BOOT, not the network.  Record which of these happens:
+
+    - the machine reaches the Shell and the stack comes up in the usual
+      ~35 s: LTO is not the lock, and step 6 is the confirmation;
+    - the machine stops with a Guru: WRITE THE NUMBER DOWN.  8000 0003 is
+      an address error and 8000 0004 an illegal instruction; either one
+      with a PC of $ffffffff or in low memory is the unrelocated-image
+      signature, which would mean step 1 missed it and the differ needs
+      that case added;
+    - the machine hangs with no Guru, screen up, drive quiet: that is the
+      reported symptom.  Note whether it hangs BEFORE or AFTER the
+      startup-sequence line that starts the stack -- before means the file
+      could not even be loaded, after means it ran.
+
+5.  Recovery, in increasing cost: reset; if it locks again, boot with both
+    mouse buttons held and pick the no-startup boot, then
+    `copy DH0:bsdsocket.library.known LIBS:bsdsocket.library` and
+    `copy DH0:anxnet.device.known DEVS:Networks/anxnet.device`; if the
+    machine will not boot at all, the CF card comes out and the pair is
+    replaced from a host.  The .known copies from step 2 are what make the
+    middle option work, which is why they are step 2.
+
+6.  If it boots: five more cold boots, power off between them, and on the
+    fifth run `netstat -s` and take a 10-second `iperf -s` receive from a
+    host on the LAN.  The original report was one boot; five clean ones and
+    a transfer is what turns "it ran" into evidence.  If any of the five
+    locks, the answer is "intermittent", which is a different and more
+    useful fact than "LTO is broken".
+
+7.  Either way the outcome belongs here and in the backlog row, with the
+    build that produced it named by commit.
+
 ## (e) GREEN_REALM stays OFF
 
 `-DAMINETXDUO_GREEN_REALM` (the option-4 green-thread port) is on main via
