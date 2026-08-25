@@ -21,7 +21,6 @@ comment beside the code, not an entry here.
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
 | `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them | `src/netdev/netdev_device.c:1269`, `:1291` |
 | The tick task's catch-up count crosses no wire | `tx_amiga_tick_catchups` reaches only a serial dump shipped builds compile out | `port/threadx-amiga/inc/tx_amiga.h:173` |
-| The EL3 `overruns` counter mixes TX underruns in | one number for a TX underrun at `:703` and an RX FIFO overrun at `:810` | `src/netdev/el3.c:703`, `:810` |
 | TARGET: X-Surf-100 reads 412 KB/s where AmiTCP_NG reads 906 | same machine, card and driver, never measured here; the A1200 half is answered | `src/netstack/netstack.c:451` |
 | Real X-Surf hardware trails other stacks where emulation says we lead | 699 against 1103 KB/s, worst arm -37%; ACK-clock starvation is the hypothesis | `src/netdev/netdev_cards.c` |
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |
@@ -30,7 +29,7 @@ comment beside the code, not an entry here.
 | The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
 | Shipping `-m68000` codegen was justified on a loopback measurement | on the wire at v0.21.3 `-m68020` reads 476 KB/s against 449, -5.5% | `cmake/toolchain-m68k-amigaos.cmake:261` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
-| A 3c589 holds its only receive buffer across the whole upstack cost | it discards after `nic->rx()` where NetBSD discards at the FIFO; a guess | `src/netdev/el3.c:715` |
+| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:1103` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:275` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |

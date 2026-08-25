@@ -728,7 +728,7 @@ VOID el3_drain_tx_status(NetdevNic *nic)
         if ((st & EL3_TXS_MAX_COLLISION) != 0)
             nic->collisions++;
         if ((st & EL3_TXS_UNDERRUN) != 0)
-            nic->overruns++;
+            nic->tx_underruns++;
 
         /* Any value pops it.  Zero is the value, so that nothing here reads
            as a bit written back into a register that has none. */
@@ -811,14 +811,20 @@ LONG el3_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 
 /* ------------------------------------------------------------- receive --- */
 
+/* The only thing that advances the FIFO past the frame's dword padding. */
+static VOID el3_discard(NetdevNic *nic)
+{
+    el3_cmd(nic, EL3_C_RX_DISCARD, 0);
+    (VOID)el3_wait_cmd(nic);
+}
+
 /*
  * One frame out of the receive FIFO, or nothing.
  *
- * Discard is issued for every frame, good or bad, and it is the only thing
- * that advances the FIFO past the dword padding, so the error paths below
- * fall through to it rather than returning.  A read past the pad is an
- * underrun and an adapter failure, which is why the read is rounded up to a
- * word and no further.
+ * Discard is issued for every frame, good or bad, and it is issued as soon as
+ * the last byte is off the FIFO: the head packet occupies receive memory until
+ * it is popped, and everything above this returns into a stack that may run
+ * for longer than the wire takes to deliver the next frame.
  */
 static BOOL el3_rint(NetdevNic *nic)
 {
@@ -880,21 +886,24 @@ static BOOL el3_rint(NetdevNic *nic)
                                                  nic->bus.asic,
                                              (ULONG)(len - NETDEV_HDR_LEN));
 
+                el3_discard(nic);
                 nic->rx_packets++;
                 nic->rx_claimed(nic->rx_arg, token, sum, 1);
+
+                return TRUE;
             }
-            else
-            {
-                netdev_bus_rdata(&nic->bus, buf + NETDEV_HDR_LEN,
-                                 (UWORD)(len - NETDEV_HDR_LEN));
-                nic->rx_packets++;
-                nic->rx(nic->rx_arg, buf, len);
-            }
+
+            netdev_bus_rdata(&nic->bus, buf + NETDEV_HDR_LEN,
+                             (UWORD)(len - NETDEV_HDR_LEN));
+            el3_discard(nic);
+            nic->rx_packets++;
+            nic->rx(nic->rx_arg, buf, len);
+
+            return TRUE;
         }
     }
 
-    el3_cmd(nic, EL3_C_RX_DISCARD, 0);
-    (VOID)el3_wait_cmd(nic);
+    el3_discard(nic);
 
     return TRUE;
 }

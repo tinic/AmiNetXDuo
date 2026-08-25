@@ -52,6 +52,30 @@ static int            mock_rxlen;
 static int            mock_rxpos;
 static int            mock_rxread;
 
+/*
+ * The wire, which does not stop for the stack above.  MOCK_FIFO is this
+ * model's receive memory and the head packet occupies it until RX_DISCARD
+ * pops it, so what fits behind it is what the driver has not yet let go.
+ */
+#define MOCK_WIRE_FRAME 1514
+static int            mock_wire_frames;
+static int            mock_wire_overruns;
+
+static void mock_wire_run(void)
+{
+    int used = (mock_rxlen + 3) & ~3;
+    int cost = (MOCK_WIRE_FRAME + 3) & ~3;
+    int i;
+
+    for (i = 0; i < mock_wire_frames; i++)
+    {
+        if (MOCK_FIFO - used < cost)
+            mock_wire_overruns++;
+        else
+            used += cost;
+    }
+}
+
 /* What the driver delivered upward. */
 static unsigned char  mock_rx_frame[2048];
 static int            mock_rx_len;
@@ -361,6 +385,8 @@ static void mock_reset_chip(int swapped)
     mock_rxlen  = 0;
     mock_rxpos  = 0;
     mock_rxread = 0;
+    mock_wire_frames   = 0;
+    mock_wire_overruns = 0;
     mock_rx_len = 0;
     mock_rx_calls = 0;
     memset(mock_direct_buf, 0, sizeof(mock_direct_buf));
@@ -394,6 +420,7 @@ static void mock_rx(APTR arg, const UBYTE *frame, UWORD len)
 {
     (void)arg;
     mock_rx_calls++;
+    mock_wire_run();
     mock_rx_len = (int)len;
     if (len <= sizeof(mock_rx_frame))
         memcpy(mock_rx_frame, frame, len);
@@ -418,6 +445,7 @@ static void mock_rx_claimed(APTR arg, APTR token, ULONG sum, UBYTE summed)
     expect_u32("direct completion token",
                (unsigned long)(token == (APTR)mock_direct_buf), 1);
     mock_claimed_calls++;
+    mock_wire_run();
     mock_claim_sum = sum;
     mock_claim_summed = summed;
 }
@@ -783,15 +811,19 @@ static void test_tx_status(void)
 
     /* An underrun counts, resets the transmitter and re-enables it. */
     odd[EL3_W1_TX_STATUS - 1] = (UBYTE)(EL3_TXS_COMPLETE | EL3_TXS_UNDERRUN);
-    nic.tx_errors = 0;
-    nic.overruns  = 0;
+    nic.tx_errors    = 0;
+    nic.overruns     = 0;
+    nic.tx_underruns = 0;
     {
         int resets  = mock_cmd_count[EL3_C_TX_RESET];
         int enables = mock_cmd_count[EL3_C_TX_ENABLE];
 
         el3_drain_tx_status(&nic);
         expect_u32("underrun counted", (unsigned long)nic.tx_errors, 1);
-        expect_u32("as an overrun too", (unsigned long)nic.overruns, 1);
+        expect_u32("as a transmit underrun",
+                   (unsigned long)nic.tx_underruns, 1);
+        expect_u32("and not as a receive overrun",
+                   (unsigned long)nic.overruns, 0);
         expect_u32("transmitter reset",
                    (unsigned long)mock_cmd_count[EL3_C_TX_RESET],
                    (unsigned long)(resets + 1));
@@ -1097,6 +1129,50 @@ static void test_reset_and_ops(void)
 }
 
 /* The CIS identity that picks this row out of the table. */
+/*
+ * How long the head packet is held.  Two 1514-byte frames arrive while the
+ * upstack call runs: they fit only if the head has already been discarded.
+ */
+static void test_receive_fifo_hold(void)
+{
+    UWORD i;
+
+    nic_reset(1);
+    (void)el3_attach(&nic);
+    memcpy(nic.mac, nic.factory, 6);
+    (void)el3_init(&nic);
+    netdev_mar_clear(nic.mar);
+
+    mock_rxlen = MOCK_WIRE_FRAME;
+    mock_rxpos = 0;
+    memcpy(mock_rxfifo, nic.factory, 6);
+    for (i = 6; i < (UWORD)mock_rxlen; i++)
+        mock_rxfifo[i] = (UBYTE)i;
+    mock_win[1][EL3_W1_RX_STATUS / 2] = (UWORD)mock_rxlen;
+    mock_wire_frames   = 2;
+    mock_wire_overruns = 0;
+
+    expect_u32("the staged frame is taken",
+               (unsigned long)el3_rint(&nic), 1);
+    expect_u32("the head was popped before the stack ran",
+               (unsigned long)mock_wire_overruns, 0);
+
+    /* The claimed path drains into the stack's own packet and must match. */
+    nic.rx_claim   = mock_rx_claim;
+    nic.rx_claimed = mock_rx_claimed;
+    mock_claim_accept = 1;
+    mock_rxlen = MOCK_WIRE_FRAME;
+    mock_rxpos = 0;
+    mock_win[1][EL3_W1_RX_STATUS / 2] = (UWORD)mock_rxlen;
+    mock_wire_frames   = 2;
+    mock_wire_overruns = 0;
+
+    expect_u32("the claimed frame is taken",
+               (unsigned long)el3_rint(&nic), 1);
+    expect_u32("and its head was popped first",
+               (unsigned long)mock_wire_overruns, 0);
+}
+
 static void test_card_selection(void)
 {
     const NetdevCard *c = netdev_card_by_cis(0x0101, 0x0589);
@@ -1132,6 +1208,7 @@ int main(void)
     test_receive_direct();
     test_interrupt();
     test_reset_and_ops();
+    test_receive_fifo_hold();
     test_card_selection();
 
     if (failures != 0)

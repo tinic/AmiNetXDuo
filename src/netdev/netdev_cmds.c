@@ -93,6 +93,7 @@ static BOOL cmd_dequeue(struct List *list, struct IOSana2Req *io)
 
 static const char netdev_stat_mode[]  = "Data transfer mode";
 static const char netdev_stat_ovw[]   = "Receive ring overruns";
+static const char netdev_stat_txur[]  = "Transmit FIFO underruns";
 static const char netdev_stat_rst[]   = "Chip resets";
 static const char netdev_stat_mc[]    = "Multicast addresses";
 static const char netdev_stat_mcful[] = "Multicast joins refused";
@@ -148,6 +149,7 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
      */
     STAT(netdev_stat_mode,  unit->nu_Nic.bus.dmode);
     STAT(netdev_stat_ovw,   unit->nu_Nic.overruns);
+    STAT(netdev_stat_txur,  unit->nu_Nic.tx_underruns);
     STAT(netdev_stat_rst,   unit->nu_Nic.resets);
     STAT(netdev_stat_mc,    mc);
     STAT(netdev_stat_mcful, unit->nu_McastFull);

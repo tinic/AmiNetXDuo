@@ -224,7 +224,8 @@ struct NetdevNic
     ULONG               tx_packets;
     ULONG               rx_errors;
     ULONG               tx_errors;
-    ULONG               overruns;
+    ULONG               overruns;       /* receive FIFO/ring only */
+    ULONG               tx_underruns;
     ULONG               collisions;
     ULONG               resets;
 
