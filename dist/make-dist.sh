@@ -167,6 +167,18 @@ cpu_of() {
     sed -n 's/^AMINETXDUO_CPU:STRING=//p' "$1/CMakeCache.txt" 2>/dev/null
 }
 
+lto_of() {
+    sed -n 's/^AMINETXDUO_LTO:BOOL=//p' "$1/CMakeCache.txt" 2>/dev/null
+}
+
+# The Release C flags, not a grep of the whole cache: the option's own help
+# text contains the string "-flto" whether it is ON or OFF, so a bare grep
+# says yes on a build that has none.
+flto_in() {
+    sed -n 's/^CMAKE_C_FLAGS_RELEASE:STRING=//p' "$1/CMakeCache.txt" 2>/dev/null \
+        | grep -q -- '-flto' && echo yes || echo no
+}
+
 # A missing build is built, not reported.  This script's job is to produce the
 # archive, and printing the two commands that would produce it and exiting 2 is
 # the same work with a person in the middle of it.  AMINETXDUO_DIST_NO_BUILD=1
@@ -218,6 +230,30 @@ for b in "${BUILDS[@]}"; do
         echo "==> building $b" >&2
         cmake --build "$b" --parallel >&2 || exit 2
     fi
+
+    # -flto IS MANDATORY IN EVERY SHIPPED DRAWER.  Not a default, not a
+    # recommendation, and not a decision this script or anything calling it may
+    # take: 0.25.3 was cut without it, the archive was larger and slower than
+    # the release before it, and it was pulled.  Both halves are checked --
+    # the option, and the flag actually reaching the Release flags -- because
+    # a cached value survives a reconfigure and the option alone has been
+    # true while the flag was absent.
+    lto=$(lto_of "$b")
+    [ "$lto" = "ON" ] || {
+        echo "!! $b was configured with AMINETXDUO_LTO=${lto:-unset}." >&2
+        echo "!! Every shipped drawer is built with -flto.  Reconfigure with" >&2
+        echo "!! -DAMINETXDUO_LTO=ON, in a fresh build directory: a cached" >&2
+        echo "!! OFF survives a reconfigure." >&2
+        exit 2
+    }
+    [ "$(flto_in "$b")" = "yes" ] || {
+        echo "!! $b has AMINETXDUO_LTO=ON but no -flto in its cache." >&2
+        echo "!! The option is set and the flag never reached the compiler," >&2
+        echo "!! which is the shape that ships a non-LTO archive while every" >&2
+        echo "!! check that reads the option says it is fine.  Configure it" >&2
+        echo "!! fresh." >&2
+        exit 2
+    }
 
     got=$(cpu_of "$b")
     [ "$got" = "any" ] || {

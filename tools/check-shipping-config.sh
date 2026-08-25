@@ -97,7 +97,7 @@ def ci_cross_configs():
 # workflow passes -b build/release, so the suffixes are the same.
 DRAWERS = [
     #  drawer      release.yml dir           ci.sh arm
-    ("full",      "build/release",          "nolto"),
+    ("full",      "build/release",          "default"),
     ("minimal",   "build/release-minimal",  "minimal"),
 ]
 

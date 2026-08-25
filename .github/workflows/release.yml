@@ -235,21 +235,11 @@ jobs:
       # AttnFlags at init.  The directory names are what make-dist.sh derives
       # from -b, so they are not free-form.
       #
-      # NON-LTO, and deliberately not the cross default.  docs/SHIP-DECISIONS.md
-      # (d): a clean LTO Release boot-locked the physical A1200 at 08fe2a21 and
-      # a non-LTO build of the same tree ran, the lock-up has never been
-      # reproduced or named, and every physical hour this project has spent was
-      # on non-LTO images.  The off-hardware sweep narrowed it -- the shipped
-      # images are structurally sound under LTO -- but narrowing is not
-      # closing, and shipping the shape that has never been booted on the
-      # hardware to save kilobytes inverts the burden of proof.  Take this off
-      # when the physical test in SHIP-DECISIONS (d) has been run, and not
-      # before.
       - name: Build the shipping configuration
         run: |
           cmake -S . -B build/release \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF
+                -DCMAKE_BUILD_TYPE=Release
           cmake --build build/release --parallel
 
           # The second drawer: everything optional compiled out, for somebody
@@ -264,7 +254,7 @@ jobs:
           # which on the 1 MB machine this drawer exists for is the point.
           cmake -S . -B build/release-minimal \
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
-                -DCMAKE_BUILD_TYPE=Release -DAMINETXDUO_LTO=OFF \
+                -DCMAKE_BUILD_TYPE=Release \
                 -DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF \
                 -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF \
                 -DAMINETXDUO_MULTICAST=OFF \
