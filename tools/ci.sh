@@ -1690,6 +1690,18 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    rc=0
+    "$ROOT/tests/tools/run-checkconfig.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  every wrong file in the drawer is named, and the right\
+ one is left alone" ;;
+        2) skip "checkconfig: the rig refused it before the guest booted" ;;
+        *) fail "checkconfig: a configuration that is wrong in a way only the\
+ machine can see was not reported, or a correct file was -- the assertion\
+ list above says which"
+           bad=$((bad + 1)) ;;
+    esac
+
     # HERE, and not in `cards` or `bridged`, because it needs neither a card
     # nor a link: the whole exchange is on the guest's own loopback, so a ROM
     # is the entire ingredient list, which is exactly what this stage asks for.
