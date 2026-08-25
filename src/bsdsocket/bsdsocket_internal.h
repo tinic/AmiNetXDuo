@@ -949,6 +949,7 @@ VOID  bsd_nx_release(struct AmiSocketBase *base);
  */
 #if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
 ULONG ami_green_checked_wait(ULONG sigmask);
+#undef Wait                     /* the NDK's inline macro, replaced whole */
 #define Wait(sigmask) ami_green_checked_wait(sigmask)
 #endif
 

@@ -283,6 +283,37 @@ VOID _tx_amiga_thread_completed(VOID);
  */
 VOID _tx_amiga_timer_clock_advance(ULONG ticks);
 
+/*
+ * The shared tick service (tx_initialize_low_level.c): everything one tick
+ * wakeup does, E-Clock-based and idempotent, callable from the tick task
+ * (every build) and from the realm's scheduler loop (green builds, once
+ * tr_realm says the VERTB server targets the realm).  Runs under its own
+ * Forbid(); a caller already holding one nests.
+ */
+VOID _tx_amiga_tick_deliver(UINT from_realm);
+
+/* Its state, one instance in tx_initialize_low_level.c.  The scheduler loop
+   reads tr_realm (under Forbid()) to know whether tick servicing is its
+   job; everything else is the service's own.  */
+struct _tx_amiga_tick_run
+{
+    ULONG   tr_eclock_hz;
+    ULONG   tr_eclock_per_ms;
+    ULONG   tr_eclock_per_tick;
+    ULONG   tr_eclock_rem;
+    ULONG   tr_frac;
+    ULONG   tr_backlog;
+    ULONG   tr_last_lo;
+    ULONG   tr_up_lo;
+    ULONG   tr_up_rem;
+    ULONG   tr_last_service;
+    ULONG   tr_worst_delta;
+    UINT    tr_live;            /* parameters valid; service may run        */
+    UINT    tr_realm;           /* green: the realm is the wakeup target    */
+};
+
+extern struct _tx_amiga_tick_run    _tx_amiga_tick_run;
+
 
 /* Port globals defined in tx_initialize_low_level.c.  */
 extern volatile UINT    _tx_amiga_kernel_up;

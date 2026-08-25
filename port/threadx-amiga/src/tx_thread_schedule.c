@@ -87,6 +87,19 @@ ULONG        mask;
     for (;;)
     {
 
+        /* The tick merge: once the VERTB server targets the realm
+           (tr_realm, set by the tick task after source validation), tick
+           servicing happens here, in passing, at every scheduler pass --
+           on the wake the server's Signal caused, and between green
+           dispatches.  The service is E-Clock-based and delivers exactly
+           the periods that elapsed, so passing by often costs a ReadEClock
+           and nothing else.  The per-frame Exec switch to the tick Task is
+           what this replaces.  */
+        if (_tx_amiga_tick_run.tr_realm != ((UINT) TX_FALSE))
+        {
+            _tx_amiga_tick_deliver((UINT) TX_TRUE);
+        }
+
         /* Deliver Exec signals to green waiters: whatever the last Wait()
            returned, plus anything that latched while green threads ran.
            Consume ONLY registered waiters' bits -- an unregistered thread's
