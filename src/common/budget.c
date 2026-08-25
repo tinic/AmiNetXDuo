@@ -11,7 +11,31 @@
  *   settle   ami_budget_deliver() to ami_budget_notify(): the frame left the
  *            SANA-II reader for the IP thread, and the socket's receive
  *            notify fired for it.  IP-thread queueing, TCP processing and
- *            the socket handoff, in one number.
+ *            the socket handoff, in one number -- and dissected into three
+ *            chained sub-legs below, because on the physical machine this
+ *            number is the largest still-anonymous block:
+ *
+ *   defer    deliver to ami_budget_pickup(): the packet sat on the deferred
+ *            receive queue, the IP thread woke, took the baton and dequeued
+ *            it.  Witnessed from nx_ip_packet_filter, which on this port
+ *            _nx_ip_packet_receive() consults before any protocol work
+ *            (src/netstack/netstack.c installs the probe's filter), so the
+ *            filter firing IS the pickup.  Pure scheduling wait, no
+ *            arithmetic of ours.
+ *   demux    pickup to ami_budget_socket_enter(): IPv4 header validation,
+ *            the trim, the TCP length and checksum checks, and the socket
+ *            lookup -- everything between the IP thread holding the packet
+ *            and _nx_tcp_socket_packet_process() taking over.  The one call
+ *            inside the NetX Duo fork witnesses that boundary.
+ *   state    socket entry to the notify: the TCP state machine itself, the
+ *            ACK checking, the in-sequence queueing, ending where settle
+ *            ends.  The ACK the segment provokes is sent after the notify
+ *            and is the TX legs' to account, not this one's.
+ *
+ *            The three ride between the same two stamps as settle, so their
+ *            sum is settle whenever all four boundaries saw the same frame;
+ *            a chain broken by a burst or a drop loses its samples to the
+ *            ceiling, never fabricates one.
  *   fetch    ami_budget_notify() to ami_budget_fetch(): the notify to the
  *            application's recv() returning with data.  The wakeup chain and
  *            recv's own dequeue.
@@ -96,6 +120,55 @@ VOID ami_budget_baton(ULONG dt)
 VOID ami_budget_deliver(ULONG now)
 {
     ami_budget.deliver_at = now;
+
+    /* A fresh chain: a pickup or socket stamp still armed belongs to a frame
+       that never notified (out-of-order queueing, a drop, a foreign socket).
+       Clearing them here keeps a stale boundary from pairing with this
+       frame's; the sample it would have made is discarded, per the module
+       rule above. */
+    ami_budget.pickup_at = 0UL;
+    ami_budget.socket_at = 0UL;
+}
+
+/*
+ * The IP thread holds the packet: close the defer sub-leg, open demux.  Only
+ * a chain deliver armed is continued -- the filter this is called from sees
+ * every inbound IP packet, and a bare ACK or a foreign protocol must not
+ * inherit a data segment's stamp.  deliver_at is read, not consumed: the
+ * whole settle pair still closes at the notify.
+ */
+VOID ami_budget_pickup(ULONG now)
+{
+    ULONG opened = ami_budget.deliver_at;
+
+    if (opened == 0UL)
+        return;
+
+    ami_budget_leg(&ami_budget.defer, now - opened);
+    ami_budget.pickup_at = now;
+}
+
+/*
+ * The segment reached its socket: close demux, open state.  Called from the
+ * one probe hook inside the NetX Duo fork (nx_tcp_socket_packet_process.c),
+ * which is why this one reads the clock itself rather than taking it -- the
+ * fork's call site stays a single argumentless line.
+ */
+VOID ami_budget_socket_enter(VOID)
+{
+    ULONG opened = ami_budget.pickup_at;
+    ULONG now;
+
+    if (opened == 0UL)
+        return;
+
+    now = ami_budget_clock();
+    if (now == 0UL)
+        return;
+
+    ami_budget.pickup_at = 0UL;
+    ami_budget_leg(&ami_budget.demux, now - opened);
+    ami_budget.socket_at = now;
 }
 
 VOID ami_budget_notify(ULONG now)
@@ -106,6 +179,14 @@ VOID ami_budget_notify(ULONG now)
     {
         ami_budget.deliver_at = 0UL;
         ami_budget_leg(&ami_budget.settle, now - opened);
+    }
+
+    /* The state sub-leg ends where settle ends. */
+    opened = ami_budget.socket_at;
+    if (opened != 0UL)
+    {
+        ami_budget.socket_at = 0UL;
+        ami_budget_leg(&ami_budget.state, now - opened);
     }
 
     ami_budget.notify_at = now;

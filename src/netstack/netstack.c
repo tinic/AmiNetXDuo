@@ -27,6 +27,7 @@
    by the _Static_asserts beside netstack_interface_dhcp_raw_state(). */
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/events.h"
+#include "aminetxduo/budget.h"
 
 #include "tx_amiga.h"
 
@@ -853,6 +854,42 @@ static BOOL ami_ns_drop_iface(AmiNetStack *ns, UWORD slot)
     return TRUE;
 }
 
+#ifdef AMINETXDUO_RXPROBE
+/*
+ * The receive budget's pickup boundary.  _nx_ip_packet_receive() consults
+ * nx_ip_packet_filter before any protocol work, and on this port every
+ * inbound packet arrives through the deferred receive queue, so the filter
+ * firing IS the IP thread picking the packet up: the defer sub-leg closes
+ * here and demux opens (src/common/budget.c tells the whole chain).  The
+ * gate is the same one the deliver stamp uses (src/sana2/sana2_rx.c): an
+ * IPv4 TCP segment carrying more than a bare header, so the pair stays on
+ * one frame; the length-sanity clause is dropped only because a filter sees
+ * the header, not the packet.
+ *
+ * The plain filter slot is otherwise free: src/bsdsocket/oob.c borrows it
+ * around a single OOB send and restores whatever it found, so the probe
+ * merely misses that send's window, and src/netstack/netstack_capture.c
+ * lives in the extended slot, a different pointer entirely.
+ */
+static UINT ami_ns_budget_filter(VOID *ip_header_ptr, UINT direction)
+{
+    const UBYTE *ip4 = (const UBYTE *)ip_header_ptr;
+
+    if (direction == NX_IP_PACKET_IN && ip4 != NULL &&
+        (ip4[0] >> 4) == 4U && ip4[9] == 6U)
+    {
+        UINT  ihl   = (UINT)((ip4[0] & 0x0FU) << 2);
+        ULONG total = ((ULONG)ip4[2] << 8) | ip4[3];
+
+        if (ihl >= 20U && total > (ULONG)ihl + 20UL)
+            ami_budget_pickup(ami_budget_clock());
+    }
+
+    /* Anything else drops the packet (nx_ip_packet_receive.c). */
+    return NX_SUCCESS;
+}
+#endif /* AMINETXDUO_RXPROBE */
+
 static LONG ami_ns_create_ip(AmiNetStack *ns)
 {
     const AmiIfConfig *cfg0 = &ns->ns_Config.interfaces[0];
@@ -905,6 +942,12 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
         return AMI_NET_ERR_KERNEL;
     }
     ns->ns_IpCreated = TRUE;
+
+#ifdef AMINETXDUO_RXPROBE
+    /* The pickup boundary of the receive budget, on from the first packet;
+       the function above says why this slot and why the gate. */
+    ns->ns_Ip.nx_ip_packet_filter = ami_ns_budget_filter;
+#endif
 
     AMI_INFO("netstack: waiting for NX_IP initialisation");
     status = nx_ip_status_check(&ns->ns_Ip, NX_IP_INITIALIZE_DONE, &actual,

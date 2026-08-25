@@ -70,9 +70,18 @@ typedef struct AmiBudget
 {
     ULONG           deliver_at;     /* armed by deliver, taken by notify   */
     ULONG           notify_at;      /* armed by notify, taken by fetch     */
+    ULONG           pickup_at;      /* armed by pickup, taken by socket    */
+    ULONG           socket_at;      /* armed by socket, taken by notify    */
     AmiBudgetLeg    drain;          /* reader: reply dequeued -> delivered */
     AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
+    /* The settle leg told in parts: three chained sub-legs whose stamps
+       ride between the same deliver and the same notify, so their sum is
+       settle whenever the chain stays on one frame.  src/common/budget.c
+       says where each boundary is witnessed. */
+    AmiBudgetLeg    defer;          /* deliver -> the IP thread picks it up */
+    AmiBudgetLeg    demux;          /* pickup -> the segment's own socket  */
+    AmiBudgetLeg    state;          /* socket entry -> receive notify      */
     AmiBudgetLeg    fetch;          /* receive notify -> recv() returns    */
     AmiBudgetLeg    ack;            /* CMD_WRITE BeginIO -> reply reaped   */
     AmiBudgetLeg    reap;           /* tx_send: the TX completion reap walk */
@@ -107,6 +116,8 @@ ULONG ami_budget_clock(VOID);
 VOID ami_budget_drain(ULONG dt);
 VOID ami_budget_baton(ULONG dt);
 VOID ami_budget_deliver(ULONG now);
+VOID ami_budget_pickup(ULONG now);
+VOID ami_budget_socket_enter(VOID);
 VOID ami_budget_notify(ULONG now);
 VOID ami_budget_fetch(ULONG now);
 VOID ami_budget_ack(ULONG dt);
@@ -129,6 +140,8 @@ VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site)
 #define ami_budget_drain(dt)     ((VOID)0)
 #define ami_budget_baton(dt)     ((VOID)0)
 #define ami_budget_deliver(now)  ((VOID)0)
+#define ami_budget_pickup(now)   ((VOID)0)
+#define ami_budget_socket_enter() ((VOID)0)
 #define ami_budget_notify(now)   ((VOID)0)
 #define ami_budget_fetch(now)    ((VOID)0)
 #define ami_budget_ack(dt)       ((VOID)0)

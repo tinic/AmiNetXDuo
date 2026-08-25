@@ -1095,6 +1095,13 @@ typedef struct NetStatusRxBudget
     ULONG               nrb_HoldMax;    /* E-Clock ticks                     */
     ULONG               nrb_HoldThreshold;
     NetStatusHold       nrb_Hold[NETSTATUS_HOLD_RING];
+    /* The settle leg dissected: three chained sub-legs between the same two
+       stamps, so their sum is nrb_Settle told in parts.  Appended here, not
+       beside nrb_Settle, so every earlier offset holds and an older tool
+       still reads what it knows.  src/common/budget.c owns the definitions. */
+    NetStatusBudgetLeg  nrb_Defer;      /* deliver -> IP thread pickup       */
+    NetStatusBudgetLeg  nrb_Demux;      /* pickup -> the segment's socket    */
+    NetStatusBudgetLeg  nrb_State;      /* socket entry -> receive notify    */
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

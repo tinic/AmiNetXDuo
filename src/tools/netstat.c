@@ -359,6 +359,13 @@ static VOID show_budget(VOID)
                     b->nrb_EClockRate);
     show_budget_leg("settle, IP thread to notify ", &b->nrb_Settle,
                     b->nrb_EClockRate);
+    /* The settle leg in parts; the three should sum to it. */
+    show_budget_leg("defer,  deliver to pickup   ", &b->nrb_Defer,
+                    b->nrb_EClockRate);
+    show_budget_leg("demux,  pickup to TCP socket", &b->nrb_Demux,
+                    b->nrb_EClockRate);
+    show_budget_leg("state,  socket to notify    ", &b->nrb_State,
+                    b->nrb_EClockRate);
     show_budget_leg("fetch,  notify to recv()    ", &b->nrb_Fetch,
                     b->nrb_EClockRate);
     show_budget_leg("ack,    write to reply      ", &b->nrb_Ack,

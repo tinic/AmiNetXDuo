@@ -1535,6 +1535,15 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Settle.nbl_Count = ami_budget.settle.count;
             out->nrb_Settle.nbl_Sum   = ami_budget.settle.sum;
             out->nrb_Settle.nbl_Max   = ami_budget.settle.max;
+            out->nrb_Defer.nbl_Count  = ami_budget.defer.count;
+            out->nrb_Defer.nbl_Sum    = ami_budget.defer.sum;
+            out->nrb_Defer.nbl_Max    = ami_budget.defer.max;
+            out->nrb_Demux.nbl_Count  = ami_budget.demux.count;
+            out->nrb_Demux.nbl_Sum    = ami_budget.demux.sum;
+            out->nrb_Demux.nbl_Max    = ami_budget.demux.max;
+            out->nrb_State.nbl_Count  = ami_budget.state.count;
+            out->nrb_State.nbl_Sum    = ami_budget.state.sum;
+            out->nrb_State.nbl_Max    = ami_budget.state.max;
             out->nrb_Fetch.nbl_Count  = ami_budget.fetch.count;
             out->nrb_Fetch.nbl_Sum    = ami_budget.fetch.sum;
             out->nrb_Fetch.nbl_Max    = ami_budget.fetch.max;
@@ -1583,6 +1592,9 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                     out->nrb_Drain.nbl_Hist[i]  = ami_budget.drain.hist[i];
                     out->nrb_Baton.nbl_Hist[i]  = ami_budget.baton.hist[i];
                     out->nrb_Settle.nbl_Hist[i] = ami_budget.settle.hist[i];
+                    out->nrb_Defer.nbl_Hist[i]  = ami_budget.defer.hist[i];
+                    out->nrb_Demux.nbl_Hist[i]  = ami_budget.demux.hist[i];
+                    out->nrb_State.nbl_Hist[i]  = ami_budget.state.hist[i];
                     out->nrb_Fetch.nbl_Hist[i]  = ami_budget.fetch.hist[i];
                     out->nrb_Ack.nbl_Hist[i]    = ami_budget.ack.hist[i];
                     out->nrb_Reap.nbl_Hist[i]   = ami_budget.reap.hist[i];
