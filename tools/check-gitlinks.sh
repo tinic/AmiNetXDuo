@@ -33,7 +33,9 @@
 #
 #   NOT ON THE TRACKED BRANCH.  A pin belongs on the first-parent chain of the
 #   branch .gitmodules names, or on a tag.  Merges and tags do not move; a
-#   topic tip does, and is deleted the moment it lands.
+#   topic tip does, and is deleted the moment it lands.  Asked only of a
+#   submodule with history to answer with: a shallow checkout has one commit
+#   and no tags, and cannot tell a good pin from a bad one either way.
 #
 #   THE BUMP WENT BACKWARDS.  1d8b8a15 moved netxduo from merge 396dc632 back
 #   to tip 7206b214, which is not a descendant of it, so that commit's tree
@@ -133,7 +135,9 @@ for name in $names; do
         continue
     fi
 
-    if [ "$(git --git-dir="$gitdir" rev-parse --is-shallow-repository)" = "false" ] &&
+    shallow="$(git --git-dir="$gitdir" rev-parse --is-shallow-repository)"
+
+    if [ "$shallow" = "false" ] &&
        ! grep -qx "$oid" "$(reachable_file "$gitdir")"; then
         use="$(known_bad_use "$path" "$oid")"
         echo "gitlink_$path=UNREACHABLE recorded=$oid${use:+ use=$use}"
@@ -155,6 +159,22 @@ for name in $names; do
         echo "gitlink_$path=ok pin=tag:$tag oid=$oid"
     elif [ -z "$ref" ]; then
         echo "gitlink_$path=ok pin=no_tracking_ref oid=$oid"
+    elif [ "$shallow" = "true" ]; then
+        # A SHALLOW SUBMODULE HAS NO CHAIN TO BE ON.  actions/checkout takes
+        # every submodule with `--depth=1 --no-tags`, which leaves one commit
+        # of history and no tag objects at all: `rev-list --first-parent
+        # origin/<branch>` then answers with the branch tip alone, and any pin
+        # that is not the tip -- which is every pin the moment upstream moves
+        # on -- reads as a topic tip that was never on the branch.  It failed
+        # exactly that way from the day this gate landed: third_party/dropbear
+        # is DROPBEAR_2026.94, one commit behind mkj/dropbear's main and
+        # carrying the tag that would have answered the question, and every
+        # job in every workflow died on it before compiling a line.
+        #
+        # The history is not there to be checked, so this says so rather than
+        # convicting on it.  A full clone -- a developer's, and the sweep
+        # below -- still does the real check.
+        echo "gitlink_$path=ok pin=shallow_unchecked oid=$oid"
     elif git --git-dir="$gitdir" rev-list --first-parent "$ref" | grep -qx "$oid"; then
         echo "gitlink_$path=ok pin=${ref#refs/remotes/} oid=$oid"
     else
