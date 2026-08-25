@@ -167,6 +167,7 @@ tests/netstack/run-winuae.sh       : manual : windows. netstack bring-up under W
 tests/perf/run-fitzbench.sh        : manual : bench, bridged. bulk throughput on a link with latency
 tests/perf/run-stackprof.sh        : manual : bench, bridged. the same transfer against another stack
 tests/perf/run-reqresp.sh          : manual : bench, bridged. request and response latency on a link that loses packets, which is the flight fast retransmit cannot reach
+tests/perf/run-poolshare.sh        : manual : bench, bridged. the receive-budget capture rig: one bulk receive per pool-share arm with the RXPROBE library, ending in the guest's own netstat -s so the budget legs land in the log. What every event-budget lever was measured with
 tests/perf/run-ackscope.sh         : manual : peer, bridged. acknowledgement and window behaviour of one machine, read out of a capture taken at the OTHER end of the connection: retransmissions and duplicate-ACK run lengths per direction, zero windows and how long each stayed shut, advertisements below one MSS, the ACK delay distribution, and bytes in flight against the window advertised at that instant. Nothing runs on the target, which is named by address or mDNS name and resolved every run, so the same command reads an emulated guest and the real A1200. Exits 3 when the target did not answer, which is neither a pass nor a fail
 tests/endurance/run-endurance.sh   : manual : bench. hours of synthetic socket traffic
 tests/endurance/run-fitz.sh        : manual : bench. hours of Fitz traffic
