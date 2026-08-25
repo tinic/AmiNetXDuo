@@ -207,6 +207,25 @@ int     bit;
 #endif
 }
 
+static u64 ami_umul32_wide(u32 a, u32 b);
+
+/* Not __builtin_clz: on a -m68000 unit that lowers to __clzsi2, a libgcc
+   member tools/check-rt-helpers.sh fails an image for taking. */
+static u32 ami_clz32(u32 value)
+{
+
+u32     n = 0;
+
+
+    if ((value & 0xFFFF0000UL) == 0) { n += 16; value <<= 16; }
+    if ((value & 0xFF000000UL) == 0) { n += 8;  value <<= 8;  }
+    if ((value & 0xF0000000UL) == 0) { n += 4;  value <<= 4;  }
+    if ((value & 0xC0000000UL) == 0) { n += 2;  value <<= 2;  }
+    if ((value & 0x80000000UL) == 0) { n += 1; }
+
+    return(n);
+}
+
 u64 __udivmoddi4(u64 numerator, u64 denominator, u64 *remainder);
 u64 __udivdi3(u64 numerator, u64 denominator);
 u64 __umoddi3(u64 numerator, u64 denominator);
@@ -273,34 +292,81 @@ u32     rem;
     }
 
     /*
-     * Divisor is >= 2^32, so the quotient is < 2^32.  Shift-subtract over the
-     * 32 candidate bits.  nx_crypto reaches this only when the trial divisor
-     * exceeds a word, which is rare, so a Knuth algorithm D implementation is
-     * not warranted.
+     * Divisor >= 2^32: normalise, one 64/32 estimate off the top words, one
+     * correction.  The 64-iteration bit loop this replaced cost 847 us against
+     * libgcc's 131 on an A1200 (tests/perf/rtdiv.c, udivdi3_wide).
      */
+    if (d_hi > n_hi)
     {
-        u64 rem64 = 0;
-        u32 quotient = 0;
-        int bit;
-
-        for (bit = 63; bit >= 0; bit--)
+        if (remainder != 0)
         {
-            rem64 = (rem64 << 1) | ((numerator >> bit) & 1ULL);
-            if (rem64 >= denominator)
+            *remainder = numerator;
+        }
+        return((u64)0);
+    }
+
+    {
+    u32     bm = ami_clz32(d_hi);
+    u32     n_2;
+    u32     m_hi;
+    u32     m_lo;
+    u64     m;
+    u32     b;
+
+
+        if (bm == 0)
+        {
+            /* d_hi's top bit is set and d_hi <= n_hi, so the quotient is 0 or
+               1 and the estimate below would need a divisor it cannot have. */
+            if (n_hi > d_hi || n_lo >= d_lo)
             {
-                rem64 -= denominator;
-                if (bit < 32)
-                {
-                    quotient |= (1UL << bit);
-                }
+                q_lo = 1;
+                m_hi = n_hi - d_hi - (n_lo < d_lo);
+                n_lo = n_lo - d_lo;
+                n_hi = m_hi;
             }
+            else
+            {
+                q_lo = 0;
+            }
+
+            if (remainder != 0)
+            {
+                *remainder = ((u64)n_hi << 32) | (u64)n_lo;
+            }
+            return((u64)q_lo);
+        }
+
+        b    = 32UL - bm;
+        d_hi = (d_hi << bm) | (d_lo >> b);
+        d_lo = d_lo << bm;
+        n_2  = n_hi >> b;
+        n_hi = (n_hi << bm) | (n_lo >> b);
+        n_lo = n_lo << bm;
+
+        /* n_2 < d_hi holds by construction, which is what the 64/32 form
+           needs. */
+        q_lo = ami_divu64_32(n_2, n_hi, d_hi, &n_hi);
+
+        m    = ami_umul32_wide(q_lo, d_lo);
+        m_hi = (u32)(m >> 32);
+        m_lo = (u32)m;
+
+        if (m_hi > n_hi || (m_hi == n_hi && m_lo > n_lo))
+        {
+            q_lo--;
+            m_hi = m_hi - d_hi - (m_lo < d_lo);
+            m_lo = m_lo - d_lo;
         }
 
         if (remainder != 0)
         {
-            *remainder = rem64;
+            n_hi = n_hi - m_hi - (n_lo < m_lo);
+            n_lo = n_lo - m_lo;
+            *remainder = ((u64)(n_hi >> bm) << 32) |
+                         (u64)((n_hi << b) | (n_lo >> bm));
         }
-        return((u64)quotient);
+        return((u64)q_lo);
     }
 }
 

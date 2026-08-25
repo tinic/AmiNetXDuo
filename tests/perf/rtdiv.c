@@ -10,8 +10,9 @@
  * NARROW AND WIDE ARE SEPARATE NUMBERS.  Every 64-bit divide this tree
  * actually performs -- nx_crypto's limbs, newlib's %llu, the E-Clock
  * conversions -- has a divisor that fits in 32 bits, and ami_udivdi3.c is
- * written for that case.  Its 64-bit-divisor branch is a bit loop and is not,
- * so an average over both would say nothing about either.
+ * written for that case.  The 64-bit-divisor branch is separate code and
+ * separately normalised, so an average over both would say nothing about
+ * either.
  *
  * The operands are carried between iterations so nothing can be folded, and
  * the accumulator is printed so nothing can be dropped.
@@ -31,7 +32,7 @@
 typedef unsigned long long u64;
 
 #define RTDIV_ITERS     100000UL
-#define RTDIV_WIDE      2000UL
+#define RTDIV_WIDE      20000UL
 #define RTDIV_STEP      0x9e3779b97f4a7c15ULL
 #define RTDIV_SEED      0x0123456789abcdefULL
 
@@ -74,6 +75,21 @@ static u64 rt_div_wide(ULONG iters)
     for (i = 0; i < iters; i++)
     {
         acc += n / ((u64)(i | 1UL) << 33);
+        n   += RTDIV_STEP;
+    }
+
+    return acc;
+}
+
+static u64 rt_mod_wide(ULONG iters)
+{
+    u64   acc = 0ULL;
+    u64   n   = RTDIV_SEED;
+    ULONG i;
+
+    for (i = 0; i < iters; i++)
+    {
+        acc += n % ((u64)(i | 1UL) << 33);
         n   += RTDIV_STEP;
     }
 
@@ -133,6 +149,10 @@ int main(int argc, char **argv)
     t0  = ami_millis();
     acc = rt_div_wide(RTDIV_WIDE);
     rt_report("udivdi3_wide", RTDIV_WIDE, ami_millis() - t0, acc);
+
+    t0  = ami_millis();
+    acc = rt_mod_wide(RTDIV_WIDE);
+    rt_report("umoddi3_wide", RTDIV_WIDE, ami_millis() - t0, acc);
 
     return RETURN_OK;
 }
