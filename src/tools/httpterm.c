@@ -463,6 +463,12 @@ static BOOL term_packet_current(const struct DosPacket *pkt)
     if (term_break_port != NULL)
         return (pkt->dp_Port == term_break_port) ? TRUE : FALSE;
 
+    /* Nothing has named this session's owner yet, so this packet is the first
+       of it and names it.  ACTION_CHANGE_SIGNAL still overrides, which is what
+       corrects it if an abandoned Shell got a packet in first. */
+    if (term_shell_task == NULL)
+        term_shell_task = pkt->dp_Port->mp_SigTask;
+
     return (term_shell_task != NULL &&
             pkt->dp_Port->mp_SigTask == term_shell_task) ? TRUE : FALSE;
 }

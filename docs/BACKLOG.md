@@ -8,7 +8,7 @@ comment beside the code, not an entry here.
 | The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
-| The first `SetMode()` or `WaitForChar()` of a console session is refused | `term_shell_task` is set after the switch that gates them | `src/tools/httpterm.c:463`, `:1439` |
+| A process the Shell spawned cannot `SetMode()`, `WaitForChar()` or `Open("*")` | its own `pr_MsgPort` is neither the break port nor the Shell's task | `src/tools/httpterm.c:458` |
 | `CheckNetConfig`'s IPv4 router and DNS checks are dead by default | all four sit behind `any_dynamic()`, TRUE on the default `ip6type` | `src/tools/checknetconfig.c:248`, `src/config/config_parse.c:619` |
 | A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1983` |
 | An RSA-PSS-signed certificate cannot be verified | no `id-RSASSA-PSS` OID and no PSS row in the type set, so the link fails closed | `src/tls/ami_tls_crypto.c:1551` |

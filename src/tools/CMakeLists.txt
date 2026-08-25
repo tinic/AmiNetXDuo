@@ -712,6 +712,18 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_refusals PRIVATE -Wall -Wextra)
     set_target_properties(test_refusals PROPERTIES C_STANDARD 11)
 
+    # Which packet of a console session may be answered, and the order the
+    # source has to be in for the first one to be.  Same technique: httpterm.c
+    # is DOS packets and a spawned Process and compiles nowhere but the target.
+    add_executable(test_httpterm
+        test/test_httpterm.c)
+
+    target_compile_definitions(test_httpterm PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+    target_compile_options(test_httpterm PRIVATE -Wall -Wextra)
+    set_target_properties(test_httpterm PROPERTIES C_STANDARD 11)
+
     add_executable(test_httplock
         test/test_httplock.c
         httplock.c
@@ -846,4 +858,5 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)
     add_test(NAME tools_arg_docs      COMMAND test_argtemplates docs)
     add_test(NAME tools_refusals      COMMAND test_refusals)
+    add_test(NAME httpterm_gate       COMMAND test_httpterm)
 endif()
