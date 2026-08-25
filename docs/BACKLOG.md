@@ -82,8 +82,16 @@ comment beside the code, not an entry here.
 | The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:789` |
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
+<<<<<<< HEAD
 | Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:403` |
 | `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:257` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
 | Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:322` |
 | Five files still carry over-long comment blocks | round 2 proved and landed 412 of 417; these five were still being edited at the deadline | `src/common/crashguard.c`, `src/netdev/test/` |
+=======
+| Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:403` |
+| `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
+| No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
+| A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:356` |
+>>>>>>> 4b912fa3 (backlog: a KB/s row cannot say the rig was quiet)
+| A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:356` |
