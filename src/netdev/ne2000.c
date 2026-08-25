@@ -66,6 +66,7 @@
 #include "netdev_nic.h"
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
+#include "netdev_clock.h"
 #include "netdev_macgen.h"
 #include "dp8390reg.h"
 #include "ne2000reg.h"
@@ -94,15 +95,28 @@ extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
  * There is no timer open when a unit is probed, and a device cannot call
  * Delay().  A read of a register the chip always answers is a real Zorro bus
  * cycle, 280 ns at the fastest a Zorro II board can be and slower on
- * everything else, so a count is a lower bound on the microseconds.  Only the
- * reset path waits, and the chip is ready long before the wait ends.
+ * everything else, so a count is a lower bound on the microseconds -- when the
+ * loop is bus-bound.  Put a 50 MHz CPU in the machine and it is not: the loop
+ * overhead falls away, the count runs out early and the reset pulse that the
+ * DS8390 wants milliseconds of gets microseconds.  So the milliseconds are
+ * measured against the beam and the count is kept as the floor.  See
+ * netdev_clock.h.
+ *
+ * The one-microsecond arm is untouched by that, and deliberately: it is the
+ * remote-DMA completion poll's pacing, four bus cycles between two reads of
+ * ISR, on the interrupt path.  A bus cycle does not get faster because the CPU
+ * did, so four of them are still four of them, and netdev_wait_begin() leaves
+ * anything under NETDEV_WAIT_MIN_US as the plain count it always was.
  */
 static VOID ne_delay(NetdevNic *nic, ULONG us)
 {
-    ULONG n = us * 4u;
+    NetdevWait w;
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, us, us * 4u);
+
+    do
         (VOID)NIC_GET(nic, ED_P0_CR);
+    while (!netdev_wait_done(&w));
 }
 
 static int ne_memcmp(const UBYTE *a, const UBYTE *b, UWORD n)

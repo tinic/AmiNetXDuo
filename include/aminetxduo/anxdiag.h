@@ -166,6 +166,14 @@ extern "C" {
 #define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
                                        there is no fallback row either        */
 #define ANXDIAG_PC_RESET       68   /* CardResetCard() at claim, 1 = pulsed   */
+#define ANXDIAG_CLOCK          69   /* iterations of a bare spin per raster
+                                       line, measured against the beam once at
+                                       claim; 0 = no readable beam, so every
+                                       wait in the driver is a counted loop
+                                       again.  Tens on a 14 MHz 68020, tens of
+                                       thousands behind an accelerator, and
+                                       that ratio is why a counted delay is
+                                       not a delay -- see netdev_clock.h      */
 
 /* --- the ISA Plug and Play bridge, netdev_isapnp.c --------------------- */
 #define ANXDIAG_PNP_VENDOR     60   /* isolation serial identifier bytes 0..3,

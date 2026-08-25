@@ -478,6 +478,22 @@ static VOID cnd_step(const AnxDiagStep *st)
             "  interrupt.\n",
             v, v & 0x3fUL);
         return;
+    case ANXDIAG_CLOCK:
+        if (v == 0)
+        {
+            say("  No raster beam could be read on this machine, so the\n"
+                "  driver's waits are counted loops rather than measured\n"
+                "  time.  On anything faster than a stock CPU they will be\n"
+                "  shorter than they are meant to be.\n");
+            return;
+        }
+        say("  The delay clock measured %lu spin(s) per raster line.  A line\n"
+            "  is about 64 us, so this CPU goes round a bare loop roughly\n"
+            "  %lu time(s) in a microsecond.  Every wait in this driver is\n"
+            "  timed against the beam and not against that number, which is\n"
+            "  the whole point: a counted loop is a measure of the CPU.\n",
+            v, (v + 63UL) / 64UL);
+        return;
     case ANXDIAG_PC_SETTLE:
         if (v == 0)
         {

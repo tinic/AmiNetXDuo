@@ -55,6 +55,7 @@
 #include "netdev_nic.h"
 #include "n68k_iocopy.h"
 #include "netdev_cards.h"
+#include "netdev_clock.h"
 #include "netdev_mcaf.h"
 #include "netdev_macgen.h"
 
@@ -211,25 +212,44 @@ static BOOL el3_wait_cmd(NetdevNic *nic)
  * away.
  */
 /*
- * Task level only, and the count is not arbitrary.
+ * Task level only.
  *
  * A scalar register access to a PCMCIA card costs about 8.3 us on a 14 MHz
  * 68020, against 0.5 us for a word through a data port, and netdev_nic.h
  * prices both.  The reset wants a millisecond.  2048 reads is 17 ms at that
  * price, and still a millisecond at the fastest access this bus can manage,
- * which brackets the requirement without a clock this driver does not open.
+ * which is how this bracketed the requirement without a clock -- on the
+ * machine the price was taken from.  Behind an accelerator neither figure
+ * holds: the loop is CPU-bound, not bus-bound, and 2048 iterations can be
+ * nothing at all.
+ *
+ * So the wait is now 20 ms of measured time, with the 2048 reads kept as the
+ * floor.  20 ms rather than el3reg.h's EL3_RESET_US, which is the millisecond
+ * the manual asks for: 20 ms is what the reference machine has actually been
+ * running -- 17 ms by the arithmetic above -- and this is a part whose
+ * post-reset settling has cost this driver two separate bugs already (see
+ * el3_eeprom_ready() below).  Giving a faster machine less than the machine
+ * this driver was debugged on would be exactly the mistake being fixed here.
+ * Nothing about it is on a fast path: it runs once per attach and once per
+ * slot probe.
  *
  * Nothing at interrupt level can call this.  el3_init() runs from the
  * vertical-blank watchdog under Disable(), so it uses the receive and transmit
  * resets instead.  Their busy bit is visible, so their wait is as short as the
  * chip needs rather than as long as the worst case.
  */
+#define EL3_RESET_WAIT_US   (20u * EL3_RESET_US)
+#define EL3_RESET_SPINS     2048u
+
 static VOID el3_reset_wait(volatile UWORD *cmd)
 {
-    UWORD n = 2048;
+    NetdevWait w;
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, EL3_RESET_WAIT_US, EL3_RESET_SPINS);
+
+    do
         (VOID)EL3_RAW_GET(cmd);
+    while (!netdev_wait_done(&w));
 }
 
 BOOL el3_answers(const NetdevCard *card)
@@ -326,6 +346,11 @@ static BOOL el3_eeprom_stable(NetdevNic *nic, UBYTE word, UWORD *out)
  * have settled and the address words can be believed.  The spin between
  * attempts is the pc_settle() shape: attribute-memory reads, each a real
  * Gayle cycle, because there is no timer at attach time.
+ *
+ * The 2 ms between attempts is measured against the beam now rather than
+ * counted off in reads, for netdev_clock.h's reason: on an accelerated machine
+ * the count is not two milliseconds, and eight rounds of not-waiting is a
+ * settling loop that does not settle.  The read count stays as the floor.
  */
 static BOOL el3_eeprom_ready(NetdevNic *nic)
 {
@@ -341,10 +366,13 @@ static BOOL el3_eeprom_ready(NetdevNic *nic)
 
         {
             volatile UBYTE *attr = (volatile UBYTE *)0x00a00000UL;
-            ULONG           n    = 2000UL * 4UL;   /* ~2 ms */
+            NetdevWait      w;
 
-            while (n-- != 0)
+            netdev_wait_begin(&w, 2000UL, 2000UL * 4UL);   /* 2 ms */
+
+            do
                 (VOID)EL3_SETTLE_READ(attr);
+            while (!netdev_wait_done(&w));
         }
     }
 

@@ -21,6 +21,7 @@ set(NETDEV_SOURCES
     netdev_watchdog.c   # progress clock for a full transmit ring
     netdev_mcast.c      # exact multicast membership and range transactions
     netdev_bus.c        # register stride and the data port
+    netdev_clock.c      # a wait measured against the beam, not counted in reads
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
     netdev_isapnp.c     # the X-Surf's chip, which is behind an ISA PnP bridge
@@ -218,10 +219,15 @@ if(NOT CMAKE_CROSSCOMPILING)
     # buffer -- which is why el3.c is #included whole and its raw word access
     # is redirected.  netdev_cards.c is linked for the CIS-to-row selection
     # and netdev_mcaf.c for the multicast hash the part has no hardware for.
+    # netdev_clock.c is linked rather than stubbed: on a host it compiles to
+    # "there is no beam here", every wait falls back to the caller's own
+    # iteration count, and the test drives exactly the loops it drove before
+    # the clock existed.  A stub would be a second answer to that question.
     add_executable(test_netdev_el3
         test/test_netdev_el3.c
         netdev_bus.c
         netdev_cards.c
+        netdev_clock.c
         netdev_mcaf.c
         netdev_macgen.c
         "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
@@ -347,6 +353,25 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_watchdog PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_watchdog COMMAND test_netdev_watchdog)
+
+    # The delay that is measured rather than counted.  NETDEV_CLOCK_TEST swaps
+    # the chip read for a beam this test drives, which is the only way to run
+    # one binary as a 14 MHz 68020 and as an accelerator and compare what the
+    # wait did.  An emulator cannot answer it: every emulator this project
+    # runs against emulates a fast machine, so a green run there is consistent
+    # with the bug and with the fix alike.
+    add_executable(test_netdev_clock
+        test/test_netdev_clock.c
+        netdev_clock.c)
+
+    target_include_directories(test_netdev_clock PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_definitions(test_netdev_clock PRIVATE NETDEV_CLOCK_TEST=1)
+    target_compile_options(test_netdev_clock PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_clock COMMAND test_netdev_clock)
 endif()
 
 # Raw-serial tracing through the custom chips, for bring-up on an emulator

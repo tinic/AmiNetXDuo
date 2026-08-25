@@ -36,6 +36,7 @@
 
 #include "netdev_internal.h"
 #include "netdev_cards.h"
+#include "netdev_clock.h"
 #include "netdev_macgen.h"
 #include "el3.h"        /* el3_answers(), and no EtherLink III register */
 
@@ -273,18 +274,33 @@ static BOOL pc_chip_answers(const NetdevCard *card)
  * the COR inside the store, so the wait costs nothing there.
  *
  * There is no timer at romtag-init time and a device cannot Delay(), so the
- * wait is a spin on attribute-memory reads.  Each is a real Gayle cycle at the
- * socket's default speed, 250 ns at the fastest, so the count is a lower bound
- * on the microseconds.  Attribute memory is the CIS and is safe to read
- * whatever is in the slot.
+ * wait is a spin on attribute-memory reads.  Attribute memory is the CIS and
+ * is safe to read whatever is in the slot, and each read is a real Gayle cycle
+ * that paces the socket -- which is why the read stays in the loop body.
+ *
+ * WHAT IT NO LONGER IS.  The count used to be the duration: `us * 4`, four
+ * reads to the microsecond, on the assumption that a Gayle cycle costs 250 ns
+ * and that the CPU driving it is the 14 MHz 68020 this driver was written on.
+ * Put an accelerator in the machine and the same loop finishes sooner by
+ * whatever factor that machine is faster by, and the longest wait here is the
+ * 300 ms a PC Card's reset hold is documented to need.  A hold shorter than
+ * the documented minimum is out of specification whatever it happens to do,
+ * which is reason enough; netdev_clock.h has the argument and is equally
+ * honest that no accelerated machine has been measured doing it.
+ *
+ * The count is kept, as the floor rather than the duration, so that no machine
+ * gets a shorter wait than it did before.
  */
 static VOID pc_settle(ULONG us)
 {
     volatile UBYTE *attr = (volatile UBYTE *)0x00a00000UL;
-    ULONG           n    = us * 4u;
+    NetdevWait      w;
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, us, us * 4u);
+
+    do
         (VOID)*attr;
+    while (!netdev_wait_done(&w));
 }
 
 /* 20 rounds of 2 ms, which is Linux's 40 ms for the same wait. */
@@ -879,8 +895,23 @@ APTR netdev_pcmcia_claim(NetdevDevice *dev, const NetdevCard **card_out)
      * written -- the card comes out of it unconfigured, which is exactly
      * what the code below expects to find.
      */
+    /*
+     * And the hold is a measured 300 ms now, not 1,200,000 attribute reads.
+     * The reads are still what the loop does -- they pace the socket -- but
+     * the beam decides when to stop, so the hold is 300 ms on a 14 MHz 68020
+     * and 300 ms behind an accelerator.  Only the first of those was ever true
+     * of a counted loop, and CardReset's README is blunt about the stake:
+     * "PC Cards require the reset time 100 or 200 mS."  See netdev_clock.h,
+     * including its note that no accelerated machine has been measured here.
+     *
+     * The measurement is published before it is used, so that CheckNetDevice
+     * on a machine that fails here says how fast the CPU under this driver
+     * is, which is the number that names the class of failure.
+     */
     {
         volatile UBYTE *gayle_intreq = (volatile UBYTE *)0x00DA9000UL;
+
+        netdev_diag_note(ANXDIAG_CLOCK, ci, netdev_clock_spins_per_line());
 
         *gayle_intreq = 0xFF;            /* reset start */
         pc_settle(300000);               /* the hold the cards require */

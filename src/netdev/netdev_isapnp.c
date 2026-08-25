@@ -59,6 +59,7 @@
  */
 
 #include "netdev_cards.h"
+#include "netdev_clock.h"
 #include "netdev_nic.h"
 
 #include <exec/types.h>
@@ -132,9 +133,12 @@ static const UBYTE pnp_init_key[32] =
 /*
  * There is no timer open at probe time and a device cannot Delay(), so a wait
  * is a spin on a real bus cycle -- the arrangement ne2000.c and
- * netdev_pcmcia.c already use, for the same reason.  A Zorro II read is 280 ns
- * at the fastest a board can be, so four per microsecond is a lower bound on
- * the time.
+ * netdev_pcmcia.c already use, for the same reason, and it is measured against
+ * the beam here for the same reason as well: four reads per microsecond is a
+ * statement about a 14 MHz 68020 and not about time.  The ISA Plug and Play
+ * isolation protocol has real minimum delays between its writes, and a machine
+ * that runs them in a tenth of the time reads back a card that has not
+ * answered yet.  See netdev_clock.h.  The count stays as the floor.
  *
  * The address read is the register file's own base.  Before activation nothing
  * decodes there and the read is a float.  After it, the read is the command
@@ -144,10 +148,13 @@ static const UBYTE pnp_init_key[32] =
 static VOID pnp_delay(const NetdevCard *card, volatile UBYTE *board, ULONG us)
 {
     volatile UBYTE *p = board + card->reg_off;
-    ULONG           n = us * 4u;
+    NetdevWait      w;
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, us, us * 4u);
+
+    do
         (VOID)*p;
+    while (!netdev_wait_done(&w));
 }
 
 /*
