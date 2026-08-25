@@ -213,6 +213,18 @@ static char fb_why[200];
 
 static FbGeometry fb_open_geom;
 
+/*
+ * TRUE when -C started on a machine that had no screen open at all.
+ *
+ * Not a failure and not an error: it is what `httpd <drawer> -C` out of
+ * S:User-Startup meets every time, because Intuition's screen list is empty
+ * until something opens one and LoadWB is at the END of the Startup-Sequence.
+ * The server comes up serving anyway and http_fb_start() reads the front
+ * screen again per session, so the console starts working by itself the moment
+ * Workbench arrives.  httpd.c asks so that the banner can say so once.
+ */
+static BOOL fb_open_screenless;
+
 /* ------------------------------------------------------------ the session -- */
 
 static BOOL            fb_live;
@@ -1038,6 +1050,11 @@ VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth)
     if (w != NULL)     *w = fb_open_geom.width;
     if (h != NULL)     *h = fb_open_geom.height;
     if (depth != NULL) *depth = fb_open_geom.depth;
+}
+
+BOOL http_fb_screenless(VOID)
+{
+    return fb_open_screenless;
 }
 
 /* ---------------------------------------------------------------- palette -- */
@@ -2597,6 +2614,7 @@ BOOL http_fb_open(VOID)
     BOOL           ok;
 
     fb_why[0] = '\0';
+    fb_open_screenless = FALSE;
 
     if (!fb_open_libraries())
     {
@@ -2604,14 +2622,48 @@ BOOL http_fb_open(VOID)
         return FALSE;
     }
 
+    /*
+     * NO SCREEN IS NOT NO, IT IS NOT YET.
+     *
+     * This look at the front screen is a preflight, and its unstated
+     * assumption was that whatever is in front when the server starts is the
+     * kind of thing that will be in front later.  Out of S:User-Startup that
+     * assumption is simply false: Intuition's screen list is empty until
+     * something opens a screen, and LoadWB is at the end of the
+     * Startup-Sequence -- so `httpd <drawer> -C` at boot refused to start at
+     * all, took the whole server down with it, and the machine that most wants
+     * a remote console is exactly the one that has not got a screen yet.
+     * Measured under Amiberry with no Workbench: rc 10, "there are no screens",
+     * while the same command with -T in the same boot served fine.
+     *
+     * So it comes up serving and remembers that it did.  Nothing is papered
+     * over, because nothing here is broken: http_fb_start() reads the front
+     * screen again for every session and refuses THAT with a reason of its own
+     * when there is still nothing to serve, which is what a browser asking too
+     * early should get.  The console starts working by itself the moment
+     * Workbench opens, with nobody restarting anything.
+     *
+     * What stays fatal is the machine that can never serve one: graphics and
+     * intuition below V39, above.  That is a property of the machine.  An
+     * empty screen list is a property of the minute.
+     */
     sc = fb_lock_front(&pub);
     if (sc == NULL)
     {
-        fb_say("there are no screens: Intuition's screen list is empty.  -C "
-               "serves the frontmost screen, so a machine with no screen "
-               "open has nothing to serve");
-        fb_close_libraries();
-        return FALSE;
+        fb_open_screenless = TRUE;
+        fb_open_geom.width  = 0;
+        fb_open_geom.height = 0;
+        fb_open_geom.depth  = 0;
+
+        if (!fb_input_open())
+        {
+            fb_input_close();
+            fb_close_libraries();
+            return FALSE;
+        }
+
+        fb_on = TRUE;
+        return TRUE;
     }
 
     if (!pub)

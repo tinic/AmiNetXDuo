@@ -1578,6 +1578,21 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    # HERE, and not in `cards` or `bridged`, because it needs neither a card
+    # nor a link: the whole exchange is on the guest's own loopback, so a ROM
+    # is the entire ingredient list, which is exactly what this stage asks for.
+    rc=0
+    "$ROOT/tests/tools/run-bootconsole.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  httpd -C comes up and serves where S:User-Startup runs\
+ it, with no Workbench and no screen" ;;
+        2) skip "bootconsole: the rig refused it before the guest booted" ;;
+        *) fail "bootconsole: httpd -C does not survive a boot with no screen\
+ open -- either it refused to start at all, or it started and did not serve,\
+ or it stopped naming the screen once there was one"
+           bad=$((bad + 1)) ;;
+    esac
+
     return "$bad"
 }
 

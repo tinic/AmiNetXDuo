@@ -83,7 +83,10 @@
 /* -C.  Opens graphics, intuition and layers at V39 and looks at the front
    screen once, so that a machine which cannot serve one refuses to start
    rather than answering 503 to the first person who asks.  FALSE having
-   filled http_fb_fault(). */
+   filled http_fb_fault().
+
+   A machine with NO screen open is not that machine and does not get FALSE:
+   see http_fb_screenless(). */
 BOOL http_fb_open(VOID);
 VOID http_fb_close(VOID);
 
@@ -106,8 +109,21 @@ BOOL http_fb_buttons_held(VOID);
 /* Why the last thing that failed did.  Never NULL, and "" when nothing has. */
 const char *http_fb_fault(VOID);
 
-/* What the screen was when http_fb_open() looked at it, for the banner. */
+/* What the screen was when http_fb_open() looked at it, for the banner.  All
+   three are 0 when there was no screen to look at; ask http_fb_screenless()
+   rather than reading a zero as a size. */
 VOID http_fb_geometry(UWORD *w, UWORD *h, UWORD *depth);
+
+/*
+ * Whether http_fb_open() found an empty screen list.
+ *
+ * The boot case, and the only reason this is not simply a refusal: started
+ * from S:User-Startup, -C runs before anything has opened a screen.  TRUE
+ * means the server is serving and the console has nothing to show YET --
+ * http_fb_start() looks again per session, so it begins working when Workbench
+ * does.  For the banner, which says it once.
+ */
+BOOL http_fb_screenless(VOID);
 
 /* ----------------------------------------------------------- the session --- */
 

@@ -52,6 +52,14 @@
  * while it is on, it is one viewer at a time, and anyone who can reach the port
  * sees that screen.  Off unless -C was given.
  *
+ * -C DOES NOT NEED A SCREEN TO START.  `httpd <drawer> -C' in S:User-Startup
+ * runs before LoadWB, so Intuition's screen list is empty and there is nothing
+ * to preflight; it comes up serving, says so in the banner once, and the
+ * console begins working by itself when Workbench opens, because the front
+ * screen is read again for every session.  It used to refuse outright and take
+ * the whole server with it, which is why the rig's own boot line had to drop
+ * -C.
+ *
  * Whatever is in front, whole, and nothing behind it, the way a screen owns the
  * display on RTG.  No compositing of a dragged-down screen over what is under
  * it, and no RTG: a non-planar BitMap has no bitplanes to read, and that case
@@ -8303,11 +8311,26 @@ int main(int argc, char **argv)
         }
 
         http_fb_geometry(&sw, &sh, &sd);
-        tool_printf("The console is at http://%s:%ld%s  "
-                    "(the frontmost screen, %ldx%ld",
-                    (LONG)dotted, (LONG)port, (LONG)HTTPD_CONSOLE_URL,
-                    (LONG)sw, (LONG)sh);
-        tool_printf("x%ld, NO PASSWORD)\n", (LONG)sd);
+
+        /* SAID ONCE, AND NOT AN ERROR.  Out of S:User-Startup there is no
+           screen open yet -- LoadWB is at the end of the Startup-Sequence --
+           and -C used to refuse to start over it, which took the whole server
+           down with it.  It serves; the console picks up whichever screen is
+           in front when a browser first asks, so it starts working when
+           Workbench does and nobody has to restart httpd. */
+        if (http_fb_screenless())
+            tool_printf("The console is at http://%s:%ld%s  (no screen is "
+                        "open yet: it serves whichever screen is in front "
+                        "when a browser asks, NO PASSWORD)\n",
+                        (LONG)dotted, (LONG)port, (LONG)HTTPD_CONSOLE_URL);
+        else
+        {
+            tool_printf("The console is at http://%s:%ld%s  "
+                        "(the frontmost screen, %ldx%ld",
+                        (LONG)dotted, (LONG)port, (LONG)HTTPD_CONSOLE_URL,
+                        (LONG)sw, (LONG)sh);
+            tool_printf("x%ld, NO PASSWORD)\n", (LONG)sd);
+        }
     }
 
     (VOID)Flush(Output());
