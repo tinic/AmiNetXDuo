@@ -400,6 +400,10 @@ char   *execbase;
 #define TX_AMIGA_THREAD_ADOPTED                 0x0001U   /* pre-existing Exec Task  */
 #define TX_AMIGA_THREAD_DIE                     0x0002U   /* teardown requested      */
 #define TX_AMIGA_THREAD_ORPHANED                0x0004U   /* woken but no longer ours */
+#define TX_AMIGA_THREAD_GREEN                   0x0008U   /* green: no Exec Task, its
+                                                             context is a saved stack
+                                                             inside the realm Task
+                                                             (AMINETXDUO_GREEN_REALM) */
 
 
 #define TX_BLOCK_POOL_EXTENSION

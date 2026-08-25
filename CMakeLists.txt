@@ -503,6 +503,19 @@ if(AMINETXDUO_TX_LAZY_COLLECT)
     add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
 endif()
 
+# The green realm (docs/THREADING-OPTIONS.md option 4, docs/GREEN-REALM.md):
+# every thread the stack creates becomes a coroutine inside the ONE master
+# Exec Task, with a real m68k stack switch per handoff instead of an Exec
+# Signal/Wait/dispatch round trip; the realm owns the stack's single idle
+# Wait().  Adopted application callers keep their own Task and the baton
+# protocol.  PROTOTYPE: whole-tree, default OFF, and every existing
+# configuration builds the baton port unchanged when it is off.
+option(AMINETXDUO_GREEN_REALM
+       "Run the stack's ThreadX threads as green threads inside one Exec Task" OFF)
+if(AMINETXDUO_GREEN_REALM)
+    add_compile_definitions(AMINETXDUO_GREEN_REALM)
+endif()
+
 # Complete a waiting stream recv() directly on the IP thread.  The shipped
 # design wakes the caller per receive notify and lets it re-enter the library
 # to dequeue -- the budget's fetch leg, ~7.3 ms of wall behind the burst on
@@ -993,6 +1006,7 @@ message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")
 message(STATUS "  RX probe ...... ${AMINETXDUO_RXPROBE}")
+message(STATUS "  green realm ... ${AMINETXDUO_GREEN_REALM}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
 message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")

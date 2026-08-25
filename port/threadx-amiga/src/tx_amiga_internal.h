@@ -173,6 +173,18 @@ TX_THREAD   *thread_ptr;
         return((UINT) TX_FALSE);
     }
 
+#ifdef AMINETXDUO_GREEN_REALM
+    /* A green thread's context can only be entered by a stack switch, and
+       only the realm Task's scheduler loop may perform one -- this inline
+       runs on whatever Task is yielding.  Decline, so the caller pokes the
+       realm (see _tx_amiga_wake_needed: dispatched FALSE, execute set,
+       current NULL is exactly the poke case) and the realm dispatches.  */
+    if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_GREEN) != 0U)
+    {
+        return((UINT) TX_FALSE);
+    }
+#endif
+
     _tx_thread_current_ptr =  thread_ptr;
     thread_ptr -> tx_thread_run_count++;
     _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
@@ -288,6 +300,79 @@ extern volatile ULONG   _tx_amiga_zombies;
  * point in a code hunk that is about to be unloaded.
  */
 extern volatile ULONG   _tx_amiga_zombies_live;
+
+
+#ifdef AMINETXDUO_GREEN_REALM
+
+/* ------------------------------------------------------- the green realm --- */
+
+/*
+ * The green realm (tx_amiga_green.c, tx_green_switch.S): every ThreadX thread
+ * the stack creates runs as a coroutine INSIDE the realm Task (the master Task
+ * that called tx_kernel_enter()), on the stack tx_thread_create() supplied,
+ * with a real m68k context switch instead of an Exec Signal/Wait handoff.
+ * Adopted threads keep their own Exec Task and the baton protocol unchanged.
+ */
+
+/* TX_TRUE if the thread's context is a green (realm-internal) one.  */
+static __inline UINT _tx_amiga_thread_green(TX_THREAD *thread_ptr)
+{
+    return(((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_GREEN) != 0U)
+           ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE));
+}
+
+/*
+ * The realm scheduler's saved context.  A green thread yields by saving its
+ * own SP into tx_thread_stack_ptr and loading this one; the scheduler loop is
+ * then running again, right after the _tx_green_switch() that dispatched.
+ */
+extern APTR     _tx_green_scheduler_sp;
+
+/*
+ * The switch itself (tx_green_switch.S): save d2-d7/a2-a6 and the return
+ * address on the current stack, store SP through save_slot, load new_sp, pop
+ * the same frame, return.  PROTOCOL: called with exactly one Forbid() held;
+ * the code at the resumed side's switch call site (or the thread begin shim)
+ * performs the matching Permit().  Holding the Forbid across the switch makes
+ * the _tx_thread_current_ptr surgery and the switch one atom.
+ */
+VOID    _tx_green_switch(APTR *save_slot, APTR new_sp);
+
+/* First activation target of a green thread (tx_amiga_green.c): the initial
+   frame's return address.  Permit()s the dispatcher's Forbid, then runs
+   _tx_thread_shell_entry(); if that ever returns, the context parks itself
+   on the scheduler for good.  */
+VOID    _tx_green_thread_begin(VOID);
+
+/* Build the initial switch frame on a green thread's stack (tx_amiga_green.c).  */
+VOID    _tx_green_stack_build(TX_THREAD *thread_ptr);
+
+/*
+ * Green Exec-signal waits.  A green thread that must sleep on Exec signals
+ * (its MsgPort lives on the realm Task, so the bits land there) registers its
+ * mask and suspends; the realm's idle Wait() covers the union of registered
+ * masks and the scheduler delivers latched bits before every dispatch pass.
+ * _tx_green_pending_union() and _tx_green_deliver() are the scheduler's half;
+ * tx_amiga_green_wait() (public, tx_amiga.h) is the thread's half.
+ */
+ULONG   _tx_green_pending_union(VOID);          /* call under Forbid()        */
+VOID    _tx_green_deliver(ULONG sigs);          /* call under Forbid()        */
+VOID    _tx_green_forget(TX_THREAD *thread_ptr);/* call under Forbid()        */
+
+/* Scheduling counters for the prototype's measurement arm (always compiled
+   in green builds; a handful of increments under Forbid).  */
+struct _tx_green_counters
+{
+    ULONG   gc_switches;        /* green contexts entered (stack switches in)  */
+    ULONG   gc_external;        /* baton handoffs to non-green (adopted) ones  */
+    ULONG   gc_idle_waits;      /* realm slept in Wait()                       */
+    ULONG   gc_wait_fast;       /* tx_amiga_green_wait() satisfied latched     */
+    ULONG   gc_wait_slow;       /* tx_amiga_green_wait() suspended             */
+    ULONG   gc_stray_wait;      /* Exec Wait()s caught from green context      */
+};
+extern struct _tx_green_counters    _tx_green_counters;
+
+#endif /* AMINETXDUO_GREEN_REALM */
 
 
 /* Temporary lifecycle tracing.  Define TX_AMIGA_TRACE to route to ami_log().  */

@@ -435,6 +435,50 @@ VOID    tx_amiga_sched_stats(TX_AMIGA_SCHED_STATS *stats);
 
 #endif /* AMINETXDUO_SCHEDCOUNT */
 
+/* ------------------------------------------------------------------------ */
+/* The green realm (AMINETXDUO_GREEN_REALM)                                  */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Built with -DAMINETXDUO_GREEN_REALM=ON, every thread the stack creates is
+ * a coroutine inside the realm Task (real m68k stack switching) instead of
+ * an Exec Task of its own; docs/GREEN-REALM.md is the design and state
+ * document.  These entry points exist in every build so callers need no
+ * conditional code: in a baton build tx_amiga_green_active() is always
+ * FALSE, tx_amiga_green_wait() is a plain Wait(), and the stats read zero.
+ */
+
+/* TX_TRUE while the caller runs in a green context (on the realm Task with a
+   green thread holding the baton).  */
+UINT    tx_amiga_green_active(VOID);
+
+/*
+ * Sleep the calling green thread until one of sigmask's Exec signals is
+ * latched on the realm Task; returns the bits that arrived.  This is the
+ * green replacement for "release the baton, Wait(), reacquire": only the
+ * calling thread sleeps, the realm keeps running everything else.  From a
+ * non-green context it degrades to Wait(sigmask).  Must not be called
+ * holding a ThreadX mutex.
+ */
+ULONG   tx_amiga_green_wait(ULONG sigmask);
+
+typedef struct TX_AMIGA_GREEN_STATS_STRUCT
+{
+    ULONG   gs_switches;        /* green contexts entered (stack switches)   */
+    ULONG   gs_external;        /* baton handoffs to adopted Exec Tasks      */
+    ULONG   gs_idle_waits;      /* times the realm slept in its one Wait()   */
+    ULONG   gs_wait_fast;       /* green waits satisfied by a latched signal */
+    ULONG   gs_wait_slow;       /* green waits that suspended the thread     */
+    ULONG   gs_stray_wait;      /* Exec Wait()s caught arriving from green
+                                   context (probe builds; must stay zero)    */
+} TX_AMIGA_GREEN_STATS;
+
+VOID    tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
+
+/* Count one intercepted Exec Wait() from green context (the probe build's
+   assert path in src/netstack/netstack_baton.c).  */
+VOID    tx_amiga_green_stray_wait_note(VOID);
+
 #ifdef __cplusplus
 }
 #endif

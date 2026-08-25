@@ -41,6 +41,124 @@
 #include <devices/timer.h>
 
 
+#ifdef AMINETXDUO_GREEN_REALM
+
+/**************************************************************************/
+/*                                                                        */
+/*    The green realm scheduler.  Same contract, different machinery: the  */
+/*    master Task no longer hands Exec signals to sibling Tasks -- for a   */
+/*    GREEN thread it stack-switches straight into the thread's saved      */
+/*    context and gets the CPU back the same way when that thread yields   */
+/*    (_tx_thread_system_return / tx_amiga_green_wait).  Only an ADOPTED   */
+/*    thread -- an application Task inside a bsdsocket call -- still gets  */
+/*    the baton by Signal() and returns it by poking the scheduler signal, */
+/*    exactly as before.                                                   */
+/*                                                                        */
+/*    The realm also owns the ONE real Wait() the stack sleeps in: its     */
+/*    mask is the scheduler signal plus the union of every registered      */
+/*    green waiter's Exec signals (a reader's reply port, the TX reap      */
+/*    bit), and latched bits are delivered to their waiters before every   */
+/*    dispatch pass, so a reader made runnable by a device reply is        */
+/*    dispatched ahead of the IP thread by ThreadX priority, the same      */
+/*    granularity the baton model gave (service-call boundaries).          */
+/*                                                                        */
+/*    PROTOCOL for every _tx_green_switch(): exactly one Forbid() held by  */
+/*    the side that switches away, one Permit() by the side that resumes.  */
+/*                                                                        */
+/**************************************************************************/
+
+VOID _tx_thread_schedule(VOID)
+{
+
+TX_THREAD   *thread_ptr;
+ULONG        pending;
+ULONG        mask;
+
+
+    if (_tx_amiga_scheduler_signal == 0UL)
+    {
+        Wait(0UL);
+    }
+
+    pending =  0UL;
+
+    Forbid();
+
+    for (;;)
+    {
+
+        /* Deliver Exec signals to green waiters: whatever the last Wait()
+           returned, plus anything that latched while green threads ran.
+           Consume ONLY registered waiters' bits -- an unregistered thread's
+           signal must stay latched for its own next wait.  */
+        mask =  _tx_green_pending_union();
+        if (mask != 0UL)
+        {
+            pending |=  SetSignal(0UL, mask) & mask;
+        }
+        if (pending != 0UL)
+        {
+            _tx_green_deliver(pending);
+            pending =  0UL;
+        }
+
+        if (_tx_amiga_kernel_stopping != TX_FALSE)
+        {
+            Permit();
+            break;
+        }
+
+        thread_ptr =  _tx_thread_execute_ptr;
+
+        if ((thread_ptr != TX_NULL) &&
+            (_tx_thread_current_ptr == TX_NULL) &&
+            (_tx_thread_system_state == ((ULONG) 0)))
+        {
+
+            /* Dispatch.  */
+            TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_DISPATCH);
+            _tx_thread_current_ptr =  thread_ptr;
+            thread_ptr -> tx_thread_run_count++;
+            _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+            thread_ptr -> tx_thread_amiga_suspension_type =  ((UINT) 0);
+
+            ami_budget_hold_start();
+
+            if (_tx_amiga_thread_green(thread_ptr) != TX_FALSE)
+            {
+
+                /* Enter the green context.  Returns when some green thread
+                   yields back; the Forbid() travels with the switch, so the
+                   loop resumes with it held, as required at the top.  */
+                _tx_green_counters.gc_switches++;
+                _tx_green_switch(&_tx_green_scheduler_sp,
+                                 thread_ptr -> tx_thread_stack_ptr);
+                continue;
+            }
+
+            /* An adopted thread: the baton goes out by Signal, and comes
+               back by a poke on the scheduler signal.  */
+            _tx_green_counters.gc_external++;
+            _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
+                             thread_ptr -> tx_thread_amiga_run_signal);
+        }
+
+        /* Nothing dispatchable from here (idle, baton out, or a tick in
+           progress).  Sleep on the scheduler signal AND the green waiters'
+           signals: a device reply must wake the realm even while an adopted
+           caller holds the baton, so its reader is ready the moment the
+           baton comes back.  */
+        mask =  _tx_amiga_scheduler_signal | _tx_green_pending_union();
+        Permit();
+        TX_AMIGA_COUNT(TX_AMIGA_SC_SCHED_WAIT);
+        _tx_green_counters.gc_idle_waits++;
+        pending =  Wait(mask) & ~_tx_amiga_scheduler_signal;
+        Forbid();
+    }
+}
+
+#else /* !AMINETXDUO_GREEN_REALM */
+
 VOID _tx_thread_schedule(VOID)
 {
 
@@ -104,6 +222,8 @@ TX_THREAD   *thread_ptr;
         Wait(_tx_amiga_scheduler_signal);
     }
 }
+
+#endif /* AMINETXDUO_GREEN_REALM */
 
 
 /* ----------------------------------------------------------- teardown --- */
@@ -189,10 +309,16 @@ UINT                     wake;
     Forbid();
     task =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
     if ((task == (struct Task *) 0) ||
-        ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) != 0U))
+        ((thread_ptr -> tx_thread_amiga_flags &
+          (TX_AMIGA_THREAD_ADOPTED | TX_AMIGA_THREAD_GREEN)) != 0U))
     {
 
-        /* Nothing of ours to remove.  */
+        /* Nothing of ours to remove: no Task (already gone), an adopted Task
+           (the application's), or a green thread (its "task" pointer is the
+           realm itself, which must obviously survive the thread).  */
+#ifdef AMINETXDUO_GREEN_REALM
+        _tx_green_forget(thread_ptr);
+#endif
         thread_ptr -> tx_thread_amiga_task =  (VOID *) 0;
         Permit();
         return;
