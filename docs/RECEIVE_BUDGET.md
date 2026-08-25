@@ -100,7 +100,37 @@ option 4.  Settle is therefore not a lever of its own: cutting it means
 cutting scheduler transitions, and that is the green-thread port's case,
 not a config or a code-path fix.
 
-## The remaining levers, in expected-value order
+## The single-copy claim, landed and measured (2026-08-25, physical)
+
+Branch `single-copy-landing` (green-realm + the `single-copy-rx2` merge)
+finally lands task #6: the device drains a PIO card's FIFO straight into the
+posted CMD_READ's packet with the Internet checksum fused into the drain
+(`ANXD_S2_RX_DIRECT`/`RX_FILLED`, netdev_direct.c), removing the ISR-level
+staging copy the old profile priced inside its 12.8% fused-copy share.  The
+three-byte-tail sum defect that killed IPv4 in the first attempt (fixed in
+b3c1b124, guarded by IoSumDrill, 264 checks in-guest) did not recur: v4 DHCP
+bound on both deploy boots and rx_err_verify stayed 0 across every frame.
+
+Engagement on the real 3c589 is total and visible: netstat's new
+"direct fills" line (the shim counts its own completions; the netstatus
+record now carries it) reads equal to "copy/direct fill" and to "summed
+while filling" -- every received frame took the claimed, fused-sum lane.
+On the emulated dp8390 the same line reads 100% with summed 0, because the
+remote-DMA core completes unsummed and the verifier walks at task level, by
+design.  The LANCE stages and fuses in the hook, also by design.
+
+The rate did not move: six warm runs 1199/1207/1190/805/1085/1228 kbit/s
+(client-side, same tool as cycle 4), mean 1119 vs the cycle-4 green2 mean
+1132 -- minus 1.1%, inside the pre-registered plus/minus 2% neutral band.
+The 805 is the known mDNS-CPU dip class (holds ring stayed bounded).  A
+storm run held 957 kbit/s with zero new holds over 50 ms.  Drain eased 605
+to 591 us; the other legs sat flat.  **Honest reading: the staging copy's
+CPU was real but its removal hides under wall overlap on a 94%-busy
+machine -- the ISR still drains the same bytes off the same slow port, and
+the freed cycles are absorbed by the waits the budget already names.  The
+claim ships anyway: one interrupt-level copy fewer, the checksum for free,
+zero errors, and the fused drain is the foundation any faster port I/O
+(task #4's movem path) multiplies against.**
 
 1. **Fewer, larger recv() bites.**  Fetch is paid per recv() call.  An
    application reading 32 KB instead of 4 KB pays it an eighth as often.
