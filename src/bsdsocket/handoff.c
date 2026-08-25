@@ -1,33 +1,5 @@
 /*
  * bsdsocket.library, handing a socket from one task to another.
- *
- *   ReleaseSocket()        release a socket, which is parked under an id
- *   ReleaseCopyOfSocket()  park a second reference and keep using the first
- *   ObtainSocket()         take a parked socket into this base's table
- *   ObtainServerSocket()   take the socket an inetd launched us with
- *   ProcessIsServer()      was this Process launched by an inetd?
- *
- * The Amiga-specific half of descriptor management, with no BSD counterpart.
- * There are no file descriptors and no descriptor passing over a socket
- * (docs/RESEARCH.md S3.1). A SocketBase belongs to exactly one task and its
- * descriptor table is private. A socket crosses between tasks only through
- * the registry here. That is how an inetd-style server works: the daemon
- * accepts, releases, launches a child and tells it the id. The child opens its
- * own bsdsocket.library and obtains it.
- *
- * The registry lives in the master base, guarded by its semaphore, since that
- * is the one object both tasks can see. A parked socket belongs to no base.
- * as_Owner is cleared, so the NetX Duo receive/disconnect callbacks find no
- * task to signal, rather than one that closed the library. ObtainSocket()
- * restores it.
- *
- * AmiSocket already carries as_RefCount for Dup2Socket(). A release moves the
- * existing reference into the registry. A copy takes an extra one, so the
- * original descriptor stays usable and the socket survives whichever of the
- * two goes away first. Anything still parked when the last opener closes the
- * library is released there, see bsd_handoff_flush(), called from
- * bsd_lib_close().
- *
  * SPDX-License-Identifier: MIT
  */
 
@@ -70,10 +42,6 @@ static struct AmiSocketBase *bsd_master_of(struct AmiSocketBase *base)
  * anyone can pick it up via ObtainSocket() by specifying the right combination
  * of socket type and protocol. If the Id value is greater than 65535 then it
  * must be unique number (this function will fail if it is not)."
- *
- * A duplicate rejected with EEXIST makes the whole non-unique range unusable.
- * A daemon uses that range when it hands each accepted connection to a child
- * under the same well-known id.
  */
 #define BSD_ID_NONUNIQUE_MAX  65535L
 
@@ -83,11 +51,6 @@ static BOOL bsd_handoff_id_is_unique(LONG id)
 }
 
 /*
- * ObtainSocket "must be identified by an ID, a domain, type and protocol
- * number", so a non-unique id is only half the key. The rest is what the
- * caller asks for. A match on id alone hands back whichever socket is first
- * in the list.
- *
  * Caller holds the master's semaphore.
  */
 static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
@@ -169,8 +132,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     struct AmiSocketBase *master = bsd_master_of(base);
     BsdHandoff           *entry;
 
-    /* ENOMEM, not ENOBUFS: "[ENOMEM] There is not enough memory left to put
-       this socket onto the public list." */
     entry = (BsdHandoff *)ami_alloc(sizeof(BsdHandoff));
     if (entry == NULL)
         return bsd_fail(base, AMI_ENOMEM);
@@ -183,10 +144,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     }
     else if (bsd_handoff_id_is_unique(id) && bsd_handoff_find(master, id) != NULL)
     {
-        /* Only the >65535 range promises uniqueness, so only there is a
-           duplicate an error. Below it, several sockets under one id is
-           documented behaviour. The errno is the autodoc's: "[EINVAL] The Id
-           number requested is not unique." */
         ReleaseSemaphore(&master->sb_Lock);
         ami_free(entry);
         return bsd_fail(base, AMI_EINVAL);
@@ -223,10 +180,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
     /*
      * A fully released socket belongs to nobody until it is obtained. An
      * as_Owner left at the releasing base lets a receive callback Signal() a
-     * task that closed the library.
-     *
-     * A copy leaves as_Owner alone: the original descriptor is still live in
-     * the releasing base and is still the one to wake.
      */
     return id;
 }
@@ -234,9 +187,6 @@ static LONG bsd_handoff_park(struct AmiSocketBase *base, AmiSocket *sock,
 /*
  * Release everything still parked. Called from bsd_lib_close() when the last
  * opener goes away. At that point no base exists that can obtain them, and the
- * alternative is a leak until reboot.
- *
- * `base` is only used for the ThreadX bracket the teardown needs.
  */
 VOID bsd_handoff_flush(struct AmiSocketBase *base)
 {
@@ -273,8 +223,6 @@ VOID bsd_handoff_flush(struct AmiSocketBase *base)
     if (bracketed)
         bsd_nx_leave(base);
 }
-
-/* ---------------------------------------------------------------- vectors, */
 
 LONG bsd_ReleaseSocket(register LONG sock_fd __asm("d0"),
                        register LONG id      __asm("d1"),
@@ -314,9 +262,6 @@ LONG bsd_ReleaseCopyOfSocket(register LONG sock_fd __asm("d0"),
     if ((sock->as_Flags & ASF_LISTENING) != 0)
         return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
-    /* The copy is a second reference to the same NX socket: NetX Duo cannot
-       duplicate one, and BSD semantics are a shared file entry rather than an
-       independent connection. */
     bsd_socket_retain(sock);
 
     result = bsd_handoff_park(SocketBase, sock, id, -1);
@@ -346,9 +291,6 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
 
     ObtainSemaphore(&master->sb_Lock);
 
-    /* bsd_handoff_match() already refuses a socket whose domain/type/protocol
-       do not match what the caller asked for, so "no match" and "wrong kind"
-       are one answer: "[EBADF] No socket with the given Id could be found." */
     entry = bsd_handoff_match(master, id, domain, type, protocol);
     if (entry == NULL)
     {
@@ -383,8 +325,6 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
     /*
      * The socket is ours now: events go to this task. A socket obtained from
      * a ReleaseCopyOfSocket() therefore no longer signals the base that still
-     * holds the original descriptor. One NX socket has one owner, and there
-     * is no second control block for the other half.
      */
     sock->as_Owner = SocketBase;
 
@@ -394,19 +334,6 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
 /*
  * ObtainServerSocket() and ProcessIsServer() answer "was this Process launched
  * by the stack's inetd, and if so what socket was it given?".
- *
- * AmiNetXDuo ships no inetd and never launches a server process, so the answer
- * is always no:
- *
- *   - ProcessIsServer() returns FALSE. A generic stub that returns -1 is
- *     all-bits-set, which every BOOL test reads as TRUE. That reports every
- *     Process on the machine as a server process.
- *   - ObtainServerSocket() returns -1, what Roadshow documents for a process
- *     that is not a server process.
- *
- * A real inetd uses ReleaseCopyOfSocket() plus ObtainSocket() above. Only the
- * daemon is missing, and Roadshow's private convention for the id a child
- * asks for.
  */
 LONG bsd_ObtainServerSocket(register struct AmiSocketBase *SocketBase __asm("a6"))
 {

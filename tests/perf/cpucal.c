@@ -1,37 +1,8 @@
 /*
- * AmiNetXDuo, CPU and memory timing calibration.
- *
- * Every performance number this project has recorded carries the same
- * disclaimer: "only the 68020 column is meaningful, FS-UAE's 68030 model is
- * not cycle-exact".  None of the symptoms behind it, a 95x memory-to-memory
- * copy, a MULU.L that costs nothing, an RSA ratio that came out 1.7x, 3.0x and
- * 3.1x on three runs of one binary, measured *what* the model gets wrong, so
- * nobody could say what an A3000 profile would be good for.
- *
- * This runs instruction sequences whose cost on real silicon is published, and
- * reports what the emulator charges for them.
- *
- * An absolute "nanoseconds per instruction" conflates the model's cycle
- * accounting with whatever clock the emulator thinks it is running at, and the
- * two cannot be separated from one figure.  So the primary results here are
- * ratios between kernels measured in the same run, which are
- * clock-independent by construction:
- *
- *   MULU.L / ADD.L      44/2 = 22.0 on a real 68030 (43/2 = 21.5 on a 68020)
- *   MOVE.L (An)+,(Am)+ / ADD.L        5/2 =  2.5 with the operands in cache
- *   big-window / small-window read    1.0 on a 68020 (no data cache at all),
- *                                     well above 1.0 on a 68030 (256 B of it)
- *   Chip RAM / Fast RAM               ~2x on an A1200's 16-bit path,
- *                                     ~4x on an A3000's 32-bit one
- *
- * Only after those does it quote an implied clock, derived from ADD.L at its
- * published two cycles.  If the ratios are wrong, the clock is meaningless.
- *
- * What a real machine would say (cache case, from the MC68020UM/MC68030UM
- * instruction-timing appendices; the 68030's figures assume both caches on):
- *
- *   MOVE.L Dn,Dm 2   ADD.L Dn,Dm 2   ADDX.L Dn,Dm 2   MULU.L Dn,Dm 44
- *   MOVE.L (An)+,Dn 4    MOVE.L Dn,(An)+ 4    MOVE.L (An)+,(Am)+ 5
+ * cpucal -- runs instruction sequences whose cost on real silicon is published
+ * and reports what the emulator charges for them.  Primary results are ratios
+ * between kernels measured in the same run, which are clock-independent; the
+ * implied clock at the end assumes ADD.L costs its published two cycles.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -117,11 +88,7 @@ static ULONG    c_bracket;              /* cost of one measurement, ticks */
 
 static ULONG c_now(VOID)
 {
-/* Zeroed for -fanalyzer, which cannot see through ReadEClock() -- a library
-   call behind an inline stub -- and reads ev.ev_lo as uninitialised.  It was
-   carried in tools/analyzer-baseline.txt instead until this file stopped being
-   compiled in the default configuration, which would have dropped the triage
-   note and let the finding come back as NEW in a -DAMINETXDUO_CPU=68020 tree. */
+/* Zeroed for -fanalyzer, which cannot see through ReadEClock(). */
 struct EClockVal ev = { 0UL, 0UL };
 
     (VOID)ReadEClock(&ev);
@@ -204,23 +171,9 @@ static VOID c_run(ULONG kind, ULONG reps)
 }
 
 /*
- * Pick a repeat count that puts the measurement two or three orders of
- * magnitude above the bracket, then measure.  Auto-scaling matters here: the
- * question is whether one profile is ~100x faster than the other, and a fixed
- * count that suits the slow one measures nothing but quantisation on the fast
- * one.
- *
- * Returns picoseconds per unit, an instruction for the register kernels, a
- * byte for the memory ones, so an operation an unthrottled model charges a
- * fraction of a nanosecond for still has digits left.
- *
- * There is no 64-bit divide worth linking here.  `ticks * c_tick_ns` is about
- * 1e8 and fits; multiplying that by the further 1000 picoseconds need does
- * not.  The first version of this file did exactly that and printed a 32 KB
- * memory sweep as 3.3 ns/B, faster than the 68020's bus can physically go,
- * and faster than the same routine over 64 bytes.  So the scaling divides the
- * unit count by 1000 instead, and the loop below refuses to stop until there
- * are at least 1000 units to make that exact.
+ * Returns picoseconds per unit (an instruction for the register kernels, a
+ * byte for the memory ones).  No 64-bit divide is linkable here, so the
+ * scaling divides the unit count by 1000, which needs >= 1000 units.
  */
 #define C_TARGET_TICKS  70000UL         /* ~100 ms of E-Clock */
 #define C_MIN_UNITS     100000UL
@@ -246,9 +199,6 @@ ULONG   units;
             break;
         }
 
-        /* Jump straight to a count that should hit the target rather than
-           doubling: on a model that charges almost nothing, doubling from 1
-           takes twenty passes to get there. */
         if (ticks > 16UL)
         {
             ULONG want = reps * (C_TARGET_TICKS / ticks + 1UL);
@@ -283,11 +233,7 @@ ULONG   units;
 
 /* ------------------------------------------------------------ reporting -- */
 
-/*
- * The loop's own cost, expressed per body slot: _cal_empty runs the same
- * subq/bne with no body at all, measured with the same notional 16 units per
- * rep, so subtracting it here leaves the instruction under test.
- */
+/* The loop's own cost per body slot; subtracted to leave the instruction. */
 static ULONG    c_empty_ps;
 static ULONG    c_add_ps;               /* one ADD.L, ps, the yardstick */
 
@@ -306,11 +252,6 @@ ULONG   ratio_x100;
 
     ratio_x100 = (c_add_ps != 0UL) ? ((ps * 100UL) / c_add_ps) : 0UL;
 
-    /*
-     * "implied cycles" is the ratio to ADD.L times ADD.L's published two,
-     * i.e. what the model charges for this instruction, expressed in the only
-     * unit that survives not knowing the clock.
-     */
     c_log("  %-22s %6ld.%03ld ns  implied %4ld.%02ld cycles   "
           "real 68020 %2ld, 68030 %2ld",
           (LONG)what,
@@ -320,12 +261,8 @@ ULONG   ratio_x100;
           (LONG)real_020, (LONG)real_030);
 }
 
-/*
- * Memory kernels sweep c_window longwords per rep, rounded down to the
- * 16-longword inner block.  "Bytes" counts the payload only: a m2m row moves
- * each byte twice (a read and a write) and is reported per byte moved, which
- * is the unit every other figure in tests/perf/ uses.
- */
+/* Sweeps c_window longwords per rep, rounded down to the 16-longword inner
+   block.  "Bytes" counts payload only, matching the rest of tests/perf/. */
 static ULONG c_print_mem(const char *what, ULONG kind)
 {
 ULONG   reps  = 0UL;
@@ -340,9 +277,7 @@ ULONG   kbs;
 
     ps_per_byte = c_measure_ps(kind, bytes, &reps);
 
-    /* KB/s = 1e12 / ps_per_byte / 1024.  Divide first to stay in 32 bits, but
-       divide only once by a thousand: doing it twice truncated 8065 KB/s to
-       7. */
+    /* KB/s = 1e12 / ps_per_byte / 1024, divided first to stay in 32 bits. */
     kbs = (ps_per_byte != 0UL)
               ? ((1000000000UL / ps_per_byte) * 1000UL / 1024UL)
               : 0UL;
@@ -384,10 +319,6 @@ ULONG   big_read, small_read;
 
     if (small_read != 0UL)
     {
-        /* Below 1.00 rather than exactly 1.00 on a cacheless part because the
-           64 B window pays the kernel's outer-loop reset once per 16
-           longwords and the 32 KB one pays it once per 8192; ~0.9 is the
-           measured floor.  A real data cache puts this well above 1. */
         c_log("    32 KB / 64 B read ratio: %ld.%02ldx  "
               "(~0.9x = no data cache, i.e. a 68020)",
               (LONG)((big_read * 100UL / small_read) / 100UL),
@@ -450,11 +381,6 @@ ULONG   reps;
     c_print_reg("MULU.L Dn,Dm",   K_MULU,   43UL, 44UL);
     c_print_reg("MULU.L Dn,Dh:Dl",K_MULU64, 45UL, 44UL);
 
-    /*
-     * The implied clock, the one figure here that assumes something: that the
-     * model charges ADD.L its published two cycles.  If MULU.L above did not
-     * come out near 22x, it does not, and this number is decoration.
-     */
     if (c_add_ps != 0UL)
     {
         c_log("");
@@ -490,11 +416,6 @@ ULONG   reps;
         c_log("  (no Chip RAM available)");
     }
 
-    /*
-     * Again with the data cache forced on: a 68020 has no data cache, so if
-     * turning it on changes nothing, the model is not simulating the part it
-     * claims to be.
-     */
     if ((flags & AFF_68030) != 0UL && fast != NULL)
     {
         ULONG before = CacheControl(0UL, 0UL);

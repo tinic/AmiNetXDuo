@@ -1,44 +1,8 @@
 /*
- * AmiNetXDuo, where a megabyte of TCP actually goes.
- *
- * There is no profiler on this platform, so this is the substitute: measure
- * every primitive the data path touches per byte, count how many times the
- * data path touches it per megabyte, multiply, and compare the total against
- * a measured end-to-end transfer.  Whatever is left over is not in the copy
- * loops.
- *
- *   1. E-Clock bracket overhead, so it can be subtracted from everything else.
- *   2. Per-primitive cost: the checksum (vendored and net68k, in one process),
- *      memcpy at every one of the sixteen alignment pairs, net68k's movem.l
- *      copy, the SANA-II shim's copy loop, nx_packet_data_append,
- *      nx_packet_data_extract_offset, nx_packet_copy, an allocate/release
- *      pair with and without NetX Duo's _nxe_ error-checking wrappers, and a
- *      bare Forbid()/Permit() pair.
- *   3. An alignment census of the pointers the stack actually hands those
- *      routines, because a memcpy penalty that never fires is not a finding.
- *   4. A pipeline benchmark: exactly the operations a loopback segment pays
- *      for, in order, with no protocol, so its reciprocal is the ceiling the
- *      copy loops impose.
- *   5. End to end: TCP over 127.0.0.1 and TCP between two NX_IP instances
- *      over the simulated RAM driver, each run with the vendored checksum and
- *      with net68k's, back to back, with nothing else changed.
- *
- * bsdsocket.library is not measured here.  This binary talks to NetX Duo
- * directly, so the difference between its loopback figure and the conformance
- * suite's throughput category is the library layer, and that is how the
- * library's cost is priced.
- *
- * Only the 68020 profiles mean anything, and that is measured rather than
- * suspected: tests/perf/cpucal.c times instructions with published cycle costs
- * and finds FS-UAE's A1200 model faithful to under 2% for two-cycle integer
- * work, while its 68030, any 68030, including `-c 68030` on the A1200 model
- * charges no cycles at all, because FS-UAE turns cycle accounting off above
- * a 68020.  Run this under `-m A3000` as a correctness check and do not quote
- * the numbers.
- *
- * `tools/amiberry-run.sh -k MHZ` moves the 68020 model's clock without losing the
- * cycle accounting, so "what would this do at 25 MHz?" has an answer here even
- * though "what would this do on an A3000?" does not.
+ * AmiNetXDuo, where a megabyte of TCP actually goes: per-primitive cost, an
+ * alignment census, a no-protocol pipeline ceiling, and end-to-end TCP over
+ * loopback and the simulated wire.  Only the 68020 profiles mean anything;
+ * emulators charge no cycles above a 68020.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -144,13 +108,8 @@ static UINT p_check(UINT ok, const char *what, ULONG detail)
 
 /* -------------------------------------------------------------- timing --- */
 
-/*
- * ReadEClock() is the finest clock a shared library can reach: ~709 kHz PAL,
- * so one tick is about 1.41 us, or twenty 68020 cycles at 14 MHz.  That is
- * fine enough to time a 1460-byte loop (hundreds of ticks) and far too coarse
- * to time one instruction, which is why everything below is a loop with a
- * repeat count rather than a single call.
- */
+/* One E-Clock tick is ~1.41 us: far too coarse to time one instruction, so
+   everything below is a loop with a repeat count. */
 
 extern struct Device *TimerBase;        /* src/common/compat.c owns it */
 
@@ -168,7 +127,6 @@ struct EClockVal ev;
     return(ev.ev_lo);
 }
 
-/* Subtract the measurement's own cost; never report a negative interval. */
 static ULONG p_elapsed(ULONG start, ULONG stop)
 {
 ULONG   d = stop - start;
@@ -176,32 +134,18 @@ ULONG   d = stop - start;
     return((d > p_bracket) ? (d - p_bracket) : 0UL);
 }
 
-/* Microseconds, for intervals below ~3 seconds. */
 static ULONG p_us(ULONG ticks)
 {
     return((ticks * p_tick_ns) / 1000UL);
 }
 
-/* Milliseconds, for anything longer. */
 static ULONG p_ms(ULONG ticks)
 {
     return(ticks / p_per_ms);
 }
 
-/*
- * Nanoseconds per byte, x100 so a fraction survives an integer print, taken
- * over the whole loop rather than as a per-iteration mean.
- *
- * The per-iteration form quantises to one E-Clock tick per rep, 1.409 us,
- * and at 14 MHz a 1460-byte copy is ~180 ticks, so the granularity is half a
- * percent and invisible.  At 24.5 MHz with `amiberry-run.sh -k 25` it is ~105
- * ticks, and three copy routines that differ by 4% all printed the same
- * 102.29 ns/B.  Dividing once, at the end, by the total byte count removes it.
- *
- * `total_bytes` is reps * bytes and is large, so the scaling divides it by 100
- * rather than multiplying the ticks by it: the pipeline benchmark's 105,000
- * ticks * 1409 is already 1.5e8, and another 100 would not fit in a longword.
- */
+/* Divide total_bytes by 100 rather than scaling the ticks: ticks * bytes
+   already reaches 1.5e8 and another x100 would not fit in a longword. */
 static ULONG p_ns_per_byte_x100(ULONG ticks, ULONG total_bytes)
 {
     if (total_bytes < 100UL)
@@ -229,11 +173,6 @@ ULONG            t0, t1, total;
         p_per_ms = 1UL;
     }
 
-    /*
-     * Calibrate the bracket.  A back-to-back pair of reads measures nothing
-     * but itself; take the mean of many so one interrupt does not set the
-     * floor.
-     */
     p_bracket = 0UL;
     total     = 0UL;
     for (i = 0UL; i < 256UL; i++)
@@ -248,13 +187,8 @@ ULONG            t0, t1, total;
 
 /* ------------------------------------------ the checksum under the test --- */
 
-/*
- * NetX Duo calls _nx_ip_checksum_compute() by name from IP, TCP, UDP and
- * ICMP.  The top-level CMakeLists drops the vendored object from the core, so
- * the symbol is ours to define; defining it here, rather than linking
- * src/net68k's hook, lets one process run both implementations back to back
- * with a single variable between them.
- */
+/* The top-level CMakeLists drops the vendored object from the core, so
+   _nx_ip_checksum_compute() is ours to define here. */
 
 USHORT n68k_checksum_reference(NX_PACKET *packet_ptr, ULONG protocol,
                                UINT data_length, ULONG *src_ip_addr,
@@ -307,13 +241,8 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 #define P_IP_STACK_SIZE     3072
 #define P_SRV_STACK_SIZE    4096
 
-/* Bytes per end-to-end run.  256 KB is long enough to swamp connection setup
-   and short enough that eight runs fit inside one emulator session. */
 #define P_XFER_BYTES        (256UL * 1024UL)
 
-/* What bsdsocket.library's send() hands NetX Duo: the conformance suite's
-   throughput test uses an 8 KB application buffer and bsd_send_tcp() clamps
-   only to the MSS, which on loopback is 65495. */
 #define P_APP_CHUNK         8192UL
 
 extern VOID _nx_ram_network_driver(NX_IP_DRIVER *driver_req_ptr);
@@ -321,12 +250,6 @@ extern VOID _nx_ram_network_driver(NX_IP_DRIVER *driver_req_ptr);
 static NX_PACKET_POOL   p_pool;
 static NX_IP            p_ip0;
 static NX_IP            p_ip1;
-/*
- * The receive window both ends of an end-to-end case are created with.  A
- * global rather than an argument because the server socket is created inside
- * p_server_entry(), which p_transfer() reaches only through the semaphore
- * handshake and cannot pass anything to.
- */
 static ULONG            p_window = 16384UL;
 
 static NX_TCP_SOCKET    p_client;
@@ -345,23 +268,13 @@ static ULONG            p_srv_stack[P_SRV_STACK_SIZE / sizeof(ULONG)];
 static ULONG            p_arp0_cache[1024 / sizeof(ULONG)];
 static ULONG            p_arp1_cache[1024 / sizeof(ULONG)];
 
-/*
- * Application buffers.  Explicitly longword aligned so the alignment sweep
- * below means what it says: `p_src_buf + 1` is then a genuinely misaligned
- * source, not an accident of what the compiler happened to choose.
- */
+/* Explicitly longword aligned, so `p_src_buf + 1` is a genuinely misaligned
+   source rather than an accident of what the compiler chose. */
 static UCHAR            p_src_buf[P_APP_CHUNK + 8] __attribute__((aligned(4)));
 static UCHAR            p_dst_buf[P_APP_CHUNK + 8] __attribute__((aligned(4)));
 
 
 /* --------------------------------------------------- micro benchmarks ----- */
-
-/*
- * Every micro benchmark has the same shape: run the operation `reps` times
- * over `bytes` bytes, bracket the lot, subtract the bracket, report the mean.
- * `reps` is chosen so the whole loop is at least a few thousand ticks, which
- * puts the ~1 tick of bracket jitter three orders of magnitude down.
- */
 
 static VOID p_report(const char *what, ULONG ticks, ULONG reps, ULONG bytes)
 {
@@ -376,7 +289,6 @@ ULONG   nspb  = p_ns_per_byte_x100(ticks, reps * bytes);
           (LONG)reps, (LONG)bytes);
 }
 
-/* Copy candidate: what the SANA-II shim uses at interrupt level. */
 extern VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
 static NX_PACKET *p_scratch_packet;
@@ -424,8 +336,6 @@ ULONG   len = 1460UL;
               (LONG)(ticks_ref * 100UL / ticks_new % 100UL));
     }
 
-    /* The A/B is worthless if the two disagree; check here as well as in the
-       host tier, because the host tier cannot run the assembly. */
     a = n68k_checksum_reference(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)len,
                                 &src, &dst);
     b = n68k_ip_checksum_compute(p_scratch_packet, NX_PROTOCOL_TCP, (UINT)len,
@@ -433,7 +343,6 @@ ULONG   len = 1460UL;
     (VOID)p_check((UINT)(a == b), "checksum agrees on a 1460 B packet",
                   ((ULONG)a << 16) | (ULONG)b);
 
-    /* And over a chain, which is the shape a loopback segment actually has. */
     if (p_scratch_chain != NX_NULL)
     {
     ULONG   clen = 0UL;
@@ -469,21 +378,6 @@ ULONG   len = 1460UL;
         p_report("checksum chain, net68k", ticks_new, reps, clen);
     }
 
-    /*
-     * Every length from 0 to 700 bytes, over three payload fills.
-     *
-     * The range is chosen from the assembly, not picked round:
-     * n68k_sum_longwords() runs a computed jump through 64 unrolled pairs up
-     * to 256 bytes and a 56-longword movem.l block above that, so a sweep
-     * that stops short of 224 bytes never reaches the second shape at all and
-     * one that stops short of 448 never runs its loop twice.  The host tier
-     * cannot check either, it compiles the C fallback, so this is the only
-     * place the assembly is checked against the vendored answer.
-     *
-     * The fills are the carry cases: all ones makes every add carry, and the
-     * alternating longwords land the accumulator on 0xFFFFFFFF with a carry
-     * pending, which is where the chain has to fold twice.
-     */
     {
     ULONG   fill;
     ULONG   bad = 0xFFFFFFFFUL;
@@ -541,20 +435,8 @@ UINT    da, sa;
 
     reps = 200UL;
 
-    /*
-     * memcpy(), at every combination of destination and source alignment.
-     *
-     * Read the build flags before reading these rows.  With
-     * AMINETXDUO_NET68K_MEMCPY=ON, the default on a cross build, memcpy()
-     * is n68k_copy_bytes(), and these rows measure it twice under two names.
-     * The C library's own numbers quoted in docs/RESEARCH.md were taken from a
-     * -DAMINETXDUO_NET68K_MEMCPY=OFF build, which is the only way to get them.
-     * The libm020 multilib, which -m68020 selects, verified in the link map
-     * aligns only the destination and then moves longwords regardless of
-     * what the source is doing, so the expensive case is supposed to be a
-     * misaligned destination, not a misaligned source.  This measurement says
-     * whether that is true.
-     */
+    /* With AMINETXDUO_NET68K_MEMCPY=ON, the cross-build default, memcpy() IS
+       n68k_copy_bytes() and these rows measure it twice under two names. */
     for (da = 0; da < 4; da++)
     {
         for (sa = 0; sa < 4; sa++)
@@ -578,21 +460,6 @@ UINT    da, sa;
         }
     }
 
-    /*
-     * The movem.l candidate, checked before it is timed.  This routine is
-     * memcpy() for the whole library when AMINETXDUO_NET68K_MEMCPY is on, so
-     * "fast" is worthless without "exact".  Every length from 0 to 288 and
-     * every one of the sixteen source/destination alignment combinations,
-     * verifying three things each time: the copied bytes match, the byte
-     * before the destination is untouched, and the byte after it is
-     * untouched.  That is 4624 cases; a routine that mishandles the head
-     * alignment, either movem block, the longword tail or the byte tail fails
-     * at least one of them.
-     *
-     * The ceiling is 288 rather than 96 so that two whole 128-byte blocks
-     * plus a remainder run at every alignment pair, at 96 the unrolled
-     * block never executes and the sweep silently covers nothing.
-     */
     {
     ULONG   n, da, sa, k;
     UINT    ok = 1;
@@ -629,7 +496,6 @@ UINT    da, sa;
         (VOID)p_check(ok, "n68k_copy_bytes exact, 4624 length/alignment cases",
                       0UL);
 
-        /* And one long copy, where the movem block does the work. */
         for (k = 0UL; k < sizeof(p_dst_buf); k++)
         {
             p_dst_buf[k] = 0xA5;
@@ -649,10 +515,6 @@ UINT    da, sa;
         }
         (VOID)p_check(ok, "n68k_copy_bytes exact, 8184 B misaligned", 0UL);
 
-        /* And the same length at 2 mod 4 with an aligned destination, which
-           is what eight of the nine real drivers hand the SANA-II shim.  The
-           case above is 1 mod 4 once the head bytes are gone, so without this
-           one no long copy ever reaches the 2 mod 4 path. */
         for (k = 0UL; k < sizeof(p_dst_buf); k++)
         {
             p_dst_buf[k] = 0xA5;
@@ -681,9 +543,6 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s0", ticks, reps, len);
 
-    /* s2 is the one that matters: eight of the nine drivers in the census
-       hand over a buffer at 2 mod 4.  s1 and s3 are here because Roadshow
-       falls off a 5.4x cliff at odd offsets and this routine does not. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -708,8 +567,6 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("n68k_copy_bytes d0 s3", ticks, reps, len);
 
-    /* The SANA-II shim's own loop, for comparison at the two alignments it
-       actually sees. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -726,12 +583,6 @@ UINT    da, sa;
     ticks = p_elapsed(t0, p_now());
     p_report("ami_sana2_copy_bytes d0 s2", ticks, reps, len);
 
-    /*
-     * Opposite parity, where a real cliff lives, in our own code, not the C
-     * library: the SANA-II shim's loop takes its longword path only when
-     * source and destination agree mod 2, and drops to one byte per iteration
-     * when they do not.
-     */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -752,7 +603,6 @@ ULONG       len = 1460UL;
 
     reps = 100UL;
 
-    /* allocate + release, the per-packet floor. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -767,12 +617,6 @@ ULONG       len = 1460UL;
           (LONG)"nx_packet_allocate + release", (LONG)p_us(ticks / reps),
           (LONG)reps);
 
-    /*
-     * The same pair through the internal entry points.  nx_user.h leaves
-     * NX_DISABLE_ERROR_CHECKING unset ("revisit for the release build"), so
-     * every nx_* call in the tree goes through an _nxe_ wrapper first.  This
-     * is what that costs on the hottest call in the stack.
-     */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -787,8 +631,6 @@ ULONG       len = 1460UL;
           (LONG)"  ... without the _nxe_ wrappers", (LONG)p_us(ticks / reps),
           (LONG)reps);
 
-    /* And the Forbid()/Permit() pair TX_DISABLE/TX_RESTORE expand to, which
-       is what the allocator spends its uninterruptible section on. */
     t0 = p_now();
     for (i = 0UL; i < reps * 10UL; i++)
     {
@@ -800,7 +642,6 @@ ULONG       len = 1460UL;
           (LONG)"  ... one Forbid/Permit pair",
           (LONG)((ticks * p_tick_ns) / (reps * 10UL)));
 
-    /* data_append of one MSS into a fresh packet. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -814,7 +655,6 @@ ULONG       len = 1460UL;
     ticks = p_elapsed(t0, p_now());
     p_report("allocate + append 1460 + release", ticks, reps, len);
 
-    /* data_append of a full application chunk, this is the one that chains. */
     t0 = p_now();
     for (i = 0UL; i < reps; i++)
     {
@@ -829,7 +669,6 @@ ULONG       len = 1460UL;
     ticks = p_elapsed(t0, p_now());
     p_report("allocate + append 8192 + release", ticks, reps, P_APP_CHUNK);
 
-    /* extract_offset out of a packet, which is what recv() does. */
     if (p_scratch_packet != NX_NULL)
     {
         t0 = p_now();
@@ -859,8 +698,6 @@ ULONG       len = 1460UL;
         ticks = p_elapsed(t0, p_now());
         p_report("extract_offset chain", ticks, reps, clen);
 
-        /* nx_packet_copy: what the loopback and RAM driver paths pay per
-           packet, and the one cost that exists for no reason but the API. */
         reps = 40UL;
         t0 = p_now();
         for (i = 0UL; i < reps; i++)
@@ -877,18 +714,6 @@ ULONG       len = 1460UL;
     }
 }
 
-/*
- * The pipeline ceiling: every operation a loopback TCP segment pays for, in
- * order, with no protocol, no scheduler and no timers in the way:
- *
- *   allocate -> append (the send() copy) -> TCP checksum ->
- *   nx_packet_copy (the loopback hand-over) -> TCP checksum (receive side) ->
- *   extract (the recv() copy) -> release x2
- *
- * The reciprocal of the per-byte total is the fastest this stack could
- * possibly move loopback TCP if the protocol were free.  Anything the
- * end-to-end runs fall short of it by is not in the copy loops.
- */
 static VOID p_bench_pipeline(ULONG mode, const char *what)
 {
 ULONG       t0, ticks, reps, i;
@@ -948,12 +773,6 @@ ULONG       dst = P_IP1_ADDRESS;
     }
 }
 
-/*
- * The alignment census.  A memcpy penalty that never fires is not a finding,
- * so this prints the alignments the stack actually produces: where a freshly
- * allocated TCP packet's payload starts, where a received packet's payload
- * starts, and where the application buffers sit.
- */
 static VOID p_census_alignment(VOID)
 {
 NX_PACKET  *pkt = NX_NULL;
@@ -1034,14 +853,6 @@ static VOID p_scratch_free(VOID)
 
 /* -------------------------------------------------- end-to-end transfer --- */
 
-/*
- * Two knobs, set by the client before it releases the server:
- *   p_run_ip      which NX_IP the server listens on
- *   p_run_extract whether the receiver copies the payload out to a user
- *                 buffer (what recv() does) or just releases the packet
- * The difference between the two prices nx_packet_data_extract_offset() in
- * situ rather than in a micro benchmark.
- */
 static ULONG    p_tcp_retransmits;
 static ULONG    p_tcp_txqueue;
 static ULONG    p_tcp_txwindow;
@@ -1057,18 +868,11 @@ static ULONG    p_run_target;
 static volatile ULONG   p_srv_bytes;
 static volatile UINT    p_srv_status;
 
-/*
- * Sender phase accounting.  Bracketing every call costs one bracket (30 ticks,
- * 42 us) per call, which against a transfer measured in seconds is under one
- * part in a thousand, and it is the only way to tell "the copy loops are
- * slow" from "the sender is asleep waiting for an acknowledgement".
- */
 static ULONG    p_phase_alloc;
 static ULONG    p_phase_append;
 static ULONG    p_phase_send;
 static ULONG    p_phase_calls;
 
-/* Receiver phase accounting, same argument. */
 static volatile ULONG   p_phase_recv;
 static volatile ULONG   p_phase_extract;
 static volatile ULONG   p_phase_rcalls;
@@ -1084,7 +888,6 @@ ULONG       t0;
 
     for (;;)
     {
-        /* Wait to be told which configuration to serve. */
         if (tx_semaphore_get(&p_srv_ready, TX_WAIT_FOREVER) != TX_SUCCESS)
         {
             return;
@@ -1134,8 +937,6 @@ ULONG       t0;
 
                     t0 = p_now();
 
-                    /* Exactly what bsd_recv_tcp() does: drain the packet into
-                       the caller's buffer in application-sized bites. */
                     while (off < length)
                     {
                     ULONG want = length - off;
@@ -1169,16 +970,8 @@ ULONG       t0;
             p_srv_status = status;
         }
 
-        /*
-         * The clock stops here, not after the teardown.  Stopping it after
-         * nx_tcp_socket_disconnect() added a flat five seconds to every run:
-         * the server closes first, the client is still blocked waiting to be
-         * told the transfer finished, so nobody completes the handshake and
-         * the disconnect burns its whole timeout.  Every figure in the first
-         * pass was ~5000 ms of nothing plus the real transfer, and they all
-         * came out around 45 KB/s regardless of what was changed, a constant
-         * offset that flattens every comparison.
-         */
+        /* The clock stops here, not after the teardown: disconnect would burn
+           its whole timeout and add a flat five seconds to every run. */
         (VOID)tx_semaphore_put(&p_srv_gotall);
 
         (VOID)nx_tcp_socket_disconnect(&p_server, 5UL * NX_IP_PERIODIC_RATE);
@@ -1190,10 +983,7 @@ ULONG       t0;
     }
 }
 
-/*
- * One transfer.  Returns the elapsed E-Clock ticks, or 0 if it did not
- * complete, the caller prints the failure.
- */
+/* Returns elapsed E-Clock ticks, or 0 if the transfer did not complete. */
 static ULONG p_transfer(NX_IP *cip, NX_IP *sip, ULONG peer, UINT port,
                         UINT extract, ULONG bytes, ULONG *packets_out)
 {
@@ -1208,7 +998,6 @@ ULONG       before_sent;
     p_run_extract = extract;
     p_run_target  = bytes;
 
-    /* Let the server set itself up and start listening. */
     (VOID)tx_semaphore_put(&p_srv_ready);
     tx_thread_sleep(NX_IP_PERIODIC_RATE / 5UL);
 

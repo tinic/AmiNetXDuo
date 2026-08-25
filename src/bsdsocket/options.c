@@ -23,8 +23,6 @@
 /* NX_TCP_MAXIMUM_RX_QUEUE, SO_RCVBUF's ceiling in a low-watermark build. */
 #include "nx_tcp.h"
 
-/* For _nx_ip_route_find(): getsockname() on a socket bound to INADDR_ANY has
-   to know which interface the packets leave by. */
 #include "nx_ip.h"
 #ifdef AMINETXDUO_IPV6
 #include "../ipv6/ipv6_srcsel.h"
@@ -33,8 +31,6 @@
 /*
  * SO_RCVBUF and SO_SNDBUF arrive in bytes and NetX Duo counts both queues in
  * packets, so one has to be turned into the other. A full-MTU segment is what
- * either queue actually holds, and rounding up means a caller asking for one
- * byte still gets one packet rather than none.
  */
 #define BSD_OPT_SEGMENT     1460
 
@@ -102,21 +98,6 @@ static LONG bsd_opt_set_long(struct AmiSocketBase *base, APTR optval,
 
 /*
  * IP_TTL and IP_TOS onto the live NetX socket.
- *
- * Both are arguments _nx_ip_packet_send() takes from the socket on every send,
- * so writing them here is what puts them on the wire. Without it the caller's
- * value was stored, echoed back by getsockopt, and never used. raw.c reads
- * as_Ttl and as_Tos directly and needs nothing from here.
- *
- * NetX Duo carries the TOS octet in bits 16..23 of a ULONG, that is where
- * NX_IP_NORMAL and NX_IP_MIN_DELAY sit, and NX_IP_TOS_MASK is 0x00FF0000.
- *
- * The IPv6 halves are not covered: _nx_ipv6_packet_send() takes the traffic
- * class as a literal 0 from both the TCP and the UDP send paths, and takes the
- * TCP hop limit from nx_ipv6_hop_limit on the NX_IP rather than from the
- * socket. The UDP hop limit is nx_udp_socket_time_to_live, so
- * IPV6_UNICAST_HOPS reaches the wire on a UDP socket through the line below.
- *
  * Must be called inside a bsd_nx_enter() bracket: this is live NX state.
  */
 VOID bsd_opt_apply_ip(AmiSocket *sock)
@@ -141,9 +122,6 @@ VOID bsd_opt_apply_ip(AmiSocket *sock)
 
 /*
  * struct timeval -> ThreadX ticks, rounded up so a tiny timeout still waits.
- * NX_WAIT_FOREVER is a sentinel rather than a finite delay, and zero is the
- * value the socket object uses for "no timeout", so saturation stops one tick
- * below the sentinel.
  */
 static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
 {
@@ -196,10 +174,6 @@ static BOOL bsd_timeval_ticks(const struct timeval *tv, ULONG *out)
  * ticks a second anything under 20 ms truncates to zero, and zero is the
  * value that means "no deadline", so a caller asking for the shortest
  * deadline it can name gets no deadline at all.
- *
- * Splitting whole seconds from the remainder keeps the intermediate multiply
- * inside a ULONG.  The accepted one-day maximum is beyond the point where
- * ms * NX_IP_PERIODIC_RATE wraps at the Amiga's 50 Hz tick.
  */
 #define BSD_OPT_MAX_MS      86400000UL      /* a day */
 
@@ -226,8 +200,6 @@ static VOID bsd_ticks_timeval(ULONG ticks, struct timeval *tv)
                    (1000000UL / (ULONG)NX_IP_PERIODIC_RATE);
 }
 
-/* ------------------------------------------------------------ setsockopt, */
-
 LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     register LONG level      __asm("d1"),
                     register LONG optname    __asm("d2"),
@@ -250,20 +222,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * TIME-WAIT, which is what a server restarting after its last
              * client disconnected runs into: the port is unavailable for up
              * to 2MSL and the program looks broken.
-             *
-             * It cannot displace a live listener or an established
-             * connection, nx_tcp_socket_reuse_address_set() says so and the
-             * bind enforces it, which is the BSD rule.
-             *
-             * SO_REUSEPORT is the same flag here.  BSD's REUSEPORT also
-             * allows several live sockets on one port and shares arrivals
-             * between them.  NetX Duo demultiplexes to one socket, so that
-             * half has nowhere to go and pretending otherwise delivers every
-             * connection to whichever socket bound first.
-             *
-             * Set on the NX socket as well as recorded, and only while the
-             * socket is unbound: after bind() the flag has already been read
-             * and the call does nothing.
              */
             case SO_REUSEADDR:
             case SO_REUSEPORT:
@@ -285,12 +243,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 }
                 return 0;
 
-            /*
-             * Likewise. BSD uses this as permission, sendto() to a broadcast
-             * address is EACCES without it, and this stack has never asked,
-             * so enforcing it now starts failing sends that work today.
-             * The flag is kept so getsockopt answers what was set.
-             */
             case SO_BROADCAST:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
                     return -1;
@@ -305,8 +257,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * NX_ENABLE_TCP_KEEPALIVE is defined.  Without it
              * nx_tcp_periodic_processing.c's keepalive block is compiled out
              * and an idle connection is never probed.  The flag is kept
-             * alongside because getsockopt() must answer for a socket that is
-             * not a live NX one yet, and the two must agree.
              */
             case SO_KEEPALIVE:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
@@ -330,12 +280,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
 #endif
                 return 0;
 
-            /*
-             * Accepted, stored nowhere, and getsockopt always answers 1: the
-             * urgent byte is delivered in the stream whatever this says, which
-             * is oob.c's first documented divergence. Echoing back a 0 the
-             * caller set hides the one fact it cannot discover any other way.
-             */
             case SO_OOBINLINE:
                 return (bsd_opt_set_long(SocketBase, optval, optlen,
                                          &value) != 0) ? -1 : 0;
@@ -355,8 +299,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 /*
                  * bsd_socket_close() turns l_linger into a tick count, so a
                  * negative one becomes about 497 days and CloseSocket() never
-                 * comes back. 4.4BSD's sosetopt() bounds it the same way, at
-                 * SHRT_MAX/hz seconds.
                  */
                 if (lin.l_linger < 0 ||
                     lin.l_linger > (LONG)(32767L / NX_IP_PERIODIC_RATE))
@@ -371,17 +313,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * SO_RCVBUF and SO_SNDBUF are answered in bytes because that is
              * what a caller sets, and applied in packets because that is the
              * only unit NetX Duo counts either queue in.
-             *
-             * On TCP nothing is applied. The receive queue depth is the only
-             * knob NetX Duo offers, and the whole body of
-             * nx_tcp_socket_receive_queue_max_set() is inside
-             * NX_ENABLE_LOW_WATERMARK, which this port does not define. The
-             * note at the end of nx_user.h says why. Defining it is a piece of
-             * work with its own measurement. The advertised
-             * window is sized from the packet pool at socket-create time
-             * (ami_bsd_tcp_window()) and is not settable afterwards. The call
-             * used to be made unconditionally with its NX_NOT_SUPPORTED
-             * discarded, which read as an option that worked.
              */
             case SO_RCVBUF:
                 if (bsd_opt_set_long(SocketBase, optval, optlen, &value) != 0)
@@ -404,10 +335,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if ((sock->as_Flags & (ASF_UDP | ASF_DELETED)) == ASF_UDP &&
                     value > 0)
                 {
-                    /* The UDP receive queue is caller-tunable: it is a
-                       datagram count on the socket, which nx_udp_socket_create
-                       took from bsd_udp_queue_max(). Lowered or raised, never
-                       past what the pool can hold. */
                     if (bsd_nx_enter(SocketBase) != 0)
                         return bsd_fail(SocketBase, AMI_ENETDOWN);
                     sock->as_Nx.udp.nx_udp_socket_queue_maximum =
@@ -488,27 +415,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
              * has no small-segment hold anywhere in it. So TCP_NODELAY is
              * permanently 1 and the get side answering 1 is the truth, not a
              * placeholder.
-             *
-             * The RFC 1122 4.2.3.4 rule that IS there,
-             * _nx_tcp_socket_sws_send_permitted(), is not one: it withholds
-             * a write when the peer's WINDOW is a sliver, never because the
-             * write is small, so a one-byte send into an open window leaves
-             * immediately whatever else is in flight. That is asserted in
-             * tests/netstack/host/test_tcp_sws_host.c, because this answer
-             * depends on it.
-             *
-             * Which makes 0 the one value that cannot be honoured, and taking
-             * it and returning 0 was the lie: a caller that asked for Nagle
-             * and got success had been told the stack would coalesce its
-             * small writes, and nothing does. It fails instead, so a ported
-             * client sees a refusal it can act on rather than a silent no-op.
-             * A caller asking for 1 is asking for what is already true and is
-             * told so.
-             *
-             * The arguments are still checked, and the socket type still has
-             * to be TCP. Accepting this on a UDP socket, which it did by
-             * returning before looking at anything, told a caller that a level
-             * it does not have was configured.
              */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
@@ -531,8 +437,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 /*
                  * The floor is RFC 791's 68-byte minimum datagram less the two
                  * 20-byte headers. The ceiling is what is left of a maximum
-                 * datagram. A negative went in as a four-billion MSS, which
-                 * NetX Duo stored without complaint.
                  */
                 if (value < 28 || value > 65495)
                     return bsd_fail(SocketBase, AMI_EINVAL);
@@ -555,13 +459,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 return 0;
             }
 
-            /*
-             * The deadline that replaces "wait out the ladder". Written to the
-             * NX socket rather than kept here and polled, so it holds whether
-             * or not a thread is in a call on this socket -- a connection dead
-             * for longer than the caller asked for is dead even if nobody is
-             * currently reading it, and select() has to say so.
-             */
             case TCP_USER_TIMEOUT:
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
@@ -666,8 +563,6 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
-/* ------------------------------------------------------------ getsockopt, */
-
 LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                     register LONG level       __asm("d1"),
                     register LONG optname     __asm("d2"),
@@ -686,9 +581,6 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
         {
             /*
              * SO_ERROR clears on read, but only on a read that happened.
-             * Clearing first meant a bad optval returned EFAULT and destroyed
-             * the pending error on the way out, and a non-blocking connect()
-             * has no other way to find out why it failed.
              */
             case SO_ERROR:
             {
@@ -749,16 +641,6 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 return bsd_opt_get_long(SocketBase, optval, optlen,
                                         (LONG)sock->as_EventMask);
 
-            /*
-             * With nothing set, this reports what the socket got.  A TCP
-             * socket's window is sized from the packet pool and the connected
-             * socket count at creation (ami_bsd_tcp_window()), so
-             * BSD_TCP_WINDOW is only the floor and is not always any socket's
-             * actual window; a UDP socket's queue is sized from the pool by
-             * bsd_udp_queue_max() and is answered in bytes at one segment a
-             * datagram, the same rate setsockopt converts at.  UDP used to
-             * answer BSD_TCP_WINDOW here, which was neither.
-             */
             case SO_RCVBUF:
             {
                 LONG rcvbuf = sock->as_RcvBuf;
@@ -828,13 +710,6 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
         switch (optname)
         {
-            /* Both refuse a socket that has no TCP under it, as the set side
-               does. Answering 1 and 0 there described a level the socket does
-               not have.
-
-               1 is not a stored value: there is no Nagle in the stack, so it
-               is the state of every TCP socket for its whole life, and the set
-               side refuses the only request that would contradict it. */
             case TCP_NODELAY:
                 if ((sock->as_Flags & ASF_TCP) == 0)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
@@ -939,8 +814,6 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
 }
 
-/* ----------------------------------------------------------- IoctlSocket, */
-
 LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                      register ULONG req    __asm("d1"),
                      register APTR argp    __asm("a0"),
@@ -968,9 +841,6 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
             if (argp == NULL)
                 return bsd_fail(SocketBase, AMI_EFAULT);
 
-            /* shutdown(SHUT_RD) makes every later receive an EOF even if
-               packets were queued beforehand. Report what recv() can return,
-               not bytes that are now intentionally hidden. */
             if ((sock->as_Flags & ASF_RDSHUT) != 0)
             {
                 *(LONG *)argp = 0;
@@ -985,10 +855,6 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                 if (length > sock->as_RxOffset)
                     available = length - sock->as_RxOffset;
 
-                /* MSG_PEEK parks one complete UDP/raw record outside its
-                   NetX queue. FIONREAD on a message socket describes that
-                   next record only; adding the queue head would cross a
-                   datagram boundary. Streams intentionally continue below. */
                 if ((sock->as_Flags & ASF_TCP) == 0)
                 {
                     *(LONG *)argp = (LONG)available;
@@ -1035,10 +901,6 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
              * "Is the next byte the urgent one?"  This implementation is
              * always OOBINLINE (see oob.c), so the urgent byte is in the
              * stream and the mark means "one has arrived and recv(MSG_OOB) has
-             * not taken it yet".  A caller that uses SIOCATMARK to decide when
-             * to stop discarding, as telnet does, gets the right answer.  A
-             * caller that expects the byte to be absent from the stream does
-             * not, which is the divergence oob.c documents.
              */
             *(LONG *)argp = ((sock->as_Flags & ASF_OOBHAVE) != 0) ? 1 : 0;
             return 0;
@@ -1054,12 +916,6 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
                                      : 0;
             return 0;
 
-        /*
-         * The interface queries, answered in interfaces.c where the naming
-         * rule and the gather live.  They ignore the socket: BSD requires one
-         * to be passed and says nothing about which, and libpcap opens a
-         * throwaway AF_INET/SOCK_DGRAM for it.
-         */
         case SIOCGIFCONF:
         case SIOCGIFFLAGS:
         case SIOCGIFADDR:
@@ -1075,27 +931,10 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
     }
 }
 
-/* ------------------------------------------------------------------ names, */
-
 /*
  * The IPv4 address a socket bound to INADDR_ANY should report: the address of
  * the interface its packets leave by, so getsockname() names what the peer
  * sees.
- *
- * RFC 6724 is IPv6 only -- src/ipv6/ipv6_srcsel.c has no IPv4 half -- and
- * nothing in NetX Duo picks a v4 source on its own.  _nx_ip_packet_send() stamps the packet with the address of
- * whichever interface the route matched, so the route is the whole question.
- *
- * A connected TCP socket has had it answered already: the connect, or the
- * accept, wrote the interface it settled on into
- * nx_tcp_socket_connect_interface.  Everything else asks the route table,
- * with a null interface hint so the call chooses rather than checks (socket.c
- * has the other form).
- *
- * 127.0.0.0/8 is answered before either, because _nx_ip_route_find() cannot:
- * it walks NX_MAX_PHYSICAL_INTERFACES and NetX Duo keeps the loopback
- * interface past the end of that, so a loopback destination falls through to
- * the default gateway and would name the Ethernet address.
  */
 static BOOL bsd_v4_source_for(AmiSocket *sock, ULONG *addr_out)
 {
@@ -1185,8 +1024,6 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
          * Bound to in6addr_any. This reports the source address the stack
          * puts on a packet to this socket's peer, through the RFC 6724
          * selection in src/ipv6/ipv6_srcsel.c, so the answer matches what the
-         * peer sees. An application cannot choose between link-local and
-         * global for itself.
          */
         ULONG chosen[4];
         LONG  interface_index = -1;
@@ -1219,9 +1056,6 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
             addr.nxd_ip_address.v6[2] = chosen[2];
             addr.nxd_ip_address.v6[3] = chosen[3];
 
-            /* An unbound socket had no local zone to retain.  Once the
-               connected route resolves its wildcard to a non-global address,
-               report the interface that address actually uses. */
             if (scope == 0UL && interface_index >= 0 &&
                 anx6_scope(addr.nxd_ip_address.v6) < 0xEU)
                 scope = (ULONG)interface_index + 1UL;
@@ -1237,13 +1071,6 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         /*
          * Bound to INADDR_ANY.  This reports the source address a packet to
          * this socket's peer would carry, see bsd_v4_source_for() above.  It
-         * used to name nx_ip_interface[0] whatever the peer was, which is the
-         * wrong address on a machine with a second interface and the wrong
-         * address for a loopback connection on every machine.
-         *
-         * Nothing is written when the route cannot be resolved: 0.0.0.0 is
-         * what the socket is bound to, and it is a better answer than an
-         * address the packets do not use.
          */
         if ((sock->as_Flags & ASF_CONNECTED) != 0 &&
             bsd_v4_source_for(sock, &chosen))

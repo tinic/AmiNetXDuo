@@ -1,23 +1,7 @@
 /*
- * kprintf() and mysnprintf() for Fitz, in C.
- *
- * Fitz supplies both in `src/kprintf.asm`, which is vasm source (`XDEF`,
- * `include "lvo/exec_lib.i"`).  This tree has no vasm, and Fitz is built from
- * source here so that a debug build prints
- *
- *     * EAGAIN
- *     * recv error err=-1 len=... errno=...
- *
- * on the serial port, which tools/amiberry-run.sh already captures.  Those two
- * lines are the direct evidence for the defect this harness hunts; without
- * them a lost connection is only ever an inference.
- *
- * So the two entry points are reimplemented here, on the same Exec primitive
- * the original uses (RawDoFmt), with the same semantics, including
- * mysnprintf()'s non-C99 return value, which Fitz's own header calls out
- * ("does not allow str=NULL, size=0") and which its callers rely on.
- *
- * Compiled only into the harness's Fitz build; nothing in src/ sees it.
+ * kprintf() and mysnprintf() for Fitz, in C -- the originals are vasm source
+ * this tree cannot assemble.  Same semantics, including mysnprintf()'s non-C99
+ * return value.  Compiled only into the harness's Fitz build.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -37,28 +21,13 @@
 
 /* ------------------------------------------------- 64-bit division ------- */
 
-/*
- * The 15.2.0 toolchain used when this harness was introduced had neither
- * `__udivdi3` nor `__umoddi3` in libgcc.a.  Fitz's `ds_to_unix()`
- * (src/amiga-common.c) needs one: it composes a Unix timestamp in `uint64_t`
- * and divides the tick field by 50 there.
- *
- * Supplied here rather than by editing Fitz, so the harness tests the released
- * program unmodified.
- *
- * Restoring-shift division: 64 iterations, no multiply, so it is correct on a
- * 68000 as well.  It runs once per timestamp conversion and is nowhere near
- * any measured path.
- */
+/* libgcc.a for this target has neither __udivdi3 nor __umoddi3; Fitz's
+   ds_to_unix() needs one. */
 unsigned long long __udivdi3(unsigned long long n, unsigned long long d);
 unsigned long long __umoddi3(unsigned long long n, unsigned long long d);
 
-/*
- * Written on 32-bit limbs rather than on `unsigned long long` directly,
- * because a variable-count 64-bit shift compiles to `__lshrdi3`/`__ashldi3`
- * which the original libgcc.a did not have either, so the obvious version of
- * this function failed to link for the same reason it existed.
- */
+/* Must use 32-bit limbs: a variable-count 64-bit shift compiles to
+   __lshrdi3/__ashldi3, which this libgcc.a also lacks. */
 typedef struct
 {
     ULONG   hi;
@@ -169,13 +138,8 @@ typedef struct
     char   *sn_Ptr;
 } SnCtx;
 
-/*
- * The original stops incrementing once the buffer is full, so the count is
- * the number of bytes actually written, not the length that would have been
- * needed.  Mirrored exactly: Fitz uses the return value to advance write
- * cursors, and a C99 return would walk them off the end of a truncated
- * buffer.
- */
+/* Counts bytes actually written, not the length needed: Fitz advances write
+   cursors by the return value, so a C99 return would walk off the end. */
 static VOID sn_put(register UBYTE c __asm("d0"),
                    register SnCtx *ctx __asm("a3"))
 {

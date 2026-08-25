@@ -1,11 +1,6 @@
 /*
  * bsdsocket.library, gethostby*, gethostname, gethostid.
  *
- * Everything routes through netstack_resolve()/netstack_resolve_reverse()
- * (include/aminetxduo/netstack.h), which drives the NetX Duo DNS client and
- * the name_resolution configuration. This file only handles the Amiga side: a
- * per-opener struct hostent for the non-reentrant calls, a caller-supplied
- * buffer for the _r ones, and h_errno.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -17,20 +12,10 @@
 /* Resolver timeout, in ThreadX ticks. */
 #define BSD_RESOLVE_TIMEOUT     (30UL * (ULONG)NX_IP_PERIODIC_RATE)
 
-/*
- * gethostname()'s reverse step. Shorter than the lookup above. It runs only
- * when nothing names this machine, and it runs on every call. A name server
- * with no PTR record for the address is the ordinary case, not an error that
- * justifies thirty seconds.
- */
 #define BSD_HOSTNAME_TIMEOUT    (5UL * (ULONG)NX_IP_PERIODIC_RATE)
 
 /*
  * Fill in the per-opener hostent, which the non-reentrant calls return.
- *
- * aliases is the vector from the DEVS:Internet/hosts entry the answer came
- * from, or NULL. Nothing is copied: those strings live in the parsed file
- * buffer, which outlives every hostent (netdb.c does the same).
  */
 static struct hostent *bsd_hostent_fill(struct AmiSocketBase *base,
                                         const char *name, ULONG addr,
@@ -61,20 +46,11 @@ static struct hostent *bsd_hostent_fill(struct AmiSocketBase *base,
 
 /*
  * The _r variants pack the same shape into the caller's buffer:
- *
- *   char *addr_list[2] | char *aliases[1] | ULONG address | name
- *
  * all longword aligned, which is what m68k needs, and which the caller's
  * buffer does not supply.  `buf` is an APTR from an application.  Every field
  * above is written through a pointer derived from it, so an odd `buf` is an
  * address error on a 68000 at the first store.  The buffer is stepped up to a
  * longword boundary here and the slack counted against buflen.  The shape
- * above is therefore true of the pointers actually used, not of the ones the
- * caller passed.
- *
- * The alias vector stays empty here, even where the non-reentrant call fills
- * it.  Aliases need a copy into the caller's buffer, and the caller sized that
- * buffer for a name.  h_name is still the official one.
  */
 static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
                                         struct hostent *hp, APTR buf,
@@ -135,18 +111,6 @@ static struct hostent *bsd_hostent_pack(struct AmiSocketBase *base,
     return hp;
 }
 
-/*
- * netstack error -> h_errno, per the autodoc's own definitions:
- *
- *   TRY_AGAIN       "usually a temporary error ... a retry at some later time
- *                    may succeed"
- *   HOST_NOT_FOUND  "no such host is known"
- *   NO_RECOVERY     "some unexpected server failure ... non-recoverable"
- *
- * A timeout and an empty server list are both temporary, so neither must be
- * reported as HOST_NOT_FOUND. A caller that retries on TRY_AGAIN otherwise
- * gives up on the first missed answer.
- */
 static LONG bsd_herrno_of(LONG status)
 {
     switch (status)
@@ -170,20 +134,6 @@ static LONG bsd_herrno_of(LONG status)
 
 /*
  * What lets Ctrl-C out of a lookup.
- *
- * SetSocketSignals() says SIGINT "is the signal to send to the process which
- * owns the socket in order to abort a blocking operation", and every other
- * blocking path here slices on it (bsd_wait_sliced(), select.c). The resolver
- * did not, so a name server that answers nothing held the calling program for
- * as long as the retransmission ladder ran, and no key released it.
- *
- * netstack_resolve_until() asks this between queries, outside the ThreadX
- * bracket. Read, not consumed: the program's own Ctrl-C handling has to see the
- * signal too.
- *
- * The unit is one query per configured name server rather than the 200 ms
- * bsd_wait_sliced() manages, because a DNS query cannot be resumed, see the
- * note on netstack_resolve_until().
  */
 BOOL bsd_resolve_break(VOID *arg)
 {
@@ -197,13 +147,6 @@ BOOL bsd_resolve_break(VOID *arg)
 
 /*
  * Shared lookup: dotted quad first, then the resolver.
- *
- * The literal test is inet_aton() rather than inet_addr() because
- * "255.255.255.255 ... is a valid broadcast address, but inet_addr() cannot
- * return that value without indicating failure" (bsdsocket.doc BUGS). With
- * inet_addr() the broadcast literal fell through to DNS and gethostbyname()
- * asked a name server about it. inet_aton() reports success separately from
- * the value, so it does not.
  */
 static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
                              ULONG *addr, LONG *he_out)
@@ -241,23 +184,11 @@ static LONG bsd_resolve_name(struct AmiSocketBase *base, const char *name,
     return 0;
 }
 
-/* ---------------------------------------------------------------- vectors, */
-
 /*
  * h_name is "official name of the host" (autodoc), which is not the string
  * the caller asked about whenever the answer came from an alias. The local
  * database knows both, so a DEVS:Internet/hosts answer gets that entry's own
  * name and alias vector.
- *
- * A DNS answer keeps the name given. The canonical name is in the CNAME chain
- * of the A response, which the vendored resolver discards ("The CNAME record
- * to be implemented", third_party/netxduo/addons/dns/nxd_dns.c), and
- * nx_dns_host_by_name_get() returns one address and no name. Recovery of it
- * needs one of two changes. The first is a patch to vendored source
- * (docs/RESEARCH.md 13.2 says no). The second is a build with
- * NX_DNS_ENABLE_EXTENDED_RR_TYPES and a second query per lookup through
- * nx_dns_cname_get(). That call answers for an alias and errors for everything
- * else, so every ordinary name pays a round trip to learn nothing.
  */
 struct hostent *bsd_gethostbyname(register STRPTR name __asm("a0"),
                                   register struct AmiSocketBase *SocketBase __asm("a6"))
@@ -357,8 +288,6 @@ struct hostent *bsd_gethostbyaddr(register STRPTR addr __asm("a0"),
         return NULL;
     }
 
-    /* netstack_resolve_reverse() already answered with the entry's own name
-       when the local database had it, so only the aliases are missing. */
     entry = ami_netdb_host_by_addr(value);
 
     /* sb_HostName already holds the answer. Fill in around it. */
@@ -394,14 +323,6 @@ struct hostent *bsd_gethostbyaddr_r(register STRPTR addr        __asm("a0"),
  * "The returned name is null-terminated unless insufficient space is
  * provided" (autodoc), and the ERRORS list is EFAULT and EPERM only, so a
  * name that does not fit is truncated into the buffer and the call still
- * succeeds. Taken literally: the terminator is dropped when there is no room
- * for it, rather than always written.
- *
- * A caller that always gets a terminated string cannot tell "amig" from a
- * machine called amig. With the documented behaviour, name[namelen - 1] !=
- * '\0' says the answer was cut. A -1/ENAMETOOLONG return, which is what this
- * did, is safer still. It also hands a caller that sized its buffer from this
- * autodoc a failure the autodoc does not list.
  */
 static VOID bsd_hostname_out(char *dst, ULONG size, const char *src)
 {
@@ -440,22 +361,6 @@ static ULONG bsd_first_online_address(VOID)
  * The autodoc's chain is: the first online interface's address looked up in
  * the host database, then reverse resolution, then the HOSTNAME environment
  * variable, then "localhost".
- *
- * A configured name comes first here instead. It is the same string DHCP
- * announces as option 12 and mDNS claims as <name>.local. A gethostname()
- * that disagrees with what the machine tells the network is the worse
- * divergence. The two address-driven steps also need an interface that is up
- * with an address, which is not true at the point most programs ask.
- *
- * The configured name covers the autodoc's HOSTNAME step as well. ENV:HOSTNAME
- * is one of the ranked sources cfg->hostname is resolved from, so what follows
- * is the autodoc's order exactly. netstack_resolve_reverse() consults
- * DEVS:Internet/hosts before it asks a name server, which is the first two
- * steps in one call.
- *
- * The short name, never a fully-qualified one: it is what option 12 announces
- * and what the mDNS label is cut from, and BSD gethostname() returns whatever
- * was set. ShowNetStatus qualifies the name for display.
  */
 int bsd_gethostname(register char *name     __asm("a0"),
                     register size_t namelen __asm("d0"),

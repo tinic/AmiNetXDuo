@@ -10,16 +10,11 @@
  *   protocols   <name>     <num>  [alias...]
  *   services    <name>     <port>/<proto> [alias...]
  *
- * AmiTCP's netdb / netdb-myhost put a HOST keyword in front of the address in
- * the hosts file. That is accepted too, and cannot collide: a standard hosts
- * line always starts with a dotted-quad address and "HOST" is not one. Where
- * the two formats disagree the standard /etc shape wins. AmiTCP's
- * NAMESERVER/DOMAIN lines in the same file are not netdb entries and are
- * skipped here. ami_config_load() feeds them to the resolver instead.
+ * AmiTCP's HOST keyword before the address is accepted too; its
+ * NAMESERVER/DOMAIN lines are not netdb entries and are skipped here.
  *
- * Each file is read once into one buffer and tokenised in place, so an entry's
- * strings point straight into that buffer, three allocations per table, not
- * one per name.
+ * Each file is read once into one buffer and tokenised IN PLACE: an entry's
+ * strings point straight into that buffer.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,11 +43,7 @@ typedef struct NetdbTable
 static NetdbTable ami_netdb[4];
 static BOOL       ami_netdb_loaded;
 
-/*
- * Used when a file is missing entirely, so that "localhost" and
- * getprotobyname("tcp") still work on a half-installed system. Parsed by the
- * same code as the real files.
- */
+/* Used when a file is missing entirely; parsed by the same code. */
 static const char ami_netdb_builtin_hosts[] =
     "127.0.0.1 localhost loopback\n";
 
@@ -89,22 +80,9 @@ static const char ami_netdb_builtin_services[] =
 /* ------------------------------------------------------------------ sizing */
 
 /*
- * Non-destructive first pass: an upper bound on the number of lines and of
- * whitespace-separated tokens. Overshooting costs a few hundred bytes and
- * saves parsing the file twice.
- *
- * It is only an estimate, so netdb_parse() below bounds every write against
- * what was allocated. This counts a run of non-space characters as one token
- * where ami_cfg_tokenize() does not. scan_item() in config_text.c returns an
- * empty, non-NULL token for every `""` pair, so the 64-character run
- * `""""..""` is one token here and thirty-two there. The line
- *
- *     1.2.3.4 host """"""""""""""""""""""""""""""""
- *
- * in DEVS:Internet/hosts wrote twenty-nine pointers past the end of
- * alias_pool. Repeating it scattered the file's whole size in stray pointers
- * over the heap, silently, on a machine with no MMU. Found by the host
- * sanitizer fuzz driver.
+ * Non-destructive first pass: an UPPER BOUND on lines and tokens, not an exact
+ * count -- it counts a run of non-space characters as one token where
+ * ami_cfg_tokenize() can split it.  netdb_parse() must bound every write.
  */
 static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 {
@@ -135,10 +113,8 @@ static VOID netdb_measure(const char *buf, ULONG *lines, ULONG *tokens)
 /* -------------------------------------------------------------- one table */
 
 /*
- * Copy one entry's aliases into the pool and terminate the vector, or return
- * FALSE when the pool cannot hold them. Every alias write in this file goes
- * through here, so a wrong estimate from the sizing pass above can never reach
- * a pointer store.
+ * Copy one entry's aliases into the pool, or FALSE when it cannot hold them.
+ * EVERY alias write in this file must go through here.
  */
 static BOOL netdb_aliases(NetdbTable *table, ULONG pool_size, ULONG *alias_pos,
                           AmiNetdbEntry *entry, char **row, ULONG count,
@@ -252,10 +228,8 @@ static BOOL netdb_parse(NetdbTable *table, NetdbKind kind, char *buf)
             break;
 
         case NETDB_PROTOCOLS:
-            /* The field is the 8-bit IPv4/IPv6 next-header number. Keeping
-               larger values makes getprotobyname() return a protocol that no
-               socket or packet can carry (and values above LONG_MAX emerge
-               through struct protoent as negative numbers). */
+            /* The field is the 8-bit IPv4/IPv6 next-header number; larger
+               values emerge through struct protoent as negative numbers. */
             if (!ami_cfg_parse_ulong(tokens[1], &entry->value) ||
                 entry->value > 255UL)
                 continue;
@@ -371,11 +345,8 @@ VOID ami_netdb_free(VOID)
     ami_netdb_loaded = FALSE;
 }
 
-/*
- * Lookups load on demand. bsdsocket.library must still call ami_netdb_load()
- * from its init path. The load is not re-entrant, and one load up front keeps
- * every later lookup read-only and lock-free.
- */
+/* The load is NOT re-entrant: bsdsocket.library must call ami_netdb_load()
+   from its init path so every later lookup is read-only and lock-free. */
 static const NetdbTable *netdb_table(NetdbKind kind)
 {
     if (!ami_netdb_loaded)

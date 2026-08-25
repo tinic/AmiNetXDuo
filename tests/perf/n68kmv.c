@@ -1,34 +1,11 @@
 /*
- * AmiNetXDuo, the multiversioned inner loops on the machine that is running.
+ * n68kmv -- proves the AttnFlags dispatch of the multiversioned checksum and
+ * copy loops picks the right variant, that every variant agrees with the C
+ * reference, and what each costs on the machine that is running.
  *
- * An AMINETXDUO_CPU=any build carries four assemblies of the checksum and the
- * copy and picks one from AttnFlags (src/net68k/n68k_cpu.c).  Three questions
- * follow from that and this answers all three in one boot:
- *
- *   1. Was the right one picked?  It prints the class it selected and the
- *      AttnFlags it read, so a wrong answer is visible rather than merely
- *      slow.
- *   2. Do they all still agree?  Every variant is checked against the C
- *      reference before anything is timed, because a faster wrong answer is
- *      not a result.  The forms written for a 68020 and up read a longword
- *      from an odd address on purpose, so on a 68000 they are checked at
- *      matched parity only -- there they would be an address error, which is
- *      the whole reason the 68000 has a variant of its own.
- *   3. What do they cost HERE?  n68k_copy.S and n68k_checksum.S both carry a
- *      68060 form that was reasoned about and never measured, because cycle
- *      accounting is off above the 68020 in every emulator this project uses.
- *      On a real 68040 or 68060 this program settles those two bets, and the
- *      dispatched entry is timed beside the variant it lands on, so what the
- *      indirection costs is a number too.
- *
- *   cmake --build build/any --parallel --target n68kmv
- *   AMINETXDUO_RUN_TAG=mv ./tools/amiberry-run.sh -t 300 -m A1200 \
- *       build/any/tests/perf/n68kmv
- *
- * Output goes through RawDoFmt and Write(), not stdio, for the reason
- * cpucal.c does the same: printf drags in newlib's double formatting, the
- * startup then opens mathieeedoubbas.library, and a 3.1 ROM has no such
- * library -- the program exits 20 before main() with nothing measured.
+ * Output must go through RawDoFmt/Write() and not stdio: printf drags in
+ * newlib double formatting, whose startup opens mathieeedoubbas.library, which
+ * a 3.1 ROM does not have -- the program would exit 20 before main().
  *
  * SPDX-License-Identifier: MIT
  */
@@ -47,7 +24,7 @@
 #include "aminetxduo/compat.h"
 
 /* Declared here rather than from net68k.h, which reaches nx_api.h and its own
-   typedef of VOID: bench/copycheck.c takes the same way out. */
+   typedef of VOID. */
 extern ULONG n68k_sum_longwords(const ULONG *p, ULONG count);
 extern VOID  n68k_copy_bytes(UBYTE *to, const UBYTE *from, ULONG len);
 extern VOID  n68k_cpu_select(ULONG attnflags);
@@ -132,8 +109,8 @@ static ULONG  src[BUFW];
 static ULONG  dst[BUFW + 1];
 static ULONG  ref[BUFW + 1];
 
-/* Longword aligned, so the offsets below are the whole of what varies: an
-   array of UBYTE is only guaranteed to start on a word. */
+/* Must be longword aligned: an array of UBYTE only starts on a word, and the
+   sub-longword offsets below are the whole of what is meant to vary. */
 static UBYTE  bsrc[320] __attribute__((aligned(4)));
 static UBYTE  bdst[320] __attribute__((aligned(4)));
 static UBYTE  bref[320] __attribute__((aligned(4)));
@@ -153,10 +130,7 @@ static ULONG rnd(VOID)
 
 static ULONG eclock(VOID)
 {
-    /* Zeroed because -fanalyzer cannot see through ReadEClock(): it is a
-       library call behind an inline stub, so the analyzer reads ev.ev_lo as
-       uninitialised and says so.  tests/perf/cpucal.c carries the same finding
-       in tools/analyzer-baseline.txt; a new file does not get to add one. */
+    /* Zeroed for -fanalyzer, which cannot see through ReadEClock(). */
     struct EClockVal ev = { 0UL, 0UL };
 
     (VOID)ReadEClock(&ev);
@@ -265,17 +239,12 @@ static VOID check_copy_sum(const char *name,
     }
 }
 
-/*
- * `all_offsets` is false on a 68000: only the four matched-parity pairs are
- * legal there for the forms that carry no parity guard, and the other twelve
- * are an address error by design rather than a defect.
- */
+/* `all_offsets` must be false on a 68000: the unguarded forms read a longword
+   from an odd address, which is an address error there. */
 static VOID check_copy(const char *name,
                        VOID (*fn)(UBYTE *, const UBYTE *, ULONG),
                        int all_offsets)
 {
-    /* 0..80 covers the byte tail, the 32-byte threshold and the alignment
-       run; the rest reach the 128-byte block loop and its remainder. */
     static const ULONG extra[] = { 96, 127, 128, 129, 160, 255, 256, 300 };
     ULONG so, dof, k, n;
 
@@ -321,19 +290,8 @@ static VOID check_copy(const char *name,
 }
 
 /* ----------------------------------------------------------- the bench --- */
-/*
- * The E-Clock is 709379 Hz, so a tick is 1409.68 ns and the 1410 below is
- * 0.02% out.  Integer throughout: a double here is mathieeedoubbas.library.
- *
- * Best of three, because the first pass through a routine pays for a cold
- * instruction cache and the host the emulator runs on has its own load.
- *
- * The copy rows for mv20 and mv40 are the SAME instructions at different
- * addresses -- n68k_copy.S has nothing to say about a 68040 -- so the gap
- * between those two is this instrument's floor, and no gap smaller than it
- * is a fact about a variant.  On the A1200 profile it was 7%, which is more
- * than the whole of what the dispatch costs.
- */
+/* The E-Clock is 709379 Hz, so a tick is 1409.68 ns; 1410 is 0.02% out.
+   Integer throughout: a double here would pull in mathieeedoubbas.library. */
 
 #define ROUNDS  3
 
@@ -384,17 +342,9 @@ static VOID bench_copy(const char *name,
           (LONG)best, (LONG)((best * 1410UL) / (len * reps)));
 }
 
-/*
- * The decode, on every machine, from AttnFlags this one does not have.
- *
- * Without this the 68060 branch of n68k_cpu_select() is unreachable in the
- * lab: AFF_68060 is set by 68060.library and not by any ROM here, so `-c
- * 68060` under Amiberry reads 0x0F and lands on the 68040 forms.  A typo in
- * that branch would ship.  Feeding the flag values directly costs nothing and
- * covers all four, and the machine's own answer is put back afterwards.
- *
- * Cumulative, as Exec sets them: a 68060 also raises 010, 020, 030 and 040.
- */
+/* Feeds AttnFlags values this machine does not have, so all four branches are
+   covered.  Flags are cumulative, as Exec sets them: a 68060 also raises 010,
+   020, 030 and 040. */
 static VOID check_decode(VOID)
 {
     static const struct { ULONG attn; VOID (*want)(UBYTE *, const UBYTE *,
@@ -490,10 +440,6 @@ int main(void)
     bench_sum("mv60",   n68k_sum_longwords_mv60, 365, 200);
     bench_sum("chosen", n68k_sum_longwords,      365, 200);
 
-    /* 288 bytes is a copy the bulk loop cares about; 20 is the TCP header,
-       which Profile found is most of what memcpy() is asked for.  The chosen
-       row is the same routine reached through the trampoline, so those two
-       rows differ by the dispatch and nothing else. */
     bench_copy("mv0",    n68k_copy_bytes_mv0,  288, 400);
     bench_copy("mv20",   n68k_copy_bytes_mv20, 288, 400);
     bench_copy("mv40",   n68k_copy_bytes_mv40, 288, 400);

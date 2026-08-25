@@ -1,17 +1,9 @@
 /*
  * AmiNetXDuo, dos.library file access for the configuration layer.
  *
- * This is the only file in src/config that talks to AmigaDOS. Everything else
- * works on memory buffers, which is what lets the host test drive the same
- * parsers. No newlib stdio anywhere: this code lives in a shared library.
- *
- * TWO SEAMS carry AmigaDOS across that line and nothing else does:
- * ami_cfg_read_file() for a file's bytes, and ami_cfg_scan_interfaces() for the
- * names in DEVS:NetInterfaces. The interface list they feed lives in
- * config_list.c, which has neither, and is therefore covered by the host test
- * rather than only by compilation -- the parse ceiling that used to drop the
- * third interface file could only ever be caught by a test that enumerates a
- * drawer, and while the scan was inline here no such test could exist.
+ * The ONLY file in src/config that talks to AmigaDOS, through exactly two
+ * seams: ami_cfg_read_file() and ami_cfg_scan_interfaces().  No newlib stdio:
+ * this code lives in a shared library.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -111,16 +103,8 @@ static BOOL is_icon(const char *name)
 
 /*
  * Every interface file in DEVS:NetInterfaces, handed to `sink` one name at a
- * time.  FALSE only when the drawer itself is missing.
- *
- * A SINK RATHER THAN A LIST because the number of files is not known before
- * the scan and there is no ceiling on it any more: collecting the names first
- * would need its own growing array, and the caller already has one it is
- * filling.  ExNext() drives, config_list.c decides what a name becomes.
- *
- * This is the second of the two seams that keep AmigaDOS in this file, beside
- * ami_cfg_read_file().  test/test_config.c replaces both, which is what lets
- * the host test enumerate a drawer of five and prove none of them is dropped.
+ * time.  FALSE only when the drawer itself is missing.  A sink and not a list:
+ * the file count is not known before the scan and has no ceiling.
  */
 BOOL ami_cfg_scan_interfaces(AmiConfig *cfg, AmiCfgIfaceSink sink)
 {
@@ -188,11 +172,8 @@ static VOID load_resolver(AmiConfig *cfg)
         ami_free(buf);
     }
 
-    /*
-     * AmiTCP installations keep NAMESERVER/DOMAIN/HOST lines in the netdb
-     * file itself. They are read too, but only to fill gaps: a real
-     * name_resolution file always wins.
-     */
+    /* AmiTCP keeps NAMESERVER/DOMAIN/HOST in the netdb file; read only to
+       fill gaps -- a real name_resolution file always wins. */
     if (cfg->resolver.nameserver_count == 0 || cfg->hostname[0] == '\0')
     {
         buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_HOSTS, NULL);
@@ -224,11 +205,7 @@ static VOID load_resolver(AmiConfig *cfg)
         }
     }
 
-    /*
-     * A HOSTNAME or HOST line went straight into cfg->hostname, so the rank is
-     * recorded here rather than through ami_config_hostname_offer(). This is
-     * the strongest source. Nothing later can displace it.
-     */
+    /* The strongest host-name source; nothing later can displace it. */
     if (cfg->hostname[0] != '\0')
         cfg->hostname_source = (UWORD)AMI_HOSTNAME_NAMERES;
 }
@@ -288,11 +265,7 @@ static VOID load_tcp_handler(AmiConfig *cfg)
 }
 
 #ifdef AMINETXDUO_MDNS
-/*
- * Only in an mDNS build. The AmiSdService fields exist in both builds, so
- * nothing else changes. A build with no responder must not open a file it can
- * do nothing with.
- */
+/* mDNS builds only: a build with no responder must not open this file. */
 static VOID load_dnssd(AmiConfig *cfg)
 {
     char *buf = (char *)ami_cfg_read_file(AMI_CFG_FILE_DNSSD, NULL);
@@ -314,18 +287,9 @@ static VOID load_dnssd(AmiConfig *cfg)
 #endif
 
 /*
- * The name an administrator gave this machine, or nothing.
- *
- * load_resolver() has already taken any HOSTNAME or HOST line from
- * DEVS:Internet/name_resolution, which outranks both sources here. The rest of
- * the chain, offered weakest first, is an interface file's ID= and then
- * ENV:HOSTNAME. AmiHostnameSource in aminetxduo/config.h gives the order. DHCP
- * option 12 outranks both and arrives later, once there is a lease.
- *
- * Nothing is invented after that. gethostname() derives a name from the
- * interface address instead (bsdsocket.doc NOTES). DHCP option 12 and the mDNS
- * host label need a network label whatever happens, and carry their own
- * default.
+ * The name an administrator gave this machine, or nothing.  Offered weakest
+ * first: an interface file's ID=, then ENV:HOSTNAME.  AmiHostnameSource in
+ * aminetxduo/config.h gives the full order.  Nothing is invented here.
  */
 static VOID load_hostname(AmiConfig *cfg)
 {
@@ -341,27 +305,13 @@ static VOID load_hostname(AmiConfig *cfg)
 
 /*
  * Fills cfg from DEVS: and allocates nothing the caller has to give back.
- *
- * This function does not call ami_netdb_load(). That load is 12,616 bytes of
- * hosts/networks/protocols/services tables, held in file-scope statics in
- * netdb.c and never reclaimed by AmigaOS when the process exits. Nothing
- * parsed here reads the netdb, and a lookup loads it on its own through
- * netdb_table().
- *
- * A caller that needs the tables asks for them. bsd_lib_open() does, on a
- * Process, because the netstack's own threads then look up names from a
- * context that cannot open a file. Four commands do. The rest allocate nothing
- * here. tools/check-netdb-free.sh checks that anything reaching
- * ami_netdb_load() also links ami_netdb_free().
+ * Deliberately does NOT call ami_netdb_load(); a caller that needs the tables
+ * asks for them, and must then also link ami_netdb_free().
  */
 /*
- * The pool-share dial.  A number, alone in
- * ENV:ANXDPOOLDIV, becomes the divisor over free memory that sizes the packet
- * pool; anything else -- absent, empty, malformed, out of range -- is the
- * fallback, silently, because the variable's whole audience is an experiment
- * that knows it set it.  The range keeps a typo from sizing a pool the machine
- * cannot survive: 4 claims a quarter of free memory, 64 starves the clamp's
- * own floor into effect.
+ * The pool-share dial: a bare number in ENV:ANXDPOOLDIV is the divisor over
+ * free memory that sizes the packet pool.  Anything else is the fallback,
+ * silently.
  */
 ULONG ami_config_pool_divisor(ULONG fallback)
 {
@@ -396,15 +346,9 @@ LONG ami_config_load(AmiConfig *cfg)
     cfg->tcp_handler = TRUE;
 
     /*
-     * The floor up front, and not because the drawer needs it: the netstack
-     * places an attached interface at the NetX Duo slot number it was handed,
-     * so it writes interfaces[slot] by index for slots the parser never
-     * appended.  A machine with an empty DEVS:NetInterfaces and an interface
-     * added later through AddInterfaceTagList() reaches exactly that.
-     * Fatal when it fails, which is the invariant the rest of the tree leans
-     * on: a loaded configuration always has capacity for every slot NetX Duo can
-     * attach, so no later reserve can ever move the list under an attached
-     * interface whose name NetX Duo is holding a pointer to.
+     * The invariant the rest of the tree leans on: a loaded configuration
+     * always has capacity for EVERY slot NetX Duo can attach, so no later
+     * reserve can move the list under an attached interface.  Fatal if unmet.
      */
     if (!ami_config_reserve(cfg, (UWORD)AMI_CFG_IFACE_FLOOR))
         return AMI_CFG_ERR_NOMEM;

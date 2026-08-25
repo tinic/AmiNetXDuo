@@ -1,26 +1,10 @@
 /*
  * anxnet.device, layer 2 of 3: the chip core interface.
  *
- * The SANA-II shell above never names a register.  It calls attach/init/stop/
- * tx/setfilter/intr and is handed whole Ethernet frames back through a
- * callback.  Everything DP8390 lives behind that, so a second core is another
- * NetdevNicOps table and no change at all above this line.
- *
- * That has now been paid for once: ed.c is the second core, for the Hydra and
- * the ASDG LAN Rover, and it changed nothing in this file except adding its
- * name to the list at the bottom.  It shares dp8390.c whole and differs only
- * in the three buffer-access pointers below.  A third core -- an Am7990 LANCE
- * for the A2065 and Ariadne I, which are not in this family and are not
- * implemented here -- would share none of dp8390.c and still fit.
- *
- * What the seam carries for a LANCE to fit later:
- *   - the frame callback takes a complete frame, header included, so a core
- *     that DMAs into host memory hands over a pointer and a core that reads a
- *     FIFO hands over its staging buffer
- *   - the filter is a 64-bit hash plus a promiscuous flag, which is what both
- *     chips implement
- *   - tx takes one linear frame, because that is the only shape either chip
- *     can be given one in
+ * The SANA-II shell above never names a register.  It calls
+ * attach/init/stop/tx/setfilter/intr and is handed whole Ethernet frames back
+ * through a callback, so a second core is another NetdevNicOps table and no
+ * change above this line.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -43,8 +27,8 @@
 
 /*
  * The receive staging buffer takes anything the ring can hold, not just an
- * untagged MTU: an 802.1Q frame is 1518 bytes and a jumbo-ish clone can be
- * longer still, and the alternative to accepting it is resetting the chip.
+ * untagged MTU: an 802.1Q frame is 1518 bytes, and the alternative to accepting
+ * it is resetting the chip.
  */
 #define NETDEV_RXBUF_MAX    2048
 
@@ -56,10 +40,9 @@ typedef struct NetdevNic NetdevNic;
 typedef VOID (*NetdevRxFn)(APTR arg, const UBYTE *frame, UWORD len);
 
 /*
- * The 4-byte header the DP8390 writes in front of every received frame.
- * count is little-endian on the wire side of the chip and is byte-swapped by
- * whichever buffer reader produced it, so by the time the ring walk sees it
- * the field is host order.
+ * The 4-byte header the DP8390 writes in front of every received frame.  count
+ * is byte-swapped by whichever buffer reader produced it, so by the time the
+ * ring walk sees it the field is in host order.
  */
 typedef struct NetdevRing
 {
@@ -82,11 +65,10 @@ struct NetdevNicOps
     /* Drain the ring and every ISR bit. TRUE if this board had work. */
     BOOL  (*intr)(NetdevNic *nic);
     /*
-     * Recover a wedged transmitter: put the chip in a known state and clear
-     * txb_inuse.  The vertical-blank watchdog is the only caller, and it runs
-     * under Disable() at INT3 against a card server at INT2, so this must not
-     * poll for milliseconds.  Every core supplies one, and a core that cannot
-     * wedge supplies a no-op rather than leaving it NULL.
+     * Recover a wedged transmitter: a known state and txb_inuse cleared.  The
+     * vertical-blank watchdog is the only caller and runs under Disable() at
+     * INT3 against a card server at INT2, so this must not poll for
+     * milliseconds.  A core that cannot wedge supplies a no-op, never NULL.
      */
     VOID  (*reset)(NetdevNic *nic);
 };
@@ -102,13 +84,10 @@ struct NetdevNic
     APTR                rx_arg;
 
     /*
-     * The direct-receive path, for cores whose frames arrive through a port
-     * and must be copied by the CPU anyway.  rx_claim asks, from the frame's
-     * first NETDEV_HDR_LEN bytes, where the payload should be drained to; a
-     * NULL answer (or a NULL hook) means stage-and-rx() as always.  A claimed
-     * frame is always finished with rx_claimed once the payload is in place;
-     * neither supported port core has a recoverable error after its drain has
-     * begun.  Both callbacks run in the same context rx() does.
+     * The direct-receive path.  rx_claim asks, from the frame's first
+     * NETDEV_HDR_LEN bytes, where the payload should be drained to; a NULL
+     * answer or a NULL hook means stage-and-rx() as always.  A claimed frame is
+     * always finished with rx_claimed.  Both run in the same context rx() does.
      */
     UBYTE            *(*rx_claim)(APTR arg, const UBYTE *hdr, UWORD frame_len,
                                   APTR *token);
@@ -127,12 +106,8 @@ struct NetdevNic
     /* DP8390 ring state, the names are NetBSD's. */
     /*
      * Where the chip's remote-DMA pointer is, and how much of the burst is
-     * left.  A read of the 4-byte ring header leaves the pointer exactly at
-     * the frame body, so the body's own RSAR/RBCR programming is writing the
-     * chip's own position back to it -- six register accesses, and on the
-     * PCMCIA card a scalar register access costs 8.3 us against 0.5 for a
-     * word through the data port.  dma_left is 0 whenever the position is not
-     * to be trusted.
+     * left: a read of the 4-byte ring header leaves the pointer exactly at the
+     * frame body.  dma_left is 0 whenever the position is not to be trusted.
      */
     LONG                dma_pos;
     UWORD               dma_left;
@@ -146,20 +121,17 @@ struct NetdevNic
     UWORD               txb_inuse;
 
     /*
-     * Hardware transmit completions, successful or not.  Unlike tx_packets,
-     * this means the same thing in every core and is never cleared by a chip
-     * reset.  The vertical-blank watchdog compares snapshots of it so a full
-     * but moving transmit ring is not mistaken for a wedged one.
+     * Hardware transmit completions, successful or not.  Unlike tx_packets this
+     * means the same thing in every core and is never cleared by a chip reset;
+     * the vertical-blank watchdog compares snapshots of it.
      */
     ULONG               tx_completed;
 
     /*
      * EtherLink III.  el3_swap is measured at attach from the window 0
-     * manufacturer ID and is not a card-table knob.  el3_win is the window
-     * last selected, because the part has no readable window register and an
-     * access in the wrong one is not an error it reports.  el3_media is which
-     * transceivers the card was built with, which is read-only and decides
-     * what init switches on.
+     * manufacturer ID and is not a card-table knob.  el3_win is the window last
+     * selected, because the part has no readable window register.  el3_media is
+     * read-only.
      */
     UBYTE               el3_swap;
     UBYTE               el3_win;
@@ -184,36 +156,25 @@ struct NetdevNic
 
     /*
      * How the packet buffer is reached.  NE2000 fills these with its remote
-     * DMA.  A shared-memory DP8390 board (Hydra, LanRover) fills them with
-     * moves through its mapped window, and that is the whole of the
-     * difference between the two.
+     * DMA; a shared-memory DP8390 board fills them with moves through its
+     * mapped window, and that is the whole of the difference.
      */
     VOID  (*read_hdr)(NetdevNic *nic, LONG src, NetdevRing *hdr);
     LONG  (*ring_copy)(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount);
 
     /*
      * A pointer straight into the card's own buffer, or NULL when the frame
-     * must be staged.  Set only by cores whose buffer is memory-mapped.  The
-     * receive path then makes one pass over the frame, with the opener's
-     * CopyToBuff reading the card directly, instead of a copy to rxbuf and a
-     * second copy by CopyToBuff.  hydra.device is 6 KB with no bulk copy loop
-     * in it, which is how it does the same thing.
-     *
-     * NULL for a wrapped frame, and NULL for every port-driven core, where
-     * there is no address to hand out.
+     * must be staged.  Set only by cores whose buffer is memory-mapped; the
+     * receive path then makes one pass over the frame.  NULL for a wrapped
+     * frame, and NULL for every port-driven core.
      */
     const volatile UBYTE *(*frame_at)(NetdevNic *nic, LONG src, UWORD len);
 
     /*
      * Where to frame the next transmit, or NULL to use the unit's staging
-     * buffer.  A core whose transmit buffer is CPU-addressable returns it, and
-     * the opener's CopyFrom writes the card directly.  That is one pass rather
-     * than a build in RAM and a copy across.  The profile priced that copy at
-     * 223 us of a 273 us deficit against a2065.device.
-     *
-     * NULL for the DP8390 cores: an NE2000's buffer is behind a port, and the
-     * Hydra and LAN Rover map a buffer whose byte lanes are not separately
-     * selectable, so CopyFrom writing bytes into it would corrupt both halves.
+     * buffer.  NULL for the DP8390 cores: an NE2000's buffer is behind a port,
+     * and the Hydra and LAN Rover map a buffer whose byte lanes are not
+     * separately selectable, so a byte write would corrupt both halves.
      */
     UBYTE *(*tx_at)(NetdevNic *nic);
     UWORD (*write_buf)(NetdevNic *nic, const UBYTE *frame, UWORD len,
@@ -230,20 +191,17 @@ struct NetdevNic
     ULONG               resets;
 
     /*
-     * What had to be done to the station address before the chip could be
-     * given one.  All three are 0 or 1 and all three are reported, because a
-     * silently repaired or invented hardware address is hard to diagnose
-     * later.
+     * What had to be done to the station address before the chip could be given
+     * one.  All three are 0 or 1 and all three are reported, because a silently
+     * repaired or invented hardware address is hard to diagnose later.
      */
     ULONG               mac_group_fix;  /* group bit cleared out of the PROM  */
     ULONG               mac_from_cis;   /* PROM blank, address taken from CIS */
     ULONG               mac_derived;    /* PROM blank, address derived here   */
 
     /*
-     * The two fields the probe record reads out of a core.  Both are set on
-     * the way through attach() and neither is used for anything else: a core
-     * setting one field is less to remember than a call, and it keeps the
-     * ANXDIAG_ATTACH_FAIL emission in the one place that knows the card.
+     * The two fields the probe record reads out of a core.  Both are set on the
+     * way through attach() and neither is used for anything else.
      */
     UBYTE               diag_why;       /* ANXDIAG_WHY_*, 0 = did not say     */
     UBYTE               mac_source;     /* ANXDIAG_MAC_*                      */
@@ -254,12 +212,9 @@ struct NetdevNic
 
 /*
  * Copy exactly `amount` bytes out of a ring into a caller-sized destination.
- *
- * A 16-bit remote-DMA core is allowed to consume and store a whole final word
- * for an odd request.  The driver's traditional staging buffer has padding
- * for that word; a direct-receive destination does not -- its contract is
- * exactly the payload length.  Keep the odd byte in an aligned two-byte
- * scratch object so the core may round without writing beyond `dst`.
+ * A 16-bit remote-DMA core may consume and store a whole final word for an odd
+ * request and a direct-receive destination has no padding for it, so the odd
+ * byte goes through an aligned two-byte scratch object.
  */
 static inline LONG netdev_ring_copy_exact(NetdevNic *nic, LONG src,
                                           UBYTE *dst, UWORD amount)
@@ -287,12 +242,8 @@ static inline LONG netdev_ring_copy_exact(NetdevNic *nic, LONG src,
 /*
  * The probe record, netdev_diag.c.  Declared here rather than in
  * netdev_internal.h, because the chip cores are half of what records into it.
- * "The command register read back 0x23" is a fact only ne2000.c has, and it is
- * the fact a user needs when a card does not come up.
- *
- * netdev_diag_note() is safe to call from anywhere the probe reaches,
- * including before netdev_diag_reset() and after netdev_diag_unpublish(),
- * where it does nothing.  It cannot fail and it allocates nothing.
+ * netdev_diag_note() is safe to call from anywhere the probe reaches, cannot
+ * fail and allocates nothing.
  */
 VOID  netdev_diag_reset(AnxDiagMark *mark);
 VOID  netdev_diag_note(UWORD code, UWORD card, ULONG value);

@@ -1,27 +1,5 @@
 /*
- * Fixed inputs for the RSASSA-PSS section of tests/x509/test_tls_x509.c.
- * Generated once with OpenSSL and checked in, for the reason
- * x509_test_vectors.h gives.
- *
- *   x509_pss_root       RSA-2048 CA, self-signed PKCS#1 v1.5 SHA-256.  The
- *                       chain walk never checks a root's signature on itself,
- *                       so this one is the anchor and not a PSS case.
- *
- *   x509_pss_int        CA under that root, signed RSASSA-PSS SHA-256.
- *
- *   x509_pss_leaf       pss.test under the intermediate, RSASSA-PSS SHA-256
- *                       with a 32-byte salt.  The two-certificate chain a
- *                       PSS-issuing CA actually presents.
- *
- *   x509_pss_leaf384    pss384.test directly under the root, RSASSA-PSS
- *                       SHA-384.  The digest has to come out of the
- *                       parameters: nothing else in the certificate says it.
- *
- *   x509_pss_leaf_salt  pss-salt.test under the root, RSASSA-PSS SHA-256 with
- *                       the salt at the maximum the modulus allows rather
- *                       than at the digest length.  RFC 4055 permits it and
- *                       a verifier that assumes sLen == hLen refuses it.
- *
+ * RSASSA-PSS test vectors for tests/x509/test_tls_x509.c (RFC 4055).
  * Regenerate with tests/x509/mkpssvectors.sh.
  *
  * SPDX-License-Identifier: MIT

@@ -1,24 +1,7 @@
 /*
- * Force-included ahead of everything in a bsdsocket host test.
- *
- * Three things have to happen before src/bsdsocket sees a header, and the
- * order is the whole content of this file.
- *
- *   1. The C library's own networking headers arrive FIRST, so that when
- *      aminetxduo/in6.h and aminetxduo/cmsg.h ask whether a structure already
- *      exists, the answer is yes.  Those two headers publish what the NDK
- *      leaves out and each definition is behind an AMINETXDUO_HAVE_ guard for
- *      exactly this case; setting the guards here is what stops a redefinition
- *      of what glibc already has.
- *
- *   2. htonl and friends are macros on the Amiga and functions here, and a
- *      macro expanded inside glibc's declaration of the function is a syntax
- *      error.  Undefined after the system headers, so the host's versions win.
- *
- *   3. __asm is neutered.  Every vector in src/bsdsocket declares its
- *      arguments in the m68k register convention, which no host compiler can
- *      honour, and putting a host #ifdef into each of them would be a change
- *      to shipping code for the benefit of a test.
+ * Force-included ahead of everything in a bsdsocket host test.  Ordering is
+ * the content: libc networking headers FIRST, then htonl-family macros
+ * undefined, then __asm neutered, all before src/bsdsocket sees a header.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,12 +24,9 @@
 #undef ntohs
 
 /*
- * The socket options aminetxduo/cmsg.h publishes because the NDK does not.
- * glibc has all of them, with the same names and, for some, different values:
- * IPV6_PKTINFO is 46 on the Amiga and 50 on Linux.  The Amiga's numbers are
- * what the library under test answers to, so ours must win, and a macro
- * redefined without being undefined first is an error under the -Werror the
- * CI build uses.
+ * glibc names these with different values (IPV6_PKTINFO is 46 on the Amiga,
+ * 50 on Linux); the Amiga's must win, and redefining without #undef is an
+ * error under -Werror.
  */
 #undef IPV6_RECVPKTINFO
 #undef IPV6_PKTINFO
@@ -69,56 +49,31 @@
 #undef IP_PKTINFO
 #undef IP_RECVDSTADDR
 
-/*
- * And the one TCP-level option in the same position.  <netinet/tcp.h> is
- * included above for it: options.c reaches that header for TCP_NODELAY, and
- * glibc's TCP_USER_TIMEOUT is 18 where aminetxduo/tcp.h publishes 0x1001,
- * which is what the library answers to.
- */
+/* glibc's TCP_USER_TIMEOUT is 18; aminetxduo/tcp.h publishes 0x1001. */
 #undef TCP_USER_TIMEOUT
 
-/*
- * The one SOL_SOCKET option that is AmiTCP's and not POSIX's, so glibc has no
- * name for it and nothing undefines anything here.  NDK 3.2
- * SANA+RoadshowTCP-IP/netinclude/sys/socket.h:152; doc/bsdsocket.doc under
- * setsockopt describes it as the mask of FD_* events GetSocketEvents()
- * reports.  options.c is the only reader.
- */
+/* AmiTCP-only SOL_SOCKET option; NDK 3.2 netinclude/sys/socket.h:152. */
 #define SO_EVENTMASK 0x2001
 
 #define AMINETXDUO_HAVE_IPV6_MREQ        1
 #define AMINETXDUO_HAVE_SOCKADDR_STORAGE 1
 #define AMINETXDUO_HAVE_IN_PKTINFO       1
 
-/* macOS publishes this tag unconditionally, while glibc hides it unless GNU
- * extensions are selected. The NDK has no definition, so cmsg.h supplies the
- * Amiga ABI shape. Rename that supplied tag after the host headers are safely
- * parsed, just as timeval is renamed below. */
+/* macOS publishes this tag unconditionally; rename cmsg.h's Amiga-shaped tag
+ * after the host headers are parsed, as with timeval below. */
 #if defined(__APPLE__)
 #define in6_pktinfo ami_in6_pktinfo
 #endif
 
-/*
- * Two structures bsdsocket_vectors.h names in prototypes without defining:
- * the Roadshow routing message and the address-allocation message.  Declared
- * here so the prototype does not introduce a type scoped to itself, which
- * -Werror treats as the mistake it usually is.
- */
+/* Named in bsdsocket_vectors.h prototypes; declared here so the prototype
+ * does not introduce a type scoped to itself (-Werror). */
 struct rt_msghdr;
 struct AddressAllocationMessage;
 
 /*
- * The Amiga's struct timeval, under a name of its own.
- *
- * It is {ULONG tv_secs; ULONG tv_micro;} and POSIX's is {time_t tv_sec;
- * suseconds_t tv_usec;}: the same tag, different members, different types.
- * The C library's headers are above and have already defined theirs, and
- * <netinet/in.h> needs that one, so it cannot simply be displaced.
- *
- * Renaming the tag from here down gives the tree's code the Amiga shape while
- * everything the C library declared keeps the POSIX one.  It works because
- * nothing in src/bsdsocket passes a timeval to libc: the only calls that take
- * one are timer.device's, which are the Amiga's.
+ * Amiga timeval is {ULONG tv_secs; ULONG tv_micro;}, POSIX's is a different
+ * shape under the same tag.  Renaming from here down gives the tree's code the
+ * Amiga shape while everything libc already declared keeps the POSIX one.
  */
 #define timeval ami_timeval
 struct ami_timeval {
@@ -128,15 +83,8 @@ struct ami_timeval {
 
 #define __asm(x)
 
-/*
- * And bare `asm`, for the same reason and one more.  library.c opens with a
- * file-scope asm() block holding the m68k "moveq #-1,d0 / rts" that makes the
- * library file harmless when it is run, which no host assembler can take.
- *
- * Safe where __asm is: the C library's headers are included above, before this
- * line, and they spell it __asm__ in any case.  It is defined last so nothing
- * in this file is affected by it either.
- */
+/* library.c opens with a file-scope m68k asm() block no host assembler can
+ * take.  Defined last so nothing in this file is affected by it. */
 #define asm(x)
 
 #endif

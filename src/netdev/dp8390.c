@@ -15,20 +15,7 @@
  * AmiNetXDuo: adapted from NetBSD sys/dev/ic/dp8390.c (rev 1.101) and
  * dp8390var.h.  The register programming, the ring geometry, the receive-ring
  * walk, the interrupt drain and the multicast hash are NetBSD's and are
- * unchanged in behaviour.  What was replaced:
- *
- *   bus_space_*      -> netdev_bus.h, which knows the per-card register stride
- *   struct ifnet     -> a frame callback.  There is no network stack here
- *   struct mbuf      -> one linear staging buffer per unit
- *   ether_multi list -> the shell's reference-counted list, hashed by the
- *                       same ether_crc32_be.  Every X-Surf and X-Surf 100
- *                       rejects the join before the hash is reached, which is
- *                       the defect this driver fixes
- *   splnet/callout   -> Disable()/Enable().  The receive drain runs in the
- *                       interrupt server, so nothing schedules
- *   printf/log       -> counters, read back through S2_GETSPECIALSTATS
- *
- * dp8390reg.h beside this file is NetBSD's, verbatim.
+ * unchanged in behaviour.  dp8390reg.h beside this file is NetBSD's, verbatim.
  *
  * SPDX-License-Identifier: MIT AND BSD-2-Clause-NetBSD
  */
@@ -54,9 +41,8 @@ extern ULONG netdev_time_tx;
 
 /*
  * The chip needs settling time between a command write and the next access.
- * There is no DELAY() in a device, and no timer.device open at interrupt
- * level: a read of a register the chip always answers is both the barrier and
- * the delay, and it is what the Zorro bus cycle costs anyway.
+ * There is no DELAY() in a device and no timer.device open at interrupt level:
+ * a read of a register the chip always answers is both the barrier and delay.
  */
 static VOID dp_pause(NetdevNic *nic, UWORD ticks)
 {
@@ -89,13 +75,9 @@ VOID dp8390_config(NetdevNic *nic)
 
 /*
  * The poll waits for the frame in progress to finish, which at 10 Mbit is at
- * most 1214 us for a maximum-length frame.  The old bound of 5000 was a count
- * with no time behind it, and it is reached every time on an emulated NE2000,
- * which never asserts ISR.RST.  Two register accesses per iteration at 0.82 us
- * each measured 8.1-8.4 ms with interrupts disabled, on the offline, expunge
- * and chip-reset paths.  900 iterations is that same worst-case frame time and
- * a margin.  A real chip asserts RST and leaves long before the bound, so this
- * is a bound for the case where the bit never arrives.
+ * most 1214 us for a maximum-length frame; 900 iterations is that worst case
+ * and a margin.  It is a bound for the case where ISR.RST never arrives, which
+ * is every emulated NE2000.
  */
 #define DP8390_HALT_POLLS   900
 
@@ -109,11 +91,10 @@ VOID dp8390_halt(NetdevNic *nic)
         dp_pause(nic, 1);
 
     /*
-     * STP does not deassert INT.  The chip asserts while ISR & IMR is
-     * non-zero whatever the command register says, and dp8390_intr() returns
-     * without acknowledging anything once running is clear -- so a bit set in
-     * the window before the stop would hold a level-triggered INT2 down
-     * forever, with the server about to be removed.  Mask, then acknowledge.
+     * STP does not deassert INT.  The chip asserts while ISR & IMR is non-zero
+     * whatever the command register says, so a bit set in the window before the
+     * stop would hold a level-triggered INT2 down forever, with the server
+     * about to be removed.  Mask, then acknowledge.
      */
     NIC_PUT(nic, ED_P0_IMR, 0);
     NIC_PUT(nic, ED_P0_ISR, 0xff);
@@ -124,9 +105,8 @@ VOID dp8390_halt(NetdevNic *nic)
 /* ------------------------------------------------- the multicast filter --- */
 
 /*
- * Program PAR0-5 and MAR0-7 from the state the shell keeps.  Page 1 is
- * selected around it and page 0 restored, so this is safe to call on a
- * running chip, which is what every S2_ADDMULTICASTADDRESS does.
+ * Program PAR0-5 and MAR0-7 from the state the shell keeps.  Page 1 is selected
+ * around it and page 0 restored, so this is safe to call on a running chip.
  */
 VOID dp8390_setfilter(NetdevNic *nic)
 {
@@ -154,8 +134,7 @@ VOID dp8390_setfilter(NetdevNic *nic)
 /* ----------------------------------------------------------------- init --- */
 
 /*
- * NetBSD's comment applies unchanged: this order is the National manual's and
- * is not negotiable.
+ * This order is the National manual's and is not negotiable.
  */
 LONG dp8390_init(NetdevNic *nic)
 {
@@ -305,9 +284,8 @@ static VOID dp8390_rint(NetdevNic *nic)
 
     /*
      * The walk cannot legitimately visit more buffers than the ring has pages,
-     * so that is the bound.  The header check below already guarantees forward
-     * progress.  This second bound catches a cycle that steps forward every
-     * time and still never reaches `current`.
+     * so that is the bound.  It catches a cycle that steps forward every time
+     * and still never reaches `current`.
      */
     steps = (UWORD)(nic->rec_page_stop - nic->rec_page_start);
 
@@ -335,19 +313,10 @@ static VOID dp8390_rint(NetdevNic *nic)
         len = (UWORD)((len & ED_PAGE_MASK) | (nlen << ED_PAGE_SHIFT));
 
         /*
-         * Forward progress is checked here rather than implied.
-         *
-         * next_packet is only ever assigned hdr.next_packet, so a header that
-         * points at its own page leaves the loop condition unchanged and this
-         * spins forever, inside the INT2 server with interrupts masked.  That
-         * is a dead machine, not a dropped frame.
-         *
-         * NetBSD is protected from that input by accident: a self-referencing
-         * header underflows nlen, the length comes out >= 0xFE00, and its
-         * `len <= MCLBYTES` test sends it down the reset-and-return arm.  When
-         * the over-length arm here stopped resetting, so that one 802.1Q frame
-         * could not flush the ring, that exit went with it.  The pathological
-         * headers are therefore named explicitly.
+         * Forward progress is checked here rather than implied: next_packet is
+         * only ever assigned hdr.next_packet, so a header that points at its
+         * own page leaves the loop condition unchanged and spins forever,
+         * inside the INT2 server with interrupts masked.
          */
         if (hdr.next_packet < nic->rec_page_start ||
             hdr.next_packet >= nic->rec_page_stop ||
@@ -377,12 +346,9 @@ static VOID dp8390_rint(NetdevNic *nic)
             {
                 /*
                  * The remote-DMA form of el3.c's two-stage drain: the header
-                 * from the ring first, and when the claim answers, the
-                 * payload goes from the ring straight into the stack's
-                 * packet, one copy where there were two.  The ring is
-                 * random-access, so a declined claim costs one 14-byte read
-                 * and nothing else -- the staging path below re-reads from
-                 * the header onward.
+                 * from the ring first, and when the claim answers, the payload
+                 * from the ring straight into the stack's packet.  The ring is
+                 * random-access, so a declined claim costs one 14-byte read.
                  */
                 UBYTE *hdr = (UBYTE *)nic->rxbuf;
 
@@ -431,11 +397,10 @@ rx_done:;
         else
         {
             /*
-             * Too long or impossibly short: skip it and carry on.  Upstream
-             * accepts anything up to a cluster, and this used to reset the
-             * chip instead, which flushes the receive ring and discards every
-             * transmit already reported as sent.  One 802.1Q-tagged frame from
-             * any host on the LAN was enough.
+             * Too long or impossibly short: skip it and carry on.  Resetting
+             * the chip instead flushes the receive ring and discards every
+             * transmit already reported as sent, and one 802.1Q-tagged frame
+             * from any host on the LAN was enough to trigger it.
              */
             nic->rx_errors++;
         }
@@ -463,9 +428,8 @@ rx_done:;
 /* ------------------------------------------------------------ interrupt --- */
 
 /*
- * Drain all of it.  The loop re-reads ISR until it reads zero.  A driver that
- * services one bit per interrupt gets that wrong: the line is level-triggered,
- * and a bit left set is an interrupt that never ends.
+ * Drain all of it: the loop re-reads ISR until it reads zero.  The line is
+ * level-triggered, and a bit left set is an interrupt that never ends.
  */
 BOOL dp8390_intr(NetdevNic *nic)
 {
@@ -497,11 +461,9 @@ BOOL dp8390_intr(NetdevNic *nic)
     for (;;)
     {
         /*
-         * One write clears every bit set here.  An AX88190 or AX88790 needs
-         * the acknowledge retried until it takes.  No such part is in the card
-         * table, and the retry loop lived here behind a flag nothing ever set,
-         * which read as support for an unsupported chip.  See the note in
-         * ne2000.c for what a row for one must add.
+         * One write clears every bit set here.  An AX88190 or AX88790 needs the
+         * acknowledge retried until it takes; no such part is in the card table
+         * and no retry loop is implemented.  See the note in ne2000.c.
          */
         NIC_PUT(nic, ED_P0_ISR, isr);
 
@@ -560,9 +522,9 @@ BOOL dp8390_intr(NetdevNic *nic)
             break;
 
         /*
-         * A board that has been pulled reads 0xff forever, and this loop runs
-         * at interrupt level where nothing else in the machine does.  Give up
-         * and return: the line is level-triggered, so real work re-enters.
+         * A board that has been pulled reads 0xff forever, and this loop runs at
+         * interrupt level where nothing else in the machine does.  Give up and
+         * return: the line is level-triggered, so real work re-enters.
          */
         if (--rounds == 0)
             break;
