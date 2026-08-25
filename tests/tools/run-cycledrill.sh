@@ -218,11 +218,13 @@ cp "$DRILL"                 "$STAGE/CycleDrill"
 # CycleDrill first, and nothing that opens bsdsocket.library before it: an
 # expunge needs lib_OpenCnt 0, and any earlier command would have taken it off
 # zero.  The two reports after it read the stack the drill left running.
+# REPORT is last and opens nothing: a fresh open would erase what it reports.
 cat > "$STAGE/commands.txt" <<EOF
 SYS:CycleDrill CYCLES $GUEST_CYCLES EXPUNGE $GUEST_EXPUNGES SOCKETS $SOCKETS
 SYS:netstat -h
 SYS:ShowNetStatus MEMORY
 SYS:NetShutdown
+SYS:CycleDrill REPORT
 EOF
 
 # ------------------------------------------------------------------ run ---
@@ -258,9 +260,9 @@ pass() { echo "  ok: $*"; }
 # ---- one boot (docs/RESEARCH.md 25) --------------------------------------
 #
 # ToolsSmoke reopens the transcript from the top after a reset, so the first
-# command appearing twice is a reboot and not a hang.  An expunge that took the
-# machine with it lands here first.
-STARTS=$(grep -c "^===== SYS:CycleDrill " "$REPORT" || true)
+# command appearing twice is a reboot and not a hang.  CYCLES is in the needle
+# because the REPORT run at the end of the list is CycleDrill too.
+STARTS=$(grep -c "^===== SYS:CycleDrill CYCLES " "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
     pass "the machine booted once (no reset)"
 elif [ "$STARTS" -gt 1 ]; then
@@ -372,6 +374,27 @@ for phase in expunge cold; do
        gives its memory back"
     fi
 done
+
+# ---- what the shutdown left standing --------------------------------------
+#
+# The TCP: handler holds no open count, so lib_OpenCnt says nothing about it,
+# and bsd_lib_expunge() declines for as long as it exists. Both lines come from
+# the CycleDrill REPORT at the end of the command list.
+TCPLEFT=$(sed -n 's/^tcp: //p' "$REPORT" | tail -1)
+LIBLEFT=$(sed -n 's/^library: //p' "$REPORT" | tail -1)
+
+if [ -z "$TCPLEFT" ]; then
+    fail "the report after NetShutdown did not run, so nothing was checked"
+elif [ "$TCPLEFT" = absent ]; then
+    pass "NetShutdown took TCP: down ($TCPLEFT)"
+else
+    fail "TCP: is still $TCPLEFT after NetShutdown, so no expunge can ever
+       succeed on this machine again"
+fi
+
+# Reported, not asserted: the drill leaves the anchor's reference behind, so
+# this run cannot reach a last close.
+[ -n "$LIBLEFT" ] && echo " , bsdsocket.library after NetShutdown: $LIBLEFT"
 
 # ---- the known SANA-II reader leak ----------------------------------------
 #

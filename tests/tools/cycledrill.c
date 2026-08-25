@@ -110,7 +110,7 @@
 static const char version_tag[] __attribute__((used)) =
     "$VER: CycleDrill 1.0 (31.7.2026)";
 
-#define TEMPLATE    "CYCLES/N,EXPUNGE/N,IFACE/K,SOCKETS/N"
+#define TEMPLATE    "CYCLES/N,EXPUNGE/N,IFACE/K,SOCKETS/N,REPORT/S"
 
 enum
 {
@@ -118,6 +118,7 @@ enum
     ARG_EXPUNGE,
     ARG_IFACE,
     ARG_SOCKETS,
+    ARG_REPORT,
     ARG_COUNT
 };
 
@@ -494,6 +495,63 @@ static ULONG count_tasks(VOID)
     Enable();
 
     return total;
+}
+
+/* Copied under Disable() and printed after: VPrintf() cannot run with
+   interrupts off, and an ln_Name read now can belong to a Task that is gone
+   by the time it is printed. */
+#define TD_MAX      48
+#define TD_NAME     28
+
+static char  td_name[TD_MAX][TD_NAME];
+static UWORD td_held;
+
+static VOID names_of(struct Node *head)
+{
+    struct Node *n;
+
+    for (n = head; n->ln_Succ != NULL && td_held < TD_MAX; n = n->ln_Succ)
+    {
+        const char *s = (const char *)n->ln_Name;
+        UWORD       i = 0;
+
+        if (s != NULL)
+        {
+            while (s[i] != '\0' && i < (TD_NAME - 1))
+            {
+                td_name[td_held][i] = s[i];
+                i++;
+            }
+        }
+        td_name[td_held][i] = '\0';
+        td_held++;
+    }
+}
+
+static VOID dump_tasks(const char *label)
+{
+    UWORD i;
+
+    td_held = 0;
+
+    Disable();
+    names_of(SysBase->TaskReady.lh_Head);
+    names_of(SysBase->TaskWait.lh_Head);
+    Enable();
+
+    for (i = 0; i < td_held; i++)
+    {
+        say("  task %s: %s\n", (LONG)label,
+            (LONG)(td_name[i][0] != '\0' ? td_name[i] : "(unnamed)"), 0, 0);
+    }
+}
+
+/* A Task count taken straight after a re-add catches the bring-up still
+   happening. A second is longer than any thread this stack creates takes to
+   reach its first Wait(). */
+static VOID settle(VOID)
+{
+    Delay(50);
 }
 
 /*
@@ -1241,6 +1299,21 @@ int main(VOID)
         return RETURN_FAIL;
     }
 
+    /* Opens nothing: opening bsdsocket.library starts a stack, and what this
+       reports is what a NetShutdown LEFT. */
+    if (args[ARG_REPORT] != 0)
+    {
+        say("tcp: %s\n", (LONG)(tcp_present() ? "present" : "absent"),
+            0, 0, 0);
+        say("library: %s\n",
+            (LONG)((lib_find() != NULL) ? "resident" : "gone"), 0, 0, 0);
+        say("tasks: %ld\n", (LONG)count_tasks(), 0, 0, 0);
+        say("free: %ld\n", (LONG)AvailMem(MEMF_ANY), 0, 0, 0);
+
+        FreeArgs(rda);
+        return RETURN_OK;
+    }
+
     if (args[ARG_CYCLES])  cycles  = *(LONG *)args[ARG_CYCLES];
     if (args[ARG_EXPUNGE]) expunge = *(LONG *)args[ARG_EXPUNGE];
     if (args[ARG_SOCKETS]) nsocks  = *(LONG *)args[ARG_SOCKETS];
@@ -1350,8 +1423,14 @@ int main(VOID)
         phase_sockets_across_bounce(anchor, iface, nsocks);
         phase_addremove(anchor, iface, nsocks);
 
+        settle();
+
         sample(anchor, &cyc[i]);
         show("cycle", i + 1, &cyc[i]);
+
+        /* The two the drift block compares. */
+        if (i == 0 || i == (cycles - 1))
+            dump_tasks((i == 0) ? "first" : "last ");
     }
 
     /* ---- phase G: expunge refused while we hold it ------------------------ */
@@ -1391,6 +1470,27 @@ int main(VOID)
         check(b->tasks <= a->tasks,
               "no Task or Process was left behind over the cycles",
               (LONG)a->tasks, (LONG)b->tasks);
+
+        /* `later <= earlier` passes on 22, 21, 21 as readily as on 21, 21, 21.
+           Every cycle does the same work, so after settle() every cycle has to
+           end on the same number. */
+        {
+            BOOL steady = TRUE;
+            LONG odd    = -1;
+
+            for (i = 1; i < cycles; i++)
+            {
+                if (cyc[i].tasks != cyc[0].tasks)
+                {
+                    steady = FALSE;
+                    if (odd < 0)
+                        odd = i + 1;
+                }
+            }
+
+            check(steady, "the Task count was the same at every cycle",
+                  (LONG)cyc[0].tasks, odd);
+        }
     }
     else
     {

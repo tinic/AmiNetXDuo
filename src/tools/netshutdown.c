@@ -3,14 +3,15 @@
  *
  *     NetShutdown TIMEOUT/N,QUIET/S
  *
- * The counterpart of AddNetInterface. It does three things, in this order:
+ * The counterpart of AddNetInterface. It does four things, in this order:
  *
  *   1  tells every program that has bsdsocket.library open that the network is
  *      stopping, by sending it SIGBREAKF_CTRL_C (NETCTRL_STACK_NOTIFY), and
  *      waits up to TIMEOUT seconds, five by default, for them to close it.
  *   2  takes every interface down, the same NETCTRL_INTERFACE_DOWN Offline
  *      makes, so nothing is sent and nothing is received afterwards.
- *   3  gives back the reference AddNetInterface left behind
+ *   3  sends TCP: an ACTION_DIE; left standing it declines every expunge.
+ *   4  gives back the reference AddNetInterface left behind
  *      (NETCTRL_STACK_RELEASE), so the last CloseLibrary() shuts the stack
  *      down and hands its memory back rather than finding the library holding
  *      itself up until a reboot.
@@ -161,6 +162,26 @@ static LONG others_holding(struct Library *base, LONG *listed)
     others = (LONG)nsd_openers.hdr.nsh_Available - 1;
 
     return (others > 0) ? others : 0;
+}
+
+/* Never with the DOS list locked: a handler answers on the Task whose port
+   this is, and answering can mean taking that list. 1 gone, 0 refused
+   (a file handle is still open), -1 there was no TCP: at all. */
+static LONG stop_tcp_handler(VOID)
+{
+    struct DosList *dl;
+    struct MsgPort *port = NULL;
+
+    dl = LockDosList(LDF_DEVICES | LDF_READ);
+    dl = FindDosEntry(dl, (STRPTR)"TCP", LDF_DEVICES);
+    if (dl != NULL)
+        port = dl->dol_Task;
+    UnLockDosList(LDF_DEVICES | LDF_READ);
+
+    if (port == NULL)
+        return -1;
+
+    return DoPkt(port, ACTION_DIE, 0, 0, 0, 0, 0) ? 1 : 0;
 }
 
 /* Name the holders the last others_holding() listed, one to a line, then the
@@ -373,6 +394,19 @@ int main(int argc, char **argv)
         }
 
         waited++;
+    }
+
+    /* ---- 2b: take TCP: down ------------------------------------------- */
+
+    /* After step 1, which is what gets a TCP: file handle closed, and before
+       step 3, whose last CloseLibrary() is the expunge this clears. */
+    {
+        LONG died = stop_tcp_handler();
+
+        if (died > 0)
+            say("TCP: stopped\n");
+        else if (died == 0)
+            say("TCP: is still open by a program and was left running\n");
     }
 
     /* ---- 3: give the network's own reference back --------------------- */
