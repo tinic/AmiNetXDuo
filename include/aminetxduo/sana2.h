@@ -150,6 +150,14 @@ typedef struct AmiSana2Stats {
      */
     ULONG   rx_copy_hook;       /* frames filled by either receive hook     */
     ULONG   rx_copy_summed;     /* of those, summed while being filled      */
+    /*
+     * Of rx_copy_hook, how many came through the private direct-receive pair
+     * -- the device drained the wire straight into the packet, no staging
+     * copy.  rx_copy_summed cannot answer this: the staging hook also fuses
+     * its checksum, so both paths bump it.  Zero on a card whose core never
+     * claims, and the one number that says the single-copy path is live.
+     */
+    ULONG   rx_direct_fill;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);

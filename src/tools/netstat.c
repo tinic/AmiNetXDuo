@@ -529,6 +529,13 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
             tool_printf("  copy/direct fill  %10lu    summed while filling %7lu\n",
                         st->rx_copy_hook, st->rx_copy_summed);
 
+        /* Of those fills, the frames the device drained straight into the
+           packet.  Both fill paths fuse a checksum, so only this line says
+           whether the single-copy claim is engaging on this card. */
+        if (st->rx_copy_hook != 0)
+            tool_printf("  direct fills      %10lu    (claimed at the device)\n",
+                        st->rx_direct_fill);
+
         /* Only when there are any: the four causes behind receive errors are
            nothing alike, and the total on its own does not say which one
            fired. */
