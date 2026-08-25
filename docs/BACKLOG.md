@@ -86,3 +86,4 @@ comment beside the code, not an entry here.
 | `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:185` |
 | Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:354` |
+| Five files still carry over-long comment blocks | round 2 proved and landed 412 of 417; these five were still being edited at the deadline | `src/common/crashguard.c`, `src/netdev/test/` |
