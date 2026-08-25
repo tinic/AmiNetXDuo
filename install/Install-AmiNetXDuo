@@ -263,6 +263,25 @@
        "by accident.  8080 is the usual second choice, and the address is "
        "then http://<this machine>:8080/shell."))
 
+(set H_ANXNET
+  (cat "anxnet.device is the SANA-II driver AmiNetXDuo builds itself.  It "
+       "drives the A2065, the Ariadne, the Ariadne II, the X-Surf, the "
+       "X-Surf 100 and NE2000-compatible PCMCIA cards, and it goes where "
+       "SANA-II drivers belong, in DEVS:Networks.\n\n"
+       "COPYING IT CHANGES NOTHING BY ITSELF.  Which driver this machine "
+       "opens is the DEVICE= line in DEVS:NetInterfaces, and this installer "
+       "writes that line with the driver that came with the card.  Nothing "
+       "reads anxnet.device until something names it.\n\n"
+       "Say yes and it is on the disk, current, ready to be tried.  To try "
+       "it, put this in the interface file:\n\n"
+       "\tDEVICE=DEVS:Networks/anxnet.device\n\tCARD=<the card>\n\n"
+       "CheckNetDevice reports what it found on this machine, and the guide "
+       "lists the cards and their CARD= names.\n\n"
+       "Say no on a machine that has no use for it, or to keep an "
+       "anxnet.device that is already there exactly as it is.\n\n"
+       "An existing one is renamed to anxnet.device.old rather than being "
+       "deleted, so the previous driver can be put back by hand."))
+
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
        "whichever TCP/IP stack was installed before -- AmiTCP, Miami, "
@@ -486,6 +505,28 @@
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
 
+; --- and the driver, checked HERE rather than where it is copied ---------
+;
+; Section 5 offers Devs/Networks/anxnet.device.  Whether it goes on is a
+; QUESTION, below; whether the archive has one is not, and a missing one is the
+; same incomplete download as a missing library.  So it is refused in the same
+; place and the same way -- before the welcome, before anything on the disk has
+; been touched -- rather than halfway through with LIBS: already replaced, and
+; rather than quietly turning into "there was nothing to install".
+;
+; Checked at all because the failure the section below exists for is silence.
+; The driver was in every archive and in no installation for eleven releases,
+; so a machine kept whatever anxnet.device it already had; an existence test
+; that skipped the copy without a word would be the same defect wearing a
+; guard.
+(set S_ANXNET (tackon (tackon S_DEVS "Networks") "anxnet.device"))
+
+(if (NOT (exists S_ANXNET (noreq)))
+    (abort "This archive has no Devs/Networks/anxnet.device.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing was changed."))
+
 ; ==========================================================================
 ;  2.  What is already here?
 ; ==========================================================================
@@ -635,6 +676,45 @@
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
+
+; --- the driver this project builds --------------------------------------
+;
+; A QUESTION NOW, AND FOR ELEVEN RELEASES IT WAS NOT EVEN THAT.  The archive
+; has always carried anxnet.device in Devs/Networks/ and this script always
+; left it there, on the reasoning that a new driver is a deliberate step and
+; that the installer is how a WORKING machine gets changed.  The caution was
+; right; leaving the file out of the installation entirely was not the way to
+; act on it.
+;
+; What it actually produced was a machine that kept whatever anxnet.device it
+; already had through every reinstall -- the one file in the archive a user had
+; no way to keep current.  On a real A1200 that cost an evening: reinstall
+; after reinstall silently restored a stale driver, and several build verdicts
+; were recorded against the wrong binary before the installer was suspected.
+;
+; The condition the old note set has been met.  anxnet.device has run on that
+; A1200 continuously since, it is the driver that machine depends on -- the
+; reference 3c589.device will not even open on it -- and the owner has asked
+; for the installer to place it.
+;
+; So it is offered rather than assumed: a page of its own, a default of yes,
+; and a help text that says copying it changes nothing until an interface file
+; names it.  A user upgrading a working machine can see it and decline it.  At
+; NOVICE the page is not drawn and the default is taken, which is the right
+; answer there for the same reason: the copy is inert.
+;
+; askbool returns 1 for the FIRST (choices) string, so yes is written first and
+; no inversion is needed -- see the note at DO_HTTPD, which has the opposite
+; default and does invert.  The first button being the page's default is also
+; what install/test/installdrive.c relies on.
+(set DO_ANXNET
+  (askbool
+    (prompt "Install anxnet.device, the network driver AmiNetXDuo builds?\n\n"
+            "It goes into DEVS:Networks and nothing uses it until an "
+            "interface file names it.")
+    (help    H_ANXNET)
+    (choices "Yes, install it" "No, leave it out")
+    (default 1)))
 
 ; --- where the drawer of documentation goes ------------------------------
 
@@ -1088,16 +1168,61 @@
 
 ; --- anxnet.device -------------------------------------------------------
 ;
-; NOT INSTALLED HERE, DELIBERATELY.  The archive carries it in Devs/Networks/
-; and a user who wants it copies it to DEVS:Networks and names it in
-; DEVS:NetInterfaces/<name> with a CARD= line.  It drives six cards and beats
-; the driver it replaces on every one of them, but it is new and the installer
-; is how a working machine gets changed, so it stays a deliberate step until it
-; has been run somewhere other than here.
+; The decision, and why it changed, is at DO_ANXNET in section 4 beside the
+; question.  This is what a yes does.
 ;
-; One build of it, like everything else in the archive: the drawer had a
-; subdrawer per CPU and does not any more.  Devs/Networks/minimal/ is the
-; minimal stack's copy, built with that stack's options.
+; DEVS:Networks/, NOT DEVS:.  That is the SANA-II convention, it is where
+; P_dev_path looks second and what DEVICE=DEVS:Networks/anxnet.device names,
+; and the drawer does not exist on a stock Workbench -- hence the makedir,
+; which is unconditional inside the yes for the same reason the two in section
+; 6 are: it is content with a drawer that is already there.
+;
+; THE OLD ONE IS RENAMED ASIDE, the way bsdsocket.library and tls.library are
+; above, and for both of their reasons: a driver that is open cannot be copied
+; over, and somebody whose network stops working after an update needs the
+; previous driver still on the disk.  A .old left by an earlier run goes first,
+; so the rename never fails onto a name that is already taken.
+;
+; One build of it, like everything else in the archive.  There is nothing to
+; choose between: no AMINETXDUO_* feature flag reaches src/netdev, so the
+; minimal build compiles the same driver, and dist/make-dist.sh stages it once
+; at the top of Devs/Networks/ rather than once per stack.
+
+(if DO_ANXNET
+  (
+    (working "Installing the network driver")
+
+    (makedir "DEVS:Networks"
+      (prompt "Creating DEVS:Networks, the drawer that SANA-II network "
+              "drivers live in")
+      (help   @makedir-help))
+
+    (if (exists "DEVS:Networks/anxnet.device" (noreq))
+      (
+        (if (exists "DEVS:Networks/anxnet.device.old" (noreq))
+            (delete "DEVS:Networks/anxnet.device.old"
+                    (prompt "Removing the previous "
+                            "DEVS:Networks/anxnet.device.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (rename "DEVS:Networks/anxnet.device"
+                "DEVS:Networks/anxnet.device.old"
+                (prompt "Renaming the old DEVS:Networks/anxnet.device out of "
+                        "the way")
+                (help H_ANXNET))
+      ))
+
+    (copyfiles
+      (prompt (cat "Installing anxnet.device into DEVS:Networks\n\n"
+                   "The SANA-II driver for the A2065, the Ariadne, the "
+                   "Ariadne II, the X-Surf, the X-Surf 100 and NE2000 PCMCIA "
+                   "cards.  Nothing uses it until an interface file names "
+                   "it."))
+      (help   H_ANXNET)
+      (source S_ANXNET)
+      (dest   "DEVS:Networks")
+      (optional "force"))
+  ))
 
 ; --- tls.library, if this archive has one --------------------------------
 ;

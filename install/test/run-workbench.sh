@@ -365,12 +365,14 @@ fi
 }
 
 # THE VENDOR DRIVER, not anxnet.device, and that is a statement about what this
-# gate is for.  The installer deliberately does not install anxnet.device
-# (Install-AmiNetXDuo, the anxnet section): the archive carries it in
-# Devs/Networks/ and a user copies it there by hand.  So what a machine
-# installed from the archive opens is the driver that came with the card, and
-# that is what this run has to boot.  AMINETXDUO_SANA2_VENDOR is set here for
-# the same reason and can still be unset by a caller that wants the other one.
+# gate is for.  The installer now DOES install anxnet.device into
+# DEVS:Networks/ -- asserted below, byte for byte against the archive's copy --
+# but installing it and opening it are two different things: what the interface
+# file this installer writes names is the driver that came with the card, so
+# that is what this run boots.  The device check below is about the file
+# landing; everything after the power cycle is about the vendor driver working.
+# AMINETXDUO_SANA2_VENDOR is set here for the same reason and can still be
+# unset by a caller that wants the other one.
 AMINETXDUO_SANA2_VENDOR="${AMINETXDUO_SANA2_VENDOR:-1}"
 export AMINETXDUO_SANA2_VENDOR
 
@@ -843,6 +845,50 @@ startup_count() {
     echo "${n:-0}"
 }
 
+# -------------------------------------------------- the driver the archive has --
+#
+# THE FILE THE ARCHIVE SHIPPED AND THE INSTALLER DID NOT COPY.
+#
+# Devs/Networks/anxnet.device has been in every archive since the driver
+# existed, and Install-AmiNetXDuo left it there: the reasoning was that a new
+# driver should be a deliberate step.  What it produced was a machine that kept
+# whatever anxnet.device it already had through every reinstall, which is the
+# worst possible property for a file somebody is iterating on.  It cost a real
+# evening on a real A1200 -- reinstall after reinstall silently restored a
+# stale driver, and several build verdicts were recorded against the wrong
+# binary before anybody suspected the installer.
+#
+# So it is asserted after the install, from the drive, against the archive's
+# own copy, rather than read out of the script.  TWO HALVES, and which one a
+# run takes is decided by the card rather than by a flag, so both are gated and
+# neither needs a boot of its own:
+#
+#   the A2065 stages its driver into DEVS: and leaves no DEVS:Networks behind
+#   at all, which is a stock Workbench.  That run -- the one tools/ci.sh's e2e
+#   stage takes -- proves the installer CREATES the drawer and puts the driver
+#   in it;
+#
+#   every other card stages into DEVS:Networks, so the drawer is already there.
+#   Those runs put a STALE anxnet.device in it first, whose contents nothing
+#   else in this tree can produce, and prove the installer replaces it and
+#   keeps the old one beside it as anxnet.device.old.
+#
+# Written before the archive is unpacked, so nothing here can be confused with
+# something the unpack left lying about.
+DEVS_NETWORKS_BEFORE=absent
+STALE_DEVICE=""
+STALE_SUM=""
+if [ -d "$HD/Devs/Networks" ]; then
+    DEVS_NETWORKS_BEFORE=present
+    STALE_DEVICE="$HD/Devs/Networks/anxnet.device"
+    printf 'not a driver: a stale anxnet.device left by an earlier install, %s\n' \
+           "$TAG" > "$STALE_DEVICE"
+    chmod 644 "$STALE_DEVICE"
+    STALE_SUM=$(shasum "$STALE_DEVICE" | cut -d' ' -f1)
+fi
+echo "==> DEVS:Networks before the install: $DEVS_NETWORKS_BEFORE" \
+     "${STALE_DEVICE:+(a stale anxnet.device staged in it)}"
+
 # The download, where a download would be: its own drawer, not the one the
 # installer is going to create.
 mkdir -p "$HD/Unpacked"
@@ -1228,6 +1274,98 @@ done
 check_file Devs/NetInterfaces/eth0
 check_file Devs/Internet/name_resolution
 check_file S/User-Startup
+
+# ---------------------------------------- anxnet.device, into DEVS:Networks --
+#
+# THE ASSERTION THIS FILE EXISTS FOR, and the one whose absence let the archive
+# ship a driver the installer never copied for eleven releases.  Not "a file of
+# that name is there": the bytes, against the copy in the archive that was just
+# installed from, because a stale driver of the right name in the right drawer
+# is the exact failure being gated against and it passes every weaker check.
+ANXNET_ARCHIVE="$HD/Unpacked/AmiNetXDuo/Devs/Networks/anxnet.device"
+ANXNET_INSTALLED=$(amiga_path Devs/Networks/anxnet.device 2>/dev/null || true)
+ANXNET_OLD=$(amiga_path Devs/Networks/anxnet.device.old 2>/dev/null || true)
+
+if [ ! -f "$ANXNET_ARCHIVE" ]; then
+    echo "  MISSING Devs/Networks/anxnet.device IN THE ARCHIVE"
+    echo "!! the archive itself carries no driver, so what the installer did"
+    echo "   with it cannot be asserted here.  dist/make-dist.sh needs it."
+    fail=1
+elif [ -z "$ANXNET_INSTALLED" ] || [ ! -f "$ANXNET_INSTALLED" ]; then
+    echo "  MISSING DEVS:Networks/anxnet.device"
+    echo "!! THE INSTALLER DID NOT INSTALL THE DRIVER."
+    echo "   The archive carries Devs/Networks/anxnet.device"
+    echo "   ($(wc -c < "$ANXNET_ARCHIVE" | tr -d ' ') bytes) and nothing of"
+    echo "   that name is in DEVS:Networks on the installed volume, so a"
+    echo "   machine keeps whatever driver it already had.  The section in"
+    echo "   Install-AmiNetXDuo beside H_ANXNET is what copies it."
+    fail=1
+else
+    _anx_want=$(shasum "$ANXNET_ARCHIVE"    | cut -d' ' -f1)
+    _anx_got=$(shasum  "$ANXNET_INSTALLED"  | cut -d' ' -f1)
+    _anx_bytes=$(wc -c < "$ANXNET_INSTALLED" | tr -d ' ')
+    if [ "$_anx_want" = "$_anx_got" ]; then
+        printf '  ok      %-32s %s bytes\n' \
+               "Devs/Networks/anxnet.device" "$_anx_bytes"
+    else
+        printf '  WRONG   %-32s %s bytes\n' \
+               "Devs/Networks/anxnet.device" "$_anx_bytes"
+        echo "!! DEVS:Networks/anxnet.device is not the driver in the archive."
+        echo "   archive   $_anx_want"
+        echo "   installed $_anx_got"
+        echo "   A driver of the right name that is not this archive's is the"
+        echo "   failure this check exists for: it is what a reinstall used to"
+        echo "   leave behind."
+        fail=1
+    fi
+fi
+
+echo "devs_networks_before=$DEVS_NETWORKS_BEFORE"
+echo "anxnet_installed=$([ -n "$ANXNET_INSTALLED" ] && echo yes || echo no)"
+echo "anxnet_backup=$([ -n "$ANXNET_OLD" ] && echo yes || echo no)"
+
+if [ "$DEVS_NETWORKS_BEFORE" = "absent" ]; then
+    # The stock-Workbench half: there was no drawer, so the installer's own
+    # makedir is the only thing that could have made one.
+    if [ -n "$ANXNET_INSTALLED" ]; then
+        echo "  ok      the installer created DEVS:Networks"
+    else
+        echo "!! there was no DEVS:Networks before the install and there is"
+        echo "   none now: the makedir beside the anxnet copy did not run."
+        fail=1
+    fi
+else
+    # The upgrade half: a stale driver was there, and it must be gone from the
+    # live name and kept under .old.  Its bytes are unique to this run, so
+    # "gone" is checked rather than assumed.
+    if [ -n "$ANXNET_INSTALLED" ] &&
+       [ "$(shasum "$ANXNET_INSTALLED" | cut -d' ' -f1)" = "$STALE_SUM" ]; then
+        echo "!! DEVS:Networks/anxnet.device is still the STALE file this"
+        echo "   harness staged before the install.  A reinstall that leaves"
+        echo "   the old driver in place is the whole defect."
+        fail=1
+    fi
+    if [ -z "$ANXNET_OLD" ] || [ ! -f "$ANXNET_OLD" ]; then
+        echo "!! there was an anxnet.device before the install and there is no"
+        echo "   anxnet.device.old after it.  The old driver was overwritten"
+        echo "   rather than renamed aside, which is not what this installer"
+        echo "   does to bsdsocket.library or to tls.library."
+        fail=1
+    elif [ "$DRIVE_RUNS" = "1" ]; then
+        # One install, so the backup can only be the file staged above.  With
+        # more runs the second install renames the first one's copy over it,
+        # which is correct and says nothing about the staged file.
+        if [ "$(shasum "$ANXNET_OLD" | cut -d' ' -f1)" = "$STALE_SUM" ]; then
+            echo "  ok      the stale driver was kept as anxnet.device.old"
+        else
+            echo "!! anxnet.device.old is not the driver that was there before"
+            echo "   the install, so the previous one is not recoverable."
+            fail=1
+        fi
+    else
+        echo "  ok      anxnet.device.old is present after $DRIVE_RUNS installs"
+    fi
+fi
 
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.

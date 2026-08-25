@@ -102,13 +102,22 @@ archive only when the archive was built with encryption in it, and the
 minimal stack leaves it out.  Its trust store goes to
 DEVS:Internet/certificates.
 
-Two things in the archive are NOT installed, deliberately.  Devs/Networks
-holds anxnet.device, AmiNetXDuo's own SANA-II driver, which drives ten cards
-and replaces the driver that came with them; copy it to DEVS:Networks by
-hand, name it with DEVICE=anxnet.device, and add a CARD= line when the probe
-has to be told which board it is.  CheckNetDevice reports what it found.
-The Developer drawer holds headers, and where headers belong is a property
-of the compiler rather than of this machine.
+Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver, which
+drives ten cards and replaces the driver that came with them.  The installer
+ASKS whether to put it in DEVS:Networks and offers yes; copying it changes
+nothing on its own, because nothing reads it until an interface file names
+it.  To try it, put DEVICE=DEVS:Networks/anxnet.device in
+DEVS:NetInterfaces/<name>, and add a CARD= line when the probe has to be told
+which board it is.  CheckNetDevice reports what it found.  An anxnet.device
+already on the machine is renamed to anxnet.device.old rather than being
+overwritten, so the previous one can be put back.
+
+Earlier releases did not offer it at all, so a machine kept whatever
+anxnet.device it already had through every reinstall.
+
+One thing in the archive is NOT installed, deliberately: the Developer
+drawer holds headers, and where headers belong is a property of the compiler
+rather than of this machine.
 
 A second run of the installer over a working installation is safe.  It
 notices the existing configuration and offers to leave it exactly as it is,
@@ -232,6 +241,8 @@ UNINSTALLING
      Delete C:NetCapture C:NetTrace
      Delete DEVS:NetInterfaces/eth0
      Delete DEVS:Internet/certificates
+     Delete DEVS:Networks/anxnet.device
+     Delete DEVS:Networks/anxnet.device.old
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
 S:User-Startup.  If another stack was installed before, rename
@@ -239,8 +250,8 @@ LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.
 
 A minimal installation has no LIBS:tls.library and no
 DEVS:Internet/certificates, and Delete says so; add QUIET to those two lines
-to silence it.  DEVS:Networks/anxnet.device is there only if it was copied
-across by hand.
+to silence it.  DEVS:Networks/anxnet.device and, if an earlier install left
+one, DEVS:Networks/anxnet.device.old go the same way.
 
 
 STATUS

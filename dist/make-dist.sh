@@ -96,8 +96,11 @@ LIBS=(bsdsocket usergroup)
 # commands: this is interrupt-level packet handling, not a shell command whose
 # hot work happens inside a library.
 #
-# It ships but Install-AmiNetXDuo does NOT install it: a user who wants it
-# copies it across deliberately.  See the note there.
+# Install-AmiNetXDuo installs it, into DEVS:Networks/.  It did not for a long
+# time, and a machine therefore kept whatever driver it already had through
+# every reinstall; install/test/run-workbench.sh now asserts the installed copy
+# byte for byte against the one packed here, so the two cannot drift apart
+# again in silence.
 DEVICES=(netdev/anxnet)
 CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname

@@ -79,8 +79,9 @@
   used. The A2065, the Ariadne, the X-Surf, the CNet, PCMCIA cards and
   uaenet under an emulator are examples. The driver normally comes
   with the card. AmiNetXDuo also ships one SANA-II driver of its own,
-  anxnet.device, which the Installer does not install. See
-  @{"CheckNetDevice" link CHECKNETDEVICE}.
+  anxnet.device. The Installer asks whether to put it in DEVS:Networks
+  and offers yes; nothing uses it until an interface file names it.
+  See @{"CheckNetDevice" link CHECKNETDEVICE}.
 
 
   @{b}Status@{ub}
@@ -181,11 +182,14 @@
   AddNetInterface, Online, Offline, ShowNetStatus, netstat, ping and
   host.
 
-  Two files in the archive are @{b}not@{ub} installed by the Installer, by
-  design. anxnet.device, in Devs/Networks, is AmiNetXDuo's own SANA-II
-  driver. Copy it to DEVS:Networks by hand to use it. The Libs/minimal
-  drawer holds the same stack with the large options compiled out. It
-  is the alternative to the top-level Libs, not an addition to it.
+  Devs/Networks holds anxnet.device, AmiNetXDuo's own SANA-II driver.
+  Copy it to DEVS:Networks, which is what the Installer offers to do.
+  Nothing uses it until an interface file names it with
+  DEVICE=DEVS:Networks/anxnet.device. The Libs/minimal drawer holds
+  the same stack with the large options compiled out. It is the
+  alternative to the top-level Libs, not an addition to it, and it is
+  the one thing here the Installer chooses between rather than copying
+  both.
 
   Then make the two configuration drawers, if they are not there
   already:
