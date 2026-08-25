@@ -475,6 +475,66 @@ LONG value;
     }
 }
 
+/*
+ * What the packet pool's clamps produced, read back.
+ *
+ * ami_bsd_tcp_window() and bsd_udp_queue_max() derive a window and a queue
+ * from the pool at socket-create time and clamp both.  Nothing read either
+ * one, so the machine where the ceilings bind -- an A3000 with 32 MB, where
+ * the pool saturates at AMI_POOL_MAX_PACKETS -- proved nothing about them.
+ *
+ * The literals are written out rather than included.  A gate that computes its
+ * expectation from the thing under test cannot fail when that thing changes;
+ * tests/tools/run-bigmem.sh says the same about the pool figure.
+ */
+#define T_TCP_WINDOW_FLOOR      8192L       /* BSD_TCP_WINDOW               */
+#define T_TCP_WINDOW_CEILING    100352L     /* (512 / 8) * 1568             */
+#define T_UDP_QUEUE_MIN         11680L      /* 8 datagrams x 1460           */
+#define T_UDP_QUEUE_CEILING     93440L      /* 64 datagrams x 1460          */
+
+static VOID t_test_pool_clamps(VOID)
+{
+LONG fd;
+LONG window = 0;
+LONG queue  = 0;
+
+    t_log("the packet pool's clamps");
+
+    fd = bsd_socket(AF_INET, SOCK_STREAM, 0);
+    if (t_check((BOOL)(fd >= 0), "tcp socket", bsd_Errno()))
+    {
+        (VOID)t_get_int(fd, SOL_SOCKET, SO_RCVBUF, &window);
+        (VOID)bsd_CloseSocket(fd);
+    }
+
+    fd = bsd_socket(AF_INET, SOCK_DGRAM, 0);
+    if (t_check((BOOL)(fd >= 0), "udp socket", bsd_Errno()))
+    {
+        (VOID)t_get_int(fd, SOL_SOCKET, SO_RCVBUF, &queue);
+        (VOID)bsd_CloseSocket(fd);
+    }
+
+    /* key=value, so a harness can quote the figures rather than restate them. */
+    t_log("poolclamp_tcp_window=%ld", window);
+    t_log("poolclamp_udp_queue=%ld", queue);
+
+    (VOID)t_check((BOOL)(window >= T_TCP_WINDOW_FLOOR &&
+                         window <= T_TCP_WINDOW_CEILING),
+                  "the TCP window is between its floor and its ceiling",
+                  window);
+
+    (VOID)t_check((BOOL)(queue >= T_UDP_QUEUE_MIN &&
+                         queue <= T_UDP_QUEUE_CEILING),
+                  "the UDP queue is between its floor and its ceiling", queue);
+
+    /*
+     * A UDP socket used to answer BSD_TCP_WINDOW here whatever its queue was,
+     * which is inside the band above and would have passed both checks.
+     */
+    (VOID)t_check((BOOL)(queue % 1460L == 0L),
+                  "the UDP queue answers in whole datagrams", queue);
+}
+
 static VOID t_test_linger(VOID)
 {
 LONG            fd;
@@ -1081,6 +1141,7 @@ int main(void)
 
     t_test_accepted_and_ignored();
     t_test_buffers();
+    t_test_pool_clamps();
     t_test_linger();
     t_test_so_error();
     t_test_type_and_timeouts();

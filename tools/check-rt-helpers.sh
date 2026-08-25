@@ -5,27 +5,17 @@
 #
 #   tools/check-rt-helpers.sh <build-dir>
 #
-# src/common/ami_udivdi3.c is the tree's CPU-dispatched copy of __udivdi3 and
-# its siblings, and it is 32 bytes where libgcc's is 1,576.  An image gets it
-# only if libaminetxduo_m68k_rt.a is on its link line AND something pulls that
-# archive before LTRANS invents the libcall -- GCC does not create the call
-# until RTL expansion, so an archive scanned at WPA time has already been
-# passed over.  Miss either half and the link still succeeds, against libgcc.
+# src/common/ami_udivdi3.c's __udivdi3 is 32 bytes where libgcc's is 1,576.  An
+# image gets it only if libaminetxduo_m68k_rt.a is on the link line AND
+# something pulls that archive before LTRANS invents the libcall; miss either
+# half and the link still succeeds, against libgcc.  Four shipped images did.
 #
-# That is how `iperf`, `httpd`, `Profile` and `profspin` shipped for as long as
-# they did: nothing failed, nothing warned, and the only evidence was in a
-# linker map nobody read.  This reads them.
+# Every image with a HUNK_HEADER in the directories below, found by magic
+# rather than from a list.  A shipped image with NO MAP is a failure and not a
+# skip: an unread map is the silence this exists to end.  tests/ is out of
+# scope -- not installed, and several link none of our code.
 #
-# EVERY SHIPPED IMAGE, FOUND BY ITS MAGIC rather than from a list: a HUNK_HEADER
-# in one of the directories below is an image that ships, and it must have a
-# linker map beside it.  A new target with no map is a FAILURE and not a skip,
-# because an unread map is exactly the silence this exists to end.
-#
-# tests/ is out of scope.  Those images are not installed and several link none
-# of our code at all, so there is nothing of ours for them to prefer.
-#
-# Output is key=value and an exit code: 0 clean, 1 an image took libgcc's,
-# 2 nothing to check.
+# 0 clean, 1 an image took libgcc's, 2 nothing to check.
 #
 # SPDX-License-Identifier: MIT
 

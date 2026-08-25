@@ -149,6 +149,50 @@ RESULTS="$ROOT/build/bigmem-results.txt"
 POOL_CEILING=520
 POOL_MIN=16
 
+# WHAT THE POOL'S CLAMPS PRODUCED, ON THE SAME MEMORY PROFILE.
+#
+# netstack_test above pings.  It never opens a socket, so the receive window
+# and the UDP queue that ami_bsd_tcp_window() and bsd_udp_queue_max() derive
+# from the pool -- and CLAMP -- were the one thing this matrix did not read,
+# on the one machine where the ceilings bind.  sockopt_test drives the shipped
+# library over a run-time SANA-II device, so it needs no card and runs on
+# every arm here; it prints poolclamp_tcp_window= and poolclamp_udp_queue=.
+#
+# A missing binary is a skip and not a failure: run-bigmem is asked for by
+# tools/ci.sh matrix with a build that may not carry tests/sockopt.
+clamp_arm() { # name model cpu fastmem z3mem
+    local name="$1" model="$2" cpu="$3" fast="$4" z3="$5"
+    local tag="matrix-clamp-$name" out win queue
+
+    if [ ! -f "$ROOT/$BUILD/tests/sockopt/sockopt_test" ]; then
+        printf '%-11s clamps SKIP  no sockopt_test in %s\n' \
+               "$name" "$BUILD" >> "$RESULTS"
+        return 0
+    fi
+
+    (
+        export AMINETXDUO_RUN_TAG="$tag"
+        export AMINETXDUO_FASTMEM="$fast"
+        export AMINETXDUO_Z3MEM="$z3"
+        "$ROOT/tests/sockopt/run-sockopt.sh" \
+            -m "$model" -c "$cpu" -t "$TIMEOUT" -b "$BUILD"
+    ) > "$ROOT/build/bigmem-clamps-$name.log" 2>&1
+
+    out="$ROOT/build/amiberry-testhd-$tag/stdout.txt"
+    win=$(sed -n 's/.*poolclamp_tcp_window=//p' "$out" 2>/dev/null | tail -1)
+    queue=$(sed -n 's/.*poolclamp_udp_queue=//p' "$out" 2>/dev/null | tail -1)
+
+    if [ -z "$win" ] || [ -z "$queue" ]; then
+        printf '%-11s clamps FAIL  no poolclamp lines in %s\n' \
+               "$name" "$out" >> "$RESULTS"
+        return 1
+    fi
+
+    printf '%-11s clamps PASS  tcp_window=%-7s udp_queue=%s\n' \
+           "$name" "$win" "$queue" >> "$RESULTS"
+    return 0
+}
+
 run_arm() { # name model cpu fastmem z3mem poolexpect
     local name="$1" model="$2" cpu="$3" fast="$4" z3="$5" expect="$6"
     local tag="matrix-mem-$name"
@@ -192,6 +236,8 @@ run_arm() { # name model cpu fastmem z3mem poolexpect
 
     # Remembered for the saturation check below.
     eval "POOL_${name//-/_}=\${packets:-0}"
+
+    clamp_arm "$name" "$model" "$cpu" "$fast" "$z3" || verdict=FAIL
 
     [ "$verdict" = PASS ] && [ "$poolverdict" = PASS ]
 }

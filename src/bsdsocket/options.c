@@ -750,11 +750,14 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                                         (LONG)sock->as_EventMask);
 
             /*
-             * With nothing set, this reports the window the socket got.  A
-             * TCP socket's is sized from the packet pool and the connected
+             * With nothing set, this reports what the socket got.  A TCP
+             * socket's window is sized from the packet pool and the connected
              * socket count at creation (ami_bsd_tcp_window()), so
              * BSD_TCP_WINDOW is only the floor and is not always any socket's
-             * actual window.
+             * actual window; a UDP socket's queue is sized from the pool by
+             * bsd_udp_queue_max() and is answered in bytes at one segment a
+             * datagram, the same rate setsockopt converts at.  UDP used to
+             * answer BSD_TCP_WINDOW here, which was neither.
              */
             case SO_RCVBUF:
             {
@@ -762,10 +765,16 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
 
                 if (rcvbuf == 0)
                 {
-                    rcvbuf = ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) ==
-                              ASF_TCP)
-                        ? (LONG)sock->as_Nx.tcp.nx_tcp_socket_rx_window_default
-                        : (LONG)BSD_TCP_WINDOW;
+                    if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP)
+                        rcvbuf = (LONG)sock->as_Nx.tcp
+                                     .nx_tcp_socket_rx_window_default;
+                    else if ((sock->as_Flags & (ASF_UDP | ASF_DELETED)) ==
+                             ASF_UDP)
+                        rcvbuf = (LONG)(sock->as_Nx.udp
+                                            .nx_udp_socket_queue_maximum *
+                                        (ULONG)BSD_OPT_SEGMENT);
+                    else
+                        rcvbuf = (LONG)BSD_TCP_WINDOW;
                 }
 
                 return bsd_opt_get_long(SocketBase, optval, optlen, rcvbuf);
