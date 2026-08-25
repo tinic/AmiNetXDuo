@@ -1123,6 +1123,12 @@ typedef struct NetStatusRxBudget
        of its 16 allocatable -- the one budget every green thread's MsgPort
        and AllocSignal draws from. */
     ULONG               nrb_RealmSigBits;
+    /* The gate's free-baton fast path: brackets that took an idle realm's
+       baton directly, against nrb_GateCalls that submitted through the
+       gate and nrb_GateFallback that fell back to the adopted path.  The
+       three partition the brackets; the fast share is what attributes the
+       physical baton-leg numbers.  Appended at the end, offsets hold. */
+    ULONG               nrb_GateFast;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

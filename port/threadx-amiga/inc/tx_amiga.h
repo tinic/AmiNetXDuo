@@ -360,6 +360,24 @@ UINT    tx_amiga_orphan_thread(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_resume(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_suspend(TX_THREAD *thread_ptr);
 
+#ifdef AMINETXDUO_GREEN_REALM
+/*
+ * The take-or-back-out form of tx_amiga_adopt_resume(), for the request
+ * gate's free-baton fast path: resume the cached thread ONLY if that takes
+ * the baton without a round trip (baton free, nothing ready that outranks),
+ * and otherwise undo the resume entirely -- both under one Forbid(), so the
+ * takeability check and the take are one atom and a decline leaves no trace.
+ * TX_SUCCESS took the baton; TX_NOT_DONE declined (submit through the gate);
+ * TX_CALLER_ERROR means what resume's does (fall back to a fresh adoption).
+ */
+UINT    tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr);
+
+/* Whether the baton looks immediately takeable.  A policy hint for the
+   first-ever adoption on a task (no cached thread to try-resume yet); it can
+   be stale by the time it is acted on, and both outcomes stay correct.  */
+UINT    tx_amiga_baton_free(VOID);
+#endif
+
 /*
  * Deregister a thread adopted by some other Task, the teardown path for a
  * cached adoption whose owner is gone or is not the one closing.  The Exec
@@ -478,6 +496,12 @@ typedef struct TX_AMIGA_GREEN_STATS_STRUCT
                                    thread's MsgPort and AllocSignal draws
                                    from this one budget (the signal-bit
                                    audit's live figure)                      */
+    ULONG   gs_gate_fast;       /* bracket calls that took a free baton
+                                   directly (the fast path) instead of
+                                   submitting through the gate; fast+gated
+                                   +fallback partitions the brackets, and
+                                   the fast share is what attributes the
+                                   physical baton-leg numbers               */
 } TX_AMIGA_GREEN_STATS;
 
 VOID    tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
@@ -489,6 +513,11 @@ VOID    tx_amiga_green_stray_wait_note(VOID);
 /* Count one gate decline (the caller fell back to the adopted-baton path;
    the counter lives in the port so it sits beside the calls it divides).  */
 VOID    tx_amiga_gate_fallback_note(VOID);
+
+/* Count one free-baton fast-path take (the caller entered without the gate
+   because the realm was idle; same home as the other two for the same
+   reason).  */
+VOID    tx_amiga_gate_fast_note(VOID);
 
 /* ------------------------------------------------------------------------ */
 /* The request gate (AMINETXDUO_GREEN_REALM)                                 */

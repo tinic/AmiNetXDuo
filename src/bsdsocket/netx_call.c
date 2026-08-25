@@ -202,9 +202,38 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 #ifdef AMINETXDUO_RXPROBE
         ULONG gt0 = ami_budget_clock();
 #endif
+        /*
+         * The free-baton fast path first (cycle 3's verdict: mid-transfer
+         * the baton is takeable far more often than not, and the gate's
+         * unconditional submission was ~1 ms per bracket of pure cost
+         * there).  The try is take-or-back-out under one Forbid() in the
+         * port, so there is no window between "the realm is idle" and
+         * holding the baton; a decline touched nothing and the gate
+         * carries the call exactly as cycle 2 built it.  Either way the
+         * realm's one Wait() stays the only idle point: a fast take means
+         * the realm had nothing ready and it still wakes on its waiters'
+         * signals while we hold the baton; a gated call pokes it
+         * unconditionally from the parker.
+         */
+        LONG fast = ami_netstack_try_enter_cached(&base->sb_NxCaller);
+
+        if (fast == AMI_NET_OK)
+        {
+            /* The baton leg is the fast take, clocked like the old adopt
+               entry so control and green numbers stay comparable. */
+#ifdef AMINETXDUO_RXPROBE
+            ami_budget_baton(ami_budget_clock() - gt0);
+#endif
+            if (base->sb_NxCaller.nc_Adopted)
+                tx_amiga_gate_fast_note();
+            base->sb_NxGated = FALSE;
+            base->sb_NxNest  = 1;
+            return 0;
+        }
+
         if (bsd_gate_enter(base) == 0)
         {
-            /* The baton leg is now the gate handoff: submission to the
+            /* The baton leg is the gate handoff: submission to the
                proxy's first instruction, clocked across the migration. */
 #ifdef AMINETXDUO_RXPROBE
             ami_budget_baton(ami_budget_clock() - gt0);

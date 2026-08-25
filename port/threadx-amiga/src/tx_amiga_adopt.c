@@ -468,6 +468,137 @@ struct Task *me;
 }
 
 
+#ifdef AMINETXDUO_GREEN_REALM
+
+/*
+ * The free-baton fast path of the request gate (docs/GREEN-REALM.md, the
+ * cycle-3 verdict's next item): resume the cached adopted thread ONLY if
+ * that gets the baton immediately -- the same condition the resume fast
+ * path above takes -- and otherwise back out completely, so the caller can
+ * submit through the gate instead of parking.
+ *
+ * Take-or-back-out is one atom.  Everything that mutates ThreadX state in
+ * this port runs in task context under the core Forbid() (interrupt servers
+ * and device ISRs only Signal(); the tick's wheel walk runs on the tick
+ * task or the realm, both under Forbid()), so between the resume and the
+ * decision below nothing can interleave: either the fast-path condition
+ * holds and the take is exactly tx_amiga_adopt_resume()'s, or it does not
+ * and the suspend puts the ready lists back -- _tx_thread_suspend()
+ * recomputes _tx_thread_execute_ptr under the same lock, so no other task
+ * ever observes the transient resume.  No Signal() is posted on either
+ * path, so there is no wake to lose and none to leak: a decline leaves the
+ * machine exactly as it found it.
+ *
+ * _tx_thread_system_state is raised across both the resume and the
+ * back-out suspend for the reason tx_amiga_adopt_suspend() gives: a resume
+ * or suspend that decided to switch would do so on behalf of a Task that
+ * does not hold the baton.
+ */
+UINT tx_amiga_adopt_try_resume(TX_THREAD *thread_ptr)
+{
+
+struct Task *me;
+UINT         taken;
+
+
+    if (thread_ptr == TX_NULL)
+    {
+        return(TX_PTR_ERROR);
+    }
+    if (_tx_amiga_kernel_up == TX_FALSE)
+    {
+        return(TX_NOT_DONE);
+    }
+
+    me =  FindTask((STRPTR) 0);
+
+    Forbid();
+
+    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
+        (thread_ptr -> tx_thread_amiga_task != (VOID *) me) ||
+        (thread_ptr -> tx_thread_id != TX_THREAD_ID) ||
+        (thread_ptr -> tx_thread_state != TX_SUSPENDED) ||
+        ((thread_ptr -> tx_thread_amiga_flags &
+          (TX_AMIGA_THREAD_DIE | TX_AMIGA_THREAD_ORPHANED)) != 0U))
+    {
+        Permit();
+        return(TX_CALLER_ERROR);
+    }
+
+    /* A cheap refusal before touching the lists: somebody holds the baton,
+       or something is already ready (every green thread outranks a caller,
+       so a non-empty execute pointer means the realm has work).  */
+    if ((_tx_thread_current_ptr != TX_NULL) ||
+        (_tx_thread_execute_ptr != TX_NULL) ||
+        (_tx_thread_system_state != ((ULONG) 0)))
+    {
+        Permit();
+        return(TX_NOT_DONE);
+    }
+
+    _tx_thread_system_state++;
+
+    (VOID) _tx_thread_resume(thread_ptr);
+
+    /* The adopt fast-path condition, minus the system_state term (ours is
+       the only raise, and it comes back down either way).  */
+    taken =  ((_tx_thread_current_ptr == TX_NULL) &&
+              (_tx_thread_execute_ptr == thread_ptr))
+             ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+
+    if (taken == ((UINT) TX_FALSE))
+    {
+
+        /* The resume surfaced somebody who outranks us.  Put the thread
+           back and let the caller gate; execute_ptr is recomputed by the
+           suspend, under this same Forbid(), so the transient was never
+           visible.  */
+        (VOID) _tx_thread_suspend(thread_ptr);
+        _tx_thread_system_state--;
+        Permit();
+        return(TX_NOT_DONE);
+    }
+
+    _tx_thread_system_state--;
+
+    _tx_thread_current_ptr =  thread_ptr;
+    thread_ptr -> tx_thread_run_count++;
+    _tx_timer_time_slice =  thread_ptr -> tx_thread_time_slice;
+    ami_budget_hold_start();
+
+    Permit();
+
+    return(TX_SUCCESS);
+}
+
+
+/*
+ * Whether the baton is immediately takeable, for the policy decision that
+ * precedes a first-ever adoption (no cached thread to try-resume yet).  A
+ * hint, not a lock: the answer can be stale by the time it is used, and
+ * both outcomes remain correct -- tx_amiga_adopt_thread() parks under
+ * contention, the gate submits under none.  Only the try-resume above is
+ * the atomic form.
+ */
+UINT tx_amiga_baton_free(VOID)
+{
+
+UINT    answer;
+
+
+    Forbid();
+    answer =  ((_tx_thread_current_ptr == TX_NULL) &&
+               (_tx_thread_execute_ptr == TX_NULL) &&
+               (_tx_thread_system_state == ((ULONG) 0)))
+              ? ((UINT) TX_TRUE) : ((UINT) TX_FALSE);
+    Permit();
+
+    return(answer);
+}
+
+#endif /* AMINETXDUO_GREEN_REALM */
+
+
 UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr)
 {
 

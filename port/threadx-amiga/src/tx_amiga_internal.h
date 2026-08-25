@@ -402,6 +402,7 @@ struct _tx_green_counters
     ULONG   gc_stray_wait;      /* Exec Wait()s caught from green context      */
     ULONG   gc_gate_calls;      /* brackets carried through the request gate   */
     ULONG   gc_gate_fallback;   /* brackets the gate declined                  */
+    ULONG   gc_gate_fast;       /* brackets that took a free baton directly    */
 };
 extern struct _tx_green_counters    _tx_green_counters;
 

@@ -903,6 +903,15 @@ VOID tx_amiga_gate_fallback_note(VOID)
 }
 
 
+VOID tx_amiga_gate_fast_note(VOID)
+{
+
+    Forbid();
+    _tx_green_counters.gc_gate_fast++;
+    Permit();
+}
+
+
 /* ------------------------------------------------------------- statistics --- */
 
 VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
@@ -922,6 +931,7 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
     stats -> gs_stray_wait    =  _tx_green_counters.gc_stray_wait;
     stats -> gs_gate_calls    =  _tx_green_counters.gc_gate_calls;
     stats -> gs_gate_fallback =  _tx_green_counters.gc_gate_fallback;
+    stats -> gs_gate_fast     =  _tx_green_counters.gc_gate_fast;
 
     /* The signal-bit audit's live figure: how many of the 16 allocatable
        bits (16..31; Exec pre-allocates the low half) the realm Task has
@@ -985,6 +995,7 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
         stats -> gs_gate_calls    =  0UL;
         stats -> gs_gate_fallback =  0UL;
         stats -> gs_realm_sigbits =  0UL;
+        stats -> gs_gate_fast     =  0UL;
     }
 }
 
@@ -993,6 +1004,10 @@ VOID tx_amiga_green_stray_wait_note(VOID)
 }
 
 VOID tx_amiga_gate_fallback_note(VOID)
+{
+}
+
+VOID tx_amiga_gate_fast_note(VOID)
 {
 }
 
