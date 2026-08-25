@@ -856,6 +856,20 @@ stage_cross() {
                 fail "a compiler runtime helper calls itself ($name)"
             fi
 
+            # And that no shipped image took libgcc's 64-bit helpers instead of
+            # the dispatched ones.  It links and runs either way; the only
+            # evidence is the linker map.
+            if tools/check-rt-helpers.sh "$BUILD/$name" \
+                    > "$BUILD/$name-rt-helpers.log" 2>&1; then
+                note "$(sed -n 's/^rt_helpers=/runtime helper source: /p' \
+                      "$BUILD/$name-rt-helpers.log" | head -1)"
+            elif grep -q 'rt_helpers=skipped' "$BUILD/$name-rt-helpers.log"; then
+                skip "cross: $(cat "$BUILD/$name-rt-helpers.log")"
+            else
+                cat "$BUILD/$name-rt-helpers.log"
+                fail "a shipped image takes libgcc's 64-bit helpers ($name)"
+            fi
+
             # And that no diagnostic sentence is inside a resident image.  The
             # event ring exists because AMINETXDUO_LOG cannot be on in a
             # shipped build; the moment a message is added to a library "just

@@ -68,7 +68,8 @@ if(AMINETXDUO_USERGROUP_LINK)
     # proportional saving of the three.  This library is small and links
     # aminetxduo_common, which is compiled -ffunction-sections for exactly this
     # and until now had nothing here to collect it.
-    target_link_options(usergroup_library PRIVATE -nostartfiles -Wl,--gc-sections)
+    target_link_options(usergroup_library PRIVATE -nostartfiles -Wl,--gc-sections
+        "-Wl,-Map=$<TARGET_FILE_DIR:usergroup_library>/usergroup.library.map")
 
     # Before the size is printed, as in src/tools/.  2,236 bytes of a 11,352-byte
     # library, the largest proportion anywhere in the archive.

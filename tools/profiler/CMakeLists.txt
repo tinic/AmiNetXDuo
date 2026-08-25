@@ -64,6 +64,14 @@ function(profile_binary name)
     target_link_options(${name} PRIVATE -Wl,--gc-sections)
     target_link_options(${name} PRIVATE
         "-Wl,-Map=$<TARGET_FILE_DIR:${name}>/${name}.map")
+
+    # The one exception to the self-containment above, and it is compiler
+    # runtime rather than stack: -u pulls the archive before LTRANS invents the
+    # 64-bit libcall, which is the only moment it can beat libgcc's copy to it.
+    if(TARGET aminetxduo_m68k_rt)
+        target_link_libraries(${name} PRIVATE aminetxduo_m68k_rt)
+        target_link_options(${name} PRIVATE -Wl,-u,_ami_rt_cpu_select)
+    endif()
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(${name} PRIVATE "${AMIGA_NDK_INCLUDE}")
     endif()

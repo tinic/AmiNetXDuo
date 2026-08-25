@@ -108,8 +108,10 @@ typedef unsigned short      u16;
 /* Compiler-generated libcalls do not exist in GIMPLE.  When this LTO object
    is pulled for ami_rt_cpu_select(), WPA can therefore delete their bodies
    before LTRANS creates the references.  Keep each entry point until the
-   native linker can garbage-collect the genuinely unreferenced sections. */
-#define AMI_LATE_LIBCALL __attribute__((used))
+   native linker can garbage-collect the genuinely unreferenced sections --
+   hence a named section each, which is what --gc-sections collects on without
+   -ffunction-sections over the consumer's whole LTRANS output. */
+#define AMI_LATE_LIBCALL(sym) __attribute__((used, section(".text." #sym)))
 
 static int ami_rt_020;
 static int ami_rt_mulul;
@@ -215,7 +217,7 @@ s64 __moddi3(s64 numerator, s64 denominator);
  * libgcc spells this one __udivmoddi4, and it is a public entry point: GCC
  * calls it directly when it needs both halves.
  */
-AMI_LATE_LIBCALL u64 __udivmoddi4(u64 numerator, u64 denominator,
+AMI_LATE_LIBCALL(__udivmoddi4) u64 __udivmoddi4(u64 numerator, u64 denominator,
                                    u64 *remainder)
 {
 
@@ -302,13 +304,13 @@ u32     rem;
     }
 }
 
-AMI_LATE_LIBCALL u64 __udivdi3(u64 numerator, u64 denominator)
+AMI_LATE_LIBCALL(__udivdi3) u64 __udivdi3(u64 numerator, u64 denominator)
 {
 
     return __udivmoddi4(numerator, denominator, 0);
 }
 
-AMI_LATE_LIBCALL u64 __umoddi3(u64 numerator, u64 denominator)
+AMI_LATE_LIBCALL(__umoddi3) u64 __umoddi3(u64 numerator, u64 denominator)
 {
 
 u64     remainder;
@@ -324,7 +326,7 @@ u64     remainder;
  * suite needs them.  Truncating division, as C99 requires: the quotient rounds
  * toward zero and the remainder takes the sign of the numerator.
  */
-AMI_LATE_LIBCALL s64 __divdi3(s64 numerator, s64 denominator)
+AMI_LATE_LIBCALL(__divdi3) s64 __divdi3(s64 numerator, s64 denominator)
 {
 
 int     negate = 0;
@@ -347,7 +349,7 @@ u64     quotient;
     return(negate ? -(s64)quotient : (s64)quotient);
 }
 
-AMI_LATE_LIBCALL s64 __moddi3(s64 numerator, s64 denominator)
+AMI_LATE_LIBCALL(__moddi3) s64 __moddi3(s64 numerator, s64 denominator)
 {
 
 int     negate = 0;
@@ -463,7 +465,7 @@ u32     mid;
 
 u64 __muldi3(u64 a, u64 b);
 
-AMI_LATE_LIBCALL u64 __muldi3(u64 a, u64 b)
+AMI_LATE_LIBCALL(__muldi3) u64 __muldi3(u64 a, u64 b)
 {
 
 u32     a_lo = (u32)a;
@@ -505,7 +507,7 @@ long __divsi3(long numerator, long denominator);
 long __modsi3(long numerator, long denominator);
 
 
-AMI_LATE_LIBCALL u32 __mulsi3(u32 a, u32 b)
+AMI_LATE_LIBCALL(__mulsi3) u32 __mulsi3(u32 a, u32 b)
 {
 
     if (ami_rt_020 != 0)
@@ -600,7 +602,7 @@ int     bit;
     return(quotient);
 }
 
-AMI_LATE_LIBCALL u32 __udivsi3(u32 numerator, u32 denominator)
+AMI_LATE_LIBCALL(__udivsi3) u32 __udivsi3(u32 numerator, u32 denominator)
 {
 
     if (ami_rt_020 != 0 && denominator != 0)
@@ -613,7 +615,7 @@ AMI_LATE_LIBCALL u32 __udivsi3(u32 numerator, u32 denominator)
     return(ami_udivmodsi(numerator, denominator, 0));
 }
 
-AMI_LATE_LIBCALL u32 __umodsi3(u32 numerator, u32 denominator)
+AMI_LATE_LIBCALL(__umodsi3) u32 __umodsi3(u32 numerator, u32 denominator)
 {
 
 u32     remainder;
@@ -638,7 +640,7 @@ u32     remainder;
 
 /* Truncating, as C99 requires: quotient toward zero, remainder takes the sign
  * of the numerator. */
-AMI_LATE_LIBCALL long __divsi3(long numerator, long denominator)
+AMI_LATE_LIBCALL(__divsi3) long __divsi3(long numerator, long denominator)
 {
 
 int     negate = 0;
@@ -672,7 +674,7 @@ u32     quotient;
     return(negate ? -(long)quotient : (long)quotient);
 }
 
-AMI_LATE_LIBCALL long __modsi3(long numerator, long denominator)
+AMI_LATE_LIBCALL(__modsi3) long __modsi3(long numerator, long denominator)
 {
 
 int     negate = 0;
@@ -745,7 +747,7 @@ u64 __lshrdi3(u64 value, int count);
 u64 __ashldi3(u64 value, int count);
 s64 __ashrdi3(s64 value, int count);
 
-AMI_LATE_LIBCALL u64 __lshrdi3(u64 value, int count)
+AMI_LATE_LIBCALL(__lshrdi3) u64 __lshrdi3(u64 value, int count)
 {
 
 u32     hi = (u32)(value >> 32);
@@ -765,7 +767,7 @@ u32     lo = (u32)value;
             (u64)((lo >> count) | (hi << (32 - count))));
 }
 
-AMI_LATE_LIBCALL u64 __ashldi3(u64 value, int count)
+AMI_LATE_LIBCALL(__ashldi3) u64 __ashldi3(u64 value, int count)
 {
 
 u32     hi = (u32)(value >> 32);
@@ -783,7 +785,7 @@ u32     lo = (u32)value;
             (u64)(lo << count));
 }
 
-AMI_LATE_LIBCALL s64 __ashrdi3(s64 value, int count)
+AMI_LATE_LIBCALL(__ashrdi3) s64 __ashrdi3(s64 value, int count)
 {
 
 long    hi = (long)(u32)((u64)value >> 32);

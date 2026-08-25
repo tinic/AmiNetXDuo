@@ -57,6 +57,10 @@ LVOWaitPort     = -384
 LVOCloseLibrary = -414
 LVOOpenLibrary  = -552
 
+AttnFlags       = 296
+AFFB_68020      = 1
+AFFB_68060      = 7
+
 pr_MsgPort      = 92
 pr_CLI          = 172
 
@@ -112,6 +116,26 @@ _____start:
         jsr     _exit
 
 .Lmain:
+#ifdef AMINETXDUO_TOOL_RT
+| Which form of src/common/ami_udivdi3.c's helpers this machine wants, and the
+| reference that pulls that archive ahead of libgcc's.  The 68060 traps the
+| 64-bit MULU.L/DIVU.L forms, so it gets the 68020 arm without them.
+        moveq   #0,d0
+        moveq   #0,d1
+        btst    #AFFB_68020,a6@(AttnFlags+1)
+        beq.s   .Lrtgo
+        moveq   #1,d0
+        moveq   #1,d1
+        btst    #AFFB_68060,a6@(AttnFlags+1)
+        beq.s   .Lrtgo
+        moveq   #0,d1
+.Lrtgo:
+        move.l  d1,sp@-
+        move.l  d0,sp@-
+        jsr     _ami_rt_cpu_select
+        addq.l  #8,sp
+#endif
+
         move.l  a2,sp@-
         move.l  d2,sp@-
         jsr     _main

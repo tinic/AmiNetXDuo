@@ -137,9 +137,8 @@ if(CMAKE_CROSSCOMPILING)
     # 32-bit five are duplicated, and only because -fno-lto made them visible.
 
     # `used' forces every possible late-libcall definition through WPA.  The
-    # compile option covers non-LTO links; the interface link option reaches
-    # LTRANS, where native sections are actually emitted in an LTO link.  That
-    # lets --gc-sections discard helpers the completed image does not call.
+    # named section on each one (ami_udivdi3.c) is what --gc-sections then
+    # collects on; an interface -ffunction-sections used to do that job and
+    # cost the consumer's WHOLE LTRANS output 0.8-6.6% for it.
     target_compile_options(aminetxduo_m68k_rt PRIVATE -ffunction-sections)
-    target_link_options(aminetxduo_m68k_rt INTERFACE -ffunction-sections)
 endif()

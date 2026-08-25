@@ -21,8 +21,7 @@ comment beside the code, not an entry here.
 | `tls.library` is callable from exactly one compiler | GCC extended-asm stubs, no `.fd` and no pragmas, so SAS/C and vbcc cannot | `include/aminetxduo/tlslib.h`, `developer/sfd/` |
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
 | Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:123` |
-| `main` cannot be built at `-DAMINETXDUO_CPU=68020` at all | the post-link check refuses a 32-bit pcrel branch landing off a function | `cmake/check-pcrel-branches.cmake:188` |
-| `cpu68060` is red and `tls.library` is in the list, not seven test images | twelve targets fail the pcrel check and one of them ships | `cmake/check-pcrel-branches.cmake:188` |
+| `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:141` |
 | `ConfigureNetInterface` answers every renewal error but one with "no DHCP client" | EBUSY from a working client reads as a stackless machine | `src/tools/configurenetinterface.c:1116` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
@@ -39,7 +38,7 @@ comment beside the code, not an entry here.
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
 | A 3c589 holds its only receive buffer across the whole upstack cost | it discards after `nic->rx()` where NetBSD discards at the FIFO; a guess | `src/netdev/el3.c:715` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
-| `iperf` and `httpd` take libgcc's 64-bit helpers, not the dispatched ones | neither links `aminetxduo_m68k_rt`; `__udivdi3` is 1,576 bytes against our 32 | `src/common/ami_udivdi3.c:19` |
+| `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:275` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
 | The pool clamps the 32 MB arm reaches are read by nothing | the TCP and UDP ceilings first bind there and that guest only pings | `src/bsdsocket/socket.c:126`, `:231` |
 | The DHCP/RA absorb runs on the caller's stack with 680 bytes to spare | a 1280-byte frame on any task that resolves or reads live config | `src/netstack/netstack_dns.c:1092` |

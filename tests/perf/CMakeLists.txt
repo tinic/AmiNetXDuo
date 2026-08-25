@@ -57,6 +57,27 @@ foreach(rtgtool rtgmodes rtgbars)
     target_link_options(${rtgtool} PRIVATE -nostartfiles)
 endforeach()
 
+# What libgcc's 64-bit helpers cost against src/common/ami_udivdi3.c's, priced
+# in the guest.  Two links of one source; see the head of rtdiv.c.
+if(CMAKE_CROSSCOMPILING AND TARGET aminetxduo_m68k_rt)
+    foreach(rtdivarm rtdiv_libgcc rtdiv_anxd)
+        add_executable(${rtdivarm}
+            "${CMAKE_SOURCE_DIR}/src/tools/tool_startup.S" rtdiv.c)
+        target_include_directories(${rtdivarm} PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+        if(AMIGA_NDK_INCLUDE)
+            target_include_directories(${rtdivarm} PRIVATE "${AMIGA_NDK_INCLUDE}")
+        endif()
+        target_compile_options(${rtdivarm} PRIVATE -Wall -Wextra)
+        target_link_libraries(${rtdivarm} PRIVATE aminetxduo_common)
+        target_link_options(${rtdivarm} PRIVATE -nostartfiles -Wl,--gc-sections
+            "-Wl,-Map=$<TARGET_FILE_DIR:${rtdivarm}>/${rtdivarm}.map")
+        set_target_properties(${rtdivarm} PROPERTIES OUTPUT_NAME "${rtdivarm}")
+    endforeach()
+
+    target_link_libraries(rtdiv_anxd PRIVATE aminetxduo_m68k_rt)
+    target_compile_definitions(rtdiv_anxd PRIVATE AMINETXDUO_TOOL_RT)
+endif()
+
 # The chipset screen prober: a public HAM6, HAM8 or extra half-brite screen
 # with a deterministic ramp on it, left in front for the console to serve.  A
 # TEST TOOL and nothing ships it; see the file for why a photograph on the

@@ -81,7 +81,7 @@ set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_TOOLS_OPTIMISE}>)
 # Everything the tools include lives behind the core include set; the port
 # headers must stay first (tx_port.h / nx_port.h / nx_user.h).
 function(aminetxduo_add_tool target output)
-    cmake_parse_arguments(TOOL "NX" "" "SOURCES;DEFINES" ${ARGN})
+    cmake_parse_arguments(TOOL "NX;RT" "" "SOURCES;DEFINES" ${ARGN})
 
     # tool_startup.S FIRST, and that position is load-bearing: AmigaOS enters
     # a command at the first byte of the first hunk, the linker script carries
@@ -139,6 +139,17 @@ function(aminetxduo_add_tool target output)
     # profilable at all.
     target_link_options(${target} PRIVATE
         "-Wl,-Map=$<TARGET_FILE_DIR:${target}>/${output}.map")
+
+    # RT: this command does 64-bit arithmetic, so it takes src/common's helpers
+    # rather than libgcc's.  tool_startup.S's ami_rt_cpu_select() call is what
+    # pulls the archive before LTRANS invents the libcall; tools/check-rt-
+    # helpers.sh says which commands need the keyword.  It is not free for one
+    # that does not: the 32-bit five come from newlib otherwise, and ours are
+    # dispatched and 572 bytes larger.
+    if(TOOL_RT AND TARGET aminetxduo_m68k_rt)
+        target_link_libraries(${target} PRIVATE aminetxduo_m68k_rt)
+        target_compile_definitions(${target} PRIVATE AMINETXDUO_TOOL_RT)
+    endif()
 
     if(TOOL_DEFINES)
         target_compile_definitions(${target} PRIVATE ${TOOL_DEFINES})
@@ -383,7 +394,8 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httppath.c httpif.c
                                           httprtg.c
                                           toolsock.c toolbudget.c
                                           iperfcore.c iperfwire.c
-                                          "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+                                          "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
+                                 RT)
 
 target_link_libraries(tool_httpd PRIVATE aminetxduo_rfb)
 
@@ -489,7 +501,8 @@ set_source_files_properties(
 # the part that must not be wrong, and keeping it free of AmigaDOS lets the
 # host test below compile it.
 aminetxduo_add_tool(tool_iperf   iperf    SOURCES iperf.c iperfcore.c
-                                          iperfwire.c toolsock.c toolbudget.c)
+                                          iperfwire.c toolsock.c toolbudget.c
+                                 RT)
 
 # paysum is iperf's content-verifying sibling: iperf proves how many bytes
 # crossed, paysum proves they were the RIGHT bytes.  The receive path computes
@@ -546,6 +559,10 @@ if(AMIGA_NDK_INCLUDE)
     target_include_directories(tool_smoke PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()
 target_compile_options(tool_smoke PRIVATE ${TOOLS_WARNINGS} ${TOOLS_OPTIMISE})
+# A map, so tools/check-rt-helpers.sh can read this one too.  It does not ship,
+# but it is built by the same directory and an unmapped image there is a hole.
+target_link_options(tool_smoke PRIVATE
+    "-Wl,-Map=$<TARGET_FILE_DIR:tool_smoke>/ToolsSmoke.map")
 set_target_properties(tool_smoke PROPERTIES OUTPUT_NAME "ToolsSmoke")
 
 # ------------------------------------------------------- the LVO stubs ---
