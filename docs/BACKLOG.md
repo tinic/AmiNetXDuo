@@ -23,7 +23,6 @@ comment beside the code, not an entry here.
 | Keystroke latency is 3.8x the requirement on a truecolour screen | 178 ms against 47 at 8-bit; every band re-resolves and re-locks the screen | `src/tools/httpfb.c:123` |
 | `main` cannot be built at `-DAMINETXDUO_CPU=68020` at all | the post-link check refuses a 32-bit pcrel branch landing off a function | `cmake/check-pcrel-branches.cmake:188` |
 | The `cpu68060` cross arm has been red on main and nothing says so | seven test images fail the pcrel check; the shipped images build clean | `tests/crypto68k/CMakeLists.txt` |
-| Ten test images link under LTO with no relocation table | zero `HUNK_RELOC32`, so LoadSeg relocates nothing and the guest wedges | `tools/hunkdiff.py`, `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:141` |
 | `ConfigureNetInterface` answers every renewal error but one with "no DHCP client" | EBUSY from a working client reads as a stackless machine | `src/tools/configurenetinterface.c:1116` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |

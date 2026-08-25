@@ -862,6 +862,31 @@ stage_cross() {
                 cat "$BUILD/$name-diag-strings.log"
                 fail "a diagnostic sentence is in a shipped image ($name)"
             fi
+
+            # And that every image the configuration produced would actually
+            # be relocated by LoadSeg.  THE WHOLE TREE, not the four the
+            # deploy carries: the libraries have linked --gc-sections all
+            # along, and it was tests/ -- ten images under the LTO
+            # configuration the release is now built with, plus AtfTcpSocket
+            # in both arms -- that came out at 10 or 12 loadable hunks and
+            # zero HUNK_RELOC32.  Those link, pass every host test, and jump
+            # into low memory on the machine.  A test tier that produces
+            # silently dead binaries cannot gate a release, and nothing here
+            # could tell, because a link-success check cannot see an address
+            # that was never fixed up.  Every configuration, because the
+            # shape depends on the flags: -flto reaches it one way and a
+            # program linking none of our code reaches it another.
+            if tools/check-hunk-relocs.sh "$BUILD/$name" \
+                    > "$BUILD/$name-hunk-relocs.log" 2>&1; then
+                note "$(sed -n 's/^hunk_relocs=/relocation tables: /p' \
+                      "$BUILD/$name-hunk-relocs.log" | head -1)"
+            elif grep -q 'hunk_relocs=skipped' "$BUILD/$name-hunk-relocs.log"; then
+                skip "cross: $(grep 'hunk_relocs=skipped' \
+                      "$BUILD/$name-hunk-relocs.log" | head -1)"
+            else
+                cat "$BUILD/$name-hunk-relocs.log"
+                fail "an image links with no relocation table ($name)"
+            fi
         else
             # `|| tail`, not a bare pipeline.  Under `set -euo pipefail` the
             # grep exits 1 when nothing matches and 141 when head -20 closes

@@ -113,6 +113,44 @@ foreach(prog ${CRYPTO68K_PROGS})
     target_link_libraries(${prog} PRIVATE
         crypto68k_testsupport crypto68k aminetxduo_common)
     set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")
+
+    # --gc-sections IS REQUIRED HERE FOR CORRECTNESS, NOT FOR SIZE.  It is the
+    # second route to the failure tools/profiler/CMakeLists.txt describes, and
+    # it is the one that reaches this directory.
+    #
+    # Under -flto the 64-bit helpers are not calls in any GIMPLE: GCC
+    # synthesises them during RTL expansion, which is LTRANS, after
+    # libaminetxduo_m68k_rt.a has already been scanned.  Nothing here pulls a
+    # member of that archive early -- only tls.library calls
+    # ami_rt_cpu_select() -- so the late call resolves against libgcc.a
+    # instead, and libgcc's members are compiled with debugging information.
+    # ld's amiga backend gives every .debug_* section a LOADABLE data hunk,
+    # and an executable that has one comes out with NO HUNK_RELOC32 at all.
+    # Measured on crypto68k_25519_test, the same objects one flag apart, with
+    # libgcc.a(_muldi3.o) named as the only .debug_* contributor in the map:
+    #
+    #   as linked        10 hunks, 0 relocations, 24,380 bytes
+    #   --gc-sections     3 hunks, 422 relocations, 22,168 bytes
+    #
+    # LoadSeg then relocates nothing.  This program produced a zero-byte
+    # stdout and timed out in the guest where its non-LTO twin passes 16,636
+    # checks, and the ten images in this directory and tests/tls were all in
+    # that shape while every host test stayed green.
+    #
+    # THE OTHER TWO FIXES WERE MEASURED AND ARE WORSE.  -Wl,-u,___muldi3, and
+    # -Wl,-u,_ami_rt_cpu_select to pull the archive before WPA, both link 3
+    # hunks and relocate -- 26,124 and 26,360 bytes against 22,168 -- but each
+    # names ONE helper, and the next thing LTRANS invents brings its own
+    # libgcc member and its own DWARF back.  Collecting the sections answers
+    # the class rather than one member of it.  -Wl,--strip-debug does NOT
+    # work: it leaves all ten hunks, exactly as it did in 9fb69360.
+    #
+    # Every shipped target has passed this all along -- src/tools/,
+    # src/tlslib/, src/netdev/, src/bsdsocket/, src/usergroup/,
+    # tools/profiler/ -- which is the whole reason it surfaced in tests/ and
+    # nowhere else.  tools/check-hunk-relocs.sh is what notices now.
+    target_link_options(${prog} PRIVATE -Wl,--gc-sections)
+
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${prog} POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:${prog}>"
@@ -168,6 +206,10 @@ if(AMINETXDUO_AMISSL_SDK AND TARGET nx_crypto)
     # AmiSSL's headers switch on this to pick the m68k inline stubs over the
     # AmigaOS 4 interfaces.
     target_compile_definitions(crypto68k_amissl PRIVATE __amigaos3__=1)
+
+    # Outside the loop above, same archives, same reason.
+    target_link_options(crypto68k_amissl PRIVATE -Wl,--gc-sections)
+
     if(AMIGA_SIZE)
         add_custom_command(TARGET crypto68k_amissl POST_BUILD
             COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:crypto68k_amissl>"

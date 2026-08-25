@@ -46,6 +46,15 @@ target_compile_options(atf_tcp_socket PRIVATE -Wall -Wextra)
 
 set_target_properties(atf_tcp_socket PROPERTIES OUTPUT_NAME "AtfTcpSocket")
 
+# --gc-sections for correctness, not size, and this one is NOT the LTO
+# instance: it is red in both arms.  This program links none of our code, so
+# it has no libaminetxduo_m68k_rt.a to prefer and its 64-bit divides go
+# straight to libgcc.a(_udivdi3,_umoddi3) -- which carry DWARF, which ld's
+# amiga backend makes loadable, which leaves the image with no relocation
+# table.  Measured: 12 hunks and 0 relocations against 3 and 950.  See
+# tests/crypto68k/CMakeLists.txt for the mechanism at length.
+target_link_options(atf_tcp_socket PRIVATE -Wl,--gc-sections)
+
 if(AMINETXDUO_BSDSOCKET_LINK)
     add_dependencies(atf_tcp_socket bsdsocket_library)
 endif()

@@ -18,6 +18,14 @@ endif()
 
 set_target_properties(tls_bench PROPERTIES OUTPUT_NAME "tls_bench")
 
+# --gc-sections for correctness, not size: under -flto the 64-bit helpers
+# are synthesised in LTRANS, after libaminetxduo_m68k_rt.a is scanned, so
+# libgcc.a(_muldi3) is pulled instead of ours, and its DWARF becomes
+# loadable data hunks with no relocation table behind them.  The
+# measurement and the two rejected alternatives are in
+# tests/crypto68k/CMakeLists.txt.
+target_link_options(tls_bench PRIVATE -Wl,--gc-sections)
+
 if(AMIGA_SIZE)
     add_custom_command(TARGET tls_bench POST_BUILD
         COMMAND "${AMIGA_SIZE}" "$<TARGET_FILE:tls_bench>"
@@ -46,6 +54,14 @@ foreach(prog tls_handshake tls_decompose tls_interop)
     endif()
 
     set_target_properties(${prog} PROPERTIES OUTPUT_NAME "${prog}")
+
+    # --gc-sections for correctness, not size: under -flto the 64-bit helpers
+    # are synthesised in LTRANS, after libaminetxduo_m68k_rt.a is scanned, so
+    # libgcc.a(_muldi3) is pulled instead of ours, and its DWARF becomes
+    # loadable data hunks with no relocation table behind them.  The
+    # measurement and the two rejected alternatives are in
+    # tests/crypto68k/CMakeLists.txt.
+    target_link_options(${prog} PRIVATE -Wl,--gc-sections)
 
     if(AMIGA_SIZE)
         add_custom_command(TARGET ${prog} POST_BUILD
@@ -146,5 +162,5 @@ endif()
 
 # A link map so tools/profiler/profreport.py can recover file-static symbols;
 # without it every sample in a static lands on the preceding global.
-target_link_options(tls_https PRIVATE
+target_link_options(tls_https PRIVATE -Wl,--gc-sections
     "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/tls_https.map")
