@@ -344,14 +344,12 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
 }
 
 /*
- * TRUE when at least one interface will be given its address at run time.
+ * TRUE when at least one interface will be given its IPv4 address at run time.
  *
- * IPv6 counts. This gates "there is no default route": a router advertisement
- * carries one, a DHCPv6 lease can, and an IPv6-only machine was told it had
- * nowhere to send packets because the file it was reading had no IPv4 GATEWAY
- * in it and never would.
+ * IPv4 ONLY. Everything this gates is an IPv4 fact -- an IPv4 GATEWAY, an IPv4
+ * name server -- and no router advertisement supplies either.
  */
-static BOOL any_dynamic(const AmiConfig *cfg)
+static BOOL any_dynamic_v4(const AmiConfig *cfg)
 {
     UWORD i;
 
@@ -361,13 +359,6 @@ static BOOL any_dynamic(const AmiConfig *cfg)
 
         if (ifc->iptype != AMI_IPTYPE_STATIC &&
             ifc->iptype != AMI_IPTYPE_NONE)
-            return TRUE;
-
-        if (ifc->ip6type == AMI_IP6TYPE_AUTO ||
-            ifc->ip6type == AMI_IP6TYPE_DHCP)
-            return TRUE;
-
-        if (ifc->have_gateway6)
             return TRUE;
     }
 
@@ -560,9 +551,11 @@ static VOID check_gateway(const AmiConfig *cfg)
     {
         /*
          * No default route is only a problem when nothing will supply one: a
-         * DHCP lease carries the router with it.
+         * DHCP lease carries the router with it. A machine with no static IPv4
+         * address has no IPv4 to route, which is the IPv6-only case.
          */
-        if (any_dynamic(cfg) || cfg->interface_count == 0)
+        if (any_dynamic_v4(cfg) || cfg->interface_count == 0 ||
+            !any_static_address(cfg))
             return;
 
         finding("DEVS:Internet/routes", 0, AMI_CFG_PROBLEM_WARN);
@@ -603,7 +596,7 @@ static VOID check_gateway(const AmiConfig *cfg)
      * to it never leave. Only checkable with a static address: with DHCP the
      * lease decides, and the router it hands out is correct by construction.
      */
-    if (!any_static_address(cfg) || any_dynamic(cfg))
+    if (!any_static_address(cfg) || any_dynamic_v4(cfg))
         return;
 
     if (network_holding(cfg, cfg->default_gateway) >= 0)
@@ -630,7 +623,8 @@ static VOID check_resolver(const AmiConfig *cfg)
     if (cfg->resolver.nameserver_count == 0)
     {
         /* DHCP supplies name servers with the lease, as check_gateway() says. */
-        if (any_dynamic(cfg) || cfg->interface_count == 0)
+        if (any_dynamic_v4(cfg) || cfg->interface_count == 0 ||
+            !any_static_address(cfg))
             return;
 
         finding(path, 0, AMI_CFG_PROBLEM_WARN);
@@ -641,7 +635,7 @@ static VOID check_resolver(const AmiConfig *cfg)
         return;
     }
 
-    if (any_dynamic(cfg) || !any_static_address(cfg))
+    if (any_dynamic_v4(cfg) || !any_static_address(cfg))
         return;
 
     for (i = 0; i < cfg->resolver.nameserver_count; i++)
