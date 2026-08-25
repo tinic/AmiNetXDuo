@@ -1119,6 +1119,10 @@ typedef struct NetStatusRxBudget
        path.  Appended at the end, offsets hold. */
     ULONG               nrb_GateCalls;
     ULONG               nrb_GateFallback;
+    /* The signal-bit audit: Exec signal bits allocated on the realm Task,
+       of its 16 allocatable -- the one budget every green thread's MsgPort
+       and AllocSignal draws from. */
+    ULONG               nrb_RealmSigBits;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

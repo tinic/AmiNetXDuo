@@ -43,6 +43,10 @@
 
 #include "tx_amiga_internal.h"
 
+#ifdef AMINETXDUO_RXPROBE
+#include "aminetxduo/compat.h"      /* AMI_WARN for the probe tripwires */
+#endif
+
 #ifdef AMINETXDUO_GREEN_REALM
 
 
@@ -268,6 +272,26 @@ UINT                     i;
         return(tx_amiga_green_wait(sigmask));
     }
 
+#ifdef AMINETXDUO_RXPROBE
+    /* The signal-bit audit's tripwire: two waiters on OVERLAPPING masks
+       would mean one thread's SetSignal()/delivery consumes bits the other
+       is owed -- exactly the blind consumption the design forbids.  Every
+       legitimate waiter owns its bits (its own MsgPort, its own AllocSignal
+       on the realm), so masks are disjoint by construction; say so loudly
+       the day one is not.  */
+    for (i = 0U; i < (UINT) TX_GREEN_WAIT_SLOTS; i++)
+    {
+        if ((_tx_green_waiter[i].gw_thread != TX_NULL) &&
+            ((_tx_green_waiter[i].gw_mask & sigmask) != 0UL))
+        {
+            AMI_WARN("green realm: waiter masks overlap (%08lx & %08lx): "
+                     "a signal bit has two owners",
+                     (unsigned long) _tx_green_waiter[i].gw_mask,
+                     (unsigned long) sigmask);
+        }
+    }
+#endif
+
     gw -> gw_thread   =  thread;
     gw -> gw_mask     =  sigmask;
     gw -> gw_received =  0UL;
@@ -391,8 +415,6 @@ UINT    i;
  * below calls the real Wait().
  */
 #ifdef AMINETXDUO_RXPROBE
-
-#include "aminetxduo/compat.h"
 
 ULONG ami_green_checked_wait(ULONG sigmask)
 {
@@ -864,6 +886,26 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
     stats -> gs_stray_wait    =  _tx_green_counters.gc_stray_wait;
     stats -> gs_gate_calls    =  _tx_green_counters.gc_gate_calls;
     stats -> gs_gate_fallback =  _tx_green_counters.gc_gate_fallback;
+
+    /* The signal-bit audit's live figure: how many of the 16 allocatable
+       bits (16..31; Exec pre-allocates the low half) the realm Task has
+       out.  Every green thread's CreateMsgPort()/AllocSignal() draws from
+       this one budget -- the scheduler signal, two bits per interface
+       (reader reply port + TX reap), and a transient bit per in-flight
+       synchronous device command.  */
+    stats -> gs_realm_sigbits =  0UL;
+    if (_tx_amiga_scheduler_task != (VOID *) 0)
+    {
+
+        ULONG   alloc =  ((struct Task *) _tx_amiga_scheduler_task)
+                             -> tc_SigAlloc >> 16;
+
+        while (alloc != 0UL)
+        {
+            stats -> gs_realm_sigbits +=  alloc & 1UL;
+            alloc >>=  1;
+        }
+    }
     Permit();
 }
 
@@ -906,6 +948,7 @@ VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats)
         stats -> gs_stray_wait    =  0UL;
         stats -> gs_gate_calls    =  0UL;
         stats -> gs_gate_fallback =  0UL;
+        stats -> gs_realm_sigbits =  0UL;
     }
 }
 

@@ -63,6 +63,7 @@ typedef struct TX_AMIGA_GREEN_STATS_STRUCT
     ULONG   gs_stray_wait;
     ULONG   gs_gate_calls;
     ULONG   gs_gate_fallback;
+    ULONG   gs_realm_sigbits;
 } TX_AMIGA_GREEN_STATS;
 
 VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);

@@ -473,6 +473,11 @@ typedef struct TX_AMIGA_GREEN_STATS_STRUCT
                                    context (probe builds; must stay zero)    */
     ULONG   gs_gate_calls;      /* bracket calls carried through the gate    */
     ULONG   gs_gate_fallback;   /* bracket calls the gate declined (adopted) */
+    ULONG   gs_realm_sigbits;   /* Exec signal bits allocated on the realm
+                                   Task, of the 16 allocatable: every green
+                                   thread's MsgPort and AllocSignal draws
+                                   from this one budget (the signal-bit
+                                   audit's live figure)                      */
 } TX_AMIGA_GREEN_STATS;
 
 VOID    tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
