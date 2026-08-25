@@ -73,6 +73,18 @@ Both of those runs are *green* and both would have been a test of 32 MB that
 never had 32 MB in it — so the arm skips loudly without
 `AMINETXDUO_KICKSTART_A3000` rather than quietly proving nothing.
 
+**The pool is not the only clamp the big arms reach, and it is the only one
+they read.** The TCP receive window and the UDP socket queue are both shares of
+the pool with ceilings of their own, and both ceilings are unreachable below
+about 13.6 MB free — so the 32 MB arm is the first run in this project's
+history where `BSD_TCP_WINDOW_CEILING` and `BSD_UDP_QUEUE_CEILING` are the
+binding terms rather than arithmetic nothing evaluates. Nothing then opens a
+socket at that memory. `ami_bsd_tcp_window()` and `bsd_udp_queue_max()` have no
+host test either, and `tests/netstack/host/test_tcp_rxflood_host.c` hardcodes
+the lab A1200's 368 packets and 72,128-byte window, so even the host model is
+the small-memory regime. The precondition is now covered and the consequence is
+not; the row is in `docs/BACKLOG.md`.
+
 The two graders run with no emulator at all and are picked up automatically by
 the `host` stage's `tests/*/*-verdict-selftest.sh` loop:
 
