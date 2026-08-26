@@ -210,10 +210,18 @@ TX_THREAD *_tx_thread_identify(VOID)
  * the shared crypto archive remains linkable.  The fallback is not selected
  * after tls_netx_bind() has installed tls_crypto_yield.
  */
+/*
+ * GCC 16.2's m68k analyser invents an uninitialised return value for this
+ * VOID wrapper.  Its only path calls another VOID function and then falls off
+ * the end, so confine the workaround to the diagnostic's exact source.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
 VOID tx_thread_relinquish(VOID)
 {
     tls_crypto_yield();
 }
+#pragma GCC diagnostic pop
 
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
