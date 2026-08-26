@@ -100,10 +100,10 @@ SYS:ping 10.0.2.2 -c 2 -t 20
 SYS:ConfigureNetInterface eth0 RELEASE
 SYS:ShowNetStatus eth0
 SYS:ConfigureNetInterface eth0 RELEASE
-&SYS:NetCapture OUT=SYS:dhcpwire.pcap IFACE=eth0 PORT=67 SNAP=400 COUNT=4 SECONDS=25 QUIET
+&SYS:NetCapture OUT=SYS:dhcpwire.pcap IFACE=eth0 PORT=67 SNAP=400 COUNT=4 SECONDS=8 QUIET >SYS:netcapture.txt
 wait 2
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
-wait 4
+wait 9
 SYS:netstat -i
 SYS:ShowNetStatus eth0
 SYS:ping 10.0.2.2 -c 2 -t 20
@@ -128,13 +128,15 @@ if [ "$RUNNER" = "amiberry" ]; then
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/ConfigureNetInterface" \
-        "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/ping"
+        "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/ping" \
+        "$STAGE/NetCapture"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/ConfigureNetInterface" \
-        "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/ping"
+        "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/ping" \
+        "$STAGE/NetCapture"
 fi
 RUN_RC=$?
 set -e
@@ -276,17 +278,31 @@ want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 0 \
 # THE WIRE, not the verdict.  NetCapture ran in the guest across the restart
 # only, so every port-67 frame in this file belongs to it; a restart that
 # re-armed nothing leaves a lease-looking verdict above and no DISCOVER here.
+# Three faults, three verdicts: no capture at all, a capture that caught
+# nothing, and a capture whose exchange has no DISCOVER in it.
 WIRE="$HD/dhcpwire.pcap"
-if [ ! -s "$WIRE" ]; then
-    fail "the guest captured no wire across the restart ($WIRE)"
-elif ! command -v python3 >/dev/null 2>&1; then
+CAPSAY="$HD/netcapture.txt"
+if ! command -v python3 >/dev/null 2>&1; then
     fail "no python3 on this host, so the captured wire cannot be read"
+elif [ ! -f "$WIRE" ]; then
+    fail "NetCapture never opened $WIRE: it did not run in the guest"
+    [ -f "$CAPSAY" ] && sed 's/^/       /' "$CAPSAY" >&2
+    [ -f "$CAPSAY" ] || echo "       and it printed nothing to $CAPSAY" >&2
 else
-    SEEN=$(python3 "$ROOT/tests/tools/dhcpwire.py" "$WIRE" 2>&1) || SEEN="0"
-    if [ "$SEEN" -ge 1 ] 2>/dev/null; then
-        pass "and a DHCP DISCOVER really went out on the wire ($SEEN)"
+    COUNTS=$(python3 "$ROOT/tests/tools/dhcpwire.py" "$WIRE" 2>&1) ||
+        COUNTS="frames=0 dhcp=0 discover=0"
+    # shellcheck disable=SC2086
+    set -- $COUNTS
+    WFRAMES=${1#frames=}; WDHCP=${2#dhcp=}; WDISC=${3#discover=}
+    if [ "${WDISC:-0}" -ge 1 ] 2>/dev/null; then
+        pass "and a DHCP DISCOVER really went out on the wire ($COUNTS)"
+    elif [ "${WFRAMES:-0}" = 0 ] 2>/dev/null; then
+        fail "NetCapture caught nothing on port 67 across the restart: the tap"\
+             "saw no frames, so this run graded no wire ($COUNTS)"
+        [ -f "$CAPSAY" ] && sed 's/^/       /' "$CAPSAY" >&2
     else
-        fail "THE RESTART WAS SILENT: no DISCOVER in $WIRE, only the verdict"
+        fail "THE RESTART WAS SILENT: $WDHCP DHCP frame(s) and no DISCOVER"\
+             "($COUNTS)"
         python3 "$ROOT/tests/tools/dhcpwire.py" -v "$WIRE" 2>&1 |
             sed 's/^/       /' >&2
     fi

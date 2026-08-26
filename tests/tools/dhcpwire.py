@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Count DHCP DISCOVERs in a pcap, so a harness can grade the wire.
 
-Prints the count.  -v lists every DHCP message type found instead, which is
-what a silent restart needs to show: a file with an ACK and no DISCOVER.
+Prints frames=, dhcp= and discover= so a caller can tell a capture that
+caught nothing from one that caught an exchange with no DISCOVER in it.
+-v lists every DHCP message type found instead.
 
 SPDX-License-Identifier: MIT
 """
@@ -82,7 +83,9 @@ def main(argv):
         blob = handle.read()
 
     seen = []
+    total = 0
     for link, frame in frames(blob):
+        total += 1
         kind = message_type(link, frame)
         if kind is not None:
             seen.append(kind)
@@ -94,7 +97,8 @@ def main(argv):
             print("%d: %s" % (i + 1, NAMES.get(kind, "type %d" % kind)))
         return 0
 
-    print(sum(1 for kind in seen if kind == DISCOVER))
+    print("frames=%d dhcp=%d discover=%d"
+          % (total, len(seen), sum(1 for kind in seen if kind == DISCOVER)))
     return 0
 
 
