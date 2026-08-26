@@ -30,7 +30,6 @@ comment beside the code, not an entry here.
 | The TCP window ceiling has never been observed binding | it needs a saturated pool; the A3000 32 MB arm of `run-bigmem` was queued and did not report | `tests/tools/run-bigmem.sh:58` |
 | The DHCP/RA absorb runs on the caller's stack with 680 bytes to spare | a 1280-byte frame on any task that resolves or reads live config | `src/netstack/netstack_dns.c:959` |
 | `ami_rx_service` has a 2508-byte frame and nothing states its stack | it runs on the ARexx host's process and nothing records that process's size | `src/netstack/netstack_rexx.c:215` |
-| 13 of 20 serial logs come back empty, so their assertions cannot fire | a harness with an empty input passes vacuously | `tools/amiberry-run.sh`, `tests/ipv6/run-bringup.sh` |
 | `run-ifdhcp`'s bridged arm always fails because it asserts SLIRP's literals | derive the expected addresses from the arm instead | `tests/tools/run-ifdhcp.sh:92`, `:318` |
 | `run-lossgate.sh` measures a clean link under an impaired name | warm-up and arm take two leases; netem impairs the warm-up's | `tests/perf/run-lossgate.sh`, `tools/emu-mac.sh` |
 | Nothing enforces that a wired harness's runner ever FIRES | `run-socket.sh` names a workflow that is dispatch, cron and tags only | `tools/check-harnesses.sh`, `tests/ipv6/run-socket.sh` |
