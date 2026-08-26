@@ -457,6 +457,30 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         break;
 
     case AMI_ETHERTYPE_IPV6:
+#if defined(AMINETXDUO_RX_VERIFY) && defined(FEATURE_NX_IPV6)
+        /* Same two entries as IPv4 above: no header checksum exists to claim,
+           so a cleared frame carries the transport bit only. */
+        {
+            UINT    drop =  NX_FALSE;
+            ULONG   caps;
+
+            if ((slot != NULL) && (slot->summed != FALSE))
+                caps = n68k_rx_verify_sum(packet, slot->sum, slot->copied,
+                                          &drop);
+            else
+                caps = n68k_rx_verify(packet, &drop);
+
+            if (drop != NX_FALSE)
+            {
+                nx_packet_release(packet);
+                iface->stats.rx_errors++;
+                iface->stats.rx_err_verify++;
+                return;
+            }
+
+            packet->nx_packet_interface_capability_flag = caps;
+        }
+#endif
         iface->stats.packets_received++;
         _nx_ip_packet_deferred_receive(iface->ip, packet);
         break;
