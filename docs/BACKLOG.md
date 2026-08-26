@@ -16,7 +16,7 @@ comment beside the code, not an entry here.
 | The whole-frame card readback is charged to every screen pass | 600 KB of Zorro per pass at 640x480 truecolour whether one tile changed or none; nothing reads back a band | `src/tools/httpfb.c:1386` |
 | `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:105` |
-| A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
+| A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7098` |
 | `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them; only S2_GETSPECIALSTATS crosses out of the device and no tool reads it | `src/netdev/netdev_device.c:1123`, `:1139` |
 | TARGET: X-Surf-100 reads 412 KB/s where AmiTCP_NG reads 906 | same machine, card and driver, never measured here; the A1200 half is answered | `src/netstack/netstack.c:325` |
 | Real X-Surf hardware trails other stacks where emulation says we lead | 699 against 1103 KB/s, worst arm -37%; ACK-clock starvation is the hypothesis | `src/netdev/netdev_cards.c` |
@@ -40,7 +40,7 @@ comment beside the code, not an entry here.
 | Two socket files are still outside the host tier | `tcp_handler.c` needs the whole `ACTION_*` vocabulary; `transfer.c` pins 4.4BSD `iovec` | `tests/bsdsocket/CMakeLists.txt` |
 | 9 harnesses are still unwired | one needs a segment with no DHCP server, one KS 2.04, three a bridged repair | `tools/check-harnesses.sh` |
 | The fork's own regression suite has never run, on either side | `ci.sh host` does not configure it and the fork's workflow run count is zero | `tools/ci.sh` |
-| The expunge refusal is proven at the library and the port, never at the joint | nothing tests that a failed stop leaves the started flag set | `src/netstack/netstack.c:1395`, `:1619` |
+| The expunge refusal is proven at the library and the port, never at the joint | nothing tests that a failed stop leaves the started flag set | `src/netstack/netstack.c:1404`, `:1628` |
 | The bring-up figure has never been measured on the build that ships | it reads `netstack: mark` lines only an `AMINETXDUO_LOG=ON` build emits | `tests/ipv6/run-bringup.sh` |
 | No lab read-throughput measurement can predate v0.21.0 | `iperf.c` first shipped there, so the reported 699-to-420 bracket is unreachable | `tests/perf/run-fitzbench.sh` |
 | No harness boots Kickstart 2.x with a Zorro network board | the romtag under 2.x and `card.resource` V37 are both unproven | `tests/tools/run-addifleak.sh`, `tests/perf/run-fitzbench.sh` |
