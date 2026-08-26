@@ -92,6 +92,16 @@ option(AMINETXDUO_LTO "Build with -flto (cross builds only)" ON)
 
 if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     string(APPEND CMAKE_C_FLAGS_RELEASE " -flto")
+
+    # A 68020+ LTO link partitions one translation unit into several output
+    # sections and can therefore create the same cross-section 32-bit sibling
+    # branch as -ffunction-sections.  The pinned linker resolves that relocation
+    # twelve bytes short.  The all-CPU/68000 build cannot encode bra.l and does
+    # not pay for disabling otherwise useful tail calls.
+    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68040|-m68060|-mcpu=68060)( |$)")
+        string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-optimize-sibling-calls")
+    endif()
+
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}"
         CACHE STRING "C flags for Release builds" FORCE)
     add_link_options(-flto)
