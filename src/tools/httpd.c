@@ -596,6 +596,10 @@ static ULONG httpd_now(VOID)
 {
     struct DateStamp ds;
 
+    /* DateStamp() has no failure result and fills through this pointer. */
+    ds.ds_Days   = 0;
+    ds.ds_Minute = 0;
+    ds.ds_Tick   = 0;
     (VOID)DateStamp(&ds);
 
     return (ULONG)ds.ds_Days * 86400UL + (ULONG)ds.ds_Minute * 60UL +
@@ -873,6 +877,10 @@ static VOID httpd_begin(HttpConn *c, ULONG status)
     c->overflow = 0;
     c->status   = status;
 
+    /* Keep a defined epoch fallback if dos.library does not fill the stamp. */
+    ds.ds_Days   = 0;
+    ds.ds_Minute = 0;
+    ds.ds_Tick   = 0;
     (VOID)DateStamp(&ds);
     httpd_rfc1123(httpd_stamp_secs(&ds), date);
 
