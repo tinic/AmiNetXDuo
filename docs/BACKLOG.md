@@ -22,7 +22,7 @@ comment beside the code, not an entry here.
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
 | IPv6 fusing refuses any extension header and all of ICMPv6 | next-header not TCP/UDP declines outright; the chain is never walked, so ND and fragments still cost the stack a payload pass | `src/net68k/n68k_rx_verify.c:72` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
-| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:35` |
+| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589; it is proven only in the C mock | `src/netdev/test/test_netdev_el3.c:35` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:162` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
