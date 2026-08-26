@@ -41,13 +41,19 @@ done
 
 # The stage names tools/ci.sh actually defines. Anything else after
 # `tools/ci.sh` on a run: line is a flag or a shell word, not a stage.
-mapfile -t KNOWN < <(grep -o '^stage_[a-z0-9_]*' tools/ci.sh |
-                     sed 's/^stage_//' | sort -u)
+KNOWN=()
+while IFS= read -r stage; do
+    KNOWN+=("$stage")
+done < <(grep -o '^stage_[a-z0-9_]*' tools/ci.sh |
+         sed 's/^stage_//' | sort -u)
 is_stage() { local s; for s in "${KNOWN[@]}"; do [ "$s" = "$1" ] && return 0; done; return 1; }
 
 # The workflow is YAML with folded (>-) run: blocks, so a `tools/ci.sh`
 # invocation is not always one line. Flatten first and read tokens.
-mapfile -t TOK < <(tr '\n' ' ' < "$WF" | tr -s ' ' | tr ' ' '\n')
+TOK=()
+while IFS= read -r token; do
+    TOK+=("$token")
+done < <(tr '\n' ' ' < "$WF" | tr -s ' ' | tr ' ' '\n')
 
 INVOKE=()          # one entry per tools/ci.sh call: "ENV... -- stage stage"
 env_carry=""
