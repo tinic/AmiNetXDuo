@@ -849,9 +849,12 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     /*
      * Start the IP identification field at an unpredictable value.  The field is
      * 16 bits wide in the header and NetX Duo shifts it up by 16, so only the low
-     * half is meaningful.
+     * half is meaningful.  NX_ENABLE_IP_ID_RANDOMIZATION deletes the member and
+     * draws the ID per datagram instead, so the seed is only for the other arm.
      */
+#ifndef AMINETXDUO_IP_ID_RANDOMIZATION
     ns->ns_Ip.nx_ip_packet_id = (ami_random_ulong() & 0xFFFFUL);
+#endif
 
     status = nx_arp_enable(&ns->ns_Ip, ns->ns_ArpCache, (ULONG)AMI_ARP_CACHE_SIZE);
     if (status != NX_SUCCESS)

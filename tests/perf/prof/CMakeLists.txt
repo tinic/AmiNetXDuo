@@ -43,7 +43,11 @@ endif()
 # of each object plus nm on that object.
 function(aminetxduo_prof_target name)
     set_target_properties(${name} PROPERTIES OUTPUT_NAME "${name}")
+    # --gc-sections for correctness, not size: without it these link at 12
+    # hunks and 0 HUNK_RELOC32, so LoadSeg relocates nothing.  Same defect and
+    # same fix as tools/profiler/CMakeLists.txt:44, which explains it.
     target_link_options(${name} PRIVATE
+        -Wl,--gc-sections
         "-Wl,-Map=$<TARGET_FILE_DIR:${name}>/${name}.map")
     if(AMIGA_NDK_INCLUDE)
         target_include_directories(${name} PRIVATE "${AMIGA_NDK_INCLUDE}")

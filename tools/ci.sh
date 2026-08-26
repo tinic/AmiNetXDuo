@@ -89,6 +89,31 @@ CROSS_CONFIGS=(
     # of them appear nowhere else at all.  It must stay byte-for-byte the
     # options .github/workflows/release.yml gives build/release-minimal.
     "minimal:-DAMINETXDUO_IPV6=OFF -DAMINETXDUO_MDNS=OFF -DAMINETXDUO_BPF=OFF -DAMINETXDUO_TLS=OFF -DAMINETXDUO_MULTICAST=OFF -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF"
+    # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
+    # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
+    # for as long as it took someone to type it by hand.  Grouped rather than
+    # one arm each: eighteen cross builds is a build cost nobody would pay, and
+    # the gate that keeps them here, tools/check-option-coverage.sh, asks only
+    # that each option's other side is compiled somewhere.
+    #
+    # Seven diagnostics that only ADD -- counters, a probe, a symbol table, the
+    # sampling profiler.  None changes a struct a shipped image lays out, so
+    # one build compiles them all and a break in any is a break in this arm.
+    "instr:-DAMINETXDUO_LOG=ON -DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON"
+    # One RTO estimator in three options: early retransmit and the tail loss
+    # probe both read what TCP_RTT measures, so RTT=OFF with either of the
+    # other two ON is not a configuration to defend.  All three off together
+    # is, and it is the only side `default` does not compile.
+    "tcpextra:-DAMINETXDUO_TCP_RTT=OFF -DAMINETXDUO_TCP_EARLY_RETRANSMIT=OFF -DAMINETXDUO_TCP_LOSS_PROBE=OFF"
+    # Six datapath alternates.  Each SWAPS an implementation -- a checksum, a
+    # completion path, a collect policy, an -O2 file list -- and none of them
+    # resizes a structure, so unlike nosack/norxverify they do not each need
+    # their own tree to be compiled honestly.
+    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=ON"
+    # GREEN_REALM replaces the thread model wholesale and shares an arm with
+    # nothing.  TESTS=OFF rides here because it is the one remaining side and
+    # it is what makes this arm the cheap one: a libraries-only tree.
+    "green:-DAMINETXDUO_GREEN_REALM=ON -DAMINETXDUO_TESTS=OFF"
 )
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
@@ -443,6 +468,21 @@ stage_host() {
     else
         cat "$BUILD/shipping-config.log"
         fail "a shipped drawer is built in a configuration no cross arm compiles"
+        return 1
+    fi
+
+    # And every option() the root CMakeLists declares is compiled on BOTH sides
+    # by CROSS_CONFIGS.  RXPROBE=ON was a -Werror failure for as long as it took
+    # someone to build it by hand; eighteen options were in that state at once.
+    if tools/check-option-coverage.sh > "$BUILD/option-coverage.log" 2>&1; then
+        note "option coverage: $(sed -n 's/^option_covered=/covered /p' \
+              "$BUILD/option-coverage.log") of $(sed -n 's/^option_total=//p' \
+              "$BUILD/option-coverage.log"), allowed $(sed -n \
+              's/^option_allowed_count=//p' "$BUILD/option-coverage.log")"
+    else
+        cat "$BUILD/option-coverage.log"
+        fail "a declared build option is compiled by no cross arm\
+ (tools/check-option-coverage.sh)"
         return 1
     fi
 
