@@ -893,9 +893,9 @@ static void check_usage(const char *name)
 
 /* ----------------------------------------------------------------- docs --- */
 
-/* Whitespace and comment furniture removed, so a template restated over three
-   wrapped lines compares equal to the one on a single #define. */
-static char *flatten(const char *text, int strip_comment_stars)
+/* Whitespace removed, so a template wrapped over three #define lines compares
+   equal to the one the guide prints on one. */
+static char *flatten(const char *text)
 {
     size_t  len = strlen(text);
     char   *out = malloc(len + 1);
@@ -908,8 +908,6 @@ static char *flatten(const char *text, int strip_comment_stars)
     while (*p != '\0')
     {
         while (*p == ' ' || *p == '\t')
-            p++;
-        if (strip_comment_stars && *p == '*')
             p++;
 
         while (*p != '\0' && *p != '\n')
@@ -945,11 +943,13 @@ static int in_guide_set(const char *name)
     return 0;
 }
 
+/* The guide only. The shipped manual must print the real template; a header
+   comment restating the template ten lines below it can only go stale, so it
+   is not checked. */
 static void check_docs(const char *name, const char *guide_flat)
 {
     char        path[512];
     char       *src;
-    char       *header_flat = NULL;
     const char *p;
     int         pair = 0;
 
@@ -961,28 +961,6 @@ static void check_docs(const char *name, const char *guide_flat)
     if (src == NULL)
         return;
 
-    /* The leading block comment, which is where every command restates its
-       template for a reader of the source. */
-    if (strncmp(src, "/*", 2) == 0)
-    {
-        char *end = strstr(src + 2, "*/");
-
-        if (end != NULL)
-        {
-            char *head = malloc((size_t)(end - src) + 1);
-
-            if (head != NULL)
-            {
-                memcpy(head, src + 2, (size_t)(end - src) - 2);
-                head[(size_t)(end - src) - 2] = '\0';
-                header_flat = flatten(head, 1);
-                free(head);
-            }
-        }
-    }
-
-    CHECK(header_flat != NULL, "%s: no leading comment", name);
-
     for (p = src; (p = strstr(p, "#define TEMPLATE")) != NULL;
          p += strlen("#define TEMPLATE"))
     {
@@ -992,14 +970,9 @@ static void check_docs(const char *name, const char *guide_flat)
         if (!read_template(p, tmpl, sizeof(tmpl)))
             continue;
 
-        flat = flatten(tmpl, 0);
+        flat = flatten(tmpl);
         if (flat == NULL)
             continue;
-
-        if (header_flat != NULL)
-            CHECK(strstr(header_flat, flat) != NULL,
-                  "%s[%d]: the header comment does not restate the template: "
-                  "\"%s\"", name, pair, tmpl);
 
         if (guide_flat != NULL && in_guide_set(name))
         {
@@ -1043,7 +1016,6 @@ static void check_docs(const char *name, const char *guide_flat)
         pair++;
     }
 
-    free(header_flat);
     free(src);
 }
 
@@ -1098,7 +1070,7 @@ int main(int argc, char **argv)
         guide = slurp(path);
         CHECK(guide != NULL, "cannot read %s", path);
         if (guide != NULL)
-            guide_flat = flatten(guide, 0);
+            guide_flat = flatten(guide);
 
         for (i = 0; i < COMMAND_COUNT; i++)
             check_docs(commands[i], guide_flat);

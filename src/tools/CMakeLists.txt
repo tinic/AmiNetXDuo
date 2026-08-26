@@ -682,10 +682,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_httpif PROPERTIES C_STANDARD 11)
 
     # The ReadArgs templates of every command, against the enums that index
-    # them, against what the code does with each slot, and against the two
-    # places the template is written out again for a reader.  Parses the
-    # sources rather than compiling them: they reach proto/dos.h, and none of
-    # what it catches is anything a compiler sees.
+    # them, against what the code does with each slot, and against the guide
+    # that ships them to the user.  Parses the sources rather than compiling
+    # them: they reach proto/dos.h, and none of what it catches is anything a
+    # compiler sees.
     #
     # Four groups, one ctest case each, selected by argv[1].
     add_executable(test_argtemplates

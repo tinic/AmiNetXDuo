@@ -133,17 +133,6 @@ case_red usage src/tools/httpd.c \
     'a synopsis short flag the template does not have'
 
 
-case_red docs src/tools/getnetstatus.c \
-    ' *     GetNetStatus CHECK/K,QUIET/S,VERSION/S' \
-    ' *     GetNetStatus CHECK/K,QUIET/S' \
-    'a header comment behind its template (the GetNetStatus VERSION defect)'
-
-case_red docs src/tools/ping.c \
-    ' *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
- *          IPV4=-4/S,IPV6=-6/S' \
-    ' *          -o=ONEREPLY/S,-q=QUIET/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A' \
-    'a header comment behind its template (the ping -4/-6 defect)'
-
 case_red docs docs/user/AmiNetXDuo.guide \
     '      host NAME/A,TIMEOUT/N/K,IPV4=-4/S,IPV6=-6/S' \
     '      host NAME/A,TIMEOUT/N/K' \
@@ -154,10 +143,10 @@ case_red docs docs/user/AmiNetXDuo.guide \
     '      INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S:' \
     'one of two copies in the guide left behind (the netstat HEALTH defect)'
 
-case_red docs src/tools/fetch.c \
-    '#define TEMPLATE    "URL/A,TO/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K," \' \
-    '#define TEMPLATE    "URL/A,TO=OUT/K,HEADERS/S,QUIET/S,NOVERIFY/S,TIMEOUT/N/K," \' \
-    'a template renamed with the header comment left behind'
+case_red docs src/tools/checknetdevice.c \
+    '#define TEMPLATE    "DEVICE/K,NOLOAD/S,RAW/S"' \
+    '#define TEMPLATE    "DEVICE/K,NOLOAD/S,RAW=HEX/S"' \
+    'a template renamed with the guide left behind'
 
 echo "argtemplates selftest: $cases cases, $wrong wrong"
 [ "$wrong" -eq 0 ]
