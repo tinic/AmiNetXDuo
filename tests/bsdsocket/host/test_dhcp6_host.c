@@ -183,7 +183,13 @@ VOID bsd_nx_leave(struct AmiSocketBase *b)  { (VOID)b; }
 LONG bsd_fail(struct AmiSocketBase *b, LONG code)
 { (VOID)b; h_error = code; return -1; }
 
-VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *s) { memset(s, 0, sizeof(*s)); }
+/* NETSTATUS_HEALTH's half: the tick counters are staged here, so what the
+   selector answers can be compared against what the port tracked. */
+static TX_AMIGA_TICK_STATS h_tick;
+static AmiMemStats         h_mem;
+static LONG                h_pool_samples;
+
+VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *s) { *s = h_tick; }
 VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *s) { memset(s, 0, sizeof(*s)); }
 ULONG ami_eclock_rate(VOID) { return 0; }
 
@@ -235,9 +241,9 @@ UINT netstack_ipv6_route_add(const ULONG d[4], ULONG len, const ULONG nh[4], UWO
 UINT netstack_ipv6_route_delete(const ULONG d[4], ULONG len, const ULONG nh[4])
 { (VOID)d; (VOID)len; (VOID)nh;
   h_unreachable("netstack_ipv6_route_delete"); return 1; }
-VOID netstack_pool_sample(VOID) { h_unreachable("netstack_pool_sample"); }
+VOID netstack_pool_sample(VOID) { h_pool_samples++; }
 
-AmiMemStats *ami_mem_stats(VOID) { h_unreachable("ami_mem_stats"); return NULL; }
+AmiMemStats *ami_mem_stats(VOID) { return &h_mem; }
 LONG ami_config_load_interface(const char *n, AmiIfConfig *out)
 { (VOID)n; (VOID)out; h_unreachable("ami_config_load_interface"); return -1; }
 ULONG ami_sana2_get_bps(const AmiSana2If *i)
@@ -464,9 +470,43 @@ static VOID t_release_still_prefers_ipv4(VOID)
     CHECK(h_v6_release_calls == 0, "and not through the DHCPv6 path");
 }
 
+/*
+ * The tick task counts a wakeup that delivered more than one tick, and before
+ * this the count reached only tx_initialize_low_level.c's serial dump, which
+ * no shipped build compiles.  NETSTATUS_HEALTH is the wire netstat -h reads.
+ */
+static VOID t_health_reports_the_tick_catchups(VOID)
+{
+    NetStatusHeader *hdr = (NetStatusHeader *)h_buffer;
+    NetStatusHealth *out = (NetStatusHealth *)NETSTATUS_ENTRIES(hdr);
+    LONG             rc;
+
+    h_reset();
+    memset(&h_tick, 0, sizeof(h_tick));
+    memset(&h_mem, 0, sizeof(h_mem));
+    h_pool_samples = 0;
+
+    h_tick.tx_amiga_tick_catchups = 4321UL;
+    h_tick.tx_amiga_tick_delivered = 99UL;
+
+    memset(h_buffer, 0, sizeof(h_buffer));
+    hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
+    hdr->nsh_Version = AMI_NETSTATUS_VERSION;
+
+    rc = bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_HEALTH,
+                           h_buffer, (ULONG)sizeof(h_buffer), NULL);
+
+    CHECK(rc == 1, "NETSTATUS_HEALTH answers one record");
+    CHECK(hdr->nsh_EntrySize == (UWORD)sizeof(NetStatusHealth),
+          "of the library's own shape");
+    CHECK(out->nsl_TickCatchups == 4321UL,
+          "and it carries the tick task's catch-up count");
+    CHECK(out->nsl_TickTicks == 99UL, "beside the ticks delivered");
+}
+
 int main(void)
 {
-    printf("NETSTATUS_DHCP6 host tests\n");
+    printf("NETSTATUS_DHCP6 and NETSTATUS_HEALTH host tests\n");
 
     t_selector_reports_the_tracked_lease();
     t_selector_reports_working();
@@ -475,8 +515,9 @@ int main(void)
     t_release_without_any_lease_is_refused();
     t_release_of_an_inform_only_client_is_refused();
     t_release_still_prefers_ipv4();
+    t_health_reports_the_tick_catchups();
 
-    printf("dhcp6_status_release checks=%lu failures=%lu\n",
+    printf("dhcp6_status_health checks=%lu failures=%lu\n",
            h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

@@ -213,6 +213,9 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # emulator: the v6-only arm needs a DHCPv6 server on the segment, and the
     # refusal under test is the one that fires when there is no lease, which
     # is indistinguishable from the bug it hid.
+    #
+    # NETSTATUS_HEALTH is here too, for the tick counters it copies: the
+    # stubs that stage them are already in this target.
     add_executable(test_dhcp6 host/test_dhcp6_host.c
                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c")
 
@@ -233,7 +236,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_compile_definitions(test_dhcp6 PRIVATE
         NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
 
-    add_test(NAME dhcp6_status_release COMMAND test_dhcp6)
+    add_test(NAME dhcp6_status_health COMMAND test_dhcp6)
 endif()
 
 # bpf_write() is the only BPF vector that reaches the NetX packet pool. Its

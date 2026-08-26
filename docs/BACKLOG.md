@@ -16,8 +16,7 @@ comment beside the code, not an entry here.
 | `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:105` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7090` |
-| `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them | `src/netdev/netdev_device.c:1123`, `:1291` |
-| The tick task's catch-up count crosses no wire | `tx_amiga_tick_catchups` reaches only a serial dump shipped builds compile out | `port/threadx-amiga/inc/tx_amiga.h:173` |
+| `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them; only S2_GETSPECIALSTATS crosses out of the device and no tool reads it | `src/netdev/netdev_device.c:1123`, `:1139` |
 | TARGET: X-Surf-100 reads 412 KB/s where AmiTCP_NG reads 906 | same machine, card and driver, never measured here; the A1200 half is answered | `src/netstack/netstack.c:325` |
 | Real X-Surf hardware trails other stacks where emulation says we lead | 699 against 1103 KB/s, worst arm -37%; ACK-clock starvation is the hypothesis | `src/netdev/netdev_cards.c` |
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |

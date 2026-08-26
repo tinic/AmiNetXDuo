@@ -545,6 +545,7 @@ LONG tool_stats(ToolStats *out)
 
         out->have_health             = TRUE;
         out->tick_ticks              = h->nsl_TickTicks;
+        out->tick_catchups           = h->nsl_TickCatchups;
         out->tick_clipped            = h->nsl_TickClipped;
         out->tick_lost               = h->nsl_TickLost;
         out->tick_service_us         = h->nsl_TickServiceUs;
@@ -645,6 +646,7 @@ BOOL tool_health_mark(ToolStats *out)
 
     out->have_health           = TRUE;
     out->tick_ticks            = tick.tx_amiga_tick_delivered;
+    out->tick_catchups         = tick.tx_amiga_tick_catchups;
     out->tick_clipped          = tick.tx_amiga_tick_clipped;
     out->tick_lost             = tick.tx_amiga_tick_lost;
     out->tick_service_us       = tick.tx_amiga_tick_service_us;

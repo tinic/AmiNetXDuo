@@ -146,6 +146,17 @@ int main(void)
     wants("src/tools/netstat.c", "lease6",
           "label the DHCPv6 lease");
 
+    /* The tick task's catch-up count reached only a serial dump that a
+       shipping build compiles out. netstat -h is the wire it crosses now. */
+    wants("src/tools/tool_nx.c", "nsl_TickCatchups",
+          "carry the tick catch-ups out of NETSTATUS_HEALTH");
+    wants("src/tools/tool_nx.c", "tx_amiga_tick_catchups",
+          "read them off the published mark as well");
+    wants("src/tools/netstat.c", "tick_catchups",
+          "print the tick catch-up count");
+    wants("src/tools/netstat.c", "catch-ups",
+          "label the tick catch-up count");
+
     printf("%s: %d checks, %d failures\n", "leasesurface", checks, failures);
     return (failures == 0) ? 0 : 1;
 }

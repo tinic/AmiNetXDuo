@@ -145,7 +145,7 @@
  * changes. lib_Revision identifies which of our builds this is, so a command
  * can tell a library that has the netstatus vectors from one that does not.
  */
-#define BSD_LIB_REVISION    6
+#define BSD_LIB_REVISION    7
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */

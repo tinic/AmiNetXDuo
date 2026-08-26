@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       10
+#define AMI_NETSTATUS_VERSION       11
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -42,7 +42,7 @@ extern "C" {
 /* Callers MUST check lib_Revision >= this before any netstatus call: an older
    library has no such vector and the jump lands past the table terminator.
    Bump when a netstatus vector is added or AMI_NETSTATUS_VERSION moves. */
-#define AMI_NETSTATUS_MIN_REVISION  6
+#define AMI_NETSTATUS_MIN_REVISION  7
 
 /* ------------------------------------------------------------ selectors --- */
 #define NETSTATUS_SYSTEM        1   /* one NetStatusSystem                   */
@@ -350,6 +350,10 @@ typedef struct NetStatusStats
 typedef struct NetStatusHealth
 {
     ULONG   nsl_TickTicks;
+    /* Wakeups that delivered more than one tick.  Counted unconditionally in
+       tx_initialize_low_level.c and, before this, printed only by a serial
+       dump no shipped build compiles. */
+    ULONG   nsl_TickCatchups;
     ULONG   nsl_TickClipped;
     ULONG   nsl_TickLost;
     ULONG   nsl_TickServiceUs;

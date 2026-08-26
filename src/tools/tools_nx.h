@@ -277,6 +277,7 @@ typedef struct ToolStats
     BOOL            have_health;
     ULONG           health_mark;
     ULONG           tick_ticks;
+    ULONG           tick_catchups;
     ULONG           tick_clipped;
     ULONG           tick_lost;
     ULONG           tick_service_us;

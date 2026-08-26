@@ -984,6 +984,7 @@ static VOID ns_fill_health(NetStatusHealth *out)
     mem = ami_mem_stats();
 
     out->nsl_TickTicks          = tick.tx_amiga_tick_delivered;
+    out->nsl_TickCatchups       = tick.tx_amiga_tick_catchups;
     out->nsl_TickClipped        = tick.tx_amiga_tick_clipped;
     out->nsl_TickLost           = tick.tx_amiga_tick_lost;
     out->nsl_TickServiceUs      = tick.tx_amiga_tick_service_us;
