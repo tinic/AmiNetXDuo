@@ -454,6 +454,10 @@ UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     if (iface == NULL || packet == NULL)
         return NX_PTR_ERROR;
 
+    /* Before the reap walk: xmit is the stack's cost of emitting this frame,
+       and reap is already its own leg. */
+    ami_budget_xmit(probe_t0);
+
     /* Cheap when the reader has already emptied the port, and the only reaping
        that happens when no reader is bound. */
     ami_sana2_tx_reap(iface);

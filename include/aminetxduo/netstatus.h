@@ -772,6 +772,10 @@ typedef struct NetStatusRxBudget
     /* Brackets that took an idle realm's baton directly; with nrb_GateCalls
        and nrb_GateFallback these partition the brackets.  Offsets hold. */
     ULONG               nrb_GateFast;
+    /* The transmit half of a received segment: its socket entry to the driver
+       call carrying the ACK.  With nrb_Reap/Stuff/Post it prices the whole TX
+       leg the receive pays for.  Appended, offsets hold. */
+    NetStatusBudgetLeg  nrb_Xmit;
 } NetStatusRxBudget;
 
 /* ------------------------------------------------------------- control,

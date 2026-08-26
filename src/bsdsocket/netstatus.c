@@ -1423,6 +1423,9 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             out->nrb_Fetch.nbl_Count  = ami_budget.fetch.count;
             out->nrb_Fetch.nbl_Sum    = ami_budget.fetch.sum;
             out->nrb_Fetch.nbl_Max    = ami_budget.fetch.max;
+            out->nrb_Xmit.nbl_Count   = ami_budget.xmit.count;
+            out->nrb_Xmit.nbl_Sum     = ami_budget.xmit.sum;
+            out->nrb_Xmit.nbl_Max     = ami_budget.xmit.max;
             out->nrb_Ack.nbl_Count    = ami_budget.ack.count;
             out->nrb_Ack.nbl_Sum      = ami_budget.ack.sum;
             out->nrb_Ack.nbl_Max      = ami_budget.ack.max;
@@ -1472,6 +1475,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
                     out->nrb_Demux.nbl_Hist[i]  = ami_budget.demux.hist[i];
                     out->nrb_State.nbl_Hist[i]  = ami_budget.state.hist[i];
                     out->nrb_Fetch.nbl_Hist[i]  = ami_budget.fetch.hist[i];
+                    out->nrb_Xmit.nbl_Hist[i]   = ami_budget.xmit.hist[i];
                     out->nrb_Ack.nbl_Hist[i]    = ami_budget.ack.hist[i];
                     out->nrb_Reap.nbl_Hist[i]   = ami_budget.reap.hist[i];
                     out->nrb_Stuff.nbl_Hist[i]  = ami_budget.stuff.hist[i];

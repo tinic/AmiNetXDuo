@@ -123,7 +123,7 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
     ihl   = (UWORD)((ip[0] & 0x0F) * 4);
     total = (ULONG)ami_rxprobe_be16(&ip[2]);
 
-    if (ihl < 20 || total < ihl + 20 ||
+    if (ihl < 20 || total < (ULONG)ihl + 20UL ||
         total > length - AMI_ETH_HEADER_SIZE)
         return;
 

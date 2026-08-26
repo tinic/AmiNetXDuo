@@ -157,6 +157,22 @@ int main(void)
     wants("src/tools/netstat.c", "catch-ups",
           "label the tick catch-up count");
 
+    /* The TX leg of a received segment. A leg that stops at ami_budget is a
+       leg no operator can quote, so the whole chain is asserted: armed,
+       consumed, copied into NETSTATUS_RXBUDGET, printed by netstat -s. */
+    wants("src/common/budget.c", "ami_budget_xmit",
+          "close the transmit leg");
+    wants("src/common/budget.c", "xmit_at",
+          "arm the transmit leg at socket entry");
+    wants("src/sana2/sana2_tx.c", "ami_budget_xmit",
+          "consume the stamp where the driver call starts");
+    wants("src/bsdsocket/netstatus.c", "nrb_Xmit",
+          "carry the transmit leg out of NETSTATUS_RXBUDGET");
+    wants("src/tools/netstat.c", "nrb_Xmit",
+          "read the transmit leg");
+    wants("src/tools/netstat.c", "xmit,",
+          "label the transmit leg");
+
     printf("%s: %d checks, %d failures\n", "leasesurface", checks, failures);
     return (failures == 0) ? 0 : 1;
 }

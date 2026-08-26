@@ -61,6 +61,7 @@ VOID ami_budget_deliver(ULONG now)
        rule above. */
     ami_budget.pickup_at = 0UL;
     ami_budget.socket_at = 0UL;
+    ami_budget.xmit_at   = 0UL;
 }
 
 /*
@@ -102,6 +103,23 @@ VOID ami_budget_socket_enter(VOID)
     ami_budget.pickup_at = 0UL;
     ami_budget_leg(&ami_budget.demux, now - opened);
     ami_budget.socket_at = now;
+    ami_budget.xmit_at   = now;
+}
+
+/*
+ * The transmit half of a received segment: socket entry to the driver call the
+ * ACK it provoked arrives in.  One stamp, consumed once, so a segment that
+ * emitted nothing costs the next transmit no sample rather than a wrong one.
+ */
+VOID ami_budget_xmit(ULONG now)
+{
+    ULONG opened = ami_budget.xmit_at;
+
+    if (opened == 0UL)
+        return;
+
+    ami_budget.xmit_at = 0UL;
+    ami_budget_leg(&ami_budget.xmit, now - opened);
 }
 
 VOID ami_budget_notify(ULONG now)

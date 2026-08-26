@@ -60,6 +60,7 @@ typedef struct AmiBudget
     ULONG           notify_at;      /* armed by notify, taken by fetch     */
     ULONG           pickup_at;      /* armed by pickup, taken by socket    */
     ULONG           socket_at;      /* armed by socket, taken by notify    */
+    ULONG           xmit_at;        /* armed by socket, taken by tx_send   */
     AmiBudgetLeg    drain;          /* reader: reply dequeued -> delivered */
     AmiBudgetLeg    baton;          /* bsd_nx_enter(): asking to having     */
     AmiBudgetLeg    settle;         /* deliver -> receive notify           */
@@ -69,6 +70,7 @@ typedef struct AmiBudget
     AmiBudgetLeg    demux;          /* pickup -> the segment's own socket  */
     AmiBudgetLeg    state;          /* socket entry -> receive notify      */
     AmiBudgetLeg    fetch;          /* receive notify -> recv() returns    */
+    AmiBudgetLeg    xmit;           /* socket entry -> the ACK's tx_send   */
     AmiBudgetLeg    ack;            /* CMD_WRITE BeginIO -> reply reaped   */
     AmiBudgetLeg    reap;           /* tx_send: the TX completion reap walk */
     AmiBudgetLeg    stuff;          /* tx_send: claim + framing + slot fill */
@@ -103,6 +105,7 @@ VOID ami_budget_pickup(ULONG now);
 VOID ami_budget_socket_enter(VOID);
 VOID ami_budget_notify(ULONG now);
 VOID ami_budget_fetch(ULONG now);
+VOID ami_budget_xmit(ULONG now);
 VOID ami_budget_ack(ULONG dt);
 VOID ami_budget_reap(ULONG dt);
 VOID ami_budget_stuff(ULONG dt);
@@ -126,6 +129,7 @@ VOID ami_budget_hold_end(APTR thread, const char *name, ULONG state, UWORD site)
 #define ami_budget_socket_enter() ((VOID)0)
 #define ami_budget_notify(now)   ((VOID)0)
 #define ami_budget_fetch(now)    ((VOID)0)
+#define ami_budget_xmit(now)     ((VOID)0)
 #define ami_budget_ack(dt)       ((VOID)0)
 #define ami_budget_reap(dt)      ((VOID)0)
 #define ami_budget_stuff(dt)     ((VOID)0)
