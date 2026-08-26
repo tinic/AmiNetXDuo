@@ -122,6 +122,12 @@ static BtTask bt_dead_gate_owner;
 static TX_EVENT_FLAGS_GROUP bt_dead_flags;
 #ifdef AMINETXDUO_GREEN_REALM
 static TX_AMIGA_GATE bt_dead_gate;
+static TX_TIMER bt_gate_port_timer;
+static struct MsgPort *bt_gate_port;
+static struct Message bt_gate_message;
+
+BYTE ami_green_checked_waitio(struct IORequest *request);
+struct Message *ami_green_checked_waitport(struct MsgPort *port);
 #endif
 static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
 static TX_THREAD bt_reap_owner;
@@ -399,6 +405,94 @@ static VOID bt_die_event_entry(VOID)
    ThreadX suspension a blocking socket receive uses.  main removes the parked
    owner Task while this continuation is still active. */
 #ifdef AMINETXDUO_GREEN_REALM
+static VOID bt_gate_post_message(ULONG input)
+{
+    (VOID)input;
+    PutMsg(bt_gate_port, &bt_gate_message);
+}
+
+static VOID bt_gate_test_exec_waits(BtTask *bt)
+{
+    struct MsgPort     *io_port;
+    struct timerequest *request;
+    struct Message     *message;
+    TX_AMIGA_GREEN_STATS before;
+    TX_AMIGA_GREEN_STATS after;
+    UINT status;
+
+    /* An incomplete timer request makes WaitIO's blocking arm deterministic. */
+    io_port = CreateMsgPort();
+    request = (io_port != NULL)
+            ? (struct timerequest *)CreateIORequest(
+                  io_port, (ULONG)sizeof(struct timerequest))
+            : NULL;
+    if (request == NULL ||
+        OpenDevice((CONST_STRPTR)"timer.device", (ULONG)UNIT_VBLANK,
+                   (struct IORequest *)request, 0UL) != 0)
+    {
+        bt->bt_Failures++;
+        if (request != NULL)
+            DeleteIORequest((struct IORequest *)request);
+        if (io_port != NULL)
+            DeleteMsgPort(io_port);
+        return;
+    }
+
+    request->tr_node.io_Command = TR_ADDREQUEST;
+    request->tr_time.tv_secs    = 0UL;
+    request->tr_time.tv_micro   = 100000UL;
+    SendIO((struct IORequest *)request);
+
+    tx_amiga_green_stats(&before);
+    (VOID)ami_green_checked_waitio((struct IORequest *)request);
+    tx_amiga_green_stats(&after);
+    bt->bt_Rounds = (LONG)(after.gs_stray_wait - before.gs_stray_wait);
+    if (bt->bt_Rounds != 1)
+        bt->bt_Failures++;
+
+    CloseDevice((struct IORequest *)request);
+    DeleteIORequest((struct IORequest *)request);
+    DeleteMsgPort(io_port);
+
+    /* WaitPort must return the first message without removing it.  A ThreadX
+       timer posts after this proxy has suspended in the green-wait wrapper. */
+    bt_gate_port = CreateMsgPort();
+    if (bt_gate_port == NULL)
+    {
+        bt->bt_Failures++;
+        return;
+    }
+
+    bt_gate_message.mn_Node.ln_Type = NT_MESSAGE;
+    bt_gate_message.mn_ReplyPort    = NULL;
+    bt_gate_message.mn_Length       = (UWORD)sizeof(bt_gate_message);
+
+    status = tx_timer_create(&bt_gate_port_timer, (CHAR *)"gate port post",
+                             bt_gate_post_message, 0UL, 2UL, 0UL,
+                             TX_AUTO_ACTIVATE);
+    if (status != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+        DeleteMsgPort(bt_gate_port);
+        bt_gate_port = NULL;
+        return;
+    }
+
+    tx_amiga_green_stats(&before);
+    message = ami_green_checked_waitport(bt_gate_port);
+    tx_amiga_green_stats(&after);
+    bt->bt_Saw = (LONG)(after.gs_stray_wait - before.gs_stray_wait);
+    if (bt->bt_Saw != 1 || message != &bt_gate_message ||
+        GetMsg(bt_gate_port) != &bt_gate_message)
+    {
+        bt->bt_Failures++;
+    }
+
+    (VOID)tx_timer_delete(&bt_gate_port_timer);
+    DeleteMsgPort(bt_gate_port);
+    bt_gate_port = NULL;
+}
+
 static VOID bt_die_gate_entry(VOID)
 {
     struct Task *me = FindTask(NULL);
@@ -426,6 +520,8 @@ static VOID bt_die_gate_entry(VOID)
     /* From here onward this continuation is the gate's green proxy, not the
        Exec owner.  It must never execute bt_finish(), which would remove the
        realm Task rather than the parked owner. */
+    bt_gate_test_exec_waits(bt);
+
     bt->bt_Ready = 1U;
     Signal(bt->bt_Parent, BT_SIG_GO);
 
@@ -1040,6 +1136,12 @@ int main(int argc, char **argv)
                 t_check(bt_dead_gate_owner.bt_Failures == 0,
                         "request gate entered without an error",
                         bt_dead_gate_owner.bt_Failures);
+                t_check(bt_dead_gate_owner.bt_Rounds == 1,
+                        "blocking WaitIO suspended only its green proxy",
+                        bt_dead_gate_owner.bt_Rounds);
+                t_check(bt_dead_gate_owner.bt_Saw == 1,
+                        "blocking WaitPort preserved its message contract",
+                        bt_dead_gate_owner.bt_Saw);
                 t_check(bt_dead_gate.ag_Active != 0U,
                         "request was active when its owner died", 0);
                 t_check(bt_dead_gate.ag_Thread.tx_thread_state == TX_EVENT_FLAG,

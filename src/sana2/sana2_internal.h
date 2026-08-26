@@ -507,15 +507,25 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface);
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw);
 
-/* <proto/exec.h> is forced FIRST: the NDK's inline Wait macro must be expanded
-   (once, behind its own guard) BEFORE ours is defined, or a TU that includes
-   it after this header has ours silently replaced -- the NDK path is -isystem,
-   so the redefinition never even warns. */
-#if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+/* <proto/exec.h> is forced FIRST: the NDK's inline wait macros must expand
+   (once, behind their guard) BEFORE ours are defined, or a TU that includes it
+   later has ours silently replaced -- the NDK path is -isystem, so the
+   redefinition never even warns. */
+#ifdef AMINETXDUO_GREEN_REALM
 #include <proto/exec.h>
+BYTE ami_green_checked_waitio(struct IORequest *request);
+struct Message *ami_green_checked_waitport(struct MsgPort *port);
+
+#undef WaitIO
+#define WaitIO(request) ami_green_checked_waitio(request)
+#undef WaitPort
+#define WaitPort(port) ami_green_checked_waitport(port)
+
+#ifdef AMINETXDUO_RXPROBE
 ULONG ami_green_checked_wait(ULONG sigmask);
 #undef Wait
 #define Wait(sigmask) ami_green_checked_wait(sigmask)
+#endif
 #endif
 
 #endif /* AMINETXDUO_SANA2_INTERNAL_H */

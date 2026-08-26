@@ -361,6 +361,16 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
        every device for a cooked read and takes that as raw support. */
     BeginIO((struct IORequest *)&req);
     AbortIO((struct IORequest *)&req);
+
+#ifdef AMINETXDUO_GREEN_REALM
+    /* The interface can be opened by a green NetX thread.  AbortIO() only
+       requests cancellation; a driver may return the request later, and a
+       direct WaitIO() in that window would park the entire realm. */
+    while (CheckIO((struct IORequest *)&req) == NULL)
+    {
+        (VOID)tx_amiga_green_wait(1UL << port->mp_SigBit);
+    }
+#endif
     WaitIO((struct IORequest *)&req);
 
     err = (LONG)(BYTE)req.ios2_Req.io_Error;

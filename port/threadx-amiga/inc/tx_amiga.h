@@ -228,8 +228,8 @@ typedef struct TX_AMIGA_GREEN_STATS_STRUCT
     ULONG   gs_idle_waits;      /* times the realm slept in its one Wait()   */
     ULONG   gs_wait_fast;       /* green waits satisfied by a latched signal */
     ULONG   gs_wait_slow;       /* green waits that suspended the thread     */
-    ULONG   gs_stray_wait;      /* Exec Wait()s caught arriving from green
-                                   context (probe builds; must stay zero)    */
+    ULONG   gs_stray_wait;      /* blocking Wait/WaitIO/WaitPort calls caught
+                                   arriving from green context              */
     ULONG   gs_gate_calls;      /* bracket calls carried through the gate    */
     ULONG   gs_gate_fallback;   /* bracket calls the gate declined (adopted) */
     ULONG   gs_realm_sigbits;   /* Exec signal bits out on the realm Task    */
@@ -238,7 +238,7 @@ typedef struct TX_AMIGA_GREEN_STATS_STRUCT
 
 VOID    tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *stats);
 
-/* Count one intercepted Exec Wait() from green context (probe builds).  */
+/* Count one intercepted blocking Exec wait from green context.  */
 VOID    tx_amiga_green_stray_wait_note(VOID);
 
 /* Count one gate decline (the caller fell back to the adopted-baton path).  */
