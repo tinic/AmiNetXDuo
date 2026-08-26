@@ -58,7 +58,7 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
     if (sock != NULL && sock->as_RxDState == BSD_RXD_ARMED)
-        bsd_rxdirect_pump(sock);
+        bsd_rxdirect_pump(sock, FALSE);
 #endif
 
     bsd_event_post(sock, FD_READ);

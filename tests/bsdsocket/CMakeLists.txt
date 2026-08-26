@@ -144,6 +144,32 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME select_readiness COMMAND test_select)
 
+    # rxdirect.c, the completer that runs inside the TCP receive notify.  It
+    # is compiled unconditionally here even though the shipping default is
+    # -DAMINETXDUO_RX_DIRECT_COMPLETE=OFF: an option nothing builds is an
+    # option nothing notices breaking, and the claim under test is a
+    # use-after-release against vendored NetX Duo, not a rate.
+    add_executable(test_rxdirect host/test_rxdirect_host.c
+                                 "${CMAKE_SOURCE_DIR}/src/bsdsocket/rxdirect.c")
+
+    target_include_directories(test_rxdirect PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_rxdirect PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_rxdirect PRIVATE NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_RX_DIRECT_COMPLETE)
+
+    add_test(NAME rxdirect_completer COMMAND test_rxdirect)
+
     # options.c, the other file the struct timeval collision used to keep out.
     # SO_RCVTIMEO and SO_SNDTIMEO are the conversions that were unreachable
     # here, and every option in the file was provable only on the emulator.

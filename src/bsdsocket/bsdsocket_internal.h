@@ -880,8 +880,8 @@ ULONG bsd_udp_available(const AmiSocket *sock);
 
 /* The completer half of the pending-receive descriptor. transfer.c owns it;
  * select.c's receive notify calls it on the IP thread when a descriptor is
- * armed. Never suspends: NX_NO_WAIT dequeues, a copy, and bookkeeping. */
-VOID bsd_rxdirect_pump(AmiSocket *sock);
+ * armed, with may_release FALSE -- rxdirect.c says why. Never suspends. */
+VOID bsd_rxdirect_pump(AmiSocket *sock, BOOL may_release);
 #endif
 
 /*

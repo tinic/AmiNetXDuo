@@ -74,7 +74,7 @@ comment beside the code, not an entry here.
 | Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
 | The xmit leg has never been read on a transfer | built and wired, but no capture run has quoted it beside reap/stuff/post | `tests/perf/run-poolshare.sh:97` |
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:97` |
-| A pending recv is never completed on the IP thread | priced +2-5% in src/bsdsocket alone; the realm was built instead and is rate-neutral | `src/bsdsocket/transfer.c:990` |
+| The IP-thread recv completer is unmeasured, so it ships OFF | safe and host-tested; +2-5% is a price, not a number; needs a two-arm poolshare | `src/bsdsocket/rxdirect.c:32` |
 | The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:789` |
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |

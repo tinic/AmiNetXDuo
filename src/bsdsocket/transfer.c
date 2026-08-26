@@ -983,70 +983,6 @@ static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
 
 /*
- * The completer half of the pending-receive descriptor.  Runs wherever the
- * baton is: on the IP thread inside the receive notify (protection mutex
- * held), or on the caller inside its bracket before it parks.  Either way no
- */
-VOID bsd_rxdirect_pump(AmiSocket *sock)
-{
-    if (sock->as_RxPending != NULL)
-        return;
-
-    while (sock->as_RxDFilled < sock->as_RxDWant)
-    {
-        NX_PACKET *packet = NX_NULL;
-        ULONG      length, take, moved;
-        UINT       status;
-
-        status = nx_tcp_socket_receive(&sock->as_Nx.tcp, &packet, NX_NO_WAIT);
-        if (status != NX_SUCCESS)
-        {
-            sock->as_RxDStatus = status;
-            break;
-        }
-
-        length = bsd_packet_len(packet);
-        take   = sock->as_RxDWant - sock->as_RxDFilled;
-        if (take > length)
-            take = length;
-
-        moved = 0;
-        if (take > 0)
-            (VOID)nx_packet_data_extract_offset(
-                      packet, 0, sock->as_RxDDst + sock->as_RxDFilled,
-                      take, &moved);
-
-        sock->as_RxDFilled += moved;
-
-        if (moved < length)
-        {
-            sock->as_RxPending = packet;
-            sock->as_RxOffset  = moved;
-            break;
-        }
-
-        if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_head == NX_NULL)
-        {
-            sock->as_RxPending = packet;
-            sock->as_RxOffset  = length;
-            break;
-        }
-
-        nx_packet_release(packet);
-    }
-
-    if (sock->as_RxDFilled > 0)
-    {
-        sock->as_RxDState = BSD_RXD_DONE;
-
-#ifdef AMINETXDUO_RXPROBE
-        ami_budget_fetch(ami_budget_clock());
-        ami_budget_rx_direct();
-#endif
-    }
-}
-
-/*
  * The caller half: publish the buffer, park in a plain Wait() on the base's
  * event signal, and return what the IP thread copied -- without re-entering
  * NetX Duo on the way out.  Everything that is not the plain blocking stream
@@ -1081,7 +1017,7 @@ static LONG bsd_recv_direct(struct AmiSocketBase *base, AmiSocket *sock,
     sock->as_RxDStatus = NX_NO_PACKET;
     sock->as_RxDState  = BSD_RXD_ARMED;
 
-    bsd_rxdirect_pump(sock);
+    bsd_rxdirect_pump(sock, TRUE);
 
     if (sock->as_RxDState == BSD_RXD_ARMED &&
         (sock->as_RxDStatus != NX_NO_PACKET || sock->as_RxPending != NULL))
