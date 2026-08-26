@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 MODEL=A1200
-TIMEOUT=105
+TIMEOUT=140
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 RUNNER=slirp
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
@@ -35,7 +35,7 @@ BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" \
          "$TOOLS/ConfigureNetInterface" "$TOOLS/ShowNetStatus" \
-         "$TOOLS/netstat" "$TOOLS/ping" "$BSD"; do
+         "$TOOLS/netstat" "$TOOLS/ping" "$TOOLS/NetCapture" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -85,6 +85,7 @@ cp "$TOOLS/ConfigureNetInterface" "$STAGE/ConfigureNetInterface"
 cp "$TOOLS/ShowNetStatus"         "$STAGE/ShowNetStatus"
 cp "$TOOLS/netstat"               "$STAGE/netstat"
 cp "$TOOLS/ping"                  "$STAGE/ping"
+cp "$TOOLS/NetCapture"            "$STAGE/NetCapture"
 
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:ConfigureNetInterface eth0 RELEASE
@@ -99,7 +100,10 @@ SYS:ping 10.0.2.2 -c 2 -t 20
 SYS:ConfigureNetInterface eth0 RELEASE
 SYS:ShowNetStatus eth0
 SYS:ConfigureNetInterface eth0 RELEASE
+&SYS:NetCapture OUT=SYS:dhcpwire.pcap IFACE=eth0 PORT=67 SNAP=400 COUNT=4 SECONDS=25 QUIET
+wait 2
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
+wait 4
 SYS:netstat -i
 SYS:ShowNetStatus eth0
 SYS:ping 10.0.2.2 -c 2 -t 20
@@ -268,6 +272,25 @@ want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 3 20 "and returns FAIL"
 
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 0 \
         "CONFIGURE=DHCP after a release takes a lease again"
+
+# THE WIRE, not the verdict.  NetCapture ran in the guest across the restart
+# only, so every port-67 frame in this file belongs to it; a restart that
+# re-armed nothing leaves a lease-looking verdict above and no DISCOVER here.
+WIRE="$HD/dhcpwire.pcap"
+if [ ! -s "$WIRE" ]; then
+    fail "the guest captured no wire across the restart ($WIRE)"
+elif ! command -v python3 >/dev/null 2>&1; then
+    fail "no python3 on this host, so the captured wire cannot be read"
+else
+    SEEN=$(python3 "$ROOT/tests/tools/dhcpwire.py" "$WIRE" 2>&1) || SEEN="0"
+    if [ "$SEEN" -ge 1 ] 2>/dev/null; then
+        pass "and a DHCP DISCOVER really went out on the wire ($SEEN)"
+    else
+        fail "THE RESTART WAS SILENT: no DISCOVER in $WIRE, only the verdict"
+        python3 "$ROOT/tests/tools/dhcpwire.py" -v "$WIRE" 2>&1 |
+            sed 's/^/       /' >&2
+    fi
+fi
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 \
      "lease taken" \
      "and says it allocated rather than renewed, which is what it did"

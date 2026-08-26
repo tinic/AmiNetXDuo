@@ -2676,6 +2676,17 @@ LONG netstack_interface_dhcp_start(UWORD index, ULONG requested_address)
     status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
 
     /*
+     * ALREADY_STARTED is the client's record disagreeing with ns_DhcpState[].
+     * Returning here leaves the record armed for nothing and no DISCOVER goes
+     * out, so stop it and start it again: a restart has to re-arm.
+     */
+    if (status == NX_DHCP_ALREADY_STARTED)
+    {
+        (VOID)nx_dhcp_interface_stop(&ns->ns_Dhcp, (UINT)index);
+        status = nx_dhcp_interface_start(&ns->ns_Dhcp, (UINT)index);
+    }
+
+    /*
      * Record started before the accelerated timer can report BOUND: the resolver
      * handoff rejects callbacks from a client that is not marked started.
      */

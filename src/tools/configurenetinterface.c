@@ -177,6 +177,20 @@ static BOOL on_dhcp(struct Library *base, LONG index)
     return (BOOL)(d != NULL && d->nsd_State != NETSTATUS_DHCP_OFF);
 }
 
+/* NETSTATUS_DHCPRAW_*, in order, so a refusal can name the state it is in. */
+static const char *raw_state_name(UWORD raw)
+{
+    static const char *const names[] = {
+        "not started", "booting",  "starting",  "selecting", "requesting",
+        "bound",       "renewing", "rebinding", "renewing",  "probing"
+    };
+
+    if (raw >= (UWORD)(sizeof(names) / sizeof(names[0])))
+        return "in a state it does not name";
+
+    return names[raw];
+}
+
 /* TRUE when this interface holds a lease right now. */
 static BOOL dhcp_bound(struct Library *base, LONG index)
 {
@@ -782,8 +796,17 @@ int main(int argc, char **argv)
                 tool_error("%s is already asking a DHCP server for an "
                            "address. Wait for that request to be answered or "
                            "to give up, then ask again", (LONG)name);
-            else
+            else if (renewing)
                 tool_error("%s has no DHCP client to ask", (LONG)name);
+            else
+            {
+                const NetStatusDhcp *d = dhcp_row(base, index);
+
+                tool_error("%s did not start a DHCP request: its client is %s",
+                           (LONG)name,
+                           (LONG)raw_state_name((d != NULL) ? d->nsd_RawState
+                                                            : (UWORD)0));
+            }
 
             tool_netstatus_close(base);
             FreeArgs(rda);

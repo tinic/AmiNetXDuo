@@ -48,7 +48,7 @@ comment beside the code, not an entry here.
 | `nc -l` from outside has never been exercised under Amiberry | it forwards with `uae_slirp_redir`, an FS-UAE option; a bridged guest needs none | `tests/tools/run-nettools.sh` |
 | DHCPv6 server selection by preference is untested | no lab server can send OPTION_PREFERENCE, so a two-server link picks by arrival | `tests/ipv6/run-dhcpv6.sh` |
 | The on-target source-selection arm cannot separate Rule 6 | one `ADDRESS6` per interface, so no guest holds a ULA and a global | `src/config/config_parse.c:769`, `tests/tools/run-srcsel.sh` |
-| A release followed by a DHCP restart was observed silent on the wire | no DISCOVER where one was due, and the harness grades verdicts not the wire | `tests/tools/run-ifdhcp.sh:90` |
+| The DHCP restart's new wire assertion has never run on a rig | the pcap-graded DISCOVER is offline-proven only; the re-arm fix is unproven live | `tests/tools/run-ifdhcp.sh:279` |
 | A legacy one-shot mDNS query drew no observable answer | proper 5353-sourced queries are answered; ephemeral-port one-shots are not | `third_party/netxduo/addons/mdns/nxd_mdns.c:8871` |
 | Nothing guards the usergroup.library hold ixemul clients depend on | no caller in our tree, so a tidy-up would silently close the stack for ixnet | `src/bsdsocket/library_runtime.c:46` |
 | The crypto yield hook is installed by `tls.library` alone | anything linking `aminetxduo_tls` directly gets a NULL hook and holds the baton | `src/tlslib/tls_netx.c:95` |
