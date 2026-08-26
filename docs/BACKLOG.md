@@ -11,7 +11,7 @@ comment beside the code, not an entry here.
 | `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
 | A process the Shell spawned cannot `SetMode()`, `WaitForChar()` or `Open("*")` | its own `pr_MsgPort` is neither the break port nor the Shell's task | `src/tools/httpterm.c:197` |
 | A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1723` |
-| An RSA-PSS-signed certificate cannot be verified | no `id-RSASSA-PSS` OID and no PSS row in the type set, so the link fails closed | `src/tls/ami_tls_crypto.c:1411` |
+| A certificate whose public key is `id-RSASSA-PSS` is refused | `rsa_pss_pss_*`: the SPKI OID is neither RSA nor EC, so the parse stops | `third_party/netxduo/nx_secure/src/nx_secure_x509.c:239` |
 | `tls.library` runs only on our own `bsdsocket.library` | a hand-coded private LVO, so Roadshow, AmiTCP and Miami get `TLS_ERR_NOSTACK` | `src/tlslib/tls_netx.c:33` |
 | `tls.library` is callable from exactly one compiler | GCC extended-asm stubs, no `.fd` and no pragmas, so SAS/C and vbcc cannot | `include/aminetxduo/tlslib.h`, `developer/sfd/` |
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
