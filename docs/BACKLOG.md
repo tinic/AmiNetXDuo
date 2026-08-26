@@ -81,11 +81,10 @@ comment beside the code, not an entry here.
 | The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:789` |
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
-| The per-unit use count has no emulator arm | run-ifslots.sh stages 4 interfaces on a2065 unit 0; nothing removes one and pings from another | `tests/tools/run-ifslots.sh:140` |
+| `ShowNetStatus` can print the CONFIGURED default route, not the live one | run-ifsurvive reads it back after a detach; it is non-zero either way once the survivor has a GATEWAY line | `tests/tools/run-ifsurvive.sh:315` |
 | `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:299` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
 | Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:300` |
 | A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:270` |
 | `ci.sh host` cannot pass without root on this box | the rig-lock selftest hard-fails when `ping` cannot probe; no unprivileged ICMP, no `cap_net_raw` | `tools/emu-rig-lock-selftest.sh:234` |
 | Three tool headers stay over 20 comment lines | each header IS the `--help` text, printed by a hardcoded `sed -n` range, so trimming it needs a code edit | `tools/fetch-toolchain.sh:164` |
-| No arm resolves, removes an interface, and resolves again end to end | the gateway hand-off after detach is unit-proven only; no wall-clock for the second lookup | `src/netstack/netstack.c:2500` |
