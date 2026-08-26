@@ -480,10 +480,22 @@ UINT status;
     printf("extensions\n");
 
     status = ext_verify(x509_ext_leaf_ok, x509_ext_leaf_ok_len, NX_CRYPTO_NULL, 0);
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        status = _nx_secure_x509_extended_key_usage_chain_check(
+            &ext_store, &ext_leaf,
+            NX_SECURE_TLS_X509_TYPE_PKIX_KP_SERVER_AUTH);
+    }
     check(status == NX_SECURE_X509_SUCCESS,
           "a serverAuth leaf still verifies");
 
     status = ext_verify(x509_ext_leaf_clientauth, x509_ext_leaf_clientauth_len, NX_CRYPTO_NULL, 0);
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        status = _nx_secure_x509_extended_key_usage_chain_check(
+            &ext_store, &ext_leaf,
+            NX_SECURE_TLS_X509_TYPE_PKIX_KP_SERVER_AUTH);
+    }
     check(status == NX_SECURE_X509_EXT_KEY_USAGE_NOT_FOUND,
           "a clientAuth-only leaf is refused");
 
@@ -627,16 +639,33 @@ static UINT ku_verify(UCHAR usage, UINT algorithm, UINT tls_1_3,
         0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01,
         0xff, 0x04, 0x04, 0x03, 0x02, 0x05
     };
-    UCHAR                           leaf[sizeof(x509_ext_leaf_ok)];
+    UCHAR                           leaf[(sizeof(x509_ext_leaf_ok) >
+                                          sizeof(x509_ext_leaf_clientauth)) ?
+                                         sizeof(x509_ext_leaf_ok) :
+                                         sizeof(x509_ext_leaf_clientauth)];
+    const UCHAR                    *leaf_source;
+    unsigned                       leaf_length;
     NX_SECURE_X509_CERT             certificate;
+    NX_SECURE_X509_CERT             issuer;
     NX_SECURE_TLS_SESSION           session;
     NX_SECURE_TLS_CIPHERSUITE_INFO  ciphersuite;
     NX_CRYPTO_METHOD                public_cipher;
     UINT                            status;
     unsigned                        i;
 
-    memcpy(leaf, x509_ext_leaf_ok, sizeof(leaf));
-    for (i = 0; i + sizeof(key_usage_prefix) < sizeof(leaf); i++)
+    if (socket_type == NX_SECURE_TLS_SESSION_TYPE_SERVER)
+    {
+        leaf_source = x509_ext_leaf_clientauth;
+        leaf_length = x509_ext_leaf_clientauth_len;
+    }
+    else
+    {
+        leaf_source = x509_ext_leaf_ok;
+        leaf_length = x509_ext_leaf_ok_len;
+    }
+
+    memcpy(leaf, leaf_source, leaf_length);
+    for (i = 0; i + sizeof(key_usage_prefix) < leaf_length; i++)
     {
         if (memcmp(&leaf[i], key_usage_prefix, sizeof(key_usage_prefix)) == 0)
         {
@@ -644,21 +673,42 @@ static UINT ku_verify(UCHAR usage, UINT algorithm, UINT tls_1_3,
             break;
         }
     }
-    if (i + sizeof(key_usage_prefix) >= sizeof(leaf))
+    if (i + sizeof(key_usage_prefix) >= leaf_length)
     {
         return NX_SECURE_X509_EXTENSION_NOT_FOUND;
     }
 
     memset(&certificate, 0, sizeof(certificate));
+    memset(&issuer, 0, sizeof(issuer));
     memset(&session, 0, sizeof(session));
     memset(&ciphersuite, 0, sizeof(ciphersuite));
     memset(&public_cipher, 0, sizeof(public_cipher));
 
     status = _nx_secure_x509_certificate_initialize(&certificate,
-                                                     leaf, (USHORT)sizeof(leaf),
+                                                     leaf, (USHORT)leaf_length,
                                                      NX_CRYPTO_NULL, 0,
                                                      NX_CRYPTO_NULL, 0,
                                                      NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return status;
+    }
+
+    status = _nx_secure_x509_certificate_initialize(&issuer,
+                                                     (UCHAR *)x509_ext_root,
+                                                     (USHORT)x509_ext_root_len,
+                                                     NX_CRYPTO_NULL, 0,
+                                                     NX_CRYPTO_NULL, 0,
+                                                     NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status != NX_SECURE_X509_SUCCESS)
+    {
+        return status;
+    }
+
+    status = _nx_secure_x509_store_certificate_add(
+        &issuer,
+        &session.nx_secure_tls_credentials.nx_secure_tls_certificate_store,
+        NX_SECURE_X509_CERT_LOCATION_TRUSTED);
     if (status != NX_SECURE_X509_SUCCESS)
     {
         return status;
