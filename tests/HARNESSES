@@ -163,7 +163,7 @@ tests/tools/run-dnssearch.sh       : manual : UNWIRED. the regression test for s
 tests/tools/run-routes.sh          : manual : bridged. the regression test for the IPv4 routing table; AddNetRoute and DeleteNetRoute have no other home. The ARP-on-the-wire half needs an unprivileged tcpdump on -B's interface
 tests/tools/run-ifquery.sh         : manual : UNWIRED. the Roadshow interface and statistics APIs
 tests/tools/run-ifreadd.sh         : manual : bridged. AddInterfaceTagList() gives back an interface that works
-tests/tools/run-cycledrill.sh      : manual : RED on a product finding. Repaired onto the bridge (the -A branch it needed to read a serial log at all is gone; both arms of it ran Amiberry, and the default arm blanked SERIAL so the orphaned-reader-stack check reported NOT CHECKED on every run). 90 of 91 guest checks pass; the one that does not is "no Task or Process was left behind over the cycles", tasks 21 -> 22 over three open/expunge/reopen cycles. `-n` is its own negative control and proves the gates fire. Its orphaned-reader-stack check still cannot fire: a ToolsSmoke run writes an empty serial log on this rig, so that assertion reports NOT CHECKED whatever the backend is
+tests/tools/run-cycledrill.sh      : manual : open/expunge/reopen and Online/Offline lifetime drill; the unresolved shutdown report requires a physical 3c589
 tests/tools/run-srcsel.sh          : manual : bridged. outbound source selection
 tests/tools/run-oommsg.sh          : manual : UNWIRED. out of memory, and which message blames what
 tests/tools/run-resolvebreak.sh    : manual : UNWIRED. how long a name lookup blocks, and whether Ctrl-C gets it back
