@@ -549,7 +549,7 @@ stage_host() {
 
 # --------------------------------------------------------------- host32 ----
 
-# The two fuzz drivers that need a 32-bit host, for different reasons.
+# The three host targets that need a 32-bit host, for different reasons.
 #
 #   fuzz_mdns         NetX Duo's mDNS cache keeps pointers in ULONG slots, so
 #                     it is only coherent where sizeof(void*) == 4.
@@ -557,19 +557,26 @@ stage_host() {
 #                     nx_secure_tls_process_certificate_verify.c both cast a
 #                     pointer to a 32-bit ULONG, and in the second one that
 #                     cast is the signature bounds check under test.
+#   test_tls_x509     NetX Secure's ECDSA implementation similarly performs
+#                     pointer arithmetic through ULONG.  Its other checks run
+#                     at both widths; the real ECDSA verification must run
+#                     here, where ULONG and pointers have the target's shape.
 #
-# Both read bytes chosen by someone else, unauthenticated multicast, and a
-# TLS server's handshake before any key exists to check it against, which
-# makes them worth a build of their own rather than leaving them unexercised.
-HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto)
+# The fuzzers read bytes chosen by someone else: unauthenticated multicast and
+# a TLS server's handshake before any key exists to check it against.  The
+# X.509 harness supplies deterministic verification coverage at the same
+# target-compatible width.
+HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509)
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep)$|tls_x509_checks$'
+HOST32_TESTS_EXPECTED=5
 
 stage_host32() {
-    hr "host tests (32-bit: mDNS + TLS crypto fuzz)"
+    hr "host tests (32-bit: mDNS, TLS crypto, X.509)"
 
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
         skip "host32: no -m32 on this host (needs gcc-multilib on Debian/Ubuntu),\
- the mDNS and TLS-crypto fuzz drivers did not run"
+ the mDNS, TLS-crypto and X.509 tests did not run"
         return "$NOTHING"
     fi
 
@@ -583,15 +590,16 @@ stage_host32() {
         --target "${HOST32_TEST_TARGETS[@]}" \
         || { fail "host32 build"; return 1; }
 
-    ( cd "$BUILD/host32" && ctest --output-on-failure -R 'mdns|tls_crypto' ) \
+    ( cd "$BUILD/host32" && ctest --output-on-failure -R "$HOST32_TEST_REGEX" ) \
         || { fail "host32 ctest"; return 1; }
 
-    # A 64-bit build registers none of these at all, so an empty run here would
-    # otherwise pass as a green stage that tested nothing.  Two per driver.
+    # An empty or incomplete selection here would otherwise pass as a green
+    # stage that tested nothing.  The two fuzzers register two cases each and
+    # the X.509 harness registers one.
     local n want
-    want=$(( ${#HOST32_TEST_TARGETS[@]} * 2 ))
-    n=$( (cd "$BUILD/host32" && ctest -N -R 'mdns|tls_crypto' 2>/dev/null | sed -n 's/^Total Tests: //p') )
-    note "$n 32-bit fuzz test(s) registered"
+    want="$HOST32_TESTS_EXPECTED"
+    n=$( (cd "$BUILD/host32" && ctest -N -R "$HOST32_TEST_REGEX" 2>/dev/null | sed -n 's/^Total Tests: //p') )
+    note "$n 32-bit test(s) registered"
     [ "${n:-0}" -ge "$want" ] || {
         fail "host32 registered $n tests, expected $want"; return 1; }
 }
@@ -665,7 +673,7 @@ stage_sanitize() {
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
         skip "sanitize32: no -m32 on this host (needs gcc-multilib on\
- Debian/Ubuntu), the mDNS and TLS-crypto drivers were not sanitized here"
+ Debian/Ubuntu), the mDNS, TLS-crypto and X.509 tests were not sanitized here"
         return 0
     fi
 
@@ -690,12 +698,12 @@ stage_sanitize() {
         --target "${HOST32_TEST_TARGETS[@]}" \
         || { fail "sanitize32 build"; return 1; }
 
-    ( cd "$BUILD/san32" && ctest --output-on-failure -R 'mdns|tls_crypto' ) \
+    ( cd "$BUILD/san32" && ctest --output-on-failure -R "$HOST32_TEST_REGEX" ) \
         || { fail "sanitize32 ctest"; return 1; }
 
     local n32 want32
-    want32=$(( ${#HOST32_TEST_TARGETS[@]} * 2 ))
-    n32=$( (cd "$BUILD/san32" && ctest -N -R 'mdns|tls_crypto' 2>/dev/null | sed -n 's/^Total Tests: //p') )
+    want32="$HOST32_TESTS_EXPECTED"
+    n32=$( (cd "$BUILD/san32" && ctest -N -R "$HOST32_TEST_REGEX" 2>/dev/null | sed -n 's/^Total Tests: //p') )
     note "$n32 sanitized 32-bit tests ran (expected $want32)"
     if [ "${n32:-0}" -ne "$want32" ]; then
         fail "sanitize32 registered $n32 tests, expected $want32"
