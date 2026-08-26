@@ -342,12 +342,15 @@ static void h_config(void)
     h_cfg.unit = 0;
 }
 
-static AmiSana2If *h_bring_up(void)
+/* One opener of the fake unit, with no reads stocked: the shared-unit cases
+   count commands, and reads_held is a device-wide number with no opener in it. */
+static AmiSana2If *h_bring_up_unit(ULONG unit)
 {
     AmiSana2If *iface;
     LONG        err = 0;
 
     h_config();
+    h_cfg.unit = unit;
 
     iface = ami_sana2_open(&h_cfg, &err);
     if (iface == NULL)
@@ -359,7 +362,15 @@ static AmiSana2If *h_bring_up(void)
         return NULL;
     }
 
-    h_dev.reads_held = H_READS;
+    return iface;
+}
+
+static AmiSana2If *h_bring_up(void)
+{
+    AmiSana2If *iface = h_bring_up_unit(0);
+
+    if (iface != NULL)
+        h_dev.reads_held = H_READS;
 
     return iface;
 }
@@ -560,6 +571,71 @@ static void case_offline_refused(void)
     (VOID)h_tear_down(iface);
 }
 
+/* 8. Two interfaces on ONE unit: the first one out must not take the wire. */
+static void case_shared_unit(void)
+{
+    AmiSana2If *a;
+    AmiSana2If *b;
+
+    h_device_reset();
+
+    a = h_bring_up_unit(0);
+    h_check(a != NULL, "the first interface on the shared unit came up");
+    if (a == NULL)
+        return;
+
+    h_check(h_dev.online_cmds == 1, "the first interface onlined the unit");
+
+    b = h_bring_up_unit(0);
+    h_check(b != NULL, "the second interface on the shared unit came up");
+    if (b == NULL)
+    {
+        (VOID)h_tear_down(a);
+        return;
+    }
+
+    h_check(h_dev.online_cmds == 1,
+            "the second interface did not re-online a unit already up");
+    h_check(b->online, "and it still counts itself online");
+
+    h_check(h_tear_down(a), "the first interface closes");
+    h_check(h_dev.offline_cmds == 0,
+            "removing one interface issues no S2_OFFLINE while a sibling holds "
+            "the unit");
+    h_check(h_dev.unit_online, "the sibling still has a live wire");
+    h_check(h_dev.closes == 1, "CloseDevice() was called for the first");
+
+    h_check(h_tear_down(b), "the second interface closes");
+    h_check(h_dev.offline_cmds == 1,
+            "the last interface out issues exactly one S2_OFFLINE");
+    h_check(!h_dev.unit_online, "and the wire is down");
+    h_check(h_dev.closes == 2, "CloseDevice() was called for both");
+}
+
+/* 9. Two units are not one: neither may borrow the other's count. */
+static void case_distinct_units(void)
+{
+    AmiSana2If *a;
+    AmiSana2If *b;
+
+    h_device_reset();
+
+    a = h_bring_up_unit(0);
+    b = h_bring_up_unit(1);
+    h_check(a != NULL && b != NULL, "both units came up");
+    if (a == NULL || b == NULL)
+        return;
+
+    h_check(h_dev.online_cmds == 2, "each unit was onlined on its own");
+
+    h_check(h_tear_down(a), "unit 0 closes");
+    h_check(h_dev.offline_cmds == 1,
+            "a unit with one interface offlines when that one leaves");
+
+    h_check(h_tear_down(b), "unit 1 closes");
+    h_check(h_dev.offline_cmds == 2, "and so does the other");
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -573,6 +649,8 @@ int main(void)
     case_online_rearms();
     case_device_keeps_everything();
     case_offline_refused();
+    case_shared_unit();
+    case_distinct_units();
 
     h_check(h_ports_made > 0, "reply ports were created");
     h_check(h_ports_live == 0, "every reply port was deleted");

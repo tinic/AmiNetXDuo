@@ -392,6 +392,9 @@ struct AmiSana2If
      * six or seven times over, and only the first means anything.
      */
     UBYTE               offline_state;
+    /* Whether this interface currently holds a share of its unit's use count.
+       See the per-unit block in sana2_device.c. */
+    BOOL                unit_counted;
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;

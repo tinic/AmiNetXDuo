@@ -373,6 +373,108 @@ static BOOL ami_sana2_probe_raw(AmiSana2If *iface)
 }
 #endif /* AMI_SANA2_PROBE_RAW */
 
+/* -------------------------------------------------------- per-unit use count */
+
+/*
+ * S2_ONLINE and S2_OFFLINE are UNIT commands: every opener of a unit shares one
+ * wire, so two interfaces on one unit must online it once and offline it on the
+ * last one out.  Keyed on (device, unit, card) because that is the whole of
+ * what OpenDevice() was given -- io_Unit is per-OPENER in anxnet.device and
+ * cannot identify the board.  Two spellings of one board (plain unit 0 and
+ * CARD= unit 0) therefore count apart, which is only today's behaviour.
+ */
+typedef struct AmiSana2Unit
+{
+    char  device[AMI_CFG_PATH_LEN];
+    char  card[AMI_CFG_NAME_LEN];
+    ULONG unit;
+    UWORD users;
+} AmiSana2Unit;
+
+static AmiSana2Unit ami_sana2_units[AMI_CFG_MAX_ATTACHED];
+
+static BOOL ami_str_same(const char *a, const char *b)
+{
+    ULONG i = 0;
+
+    while (a[i] != '\0' && a[i] == b[i])
+        i++;
+
+    return (a[i] == b[i]) ? TRUE : FALSE;
+}
+
+static AmiSana2Unit *ami_sana2_unit_slot(const AmiSana2If *iface, BOOL create)
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+    {
+        AmiSana2Unit *u = &ami_sana2_units[i];
+
+        if (u->users != 0 && u->unit == iface->unit
+            && ami_str_same(u->device, iface->device)
+            && ami_str_same(u->card, iface->card))
+            return u;
+    }
+
+    if (!create)
+        return NULL;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+    {
+        AmiSana2Unit *u = &ami_sana2_units[i];
+
+        if (u->users == 0)
+        {
+            ami_str_copy(u->device, iface->device, (ULONG)sizeof(u->device));
+            ami_str_copy(u->card, iface->card, (ULONG)sizeof(u->card));
+            u->unit = iface->unit;
+            return u;
+        }
+    }
+
+    return NULL;
+}
+
+/* TRUE when the caller must issue S2_ONLINE: the unit went from unused to
+   used, or this interface already held it and is re-onlining on purpose. */
+static BOOL ami_sana2_unit_join(AmiSana2If *iface)
+{
+    AmiSana2Unit *u;
+
+    if (iface->unit_counted)
+        return TRUE;
+
+    u = ami_sana2_unit_slot(iface, TRUE);
+    if (u == NULL)
+        return TRUE;        /* no slot to track it in: behave as before */
+
+    iface->unit_counted = TRUE;
+    u->users++;
+
+    return (u->users == 1) ? TRUE : FALSE;
+}
+
+/* TRUE when the caller must issue S2_OFFLINE: this was the last interface on
+   the unit, or it was never counted. */
+static BOOL ami_sana2_unit_leave(AmiSana2If *iface)
+{
+    AmiSana2Unit *u;
+
+    if (!iface->unit_counted)
+        return TRUE;
+
+    iface->unit_counted = FALSE;
+
+    u = ami_sana2_unit_slot(iface, FALSE);
+    if (u == NULL || u->users == 0)
+        return TRUE;
+
+    u->users--;
+
+    return (u->users == 0) ? TRUE : FALSE;
+}
+
 /* ------------------------------------------------------------ online state */
 
 LONG ami_sana2_online(AmiSana2If *iface)
@@ -380,22 +482,28 @@ LONG ami_sana2_online(AmiSana2If *iface)
     struct IOSana2Req req = iface->templ;
     LONG              err;
 
-    err = ami_sana2_command(iface, &req, S2_ONLINE);
-    if (err != 0 && req.ios2_WireError != S2WERR_UNIT_ONLINE)
+    if (ami_sana2_unit_join(iface))
     {
-        AMI_ERROR("sana2: S2_ONLINE failed (%ld/%ld)", (long)err,
-                  (long)req.ios2_WireError);
-        return err;
+        err = ami_sana2_command(iface, &req, S2_ONLINE);
+        if (err != 0 && req.ios2_WireError != S2WERR_UNIT_ONLINE)
+        {
+            (VOID)ami_sana2_unit_leave(iface);
+            AMI_ERROR("sana2: S2_ONLINE failed (%ld/%ld)", (long)err,
+                      (long)req.ios2_WireError);
+            return err;
+        }
+
+        /* S2_ONLINE resets the device's counters, so these restart with them.
+           Only when it was issued: a sibling already holds the wire up and the
+           device's counters have not moved. */
+        iface->stats.bad_data         = 0;
+        iface->stats.overruns         = 0;
+        iface->stats.unknown_types    = 0;
+        iface->stats.reconfigurations = 0;
     }
 
     iface->online        = TRUE;
     iface->offline_state = AMI_SANA2_OFFLINE_UP;
-
-    /* S2_ONLINE resets the device's counters, so these restart with them. */
-    iface->stats.bad_data        = 0;
-    iface->stats.overruns        = 0;
-    iface->stats.unknown_types   = 0;
-    iface->stats.reconfigurations = 0;
 
     return 0;
 }
@@ -415,6 +523,12 @@ LONG ami_sana2_offline(AmiSana2If *iface)
     /* Before the command rather than after it: the device has it either way,
        and a refusal is NETEVENT_OFFLINE_FAILED's to report. */
     iface->offline_state = AMI_SANA2_OFFLINE_ISSUED;
+
+    /* Not the last interface on this unit.  S2_OFFLINE here takes the wire out
+       from under the siblings; the cost is that a device which returns queued
+       CMD_READs only on S2_OFFLINE holds this one's until CloseDevice(). */
+    if (!ami_sana2_unit_leave(iface))
+        return 0;
 
     err = ami_sana2_command(iface, &req, S2_OFFLINE);
     if (err != 0 && req.ios2_WireError != S2WERR_UNIT_OFFLINE)
