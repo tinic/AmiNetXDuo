@@ -62,6 +62,7 @@ extern "C" {
 #define NETSTATUS_DEST6        15   /* NetStatusDest6[]                      */
 #define NETSTATUS_EVENTS       16   /* NetStatusEvent[]                      */
 #define NETSTATUS_RXBUDGET     17   /* one NetStatusRxBudget                 */
+#define NETSTATUS_DHCP6        18   /* NetStatusDhcp6[]                      */
 
 /* Every buffer starts with this.  Truncation is detectable rather than silent:
    nsh_Count < nsh_Available. */
@@ -241,6 +242,44 @@ typedef struct NetStatusDhcp
     char    nsd_HostName[NETSTATUS_NAME_LEN];
     char    nsd_DomainName[NETSTATUS_NAME_LEN];
 } NetStatusDhcp;
+
+/* ---------------------------------------------------- NETSTATUS_DHCP6 --- */
+
+/* One row per interface, the same as NETSTATUS_DHCP, and nsd6_State reuses
+   the NETSTATUS_DHCP_* triple.  This stack runs ONE DHCPv6 client, so at most
+   one row is ever anything but NETSTATUS_DHCP_OFF. */
+
+/* nsd6_RawState, NX_DHCPV6_STATE_* verbatim.  Zero is what a library
+   predating the selector, or one built without IPv6, answers. */
+#define NETSTATUS_DHCP6RAW_NONE         0
+#define NETSTATUS_DHCP6RAW_INIT         1
+#define NETSTATUS_DHCP6RAW_SOLICIT      2
+#define NETSTATUS_DHCP6RAW_REQUEST      3
+#define NETSTATUS_DHCP6RAW_RENEW        4
+#define NETSTATUS_DHCP6RAW_REBIND       5
+#define NETSTATUS_DHCP6RAW_DECLINE      6
+#define NETSTATUS_DHCP6RAW_CONFIRM      7
+#define NETSTATUS_DHCP6RAW_INFORM       8
+#define NETSTATUS_DHCP6RAW_RELEASE      9
+#define NETSTATUS_DHCP6RAW_BOUND       15
+
+typedef struct NetStatusDhcp6
+{
+    UWORD   nsd6_Index;                 /* NX_IP interface index             */
+    UWORD   nsd6_State;                 /* NETSTATUS_DHCP_*                  */
+    UWORD   nsd6_RawState;              /* NETSTATUS_DHCP6RAW_*              */
+
+    /* 0 when the client only ever sent an Information-Request: it has
+       options but no address, so there is no lease to release. */
+    UWORD   nsd6_Stateful;
+
+    /* All below are meaningful only in NETSTATUS_DHCP_BOUND. */
+    ULONG   nsd6_Address[4];            /* host byte order, four words       */
+    ULONG   nsd6_PreferredSeconds;      /* 0 = not stated                    */
+    ULONG   nsd6_ValidSeconds;
+    ULONG   nsd6_T1;                    /* renew at, RFC 8415 21.4           */
+    ULONG   nsd6_T2;                    /* rebind at                         */
+} NetStatusDhcp6;
 
 /* ---------------------------------------------------- NETSTATUS_STATS --- */
 

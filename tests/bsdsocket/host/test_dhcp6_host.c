@@ -1,5 +1,14 @@
 /*
- * NETSTATUS_NEIGHBOURS on the host: which neighbours carry NETSTATUS_ND_ROUTER.
+ * NETSTATUS_DHCP6 and NETCTRL_DHCP_RELEASE on an IPv6-only interface.
+ *
+ * Both were reachable only from stack shutdown before this: the selector did
+ * not exist, and RELEASE was gated on netstack_interface_dhcp_state(), which
+ * reads the IPv4 ns_DhcpState[] and so cannot see a DHCPv6 lease at all.
+ *
+ * The DHCPv6 client itself is staged rather than run -- netstack_dhcpv6.c
+ * needs a live NetX Duo and a ThreadX thread -- so what is asserted here is
+ * the netstatus.c half: which selector answers, and which netstack entry
+ * point a RELEASE reaches for an interface with no IPv4 lease.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -29,106 +38,128 @@ static unsigned long h_failures;
         }                                                                     \
     } while (0)
 
-static NX_IP           h_ip;
-static NX_INTERFACE   *h_if0;
-static NX_INTERFACE   *h_if1;
-static BOOL            h_ipv6_on = TRUE;
+static NX_IP  h_ip;
+static BOOL   h_ipv6_on = TRUE;
 
-#define R0  0xFE800000UL
-#define R3  0x00000001UL
-#define H3  0x00000042UL
+/* The interface the staged DHCPv6 client runs on, and the one with no IPv4. */
+#define H_IF6   1U
 
-static VOID hh_addr(ULONG *dst, ULONG last)
-{
-    dst[0] = R0;
-    dst[1] = 0;
-    dst[2] = 0;
-    dst[3] = last;
-}
+static LONG   h_v4_state;               /* AMI_DHCP_* for every interface   */
+static LONG   h_v6_state;               /* AMI_DHCP_* on H_IF6              */
+static BOOL   h_v6_stateful;
+static UWORD  h_v6_raw;
+static LONG   h_v6_release_calls;
+static UWORD  h_v6_release_index;
+static LONG   h_v6_release_rc;
+static LONG   h_error;                  /* what bsd_fail() was handed       */
+static LONG   h_v4_stop_calls;
+static UWORD  h_v4_stop_index;
+static BOOL   h_v4_stop_release;
+
+#define H_A0    0x20010DB8UL
+#define H_A3    0x00000042UL
 
 static VOID h_reset(VOID)
 {
     memset(&h_ip, 0, sizeof(h_ip));
+    h_ip.nx_ip_interface[0].nx_interface_valid = NX_TRUE;
+    h_ip.nx_ip_interface[1].nx_interface_valid = NX_TRUE;
 
-    h_if0 = &h_ip.nx_ip_interface[0];
-    h_if1 = &h_ip.nx_ip_interface[1];
-
-    h_if0->nx_interface_valid = NX_TRUE;
-    h_if1->nx_interface_valid = NX_TRUE;
-
-    h_ipv6_on = TRUE;
+    h_ipv6_on          = TRUE;
+    h_v4_state         = AMI_DHCP_IDLE;
+    h_v6_state         = AMI_DHCP_IDLE;
+    h_v6_stateful      = FALSE;
+    h_v6_raw           = 0;
+    h_v6_release_calls = 0;
+    h_v6_release_index = 0xFFFFU;
+    h_v6_release_rc    = AMI_NET_OK;
+    h_error            = 0;
+    h_v4_stop_calls    = 0;
+    h_v4_stop_index    = 0xFFFFU;
+    h_v4_stop_release  = FALSE;
 }
 
-static VOID h_neighbour(UINT slot, ULONG last, UCHAR state,
-                        NX_INTERFACE *iface,
-                        NX_IPV6_DEFAULT_ROUTER_ENTRY *back)
+/* A stateful lease on H_IF6 and nothing on IPv4: the IPv6-only machine. */
+static VOID h_stage_v6_lease(VOID)
 {
-    ND_CACHE_ENTRY *e = &h_ip.nx_ipv6_nd_cache[slot];
-
-    memset(e, 0, sizeof(*e));
-    hh_addr(e->nx_nd_cache_dest_ip, last);
-    e->nx_nd_cache_nd_status     = state;
-    e->nx_nd_cache_interface_ptr = iface;
-    e->nx_nd_cache_is_router     = back;
-}
-
-/* One default router table entry, the way an RA with no Source Link-Layer
-   Address option leaves it: valid, addressed, and pointing at no neighbour. */
-static NX_IPV6_DEFAULT_ROUTER_ENTRY *h_router(UINT slot, ULONG last,
-                                              NX_INTERFACE *iface)
-{
-    NX_IPV6_DEFAULT_ROUTER_ENTRY *r = &h_ip.nx_ipv6_default_router_table[slot];
-
-    memset(r, 0, sizeof(*r));
-    hh_addr(r->nx_ipv6_default_router_entry_router_address, last);
-    r->nx_ipv6_default_router_entry_flag           = NX_IPV6_ROUTE_TYPE_VALID;
-    r->nx_ipv6_default_router_entry_interface_ptr  = iface;
-    r->nx_ipv6_default_router_entry_life_time      = 1800;
-
-    return r;
+    h_v6_state    = AMI_DHCP_BOUND;
+    h_v6_stateful = TRUE;
+    h_v6_raw      = NETSTATUS_DHCP6RAW_BOUND;
 }
 
 #define H_MAX 8
 
-static NetStatusHeader     *h_hdr;
-static NetStatusNeighbour  *h_entry;
-static UBYTE                h_buffer[sizeof(NetStatusHeader) +
-                                     H_MAX * sizeof(NetStatusNeighbour)];
+static NetStatusHeader *h_hdr;
+static NetStatusDhcp6  *h_entry;
+static UBYTE            h_buffer[sizeof(NetStatusHeader) +
+                                 H_MAX * sizeof(NetStatusDhcp6)];
 
-static LONG h_query(VOID)
+static LONG h_query6(VOID)
 {
     h_hdr   = (NetStatusHeader *)h_buffer;
-    h_entry = (NetStatusNeighbour *)NETSTATUS_ENTRIES(h_hdr);
+    h_entry = (NetStatusDhcp6 *)NETSTATUS_ENTRIES(h_hdr);
 
     memset(h_buffer, 0, sizeof(h_buffer));
     h_hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
     h_hdr->nsh_Version = AMI_NETSTATUS_VERSION;
 
-    return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_NEIGHBOURS,
+    return bsd_NetStackQuery(AMI_NETSTATUS_MAGIC, NETSTATUS_DHCP6,
                              h_buffer, (ULONG)sizeof(h_buffer), NULL);
 }
 
-/* The entry for an address, or NULL: the walk is over cache slots and its
-   order is not part of the contract. */
-static const NetStatusNeighbour *h_find(ULONG last)
+static LONG h_release(UWORD index)
 {
-    UWORD i;
+    NetStatusControl ctl;
 
-    for (i = 0; i < h_hdr->nsh_Count; i++)
-    {
-        if (h_entry[i].nsn6_Address[3] == last &&
-            h_entry[i].nsn6_Address[0] == R0)
-            return &h_entry[i];
-    }
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    ctl.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    ctl.nsc_Index   = index;
 
-    return NULL;
+    h_error = 0;
+
+    return bsd_NetStackControl(AMI_NETSTATUS_MAGIC, NETCTRL_DHCP_RELEASE,
+                               &ctl, (ULONG)sizeof(ctl), NULL);
 }
 
-static BOOL h_is_router(ULONG last)
+/* The three netstack entry points the two paths under test reach.  Every
+   other one is h_unreachable() below. */
+LONG netstack_interface_dhcp_state(UWORD i)
 {
-    const NetStatusNeighbour *e = h_find(last);
+    (VOID)i;
+    return h_v4_state;
+}
 
-    return (BOOL)(e != NULL && (e->nsn6_Flags & NETSTATUS_ND_ROUTER) != 0);
+LONG netstack_interface_dhcp6_status(UWORD i, AmiDhcp6Status *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->ad6_State = (UWORD)AMI_DHCP_IDLE;
+
+    if (i != (UWORD)H_IF6)
+        return AMI_NET_OK;
+
+    out->ad6_State    = (UWORD)h_v6_state;
+    out->ad6_RawState = h_v6_raw;
+    out->ad6_Stateful = h_v6_stateful;
+
+    if (h_v6_state != AMI_DHCP_BOUND)
+        return AMI_NET_OK;
+
+    out->ad6_Address[0]       = H_A0;
+    out->ad6_Address[3]       = H_A3;
+    out->ad6_PreferredSeconds = 3600;
+    out->ad6_ValidSeconds     = 7200;
+    out->ad6_T1               = 1800;
+    out->ad6_T2               = 2880;
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_interface_dhcp6_release(UWORD i)
+{
+    h_v6_release_calls++;
+    h_v6_release_index = i;
+    return h_v6_release_rc;
 }
 
 NX_IP *netstack_ip(VOID)                    { return &h_ip; }
@@ -149,7 +180,8 @@ ULONG ami_event_snapshot(NetStatusEvent *out, ULONG room, ULONG *held)
 
 LONG bsd_nx_enter(struct AmiSocketBase *b)  { (VOID)b; return 0; }
 VOID bsd_nx_leave(struct AmiSocketBase *b)  { (VOID)b; }
-LONG bsd_fail(struct AmiSocketBase *b, LONG code) { (VOID)b; (VOID)code; return -1; }
+LONG bsd_fail(struct AmiSocketBase *b, LONG code)
+{ (VOID)b; h_error = code; return -1; }
 
 VOID tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *s) { memset(s, 0, sizeof(*s)); }
 VOID tx_amiga_green_stats(TX_AMIGA_GREEN_STATS *s) { memset(s, 0, sizeof(*s)); }
@@ -182,20 +214,14 @@ LONG netstack_interface_down(UWORD i)
 LONG netstack_interface_dhcp_start(UWORD i, ULONG a)
 { (VOID)i; (VOID)a; h_unreachable("netstack_interface_dhcp_start"); return -1; }
 LONG netstack_interface_dhcp_stop(UWORD i, BOOL rel)
-{ (VOID)i; (VOID)rel; h_unreachable("netstack_interface_dhcp_stop"); return -1; }
+{ h_v4_stop_calls++; h_v4_stop_index = i; h_v4_stop_release = rel;
+  return AMI_NET_OK; }
 LONG netstack_interface_dhcp_renew(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_renew"); return -1; }
-LONG netstack_interface_dhcp_state(UWORD i)
-{ (VOID)i; h_unreachable("netstack_interface_dhcp_state"); return -1; }
 UWORD netstack_interface_dhcp_raw_state(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_raw_state"); return 0; }
 LONG netstack_interface_dhcp_lease(UWORD i, AmiDhcpLease *out)
 { (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp_lease"); return -1; }
-LONG netstack_interface_dhcp6_status(UWORD i, AmiDhcp6Status *out)
-{ (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp6_status");
-  return -1; }
-LONG netstack_interface_dhcp6_release(UWORD i)
-{ (VOID)i; h_unreachable("netstack_interface_dhcp6_release"); return -1; }
 BOOL netstack_ipv6_address_get(UWORD i, UWORD slot, ULONG a[4], ULONG *p, ULONG *st)
 { (VOID)i; (VOID)slot; (VOID)a; (VOID)p; (VOID)st;
   h_unreachable("netstack_ipv6_address_get"); return FALSE; }
@@ -310,100 +336,147 @@ LONG netstack_mdns_browse_start(const char *t)
 LONG netstack_mdns_browse_stop(const char *t)
 { (VOID)t; h_unreachable("netstack_mdns_browse_stop"); return -1; }
 
-static VOID t_router_without_back_pointer(VOID)
+/* ------------------------------------------------------ NETSTATUS_DHCP6 --- */
+
+static VOID t_selector_reports_the_tracked_lease(VOID)
 {
     LONG rc;
 
     h_reset();
-    (VOID)h_router(0, R3, h_if0);
-    h_neighbour(0, R3, ND_CACHE_STATE_STALE, h_if0, NULL);
-    h_neighbour(1, H3, ND_CACHE_STATE_REACHABLE, h_if0, NULL);
+    h_stage_v6_lease();
 
-    rc = h_query();
+    rc = h_query6();
 
-    CHECK(rc == 2, "both neighbours are listed");
-    CHECK(h_hdr->nsh_Count == 2, "the header counts both");
-    CHECK(h_is_router(R3), "the default router is flagged, with no back pointer");
-    CHECK(!h_is_router(H3), "an ordinary neighbour is not flagged");
+    CHECK(rc == (LONG)NX_MAX_PHYSICAL_INTERFACES,
+          "one row per interface, as NETSTATUS_DHCP does");
+    CHECK(h_hdr->nsh_Type == NETSTATUS_DHCP6, "the header names the selector");
+    CHECK(h_hdr->nsh_EntrySize == (UWORD)sizeof(NetStatusDhcp6),
+          "the header states the library's own entry size");
+
+    CHECK(h_entry[H_IF6].nsd6_Index == (UWORD)H_IF6, "the row is the interface");
+    CHECK(h_entry[H_IF6].nsd6_State == NETSTATUS_DHCP_BOUND,
+          "the DHCPv6 interface reports BOUND");
+    CHECK(h_entry[H_IF6].nsd6_RawState == NETSTATUS_DHCP6RAW_BOUND,
+          "the raw NX_DHCPV6_STATE_* is carried through");
+    CHECK(h_entry[H_IF6].nsd6_Stateful == 1, "a lease is stateful");
+    CHECK(h_entry[H_IF6].nsd6_Address[0] == H_A0 &&
+          h_entry[H_IF6].nsd6_Address[3] == H_A3,
+          "the leased address is reported");
+    CHECK(h_entry[H_IF6].nsd6_ValidSeconds == 7200 &&
+          h_entry[H_IF6].nsd6_T1 == 1800 && h_entry[H_IF6].nsd6_T2 == 2880,
+          "the lifetimes and the two timers are reported");
+
+    CHECK(h_entry[0].nsd6_State == NETSTATUS_DHCP_OFF,
+          "an interface with no DHCPv6 client is OFF, not missing");
 }
 
-static VOID t_router_with_back_pointer(VOID)
+/* Nothing but the state, and no stale address from a previous lease. */
+static VOID t_selector_reports_working(VOID)
 {
-    NX_IPV6_DEFAULT_ROUTER_ENTRY *r;
-
     h_reset();
-    r = h_router(0, R3, h_if0);
-    h_neighbour(0, R3, ND_CACHE_STATE_REACHABLE, h_if0, r);
+    h_v6_state = AMI_DHCP_WORKING;
+    h_v6_raw   = NETSTATUS_DHCP6RAW_SOLICIT;
 
-    (VOID)h_query();
+    (VOID)h_query6();
 
-    CHECK(h_is_router(R3), "the back pointer still flags a router");
+    CHECK(h_entry[H_IF6].nsd6_State == NETSTATUS_DHCP_WORKING,
+          "a soliciting client is WORKING");
+    CHECK(h_entry[H_IF6].nsd6_RawState == NETSTATUS_DHCP6RAW_SOLICIT,
+          "the raw state distinguishes solicit from renew");
+    CHECK(h_entry[H_IF6].nsd6_Address[0] == 0,
+          "no address is reported before there is one");
 }
 
-static VOID t_expired_router_is_not_flagged(VOID)
+/* ------------------------------------------------- NETCTRL_DHCP_RELEASE --- */
+
+static VOID t_release_of_a_v6_only_interface(VOID)
 {
-    NX_IPV6_DEFAULT_ROUTER_ENTRY *r;
+    LONG rc;
 
     h_reset();
-    r = h_router(0, R3, h_if0);
-    r->nx_ipv6_default_router_entry_flag = 0;      /* not VALID any more */
-    h_neighbour(0, R3, ND_CACHE_STATE_STALE, h_if0, NULL);
+    h_stage_v6_lease();                 /* and h_v4_state stays IDLE */
 
-    (VOID)h_query();
+    rc = h_release((UWORD)H_IF6);
 
-    CHECK(h_hdr->nsh_Count == 1, "the neighbour is still listed");
-    CHECK(!h_is_router(R3), "an expired router is not flagged");
+    CHECK(rc == 0, "RELEASE on a v6-only interface with a lease succeeds");
+    CHECK(h_v6_release_calls == 1,
+          "it reaches netstack_interface_dhcp6_release()");
+    CHECK(h_v6_release_index == (UWORD)H_IF6, "on the asked-for interface");
 }
 
-static VOID t_other_interface_is_not_flagged(VOID)
+static VOID t_release_reports_the_release_failing(VOID)
 {
+    LONG rc;
+
     h_reset();
-    (VOID)h_router(0, R3, h_if1);
-    h_neighbour(0, R3, ND_CACHE_STATE_STALE, h_if0, NULL);
+    h_stage_v6_lease();
+    h_v6_release_rc = AMI_NET_ERR_STATE;
 
-    (VOID)h_query();
+    rc = h_release((UWORD)H_IF6);
 
-    CHECK(h_hdr->nsh_Count == 1, "the neighbour is still listed");
-    CHECK(!h_is_router(R3),
-          "the same address on another interface is not this link's router");
+    CHECK(rc == -1, "a refused Release is not reported as success");
+    CHECK(h_error == AMI_ENETDOWN, "and it is ENETDOWN, not ENOTCONN");
 }
 
-static VOID t_no_routers_at_all(VOID)
+/* The refusal has to stay honest for the case it was written for. */
+static VOID t_release_without_any_lease_is_refused(VOID)
 {
+    LONG rc;
+
     h_reset();
-    h_neighbour(0, H3, ND_CACHE_STATE_REACHABLE, h_if0, NULL);
 
-    (VOID)h_query();
+    rc = h_release((UWORD)H_IF6);
 
-    CHECK(h_hdr->nsh_Count == 1, "the neighbour is listed");
-    CHECK(!h_is_router(H3), "nothing is a router when the table is empty");
+    CHECK(rc == -1, "RELEASE with no lease is refused");
+    CHECK(h_error == AMI_ENOTCONN, "with ENOTCONN");
+    CHECK(h_v6_release_calls == 0, "and nothing is released");
 }
 
-/* INVALID slots are holes in a flat array, not entries. */
-static VOID t_invalid_slots_are_skipped(VOID)
+/* Information-Request leaves options and no address: RFC 8415 18.2.6. */
+static VOID t_release_of_an_inform_only_client_is_refused(VOID)
 {
+    LONG rc;
+
     h_reset();
-    (VOID)h_router(0, R3, h_if0);
-    h_neighbour(0, R3, ND_CACHE_STATE_INVALID, h_if0, NULL);
-    h_neighbour(1, H3, ND_CACHE_STATE_REACHABLE, h_if0, NULL);
+    h_v6_state    = AMI_DHCP_BOUND;
+    h_v6_stateful = FALSE;
 
-    (VOID)h_query();
+    rc = h_release((UWORD)H_IF6);
 
-    CHECK(h_hdr->nsh_Count == 1, "an INVALID slot is not an entry");
-    CHECK(h_find(R3) == NULL, "the INVALID slot's address is not reported");
+    CHECK(rc == -1, "a stateless client has no lease to give back");
+    CHECK(h_error == AMI_ENOTCONN, "with ENOTCONN");
+    CHECK(h_v6_release_calls == 0, "and nothing is released");
+}
+
+static VOID t_release_still_prefers_ipv4(VOID)
+{
+    LONG rc;
+
+    h_reset();
+    h_stage_v6_lease();
+    h_v4_state = AMI_DHCP_BOUND;
+
+    rc = h_release((UWORD)H_IF6);
+
+    CHECK(rc == 0, "an interface with both leases still releases the v4 one");
+    CHECK(h_v4_stop_calls == 1, "through netstack_interface_dhcp_stop()");
+    CHECK(h_v4_stop_release, "with the release flag set");
+    CHECK(h_v6_release_calls == 0, "and not through the DHCPv6 path");
 }
 
 int main(void)
 {
-    printf("NETSTATUS_NEIGHBOURS host tests\n");
+    printf("NETSTATUS_DHCP6 host tests\n");
 
-    t_router_without_back_pointer();
-    t_router_with_back_pointer();
-    t_expired_router_is_not_flagged();
-    t_other_interface_is_not_flagged();
-    t_no_routers_at_all();
-    t_invalid_slots_are_skipped();
+    t_selector_reports_the_tracked_lease();
+    t_selector_reports_working();
+    t_release_of_a_v6_only_interface();
+    t_release_reports_the_release_failing();
+    t_release_without_any_lease_is_refused();
+    t_release_of_an_inform_only_client_is_refused();
+    t_release_still_prefers_ipv4();
 
-    printf("neighbour_router checks=%lu failures=%lu\n", h_checks, h_failures);
+    printf("dhcp6_status_release checks=%lu failures=%lu\n",
+           h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
 }

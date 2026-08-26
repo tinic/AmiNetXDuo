@@ -348,6 +348,58 @@ static VOID ns_fill_dhcp(NsWriter *w)
 }
 
 /*
+ * One row per interface, the same shape as ns_fill_dhcp().  In a build without
+ * IPv6 every row is NETSTATUS_DHCP_OFF rather than the selector being refused:
+ * "no DHCPv6 here" is the honest answer and it is the same one an IPv6 build
+ * with no client gives.
+ */
+static VOID ns_fill_dhcp6(NsWriter *w)
+{
+    UWORD index;
+
+    for (index = 0; index < (UWORD)NX_MAX_PHYSICAL_INTERFACES; index++)
+    {
+        NetStatusDhcp6 *out = (NetStatusDhcp6 *)ns_writer_next(w);
+#ifdef AMINETXDUO_IPV6
+        AmiDhcp6Status  st;
+#endif
+
+        if (out == NULL)
+            continue;                   /* still count every interface */
+
+        out->nsd6_Index = index;
+
+#ifdef AMINETXDUO_IPV6
+        if (netstack_interface_dhcp6_status(index, &st) != AMI_NET_OK)
+            continue;                   /* ns_writer_next() zeroed the rest */
+
+        out->nsd6_RawState = st.ad6_RawState;
+        out->nsd6_Stateful = st.ad6_Stateful ? 1 : 0;
+
+        if (st.ad6_State == (UWORD)AMI_DHCP_BOUND)
+            out->nsd6_State = NETSTATUS_DHCP_BOUND;
+        else if (st.ad6_State == (UWORD)AMI_DHCP_WORKING)
+            out->nsd6_State = NETSTATUS_DHCP_WORKING;
+        else
+            out->nsd6_State = NETSTATUS_DHCP_OFF;
+
+        if (out->nsd6_State != NETSTATUS_DHCP_BOUND)
+            continue;
+
+        out->nsd6_Address[0] = st.ad6_Address[0];
+        out->nsd6_Address[1] = st.ad6_Address[1];
+        out->nsd6_Address[2] = st.ad6_Address[2];
+        out->nsd6_Address[3] = st.ad6_Address[3];
+
+        out->nsd6_PreferredSeconds = st.ad6_PreferredSeconds;
+        out->nsd6_ValidSeconds     = st.ad6_ValidSeconds;
+        out->nsd6_T1               = st.ad6_T1;
+        out->nsd6_T2               = st.ad6_T2;
+#endif
+    }
+}
+
+/*
  * The NX physical interface index is the configuration index. src/netstack
  * attaches the configured interfaces in configuration order from slot 0
  * (netstack.c:771 for the primary, :860 for the rest). NetX Duo puts the
@@ -1300,6 +1352,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         case NETSTATUS_ROUTES:      need = 0;                        break;
         case NETSTATUS_SOCKETS:     need = 0;                        break;
         case NETSTATUS_DHCP:        need = 0;                        break;
+        case NETSTATUS_DHCP6:       need = 0;                        break;
         case NETSTATUS_ADDRESSES6:  need = 0;                        break;
         case NETSTATUS_ROUTES6:     need = 0;                        break;
         case NETSTATUS_NEIGHBOURS:  need = 0;                        break;
@@ -1544,6 +1597,13 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
             ns_writer_finish(&w);
             break;
 
+        case NETSTATUS_DHCP6:
+            ns_writer_init(&w, hdr, size, NETSTATUS_DHCP6,
+                           sizeof(NetStatusDhcp6));
+            ns_fill_dhcp6(&w);
+            ns_writer_finish(&w);
+            break;
+
         case NETSTATUS_ADDRESSES6:
             ns_writer_init(&w, hdr, size, NETSTATUS_ADDRESSES6,
                            sizeof(NetStatusAddress6));
@@ -1739,13 +1799,38 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             }
             else
             {
-                if (netstack_interface_dhcp_state(ctl->nsc_Index) !=
-                        AMI_DHCP_BOUND)
-                    return bsd_fail(SocketBase, AMI_ENOTCONN);
+                BOOL v4 = (netstack_interface_dhcp_state(ctl->nsc_Index) ==
+                               AMI_DHCP_BOUND);
 
-                err = (op == NETCTRL_DHCP_RENEW)
-                          ? netstack_interface_dhcp_renew(ctl->nsc_Index)
-                          : netstack_interface_dhcp_stop(ctl->nsc_Index, TRUE);
+                if (op == NETCTRL_DHCP_RENEW || v4)
+                {
+                    if (!v4)
+                        return bsd_fail(SocketBase, AMI_ENOTCONN);
+
+                    err = (op == NETCTRL_DHCP_RENEW)
+                              ? netstack_interface_dhcp_renew(ctl->nsc_Index)
+                              : netstack_interface_dhcp_stop(ctl->nsc_Index,
+                                                             TRUE);
+                }
+                else
+                {
+                    /* ns_DhcpState[] is IPv4-only, so a v6-only interface's
+                       lease is invisible above; ENOTCONN here means there is
+                       genuinely nothing leased. */
+#ifdef AMINETXDUO_IPV6
+                    AmiDhcp6Status st;
+
+                    if (netstack_interface_dhcp6_status(ctl->nsc_Index,
+                                                        &st) != AMI_NET_OK ||
+                        st.ad6_State != (UWORD)AMI_DHCP_BOUND ||
+                        !st.ad6_Stateful)
+                        return bsd_fail(SocketBase, AMI_ENOTCONN);
+
+                    err = netstack_interface_dhcp6_release(ctl->nsc_Index);
+#else
+                    return bsd_fail(SocketBase, AMI_ENOTCONN);
+#endif
+                }
             }
 
             if (err == AMI_NET_OK)

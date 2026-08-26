@@ -207,6 +207,33 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
 
     add_test(NAME neighbour_router COMMAND test_neighbour)
+
+    # netstatus.c again, for NETSTATUS_DHCP6 and for which netstack entry
+    # point NETCTRL_DHCP_RELEASE reaches. Neither was provable on the
+    # emulator: the v6-only arm needs a DHCPv6 server on the segment, and the
+    # refusal under test is the one that fires when there is no lease, which
+    # is indistinguishable from the bug it hid.
+    add_executable(test_dhcp6 host/test_dhcp6_host.c
+                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c")
+
+    target_include_directories(test_dhcp6 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim-netstatus"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_dhcp6 PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_dhcp6 PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
+
+    add_test(NAME dhcp6_status_release COMMAND test_dhcp6)
 endif()
 
 # bpf_write() is the only BPF vector that reaches the NetX packet pool. Its

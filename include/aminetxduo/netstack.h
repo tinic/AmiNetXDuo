@@ -267,6 +267,32 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
 UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
                                 const ULONG next_hop[4]);
 
+/* ------------------------------------------------------------- DHCPv6 --- */
+
+typedef struct AmiDhcp6Status {
+    UWORD   ad6_State;              /* AMI_DHCP_*                           */
+    UWORD   ad6_RawState;           /* NX_DHCPV6_STATE_*, 0 = no client     */
+    /* FALSE when the client only sent an Information-Request: options, no
+       address, and so nothing that could be released. */
+    BOOL    ad6_Stateful;
+    ULONG   ad6_Address[4];         /* host byte order; AMI_DHCP_BOUND only */
+    ULONG   ad6_PreferredSeconds;
+    ULONG   ad6_ValidSeconds;
+    ULONG   ad6_T1;
+    ULONG   ad6_T2;
+} AmiDhcp6Status;
+
+/* This stack runs one DHCPv6 client, so every interface but the one it was
+   started on answers AMI_DHCP_IDLE.  AMI_NET_ERR_STATE only on a bad
+   argument; *out is filled either way. */
+LONG netstack_interface_dhcp6_status(UWORD interface_index,
+                                     AmiDhcp6Status *out);
+
+/* Give a stateful lease back (RFC 8415 18.2.7) while the stack keeps running.
+   Blocks for up to AMI_DHCPV6_RELEASE_TICKS, so never from a NetX callback.
+   AMI_NET_ERR_STATE when this interface holds no DHCPv6 lease. */
+LONG netstack_interface_dhcp6_release(UWORD interface_index);
+
 #endif /* AMINETXDUO_IPV6 */
 
 /* Put resolver changes recorded by DHCP -- and, in an IPv6 build, router

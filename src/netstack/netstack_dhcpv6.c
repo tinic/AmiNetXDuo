@@ -604,6 +604,87 @@ VOID ami_netstack_dhcpv6_resume(AmiNetStack *ns, UWORD interface_index)
     (VOID)tx_event_flags_set(&ns->ns_Dhcpv6Events, event, TX_OR);
 }
 
+/* The client's own nx_dhcpv6_state, NOT ns_Dhcpv6State: that mirror is written
+   on the client's thread and lags every transition, which is the same reason
+   ami_netstack_dhcpv6_release() reads the client. */
+LONG netstack_interface_dhcp6_status(UWORD interface_index,
+                                     AmiDhcp6Status *out)
+{
+    AmiNetStack                *ns = ami_netstack_raw();
+    const NX_DHCPV6_IA_ADDRESS *ia;
+    UINT                        state;
+
+    if (out == NULL)
+        return AMI_NET_ERR_STATE;
+
+    memset(out, 0, sizeof(*out));
+    out->ad6_State = (UWORD)AMI_DHCP_IDLE;
+
+    if (ns == NULL || interface_index != (UWORD)ns->ns_Dhcpv6Iface)
+        return AMI_NET_OK;
+
+    if (!ns->ns_Dhcpv6Created)
+    {
+        /* Asked for by a router advertisement, client not built yet. */
+        if (ns->ns_Dhcpv6Asked && ns->ns_Dhcpv6WorkReady)
+            out->ad6_State = (UWORD)AMI_DHCP_WORKING;
+        return AMI_NET_OK;
+    }
+
+    state = ns->ns_Dhcpv6.nx_dhcpv6_state;
+
+    out->ad6_RawState = (UWORD)state;
+    out->ad6_Stateful = ns->ns_Dhcpv6Stateful;
+
+    if (state == NX_DHCPV6_STATE_BOUND_TO_ADDRESS)
+        out->ad6_State = (UWORD)AMI_DHCP_BOUND;
+    else if (state != NX_DHCPV6_STATE_INIT)
+        out->ad6_State = (UWORD)AMI_DHCP_WORKING;
+
+    if (out->ad6_State != (UWORD)AMI_DHCP_BOUND || !ns->ns_Dhcpv6Stateful)
+        return AMI_NET_OK;
+
+    ia = &ns->ns_Dhcpv6.nx_dhcpv6_ia[0];
+
+    out->ad6_Address[0] = ia->nx_global_address.nxd_ip_address.v6[0];
+    out->ad6_Address[1] = ia->nx_global_address.nxd_ip_address.v6[1];
+    out->ad6_Address[2] = ia->nx_global_address.nxd_ip_address.v6[2];
+    out->ad6_Address[3] = ia->nx_global_address.nxd_ip_address.v6[3];
+
+    out->ad6_PreferredSeconds = ia->nx_preferred_lifetime;
+    out->ad6_ValidSeconds     = ia->nx_valid_lifetime;
+    out->ad6_T1               = ns->ns_Dhcpv6.nx_dhcpv6_iana.nx_T1;
+    out->ad6_T2               = ns->ns_Dhcpv6.nx_dhcpv6_iana.nx_T2;
+
+    return AMI_NET_OK;
+}
+
+LONG netstack_interface_dhcp6_release(UWORD interface_index)
+{
+    AmiNetStack    *ns = ami_netstack_raw();
+    AmiNetCaller   *caller;
+    AmiDhcp6Status  status;
+
+    if (ns == NULL || !ns->ns_Dhcpv6Created || !ns->ns_Dhcpv6Started)
+        return AMI_NET_ERR_STATE;
+
+    if (netstack_interface_dhcp6_status(interface_index, &status) != AMI_NET_OK
+        || status.ad6_State != (UWORD)AMI_DHCP_BOUND || !status.ad6_Stateful)
+        return AMI_NET_ERR_STATE;
+
+    /* ami_netstack_dhcpv6_release() takes the client's mutex and sleeps, both
+       of which are caller errors outside a ThreadX thread. */
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_KERNEL;
+
+    ami_netstack_dhcpv6_release(ns);
+
+    ami_netstack_leave_free(caller);
+
+    return AMI_NET_OK;
+}
+
 VOID ami_netstack_dhcpv6_destroy(AmiNetStack *ns)
 {
     if (ns == NULL)
