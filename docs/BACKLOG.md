@@ -47,7 +47,6 @@ comment beside the code, not an entry here.
 | The DHCP restart's re-arm path has no test | ALREADY_STARTED never arises in the SLIRP arm, so the stop-and-start-again is unexercised | `src/netstack/netstack.c:2686` |
 | A legacy one-shot mDNS query drew no observable answer | proper 5353-sourced queries are answered; ephemeral-port one-shots are not | `third_party/netxduo/addons/mdns/nxd_mdns.c:8871` |
 | Nothing guards the usergroup.library hold ixemul clients depend on | no caller in our tree, so a tidy-up would silently close the stack for ixnet | `src/bsdsocket/library_runtime.c:46` |
-| The crypto yield hook is installed by `tls.library` alone | anything linking `aminetxduo_tls` directly gets a NULL hook and holds the baton | `src/tlslib/tls_netx.c:95` |
 | HAM and EHB are proven on one machine and one resolution | left: an A600 for HAM6 and EHB on OCS, and anything but 320x256 lores | `tests/tools/run-console.sh`, `src/tools/httpfb.c` |
 | PCMCIA parity stops short of the CFTABLE walk | walking every entry would plausibly reach the seven multifunction cards | `src/netdev/netdev_pcmcia.c` |
 | The PCMCIA socket is never contended in the lab | `CARDF_IFAVAILABLE`'s rejection path and the later-`OpenDevice()` claim are untested | `src/netdev/netdev_pcmcia.c` |

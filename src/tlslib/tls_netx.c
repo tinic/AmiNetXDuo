@@ -203,6 +203,18 @@ TX_THREAD *_tx_thread_identify(VOID)
     return tls_ctx->nxc_thread_identify();
 }
 
+/*
+ * aminetxduo_tls supplies a relinquish fallback for programs that link the
+ * ThreadX core directly.  tls.library does not link that core, and its normal
+ * crypto hook is the stronger baton bracket above; provide the symbol only so
+ * the shared crypto archive remains linkable.  The fallback is not selected
+ * after tls_netx_bind() has installed tls_crypto_yield.
+ */
+VOID tx_thread_relinquish(VOID)
+{
+    tls_crypto_yield();
+}
+
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
     if (tls_ctx == NULL)

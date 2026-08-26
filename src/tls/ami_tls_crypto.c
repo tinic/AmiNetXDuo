@@ -25,11 +25,26 @@
 #include "tls.h"
 #include "ami_tls_crypto.h"
 
-
 /* ------------------------------------------------ measurement and modes --- */
 
 static UINT     ami_arithmetic  = AMI_TLS_ARITH_C68K;
 static UINT     ami_crt_enabled = 1u;
+
+/*
+ * A direct aminetxduo_tls consumer has no tls.library bind step to install the
+ * bsdsocket.library release/acquire hook.  Still give ThreadX a scheduling
+ * point during long public-key operations.  The identify check matters for
+ * tls_bench, which deliberately uses the arithmetic without starting ThreadX;
+ * tx_thread_relinquish() requires a current thread.
+ *
+ * tls.library installs its stronger hook before calling initialize(), so this
+ * fallback never replaces the integration hook.
+ */
+static VOID ami_tls_crypto_thread_yield(VOID)
+{
+    if (tx_thread_identify() != TX_NULL)
+        tx_thread_relinquish();
+}
 
 VOID ami_tls_crypto_set_arithmetic(UINT mode)
 {
@@ -147,6 +162,10 @@ UINT ami_tls_crypto_initialize(VOID)
 
 NX_CRYPTO_EC   *reference;
 UINT            status;
+
+
+    if (c68k_yield_hook == (VOID (*)(VOID))0)
+        c68k_yield_hook = ami_tls_crypto_thread_yield;
 
 
     if (ami_p256_ready)

@@ -14,6 +14,7 @@
 #include "nx_crypto_sha2.h"
 
 #include "ami_tls_crypto.h"
+#include "crypto68k.h"
 #include "tls.h"
 
 #pragma GCC diagnostic push
@@ -35,6 +36,9 @@ ULONG ami_tls_eclock_micros(ULONG ticks)
 {
     return ticks;
 }
+
+extern TX_THREAD *_tx_thread_current_ptr;
+extern ULONG      fuzz_tx_relinquish_count;
 
 /* tls_internal.h's sizes, restated: that header pulls in the AmigaOS library
    ABI. These are what tls_conn.c allocates. */
@@ -741,6 +745,7 @@ static void fc_selftest(void)
 static void fc_env_init(void)
 {
     const NX_CRYPTO_METHOD *rsa;
+    TX_THREAD               direct_thread;
     UINT                    status;
     unsigned                i;
 
@@ -759,6 +764,21 @@ static void fc_env_init(void)
                (unsigned)status);
         exit(2);
     }
+
+    if (c68k_yield_hook == (VOID (*)(VOID))0)
+        fc_fail("direct TLS initialization installed no crypto yield hook");
+
+    fuzz_tx_relinquish_count = 0;
+    c68k_yield_hook();
+    if (fuzz_tx_relinquish_count != 0)
+        fc_fail("crypto yield relinquished without a current ThreadX thread");
+
+    memset(&direct_thread, 0, sizeof(direct_thread));
+    _tx_thread_current_ptr = &direct_thread;
+    c68k_yield_hook();
+    _tx_thread_current_ptr = NX_NULL;
+    if (fuzz_tx_relinquish_count != 1)
+        fc_fail("direct TLS crypto yield did not relinquish its ThreadX thread");
 
     status = _nx_secure_tls_metadata_size_calculate(&ami_crypto_tls_ciphers_ecc,
                                                     &fc_metadata_size);

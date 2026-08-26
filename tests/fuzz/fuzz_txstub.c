@@ -26,6 +26,7 @@ TX_THREAD       *_tx_thread_current_ptr;
 volatile ULONG   _tx_thread_system_state;
 volatile UINT    _tx_thread_preempt_disable;
 TX_THREAD        _tx_timer_thread;
+ULONG            fuzz_tx_relinquish_count;
 
 UINT _tx_thread_create(TX_THREAD *thread_ptr, CHAR *name_ptr,
                        VOID (*entry_function)(ULONG entry_input),
@@ -81,7 +82,12 @@ UINT _tx_thread_preemption_change(TX_THREAD *thread_ptr, UINT new_threshold,
 
 TX_THREAD *_tx_thread_identify(VOID)
 {
-    return TX_NULL;
+    return _tx_thread_current_ptr;
+}
+
+VOID _tx_thread_relinquish(VOID)
+{
+    fuzz_tx_relinquish_count++;
 }
 
 VOID _tx_thread_system_preempt_check(VOID)

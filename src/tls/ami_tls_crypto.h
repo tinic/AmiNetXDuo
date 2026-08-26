@@ -40,8 +40,10 @@ extern const UINT                   ami_crypto_ecc_offered_groups_size;
 
 /*
  * Build the private secp256r1 curve.  Call once, before any session is created;
- * idempotent but not thread safe, matching nx_secure_tls_initialize().  On
- * failure the tables still work and fall through to the vendored arithmetic.
+ * idempotent but not thread safe, matching nx_secure_tls_initialize().  Direct
+ * users also get a safe tx_thread_relinquish() crypto-yield hook here;
+ * tls.library replaces it with the bsdsocket.library baton hook.  On failure
+ * the tables still work and fall through to the vendored arithmetic.
  */
 UINT ami_tls_crypto_initialize(VOID);
 
