@@ -215,13 +215,17 @@ TX_THREAD *_tx_thread_identify(VOID)
  * VOID wrapper.  Its only path calls another VOID function and then falls off
  * the end, so confine the workaround to the diagnostic's exact source.
  */
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+#endif
 VOID tx_thread_relinquish(VOID)
 {
     tls_crypto_yield();
 }
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
+#endif
 
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
