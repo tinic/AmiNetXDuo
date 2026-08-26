@@ -8,7 +8,6 @@ comment beside the code, not an entry here.
 | `-ffunction-sections` reaches LTRANS without `-fno-optimize-sibling-calls` | a pairing the tree calls indivisible is split | `src/common/CMakeLists.txt:144` |
 | The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
-| A process the Shell spawned cannot `SetMode()`, `WaitForChar()` or `Open("*")` | its own `pr_MsgPort` is neither the break port nor the Shell's task | `src/tools/httpterm.c:197` |
 | A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1723` |
 | A certificate whose public key is `id-RSASSA-PSS` is refused | `rsa_pss_pss_*`: the SPKI OID is neither RSA nor EC, so the parse stops | `third_party/netxduo/nx_secure/src/nx_secure_x509.c:239` |
 | `tls.library` runs only on our own `bsdsocket.library` | a hand-coded private LVO, so Roadshow, AmiTCP and Miami get `TLS_ERR_NOSTACK` | `src/tlslib/tls_netx.c:33` |

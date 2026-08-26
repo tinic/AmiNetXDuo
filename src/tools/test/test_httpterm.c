@@ -1,5 +1,5 @@
 /*
- * THE CONSOLE GATE, ON THE SOURCE.
+ * THE CONSOLE GATE.
  *
  * SetMode(), WaitForChar() and Open("*") carry no fh_Arg1, so httpterm.c gates
  * them on term_packet_current() instead.  That predicate answered FALSE while
@@ -7,17 +7,24 @@
  * that set term_shell_task to a task sat AFTER the switch those three packets
  * leave through -- so the first one of a session was refused ERROR_INVALID_LOCK.
  *
- * The invariant here is the one that catches that WITHOUT naming a fix: a task
- * has to be written into term_shell_task somewhere ABOVE the packet the gate
- * protects.  Learning it in the predicate satisfies it; so does moving the
- * assignment above the switch.
+ * Two halves, because httpterm.c reaches proto/dos.h and compiles nowhere but
+ * the target:
  *
- * Parsed rather than compiled, for the reason test_argtemplates.c gives: the
- * file reaches proto/dos.h.  What a live session then does is
- * tests/tools/run-wsterm.sh's, and stays there.
+ *   * the ORDER, parsed off the source, for the reason test_argtemplates.c
+ *     gives -- a task has to be written into term_shell_task somewhere ABOVE
+ *     the packet the gate protects;
+ *   * the DECISION, compiled and run, out of src/tools/httpterm_owner.h, which
+ *     is the predicate itself in plain pointers.  Three callers: the session's
+ *     own Shell, a process that Shell spawned -- its own pr_MsgPort, matching
+ *     neither the break port nor the Shell's task -- and an unrelated process,
+ *     which is what stops the fix from being "admit everybody".
+ *
+ * What a live session then does is tests/tools/run-wsterm.sh's, and stays there.
  *
  * SPDX-License-Identifier: MIT
  */
+
+#include "httpterm_owner.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -172,6 +179,120 @@ static long offset_of_gated(const char *text, const char *label)
     return -1;
 }
 
+/* Stand-ins for the only things the predicate ever does with a pointer, which
+   is compare it.  Distinct objects, so no two addresses can coincide. */
+static char handler_port, other_port, break_port;
+static char shell_task, child_task, stranger_task, ghost_task;
+
+static int admits(const TermOwner *s, const TermCallerId *c)
+{
+    const void *adopt = NULL;
+
+    return term_owner_admits(s, c, &adopt);
+}
+
+static void session(TermOwner *s, const void *brk)
+{
+    s->to_Active    = 1;
+    s->to_Port      = &handler_port;
+    s->to_BreakPort = brk;
+    s->to_ShellTask = &shell_task;
+}
+
+/* The Shell itself: dos.library named its port in ACTION_CHANGE_SIGNAL, and
+   its pr_ConsoleTask is the handler it was started on. */
+static void owner(TermCallerId *c)
+{
+    c->tc_Port    = &break_port;
+    c->tc_Task    = &shell_task;
+    c->tc_Console = &handler_port;
+    c->tc_Stale   = 0;
+}
+
+/* A process the Shell spawned: its OWN pr_MsgPort, its own task, and the
+   console it inherited. */
+static void spawned(TermCallerId *c)
+{
+    c->tc_Port    = &other_port;
+    c->tc_Task    = &child_task;
+    c->tc_Console = &handler_port;
+    c->tc_Stale   = 0;
+}
+
+/* Somebody else's process entirely: a console that is not this one. */
+static void stranger(TermCallerId *c)
+{
+    c->tc_Port    = &other_port;
+    c->tc_Task    = &stranger_task;
+    c->tc_Console = &other_port;
+    c->tc_Stale   = 0;
+}
+
+static void test_callers(void)
+{
+    TermOwner    s;
+    TermCallerId c;
+    const void  *adopt;
+
+    printf("who may drive the session\n");
+
+    /* The owner, before and after dos.library has named its port. */
+    session(&s, NULL);
+    owner(&c);
+    CHECK(admits(&s, &c), "the session's own Shell is refused");
+
+    session(&s, &break_port);
+    owner(&c);
+    CHECK(admits(&s, &c), "the session's own Shell is refused once its break"
+          " port is known");
+
+    /* THE ROW.  Both arms: the break port is what a real Shell sets early, so
+       a fix that only works before it does is not one. */
+    session(&s, NULL);
+    spawned(&c);
+    CHECK(admits(&s, &c), "a process the Shell spawned is refused: its own"
+          " pr_MsgPort is neither the break port nor the Shell's task");
+
+    session(&s, &break_port);
+    spawned(&c);
+    CHECK(admits(&s, &c), "a process the Shell spawned is refused once the"
+          " break port is known");
+
+    /* And the isolation that must not have cost anything. */
+    session(&s, NULL);
+    stranger(&c);
+    CHECK(!admits(&s, &c), "an unrelated process may drive this console");
+
+    session(&s, &break_port);
+    stranger(&c);
+    CHECK(!admits(&s, &c), "an unrelated process may drive this console with a"
+          " break port set");
+
+    /* A Shell whose session was let go of keeps this port as its console. */
+    session(&s, &break_port);
+    spawned(&c);
+    c.tc_Task  = &ghost_task;
+    c.tc_Stale = 1;
+    CHECK(!admits(&s, &c), "an abandoned session's runner may drive the"
+          " replacement");
+
+    /* A caller with no pr_ConsoleTask at all still falls back, and a dead
+       session still refuses everyone. */
+    session(&s, NULL);
+    s.to_ShellTask = NULL;
+    c.tc_Port    = &other_port;
+    c.tc_Task    = &shell_task;
+    c.tc_Console = NULL;
+    c.tc_Stale   = 0;
+    adopt        = NULL;
+    CHECK(term_owner_admits(&s, &c, &adopt) && adopt == &shell_task,
+          "the first packet of a session no longer names its owner");
+
+    s.to_Active = 0;
+    owner(&c);
+    CHECK(!admits(&s, &c), "a session that is over still answers packets");
+}
+
 int main(void)
 {
     char *text = slurp("src/tools/httpterm.c");
@@ -209,16 +330,22 @@ int main(void)
           " ACTION_WAIT_CHAR arm at %ld, so the first WaitForChar() of a"
           " session is refused", learned, wait_char);
 
-    /* And the isolation it must not have cost: dos.library's own answer still
-       outranks the inference, and a dead session refuses everything. */
-    CHECK(strstr(text, "term_break_port != NULL") != NULL,
-          "httpterm.c: ACTION_CHANGE_SIGNAL's port no longer outranks the"
-          " task the gate inferred");
-    CHECK(strstr(text, "!term_active") != NULL,
-          "httpterm.c: the gate no longer refuses a packet for a session that"
-          " is over");
+    /* The decision below is only the shipped one if httpterm.c reaches it, and
+       only answers for a spawned process if it is handed pr_ConsoleTask. */
+    CHECK(strstr(text, "term_owner_admits") != NULL,
+          "httpterm.c: the gate no longer goes through httpterm_owner.h, so"
+          " nothing below this line is about the shipped predicate");
+    CHECK(strstr(text, "pr_ConsoleTask") != NULL,
+          "httpterm.c: the gate no longer looks at the caller's"
+          " pr_ConsoleTask, so a process the Shell spawned cannot be told"
+          " from an unrelated one");
+    CHECK(strstr(text, "NT_PROCESS") != NULL,
+          "httpterm.c: mp_SigTask is read as a Process without checking that"
+          " it is one");
 
     free(text);
+
+    test_callers();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);
 

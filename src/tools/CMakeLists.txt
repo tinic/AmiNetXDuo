@@ -721,6 +721,11 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_definitions(test_httpterm PRIVATE
         AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
+    # httpterm_owner.h is the decision itself, in plain pointers, so the three
+    # callers can be run here rather than only parsed for.
+    target_include_directories(test_httpterm PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
     target_compile_options(test_httpterm PRIVATE -Wall -Wextra)
     set_target_properties(test_httpterm PROPERTIES C_STANDARD 11)
 

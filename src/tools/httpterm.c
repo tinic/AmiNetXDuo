@@ -4,6 +4,7 @@
  */
 
 #include "httpterm.h"
+#include "httpterm_owner.h"
 
 #include <dos/dostags.h>
 #include <dos/dosasl.h>
@@ -194,19 +195,54 @@ static VOID term_reply(struct DosPacket *pkt, LONG res1, LONG res2)
     PutMsg(reply, pkt->dp_Link);
 }
 
+/* A live runner of a session that has been let go of.  Compared, never
+   dereferenced: term_runners_collect() only frees a dead one. */
+static int term_task_stale(const struct Task *task)
+{
+    const TermRunner *r;
+
+    if (task == NULL)
+        return 0;
+
+    for (r = term_runners; r != NULL; r = r->rn_Next)
+        if (r != term_runner && r->rn_Task == task)
+            return 1;
+
+    return 0;
+}
+
 static BOOL term_packet_current(const struct DosPacket *pkt)
 {
-    if (!term_active || pkt->dp_Port == NULL)
+    TermOwner       s;
+    TermCallerId    c;
+    const void     *adopt = NULL;
+    struct Task    *task;
+    struct Process *proc;
+    int             ok;
+
+    if (pkt->dp_Port == NULL)
         return FALSE;
 
-    if (term_break_port != NULL)
-        return (pkt->dp_Port == term_break_port) ? TRUE : FALSE;
+    task = pkt->dp_Port->mp_SigTask;
+    proc = (task != NULL && task->tc_Node.ln_Type == NT_PROCESS)
+               ? (struct Process *)task : NULL;
 
-    if (term_shell_task == NULL)
-        term_shell_task = pkt->dp_Port->mp_SigTask;
+    s.to_Active    = term_active ? 1 : 0;
+    s.to_Port      = (const void *)term_port;
+    s.to_BreakPort = (const void *)term_break_port;
+    s.to_ShellTask = (const void *)term_shell_task;
 
-    return (term_shell_task != NULL &&
-            pkt->dp_Port->mp_SigTask == term_shell_task) ? TRUE : FALSE;
+    c.tc_Port    = (const void *)pkt->dp_Port;
+    c.tc_Task    = (const void *)task;
+    c.tc_Console = (proc != NULL) ? (const void *)proc->pr_ConsoleTask : NULL;
+    c.tc_Stale   = term_task_stale(task);
+
+    ok = term_owner_admits(&s, &c, &adopt);
+
+    if (adopt != NULL)
+        term_shell_task = (struct Task *)adopt;
+
+    return ok ? TRUE : FALSE;
 }
 
 #define TERM_SEQ_MAX    24      /* a runaway parameter list is not a sequence */
