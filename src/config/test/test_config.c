@@ -115,10 +115,11 @@ static void stage_interface(const char *name, unsigned unit)
 {
     unsigned i = drawer_count++;
 
-    sprintf(drawer_name[i], "%s", name);
-    sprintf(drawer_path[i], "DEVS:NetInterfaces/%s", name);
-    sprintf(drawer_text[i],
-            "DEVICE=ariadne.device\nUNIT=%u\nCONFIGURE=DHCP\n", unit);
+    (void)snprintf(drawer_name[i], sizeof(drawer_name[i]), "%s", name);
+    (void)snprintf(drawer_path[i], sizeof(drawer_path[i]),
+                   "DEVS:NetInterfaces/%s", name);
+    (void)snprintf(drawer_text[i], sizeof(drawer_text[i]),
+                   "DEVICE=ariadne.device\nUNIT=%u\nCONFIGURE=DHCP\n", unit);
 
     set_fixture(drawer_path[i], drawer_text[i]);
 }
@@ -2380,7 +2381,9 @@ static void test_interface_reserve(void)
 
     for (i = 0; i < (UWORD)AMI_CFG_IFACE_FLOOR; i++)
     {
-        sprintf(cfg.interfaces[i].name, "if%u", (unsigned)i);
+        (void)snprintf(cfg.interfaces[i].name,
+                       sizeof(cfg.interfaces[i].name),
+                       "if%u", (unsigned)i);
         cfg.interface_count++;
     }
 
@@ -2393,7 +2396,7 @@ static void test_interface_reserve(void)
     {
         char want[16];
 
-        sprintf(want, "if%u", (unsigned)i);
+        (void)snprintf(want, sizeof(want), "if%u", (unsigned)i);
         CHECK_STR(cfg.interfaces[i].name, want);
     }
     CHECK(cfg.interfaces[299].name[0] == '\0');
