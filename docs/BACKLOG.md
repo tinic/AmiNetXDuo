@@ -93,5 +93,4 @@ comment beside the code, not an entry here.
 | `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
 | A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:356` |
->>>>>>> 4b912fa3 (backlog: a KB/s row cannot say the rig was quiet)
-| A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:356` |
+| argtemplates selftest red on `main` | the comment purge removed the restatements the gate wants; `ci.sh host` fails | `src/tools/test/test_argtemplates.c:1001` |
