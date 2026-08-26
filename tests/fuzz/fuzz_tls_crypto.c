@@ -112,8 +112,9 @@ static UINT fc_verify_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
 
 static UINT fc_install_certificate(NX_SECURE_TLS_SESSION *s)
 {
-    unsigned len   = test_device_cert_der_len;
-    unsigned total = 3u + len;
+    unsigned leaf_len = test_device_cert_der_len;
+    unsigned ca_len   = test_ca_cert_der_len;
+    unsigned total    = 3u + leaf_len + 3u + ca_len;
     unsigned at    = 0;
 
     memset(fc_record, 0, FC_RECORD_BUFFER);
@@ -121,11 +122,21 @@ static UINT fc_install_certificate(NX_SECURE_TLS_SESSION *s)
     fc_record[at++] = (UCHAR)(total >> 16);
     fc_record[at++] = (UCHAR)(total >> 8);
     fc_record[at++] = (UCHAR)total;
-    fc_record[at++] = (UCHAR)(len >> 16);
-    fc_record[at++] = (UCHAR)(len >> 8);
-    fc_record[at++] = (UCHAR)len;
-    memcpy(&fc_record[at], test_device_cert_der, len);
-    at += len;
+    fc_record[at++] = (UCHAR)(leaf_len >> 16);
+    fc_record[at++] = (UCHAR)(leaf_len >> 8);
+    fc_record[at++] = (UCHAR)leaf_len;
+    memcpy(&fc_record[at], test_device_cert_der, leaf_len);
+    at += leaf_len;
+
+    /* The verifier itself is stubbed because this driver exercises the
+       handshake crypto, but endpoint-policy checks still walk the received
+       chain.  Supply the real issuer so that walk tests a valid fixture
+       instead of failing before it reaches the message under test. */
+    fc_record[at++] = (UCHAR)(ca_len >> 16);
+    fc_record[at++] = (UCHAR)(ca_len >> 8);
+    fc_record[at++] = (UCHAR)ca_len;
+    memcpy(&fc_record[at], test_ca_cert_der, ca_len);
+    at += ca_len;
 
     return _nx_secure_tls_process_remote_certificate(s, fc_record, at, at);
 }
@@ -652,8 +663,13 @@ static void fc_selftest(void)
 
     fcs_ske_signed(&w);
 
-    if (fc_session_open(&s, TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256) != NX_SUCCESS)
-        fc_fail("session would not open");
+    status = fc_session_open(&s, TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256);
+    if (status != NX_SUCCESS)
+    {
+        printf("fuzz_tls_crypto: SELFTEST FAILED, session open returned %u\n",
+               (unsigned)status);
+        exit(2);
+    }
 
     if (s.nx_secure_tls_session_ciphersuite == NX_NULL)
         fc_fail("ciphersuite not resolved");
