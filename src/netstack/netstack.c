@@ -449,11 +449,12 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
     ami_event(NETEVENT_SHUTDOWN, NETEVENT_NOINDEX, (ULONG)ns->ns_IfaceCount);
 
 #ifdef AMINETXDUO_RX_VERIFY
-    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu, bad_ip %lu, "
-             "bad_transport %lu; skip short %lu / ver %lu / len %lu / "
-             "frag %lu / proto %lu / udp0 %lu",
+    AMI_ERROR("net68k rxverify: ip_ok %lu, transport_ok %lu (v6 %lu), "
+             "bad_ip %lu, bad_transport %lu; skip short %lu / ver %lu / "
+             "len %lu / frag %lu / proto %lu / udp0 %lu / ext %lu",
              (unsigned long)n68k_rx_verify_stats.ip_ok,
              (unsigned long)n68k_rx_verify_stats.transport_ok,
+             (unsigned long)n68k_rx_verify_stats.v6_ok,
              (unsigned long)n68k_rx_verify_stats.bad_ip,
              (unsigned long)n68k_rx_verify_stats.bad_transport,
              (unsigned long)n68k_rx_verify_stats.skip_short,
@@ -461,7 +462,8 @@ static VOID ami_ns_destroy(AmiNetStack *ns)
              (unsigned long)n68k_rx_verify_stats.skip_length,
              (unsigned long)n68k_rx_verify_stats.skip_fragment,
              (unsigned long)n68k_rx_verify_stats.skip_protocol,
-             (unsigned long)n68k_rx_verify_stats.skip_udp_nosum);
+             (unsigned long)n68k_rx_verify_stats.skip_udp_nosum,
+             (unsigned long)n68k_rx_verify_stats.skip_ext);
 #endif
 
 #ifdef AMINETXDUO_BPF

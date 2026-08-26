@@ -43,14 +43,140 @@ ULONG   checksum;
     return ((~checksum & NX_LOWER_16_MASK) == 0UL) ? NX_TRUE : NX_FALSE;
 }
 
+#ifdef FEATURE_NX_IPV6
+
+/*
+ * IPv6 has no header checksum, so there is no header verdict and no IPv4 bit
+ * to publish -- only the transport, and only when the transport header sits
+ * directly at offset 40.  This file does not walk the extension header chain;
+ * a frame that carries one is refused here and the stack handles it as before.
+ */
+static UINT n68k_rxv6_shape(const UCHAR *ip, ULONG length, UINT *protocol,
+                            UINT *payload)
+{
+ULONG   plen;
+UINT    next;
+
+    if (length < 40UL)
+    {
+        n68k_rx_verify_stats.skip_short++;
+        return (NX_FALSE);
+    }
+
+    next =  (UINT)ip[6];
+
+    if ((next != NX_PROTOCOL_TCP) && (next != NX_PROTOCOL_UDP))
+    {
+        switch (next)
+        {
+        case 0U:    case 43U:   case 44U:   case 50U:
+        case 51U:   case 59U:   case 60U:   case 135U:
+            /* Hop-by-hop, routing, fragment, ESP, AH, none, dest opts,
+               mobility: the transport header is not at offset 40. */
+            n68k_rx_verify_stats.skip_ext++;
+            break;
+        default:
+            n68k_rx_verify_stats.skip_protocol++;
+            break;
+        }
+        return (NX_FALSE);
+    }
+
+    plen =  N68K_RD16(&ip[4]);
+
+    /* Zero means a jumbogram, which needs the hop-by-hop header above. */
+    if ((plen == 0UL) || ((plen + 40UL) > length))
+    {
+        n68k_rx_verify_stats.skip_length++;
+        return (NX_FALSE);
+    }
+
+    if ((next == NX_PROTOCOL_UDP) && (plen >= 8UL) &&
+        (N68K_RD16(&ip[46]) == 0UL))
+    {
+        n68k_rx_verify_stats.skip_udp_nosum++;
+        return (NX_FALSE);
+    }
+
+    *protocol =  next;
+    *payload  =  (UINT)plen;
+
+    return (NX_TRUE);
+}
+
+/* Into host-order longwords: the address in the frame need not be aligned the
+   way the checksum function casts it, and a ones-complement sum does not care
+   in what order the halves arrive. */
+static VOID n68k_rxv6_addr(const UCHAR *ip, ULONG *out)
+{
+    out[0] =  N68K_RD32(&ip[0]);
+    out[1] =  N68K_RD32(&ip[4]);
+    out[2] =  N68K_RD32(&ip[8]);
+    out[3] =  N68K_RD32(&ip[12]);
+}
+
+static ULONG n68k_rxv6_verify(NX_PACKET *packet, UINT *drop)
+{
+UCHAR      *ip =  packet -> nx_packet_prepend_ptr;
+UCHAR      *saved_prepend;
+ULONG       saved_length;
+UCHAR       saved_version;
+ULONG       src[4];
+ULONG       dst[4];
+UINT        protocol;
+UINT        payload;
+UINT        ok;
+
+    if (n68k_rxv6_shape(ip, packet -> nx_packet_length, &protocol, &payload)
+        != NX_TRUE)
+    {
+        return (0UL);
+    }
+
+    n68k_rxv6_addr(&ip[8],  src);
+    n68k_rxv6_addr(&ip[24], dst);
+
+    saved_prepend =  packet -> nx_packet_prepend_ptr;
+    saved_length  =  packet -> nx_packet_length;
+    saved_version =  packet -> nx_packet_ip_version;
+
+    /* The checksum function reads the version off the packet to decide the
+       pseudo header is 128-bit; the caller's value is put back below. */
+    packet -> nx_packet_prepend_ptr =  ip + 40;
+    packet -> nx_packet_length      =  (ULONG)payload;
+    packet -> nx_packet_ip_version  =  NX_IP_VERSION_V6;
+
+    ok =  n68k_rx_sum_ok(packet, (ULONG)protocol, payload, src, dst);
+
+    packet -> nx_packet_prepend_ptr =  saved_prepend;
+    packet -> nx_packet_length      =  saved_length;
+    packet -> nx_packet_ip_version  =  saved_version;
+
+    if (ok != NX_TRUE)
+    {
+        n68k_rx_verify_stats.bad_transport++;
+        *drop =  NX_TRUE;
+        return (0UL);
+    }
+
+    n68k_rx_verify_stats.transport_ok++;
+    n68k_rx_verify_stats.v6_ok++;
+
+    return ((protocol == NX_PROTOCOL_TCP)
+            ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+            : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM);
+}
+
+#endif /* FEATURE_NX_IPV6 */
+
 /*
  * Check what can be checked, and report what was checked.
  *
  * Returns the capability bits to publish on the packet, or sets *drop when the
  * frame is corrupt and must not reach the stack at all.  A frame this function
- * does not understand -- IPv6, a fragment, a truncated or padded header --
- * returns fewer bits and is checked by the stack in the ordinary way.  The
- * conservative answer is always no bits.
+ * does not understand -- a fragment, an IPv6 extension header, a truncated or
+ * padded header -- returns fewer bits and is checked by the stack in the
+ * ordinary way.  The conservative answer is always no bits.
  */
 ULONG n68k_rx_verify(NX_PACKET *packet, UINT *drop)
 {
@@ -78,10 +204,15 @@ UINT        ok;
         return (0UL);
     }
 
+#ifdef FEATURE_NX_IPV6
+    if ((ip[0] >> 4) == 6U)
+    {
+        return (n68k_rxv6_verify(packet, drop));
+    }
+#endif
+
     if ((ip[0] >> 4) != 4U)
     {
-        /* IPv6 is not handled here yet: its header carries no checksum and
-           the transport pseudo header is 128-bit. */
         n68k_rx_verify_stats.skip_version++;
         return (0UL);
     }
@@ -258,6 +389,60 @@ UINT    payload;
         n68k_rx_verify_stats.skip_short++;
         return (0UL);
     }
+
+#ifdef FEATURE_NX_IPV6
+    if ((ip[0] >> 4) == 6U)
+    {
+        if (n68k_rxv6_shape(ip, packet -> nx_packet_length, &protocol,
+                            &payload) != NX_TRUE)
+        {
+            return (0UL);
+        }
+
+        if (copied != ((ULONG)payload + 40UL))
+        {
+            return (n68k_rxv6_verify(packet, drop));
+        }
+
+        /*
+         * The IPv6 pseudo header is the source and destination addresses, the
+         * upper-layer length and the next header.  The addresses are already
+         * inside the carried sum; only the first two longwords of the fixed
+         * header are not part of it, so those are what comes back out.
+         */
+        /* Read big-endian, not through N68K_SUM_LONGWORDS: unlike a valid IPv4
+           header these eight bytes do not sum to zero, so the subtraction is
+           only a no-op on the byte order the carried sum was taken in. */
+        head =  N68K_RD32(&ip[4]);
+        sum  =  N68K_RD32(&ip[0]) + head;
+        if (sum < head)
+            sum++;
+        head =  sum;
+
+        sum =  carried + (~head);
+        if (sum < carried)
+            sum++;                          /* end-around carry */
+
+        sum =  n68k_rxv_fold(sum);
+        sum +=  (ULONG)protocol;
+        sum +=  (ULONG)payload;
+
+        if (n68k_rxv_fold(sum) != 0xFFFFUL)
+        {
+            n68k_rx_verify_stats.bad_transport++;
+            *drop =  NX_TRUE;
+            return (0UL);
+        }
+
+        n68k_rx_verify_stats.transport_ok++;
+        n68k_rx_verify_stats.v6_ok++;
+        n68k_rx_verify_stats.from_copy++;
+
+        return ((protocol == NX_PROTOCOL_TCP)
+                ? NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM
+                : NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM);
+    }
+#endif
 
     if ((ip[0] >> 4) != 4U)
     {

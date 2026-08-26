@@ -24,7 +24,7 @@ comment beside the code, not an entry here.
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |
 | The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:141` |
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
-| The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:81` |
+| IPv6 fusing refuses any extension header and all of ICMPv6 | next-header not TCP/UDP declines outright; the chain is never walked, so ND and fragments still cost the stack a payload pass | `src/net68k/n68k_rx_verify.c:72` |
 | `-m68000` ships on compatibility alone | wire 2026-08-25: `any` 417.8, 68020 426.4 (+2.1%), 68060 441.7 KB/s; 68020 also smaller. Spread tracks zero-windows, not CPU | `cmake/toolchain-m68k-amigaos.cmake:261` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
 | The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:35` |

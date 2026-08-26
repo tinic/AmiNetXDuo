@@ -302,8 +302,12 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_THREADX}/common/inc"
         "${CMAKE_SOURCE_DIR}/src/net68k")
 
+    # FEATURE_NX_IPV6 is what selects the 128-bit pseudo header in the checksum
+    # function, so the IPv6 half of the verifier only exists with it on.  The
+    # noipv6 cross arm is what compiles the other shape.
     target_compile_definitions(test_net68k_rxverify PRIVATE
         AMINETXDUO_RX_VERIFY
+        FEATURE_NX_IPV6
         NX_ENABLE_INTERFACE_CAPABILITY
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
         _nx_ip_checksum_compute=n68k_ip_checksum_compute)
