@@ -76,5 +76,4 @@ comment beside the code, not an entry here.
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
 | Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:300` |
 | A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:270` |
-| `ci.sh host` cannot pass without root on this box | the rig-lock selftest hard-fails when `ping` cannot probe; no unprivileged ICMP, no `cap_net_raw` | `tools/emu-rig-lock-selftest.sh:234` |
 | Three tool headers stay over 20 comment lines | each header IS the `--help` text, printed by a hardcoded `sed -n` range, so trimming it needs a code edit | `tools/fetch-toolchain.sh:164` |
