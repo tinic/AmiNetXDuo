@@ -118,9 +118,17 @@ static VOID show_defined_only(const AmiConfig *cfg, const ToolSnapshot *snap)
 
 static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
 {
+    /* Static for the reason netstat_config is: a Shell command starts with a
+       4 KB stack and this table is one row per interface slot. */
+    static ToolDhcp6 dhcp6;
+    const ToolDhcp6 *lease6;
     char  addr[16];
     char  mac[24];
     UWORD i;
+
+    /* An IPv4-only or older library answers with no rows, which prints
+       nothing; a failure to ask at all is the same absence. */
+    lease6 = (tool_dhcp6(&dhcp6) == 0) ? &dhcp6 : NULL;
 
     tool_printf("Network interfaces\n");
     tool_printf("Name    Mtu   Address          Link   "
@@ -158,6 +166,7 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
         tool_printf("        hardware %s\n", (LONG)mac);
 
         show_addresses6(snap, info->nx_index);
+        tool_print_lease6(lease6, info->nx_index, "        lease6 ");
     }
 
     show_defined_only(cfg, snap);

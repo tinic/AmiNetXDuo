@@ -353,6 +353,39 @@ typedef struct ToolDhcp
  */
 LONG tool_dhcp(ToolDhcp *out);
 
+/*
+ * The DHCPv6 lease, NETSTATUS_DHCP6, one row per interface exactly as ToolDhcp
+ * is. `text` rather than words for ToolAddr6Info's reason. Empty on a library
+ * without IPv6 or too old to know the selector, neither of which is a failure.
+ */
+typedef struct ToolDhcp6Info
+{
+    UWORD   nx_index;
+    UWORD   state;                   /* NETSTATUS_DHCP_*                     */
+    UWORD   raw_state;               /* NETSTATUS_DHCP6RAW_*                 */
+    UWORD   stateful;                /* 0 = Information-Request, no address  */
+    ULONG   preferred_seconds;       /* 0 = not stated                       */
+    ULONG   valid_seconds;
+    ULONG   t1;                      /* renew at, RFC 8415 21.4              */
+    ULONG   t2;                      /* rebind at                            */
+    char    text[48];                /* the leased address                   */
+} ToolDhcp6Info;
+
+typedef struct ToolDhcp6
+{
+    ToolDhcp6Info   iface[TOOL_MAX_IF];
+    UWORD           count;
+} ToolDhcp6;
+
+LONG tool_dhcp6(ToolDhcp6 *out);
+
+/*
+ * One interface's lease, printed. Both commands call this, so they cannot
+ * disagree. `lead` is the whole label column, so each keeps its own alignment.
+ * Nothing at all is printed when that interface holds no DHCPv6 lease.
+ */
+VOID tool_print_lease6(const ToolDhcp6 *dhcp, UWORD nx_index, const char *lead);
+
 /* ------------------------------------------------------------- routes, */
 
 #define TOOL_MAX_ROUTE  8

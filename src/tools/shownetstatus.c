@@ -338,6 +338,7 @@ static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolSnapshot *snap,
                            const ToolDhcpInfo *lease,
+                           const ToolDhcp6 *lease6,
                            BOOL up, BOOL stats, BOOL stack_running,
                            BOOL readable)
 {
@@ -465,6 +466,11 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                                                                  : "auto"));
 
     show_lease(lease);
+
+    /* The DHCPv6 lease is a table of its own, joined on the NX slot: this
+       stack runs one DHCPv6 client, so at most one interface has a row. */
+    if (live != NULL)
+        tool_print_lease6(lease6, live->nx_index, "  lease6      ");
 
     if (stats)
     {
@@ -1413,6 +1419,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     static ToolSnapshot snap;
     static ToolDhcp     dhcp;
     BOOL                have_lease = FALSE;
+    static ToolDhcp6    dhcp6;
+    BOOL                have_lease6 = FALSE;
     static ToolStats    stats;
     BOOL                have_live     = FALSE;
     BOOL                have_stats    = FALSE;
@@ -1454,6 +1462,11 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
            detail to add. */
         if (tool_dhcp(&dhcp) == 0)
             have_lease = TRUE;
+
+        /* The same, for the DHCPv6 client: an IPv4-only library answers the
+           selector with no rows, which prints nothing. */
+        if (tool_dhcp6(&dhcp6) == 0)
+            have_lease6 = TRUE;
 
         /* Running, and this command could not see in. Say which. */
         elsewhere = (BOOL)(!have_live);
@@ -1572,6 +1585,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
             show_interface(&cfg->interfaces[i], live, &snap,
                            have_lease ? lease_for(&dhcp, live) : NULL,
+                           have_lease6 ? &dhcp6 : NULL,
                            iface_online(live), detailed,
                            stack_running, (BOOL)!elsewhere);
             shown++;

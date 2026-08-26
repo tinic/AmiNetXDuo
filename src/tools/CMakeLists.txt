@@ -815,6 +815,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     # asserted: a wrong magic or a snap length below a record's own capture
     # length is a file that opens and is nonsense, or that tcpdump stops
     # reading part-way through, and neither shows on the machine that wrote it.
+    # A counter that reaches no command reaches nobody. Reads the two
+    # commands' source for test_refusals.c's reason: both are ReadArgs and
+    # dos.library and compile nowhere but the target, and the halves these
+    # rows are about are that the command ASKS and that it PRINTS.
+    add_executable(test_leasesurface
+        test/test_leasesurface.c)
+
+    target_compile_definitions(test_leasesurface PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+    target_compile_options(test_leasesurface PRIVATE -Wall -Wextra)
+    set_target_properties(test_leasesurface PROPERTIES C_STANDARD 11)
+
     add_executable(test_toolpcap
         test/test_toolpcap.c
         toolpcap.c)
@@ -858,6 +871,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME iperf_wire_format COMMAND test_iperfwire)
     add_test(NAME toolpcap_file_format COMMAND test_toolpcap)
     add_test(NAME bpffilter_programs COMMAND test_bpffilter)
+    add_test(NAME tool_counter_surface COMMAND test_leasesurface)
     add_test(NAME tools_arg_templates COMMAND test_argtemplates enums)
     add_test(NAME tools_arg_contract  COMMAND test_argtemplates contract)
     add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)

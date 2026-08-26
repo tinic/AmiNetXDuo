@@ -34,6 +34,7 @@ static union
     struct { NetStatusHeader hdr; NetStatusRoute     e[TOOL_MAX_ROUTE]; } route;
     struct { NetStatusHeader hdr; NetStatusSocket    e[TOOL_MAX_SOCK]; } sock;
     struct { NetStatusHeader hdr; NetStatusDhcp      e[TOOL_MAX_IF]; }   dhcp;
+    struct { NetStatusHeader hdr; NetStatusDhcp6     e[TOOL_MAX_IF]; }   dhcp6;
     struct { NetStatusHeader hdr; NetStatusAddress6  e[TOOL_MAX_ADDR6]; } addr6;
     struct { NetStatusHeader hdr; NetStatusRoute6    e[TOOL_MAX_ROUTE6]; } route6;
     struct { NetStatusHeader hdr; NetStatusNeighbour e[TOOL_MAX_ND]; }     nd;
@@ -756,6 +757,99 @@ LONG tool_dhcp(ToolDhcp *out)
     tool_netstatus_close(base);
 
     return 0;
+}
+
+LONG tool_dhcp6(ToolDhcp6 *out)
+{
+    struct Library *base;
+    LONG            n;
+    LONG            i;
+
+    if (out == NULL)
+        return -1;
+
+    out->count = 0;
+
+    base = nx_open();
+    if (base == NULL)
+        return -1;
+
+    /* No nx_query_failed(), for tool_dhcp()'s reason: an IPv4-only or older
+       library answering nothing here is one absent block, not an error. */
+    n = tool_netstatus_query(base, NETSTATUS_DHCP6, &nx_answer,
+                             sizeof(nx_answer.dhcp6), sizeof(NetStatusDhcp6));
+    if (n < 0)
+    {
+        tool_netstatus_close(base);
+        return -1;
+    }
+
+    for (i = 0; i < n && i < (LONG)TOOL_MAX_IF; i++)
+    {
+        const NetStatusDhcp6 *src  = &nx_answer.dhcp6.e[i];
+        ToolDhcp6Info        *info = &out->iface[i];
+
+        info->nx_index          = src->nsd6_Index;
+        info->state             = src->nsd6_State;
+        info->raw_state         = src->nsd6_RawState;
+        info->stateful          = src->nsd6_Stateful;
+        info->preferred_seconds = src->nsd6_PreferredSeconds;
+        info->valid_seconds     = src->nsd6_ValidSeconds;
+        info->t1                = src->nsd6_T1;
+        info->t2                = src->nsd6_T2;
+
+        tool_format_ip6(src->nsd6_Address, info->text, sizeof(info->text));
+
+        out->count++;
+    }
+
+    tool_netstatus_close(base);
+
+    return 0;
+}
+
+VOID tool_print_lease6(const ToolDhcp6 *dhcp, UWORD nx_index, const char *lead)
+{
+    UWORD i;
+
+    if (dhcp == NULL || lead == NULL)
+        return;
+
+    for (i = 0; i < dhcp->count && i < (UWORD)TOOL_MAX_IF; i++)
+    {
+        const ToolDhcp6Info *d = &dhcp->iface[i];
+
+        if (d->nx_index != nx_index)
+            continue;
+
+        if (d->state == NETSTATUS_DHCP_WORKING)
+        {
+            tool_printf("%sasking, no server has answered yet\n", (LONG)lead);
+            return;
+        }
+
+        if (d->state != NETSTATUS_DHCP_BOUND)
+            return;
+
+        /* An Information-Request client has options and no address, so there
+           is nothing to print an address for and nothing to release. */
+        if (d->stateful == 0)
+        {
+            tool_printf("%soptions only, this client asked for no address\n",
+                        (LONG)lead);
+            return;
+        }
+
+        tool_printf("%s%s", (LONG)lead, (LONG)d->text);
+
+        if (d->valid_seconds != 0)
+            tool_printf(", valid for %lu s", d->valid_seconds);
+        if (d->t1 != 0)
+            tool_printf(", renews at %lu s", d->t1);
+
+        tool_printf("\n");
+        return;
+    }
 }
 
 /* ---------------------------------------------------------------- routes, */
