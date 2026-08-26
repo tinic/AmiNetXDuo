@@ -55,7 +55,7 @@ for ((i = 0; i < ${#TOK[@]}; i++)); do
     t="${TOK[i]}"
     case "$t" in
         AMINETXDUO_*=*) env_carry="$env_carry ${t//\"/}" ;;
-        */ci.sh|tools/ci.sh)
+        */ci.sh)
             stages=""
             for ((j = i + 1; j < ${#TOK[@]}; j++)); do
                 is_stage "${TOK[j]}" || break
