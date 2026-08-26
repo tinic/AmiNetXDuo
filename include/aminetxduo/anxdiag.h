@@ -131,6 +131,11 @@ extern "C" {
    there and zero.  Chosen so it cannot be a real MANFID or subtuple. */
 #define ANXDIAG_ABSENT      0xfffffffeUL
 
+/* The byte the CR probe drives last at another register.  ANXDIAG_PC_CR and
+   ANXDIAG_PNP_CR read back as this when the bus is echoing writes, which is
+   an empty socket, not a card.  See src/netdev/netdev_float.h. */
+#define ANXDIAG_CR_DECOY    0x5aUL
+
 /* ANXDIAG_ATTACH_FAIL values. */
 #define ANXDIAG_WHY_UNKNOWN     0   /* the core refused and said no more     */
 #define ANXDIAG_WHY_CR          1   /* command register readback wrong       */

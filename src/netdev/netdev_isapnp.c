@@ -10,6 +10,7 @@
 
 #include "netdev_cards.h"
 #include "netdev_clock.h"
+#include "netdev_float.h"
 #include "netdev_nic.h"
 
 #include <exec/types.h>
@@ -199,24 +200,16 @@ static VOID pnp_isolate(const NetdevCard *card, volatile UBYTE *board,
 /* ------------------------------------------------------------- settling -- */
 
 /*
- * Is a DP8390 decoding where the row says it is?  A read of the command
- * register cannot answer this: a chip out of reset and an address nothing
- * decodes both read $00.  CR is written instead -- it is read/write and STP|RD2
- * is the state the chip is already in -- with the START bit masked out of the
- * comparison for the clones that come up with it stuck.
+ * Is a DP8390 decoding where the row says it is?  Neither a read of CR nor a
+ * write-then-read of it can answer that on a bus that echoes -- see the float
+ * guard in netdev_float.h, which is what decides it.
  */
 static UBYTE pnp_last_cr;
 
 static BOOL pnp_chip_answers(const NetdevCard *card, volatile UBYTE *board)
 {
-    volatile UBYTE *cr = board + card->reg_off;
-    UBYTE           v;
-
-    *cr = 0x21;             /* ED_CR_STP | ED_CR_RD2 */
-    v   = *cr;
-    pnp_last_cr = v;
-
-    return (BOOL)((v & (UBYTE)~0x02u) == 0x21);
+    return netdev_cr_answers(board + card->reg_off, card->stride,
+                             &pnp_last_cr);
 }
 
 /*

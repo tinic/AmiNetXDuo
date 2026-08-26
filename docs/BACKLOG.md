@@ -8,7 +8,6 @@ comment beside the code, not an entry here.
 | `-ffunction-sections` reaches LTRANS without `-fno-optimize-sibling-calls` | a pairing the tree calls indivisible is split | `src/common/CMakeLists.txt:144` |
 | The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
-| `CheckNetDevice` calls an empty PCMCIA slot a valid card | Gayle's bus keeper echoes the probe's own bytes; needs a float guard | `src/tools/checknetdevice.c` |
 | A process the Shell spawned cannot `SetMode()`, `WaitForChar()` or `Open("*")` | its own `pr_MsgPort` is neither the break port nor the Shell's task | `src/tools/httpterm.c:197` |
 | A live IPv6-only interface cannot be reconfigured or release DHCPv6 | no ADDRESS6/CONFIGURE6 writer, no `NETSTATUS_DHCP6` | `src/bsdsocket/netstatus.c:1723` |
 | A certificate whose public key is `id-RSASSA-PSS` is refused | `rsa_pss_pss_*`: the SPKI OID is neither RSA nor EC, so the parse stops | `third_party/netxduo/nx_secure/src/nx_secure_x509.c:239` |
@@ -60,7 +59,7 @@ comment beside the code, not an entry here.
 | HAM and EHB are proven on one machine and one resolution | left: an A600 for HAM6 and EHB on OCS, and anything but 320x256 lores | `tests/tools/run-console.sh`, `src/tools/httpfb.c` |
 | PCMCIA parity stops short of the CFTABLE walk | walking every entry would plausibly reach the seven multifunction cards | `src/netdev/netdev_pcmcia.c` |
 | The PCMCIA socket is never contended in the lab | `CARDF_IFAVAILABLE`'s rejection path and the later-`OpenDevice()` claim are untested | `src/netdev/netdev_pcmcia.c` |
-| Amiberry cannot eject a PCMCIA card, so removal is unexercised | `pc_on_removed`/`pc_on_inserted` have never fired, nor the reset order | `src/netdev/netdev_pcmcia.c:341`, `:511` |
+| Amiberry cannot eject a PCMCIA card, so removal is unexercised | `pc_on_removed`/`pc_on_inserted` have never fired, nor the reset order | `src/netdev/netdev_pcmcia.c:363`, `:386` |
 | Two card rows have never run on their hardware | `xsurf500` is from the iComp wiki and `3c589` from the 3Com manual | `src/netdev/netdev_cards.c` |
 | `AMINETXDUO_AMIBERRY_MAC` is ignored for `ne2000_pcmcia` | Amiberry uses the host NIC address, so the second consecutive run has a dead RX | `tools/emu-board.sh`, `tests/tools/cards.sh` |
 | Nothing checks the archive's contents against what is installed | `anxnet.device` shipped uninstalled for eleven releases unnoticed | `dist/make-dist.sh`, `install/Install-AmiNetXDuo` |

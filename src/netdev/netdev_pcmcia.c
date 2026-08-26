@@ -8,6 +8,7 @@
 #include "netdev_cards.h"
 #include "netdev_clock.h"
 #include "netdev_macgen.h"
+#include "netdev_float.h"
 #include "el3.h"        /* el3_answers(), and no EtherLink III register */
 
 #include <exec/types.h>
@@ -157,18 +158,12 @@ static BOOL pc_dp8390_answers(const NetdevCard *card)
 {
     volatile UBYTE *cr =
         (volatile UBYTE *)(ULONG)(card->base + card->reg_off);
-    UBYTE           v;
+    BOOL            ok;
 
-    *cr = 0x21;             /* ED_CR_STP | ED_CR_RD2 */
-    v   = *cr;
-    pc_trace("pc: cr ", (ULONG)v);
-    pc_last_cr = v;
-    /*
-     * Mask the START bit: some clones (Netgear FA411) come out of reset with
-     * CR bit 1 stuck and read 0x23 where the datasheet says 0x21.  0xff (bus
-     * floating) and 0x00 (nothing decoding) still fail the comparison.
-     */
-    return (BOOL)((v & (UBYTE)~0x02u) == 0x21);
+    ok = netdev_cr_answers(cr, card->stride, &pc_last_cr);
+    pc_trace("pc: cr ", (ULONG)pc_last_cr);
+
+    return ok;
 }
 
 static BOOL pc_chip_answers(const NetdevCard *card)

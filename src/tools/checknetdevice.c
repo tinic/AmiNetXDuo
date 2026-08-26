@@ -513,6 +513,14 @@ static VOID cnd_step(const AnxDiagStep *st)
                 v);
             return;
         }
+        if (v == ANXDIAG_CR_DECOY)
+        {
+            say("  The command register read back $%02lx, which is the byte the\n"
+                "  probe wrote at a DIFFERENT register just before reading it.\n"
+                "  The socket is echoing whatever was last driven on the bus\n"
+                "  rather than holding a value, so the slot is empty.\n", v);
+            return;
+        }
         say("  The command register read back $%02lx, which is not what a\n"
             "  stopped DP8390 answers ($21, or $23 on a clone with a stuck\n"
             "  START bit).\n", v);
@@ -610,6 +618,13 @@ static VOID cnd_step(const AnxDiagStep *st)
         {
             say("  The command register read back $%02lx: the chip is there.\n",
                 v);
+            return;
+        }
+        if (v == ANXDIAG_CR_DECOY)
+        {
+            say("  The command register read back $%02lx, the byte the probe\n"
+                "  wrote at a different register just before reading it: the\n"
+                "  bus is echoing writes, so no chip is decoding there.\n", v);
             return;
         }
         say("  The command register read back $%02lx, which is not what a\n"

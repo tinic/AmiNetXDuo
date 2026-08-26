@@ -213,6 +213,21 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netdev_ed COMMAND test_netdev_ed)
     add_test(NAME netdev_cards COMMAND test_netdev_cards)
 
+    # netdev_float.h is header-only because both callers of it -- the PCMCIA
+    # slot and the ISA PnP bridge -- are files of m68k inline asm that no host
+    # can compile.  The guard itself needs neither.
+    add_executable(test_netdev_float
+        test/test_netdev_float.c)
+
+    target_include_directories(test_netdev_float PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_float PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_float COMMAND test_netdev_float)
+
     # The EtherLink III, which NOTHING EMULATES: Amiberry's PCMCIA support is
     # NE2000 only, so this test is the only thing that has ever driven el3.c.
     # It is a reactive mock rather than a memory image -- a window is not a
