@@ -1,32 +1,8 @@
 /*
  * AmiNetXDuo, the BPF filter interpreter.
  *
- * A classic Berkeley packet filter VM: accumulator A, index register X,
- * BPF_MEMWORDS words of scratch, eight instruction classes, and a return value
- * that is the number of bytes of the packet to keep.
- *
- * The interpreter is total: no input can make it trap, read outside the
- * packet, divide by zero, shift by more than 31, loop forever, or step outside
- * the instruction array. This holds for an invalid program and for an invalid
- * packet. Each of these cases is checked, and the packet is rejected:
- *
- *   - packet reads are bounds-checked against the view, in arithmetic that
- *     cannot wrap (`off > caplen - size` after `size <= caplen` is proved)
- *   - X + k for indexed loads is checked for wraparound
- *   - every jump is checked against the remaining instruction count, and only
- *     forward jumps exist in the encoding, so pc strictly increases and the
- *     loop always terminates
- *   - scratch indices are checked against BPF_MEMWORDS
- *   - unknown encodings reject instead of a fall-through
- *
- * ami_bpf_validate() still runs at BIOCSETF time, so a bad program is rejected
- * at load time and does not silently drop every packet afterwards. The
- * interpreter does not depend on that validation.
- *
  * Packet bytes are assembled big-endian, the order that BPF specifies (network
- * order). On 68k a direct load gives the same order.
- *
- * No AmigaOS calls here.
+ * order). No AmigaOS calls here.
  *
  * SPDX-License-Identifier: MIT
  */

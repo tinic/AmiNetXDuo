@@ -1,30 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k RSA CRT exponentiation.
  *
- *   Structurally identical to the vendored
- *   _nx_crypto_huge_number_crt_power_modulus().  The only difference is the
- *   two lines that raise xp and xq to a power: they call this module instead.
- *   It lets the CRT path be measured with the fast exponentiation, and CRT is
- *   the largest single gain available.
- *
- *   The measured baseline on the emulated 68020 is 44.4 s with CRT against
- *   158.0 s without, 3.6x, and nx_secure reaches for CRT on exactly one
- *   code path.  NX_CRYPTO_SET_PRIME_P appears once in the whole of
- *   nx_secure/src, in nx_secure_process_client_key_exchange.c (the server side
- *   of a plain-RSA key exchange).  The ECDHE_RSA ServerKeyExchange signature
- *   in nx_secure_tls_ecc_generate_keys.c and the client certificate signature
- *   in nx_secure_tls_send_certificate_verify.c both hand the full 2048-bit
- *   private exponent to _nx_crypto_rsa_operation() with p and q left NULL, so
- *   they take the 158 s path.  A call that supplies the primes there is worth
- *   3.6x, for the price of two nx_crypto_operation() calls.  That gain
- *   multiplies with everything in this module rather than overlaps it.
- *
- *   CRT is ~4x because each half works modulo a number of half the width, so
- *   each Montgomery multiply costs a quarter, and each exponent is half as
- *   long, so there are half as many of them, 8x per half, two halves, 4x
- *   overall (HAC Note 14.75(ii)).  The recombination is O(s^2) and takes the
- *   rest.
- *
  * SPDX-License-Identifier: MIT
  */
 

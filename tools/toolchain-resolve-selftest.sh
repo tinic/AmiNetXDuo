@@ -4,21 +4,11 @@
 #
 #   tools/toolchain-resolve-selftest.sh
 #
-# tools/amiga-toolchain.sh and cmake/toolchain-m68k-amigaos.cmake used to take
-# <cache>/current on the "it runs" test alone.  That symlink is written by
-# tools/fetch-toolchain.sh when it installs, so a cache that already held the
-# pinned tree kept whatever was current last, and nothing compared the two.
-#
-# The self-hosted emulator runner held eabb6789378f (the pin, GCC 16.2.0b) and
-# c63033fd4473 (GCC 15.2) side by side with `current` on the older one.  Every
-# cross build there ran under GCC 15.2, and the only symptom was
-# tools/gen-developer.sh --check calling the committed headers stale.  The arm
-# was red through v0.22.0, v0.22.1 and v0.23.0 on that.
-#
-# So the rule now is: the cache candidate is the pin, and a `current` that runs
-# here and is not the pin is an error.  Both resolvers have to agree about it,
-# which is what this checks.  It uses a fake cache, so it needs no toolchain,
-# no network and no runner.
+# The rule is: the cache candidate is the pin, and a `current` that runs here
+# and is not the pin is an error.  tools/amiga-toolchain.sh and
+# cmake/toolchain-m68k-amigaos.cmake both have to agree about it, which is what
+# this checks.  It uses a fake cache, so it needs no toolchain, network or
+# runner.
 #
 # Output is key=value plus an exit code.
 #

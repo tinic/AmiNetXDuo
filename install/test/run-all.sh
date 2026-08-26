@@ -4,46 +4,19 @@
 #
 #   install/test/run-all.sh [-a ARCHIVE]
 #
-# The harness is install/test/run-workbench.sh.  This used to call
-# install/test/run-installer-fsuae.sh, which was deleted with the rest of the
-# fs-uae harnesses; `set -uo pipefail` has no -e, so all five scenarios scored
-# 127, the script exited 5, and nothing invoked it, so nothing ever saw that.
+# The harness is install/test/run-workbench.sh.  Each scenario is a full
+# install onto a freshly staged bare machine, then a power cycle that requires
+# the stock Startup-Sequence to reach S:User-Startup on its own:
 #
-# Each scenario is a full install onto a freshly staged bare machine:
+#   ICONS     the generated .info files, through the real icon.library
+#   NOVICE    no questions at all; every default has to be right on its own
+#   AVERAGE   the normal questions, all answered with the default
+#   EXPERT    the only level drawing the unit-number, interface-name and
+#             per-copy confirmation pages, and no other caller passes it
+#   STATIC    "no" to DHCP, the only way into P_ask_ip and P_ip_parse
+#   RERUN     installs three times; later passes must keep the configuration
 #
-#   NOVICE    no questions asked at all, the card is auto-detected from
-#             DEVS: and every default has to be right on its own
-#   AVERAGE   the questions a normal install asks, all answered with the
-#             default
-#   EXPERT    the same plus the unit number, the interface name and the
-#             confirmation page for every copy and every file written
-#   STATIC    "no" to the DHCP question, which is the only way into the four
-#             P_ask_ip prompts and into P_ip_parse.  run-workbench.sh -S,
-#             which answers that page by the LABEL of its second button --
-#             installdrive.c already had that mechanism for -H, and the
-#             DRIVE_NO_ON_YESNO page counter this scenario used to wait on is
-#             set by nothing and is an index, so it would drift the first time
-#             a question moved.  The four prompts are answered with their own
-#             defaults; the run asserts CONFIGURE=STATIC and all four values
-#             reached DEVS:.
-#   RERUN     installs over itself; the second pass has to notice the existing
-#             configuration and keep it.  This is run-workbench.sh -H, which
-#             installs three times.
-#
-# It starts with ICONS, which hands the generated .info files to the real
-# icon.library rather than trusting the generator to grade its own homework.
-#
-# Each then power-cycles the installed machine and requires the stock
-# Startup-Sequence to reach S:User-Startup and bring the network up on its own.
-#
-# EXPERT is the reason this file is worth repairing rather than deleting: it is
-# the only level that draws the unit-number and interface-name prompts
-# (Install-AmiNetXDuo:783-804) and the confirmation page on each copylib, and
-# no caller anywhere passes -l EXPERT.
-#
-# Runs are serialised by tools/amiberry-run.sh's lock, so this takes a while --
-# budget about fifteen minutes.
-#
+# Runs are serialised by tools/amiberry-run.sh's lock -- about fifteen minutes.
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail

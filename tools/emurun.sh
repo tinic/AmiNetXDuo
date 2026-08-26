@@ -4,18 +4,6 @@
 #
 #   emurun.sh -b BUILD -m MODEL -T TAG -P PORT [-B BYTES] [-w WORKLOAD] [-p]
 #
-# Every silent failure this harness produced in one day, and the gate for it:
-#
-#   env not sourced, no ROM            -> preflight, exit 2
-#   binary built for the wrong CPU     -> preflight, exit 2
-#   Zorro board on a machine with none -> preflight, exit 2
-#   stale emulator holding the network -> preflight, exit 2
-#   port already in use                -> preflight, exit 2
-#   build directory missing a binary   -> preflight, exit 2
-#   launched over ssh, died on HUP     -> setsid, and the caller polls a file
-#   ran but the guest wrote nothing    -> postflight, exit 3
-#   ran but produced no throughput     -> postflight, exit 3
-#
 # Output is key=value on stdout and one RESULT= line last.  Exit codes:
 #   0 ok   1 the run failed   2 refused before starting   3 ran, no verdict
 #

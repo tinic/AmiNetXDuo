@@ -37,28 +37,11 @@ import sys
 MAX_STRING = 512
 
 # The Installer's window is 56 characters wide and sixteen text rows tall
-# (window.c calc_window_size), of which a radio page gets what is left after
-# the prompt and the buttons.  Two columns of four short labels fit; eight
-# long ones do not.  These limits are empirical, from watching Installer 2.17
-# fail on the real thing.
-#
-# TEN fits once the labels are short.  The card page carries ten at ten
-# characters or less ("Ariadne II", "X-Surf 100", "LAN Rover") and lays out; it
-# did not when the same page used names like "Commodore A2065" and "Not in this
-# list".  Both numbers are about ROOM, and the count alone was never the
-# whole story, which is why the length limit below matters more than this
-# one.
-#
-# Nine was the recorded figure and the note said to merge entries rather than
-# raise it.  Merging was not available: the tenth entry is the ASDG LAN Rover,
-# which has a driver of its own (eb920.device) and had no entry at all, so a
-# machine with one could not be detected and aborted the install at NOVICE.
-#
-# Raised only after install/test/run-workbench.sh -l AVERAGE drove the page
-# under Installer 2.17 on a real Workbench 3.1 and installdrive.txt reported
-# ten option gadgets on it (ids 2..11) with the run completing.  If a future
-# page dies on "askchoice: No choices selected", it has too many or they are
-# too wide, and the answer is to merge entries rather than to raise this again.
+# (window.c calc_window_size), and layout_box_gads() silently creates FEWER
+# gadgets than there are choices when they do not fit, which the install then
+# dies on as "askchoice: No choices selected".  Both limits are empirical, and
+# ten was reached only after a real Installer 2.17 run laid out ten option
+# gadgets.  If a page dies that way, merge entries rather than raise these.
 MAX_CHOICES = 10
 MAX_CHOICE_LEN = 22
 

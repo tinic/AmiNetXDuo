@@ -4,26 +4,6 @@
 #
 #   tools/check-no-diag-strings.sh <build-dir>
 #
-# THE CONSTRAINT THIS HOLDS.  bsdsocket.library is resident for the life of the
-# machine, anxnet.device may be the only image of ours on a machine at all, and
-# both are size-sensitive to the byte.  That is why AMINETXDUO_LOG is off in
-# every shipped build, and why the event ring (aminetxduo/events.h) records
-# numbers: the words that go with them live in src/tools/tool_events.c, which
-# is a Shell command, loaded to print once and unloaded again.
-#
-# A rule of that shape erodes.  Somebody adds one message, to one path, in one
-# library, because one message is nothing.  This is what says otherwise.  It
-# takes every sentence out of the decode table and looks for it in every linked
-# image, so a sentence added to the table extends the check by itself and there
-# is no second list to keep in step.
-#
-# EVERY SHIPPED IMAGE IS NAMED, not the one the ring is read from.  A message
-# added to anxnet.device would be just as resident, and a check that looked
-# only at the library publishing the ring would never see it.
-#
-# Output is key=value and an exit code: 0 clean, 1 a sentence is in an image,
-# 2 nothing to check.
-#
 # SPDX-License-Identifier: MIT
 
 set -eu

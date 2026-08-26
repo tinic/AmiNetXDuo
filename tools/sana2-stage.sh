@@ -7,24 +7,13 @@
 #   sana2_driver_for <board>        echoes the driver file name
 #   sana2_stage <board> <devsdir>   stages the driver and rewrites DEVICE=
 #
-# The driver name is not the board key.  Individual Computers ship
-# x-surf-100.device, Hydra Systems ship hydra.device, ASDG ship eb920.device.
-#
 # Third-party drivers are staged into DEVS:Networks, which is where they are
 # really installed, and DEVICE= is left as the bare name so the run exercises
 # the fallback in ami_sana2_open_device(), docs/RESEARCH.md 44.9.  The A2065
 # keeps DEVS: itself, which is where our own tests have always put it.
 #
-# Environment:
-#   AMINETXDUO_SANA2_DRIVER       path to the driver binary to stage
-#   AMINETXDUO_SANA2_DRIVER_NAME  the name it is staged under
-#   AMINETXDUO_SANA2_DEVICE       what goes in DEVICE=, for proving whether a
-#                                 bare name reaches DEVS:Networks
-#   AMINETXDUO_SANA2_DIR          subdirectory of DEVS: to stage into
-#   AMINETXDUO_SANA2_CARD         CARD= to write into the interface file, for
-#                                 a driver that covers a family of boards
-#   AMINETXDUO_SANA2_VENDOR       set to anything: sana2_select() picks the
-#                                 vendor driver for every card
+# Environment: AMINETXDUO_SANA2_DRIVER / _DRIVER_NAME / _DEVICE / _DIR / _CARD /
+# _VENDOR override which driver is staged, under what name, and what DEVICE= says.
 #
 # SPDX-License-Identifier: MIT
 

@@ -6,51 +6,16 @@
 #   tools/analyze.sh            # check: new findings are a failure
 #   tools/analyze.sh --update   # rewrite the baseline from this run
 #
-# WHY A BASELINE AND NOT -Werror
+# The tree is not analyser-clean and cannot be made so by editing it, so what is
+# left after triage is recorded and anything NEW fails the build.  The baseline
+# is keyed on file + warning + message text with a count, NOT on line numbers: a
+# baseline that moves when an unrelated line above it moves gets regenerated
+# blindly, and then it is not a gate.
 #
-#   The tree is not analyser-clean and cannot be made so by editing it.  What
-#   is left after triage is 25 findings in five groups, none of them defects:
-#
-#     * six in src/bsdsocket/netstatus.c, where the buffer-has-room invariant
-#       goes through an integer division the analyser's constraint solver does
-#       not follow.  The comment above the switch in bsd_NetStackQuery() has
-#       the proof.
-#     * twelve in tests/tcpdrill/tcpdrill.c, where say() is a hand-rolled
-#       printf.  The analyser does not read the format string through the call,
-#       so it walks every conversion branch and reports the ones that do not
-#       match the arguments actually passed.  Every real pair matches.
-#     * one in port/threadx-amiga/src/tx_thread_stack_build.c, where Wait(0UL)
-#       is a deliberate never-returns trap and the analyser continues past it.
-#     * one in tests/tools/ifprobe.c, where p_poison() fills the struct in a
-#       loop the analyser unrolls once.
-#     * five uninitialised E-Clock reads in the units listed as falling back
-#       below, the NDK blind spot this script otherwise removes.
-#
-#   Silencing those would mean adding dead NULL tests, pragmas over whole
-#   functions, or a rewrite of a test's formatter, all of which cost more
-#   than they buy.  So they are recorded, and anything NEW fails the build.
-#   Verified to do that: a `return *(long *)0` planted in src/sana2 is reported
-#   as a new finding and exits 1.
-#
-#   The baseline is keyed on file + warning + message text, with a count.  Not
-#   on line numbers: a baseline that moves when an unrelated line above it
-#   moves gets regenerated blindly, and then it is not a gate.
-#
-# WHY -D_NO_INLINE
-#
-#   The NDK spells every system call as an inline asm statement expression --
-#   inline/macros.h LPn(), a `jsr a6@(-offs:W)` with a "memory" clobber and no
-#   output constraint for the destination.  -fanalyzer does not read a "memory"
-#   clobber as a store, so after ReadEClock(&ev) it still believes ev.ev_lo is
-#   uninitialised.  Measured: 32 of 48 findings on this tree were that, and
-#   only that, the same call declared as a plain extern produces none.
-#
-#   <proto/*.h> already has the switch: _NO_INLINE takes the clib/*_protos.h
-#   prototypes instead of the inline macros.  Objects built that way would not
-#   link, which is why this pass compiles to /dev/null and the real build is
-#   left alone.  A handful of files do not compile under it, they hand-roll
-#   an LPnNR() for a call the NDK has no prototype for, and those fall back
-#   to a normal -fanalyzer pass so they are still covered, just noisier.
+# -D_NO_INLINE because -fanalyzer does not read the NDK inline asm's "memory"
+# clobber as a store, and reports every ReadEClock() output as uninitialised.
+# Objects built that way would not link, which is why this pass compiles to
+# /dev/null; files with no clib prototype fall back to a normal pass.
 #
 # SPDX-License-Identifier: MIT
 
@@ -107,28 +72,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 # compile_commands.json, one command per line, ours only, deduplicated.
 #
-# run_one() eval()s these, and CMake has already shell-quoted what it put in
-# the JSON string, so the only layer to undo here is the JSON one.  Two
-# escapes come out of CMake and both are decoded below, backslash first, the
-# order JSON defines:
-#
-#   \\  ->  \    a backslash the shell wants, which eval then consumes
-#   \"  ->  "    likewise part of the shell quoting, not of the argument
-#
-# A quoted -D is what produces them.  -DATF_PROGNAME="tcp_socket" arrives as
-# -DATF_PROGNAME=\\\"tcp_socket\\\", decodes to -DATF_PROGNAME=\"tcp_socket\",
-# and eval hands the compiler -DATF_PROGNAME="tcp_socket", so the macro is
-# still a string literal.  Checked end to end, not reasoned about.
-#
-# Anything else -- \n, \t, \/, \uXXXX -- is still refused, because decoding it
-# properly means a real JSON parser.  What changed is that the refusal now
-# names the argument that caused it: the old message said only "this parser is
-# too naive", which named the file and not the cause, and cost a CI run on
-# 2026-08-10 when tests/atf/CMakeLists.txt first added a quoted -D.
-#
-# The two handled escapes are removed BEFORE looking for a leftover backslash.
-# Searching for \<other> directly reports the second half of every \\ as a
-# finding that is not there.
+# run_one() eval()s these and CMake has already shell-quoted the contents, so
+# the only layer to undo here is the JSON one.  Two escapes are decoded,
+# backslash first, the order JSON defines: `\\` -> `\` and `\"` -> `"`.
+# Anything else is refused, because decoding it properly means a real JSON
+# parser.  The two handled escapes are removed BEFORE looking for a leftover
+# backslash: searching for \<other> directly reports the second half of every
+# `\\` as a finding that is not there.
 if sed -e 's/\\\\//g' -e 's/\\"//g' "$BUILD/compile_commands.json" |
        grep -q '\\'; then
     echo "compile_commands.json: a JSON escape this parser does not decode" >&2
@@ -150,27 +100,12 @@ echo "analysing $(wc -l < "$WORK/cmds" | tr -d ' ') translation units with $JOBS
 
 # ------------------------------------------------------------- the two passes -
 #
-# HOW MUCH THE ANALYSER IS ALLOWED TO EXPLORE
-#
-#   -Wanalyzer-too-complex is off by default, and when the analyser gives up on
-#   a function it then says nothing at all about it.  At GCC's default
-#   bb-explosion-factor of 5, 48 of this tree's 213 units gave up, including
-#   socket.c, select.c, tcp_handler.c, netdb.c, fetch.c, telnet.c and
-#   nettrace.c, which is to say three of the five defects the memory-safety
-#   audit found were in files -fanalyzer had never actually looked at.  A run
-#   that reports "clean" for those is worse than no run.
-#
-#   50 brings it down to five, for about 150 seconds.  The warning is turned ON
-#   so the five that remain are printed rather than assumed away, and the two
-#   that are worth more time get it by name:
-#
-#     netdb.c    3.2s at 200, parses DEVS:Internet/*, and is where the alias
-#                pool overflow lived
-#     nettrace.c 4.1s at 200, parses what comes back off the wire
-#
-#   Not raised: c68k_25519.c and c68k_mont.c (bignum limb loops, 18s each and
-#   no pointer arithmetic over untrusted input) and tcpdrill.c (over eight
-#   minutes at 200, and a test harness).
+# -Wanalyzer-too-complex is off by default, and when the analyser gives up on a
+# function it then says nothing at all about it: at GCC's default
+# bb-explosion-factor of 5, 48 of this tree's 213 units gave up, socket.c and
+# netdb.c among them.  50 brings it down to five for about 150 seconds, and the
+# warning is ON so those five are printed rather than assumed away.  The two
+# that parse untrusted input get 200 by name below.
 EXPLODE_DEFAULT=50
 explode_for() {
     case "$1" in

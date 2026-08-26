@@ -9,21 +9,6 @@
 # richer set the 3.2 CD carries in its ADF/ directory: Workbench is the base
 # and the rest are overlaid onto it in the order the Installer would.
 #
-# WHY A TREE AND NOT A DISK IMAGE
-#
-#   Amiberry mounts a host directory as a volume (uaehf0=dir), so a tree is
-#   directly bootable and can be inspected, diffed and patched from the host
-#   without loopback mounts or an Amiga-side filesystem.  That is what the 3.1
-#   harness has always used.
-#
-# WHY NOT RUN THE REAL INSTALLER
-#
-#   The 3.2 Installer is interactive and its script asks about the target
-#   machine, the languages and the printer.  Assembling the floppies directly
-#   gives a system that boots and runs commands, which is what a test harness
-#   needs.  It is NOT a substitute for a real install when the question is
-#   about the installer itself.
-#
 # The ADFs are not ours to ship: they come from a purchased AmigaOS 3.2
 # licence.  See the lab asset store, os32/README.md.
 #

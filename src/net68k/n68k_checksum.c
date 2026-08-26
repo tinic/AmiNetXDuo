@@ -1,32 +1,9 @@
 /*
  * AmiNetXDuo, the internet checksum in the form the 68k has.
  *
- * third_party/netxduo/common/src/nx_ip_checksum_compute.c walks the payload a
- * longword at a time and splits each one into two 16-bit halves by hand:
- *
- *     checksum += (*long_ptr & NX_LOWER_16_MASK);
- *     checksum += (*long_ptr >> NX_SHIFT_BY_16);
- *
- * GCC 15.2 -O2 -m68020 turns that into seven instructions per longword
- * (move.l (An)+,Dn / move.l / andi.l #65535 / clr.w / swap / add.l / add.l)
- * plus the dbf.  That is the cost of expressing a carry in a language with no
- * carry flag.
- *
- * The 68k has a carry flag, so a one's-complement sum is add.l followed by
- * addx.l of a zero register: two instructions per longword, no immediate, no
- * swap, and the operand comes straight out of (An)+ with no separate load.
- * The 32-bit sum that produces is congruent to the 16-bit one modulo 0xFFFF,
- * so folding it at the end gives the same checksum.  See
- * n68k_sum_longwords().
- *
- * The rest is structurally identical to the vendored code: the pseudo-header
- * arithmetic, the chain walk, the end-pointer rounding, the two-byte carry
- * across a packet boundary whose append pointer is 2 mod 4, and the trailing
- * 1/2/3-byte case with its zero-write into the pad byte.  This must return
- * exactly what NetX Duo returns, and a correct internet checksum is not
- * enough.  tests/perf/host/ checks that differentially against the vendored
- * function compiled under a different name.  It covers random buffers, every
- * length from 0 to 64, every start alignment and multi-packet chains.
+ * This must return exactly what NetX Duo returns, and a correct internet
+ * checksum is not enough.  tests/perf/host/ checks that differentially against
+ * the vendored function compiled under a different name.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -2,45 +2,13 @@
  * clients/compat, the POSIX calls a ported Unix network client references
  * and this toolchain's newlib does not define.
  *
- * curl, wget and every other Unix client were written against a libc that has
- * stat(), mkdir(), unlink(), isatty() and gettimeofday().  The newlib in this
- * m68k-amigaos toolchain has a thin syscall layer: libc.a's lib_a-dummy.o
- * defines _fstat, _unlink, _lseek, _getpid and _kill and nothing else, with no
- * non-underscore wrappers over any of them.  So a link of the curl command
- * line tool (libcurl itself is clean) fails with this list:
+ * fstat, stat, ftruncate, isatty, mkdir, unlink, _gettimeofday and _link, over
+ * dos.library.  It lives in clients/ and not src/: a bsdsocket.library that
+ * dragged dos.library file calls in would be a defect.
  *
- *     fstat  stat  ftruncate  isatty  mkdir  unlink  _gettimeofday  _link
- *
- * Each has a two-line AmigaOS answer through dos.library, so this is a shim
- * and not a port.  It lives in clients/ and not src/: nothing in the stack
- * itself uses newlib, and a bsdsocket.library that dragged dos.library file
- * calls in would be a defect.
- *
- *   stat()/lstat()   Lock() + Examine().  st_mode, st_size, st_mtime and
- *                    st_nlink are real.  AmigaOS has no symbolic links in the
- *                    POSIX sense, so lstat() is stat().
- *   fstat()          newlib's _fstat() returns 0 and writes nothing to the
- *                    struct, which is worse than failing, callers read
- *                    uninitialised st_mode.  This one zeroes the struct,
- *                    asks _isatty() what kind of thing the descriptor is, and
- *                    measures a regular file with _lseek().
- *   ftruncate()      SetFileSize() needs a BPTR and only a newlib descriptor
- *                    is available, so this fails with EINVAL.  curl calls it
- *                    in one place, truncating a partially written --output
- *                    file after a failed resume, and handles the failure.
- *   link()           AmigaOS has MakeLink(), but hard links are a filesystem
- *                    option most Amiga volumes do not have.  ENOSYS.
- *   gettimeofday()   DateStamp().  Resolution is one tick (1/50 s), and the
- *                    epoch conversion is the AmigaOS one: 1978-01-01, which
- *                    is 2,922 days after 1970-01-01.  A machine with a dead
- *                    RTC battery therefore reports 1978 here, as
- *                    tls.library's clock check already assumes.
- *   nanosleep()      Delay(), so the resolution is one tick (20 ms) and a
- *                    request is rounded up to the next whole tick.  A caller
- *                    asking for less than a tick still loses one.  It never
- *                    returns EINTR, so the standard
- *                    while (nanosleep(...) == -1 && errno == EINTR) loop runs
- *                    once.  rem is zeroed rather than left alone.
+ * ftruncate() and link() always fail (EINVAL, ENOSYS).  gettimeofday() and
+ * nanosleep() have one-tick resolution and the AmigaOS 1978-01-01 epoch;
+ * nanosleep() never returns EINTR and rounds up to the next whole tick.
  *
  * SPDX-License-Identifier: MIT
  */

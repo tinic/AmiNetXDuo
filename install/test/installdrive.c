@@ -2,32 +2,10 @@
  * installdrive, run Commodore's Installer on the AmiNetXDuo script under
  * FS-UAE, without a human at the mouse.
  *
- * The Installer has no batch mode.  Every page it puts up waits for a click
- * on "Proceed", and the buttons carry no keyboard shortcut: find_key_gadget()
- * in the Installer's layout.c looks for an underscore in the button label,
- * and the English catalog has none in "Proceed" or "Abort Install".  Only
- * HELP and ESC are bound to keys.  So neither a keystroke injector nor a
- * fixed screen coordinate will do.
- *
- * What does work is to find the Proceed gadget by its gadget ID.  The
- * Installer numbers its own gadgets (window.h: PROCEED_ID 90, ABORT_ID 91),
- * and its event loop reads plain IntuiMessages off window->UserPort and
- * dispatches on Class and IAddress.  So this program walks Intuition's
- * window list looking for a window that has both of those gadgets, and posts
- * that window a GADGETUP naming the Proceed one, the same message
- * Intuition would have sent had the user clicked it.  No geometry and no
- * guessing where a button landed, so it works whatever font or screen size
- * the emulated machine came up with.
- *
- * Run from the harness's Startup-Sequence with no arguments.  It:
- *
- *   1. starts the Installer asynchronously with a 40000 byte stack (the
- *      documented requirement is 10000; the Shell's default 4000 is not
- *      enough);
- *   2. clicks Proceed on whatever page is up, once a second;
- *   3. stops once the Installer's window has been gone for several polls in
- *      a row, or on a hard timeout;
- *   4. writes DH0:installdrive.txt saying what it saw.
+ * The Installer has no batch mode and its buttons carry no keyboard shortcut,
+ * so Proceed is found by GADGET ID (window.h: PROCEED_ID 90, ABORT_ID 91) and
+ * posted a GADGETUP -- no geometry, so font and screen size do not matter.
+ * It is started asynchronously with a 40000 byte stack.
  *
  * Exit status is 0 only if the Installer appeared, was driven, and went away
  * of its own accord.
@@ -95,18 +73,6 @@
 /*
  * How a yes/no page is answered with its SECOND choice: name the BUTTON.
  *
- * There was a second knob here, DRIVE_NO_ON_YESNO, which named a page by its
- * INDEX among the yes/no pages seen so far.  Nothing in the tree ever set it,
- * so the one scenario that needed it -- install/test/run-all.sh's STATIC, the
- * only way into P_ask_ip's four prompts and P_ip_parse -- was reported as a
- * permanent SKIP.  It is gone rather than wired up, because an index is wrong
- * the moment a question is added, or the moment a question that only appears
- * on a machine in some state does appear -- the "keep the existing settings"
- * page shows up on the second run of a DRIVE_RUNS=2 install and shifts every
- * index after it by one.  A label cannot drift like that, and it says in the
- * transcript which question was answered rather than which position it was
- * in.
- *
  * A yes/no page whose SECOND button's text contains this string is answered
  * with that button.  Empty means no page is, which is the default.
  */
@@ -118,56 +84,14 @@
  * A CHOICE ON AN askchoice PAGE, which is a different thing from a yes/no
  * button and needed its own answer.
  *
- * askchoice draws its options as the page's OWN gadgets, and this program
- * clicked Proceed the moment it saw one -- so every run ever made took the
- * (default) of every askchoice in the script.  The one that matters is
- * "Select the stack to install", whose default is the full stack, which is why
- * Libs/minimal/bsdsocket.library had never been installed or booted by any
- * end-to-end run.
+ * A page is named by HOW MANY options it has and an answer by WHICH gadget id;
+ * the options are numbered from 2 upward in the order the script lists them,
+ * and there is no label on them to match.  0 options means no page is picked
+ * at, which is the default.
  *
- * NOT BY LABEL, and this is measured rather than assumed.  A page's option
- * gadgets are not the Installer's struct Buttons: the word past the Gadget is
- * not a label, so there is no text on them to match.  What they do have is an
- * id.  With DRIVE_PICK_LABEL=Minimal at -l AVERAGE, an install of 0.24.0
- * reported (installdrive.txt, poll 4):
- *
- *     window "Install-AmiNetXDuo (0% done)"
- *     gadget 0 / gadget 0 / gadget 0
- *     gadget 3
- *     gadget 2
- *     gadget 91 "Abort Install"  gadget 90 "Proceed"  gadget 100 "Help..."
- *
- * so the options are numbered from 2 upward in the order the script lists
- * them: 2 is "Everything" and 3 is "Minimal, no IPv6/TLS".  The card question
- * on the same run carried nine of them, 2 through 10.
- *
- * A page is therefore named by HOW MANY options it has and an answer by WHICH
- * id, both compile-time.  The count is what tells the stack question (two)
- * from the card question (nine).
- *
- * AND IT IS NOT ENOUGH: POSTING GADGETUP AT AN OPTION DOES NOT ANSWER IT.
- * Measured twice on 0.24.0, -l AVERAGE, the two-option stack page, the click
- * landing where the transcript says it did ("picking option gadget N" at
- * poll 4, then Proceed at poll 5):
- *
- *     rel024min3   gadget 3 clicked   369,820 bytes installed  (the full one)
- *     rel024min4   gadget 2 clicked   369,820 bytes installed  (the full one)
- *
- * Either option leaves the page's default in place, and 369,820 is also what a
- * run that picks nothing installs, so neither id is "the other choice": the
- * message does not reach the answer at all.  A posted GADGETUP is enough for
- * Proceed and for a yes/no button, both of which the Installer dispatches on
- * from the message; the selected state of an option is not in the message.
- * Intuition sets GFLG_SELECTED on a real click and nothing here does, so the
- * next thing to try is setting it -- RemoveGList, the flag, AddGList,
- * RefreshGList -- and clearing it on the sibling.  Untested; do not assume it.
- *
- * So the minimal stack is still not installable by this harness.  What has
- * changed is that it cannot be installed QUIETLY: run-workbench.sh asserts by
- * byte count which of the archive's two libraries landed, and -p minimal fails
- * the run rather than testing the full stack under another name.
- *
- * 0 options means no page is picked at, which is the default.
+ * IT IS NOT ENOUGH: posting GADGETUP at an option does not answer it, measured
+ * twice -- the selected state is not in the message.  Untested next step is
+ * setting GFLG_SELECTED by hand (RemoveGList, flag, AddGList, RefreshGList).
  */
 #ifndef DRIVE_PICK_OPTIONS
 #define DRIVE_PICK_OPTIONS 0

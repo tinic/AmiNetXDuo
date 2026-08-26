@@ -5,40 +5,17 @@
 #   dist/try-installer.sh [-a ARCHIVE_DIR] [-r ROM] [-w ADF] [-m MODEL]
 #                         [-e fs-uae|amiberry]
 #
-# WHAT THIS IS FOR, AND WHY IT IS NOT LIKE THE OTHERS
+# NOT LIKE THE OTHER HARNESSES: it opens a window and leaves a person in front
+# of it.  No timeout, no verdict and nothing to grep -- the thing being checked
+# is what the Installer LOOKS like.  Changes to install/Install-AmiNetXDuo go
+# through here before they ship.
 #
-#   Every other harness in this tree runs headless, asserts something and
-#   exits.  This one does the opposite: it opens a window, boots a Workbench,
-#   and leaves a person in front of it.  There is no timeout, no verdict and
-#   nothing to grep, the thing being checked is what the Installer LOOKS
-#   like, which no assertion reaches.
+# It needs an archive (dist/make-dist.sh builds one; -a points at the unpacked
+# tree in build/dist), plus a Kickstart 3.1 ROM and a Workbench 3.1 disk that
+# are not ours to ship -- AMINETXDUO_KICKSTART and AMINETXDUO_WB_ADF name them.
+# The floppy is what boots; the archive is on DH0:.
 #
-#   It exists because the Installer script is the one part of this project a
-#   user meets before anything works, and the only way to know that a question
-#   reads well, that a default is the right one, or that a choice fits its
-#   line, is to sit in front of it.  Changes to install/Install-AmiNetXDuo go
-#   through here before they ship.
-#
-# WHAT IT NEEDS
-#
-#   An archive.  dist/make-dist.sh builds one; -a points at the unpacked
-#   AmiNetXDuo/ tree it leaves in build/dist, which is the default.
-#
-#   A Kickstart 3.1 ROM and a Workbench 3.1 disk.  Neither is ours to ship.
-#   AMINETXDUO_KICKSTART and AMINETXDUO_WB_ADF name them, or drop them beside
-#   this script's defaults below.  The Workbench floppy is what boots; the
-#   archive is on DH0:.
-#
-# HOW TO USE IT
-#
-#   The guest comes up on the Workbench desktop.  Open the DH0: icon, open
-#   AmiNetXDuo, and double-click Install-AmiNetXDuo.  That is the same path a
-#   user takes out of an .lha, including the icon's own tooltypes, the
-#   default user level among them, which is what decides how much the script
-#   shows.
-#
-#   Close the emulator window to finish.  Nothing is written back to the
-#   archive tree: the hard drive is a copy under build/.
+# Nothing is written back to the archive tree: the hard drive is a copy in build/.
 #
 # SPDX-License-Identifier: MIT
 

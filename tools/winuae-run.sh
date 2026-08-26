@@ -6,68 +6,12 @@
 #   tools/winuae-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-a ARGS] [-n] [-x]
 #                       [-K] <executable> [extra files...]
 #
-# -a passes arguments to the executable under test, `-a 'eth0 QUIET'`.  Same
-# string as AMINETXDUO_GUEST_ARGS; the flag wins when both are set.
-#
-# -m selects the machine.  A3000 is the default and the one that matters: a
-# real 68030 with 32-bit motherboard RAM, which is the machine the project is
-# actually aimed at.  A1200 (68EC020) and A4000 (68040) are also here.
-# -c overrides the CPU on any model (68020/68030/68040/68060).
-# -n attaches an emulated Commodore A2065 on WinUAE's SLIRP user-mode NAT
-# (10.0.2.0/24, gateway and DHCP/DNS 10.0.2.2), the same network the FS-UAE
-# harness gives you, so tests/netstack expectations carry over unchanged.
-# -N picks a different card; see the board table below.
-# -x turns warp mode off and asks for cycle accounting.  See the -x block.
-#
-# WHY THIS EXISTS AT ALL, given that FS-UAE already works:
-#
-#   * FS-UAE emulates ONE ethernet card, the A2065.  WinUAE emulates the
-#     A2065, Ariadne, Ariadne II, Hydra, AmigaNet/LAN Rover, X-Surf, X-Surf-100
-#     (Z2 and Z3) and three NE2000s (ISA, PCI, PCMCIA).  Every SANA-II driver
-#     our installer offers except cnet.device has hardware here to run on.
-#   * FS-UAE switches cycle accounting off for every CPU above a 68020, so no
-#     68030/68040/68060 timing claim can be made on it at all.  WinUAE has
-#     cycle-exact modes above the 68020.  Whether they are accurate ENOUGH is a
-#     separate question this harness does not answer, see -x.
-#
-# HOW IT WORKS
-#
-#   The Amiga side is deliberately identical to tools/amiberry-run.sh: the
-#   executable and any extra files are staged into a directory that the guest
-#   mounts as DH0:, s/Startup-Sequence runs the binary and writes DH0:.done
-#   with its return code, ami_log() output goes out of the serial port, and the
-#   exit status is the test's own or 124 on timeout.
-#
-#   The host side is different, because the emulator is on another machine and
-#   is a GUI application:
-#     * the staging directory is pushed over scp and pulled back afterwards, so
-#       anything the guest writes still lands on this Mac;
-#     * WinUAE is launched with PsExec into the interactive console session,
-#       because it does not finish initialising in an SSH session's session 0;
-#     * the serial port is a TCP listener that a helper on the Windows side
-#       drains into a file, because WinUAE cannot write serial output to one;
-#     * the run ends when the guest calls UAEquit, so the emulator exits by
-#       itself rather than being killed on a timer.
-#
-#   tools/winuae/run.ps1 and tools/winuae/sercap.ps1 are the Windows half and
-#   are pushed on every run, so this repository stays the source of truth.
-#
 # SETUP THE HOST NEEDS, ONCE: WinUAE installed, PSTools extracted to
-# C:\aminetxduo\pstools.  --setup does the PsExec half from a PSTools.zip in
-# the jenkins Downloads folder.
+# C:\aminetxduo\pstools.
 #
-# AMINETXDUO_WINUAE_EXE picks the emulator; it defaults to the packaged
-# C:\Program Files\WinUAE\winuae64.exe.  winbuilder also carries a build from
-# WinUAE master at C:\winuae-patched\winuae64.exe, which is the one to use for
-# anything bridged: 6.0.3 takes an access violation on an ethernet frame larger
-# than 4000 bytes, and master does not.  Recipe and detail in docs/RESEARCH.md
-# section 63.5.
-#
-# AMINETXDUO_WINUAE_ARGS passes WinUAE's own command line through, and every
-# run brings the emulator log back as build/winuae-emulog-<tag>.txt.  With
-# -a2065log2 that log holds every ethernet frame in both directions, which is
-# the host-side view FS-UAE gives for free and the only one a bridged run has.
-# tests/trace/a2065pcap.py --winuae turns it into a pcap.
+# AMINETXDUO_WINUAE_EXE picks the emulator.  Anything BRIDGED needs the WinUAE
+# master build at C:\winuae-patched\winuae64.exe: 6.0.3 takes an access
+# violation on an ethernet frame larger than 4000 bytes.  docs/RESEARCH.md 63.5.
 #
 # A bridged run that has to configure IPv6 needs one more thing on top of
 # master: tools/winuae/a2065-multicast-loopback.patch, or the guest hears its
@@ -123,38 +67,18 @@ shift $((OPTIND - 1))
 
 # ------------------------------------------------------------- network cards --
 #
-# Every one of these was brought up and confirmed in WinUAE's own autoconfig
-# dump, on this host, on 2026-07-26.  The second column is the SANA-II driver
-# the Amiga side needs; NONE of them except a2065.device is in this repository
-# or on the machine that wrote this, so a card being listed here means the
-# hardware is available, not that we can drive it.
-#
 # The driver each one wants is in tools/sana2-stage.sh; none of them except
-# a2065.device is in this repository.
+# a2065.device is in this repository, so a card listed here means the hardware
+# is available, not that we can drive it.
 #
-#   key             card                              driver needed
-#   a2065           Commodore A2065 (Am7990)          a2065.device
-#   ariadne         Village Tronic Ariadne            ariadne.device
-#   ariadne2        Village Tronic Ariadne II         ariadne_ii.device
-#   hydra           Hydra Systems AmigaNet            hydra.device
-#   eb920           ASDG LAN Rover / EB920            eb920.device
-#   xsurf           Individual Computers X-Surf       x-surf.device
-#   xsurf100z2      X-Surf-100 Zorro II               x-surf-100.device
-#   xsurf100z3      X-Surf-100 Zorro III              x-surf-100.device
-#   ne2000_pcmcia   RTL8019 PCMCIA (NE2000)           cnet.device
+# ne2000_pcmcia is a PC Card behind Gayle, so it needs pcmcia=true and a machine
+# that has a Gayle -- an A1200, not the A3000 default -- and it is
+# BOARD_NONAUTOCONFIG_BEFORE, so it never appears in the autoconfig board list.
 #
-# ne2000_pcmcia is the odd one.  It is a PC Card behind Gayle, so it needs
-# pcmcia=true and a machine that has a Gayle, an A1200, not the A3000
-# default, and it is BOARD_NONAUTOCONFIG_BEFORE in WinUAE, so it never
-# appears in the autoconfig board list however well it is working.  The only
-# proof it is there is a driver opening it.
-#
-# The A2065 keeps its own legacy config key; everything else is an expansion
-# board and is switched on with <name>_rom_file=:ENABLED.  All of them come up
-# on SLIRP without being asked to, slirp is WinUAE's default network device
-# which is why there is no per-board backend option below.  a2065=none is
-# the only "fit the card, wire it to nothing" setting proven to work; the
-# equivalent for the other boards is UNTESTED.
+# The A2065 keeps its own legacy config key; everything else is switched on with
+# <name>_rom_file=:ENABLED, and all come up on SLIRP without being asked to.
+# a2065=none is the only "fit the card, wire it to nothing" setting proven to
+# work; the equivalent for the other boards is UNTESTED.
 case "$BOARD" in
     a2065)
         # slirp | slirp_inbound | none, or a host adapter to bridge onto.

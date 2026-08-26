@@ -5,36 +5,17 @@
 #   tools/alloc-census.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-r ROUNDS]
 #                         [-k KNOWNFILE] [-s SCOPE] [--record]
 #
-# Boots CensusProbe under Amiberry, which opens and closes bsdsocket.library and
-# then provokes the expunge, and reads the census the library prints to the
-# serial port.  Fails when anything is outstanding that the known set does not
-# already account for, which is the whole point: a leak nobody thought to write
-# a test for still appears here, named by the file and line that allocated it.
+# tools/alloc-census-known.txt lists sites outstanding today with the bytes they
+# hold.  Every line is a REPORTED FINDING, not an accepted cost, and growth of a
+# listed site fails too: the count and the bytes are both ceilings.
 #
-# WHAT THE KNOWN SET IS AND IS NOT
-#
-# tools/alloc-census-known.txt lists sites that are outstanding today, with the
-# bytes they hold.  Every line in it is a REPORTED FINDING, not an accepted
-# cost: it is there so that a NEW leak is visible against a background that is
-# not yet zero, and each one is a bug with an owner.  Growth of a listed site
-# fails too -- the count and the bytes are both ceilings.
-#
-# EXIT STATUS, and the difference between them is the point
-#
-#   0   the outstanding set is within the known set
-#   1   something is outstanding that the known set does not cover, or a known
-#       site grew.  A defect in the product.
-#   2   usage, or the build is missing.  Nothing was tested.
-#   3   NO CENSUS OUTPUT AT ALL.  Infrastructure: the guest did not run, the
-#       serial log did not arrive, or the library was never expunged.  This is
-#       never a pass, and it is deliberately not 1, because "nothing was
-#       outstanding" and "nothing was measured" must not read the same.
-#   4   the census disowns its own numbers: lost= or unknown_free= is nonzero,
-#       so the table overflowed or saw a free it had no record of.  The run
-#       says nothing about leaks either way.
+# Exit 0 within the known set; 1 a leak or a grown site; 2 usage, or no build;
+# 3 NO CENSUS OUTPUT AT ALL, which is infrastructure and never a pass; 4 the
+# census disowns its own numbers (lost= or unknown_free= nonzero), so the run
+# says nothing about leaks either way.
 #
 # --record prints the outstanding set in known-file format and exits 0 without
-# asserting.  Read what it prints before pasting it anywhere.
+# asserting.
 #
 # SPDX-License-Identifier: MIT
 

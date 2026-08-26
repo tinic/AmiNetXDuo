@@ -26,10 +26,10 @@ comment beside the code, not an entry here.
 | Five tcpdrill retransmission cases fail and no gate carries the number | it grades by emulator status rather than through `test-verdict.sh` | `tests/tcpdrill/run-tcpdrill.sh` |
 | The `FASTMEM=0` zero-window count is 0 to 44 on the 8 MB arm from one boot to the next | same pool, same binary, same 15 s; nothing says which of the two is the machine | `tests/perf/run-poolshare.sh:141` |
 | `anxnet.device` acknowledges 12 ms later than `cnet.device` | p50 35.2 against 23.0 ms; loss, window and cadence ruled out, register cost left | `src/netdev/dp8390.c` |
-| The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:93` |
+| The fused receive checksum stops at IPv4, so IPv6 frames are walked twice | both verify entries bail at the version gate; needs content-level RX tests | `src/net68k/n68k_rx_verify.c:81` |
 | `-m68000` ships on compatibility alone | wire 2026-08-25: `any` 417.8, 68020 426.4 (+2.1%), 68060 441.7 KB/s; 68020 also smaller. Spread tracks zero-windows, not CPU | `cmake/toolchain-m68k-amigaos.cmake:261` |
 | Three receive-path changes are right ideas whose implementations crash | RX on the SANA-II reader, re-arm before delivering, stop poking the scheduler | `src/sana2/sana2_rx.c` |
-| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:50` |
+| The 3c589 RX FIFO-hold fix has no wire number | no emulator models a 3c589 and the A1200 is off-limits; proven only in the C mock | `src/netdev/test/test_netdev_el3.c:35` |
 | The console pacing does not turn a cheaper pass into a sooner one | skipping cut duty to 24% of a 75% cap and latency got worse; see `FB_GRAB_FLOOR` | `src/tools/httpfb.c` |
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:162` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
@@ -67,8 +67,8 @@ comment beside the code, not an entry here.
 | `peercap_tcpdump_state` turns a transient ssh failure into a missing binary | it discards stderr and exits 2; two of its three callers have no retry | `tests/perf/peercap.sh` |
 | Two netdev poll bounds are sized in iterations, not in time | 4000 and 20000 expire early on a fast machine, so a slow card is called dead | `src/netdev/el3.c:111`, `:277` |
 | A submodule bump should pin the `master` merge, not a topic tip | check `cat-file -e` and `merge-base --is-ancestor` first; it fabricated an id once | `1d8b8a15`, `b8bb2bc8` |
-| `C:ssh` is the one artefact that does not reproduce from its own tag | 44 `__FILE__` paths reach it and `-ffile-prefix-map` appears nowhere | `clients/dropbear/build.sh:181` |
-| The ClassicWB hostname collides the way the MAC used to | `NAME` defaults to model plus variant, so two agents claim one mDNS name | `tools/classicwb.sh:162` |
+| `C:ssh` is the one artefact that does not reproduce from its own tag | 44 `__FILE__` paths reach it and `-ffile-prefix-map` appears nowhere | `clients/dropbear/build.sh:89` |
+| The ClassicWB hostname collides the way the MAC used to | `NAME` defaults to model plus variant, so two agents claim one mDNS name | `tools/classicwb.sh:114` |
 | Our `telnet` answered no option negotiation the peer recorded | `telnet.c` implements WONT/DONT; may be netpeer returning mid-buffer | `src/tools/telnet.c`, `tests/tools/netpeer.py` |
 | `aamprobe.c` hard-codes `a2065.device` twice | on any other board the re-add is refused with errno 6 and later asserts read poison | `tests/tools/aamprobe.c:669`, `:926` |
 | binutils `amiga-2.46` cannot assemble gcc 16.2's own output | it forces a byte displacement on `jne`/`jeq`; we stay pinned at `amiga-2.39.0` | bebbo's `binutils-gdb` |
@@ -76,21 +76,16 @@ comment beside the code, not an entry here.
 | No arm reaches the accelerated-Gayle timing ratio | an emulated bus read costs host time, not guest time; needs real hardware | `tests/tools/run-cpuspeed.sh:30` |
 | No arm puts two network boards in one machine | Amiberry holds one board per family in a static; unit numbering and `CARD=` are untested | `tests/tools/cards.sh` |
 | Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
-| The budget has no ACK/TX leg | the transmit half of every received segment is uninstrumented, so a TX cut cannot be priced | `src/common/budget.c:89` |
+| The budget has no ACK/TX leg | the transmit half of every received segment is uninstrumented, so a TX cut cannot be priced | `src/common/budget.c:22` |
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:97` |
 | A pending recv is never completed on the IP thread | priced +2-5% in src/bsdsocket alone; the realm was built instead and is rate-neutral | `src/bsdsocket/transfer.c:990` |
 | The request gate's owner-death reap is proven by inspection only | nothing kills an opener mid-recv under the emulator | `port/threadx-amiga/src/tx_amiga_green.c:789` |
 | The stray-Wait net covers Wait() only | a green thread blocking in WaitIO or WaitPort sleeps the whole realm and nothing counts it | `port/threadx-amiga/inc/tx_amiga.h:231` |
 | The docs/*.md budget is 1150 where 800 was asked for | the non-campaign reference docs alone are 1129 lines | `tools/check-doc-budget.sh:17` |
-<<<<<<< HEAD
 | Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:403` |
-| `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:257` |
+| `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:299` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
-| Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:322` |
-| Five files still carry over-long comment blocks | round 2 proved and landed 412 of 417; these five were still being edited at the deadline | `src/common/crashguard.c`, `src/netdev/test/` |
-=======
-| Removing an interface kills the wire on every other one on its card | `S2_OFFLINE` is the device's, not the interface's; wants a per-unit use count | `src/sana2/sana2_device.c:403` |
-| `AddNetInterface` cannot name what stood down for an add that SUCCEEDS | `report_what_yielded()` sees only `NETSTATUS_IF_NAMED`; read the event ring | `src/tools/addnetinterface.c:376` |
-| No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
-| A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:356` |
+| Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:300` |
+| A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:270` |
 | argtemplates selftest red on `main` | the comment purge removed the restatements the gate wants; `ci.sh host` fails | `src/tools/test/test_argtemplates.c:1001` |
+| Three tool headers stay over 20 comment lines | each header IS the `--help` text, printed by a hardcoded `sed -n` range, so trimming it needs a code edit | `tools/fetch-toolchain.sh:164` |

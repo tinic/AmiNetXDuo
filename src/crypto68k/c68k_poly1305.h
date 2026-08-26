@@ -1,36 +1,8 @@
 /*
  * AmiNetXDuo, crypto68k: Poly1305, the authenticator half of RFC 8439.
  *
- *   docs/RESEARCH.md 5.5 measured AES-GCM at 344.6 ms for 1 KB against 21.9
- *   for AES-CBC, twenty times slower, because the GHASH in nx_crypto_gcm.c is
- *   a bit-serial GF(2^128) multiply, and then said what the alternative was:
- *   "nx_secure has no ChaCha20-Poly1305 (verified: no source files, no
- *   ciphersuite entries).  That is the AEAD a 68k would want."  This is the
- *   authenticator half of writing it.
- *
- *   Needed because the modern web has stopped accepting the CBC suites this
- *   client was born with.  `www.google.com` offers ChaCha20-Poly1305 and
- *   AES-GCM and nothing else, so the question is which AEAD this machine can
- *   afford.
- *
- *   Poly1305 is arithmetic modulo 2^130 - 5, so a 32-bit machine holds the
- *   accumulator in five limbs either way.  The 2^26 layout is the standard
- *   32-bit one, the same decomposition RFC 8439 2.5 describes and that
- *   poly1305-donna uses, in which every partial product fits a 64-bit
- *   accumulator with room to add four more, so a block is twenty-five MULU.L
- *   and no carry chain at all.  A 2^32 layout needs twenty multiplies
- *   but pays for them in explicit carry propagation, which on this part costs
- *   more than the five multiplies it saves: an ADD.L is 2 cycles against 43
- *   for MULU.L, and the 2^32 form needs a two-word add and a compare per
- *   partial product rather than one 64-bit accumulate.
- *
- *   Twenty-five MULU.L at 43 cycles is 1,075 cycles a block, 67 a byte: the
- *   floor for this construction on a 68020, and about a third of what
- *   AES-128-CBC charges (233 cycles a byte, docs/RESEARCH.md 18.2).
- *
- * Constant time: the arithmetic is add and multiply on data with no table
- * lookup and no branch on a secret, and the final reduction's select is
- * written branch-free.
+ * Constant time: add and multiply on data with no table lookup and no branch
+ * on a secret, and the final reduction's select is written branch-free.
  *
  * SPDX-License-Identifier: MIT
  */

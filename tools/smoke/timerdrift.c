@@ -1,28 +1,13 @@
 /*
  * Does a periodic ThreadX timer keep its period?
  *
- * NetX Duo's DHCP Client runs off one: tx_timer_create() with a period of
- * NX_DHCP_TIME_INTERVAL, 50 ticks, and _nx_dhcp_timeout_process() subtracts
- * exactly that from every retransmission and lease timer it holds each time it
- * runs.  Measured in a bring-up, tx_time_get() moved 58 to 66 ticks between
- * consecutive runs, so every DHCP timeout was 16 to 32 per cent long and the
- * lease timers with them.
+ * _tx_timer_interrupt() advances _tx_timer_current_ptr only when the slot it
+ * points at is EMPTY, and here it is called from the tick task rather than
+ * from an interrupt, so the timer thread may not have drained it in time.
  *
- * The mechanism is in the port.  _tx_timer_interrupt() advances
- * _tx_timer_current_ptr only when the slot it points at is EMPTY; when a timer
- * is sitting there it sets _tx_timer_expired and leaves the pointer alone,
- * because in stock ThreadX the timer thread that drains the slot runs at
- * priority 0 and preempts before the next tick.  Here _tx_timer_interrupt() is
- * called from the tick task rather than from an interrupt, and the timer thread
- * is another Exec Task that has to be dispatched, so every tick in between
- * finds the same non-empty slot and advances nothing.  The wheel loses them:
- * the tick task counts them as delivered, tx_time_get() counts them as time,
- * and the wheel simply never moved.  netstat -h therefore reports nothing wrong
- * -- delivered, clipped, lost and skew are all what they should be -- which is
- * why this probe measures the period rather than the counters.
- *
- *   AMINETXDUO_RUN_TAG=drift ./tools/amiberry-run.sh -t 90 \
- *       build/cm/tools/smoke/timerdrift
+ * The wheel loses those ticks while delivered, clipped, lost and skew all stay
+ * what they should be, so netstat -h reports nothing wrong.  That is why this
+ * probe measures the period rather than the counters.
  *
  * Output is key=value.  Exit 0 if every arm held its period inside TOLERANCE,
  * 10 otherwise.

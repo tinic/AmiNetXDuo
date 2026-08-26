@@ -1,25 +1,13 @@
 /*
  * Does tx_time_get() still tell the time after the tick task is starved?
  *
- * The port's tick task measures elapsed time from ReadEClock() but is only
- * allowed to deliver TX_AMIGA_TIMER_MAX_CATCHUP ticks per wakeup, so a long
- * stall leaves the timer wheel short.  Whether that also costs TIMEKEEPING
- * depends on where the ThreadX clock comes from, and that is what this probe
- * measures: it holds the machine in Forbid() for longer than the cap allows,
- * then compares how far tx_time_get() moved against how far the E-Clock moved
- * over the same window.
- *
- * A port that counts ticks reports the stall as time that never happened.  A
- * port that derives the clock from the E-Clock reports it as timers running
- * late, which is what tx_amiga_tick_skew is for.  Both are printed, so the
- * numbers say which port this is rather than the probe having to know.
+ * The probe holds the machine in Forbid() for longer than
+ * TX_AMIGA_TIMER_MAX_CATCHUP allows, then compares how far tx_time_get() moved
+ * against how far the E-Clock moved over the same window.
  *
  * ami_millis() is the reference.  It is E-Clock based and has nothing to do
  * with ThreadX, which is the point, and it keeps working inside the Forbid(),
  * because ReadEClock() reads a CIA and never waits.
- *
- *   AMINETXDUO_RUN_TAG=tick ./tools/amiberry-run.sh   -t 120 build/cm/tools/smoke/tickclock
- *   AMINETXDUO_RUN_TAG=tick ./tools/amiberry-run.sh -t 120 build/cm/tools/smoke/tickclock
  *
  * SPDX-License-Identifier: MIT
  */

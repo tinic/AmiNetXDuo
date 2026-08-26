@@ -1,25 +1,12 @@
 /*
  * alignprobe, what this machine's alignment rules actually are.
  *
- * Run it on an A600 or an A500 and every number below comes from a real 68000,
- * which is the only CPU in the family that faults rather than tolerates.  On a
- * 68020 it prints the same numbers and proves nothing, which is the point.
- *
- * It reports, and does not assume:
- *
- *   - the compiler's alignment for a long and for struct cmsghdr, which on
- *     m68k is 2 and not 4, and which is why CMSG_BUFFER() needs an attribute;
- *   - the alignment CMSG_BUFFER() delivers, on the stack and in static
- *     storage, which is the thing that was wrong;
- *   - what AllocVec() and AllocMem() return, which docs/ALIGNMENT.md and
- *     addralloc.c both rely on without ever having measured it;
- *   - that a longword load from an address 2 mod 4 completes, since half of
- *     every m68k object lands there and the library used to refuse those.
+ * Only a real 68000 (A600, A500) faults rather than tolerates, so only a run
+ * on one means anything.  On a 68020 it prints the same numbers and proves
+ * nothing.  It reports measured alignments; it does not assume them.
  *
  * It does NOT provoke an address error.  Nothing here reads a longword from an
- * odd address: that is a Guru, not a test result, and the hazard being real is
- * not in question.  What is in question is whether our own pointers can ever
- * be odd, and that is answered by the numbers.
+ * odd address: that is a Guru, not a test result.
  *
  * Output goes to the serial port, which is what the emulator harnesses
  * capture.

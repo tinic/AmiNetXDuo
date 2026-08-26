@@ -4,34 +4,16 @@
 #
 #   clients/dropbear/tweetnacl-count.sh
 #
-# WHY THIS IS NOT AN EMULATOR RUN
+# NOT AN EMULATOR RUN: 2^255-19 arithmetic executes the same multiplies
+# everywhere, so this does not need a timing slot.
 #
-#   A timing run has to take the machine alone and the queue is deep, so a
-#   slot is worth spending only on something a 68020 can answer and a Mac
-#   cannot.  An operation count is not that: 2^255-19 arithmetic
-#   executes the same multiplies everywhere.  The guest supplies milliseconds
-#   per primitive, this supplies multiplies per primitive, and the quotient --
-#   the cost of one field multiply on this part, is what every proposal to
-#   make SSH faster has to be argued against.
+# third_party/dropbear is unpatched, so the two definitions that matter are
+# renamed in a DERIVED COPY under build/ with counting macros of the original
+# names put directly after them.  The copy is regenerated on every run and the
+# sed is checked for having hit something, so it cannot drift from the tag.
 #
-# HOW IT REACHES A `static` FUNCTION WITHOUT PATCHING THE SUBMODULE
-#
-#   third_party/dropbear is unpatched and clients/dropbear/build.sh refuses to
-#   build if it is not.  So the two definitions that matter are renamed in a
-#   DERIVED COPY under build/, with counting macros of the original names put
-#   directly after them.  TweetNaCl is written bottom-up, every use of M() and
-#   S() is below their definitions, so every use in the file goes through the
-#   counter, including S()'s own call to M().
-#
-#   The copy is regenerated on every run and the sed is checked for having hit
-#   something, so this cannot silently drift from the pinned tag.
-#
-# WHAT IT LINKS AGAINST
-#
-#   build/dropbear-host, the native Dropbear that clients/dropbear/
-#   sshd-testserver.sh already builds for dropbearkey.  Its config.h and its
-#   libtomcrypt (for SHA-512) are the same source at the same tag as the
-#   Amiga's, so the counts are of the code the Amiga runs.
+# It links against build/dropbear-host, the same source at the same tag as the
+# Amiga's, so the counts are of the code the Amiga runs.
 #
 # SPDX-License-Identifier: MIT
 

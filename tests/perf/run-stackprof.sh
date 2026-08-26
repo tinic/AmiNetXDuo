@@ -4,62 +4,12 @@
 #
 #   tests/perf/run-stackprof.sh -s ours|roadshow|amitcpng [-T tag] [options]
 #
-# WHY THIS EXISTS
-#
-#   tests/perf/run-fitzbench.sh measures throughput and can swap in Roadshow;
-#   tools/profiler/Profile says where the CPU went.  Neither on its own answers
-#   the question a user's "stack X is faster" raises, which is whether the
-#   difference is CPU work at all.  A stack that is 60% idle on a read is not
-#   losing to anything the CPU is doing.
-#
-#   So: one bridged Amiberry rig, one peer, one fitz binary, one FitzBench, one
-#   set of mount parameters, and the library as the only variable.  The stack
-#   brings itself up with its OWN AddNetInterface, because a stack that needed
-#   somebody else's would not be the stack under test.
-#
-#   NOTHING OF THEIRS IS COPIED INTO THIS REPOSITORY.  Roadshow and AmiTCP_NG
-#   are located at run time by path, exactly as tests/compare/run-compare.sh
-#   does it.
+# NOTHING OF THEIRS IS COPIED INTO THIS REPOSITORY.  Roadshow and AmiTCP_NG are
+# located at run time by path, exactly as tests/compare/run-compare.sh does it.
 #
 # THE PEER IS NOT playhouse2.  VMs on one Proxmox host never cross a NIC, so a
 # deferred TX checksum is never computed and our stack correctly rejects the
-# result, which reads as "6 bad packets, 6 checksum errors" and looks like
-# our defect.  The peer needs `ethtool -K <iface> tx off` either way.
-#
-# OPTIONS
-#
-#   -s STACK    ours | roadshow | amitcpng | none     (required)
-#               `none` stages no bsdsocket.library and brings nothing
-#               up: the baseline that says whether a gap between two
-#               stacks is either stack's doing.  Requires -c.
-#   -T TAG      run tag; results land in build/amiberry-testhd-<tag>/
-#   -p          PLAIN: no profiler, throughput only.  This is the control that
-#               says whether the sampler moved the figure it is explaining.
-#   -d          DIAG: bring the interface up and print the stack's status, and
-#               stop there.  A stack that will not come up is diagnosed in
-#               thirty seconds rather than inside a workload whose failure
-#               mode is a timeout.
-#   -c          CONTROL ONLY: the RAM: arm alone, stack up, no traffic.
-#               This separates local FitzBench and memory-copy cost from the
-#               filesystem handler and network path.  It does not predict how
-#               much a wire transfer idles; read that from the sampled SR.
-#               Needs no peer.
-#   -i FILE     use FILE as DEVS:NetInterfaces/eth0 instead of the tree's.  A
-#               stack should be measured with a configuration it agrees is
-#               well formed, because "the interface would not come up" has two
-#               causes that look identical from outside.
-#   -A ADDR     peer address (default 192.168.1.160)
-#   -P PORT     peer port (default 17712)
-#   -k KB       FitzBench file size (default 4096)
-#   -C CHUNK    FitzBench chunk (default 32768)
-#   -r REPS     FitzBench reps (default 3)
-#   -b DIR      build directory for `ours` (default build/cm)
-#   -R DIR      Roadshow Workbench/ directory
-#   -G DIR      AmiTCP_NG data/ directory (the one holding Libs/ and C/)
-#   -B IFACE    host NIC to bridge onto (default ens18)
-#   -m MODEL    emulator profile (default A3000)
-#   -t SECS     timeout (default 500)
-#   -L DIR      extra files staged into LIBS:
+# result.  The peer needs `ethtool -K <iface> tx off` either way.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

@@ -1,36 +1,10 @@
 /*
  * The delay that is not a counted loop, on the host.
  *
- * WHY THIS IS A HOST TEST AND NOT AN EMULATOR RUN.  The defect this file
- * guards against is a wait that comes out short on a fast machine, and every
- * emulator this project runs against emulates a fast machine -- so a green
- * Amiberry run says nothing at all about it, in either direction.  A 68060 arm
- * reproduces the CONDITION, a CPU fast relative to the chipset, and the
- * emulated cards it drives have no reset timing to violate, so nothing there
- * turns red when the hold collapses.  What decides the question is the
- * relationship between three numbers: how many iterations the caller's loop is
- * worth, how far the beam moved while it ran, and when netdev_wait_done()
- * finally says yes.  On real hardware two of those belong to the machine.
- * Here all three belong to this file, because it supplies the beam -- which is
- * the only way to run the same binary as a 14 MHz 68020 and as an accelerator
- * and compare the answers.
- *
- * AND THE OLD CODE IS RUN HERE TOO, as spin_counted() below.  A regression
- * test that only exercises the fix cannot say what the fix was for, and this
- * one is asserting a DIFFERENCE: the same 300 ms asked for by the same call
- * site, on the same simulated accelerator, comes out at three milliseconds the
- * old way and three hundred the new way.  Delete netdev_clock.c and the
- * assertions that fail are the ones naming the old behaviour, which is what a
- * gate for this defect has to do.
- *
  * TIME IN THIS FILE IS A TICK COUNT, advanced by the loop bodies that would
  * really cost time on a machine -- the caller's bus access, and each read of
- * the beam.  The beam's position is then derived from the clock rather than
- * from how often it happens to be looked at, which is what a real beam does
- * and what the previous shape of this file could not model.  Without that,
- * a loop which never reads the beam -- which is exactly what the old code is
- * -- experiences no time passing at all, and the control below could not be
- * written.
+ * the beam.  The beam's position is derived from the clock, not from how often
+ * it happens to be looked at.
  *
  * SPDX-License-Identifier: MIT
  */

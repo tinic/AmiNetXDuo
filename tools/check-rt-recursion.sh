@@ -4,25 +4,9 @@
 #
 #   tools/check-rt-recursion.sh <build-dir>
 #
-# src/common/ami_udivdi3.c supplies the compiler-runtime helpers AmiNetXDuo
-# selects ahead of libgcc.  GCC calls each one when it has no instruction for
-# an operation -- and if the C for one of them performs that same operation,
-# GCC lowers it to a call, to the function it is compiling.
-# The result links, exports the right symbol, and recurses until the stack is
-# gone.  On a 4 KB Shell stack that is a few thousand frames and a dead machine.
-#
-#   u64 __lshrdi3(u64 value, int count) { ... return (value >> count); }
-#
-#   5d0: jsr ___lshrdi3(pc)            <- inside ___lshrdi3
-#
-# That shipped.  It was reached from __udivmoddi4's wide-divisor branch and
-# took out a 68000 inside __udivdi3(0x10000, 0x100000000); nothing in the
-# libraries divides by more than 32 bits, which is the only reason it was not
-# worse.  The fix is to write every shift as a pair of 32-bit ones, and this is
-# what says whether it stayed written that way.
-#
-# Output is key=value and an exit code: 0 clean, 1 a helper calls itself,
-# 2 nothing to check (no object built, no objdump).
+# src/common/ami_udivdi3.c must write every shift as a pair of 32-bit ones: a
+# shift written wide lowers to a call to the helper being compiled, which then
+# recurses until the stack is gone.
 #
 # SPDX-License-Identifier: MIT
 

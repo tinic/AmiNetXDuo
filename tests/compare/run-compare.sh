@@ -4,57 +4,10 @@
 #
 #   tests/compare/run-compare.sh -s STACK -w WORKLOAD [options]
 #
-# WHY THIS EXISTS
-#
-#   Every other harness in this tree stages OUR library out of a build
-#   directory, which makes it structurally incapable of measuring anybody
-#   else's.  The comparison that is worth having is against the stacks this
-#   project is compatible with, Roadshow, whose ABI we implement, and
-#   AmiTCP_NG, which implements the same one, on the same emulator profile,
-#   the same ROM, the same a2065.device and the same host, back to back.
-#
-#   So the stack is a parameter here, and everything else is held fixed:
-#
-#     * the driver is tests/compare/checkrunner.c, built once and reused,
-#       which runs each command with a 512 KB stack and records its exit
-#       code and elapsed ticks, so the DHCP figure is the stack's own
-#       AddNetInterface and the throughput figure is one binary run twice;
-#     * NetTrace comes out of ONE build and is staged unchanged against every
-#       stack.  It links nothing of src/: every call into the library is a
-#       published LVO through toolsock.c's inline `jsr a6@(-n:W)`, so it is as
-#       foreign to our stack as to theirs;
-#     * bsdsocktest is the upstream suite, which knows about none of us.
-#
 # NOTHING OF THEIRS IS COPIED INTO THIS REPOSITORY.  Both foreign stacks are
 # located at run time through a path, AMINETXDUO_CMP_ROADSHOW and
-# AMINETXDUO_CMP_AMITCPNG, or -R / -G, and staged straight from wherever
-# they were unpacked.  Roadshow is a commercial demo and AmiTCP_NG is GPL;
-# this tree is MIT and stays that way.
-#
-# OPTIONS
-#
-#   -s ours|roadshow|amitcpng     which stack (required)
-#   -w bench|conf|diag            which workload (required)
-#        bench  AddNetInterface (= time to a DHCP lease), ping, and NetTrace
-#               on loopback and over the wire
-#        conf   the bsdsocktest conformance suite, tier chosen with -a
-#        diag   bring-up only, plus whatever -X adds
-#   -a "ARGS"   bsdsocktest's own argument line (default "NOPAGE";
-#               "LOOPBACK NOPAGE" for the loopback tier).  A line containing
-#               HOST starts the suite's host helper on this machine.
-#   -b DIR      build directory for the `ours` stack (default build/cm)
-#   -B BYTES    NetTrace workload size (default 524288, as docs/RESEARCH.md 24)
-#   -m MODEL    emulator profile (default A1200, the only timing profile)
-#   -t SECS     timeout
-#   -T TAG      run tag; results land in build/testhd-<tag>/
-#   -P PORT     base port for the workload peer (default 7500)
-#   -R DIR      Roadshow Workbench/ directory
-#   -G DIR      AmiTCP_NG data/ directory (the one holding Libs/ and C/)
-#   -i FILE     use FILE as DEVS:NetInterfaces/eth0 instead of the tree's
-#   -C DIR      stage every command in DIR at DH0:
-#   -L DIR      stage every file in DIR into LIBS:
-#   -X FILE     extra plan lines (NAME<TAB>COMMAND), appended
-#   -U          stage OUR usergroup.library when the stack has none of its own
+# AMINETXDUO_CMP_AMITCPNG, or -R / -G.  Roadshow is a commercial demo and
+# AmiTCP_NG is GPL; this tree is MIT and stays that way.
 #
 # SPDX-License-Identifier: MIT
 

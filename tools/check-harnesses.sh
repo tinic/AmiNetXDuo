@@ -5,25 +5,11 @@
 #   tools/check-harnesses.sh
 #
 # tests/HARNESSES says, for each run-*.sh under tests/ and install/test/, what
-# invokes it.  This checks the file against the tree and against the runners,
-# in both directions:
-#
-#   * a harness with no row              a test nothing invokes, unrecorded
-#   * a row whose file is gone           a stale row
-#   * a row naming a runner that does
-#     not invoke it                      a claim of coverage that is not there
-#   * a row saying `manual` for
-#     something a runner does invoke     a row that has gone stale quietly
-#   * a `manual` row with no reason      a hole recorded as if it were a choice
-#   * a chain that does not end at a
-#     runner                             a harness invoked only by other
-#                                        harnesses nothing invokes
-#
-# The third and fourth are the ones worth having.  tests/tools/httpd-drill.py
-# held twelve WebDAV assertions nothing called; run-addifup.sh's verdict
-# matched ShowNetStatus's column header and could not go red.  Neither was
-# visible from inside the file, and both are the same shape: something that
-# reads as coverage.
+# invokes it.  This checks the file against the tree and against the runners in
+# both directions: a harness with no row, a row whose file is gone, a row naming
+# a runner that does not invoke it, a `manual` row for something a runner does
+# invoke, a `manual` row with no reason, and a chain that does not end at a
+# runner.
 #
 # Output is key=value plus an exit code.  Needs no toolchain and no emulator.
 #
@@ -146,28 +132,16 @@ say harnesses_wired "$wired"
 
 # ------------------------------------------- every guest TEST BINARY too --
 #
-# THE HOLE THE ROWS ABOVE CANNOT SEE.  Everything above is about run-*.sh: a
-# harness with no row fails, a row naming a deleted file fails.  A test
-# BINARY with no harness at all has no row to go stale, so it is invisible
-# from inside tests/HARNESSES -- and four were in exactly that state on
-# 2026-08-20: tests/atf, and three programs under tests/crypto68k, and
-# tests/ipv6/ipv6_test.c.  Every one had been compiled by every cross
-# configuration since it was written and executed by nothing, and every one
-# carried an amiberry-run.sh command line in its CMakeLists comment.  A
-# command line in a comment is not a gate, and crypto68k_25519_test proved
-# what that is worth: it had never reached its first check on a guest, so
-# nobody had seen it die on a missing mathieeedoubbas.library.
+# THE HOLE THE ROWS ABOVE CANNOT SEE: a test BINARY with no harness at all has
+# no row to go stale, so it is invisible from inside tests/HARNESSES.
 #
-# THE RULE, AND WHY IT NEEDS NO LIST OF WHAT IS A TEST.  A target registered
-# with add_test() is a host test and ctest runs it.  Every OTHER
-# add_executable() under tests/ is a guest binary, and something has to name
-# it: a run-*.sh, tools/ci.sh, a workflow, or a row below saying it is an
-# instrument rather than a gate.  Resolved through OUTPUT_NAME, because that
-# is what the harnesses spell.
-#
-# The exemptions are held to the same rule the `manual` rows are: one that
-# something DOES run is an error, so the list cannot go stale in the quiet
-# direction either.
+# THE RULE, which needs no list of what is a test: a target registered with
+# add_test() is a host test and ctest runs it; every OTHER add_executable()
+# under tests/ is a guest binary, and something has to name it -- a run-*.sh,
+# tools/ci.sh, a workflow, or a row below saying it is an instrument rather
+# than a gate.  Resolved through OUTPUT_NAME, because that is what the
+# harnesses spell.  An exemption that something DOES run is an error, so the
+# list cannot go stale in the quiet direction either.
 
 # Instruments, not gates.  A benchmark, a probe or a calibration has no pass
 # to go red, and putting one in a runner buys a number nobody reads.

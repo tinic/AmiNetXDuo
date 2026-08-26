@@ -1,24 +1,9 @@
 #!/bin/sh
 # Fail when a vendored NetX Duo file we shadow has changed upstream.
 #
-# Three files in third_party/netxduo are dropped from their glob so that a copy
-# or a rewrite of ours is what the linker resolves to.  The mechanism is silent
-# in both directions: the vendored file stays in the tree, still compiles, still
-# shows up in `git log` when the submodule is bumped, and has no effect on the
-# binary.  A fix that lands upstream is therefore invisible unless somebody
-# remembers to look.
-#
-# That is not hypothetical.  Submodule commit 1b9fb637 replaced a file-scope
-# UCHAR[128] that both TLS record paths shared and held across a suspension
-# point, which leaked one session's plaintext into another's packet.  The
-# submodule was bumped, the fix was in the tree, and the shipped record path
-# still had the shared buffer, because the shadowing copies under
-# src/tls/rfc7905 were not touched.
-#
-# So each shadowed file is pinned here by the hash of the vendored content its
-# shadow was last reconciled against.  Upstream moving is the alarm.  Read the
-# upstream change, port it or reject it on purpose, then update the hash in the
-# same commit.
+# Each shadowed file is pinned here by the hash of the vendored content its
+# shadow was last reconciled against.  Read the upstream change, port it or
+# reject it on purpose, then update the hash in the same commit.
 #
 # Usage: tools/check-shadowed-sources.sh [source-root]
 

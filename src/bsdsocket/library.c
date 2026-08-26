@@ -992,25 +992,9 @@ LONG bsd_stack_unhold(struct AmiSocketBase *base)
 }
 
 /*
- * NETCTRL_STACK_NOTIFY: tell every program using the network that it is going
- * away, by sending it the signal it already listens for.
- *
- * SIGBREAKF_CTRL_C always, which is what AmiTCP's api_sendbreaktotasks() sent
- * to every task on its socketBaseList and what AmiTCP_NG still sends. It is
- * the signal an Amiga program already means "stop" by, so a program written
- * for either of those stacks needs no change to work with this one.
- *
- * The base's own sb_BreakMask goes with it when it is something else.
- * SBTC_BREAKMASK is "the signal to send to the process which owns the socket
- * in order to abort a blocking operation", so a program that moved it off
- * Ctrl-C is asking to be woken on that bit instead, and a notification on a
- * bit it does not wait for reaches nothing. Neither reference implementation
- * reads the mask here. Sending both covers the program that set one without
- * missing the program that expects the standard bit.
- *
- * Skips the caller: NetShutdown breaking itself in the middle of its own grace
- * period is not a notification. Skips a base whose task has exited, through
- * bsd_signal_if_alive() and for the reason written there.
+ * NETCTRL_STACK_NOTIFY: sends SIGBREAKF_CTRL_C always, for AmiTCP/AmiTCP_NG
+ * compatibility, plus the base's own sb_BreakMask when it is something else.
+ * Skips the caller, and a base whose task has exited.
  */
 LONG bsd_stack_notify(struct AmiSocketBase *base, ULONG *signalled)
 {

@@ -4,32 +4,10 @@
 #
 #   tests/compare/run-legacy-client.sh -b BUILD [options]
 #
-#   -b DIR   build directory the library comes from (default build/cm)
-#   -A FILE  .lha holding the client (default the curl below)
-#   -x FILE  use this client binary instead of extracting one
-#   -a DIR   extracted AmiSSL-v5-OS3 AmiSSL/ directory
-#   -P PORT  base port for tests/peer/httppeer.py (default 7600)
-#   -B N     bulk transfer size in bytes (default 307200)
-#   -T TAG   run tag; results land in build/amiberry-testhd-<tag>/
-#   -t SECS  timeout
-#   -m MODEL emulator profile (default A1200, the only timing profile)
-#   -E       run under Enforcer instead of plain FS-UAE (68030, no timings)
-#   -I       also run the one case that needs the internet and DNS
-#   -W       run under WinUAE instead of FS-UAE
-#   -N BOARD network card, WinUAE only (see tools/winuae-run.sh)
-#
-# -W is what measures a card other than the A2065.  FS-UAE emulates one NIC;
-# WinUAE emulates nine, so a throughput number per card comes from there.  The
-# peer then has to be somewhere the guest can reach: under FS-UAE it is the
-# host at 10.0.2.2, under WinUAE the emulator is on another machine and the
-# peer is on this one, so AMINETXDUO_PEER_IP has to name this machine's LAN
-# address and the peer has to bind on all interfaces.
-#
-# The client is somebody else's binary, taken out of the archive it ships in.
-# It is IPv4-only by construction, the packaged curl is configured
-# --disable-ipv6, so it resolves through gethostbyname() and connects through
-# struct sockaddr_in, which is the 1990s assumption an IPv6 library has to keep
-# working with.
+# The peer has to be somewhere the guest can reach: under FS-UAE it is the host
+# at 10.0.2.2; under -W (WinUAE) the emulator is on another machine, so
+# AMINETXDUO_PEER_IP must name this machine's LAN address and the peer must bind
+# on all interfaces.
 #
 # SPDX-License-Identifier: MIT
 

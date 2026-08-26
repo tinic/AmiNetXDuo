@@ -4,32 +4,13 @@
 #
 #   clients/dropbear/sshd-testserver.sh {start|stop|status}
 #
-# FS-UAE's SLIRP puts the HOST at 10.0.2.2, so the shortest path to "does
-# dbclient complete a key exchange" is an sshd on this machine.  This starts
-# one that touches nothing outside build/sshd-test/:
+# Touches nothing outside build/sshd-test/: port 2222, its own host keys, its
+# own authorized_keys, PasswordAuthentication no, StrictModes no.  NO ROOT, so
+# the login has to be the user running this script.
 #
-#   * port 2222, so the system's own sshd (if any) is untouched
-#   * its own host keys, made here, ed25519, ECDSA P-256 and RSA, so that a
-#     client built with any one algorithm family has something to verify
-#   * its own authorized_keys, holding one key made here
-#   * PasswordAuthentication no, a non-root sshd cannot do it anyway, and
-#     public-key is what a machine with no keyboard should be using
-#   * StrictModes no, because the key lives under build/ and not in ~/.ssh
-#
-# NO ROOT.  OpenSSH's sshd refuses to change user without it, which is exactly
-# why the login has to be the user running this script, and it is, because
-# the authorized key is theirs.  Anything else would need sudo and this does
-# not.
-#
-# THE CLIENT KEY IS MADE HERE, NOT ON THE AMIGA, AND THAT IS THE POINT.
-#
-#   build/sshd-test/id_amiga is a Dropbear-format ed25519 private key, made by
-#   a NATIVELY built dropbearkey from the same pinned source.  The Amiga could
-#   run dropbearkey, it builds, and it should not: src/common/ami_random.c
-#   credits itself about 21 bits and reports itself unseeded, so a long-term
-#   key generated there would be a key somebody could enumerate.  A per-session
-#   ephemeral key from that pool risks one session; a private key on disk risks
-#   every session anyone ever makes with it.
+# THE CLIENT KEY IS MADE HERE, NOT ON THE AMIGA: src/common/ami_random.c
+# credits itself about 21 bits and reports itself unseeded, so a long-term key
+# generated there would be a key somebody could enumerate.
 #
 # SPDX-License-Identifier: MIT
 

@@ -5,35 +5,13 @@
 #
 #   tests/compare/run-tickprobe.sh -s ours|roadshow [options]
 #
-# WHY
-#
-#   docs/RESEARCH.md 29.5 had Roadshow answering ICMP in 4.32 ms where we took
-#   7, and two explanations fit: a faster periodic timer, or a cheaper receive
-#   path.  tests/compare/tickprobe.c distinguishes them by putting a SANA-II
-#   device underneath whichever stack is being measured and timestamping every
-#   frame it hands over, inside BeginIO, from the E-Clock.  It answered
-#   neither: our tick is the finer of the two and our turnaround through this
-#   device is the shorter, so the 2.7 ms is below SANA-II.  See tickprobe.c.
-#
-#   Nothing of the foreign stack is read, disassembled or copied.  It is
-#   located at run time, staged, given an interface, and watched.
-#
 # NO NETWORK.  There is no -n and no a2065.device: the guest's only interface
 # is tcpdrill.device, so SLIRP, the host's routing and the emulator's own
 # scheduling are all out of the measurement.
 #
-# MEASUREMENT RUN, AND NOTHING ENFORCES IT.  The exclusive lane lived in the
-# FS-UAE runner's slot lock and went with it; tools/amiberry-run.sh has none.
-# A quantisation histogram taken while another agent's boot shares the machine
-# is a histogram of that agent, so idle the machine by hand first.
-#
-# OPTIONS
-#   -s ours|roadshow   which stack (required)
-#   -b DIR             build directory for `ours` (default build/cm)
-#   -R DIR             Roadshow Workbench/ directory
-#   -m MODEL           emulator profile (default A1200, the only timing one)
-#   -t SECS            timeout (default 300)
-#   -T TAG             run tag; results land in build/amiberry-testhd-<tag>/
+# MEASUREMENT RUN, AND NOTHING ENFORCES IT.  A quantisation histogram taken
+# while another agent's boot shares the machine is a histogram of that agent,
+# so idle the machine by hand first.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

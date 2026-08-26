@@ -6,50 +6,14 @@
 #   tools/check-archive-installed.sh              # the source half alone
 #   tools/check-archive-installed.sh <outdir>     # and the staged tree
 #
-# <outdir> is the directory dist/make-dist.sh packs FROM: the one holding
-# `AmiNetXDuo.info` and `AmiNetXDuo/`.  Without it the tree checks are skipped
-# and the manifest is still checked against install/Install-AmiNetXDuo, which
-# needs no build and is where tools/ci.sh's host stage runs it.
+# <outdir> is the directory dist/make-dist.sh packs FROM, the one holding
+# `AmiNetXDuo.info` and `AmiNetXDuo/`; without it the tree checks are skipped.
 #
-# THE HOLE THIS FILLS.  Two lists describe a release -- what dist/make-dist.sh
-# packs and what install/Install-AmiNetXDuo copies -- and until now nothing
-# compared them.  anxnet.device was in the first for eleven releases and in the
-# second for none of them: every machine kept whatever SANA-II driver it
-# already had through every reinstall, and no listing, checksum or round-trip
-# check could see it, because each list was correct about itself.
-#
-# Still live when this was written: Docs.info, Examples.info and Terminal.info
-# were packed and never copied.  A drawer's icon sits BESIDE the drawer, not
-# inside it, and the installer copies each drawer's CONTENTS -- so Examples and
-# Terminal arrived on the user's disk as drawers Workbench does not draw.
-#
-# WHAT IT CHECKS, and the directions matter more than the count
-#
-#   1. every file in the staged tree matches a row              (nothing new
-#                                                                ships
-#                                                                undecided)
-#   2. every `always` row matches at least one file             (no stale row
-#                                                                left behind by
-#                                                                something that
-#                                                                stopped
-#                                                                shipping)
-#   3. every `installed` row's token is still in the Installer  (no row
-#      script                                                    claiming an
-#                                                                install that
-#                                                                was deleted)
-#   4. the manifest parses: four fields, a known disposition, a
-#      known presence, and a reason on every not-installed row
-#
-# 1 alone would have caught anxnet.device.  2 and 3 are what stop the manifest
-# becoming the next thing that drifts: a record nothing checks is a record that
-# is wrong within two releases.
-#
-# WHAT IT DOES NOT CHECK, so nobody mistakes green here for proof.  That a copy
-# actually LANDS is a question about a real Workbench, and
-# install/test/run-workbench.sh asks it: it mounts the installed volume after
-# the installer has run and compares what it finds against the archive copy.
-# This script checks that a decision was TAKEN about every file.  The two
-# together are the gate; neither is on its own.
+# Checked in both directions: every staged file matches a manifest row; every
+# `always` row matches a file; every `installed` row's token is still in the
+# Installer script; and the manifest parses, with a reason on every
+# not-installed row.  It does NOT check that a copy LANDS --
+# install/test/run-workbench.sh asks that of a real Workbench.
 #
 # Output is key=value plus an exit code: 0 green, 1 a defect, 2 cannot run.
 #

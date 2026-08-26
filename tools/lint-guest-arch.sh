@@ -3,26 +3,6 @@
 # Refuse a hardcoded -m680x0 in a script that builds a GUEST binary for a
 # machine it also chooses.
 #
-# THE BUG THIS EXISTS FOR, three times over.  A harness compiles a small helper
-# for the emulated machine, hardcodes -m68020, and is then pointed at an A600.
-# The helper stops on an illegal instruction inside its own C constructor
-# before one line of the thing under test runs: no serial, no stdout.txt, the
-# machine idling at 50 fps.  It reads as "the stack does not work on a 68000"
-# and costs a day.
-#
-#   clients/dropbear/run-dbclient.sh  fixed, RUNNER_ARCH
-#   tools/amiberry-run.sh           fixed, ENVSETUP_ARCH
-#   tests/compare/run-compare.sh    NOT fixed until 2026-08-07, and it is the
-#                                   harness every measurement in this tree runs
-#                                   through.  CheckRunner carried `tst.l a0`.
-#
-# The pattern is always the same and is in amiberry-run.sh:
-#
-#     case "${CPU:-}${MODEL:-}" in
-#         *68000*|*A500*|*A600*|*A2000*) ARCH="-m68000" ;;
-#         *)                             ARCH="-m68020" ;;
-#     esac
-#
 # A script with no MODEL and no CPU is fixed-machine and exempt; name it below
 # with the reason.
 #

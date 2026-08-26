@@ -4,22 +4,8 @@
 #
 #   tools/check-backlog.sh
 #
-# Every row in docs/BACKLOG.md ends with a citation column naming the files the
-# row is about, and usually a line inside one of them.  Those rot: a file moves
-# and the row goes on naming where it used to be.  `rfbbench` cannot price the
-# banded path still cited tests/perf/rfbbench.c months after it became
-# src/rfb/host/rfbbench.c, and the row was otherwise correct -- the defect it
-# describes is still there.  Somebody reading it would have gone looking in a
-# directory that does not have the file.
-#
-# WHAT THIS CANNOT DO is tell you a row is stale in the way that matters most:
-# that the defect was fixed and nobody retired the row.  Four of those turned
-# up in one afternoon -- a WebSocket close payload fixed on 10 August, a $VER:
-# hash fixed on 17 August, a struct timeval collision that was still keeping
-# two files out of the host tier a month after it was resolved, and an
-# IPv6-only interface refusal that had a dedicated harness proving otherwise on
-# every push.  No script finds those.  A citation that does not resolve is the
-# cheap half, and it is worth having because it is free.
+# Cannot tell that a row's defect was fixed and nobody retired the row; a
+# citation that does not resolve is only the cheap half.
 #
 # key=value and an exit code, like every other gate here.
 #

@@ -2,37 +2,13 @@
  * clients/compat, compiler-runtime helpers needed by the ported clients beyond
  * the 64-bit arithmetic already in src/common.
  *
- * The 15.2.0 toolchain used when this file was introduced had a zero-byte
- * libgcc.a.  The current pinned toolchain has fallbacks, but keeping these
- * local definitions makes client builds independent of that historical
- * toolchain difference and retains the implementations already tested here.
- * src/common/ami_udivdi3.c covers __udivdi3 / __umoddi3 / __divdi3 / __moddi3
- * / __udivmoddi4, which is everything the stack itself and newlib's printf
- * need.  A ported Unix client reaches further:
+ * __ctzdi2, __popcountdi2, __floatdidf, __fixdfdi, __atomic_exchange_4 and
+ * nothing else; the division helpers stay in src/common/ami_udivdi3.c, which
+ * clients/amiga-client.sh compiles alongside this file.
  *
- *     __ctzdi2         curl's bitset scan over a 64-bit mask
- *     __popcountdi2    ditto
- *     __floatdidf      curl_off_t -> double, the progress meter
- *     __fixdfdi        double -> curl_off_t, --max-filesize and friends
- *     __atomic_exchange_4   the once-only guard in curl_global_init()
- *
- * This file is those five and nothing else.  It does not redefine the division
- * helpers: there is one copy of those in the tree (src/common/ami_udivdi3.c)
- * and clients/amiga-client.sh compiles that same file.
- *
- * __floatdidf and __fixdfdi are written in C over double arithmetic, which on
- * this toolchain means libc.a's __adddf3 / __muldf3 / ..., which call
- * mathieeedoubbas.library.  Any client that touches a double already has that
- * dependency, and these two do not escape it.  mathieeedoubbas.library is not
- * in Kickstart 3.1 ROM (the 40.68 A1200 image contains mathieeesingbas and no
- * other), so it has to be in LIBS: on the machine.  Every Workbench install
- * has it.
- *
- * __atomic_exchange_4 uses Disable().  The 68020 has CAS, so a lock-free
- * version is possible, but this is called once per curl_global_init() on a
- * machine with one CPU and no memory ordering to speak of, and Disable() is
- * four instructions.  It does have to be safe against an interrupt touching
- * the same word, which Forbid() would not give.
+ * __floatdidf and __fixdfdi go through mathieeedoubbas.library, which is not in
+ * Kickstart 3.1 ROM and must be in LIBS:.  __atomic_exchange_4 uses Disable()
+ * rather than Forbid(), because it must be safe against an interrupt.
  *
  * SPDX-License-Identifier: MIT
  */

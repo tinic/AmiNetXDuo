@@ -4,37 +4,13 @@
 #
 #   tools/check-stack-frames.sh [build-dir]
 #
-# A bsdsocket.library vector runs on the CALLER's stack, an AmigaDOS Shell
-# hands a command 4096 bytes, and there is no MMU: a frame that does not fit
-# does not fault, it writes over what lies below and the machine dies later,
-# somewhere unrelated.  tests/stack/stack_test.c measures what an ordinary API
-# path actually touches, in a guest, on a real Shell stack.  This is the other
-# half: the worst case the compiler will admit to, on every path, without a
-# guest and without an event having to happen while the measurement is running.
-#
-# It exists because the DHCP/RA absorb was the deepest thing in
-# bsdsocket.library and nothing measured it.  It only runs when a lease or an
-# advertisement is pending, so stack_test could execute an entire clean run
-# beside it and report a comfortable margin, and the frames were free to grow
-# -- 1280 bytes when they were written down, 1412 by the time anyone measured.
-#
-# HOW IT WORKS
-#
-# -fstack-usage gives one frame size per function, -save-temps=obj keeps the
-# LTRANS assembly the frame sizes belong to, and tools/stack-depth.py walks the
-# jsr/bsr graph over the two.  The build is its own: the flags change no code,
-# but they are not in the shipping configuration and this must not depend on a
-# build somebody else configured.  Pass a build directory that already has
-# .su/.s files in it to skip the build.
-#
 # THE NUMBERS ARE FLOORS.  A call through a function pointer in a struct is not
-# a symbol in the assembly.  The resolver ladder is four such calls and they
-# are supplied by hand in LADDER_EDGES below; anything else missing counts as
-# zero.  So a budget here is checked against stack_test's measurement, not
-# instead of it.
+# a symbol in the assembly; the resolver ladder is supplied by hand in
+# LADDER_EDGES below, and anything else missing counts as zero.
 #
-# Output is key=value and an exit code: 0 within budget, 1 over, 2 nothing
-# checked (no toolchain, no build).
+# The build is its own: -fstack-usage and -save-temps=obj are not in the
+# shipping configuration.  Pass a build directory that already has .su/.s files
+# in it to skip the build.
 #
 # SPDX-License-Identifier: MIT
 

@@ -5,18 +5,10 @@
 #
 #   tests/concurrent/run-concurrent.sh [-m model] [-t seconds] [-b builddir]
 #
-# WHY THIS IS NOT IN EMULATOR_TESTS
-#
-# The harness reaches bsdsocket.library through its LVOs, so the library and a
-# SANA-II driver both have to be staged, unlike ram_driver_test and soak_test,
-# which link the stack into themselves and need no driver at all. The only
-# driver that brings an interface up under FS-UAE here is a2065.device, which is
-# Commodore's and not redistributable, so this cannot run in public CI for the
-# same reason bsdsocktest and netstack_test cannot.
-#
-# cnet.device is PCMCIA and was brought up under Amiberry rather than FS-UAE;
-# making it work here is what would move this test into CI, and it would take
-# bsdsocktest with it.
+# NOT IN EMULATOR_TESTS: the harness reaches bsdsocket.library through its LVOs,
+# so a SANA-II driver has to be staged, and the only one that brings an interface
+# up under FS-UAE here is a2065.device, which is Commodore's and not
+# redistributable.  So this cannot run in public CI.
 #
 # SPDX-License-Identifier: MIT
 

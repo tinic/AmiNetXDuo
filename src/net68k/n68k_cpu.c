@@ -1,23 +1,12 @@
 /*
  * AmiNetXDuo, pick this machine's inner loops.
  *
- * The three routines in this directory each exist in one form per CPU class
- * (n68k_variant.h), and this is where one of them is chosen.  Before the `any`
- * build the preprocessor made the choice and the archive carried one library
- * per CPU.  Here it is AttnFlags at library init, and one binary.
- *
  * The vectors start on the 68000 forms rather than on NULL, so a caller that
- * links net68k and never calls n68k_cpu_select() -- a Shell command, a bench,
- * a test -- gets the slow answer and not an address error.  Every variant is
- * assembled from original 68000 instructions, so a wrong choice here costs
- * speed and nothing else.  The exception is the parity guard in the 68000
- * copy, which the faster forms omit because they run on parts that fetch a
- * longword from an odd address.  That is why the 68000 vector is the start.
+ * never calls n68k_cpu_select() gets the slow answer and not an address error:
+ * the 68000 copy carries a parity guard the faster forms omit.
  *
- * AttnFlags is what Exec worked out at boot, and it is cumulative: a 68060
- * sets the 010, 020, 030 and 040 bits as well, so this reads highest first.  A
- * 68010 lands on 0 and a 68030 on 20, which is the mapping the per-CPU builds
- * already had (cmake/toolchain-m68k-amigaos.cmake).
+ * AttnFlags is cumulative -- a 68060 sets the 010, 020, 030 and 040 bits as
+ * well -- so this reads highest first.
  *
  * SPDX-License-Identifier: MIT
  */

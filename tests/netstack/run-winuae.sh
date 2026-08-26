@@ -6,17 +6,10 @@
 #   tests/netstack/run-winuae.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                                [-N BOARD]
 #
-# -m defaults to A3000, because that is the machine this project is aimed at
-# and the one FS-UAE cannot emulate the CPU of with any timing meaning.
-#
-# -N picks the card; the boards are listed in tools/winuae-run.sh and the
-# driver each one wants is in tools/sana2-stage.sh.  Every driver except
-# a2065.device is a third-party binary that is not in this repository, so
-# AMINETXDUO_SANA2_DRIVER=<path> has to name one.  Without it the card is in
-# the machine and nothing can open it, which the run then shows.
-#
-# The a2065.device driver is not ours to ship: point AMINETXDUO_A2065 at one,
-# or drop a copy in build/a2065.device.
+# No SANA-II driver is in this repository: a2065.device needs AMINETXDUO_A2065 or
+# a copy in build/a2065.device, and every other board (-N, listed in
+# tools/winuae-run.sh) needs AMINETXDUO_SANA2_DRIVER=<path>.  Without one the
+# card is in the machine and nothing can open it.
 #
 # SPDX-License-Identifier: MIT
 

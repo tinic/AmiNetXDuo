@@ -1,21 +1,9 @@
 /*
  * The bus accessors, and in particular cnet16's GETODD, on the host.
  *
- * The whole of that feature is address arithmetic: which address is touched,
- * how wide the access is, and which half of the result is kept.  An emulator
- * cannot check any of it.  Amiberry decodes the PCMCIA windows 1:1 and answers
- * a byte read of an odd address as readily as a word read of the even one, so
- * both the right arithmetic and the wrong arithmetic pass there.  A host can
- * pin it exactly, and that is all this file does.
- *
  * The rule on a little-endian host is test_netdev_ed.c's: a claim about a word
  * access is stated as a word value, and a claim about a byte access is stated
- * as a byte at a byte address.  Neither is a claim about the host's byte
- * order.  One 68k fact cannot be demonstrated here, which is that the low half
- * of a word loaded from an even address is the byte at the odd address beside
- * it.  That is why GETODD works, it is asserted in cnet's own source
- * (`move.w reg-1,-(sp) / move.b 1(sp),d`), and it is noted here rather than
- * faked with a byte-order test.
+ * as a byte at a byte address.  Neither is a claim about the host's byte order.
  *
  * SPDX-License-Identifier: MIT
  */

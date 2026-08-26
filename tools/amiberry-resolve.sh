@@ -5,30 +5,12 @@
 #   . "$ROOT/tools/amiberry-resolve.sh"
 #   amiberry_resolve          # sets AMIBERRY, or exits 2 saying why
 #
-# WHY THIS IS A FILE OF ITS OWN
+# $AMIBERRY is a PATH and has ONE owner; do not reuse the name for a flag
+# (tests/perf/run-fitzbench.sh's is USE_AMIBERRY for that reason).
 #
-#   $AMIBERRY is a PATH, read by tools/amiberry-run.sh and exported by
-#   amiga-assets/env.sh.  tests/perf/run-fitzbench.sh used the same name for
-#   its -a flag, `AMIBERRY=1`; assigning to an already-exported variable keeps
-#   the export attribute, so the flag reached the child as a path of "1" and
-#   every bridged run died on "amiberry not found" with the emulator installed,
-#   working, and on disk where the script was about to look.  One owner of the
-#   name is the fix; the flag is USE_AMIBERRY now, and the check below names
-#   the trap if anything sets it that way again.
-#
-# CALL IT BEFORE DOING ANYTHING EXPENSIVE.  A run that resolves the emulator
-# after staging a drive and starting a server on the peer reports a bad
-# environment several minutes and one boot timeout later, which reads as a
-# defect in the code under test.
-#
-# AND IT SAYS WHICH BINARY IT PICKED.  On 2026-08-11 a bring-up failure was
-# reported as a regression in this stack and chased for hours; the cause was
-# $AMIBERRY pointing at an instrumented build with a write_log() on every read
-# of a polled register, left exported in one shell.  Every harness printed the
-# board, the backend, the model and the ROM, and none of them printed the one
-# thing that had changed.  A line naming the path, its size and its date is
-# what tells a swapped emulator apart from a product defect, so it is printed
-# on every resolve and not behind a verbose flag.
+# CALL IT BEFORE DOING ANYTHING EXPENSIVE, so a bad environment is not reported
+# as a defect several minutes and one boot timeout later.  It prints the path it
+# picked, unconditionally: that is what tells a swapped emulator from a defect.
 #
 # SPDX-License-Identifier: MIT
 

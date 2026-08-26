@@ -35,19 +35,12 @@
 BOOL ami_ns_dns_again(UINT status);
 
 /*
- * Map a NetX Duo DNS status onto an actionable error. The distinction is
- * between "no resolver configured or reachable" and "that name does not
- * exist". Reporting the second as a device failure makes the reader check
- * cables when the host name was mistyped.
- */
-/*
- * Keep the entry point in the linked symbol table under LTO.  Several DNS
- * callers tail-call this function.  A 68020 build spells a sufficiently long
- * tail call as bra.l, and the post-link relocation check can prove its target
- * only when the target remains a named function.  Without externally_visible
- * GCC internalizes this cross-file helper, emits the correct branch, then
- * removes the symbol and makes the safety check reject the valid binary.
- * `used` also keeps the contract intact if LTO clones the small switch.
+ * Map a NetX Duo DNS status onto an actionable error: "no resolver configured
+ * or reachable" versus "that name does not exist".
+ *
+ * used/externally_visible keeps the entry point a named symbol under LTO: the
+ * post-link relocation check can prove a 68020 bra.l tail call's target only
+ * when that target remains a named function.
  */
 #if defined(__has_attribute)
 # if __has_attribute(externally_visible)

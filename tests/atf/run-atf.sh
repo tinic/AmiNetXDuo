@@ -5,18 +5,9 @@
 #   tests/atf/run-atf.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
 #                        [-N BOARD] [-B BACKEND]
 #
-# tests/atf/ has been built by every cross configuration since it was written
-# and executed by nothing, which is the state tests/HARNESSES exists to make
-# visible.  It has no requirement that the socket-option test does not have:
-# the same LIBS: staging, the same DEVS: from tests/tcpdrill, and the same
-# interface, tests/tcpdrill/tapdev.c, made at run time and named by
-# DEVS:NetInterfaces/tap0.
-#
 # NO DRIVER AND NO CARD.  Everything the adopted cases do is over
-# INADDR_LOOPBACK; the interface exists only because the library will not
-# bring a stack up without one.  So this runs wherever tier 2 runs, and asks
-# for no board -- see tests/sockopt/run-sockopt.sh for what claiming one that
-# nothing opens does to the backend assertion.
+# INADDR_LOOPBACK; the tap0 interface exists only because the library will not
+# bring a stack up without one, so this asks for no board.
 #
 # SPDX-License-Identifier: MIT
 

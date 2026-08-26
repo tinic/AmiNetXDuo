@@ -1,27 +1,9 @@
 /*
  * AmiNetXDuo, BPF program validator.
  *
- * Runs at BIOCSETF time, on a program that came from an application over an
- * LVO, on a machine with no memory protection. Anything the interpreter in
- * bpf_filter.c does not implement is refused here, and not left to reject
- * packets silently at run time. The 4.4BSD bpf_validate is more permissive: it
- * lets several undefined encodings through because the interpreter treats them
- * as no-ops. Here the cost of a wrong decision is the whole machine, so this
- * validator is stricter.
- *
- * Rejected:
- *   - an empty program, or one longer than BPF_MAXINSNS
- *   - any jump that is backward, or that lands at or past the end (only
- *     forward jumps exist in the encoding, so this also guarantees that the
- *     interpreter terminates)
- *   - a scratch-memory index at or past BPF_MEMWORDS
- *   - division by a zero constant
- *   - a load, store, ALU, jump, return or misc opcode outside the defined set.
- *     This includes size and mode combinations that are defined on their own
- *     but not legal together (BPF_LDX|BPF_ABS, BPF_LD|BPF_MSH, 16-bit BPF_MSH)
- *   - a program whose last instruction is not a BPF_RET
- *
- * No AmigaOS calls here.
+ * Runs at BIOCSETF time. Stricter than 4.4BSD bpf_validate: anything the
+ * interpreter in bpf_filter.c does not implement is refused here rather than
+ * left to reject packets silently at run time. No AmigaOS calls here.
  *
  * SPDX-License-Identifier: MIT
  */

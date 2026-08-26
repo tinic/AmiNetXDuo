@@ -1,38 +1,11 @@
 /*
  * envsetup, prepare the AmigaDOS environment for a harness test run.
  *
- * The harness boots from a bare directory hard drive with a minimal
- * Startup-Sequence, so none of the assigns a normal Workbench boot makes exist.
- * Anything calling GetVar()/SetVar() (ENV:), or writing scratch files (T:),
- * fails without them.
- *
- * Doing this in C rather than with C:Assign and C:MakeDir keeps the harness
- * self-contained, no Workbench binaries have to be extracted or staged.
- *
- * ENV: and T: are backed by directories on the *host*, not RAM:, so env vars a
- * test sets are visible from the host after the run, and can be pre-seeded by
- * staging an env/ directory.
- *
- * IT ALSO SIGNS THE TRANSCRIPT.
- *
- *   envsetup <token>
- *
- * prints `ANXD-RUN <token>` out the serial port before anything under test
- * runs.  The harness reads the guest's serial line over a TCP socket, and the
- * bytes that arrive carry nothing that says which emulator sent them: when two
- * runs collided on one port on 2026-08-25, one arm read the other's guest and
- * reported findings about a machine it had never booted.  A token the harness
- * generated and the guest echoed closes that: a transcript either opens with
- * this run's token or it is not this run's transcript, and that stays true a
- * week later when the only thing left is the log file.
- *
  * The token goes out with RawPutChar (exec LVO -516) rather than Printf,
- * because Printf writes to the CLI's console and the serial line is the only
- * sink the harness reads.  RawIOInit first, or the serial hardware is never
- * set up and most of what follows is dropped -- an earlier probe elsewhere in
- * this tree printed "start." for "start.in " before it learned that.  The spin
- * between characters is for the same reason: the emulated line drops anything
- * written faster than it clocks out.
+ * because the serial line is the only sink the harness reads.  RawIOInit
+ * first, or the serial hardware is never set up.  The spin between characters
+ * is required too: the emulated line drops anything written faster than it
+ * clocks out.
  *
  * SPDX-License-Identifier: MIT
  */

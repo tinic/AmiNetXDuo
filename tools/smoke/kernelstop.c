@@ -1,49 +1,19 @@
 /*
  * tx_amiga_kernel_stop(), does the machine survive the program?
  *
- * The failure this exists to catch is not a wrong return code, it is a wild
- * jump one tick AFTER a clean "PASS": tx_amiga_kernel_start() leaves the tick
- * Task and the scheduler Task running with their entry points inside the
- * program's code hunk, and AmigaDOS frees that hunk the instant the program
- * exits.  A test that merely called stop and returned could not tell a working
- * shutdown from a broken one, both print PASS, and only one of them takes the
- * machine down 20 ms later, by which time the harness has already recorded the
- * exit status.
+ * The failure this exists to catch is a wild jump one tick AFTER a clean
+ * "PASS": tx_amiga_kernel_start() leaves Tasks whose entry points are inside
+ * the program's code hunk, and AmigaDOS frees that hunk the instant the
+ * program exits, well after the harness has recorded the exit status.
  *
- * So this binary runs as TWO processes.
- *
- *   parent (no arguments, what s/Startup-Sequence runs)
- *       System()s a SECOND COPY of itself.  AmigaDOS LoadSeg()s that copy into
- *       its own hunk and UnLoadSeg()s it when the child exits, so the child
- *       really does experience the thing a program experiences on exit, while
- *       the parent's own hunk stays put to report on it.  Afterwards the parent
- *
- *         - looks for surviving "ThreadX" / "ThreadX tick" Tasks by name;
- *         - Fills free memory with the 68000 ILLEGAL INSTRUCTION, so that a
- *           stale Task jumping into the child's freed hunk faults immediately
- *           and visibly instead of running whatever happens to be there;
- *         - stays alive for several seconds, hundreds of ticks, and only
- *           then reports.
- *
- *   child (one argument)
- *       Starts the kernel, does real work on it, tears the work down, calls
- *       tx_amiga_kernel_stop(), and exits normally.  It also checks the
- *       contract: that stop REFUSES while application threads exist, that the
- *       refusal leaves the kernel usable, that it is idempotent, and that
- *       start -> stop -> start -> stop works.
- *
- * Build:
- *
- *   cmake --build build/cm --parallel --target smoke_KernelStop
+ * So this binary runs as TWO processes: the parent (no arguments, what
+ * s/Startup-Sequence runs) System()s a SECOND COPY of itself, fills free
+ * memory with the 68000 ILLEGAL INSTRUCTION, and outlives it to report; the
+ * child (one argument) starts the kernel, works, and stops it.
  *
  * The output name is load-bearing: the parent runs "SYS:KernelStop child",
  * so the binary has to be called KernelStop whatever the CMake target is
  * named.
- *
- * Run:
- *
- *   AMINETXDUO_RUN_TAG=kstop ./tools/amiberry-run.sh -t 120 \
- *       build/cm/tools/smoke/KernelStop
  *
  * SPDX-License-Identifier: MIT
  */

@@ -5,23 +5,13 @@
 #   tools/demo-rtg.sh [-b BUILDDIR] [-B BACKEND] [-m MODEL] [-n NAME]
 #                     [-p PORT] [-t SECONDS]
 #
-# tools/demo.sh boots the drive tools/amiberry-run.sh builds, which has no
-# Workbench on it and therefore no screen worth streaming.  This one boots
-# Commodore's own Workbench 3.1 on an RTG screen -- the staging is
-# tests/tools/run-console.sh -R, unchanged in what it puts on the drive -- and
-# leaves it up on the real network the way demo.sh does:
-#
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/shell      an AmigaDOS Shell in a browser, NO PASSWORD
 #   http://<address>/console    the Workbench screen, streamed off the card
 #
-# WHY THE CARD MATTERS HERE
-#
-#   src/tools/httprtg.c serves a Picasso96 screen and src/tools/httpfb.c serves
-#   a planar one, and a board that fails to come up is invisible: Workbench
-#   falls back to the chipset and every other symptom is identical.  The geom
-#   word's format field is the one place it shows -- 1 is a card -- so this
-#   script reads it back off a live session before it says the demo is up.
+# A board that fails to come up is invisible: Workbench falls back to the chipset
+# and every other symptom is identical.  The geom word's format field is the one
+# place it shows -- 1 is a card -- so this reads it back off a live session.
 #
 # SPDX-License-Identifier: MIT
 
@@ -245,27 +235,13 @@ wb31_screenmode_prefs_id "$HD" "$RTG_DEPTH" "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
 # boot shell away before the server started.
 sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
 #
-# THE SERVER IS THE FIRST THING AFTER LoadWB, and nothing diagnostic runs
-# before it.  This had the monitor and the mode prober ahead of it, the way
-# tests/tools/run-console.sh writes them, and one of the two never returned:
-# the boot stopped on that line with the server three lines below it, so the
-# guest sat there booted, idle and answering nothing.  A harness that exits
-# after a probe can afford that; a demo that is left up cannot.  DEVS:Monitors
-# is already run by the stock sequence above, so the board is up either way,
-# and C:rtgscreen is on the drive for anyone who wants to ask it by hand.
+# THE SERVER IS THE FIRST THING AFTER LoadWB, and nothing diagnostic runs before
+# it: a probe that never returns leaves the guest booted, idle and answering
+# nothing.  DEVS:Monitors is already run by the stock sequence above.
 #
-# AND THE BOOT SHELL GOES, because the screen this serves is the one somebody
-# looks at.  The stock EndCLI is stripped above only so this tail can replace
-# it, and it is put back here as the last line.
-#
-# `Run >NIL:`, not `Run >DH0:httpd.txt`.  Run hands the started process the
-# output stream it was given, so a file redirect leaves httpd holding the boot
-# shell's console: the file caught Run's own "[CLI 3]" and the server's banner
-# went to the SCREEN, which is the handle that keeps the window alive after the
-# shell that opened it has ended.  EndCLI then ends the shell and the window
-# stays -- a Shell window on the Workbench screen that nothing can close,
-# because the process still owning it is the web server.  NIL: on both sides is
-# what makes EndCLI take the window with it.
+# `Run >NIL: <NIL:`, not a file redirect.  Run hands the started process the
+# output stream it was given, and NIL: on both sides is what makes the final
+# EndCLI take the boot shell's window with it.
 cat >> "$HD/S/Startup-Sequence" <<EOF
 
 FailAt 9999

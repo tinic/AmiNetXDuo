@@ -243,38 +243,12 @@ def functions(objdump, path):
 
 
 # --------------------------------------------------------------- SECOND BUG
-#
-# THE ARGV INDIRECTION, codeberg.org/bebbo/amiga-gcc issue #8.
-#
-# Separate from the frame skew above, in the same file, and it breaks a
-# different class of program. crt0.c declared
-#
-#     char * __argv[];        instead of        char ** __argv;
-#
-# An array name decays to its OWN ADDRESS, so ____start passes &__argv where
-# main expects __argv, one level of indirection too many. main() then reads
-# the pointer variable itself as argv[0], and whatever follows it in .bss as
-# argv[1..]. Compare the two pushes at the call site, argv first:
-#
-#     pea    __argv          ; 4879, pushes the ADDRESS       <- wrong
-#     move.l __argc,-(sp)    ; 2f39, pushes the VALUE         <- right
-#     jsr    _main
-#
-# WHY IT WENT UNNOTICED HERE. Our own commands take their arguments through
-# ReadArgs(), which reads the command line from the Shell and never touches
-# argv, so all of them work on a broken toolchain. Ported Unix programs do not:
-# curl and ssh parse argv and get garbage. The prebuilt curl used for every
-# throughput measurement in docs/RESEARCH.md was built with someone else's
-# toolchain and is unaffected, which is why the benchmarks never showed it.
+# THE ARGV INDIRECTION, codeberg.org/bebbo/amiga-gcc issue #8.  crt0.c declared
+# `char * __argv[];` instead of `char ** __argv;`, so ____start passes &__argv.
 #
 # THE REPAIR is a two-byte opcode swap. `pea` and `move.l ...,-(sp)` are the
 # same length in both addressing modes used here and put their operand in the
-# same place, so the relocation is untouched and only the opcode word changes:
-#
-#     absolute   4879 pea <abs>.l        -> 2f39 move.l <abs>.l,-(sp)
-#     baserel    486c pea a4@(d16)       -> 2f2c move.l a4@(d16),-(sp)
-#
-# Fixed upstream in 120371e, which changed only the declaration.
+# same place, so the relocation is untouched and only the opcode word changes.
 
 PEA_ABS, PUSH_ABS = 0x4879, 0x2F39      # pea <abs>.l   / move.l <abs>.l,-(sp)
 PEA_A4, PUSH_A4 = 0x486C, 0x2F2C        # pea a4@(d16)  / move.l a4@(d16),-(sp)

@@ -2,22 +2,9 @@
  * SMBProbe, ask a mounted device the two questions `List` cannot answer on a
  * machine with nobody at the mouse.
  *
- *     SMBProbe LOCK DEVICE=SMB2: LOG=DH0:probe.txt
- *     SMBProbe WINDOWS LOG=DH0:windows.txt
- *
- * WHY THIS EXISTS.  `List SMB2:` on a device whose handler cannot mount does
- * not return an error: DOS puts up a "Please insert volume" requester and
- * waits for it to be answered.  On a headless emulator that requester is
- * invisible and the command looks like it hung, which is exactly the shape of
- * the report being investigated -- and telling the two apart is the whole
- * question.
- *
  *   LOCK     sets pr_WindowPtr to -1, so DOS answers its own requesters with
- *            Cancel and Lock() RETURNS with an error code instead of
- *            blocking, then Examines the lock and walks it.  Every step is
- *            timestamped and every IoErr() is printed.
- *   WINDOWS  walks Intuition's screen and window lists and prints what is on
- *            them.  Run while something else is blocked, it says whether a
+ *            Cancel and Lock() RETURNS with an error instead of blocking.
+ *   WINDOWS  walks Intuition's screen and window lists, to say whether a
  *            requester is up and which window owns it.
  *
  * Each line is written and flushed as it happens, because the interesting

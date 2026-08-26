@@ -9,43 +9,12 @@
 #   AmiNetXDuo-<version>.lha   the archive, in the conventional layout
 #   AmiNetXDuo/                the same tree unpacked, for inspection
 #
-# The version comes from tools/version.sh, i.e. from project(AmiNetXDuo
-# VERSION ...) compounded with the NetX Duo version read out of the submodule.
-# -v overrides the product part for a test build; there is deliberately no way
-# to override the NetX Duo part, because it describes what is in the archive.
-# The archive filename carries our version alone, because a filename is read
-# by people.  The full compound is in the installer and in each binary's
-# version string.
+# The version comes from tools/version.sh.  -v overrides the product part for a
+# test build; there is deliberately no way to override the NetX Duo part,
+# because it describes what is in the archive.
 #
-# The convention is that an archive extracts into the directory it is
-# unpacked in as one drawer plus that drawer's icon, so that dropping it on a
-# Workbench window leaves one recognisable object rather than a scattering of
-# files:
-#
-#   AmiNetXDuo.info                  drawer icon
-#   AmiNetXDuo/
-#       Install-AmiNetXDuo           the Installer script
-#       Install-AmiNetXDuo.info      its icon: default tool Installer
-#       AmiNetXDuo.info              a spare drawer icon, for the drawer the
-#                                    installer creates on the user's disk
-#       ReadMe  ReadMe.info
-#       C/                           the commands
-#       Libs/                        the libraries: ONE build, every 68k
-#       Libs/minimal/                the same stack with the big options out
-#       Devs/Networks/               the SANA-II drivers, one build, and one
-#                                    copy: no minimal drawer, see stage_build
-#       Devs/Internet/               protocols, services, networks
-#       Docs/  Docs.info             the manual, from docs/user/
-#       Examples/  Examples.info     commented configuration files
-#       Terminal/  Terminal.info     httpd's pages: the terminal's and the
-#                                    console's, one HTML file each
-#       Developer/  Developer.info   headers and glue for the vectors past
-#                                    the end of the NDK's SFD
-#
-# Compression: a real `lha a` is used when one is on the PATH.  Homebrew's
-# `lha` is Lhasa, which can only extract, so the fallback is dist/lhapack.py
-# correct, readable by every LhA, and uncompressed.  Build the upload on a
-# machine with a proper archiver.
+# A real `lha a` is used when one is on the PATH; the dist/lhapack.py fallback
+# is uncompressed, so build the upload on a machine with a proper archiver.
 #
 # SPDX-License-Identifier: MIT
 
@@ -113,30 +82,15 @@ CMDS=(AddNetInterface NetSetup Online Offline ShowNetStatus ShowNetServices
 
 # ------------------------------------------------------------- the builds --
 #
-# ONE ARCHIVE, ONE SET OF BINARIES.  There is no CPU in here any more and the
-# installer does not ask: every library, device and command is built -m68000 and
-# picks its own inner loops from SysBase->AttnFlags at init
-# (src/net68k/n68k_cpu.c, src/crypto68k/c68k_cpu.c).  What used to be four
-# drawers keyed on `database "cpu"` -- 68000, 68000-minimal, 68020-40, 68060 --
-# is now one, plus `minimal`, which is a FEATURE choice and not a CPU one.
-#
-# That removes the failure this archive was shaped around.  A user who picked
-# the low drawer to be safe got a library with none of the 68020 assembly, and
-# on crypto that is not a few percent: a 68060 running the portable bignums
-# spends 64% of a TLS 1.3 transfer in one function.  Nobody can pick wrong now
-# because there is nothing to pick.
+# ONE ARCHIVE, ONE SET OF BINARIES.  There is no CPU in here and the installer
+# does not ask: every library, device and command is built -m68000 and picks
+# its own inner loops from SysBase->AttnFlags at init (src/net68k/n68k_cpu.c,
+# src/crypto68k/c68k_cpu.c).
 #
 # minimal is the same stack with IPv6, mDNS, the packet filter, TLS, IPv4
-# multicast, the ARexx host and the TCP: handler compiled out: 243,332 bytes
-# against the full build's 369,820, 124 KB of options, both stripped.  It is for
-# somebody who has measured their 1 MB machine and decided, which is why it is
-# a drawer and not a threshold: a stack that silently drops IPv6 and .local
-# resolution on a machine that could have run them is a support question, not a
-# saving.
-#
-# The build directory is derived from -b, so `-b build/release` wants
-# build/release-minimal beside it and cannot be pointed at a tree from a
-# different commit by accident.
+# multicast, the ARexx host and the TCP: handler compiled out.  It is a FEATURE
+# choice and not a CPU one, and its build directory is derived from -b so it
+# cannot be pointed at a tree from a different commit by accident.
 MINIMAL_BUILD="${AMINETXDUO_BUILD_MINIMAL:-$BUILD-minimal}"
 case "$MINIMAL_BUILD" in /*) ;; *) MINIMAL_BUILD="$ROOT/$MINIMAL_BUILD" ;; esac
 
@@ -179,29 +133,12 @@ flto_in() {
         | grep -q -- '-flto' && echo yes || echo no
 }
 
-# A missing build is built, not reported.  This script's job is to produce the
-# archive, and printing the two commands that would produce it and exiting 2 is
-# the same work with a person in the middle of it.  AMINETXDUO_DIST_NO_BUILD=1
-# restores the old behaviour for a caller that wants to be told rather than
-# served -- CI sets it, because there a missing tree means the build stage did
-# not run and building it here would hide that.
-#
-# AN EXISTING TREE IS BUILT TOO, and that is the whole of the second cmake call
-# below rather than a nicety.  Until 2026-08-20 the build ran only when the
-# directory was absent, so a checkout that had ever been built packed whatever
-# was in build/ regardless of what the source now said.  It shipped:
-# AmiNetXDuo-rel.lha, packed 20:11 UTC from a HEAD containing acd18077, carried
-# the tls.library linked at 07:59 UTC that morning -- twelve hours and one
-# crypto fix behind its own source tree, md5 identical to the stale object
-# still sitting in that build directory.  Nothing said a word, because the
-# `need` checks below assert that a library EXISTS and its CPU cache entry
-# matches, and both were true of the old one.
-#
-# It cost a release gate: install/test/run-workbench.sh went red four times
-# against a stack whose defect had already been fixed, and read as "the fix did
-# not take" rather than "the fix was not in the archive".  `cmake --build` on an
-# up-to-date tree is a few seconds; an archive that does not correspond to the
-# source it was built from is not a thing this script may produce.
+# A missing build is built, not reported, and AN EXISTING TREE IS BUILT TOO:
+# the `need` checks below assert only that a library EXISTS and that its CPU
+# cache entry matches, both of which are true of a stale one, so without the
+# second cmake call an archive need not correspond to its source.
+# AMINETXDUO_DIST_NO_BUILD=1 reports instead of building -- CI sets it, because
+# there a missing tree means the build stage did not run.
 for b in "${BUILDS[@]}"; do
     if [ ! -d "$b" ]; then
         if [ -n "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
@@ -277,28 +214,10 @@ CMD_BUILD="$BUILD"
 
 for cmd in "${CMDS[@]}"; do need "$CMD_BUILD/src/tools/$cmd"; done
 
-# A command that is BUILT and not listed above ships nowhere, and nothing
-# notices: `need` above catches a name in the list with no binary, which is the
-# easy direction.  iperf was merged and left out of CMDS, and the archive would
-# have gone out without it.
-#
-# Anything deliberately not shipped goes here with its reason.  ToolsSmoke is a
-# test driver -- it runs the real commands through SystemTagList() and records
-# rc, milliseconds and free memory per command, which is what the leak sweep
-# and the tool tests read -- and has no use on a user's machine.
-# wbgrab writes the Workbench screen's bitplanes to a file and is the harness
-# half of the console: httpd -C is what a user runs, and this is what
-# tests/tools/run-wbgrab.sh runs to check the grab against a decoder on
-# another machine.  A test driver, like ToolsSmoke, and no use on a user's
-# machine for the same reason.
-# El3Diag reads one card's registers at one machine's address through one
-# measured byte-order quirk, and its capture-watch phases read 0/100 on a
-# HEALTHY machine (the driver drains frames faster than the tool samples).
-# A specialist's instrument for a bench, not a command for a drawer.
-# paysum is the guest half of the payload-integrity harness: it moves a
-# seeded pattern and prints content CRCs for tests/tools/paypeer.py to be
-# compared against, and without that peer and run-payverify.sh's join it
-# proves nothing a user can read.  A harness half, like ToolsSmoke.
+# A command that is BUILT and not listed in CMDS ships nowhere and nothing
+# notices, so anything deliberately not shipped goes in NOT_SHIPPED below with
+# its reason.  ToolsSmoke, wbgrab and paysum are harness halves and El3Diag is
+# a bench instrument; none has a use on a user's machine.
 NOT_SHIPPED=(ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 for path in "$CMD_BUILD"/src/tools/*; do
@@ -420,48 +339,19 @@ for cmd in "${CMDS[@]}"; do
 done
 chmod 755 "$TREE"/C/*
 
-# The ssh client, when it has been built. Optional, because it comes from
+# The ssh client, when it has been built.  Optional, because it comes from
 # clients/ rather than the CMake tree and a plain `cmake --build` does not
-# produce it. It goes into C: with the other commands: the argv/stack shim
-# (clients/compat/amiga_argv.c) now gives it a real POSIX argv[] and its own
-# 256 KB stack, so the two reasons the clients used to be kept out of C:, no
-# tokenised arguments, and a stack far bigger than a Shell hands a command --
-# are both gone. It still wants mathieeedoubbas.library in LIBS:, which every
-# Workbench installation has; the installer's help text says so.
+# produce it.  It goes into C: with the other commands and it wants
+# mathieeedoubbas.library in LIBS:, which every Workbench installation has.
 #
-# AMINETXDUO_SSH names the built binary outright, the release workflow sets
-# it, so the path it builds into and the path packed here cannot drift.
-# ONE ssh, in C:, like everything else.  It used to be three -- ssh.000,
-# ssh.020 and ssh.060, with the installer copying the one this machine could run
-# -- because dbclient comes from clients/ rather than the CMake tree and was
-# built once per architecture, and copying the drawer wholesale had put a 68020
-# binary on a 68000 machine: the installer offered it, the user ran it, and the
-# machine took an illegal instruction.
-#
-# clients/dropbear/build.sh with AMINETXDUO_CLIENT_ANY=1 builds one instead: the
-# code is -m68000 and both X25519 field multiplies are in it, the MULU.L one and
-# the four-MULU.W one, picked from AttnFlags at the first handshake
-# (clients/dropbear/amiga_25519.c).  That matters more here than anywhere else
-# in the archive -- an ssh handshake is 97% public-key arithmetic (35), so the
-# wrong binary was never a few percent.
+# ONE ssh, not one per architecture: the code is -m68000 and both X25519 field
+# multiplies are in it, picked from AttnFlags at the first handshake
+# (clients/dropbear/amiga_25519.c).
 #
 # AMINETXDUO_SSH names the built binary outright; the release workflow sets it,
-# so the path it builds into and the path packed here cannot drift.
-#
-# AND WHEN NOBODY NAMES ONE, BUILD IT. A release archive without C:ssh is not
-# the release: the same reasoning that makes this script build a missing CMake
-# tree rather than print the command applies here, and the half that was left
-# out is the one that silently produces a SHORTER archive rather than an error.
-# An e2e run against a hand-built archive staged `C/ssh ABSENT` and nothing
-# said so. AMINETXDUO_DIST_NO_BUILD=1 still reports instead of building, which
-# is what the release workflow wants -- there the client is built in its own
-# step and AMINETXDUO_SSH names it, so building here would be the second copy.
-#
-# UNCONDITIONALLY, for the reason the CMake loop above is unconditional: a
-# dbclient left in build/ssh from an earlier checkout is packed as readily as a
-# current one and looks the same in the archive listing.  clients/dropbear/
-# build.sh reconfigures only when the flags change and otherwise runs `make`,
-# so an up-to-date tree costs one make invocation.
+# so the path it builds into and the path packed here cannot drift.  When
+# nobody names one it is built here, UNCONDITIONALLY, for the reason the CMake
+# loop above is unconditional.  AMINETXDUO_DIST_NO_BUILD=1 reports instead.
 CLIENT_SSH="${AMINETXDUO_SSH:-}"
 if [ -z "$CLIENT_SSH" ] && [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
     CLIENT_SSH="$ROOT/build/ssh/dbclient"

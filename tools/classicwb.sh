@@ -5,64 +5,16 @@
 #   tools/classicwb.sh [-m MODEL] [-v VARIANT] [-b BUILDDIR] [-a ARCHIVE.lha]
 #                      [-B BACKEND] [-n NAME] [-p PORT] [-t SECONDS]
 #                      [-s SNAPSHOTS] [-c HOST]
-#
-# tools/demo.sh boots the drive tools/amiberry-run.sh builds, which is httpd
-# and whatever else the staging puts beside it.  This boots a ClassicWB
-# snapshot instead: a Workbench somebody could actually use.
-#
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/shell      an AmigaDOS Shell in a browser, no password
 #   http://<address>/console    the Workbench screen
 #
-# THE INSTALLER PUTS OUR FILES THERE, not this script.  A launch is: copy the
-# snapshot, unpack a release archive built from -b onto the copy the way a
-# download would arrive, boot once and drive Commodore's Installer over
-# Install-AmiNetXDuo, check what landed, then power cycle into the machine.
-# install/test/run-workbench.sh has done exactly this against a stock
-# Workbench 3.1 for months; the mechanism here is that one, and
-# install/test/installdrive.c is the same program clicking Proceed.
+# THE INSTALLER PUTS OUR FILES THERE, not this script: install/Install-AmiNetXDuo
+# is the only definition of a complete install there is, and the check that it
+# was complete is what decides the exit status.
 #
-# It used to be a hand-written list of `cp` lines, and a hand-written list
-# drifts from install/Install-AmiNetXDuo, which is the only definition of a
-# complete install there is.  It had drifted three ways at once: anxnet.device
-# was built and never staged, so the rig tested Commodore's driver and never
-# ours; usergroup.library was built and never staged; and ssh was looked for in
-# three directories that a CMake build never writes, found nowhere, and skipped
-# without a word.  Nothing failed.  A rig that cannot notice its own incomplete
-# install is worse than one that installs nothing, so the install is now real
-# and the check that it was complete is what decides the exit status.
-#
-# WHAT THIS SCRIPT STILL PUTS THERE, after the Installer has finished, and why
-# each one is a step a user takes rather than a step the Installer skipped:
-#
-#   Devs/Networks/anxnet.device  Install-AmiNetXDuo deliberately does not
-#                                install the driver -- see its note -- so a
-#                                user copies it across and names it with a
-#                                CARD= line.  This is that copy, through
-#                                tools/sana2-stage.sh, which is the one place
-#                                that maps a board to a driver.
-#   MDNS=YES in the interface    one line in the file the Installer wrote, and
-#                                its own help text says so.  Without it the
-#                                .local name this script prints answers
-#                                nothing.
-#   hostname <name>              the same, in DEVS:Internet/name_resolution.
-#                                The Installer writes "amiga" for everybody and
-#                                five of these on one wire need five names.
-#   the httpd line               in S:Startup-Sequence, not in the Installer's
-#                                block: this rig serves a chosen drawer on a
-#                                chosen port with the console page as well, and
-#                                the Installer's own httpd question offers RAM:
-#                                on port 80 with no console.  The Installer's
-#                                block is left holding AddNetInterface alone,
-#                                which is the line the network comes up from.
-#
-# The snapshot is built once by ~/amiga-assets/classicwb/install.sh and carries
-# no file of ours.  That is asserted on every launch and is what makes the
-# install honest: nothing of ours can survive in the snapshot to stand in for
-# a file the install failed to write.
-#
-# The run copy is a copy.  A guest that corrupts its drive costs the copy and
-# not the install.
+# The snapshot carries no file of ours -- asserted on every launch -- so nothing
+# of ours can stand in for a file the install failed to write.
 #
 # SPDX-License-Identifier: MIT
 
@@ -503,30 +455,13 @@ fi
 
 # ------------------------------------------- what the Installer actually did --
 #
-# WHAT THE INSTALLER WOULD INSTALL, derived from the archive rather than
-# written down here, so this cannot drift from install/Install-AmiNetXDuo the
-# way the `cp` list it replaces did.  Every file is compared by content: a name
-# that exists proves the copy started and nothing else.
-#
 # The one thing kept in step by hand is which archive drawer goes where, and
-# the Installer's own copy statements are the list:
+# install/Install-AmiNetXDuo's own copy statements are the list.  Every file is
+# compared by content: a name that exists proves the copy started, nothing else.
 #
-#   Libs/*        -> LIBS:            copylib, tls.library only when packed
-#   C/*           -> C:               copyfiles (all)
-#   Docs/*        -> <docdir>         copyfiles (all) (infos) -- the drawer's
-#                                     CONTENTS, and its (dest) is DOCDIR
-#                                     itself, so the guide lands beside
-#                                     Examples and not under a Docs drawer
-#   Examples/*    -> <docdir>/Examples
-#   Terminal/*    -> <docdir>/Terminal
-#   AmiNetXDuo.info -> beside <docdir>
-#   Devs/Internet/{protocols,services,networks}  only where there is none
-#   Devs/Internet/certificates                   always, when packed
-#
-# Devs/Networks/anxnet.device is NOT in this list, and that is the Installer's
-# decision, not an omission: it ships and a user copies it deliberately.  This
-# script does that copy below, and the driver gate proves it is the one the
-# stack opened.
+# Devs/Networks/anxnet.device is NOT in that list, and that is the Installer's
+# decision, not an omission: it ships and a user copies it deliberately.  The
+# driver gate proves the copy below is the one the stack opened.
 #
 # <docdir> is DH0:AmiNetXDuo -- @default-dest on a machine with one volume --
 # and the askdir page is answered with its default.
@@ -786,31 +721,12 @@ done
 # ------------------------------------------------------- 2/2, the machine ----
 #
 # A POWER CYCLE, not a continuation.  The network comes up from the line the
-# Installer wrote in S:User-Startup, reached by ClassicWB's own
-# `Execute S:User-Startup`, with nothing in the path this script put there.
+# Installer wrote in S:User-Startup, with nothing in the path this script put
+# there.  The terminal and console pages below are the INSTALLED ones.
 #
-# The tail is the rig's: the version of the binary the guest LOADED, written
-# where the host can read it, then httpd, then the stack's own account of which
-# driver it has open.
-#
-# The terminal and console pages are the INSTALLED ones, in the drawer the
-# Installer created.  Naming them here is a fourth assertion that the install
-# was complete, made by the thing that has to open them.
-#
-# THE SERVER'S OWN OUTPUT, WITHOUT THE BOOT WINDOW.  It used to go to NIL:,
-# which is why a wedged guest left nothing to read; and `Run >file` does not
-# move it, because Run keeps that stream for its own "[CLI n]" line and the
-# process it starts does not get it -- measured here, the file held those eight
-# bytes and nothing else after a request had been served.
-#
-# So the redirection is made by a Shell that is already detached.  `Run >NIL:
-# <NIL:` is unchanged and is what lets EndCLI take the boot window with it:
-# nothing is ever handed the console.  What it starts is Execute on the script
-# below, and the Shell running THAT script opens the file and hands it to httpd
-# as its output.
-#
-# The file grows with requests and not with time, so an idle guest writes its
-# own banner and stops.
+# `Run >file` does not redirect the started process -- Run keeps that stream for
+# its own "[CLI n]" line -- so the redirection is made by a Shell that is already
+# detached.  `Run >NIL: <NIL:` is what lets EndCLI take the boot window with it.
 cat > "$HD/S/AmiNetXDuo-httpd" <<EOF
 ; Written by tools/classicwb.sh.
 C:httpd DH0:Public $PORT -T PAGE=DH0:$DOCDIR_REL/Terminal/shell.html -C CONSOLEPAGE=DH0:$DOCDIR_REL/Terminal/console.html >DH0:httpd-log.txt

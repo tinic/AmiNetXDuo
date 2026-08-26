@@ -2,28 +2,9 @@
  * bootcheck, start the network the way a boot would, using nothing but
  * what the installer left behind, and see whether it comes up.
  *
- * This is the half of the installer test that matters.  installdrive runs
- * the Installer; this runs on the machine the Installer just wrote to,
- * reads S:User-Startup, finds the block the (startup) statement created --
- *
- *      ;BEGIN AmiNetXDuo
- *      C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET
- *      ;END AmiNetXDuo
- *
- * and executes exactly those command lines, exactly as the Shell would on
- * the next boot.  Nothing here knows the interface's name, the device, or
- * the address; if the installer wrote the wrong thing, this fails.
- *
- * The pass criterion is that ShowNetStatus reports a real address for this
- * machine.  That is a stronger claim than it looks: the interface file the
- * installer wrote says CONFIGURE=DHCP, so an address can only be there if
- * the stack opened the driver named in that file, put a DHCP DISCOVER on the
- * wire, answered the ARP for it and took the lease.
- *
- * ping and host are run afterwards for the record, but not used to decide.
- * As things stand they report that they cannot read a stack another program
- * has open, which is a limitation of those two commands rather than
- * anything to do with the installation.
+ * It reads S:User-Startup, finds the ;BEGIN AmiNetXDuo / ;END AmiNetXDuo block
+ * the (startup) statement created and executes exactly those command lines.
+ * Nothing here knows the interface's name, the device, or the address.
  *
  * Exit status:  0  the User-Startup block ran and the machine has an address
  *               5  it ran but no address arrived

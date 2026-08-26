@@ -6,48 +6,13 @@
 #   tools/cppcheck.sh --update   # rewrite the baseline from this run
 #   tools/cppcheck.sh --style    # add the style class, print, gate nothing
 #
-# GETTING THE TARGET RIGHT IS MOST OF THE WORK
+# Three things have to be handed to cppcheck or it invents findings and misses
+# whole subsystems: the m68k-amigaos platform (cmake/cppcheck-m68k.xml), the
+# predefined macros dumped from the real compiler at run time, and -D'__asm(x)='.
 #
-#   Three things have to be handed to cppcheck or it invents findings and
-#   misses whole subsystems:
-#
-#   1. The platform.  m68k-amigaos is ILP32 big-endian with signed plain char
-#      and 2-byte struct alignment.  None of cppcheck's built-in platforms is
-#      that, so cmake/cppcheck-m68k.xml describes it.
-#
-#   2. The predefined macros.  Without them <machine/ieeefp.h> stops at
-#      "#error Endianess not declared!!" and <sys/_intsup.h> at "Unable to
-#      determine type definition of intptr_t", and every translation unit that
-#      reaches either is abandoned.  They are dumped from the real compiler at
-#      run time rather than checked in, so they cannot drift from it.
-#
-#   3. -D'__asm(x)='.  cppcheck cannot parse GCC's register-variable syntax --
-#      `register ULONG version __asm("d0")`, which is how every library vector
-#      in this tree is declared, and abandons the file at the first one.
-#      With the NDK's real headers on the include path and this define, 32
-#      files that used to be silently skipped are checked, src/bsdsocket among
-#      them.  The define is safe because a function-like macro only expands
-#      when the next token is `(`, and statement asm is spelled
-#      `__asm volatile (...)`.
-#
-# WHY ONLY error AND warning ARE GATED
-#
-#   With style, performance and portability on, this tree produces 1,059
-#   findings.  1,046 of them are constVariablePointer, variableScope,
-#   unusedStructMember and friends: they are a house-style argument, not a
-#   defect report, and a baseline of a thousand of them would never be read.
-#   All thirteen of the error/warning findings were triaged and are false --
-#   see the baseline for what each one is, but that class is small enough to
-#   watch, so it is the one this gate watches.  --style prints the rest.
-#
-# NOT INSTALLED IN CI, ON PURPOSE
-#
-#   cppcheck is not part of the pinned toolchain, and its findings move between
-#   its own releases: a runner's distro cppcheck would disagree with the
-#   baseline and turn this into a "regenerate it" ritual.  tools/ci.sh runs this
-#   where it is installed and says out loud when it is not.  The gate CI relies
-#   on is tools/analyze.sh, which uses the pinned compiler and is deterministic.
-#   The baseline records which cppcheck produced it.
+# Only error and warning are gated; --style prints the rest.  cppcheck is not in
+# the pinned toolchain and its findings move between its own releases, so CI does
+# not install it; the baseline records which cppcheck produced it.
 #
 # SPDX-License-Identifier: MIT
 

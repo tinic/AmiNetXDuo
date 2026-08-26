@@ -5,24 +5,9 @@
 #   . "$ROOT/tools/test-verdict.sh"
 #   verdict_guest <name> <min-checks> <run-rc> <transcript> [more transcripts...]
 #
-# WHY THIS EXISTS
-#
-# Fourteen harnesses used to end in `exec tools/amiberry-run.sh ...`, so the
-# script's exit status was the emulator's, which is the guest's own exit code
-# out of DH0:.done.  A guest that opened nothing, ran no checks and returned 0
-# was a pass, and so was one whose transcript never arrived.  Those runs bought
-# confidence and tested nothing.
-#
-# A verdict needs evidence of work done, so this asks for three things:
-#
-#   1. a transcript that exists and is not empty -- named as a fact, and a
-#      failure of its own, because "no output" is an infrastructure fault and
-#      reads nothing like "the code is wrong"
-#   2. the guest's own summary line, `N checks, M failures`, which every test
-#      program under tests/ prints last, with M == 0
-#   3. N at or above a floor the caller states.  A test that silently stops
-#      calling half its cases still prints `12 checks, 0 failures`, and the
-#      floor is the only thing that notices.
+# A verdict needs evidence of work done: a transcript that exists and is not
+# empty, the guest's own `N checks, M failures` line with M == 0, and N at or
+# above a floor the caller states.
 #
 # and then, and only then, the emulator's exit status: 124 is a timeout, 4 is a
 # guest built for the wrong CPU, and neither can be read as a result.

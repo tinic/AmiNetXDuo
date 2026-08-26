@@ -5,61 +5,16 @@
 #   tools/demo.sh [-b BUILDDIR] [-B BACKEND] [-C CMDDIR] [-m MODEL] [-n NAME]
 #                 [-p PORT] [-t SECONDS]
 #
-# Boots an emulated Amiga bridged onto the real network, running httpd with the
-# WebSocket terminal, and prints the address it leased.  For showing somebody
-# the thing rather than testing it: nothing here asserts anything.
-#
 #   http://<address>/           the Public drawer, WebDAV-writable
 #   http://<address>/shell   an AmigaDOS Shell in a browser, NO PASSWORD
 #   http://amiga-demo.local/    the same machine by name, -n renames it
 #
-# The interface is staged with MDNS=YES and the drive with a hostname, because
-# neither is a default: a demo reached only by its DHCP lease is one somebody
-# has to be told the address of again tomorrow.
+# `amiga-demo` and 02:41:4d:49:00:77 do not change between runs; -n and
+# AMINETXDUO_DEMO_MAC override for a second instance, which then needs BOTH.
 #
-# THE NAME AND THE MAC ARE FIXED ON PURPOSE
-#
-#   `amiga-demo` and 02:41:4d:49:00:77 are this machine's identity and do not
-#   change between runs, so a bookmark and a DHCP reservation both keep
-#   working.  -n and AMINETXDUO_DEMO_MAC still override for a second instance,
-#   which then needs both: two guests sharing either one collide.
-#
-# A SHELL WITH NO COMMANDS IN IT
-#
-#   The drive amiberry-run.sh builds carries httpd and nothing else, so the
-#   Shell on the far end of the terminal answers `Dir` with "Unknown command"
-#   and there is nothing to show anybody.  -C stages a commands drawer into
-#   C:, and AMINETXDUO_DEMO_C is the same thing from the environment.  Where
-#   they come from is a licensed Workbench and not ours to ship; the lab store
-#   has the ADFs and amitools' xdftool unpacks one:
-#
-#     xdftool ~/amiga-assets/adf-wb31/amiga-wb31_workbench.adf unpack /tmp/wb
-#     tools/demo.sh -C /tmp/wb/Workbench/C
-#
-#   Without it the demo still runs and the terminal still works.  It is a
-#   Shell with 0 commands instead of 81.
-#
-# BRIDGED, OR SLIRP WITH A FORWARDED PORT
-#
-#   Bridged is the default and is what a demo is for: the machine appears on
-#   the real network with a lease of its own and anyone can reach it.
-#
-#   `-B slirp` is the other one.  It needs no bridge, no root and no address
-#   on the LAN -- the guest is behind NAT and one port is forwarded out to
-#   127.0.0.1 -- which is what to use when the LAN is somebody else's, or when
-#   a demo is ALREADY RUNNING on it.
-#
-#   Two bridged guests are not two machines.  The a2065's LANCE derives its
-#   address from the unit, so both are 00:80:10:49:00:01 and the network sees
-#   one host answering from two places: leases fight, ARP caches flap, and the
-#   demo that was already up stops answering.  Second instance, -B slirp.
-#
-# THE MAC IS NOT THE ONE YOU ASK FOR
-#
-#   amiberry-run.sh takes AMINETXDUO_AMIBERRY_MAC, and the a2065's LANCE then
-#   reports a DIFFERENT address on the wire -- 00:80:10:49:xx:xx, derived from
-#   the unit.  Looking for the MAC you set finds nothing, which is a good way
-#   to lose fifteen minutes.  This script reads the one the emulator logged.
+# TWO BRIDGED GUESTS ARE NOT TWO MACHINES: the a2065's LANCE derives its address
+# from the unit, so both are 00:80:10:49:00:01 -- and that derivation is why the
+# MAC on the wire is not the one you set.  Second instance, -B slirp.
 #
 # SPDX-License-Identifier: MIT
 

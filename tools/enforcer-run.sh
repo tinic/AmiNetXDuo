@@ -5,32 +5,10 @@
 #
 #   tools/enforcer-run.sh [-t SECONDS] [-T TAG] [-m] [-M] <executable> [files...]
 #
-#     -t  timeout in seconds (default 240)
-#     -T  run tag; isolates the staging drive, serial log, config and fs-uae
-#         base directory, exactly like AMINETXDUO_RUN_TAG elsewhere
-#     -m  also install MungWall (AllocMem/FreeMem guard bands)
-#     -M  install MungWall only, no Enforcer (works on a plain 68020)
-#     -n  attach the emulated A2065 on SLIRP
-#
-# WHY THIS IS THE ONE RUNNER STILL ON FS-UAE
-#
-#   Every other harness moved to Amiberry when FS-UAE went; Enforcer did not,
-#   because it needs a real MMU and this is where one is configurable.
-#
-#   * The A1200 model this would otherwise boot is a bare 68020 with no
-#     68851, and on that machine Enforcer does not print its
-#     "MMU is not available" message, it WEDGES.  So this script overrides the
-#     CPU to a 68030, which makes FS-UAE set mmu_model=68030 and cachesize=0.
-#   * JIT must stay off.  With jit_compiler=1 FS-UAE logs "MMU emulation ...
-#     is not JIT compatible", Enforcer installs anyway and then reports nothing
-#     at all, a silent false negative.  FS-UAE defaults to JIT off; do not
-#     turn it on here.
-#   * FS-UAE's directory-hard-drive handler lives in a trap ROM at $00F00000,
-#     which Enforcer counts as illegal.  Without the FSPACE option every file
-#     access produces a hit and the report is unreadable.  Hence FSPACE.
-#   * MungWall must be installed BEFORE Enforcer: tools that SetFunction()
-#     AllocMem/FreeMem and chain to the previous vector have to be stacked in
-#     that order (mungwall.doc).
+# Enforcer needs a real MMU, so the CPU is overridden to a 68030 (a bare 68020
+# WEDGES) and JIT must stay off (Enforcer installs but reports nothing at all).
+# FSPACE is required or the trap ROM at $00F00000 floods the report, and
+# MungWall must be installed BEFORE Enforcer.
 #
 # Enforcer and MungWall are not redistributable, so they are not in this tree.
 # Point AMINETXDUO_ENFORCER / AMINETXDUO_MUNGWALL at your copies if they are not

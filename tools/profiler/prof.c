@@ -7,35 +7,9 @@
  * vector, and recording everything the host needs to turn a raw address back
  * into a name.
  *
- * WHAT THE HOST NEEDS, and where each comes from:
- *
- *   1. Where the profiled program was loaded.  LoadSeg() puts each hunk
- *      wherever it likes, so a sampled PC means nothing until it is mapped
- *      back to the link-time addresses in the executable.  prof_set_target()
- *      walks the seglist the caller loaded and records every hunk's base and
- *      length in load order, which is the same order as the hunks in the file.
- *
- *   2. Which library or device anything else belongs to.  Every AmigaOS
- *      library is a jump table: LVO -6*n of a base is a JMP to the real entry
- *      point.  prof_scan_libs() resolves all of them for every library, device
- *      and resource on Exec's lists, so a PC in Kickstart can be named by the
- *      nearest preceding entry, "exec.library/Forbid" rather than
- *      "$00f8xxxx", and the hull of one library's targets becomes a named
- *      range, so a sample in a disk-loaded device with no symbols at all still
- *      gets a module.
- *
- *   3. Which task was running.  SysBase->ThisTask, for the cost of one
- *      indirection in the handler, plus a name table so the host can print
- *      "IP thread" rather than "$0021c4f8".
- *
- *   4. When.  ps_Time, so the gaps Disable() leaves are a measured quantity
- *      rather than a silent bias.  See prof_gap_summary().
- *
  * NO CIA TIMER.  Two CIA sources were tried and both died mid-run while still
- * producing enough correct samples to look convincing; the source table that
- * used to carry them as fallbacks is gone rather than kept, because a fallback
- * that is known to fail silently is worse than no fallback.  Four audio
- * channels are tried instead, and if none is free the tool refuses.
+ * producing enough correct samples to look convincing.  Four audio channels
+ * are tried instead, and if none is free the tool refuses.
  *
  * SPDX-License-Identifier: MIT
  */

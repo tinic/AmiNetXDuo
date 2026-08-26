@@ -1,36 +1,13 @@
 /*
  * Entropy pool probe, what is src/common/ami_random.c actually worth?
  *
- * Three separate questions, and it is worth being clear which is which:
+ * The SHA-256 itself is NOT checked here; it is verified against the FIPS
+ * 180-4 vectors in a host harness.  The entropy numbers are REPORTED, not
+ * asserted: passing them would only mean the machine looked lively today.
  *
- *   1. Is the CONDITIONING correct?  The obvious output failure modes,
- *      constant output, a repeated block, a stuck bit, a wildly skewed byte
- *      distribution, plus the DRBG wiring.  These are cheap and a failure
- *      here is a real bug.  The SHA-256 itself is NOT checked here; it is
- *      verified against the FIPS 180-4 vectors in a host harness, because
- *      exposing the hash just to test it would be the wrong trade.
- *
- *   2. Is there any ENTROPY going in?  Reported, not asserted: the pool's own
- *      credit, whether ami_random_is_seeded() clears the bar, and how many
- *      distinct E-Clock interval deltas the machine produced.  Passing these
- *      "tests" would only mean the machine looked lively today.
- *
- *   3. Does a COLD BOOT give the same stream twice?  This is the one that
- *      matters and it cannot be answered from inside one run.  The probe
- *      writes its first 32 output bytes to DH0:randtest.txt; run it twice
- *      from a cold boot and diff the file.  Identical output would NOT
- *      automatically be a bug, it would be the honest measurement of how
- *      little a fixed boot image has to offer.  Measured under FS-UAE: three
- *      cold boots gave three different streams, driven almost entirely by the
- *      host wall clock reaching GetSysTime().  Different is not the same
- *      claim as unpredictable; see the source dump below for which individual
- *      sources moved and which did not.
- *
- *   AMINETXDUO_RUN_TAG=rand1 ./tools/amiberry-run.sh -t 120 \
- *       build/cm/tools/smoke/randtest
- *   AMINETXDUO_RUN_TAG=rand2 ./tools/amiberry-run.sh -t 120 \
- *       build/cm/tools/smoke/randtest
- *   diff build/testhd-rand1/randtest.txt build/testhd-rand2/randtest.txt
+ * Whether a COLD BOOT gives the same stream twice cannot be answered from
+ * inside one run.  The probe writes its first 32 output bytes to
+ * DH0:randtest.txt; run it twice from a cold boot and diff the file.
  *
  * SPDX-License-Identifier: MIT
  */

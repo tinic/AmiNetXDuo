@@ -1,17 +1,9 @@
 /*
  * <devices/timer.h> for the bsdsocket host tests.
  *
- * struct timeval is DELIBERATELY not defined here.  The Amiga's is
- * { ULONG tv_secs; ULONG tv_micro; } and POSIX's is
- * { time_t tv_sec; suseconds_t tv_usec; }: different member names, different
- * types, same tag.  Defining ours would collide with the one <sys/select.h>
- * has already brought in, and defining neither is not an option because
- * netinet/in.h needs the POSIX one.
- *
- * host_prelude.h resolves it by renaming the tag once the C library's headers
- * are parsed, so tr_time below is the Amiga's two ULONGs and the C library
- * keeps its own.  tv_secs and tv_micro are therefore readable here, which is
- * what lets options.c and select.c compile in this tier.
+ * struct timeval is DELIBERATELY not defined here: the Amiga's and POSIX's share
+ * a tag with different members, and netinet/in.h needs the POSIX one.
+ * host_prelude.h renames the tag once the C library's headers are parsed.
  *
  * SPDX-License-Identifier: MIT
  */

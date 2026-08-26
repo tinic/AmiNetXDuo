@@ -1,81 +1,15 @@
 #!/usr/bin/env bash
 #
-# Port a Unix network client to m68k AmigaOS.  Source this, do not run it:
+# Port a Unix network client to m68k AmigaOS.  Source this, do not run it.
+# Exports AMIGA_CLIENT_{CFLAGS,LDFLAGS,LIBDIR,COMPAT_A}; call
+# amiga_client_prepare [BUILDROOT] once before configuring.
 #
-#   . "$ROOT/clients/amiga-client.sh"
+# The three NDK flags are all required: -D__USE_NEW_TIMEVAL__ (NDK vs POSIX
+# struct timeval), -D_SYS_MBUF_H (net/if.h has an undefined struct __timeval as
+# a FIELD), -include sys/types.h (NDK sys/socket.h uses ssize_t undeclared).
 #
-# It resolves the cross toolchain (through tools/amiga-toolchain.sh, so a
-# client build and a stack build never disagree about which compiler they are
-# using) and then exports everything a stock configure or CMake needs to
-# produce a working AmigaOS binary against bsdsocket.library:
-#
-#   AMIGA_CLIENT_CFLAGS     compiler flags, including the three NDK
-#                           workarounds explained below
-#   AMIGA_CLIENT_LDFLAGS    -L for the fabricated support archives
-#   AMIGA_CLIENT_LIBDIR     where those archives are
-#   AMIGA_CLIENT_COMPAT_A   libamigaclient.a, the libc and libgcc gaps
-#
-# amiga_client_prepare [BUILDROOT]  builds the archives.  Call it once before
-# configuring; it is cheap and idempotent.
-#
-# ----------------------------------------------------------------------------
-# THE THREE FLAGS, AND WHY EACH IS THERE
-#
-#   -D__USE_NEW_TIMEVAL__
-#       The Roadshow NDK's <devices/timer.h> defines `struct timeval` with
-#       AmigaOS semantics (two ULONGs, tv_secs/tv_micro).  newlib defines the
-#       POSIX one (time_t/suseconds_t, tv_sec/tv_usec).  Including both is a
-#       redefinition error, and every Unix client wants the POSIX one.  The
-#       NDK header provides this switch itself, in as many words: define it
-#       and AmigaOS uses `struct TimeVal` instead and leaves `struct timeval`
-#       to libc.  Nothing is being worked around here; it is the supported
-#       route and it has been there since NDK 3.9.
-#
-#   -D_SYS_MBUF_H
-#       <proto/bsdsocket.h> pulls in <sys/mbuf.h>, which pulls in <net/if.h>,
-#       which has `struct __timeval ifi_lastchange;` as a FIELD, and
-#       `struct __timeval` is never defined anywhere in the NDK.  It is an
-#       opaque type the inline stubs use behind a pointer, so a pointer is
-#       fine and a field is not.  Nothing in a client wants mbufs, so the
-#       whole header is suppressed by its own guard.  (curl's own
-#       lib/curl_setup.h does exactly this, and calls the m_len clash its
-#       reason; the incomplete type is the one that actually bites here.)
-#
-#   -include sys/types.h
-#       The NDK's <sys/socket.h> declares recv/send/sendto/... as returning
-#       ssize_t without including anything that declares ssize_t.  On the
-#       bebbo/clib2 toolchain curl's build is upstream-tested against, some
-#       other header has already done it.  Here it has not, so
-#       proto/bsdsocket.h fails to compile at all, which a configure script
-#       reports as "AmigaOS bsdsocket.library not found" and then silently
-#       builds a client that calls a libc networking API that does not exist.
-#       tests/conformance/build.sh carries the identical line for the
-#       identical reason.
-#
-# ----------------------------------------------------------------------------
-# THE TWO ARCHIVES
-#
-#   libamigaclient.a    clients/compat/*.c plus src/common/ami_udivdi3.c --
-#                       stat/mkdir/isatty/gettimeofday over dos.library, and
-#                       AmiNetXDuo's CPU-dispatched compiler helpers and the
-#                       client-only helpers.  See those files; each says what
-#                       it is faithful about.
-#
-#   libnet.a, libatomic.a
-#                       Named, not chosen: curl's CMakeLists.txt hardcodes
-#                       `list(APPEND CURL_NETWORK_AND_TIME_LIBS "net" "m"
-#                       "atomic")` for AMIGA and there is no switch for it.
-#                       libm.a is real and in the toolchain.  The other two
-#                       are ours: libnet.a holds a weak SocketBase (see
-#                       clients/compat/amiga_net.c, it is what makes
-#                       configure-time socket feature tests LINK, which is
-#                       not optional), and libatomic.a is empty because
-#                       clients/compat/amiga_libgcc.c supplies the one atomic
-#                       a client actually reaches.
-#
-#   Fabricating an archive to satisfy a hardcoded -l is preferable to
-#   patching the client's build system: the patch would have to be rebased
-#   on every version bump, and this does not.
+# libnet.a and libatomic.a are fabricated because curl's CMakeLists.txt
+# hardcodes `-lnet -lm -latomic` for AMIGA and there is no switch for it.
 #
 # SPDX-License-Identifier: MIT
 

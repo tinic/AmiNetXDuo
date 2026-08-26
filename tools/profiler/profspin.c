@@ -2,34 +2,19 @@
  * profspin, an ordinary program, for proving the profiler on something that
  * is not part of it.
  *
- * This links nothing from tools/profiler.  It does not know it is being
- * profiled, it is not recompiled for profiling, and it has no idea what an
- * autovector is.  It is a Shell command like any other:
+ * This links nothing from tools/profiler and is not recompiled for profiling:
  *
  *      Profile OUT=spin.prof profspin RANGES=spin.ranges
  *
- * What it does write is GROUND TRUTH FOR THE CHECKER, not anything the
- * profiler consumes: the exact byte range of each assembly kernel, taken from
- * the linker's own labels, and the wall clock it measured in each phase.
- * tools/profiler/profreport.py --contain reads that file and asks two
- * questions of the profile:
+ * RANGES is GROUND TRUTH FOR THE CHECKER, not anything the profiler consumes:
+ * the exact byte range of each assembly kernel, taken from the linker's own
+ * labels, and the wall clock it measured in each phase.  The kernels have no
+ * calls in them, so during their phases every sample must land inside them.
+ * tools/profiler/profreport.py --contain reads that file.
  *
- *   CONTAINMENT.  Did the samples land inside the kernels that were running?
- *   The kernels have no calls in them, so during their phases every sample
- *   must.  This is the frame-offset test, and it is sharp: a vector that read
- *   the exception frame two bytes off would record half an SR concatenated
- *   with half a PC, an address nowhere near any of these ranges, and would
- *   score approximately zero rather than a bit less.
- *
- *   PROPORTIONALITY.  Does each kernel's share of the samples match its share
- *   of the measured wall clock?  A sampler can be correctly aimed and still
- *   biased, by only firing when some other periodic thing is also running,
- *   say, and this is what catches that.
- *
- * There are no phase marks.  The profiler cannot ask a program it did not
- * build to call anything, so the check is made over the whole run against the
- * ratios this program measured for itself.  That is the case a general-purpose
- * profiler actually has to work in.
+ * There are no phase marks: the profiler cannot ask a program it did not build
+ * to call anything, so the check is made over the whole run against the ratios
+ * this program measured for itself.
  *
  * SPDX-License-Identifier: MIT
  */

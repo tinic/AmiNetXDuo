@@ -4,53 +4,18 @@
 #
 #   tools/check-gitlinks.sh [commit]
 #
-# A gitlink is forty characters in a tree, and nothing validates it at the
-# moment it is written: `git commit` will record an object id no submodule has
-# ever produced, the superproject stays green, and the failure surfaces on
-# somebody else's machine either as `git submodule update` refusing to run or,
-# worse, as a stale submodule that still compiles.  This session lost time to
-# the second one -- a checkout arrived with third_party/netxduo at the wrong
-# commit and the build said `implicit declaration of nx_mld_enable`, which
-# reads exactly like a defect of ours.
+# Nothing validates a gitlink at the moment it is written, so five things can be
+# wrong and all five are checked: the working tree is stale (`git submodule
+# status` prints `+`); no such object; the object is reachable from no ref, so a
+# fresh clone cannot fetch it; the pin is not on the first-parent chain of the
+# branch .gitmodules names nor on a tag (asked only of a submodule with history
+# to answer with); and the bump went backwards, so that pin silently reverts
+# every fix merged in between.
 #
-# Five things can be wrong, and this checks all five.
-#
-#   THE WORKING TREE IS STALE.  `git submodule status --recursive` prints `+`
-#   when the checked-out commit is not the recorded one.  Cheapest of the four
-#   and the one that pays for this script every time it fires.
-#
-#   NO SUCH OBJECT.  3cb2e52e recorded netxduo at a5366b1d47d5f00b... when the
-#   merge it meant was a5366b1d73b91c30...: the first eight characters are
-#   right and the remaining thirty-two were invented, so it is not a truncation
-#   anybody can widen back out.  Seven commits carry it and `git submodule
-#   update` cannot work at any of them.
-#
-#   NOT REACHABLE FROM ANY REF.  1787574d pinned netxduo at 9e5d3226, the tip
-#   of a topic branch revised before it was merged.  That object still exists
-#   in the clone that wrote it and nowhere else: a fresh clone fetches refs,
-#   and no ref reaches that commit any more.  This is what pinning a tip costs,
-#   and it is invisible from the machine that did it.
-#
-#   NOT ON THE TRACKED BRANCH.  A pin belongs on the first-parent chain of the
-#   branch .gitmodules names, or on a tag.  Merges and tags do not move; a
-#   topic tip does, and is deleted the moment it lands.  Asked only of a
-#   submodule with history to answer with: a shallow checkout has one commit
-#   and no tags, and cannot tell a good pin from a bad one either way.
-#
-#   THE BUMP WENT BACKWARDS.  1d8b8a15 moved netxduo from merge 396dc632 back
-#   to tip 7206b214, which is not a descendant of it, so that commit's tree
-#   silently reverts every fork fix merged in between.  Both ids are real and
-#   both check out: the only thing that separates a bump from a revert is
-#   ancestry, and nothing was asking.
-#
-# Object existence and reachability are also swept over every gitlink recorded,
-# which is cheap because a raw log names each change once: about 140 distinct
-# ids over 3000 commits.  A pin can rot after it is written -- deleting a topic
-# branch on the remote takes its object with it -- so the sweep is the only
-# thing that notices.
-#
-# Output is key=value and an exit code: 0 clean, 1 a pin is wrong, 2 nothing
-# to check (no submodule initialised).
+# Existence and reachability are also swept over every gitlink ever recorded,
+# because a pin can rot after it is written: deleting a topic branch on the
+# remote takes its object with it.
+# Output is key=value; exit 0 clean, 1 a pin is wrong, 2 nothing to check.
 #
 # SPDX-License-Identifier: MIT
 

@@ -6,38 +6,9 @@
 #                   -r AMINETXDUO_A2065 -r AMINETXDUO_TLS13_PEER \
 #                   -- tests/tls/run-tls13.sh -b build/ci/default -c 68020
 #
-# .github/workflows/emulator.yml used to spell the same requirement as a step
-# condition, `if: env.AMINETXDUO_A2065 != ''`.  A step that does not run under a
-# condition leaves NOTHING: no line in the log, no row in the summary, and the
-# job it belongs to still reports success.  Twenty arms were gated that way and
-# a run with every variable unset was indistinguishable from a run that tested
-# all of them.
-#
-# So the condition moves in here.  The step always runs, this decides, and
-# either way there is a row in the run summary saying which it was.  Same shape
-# as tests/tools/run-cardsweep.sh, which prints a status per card rather than
-# leaving the untestable ones out of its table.
-#
-# A skipped arm exits 0: a machine that was never given an SMB share is not a
-# machine with an SMB defect.  What it must not do is pass QUIETLY, and the row
-# is what stops that.  Whether a whole tier going missing should be a failure is
-# a different question and it is answered in the workflow's `gate` job.
-#
-# THREE STATES, NOT TWO.  An arm either ran and passed, or did not run, or
-# failed, and the first two are not the same fact.  A missing variable was
-# already the second; an exit code was not.  `-x CODE` used to name a code that
-# "counts as a pass", so a harness whose whole point was to say I COULD NOT
-# OBSERVE THIS got a green row that read as a measurement -- and `tools/ci.sh
-# cards` with no peer, which measures nothing at all, exited 0 and was reported
-# as nine cards proved.  `-s CODE` replaces it: the same exit code, and the row
-# says the arm did not run.  Both still exit 0 from here.
-#
-# OUTPUT is key=value plus an exit code, and nothing about the verdict is left
-# in prose:
-#
-#   arm="TLS 1.3 handshake, 68020" status=pass rc=0 wall_s=41
-#   arm="Mount an SMB share" status=skipped reason="AMINETXDUO_PEER is not set"
-#   arm="Every network card" status=skipped rc=77 wall_s=3 reason="it tested nothing"
+# THREE STATES, NOT TWO: an arm ran and passed, or did not run, or failed.
+# `-s CODE` names an exit code that means the arm did not run; a skipped arm
+# still exits 0 from here, and the row is what stops it passing quietly.
 #
 # SPDX-License-Identifier: MIT
 

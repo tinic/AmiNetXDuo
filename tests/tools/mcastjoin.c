@@ -1,37 +1,12 @@
 /*
  * McastJoin, does this card's driver accept a real multicast address?
  *
- * The whole of the defect anxnet.device was written to remove is one bit.
- * Individual Computers' x-surf.device and x-surf-100.device 1.16 test bit 7
- * of ios2_SrcAddr[0] in S2_ADDMULTICASTADDRESS; the Ethernet group bit is bit
- * 0.  Every address a real group has -- IPv4's 01:00:5e:.., IPv6's 33:33:.. --
- * has bit 7 clear, so every legitimate join is refused and the card's hash
- * filter stays empty.
+ * It asks the driver directly, with no stack in the way, because our own stack
+ * works around the bit-7 S2_ADDMULTICASTADDRESS defect (src/sana2/sana2_device.c,
+ * ami_sana2_multicast) and the card sweeps therefore cannot see it.  rc 0 means
+ * the three group addresses were accepted and the unicast one was not.
  *
- * THE SWEEPS CANNOT SEE THIS, and that is why this exists.  Our own stack
- * works around it (src/sana2/sana2_device.c, ami_sana2_multicast): when a
- * driver answers S2ERR_BAD_ADDRESS/S2WERR_BAD_MULTICAST to an address with
- * bit 7 clear, it asks again for the SAME HASH BUCKET using a synthetic
- * 80:00:00:00:00:xx that the bit-7 test accepts.  So tests/tools/
- * run-cardsweep6.sh passes on those drivers through this stack, and would not
- * through Roadshow or AmiTCP.  What that workaround hides, this prints.
- *
- * It asks the driver directly, with no stack in the way:
- *
- *   33:33:ff:12:34:56   an IPv6 solicited-node address, the one whose loss
- *                       costs off-LAN IPv6
- *   33:33:00:00:00:01   IPv6 all-nodes
- *   01:00:5e:00:00:01   IPv4 all-hosts
- *   02:41:4d:49:00:01   a UNICAST address, which must be REFUSED
- *
- * Output is key=value, one line per address, plus a verdict.  rc 0 means the
- * three group addresses were accepted and the unicast one was not.
- *
- * A one-off probe rather than a command, so it has no CMake entry:
- *
- *   . tools/amiga-toolchain.sh
- *   "$AMIGA_GCC" -O2 -m68020 -I"$AMIGA_NDK" -o McastJoin \
- *       tests/tools/mcastjoin.c
+ * A one-off probe rather than a command, so it has no CMake entry.
  *
  * SPDX-License-Identifier: MIT
  */

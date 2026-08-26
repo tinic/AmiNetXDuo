@@ -7,65 +7,16 @@
 #                                [-B backend] [-M mac] [-T tag] [-t seconds]
 #                                [-w seconds] [-A] [-C] [-k]
 #
-# THE REPORTS THIS EXISTS FOR.  GitHub #4, "Mounting SMB freezes system", an
-# A500 with a PiStorm on OS 3.2.2, no error printed, and the same DOSDriver
-# working over AmiTCP 4.2.  GitHub #3, "opening SMB2 to the LAN never
-# responds", while ping and SNTP work.  Neither is reachable from a socket
-# test: tests/tools/run-smbprobe.sh already shows `nc` connecting to 445 and
-# 139 from a booted A1200, so whatever fails happens above the TCP handshake,
-# inside smb2-handler, and only a machine that can Mount can show it.
+# NOTHING HANGS THE HARNESS: Mount, List and Info run DETACHED, each step
+# writing its own marker with its own `Echo >file`, because a process that
+# hangs never flushes a file it left open.  `netstat -a` is sampled four times
+# meanwhile, separating "never connected" from "connected and stopped".
 #
-# WHY NOT ToolsSmoke.  smb2-handler is reached through a DOSDriver, and a
-# DOSDriver needs `Mount`, which needs a C: with Commodore's commands in it.
-# The staging drive tools/amiberry-run.sh builds has eight of our binaries and
-# nothing else.  So this assembles a Workbench, the same way
-# install/test/run-workbench.sh does, and boots that.
+#   -A   ACTIVATE=1, so the handler starts at Mount time, not on first access
+#   -P   puts tests/tools/smb2-testserver.py on a THIRD machine and mounts it;
+#        the emulating host cannot be it, its frames do not reach its own pcap
 #
-# NOTHING HANGS THE HARNESS.  Mount, List and Info run in a DETACHED process,
-# each step writing its own file before and after, so the boot shell always
-# reaches the end and always writes DH0:.done.  A step that never returns is
-# then a file that is not there, with the netstat samples taken while it was
-# still running beside it -- rather than a run that times out and produces
-# nothing.  Each marker is its own `Echo >file`, opened and closed, because a
-# process that hangs never flushes a file it left open.
-#
-# THE SAMPLES ARE THE POINT.  `netstat -a` is run four times while the
-# detached process is working: whether a connection to the server's port 445
-# is ESTABLISHED at that moment separates "the handler never connected" from
-# "it connected and the exchange stopped".
-#
-#   -A   ACTIVATE=1 in the DOSDriver, so the handler starts at Mount time
-#        rather than on first access.  Without it Mount only creates the
-#        device node and `List` is what connects; with it, Mount is.  Both
-#        arms are worth running: they put the connect in different processes.
-#   -C   capture the exchange on the host with tcpdump, port 445/139, for the
-#        whole run.  Needs a tcpdump this user can run on the bridge.
-#
-# INGREDIENTS, none of them ours:
-#
-#   Workbench 3.1 ADFs   AMINETXDUO_ADF_DIR (-o 31), and amitools' xdftool
-#   Workbench 3.2 tree   AMINETXDUO_WB32_TARBALL or tools/mkwb32.sh (-o 32)
-#   Kickstart            AMINETXDUO_KICKSTART_<MODEL>[_32]
-#   a2065.device         AMINETXDUO_A2065
-#   smb2-handler         AMINETXDUO_SMB2FS, the smb2fs archive unpacked
-#   filesysbox.library   AMINETXDUO_FILESYSBOX
-#   a share to mount     -P, which puts tests/tools/smb2-testserver.py on a
-#                        named machine and mounts that.  -u names one that is
-#                        already there instead.
-#
-# -P IS THE ONE TO USE IN A RUNNER.  A share that happens to be up on the LAN
-# is not coverage: the day it is off, or its password changes, this test fails
-# for a reason that has nothing to do with the stack, and the day it is on,
-# nothing records what it was.  With -P the harness brings its own server, on a
-# machine it is told about, and takes it away afterwards.  It has to be a THIRD
-# machine for the reason tests/tools/smb2-testserver.py:20-23 gives: a frame
-# the guest sends to the emulating host's own MAC does not come back round to
-# that NIC's pcap.
-#
-# Exit status: 0 the share mounted and listed, 1 it did not, 2 an ingredient
-# is missing.  A `List` that never returned is exit 1, not a timeout: the
-# transcript says which step it was.
-#
+# Exit 0 mounted and listed, 1 not, 2 an ingredient is missing.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

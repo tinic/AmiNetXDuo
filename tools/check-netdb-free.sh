@@ -4,35 +4,18 @@
 #
 #   tools/check-netdb-free.sh [builddir]
 #
-# WHAT IT STOPS
-#
 # ami_netdb_load() builds four tables out of DEVS:Internet and hangs them off
-# file-scope statics in src/config/netdb.c: 12,616 bytes on a stock install.
-# ami_alloc() is AllocVec(), and AmigaOS gives back nothing when a process
-# exits, so a command that loads them and never calls ami_netdb_free() costs
-# the machine 12,616 bytes every time it is run, until the next reboot.
+# file-scope statics in src/config/netdb.c, 12,616 bytes on a stock install,
+# through AllocVec(); AmigaOS gives back nothing when a process exits, so a
+# command that loads them and never calls ami_netdb_free() costs the machine
+# that much until the next reboot.  Such a rule is broken by ADDING a caller,
+# not by removing a free.
 #
-# That was one rule held by hand in eight places, and `hostname` broke it a
-# week after it was written.  It broke it the way every such rule is broken:
-# not by removing a free, but by adding a caller.  ami_config_load() used to
-# load the netdb as a side effect, so `hostname` acquired the debt by asking
-# for the interface list.  That side effect is gone (src/config/config_file.c);
-# this is the other half, and it is the half that survives somebody adding a
-# lookup to a command that has none today.
-#
-# HOW
-#
-# The linker's map, not the source.  --gc-sections means a tool's map lists
-# ami_netdb_load only when something in that tool can actually reach it, so
-# this reads what was LINKED rather than what was written, and no spelling,
-# macro or indirection hides a caller from it.  A tool that names any
-# allocating netdb entry point and does not name ami_netdb_free fails the
-# build.
-#
-# bsdsocket.library is not a tool and is not checked here: it is not a process
-# that exits, its load is bsd_lib_open() and its free is bsd_lib_expunge(), and
-# tools/alloc-census.sh gates that pair on the real thing by provoking an
-# expunge and reading what is still outstanding.
+# The linker's map, not the source: --gc-sections means a tool's map lists
+# ami_netdb_load only when something in that tool can actually reach it.  A tool
+# that names an allocating netdb entry point and not ami_netdb_free fails.
+# bsdsocket.library is not a process that exits; tools/alloc-census.sh gates
+# bsd_lib_open()/bsd_lib_expunge() instead.
 #
 # SPDX-License-Identifier: MIT
 

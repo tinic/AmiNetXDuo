@@ -1,32 +1,6 @@
 /*
  * AmiNetXDuo, crypto68k modular exponentiation.
  *
- *   The vendored _nx_crypto_huge_number_mont_power_modulus() is bit-at-a-time
- *   square-and-multiply over every bit of every exponent limb.  Two
- *   consequences, both fixed here.
- *
- *   1. It never skips the leading zero bits of the top exponent limb.  For
- *      e = 65537 the exponent is one limb, 0x00010001, so it performs 32
- *      squarings and 2 multiplies where 16 squarings and 1 multiply suffice.
- *      An RSA public operation, the certificate signature check a TLS
- *      client does three times per handshake, therefore costs about twice
- *      what it needs to.  The largest gain in the module, and not an assembly
- *      change.
- *
- *   2. For a full-length private exponent it does one multiply per set bit,
- *      about 1024 of them for RSA-2048.  Sliding window with w bits needs
- *      2^(w-1) + (b-w)/(w+1) instead.  At b = 1024, w = 6 that is 32 + 145
- *      against 512.  (Formula from the bn_local.h of OpenSSL, which is also
- *      where the window thresholds below come from.)
- *
- *   Squarings are then most of the work, which is what makes the ~24% of
- *   c68k_mont_sqr() over c68k_mont_mul() matter.
- *
- *   The setup, radix^2 mod m, still goes through the vendored long division.
- *   It is O(s^2) and runs once, so a replacement gains little.  It also keeps
- *   the before/after numbers different only in the part under optimisation,
- *   and leaves one less division routine to get subtly wrong.
- *
  * SPDX-License-Identifier: MIT
  */
 

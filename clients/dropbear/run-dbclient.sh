@@ -7,71 +7,15 @@
 #                                    [-C COMMANDS] [-N BOARD] [-B BACKEND]
 #                                    [-X FILE]...
 #
-# It was called run-fsuae.sh.  Both halves of it drove tools/amiberry-run.sh
-# and -A picked between them; fs-uae left the tree on 2026-08-04 and the name
-# outlived it.  -N and -B now say what they always meant: the board, and what
-# it is wired to.  Without -B the backend is tools/amiberry-run.sh's own
-# default, which is SLIRP, and SLIRP puts the host at 10.0.2.2, which is where
-# the default command list points.
+# EVERY timing here needs the machine to itself; nothing enforces it.  NOT A
+# BASELINE either: it depends on a server this script does not start --
+# clients/dropbear/sshd-testserver.sh starts one at 10.0.2.2:2222 under SLIRP.
 #
-#   EVERY timing here needs the machine to itself -- a handshake measured while
-#   two other emulators share the host is fiction, and this project has already
-#   had one set of figures corrupted that way.  Nothing enforces it: the
-#   exclusive lane lived in the FS-UAE runner's slot lock and went with it.
-#   -C  a command list to stage instead of the default four connections
-#   -X  stage one more file into DH0:, repeatable.  It exists for
-#       tools/profiler/Profile, which has to sit beside dbclient in order
-#       to load it, and it keeps a profiling run on THIS staging rather
-#       than on a second copy of it that would drift.
-#   -E  a SECOND dbclient build, staged as SYS:dbclient2.
+# -i names a PRIVATE KEY in Dropbear's own format, generated on the HOST on
+# purpose: this machine's entropy pool credits itself about 21 bits.
 #
-#       This exists because of the emulator queue, and it makes the comparison
-#       better rather than merely cheaper: an A/B taken inside ONE run shares
-#       the host's load, the SLIRP scheduling and the server process, so the
-#       only thing that differs between the two rows is the binary.  Two runs
-#       minutes apart do not have that property, and docs/RESEARCH.md 18.6
-#       records what host contention does to a wire figure.
-#
-# WHAT IT NEEDS ON THE OTHER END
-#
-#   An SSH server the guest can reach.  SLIRP puts the HOST at
-#   10.0.2.2, so an sshd on this machine is the obvious target and is what the
-#   default command list uses.  clients/dropbear/sshd-testserver.sh starts one on port
-#   2222 with its own host keys, its own authorized_keys and no root:
-#
-#       clients/dropbear/sshd-testserver.sh start        # writes build/sshd-test/
-#       clients/dropbear/run-dbclient.sh
-#       clients/dropbear/sshd-testserver.sh stop
-#
-#   -i names the PRIVATE KEY staged onto the Amiga.  It must be in Dropbear's
-#   own format, not OpenSSH's; `dropbearkey -t ed25519 -f key` writes one and
-#   `dropbearkey -y -f key` prints the line for authorized_keys.
-#
-#   THE KEY IS GENERATED ON THE HOST ON PURPOSE, and it is not a convenience.
-#   docs/RESEARCH.md's entropy note and clients/dropbear/amiga_dropbear.c both
-#   say why: this machine's pool credits itself about 21 bits.  A per-session
-#   ephemeral key from that pool is a risk bounded by one session; a LONG-TERM
-#   private key from it is not, so no long-term key is made here.
-#
-# WHY -T IS IN EVERY COMMAND
-#
-#   -T asks for no pseudo-terminal.  AmigaOS has none, tcgetattr() answers
-#   ENOTTY in the shim, deliberately, so `dbclient host` without -T fails at
-#   "Failed to set raw TTY mode" and `dbclient -T host command` is the whole
-#   supported shape.  See clients/dropbear/amiga_dropbear.c.
-#
-# WHY -y -y
-#
-#   First -y accepts an unknown host key; second -y stops it being written to
-#   ~/.ssh/known_hosts.  On a directory hard drive with no home directory that
-#   write would fail, and more to the point a test that trusts a key on first
-#   sight should say so rather than accumulate state between runs.
-#
-# It uses clients/dropbear/clientrun.c, a general "run these command lines with
-# a real stack" program (once shared with the curl port, now gone).  dbclient
-# needs the big stack because a Kickstart 3.1 Shell gives only 4 KB.
-#
-# NOT A BASELINE: it depends on a server this script does not start.
+# -T is in every command because AmigaOS has no pty and tcgetattr() answers
+# ENOTTY; -y -y accepts an unknown host key without writing known_hosts.
 #
 # SPDX-License-Identifier: MIT
 
@@ -261,25 +205,13 @@ fi
 
 # ------------------------------------------------------------- the server --
 #
-# -S stages the Dropbear SERVER as well and points the client at 127.0.0.1
-# instead of the host.
+# -S stages the Dropbear SERVER as well and points the client at 127.0.0.1.
+# It HAS to be loopback: SLIRP is outbound-only, so nothing on this machine can
+# open a connection INTO the guest.
 #
-# It has to be loopback.  FS-UAE's SLIRP is outbound-only, there is no way
-# for anything on this machine to open a connection INTO the guest, so a
-# server on the Amiga cannot be reached from here at all.  Running both ends
-# inside the guest is not a workaround for that, it is the only arrangement
-# that exercises the accept() side of the stack under emulation, and it puts
-# a real key exchange over the loopback interface as a bonus.
-#
-# The host key is generated HERE, by the host build of dropbearkey, and cached.
-# Generating one in the guest is a minute of ed25519 on a 14 MHz 68020 before
-# the thing being tested even starts, and it would be a different key every
-# run.
-#
-# authorized_keys goes to DH0:.ssh/ because getpwnam() in the shim reports a
-# home of SYS: and Dropbear appends "/.ssh/authorized_keys", which reaches
-# the right place only because amiga_fix_path() collapses the "SYS:/" that
-# produces.  If that ever regresses, this test is what notices.
+# The host key is generated here and cached.  authorized_keys goes to DH0:.ssh/
+# because getpwnam() in the shim reports a home of SYS: and amiga_fix_path()
+# collapses the "SYS:/" that Dropbear's append produces.
 if [ -n "$DB_SERVER" ]; then
     DBSRV="$ROOT/$DB_SERVER/dropbear"
     [ -f "$DBSRV" ] || {

@@ -4,29 +4,9 @@
 #
 #   tools/check-vector-abi.sh [source-root]
 #
-# Every vector in that header passes its arguments in registers, and says so
-# with register ... __asm("a0") on each parameter.  GCC drops those annotations,
-# silently and at every warning level, when it has to COMPOSE two declarations
-# of the same function: if a struct tag is incomplete where the prototype is
-# parsed and complete where the definition is, the definition's type is not the
-# prototype's type, GCC forms the composite, and the register names are not part
-# of it.  The vector then takes its arguments off the stack while the caller
-# still puts them in registers.
-#
-#   struct if_nameindex;                                  /* the trigger */
-#   VOID bsd_if_freenameindex(register struct if_nameindex *ptr __asm("a0"),
-#                             register struct AmiSocketBase *b  __asm("a6"));
-#
-# That was if_freenameindex() until 2026-08-10.  It read `ptr` off the stack,
-# so it freed whatever the caller happened to have at sp+4: usually zero, which
-# leaks the block, and otherwise a FreeVec() of an arbitrary address, which
-# takes the machine down inside exec's memory list.  The return type counts
-# too -- if_nameindex() takes no pointer argument and lost its a6 the same way.
-#
-# The fix is to include the header that defines the type.  This is the alarm
-# for the next forward declaration, because nothing else is: no diagnostic, no
-# link error, and a caller that happens to leave the right value on the stack
-# behaves correctly.
+# GCC drops the register ... __asm() annotations, silently and at every warning
+# level, when it composes two declarations of the same function.  The fix is to
+# include the header that defines the type.
 #
 # SPDX-License-Identifier: MIT
 

@@ -1,30 +1,9 @@
 /*
  * AmiNetXDuo, pick this machine's crypto primitives.
  *
- * The module used to be one all-or-nothing switch: AMINETXDUO_CRYPTO68K_ASM was
- * ON for a 68020 or 68040 build and OFF for a 68000 or 68060, so the archive
- * carried a tls.library per CPU and a machine that installed the wrong one
- * either ran the portable C for everything or trapped every MULU.L into
- * 68060.library.  Here the choice is AttnFlags at library init, once, and one
- * binary serves the family.
- *
- * Most of the assembly in this directory is legal on every 68k and is called
- * by name: c68k_chacha20.S, and four of the six routines in c68k_prim.S (add,
- * sub, cmp, add_carry).  Only two primitives cannot be one routine, and they
- * are the two the 68060 lost:
- *
- *   addmul_1   MULU.L 32x32 -> 64 in c68k_prim.S, and the same function
- *              rewritten in MULU.W in c68k_prim_mulw.S, which every part
- *              implements.  Both are assembled now, and this picks.  It is the
- *              hottest routine in the module, so a wrong choice costs the most
- *              there.
- *   div_2by1   DIVU.L 64/32 in c68k_prim.S, against the portable 64-bit divide
- *              that reaches src/common/ami_udivdi3.c.
- *
- * poly1305_blocks is the third: its inner loop is a 32x32 -> 64 product, so it
- * is 68020-to-68040 assembly or the C, with nothing in between.
- *
- * c68k_variant.h has the two hardware facts this reads and why they are two.
+ * Two primitives cannot be one routine, because they are the two the 68060
+ * lost: addmul_1 (MULU.L 32x32 -> 64, else MULU.W) and div_2by1 (DIVU.L 64/32,
+ * else the portable divide).  poly1305_blocks is 68020-to-68040 asm or the C.
  *
  * SPDX-License-Identifier: MIT
  */

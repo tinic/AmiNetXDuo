@@ -5,25 +5,13 @@
 #   . tools/emu-board.sh
 #   emu_board_lines "$BOARD" "$MAC" "$BACKEND" >> "$cfg"
 #
-# WHY IT IS SHARED.  tools/amiberry-run.sh had the only copy, and every harness
-# that wanted a card had to go through that script -- which wipes the staging
-# drive and writes its own Startup-Sequence.  install/test/run-workbench.sh
-# cannot do that (it boots Commodore's own Startup-Sequence, which is the whole
-# point of the release gate), so it wrote the config itself and hardcoded the
-# A2065.  The result was a release gate that booted one card, for every release
-# this project has cut.  A second copy of these keys would have the two drift;
-# one function cannot.
-#
 # The keys are WinUAE's, because Amiberry parses WinUAE's config file.  See
 # tests/tools/cards.sh for what each board is and which machine it needs, and
-# tools/sana2-stage.sh for the driver that opens it.  This file only puts the
-# card in the slot.
+# tools/sana2-stage.sh for the driver that opens it.
 #
-# THE MAC IS SET EXPLICITLY.  Left alone the emulator invents one, so a DHCP
-# server hands out a different lease every run and nothing on the LAN can hold
-# a reservation.  The A2065 keeps only the last three bytes -- a2065.cpp
-# overwrites the first three with Commodore's 00:80:10 -- while the NE2000
-# boards take the whole address.  tools/emu-mac.sh derives one per run tag.
+# THE MAC IS SET EXPLICITLY: left alone the emulator invents one.  The A2065
+# keeps only the last three bytes -- a2065.cpp overwrites the first three with
+# Commodore's 00:80:10 -- while the NE2000 boards take the whole address.
 #
 # SPDX-License-Identifier: MIT
 
@@ -60,33 +48,12 @@ emu_board_lines() { # board mac backend [extra-options]
 
 # DOES THE EMULATOR ACTUALLY USE THE mac= WE WROTE?  $1 board.  0 yes, 1 no.
 #
-# On every board but one, yes.  On ne2000_pcmcia, NO, and the option is
-# accepted in silence -- which is the worst shape a configuration key can have.
+# On every board but one, yes.  On ne2000_pcmcia, NO, and the option is accepted
+# in silence: Amiberry builds it with a NULL autoconfig_info, so ethernet_getmac
+# fails and the card takes `td->mac`, the HOST INTERFACE's address.
 #
-# THE MECHANISM, so nobody has to bisect it again.  Amiberry builds the PCMCIA
-# NE2000 from gayle.cpp:1590:
-#
-#     if (!ne2000->init(ne2000_board_state, NULL)) {
-#
-# The NULL is the autoconfig_info, and ne2000_init_pcmcia() reads the MAC out
-# of `aci->rc->configtext`; with no aci there is no configtext, so
-# ethernet_getmac() is handed a null pointer, returns false, and the card takes
-# `td->mac` -- the HOST INTERFACE's address.  Every Zorro board reaches
-# ne2000_init_2() through a real aci and is unaffected, and the A2065 does the
-# same thing through a2065.cpp:1516.
-#
-# MEASURED, not read: nine bridged pcmcia configs on playhouse3 carrying nine
-# different mac= values all logged `NE2000: 'ens18' 3E:24:11:93:E8:8B`, which
-# is ens18's own address.  The matching a2065 runs logged
-# `7990: 'ens18' 00:80:10:49:AA:BB` for mac=02:41:4d:49:aa:bb -- the last three
-# bytes kept, the first three overwritten with Commodore's, exactly as
-# documented above.
-#
-# WHAT IT IS FOR.  A caller that puts this board on a bridge cannot give two
-# guests distinct identities, so it must not run two at once.
-# tools/amiberry-run.sh takes an interlock through tools/emu-rig-lock.sh
-# instead, and refuses the second run rather than producing two transcripts
-# that quietly describe each other.
+# A caller that puts this board on a bridge cannot give two guests distinct
+# identities, so it must not run two at once.
 emu_board_mac_honoured() { # board
     case "$1" in
     ne2000_pcmcia) return 1 ;;

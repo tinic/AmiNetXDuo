@@ -21,75 +21,10 @@
 extern "C" {
 #endif
 
-/*
- * A DEFINITION IS NOT AN ATTACHMENT, and conflating them was the defect.
- *
- * AMI_CFG_MAX_ATTACHED is how many interfaces can be ONLINE AT ONCE.  It is
- * NX_MAX_PHYSICAL_INTERFACES (port/netxduo-amiga/inc/nx_user.h), because every
- * attached interface costs an NX_INTERFACE inside the NX_IP plus a slot in
- * every per-interface table in src/netstack.  That is a real constraint, and
- * the ATTACH path is where it is refused -- out loud, naming what is already
- * up.  It is the only limit on interfaces anywhere in this tree.
- *
- * FOUR since 2026-08-25, up from two, and priced before it was raised: nx_user.h
- * carries the measurement.  The short version is 4,872 bytes resident -- 4,032
- * of the one allocation the stack makes, 808 of interface-list floor and 32 of
- * bsdsocket.library's BSS -- on every machine, whatever it attaches.  Four is
- * what an A1200 with a PiStorm32 has -- two conventional cards plus
- * genet.device and wifipi.device from the accelerator -- so it is not a round
- * number, it is a machine.  A smaller one builds fewer slots with
- * -DAMINETXDUO_MAX_INTERFACES=2, which sets this constant and
- * NX_MAX_PHYSICAL_INTERFACES together.
- *
- * HOW MANY MAY BE DESCRIBED: any number.  A file in DEVS:NetInterfaces is a
- * description on disk.  It opens no device, creates no NetX Duo object and
- * costs nothing until somebody attaches it, so a machine that keeps five card
- * definitions and brings up whichever two it wants is doing something ordinary
- * and nothing here may stop it.  interfaces[] below is therefore a list that
- * grows, not an array with a ceiling.
- *
- * WHAT USED TO BE HERE was a single constant at 2, and the comment recorded
- * the wrong fix being chosen deliberately: "It was 4, which the stack could
- * parse and NetX Duo could not attach".  The PARSE limit was lowered to the
- * ATTACH limit instead of the attach being taught to refuse clearly, so the
- * third and later files were dropped by the parser (src/config/config_list.c)
- * behind an AMI_WARN that no shipped build compiles -- silently, and in
- * whatever order the directory happened to be read.  Nothing on the machine
- * said an interface had gone.  A card renamed from "eth0" to "wifi" could
- * disappear, and the machine would report the card and the driver as healthy,
- * because as far as the configuration went that interface did not exist.
- *
- * Raising that constant would have been the same defect with a bigger
- * number, and it would have been paid for by every machine that does not need
- * it.  Measured, m68k: sizeof(AmiIfConfig) is 404 bytes, so an array of eight
- * inside this struct is 3,232 of them -- 2,424 bytes (2.4 KB) more than the
- * array of two, on every machine, including the 2 MB A1200 with one card.
- * Holding the list on the end of a pointer instead takes sizeof(AmiConfig)
- * from 4,392 bytes to 3,592, and each description that EXISTS costs 404.  A
- * one-card machine pays 4,400 all in, eight bytes more than it used to; the
- * fixed array of eight would have charged it 6,816 for seven descriptions it
- * does not have.  Unlimited and cheaper, which is the usual shape of a limit
- * that was never buying anything.
- *
- * WHICH OF THEM GETS A SLOT is the second half of the same rule, and it is
- * not the order of the list.  The start-up pass brings up what it finds, and
- * on a drawer that describes more interfaces than there are slots it can only
- * reach the first few -- the list is sorted, so that would make the ALPHABET
- * decide which card a machine is allowed to use, and `AddNetInterface wifi0`
- * on a machine that also has eth0 and eth1 was refused ENOSPC with nothing
- * else online.  So a slot held by an interface NOBODY NAMED yields to one
- * somebody did (src/netstack/netstack.c, ami_ns_yield_candidate()), once the
- * newcomer's device has opened and never before.  A slot held by an interface
- * that WAS named does not yield: that is the attach cap, and it is refused out
- * loud with the holders' names in it.
- *
- * AMI_CFG_IFACE_FLOOR is a starting capacity and nothing else.  NO REFUSAL
- * HANGS OFF IT and nothing is ever dropped for exceeding it: the list grows
- * past it silently and without limit, which is the whole point.  It equals the
- * attach cap only so that the netstack -- which writes an attached interface
- * into this list at the NetX Duo slot number it was handed, by index -- always
- * has that index available even on a machine whose drawer was empty.
- */
+/* AMI_CFG_MAX_ATTACHED is how many interfaces can be ONLINE AT ONCE, and equals
+   NX_MAX_PHYSICAL_INTERFACES (nx_user.h); -DAMINETXDUO_MAX_INTERFACES sets both.
+   AMI_CFG_IFACE_FLOOR is a starting capacity only: interfaces[] grows without
+   limit and nothing is ever dropped for exceeding it. */
 #ifndef AMI_CFG_MAX_ATTACHED
 #define AMI_CFG_MAX_ATTACHED        4
 #endif
@@ -278,46 +213,10 @@ BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg);
 BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
 
 /*
- * nameserver_use[] is what ObtainDomainNameServerList() reports as
- * dnsn_UseCount, in that call's own convention: negative means the server was
- * configured statically in DEVS:Internet/name_resolution, positive means it
- * was added at run time by DHCP or AddDomainNameServer(). The magnitude is the
- * number of references either way, because AddDomainNameServer() nests, see
- * netstack_dns_server_add().
- *
- * A slot in use is never 0, so a zeroed AmiResolverConfig with a non-zero
- * nameserver_count would be malformed; every writer of nameserver[] sets this
- * alongside it.
- *
- * nameserver6[] is the same list for IPv6 servers, which the file cannot hold:
- * name_resolution's NAMESERVER line is a dotted quad. Everything in it arrived
- * in a router advertisement's RFC 8106 option, so every use count is positive,
- * and it is a separate array rather than a family tag on the first because
- * every existing reader of nameserver[] takes a ULONG and would have had to
- * change to ignore entries it cannot represent.
- *
- * search[] holds the file's SEARCH line first and the network's domains after
- * it, and search_static says where the join is: entries below it came from
- * DEVS:Internet/name_resolution, entries from it up came off the network (the
- * DHCP lease's option 119 list in its own order, then its option 15, then a
- * router advertisement's RFC 8106 5.2 list). That is the order a name with no
- * dot is tried in, see ami_ns_search_list() in src/netstack/netstack_dns.c,
- * and it is the AmiHostnameSource ranking applied to a list: name_resolution
- * outranks the network, so it goes first rather than making the network's
- * domains go away.
- *
- * search_use[] counts independent network owners of each dynamic entry.  The
- * ordinary offer/withdraw API remains set-like for DHCP imports and Roadshow
- * compatibility; the reference pair is for a source such as RFC 8106 whose
- * entries can be withdrawn without taking an identical suffix learned from
- * another source with them.  Static entries do not need a count because
- * search_static makes them permanent.
- *
- * Between the two network sources there is no ranking to make -- neither is
- * more authoritative than the other -- so they are in arrival order, which is
- * the lease's and then the advertisement's: the lease is drained once at
- * ami_netstack_dns_start() and an advertisement is drained on the resolver
- * path, which is always later.
+ * nameserver_use[] carries ObtainDomainNameServerList()'s dnsn_UseCount
+ * convention: negative = static from name_resolution, positive = added at run
+ * time, magnitude = references.  A slot in use is never 0.  search[] entries
+ * below search_static are static, from it up came off the network, in try order.
  */
 typedef struct AmiResolverConfig {
     ULONG   nameserver[AMI_CFG_MAX_NAMESERVERS];
@@ -412,21 +311,10 @@ typedef struct AmiConfig {
 } AmiConfig;
 
 /*
- * Read the Roadshow config layout into *cfg. Missing files are not an error: an
- * empty config yields interface_count == 0 and the caller decides.
- * Returns 0 on success, or a negative AMI_CFG_ERR_* code.
- *
- * OWNER FREES.  interfaces[] is allocated here, so every caller must call
- * ami_config_free() before it lets the AmiConfig go, and a command that can
- * leave from several places needs one exit that does it -- the shape
- * ami_netdb_free() already forced on ping, ShowNetStatus and AddNetRoute
- * (a body function called from a main() that does the cleanup).  A library
- * allocation leaks until the library is expunged and AmigaOS reclaims nothing
- * a Process did not free, so this is not a tidy-up: see docs/ALLOCATIONS.md.
- *
- * *cfg is OVERWRITTEN, not merged: the struct is zeroed first.  Loading twice
- * into the same AmiConfig without an ami_config_free() between the two loses
- * the first list.
+ * Read the Roadshow config layout into *cfg; missing files are not an error.
+ * OWNER FREES: interfaces[] is allocated here, so every caller must call
+ * ami_config_free() before it lets the AmiConfig go.  *cfg is OVERWRITTEN, not
+ * merged: loading twice without a free between the two loses the first list.
  */
 #define AMI_CFG_OK              0
 #define AMI_CFG_ERR_NOMEM      (-1)
@@ -619,42 +507,9 @@ UWORD ami_config_search_withdraw_rfc3397(AmiResolverConfig *res,
 #define AMI_CFG_PROBLEM_NOTE    2   /* correct as written, and inert here  */
 
 /*
- * WHY THERE IS A THIRD SEVERITY, and it is not a smaller warning.
- *
- * ERROR and WARN are both about a MISTAKE: something the user typed is wrong,
- * or is right and could not be honoured, and either way the file would be
- * better if it were changed. A NOTE is the opposite. It says a line is
- * correct, is accepted, and does nothing here BY DESIGN -- the Roadshow
- * compatibility keywords, which this stack reads so that a stock configuration
- * file loads unchanged and then acts on none of them.
- *
- * That is not a problem, and reporting it as one cost the user a lecture on
- * every command that loads the configuration. Four such keywords in one file
- * turned `netstat -i' into thirty-three lines, twenty-one of them a
- * "Problems in the configuration:" essay that ended by saying the lines were
- * harmless and could stay. The same block appeared under an unrelated error,
- * so a user asking about one interface was told at length about four keywords
- * they never chose and cannot usefully remove.
- *
- * THE RULE, and it is about the READER rather than the message:
- *
- *   ERROR, WARN   every command that loads the configuration prints them.
- *                 A syntax error, an unusable ADDRESS, a missing DEVICE line
- *                 are the reason the machine is not working, and the command
- *                 the user happened to run is where they will see it.
- *   NOTE          only a command whose JOB is auditing the configuration.
- *                 CheckNetConfig prints them, at whatever length is useful,
- *                 because a user who runs it has asked to be told everything
- *                 about their files. Nothing else prints them at all.
- *
- * src/tools/tool_diag.c's reporter -- the one netstat, ShowNetStatus,
- * AddNetInterface, Online and Offline install -- drops NOTE and prints the
- * other two. src/tools/checknetconfig.c's prints all three, and counts NOTE
- * apart from the rest so a file whose only findings are notes still returns
- * RETURN_OK and still says it has nothing wrong with it.
- *
- * Adding a keyword to the inert list therefore needs no change anywhere else:
- * the category is what decides who sees it, not the keyword.
+ * Every command that loads the configuration prints ERROR and WARN.  NOTE is
+ * printed only by a command whose job is auditing the configuration, which is
+ * CheckNetConfig and nothing else; the category decides the reader.
  */
 
 typedef struct AmiCfgProblem {
@@ -674,32 +529,14 @@ BOOL  ami_config_parse_ip(const char *text, ULONG *out);
 VOID  ami_config_format_ip(ULONG addr, char *buf, ULONG buflen);
 
 /*
- * RFC 4291 text form <-> four host-order ULONGs.
- *
- * ami_config_parse_ip6() accepts the full grammar: eight groups, "::" run
- * compression (at most one), and a trailing dotted quad ("::ffff:10.0.0.1").
- * Leading zeroes inside a group are allowed, more than four hex digits is not.
- *
- * `prefix_out` selects the dialect, which is what lets the two callers share
- * one parser:
- *   - non-NULL: a "/N" suffix is accepted and written there (N in 0..128).
- *     Without a suffix the value is left untouched, so the caller pre-seeds
- *     its default. This is the config-file dialect.
- *   - NULL: a '/' is a syntax error. This is inet_pton()'s dialect.
- *
- * ami_config_format_ip6() writes the RFC 5952 canonical form: lower-case hex,
- * no leading zeroes, "::" over the longest run of two or more zero groups
- * (leftmost wins a tie), and the IPv4 dotted form for v4-mapped addresses.
- * `buflen` must be at least AMI_CFG_IP6_STRLEN; anything shorter yields "".
+ * RFC 4291 text form <-> four host-order ULONGs, RFC 5952 canonical on output;
+ * `buflen` must be at least AMI_CFG_IP6_STRLEN or the result is "".  `prefix_out`
+ * non-NULL accepts a "/N" suffix (0..128) and is left untouched when there is
+ * none, so the caller pre-seeds its default; NULL makes '/' a syntax error.
  */
 /*
  * The RFC 4007 forms. ami_config_parse_ip6() refuses a "%zone" rather than
- * dropping it: an address whose zone went missing names a different
- * destination. _zone() takes it as text and leaves resolving a name to an
- * index to the caller, which is the layer that can call if_nametoindex().
- * ami_config_format_ip6_zone() appends one when `zone` is non-empty; deciding
- * whether an address should carry a zone at all is the caller's, since RFC
- * 4007 11.1 excludes global scope and loopback.
+ * dropping it; _zone() returns it as text, leaving name-to-index to the caller.
  */
 BOOL  ami_config_parse_ip6_zone(const char *text, ULONG out[AMI_CFG_IP6_WORDS],
                                 ULONG *prefix_out, char *zone_out,

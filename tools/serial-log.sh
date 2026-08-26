@@ -9,41 +9,13 @@
 #   serial_log_state <builddir>              on | off | unknown
 #   serial_log_have  <file> <builddir> <what>   0 if <what> can be checked
 #
-# WHY THIS EXISTS
+# AMI_ERROR, AMI_WARN and AMI_INFO compile to `if (0)` unless AMINETXDUO_LOG is
+# defined, and it is OFF by default, so a harness reading guest ami_log() output
+# has a BUILD REQUIREMENT and an empty log is a RESULT, not a passing assertion.
 #
-# Of twenty serial logs written in one session, thirteen came back 0 bytes, and
-# every assertion reading one of those thirteen passed without looking at
-# anything.  tests/tools/run-cycledrill.sh counted orphaned SANA-II reader
-# stacks with `grep -c` over an empty file, got 0, and printed it as a result.
-#
-# The logs were empty because NOTHING WAS EVER WRITTEN TO THEM.  AMI_ERROR,
-# AMI_WARN and AMI_INFO compile to `if (0)` unless AMINETXDUO_LOG is defined
-# (include/aminetxduo/compat.h), and it is OFF by default (CMakeLists.txt).  A
-# library built that way puts not one byte on the serial port, so the seven
-# logs that did have content were the seven whose GUEST PROGRAM carries a
-# RawPutChar tracer of its own -- tests/libraries, tests/concurrent,
-# tests/netstack, tests/udpdrill.  The thirteen empty ones were the runs driven
-# by ToolsSmoke, which writes to stdout, plus tests/leak and tests/stack, which
-# do the same.  Measured on the same rig in the same minute: tests/stack
-# against a -DAMINETXDUO_LOG=OFF build wrote 0 bytes and against
-# -DAMINETXDUO_LOG=ON wrote 3,847, and the second carried every
-# `netstack: mark` line tests/ipv6/run-bringup.sh reports.
-#
-# So a harness that reads guest ami_log() output has a BUILD REQUIREMENT, and
-# until this file existed nothing checked it.  Two things follow, and both are
-# here rather than in each harness:
-#
-#   * the state of the build is a fact about the build, readable from it
-#   * an empty log is a RESULT OF ITS OWN and never a passing assertion
-#
-# THE PATH IS HERE TOO, because four harnesses had it wrong.
-# run-livetools.sh, run-tcphandler.sh, run-routes.sh and
-# tests/ipv6/run-tools-amiberry.sh each built `build/serial-<tag>.log`, which
-# tools/amiberry-run.sh has never written -- it writes
-# `build/amiberry-serial-<tag>.log`.  Every one of them guarded its serial
-# assertions with `[ -s "$SERIAL" ]`, so a filename that never exists read as a
-# clean skip on every run.  tools/enforcer-run.sh writes the other spelling and
-# is the reason it looks plausible.
+# tools/amiberry-run.sh writes `build/amiberry-serial-<tag>.log`, never
+# `build/serial-<tag>.log`; tools/enforcer-run.sh writes the other spelling,
+# which is the reason the wrong one looks plausible.
 #
 # SPDX-License-Identifier: MIT
 

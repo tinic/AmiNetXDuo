@@ -3,111 +3,19 @@
 # Build Dropbear's SSH client, dbclient, for m68k AmigaOS 3.x against
 # bsdsocket.library.
 #
-#   clients/dropbear/build.sh [-u] [-b BUILDDIR] [-T] [-p] [-O FILE]
+#   clients/dropbear/build.sh [-u] [-b BUILDDIR] [-T] [-p] [-S] [-O FILE]
 #                             [-P "prog ..."]
 #
-#   -u  fetch/update third_party/dropbear to the pinned tag first
-#   -b  build directory (default build/dropbear)
-#   -T  compile Dropbear's TRACE output in (-v at runtime); larger and slower
-#   -p  link clients/dropbear/dbprofile.c: --wraps the crypto entry points and
-#       prints an E-Clock breakdown of the connection when the process exits
-#   -S  STOCK 25519: leave Dropbear's TweetNaCl in place.  The default is to
-#       --wrap the four curve25519.c entry points onto src/crypto68k's
-#       eight-limb implementation, which is where docs/RESEARCH.md 35's
-#       speed-up comes from.  -S is the other arm of that A/B and nothing
-#       else; it is not a fallback for a bug.
-#   -O  use a different localoptions.h (clients/dropbear/localoptions-*.h are
-#       the algorithm-set variants docs/RESEARCH.md 35 compares)
-#   -P  which programs to build (default "dbclient")
+# third_party/dropbear IS NOT PATCHED: the whole port is localoptions.h,
+# amiga_dropbear.c, include/ and the flags below.
 #
-# WHAT IS BEING BUILT
+# clients/dropbear/amiga_dropbear.o must NOT be in LIBS at CONFIGURE time -- it
+# defines fork(), getpass(), select() and getpwnam(), so configure would answer
+# HAVE_FORK=1.  It is added at MAKE time instead.
 #
-#   Upstream Dropbear from third_party/dropbear, a submodule pinned to the tag
-#   in DROPBEAR_TAG below.  NOTHING IN third_party/dropbear IS PATCHED, the
-#   submodule is built as-is.  The entire AmigaOS port is:
-#
-#     clients/dropbear/localoptions.h     what is compiled in
-#     clients/dropbear/amiga_dropbear.c   the syscalls this toolchain lacks
-#     clients/dropbear/include/           two shim headers
-#     the flags below
-#
-#   Dropbear is MIT-licensed (third_party/dropbear/LICENSE), with libtomcrypt
-#   and libtommath public domain and a handful of OpenSSH files under the
-#   2-clause BSD.  All of it is compatible with this tree's MIT posture.
-#
-# WHY ./configure AND NOT A HAND-WRITTEN config.h
-#
-#   docs/RESEARCH.md §11.7 recommended a hand-written config for wget, because
-#   wget needs `./bootstrap`, which needs autoconf, automake, libtool, gettext
-#   and a gnulib checkout on the build host.  Dropbear needs none of that: it
-#   ships a GENERATED `configure` in the repository, so a cross-configure is one
-#   command and no build-host autotools are involved.  It is also worth more
-#   than a hand-written header, because it discovers the gaps by LINKING rather
-#   than by someone remembering to list them.
-#
-#   The one thing it must not see is clients/dropbear/amiga_dropbear.o.  That
-#   object defines fork(), getpass(), select() and getpwnam(), so a configure
-#   run with it in LIBS would answer HAVE_FORK=1, and Dropbear would then
-#   compile the fork() paths for a fork() that always fails.  So it is added at
-#   MAKE time and not at CONFIGURE time, and config.h therefore describes the
-#   toolchain honestly.
-#
-# THE FLAGS THAT ARE NOT clients/amiga-client.sh's
-#
-#   --disable-harden
-#       Dropbear's configure probes for -fPIE, -fstack-protector-strong and
-#       -D_FORTIFY_SOURCE=2 and keeps whatever compiles.  All three "compile"
-#       here and the third one is fatal later: _FORTIFY_SOURCE pulls in
-#       newlib's <ssp/*.h>, whose __ssp_redirect0 macros do not expand under
-#       this GCC, and every subsequent configure test then fails for a reason
-#       that has nothing to do with what it was testing.  (That is how
-#       netinet/in.h and netdb.h get reported missing when both are present.)
-#       None of the three means anything on a machine with no MMU, no ASLR and
-#       no stack guard page.
-#
-#   -DFD_SETSIZE=256
-#       clients/dropbear/amiga_dropbear.c maps bsdsocket descriptors to 64..191
-#       and a wakeup pipe to 192..193, because both namespaces start at 0 and a
-#       program holding a socket and stdin cannot otherwise tell them apart.
-#       newlib's fd_set is 64 bits.  See that file.
-#
-#   -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close
-#       All four are in newlib's libc.a, in ONE object (lib_a-open.o), so any
-#       one of them being referenced drags in all four and none can be
-#       redefined.  They have to be intercepted anyway, because on this platform
-#       a read() of a socket is recv().  --wrap is also the only route that
-#       survives `atomicio(read, ...)`, which passes read as a function pointer;
-#       a macro would not have.
-#
-#       open() is wrapped for a second reason: it is how dbrandom.c reaches
-#       DROPBEAR_URANDOM_DEV, which localoptions.h renames to "RANDOM:" and
-#       clients/dropbear/amiga_dropbear.c answers from src/common/ami_random.c.
-#       Read the entropy note in that file before trusting any of it.
-#
-#   -Wl,--wrap=spawn_command
-#       dbutil.c's spawn_command() is three pipes and a fork(), and it is the
-#       only place Dropbear starts a program.  The AmigaOS answer is
-#       SystemTagList(), which is a different shape entirely, so the whole
-#       function is replaced rather than propped up, see THE SERVER RUNS A
-#       COMMAND in clients/dropbear/amiga_dropbear.c.
-#
-#       It is wrapped for both programs because there is one link line, and
-#       that is harmless: the client's only caller is -J proxycmd, which
-#       localoptions.h compiles out, so dbclient does not reference the symbol
-#       at all.
-#
-#   -Wl,--wrap=getenv,--wrap=ioctl,--wrap=signal
-#       getenv() answers TERM (and reads ENV:) from dos.library.  ioctl()
-#       answers TIOCGWINSZ from the console's real size so the server is told
-#       the true terminal geometry instead of a fixed 80x25.  signal() is wrapped
-#       only to capture Dropbear's SIGWINCH handler, which the resize detector
-#       calls by hand when the console window changes size, AmigaOS has no such
-#       signal.  See con_query_size()/con_child() in amiga_dropbear.c.
-#
-#   --disable-{syslog,shadow,lastlog,utmp,utmpx,wtmp,loginfunc,pututline,pututxline}
-#       There is no system logger and no account database on AmigaOS 3.x.  Left
-#       enabled, configure finds <utmp.h> in the Roadshow NDK, it is there for
-#       AmiTCP compatibility, and Dropbear then tries to record logins.
+# open/read/write/close are --wrapped because all four live in ONE newlib
+# object (lib_a-open.o) and none can be redefined, and because a read() of a
+# socket is recv() here.
 #
 # SPDX-License-Identifier: MIT
 

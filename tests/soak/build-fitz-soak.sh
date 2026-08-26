@@ -4,19 +4,11 @@
 #
 #   tests/soak/build-fitz-soak.sh
 #
-# Produces build/soak/FitzSoak, the m68k guest-side program: it starts Fitz,
-# drives it, samples the stack and writes the timeline.
-#
-# It also needs Fitz itself, which is third-party and not vendored.  Fitz is
-# fetched and built by tests/endurance/fetch-fitz.sh and tests/endurance/
-# build.sh; both are used here as they stand rather than duplicated, so there
-# is one recipe for building somebody else's program and not two that can
-# drift apart.
-#
-# Compiled the way tests/endurance/build.sh compiles Endurance: against the
-# Roadshow NDK headers with tests/conformance/compat first on the include
-# path, so the regenerated inline/bsdsocket.h wins over the NDK one, which
-# GCC 15 cannot compile.
+# Produces build/soak/FitzSoak, the m68k guest-side program.  Fitz itself is
+# third-party and not vendored; it is fetched and built by
+# tests/endurance/fetch-fitz.sh and tests/endurance/build.sh.  tests/conformance/
+# compat must come first on the include path: GCC 15 cannot compile the NDK's
+# inline/bsdsocket.h.
 #
 # SPDX-License-Identifier: MIT
 

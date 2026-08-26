@@ -2,26 +2,9 @@
  * AmiNetXDuo, milestone 7 on-Amiga test: mbuf_* and bpf_*.
  *
  * The host tests in src/mbuf/test/ and src/bpf/test/ carry the exhaustive
- * batteries. This one exists for the four things a host cannot answer:
- *
- *   1. The real constants. On a 64-bit host the mbuf replica scales MSIZE to
- *      256 and MLEN/MHLEN to 224/208, so every boundary case is exercised at
- *      the wrong number. Here they are 128/108/100, and `struct bpf_hdr` is
- *      the real 18 bytes with bh_hdrlen 20.
- *   2. Msize alignment from a real AllocVec(). dtom() is published ABI and
- *      needs every mbuf on a 128-byte boundary; AllocVec() gives 8. The slab
- *      allocator's rounding is only really tested against the real allocator.
- *   3. The NX_PACKET bridge, which needs a live packet pool, which needs
- *      ThreadX running.
- *   4. Forbid()/Permit(), Signal() and GetSysTime(), the four platform
- *      hooks that the host build replaces with stubs.
- *
- * Everything runs on main()'s own Process, adopted as a TX_THREAD, so
- * dos.library stays usable for output throughout.
- *
- *   cmake --build build/cm --parallel --target mbuf_bpf_test
- *   AMINETXDUO_RUN_TAG=mbufbpf ./tools/amiberry-run.sh -t 120 \
- *       build/cm/tests/mbuf_bpf/mbuf_bpf_test
+ * batteries; this one exists for what a host cannot answer -- the real constants
+ * (MSIZE/MLEN/MHLEN 128/108/100), dtom()'s 128-byte mbuf alignment over a real
+ * AllocVec(), the NX_PACKET bridge, and the platform hooks the host build stubs.
  *
  * SPDX-License-Identifier: MIT
  */

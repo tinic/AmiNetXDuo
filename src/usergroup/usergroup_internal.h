@@ -1,33 +1,10 @@
 /*
  * AmiNetXDuo, usergroup.library internals.
  *
- * usergroup.library is AmiTCP's companion to bsdsocket.library. Ported Unix
- * software links against it for the BSD user/group database calls. Without it
- * those binaries fail to load. See docs/RESEARCH.md §3.3.
- *
- * ------------------------------------------------------------------ ABI ---
- *
- * The vector table below is not inferred. Five independent sources in two
- * lineages agree function-for-function and register-for-register:
- *
- *   1. AmiTCP  fd/usergroup_lib.fd     (c) 1993 AmiTCP/IP Group, HUT Finland
- *   2. Roadshow sfd/usergroup_lib.sfd  $Id: v1.4 2004-09-16 obarthel $
- *   3. Roadshow NDK pragmas/usergroup_pragmas.h + inline/usergroup.h
- *      (fd2pragma V2.164 output of #2, in the local toolchain)
- *   4. The toolchain's own AmiTCP-derived sys-include/inline/usergroup.h
- *      (libnix LP-macro style, UG_-prefixed)
- *   5. clib2 usergroup_headers.h
- *
- *   ##base _UserGroupBase   ##bias 30   39 public vectors, LVO -30 .. -258.
- *
- * The passwd and group record layouts are equally certain: the AmiTCP
- * netinclude pwd.h and the Roadshow netinclude pwd.h define byte-identical
- * structures (7 fields, no pw_change, pw_class or pw_expire).
- *
- * Note: the local ndk-include/pwd.h of the toolchain is not the usergroup ABI.
- * It is the newlib 10-field 4.4BSD struct passwd, substituted over the
- * Roadshow one. That is why the AmiTCP inline header of the toolchain spells
- * the return type "struct TCP_passwd", the 7-field layout used here.
+ * ABI: ##base _UserGroupBase   ##bias 30   39 public vectors, LVO -30 .. -258.
+ * The passwd record is the AmiTCP/Roadshow 7-field layout (no pw_change,
+ * pw_class or pw_expire), spelled "struct TCP_passwd"; the toolchain's local
+ * ndk-include/pwd.h is the newlib 10-field 4.4BSD struct and is NOT this ABI.
  *
  * SPDX-License-Identifier: MIT
  */

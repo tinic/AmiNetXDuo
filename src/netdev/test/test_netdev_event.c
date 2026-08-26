@@ -1,28 +1,9 @@
 /*
  * S2_ONEVENT delivery and the S2_PacketFilter hook, on the host.
  *
- * This is not an emulator test.  Everything netdev_event.c decides runs from
- * an interrupt, and the two ways it can be wrong are invisible from a booted
- * machine: a request completed while still on its list corrupts that list only
- * under a race, and a filter hook asked on the wrong side of the copy-out
- * drops traffic that nothing counts.  Here the list is inspected directly
- * after every post, the Disable() nesting is counted, and the filter hook
- * records what it was passed.
- *
  * The expectations are the SANA-II specification's, not this code's output:
- *
- *   "All pending requests for a particular event will be returned when that
- *    event occurs."
- *   "All event types that cover a particular condition are returned when that
- *    condition occures.  For instance, if an error is returned by a buffer
- *    management function during receive processing, events of types
- *    S2EVENT_ERROR, S2EVENT_RX and S2EVENT_BUFF would be returned if
- *    pending."                       sana2device.spec, S2_ONEVENT NOTES
- *   "ios2_WireError - Mask of events that occured."
- *                                    sana2device.spec, S2_ONEVENT RESULTS
- *   keep = PacketFilter(hook, ios2, data): "TRUE if the driver should provide
- *    the packet to the protocol stack, FALSE if the packet should be
- *    ignored."                       copybuff.spec, PacketFilter autodoc
+ * sana2device.spec S2_ONEVENT NOTES and RESULTS, and the PacketFilter autodoc
+ * in copybuff.spec.
  *
  * SPDX-License-Identifier: MIT
  */

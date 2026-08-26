@@ -47,30 +47,10 @@ UINT    stride;
 }
 
 /*
- * Always compiled, under its own name, even in an assembly build: the
- * benchmark measures the two against each other in the same run, the only
- * comparison the emulator does not distort.
- */
-/*
- * 32x32 -> 64 without a call and without __muldi3.
- *
- * The product written as (HN_UBASE2)a * (HN_UBASE2)b asks for a 64x64
- * multiply, so GCC emits __muldi3, which does three partial products and then
- * calls ami_umul32_wide for each.  On a 68060 that made the software multiply
- * 77% of a TLS 1.3 transfer: 64.7% in ami_umul32_wide, 12.8% in __muldi3.
- *
- * Only 32x32 -> 64 is wanted, and it is four partial products of 16-bit
- * halves.  The 68060 dropped the 64-bit-result forms of MULU.L but implements
- * the 32x32 -> 32 one, so each partial product below is a single instruction
- * there, and the whole of it inlines into the multiply-accumulate loop with
- * nothing spilled.
- *
- * A 68000 has no 32-bit multiply, but it does have MULU.W, so it gets the
- * same treatment with 16-bit operands.  The halves declared as USHORT are what
- * make GCC pick the widening 16x16 -> 32 pattern instead of a promotion to int
- * and a call to __mulsi3.  ami_umul32_wide declares them that way for the same
- * reason.  The difference here is that the four products are inline, so the
- * multiply-accumulate loop does not pay a call per limb.
+ * 32x32 -> 64 without a call and without __muldi3.  Written as
+ * (HN_UBASE2)a * (HN_UBASE2)b it asks for a 64x64 multiply and GCC emits
+ * __muldi3; the halves must stay USHORT so GCC picks the widening pattern
+ * instead of promoting to int and calling __mulsi3.
  */
 #define C68K_HAVE_INLINE_WIDE_MUL   1
 

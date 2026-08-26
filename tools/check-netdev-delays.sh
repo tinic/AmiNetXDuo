@@ -4,35 +4,16 @@
 #
 #   tools/check-netdev-delays.sh
 #
-# THE DEFECT THIS HOLDS SHUT.  Every delay in src/netdev used to be written
-# this way:
-#
-#     ULONG n = us * 4u;                  -- "four reads to the microsecond"
-#     while (n-- != 0) (VOID)*attr;
-#
-# which is not a measure of time.  It is a measure of how many times THIS CPU
-# gets round a loop, and that differs by two orders of magnitude between a
-# 14 MHz 68020 and the same machine with a PiStorm32, a Blizzard, an ACA or a
-# Vampire in it.  The longest of them holds a PC Card in reset for a documented
-# minimum of 100 to 200 ms; src/netdev/test/test_netdev_clock.c measures what
-# the shape above does to that hold on a machine a hundred times quicker
-# through the loop, and the answer is three milliseconds.
-#
-# netdev_clock.c replaced them with a wait measured against the raster beam.
-# This is what stops the next one being written the old way -- because it will
-# be, and it will look completely reasonable, and nothing else in the tree
-# would notice.  The unit test proves the primitive works; this proves the call
-# sites use it.
-#
-# WHAT IT LOOKS FOR is the arithmetic, `us * 4`, and not the loop: a spin is a
-# perfectly good thing to write, and several in these files are deliberate and
-# documented (dp8390.c's dp_pause() and the sub-NETDEV_WAIT_MIN_US arm of
-# ne_delay() are bus barriers, N real cycles between two register writes, which
-# a faster CPU does not shorten; el3_wait_cmd() and el3_eeprom() are polls with
-# a real exit condition).  What is never right is TURNING MICROSECONDS INTO A
-# COUNT, because that is the step where a duration stops being one.  A file
-# that does it must be routing the result through netdev_wait_begin(), which is
-# where the count becomes a floor rather than the whole of the wait.
+# `ULONG n = us * 4u; while (n-- != 0) (VOID)*attr;` is not a measure of time.
+# It measures how many times THIS CPU gets round a loop, which differs by two
+# orders of magnitude between a 14 MHz 68020 and an accelerated one.
+# netdev_clock.c replaced them with a wait measured against the raster beam;
+# the unit test proves the primitive, this proves the call sites use it.
+# It looks for the ARITHMETIC, `us * 4`, and not the loop: a spin with a real
+# exit condition, or a bus barrier of N real cycles a faster CPU cannot shorten,
+# is fine and several are deliberate.  Turning microseconds into a COUNT is
+# never right -- a file that does it must route the result through
+# netdev_wait_begin(), where the count becomes a floor rather than the wait.
 #
 # Output is key=value and an exit code: 0 clean, 1 a delay is counted again.
 #

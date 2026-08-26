@@ -1,36 +1,10 @@
 /*
  * AmiNetXDuo, the access patterns real network clients use.
  *
- * bsdsocktest checks that each vector behaves; this checks that the sequences
- * a ported client actually issues behave.  A stack can pass "connect() to
- * loopback listener" and still hang a client that does non-blocking connect +
- * select-for-writable + getsockopt(SO_ERROR), because nothing in the
- * per-vector suite ever puts those three together.
- *
- * Every group below is copied from a real program, named in its comment:
- *
- *   A  curl   lib/amigaos.c            SocketBaseTags() init, errno mirroring
- *   B  curl   lib/cf-socket.c          non-blocking connect -> writable -> SO_ERROR
- *   C  curl   lib/cf-socket.c          the same, to a closed port
- *   D  curl   lib/socketpair.c         wakeup_inet(): its own loopback socketpair
- *   E  control + active-mode data connection (the shape ftp used)
- *   F  curl   lib/select.c             select() over a wide, sparse fd set
- *   G  curl                            descriptor churn across many transfers
- *   H  curl   lib/cf-socket.c          send() after the peer has gone
- *   I  wget   src/connect.c            blocking connect (wget has no async path)
- *   J  ssh/nc                          a raised descriptor table
- *   K  nc -N                           half-close in both directions
- *   L  nc, telnet                      FIONREAD before reading
- *   M  nc -l                           re-listen on the same port after close
- *   N  http server                     write a whole response, then close
- *   O  nc, ssh -L                    simultaneous listening sockets
- *   P  wget, nc, ssh                 getaddrinfo / getnameinfo
- *   Q  UDP clients                    source-address value-result arguments
- *
- * Style follows tests/conformance/conf_probe.c: an ordinary AmigaOS program
- * that opens bsdsocket.library and calls vectors, linked against none of our
- * code.  Unlike the probe this one asserts, it exits RETURN_FAIL if any
- * check fails, so it can be a gate.
+ * bsdsocktest checks that each vector behaves; this checks that the sequences a
+ * ported client actually issues behave.  An ordinary AmigaOS program that opens
+ * bsdsocket.library and calls vectors, linked against none of our code; it exits
+ * RETURN_FAIL if any check fails, so it can be a gate.
  *
  * SPDX-License-Identifier: MIT
  */

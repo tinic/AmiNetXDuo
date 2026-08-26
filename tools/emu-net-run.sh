@@ -8,28 +8,6 @@
 # Takes tools/amiberry-run.sh's arguments unchanged, so a caller switches to it
 # by changing the script name and nothing else.
 #
-# WHY THIS EXISTS
-#
-#   The Debian fs-uae 3.1.66 imports SLIRP from the qemu-uae plugin and, with
-#   the plugin absent, logs
-#
-#, stub, uae_slirp_start
-#
-#   and carries on.  The A2065 initialises, the link comes up, DHCP is
-#   answered inside the stub, and there is no NAT behind any of it, so every
-#   TCP connection to 10.0.2.2 is refused and the host peer never sees one.
-#   A workload measuring the wire then reports a timeout that looks exactly
-#   like a defect in the stack.  That is how tests/compare/run-compare.sh and
-#   tests/trace/run-trace.sh spent their wire arms measuring nothing:
-#   `wire.pcap` holds 11 packets and no TCP flow, and the peer log holds its
-#   own startup lines and nothing else.
-#
-#   Amiberry has SLIRP compiled in.  The same plan through it: wire 64 ticks
-#   against fs-uae's 6,368-tick timeout, ping 229 against 825.
-#
-#   fs-uae is gone entirely, 2026-08-04.  It needed an X server and its SLIRP
-#   was a stub, so both halves of what this script exists to pick were bad.
-#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

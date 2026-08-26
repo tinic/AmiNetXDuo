@@ -1,21 +1,9 @@
 /*
  * AmiNetXDuo, the ThreadX priority ladder, in one place.
  *
- * This header exists because the ladder used to live in two: netstack_internal.h
- * defined the IP thread's priority and sana2_internal.h the readers', each with
- * a comment describing their relationship, and the two drifted into stating an
- * ordering the numbers did not implement. It cost 6.6% of bulk receive
- * throughput and went unnoticed for months precisely because every reading of
- * either comment confirmed the intent (docs/RESEARCH.md 52).
- *
- * So the ordering is declared once, and asserted below rather than described.
- * Both internal headers include this and neither defines a priority.
- *
- * ThreadX counts DOWN: lowest number wins. From the scheduler itself,
- * tx_thread_system_resume.c:213,
- *
- *     if (priority < _tx_thread_highest_priority)
- *         // A new highest priority thread is present.
+ * ThreadX counts DOWN: lowest number wins. The ordering is declared once here
+ * and asserted below; both internal headers include this and neither defines a
+ * priority.
  *
  * SPDX-License-Identifier: MIT
  */

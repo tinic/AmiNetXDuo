@@ -5,86 +5,16 @@
 #   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]
 #                         [-B BACKEND] [-a ARGS] <executable> [extra files...]
 #
-# -a passes arguments to the executable under test, `-a 'eth0 QUIET'`, which
-# is the only way to reach a command that takes a parameter.  It is the same
-# string as AMINETXDUO_GUEST_ARGS, which tools/winuae-run.sh already read; the
-# flag wins when both are set.
-#
-# The Linux counterpart of tools/winuae-run.sh.  Amiberry is WinUAE's core, so
-# -N takes WinUAE's board keys unchanged and the board table below is
-# tools/winuae-run.sh's.
-#
-# WHY THIS REPLACED FS-UAE
-#
-#   Amiberry runs genuinely headless, `headless=true` and SDL is never asked
-#   for a video device, where FS-UAE needs an X server on a Linux runner.  It
-#   emulates all nine ethernet boards rather than only the A2065.  And it has
-#   backends that reach the real network: -B <interface> puts the guest on the
-#   host's LAN with its own MAC, which is the thing SLIRP cannot do.
-#   tools/enforcer-run.sh is the one runner left on FS-UAE, because Enforcer
-#   needs a real MMU.
-#
-# -B PICKS THE BACKEND, AND IT IS CHECKED
-#
-#   slirp           user-mode NAT, 10.0.2.0/24, gateway 10.0.2.2 (the default)
-#   slirp_inbound   the same, with the standard ports forwarded in
-#   <interface>     a host NIC (`ens18`), a bridge, or a tap device, the
-#                   guest is then a machine on the host's own LAN
-#
-#   THE NAME GOES IN BARE, not as `netmode=<name>`.  It is an
-#   EXPANSIONBOARD_MULTI, and cfgfile_read_rom_settings() picks the item by
-#   looking for each candidate as an option of its own; `netmode=ens18` parses
-#   as an option called netmode, matches no item, and selects index 0, which
-#   is slirp.  `netmode=slirp` therefore appears to work and is doing nothing,
-#   which is how the spelling survives.  WinUAE's own saved configs write the
-#   bare name too (tools/winuae-run.sh: `mac=...,rpcap://...`).
-#
-#   ethernet_getselectionname() then returns "slirp" for any name it cannot
-#   match, so a typo does not fail either: it comes up on NAT and passes.  This
-#   script reads the backend back out of the emulator log and refuses the run
-#   if it is not the one asked for.  docs/RESEARCH.md 76.7 found that trap;
-#   this harness is what stops it costing anyone a day.
-#
-# -m PICKS THE MACHINE
-#
-#   Anything Amiberry's `quickstart=` accepts: A500, A600, A1200 (the default),
-#   A3000, A4000.  Two things follow from it rather than having to be set:
-#   the boot ROM, from AMINETXDUO_KICKSTART_<MODEL> if that is set, and the
-#   architecture envsetup is built for, because a 68020 binary stops a 68000
-#   machine with an illegal instruction before anything under test runs.
-#
-#   The executable under test is NOT rebuilt to match.  Pass one from a build
-#   configured for the machine, `cmake -DAMINETXDUO_CPU=68000` for an A500 or
-#   an A600, or the run dies the same way for the same reason.
-#
-#   A host NIC needs CAP_NET_RAW on the amiberry binary (libpcap), a tap or
-#   bridge needs CAP_NET_ADMIN.  Both are cleared by every relink, so
-#   `sudo setcap cap_net_admin,cap_net_raw=eip <binary>` is a per-build step --
-#   and file capabilities are ignored on a nosuid mount, which /tmp usually is.
-#
-# SERIAL IS A SOCKET, NOT A FILE
-#
-#   openser() takes a TCP URI, a serial port name, INTERNAL_SERIAL or
-#   LOOPBACK_SERIAL.  A path is not among them, so FS-UAE's
-#   `serial_port = build/serial.log` has no equivalent; the replacement is a
-#   listening socket the host drains with nc.  `/wait` makes the emulator block
-#   until something connects, so the host has to RETRY, losing that race
-#   leaves an emulator waiting forever and looks like a hang, not a lost log.
-#
-# EXIT STATUS
-#
-#   0..n  the test's own, read from DH0:.done
-#   4     an illegal instruction outside ROM: the guest is built for a CPU
-#         this machine does not have, so nothing under test ran
-#   5     the run did not get the network backend it asked for, so anything
-#         it proved about the LAN is worthless
-#   124   the timeout expired with no DH0:.done
-#
-# 4 and 5 are DISTINCT FROM THE GUEST'S OWN CODES on purpose.  The backend
-# fault used to be reported by overwriting a zero status with 1, and the one
-# caller that reads it, tools/test-verdict.sh, then said "the guest exited 1"
-# about a guest whose transcript ended `113 checks, 0 failures, PASS`.  A rig
-# fault named as a code failure sends the reader to the wrong file.
+# -N takes WinUAE's board keys unchanged.  -B is slirp, slirp_inbound or a host
+# interface name, and the name goes in BARE, not `netmode=<name>`; an unmatched
+# name silently selects slirp, so the run is verified against the emulator log.
+# A host NIC needs CAP_NET_RAW on the amiberry binary, a tap or bridge
+# CAP_NET_ADMIN; both are cleared by every relink and ignored on a nosuid mount.
+# -m does not rebuild the executable: pass one built for that CPU.
+# Serial is a listening TCP socket, not a file: the host has to RETRY the
+# connect, and losing that race leaves an emulator waiting forever.
+# Exit 4 (illegal instruction outside ROM) and 5 (wrong network backend) are rig
+# faults, deliberately distinct from the guest's own codes; 124 is the timeout.
 #
 # SPDX-License-Identifier: MIT
 
@@ -185,33 +115,17 @@ fi
 
 # ------------------------------------------------------------------- boards --
 #
-# The keys are WinUAE's, because Amiberry parses WinUAE's config file.  See
-# tools/winuae-run.sh for what each board is and which driver it wants; the
+# The keys are WinUAE's, because Amiberry parses WinUAE's config file; the
 # driver is staged by tools/sana2-stage.sh, not here.
 #
-# The MAC is set explicitly on a bridged run.  Left alone the emulator invents
-# one, so a DHCP server hands out a different lease every time and nothing on
-# the LAN can hold a reservation.  The A2065 keeps only the last three bytes --
-# a2065.cpp overwrites the first three with Commodore's 00:80:10, while the
-# NE2000 boards take the whole address.
+# The MAC is set explicitly on a bridged run and DERIVED FROM THE RUN TAG: one
+# fixed default aliases in the switch's and the router's ARP caches, and a
+# broken arm then reads as a passing one.  The A2065 keeps only the last three
+# bytes (a2065.cpp overwrites the first three); the NE2000 boards take all six.
 #
-# It is DERIVED FROM THE RUN TAG, near the tag itself below, because one fixed
-# default is worse than no default at all: back-to-back runs then alias in the
-# switch's and the router's ARP caches, the second run answers on a cache entry
-# the first one put there, and a broken arm reads as a passing one.  That cost
-# half an A/B on 2026-08-15.
-# PCMCIA needs a 68020.  Rederived from scratch more than once, so it stops
-# here rather than in an hour of somebody's afternoon.
-#
-# `-N ne2000_pcmcia` with cnet.device bisects to cpu_type and nothing else:
-# 68000, 68010, cpu_compatible=false and cpu_multiplier=16 all answer
-# `Could not add interface "eth0" (Input/output error)`, while 68020 leases,
-# with or without address_space_24 or a slower multiplier.  ROM, chipset prefs,
-# memory and cnet16.device were ruled out.  The two CPUs diverge inside
-# card.resource's CIS walk, in gayle.cpp.
-#
-# This is a CPU limit and NOT a model limit.  An A600 networks perfectly well
-# on -N a2065, which is the answer if what you wanted was a 68000.
+# `-N ne2000_pcmcia` NEEDS A 68020.  68000, 68010, cpu_compatible=false and
+# cpu_multiplier=16 all fail in card.resource's CIS walk, in gayle.cpp.  A CPU
+# limit, not a model limit: an A600 networks perfectly well on -N a2065.
 pcmcia_cpu_check() {
     case "$1" in
         ne2000_pcmcia) ;;
@@ -412,28 +326,16 @@ fi
 cp "$ENVSETUP" "$HD/c/envsetup"
 
 # failat is essential: AmigaDOS aborts a script the moment a command returns a
-# code at or above the fail level, so without it a test that exits nonzero
-# never reaches the line recording its status and the run merely times out.
+# code at or above the fail level, so without it a test that exits nonzero never
+# reaches the line recording its status and the run merely times out.
 #
-# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting, which
-# is what a command with a ReadArgs template wants.  Empty by default, and then
-# the line is the one this script always wrote.
-# STACK, because the default is 4 KB and nothing here ever raised it.
-# AmigaOS gives a Startup-Sequence command whatever the Shell's default is,
-# 4096 bytes on 3.1, and there is no MMU: a program that runs past the end of
-# it corrupts whatever is below rather than trapping. tests/tls/tls_https
-# entered _nx_secure_tls_session_start() and never came back -- no crash, no
-# output, a wedge that survived a 900 s ceiling -- while the same handshake
-# through tls.library completed in 100.4 s from a Shell that had more.
-# 8192, and it is a CEILING rather than a size to grow when something does not
-# fit. A Shell hands a command 4096 by default and a considerate Shell-Startup
-# raises it to about this; past that the harness is no longer running the
-# program the way a user runs it, and a shipped command that outgrows a real
-# stack would pass every test here and crash for them.
+# GUEST_ARGS goes in verbatim, so the AmigaDOS shell does the quoting.
 #
-# A guest program that needs more brings its own, the way src/tools/fetch.c
-# does with StackSwap() at :1028 -- which is exactly why fetch was immune to
-# the overrun that wedged the TLS test on 4096.
+# STACK_BYTES is a CEILING, not a size to grow when something does not fit.  A
+# Shell hands a command 4096 by default and there is no MMU, so a program that
+# runs past the end corrupts whatever is below rather than trapping; a command
+# that outgrows a real user's stack must not pass here.  A guest that needs more
+# brings its own, the way src/tools/fetch.c does with StackSwap().
 STACK_BYTES="${AMINETXDUO_GUEST_STACK:-8192}"
 
 # envsetup takes the run token and prints it out the serial port before
@@ -606,35 +508,17 @@ if command -v python3 > /dev/null 2>&1; then
     : > "$SERIALTS"
 fi
 
-# SIGPIPE is ignored: the
-# emulator writes guest payload to host sockets with plain send(), and a peer
-# that hangs up first otherwise takes the emulator down mid-instruction with no
-# guru and a truncated log, which reads exactly like the Amiga crashed.
+# SIGPIPE is ignored: the emulator writes guest payload to host sockets with
+# plain send(), and a peer that hangs up first otherwise takes it down
+# mid-instruction with no guru and a truncated log.
 #
-# --log is not optional here.  Without it write_log() goes to Amiberry's own
-# amiberry_log.txt, which is off by default, and the emulator's stdout carries
-# one line about an IPC socket, so the backend assertion below has nothing to
-# read and a bridged run that silently came up on SLIRP cannot be told from one
-# that did not.
-#
-# AND IT IS UNBOUNDED, so it goes through tools/logcap.sh.  Measured at 87 MB
-# per 30 s on an RTG guest, 3.3 GB an hour; it has filled playhouse3 three
-# times, 30 GB across five stale logs on the last sweep with 27.6 GB of that in
-# one file.  What it writes is a run of identical `Denise queue without lock!`
-# lines, and the disk is the smaller cost: an arm whose serial log is 0 bytes
-# while that runs reads exactly like a driver hang in the code under test.
-# Collapsed it is one line and a count, which is a sentence somebody can act
-# on.  The cap keeps the head, where every line anything greps for is printed
-# -- the board and MAC lines, UAENET's, the first illegal instruction -- and a
-# ring of the last lines for the `tail -20` below.
-#
-# THROUGH A FIFO rather than a pipeline, because $! after `a | b` is b, and
-# AMIBERRY_PID has to be amiberry: cleanup kills it and the loop below watches
-# it for an early exit.
-#
-# And it degrades to the plain redirect if the capper is not there: opening a
-# FIFO for writing blocks until something opens it for reading, so a missing
-# reader would hang the run rather than lose a log.
+# --log is not optional: without it write_log() goes to a file that is off by
+# default and the backend assertion below has nothing to read.  It is UNBOUNDED
+# (measured 87 MB per 30 s on an RTG guest), so it goes through tools/logcap.sh,
+# THROUGH A FIFO rather than a pipeline, because $! after `a | b` is b and
+# AMIBERRY_PID has to be amiberry.  It degrades to the plain redirect if the
+# capper is missing: opening a FIFO for writing blocks until a reader opens it,
+# so that would hang the run rather than lose a log.
 LOGPIPE="$ROOT/build/amiberry-$TAG.logpipe"
 rm -f "$LOGPIPE"
 if [ -x "$ROOT/tools/logcap.sh" ] && mkfifo "$LOGPIPE" 2>/dev/null; then
@@ -654,31 +538,13 @@ AMIBERRY_PID=$!
 
 # ------------------------------------------- WHOSE LISTENER IS ON THIS PORT --
 #
-# The reservation above makes a collision very unlikely.  Being able to SAY SO
-# is a different and stronger property, and it is the one that was missing:
-# nothing checked, so nothing could report, and an arm read a foreign guest and
-# published findings about a machine it never booted.
+# "Is the process listening on $PORT the amiberry we started" HAS NO ANSWER
+# here: amiberry carries file capabilities, and a process that gains them from
+# its executable is non-dumpable, so /proc/<pid>/fd is unreadable even by its
+# owner and ss(8) declines to name it.
 #
-# WHAT CANNOT BE DONE HERE, so nobody spends an afternoon on it again.  The
-# obvious check is "is the process listening on $PORT the amiberry we started",
-# and on this rig it has NO ANSWER.  Amiberry carries file capabilities --
-#
-#     amiberry cap_net_admin,cap_net_raw=eip
-#
-# which the bridged backends need -- and a process that gains capabilities from
-# its executable is marked NON-DUMPABLE: the kernel reparents its /proc entry
-# to root, so /proc/<pid>/fd is unreadable even by the user who started it, and
-# ss(8) declines to name it for the same reason.  Measured: a live amiberry
-# listening on 127.0.0.1:12709 shows as `LISTEN 0 1 127.0.0.1:12709` with an
-# EMPTY Process column, while sshd's socket in the same output carries its pid.
-#
-# So the check that is made is the one that has an answer:
-#
-#   the port we reserved is bound at all, which says the emulator got the
-#     number this script chose rather than failing over to something else;
-#   the GUEST'S OWN TOKEN, below and in the run loop, which is a stronger
-#     statement than socket ownership anyway -- it is the machine under test
-#     saying which run it belongs to, in the artefact that outlives the rig.
+# What is checked is what has an answer: the reserved port is bound at all, and
+# the guest's own token below, which outlives the rig anyway.
 LISTEN_INODE=""
 for _ in $(seq 1 40); do
     kill -0 "$AMIBERRY_PID" 2>/dev/null || break
@@ -799,25 +665,12 @@ fi
 
 # ------------------------------------------------- WHOSE TRANSCRIPT IS THIS --
 #
-# The listener check above asked the question of the host, before a byte was
-# read.  This asks it of the ARTEFACT, which is the copy that survives: a
-# transcript on disk a week later has no pid, no port and no lock directory,
-# only the bytes the guest sent.  envsetup prints `ANXD-RUN <token>` as its
-# first act, so a transcript either opens with this run's token or it did not
-# come from this run.
-#
-# THE POLARITY MATTERS.  A DIFFERENT token is fatal: it is a foreign guest, and
-# every assertion downstream would be reading someone else's machine.  NO token
-# is only a note -- a guest can die in the ROM before AmigaDOS runs a line of
-# the Startup-Sequence, and that is a real failure with its own diagnosis
-# further down; turning it into "the transcript is foreign" would put the wrong
-# word on it.
-#
-# THE CR IS NOT OPTIONAL.  Exec's raw serial output turns the LF into CR LF, so
-# every line in $SERIAL ends `\r\n`; an anchored `$` match without stripping it
-# reports this run's own token as foreign, which is a check that fires on
-# everything and is therefore worse than no check.  Caught the first time this
-# ran.
+# envsetup prints `ANXD-RUN <token>` as its first act, so the ARTEFACT itself
+# says which run wrote it.  THE POLARITY MATTERS: a DIFFERENT token is fatal, a
+# foreign guest; NO token is only a note, because a guest can die in the ROM
+# before AmigaDOS runs a line.  THE CR IS NOT OPTIONAL -- Exec's raw serial
+# output ends every line `\r\n`, and an anchored `$` match without stripping it
+# reports this run's own token as foreign.
 _foreign=$(tr -d '\r' < "$SERIAL" 2>/dev/null | grep -a '^ANXD-RUN ' |
            grep -av "^ANXD-RUN $RUNTOKEN\$" | head -1 || true)
 if [ -n "$_foreign" ]; then
@@ -835,29 +688,15 @@ fi
 
 # ------------------------------------------- illegal instruction assertion --
 #
-# The emulator says so, and nothing else has to be believed.
+# A guest built for a newer CPU than the machine stops in its own C constructor
+# before anything under test runs: no serial, no stdout.txt, the machine idling.
+# The emulator log says so, and this is the artifact rather than a grep of the
+# source, so it catches a binary somebody staged by hand.  ROM is excluded:
+# Kickstart probes the CPU with MOVEC at boot and takes that exception itself.
 #
-# A guest binary built for a newer CPU than the machine stops in its own C
-# constructor before a line of the thing under test runs: no serial, no
-# stdout.txt, the machine idling at 50 fps.  It reads as "the stack does not
-# work on this processor" and costs a day.  It cost one on 2026-08-07, when
-# CheckRunner carried `tst.l a0` -- 68020 only -- into an A600, and the log had
-# said so from the first run:
-#
-#     Illegal instruction: 4a88 at 002186FA -> 00F80AD2
-#
-# ROM is excluded: Kickstart probes the CPU with MOVEC at boot on purpose and
-# takes the exception itself.  Anything outside ROM is ours.
-#
-# This is the artifact, not a grep of the source.  It catches a wrong-CPU
-# binary however it was built, including one somebody staged by hand.
 # `|| true` because a clean run is the case where both greps match nothing:
 # under `set -o pipefail` the pipeline is then 1, an assignment carries its
 # command substitution's status, and `set -e` took the script out right here.
-# Everything below -- the backend assertion, the serial dump, the guest's own
-# exit status -- was unreachable on any run that did NOT crash, and the harness
-# returned 1 for it.  Callers that read the guest's report rather than the exit
-# status did not notice.
 _illegal=$( { grep -aE "Illegal instruction: [0-9a-f]+ at [0-9A-F]+" "$UAELOG" 2>/dev/null |
               grep -avE "at 00F[0-9A-F]{5}" | head -3; } || true)
 if [ -n "$_illegal" ]; then

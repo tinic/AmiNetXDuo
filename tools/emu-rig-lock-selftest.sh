@@ -8,23 +8,6 @@
 # beside the other selftests and goes red on a machine that cannot boot
 # anything.
 #
-# WHAT IT ASSERTS, and each of these is a way the old hashing failed
-#
-#   1. Two claims in one process get DIFFERENT ports.  The hash gave the same
-#      port to the same tag every time, which is what put two clones running
-#      `ifslots-typo` on port 12714 together.
-#   2. A claim never returns a port something is already LISTENING on.  The
-#      hash had no idea what was on the host.
-#   3. A port stays claimed for the life of the claiming process and is free
-#      the moment it dies -- so a killed harness strands nothing.
-#   4. A named claim is exclusive across processes, and the refusal names the
-#      holder.  This is the bridged-guest interlock.
-#   5. An orphaned serial reader aimed at a port is found, and a shell that
-#      only mentions one is not.  A reader is a client, so the bind probe
-#      cannot see it; an unanchored pattern sees far too much.
-#   6. An address that answers a ping is never claimed.  127.0.0.1 stands in
-#      for the live LAN host that 192.168.1.243 turned out to be.
-#
 # SPDX-License-Identifier: MIT
 
 set -uo pipefail

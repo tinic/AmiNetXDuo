@@ -9,58 +9,13 @@
 #                                     #    who holds it
 #   rig_claim_address 192.168.1 200 239   # -> $RIG_ADDRESS, free on the LAN
 #
-# THE KNOB IS THE DIRECTORY.  Everything below is arbitrated through lock files
-# under one directory, and every harness in this tree reaches it through this
-# file.  Two checkouts, two agents and one machine share it by default:
+# THE KNOB IS THE DIRECTORY: $AMINETXDUO_RIG_LOCKDIR, or
+# ${TMPDIR:-/tmp}/aminetxduo-rig-<uid>.  Host-wide and NOT under build/ on
+# purpose -- the runs that corrupt each other are in different clones.
 #
-#   $AMINETXDUO_RIG_LOCKDIR, or ${TMPDIR:-/tmp}/aminetxduo-rig-<uid>
-#
-# It is host-wide and NOT under build/ on purpose.  A per-checkout lock
-# directory arbitrates a checkout against itself and nothing else, which is the
-# case that was never the problem: the runs that corrupted each other were in
-# different clones.  Point AMINETXDUO_RIG_LOCKDIR somewhere else only to
-# ISOLATE a set of runs deliberately -- two directories are two independent
-# rigs, and if they are the same machine they will collide again.
-#
-# WHY THIS FILE EXISTS AT ALL
-#
-#   tools/amiberry-run.sh:272 used to derive the guest's serial port by hashing
-#   the run tag into 900 slots:
-#
-#       PORT=$((12000 + $(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 900))
-#
-#   and $TAG is the PER-ARM tag a harness invents for itself, not
-#   $AMINETXDUO_RUN_TAG, so setting a unique run tag bought nothing.  With
-#   `serial_port=tcp://127.0.0.1:$PORT/wait` the emulator listens and blocks
-#   until something connects, and nothing checked that the something was the
-#   right something.  On 2026-08-25 three listeners were measured on port
-#   12714 at once -- two clones running `ifslots-typo`, plus an unrelated
-#   memory arm that hashed to the same slot.  One arm's guest was driven by
-#   another arm's reader.  What it produced was not a crash: it was a
-#   transcript with two interfaces on one address, an arm that hung at 185 s
-#   while its FASTER siblings passed in 16 s, and two red rows in a release
-#   gate that were not defects.  A birthday collision at 900 slots is even
-#   money at about 35 arms, and `tools/ci.sh matrix` alone is 22.
-#
-#   Hashing a name answers "which slot does this name want".  The question is
-#   "which port is free", and only the kernel knows that.
-#
-# HOW A CLAIM IS MADE, and why it is two checks and not one
-#
-#   flock(2) on <lockdir>/port-<n>.lock  excludes every other harness in this
-#     tree, in any checkout, for as long as the claiming shell lives.  The
-#     lock is released by the kernel when the process dies, so a harness that
-#     is killed does not strand a port.
-#   bind(2) on 127.0.0.1:<n>             excludes everything else on the host:
-#     an orphan from an older revision of these scripts, a stale emulator,
-#     another project.  A port that is merely in TIME_WAIT fails this too,
-#     deliberately -- SO_REUSEADDR is NOT set.
-#
-#   Neither alone is enough.  The lock does not know about processes that
-#   never took it; the bind probe is a TOCTOU race on its own, because the
-#   probe socket must close before the emulator can bind.  Together the window
-#   between probe and use is covered by the lock, and the lock is covered by
-#   the probe.
+# A claim is flock(2) on <lockdir>/port-<n>.lock AND a bind(2) probe on
+# 127.0.0.1:<n>; neither alone is enough, and SO_REUSEADDR is NOT set, so a
+# port in TIME_WAIT is refused deliberately.
 #
 # SPDX-License-Identifier: MIT
 
@@ -317,27 +272,13 @@ rig_owner_pid() { # inode
 # IS AN OLD READER AIMED AT THIS PORT?  Prints the offenders, one per line, or
 # nothing.
 #
-# The bind probe above answers for anything LISTENING on a number.  A serial
-# reader is a CLIENT: it holds nothing until an emulator binds, so it is
-# invisible to that probe, and the instant a new run's emulator binds the port
-# the old reader connects and takes that guest's transcript.  Same corruption
-# as the hashed port, with the roles swapped.
-#
-# They existed in quantity.  tools/amiberry-run.sh used to run the reader in a
-# subshell and kill the SUBSHELL, so `python3 tools/serial-timestamp.py`
-# survived every exit and stayed connected for as long as the machine was up.
-# That is fixed at the source, and this is for the runs that started before the
-# fix or under a shell that was killed with -9.
+# A serial reader is a CLIENT: it holds nothing until an emulator binds, so the
+# bind probe above cannot see it.
 #
 # ANCHORED AT THE START OF THE COMMAND LINE, and that is not decoration.
 # `pgrep -f` matches anywhere in the whole argv, so an UNANCHORED pattern hits
-# any shell whose command line happens to contain the text -- including
-# `ssh host '... serial-timestamp.py ... 12777 ...'` and including the very
-# command a person types to test this.  Measured while writing it: the
-# unanchored form reported the wrapper shell instead of the reader, twice, and
-# would have refused to boot on the strength of a string in somebody's ssh
-# argument.  `^[^ ]*python3` and `^[^ ]*nc ` match an interpreter that IS the
-# process; a wrapper starts with its own name.
+# any shell whose command line happens to contain the text -- including the very
+# command a person types to test this.
 rig_port_readers() { # port
     pgrep -af "^[^ ]*python3[^ ]* .*serial-timestamp\.py 127\.0\.0\.1 $1 " \
         2> /dev/null || true

@@ -1,22 +1,9 @@
 /*
  * AmiNetXDuo, crash guard implementation.
  *
- * How a CPU exception reaches this code:
- *   1. The 68k takes the exception and enters supervisor mode.
- *   2. Exec's exception handler pushes the trap number as a longword on the
- *      supervisor stack and jumps to the task's tc_TrapCode.
- *   3. Above that longword sits the exception frame: SR.w, PC.l, and on 68010+
- *      a format/vector word.
- *
- * The handler saves the registers and records the frame. It then rewrites the
- * return PC in the frame to a user-mode bail-out routine, and runs RTE. The
- * processor drops back to user mode in the recovery code, and does not re-run
- * the faulting instruction, so the process can report and exit instead of a
- * machine halt.
- *
- * This assumes that the exception happened in user mode. If SR in the frame
- * has the supervisor bit set, there is nothing safe to return to, and no
- * recovery is attempted.
+ * Exec pushes the trap number as a longword on the supervisor stack; above it
+ * sits the exception frame: SR.w, PC.l, and on 68010+ a format/vector word.
+ * If SR has the supervisor bit set, no recovery is attempted.
  *
  * SPDX-License-Identifier: MIT
  */

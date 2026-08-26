@@ -4,42 +4,17 @@
 #
 #   tools/check-config-free.sh [builddir]
 #
-# WHAT IT STOPS
-#
-# ami_config_load() allocates the interface list.  It did not always: until the
-# definition ceiling was removed, AmiConfig.interfaces was a fixed array of two
-# inside the struct and loading one allocated nothing at all, so no caller owed
-# anything and none of the six had a free.  Making the list unlimited made it
-# an allocation, and turned all six into leaks in the same commit.
-#
-# The list is 404 bytes per interface described (m68k), ami_alloc() is
-# AllocVec(), and AmigaOS gives back nothing when a process exits.  So a
-# command that loads the configuration and never calls ami_config_free() costs
-# the machine that much every time it is run, until the next reboot.
-# docs/ALLOCATIONS.md.
-#
-# This is the same debt, and the same shape of rule, as
-# tools/check-netdb-free.sh -- read that one first, its header explains why the
-# rule cannot be held by hand.  The lesson there was that such a rule is broken
-# by ADDING a caller, not by removing a free, and a caller can be added by
-# somebody who never reads this file.  A command that starts wanting the
-# interface list acquires the debt silently.
-#
-# HOW
-#
-# The linker's map, not the source.  --gc-sections means a tool's map lists
-# ami_config_load only when something in that tool can actually reach it, so
-# this reads what was LINKED rather than what was written, and no spelling,
-# macro or indirection hides a caller from it.
-#
+# ami_config_load() allocates the interface list, 404 bytes per interface
+# described (m68k), through AllocVec(), and AmigaOS gives back nothing when a
+# process exits: a command that loads the configuration and never calls
+# ami_config_free() costs the machine that much until the next reboot.  Such a
+# rule is broken by ADDING a caller, not by removing a free.
+# The linker's map, not the source: --gc-sections means a tool's map lists
+# ami_config_load only when something in that tool can actually reach it, so no
+# spelling, macro or indirection hides a caller from it.
 # ami_config_load_interface() is NOT a debt and is deliberately not listed
-# below: it parses one file into a caller-supplied AmiIfConfig and allocates
-# nothing that outlives the call.  Several commands use only that one.
-#
-# bsdsocket.library is not a tool and is not checked here: it is not a process
-# that exits.  Its load is in netstack_startup() and its free is in
-# ami_ns_destroy(), and tools/alloc-census.sh gates that pair on the real thing
-# by provoking an expunge and reading what is still outstanding.
+# below: it parses one file into a caller-supplied AmiIfConfig.  bsdsocket
+# .library is not a process that exits; tools/alloc-census.sh gates it instead.
 #
 # SPDX-License-Identifier: MIT
 

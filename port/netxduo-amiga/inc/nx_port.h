@@ -5,17 +5,10 @@
  *   Copyright (c) 2024 Microsoft Corporation
  *   Copyright (c) 2025-present Eclipse ThreadX Contributors
  *
- * Changes from the Linux original:
- *   - NX_LITTLE_ENDIAN is not defined.  m68k is big-endian, which is also the
- *     network byte order, so NX_CHANGE_ULONG_ENDIAN/NX_CHANGE_USHORT_ENDIAN
- *     and htons/htonl/ntohs/ntohl all compile away to nothing, removing every
- *     header byte-swap in the stack (docs/RESEARCH.md 5.3).
- *   - <stdio.h> and <stdlib.h> are not pulled in.  A shared library build
- *     must not drag newlib's stdio along; the core needs memset/memcpy/memcmp
- *     only, which we supply.
- *   - nx_user.h is included unconditionally rather than behind
- *     NX_INCLUDE_USER_DEFINE_FILE, so the floor tuning always applies whatever
- *     the build system passes.
+ * Changes from the Linux original: NX_LITTLE_ENDIAN is not defined (m68k is
+ * big-endian, so every byte-swap compiles away); <stdio.h>/<stdlib.h> are not
+ * pulled in; nx_user.h is included unconditionally, not behind
+ * NX_INCLUDE_USER_DEFINE_FILE.
  *
  * This program and the accompanying materials are made available under the
  * terms of the MIT License which is available at
@@ -146,36 +139,10 @@ extern unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result);
 
 
 /*
- * The error-checking shell's caller checks.
- *
- * The generic ones read _tx_thread_system_state, which on a target is "an ISR is
- * running", one CPU-wide fact, so it is the same answer for every caller.  Here
- * interrupt context is an Exec Task holding the core lock, and the ThreadX port
- * raises that same counter around _tx_thread_terminate()/_tx_thread_delete()
- * with task switching enabled, because the reaper underneath can Wait().  During
- * that window every other Task reads a non-zero counter and fails a check it
- * should pass.  Two processes sharing bsdsocket.library is enough to hit it:
- * docs/RESEARCH.md 77.6 has a 44-byte write returning NX_CALLER_ERROR in a
- * loopback SSH session, mapped to EINVAL, killing the session, while the same
- * binary against a remote server never failed, because only one process was
- * bracketing.
- *
- * tx_amiga_caller_is_thread() asks whether the calling Task is the ThreadX baton
- * holder, which is what "a thread is calling" means on this port and cannot be
- * perturbed by another Task.  It rejects the tick task, the scheduler task and
- * any Task ThreadX never adopted, so the thread-only checks lose nothing.
- *
- * The two that admit non-thread callers by design keep the counter test: their
- * job is to reject an ISR, not to identify a thread, and NX_INIT_AND_THREADS in
- * particular has to let a plain Exec Task through during bring-up.  They are
- * still exposed to the teardown window, on nx_*_socket_create() only.
- *
- * There is no _tx_timer_thread to reject.  tx_port.h defines
- * TX_TIMER_PROCESS_IN_ISR, so a timer callback runs in the tick task and
- * arrives here as an ISR, which _tx_thread_system_state and
- * tx_amiga_caller_is_thread() already refuse; ThreadX does not declare the
- * thread at all in that configuration, and naming it here is what stopped the
- * whole tree linking when the define went in.
+ * Thread-only caller checks must use tx_amiga_caller_is_thread(), not
+ * _tx_thread_system_state: this port raises that counter with task switching
+ * enabled, so another Task can read non-zero and fail a check it should pass.
+ * The two that admit non-thread callers by design keep the counter test.
  */
 
 /* At file scope, not only in NX_CALLER_CHECKING_EXTERNS: several addons expand

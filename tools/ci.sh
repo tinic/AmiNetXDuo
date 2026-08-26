@@ -1,121 +1,8 @@
 #!/usr/bin/env bash
 #
 # Everything CI does, in one script, so it can be run before pushing.
-#
-#   tools/ci.sh                      # tier 1: host tests + every cross config
-#   tools/ci.sh host                 # just the host tests
-#   tools/ci.sh cross                # just the cross builds
-#   tools/ci.sh emulator             # tier 2: FS-UAE, needs a boot ROM
-#   tools/ci.sh matrix               # tier 2: CPU speed, interface count,
-#                                    #         refusal wording, memory size
-#   tools/ci.sh cards                # tier 2: every network card, one boot each
-#   tools/ci.sh cards6               # tier 2: every card, IPv6 past the router
-#   tools/ci.sh capture              # tier 2: NetCapture, every card
-#   tools/ci.sh wirequiet            # tier 2: what an idle machine emits
-#   tools/ci.sh reachability         # tier 2: still answering during a handshake
-#   tools/ci.sh bridged lossgate smb # tier 2: the arms that need a real link
-#   tools/ci.sh host cross emulator  # pick and choose
-#
-# .github/workflows/ci.yml and emulator.yml call THIS, they add caching,
-# a matrix and a job summary and nothing else.  If it passes here it passes
-# there, and a workflow edit cannot quietly change what is tested.
-#
-# STAGES
-#
-#   toolchain    resolve, or download, the pinned m68k-amigaos-gcc
-#   host         the parser / mbuf / BPF VM / crypto68k vector tests, ctest
-#   host32       the mDNS and TLS-crypto fuzz drivers, which need a 32-bit build
-#   sanitize     the whole host tier again, 64-bit and 32-bit, built under
-#                ASan+UBSan with leaks fatal.  Not in the default set: name
-#                it, or set AMINETXDUO_SANITIZE=1.  CI does both.
-#   cross        every build configuration, warnings fatal
-#   web          httpd's two pages, the terminal's and the console's, still
-#                match the TypeScript they are generated from, and the
-#                vendored xterm.js is untouched
-#   analyze      GCC -fanalyzer over our own sources vs a triaged baseline
-#   conformance  build the bsdsocktest suite for m68k (running it needs tier 2)
-#   matrix       tier 2, THE MACHINE THE USER HAS rather than the one this
-#                tree was written on: the same bring-up at 68030/68040/68060
-#                and at two emulator speed settings, three to eight files in
-#                DEVS:NetInterfaces/, which of them gets the hardware and
-#                whether it answers to its own name, what a user is told when
-#                bring-up fails for each cause, and the packet-pool arithmetic
-#                at 32 and 128 MB.  Every one of those axes had a coverage of zero until
-#                2026-08-25, which is how three defects reached real hardware
-#                unseen.  Needs a ROM and nothing else -- SLIRP is enough.
-#                Two of its four arms landed RED, against the contract rather
-#                than the behaviour, and went green on the fixes.
-#   emulator     tier 2, boots FS-UAE, needs a ROM
-#   cards        tier 2, boots EVERY network card this project supports,
-#                one guest each, and proves each one carries bytes in
-#                both directions.  Needs a bridge and a peer.
-#   cards6       tier 2, boots EVERY network card again and asks a different
-#                question: does IPv6 reach anything PAST THE ROUTER.  Needs a
-#                bridge and a working IPv6 delegation on it; no peer.
-#   capture      tier 2, boots EVERY card again and points NetCapture at a
-#                real segment: the frames are ping's, the filter is checked
-#                against an unfiltered capture of the same seconds, and
-#                tcpdump on another machine reads the files.  Needs a bridge;
-#                a peer makes the last claim stronger.
-#   wirequiet    tier 2, boots EVERY card and asks what the machine puts on
-#                the wire when nobody asked it to: a settle, then a window of
-#                idle counted off this host's own NIC with tcpdump.  Nothing
-#                else in this tree asserts on what the guest EMITS, which is
-#                how a DHCPv6 client rebinding eight times a second passed
-#                every stage for as long as it did.  Needs a bridge and an
-#                unprivileged tcpdump; no peer.
-#   reachability tier 2, does the machine still answer while it is doing a
-#                TLS handshake.  A peer probes it every two seconds through a
-#                real https fetch, and the gate is the longest stretch with no
-#                answer.  Needs a bridge and a peer that is not this host.
-#   bridged      tier 2, the pass/fail harnesses that need a real link:
-#                NetShutdown against live services, TCP: driven by Commodore's
-#                own Type and Copy, and the guest programs that drive the
-#                SHIPPED LIBRARY -- the shared-library load, eight concurrent
-#                openers, the API called off a Shell command's stack, the
-#                refused-connect leak, the UDP receive path, netstack
-#                bring-up, and what the commands say when they have no answer.
-#                Needs a bridge; the arms that also need a peer say so and
-#                skip without one.
-#   lossgate     tier 2, throughput on a link that loses packets, against a
-#                recorded baseline.  The only rig that can price a change to
-#                acknowledgement or retransmission behaviour.  Needs a bridge,
-#                a peer, and tc on it.
-#   smb          tier 2, mounts an SMB share on a real Workbench over our
-#                stack, the way GitHub #3 and #4 describe.  Needs a licensed
-#                Workbench, smb2fs, filesysbox and a peer to serve the share.
-#   e2e          tier 2, installs the SHIPPED ARCHIVE on a real
-#                Workbench 3.1, reboots, and drives it from another
-#                machine: WebDAV, `lha x`, the browser terminal.
-#                Needs a licensed Workbench, LhA, and a peer.
-#   e2ecards     tier 2, the same install and power cycle ON EVERY CARD in
-#                tests/tools/cards.sh rather than on the A2065 alone.  Needs
-#                a licensed Workbench and the vendor drivers in the asset
-#                store; no peer, so it is not `e2e` with a loop round it.
-#
-# `tools/ci.sh` with no arguments runs toolchain, host, host32, cross, web and
-# conformance: everything that needs neither an emulator nor a licensed ROM.
-#
-# ENVIRONMENT
-#
-#   AMIGA_TOOLCHAIN_ROOT   use this toolchain instead of fetching one
-#   AMINETXDUO_CI_BUILD    build directory root (default build/ci)
-#   AMINETXDUO_CI_JOBS     parallel jobs (default: all cores)
-#   AMINETXDUO_CI_CROSS    space-separated subset of the cross configs to
-#                          build, e.g. "default" (default: all of them)
-#   AMINETXDUO_KICKSTART   emulator stage: boot ROM.  Required.
-#
-# EXIT CODES
-#
-#   0   the stages ran and nothing failed
-#   1   something failed; the list at the end names it
-#   2   a stage name that does not exist
-#   77  IT TESTED NOTHING.  Every stage asked for skipped outright -- no peer,
-#       no bridge, no -m32 -- so there is no result here at all, in either
-#       direction.  This used to be 0, and `tools/ci.sh cards` on a runner with
-#       AMINETXDUO_CARDSWEEP_PEER unset reported nine network cards proved when
-#       it had booted none of them.  tools/ci-arm.sh renders 77 as SKIPPED.
-#       A run where ANY stage produced a verdict is 0 or 1 as before.
+# .github/workflows/ci.yml and emulator.yml call THIS; with no arguments it runs
+# toolchain, host, host32, cross, web and conformance.  Exit 77 = tested nothing.
 #
 # SPDX-License-Identifier: MIT
 
@@ -127,29 +14,9 @@ cd "$ROOT"
 BUILD="${AMINETXDUO_CI_BUILD:-build/ci}"
 JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4 )}"
 
-# The configurations that must all build.  They are not variations on a
-# theme: AMINETXDUO_IPV6 changes the layout of NX_IP, NX_PACKET and
-# NX_TCP_SOCKET across the whole tree, AMINETXDUO_TLS pulls in nx_secure and
-# nx_crypto, and AMINETXDUO_CRYPTO68K_ASM=OFF swaps the hand-written 68020
-# limb primitives for the portable C.  Each has broken while the others built.
-#
-# TLS and IPv6 are both ON by default now, so `default` covers them and the
-# entries here are the OFF ones, the configurations a user gets by asking for
-# a smaller stack, and the ones that would otherwise stop being compiled at all.
-#
-# THE CPU ARMS ARE GONE, and their absence is the point: the archive used to
-# carry a library per CPU and each -m flag had to compile, so three full cross
-# builds ran here to prove three binaries that one binary now replaces.  What
-# the tree may contain no longer depends on the flag -- every part of the data
-# path and the crypto that needs a 68020 instruction is assembled for the part
-# that needs it and reached through a vector chosen from AttnFlags at init
-# (src/net68k/n68k_cpu.c, src/crypto68k/c68k_cpu.c), so the `default` arm is
-# the shipping arm and compiles all of it.
-#
-# `default` and `minimal` are the two libraries the archive ships, in the
-# options the release workflow gives them, so a break in either is a break in
-# something a user downloads.  Nothing may ship in a shape that is not built
-# here.
+# The configurations that must all build.  AMINETXDUO_IPV6, AMINETXDUO_TLS and
+# AMINETXDUO_CRYPTO68K_ASM each change the tree, and each has broken while the
+# others built.  `default` and `minimal` are the two the archive ships.
 CROSS_CONFIGS=(
     "default:"
     # Coverage only.  `default` is the shipping arm and dist/make-dist.sh
@@ -1570,47 +1437,9 @@ stage_cards6() {
 #
 # THE MACHINE THE USER HAS, RATHER THAN THE MACHINE THIS TREE WAS WRITTEN ON.
 #
-# Four arms, all of which cover a class that had a coverage of exactly zero
-# until 2026-08-25, and each of which exists because a defect of its shape was
-# found by hand on real hardware after every gate here walked past it:
-#
-#   cpuspeed   the same bring-up at 68030/68040/68060 and at two emulator
-#              speed settings, on the PCMCIA claim path and on a control
-#              board.  NOTHING in this tree had ever booted a CPU other than
-#              the A1200's 68EC020.
-#   multidef   three, four and eight files in DEVS:NetInterfaces/.  Nothing
-#              had ever staged more than two, so the parser's old cap was
-#              never reached by a test and the branch that dropped the rest
-#              never executed in CI.  There is no parse cap now (dd4b3cee):
-#              any number may be DESCRIBED, and what is finite is how many
-#              attach at once, which ifslots below is about.  Its `compat'
-#              round is the same question inverted: a file carrying keywords
-#              this stack ignores by design must produce NO output from
-#              ordinary commands and a full report from CheckNetConfig, while
-#              a real fault beside it is still reported by both.
-#   bringupfail  what a user is TOLD when bring-up fails, per cause.  Several
-#              selftests assert the wording of a success; none asserted the
-#              wording of a failure, which is the half a user reads.
-#   bigmem     the pool arithmetic at 32 MB and 128 MB.  It has only ever run
-#              at 0 MB and 8 MB.
-#   ifslots    WHICH interface gets the hardware when the drawer describes
-#              more of them than there are slots, and whether a live interface
-#              answers to its own name.  multidef proves every definition is
-#              VISIBLE; this proves the one a user NAMES can be brought UP,
-#              which is the half that cost the user an evening after the
-#              visible half was fixed.
-#
-# SLIRP IS ENOUGH, which is why this is not in `cards` or `bridged`.  Every
-# arm asks whether the machine came up and moved a packet, and SLIRP's gateway
-# answers ICMP; none of them counts bytes off a third machine.  So this needs
-# a ROM and a driver and nothing else, and it can run wherever `emulator` can.
-#
-# ALL FOUR ARE GREEN, and two of them were not when they landed.  multidef and
-# bringupfail were written against the CONTRACT rather than against what the
-# tree did, went red on the defects above, and went green when those were
-# fixed -- without an assertion changing.  That order is the only way an arm
-# added at the same time as its fix can be trusted afterwards, and it is worth
-# preserving if a fifth arm is added here.  The harness headers have the detail.
+# SLIRP IS ENOUGH, which is why this is not in `cards` or `bridged`: every arm
+# asks whether the machine came up and moved a packet, and SLIRP's gateway
+# answers ICMP.  So this needs a ROM and a driver and nothing else.
 stage_matrix() {
     hr "machine matrix (tier 2, needs a ROM; SLIRP is enough)"
 
@@ -1760,36 +1589,14 @@ stage_bridged() {
 
     # ---- the guest programs that drive the SHIPPED LIBRARY ------------------
     #
-    # Seven harnesses that tests/HARNESSES called UNWIRED: every one of them
-    # was written for a named defect, every one of them still runs, and
-    # nothing in this tree invoked any of them.  What they cover was covered
-    # by whoever remembered to type the command.
-    #
-    # THEY ARE HERE AND NOT IN THE EMULATOR TIER for the reason
-    # run-ifconfigure6.sh is: that tier runs eight arms on SLIRP, and a stack
-    # result taken over SLIRP is the emulator's own TCP/IP rather than a
-    # SANA-II driver and our data path.  None of these needs a peer and none
-    # puts a workload on the link, so a bridge and a ROM is the whole
-    # requirement -- which is what `bridged` already has.
-    #
-    # ORDERED BY WHAT THEIR ABSENCE COSTS, worst first, and a silent wrong
-    # answer outranks a loud one.  A datagram delivered to the wrong socket, a
-    # socket leaked on a refused connect, a second opener corrupting the
-    # first: those ship and are never seen.  A netstack that does not come up
-    # is noticed by the first person who boots it, so it is last.
-    #
-    # EVERY ONE GRADES ITS OWN TRANSCRIPT, which is the whole point of wiring
-    # them.  Six reach a verdict through tools/test-verdict.sh, which reads
-    # the guest's own `N checks, M failures` line and holds N to a floor --
-    # tools/test-verdict-selftest.sh proves that path can go red without an
-    # emulator, ten fixtures in under a second.  run-toolsay.sh greps for the
-    # sentences the shipped commands have to print on the branches where they
-    # used to print nothing.
+    # THEY ARE HERE AND NOT IN THE EMULATOR TIER because that tier runs on
+    # SLIRP, and a stack result taken over SLIRP is the emulator's own TCP/IP
+    # rather than a SANA-II driver and our data path.  None of these needs a
+    # peer and none puts a workload on the link.
     #
     # The table is `name | path | extra args | what it proves`.  A harness that
     # takes -B is given it; run-udpdrill.sh is not, because its interface is a
-    # tap device it makes in its own address space and it asks amiberry-run.sh
-    # for `-B none` itself.
+    # tap device it makes itself and it asks amiberry-run.sh for `-B none`.
     local entry hname hpath hargs hwhy rest
     for entry in \
 "udpdrill|tests/udpdrill/run-udpdrill.sh| |the UDP receive path, the bind-address filter, and the largest datagram a route takes (108 checks, floor 108)" \

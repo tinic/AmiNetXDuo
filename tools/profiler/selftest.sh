@@ -4,23 +4,6 @@
 #
 #   tools/profiler/selftest.sh [-b BUILDDIR] [-m MODEL] [-c CPU] [-t SECONDS]
 #
-# Runs Profile against profspin under Amiberry and then asks
-# tools/profiler/profreport.py whether the samples landed where the program
-# says it was.  Two questions, and a sampling profiler that gets either wrong
-# still produces a ranking that reads perfectly well:
-#
-#   CONTAINMENT      the samples are inside the kernels that were running.
-#                    This is the exception-frame test.  Read the frame two
-#                    bytes off and every recorded value is half an SR
-#                    concatenated with half a PC, a number that lands
-#                    somewhere and resolves to something.  It scores
-#                    approximately zero here rather than a bit less.
-#
-#   PROPORTIONALITY  each kernel's share of the samples matches its share of
-#                    the wall clock profspin measured for itself.  A sampler
-#                    can be correctly aimed and still fire only when something
-#                    else periodic is running; this is what catches that.
-#
 # RUN IT ON MORE THAN ONE CPU, because the frame is what is in question:
 #
 #   tools/profiler/selftest.sh -b build/p20                 68020, 8-byte frame
@@ -29,14 +12,6 @@
 # and with AMINETXDUO_KICKSTART pointing at a ROM the model can boot, an
 # A1200 ROM in an A500 does not fail as a bad ROM, it fails as an emulator
 # that dies host-side before the guest runs.
-#
-# ON A REAL MACHINE there is no script: copy Profile and profspin across and
-#
-#   Profile OUT=RAM:spin.prof profspin RANGES=RAM:spin.ranges
-#
-# then bring both files back and run the profreport.py line this script
-# prints.  That is the whole point of the tool, an emulator above a 68020
-# has no usable cycle model, so the interesting answer only exists on iron.
 #
 # SPDX-License-Identifier: MIT
 

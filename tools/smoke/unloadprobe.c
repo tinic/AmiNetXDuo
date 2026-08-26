@@ -1,52 +1,20 @@
 /*
  * Does the machine survive unloading a program?  For any program.
  *
- * tools/smoke/kernelstop.c asks this question about one binary by re-execing
- * itself.  This asks it about a binary it is handed, so a test that was not
- * written as a parent/child pair can still be put through it:
- *
  *   unloadprobe DH0:ram_driver_test
  *
- * The failure it is built for is the one commit 475311e found in
- * tools/smoke/lifecycle: tx_amiga_kernel_start() installs a VERTB interrupt
- * server whose struct Interrupt, and whose is_Code, live in the program's hunk.
- * AmigaDOS frees that hunk the instant the program exits, and the next VBlank
- * 20 ms later calls through it.  The program has already reported PASS and
- * already returned its exit status by then, so nothing about its own output
- * can tell a program that stopped the kernel from one that did not.
+ * tx_amiga_kernel_start() installs a VERTB interrupt server whose struct
+ * Interrupt, and whose is_Code, live in the program's hunk.  AmigaDOS frees
+ * that hunk the instant the program exits and the next VBlank calls through
+ * it, well after the program reported PASS and returned its exit status.
  *
- * Two separate things happen here, and they answer different questions.
+ * THE ASSERTION: is each VERTB server node's address inside a free MemChunk?
+ * THE DEMONSTRATION: fill free memory with the 68000 ILLEGAL opcode, since
+ * freed memory often still holds what was there and a broken program passes.
  *
- *   THE ASSERTION is exact and does not depend on luck: walk the VERTB server
- *   chain and ask, of each node, whether its address is inside a free MemChunk.
- *   Exec calls through those nodes fifty times a second.  A node sitting in
- *   free memory is the defect stated as a boolean -- it is true on every run,
- *   including the runs where nothing happens to crash.
- *
- *   THE DEMONSTRATION is the crash: fill free memory with the 68000 ILLEGAL
- *   opcode and hold the machine open.  The child's hunk was freed a moment
- *   ago, so the allocations very probably land on top of it, and the next
- *   VBlank calls an is_Code that is now 0x4AFC4AFC.  Without this, freed memory
- *   often still holds the instructions that were there before it was freed and
- *   a broken program passes.
- *
- * The report is written and closed BEFORE the poison goes down, because the
- * interesting runs are the ones where the machine does not come back.
- *
- * Build:
- *
- *   cmake --build build/cm --parallel --target smoke_unloadprobe
- *
- * Run, with the program under test staged alongside it:
- *
- *   AMINETXDUO_RUN_TAG=unl ./tools/amiberry-run.sh -t 240 \
- *       -a 'DH0:ram_driver_test' \
- *       build/cm/tools/smoke/unloadprobe build/cm/tests/ram_driver/ram_driver_test
- *
- * Exit 0 means the child ran, left nothing of the port's behind, and the
- * machine outlived it.  Anything else is described in the report.  A run that
- * takes the machine down produces no exit status at all: amiberry-run.sh reads
- * the illegal instruction out of the emulator log and returns 4.
+ * The report is written and closed BEFORE the poison goes down.  A run that
+ * takes the machine down produces no exit status at all: amiberry-run.sh
+ * reads the illegal instruction out of the emulator log and returns 4.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,47 +1,9 @@
 /*
  * AmiNetXDuo, crypto68k: AES-128/192/256 in CBC, for the TLS record path.
  *
- *   docs/RESEARCH.md 15 measured the bulk path against AmiSSL and found the
- *   two equal, 85.3 ms against 84.2 ms for 16 KiB of AES-128-CBC, for the same
- *   reason on both sides: neither tree had any m68k assembly for it then.
- *   c68k_aes.S was written afterwards and is the default variant on a 68020.
- *   That row decides `https://` throughput, because it is paid on every byte
- *   of every transfer rather than once per connection.
- *
- *   This and c68k_sha256.c are the record path for 0xC027 and 0xC023, both
- *   AES-128-CBC with HMAC-SHA256, which is what a server negotiates when it
- *   will not take the AEAD this client now prefers.  Many servers still do
- *   not, GitHub among them.  c68k_chacha20.c is the other path and the faster
- *   one.
- *
- *   tests/perf/cpucal on the A1200 profile, -k 56:
- *
- *     32 KB / 64 B read ratio  0.88x, no data cache
- *     Fast RAM longword read   117.7 ns, 6.6 cycles, against ADD.L's 2
- *     Fast RAM byte read        29.4 ns/B
- *     instruction cache        256 bytes
- *
- *   No data cache is the constraint that matters.  The classic AES four-table
- *   layout is an argument about cache footprint, and here footprint costs
- *   nothing: a lookup into a 4 KB table and a lookup into a 1 KB table are the
- *   same instruction with the same bus cycle.  The usual reason to prefer one
- *   table and three rotates over four tables, the 3 KB it saves in a cache
- *   that otherwise holds the state, does not apply, and the rotates are pure
- *   loss.  Measured.  See c68k_aes_variant below and docs/RESEARCH.md 18.2.
- *
- *   AES on this machine is also not memory bound.  160 table reads per block
- *   at ~140 ns is 22 us against a measured 83 us per block, so three quarters
- *   of the cost is instruction issue.  The instruction count of the byte
- *   extraction is what matters, not the number of bytes read.  A byte-oriented
- *   S-box implementation trades 4-byte reads for 1-byte reads and pays for
- *   MixColumns in the ALU, which moves the wrong one of those two, and it
- *   measured accordingly.
- *
  * Not constant time.  Table-driven AES cannot be, on a machine with no data
- * cache to hide the access pattern in, and this one has neither the cache nor
- * a defence.  The threat model in docs/RESEARCH.md 9, a vintage machine on a
- * LAN with no remote timing attacker, makes that acceptable here.  It is not
- * acceptable for a server.
+ * cache to hide the access pattern in.  Acceptable for the threat model in
+ * docs/RESEARCH.md 9.  It is not acceptable for a server.
  *
  * SPDX-License-Identifier: MIT
  */

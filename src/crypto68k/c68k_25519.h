@@ -2,38 +2,6 @@
  * AmiNetXDuo, crypto68k: X25519 and Ed25519 for a 32-bit machine with a
  * 32x32->64 multiplier.
  *
- *   docs/RESEARCH.md 31.6 recorded that src/crypto68k/ accelerated RSA, P-256,
- *   SHA-256 and AES, and that the suite a modern OpenSSH negotiates,
- *   curve25519, ed25519, chacha20-poly1305, used none of it.  32 measured
- *   where the 84 seconds went and the answer was entirely here.
- *
- *   The 25519 of Dropbear is TweetNaCl, which is written for size and not for
- *   speed.  Its field element is sixteen 16-bit limbs stored in an `i64[16]`,
- *   so one field multiply is 256 software 64x64 multiplies on a part that has
- *   a 32x32->64 in hardware.  This file is the same mathematics over eight
- *   32-bit limbs, the layout src/crypto68k/c68k_p256.c already uses for P-256.
- *
- *   Not a wrapper around a reference implementation.  §18 established that the
- *   GCC in this toolchain loses nothing against assembly for SHA-256 on this
- *   part, and the gain here is the representation before it is the instruction
- *   selection.  Assembly was the separate question and it was measured:
- *   c68k_25519.S carries fe_mul, fe_sqr, fe_add and fe_sub, and the C above
- *   defers to them under C68K_ASM.
- *
- *   Ed25519 is defined over SHA-512 and this file does not contain one.  Every
- *   program that wants Ed25519 here already has one, Dropbear the one from
- *   libtomcrypt, a TLS build the one from nx_crypto, and a second copy is a
- *   second thing to keep right.  The callback takes up to three chunks because
- *   that is what RFC 8032 hashes (prefix||M, and R||A||M).  A NULL chunk with
- *   length 0 is skipped.
- *
- *   The scalar multiplications are ladder/always-add shaped and the
- *   conditional moves are mask-based, so the secret scalar does not steer a
- *   branch or an address.  Immunity to a microarchitectural attacker is not
- *   claimed: this is a 68020 in a machine with no memory protection, where any
- *   process can read any other's memory outright.  The constant-time shape is
- *   kept because it costs nothing here.
- *
  * SPDX-License-Identifier: MIT
  */
 

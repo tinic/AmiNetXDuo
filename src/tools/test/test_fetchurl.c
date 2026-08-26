@@ -1,21 +1,9 @@
 /*
  * The tests for src/tools/fetchurl.c, the URL half of `fetch`.
  *
- * Both halves of this file fail silently when they are wrong.  A relative
- * Location: resolved as if it were absolute asks the resolver for a host called
- * "about.html", and "docs/x.html" becomes host "docs", and neither reads as a
- * bug in the code that does it.  An interim 1xx response taken for a final one
- * writes the real response, status line and headers included, into the user's
- * file as body and returns success.
- *
- * RFC 3986 section 5.4 is a ready-made table of thirty-six references and the
- * target URI each one resolves to against a single base, so the resolution
- * half is tested against the specification's own worked answers rather than
- * against what this implementation happens to do.  The handful that cannot
- * pass verbatim are listed in the deviations block below with the reason.
- *
- *     cc -std=c11 -Wall -Wextra -Isrc/tools \
- *        src/tools/test/test_fetchurl.c src/tools/fetchurl.c -o test_fetchurl
+ * The resolution half is tested against RFC 3986 section 5.4's own worked
+ * answers.  The handful that cannot pass verbatim are listed in the deviations
+ * block below with the reason.
  *
  * SPDX-License-Identifier: MIT
  */

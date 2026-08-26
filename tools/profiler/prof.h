@@ -1,58 +1,20 @@
 /*
  * Profile, timer-driven PC sampling for AmigaOS/m68k.
  *
- * Self-contained: this core needs nothing but exec, dos and the chipset, so
- * it can be lifted out of this tree whole.  tools/profiler/profile.c drives an
- * arbitrary program with it; nothing here knows what that program is.
- *
- * HOW THE PC IS OBTAINED, which is the whole difficulty.
- *
- * A timer raises an interrupt.  We do NOT read the exception frame from an
- * Exec interrupt server: by the time AddIntServer()'s dispatcher calls a
- * server it has pushed registers on top of the frame, and the distance from
- * SSP back to it is undocumented and version-dependent.  A wrong offset there
- * yields a plausible address that is not the PC, and nothing about the
- * resulting profile looks wrong.
- *
- * Instead prof_vector.S is installed directly in the 68k autovector, so it is
- * the first instruction executed after the CPU takes the exception and SP
+ * prof_vector.S is installed directly in the 68k autovector, NOT as an Exec
+ * interrupt server: AddIntServer()'s dispatcher pushes registers on top of the
+ * frame and the distance from SSP back to it is undocumented.  On entry SP
  * points exactly at the frame the CPU just built:
  *
  *      0(SP)   SR      word
  *      2(SP)   PC      long
  *      6(SP)   format/vector word, 68010 and up only
  *
- * That layout is identical on every 68k.  The 68010+ frame is EIGHT bytes
- * rather than six, but the extra word is APPENDED; SR and PC do not move, so
- * the handler needs no CPU test to find the PC.  It records the format word
- * anyway and prof_write() checks that every sample carried format $0.
- *
- * WHAT RAISES THE INTERRUPT: an audio channel, at level 4.  A CIA timer is the
- * obvious choice and does not work, see the source table in prof.c for the
- * two separate ways both CIA-B timers were lost.  Audio DMA raises the
- * interrupt and nothing latches, so nothing wedges.  Level 4 also means a
- * sample can be taken inside a level-2 or level-3 handler, which is where a
- * SANA-II driver's receive path runs.
- *
- * WHICH CHANNEL: 3 by preference, then 2, 1, 0, and the channel is taken
- * through audio.device rather than by poking DMACON.  A general-purpose
- * profiler runs against programs that may want the audio hardware themselves,
- * so it has to arbitrate for it and be told when it loses, see prof_audio_*
- * in prof.c.
- *
- * WHAT IS INVISIBLE, stated here because a profiler that hides its blind
- * spots is worse than none:
- *
- *   Disable().  Exec's Disable() clears INTENA's master enable, so no sample
- *   is taken inside a Disable()/Enable() pair.  ps_Time makes those gaps
- *   MEASURABLE rather than silent: consecutive samples one interval apart
- *   missed nothing, samples four intervals apart swallowed three.
- *
- *   Level 5 and 6.  A level-4 interrupt cannot preempt a level-5 (disk sync,
- *   serial receive) or level-6 (CIA-B, external) handler.  That time is
- *   charged to whatever runs next, and shows up as a gap in ps_Time.
- *
- *   Forbid()/Permit() does NOT mask interrupts and is sampled normally.
+ * The 68010+ frame APPENDS that word; SR and PC do not move, so the handler
+ * needs no CPU test.  The interrupt comes from an audio channel at level 4,
+ * taken through audio.device rather than by poking DMACON.  No sample is
+ * taken inside a Disable()/Enable() pair, nor inside a level-5 or level-6
+ * handler; Forbid()/Permit() does NOT mask interrupts and is sampled normally.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -64,30 +26,18 @@
 #include <dos/dos.h>
 
 /*
- * One sample, 16 bytes, four more than without a timestamp.
+ * One sample, 16 bytes.
  *
  * ps_Time is the raw longword at $DFF004, VPOSR in the high word, VHPOSR in
- * the low.  A single `move.l` with no latch, no side effect and no chip that
- * has to be acknowledged, which is the same reasoning that chose audio over
- * the CIA in the first place.  The beam position is the only free-running
- * counter on a plain OCS 68000 machine that can be read that cheaply.
- *
- * The host decodes it: vpos = (V8 << 8) | V7..V0, hpos = the low byte, and the
- * time within a frame is vpos * 227 + hpos colour clocks.
+ * the low.  The host decodes it: vpos = (V8 << 8) | V7..V0, hpos = the low
+ * byte, and the time within a frame is vpos * 227 + hpos colour clocks.
  *
  * hpos IS ALREADY IN COLOUR CLOCKS.  The hardware reference names the field
  * H8..H1 because the internal counter runs at half a colour clock, so the
- * eight bits exposed are the colour clock number 0..226 and scaling them is
- * wrong.  It is worth stating because the wrong version is not obviously
- * wrong: it inflates a line to 452 clocks, so the position goes BACKWARDS at
- * every line boundary, every close pair of samples that straddles one reads as
- * a frame wrap, and the run appears to contain hundreds of milliseconds that
- * were never in it.  Caught by disagreeing with the vertical-blank count.
+ * eight bits exposed are the colour clock number 0..226; scaling them is wrong.
  *
- * It wraps once a frame, i.e. every ~20 ms PAL / ~17 ms NTSC, and consecutive
- * samples at any rate this tool will run at are far closer together than that,
- * so unwrapping is unambiguous.  A gap that swallowed a WHOLE frame would
- * alias, ph_Frames is the independent count that catches that.
+ * It wraps once a frame, ~20 ms PAL / ~17 ms NTSC.  A gap that swallowed a
+ * WHOLE frame would alias; ph_Frames is the independent count that catches it.
  *
  * prof_vector.S knows these offsets.
  */
@@ -214,37 +164,19 @@ struct ProfLibSeg
 /*
  * HOW A LIBRARY LETS ITS SEGLIST BE FOUND.
  *
- * A library base is a private struct.  Exec publishes the two dozen bytes of
- * struct Library at the front of it and nothing after, so the seglist, which
- * every library keeps, because Expunge has to return it, sits at an offset
- * only that library's own source knows.  Reading it from a hard-coded offset
- * would be a profiler asserting a layout it cannot check, and the first field
- * anybody inserted would move it silently: the walk would still find eight
- * bytes that look like a segment header, still produce hunk bases, and still
- * resolve every address in the library to a wrong and entirely plausible name.
+ * A library base is a private struct, so the seglist sits at an offset only
+ * that library's own source knows and cannot be read from a fixed offset.
+ * The library embeds a self-identifying record of five longwords instead:
  *
- * So the library says where it is instead, in a record that identifies itself:
+ *   * scanned for over [base, base + PosSize) at WORD boundaries, since a
+ *     record of longwords lands four-aligned only by luck;
+ *   * pst_LibBase must equal the base it was found in, so a cloned base has
+ *     to fix up pst_LibBase and pst_Sum in the clone;
+ *   * pst_Sum makes the five longwords add to zero.
  *
- *   * Anywhere in the library's own positive half, at any word boundary, a
- *     longword on m68k is aligned to two bytes, so a record of longwords lands
- *     four-aligned only by luck.  The profiler scans [base, base + PosSize)
- *     for the magic; no offset is agreed in advance and none can go stale.
- *   * pst_LibBase must equal the base it was found in, so a copy of the record
- *     that has been moved, a cloned library base, a stale image in freed
- *     memory, is refused rather than believed.
- *   * pst_Sum makes the five longwords add to zero, so the magic appearing by
- *     accident in somebody's data is not enough.
- *
- * The profiler then checks the answer against something it already knows: the
- * hull of the library's own jump-table targets must lie inside the hunks the
- * seglist walk produced.  A seglist that fails that is discarded and the
- * library falls back to being named by module.  Which is also what a library
- * that carries no tag at all gets, most of them, since this is our
- * convention and not Exec's.  See prof_find_segtag() in prof.c.
- *
- * A library adopting this needs no header from here.  It is five longwords:
- * declare them, fill them in at init, and if the base is ever cloned fix up
- * pst_LibBase and pst_Sum in the clone.
+ * The hull of the library's own jump-table targets must then lie inside the
+ * hunks the seglist walk produced, or the seglist is discarded and the library
+ * falls back to being named by module.  See prof_find_segtag() in prof.c.
  */
 #define PROF_SEGTAG_MAGIC   0x50534731UL    /* 'PSG1' */
 

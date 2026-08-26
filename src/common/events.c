@@ -1,41 +1,9 @@
 /*
  * The event ring: what the library did, as numbers.
  *
- * WHY THIS IS NOT A LOG.  AMI_ERROR/AMI_WARN/AMI_INFO compile away unless
- * AMINETXDUO_LOG is defined, and it is off in every shipped binary because the
- * format strings cost 12,820 bytes on the 68000 tier.  Every diagnostic in the
- * tree is therefore absent from every binary a user has.  This records the
- * same facts in a form that costs no strings at all: a code, an index, a value
- * and a time, in a fixed array in BSS.  The words live in
- * src/tools/tool_events.c and are printed by a Shell command.
- *
- * NOT ONE STRING MAY ENTER THIS FILE, or any call site of ami_event().  That
- * is the constraint the whole design exists to satisfy, and
- * tools/check-no-diag-strings.sh is what says it stayed satisfied.
- *
- * NO ALLOCATION, EVER.  Two of the call sites are a teardown that has already
- * failed and an expunge with the segment about to be handed back; neither can
- * afford a path that can fail or block.  The ring is a static array and
- * recording is a bounded number of instructions between Disable() and
- * Enable().
- *
- * DISABLE AND NOT FORBID.  Recording happens on application tasks, on ThreadX
- * threads, on SANA-II reader Tasks and inside lib_expunge, which Exec calls
- * with Forbid() already held.  Disable() is correct in all of them and is the
- * only one that would still be correct if a call site ever moved into an
- * interrupt.  The window is a few dozen instructions.
- *
- * THE CLOCK IS OPTIONAL.  ami_millis() opens timer.device on its first call,
- * and that ObtainSemaphore() can Wait; a Wait inside lib_expunge's Forbid()
- * would break the Forbid on the one path whose job is to decide whether the
- * segment may be unloaded.  ami_millis_quick() answers 0 rather than opening
- * anything, so an event recorded before the stack ever asked the time carries
- * no time.  Zero is not ambiguous: nse_Seq still orders it.
- *
- * WHY THE RING IS INSIDE THE PUBLISHED MARK.  A reader must be able to get at
- * it without opening the library, since opening it starts the network
- * (aminetxduo/events.h).  Putting the ring in the mark rather than beside it
- * means there is one copy and no synchronising between them.
+ * NOT ONE STRING MAY ENTER THIS FILE, or any call site of ami_event();
+ * tools/check-no-diag-strings.sh is what says it stayed satisfied.  No
+ * allocation ever, and Disable() not Forbid(): lib_expunge already holds one.
  *
  * SPDX-License-Identifier: MIT
  */

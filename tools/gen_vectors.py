@@ -52,19 +52,11 @@ TRAILING_RESERVED = 6
 # 0x360 is the first slot after the six reserved ones clib/bsdsocket_protos.h
 # documents following getnameinfo(), i.e. after every offset any published
 # bsdsocket ABI assigns.  Callers must still present a magic and a version
-# (include/aminetxduo/nxcontext.h, include/aminetxduo/netstatus.h) so that a
-# program aiming at some future vendor's vector at the same offset gets a
-# clean failure rather than a pointer.
+# (include/aminetxduo/nxcontext.h, include/aminetxduo/netstatus.h).
 #
 # THE SLOT IS UNCONDITIONAL EVEN WHEN THE FUNCTION IS NOT.  A guarded vector
 # emits its real symbol under `#ifdef <guard>` and bsd_enosys() otherwise, so
-# every offset below means the same thing in every build configuration.  This
-# is the rule bpf.c already states for its own eight: "a caller gets a
-# documented failure instead of a jump into a slot that means something else
-# in the next build".  It matters here because AMINETXDUO_TLS_CONTEXT is
-# off in the -DAMINETXDUO_TLS=OFF configuration, and without this the two
-# netstatus vectors would sit six bytes higher there than in a TLS build --
-# which is precisely the class of bug that makes a private ABI unusable.
+# every offset below means the same thing in every build configuration.
 # ---------------------------------------------------------------------------
 PRIVATE_VECTORS = [
     (0x360, "bsd_ObtainNetXDuoContext", "AMINETXDUO_TLS_CONTEXT",

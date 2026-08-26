@@ -2,24 +2,8 @@
  * __wrap_main, give a ported Unix client a real POSIX argv[] and a big stack.
  *
  * This toolchain's newlib crt0 does not turn the CLI command line into an
- * argv[]: on the Shell path it hands main() argc = 1 and a single "argv" that
- * is the whole raw argument string (and, before tools/fix-toolchain-crt0.py
- * repaired the indirection, the address of that pointer rather than the
- * pointer).  AmiNetXDuo's own commands never noticed, they read their
- * arguments through ReadArgs() and only look at argc, but Dropbear parses
- * argv and nothing else, so every invocation comes back as "no host", or
- * dereferences the garbage and crashes.
- *
- * -Wl,--wrap=main (clients/amiga-client.sh) routes the crt0's call to main()
- * through here, leaving the client's real main() reachable as __real_main().
- * argv is built from dos.library, GetProgramName() for argv[0], GetArgStr()
- * for the tail, split on whitespace with "..." grouping and the '*' escape
- * AmigaDOS uses inside quotes.
- *
- * GetArgStr() is the same command tail ReadArgs() would parse, so this stays
- * correct even if a later toolchain crt0 tokenises argv itself: the same
- * answer is rebuilt either way.  Compiled into libamigaclient, which every
- * ported client links.
+ * argv[], so -Wl,--wrap=main routes the crt0's call through here and argv is
+ * built from GetProgramName()/GetArgStr(), the same tail ReadArgs() parses.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,28 +32,9 @@ static char  argv_buf[AMIGA_ARGV_BUFSIZE];
 static char *argv_vec[AMIGA_ARGV_MAX + 1];
 
 /*
- * A ported client needs more stack than the Shell's 4 KB default, so the same
- * shim that fixes argv also brings the stack and the user never has to type
- * `stack 200000` first.
- *
- * 8 KB, measured rather than guessed: AMIGA_ARGV_STACKCHECK below paints the
- * block and reports the deepest word touched, and dbclient's high-water is
- * 5,008 bytes, a full key exchange no deeper than `dbclient -V`, because
- * Dropbear targets routers and libtommath keeps bignum digits on the heap.
- *
- * Re-measured after httpd grew a console handler, on the suspicion that
- * console I/O through DOS packets would deepen it: 4,940 bytes, over a bridge
- * to a real sshd, full key exchange and six password prompts, read out of a
- * browser terminal.  It did not -- the packets are answered in the SERVER's
- * process and cost this one a Wait() -- so 8 KB stands with 3.2 KB spare.
- *
- * It was 256 KB, sized by a comment that named curl first.  Nothing here has
- * ever built curl; clients/ holds dropbear and this directory.  Our own fetch
- * is a command in src/tools, allocates its own 64 KB and never comes through
- * here.  So dbclient is the only client this number serves, and 256 KB was a
- * quarter of the smallest supported machine held for the length of every ssh.
- *
- * Re-measure before adding a second client, and the check is one variable.
+ * A ported client needs more stack than the Shell's 4 KB default.  8 KB,
+ * measured: dbclient's high-water is 5,008 bytes, and AMIGA_ARGV_STACKCHECK
+ * below is what measures it.  Re-measure before adding a second client.
  */
 #define AMIGA_ARGV_STACK    (8UL * 1024UL)
 
@@ -174,46 +139,9 @@ static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 }
 
 /*
- * exit() unwinds through the swapped stack.
- *
- * A client that ends by calling exit() rather than returning from main(),
- * Dropbear always, never comes back to
- * argv_run_on_stack(), so its second StackSwap() does not run.  The crt0's exit
- * restores the stack pointer from its own saved copy, but not tc_SPLower/
- * tc_SPUpper: the task is left advertising the swapped, about-to-be-abandoned
- * stack as its bounds, and the next stack check sees the pointer outside them
- * and traps with an illegal instruction right at the end, after everything
- * appeared to work.
- *
- * StackSwap() cannot put them back from here: it moves its own return address
- * onto the stack it swaps to, and the frames between an exit() call site and
- * this point live on the stack being abandoned, so the returns would unwind
- * through the wrong memory.  Restore the two bounds directly instead, from what
- * the first StackSwap() saved into argv_sss; the pointer itself is the crt0's
- * to restore.  -Wl,--wrap=exit,--wrap=_exit routes both here.
- *
- * The same path also loses the stack itself.  AmigaOS does not reclaim
- * AllocMem() memory when a process exits, and the FreeMem() in __wrap_main()
- * sits after argv_run_on_stack() returns, which it never does on an exit().
- * That is one stack per invocation of every client that ends this way, gone
- * until reboot, on a machine whose supported floor is 1 MB.  It was 256 KB a
- * run when this was found.
- *
- * So the exit wrappers longjmp() back into __wrap_main(), which is still on the
- * caller's stack, and the free happens there.
- *
- * BOTH wrappers, not only __wrap__exit().  This crt0 defines exit(), _exit()
- * and __exit() as three names for ONE function, `nm` puts all three at the
- * same address, so a client that calls exit() never makes a second call that
- * the linker can see and redirect.  --wrap=_exit gives a wrapper that is never
- * reached, and an earlier version of this file put the longjmp only there:
- * measured on an emulated A1200, every dbclient run still lost 266,368 bytes,
- * the same figure five times running.
- *
- * stdio is flushed here rather than left to the crt0, because after the
- * longjmp we are on the caller's stack, 4 KB under a Shell, and the flush
- * wants the big one.  What is left to run then is the atexit() handlers and
- * the return to DOS, which __real__exit() does from __wrap_main().
+ * exit() never returns to argv_run_on_stack(), so its second StackSwap() does
+ * not run: tc_SPLower/tc_SPUpper are restored by hand from argv_sss and both
+ * exit wrappers longjmp() back into __wrap_main(), which frees the stack.
  */
 extern void __real_exit(int status);
 extern void __real__exit(int status);

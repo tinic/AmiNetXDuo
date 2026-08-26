@@ -1,45 +1,9 @@
 /*
  * AmiNetXDuo, crypto68k long division, 32-bit limbs.
  *
- *   Measured: on an RSA-2048 public operation through crypto68k, 36.6 ms of
- *   163.9 went into one routine, the R^2 mod m setup in c68k_powm.c, which
- *   reduces through the vendored _nx_crypto_huge_number_modulus().  AmiSSL's
- *   equivalent is 15.9 ms.  With the exponentiation itself level at 0.997x
- *   after Karatsuba, that setup was 98% of the remaining gap to OpenSSL on
- *   that operation.
- *
- *   The vendored divider is a correct implementation of the right algorithm,
- *   traditional long division with a two-digit quotient estimate, done in
- *   16-bit half-limbs.  Its own declarations say so ("In number of USHORT
- *   words") and it takes its estimate from `>> (HN_SHIFT >> 1)`.  A halved
- *   digit size doubles the number of quotient digits and doubles the length of
- *   the multiply-subtract pass under each one, so it is about four times the
- *   inner work of the same algorithm over 32-bit limbs.  OpenSSL gets its
- *   quotient digit from bn_div_words, which on this target is one DIVU.L out
- *   of the bn_m68k.s of Howard Chu.  This file is the same algorithm at the
- *   word size of the machine, not a better one.
- *
- *   Rejected: a cache of R^2 against the modulus, which avoids the division
- *   rather than makes it faster.  It gains nothing for a TLS client.  The
- *   three RSA public operations in a handshake check the leaf with the key of
- *   the intermediate, the intermediate with the key of the root, and the
- *   ServerKeyExchange with the key of the leaf, three different moduli, so a
- *   cache keyed on the modulus never hits inside a handshake.  Across
- *   handshakes to one host, session resumption (docs/RESEARCH.md 13) does no
- *   public-key work, so the cache is not consulted there either.
- *
- *   Also rejected: R^2 mod m by repeated modular doubling from R mod m is 2048
- *   shift-and-subtract passes over 64 limbs, and by a Montgomery-squaring
- *   ladder is eleven Montgomery squares.  Priced at the measured figures of
- *   this module, those are ~42 ms and ~72 ms against the 36.6 ms in question.
- *   Division is the right primitive, in 32-bit digits.
- *
- *   The one place DIVU.L can trap: algorithm D's quotient estimate divides a
- *   two-limb prefix of the partial remainder by the top limb of the divisor,
- *   and the result fits in one limb except when those two top limbs are equal,
- *   where the true quotient digit is B-1.  A 68020 DIVU.L traps on that
- *   overflow rather than saturating, so the case is tested for and never
- *   reaches the instruction.
+ * A 68020 DIVU.L traps on quotient overflow rather than saturating.  Algorithm
+ * D's quotient estimate overflows exactly when the two top limbs are equal, so
+ * that case is tested for and never reaches the instruction.
  *
  * SPDX-License-Identifier: MIT
  */

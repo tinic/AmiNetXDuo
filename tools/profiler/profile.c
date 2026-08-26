@@ -4,44 +4,13 @@
  *      Profile [RATE=n] [SAMPLES=n] [CHANNEL=n] [STACK=n] [OUT=file]
  *              [FOLDED=file] [TOP=n] [QUIET] <program> [arguments]
  *
- * The program is loaded, its hunk bases are recorded, it is run, and the whole
- * time it runs the level-4 autovector is sampling the program counter.  The
- * program needs no recompilation, no instrumentation and no cooperation; it
- * does not know it is being profiled.
+ * RunCommand(), NOT SystemTagList(): the host cannot reconstruct where each
+ * hunk was loaded, and SystemTagList() never shows a caller the seglist it
+ * used.  RunCommand() takes the seglist we loaded ourselves.
  *
- * WHY RunCommand() AND NOT CreateNewProc() OR SystemTagList().
- *
- * The one thing the host cannot reconstruct on its own is where each hunk of
- * the program was loaded, so whatever runs the program has to hand us the
- * seglist.  That rules SystemTagList() out at once: it loads and runs and
- * unloads, and never shows a caller the seglist it used.
- *
- * That leaves LoadSeg() plus one of two ways to enter it.
- *
- *   RunCommand()      synchronous, in this process, returns the program's
- *                     return code, and takes the seglist WE loaded, so the
- *                     hunk table is recorded before the first instruction
- *                     runs and is exact by construction.  prof_start() before
- *                     and prof_stop() after bracket the run with nothing in
- *                     between: no signal to wait for, no window in which the
- *                     program has finished and the sampler is still going.
- *
- *   CreateNewProc()   asynchronous, in a new process.  Everything above has to
- *                     be rebuilt: NP_ExitCode or a signal to learn that it
- *                     finished, and a race at both ends between the child
- *                     starting and the sampler starting.  It buys one thing,
- *                     the program gets its own stack and its own process, so a
- *                     program that Exit()s does not take the profiler with it.
- *
- * RunCommand(), and the cost is stated rather than hidden: a program that
- * calls Exit() rather than returning from main() unwinds past us, and the
- * profile for that run is not written.  That is the same deal the Shell makes,
- * which is what a Shell command is written against, so in practice it is the
- * uncommon case, and it is loud when it happens rather than quiet.
- *
- * RunCommand() runs the program in THIS process, so a program that reads
- * cli_Module to find its own seglist sees Profile's, not its own.  Nothing in
- * the OS does that; a program that profiles itself might.
+ * Two costs of that choice: a program that calls Exit() rather than returning
+ * from main() unwinds past us and its profile is not written; and it runs in
+ * THIS process, so a program reading cli_Module sees Profile's, not its own.
  *
  * SPDX-License-Identifier: MIT
  */

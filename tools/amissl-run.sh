@@ -7,23 +7,13 @@
 #   -f  set C68K_AMISSL=full, which adds the slow extras (an AmiSSL RSA-2048
 #       private operation WITHOUT CRT, which is minutes on its own)
 #
-# WHY THIS SCRIPT EXISTS RATHER THAN A LINE IN THE README
+# amisslmaster.library opens `LIBS:AmiSSL/amissl_v362.library` as a literal path
+# inside the binary, so the staged directory layout is not negotiable; getting
+# it wrong produces "OpenAmiSSLTags failed" and nothing more.
 #
-# The emulated machine resolves amissl.library through LIBS:, and
-# amisslmaster.library then opens `LIBS:AmiSSL/amissl_v362.library`, that
-# path is a literal inside amisslmaster (checked with `strings`), so the
-# directory layout is not negotiable.  Getting it wrong produces
-# "OpenAmiSSLTags failed", which says nothing about which of the two files was
-# missing.  So the staging happens here, once, and the script says which build
-# of the library it copied.
-#
-# WHICH CPU BUILD.  AmiSSL ships exactly two m68k builds: `68020-40`, compiled
-# `-m68020-40 -msoft-float` WITH Howard Chu's bn_m68k.s bignum assembly, and
-# `68060`, compiled `-m68060` WITHOUT it (MULU.L's 32x32->64 form is not
-# implemented on a 68060 and traps to the emulator, so the assembly is a
-# pessimisation there and AmiSSL disabled it in 4.4).  The timing profile is a
-# 68EC020, so `68020-40` is the correct and the only defensible choice, and it
-# is the one that gives OpenSSL its best case.
+# AmiSSL ships exactly two m68k builds.  `68020-40` is the one to stage: it
+# carries Howard Chu's bn_m68k.s bignum assembly and the timing profile is a
+# 68EC020.
 #
 # SPDX-License-Identifier: MIT
 
@@ -97,29 +87,13 @@ echo "    CPU build: 68020-40 (the one with bn_m68k.s; the 68060 build has none)
 # ------------------------------------------------------- the math libraries --
 #
 # AmiSSL is built against clib2, whose startup opens the IEEE math libraries,
-# and Kickstart 3.1's ROM contains mathieeesingbas and NOTHING ELSE (verified
-# against the 40.68 A1200 image, docs/RESEARCH.md 11.2).  A bare directory hard
-# drive has none of the others.
-#
-# Two are needed, not one, and the second one cost an afternoon: AmiSSL's own
-# `OpenSSL` command staged with only mathieeedoubbas.library prints
-# "mathieeedoubtrans.library could not be opened." and exits 20.  That is the
-# loud version of the failure.  The quiet version is what
-# amissl_v362.library's own LibInit does with the same missing library, which
-# is to sit there, the benchmark looked hung for a quarter of an hour before
-# this probe was run.
-#
-# They must be a MATCHED PAIR.  Measured, with AmiSSL's own `OpenSSL` command
-# as the probe: a stock mathieeedoubbas.library beside the AROS
-# mathieeedoubtrans.library still reports "mathieeedoubtrans.library could not
-# be opened"; both from the AROS m68k boot ISO and the command gets all the way
-# to its own "Couldn't open bsdsocket.library v4!", which is that command's
-# requirement and not AmiSSL's.  So build/amissl-mathlibs/ holds the AROS pair
-# and is searched first.
-#
-# Getting them: the AROS m68k boot ISO carries all four in Libs/, and
-# `bsdtar xf aros-amiga-m68k.iso Libs/mathieeedoub*.library` extracts them.
-# Not vendored here, they are somebody else's binaries.
+# and Kickstart 3.1's ROM contains mathieeesingbas and NOTHING ELSE.  Both
+# mathieeedoubbas and mathieeedoubtrans must be staged, and they must be a
+# MATCHED PAIR -- a stock one beside an AROS one still fails to open, and
+# amissl_v362.library's LibInit then sits there instead of saying so.
+# build/amissl-mathlibs/ holds the AROS pair and is searched first; the AROS
+# m68k boot ISO carries all four in Libs/.  Not vendored here, they are
+# somebody else's binaries.
 MATH_MISSING=0
 for lib in mathieeedoubbas mathieeedoubtrans; do
     src=""

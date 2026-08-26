@@ -2,39 +2,9 @@
  * AmiNetXDuo, crypto68k: SHA-256, for the TLS record path and everything
  * else in the handshake that hashes.
  *
- *   docs/RESEARCH.md 15.7 named "an unwritten 68020 SHA-256" as the largest
- *   single gain available to https:// on a classic Amiga.  This is it.  The
- *   tree was already 1.28x AmiSSL on HMAC-SHA256 with both sides portable C,
- *   so that 1.28x described two C implementations, not the machine.
- *
- *   The C below is 1.29x the vendored implementation on the same buffer,
- *   85,952 us to 66,687 for 16 KiB, with no assembly.  Two changes did it:
- *
- *     1. The sixteen message words are loaded, not assembled.  This is a
- *        big-endian machine, so W[t] for t < 16 is the longword at data + 4t,
- *        and on a 68020 that is one MOVE.L at any alignment.
- *        nx_crypto_sha2.c builds each one from four byte loads, three shifts
- *        and three ORs.
- *     2. The message schedule is computed up front rather than interleaved
- *        with the rounds, so the round loop's two scratch registers do not
- *        have to serve both.
- *
- *   A hand-written 68020 compression function was written, checked and timed
- *   against this, on the argument that the SHA-256 rotations map onto ROR.L,
- *   ROL.L and SWAP and that a compiler cannot use a count above eight without
- *   a data register for the count.  It lost: 67,656 us against 66,687.  The
- *   measured instruction costs say why.  On this part ROR.L #n is 5.94 cycles
- *   and ROR.L Dm,Dn is 7.91, so SWAP-then-rotate (9.89) and MOVEQ-then-rotate
- *   (9.91) are the same price.  The SWAP idiom is a 68000 habit, where a
- *   rotate cost 8+2n.  The 68020 shifter is flat.  docs/RESEARCH.md 18 has the
- *   table.
- *
- *   c68k_sha256_initialize / _update / _digest_calculate have the same
- *   signatures as _nx_crypto_sha256_initialize and friends, because
- *   _nx_crypto_hmac_metadata_set() takes those three as function pointers.
- *   HMAC-SHA256 is therefore nx_crypto's own framing with the hash swapped
- *   underneath it, and none of the padding, key-shortening or ipad/opad logic
- *   is reimplemented here.  See src/tls/ami_tls_crypto.c.
+ * c68k_sha256_initialize / _update / _digest_calculate must keep the
+ * signatures of _nx_crypto_sha256_initialize and friends, because
+ * _nx_crypto_hmac_metadata_set() takes those three as function pointers.
  *
  * SPDX-License-Identifier: MIT
  */

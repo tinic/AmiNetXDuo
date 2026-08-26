@@ -4,222 +4,19 @@
 # the machine the way its owner would.
 #
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
-#                                       [-l NOVICE|AVERAGE|EXPERT]
-#                                       [-p CHOICE] [-N BOARD]
-#                                       [-t SECONDS] [-T SECONDS] [-k] [-H]
+#                                 [-l NOVICE|AVERAGE|EXPERT] [-p CHOICE]
+#                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k] [-H]
 #
-# -N NAMES THE NETWORK CARD, from tests/tools/cards.sh, and it defaults to
-# a2065 because that is the only card this gate has ever booted.  Every release
-# this project has cut was gated on one card: the driver was staged by name and
-# the emulator config held a2065_rom_file, with no way to ask for another.  The
-# standing rule is that every card appears in the end-to-end, and one-card
-# coverage has already let a regression reach a user once.
-#
-# The model follows the card unless AMINETXDUO_MODEL says otherwise --
-# xsurf100z3 is a Zorro III board and an A1200 has a 24-bit address space, so
-# Amiberry never maps it and the run reads as a driver that cannot find its
-# hardware.  tools/emu-board.sh refuses that pair by name instead.
-#
-# WHAT -N PROVES, AND WHAT IT DOES NOT.  The Installer asks which card the
-# machine has, and installdrive.c cannot answer an askchoice: a posted GADGETUP
-# at an option gadget leaves the page's default in place (installdrive.c, the
-# DRIVE_PICK_OPTIONS note, measured twice).  What it CAN do is arrive at a
-# machine where the answer is already right: the script's detection loop scans
-# DEVS: and DEVS:Networks for a driver it knows and makes that the page's
-# default, so staging the driver first is how the card gets selected.
-#
-# That works only for a driver whose FILE NAME is in the script's list.  When
-# it is not, the default falls back to the first entry -- the A2065 -- and the
-# installer writes DEVICE=a2065.device for whatever card is really in the
-# machine.  This run does not paper over that: it prints
-#
-#   installer_card_selected=yes|no   installer_device=<what was written>
-#
-# and, when the answer is no, rewrites the interface file after the install and
-# says so with card_config=post-install.  Such a run proves THE STACK DRIVES
-# THE CARD.  It does not prove the installer can select it, and the two are
-# never reported as one thing.
-#
-# -p NAMES AN OPTION ON AN askchoice PAGE.  It takes `minimal` or `full`, and
-# `-p minimal` is the one that matters: the second stack in the archive, with
-# IPv6, mDNS, the packet filter, TLS, IPv4 multicast, the ARexx host and the
-# TCP: handler compiled out.  Needs -l AVERAGE or -l EXPERT, like -H, because
-# at NOVICE the page is never drawn.
-#
-# -p minimal DOES NOT WORK YET, and it fails rather than pretending.  The
-# harness took the default of every askchoice in the script -- so the minimal
-# stack has shipped in every archive and has never been installed or booted by
-# any end-to-end run -- and driving the option turns out to need more than a
-# posted GADGETUP: installdrive.c records both measurements and what to try
-# next.  What is fixed here is the silence: the run asserts by byte count which
-# of the two libraries landed, so an arm that asks for minimal and gets the
-# full stack is a failure and not a pass.
-#
-# -H IS THE TERMINAL ARM, and it makes the run three installs instead of one:
-#
-#   1. a pre-existing S:User-Startup with another application's lines in it is
-#      written BEFORE anything is installed, then the Installer runs twice,
-#      both times answering "Yes, serve them" to the question about serving a
-#      drawer and a Shell at boot.  Two runs, one httpd line and one assign
-#      line, or the managed block was appended to rather than replaced;
-#   2. the power cycle, and while the machine is up this host fetches
-#      http://<the Amiga>/shell over the bridge, which is what "reachable"
-#      means;
-#   3. a third install answering the question the other way, which has to take
-#      both lines away again and leave AddNetInterface and the other
-#      application's lines exactly where they were.
-#
-# WHAT THE OTHER MACHINE DOES, in step 2, and it is the product's main path:
-# GET /shell and compare Content-Length against the page on the drive; PUT
-# a file and GET it back and compare the bytes; PUT our own release .lha and
-# have the Amiga `lha x` it, then compare the extracted files against this
-# host's copies; and run tests/tools/httpd-drill.py --terminal and
-# tests/tools/wsterm-console.py, which is a Shell answering through the
-# WebSocket.  Nothing here scores "the command completed".
-#
-# AMINETXDUO_PEER is that machine and there is no default.  The host running
-# amiberry cannot be it: with uaenet_pcap on a shared NIC a frame this host
-# sends to the guest's MAC does not come back round to that NIC's pcap, so
-# every connection from here is refused.  Without a peer the -H run exits 3
-# rather than passing.
-#
-# lha is LhA 2.15 from ~/amiga-assets/apps/lha-2.15, which is licensed
-# third-party software: it is staged onto the test drive here and is in
-# nothing this repository ships.  Absent, that one step says so and fails,
-# rather than disappearing.
-#
-# It needs -l AVERAGE or -l EXPERT: at NOVICE the Installer draws no questions
-# at all and there is nothing to answer.
-#
-# Exit status: 0 pass, 1 something under test failed, 2 an ingredient is
-# missing on this machine, 3 nothing could reach the Amiga from outside.
-#
-# WHY THIS EXISTS, given that install/test/run-installer.sh already installs and
-# boots.  That harness stages the machine itself: it makes an empty LIBS:, a
-# DEVS: holding one driver and an S: with nothing in it, boots a bare
-# directory hard drive with no Workbench on it at all, and drives its own
-# boot script.  Every failure a user has reported so far, `fetch https://`
-# not working, a command not seeing its arguments, happened on a real
-# Workbench and was invisible here, because "works on the staging tree" and
-# "works on a Workbench" are different claims and only the second one is the
-# product.
-#
-# So this one does the whole thing end to end:
-#
-#   0. assembles a genuine Workbench 3.1 SYS: out of Commodore's five
-#      floppies (workbench, fonts, locale, storage, extras) and caches it;
-#   1. boots it, SetPatch, IPrefs, LoadWB, the real Startup-Sequence;
-#   2. unpacks the release .lha into DH0:Unpacked/ the way a download
-#      would arrive, and runs Install-AmiNetXDuo through Commodore's
-#      Installer with installdrive clicking Proceed;
-#   3. POWER CYCLES the machine.  The second boot runs the stock 3.1
-#      Startup-Sequence untouched, which reaches `Execute S:User-Startup`
-#      and starts the network from the line the installer wrote, nothing
-#      the harness knows is in the path;
-#   4. runs, from an ordinary Shell script, the four things a user does
-#      first: look at the network, fetch an http: URL, fetch an https: URL,
-#      and run the shipped commands WITH ARGUMENTS.
-#
-# Each of those four reports its own return code, and this script prints them
-# as a table.  IT DOES NOT ADJUST THEM UNTIL THEY PASS: a failure here is the
-# finding.
-#
-# The bare-hardware harness is untouched and still the one to run for
-# installer-script coverage (five user levels, the static-address branch, the
-# reinstall path).  This one covers the other axis: one install, on a machine
-# that looks like the user's.
-#
-# -a TAKES THE ARCHIVE AS GIVEN, and that is the strongest form of this test:
-#
-#     gh release download v0.8.1 -D /tmp/rel
-#     install/test/run-workbench.sh -a /tmp/rel/AmiNetXDuo-0.8.1.lha
-#
-# Without it the archive is built here, from this machine's toolchain, and a
-# defect that lives in the RELEASE build, a different compiler, a different
-# crt0, cannot show up.  Run it both ways before believing a release.
-#
-# The https step fetches a list of hosts and passes on the first one that
-# answers.  What it asserts is that the trust store the installer just wrote
-# verifies a real public CA chain, so the certificate has to come off the
-# internet and not out of our own peer, and that makes the step depend on
-# somebody else's server.  One server is a single point of failure:
-# ftp.gnu.org, which this used to fetch, rate-limits this lab and then refuses
-# both families for minutes -- 0 of 10 curl fetches, connect timeouts, at the
-# same moment www.gnu.org answered 10 of 10.  A red run then said nothing
-# about this stack.  Three hosts, and it goes red only when all three fail,
-# which no single operator's policy can produce.
-#
-# A server also puts a clock on the handshake, started at accept() and stopped
-# when the client's Finished arrives, and a 68020 does not finish inside every
-# one of them.  Seconds a server holds a connection with no ClientHello on it,
-# measured from this lab 2026-08-12:
-#
-#   www.google.com, dns.google                       10
-#   www.7-zip.org                                    11
-#   www.iana.org, www.rfc-editor.org (Cloudflare)    15
-#   ftp.heanet.ie                                    30
-#   ftp.acc.umu.se                                   43
-#   aminet.net, www.kernel.org, ftp.nluug.nl,
-#   mirror.leaseweb.com, mirrors.mit.edu,
-#   eab.abime.net, mirror.init7.net                  60
-#   ftp.tu-chemnitz.de, ftp.riken.jp                 92
-#   www.zlib.net                                     152
-#   www.amiga-news.de, www.pouet.net, ftp.tugraz.at,
-#   os4depot.net, www.gnu.org, www.openbsd.org,
-#   www.debian.org, ftp.funet.fi, ftp.fau.de,
-#   ftp.lysator.liu.se, ftp.snt.utwente.nl           no close at 250
-#
-# Only the last group can be used.  Against www.iana.org the A1200 here took
-# 20.1 s of handshake, so Cloudflare sent FIN 15.0 s in, five seconds before
-# the client Finished went out, and the RST arrived before the request could
-# be answered.  Handshake cost, A1200/68020, whole chain verified:
-#
-#   www.pouet.net       17.4 s   3 certificates, RSA-2048 leaf   IPv4
-#   www.amiga-news.de   17.5 s   3 certificates, RSA-2048 leaf   IPv4
-#   www.gnu.org         22.1 s   3 certificates, RSA-2048 leaf   IPv6
-#   ftp.tugraz.at       24.4 s   3 certificates, ECDSA P-256     IPv4
-#   www.openbsd.org     25.2 s   3 certificates, RSA-4096 leaf   IPv4
-#   www.debian.org      25.4 s   3 certificates, RSA-4096 leaf   IPv4
-#   os4depot.net        34.4 s   4 certificates, ECDSA P-256     IPv4
-#
-# The family is not chosen here.  fetch resolves once and connects once --
-# src/tools/toolsock.c:840 takes the first usable answer and the library
-# orders IPv6 first -- and does not fall back to the other address, so a name
-# with an AAAA is fetched over IPv6 and a name without one over IPv4.
-# www.gnu.org is first because it has both and this is the only place an
-# https transfer over IPv6 happens end to end; the two behind it have no AAAA,
-# so an IPv6 outage cannot take the whole list with it.
-#
-# On this rig it takes that outage every run, and it is the rig.  Amiberry's
-# ethernet_fix_partial_csum (src/ethernet.cpp:172) returns at :181 for
-# anything that is not ethertype 0x0800, so an off-LAN IPv6 segment reaches
-# the guest carrying the pseudo-header sum rather than a finished checksum and
-# the stack is right to drop it -- 560 of 560 inbound IPv6 frames on
-# 2026-08-12, against 6351 of 6351 correct for a Linux client on the same
-# server.  Measured from the guest the same day: 1 MB in 4.1 s over IPv4 and
-# 11.3 to 64.3 s over IPv6, and an IPv6 connect to www.openbsd.org,
-# www.debian.org, ftp.funet.fi, ftp.lysator.liu.se or ftp.snt.utwente.nl
-# failing after 191 s while this host reached those addresses in under 2 s
-# from the guest's own /64.  So the first host costs 191 s and then the second
-# answers.  A repair for the other ethertypes is being written; when it lands
-# the first host answers in 22 s and this step gets three minutes shorter.
-# Every attempt is printed, so the day that line stops appearing is visible in
-# the artifact.
-#
-# INGREDIENTS, none of which are ours to ship:
-#
-#   Workbench 3.1 ADFs   ~/amigaos/adf/amiga-wb31_{workbench,extras,fonts,
-#                        locale,storage}.adf, or AMINETXDUO_ADF_DIR
-#   Kickstart 3.1        AMINETXDUO_KICKSTART, else the A1200 40.68 image
-#   Commodore Installer  build/Installer, or AMINETXDUO_INSTALLER
-#   the card's driver    a2065.device from build/ or AMINETXDUO_A2065; every
-#                        other card's from ~/amiga-assets/devs or
-#                        AMINETXDUO_SANA2_STORE.  Most of them cannot be
-#                        fetched (docs/RESEARCH.md 77 permits two of eight), so
-#                        they arrive by somebody putting the file there.
-#   amitools' xdftool    AMINETXDUO_XDFTOOL, or on PATH (pip install amitools)
-#   lha                  to unpack the archive on the host; Lhasa will do
-#
+# -N names the card (tests/tools/cards.sh, default a2065); one whose FILE NAME
+# the installer's own list does not carry gets card_config=post-install, which
+# proves the stack drives the card, not that the installer can select it.
+# -p minimal DOES NOT WORK YET and fails rather than pretending.  -p and -H
+# need -l AVERAGE or EXPERT; -H also needs AMINETXDUO_PEER, a THIRD machine
+# (this host's frames do not come back round to its own pcap), or it exits 3.
+# -a takes an archive as given; without it a release-only defect cannot show.
+# Exit: 0 pass, 1 a failure under test, 2 an ingredient is missing (Workbench
+# 3.1 ADFs, Kickstart, Commodore's Installer, the card's driver, xdftool, lha
+# -- none of them ours to ship), 3 nothing could reach the Amiga from outside.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -507,22 +304,13 @@ fi
 # own MAC, which is what makes the DHCP, DNS, http and TLS checks below a
 # statement about the machine a user gets.
 #
-# THERE IS NO SLIRP PATH HERE ANY MORE, and the reason is not taste.  This
-# script is the release gate: it is what decides "shipped" rather than
-# "tagged".  It defaulted to slirp for every run without -H, so the network arm
-# of every release gate ever run -- 0.23.0 included -- proved DHCP, HTTP and
-# TLS against slirp's 10.0.2.0/24 and against a gateway written in C inside the
-# emulator, and never once against a LAN, a real DHCP server, a real router or
-# a real neighbour.  A green gate that tested a different machine than the one
-# people download is worse than no gate, because it is believed.
+# THERE IS NO SLIRP PATH HERE ANY MORE.  A backend that is not a bridge is
+# refused by name, and one that cannot be worked out is refused with what to
+# pass; it is never substituted for.
 #
-# So a backend that is not a bridge is refused by name, and a backend that
-# cannot be worked out is refused with what to pass.  It is never substituted
-# for: the whole failure above is a substitution nobody was told about.
-#
-# Nothing is guessed except the obvious: the interface the host's own default
-# route goes out of is the one that reaches the LAN this test needs.  On a host
-# where that is wrong, name it.
+# The only guess is that the interface the host's own default route goes out of
+# is the one that reaches the LAN this test needs.  Where that is wrong, name
+# it.
 BACKEND="${AMINETXDUO_EMU_BACKEND:-${AMINETXDUO_AMIBERRY_BACKEND:-}}"
 if [ -z "$BACKEND" ]; then
     BACKEND=$(ip -4 route show default 2>/dev/null |
@@ -849,31 +637,17 @@ startup_count() {
 
 # -------------------------------------------------- the driver the archive has --
 #
-# THE FILE THE ARCHIVE SHIPPED AND THE INSTALLER DID NOT COPY.
+# THE FILE THE ARCHIVE SHIPPED AND THE INSTALLER DID NOT COPY.  It is asserted
+# after the install, from the drive, against the archive's own copy, rather
+# than read out of the script.  Which of two halves a run takes is decided by
+# the card and not by a flag:
 #
-# Devs/Networks/anxnet.device has been in every archive since the driver
-# existed, and Install-AmiNetXDuo left it there: the reasoning was that a new
-# driver should be a deliberate step.  What it produced was a machine that kept
-# whatever anxnet.device it already had through every reinstall, which is the
-# worst possible property for a file somebody is iterating on.  It cost a real
-# evening on a real A1200 -- reinstall after reinstall silently restored a
-# stale driver, and several build verdicts were recorded against the wrong
-# binary before anybody suspected the installer.
+#   the A2065 leaves no DEVS:Networks behind at all, so that run proves the
+#   installer CREATES the drawer and puts the driver in it;
 #
-# So it is asserted after the install, from the drive, against the archive's
-# own copy, rather than read out of the script.  TWO HALVES, and which one a
-# run takes is decided by the card rather than by a flag, so both are gated and
-# neither needs a boot of its own:
-#
-#   the A2065 stages its driver into DEVS: and leaves no DEVS:Networks behind
-#   at all, which is a stock Workbench.  That run -- the one tools/ci.sh's e2e
-#   stage takes -- proves the installer CREATES the drawer and puts the driver
-#   in it;
-#
-#   every other card stages into DEVS:Networks, so the drawer is already there.
-#   Those runs put a STALE anxnet.device in it first, whose contents nothing
-#   else in this tree can produce, and prove the installer replaces it and
-#   keeps the old one beside it as anxnet.device.old.
+#   every other card stages into DEVS:Networks, so those runs put a STALE
+#   anxnet.device there first and prove the installer replaces it and keeps
+#   the old one beside it as anxnet.device.old.
 #
 # Written before the archive is unpacked, so nothing here can be confused with
 # something the unpack left lying about.
@@ -1376,33 +1150,17 @@ fi
 
 # -------------------------------------------------- the drawers have icons --
 #
-# THE SAME SHAPE AS THE anxnet.device ASSERTION ABOVE, and for the same reason:
-# a thing was in the archive, was never copied, and every listing of both sides
-# looked right.  Docs.info, Examples.info and Terminal.info were packed by every
-# release and installed by none of them, so the Examples and Terminal drawers
-# arrived on the user's disk as real drawers holding the right files that
-# Workbench does not draw.  Invisible to anyone who does not open a Shell.
+# A drawer's icon is a SIBLING of the drawer, not a member of it, so `(all)`
+# and `(infos)` copies of a drawer's CONTENTS cannot reach it: Examples.info
+# and Terminal.info were packed by every release and installed by none.
 #
-# WHY IT WAS MISSED FOR SO LONG.  A drawer's icon is a sibling of the drawer,
-# not a member of it -- Examples.info sits BESIDE Examples/ -- and every copy in
-# the installer that handles a drawer copies that drawer's CONTENTS.  `(all)`
-# and `(infos)` between them cover every file in the drawer and neither can
-# reach the icon one level up.
+# The bytes, not the name, exactly as the driver is checked above.  Docs.info
+# is NOT in this list: the installer copies the CONTENTS of Docs/ into the
+# AmiNetXDuo drawer, so there is no Docs drawer here to give an icon to, and
+# install/ARCHIVE-MANIFEST records it that way.
 #
-# The bytes, not the name, exactly as the driver is checked: an icon of the
-# right name that is not this archive's is a different failure and passes every
-# weaker check.
-#
-# Docs.info is NOT in this list, and that is a decision rather than an
-# oversight: the installer copies the CONTENTS of Docs/ straight into the
-# AmiNetXDuo drawer, so no Docs drawer exists here to give an icon to.  It is
-# recorded that way in install/ARCHIVE-MANIFEST, which is what
-# tools/check-archive-installed.sh reads, and printed below so a reader of this
-# transcript can see all three were considered.
-#
-# DOCDIR is SYS:AmiNetXDuo on this run -- the harness answers the askdir with
-# the default -- and DOCPARENT is the volume root, which is where the drawer's
-# own icon goes.
+# DOCDIR is SYS:AmiNetXDuo on this run and DOCPARENT is the volume root, which
+# is where the drawer's own icon goes.
 _icon_check() { # archive-relative-path  installed-relative-path
     local arch="$HD/Unpacked/AmiNetXDuo/$1" got want bytes
     local real

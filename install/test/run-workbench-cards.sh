@@ -5,37 +5,14 @@
 #   install/test/run-workbench-cards.sh -a ARCHIVE.lha [-c BOARD[,BOARD...]]
 #                                       [-l LEVEL] [-t SECONDS] [-T SECONDS]
 #
-# install/test/run-workbench.sh installs the release archive on a real
-# Workbench 3.1, power cycles the machine and then uses it.  It booted the
-# A2065 and nothing else -- the driver was staged by name and the emulator
-# config held two literal a2065 lines -- so every release this project has cut
-# was gated on one network card.  The standing rule is that every card appears
-# in the end-to-end, and one-card coverage has already let a regression reach a
-# user once.
+# One install/test/run-workbench.sh run per card from tests/tools/cards.sh, in
+# series.  EVERY RUN GETS ITS OWN MAC, because AMINETXDUO_RUN_TAG is per card
+# and tools/emu-mac.sh derives the address from the tag; several guests under
+# one hardware address is not a collision the emulator reports.
 #
-# The cards are tests/tools/cards.sh, the same table the two card sweeps read.
-# One run per card, in series: each one boots a whole Workbench twice, and the
-# lab host is shared.
-#
-# EVERY RUN GETS ITS OWN MAC, because AMINETXDUO_RUN_TAG is per card and
-# tools/emu-mac.sh derives the address from the tag.  Nine guests on the LAN
-# under one hardware address is not a collision the emulator reports: the
-# frames arrive, a peer's neighbour cache keeps whichever answered last, and
-# what fails is an assertion somewhere else.
-#
-# WHAT A GREEN CARD MEANS, AND IT IS NOT ONE THING.  The Installer asks which
-# card the machine has and installdrive.c cannot answer an askchoice, so the
-# card is selected only when the script's own detection loop finds the staged
-# driver -- which needs the driver's FILE NAME to be one of the eight in
-# Install-AmiNetXDuo:524-533.  For the rest, run-workbench.sh rewrites the
-# interface file after the install and says so.  Both are reported, never
-# merged:
-#
-#   card_config=installer      the installer chose this card
-#   card_config=post-install   the stack drives this card; the installer did
-#                              not choose it and this run does not claim it did
-#
-# Output is key=value plus an exit code, one line per card and one at the end.
+# Two results, never merged: card_config=installer (the installer chose this
+# card) and card_config=post-install (the stack drives this card; the installer
+# did not choose it and this run does not claim it did).
 #
 # Exit status: 0 every card that ran passed, 1 a card failed, 2 no card could
 # run at all.

@@ -1,24 +1,9 @@
 /*
  * el3.c against a chip modelled in C.
  *
- * This mock is reactive, and test_netdev_ed.c's is not.
- *
- * A DP8390's registers are a buffer: write one, read it back, and an array
- * models it exactly.  An EtherLink III's are not.  Offset 0x04 is a different
- * register depending on a window that was selected by a command written to a
- * different offset, and a read of the wrong window is not an error the chip
- * reports.  It quietly answers with another register.  A passive array cannot
- * model that, and window bookkeeping is the thing most worth testing in a
- * driver for this part.
- *
- * So the mock is a function.  el3.c routes its raw word access through
- * EL3_RAW_GET/EL3_RAW_PUT, which are a plain load and store in the shipping
- * driver.  This file defines them first and then includes el3.c whole, the
+ * EL3_RAW_GET/EL3_RAW_PUT must be defined before el3.c is included whole, the
  * same way test_netdev_ed.c includes ed.c to reach its statics.  The frame
- * FIFOs come in through NetdevBusOps, which is a seam that already existed.
- *
- * Nothing emulates this card.  Amiberry's PCMCIA support is NE2000 only, so
- * what is below is the only thing that has ever driven this core.
+ * FIFOs come in through NetdevBusOps.
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,31 +1,11 @@
 /*
  * AmiNetXDuo, the transmit capture tap.
  *
- * Separate from bpf_tap.c only because it needs NX_PACKET, and therefore
- * tx_api.h / nx_api.h ahead of any exec header (same rule as
- * src/sana2/sana2_internal.h and src/mbuf/mbuf_packet.c).
+ * Needs NX_PACKET, and therefore tx_api.h / nx_api.h ahead of any exec header
+ * (same rule as src/sana2/sana2_internal.h and src/mbuf/mbuf_packet.c).
  *
- * A transmit at the tap point, in cooked mode (the default, and the only mode
- * most SANA-II devices are safe in):
- *
- *     nx_packet_prepend_ptr ---> [ IP header ][ payload ... ]
- *
- * There is no Ethernet header. NetX Duo leaves the link header to the driver
- * and reserves NX_PHYSICAL_HEADER bytes of headroom for it. The SANA-II shim
- * never builds one either, because CMD_WRITE takes ios2_PacketType and
- * ios2_DstAddr as separate fields and the device does the framing. The
- * complete Ethernet frame that goes on the wire never exists in memory.
- *
- * A DLT_EN10MB consumer must see that frame, so the tap reconstructs the 14
- * bytes on the stack from the three things that the CMD_WRITE carries. The
- * destination comes from nx_ip_driver_physical_address_msw/lsw, the source
- * from the MAC of the interface, and the type from the driver command. The tap
- * then hands the filter a two-segment view. The packet itself is not touched,
- * because it is often a queued TCP segment that the stack hands back for
- * retransmission.
- *
- * In raw mode the shim has already prepended the header, so segment 0 is
- * skipped and the view is only the packet chain.
+ * The packet itself is never touched: it is often a queued TCP segment that the
+ * stack hands back for retransmission.
  *
  * SPDX-License-Identifier: MIT
  */

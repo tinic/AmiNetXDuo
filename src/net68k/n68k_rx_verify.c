@@ -1,21 +1,9 @@
 /*
  * AmiNetXDuo, receive checksum checks in the driver glue.
  *
- * NX_ENABLE_INTERFACE_CAPABILITY lets an interface tell NetX Duo that receive
- * checksums are already checked, so the stack skips its own walk.  Upstream
- * reads the capability per interface.  On its own that makes this glue
- * answerable for every frame on the interface, with no way to decline one.
- * The fork requires the per-packet nx_packet_interface_capability_flag as
- * well, so a frame this file does not clear is checked by the stack exactly
- * as before.
- *
- * Summing inside ami_sana2_copy_to_buff() saves the second pass over the
- * payload and is measurably faster.  That was tried.  It needs somewhere to
- * leave the answer, the only sanctioned place is NX_PACKET_HEADER_PAD, and
- * growing NX_PACKET wedged the stack on 6 of 6 tcpdrill runs against 0 of 6
- * without it.  The arrangement here costs a second parse of the IP header and
- * a second walk of the payload, the walk the stack does anyway.  It changes no
- * structure, allocates nothing, and keeps no state between packets.
+ * The fork requires the per-packet nx_packet_interface_capability_flag as well
+ * as the interface capability, so a frame this file does not clear is checked
+ * by the stack exactly as before.
  *
  * The core owns the lifetime of the per-packet flag: _nx_packet_allocate() and
  * _nx_packet_release() both clear it.  This file sets bits only on a frame it

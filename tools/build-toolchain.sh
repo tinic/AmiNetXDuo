@@ -1,55 +1,21 @@
 #!/usr/bin/env bash
 #
-# Build the pinned m68k-amigaos cross toolchain from source.
+# Build the pinned m68k-amigaos cross toolchain from source.  The slow path:
+# tools/fetch-toolchain.sh downloads a prebuilt copy of exactly this.
 #
 #   tools/build-toolchain.sh                     # build into ./build-toolchain
 #   tools/build-toolchain.sh --package out.tar.xz
 #   tools/build-toolchain.sh --fetch-only        # just clone the sources
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
-# WHAT THIS BUILDS
+# GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, PINNED BY COMMIT, not by branch.
+# The binutils pairing is deliberate -- 2.46 cannot assemble GCC 16.2's own
+# output -- so do not "upgrade" it.  Each entry records the remote verified to
+# serve its pin: bebbo's GitHub repos are gone and Codeberg does not carry
+# every branch.
 #
-#   GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, targeting m68k-amigaos, from
-#   bebbo's amiga-gcc build system.  tools/fetch-toolchain.sh downloads a
-#   prebuilt copy of exactly this; that is the fast path and what CI uses.
-#   This script is the slow path: it is how the prebuilt asset is cut, and it
-#   is the answer to "the binary does not run on my machine".
-#
-#   Budget the better part of an hour and ~12 GB of disk.
-#
-# PINNED BY COMMIT, NOT BY BRANCH
-#
-#   bebbo's `amiga-2.39.0` and `amiga16.2` are branches, and branches move.
-#   Every source below is pinned to the exact commit the published assets were
-#   built from, and the clone is a fetch of that object by name.  A moved
-#   branch changes nothing here.
-#
-# WHY BINUTILS 2.39 AND NOT 2.46
-#
-#   2.46 cannot assemble GCC 16.2's own output: it forces the MIT-syntax
-#   pseudo-branches (jne, jeq, ...) to a byte displacement and then rejects
-#   thousands of them as operand mismatches.  It fails a second way, too --
-#   its `size` does not recognise the format of some of our own objects, so
-#   three targets fall back to unstripped binaries.  Under 2.39 the whole tree
-#   builds with no fallbacks.  The pairing is deliberate; do not "upgrade" it.
-#
-# WHERE THE SOURCES LIVE
-#
-#   bebbo's GitHub repositories are gone.  What survives is Codeberg and his
-#   own franke.ms Gitea.  They are not interchangeable: at the time of writing
-#   codeberg.org/bebbo/binutils-gdb does not carry the amiga-2.39.0 branch at
-#   all, and franke.ms is the only remote that serves that commit.  Each entry
-#   below therefore records the remote that was verified to serve its pin, and
-#   a mirror only where one actually exists.
-#
-# HOST REQUIREMENTS
-#
-#   Linux    build-essential, git, curl, python3, flex, bison, texinfo,
-#            libgmp-dev, libmpfr-dev, libmpc-dev, lhasa (or lha), rsync, xz
-#   macOS    Xcode command line tools, plus Homebrew: texinfo gmp mpfr libmpc
-#            lha rsync.  GNU rsync is REQUIRED -- macOS ships openrsync, which
-#            mishandles libnix's --exclude patterns and silently installs the
-#            wrong set of objects.  No container is used or needed.
+# On macOS GNU rsync is REQUIRED: openrsync mishandles libnix's --exclude
+# patterns and silently installs the wrong set of objects.
 #
 # SPDX-License-Identifier: MIT
 
