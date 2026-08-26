@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <stdarg.h>
-
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
@@ -346,7 +344,7 @@ static VOID emit(const char *s)
     Write(Output(), (APTR)s, (LONG)n);
 }
 
-/* A tiny formatter. %s %ld %lu %02x %04x are all this needs, and pulling in
+/* A tiny formatter. %s %d %u %x are all this needs, and pulling in
    newlib's printf would drag mathieeedoubbas.library onto a bare boot disk
    (tests/conformance/build.sh records the same trap). */
 static VOID fmt_num(char **p, ULONG v, UWORD base, UWORD width, BOOL sign)
@@ -377,14 +375,34 @@ static VOID fmt_num(char **p, ULONG v, UWORD base, UWORD width, BOOL sign)
     *p = o;
 }
 
-static VOID say(const char *fmt, ...)
+typedef enum SayArgKind
+{
+    SAY_ARG_STRING,
+    SAY_ARG_SIGNED,
+    SAY_ARG_UNSIGNED
+} SayArgKind;
+
+typedef struct SayArg
+{
+    SayArgKind  kind;
+    const char *string;
+    ULONG       number;
+} SayArg;
+
+static VOID say_bad_arg(char **out, const char *limit)
+{
+    const char *s = "<?>";
+
+    while (*s != '\0' && *out < limit)
+        *(*out)++ = *s++;
+}
+
+static VOID say_args(const char *fmt, const SayArg *args, UWORD count)
 {
     static char line[320];              /* 4 KB of Shell stack; see the header */
     char       *o = line;
     const char *f = fmt;
-    va_list     ap;
-
-    va_start(ap, fmt);
+    UWORD       used = 0;
 
     while (*f != '\0' && (ULONG)(o - line) < sizeof(line) - 16)
     {
@@ -396,25 +414,49 @@ static VOID say(const char *fmt, ...)
         f++;
         if (*f == 's')
         {
-            const char *s = va_arg(ap, const char *);
+            const SayArg *arg = (used < count) ? &args[used] : NULL;
             f++;
-            while (*s != '\0' && (ULONG)(o - line) < sizeof(line) - 8)
-                *o++ = *s++;
+            used++;
+            if (arg != NULL && arg->kind == SAY_ARG_STRING &&
+                arg->string != NULL)
+            {
+                const char *s = arg->string;
+
+                while (*s != '\0' && (ULONG)(o - line) < sizeof(line) - 8)
+                    *o++ = *s++;
+            }
+            else
+                say_bad_arg(&o, line + sizeof(line) - 8);
         }
         else if (*f == 'd')
         {
+            const SayArg *arg = (used < count) ? &args[used] : NULL;
             f++;
-            fmt_num(&o, (ULONG)va_arg(ap, LONG), 10, 0, TRUE);
+            used++;
+            if (arg != NULL && arg->kind == SAY_ARG_SIGNED)
+                fmt_num(&o, arg->number, 10, 0, TRUE);
+            else
+                say_bad_arg(&o, line + sizeof(line) - 8);
         }
         else if (*f == 'u')
         {
+            const SayArg *arg = (used < count) ? &args[used] : NULL;
             f++;
-            fmt_num(&o, va_arg(ap, ULONG), 10, 0, FALSE);
+            used++;
+            if (arg != NULL && arg->kind == SAY_ARG_UNSIGNED)
+                fmt_num(&o, arg->number, 10, 0, FALSE);
+            else
+                say_bad_arg(&o, line + sizeof(line) - 8);
         }
         else if (*f == 'x')
         {
+            const SayArg *arg = (used < count) ? &args[used] : NULL;
             f++;
-            fmt_num(&o, va_arg(ap, ULONG), 16, 0, FALSE);
+            used++;
+            if (arg != NULL && arg->kind == SAY_ARG_UNSIGNED)
+                fmt_num(&o, arg->number, 16, 0, FALSE);
+            else
+                say_bad_arg(&o, line + sizeof(line) - 8);
         }
         else
         {
@@ -422,12 +464,21 @@ static VOID say(const char *fmt, ...)
         }
     }
 
-    va_end(ap);
-
     *o++ = '\n';
     *o   = '\0';
     emit(line);
 }
+
+#define SAY_S(value) ((SayArg){ SAY_ARG_STRING, (value), 0 })
+#define SAY_D(value) ((SayArg){ SAY_ARG_SIGNED, NULL, (ULONG)(LONG)(value) })
+#define SAY_U(value) ((SayArg){ SAY_ARG_UNSIGNED, NULL, (ULONG)(value) })
+#define SAY0(format) say_args((format), NULL, 0)
+#define SAY(format, ...)                                                   \
+    do {                                                                   \
+        const SayArg say_arguments[] = { __VA_ARGS__ };                    \
+        say_args((format), say_arguments,                                  \
+                 (UWORD)(sizeof(say_arguments) / sizeof(say_arguments[0]))); \
+    } while (0)
 
 static ULONG rd32(const UBYTE *p) { return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
                                            ((ULONG)p[2] << 8) | (ULONG)p[3]; }
@@ -758,8 +809,8 @@ static VOID pump(VOID)
         {
             /* Dropping here would leave every later assertion one frame out
                of step. */
-            say("  !! frame queue overflow -- a case sent more than %u frames "
-                "between directives", (ULONG)PEND_MAX);
+            SAY("  !! frame queue overflow -- a case sent more than %u frames "
+                "between directives", SAY_U(PEND_MAX));
             pend_tail = (UWORD)((pend_tail + 1) % PEND_MAX);
             pend_count--;
         }
@@ -993,13 +1044,13 @@ static VOID build_and_inject(const Inject *in)
     if (tap_rx_put(f, ETH_HDR + iplen + in->pad) != 0)
     {
         /* The wire task (below) injects from a Process of its own, which has
-           no Output() and must not reach say(); it counts instead and the
+           no Output() and must not reach SAY(); it counts instead and the
            main task reports the count at `join`. */
         if (inject_quiet)
             n_inject_dropped++;
         else
         {
-            say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
+            SAY0("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
             cs.fails++;
         }
     }
@@ -1048,7 +1099,7 @@ static VOID inject_icmp(UBYTE type, UBYTE code, ULONG seq)
 
     if (tap_rx_put(f, ETH_HDR + iplen) != 0)
     {
-        say("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
+        SAY0("  !! injection dropped -- no CMD_READ outstanding for 0x0800");
         cs.fails++;
     }
 }
@@ -1123,7 +1174,7 @@ static LONG parse_operand(const char **pp)
 
         if (!var_value(name, &v))
         {
-            say("!! unknown variable $%s", name);
+            SAY("!! unknown variable $%s", SAY_S(name));
             n_fail++;
         }
     }
@@ -1300,13 +1351,13 @@ static const char *parse_keys(const char *p, Expect *e)
                 else if (streq(v, "mcast"))  e->dst = DST_MCAST;
                 else
                 {
-                    say("!! unknown dst=%s", v);
+                    SAY("!! unknown dst=%s", SAY_S(v));
                     n_fail++;
                 }
             }
             else
             {
-                say("!! unknown key %s=", key);
+                SAY("!! unknown key %s=", SAY_S(key));
                 n_fail++;
             }
         }
@@ -1425,15 +1476,15 @@ static VOID describe(const Seg *s, char *out, ULONG max)
 static VOID pass(const char *what)
 {
     n_pass++;
-    say("  ok   %s", what);
+    SAY("  ok   %s", SAY_S(what));
 }
 
 static VOID fail(const char *what, const char *why)
 {
     n_fail++;
     cs.fails++;
-    say("  FAIL %s", what);
-    say("       %s", why);
+    SAY("  FAIL %s", SAY_S(what));
+    SAY("       %s", SAY_S(why));
 }
 
 static VOID do_tx(const char *args, const char *raw)
@@ -1509,7 +1560,7 @@ static VOID do_tx(const char *args, const char *raw)
         t = have;             while (*t) *w++ = *t++;
         *w = '\0';
         fail(raw, why);
-        say("       observed  %s", desc);
+        SAY("       observed  %s", SAY_S(desc));
         cs.t_last = got.stamp;
         return;
     }
@@ -1525,7 +1576,7 @@ static VOID do_tx(const char *args, const char *raw)
             fmt_num(&q, (ULONG)(actual), 10, 0, TRUE);                        \
             *q = '\0';                                                        \
             fail(raw, why);                                                   \
-            say("       observed  %s", desc);                                 \
+            SAY("       observed  %s", SAY_S(desc));                         \
             cs.t_last = got.stamp;                                            \
             return;                                                           \
         }                                                                     \
@@ -1643,7 +1694,7 @@ static VOID do_tx(const char *args, const char *raw)
         cs.t_last = got.stamp;
         cs.wire_bytes += (ULONG)got.dlen;
         n_pass++;
-        say("  ok   %s   [%s%ums]", raw, sign, gap);
+        SAY("  ok   %s   [%s%ums]", SAY_S(raw), SAY_S(sign), SAY_U(gap));
     }
 }
 
@@ -1953,7 +2004,7 @@ static VOID do_wire(const char *args, const char *raw)
         else if (streq(tok, "after"))   wire.w_After  = (ULONG)v;
         else
         {
-            say("!! unknown wire key %s=", tok);
+            SAY("!! unknown wire key %s=", SAY_S(tok));
             n_fail++;
         }
         args = next;
@@ -2035,15 +2086,15 @@ static VOID do_join(const char *args, const char *raw)
         return;
     }
 
-    say("       wire: %u seg(s), %u byte(s) contiguous, %u seen, "
-        "%u grant(s), %u injected", wire.w_Segs, wire.w_Next, wire.w_High,
-        wire.w_Given, wire.w_Sent);
+    SAY("       wire: %u seg(s), %u byte(s) contiguous, %u seen, "
+        "%u grant(s), %u injected", SAY_U(wire.w_Segs), SAY_U(wire.w_Next),
+        SAY_U(wire.w_High), SAY_U(wire.w_Given), SAY_U(wire.w_Sent));
     if (wire.w_FinAt >= 0)
-        say("       wire: the FIN arrived %ums in", (ULONG)wire.w_FinAt);
+        SAY("       wire: the FIN arrived %ums in", SAY_U(wire.w_FinAt));
     if (wire.w_BadSum != 0 || wire.w_Other != 0 || n_inject_dropped != 0)
-        say("       wire: %u bad checksum(s), %u foreign frame(s), "
-            "%u injection(s) dropped", wire.w_BadSum, wire.w_Other,
-            n_inject_dropped);
+        SAY("       wire: %u bad checksum(s), %u foreign frame(s), "
+            "%u injection(s) dropped", SAY_U(wire.w_BadSum),
+            SAY_U(wire.w_Other), SAY_U(n_inject_dropped));
 
     if (wire.w_BadSum != 0)
     {
@@ -2154,10 +2205,10 @@ static VOID do_notx(const char *args, const char *raw)
     {
         describe(&got, desc, sizeof(desc));
         fail(raw, desc);
-        say("       at        +%ums", took);
+        SAY("       at        +%ums", SAY_U(took));
         return;
     }
-    say("  ok   %s   [%ums quiet]", raw, took);
+    SAY("  ok   %s   [%ums quiet]", SAY_S(raw), SAY_U(took));
     n_pass++;
 }
 
@@ -2353,7 +2404,7 @@ static VOID do_connect(const char *args, const char *raw)
             }
 
             n_pass++;
-            say("  ok   %s   [%ums]", raw, took);
+            SAY("  ok   %s   [%ums]", SAY_S(raw), SAY_U(took));
             return;
         }
         {
@@ -2559,7 +2610,7 @@ static VOID do_accept(const char *args, const char *raw)
                 took = ticks_to_ms(t0, tap_eclock_now());
                 cs.t_last = tap_eclock_now();
                 n_pass++;
-                say("  ok   %s   [%ums]", raw, took);
+                SAY("  ok   %s   [%ums]", SAY_S(raw), SAY_U(took));
                 return;
             }
             last = s_errno();
@@ -2603,7 +2654,8 @@ static VOID do_accept(const char *args, const char *raw)
 
         cs.t_last = tap_eclock_now();
         n_pass++;
-        say("  ok   %s   [%ums over %d wait(s)]", raw, took, (LONG)n_wait);
+        SAY("  ok   %s   [%ums over %d wait(s)]", SAY_S(raw), SAY_U(took),
+            SAY_D(n_wait));
         return;
     }
 
@@ -2801,7 +2853,7 @@ static VOID do_bstream(const char *args, const char *raw)
                 hi = (ULONG)to_num(eq + 1);
             else
             {
-                say("!! unknown bstream key %s=", tok);
+                SAY("!! unknown bstream key %s=", SAY_S(tok));
                 n_fail++;
             }
         }
@@ -2852,8 +2904,8 @@ static VOID do_bstream(const char *args, const char *raw)
 
     ms = ticks_to_ms(start, tap_eclock_now());
 
-    say("       bstream: %u byte(s) in %u call(s), %u short, %ums",
-        total, calls, shorts, ms);
+    SAY("       bstream: %u byte(s) in %u call(s), %u short, %ums",
+        SAY_U(total), SAY_U(calls), SAY_U(shorts), SAY_U(ms));
 
     if (total != want)
     {
@@ -3018,7 +3070,7 @@ static VOID do_bclose(const char *args, const char *raw)
             else if (streq(tok, "max")) hi = (ULONG)to_num(eq + 1);
             else
             {
-                say("!! unknown bclose key %s=", tok);
+                SAY("!! unknown bclose key %s=", SAY_S(tok));
                 n_fail++;
             }
         }
@@ -3051,7 +3103,7 @@ static VOID do_bclose(const char *args, const char *raw)
     }
 
     n_pass++;
-    say("  ok   %s   [%ums]", raw, ms);
+    SAY("  ok   %s   [%ums]", SAY_S(raw), SAY_U(ms));
 }
 
 static VOID do_recv(const char *args, const char *raw)
@@ -3339,7 +3391,7 @@ static VOID do_close(const char *args, const char *raw)
     }
 
     n_pass++;
-    say("  ok   %s   [%ums]", raw, ms);
+    SAY("  ok   %s   [%ums]", SAY_S(raw), SAY_U(ms));
 }
 
 static VOID do_txsame(const char *args, const char *raw)
@@ -3378,7 +3430,7 @@ static VOID do_txsame(const char *args, const char *raw)
 
     cs.t_last = tap_eclock_now();
     n_pass++;
-    say("  ok   %s   [%u identical frame(s)]", raw, n);
+    SAY("  ok   %s   [%u identical frame(s)]", SAY_S(raw), SAY_U(n));
 }
 
 static VOID do_txcount(const char *args, const char *raw)
@@ -3418,7 +3470,7 @@ static VOID do_txcount(const char *args, const char *raw)
 
     cs.t_last = tap_eclock_now();
     n_pass++;
-    say("  ok   %s   [%u frame(s)]", raw, n);
+    SAY("  ok   %s   [%u frame(s)]", SAY_S(raw), SAY_U(n));
 }
 
 static VOID do_rxorder(const char *args, const char *raw)
@@ -3483,7 +3535,7 @@ static VOID case_end(VOID)
     if (wire_live)
     {
         (VOID)wire_stop();
-        say("  !! the wire task was still running at the end of the case");
+        SAY0("  !! the wire task was still running at the end of the case");
         n_fail++;
         cs.fails++;
     }
@@ -3502,13 +3554,13 @@ static VOID case_end(VOID)
     }
 
     if (cs.fails == 0)
-        say("PASS %s", cs.name);
+        SAY("PASS %s", SAY_S(cs.name));
     else
     {
         n_cases_failed++;
-        say("FAIL %s (%u check(s))", cs.name, cs.fails);
+        SAY("FAIL %s (%u check(s))", SAY_S(cs.name), SAY_U(cs.fails));
     }
-    say("");
+    SAY0("");
 }
 
 static VOID case_begin(const char *name)
@@ -3536,7 +3588,7 @@ static VOID case_begin(const char *name)
     cs.peer_wscale = -1;
 
     n_cases++;
-    say("---- %s", cs.name);
+    SAY("---- %s", SAY_S(cs.name));
 }
 
 #define REPEAT_MAX_LINES    12
@@ -3602,7 +3654,7 @@ static VOID run_line(char *line)
 
     if (cs.name[0] == '\0')
     {
-        say("!! directive before any `case`: %s", raw);
+        SAY("!! directive before any `case`: %s", SAY_S(raw));
         n_fail++;
         return;
     }
@@ -3632,7 +3684,7 @@ static VOID run_line(char *line)
         else if (streq(tok, "foreign"))  cs.local_addr = FOREIGN_IP;
         else
         {
-            say("!! unknown localaddr: %s", raw);
+            SAY("!! unknown localaddr: %s", SAY_S(raw));
             n_fail++;
         }
     }
@@ -3673,24 +3725,24 @@ static VOID run_line(char *line)
         (VOID)token(args, tok, sizeof(tok));
         if (rep_collecting)
         {
-            say("!! nested `repeat`: %s", raw);
+            SAY("!! nested `repeat`: %s", SAY_S(raw));
             n_fail++;
             return;
         }
         rep_count      = to_num(tok);
         rep_n          = 0;
         rep_collecting = TRUE;
-        say("  -- repeat %d", rep_count);
+        SAY("  -- repeat %d", SAY_D(rep_count));
     }
     else if (streq(verb, "end"))
     {
-        say("!! `end` without `repeat`: %s", raw);
+        SAY("!! `end` without `repeat`: %s", SAY_S(raw));
         n_fail++;
     }
     else if (streq(verb, "icmp"))     do_icmp(args, raw);
     else
     {
-        say("!! unknown directive: %s", raw);
+        SAY("!! unknown directive: %s", SAY_S(raw));
         n_fail++;
     }
 }
@@ -3703,7 +3755,7 @@ static LONG run_script(const char *path)
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (fh == (BPTR)0)
     {
-        say("!! cannot open %s", path);
+        SAY("!! cannot open %s", SAY_S(path));
         return 20;
     }
 
@@ -3729,8 +3781,8 @@ static LONG run_script(const char *path)
                 continue;
             if (rep_n >= REPEAT_MAX_LINES)
             {
-                say("!! `repeat` body over %d lines: %s", REPEAT_MAX_LINES,
-                    line);
+                SAY("!! `repeat` body over %d lines: %s",
+                    SAY_D(REPEAT_MAX_LINES), SAY_S(line));
                 n_fail++;
                 continue;
             }
@@ -3739,8 +3791,8 @@ static LONG run_script(const char *path)
 
             if (line[n] != '\0')
             {
-                say("!! `repeat` line is longer than %u bytes: %s",
-                    (ULONG)sizeof(rep_body[0]) - 1UL, line);
+                SAY("!! `repeat` line is longer than %u bytes: %s",
+                    SAY_U(sizeof(rep_body[0]) - 1UL), SAY_S(line));
                 n_fail++;
                 continue;
             }
@@ -3757,7 +3809,7 @@ static LONG run_script(const char *path)
 
     if (rep_collecting)
     {
-        say("!! `repeat` with no `end`, %u line(s) never ran", rep_n);
+        SAY("!! `repeat` with no `end`, %u line(s) never ran", SAY_U(rep_n));
         n_fail++;
         rep_collecting = FALSE;
     }
@@ -3774,22 +3826,23 @@ int main(void)
 
     out_file = Open((STRPTR)"DH0:tcpdrill.txt", MODE_NEWFILE);
 
-    say("tcpdrill -- packet-level TCP conformance");
+    SAY0("tcpdrill -- packet-level TCP conformance");
 
     if (tap_install(local_mac) != 0)
     {
-        say("!! cannot install %s", TAP_DEVICE_NAME);
+        SAY("!! cannot install %s", SAY_S(TAP_DEVICE_NAME));
         if (out_file != (BPTR)0) Close(out_file);
         return 20;
     }
 
     eclock_per_ms = tap_eclock_rate() / 1000;
-    say("E-Clock %u Hz (%u ticks/ms)", tap_eclock_rate(), eclock_per_ms);
+    SAY("E-Clock %u Hz (%u ticks/ms)", SAY_U(tap_eclock_rate()),
+        SAY_U(eclock_per_ms));
 
     SockBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
     if (SockBase == NULL)
     {
-        say("!! bsdsocket.library would not open");
+        SAY0("!! bsdsocket.library would not open");
         tap_remove();
         if (out_file != (BPTR)0) Close(out_file);
         return 20;
@@ -3800,7 +3853,7 @@ int main(void)
 
     if (!tap_is_online())
     {
-        say("!! the interface never came online -- DEVS:NetInterfaces/tap0?");
+        SAY0("!! the interface never came online -- DEVS:NetInterfaces/tap0?");
         CloseLibrary(SockBase);
         tap_remove();
         if (out_file != (BPTR)0) Close(out_file);
@@ -3810,20 +3863,20 @@ int main(void)
     for (tries = 0; tries < 50 && tap_reads_for(ETYPE_IP) == 0; tries++)
         Delay(1);
 
-    say("device online, %u IPv4 read(s) and %u ARP read(s) outstanding",
-        tap_reads_for(ETYPE_IP), tap_reads_for(ETYPE_ARP));
-    say("");
+    SAY("device online, %u IPv4 read(s) and %u ARP read(s) outstanding",
+        SAY_U(tap_reads_for(ETYPE_IP)), SAY_U(tap_reads_for(ETYPE_ARP)));
+    SAY0("");
 
     rc = run_script("DH0:drill.txt");
 
     tap_get_stats(&st);
-    say("");
-    say("tap: tx %u  rx delivered %u  rx no-reader %u  copy-failed %u  "
-        "tx-overrun %u", st.tx_frames, st.rx_delivered, st.rx_no_reader,
-        st.rx_copy_failed, st.tx_overrun);
-    say("background frames ignored: %u", n_background);
-    say("%u case(s), %u failed; %u check(s) passed, %u failed",
-        n_cases, n_cases_failed, n_pass, n_fail);
+    SAY0("");
+    SAY("tap: tx %u  rx delivered %u  rx no-reader %u  copy-failed %u  "
+        "tx-overrun %u", SAY_U(st.tx_frames), SAY_U(st.rx_delivered),
+        SAY_U(st.rx_no_reader), SAY_U(st.rx_copy_failed), SAY_U(st.tx_overrun));
+    SAY("background frames ignored: %u", SAY_U(n_background));
+    SAY("%u case(s), %u failed; %u check(s) passed, %u failed",
+        SAY_U(n_cases), SAY_U(n_cases_failed), SAY_U(n_pass), SAY_U(n_fail));
 
     CloseLibrary(SockBase);
     SockBase = NULL;
