@@ -413,6 +413,22 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME dns_lease COMMAND test_dns_lease)
 
+    # Removing one of two interfaces takes the machine's default gateway with
+    # it whenever that interface carried it, and the survivor is then left
+    # unable to reach anything off its own subnet.
+    add_executable(test_gateway
+        host/test_gateway_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c")
+
+    target_include_directories(test_gateway PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_gateway PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME gateway COMMAND test_gateway)
+
     # A DNSSL suffix can supply the default domain only while that advertised
     # suffix remains live, and never owns a file, DHCP, or caller override.
     add_executable(test_dns_domain

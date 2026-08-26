@@ -27,6 +27,7 @@
 #include "netstack_dns_handoff.h"
 #include "netstack_dns_lease.h"
 #include "netstack_dns_domain.h"
+#include "netstack_gateway.h"
 #include "netstack_dhcp_hostname.h"
 #ifdef AMINETXDUO_IPV6
 #include "netstack_ra.h"

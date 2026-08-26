@@ -88,3 +88,4 @@ comment beside the code, not an entry here.
 | A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:270` |
 | `ci.sh host` cannot pass without root on this box | the rig-lock selftest hard-fails when `ping` cannot probe; no unprivileged ICMP, no `cap_net_raw` | `tools/emu-rig-lock-selftest.sh:234` |
 | Three tool headers stay over 20 comment lines | each header IS the `--help` text, printed by a hardcoded `sed -n` range, so trimming it needs a code edit | `tools/fetch-toolchain.sh:164` |
+| No arm resolves, removes an interface, and resolves again end to end | the gateway hand-off after detach is unit-proven only; no wall-clock for the second lookup | `src/netstack/netstack.c:2500` |

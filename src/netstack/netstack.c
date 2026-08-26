@@ -2334,6 +2334,76 @@ static UWORD ami_ns_interface_users(AmiNetStack *ns, UWORD index)
 
 static BOOL ami_ns_same_name(const char *a, const char *b);
 
+/* The next hop this slot knows: the lease's option 3 while it is bound, else
+   what the file named, else the machine-wide one. */
+static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
+{
+    const AmiIfConfig *cfg = &ns->ns_Config.interfaces[index];
+    ULONG              router = 0UL;
+    UINT               size = (UINT)sizeof(router);
+
+    if (cfg->iptype == AMI_IPTYPE_DHCP && ns->ns_DhcpCreated &&
+        ns->ns_DhcpState[index] >= (UBYTE)NX_DHCP_STATE_BOUND &&
+        nx_dhcp_interface_user_option_retrieve(
+            &ns->ns_Dhcp, (UINT)index, NX_DHCP_OPTION_GATEWAYS,
+            (UCHAR *)&router, &size) == NX_SUCCESS &&
+        size >= (UINT)sizeof(ULONG) && router != 0UL)
+        return router;
+
+    if (cfg->gateway != 0UL)
+        return cfg->gateway;
+
+    return ns->ns_Config.default_gateway;
+}
+
+/*
+ * nx_ip_interface_detach() takes the machine's default gateway with the
+ * interface that carried it, so a survivor that has one has to reinstall it or
+ * nothing reaches off its own subnet.  Must be called inside the bracket.
+ */
+static VOID ami_ns_gateway_reinstate(AmiNetStack *ns, UWORD removed)
+{
+    AmiNsGatewayIface table[AMI_CFG_MAX_ATTACHED];
+    ULONG             candidate[AMI_CFG_MAX_ATTACHED];
+    ULONG             installed = 0UL;
+    UWORD             count;
+    UWORD             i;
+
+    if (nx_ip_gateway_address_get(&ns->ns_Ip, &installed) == NX_SUCCESS &&
+        installed != 0UL)
+        return;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+    {
+        table[i].present = (BOOL)(i < ns->ns_IfaceCount &&
+                                  ns->ns_Iface[i] != NULL &&
+                                  ns->ns_Config.interfaces[i].configured);
+        table[i].gateway = table[i].present ? ami_ns_gateway_of(ns, i) : 0UL;
+    }
+
+    count = ami_ns_gateway_candidates(table, (UWORD)AMI_CFG_MAX_ATTACHED,
+                                      removed, candidate,
+                                      (UWORD)AMI_CFG_MAX_ATTACHED);
+
+    for (i = 0; i < count; i++)
+    {
+        if (nx_ip_gateway_address_set(&ns->ns_Ip, candidate[i]) != NX_SUCCESS)
+            continue;
+
+        AMI_INFO("netstack: default gateway %lu.%lu.%lu.%lu reinstalled after "
+                 "interface %ld went",
+                 (unsigned long)((candidate[i] >> 24) & 0xFFUL),
+                 (unsigned long)((candidate[i] >> 16) & 0xFFUL),
+                 (unsigned long)((candidate[i] >>  8) & 0xFFUL),
+                 (unsigned long)(candidate[i] & 0xFFUL), (long)removed);
+        return;
+    }
+
+    if (count != 0)
+        AMI_WARN("netstack: no surviving interface can carry a default "
+                 "gateway after interface %ld went", (long)removed);
+}
+
 static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
 {
     AmiNetStack  *ns = ami_ns;
@@ -2425,6 +2495,9 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
     }
 
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
+
+    if (status == NX_SUCCESS)
+        ami_ns_gateway_reinstate(ns, index);
 
     ami_netstack_leave_free(caller);
 
