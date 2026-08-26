@@ -33,7 +33,6 @@ comment beside the code, not an entry here.
 | Nothing enforces that a wired harness's runner ever FIRES | `run-socket.sh` names a workflow that is dispatch, cron and tags only | `tools/check-harnesses.sh`, `tests/ipv6/run-socket.sh` |
 | Two socket files are still outside the host tier | `tcp_handler.c` needs the whole `ACTION_*` vocabulary; `transfer.c` pins 4.4BSD `iovec` | `tests/bsdsocket/CMakeLists.txt` |
 | 9 harnesses are still unwired | one needs a segment with no DHCP server, one KS 2.04, three a bridged repair | `tools/check-harnesses.sh` |
-| The NetX fork regression suite is not green on 32-bit Linux | the default build passes 833/923 non-HTTP tests; 90 fail, and the full matrix stops in `v4_small_build` | `tools/ci.sh` |
 | The expunge refusal is proven at the library and the port, never at the joint | nothing tests that a failed stop leaves the started flag set | `src/netstack/netstack.c:1404`, `:1628` |
 | The bring-up figure has never been measured on the build that ships | it reads `netstack: mark` lines only an `AMINETXDUO_LOG=ON` build emits | `tests/ipv6/run-bringup.sh` |
 | No harness boots Kickstart 2.x with a Zorro network board | the romtag under 2.x and `card.resource` V37 are both unproven | `tests/tools/run-addifleak.sh`, `tests/perf/run-fitzbench.sh` |
