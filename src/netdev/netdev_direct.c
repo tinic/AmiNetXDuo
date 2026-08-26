@@ -18,13 +18,16 @@
 #include "netdev_internal.h"
 #include "aminetxduo/anxs2ext.h"
 
-/* netdev_device.c has the same helper as a static; the pair of them is two
-   instructions each and the profile priced the byte loop they replaced at
-   16% of the hand-over. */
+/*
+ * The header is longword-aligned, but its source address starts six bytes in.
+ * Three word moves retain the aligned fast path without telling the compiler
+ * that this 2-mod-4 source is suitable for a ULONG load.
+ */
 static VOID direct_addr6(UBYTE *to, const UBYTE *from)
 {
-    *(ULONG *)(APTR)to        = *(const ULONG *)(const APTR)from;
-    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(const APTR)(from + 4);
+    *(UWORD *)(APTR)to       = *(const UWORD *)(const APTR)from;
+    *(UWORD *)(APTR)(to + 2) = *(const UWORD *)(const APTR)(from + 2);
+    *(UWORD *)(APTR)(to + 4) = *(const UWORD *)(const APTR)(from + 4);
 }
 
 /*
