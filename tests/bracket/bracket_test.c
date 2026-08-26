@@ -116,7 +116,13 @@ static BtTask bt_dead_holding;
 static BtTask bt_dead_dormant;
 static BtTask bt_dead_released;
 static BtTask bt_dead_event;
+#ifdef AMINETXDUO_GREEN_REALM
+static BtTask bt_dead_gate_owner;
+#endif
 static TX_EVENT_FLAGS_GROUP bt_dead_flags;
+#ifdef AMINETXDUO_GREEN_REALM
+static TX_AMIGA_GATE bt_dead_gate;
+#endif
 static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
 static TX_THREAD bt_reap_owner;
 static TX_THREAD bt_reap_target;
@@ -388,6 +394,49 @@ static VOID bt_die_event_entry(VOID)
     bt->bt_Failures++;                 /* a dead task must not come back */
     bt_finish(bt);
 }
+
+/* Enter through the production request gate, then stop in the same kind of
+   ThreadX suspension a blocking socket receive uses.  main removes the parked
+   owner Task while this continuation is still active. */
+#ifdef AMINETXDUO_GREEN_REALM
+static VOID bt_die_gate_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+    ULONG        actual = 0UL;
+    UINT         status;
+
+    Wait(BT_SIG_GO);
+
+    status = tx_amiga_gate_bind(&bt_dead_gate, (CHAR *)"dead request gate", 20);
+    if (status != TX_SUCCESS)
+    {
+        bt->bt_Failures = (LONG)status;
+        bt_finish(bt);
+    }
+
+    status = tx_amiga_gate_call(&bt_dead_gate, 0UL);
+    if (status != TX_SUCCESS)
+    {
+        bt->bt_Failures = (LONG)status;
+        tx_amiga_gate_release(&bt_dead_gate);
+        bt_finish(bt);
+    }
+
+    /* From here onward this continuation is the gate's green proxy, not the
+       Exec owner.  It must never execute bt_finish(), which would remove the
+       realm Task rather than the parked owner. */
+    bt->bt_Ready = 1U;
+    Signal(bt->bt_Parent, BT_SIG_GO);
+
+    (VOID)tx_event_flags_get(&bt_dead_flags, 2UL, TX_OR_CLEAR, &actual,
+                             TX_WAIT_FOREVER);
+
+    bt->bt_Failures++;
+    for (;;)
+        (VOID)tx_thread_sleep(0x7FFFFFFFUL);
+}
+#endif
 
 static BOOL bt_wait_dead(BtTask *bt, const char *what)
 {
@@ -742,7 +791,11 @@ int main(int argc, char **argv)
     t_check(tx_amiga_caller_is_thread() == (UINT)TX_FALSE,
             "an unadopted Task is not the baton holder", 0);
 
+#ifndef AMINETXDUO_GREEN_REALM
+    /* Green threads have no native Exec task to become a reaper zombie; this
+       case specifically exhausts the native thread's handshake signals. */
     bt_test_no_signal_reap();
+#endif
 
     /* ---- the regression case, on its own and deterministic -------------- */
 
@@ -958,6 +1011,106 @@ int main(int argc, char **argv)
                 }
             }
         }
+
+#ifdef AMINETXDUO_GREEN_REALM
+        /* A request owner can disappear while its continuation is suspended
+           in NetX.  This is the production gate path, including the owner-side
+           stack switch and Wait(), rather than another adopted-thread test. */
+        {
+            ULONG waited = 0UL;
+            UINT  reaped;
+
+            bt_dead_gate_owner.bt_Parent = me;
+            t_check(bt_spawn(&bt_dead_gate_owner, bt_die_gate_entry,
+                             "dead-gate-owner", BT_PRI) != NULL,
+                    "spawned request-gate owner death", 0);
+            if (bt_dead_gate_owner.bt_Task != NULL)
+            {
+                Signal(bt_dead_gate_owner.bt_Task, BT_SIG_GO);
+
+                while ((bt_dead_gate_owner.bt_Ready == 0U ||
+                        bt_dead_gate.ag_Thread.tx_thread_state != TX_EVENT_FLAG ||
+                        bt_dead_flags.tx_event_flags_group_suspended_count != 1UL) &&
+                       waited < (ULONG)(30 * 50))
+                {
+                    Delay(1);
+                    waited++;
+                }
+
+                t_check(bt_dead_gate_owner.bt_Failures == 0,
+                        "request gate entered without an error",
+                        bt_dead_gate_owner.bt_Failures);
+                t_check(bt_dead_gate.ag_Active != 0U,
+                        "request was active when its owner died", 0);
+                t_check(bt_dead_gate.ag_Thread.tx_thread_state == TX_EVENT_FLAG,
+                        "request proxy suspended inside ThreadX",
+                        (LONG)bt_dead_gate.ag_Thread.tx_thread_state);
+                t_check(bt_dead_flags.tx_event_flags_group_suspended_count == 1UL,
+                        "event group contains the request proxy",
+                        (LONG)bt_dead_flags.tx_event_flags_group_suspended_count);
+
+                if (bt_dead_gate.ag_Thread.tx_thread_state == TX_EVENT_FLAG &&
+                    bt_dead_flags.tx_event_flags_group_suspended_count == 1UL)
+                {
+                    RemTask(bt_dead_gate_owner.bt_Task);
+                    bt_dead_gate_owner.bt_Task = NULL;
+
+                    reaped = tx_amiga_gate_orphan(&bt_dead_gate);
+                    t_check(reaped == TX_TRUE,
+                            "dead request owner was reaped immediately",
+                            (LONG)reaped);
+                    t_check(bt_dead_gate.ag_OwnerDead != 0U,
+                            "request gate records its dead owner", 0);
+                    t_check(bt_dead_gate.ag_Live == 0U,
+                            "request proxy was deleted", 0);
+                    t_check(bt_dead_gate.ag_Thread.tx_thread_id == 0UL,
+                            "request proxy control block was cleared", 0);
+                    t_check(bt_dead_gate.ag_Side == NULL,
+                            "dead owner's side stack was released", 0);
+                    t_check(bt_dead_gate.ag_Task == NULL &&
+                            bt_dead_gate.ag_DoneMask == 0UL,
+                            "dead owner's signal bookkeeping was dropped", 0);
+                    t_check(bt_dead_flags.tx_event_flags_group_suspended_count == 0UL,
+                            "reap unlinked the proxy's ThreadX wait",
+                            (LONG)bt_dead_flags.tx_event_flags_group_suspended_count);
+                    t_check(tx_amiga_stack_in_use(bt_dead_gate_owner.bt_Stack,
+                                                  bt_dead_gate_owner.bt_StackSize)
+                            == TX_FALSE,
+                            "reap released the dead owner's shared stack", 0);
+
+                    bt_reap(&bt_dead_gate_owner);
+                }
+                else
+                {
+                    /* Keep a failed assertion from leaving either the owner
+                       or the realm behind and obscuring the remaining suite. */
+                    if (bt_dead_gate_owner.bt_Done != 0U)
+                    {
+                        bt_reap(&bt_dead_gate_owner);
+                    }
+                    else
+                    {
+                        ULONG reap_waited = 0UL;
+
+                        RemTask(bt_dead_gate_owner.bt_Task);
+                        bt_dead_gate_owner.bt_Task = NULL;
+                        while (bt_dead_gate.ag_Live != 0U &&
+                               tx_amiga_gate_orphan(&bt_dead_gate) == TX_FALSE &&
+                               reap_waited < (ULONG)(30 * 50))
+                        {
+                            Delay(1);
+                            reap_waited++;
+                        }
+                        t_check(bt_dead_gate.ag_Live == 0U,
+                                "failed gate case was still made quiescent",
+                                (LONG)bt_dead_gate.ag_Live);
+                        if (bt_dead_gate.ag_Live == 0U)
+                            bt_reap(&bt_dead_gate_owner);
+                    }
+                }
+            }
+        }
+#endif
 
         t_check(tx_event_flags_delete(&bt_dead_flags) == TX_SUCCESS,
                 "deleted the forced-death event group", 0);
