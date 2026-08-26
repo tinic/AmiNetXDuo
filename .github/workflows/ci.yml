@@ -251,6 +251,7 @@ jobs:
           # -e SC1091: the sourced toolchain resolver is found at run time.
           shellcheck -S warning -e SC1091 \
             tools/ci.sh \
+            tools/check-release-ready.sh \
             tools/analyze.sh \
             tools/cppcheck.sh \
             tools/version.sh \

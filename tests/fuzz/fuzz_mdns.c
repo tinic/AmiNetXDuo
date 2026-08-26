@@ -170,6 +170,12 @@ UINT _txe_thread_terminate(TX_THREAD *t)
     return TX_SUCCESS;
 }
 
+/* _nx_mdns_yield() offers the processor between packets. One thread here, so
+   there is nothing to offer it to. */
+VOID _txe_thread_relinquish(VOID)
+{
+}
+
 UINT _txe_timer_create(TX_TIMER *timer_ptr, CHAR *name,
                        VOID (*expiration_function)(ULONG), ULONG input,
                        ULONG initial_ticks, ULONG reschedule_ticks,

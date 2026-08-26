@@ -170,6 +170,13 @@ APTR ami_cfg_read_file(const char *path, ULONG *size_out)
 static int failures;
 static int checks;
 
+/* CHECK_STR is handed arrays as often as pointers, and `arr ? arr : ...` is
+   -Waddress. The decay happens at the call, so the test is a real one here. */
+static const char *or_null(const char *s)
+{
+    return s != NULL ? s : "(null)";
+}
+
 #define CHECK(cond)                                                          \
     do {                                                                     \
         checks++;                                                            \
@@ -185,7 +192,7 @@ static int checks;
         if ((got) == NULL || strcmp((got), (want)) != 0) {                    \
             failures++;                                                      \
             printf("  FAIL %s:%d: expected \"%s\", got \"%s\"\n",            \
-                   __FILE__, __LINE__, (want), (got) ? (got) : "(null)");    \
+                   __FILE__, __LINE__, (want), or_null(got));                \
         }                                                                    \
     } while (0)
 

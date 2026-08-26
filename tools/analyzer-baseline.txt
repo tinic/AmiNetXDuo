@@ -32,6 +32,7 @@
 2	src/bsdsocket/socket.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '*addr.nxd_ip_address.v6[1]'
 2	src/crypto68k/c68k_div.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 3	src/crypto68k/c68k_mont.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
+4	port/threadx-amiga/src/tx_amiga_green.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	port/threadx-amiga/src/tx_initialize_low_level.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	src/crypto68k/c68k_powm.c	-Wanalyzer-use-of-uninitialized-value	use of uninitialized value '<return-value>'
 4	tests/tcpdrill/tcpdrill.c	-Wanalyzer-va-list-exhausted	'ap' has no more arguments (0 consumed)

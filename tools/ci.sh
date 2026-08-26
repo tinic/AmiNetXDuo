@@ -546,6 +546,20 @@ stage_host() {
         return 1
     fi
 
+    # The release workflow was red for three releases and all three archives
+    # were built by hand. tools/check-release-ready.sh runs its job set before
+    # a tag; this asserts it can still see that job set in release.yml.
+    if tools/check-release-ready.sh --list > "$BUILD/release-ready.log" 2>&1; then
+        note "release job set: $(grep -c '^release-job:' \
+              "$BUILD/release-ready.log") ci.sh calls + $(sed -n \
+              's/^release-arms: //p' "$BUILD/release-ready.log" | wc -w) arms"
+    else
+        cat "$BUILD/release-ready.log"
+        fail "tools/check-release-ready.sh can no longer read release.yml's\
+ job set, so nothing runs it before a tag"
+        return 1
+    fi
+
     # Every drawer in the archive is a configuration this script compiles.
     # The minimal drawer is not, and says so with its reason.
     if tools/check-shipping-config.sh > "$BUILD/shipping-config.log" 2>&1; then
