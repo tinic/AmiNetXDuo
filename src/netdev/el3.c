@@ -102,21 +102,27 @@ static VOID el3_window(NetdevNic *nic, UBYTE win)
 }
 
 /*
- * Wait out a multi-cycle command.  Bounded and short, because this runs at
- * interrupt level and receive discard is issued once per frame.  The count is
- * register reads, not time.  An exhausted count is not fatal.
+ * Wait out a multi-cycle command.  The receive and transmit resets are the long
+ * ones, EL3_RESET_US in the part's own terms; measured, with the old 4000
+ * register reads kept as the floor.  An expired bound is not fatal.
  */
-#define EL3_CMD_SPINS   4000
+/* Interrupt level, so the clock must already be measured: el3_answers() arms a
+   timed wait at task level before any card of this family is ever attached. */
+#define EL3_CMD_WAIT_US EL3_RESET_US
+#define EL3_CMD_SPINS   4000u
 
 static BOOL el3_wait_cmd(NetdevNic *nic)
 {
-    UWORD n = EL3_CMD_SPINS;
+    NetdevWait w;
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, EL3_CMD_WAIT_US, EL3_CMD_SPINS);
+
+    do
     {
         if ((el3_status(nic) & EL3_S_CMD_BUSY) == 0)
             return TRUE;
     }
+    while (!netdev_wait_done(&w));
 
     EL_TRACE("el3: command stuck ", (ULONG)el3_status(nic));
 
@@ -173,15 +179,22 @@ BOOL el3_answers(const NetdevCard *card)
  * Not bit-banged: one word says "read word N" and the answer is in the data
  * register once the busy bit clears.  Attach only, at task level.
  */
+/* 162 us in the EtherLink III reference and demonstrably longer on some parts,
+   so 2 ms measured, with the old 20000 register reads kept as the floor. */
+#define EL3_EEPROM_WAIT_US  (2u * EL3_RESET_US)
+#define EL3_EEPROM_SPINS    20000u
+
 static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
 {
-    UWORD n = 20000;
+    NetdevWait w;
 
     el3_window(nic, 0);
     el3_put(nic, EL3_W0_EEPROM_CMD,
             (UWORD)(EL3_EE_READ | (word & EL3_EE_ADDR_MASK)));
 
-    while (n-- != 0)
+    netdev_wait_begin(&w, EL3_EEPROM_WAIT_US, EL3_EEPROM_SPINS);
+
+    do
     {
         if ((el3_get(nic, EL3_W0_EEPROM_CMD) & EL3_EE_BUSY) == 0)
         {
@@ -189,6 +202,7 @@ static BOOL el3_eeprom(NetdevNic *nic, UBYTE word, UWORD *out)
             return TRUE;
         }
     }
+    while (!netdev_wait_done(&w));
 
     EL_TRACE("el3: eeprom stuck ", (ULONG)word);
 
@@ -393,6 +407,10 @@ static VOID el3_pcmcia_setup(NetdevNic *nic)
  * a millisecond, and el3_reset() calls this from the vertical blank under
  * Disable().  The receive and transmit resets do show the bit and suffice.
  */
+/* The coaxial converter's own timer: 3.2 us a tick, saturating at 255. */
+#define EL3_COAX_WAIT_US    816u
+#define EL3_COAX_SPINS      4000u
+
 LONG el3_init(NetdevNic *nic)
 {
     UWORD i;
@@ -457,15 +475,18 @@ LONG el3_init(NetdevNic *nic)
      * The coaxial converter needs 800 us before it carries anything, measured
      * by the chip's own timer: 3.2 us a tick, saturating at 255, so 816 us.  A
      * hardware clock rather than a spin, because this can run from the watchdog.
+     * The timer is the deadline; the old 4000 register reads are only the floor.
      */
     if ((nic->el3_media & EL3_CC_BNC_PRESENT) != 0 &&
         (nic->el3_media & EL3_CC_UTP_PRESENT) == 0)
     {
-        UWORD guard = 4000;
+        NetdevWait w;
 
         el3_cmd(nic, EL3_C_COAX_START, 0);
-        while (guard-- != 0 &&
-               netdev_bus_r8(&nic->bus, EL3_W1_TIMER) != 0xff)
+        netdev_wait_begin(&w, EL3_COAX_WAIT_US, EL3_COAX_SPINS);
+
+        while (netdev_bus_r8(&nic->bus, EL3_W1_TIMER) != 0xff &&
+               !netdev_wait_done(&w))
             ;
     }
 

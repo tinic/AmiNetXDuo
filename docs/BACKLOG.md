@@ -65,7 +65,7 @@ comment beside the code, not an entry here.
 | `AMINETXDUO_AMIBERRY_MAC` is ignored for `ne2000_pcmcia` | Amiberry uses the host NIC address, so the second consecutive run has a dead RX | `tools/emu-board.sh`, `tests/tools/cards.sh` |
 | Nothing checks the archive's contents against what is installed | `anxnet.device` shipped uninstalled for eleven releases unnoticed | `dist/make-dist.sh`, `install/Install-AmiNetXDuo` |
 | `peercap_tcpdump_state` turns a transient ssh failure into a missing binary | it discards stderr and exits 2; two of its three callers have no retry | `tests/perf/peercap.sh` |
-| Two netdev poll bounds are sized in iterations, not in time | 4000 and 20000 expire early on a fast machine, so a slow card is called dead | `src/netdev/el3.c:111`, `:277` |
+| Three more netdev poll bounds are still sized in iterations | `dp8390_halt` 900 vs 1214 us, `ed_attach` 5000 and `ne_probe` 100 wait on ISR.RST | `src/netdev/dp8390.c:86`, `src/netdev/ed.c:324`, `src/netdev/ne2000.c:459` |
 | A submodule bump should pin the `master` merge, not a topic tip | check `cat-file -e` and `merge-base --is-ancestor` first; it fabricated an id once | `1d8b8a15`, `b8bb2bc8` |
 | `C:ssh` is the one artefact that does not reproduce from its own tag | 44 `__FILE__` paths reach it and `-ffile-prefix-map` appears nowhere | `clients/dropbear/build.sh:89` |
 | The ClassicWB hostname collides the way the MAC used to | `NAME` defaults to model plus variant, so two agents claim one mDNS name | `tools/classicwb.sh:114` |

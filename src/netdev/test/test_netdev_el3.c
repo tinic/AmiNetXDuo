@@ -131,6 +131,36 @@ static void           mock_put(volatile unsigned short *p, unsigned short v);
 #include <exec/types.h>
 #include "netdev_cards.h"
 
+/* ---------------------------------------------------------- the machine -- */
+
+/*
+ * A machine whose bus is fast against the raster: a scan line costs
+ * MOCK_TICKS_LINE register accesses.  Off by default -- with the beam frozen
+ * netdev_clock.c finds no clock, and every other test below runs the same
+ * counted loops it ran before this existed.
+ */
+#define MOCK_TICKS_LINE     2000UL
+#define MOCK_FIELD_LINES    313UL
+
+static unsigned long mock_ticks;
+static int           mock_beam_on;
+
+/* How many more reads of each register report the part still busy. */
+static unsigned long mock_cmd_busy;
+static unsigned long mock_eeprom_busy;
+
+VOID netdev_clock_test_forget(VOID);
+
+UWORD netdev_clock_test_vpos(VOID)
+{
+    mock_ticks++;
+
+    if (!mock_beam_on)
+        return 0;
+
+    return (UWORD)((mock_ticks / MOCK_TICKS_LINE) % MOCK_FIELD_LINES);
+}
+
 /*
  * The shipping path drains through n68k_port_in_w_sum(), whose actual 68k
  * instructions are covered by IoSumDrill.  This test's FIFO is reactive, not
@@ -228,14 +258,36 @@ static unsigned long mock_off(volatile unsigned short *p)
 
 static unsigned short mock_get(volatile unsigned short *p)
 {
-    unsigned long off = mock_off(p);
-    int           i   = mock_index(off);
+    unsigned long  off = mock_off(p);
+    int            i   = mock_index(off);
+    unsigned short v;
+
+    mock_ticks++;               /* a register access costs a bus cycle */
 
     if (i < 0)
-        return bus_in((unsigned short)(mock_status |
-                      ((unsigned short)mock_window << EL3_S_WINDOW_SHIFT)));
+    {
+        v = (unsigned short)(mock_status |
+                             ((unsigned short)mock_window <<
+                              EL3_S_WINDOW_SHIFT));
 
-    return bus_in(mock_win[mock_window][i]);
+        if (mock_cmd_busy != 0)
+        {
+            mock_cmd_busy--;
+            v |= EL3_S_CMD_BUSY;
+        }
+
+        return bus_in(v);
+    }
+
+    v = mock_win[mock_window][i];
+
+    if (mock_window == 0 && off == EL3_W0_EEPROM_CMD && mock_eeprom_busy != 0)
+    {
+        mock_eeprom_busy--;
+        v |= EL3_EE_BUSY;
+    }
+
+    return bus_in(v);
 }
 
 static void mock_put(volatile unsigned short *p, unsigned short v)
@@ -243,6 +295,8 @@ static void mock_put(volatile unsigned short *p, unsigned short v)
     unsigned long  off = mock_off(p);
     int            i   = mock_index(off);
     unsigned short chip = bus_out(v);
+
+    mock_ticks++;
 
     if (i < 0)
     {
@@ -383,6 +437,8 @@ static void mock_reset_chip(int swapped)
     mock_claim_calls = 0;
     mock_claimed_calls = 0;
     mock_swapped = swapped;
+    mock_cmd_busy = 0;
+    mock_eeprom_busy = 0;
 
     mock_win[0][EL3_W0_MFG_ID / 2]     = EL3_MFG_ID;
     mock_win[0][EL3_W0_CONFIG_CTRL / 2] = EL3_CC_UTP_PRESENT |
@@ -1158,6 +1214,45 @@ static void test_receive_fifo_hold(void)
                (unsigned long)mock_wire_overruns, 0);
 }
 
+/*
+ * A card slower than this CPU.  Both bits arrive after more register reads
+ * than the old counted bound allowed and well inside the part's own deadline:
+ * counted, the card is called dead; measured against the beam, it is not.
+ */
+static void test_slow_card_is_not_dead(void)
+{
+    UWORD word = 0;
+
+    nic_reset(0);
+    expect_u32("attach", (unsigned long)el3_attach(&nic), 0);
+
+    mock_beam_on = 1;
+    netdev_clock_test_forget();
+
+    /* Past EL3_CMD_SPINS, inside EL3_CMD_WAIT_US. */
+    mock_cmd_busy = 8000;
+    el3_cmd(&nic, EL3_C_TX_RESET, 0);
+    expect_u32("a command that completes late is waited out",
+               (unsigned long)el3_wait_cmd(&nic), 1);
+    expect_u32("and the busy bit was polled until it cleared",
+               (unsigned long)mock_cmd_busy, 0);
+
+    /* Past EL3_EEPROM_SPINS, inside EL3_EEPROM_WAIT_US. */
+    mock_eeprom_busy = 30000;
+    expect_u32("an EEPROM that answers late is waited out",
+               (unsigned long)el3_eeprom(&nic, EL3_EE_MFG_ID, &word), 1);
+    expect_u32("and hands back the word", (unsigned long)word,
+               (unsigned long)EL3_MFG_ID);
+
+    /* A bit that never arrives still gives up rather than hanging. */
+    mock_cmd_busy = 0xffffffffUL;
+    expect_u32("a command that never completes still gives up",
+               (unsigned long)el3_wait_cmd(&nic), 0);
+
+    mock_beam_on = 0;
+    netdev_clock_test_forget();
+}
+
 static void test_card_selection(void)
 {
     const NetdevCard *c = netdev_card_by_cis(0x0101, 0x0589);
@@ -1194,6 +1289,7 @@ int main(void)
     test_interrupt();
     test_reset_and_ops();
     test_receive_fifo_hold();
+    test_slow_card_is_not_dead();
     test_card_selection();
 
     if (failures != 0)

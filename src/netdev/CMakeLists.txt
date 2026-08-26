@@ -238,6 +238,10 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/net68k"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim")
 
+    # The beam netdev_clock.c measures against is supplied by the test, frozen
+    # for every case but the late-busy-bit one, which needs a machine whose bus
+    # outruns the raster to show a counted bound calling a good card dead.
+    target_compile_definitions(test_netdev_el3 PRIVATE NETDEV_CLOCK_TEST=1)
     target_compile_options(test_netdev_el3 PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_el3 COMMAND test_netdev_el3)

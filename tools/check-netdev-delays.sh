@@ -75,6 +75,45 @@ done <<EOF
 $(find "$CORE" -name '*.c' -o -name '*.h' | sort)
 EOF
 
+# Second rule, same reason from the other end: a POLL bound.  A wait for a
+# hardware bit is sized `<NAME>_SPINS`, and every use of one of those names
+# outside its own #define must be an argument to netdev_wait_begin(), where the
+# count is the floor and the beam is the deadline.  A bare `while (n-- != 0)`
+# over a status register expires early on a fast machine and calls a working
+# card dead -- the faster the Amiga, the likelier, which is backwards.
+SPINS='\b[A-Z][A-Z0-9_]*_SPINS\b'
+
+while IFS= read -r file; do
+    case "$file" in
+        */netdev_clock.c|*/netdev_clock.h|*/test/*) continue ;;
+    esac
+
+    while IFS=: read -r line text; do
+        [ -n "$line" ] || continue
+
+        case "$(echo "$text" | sed 's/^[[:space:]]*//')" in
+            '*'*|'/*'*|'//'*|'#define'*) continue ;;
+        esac
+
+        found=$((found + 1))
+
+        from=$((line > 3 ? line - 3 : 1))
+        to=$((line + 3))
+
+        if sed -n "${from},${to}p" "$file" | grep -q 'netdev_wait_begin'; then
+            continue
+        fi
+
+        printf 'netdev_delays=counted_poll file=%s line=%s text=%s\n' \
+               "${file#"$ROOT/"}" "$line" "$(echo "$text" | sed 's/^[[:space:]]*//')"
+        bad=$((bad + 1))
+    done <<EOF
+$(grep -nE "$SPINS" "$file" || true)
+EOF
+done <<EOF
+$(find "$CORE" -name '*.c' -o -name '*.h' | sort)
+EOF
+
 if [ "$bad" -ne 0 ]; then
     cat >&2 <<MSG
 
