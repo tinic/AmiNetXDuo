@@ -7,7 +7,8 @@
 
 /* The green realm: threads the stack creates get no Exec Task of their own and run
    as coroutines inside the realm Task.  A green thread MUST NOT block in Exec --
-   its Wait() sleeps the whole realm -- and calls tx_amiga_green_wait() instead.  */
+   Wait(), WaitIO() or WaitPort() would sleep the whole realm.  The checked I/O
+   wrappers and explicit tx_amiga_green_wait() calls suspend one coroutine. */
 
 #define TX_SOURCE_CODE
 
@@ -390,10 +391,10 @@ UINT    i;
 }
 
 
-/* -------------------------------------------------------- stray-Wait net --- */
+/* -------------------------------------------------------- stray-wait net --- */
 
-/* The probe build's net: netstack_internal.h and sana2_internal.h #define Wait() to
-   this, so an Exec Wait() reachable from a green thread is counted (gs_stray_wait,
+/* The probe build's net: the stack's internal headers #define Wait() to this,
+   so an Exec Wait() reachable from a green thread is counted (gs_stray_wait,
    MUST read zero) and converted.  Here, so the passthrough calls the real Wait(). */
 #ifdef AMINETXDUO_RXPROBE
 
@@ -412,6 +413,74 @@ ULONG ami_green_checked_wait(ULONG sigmask)
 }
 
 #endif /* AMINETXDUO_RXPROBE */
+
+
+/* WaitIO() is safe only after the request is complete: its final call also
+   removes the reply message and therefore cannot simply be replaced.  A green
+   caller waits through the realm until CheckIO says that collection cannot
+   block.  Completed requests take the ordinary fast path and do not count as
+   stray waits. */
+BYTE ami_green_checked_waitio(struct IORequest *request)
+{
+
+    if ((tx_amiga_green_active() != ((UINT) 0)) &&
+        (CheckIO(request) == (struct IORequest *) 0))
+    {
+        tx_amiga_green_stray_wait_note();
+#ifdef AMINETXDUO_RXPROBE
+        AMI_WARN("green realm: blocking WaitIO() converted to a green wait");
+#endif
+        do
+        {
+            (VOID) tx_amiga_green_wait(
+                1UL << request -> io_Message.mn_ReplyPort -> mp_SigBit);
+        }
+        while (CheckIO(request) == (struct IORequest *) 0);
+    }
+
+    return(WaitIO(request));
+}
+
+
+/* WaitPort() returns the first message without removing it.  Inspecting the
+   list under Forbid() preserves that contract; an empty green port suspends
+   only its coroutine and retries after the port signal. */
+struct Message *ami_green_checked_waitport(struct MsgPort *port)
+{
+
+struct Message *message;
+UINT            noted;
+
+
+    if (tx_amiga_green_active() == ((UINT) 0))
+    {
+        return(WaitPort(port));
+    }
+
+    noted =  (UINT) TX_FALSE;
+    for (;;)
+    {
+        Forbid();
+        message =  (struct Message *) port -> mp_MsgList.lh_Head;
+        if (message -> mn_Node.ln_Succ != (struct Node *) 0)
+        {
+            Permit();
+            return(message);
+        }
+        Permit();
+
+        if (noted == ((UINT) TX_FALSE))
+        {
+            tx_amiga_green_stray_wait_note();
+#ifdef AMINETXDUO_RXPROBE
+            AMI_WARN("green realm: blocking WaitPort() converted to a green wait");
+#endif
+            noted =  (UINT) TX_TRUE;
+        }
+
+        (VOID) tx_amiga_green_wait(1UL << port -> mp_SigBit);
+    }
+}
 
 
 /* ------------------------------------------------------- the request gate --- */

@@ -272,7 +272,7 @@ struct _tx_green_counters
     ULONG   gc_idle_waits;      /* realm slept in Wait()                       */
     ULONG   gc_wait_fast;       /* tx_amiga_green_wait() satisfied latched     */
     ULONG   gc_wait_slow;       /* tx_amiga_green_wait() suspended             */
-    ULONG   gc_stray_wait;      /* Exec Wait()s caught from green context      */
+    ULONG   gc_stray_wait;      /* blocking Exec waits caught from green       */
     ULONG   gc_gate_calls;      /* brackets carried through the request gate   */
     ULONG   gc_gate_fallback;   /* brackets the gate declined                  */
     ULONG   gc_gate_fast;       /* brackets that took a free baton directly    */

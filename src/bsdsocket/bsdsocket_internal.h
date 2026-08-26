@@ -575,10 +575,20 @@ VOID  bsd_nx_leave(struct AmiSocketBase *base);
    See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
 
-#if defined(AMINETXDUO_GREEN_REALM) && defined(AMINETXDUO_RXPROBE)
+#ifdef AMINETXDUO_GREEN_REALM
+BYTE ami_green_checked_waitio(struct IORequest *request);
+struct Message *ami_green_checked_waitport(struct MsgPort *port);
+
+#undef WaitIO
+#define WaitIO(request) ami_green_checked_waitio(request)
+#undef WaitPort
+#define WaitPort(port) ami_green_checked_waitport(port)
+
+#ifdef AMINETXDUO_RXPROBE
 ULONG ami_green_checked_wait(ULONG sigmask);
 #undef Wait                     /* the NDK's inline macro, replaced whole */
 #define Wait(sigmask) ami_green_checked_wait(sigmask)
+#endif
 #endif
 
 /*
