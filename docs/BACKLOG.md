@@ -28,7 +28,6 @@ comment beside the code, not an entry here.
 | `__udivmoddi4`'s 64-bit-divisor branch is 6.6x libgcc's | 852 us against 129 on a 68020; a 64-iteration bit loop where libgcc uses Knuth D. Nothing shipped divides by more than 32 bits | `src/common/ami_udivdi3.c:162` |
 | Server-side TLS is 2.8% of the library and unreachable | cutting it changes `NX_SECURE_TLS_SESSION`'s layout, so it needs a second build | `src/tls/CMakeLists.txt` |
 | The TCP window ceiling has never been observed binding | it needs a saturated pool; the A3000 32 MB arm of `run-bigmem` was queued and did not report | `tests/tools/run-bigmem.sh:58` |
-| The DHCP/RA absorb runs on the caller's stack with 680 bytes to spare | a 1280-byte frame on any task that resolves or reads live config | `src/netstack/netstack_dns.c:959` |
 | `ami_rx_service` has a 2508-byte frame and nothing states its stack | it runs on the ARexx host's process and nothing records that process's size | `src/netstack/netstack_rexx.c:215` |
 | `run-ifdhcp`'s bridged arm always fails because it asserts SLIRP's literals | derive the expected addresses from the arm instead | `tests/tools/run-ifdhcp.sh:92`, `:318` |
 | `run-lossgate.sh` measures a clean link under an impaired name | warm-up and arm take two leases; netem impairs the warm-up's | `tests/perf/run-lossgate.sh`, `tools/emu-mac.sh` |
