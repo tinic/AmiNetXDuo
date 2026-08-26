@@ -55,7 +55,6 @@ comment beside the code, not an entry here.
 | Amiberry cannot eject a PCMCIA card, so removal is unexercised | `pc_on_removed`/`pc_on_inserted` have never fired, nor the reset order | `src/netdev/netdev_pcmcia.c:363`, `:386` |
 | Two card rows have never run on their hardware | `xsurf500` is from the iComp wiki and `3c589` from the 3Com manual | `src/netdev/netdev_cards.c` |
 | `AMINETXDUO_AMIBERRY_MAC` is ignored for `ne2000_pcmcia` | Amiberry uses the host NIC address, so the second consecutive run has a dead RX | `tools/emu-board.sh`, `tests/tools/cards.sh` |
-| Nothing checks the archive's contents against what is installed | `anxnet.device` shipped uninstalled for eleven releases unnoticed | `dist/make-dist.sh`, `install/Install-AmiNetXDuo` |
 | `peercap_tcpdump_state` turns a transient ssh failure into a missing binary | it discards stderr and exits 2; two of its three callers have no retry | `tests/perf/peercap.sh` |
 | Three more netdev poll bounds are still sized in iterations | `dp8390_halt` 900 vs 1214 us, `ed_attach` 5000 and `ne_probe` 100 wait on ISR.RST | `src/netdev/dp8390.c:86`, `src/netdev/ed.c:324`, `src/netdev/ne2000.c:459` |
 | A submodule bump should pin the `master` merge, not a topic tip | check `cat-file -e` and `merge-base --is-ancestor` first; it fabricated an id once | `1d8b8a15`, `b8bb2bc8` |
