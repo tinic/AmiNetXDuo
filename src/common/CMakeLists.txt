@@ -140,5 +140,10 @@ if(CMAKE_CROSSCOMPILING)
     # named section on each one (ami_udivdi3.c) is what --gc-sections then
     # collects on; an interface -ffunction-sections used to do that job and
     # cost the consumer's WHOLE LTRANS output 0.8-6.6% for it.
-    target_compile_options(aminetxduo_m68k_rt PRIVATE -ffunction-sections)
+    # This toolchain can resolve a cross-section sibling call twelve bytes
+    # short.  Keep this pair indivisible, as it is for every other target that
+    # enables function sections (see the tree-wide rule in the top-level
+    # CMakeLists.txt and cmake/check-pcrel-branches.cmake).
+    target_compile_options(aminetxduo_m68k_rt PRIVATE
+                           -ffunction-sections -fno-optimize-sibling-calls)
 endif()
