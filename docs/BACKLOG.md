@@ -5,7 +5,6 @@ comment beside the code, not an entry here.
 **ONE LINE PER ROW.** What is wrong and where. Not how it was found.
 | Item | Why it is open | Cite |
 |---|---|---|
-| `-ffunction-sections` reaches LTRANS without `-fno-optimize-sibling-calls` | a pairing the tree calls indivisible is split | `src/common/CMakeLists.txt:144` |
 | The guru after `NetShutdown` is unreproduced | a2065/A1200, 3 cycles: the task lists match name for name and `run-cycledrill.sh` is green; the report is a 3c589 | `tests/tools/run-cycledrill.sh` |
 | CNet and CNet16 still do not attach on real hardware | the vendor `cnet16.device` does, so a layer fix or the 16-bit probe is wrong | `src/netdev/netdev_pcmcia.c` |
 | A certificate whose public key is `id-RSASSA-PSS` is refused | `rsa_pss_pss_*`: the SPKI OID is neither RSA nor EC, so the parse stops | `third_party/netxduo/nx_secure/src/nx_secure_x509.c:239` |
@@ -14,7 +13,6 @@ comment beside the code, not an entry here.
 | No ALPN, so HTTP/2 cannot be negotiated | the extension exists nowhere in nx_secure, `src/tlslib` or `include/` | `include/aminetxduo/tlslib.h` |
 | Keystroke latency is 3.8x the requirement on truecolour | 178 vs 47 ms at 8-bit. NOT the re-resolve: a chunky band past the first skips it. Host prices encode at 1.9x, so the card readback carries the rest | `src/tools/httpfb.c:1316` |
 | The whole-frame card readback is charged to every screen pass | 600 KB of Zorro per pass at 640x480 truecolour whether one tile changed or none; nothing reads back a band | `src/tools/httpfb.c:1386` |
-| `cpu68020` and `cpu68060` are red on three `tests/tls` images, and no longer on `tls.library` | twelve targets failed the pcrel check, nine of them on an interface `-ffunction-sections` since removed | `tests/tls/CMakeLists.txt` |
 | Every diagnostic is compiled out of every shipped binary | `AMI_ERROR`/`WARN`/`INFO` need `AMINETXDUO_LOG`, which defaults OFF | `include/aminetxduo/compat.h:105` |
 | A console session that works logs nothing | only the startup banner, so the log cannot say what was served or at what depth | `src/tools/httpd.c:7098` |
 | `nu_TickPolls` and `nu_RxKicks` reach neither `netstat` nor `ShowNetStatus` | kept for a field report that can never quote them; only S2_GETSPECIALSTATS crosses out of the device and no tool reads it | `src/netdev/netdev_device.c:1123`, `:1139` |
