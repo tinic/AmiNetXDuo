@@ -26,6 +26,9 @@ printf 'the guest booted and said nothing useful\n'       > "$T/nosummary"
 printf '  FAIL nope\n40 checks, 3 failures, FAIL\n'       > "$T/failures"
 printf '4 checks, 0 failures, PASS\n'                     > "$T/short"
 printf '2 checks, 0 failures, SKIPPED (no network)\n'     > "$T/skipped"
+printf '2 case(s), 0 failed; 40 check(s) passed, 0 failed\n40 checks, 0 failures, PASS\n' > "$T/cases-good"
+printf '1 case(s), 0 failed; 40 check(s) passed, 0 failed\n40 checks, 0 failures, PASS\n' > "$T/cases-short"
+printf '40 checks, 0 failures, PASS\n'                    > "$T/cases-none"
 # Both facts in one transcript.  This is the ordering case: the SKIPPED grep
 # used to run before the failure count, so this reported SKIPPED and named
 # none of the three assertions that had gone off.
@@ -80,6 +83,30 @@ case_ "the guest SKIPPED itself" 77 SKIP guest_skipped selftest 1 0 "$T/skipped"
 case_ "SKIPPED *and* 3 failures"  1 FAIL failures      selftest 1 0 "$T/skipfail"
 case_ "SKIPPED and a TIMEOUT"     1 FAIL timeout       selftest 1 124 "$T/skipped"
 case_ "SKIPPED under the floor"  77 SKIP guest_skipped selftest 40 0 "$T/skipped"
+
+case_cases_() { # description expected-rc expected-verdict expected-reason args...
+    local what="$1" want="$2" wantv="$3" wantr="$4"; shift 4
+    local out rc gotv gotr
+    out=$(verdict_guest_cases "$@" 2>"$T/err"); rc=$?
+    gotv=$(printf '%s\n' "$out" | sed -n 's/^verdict=//p' | tail -1)
+    gotr=$(printf '%s\n' "$out" | sed -n 's/^reason=//p'  | tail -1)
+    n=$((n + 1))
+    if [ "$rc" = "$want" ] && [ "$gotv" = "$wantv" ] && [ "$gotr" = "$wantr" ]; then
+        printf 'ok   %-34s -> %s %s/%s\n' "$what" "$rc" "$gotv" "$gotr"
+    else
+        printf 'FAIL %-34s -> %s %s/%s, wanted %s %s/%s\n' \
+               "$what" "$rc" "$gotv" "$gotr" "$want" "$wantv" "$wantr"
+        bad=$((bad + 1))
+    fi
+    printf '%s\n%s\n' "$out" "$(cat "$T/err")" | sed 's/^/       | /'
+}
+
+case_cases_ "the exact case count"       0 PASS ok \
+    drill 2 2 0 "$T/cases-good"
+case_cases_ "too few completed cases"    1 FAIL case_count \
+    drill 1 2 0 "$T/cases-short"
+case_cases_ "no drill case summary"      1 FAIL no_case_summary \
+    drill 1 2 0 "$T/cases-none"
 
 echo
 echo "verdict-selftest: $n cases, $bad wrong"

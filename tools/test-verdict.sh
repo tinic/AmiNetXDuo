@@ -30,7 +30,8 @@
 #   reason=<token>             why, when it is not a plain pass.  One of
 #                              no_transcript, no_summary, failures, timeout,
 #                              wrong_cpu, wrong_backend, exit_disagrees,
-#                              guest_skipped, too_few_checks
+#                              guest_skipped, too_few_checks, no_case_summary,
+#                              case_count
 #   transcript=<path>          the file the verdict was read out of
 #
 # stdout, not stderr: a verdict is the result, and a caller that redirects
@@ -54,6 +55,20 @@ verdict_serial_amiberry() { echo "$ROOT/build/amiberry-serial-${AMINETXDUO_RUN_T
 verdict_summary() {
     tr -d '\r' < "$1" 2>/dev/null |
     awk 'match($0, /[0-9]+ checks, [0-9]+ failures/) {
+             s = substr($0, RSTART, RLENGTH)
+             gsub(/[^0-9]/, " ", s)
+             n = split(s, f, " ")
+             if (n >= 2) last = f[1] " " f[2]
+         }
+         END { if (last != "") print last }'
+}
+
+# The packet-level drills additionally promise an exact number of cases.  A
+# standard check summary proves that the guest reached a verdict; this proves
+# that it did not silently stop after a syntactically valid prefix of its input.
+verdict_case_summary() {
+    tr -d '\r' < "$1" 2>/dev/null |
+    awk 'match($0, /[0-9]+ case\(s\), [0-9]+ failed/) {
              s = substr($0, RSTART, RLENGTH)
              gsub(/[^0-9]/, " ", s)
              n = split(s, f, " ")
@@ -222,4 +237,40 @@ verdict_guest() {
                "checks=$checks" "failures=0" "min_checks=$min" \
                "run_rc=$run_rc" "transcript=$found"
     return 0
+}
+
+# verdict_guest_cases NAME MIN_CHECKS EXPECTED_CASES RUN_RC TRANSCRIPT...
+#
+# First require the drill-specific exact case count, then apply every ordinary
+# transcript, check-count and emulator-status rule in verdict_guest().
+verdict_guest_cases() {
+    local name="$1" min="$2" expected="$3" run_rc="$4"; shift 4
+    local found summary cases failed
+
+    if ! found=$(verdict_find "$name" "$run_rc" \
+                              '[0-9]+ case\(s\), [0-9]+ failed' "$@"); then
+        printf '%s\n' "$found"
+        return 1
+    fi
+
+    summary=$(verdict_case_summary "$found")
+    if [ -z "$summary" ]; then
+        echo "FAIL: $name: $found has no case summary" >&2
+        verdict_kv "name=$name" "verdict=FAIL" "reason=no_case_summary" \
+                   "checks=0" "failures=0" "min_checks=$min" \
+                   "run_rc=$run_rc" "transcript=$found"
+        return 1
+    fi
+
+    cases=${summary%% *}
+    failed=${summary##* }
+    if [ "$cases" -ne "$expected" ]; then
+        echo "FAIL: $name: $cases of $expected cases ran" >&2
+        verdict_kv "name=$name" "verdict=FAIL" "reason=case_count" \
+                   "checks=0" "failures=$failed" "min_checks=$min" \
+                   "run_rc=$run_rc" "transcript=$found"
+        return 1
+    fi
+
+    verdict_guest "$name" "$min" "$run_rc" "$found"
 }

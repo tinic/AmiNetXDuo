@@ -10,6 +10,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+. "$ROOT/tools/test-verdict.sh"
 MODEL=A1200
 TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
@@ -87,7 +88,8 @@ cp "$DRILL"  "$STAGE/TcpDrill"
 cp "$SCRIPT" "$STAGE/drill.txt"
 
 echo "==> stack:  $BUILD"
-echo "==> script: $SCRIPT ($(grep -c '^case ' "$SCRIPT") cases)"
+EXPECTED_CASES=$(grep -c '^case ' "$SCRIPT")
+echo "==> script: $SCRIPT ($EXPECTED_CASES cases)"
 
 export AMINETXDUO_RUN_TAG="$TAG"
 
@@ -119,4 +121,5 @@ else
 fi
 echo "guest files:  $HD"
 
-exit "$RC"
+verdict_guest_cases "tcpdrill-$(basename "$SCRIPT" .drill)" \
+    "$EXPECTED_CASES" "$EXPECTED_CASES" "$RC" "$HD/tcpdrill.txt"

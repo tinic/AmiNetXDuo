@@ -3877,6 +3877,8 @@ int main(void)
     SAY("background frames ignored: %u", SAY_U(n_background));
     SAY("%u case(s), %u failed; %u check(s) passed, %u failed",
         SAY_U(n_cases), SAY_U(n_cases_failed), SAY_U(n_pass), SAY_U(n_fail));
+    SAY("%u checks, %u failures, %s", SAY_U(n_pass + n_fail), SAY_U(n_fail),
+        SAY_S((n_fail == 0) ? "PASS" : "FAIL"));
 
     CloseLibrary(SockBase);
     SockBase = NULL;
