@@ -486,6 +486,18 @@ stage_host() {
         return 1
     fi
 
+    # An arm nothing runs is the same defect one layer up: cpu68060 and if2
+    # were in CROSS_CONFIGS and in no workflow matrix.
+    if tools/check-ci-arm-coverage.sh > "$BUILD/ci-arm-coverage.log" 2>&1; then
+        note "ci arm coverage: $(sed -n 's/^ci_arms=/arms /p' \
+              "$BUILD/ci-arm-coverage.log")"
+    else
+        cat "$BUILD/ci-arm-coverage.log"
+        fail "a cross arm is declared and run by no CI job\
+ (tools/check-ci-arm-coverage.sh)"
+        return 1
+    fi
+
     local st log
     for st in tests/*/*-verdict-selftest.sh; do
         [ -x "$st" ] || continue
