@@ -55,6 +55,10 @@ static HostDevice h_dev;
 static UWORD h_last_event;
 static ULONG h_events;
 static ULONG h_retained_events;
+/* A driver that refuses to return requests leaves pointers into the interface
+   live.  The shipping code must retain that allocation, and this root models
+   the same lifetime so LeakSanitizer does not classify it as unreachable. */
+static AmiSana2If *volatile h_retained_iface;
 
 static void h_device_reset(void)
 {
@@ -539,7 +543,7 @@ static void case_device_keeps_everything(void)
     h_check(h_dev.closes == 0, "CloseDevice() was NOT called");
     h_check(h_retained_events == 1, "NETEVENT_IFACE_RETAINED was recorded");
 
-    /* Leaked, as the shipping path leaks it. */
+    h_retained_iface = iface;
 }
 
 /* 7. A refused S2_OFFLINE still counts as told. */
