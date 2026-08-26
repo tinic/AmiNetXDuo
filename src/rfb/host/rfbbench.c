@@ -333,6 +333,53 @@ static void dfl_end(dfl *d)
 }
 #endif
 
+/* One screen pass: whole, or g_bands messages, which is what the Amiga sends
+ * when it services its socket between them.  d NULL = timed loop, no decode;
+ * bmax non-NULL collects the slowest single band, the quantum a keystroke
+ * waits behind. */
+static long encode_pass(rfb_encoder *e, const unsigned char *src,
+                        unsigned char *out, rfb_dec *d, int *bad, double *bmax)
+{
+    const unsigned cap = rfb_worst_case_frame(&e->g);
+    const rfb_u8 *planes[RFB_MAX_DEPTH];
+    unsigned p, b;
+    rfb_u16 rows;
+    long total = 0;
+    double t0, dt;
+
+    if (g_bands <= 1) {
+        long n;
+        t0 = now_us();
+        n = rfb_encode_frame(e, src, out, cap);
+        dt = now_us() - t0;
+        if (bmax && dt > *bmax) *bmax = dt;
+        if (n < 0) return n;
+        if (d && dec_frame(d, out, (unsigned)n) != (int)n) *bad = 1;
+        return n;
+    }
+
+    for (p = 0; p < rfb_planes(&e->g); p++)
+        planes[p] = src + (size_t)p * e->plane_stride;
+    rows = (rfb_u16)((e->tiles_y + g_bands - 1) / g_bands);
+    if (rows == 0)
+        rows = 1;
+    for (b = 0; b * rows < e->tiles_y; b++) {
+        rfb_u16 ty0 = (rfb_u16)(b * rows);
+        rfb_u16 ty1 = (rfb_u16)(ty0 + rows);
+        long bn;
+        if (ty1 > e->tiles_y)
+            ty1 = e->tiles_y;
+        t0 = now_us();
+        bn = rfb_encode_band(e, planes, out, cap, ty0, ty1);
+        dt = now_us() - t0;
+        if (bmax && dt > *bmax) *bmax = dt;
+        if (bn < 0) return bn;
+        if (d && dec_frame(d, out, (unsigned)bn) != (int)bn) *bad = 1;
+        total += bn;
+    }
+    return total;
+}
+
 static int run(const pfs *s, const strategy *st, tiling t, int reps)
 {
     rfb_encoder e;
@@ -343,7 +390,7 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     unsigned i, rep;
     unsigned long total = 0, mx = 0, f0 = 0, mx_after = 0;
     unsigned rt_ok = 0, rt_fail = 0;
-    double t0, us;
+    double t0, us, band_us_max = 0.0;
 
     rfb_u32 flags = st->flags | (g_interleaved ? RFB_F_INTERLEAVED : 0u);
 
@@ -366,7 +413,8 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
                "f0=%lu max=%lu max_after_f0=%lu fps_at_398k=%.1f "
                "ratio=%.3f us_per_frame=%.1f rt_ok=%u rt_fail=%u "
                "src_kb=%lu probe_kb=0 move_kb=0 dirty=0 sent=0 "
-               "c_raw=0 c_pbraw=0 c_pbxor=0 copies=0\n",
+               "c_raw=0 c_pbraw=0 c_pbxor=0 copies=0 "
+               "bands=1 band_us_max=0.0\n",
                st->name, s->name, t.tile_w, t.tile_h, total,
                (double)total / (double)s->frames, (double)s->frame_bytes,
                (unsigned long)s->frame_bytes, mx, mx,
@@ -387,7 +435,8 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     decfb = calloc(1, rfb_shadow_size(&g));
     if (!shadow || !scratch || !out || !decfb) return -1;
 
-    /* Timed loop: encode only, `reps` passes, shadow reset between passes. */
+    /* Timed loop: encode only, `reps` passes, shadow reset between passes.
+     * Banded when --bands says so -- what is timed has to be what ships. */
     t0 = now_us();
     for (rep = 0; rep < (unsigned)reps; rep++) {
         memset(shadow, 0, rfb_shadow_size(&g));
@@ -398,8 +447,8 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
             return -1;
         }
         for (i = 0; i < s->frames; i++) {
-            long n = rfb_encode_frame(&e, s->data + (size_t)i * s->frame_bytes,
-                                      out, rfb_worst_case_frame(&g));
+            long n = encode_pass(&e, s->data + (size_t)i * s->frame_bytes,
+                                 out, NULL, NULL, &band_us_max);
             if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
         }
     }
@@ -429,58 +478,15 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
     for (i = 0; i < s->frames; i++) {
         const unsigned char *src = s->data + (size_t)i * s->frame_bytes;
         long n;
-        int used;
         int bad = 0;
 
-        if (g_bands > 1) {
-            /*
-             * The same screen pass, as g_bands messages instead of one, each
-             * decoded as it is produced.  That is what the Amiga does when it
-             * has to let go of the CPU between bands, and the check is that
-             * the picture it builds is the same one: a band that got its tile
-             * indices, its shadow or its clipped bottom row wrong shows up
-             * here as a decode that does not match the source.
-             *
-             * The bytes are counted together, because the screen pass is what
-             * costs a frame's worth of wire whether it went in one message or
-             * five, and comparing a banded run's mean against an unbanded
-             * one's is the point.
-             */
-            const rfb_u8 *planes[RFB_MAX_DEPTH];
-            unsigned p, b;
-            rfb_u16 rows = (rfb_u16)((e.tiles_y + g_bands - 1) / g_bands);
-
-            if (rows == 0)
-                rows = 1;
-            for (p = 0; p < rfb_planes(&g); p++)
-                planes[p] = src + (size_t)p * e.plane_stride;
-
-            n = 0;
-            for (b = 0; b * rows < e.tiles_y; b++) {
-                rfb_u16 ty0 = (rfb_u16)(b * rows);
-                rfb_u16 ty1 = (rfb_u16)(ty0 + rows);
-                long bn;
-
-                if (ty1 > e.tiles_y)
-                    ty1 = e.tiles_y;
-                bn = rfb_encode_band(&e, planes, out,
-                                     rfb_worst_case_frame(&g), ty0, ty1);
-                if (bn < 0) {
-                    fprintf(stderr, "band encode error %ld\n", bn);
-                    return -1;
-                }
-                used = dec_frame(&d, out, (unsigned)bn);
-                if (used != (int)bn)
-                    bad = 1;
-                n += bn;
-            }
-        } else {
-            n = rfb_encode_frame(&e, src, out, rfb_worst_case_frame(&g));
-            if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
-            used = dec_frame(&d, out, (unsigned)n);
-            if (used != (int)n)
-                bad = 1;
-        }
+        /* Each band decoded as it is produced: a band that got its tile
+         * indices, its shadow or its clipped bottom row wrong shows up here as
+         * a decode that does not match the source.  The bytes are counted
+         * together, because the screen pass costs a frame's worth of wire
+         * whether it went in one message or five. */
+        n = encode_pass(&e, src, out, &d, &bad, NULL);
+        if (n < 0) { fprintf(stderr, "encode error %ld\n", n); return -1; }
 
         total += (unsigned long)n;
         if ((unsigned long)n > mx) mx = (unsigned long)n;
@@ -507,7 +513,8 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
            "f0=%lu max=%lu max_after_f0=%lu fps_at_398k=%.0f "
            "ratio=%.3f us_per_frame=%.1f rt_ok=%u rt_fail=%u "
            "src_kb=%lu probe_kb=%lu move_kb=%lu dirty=%lu sent=%lu "
-           "c_raw=%lu c_pbraw=%lu c_pbxor=%lu copies=%lu\n",
+           "c_raw=%lu c_pbraw=%lu c_pbxor=%lu copies=%lu "
+           "bands=%d band_us_max=%.1f\n",
            st->name, s->name, t.tile_w, t.tile_h, total,
            (double)total / (double)s->frames, mean_after, f0, mx, mx_after,
            mean_after > 0.0 ? WIRE_BYTES_PER_SEC / mean_after : 99999.0,
@@ -517,7 +524,8 @@ static int run(const pfs *s, const strategy *st, tiling t, int reps)
            (unsigned long)e.st.shadow_move / 1024,
            (unsigned long)e.st.tiles_dirty, (unsigned long)e.st.planes_sent,
            (unsigned long)e.st.code_raw, (unsigned long)e.st.code_pb_raw,
-           (unsigned long)e.st.code_pb_xor, (unsigned long)e.st.copies);
+           (unsigned long)e.st.code_pb_xor, (unsigned long)e.st.copies,
+           g_bands, band_us_max);
     }
 
 #ifdef RFBBENCH_ZLIB

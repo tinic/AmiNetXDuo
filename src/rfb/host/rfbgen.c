@@ -371,11 +371,11 @@ static void seq_idle(const char *dir, const char *name)
     close_pfs(f);
 }
 
-static void seq_type(const char *dir)
+static void seq_type(const char *dir, const char *name, unsigned frames)
 {
-    FILE *f = open_pfs(dir, "type", 60);
+    FILE *f = open_pfs(dir, name, frames);
     unsigned i, k;
-    for (i = 0; i < 60; i++) {
+    for (i = 0; i < frames; i++) {
         desktop();
         window(64, 64, 400, 300, 3);
         for (k = 0; k < 10; k++)
@@ -461,7 +461,7 @@ int main(int argc, char **argv)
 
     setup(640, 480, 3);
     seq_idle(dir, "idle");
-    seq_type(dir);
+    seq_type(dir, "type", 60);
     seq_scroll(dir, "scroll", 8, 60);
     seq_scroll(dir, "scroll16", 16, 40);
     seq_scroll(dir, "scroll_slow", 2, 40);
@@ -486,6 +486,7 @@ int main(int argc, char **argv)
        therefore walked too. */
     setup_chunky(640, 480);
     seq_idle(dir, "idle_c8");
+    seq_type(dir, "type_c8", 20);
     seq_scroll(dir, "scroll_c8", 8, 40);
     seq_menu(dir, "menu_c8");
     setup_chunky(804, 300);
@@ -506,6 +507,7 @@ int main(int argc, char **argv)
      */
     setup_rgb565(640, 480);
     seq_scroll(dir, "scroll_rgb", 8, 20);
+    seq_type(dir, "type_rgb", 20);
     seq_full(dir, "full_rgb");
     setup_rgb565(404, 200);
     seq_idle(dir, "idle_rgbpad");
