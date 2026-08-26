@@ -49,6 +49,7 @@ amiga_client_prepare()
     local sources=(
         "$AMIGA_CLIENT_ROOT/clients/compat/amiga_posix.c"
         "$AMIGA_CLIENT_ROOT/clients/compat/amiga_argv.c"
+        "$AMIGA_CLIENT_ROOT/clients/compat/amiga_exit.c"
         "$AMIGA_CLIENT_ROOT/clients/compat/amiga_libgcc.c"
         "$AMIGA_CLIENT_ROOT/src/common/ami_udivdi3.c"
     )
@@ -96,7 +97,7 @@ amiga_client_prepare()
     AMIGA_CLIENT_COMPAT_A="$AMIGA_CLIENT_LIBDIR/libamigaclient.a"
     # --wrap=main: the crt0 does not tokenise the CLI command line into argv[],
     # so route main() through clients/compat/amiga_argv.c, which rebuilds a real
-    # POSIX argv[] from dos.library and runs the client on a 256 KB stack.
+    # POSIX argv[] from dos.library and runs the client on its private stack.
     # --wrap=exit,_exit: so that shim can put the task's stack bounds back when a
     # client ends by exit()ing off the swapped stack instead of returning.
     AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit"

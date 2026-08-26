@@ -339,23 +339,27 @@ for cmd in "${CMDS[@]}"; do
 done
 chmod 755 "$TREE"/C/*
 
-# The ssh client, when it has been built.  Optional, because it comes from
-# clients/ rather than the CMake tree and a plain `cmake --build` does not
-# produce it.  It goes into C: with the other commands and it wants
+# The ssh and scp clients, when they have been built.  Optional, because they
+# come from clients/ rather than the CMake tree and a plain `cmake --build`
+# does not produce them.  They go into C: with the other commands and need
 # mathieeedoubbas.library in LIBS:, which every Workbench installation has.
 #
 # ONE ssh, not one per architecture: the code is -m68000 and both X25519 field
 # multiplies are in it, picked from AttnFlags at the first handshake
 # (clients/dropbear/amiga_25519.c).
 #
-# AMINETXDUO_SSH names the built binary outright; the release workflow sets it,
-# so the path it builds into and the path packed here cannot drift.  When
-# nobody names one it is built here, UNCONDITIONALLY, for the reason the CMake
-# loop above is unconditional.  AMINETXDUO_DIST_NO_BUILD=1 reports instead.
+# The three AMINETXDUO_* variables name the built binaries outright; the
+# release workflow sets them, so the paths it builds into and the paths packed
+# here cannot drift.  When any is absent they are built here,
+# UNCONDITIONALLY, for the reason the CMake loop above is unconditional.
+# AMINETXDUO_DIST_NO_BUILD=1 reports instead.
 CLIENT_SSH="${AMINETXDUO_SSH:-}"
-if [ -z "$CLIENT_SSH" ] && [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
-    CLIENT_SSH="$ROOT/build/ssh/dbclient"
-    echo "==> building the ssh client (no AMINETXDUO_SSH given)" >&2
+CLIENT_SCP="${AMINETXDUO_SCP:-}"
+CLIENT_SCP_RUNNER="${AMINETXDUO_SCP_RUNNER:-}"
+if { [ -z "$CLIENT_SSH" ] || [ -z "$CLIENT_SCP" ] ||
+     [ -z "$CLIENT_SCP_RUNNER" ]; } &&
+   [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
+    echo "==> building the ssh and scp clients (a client path was not given)" >&2
     # The same two settings the release workflow uses: ONE binary for the
     # whole 68k family, picking its X25519 field multiply from AttnFlags at
     # the first handshake rather than being built per CPU.
@@ -363,11 +367,31 @@ if [ -z "$CLIENT_SSH" ] && [ -z "${AMINETXDUO_DIST_NO_BUILD:-}" ]; then
         "$ROOT/clients/dropbear/build.sh" -b "$ROOT/build/ssh" >&2 || {
         echo "ssh client build failed; the archive would carry none" >&2
         exit 2; }
+    CLIENT_SSH="${CLIENT_SSH:-$ROOT/build/ssh/dbclient}"
+    CLIENT_SCP="${CLIENT_SCP:-$ROOT/build/ssh/scp}"
+    CLIENT_SCP_RUNNER="${CLIENT_SCP_RUNNER:-$ROOT/build/ssh/scp-runner}"
 fi
 if [ -n "$CLIENT_SSH" ] && [ -x "$CLIENT_SSH" ]; then
     cp "$CLIENT_SSH" "$TREE/C/ssh"
     chmod 755 "$TREE/C/ssh"
     echo "==> including ssh ($(wc -c < "$CLIENT_SSH" | tr -d ' ') bytes)"
+fi
+HAVE_SCP=0
+HAVE_SCP_RUNNER=0
+[ -n "$CLIENT_SCP" ] && [ -x "$CLIENT_SCP" ] && HAVE_SCP=1
+[ -n "$CLIENT_SCP_RUNNER" ] && [ -x "$CLIENT_SCP_RUNNER" ] &&
+    HAVE_SCP_RUNNER=1
+if [ "$HAVE_SCP" != "$HAVE_SCP_RUNNER" ]; then
+    echo "scp and scp-runner must be packaged together" >&2
+    exit 2
+fi
+if [ "$HAVE_SCP" = "1" ]; then
+    cp "$CLIENT_SCP" "$TREE/C/scp"
+    cp "$CLIENT_SCP_RUNNER" "$TREE/C/scp-runner"
+    chmod 755 "$TREE/C/scp"
+    chmod 755 "$TREE/C/scp-runner"
+    echo "==> including scp ($(wc -c < "$CLIENT_SCP" | tr -d ' ') bytes)"
+    echo "==> including scp-runner ($(wc -c < "$CLIENT_SCP_RUNNER" | tr -d ' ') bytes)"
 fi
 
 # The installer prints its version in the about text; stamp it from the same

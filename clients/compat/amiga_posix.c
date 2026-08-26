@@ -24,6 +24,8 @@
 #include <sys/time.h>
 #include <time.h>               /* struct timespec, for nanosleep() */
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -264,6 +266,32 @@ int link(const char *from, const char *to)
     return _link(from, to);
 }
 
+/* ----------------------------------------------------------- formatting --- */
+
+int vasprintf(char **result, const char *format, va_list args)
+{
+    size_t size = 0;
+    char  *buf;
+
+    if (result == NULL || format == NULL)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    /* newlib has the GNU allocation primitive, only not vasprintf itself.
+       Passing va_list through a second vsnprintf() call is not portable on
+       this m68k ABI; vasnprintf consumes it once and allocates the answer. */
+    buf = vasnprintf(NULL, &size, format, args);
+    if (buf == NULL)
+    {
+        *result = NULL;
+        return -1;
+    }
+    *result = buf;
+    return (int)size;
+}
+
 
 /* ------------------------------------------------------------- clock --- */
 
@@ -335,4 +363,3 @@ int nanosleep(const struct timespec *req, struct timespec *rem)
     Delay((ULONG)ticks);
     return 0;
 }
-

@@ -50,7 +50,7 @@
 #                          matching nothing is a stale row -- FAILURE
 #               sometimes  a build option or an optional ingredient decides:
 #                          the minimal drawer, tls.library, the trust store,
-#                          ssh, the profiler
+#                          ssh, scp, the profiler
 #
 # via-or-reason for `installed`: a literal string that must appear in the CODE
 #               of install/Install-AmiNetXDuo -- comments are stripped before

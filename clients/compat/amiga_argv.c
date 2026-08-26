@@ -19,6 +19,8 @@
 #include <stdio.h>
 
 extern int __real_main(int argc, char **argv);
+extern int amiga_client_exit_returns(void);
+extern unsigned long amiga_client_stack_size(void);
 
 /* Generous, and static: this runs before the client's main() sets anything up,
    on whatever stack the crt0 provided.  A command line longer than this is
@@ -32,17 +34,16 @@ static char  argv_buf[AMIGA_ARGV_BUFSIZE];
 static char *argv_vec[AMIGA_ARGV_MAX + 1];
 
 /*
- * A ported client needs more stack than the Shell's 4 KB default.  8 KB,
- * measured: dbclient's high-water is 5,008 bytes, and AMIGA_ARGV_STACKCHECK
- * below is what measures it.  Re-measure before adding a second client.
+ * A ported client needs more stack than the Shell's 4 KB default.  Ordinary
+ * dbclient uses the weak 32 KB policy; scp and the dbclient it hosts request
+ * 128 KB.  AMIGA_ARGV_STACKCHECK below measures the selected size.
  */
-#define AMIGA_ARGV_STACK    (8UL * 1024UL)
-
 static struct StackSwapStruct argv_sss;
 static int                    argv_argc;
 static int                    argv_result;
 static BOOL                   argv_on_swapped;   /* TRUE between the swaps */
 static APTR                   argv_stack;        /* the swapped stack, to free */
+static ULONG                  argv_stack_size;
 
 /* The way back onto the caller's stack when the client exits rather than
    returns; see the note above __wrap__exit(). */
@@ -53,7 +54,7 @@ static int                    argv_exit_status;
 /*
  * How much of the stack the client actually used.
  *
- * What sized AMIGA_ARGV_STACK, and what has to re-size it for a new client.
+ * What sized each client's stack policy, and what has to re-size it.
  * Painting the block and finding the lowest word still holding the pattern
  * gives the high-water mark: the stack grows down from stk_Upper, so
  * everything below the deepest frame is untouched.
@@ -78,7 +79,7 @@ static BOOL argv_stackcheck_wanted(VOID)
 static VOID argv_paint(VOID)
 {
     ULONG *word = (ULONG *)argv_stack;
-    ULONG  left = AMIGA_ARGV_STACK / sizeof(ULONG);
+    ULONG  left = argv_stack_size / sizeof(ULONG);
 
     while (left-- > 0)
         *word++ = ARGV_PAINT;
@@ -107,7 +108,7 @@ static VOID argv_mem(const char *where)
 static VOID argv_report_high_water(VOID)
 {
     const ULONG *word = (const ULONG *)argv_stack;
-    ULONG        left = AMIGA_ARGV_STACK / sizeof(ULONG);
+    ULONG        left = argv_stack_size / sizeof(ULONG);
     ULONG        untouched = 0;
 
     if (!argv_painted)
@@ -118,22 +119,26 @@ static VOID argv_report_high_water(VOID)
         untouched++;
 
     Printf("[argv: stack high-water %ld of %ld bytes]\n",
-           (LONG)(AMIGA_ARGV_STACK - untouched * sizeof(ULONG)),
-           (LONG)AMIGA_ARGV_STACK);
+           (LONG)(argv_stack_size - untouched * sizeof(ULONG)),
+           (LONG)argv_stack_size);
 }
 
-/*
- * Run __real_main() on the swapped stack.  No locals, no arguments, and
- * noinline: between the two StackSwap() calls the stack pointer is the new
- * stack's, so anything this function touched on the old one would be the wrong
- * memory.  Everything it needs is static, the same discipline
- * src/tools/fetch.c documents.
- */
+/* Keep main()'s two arguments and their cleanup wholly on the swapped stack.
+   Calling it directly from argv_run_on_stack() lets GCC defer `addq #8,sp`
+   until after the second StackSwap(), which advances the caller's stack past
+   its saved return state and jumps into data. */
+static __attribute__((noinline)) int argv_call_main(VOID)
+{
+    return __real_main(argv_argc, argv_vec);
+}
+
 static __attribute__((noinline)) VOID argv_run_on_stack(VOID)
 {
+    /* No locals or arguments: between these calls sp belongs to the allocated
+       stack, so every value this function needs lives in static storage. */
     argv_on_swapped = TRUE;
     StackSwap(&argv_sss);
-    argv_result = __real_main(argv_argc, argv_vec);
+    argv_result = argv_call_main();
     StackSwap(&argv_sss);
     argv_on_swapped = FALSE;
 }
@@ -321,12 +326,13 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
      * even this, fall back to the caller's stack rather than refuse: a small
      * program may still fit.
      */
-    argv_stack = AllocMem(AMIGA_ARGV_STACK, MEMF_ANY);
+    argv_stack_size = (ULONG)amiga_client_stack_size();
+    argv_stack = AllocMem(argv_stack_size, MEMF_ANY);
     if (argv_stack != NULL)
     {
         argv_sss.stk_Lower   = argv_stack;
-        argv_sss.stk_Upper   = (ULONG)argv_stack + AMIGA_ARGV_STACK;
-        argv_sss.stk_Pointer = (APTR)((ULONG)argv_stack + AMIGA_ARGV_STACK);
+        argv_sss.stk_Upper   = (ULONG)argv_stack + argv_stack_size;
+        argv_sss.stk_Pointer = (APTR)((ULONG)argv_stack + argv_stack_size);
 
         /* setjmp() here, so a client that exits instead of returning comes
            back to this frame, on the caller's stack, and the FreeMem()
@@ -346,7 +352,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
         argv_exit_task = NULL;
 
         argv_report_high_water();
-        FreeMem(argv_stack, AMIGA_ARGV_STACK);
+        FreeMem(argv_stack, argv_stack_size);
         argv_stack = NULL;
         argv_mem("post-main");
 
@@ -354,7 +360,11 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
            on the big stack, so finish the termination rather than return a
            status the client did not ask for. */
         if (exited != 0)
-            __real__exit(argv_exit_status);
+        {
+            if (!amiga_client_exit_returns())
+                __real__exit(argv_exit_status);
+            argv_result = argv_exit_status;
+        }
     }
     else
     {

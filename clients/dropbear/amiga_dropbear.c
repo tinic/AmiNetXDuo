@@ -21,6 +21,8 @@
 #include <stdarg.h>
 #include <setjmp.h>             /* the execv() -> spawn_command() jump */
 #include <signal.h>
+#include <limits.h>
+#include <reent.h>              /* struct _reent, _ssize_t */
 #include <sys/stat.h>           /* chmod() */
 #include <sys/wait.h>           /* waitpid() */
 #include <grp.h>                /* getgrnam() */
@@ -95,6 +97,8 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #include <sys/filio.h>
 #include <sys/ioctl.h>          /* TIOCGWINSZ, struct winsize */
 #include <dos/dostags.h>
+
+#include "amiga_stdio.h"
 
 
 /* ------------------------------------------------------ the descriptor map */
@@ -511,6 +515,154 @@ static int con_active(void);
 static int con_read(void *buf, size_t len);
 static int con_write(int fd, const void *buf, size_t len);
 
+static struct amiga_stdio_override *amiga_stdio_descriptor(void)
+{
+    struct Task *task = FindTask(NULL);
+    struct amiga_stdio_override *stdio;
+    ULONG tagged;
+
+    if (task == NULL)
+        return NULL;
+    tagged = (ULONG)task->tc_UserData;
+    if ((tagged & 3UL) != AMIGA_STDIO_USERDATA_TAG)
+        return NULL;
+    stdio = (struct amiga_stdio_override *)(tagged & ~3UL);
+    if (stdio->magic != AMIGA_STDIO_MAGIC)
+        return NULL;
+    return stdio;
+}
+
+static struct amiga_mempipe *amiga_stdio_pipe(int fd)
+{
+    struct amiga_stdio_override *stdio = amiga_stdio_descriptor();
+
+    if (stdio == NULL)
+        return NULL;
+    return fd == 0 ? stdio->input : fd == 1 ? stdio->output : NULL;
+}
+
+/* RunCommand() is hosting this invocation when scp installed a stdio
+   descriptor.  Its small runner must regain control after Dropbear calls
+   exit(), so the common argv shim returns the status instead of terminating
+   the hosting Process. */
+int amiga_client_exit_returns(void)
+{
+    return amiga_stdio_descriptor() != NULL;
+}
+
+unsigned long amiga_client_stack_size(void)
+{
+    return amiga_stdio_descriptor() != NULL ? 128UL * 1024UL : 32UL * 1024UL;
+}
+
+/* newlib's fd 2 is wired to Output() on this target.  AmigaDOS keeps the
+   separately redirected error stream in pr_CES, so using newlib's write(2)
+   would put diagnostics into stdout.  That is merely untidy for a terminal,
+   but corrupts byte protocols such as scp when stdout is a pipe. */
+static BPTR amiga_error_handle(void)
+{
+    struct Process *proc = (struct Process *)FindTask(NULL);
+    struct amiga_stdio_override *stdio = amiga_stdio_descriptor();
+
+    if (stdio != NULL && stdio->error != (BPTR)0)
+        return stdio->error;
+    if (proc != NULL && proc->pr_Task.tc_Node.ln_Type == NT_PROCESS
+        && proc->pr_CES != (BPTR)0)
+        return proc->pr_CES;
+    return Output();
+}
+
+static int amiga_raw_write(int fd, const void *buf, size_t len)
+{
+    struct amiga_mempipe *pipe = amiga_stdio_pipe(fd);
+    BPTR handle = (BPTR)0;
+    LONG n;
+
+    if (pipe != NULL)
+    {
+        if (len > (size_t)LONG_MAX)
+        {
+            errno = EINVAL;
+            return -1;
+        }
+        n = amiga_mempipe_write(pipe, buf, (ULONG)len);
+        if (n < 0)
+            errno = EPIPE;
+        return (int)n;
+    }
+    if (fd != 2)
+        return __real_write(fd, buf, len);
+    if (len > (size_t)LONG_MAX)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    handle = amiga_error_handle();
+    n = Write(handle, (APTR)buf, (LONG)len);
+    if (n < 0)
+    {
+        errno = EIO;
+        return -1;
+    }
+    return (int)n;
+}
+
+static int amiga_raw_read(int fd, void *buf, size_t len)
+{
+    struct amiga_mempipe *pipe = amiga_stdio_pipe(fd);
+    LONG n;
+
+    if (pipe == NULL)
+        return __real_read(fd, buf, len);
+    if (len > (size_t)LONG_MAX)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    n = amiga_mempipe_read(pipe, buf, (ULONG)len);
+    if (n < 0)
+    {
+        errno = EIO;
+        return -1;
+    }
+    return (int)n;
+}
+
+extern _ssize_t __real__read_r(struct _reent *, int, void *, size_t);
+
+_ssize_t __wrap__read_r(struct _reent *reent, int fd, void *buf, size_t len)
+{
+    int n;
+
+    if (fd != 0)
+        return __real__read_r(reent, fd, buf, len);
+
+    n = amiga_raw_read(fd, buf, len);
+    if (n < 0 && reent != NULL)
+        reent->_errno = errno;
+    return (_ssize_t)n;
+}
+
+/* newlib stdio reaches _write_r() from inside libc.a, so --wrap=write cannot
+   see it.  In particular, Dropbear's fprintf(stderr, ...) takes this path. */
+extern _ssize_t __real__write_r(struct _reent *, int, const void *, size_t);
+
+_ssize_t __wrap__write_r(struct _reent *reent, int fd,
+                         const void *buf, size_t len)
+{
+    int n;
+
+    if (fd != 1 && fd != 2)
+        return __real__write_r(reent, fd, buf, len);
+
+    n = amiga_raw_write(fd, buf, len);
+    if (n < 0 && reent != NULL)
+        reent->_errno = errno;
+    return (_ssize_t)n;
+}
+
 int __wrap_read(int fd, void *buf, size_t len)
 {
     if (IS_SOCK(fd))
@@ -527,7 +679,7 @@ int __wrap_read(int fd, void *buf, size_t len)
     if (IS_PIPE(fd))
         return pipe_read(fd, buf, len);
 
-    return __real_read(fd, buf, len);
+    return amiga_raw_read(fd, buf, len);
 }
 
 int __wrap_write(int fd, const void *buf, size_t len)
@@ -547,11 +699,22 @@ int __wrap_write(int fd, const void *buf, size_t len)
     if (IS_RAND(fd))
         return (int)len;                /* swallowed: see rand_fill() */
 
+    if (fd == 1 && amiga_stdio_pipe(fd) != NULL)
+        return amiga_raw_write(fd, buf, len);
+
     /* The client's own console output (prompts, messages) before an interactive
        session is up: give it the CR the Amiga console needs.  Once the session
        runs, the server's byte stream (already CRLF) passes straight through. */
     if ((fd == 1 || fd == 2) && !con_active())
-        return con_write(fd, buf, len);
+    {
+        BPTR handle = (fd == 2) ? amiga_error_handle() : Output();
+
+        if (handle != (BPTR)0 && IsInteractive(handle))
+            return con_write(fd, buf, len);
+    }
+
+    if (fd == 2)
+        return amiga_raw_write(fd, buf, len);
 
     return __real_write(fd, buf, len);
 }
@@ -964,7 +1127,7 @@ static int con_write(int fd, const void *buf, size_t len)
 
         if (o >= sizeof(out) - 2)       /* room for a CR + the byte */
         {
-            __real_write(fd, out, o);
+            amiga_raw_write(fd, out, o);
             o = 0;
         }
 
@@ -975,7 +1138,7 @@ static int con_write(int fd, const void *buf, size_t len)
     }
 
     if (o > 0)
-        __real_write(fd, out, o);
+        amiga_raw_write(fd, out, o);
     if (fd >= 0 && fd < 3)
         con_wr_prev[fd] = prev;
 
@@ -992,17 +1155,20 @@ static BPTR dos_handle_for(int fd)
 {
     switch (fd)
     {
-        case 0:  return Input();
-        case 1:  return Output();
-        case 2:  return Output();
+        case 0:  return amiga_stdio_pipe(0) != NULL ? (BPTR)0 : Input();
+        case 1:  return amiga_stdio_pipe(1) != NULL ? (BPTR)0 : Output();
+        case 2:  return amiga_error_handle();
         default: return (BPTR)0;
     }
 }
 
 static int dos_readable(int fd)
 {
+    struct amiga_mempipe *pipe = amiga_stdio_pipe(fd);
     BPTR h = dos_handle_for(fd);
 
+    if (pipe != NULL)
+        return amiga_mempipe_read_ready(pipe);
     if (h == (BPTR)0)
         return 1;                       /* a plain file: a read will return */
 
@@ -1025,6 +1191,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     int   have_sockets = 0;
     int   con_watch = 0;              /* the interactive console is in readfds */
     int   con_fd = -1;
+    int   mem_watch = 0;              /* scp's shared-memory stdin */
     int   fd;
     LONG  rc;
 
@@ -1072,6 +1239,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             con_fd    = fd;
             if (con_readable()) { FD_SET(fd, &out_r); other_ready++; }
         }
+        else if (want_r && fd == 0 && amiga_stdio_pipe(0) != NULL)
+        {
+            mem_watch = 1;
+            if (dos_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
+        }
         else if (want_r && dos_readable(fd)) { FD_SET(fd, &out_r); other_ready++; }
 
         if (want_w) { FD_SET(fd, &out_w); other_ready++; }
@@ -1101,6 +1273,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         sigs = 0;
         if (con_watch)    sigs |= con_reader->cr_DataSig;
         if (con_active()) sigs |= SIGBREAKF_CTRL_C;
+        if (mem_watch)    sigs |= SIGBREAKF_CTRL_F;
 
         rc = nx_waitselect(sock_n, &sock_r, &sock_w, NULL, (APTR)tv, &sigs);
         if (rc < 0)
@@ -1132,6 +1305,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             FD_SET(con_fd, &out_r);
             ready++;
         }
+        if (mem_watch && dos_readable(0) && !FD_ISSET(0, &out_r))
+        {
+            FD_SET(0, &out_r);
+            ready++;
+        }
     }
     else if (con_watch && !con_readable())
     {
@@ -1143,6 +1321,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         if ((got & SIGBREAKF_CTRL_C) != 0)
             con_intr = 1;
         if (con_readable()) { FD_SET(con_fd, &out_r); ready++; }
+    }
+    else if (mem_watch && !dos_readable(0))
+    {
+        (VOID)Wait(SIGBREAKF_CTRL_F);
+        if (dos_readable(0)) { FD_SET(0, &out_r); ready++; }
     }
     else if (other_ready == 0)
     {

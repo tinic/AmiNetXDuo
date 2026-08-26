@@ -9,6 +9,11 @@ version at the top when it merges.
 
 ## Unreleased
 
+- `scp` is included alongside `ssh`. It transfers files in either direction,
+  recursively copies directories and preserves timestamps, using Dropbear's
+  traditional SCP protocol without requiring `fork()` or a Unix pipe handler
+  on AmigaOS
+
 ## 0.25.5
 
 - Removing one interface no longer takes the machine's default gateway with it. DHCP installs the gateway at bind, so the last interface to come up owns it machine-wide -- and detaching that one cleared it, leaving the surviving interface able to reach its own subnet and nothing else. Every off-link connection and every name lookup that had to leave the subnet failed, on an interface that was up, had an address and answered an on-link ping. A gateway is now reinstated from a surviving interface after a detach, taking the survivors' next hops in slot order and letting the stack pick one that is on a live subnet

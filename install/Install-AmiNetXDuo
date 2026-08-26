@@ -1332,7 +1332,7 @@
           "machines can read and write.\n\nAll of "
           "them are installed.  They are small, and a missing command "
           "is worse than a few extra files "
-          "in C:.  ssh comes with them.")
+          "in C:.  ssh and scp come with them.")
   (source S_C)
   (dest   "C:")
   ; (all), because a copyfiles from a DRAWER needs one of (all) or (pattern)
@@ -1342,7 +1342,7 @@
   (all)
   (optional "force"))
 
-; ssh went into C: with the copy above.  It used to need its own step and a
+; ssh and scp went into C: with the copy above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
 ; because Dropbear comes from clients/ rather than the CMake tree and was built
 ; once per architecture; the one binary carries both X25519 field multiplies and
@@ -1628,9 +1628,9 @@
       (newname "Terminal.info")
       (optional "nofail")))
 
-; ssh (Dropbear's dbclient) rides into C: with the other network commands
-; above -- the argv/stack shim gives it a real argv[] and its own 256 KB
-; stack, so it no longer needs the separate drawer and the `stack 200000`
+; ssh (Dropbear's dbclient) and scp ride into C: with the other network commands
+; above -- the argv/stack shim gives them a real argv[] and their own stack,
+; so they no longer need the separate drawer and the `stack 200000`
 ; ritual the ported clients once did.
 
 (complete 90)

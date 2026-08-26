@@ -711,7 +711,7 @@ fi
 echo "==> the archive holds:"
 for f in Libs/bsdsocket.library Libs/usergroup.library \
          Libs/tls.library Devs/Internet/certificates \
-         C/fetch C/ssh; do
+         C/fetch C/ssh C/scp C/scp-runner; do
     if [ -f "$HD/Unpacked/AmiNetXDuo/$f" ]; then
         printf '      %-36s %s bytes\n' "$f" \
                "$(wc -c < "$HD/Unpacked/AmiNetXDuo/$f" | tr -d ' ')"
@@ -1552,7 +1552,7 @@ HTTPS_STEPS=$(https_steps)
 # An ordinary Shell script, doing ordinary things, with every command's return
 # code written down beside its output.  `Stack 200000` is the Shell's internal
 # stack command.  It is NOT needed any more, clients/compat/amiga_argv.c
-# swaps in 256 KB of its own before main() runs, and the ReadMe says so, and
+# swaps in a measured private stack before main() runs, and the ReadMe says so,
 # it stays here precisely because a cautious user will still type it: a client
 # that mishandled an already-large Shell stack would fail nowhere else.
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF

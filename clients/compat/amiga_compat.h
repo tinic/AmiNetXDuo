@@ -22,6 +22,8 @@
 #ifndef AMINETXDUO_CLIENTS_COMPAT_H
 #define AMINETXDUO_CLIENTS_COMPAT_H
 
+#include <stdarg.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,6 +41,9 @@ const char *amiga_fix_path(const char *path);
 
 /* Delay().  One tick of resolution, rounds up, never returns EINTR. */
 int nanosleep(const struct timespec *req, struct timespec *rem);
+
+/* newlib has vsnprintf(), but neither vasprintf() nor its declaration. */
+int vasprintf(char **result, const char *format, va_list args);
 
 /* Not ours: newlib's libc.a defines clearenv() (lib_a-environ.o) but never
    declares it, <stdlib.h> puts it behind a visibility guard this toolchain

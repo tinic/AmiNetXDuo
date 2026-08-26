@@ -88,7 +88,7 @@ It puts
      AddNetRoute, DeleteNetRoute, hostname,
      ping, netstat, host, nslookup, arp,
      fetch, nc, telnet, tftp, sntp, traceroute,
-     whois, ssh, httpd, iperf,
+     whois, ssh, scp, httpd, iperf,
      NetCapture, NetTrace                      into C:
      the interface description                 into DEVS:NetInterfaces
      the routing and name server files         into DEVS:Internet
@@ -172,12 +172,32 @@ works here.  It does not work on Roadshow.
 USING SSH
 ---------
 
-`ssh' is Dropbear's dbclient.  It needs mathieeedoubbas.library in LIBS:,
+`ssh' is Dropbear's dbclient and `scp' is its traditional secure-copy client.
+They need mathieeedoubbas.library in LIBS:,
 which every Workbench installation has, and nothing else.  It brings its own
 stack, so there is no `stack 200000' to type first.
 
      ssh me@192.168.1.10                    log in
      ssh me@192.168.1.10 "uname -a"         run one command
+     scp -i DH0:keys/id_amiga RAM:test me@192.168.1.10:/tmp/test
+                                                copy a file to the server
+     scp -i DH0:keys/id_amiga me@192.168.1.10:/tmp/test RAM:test
+                                                copy one back
+
+This is the original SCP protocol, not SFTP.  The remote machine must have an
+`scp' command; current OpenSSH installations normally retain one for this
+compatibility mode.  Recursive copy (`scp -r') and timestamp preservation
+(`scp -p') are supported.  Direct remote-to-remote and local-to-local copies
+are not; use the ordinary `Copy' command for two local paths, or copy through
+the Amiga in two commands for two remote paths.
+
+`C:scp-runner' is scp's internal process helper.  It is not a command to run,
+but it must remain in the same drawer as scp.
+
+An Amiga volume or assign contains a colon, the same character SCP uses in
+`host:path'.  Existing names such as `RAM:test' and `DH0:work/file' are
+recognized as local.  `/DH0/work/new-file' is the unambiguous spelling when a
+new path's volume or assign is not mounted yet.
 
 A password works if the far end allows one.  A key works as well, and on a
 machine this slow a key also saves the typing.
@@ -237,7 +257,7 @@ UNINSTALLING
      Delete C:AddNetRoute C:DeleteNetRoute C:hostname
      Delete C:ping C:netstat C:host C:nslookup C:arp
      Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
-     Delete C:whois C:ssh C:httpd C:iperf
+     Delete C:whois C:ssh C:scp C:scp-runner C:httpd C:iperf
      Delete C:NetCapture C:NetTrace
      Delete DEVS:NetInterfaces/eth0
      Delete DEVS:Internet/certificates

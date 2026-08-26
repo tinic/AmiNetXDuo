@@ -50,7 +50,7 @@ static const char version_tag[] __attribute__((used)) =
 
 /* 512 KB, deliberately more than any client needs: this is the harness, and a
    client that runs out of stack here fails in a way that looks like the thing
-   under test.  The real budget is AMIGA_ARGV_STACK in clients/compat/amiga_argv.c. */
+   under test.  The real budget comes from amiga_client_stack_size(). */
 #define CLIENT_STACK    (512UL * 1024UL)
 
 #define MAX_COMMANDS    24

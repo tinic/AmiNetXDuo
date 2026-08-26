@@ -261,10 +261,9 @@ jobs:
                 -DAMINETXDUO_AREXX=OFF -DAMINETXDUO_TCPDEVICE=OFF
           cmake --build build/release-minimal --parallel
 
-      # ssh comes from clients/, not the CMake tree, so a `cmake --build` does
-      # not produce it and make-dist.sh would quietly ship an archive without
-      # it. Built here so a release always carries it; dbclient defaults to the
-      # 25519 rewritten for this machine.
+      # ssh and scp come from clients/, not the CMake tree, so a `cmake --build`
+      # does not produce them. Built here so a release always carries both;
+      # dbclient defaults to the 25519 rewritten for this machine.
       # ONCE.  It used to be three times, one per processor drawer, because a
       # 68020 binary takes an illegal instruction on a 68000 and the 68060
       # dropped instructions the 68020 build uses.  AMINETXDUO_CLIENT_ANY=1
@@ -284,11 +283,13 @@ jobs:
       - name: An archiver that can create
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jlha-utils
 
-      # AMINETXDUO_SSH names exactly what the step above built, so the packed
-      # binary cannot be a stale tree.
+      # Name exactly what the step above built, so none of the packed client
+      # artifacts can come from a stale tree.
       - name: Build the distribution archive
         env:
           AMINETXDUO_SSH: build/ssh/dbclient
+          AMINETXDUO_SCP: build/ssh/scp
+          AMINETXDUO_SCP_RUNNER: build/ssh/scp-runner
           # Report a missing build rather than making one: here it means the
           # build step above did not run, and building it inside the packer
           # would hide that.
@@ -300,19 +301,21 @@ jobs:
       # The manual is here for the same reason and a worse history: it was
       # missing from every archive for a month, because make-dist.sh globbed
       # the wrong directory and said so in a note nobody read.
-      - name: ssh, the Installer and the manual really are in the archive
+      - name: ssh, scp, the Installer and the manual really are in the archive
         run: |
           # ssh is in this list because a per-CPU one was not, once, and its
           # absence is silent at every step: make-dist.sh skips a binary that is
           # not executable rather than failing, and the installer copies it only
           # `(if (exists ...))`, so a machine could install with no C:ssh and no
           # message.  There is one name now and this is where it is checked.
-          for f in C/ssh Installer \
+          for f in C/ssh C/scp C/scp-runner Installer \
                    Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info; do
               [ -f "build/dist/AmiNetXDuo/$f" ] || {
                   echo "::error::$f is missing from the archive"; exit 1; }
           done
-          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/Installer
+          ls -l build/dist/AmiNetXDuo/C/ssh build/dist/AmiNetXDuo/C/scp \
+                build/dist/AmiNetXDuo/C/scp-runner \
+                build/dist/AmiNetXDuo/Installer
           ls -l build/dist/AmiNetXDuo/Docs/
 
       # The two libraries the archive carries.  There used to be four, one per

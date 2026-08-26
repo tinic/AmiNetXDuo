@@ -36,6 +36,9 @@
 #define DROPBEAR_USE_SSH_CONFIG 0
 #define DO_MOTD 0
 
+/* scp starts the separately installed client through AmigaDOS, not execvp(). */
+#define DROPBEAR_PATH_SSH_PROGRAM "C:ssh"
+
 /* dbrandom.c's seedrandom() has no fallback and there is no build without a
    device.  This string must match AMIGA_URANDOM_DEV in clients/dropbear/
    amiga_dropbear.c, which intercepts open() for exactly it. */

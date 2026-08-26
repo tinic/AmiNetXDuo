@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 #
-# Build Dropbear's SSH client, dbclient, for m68k AmigaOS 3.x against
+# Build Dropbear's SSH client and scp for m68k AmigaOS 3.x against
 # bsdsocket.library.
 #
 #   clients/dropbear/build.sh [-u] [-b BUILDDIR] [-T] [-p] [-S] [-O FILE]
 #                             [-P "prog ..."]
 #
-# third_party/dropbear IS NOT PATCHED: the whole port is localoptions.h,
-# amiga_dropbear.c, include/ and the flags below.
+# third_party/dropbear IS NOT MODIFIED: the port is localoptions.h, the Amiga
+# shims, include/ and the flags below.  prepare-scp.py renames one function in
+# a generated build-directory copy because HUNK PC-relative calls cannot be
+# link-interposed; it verifies the exact pinned-source shape before doing so.
 #
 # clients/dropbear/amiga_dropbear.o must NOT be in LIBS at CONFIGURE time -- it
 # defines fork(), getpass(), select() and getpwnam(), so configure would answer
@@ -33,7 +35,7 @@ PROFILE=0
 STOCK25519=0
 KEEP_SYMBOLS=0
 LOCALOPTS=""
-PROGRAMS="dbclient"
+PROGRAMS="dbclient scp"
 
 while getopts "ub:TpSkO:P:" opt; do
     case "$opt" in
@@ -405,10 +407,91 @@ else
 fi
 
 echo "==> building $PROGRAMS"
-make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
-     PROGRAMS="$PROGRAMS" \
-     LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS$MAP_FLAG" \
-     LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
+MAKE_PROGRAMS=""
+WANT_SCP=0
+for p in $PROGRAMS; do
+    if [ "$p" = "scp" ]; then
+        WANT_SCP=1
+    else
+        MAKE_PROGRAMS="${MAKE_PROGRAMS:+$MAKE_PROGRAMS }$p"
+    fi
+done
+
+# Upstream's scp rule deliberately omits LIBS, and its Unix do_cmd() needs
+# fork().  Build the ordinary Dropbear programs through their own rules, then
+# link scp below with the Amiga process bridge and client compatibility archive.
+if [ -n "$MAKE_PROGRAMS" ]; then
+    make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
+         PROGRAMS="$MAKE_PROGRAMS" \
+         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS$MAP_FLAG" \
+         LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
+fi
+
+if [ "$WANT_SCP" = "1" ]; then
+    SCP_OBJECTS=(obj/scp.o obj/atomicio.o
+                 obj/scpmisc.o obj/compat.o obj/dbctype.o)
+    SCP_MAKE_OBJECTS=(obj/atomicio.o
+                      obj/scpmisc.o obj/compat.o obj/dbctype.o)
+    SCP_PATHS=()
+    SCP_SHIM_O="$CLIENT_OBJ/db-amiga_scp-$(basename "$BUILD").o"
+    SCP_RUNNER_O="$CLIENT_OBJ/db-amiga_scp_runner-$(basename "$BUILD").o"
+
+    echo "  CC amiga_scp.c"
+    "$AMIGA_GCC" $DB_CFLAGS -I"$OUT" -I"$DB_DIR/src" \
+                 -DDROPBEAR_CLIENT -Wall -Wextra -c -o "$SCP_SHIM_O" \
+                 "$ROOT/clients/dropbear/amiga_scp.c"
+
+    echo "  CC amiga_scp_runner.c"
+    "$AMIGA_GCC" $DB_CFLAGS -Wall -Wextra -c -o "$SCP_RUNNER_O" \
+                 "$ROOT/clients/dropbear/amiga_scp_runner.c"
+    "$AMIGA_GCC" $AMIGA_CLIENT_ARCH -o "$OUT/scp-runner" "$SCP_RUNNER_O"
+
+    make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
+         PROGRAMS=scp "${SCP_MAKE_OBJECTS[@]}"
+
+    SCP_SOURCE="$OUT/scp-amiga.c"
+    python3 "$ROOT/clients/dropbear/prepare-scp.py" \
+            "$DB_DIR/src/scp.c" "$SCP_SOURCE"
+    "$AMIGA_GCC" -Wundef -fno-strict-overflow -Wno-pointer-sign \
+        $DB_CFLAGS -I"$DB_DIR/libtomcrypt/src/headers" \
+        -Dstrtod=amiga_scp_strtod \
+        -DLOCALOPTIONS_H_EXISTS -I"$OUT" -I"$DB_DIR/src" \
+        -c "$SCP_SOURCE" -o "$OUT/obj/scp.o"
+
+    # scp.o now has an undefined do_cmd resolved by amiga_scp.c.  colon() lives
+    # in a different translation unit; compile that one with only its symbol
+    # renamed.  Do not round-trip a HUNK object through objcopy here: doing so
+    # makes this BFD backend lose the final executable's loader relocations.
+    "$AMIGA_GCC" -Wundef -fno-strict-overflow -Wno-pointer-sign \
+        $DB_CFLAGS -I"$DB_DIR/libtomcrypt/src/headers" \
+        -Dcolon=dropbear_unix_colon \
+        -DLOCALOPTIONS_H_EXISTS -I"$OUT" -I"$DB_DIR/src" \
+        -c "$DB_DIR/src/scpmisc.c" -o "$OUT/obj/scpmisc.o"
+
+    for p in "${SCP_OBJECTS[@]}"; do SCP_PATHS+=("$OUT/$p"); done
+    "$AMIGA_GCC" $AMIGA_CLIENT_LDFLAGS \
+        -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=fstat,--wrap=ftruncate \
+        $MAP_FLAG \
+        -o "$OUT/scp" "${SCP_PATHS[@]}" "$SCP_SHIM_O" \
+        -Wl,--start-group -L"$AMIGA_CLIENT_LIBDIR" -lamigaclient -lc -Wl,--end-group
+
+    # This BFD backend has historically emitted DWARF output sections as HUNK
+    # load segments.  Such a file links successfully but hangs in LoadSeg().
+    # Both executables are exactly three loader sections and retain loader
+    # relocations.
+    SCP_OBJDUMP="$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-objdump"
+    for SCP_HUNK in scp scp-runner; do
+        SCP_SECTION_COUNT=$("$SCP_OBJDUMP" -h "$OUT/$SCP_HUNK" |
+                            awk '/^[[:space:]]*[0-9]+[[:space:]]/ { n++ } END { print n + 0 }')
+        if [ "$SCP_SECTION_COUNT" -ne 3 ] ||
+           ! "$SCP_OBJDUMP" -f "$OUT/$SCP_HUNK" | grep -q HAS_RELOC; then
+            echo "!! malformed $SCP_HUNK HUNK file: expected 3 sections with relocations" >&2
+            "$SCP_OBJDUMP" -f -h "$OUT/$SCP_HUNK" >&2
+            exit 1
+        fi
+    done
+
+fi
 
 # Symbols, before the sizes are reported so the numbers are the ones that ship.
 # Dropbear has a `strip` target but nothing invokes it, and STRIP= reaches only
@@ -419,18 +502,22 @@ if [ "$KEEP_SYMBOLS" = "0" ]; then
     for p in $PROGRAMS; do
         [ -f "$OUT/$p" ] && "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-strip" "$OUT/$p"
     done
+    [ "$WANT_SCP" = "1" ] &&
+        "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-strip" "$OUT/scp-runner"
 fi
 
 echo
 for p in $PROGRAMS; do
     ls -l "$OUT/$p"
 done
+[ "$WANT_SCP" = "1" ] && ls -l "$OUT/scp-runner"
 echo
 SIZE_ARGS=()
 for p in $PROGRAMS; do SIZE_ARGS+=("$OUT/$p"); done
+[ "$WANT_SCP" = "1" ] && SIZE_ARGS+=("$OUT/scp-runner")
 "$AMIGA_SIZE" "${SIZE_ARGS[@]}" 2>/dev/null || true
 echo
-echo "dbclient for AmigaOS: $OUT/dbclient"
+echo "Dropbear clients for AmigaOS: $OUT"
 echo "  kex/cipher set (localoptions.h wins over default_options.h):"
 # Reporting default_options.h alone was wrong the moment -O existed: it says
 # CURVE25519 1 for a build that has none.  So the override file is read first
