@@ -316,14 +316,20 @@ stage_host() {
     # defects.  The allocator that replaced it is only worth what its
     # exclusion is worth, and that is a claim a host stage can check -- it
     # needs no emulator, no ROM and no network.
-    if tools/emu-rig-lock-selftest.sh > "$BUILD/rig-lock-selftest.log" 2>&1; then
-        note "rig lock selftest: $(sed -n 's/^rig_lock_selftest=//p' \
-              "$BUILD/rig-lock-selftest.log")"
-    else
-        cat "$BUILD/rig-lock-selftest.log"
-        fail "two runs on one host can take the same port, name or address"
-        return 1
-    fi
+    # Exit 3 is "a claim could not be evaluated on this host", which is not
+    # the same as a claim that failed, and must not read as either.
+    rlrc=0
+    tools/emu-rig-lock-selftest.sh > "$BUILD/rig-lock-selftest.log" 2>&1 || rlrc=$?
+    case "$rlrc" in
+        0) note "rig lock selftest: $(sed -n 's/^rig_lock_selftest=//p' \
+                 "$BUILD/rig-lock-selftest.log")" ;;
+        3) cat "$BUILD/rig-lock-selftest.log"
+           skip "rig lock selftest: the live-address claim is unproven on this\
+ host -- unprivileged ICMP is off and ping has no cap_net_raw" ;;
+        *) cat "$BUILD/rig-lock-selftest.log"
+           fail "two runs on one host can take the same port, name or address"
+           return 1 ;;
+    esac
 
     # THAT EVERY ROW IN install/ARCHIVE-MANIFEST STILL NAMES A REAL COPY.  The
     # other half of that gate needs a staged tree and runs inside

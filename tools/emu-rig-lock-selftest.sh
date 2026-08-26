@@ -231,7 +231,10 @@ wait "$R_PID" "$R_DECOY" 2> /dev/null
 # nothing.  This is the 192.168.1.243 case: an address free of other RUNS is
 # not the same as an address free.
 if ! ping -c 1 -W 1 127.0.0.1 > /dev/null 2>&1; then
-    bad "ping cannot probe, so this assertion would pass vacuously; as root: sysctl -w net.ipv4.ping_group_range='0 2147483647'"
+    UNPROVEN=1
+    echo "  SKIP the live-address assertion cannot be evaluated here:" \
+         "unprivileged ICMP is off. As root:" \
+         "sysctl -w net.ipv4.ping_group_range='0 2147483647'"
 elif rig_claim_address 127.0.0 1 1 selftest-live 2> /dev/null; then
     bad "claimed 127.0.0.1, which answers a ping"
 else
@@ -239,6 +242,12 @@ else
 fi
 
 echo
+if [ "$WRONG" = 0 ] && [ "${UNPROVEN:-0}" != 0 ]; then
+    echo "rig_lock_selftest=0 wrong unproven=$UNPROVEN"
+    echo "rig-lock selftest: exclusive and released; the live-address probe"
+    echo "  could not run on this host, so that one claim is UNPROVEN here."
+    exit 3
+fi
 if [ "$WRONG" = 0 ]; then
     echo "rig_lock_selftest=0 wrong"
     echo "rig-lock selftest: every claim is exclusive, probed and released"
