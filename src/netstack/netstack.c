@@ -28,10 +28,19 @@
  * everything from netstack_startup() instead.  Weak, so a standalone test
  * executable can supply its own.
  */
+/*
+ * GCC 16.2's analyser invents an uninitialised return value for this empty
+ * VOID hook.  There is no body to analyse beyond consuming the argument, so
+ * suppress that one diagnostic around the stub rather than carrying a
+ * file-wide false positive.
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
 __attribute__((weak)) VOID tx_application_define(VOID *first_unused_memory)
 {
     (VOID)first_unused_memory;
 }
+#pragma GCC diagnostic pop
 
 static struct SignalSemaphore   ami_ns_lock;
 static volatile BOOL            ami_ns_lock_ready;
