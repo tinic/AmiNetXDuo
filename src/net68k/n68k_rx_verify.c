@@ -104,17 +104,6 @@ UINT    next;
     return (NX_TRUE);
 }
 
-/* Into host-order longwords: the address in the frame need not be aligned the
-   way the checksum function casts it, and a ones-complement sum does not care
-   in what order the halves arrive. */
-static VOID n68k_rxv6_addr(const UCHAR *ip, ULONG *out)
-{
-    out[0] =  N68K_RD32(&ip[0]);
-    out[1] =  N68K_RD32(&ip[4]);
-    out[2] =  N68K_RD32(&ip[8]);
-    out[3] =  N68K_RD32(&ip[12]);
-}
-
 static ULONG n68k_rxv6_verify(NX_PACKET *packet, UINT *drop)
 {
 UCHAR      *ip =  packet -> nx_packet_prepend_ptr;
@@ -133,8 +122,19 @@ UINT        ok;
         return (0UL);
     }
 
-    n68k_rxv6_addr(&ip[8],  src);
-    n68k_rxv6_addr(&ip[24], dst);
+    /* Into host-order longwords: the address in the frame need not be aligned
+       the way the checksum function casts it, and a ones-complement sum does
+       not care in what order the halves arrive.  Keep these assignments here:
+       GCC 16's analyzer invents an uninitialized return value for a void
+       helper which fills either four-word array through a pointer. */
+    src[0] =  N68K_RD32(&ip[8]);
+    src[1] =  N68K_RD32(&ip[12]);
+    src[2] =  N68K_RD32(&ip[16]);
+    src[3] =  N68K_RD32(&ip[20]);
+    dst[0] =  N68K_RD32(&ip[24]);
+    dst[1] =  N68K_RD32(&ip[28]);
+    dst[2] =  N68K_RD32(&ip[32]);
+    dst[3] =  N68K_RD32(&ip[36]);
 
     saved_prepend =  packet -> nx_packet_prepend_ptr;
     saved_length  =  packet -> nx_packet_length;
