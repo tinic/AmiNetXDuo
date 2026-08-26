@@ -37,7 +37,6 @@ comment beside the code, not an entry here.
 | The fork's own regression suite has never run, on either side | `ci.sh host` does not configure it and the fork's workflow run count is zero | `tools/ci.sh` |
 | The expunge refusal is proven at the library and the port, never at the joint | nothing tests that a failed stop leaves the started flag set | `src/netstack/netstack.c:1404`, `:1628` |
 | The bring-up figure has never been measured on the build that ships | it reads `netstack: mark` lines only an `AMINETXDUO_LOG=ON` build emits | `tests/ipv6/run-bringup.sh` |
-| No lab read-throughput measurement can predate v0.21.0 | `iperf.c` first shipped there, so the reported 699-to-420 bracket is unreachable | `tests/perf/run-fitzbench.sh` |
 | No harness boots Kickstart 2.x with a Zorro network board | the romtag under 2.x and `card.resource` V37 are both unproven | `tests/tools/run-addifleak.sh`, `tests/perf/run-fitzbench.sh` |
 | No console arm exercises a screen arriving mid-session | every arm connects to a screen already in front and settled | `tests/tools/run-console.sh`, `tests/tools/run-bootconsole.sh` |
 | No resolution the lab tests is unaligned | every arm is a multiple of 16 with nothing to pad, which is how 1600 columns shipped | `tests/tools/run-console.sh`, `src/tools/httprtg.c:560` |
