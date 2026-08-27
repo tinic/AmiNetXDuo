@@ -357,12 +357,21 @@ static VOID show_budget(VOID)
     static UBYTE buf[sizeof(NetStatusHeader) + sizeof(NetStatusRxBudget)];
     NetStatusRxBudget *b;
     struct Library    *base = tool_netstatus_open(TRUE);
+    LONG               got;
 
     if (base == NULL)
         return;
 
-    if (tool_netstatus_query(base, NETSTATUS_RXBUDGET, buf, sizeof(buf),
-                             sizeof(NetStatusRxBudget)) <= 0)
+    got = tool_netstatus_query(base, NETSTATUS_RXBUDGET, buf, sizeof(buf),
+                               sizeof(NetStatusRxBudget));
+
+    /* Closed here, not at each exit below: the answer is in buf and nothing
+       past this point asks the library anything. A path that returned with the
+       base still open left this command's opener registered after it exited,
+       and NetShutdown then counted it as a program holding the network. */
+    tool_netstatus_close(base);
+
+    if (got <= 0)
         return;                     /* an older library: no selector, no line */
 
     b = (NetStatusRxBudget *)(buf + sizeof(NetStatusHeader));
