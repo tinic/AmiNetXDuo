@@ -373,8 +373,13 @@ rank() { case "$1" in push) printf 4 ;; nightly) printf 3 ;; release) printf 2 ;
 stronger() { [ "$(rank "$1")" -ge "$(rank "$2")" ] && printf '%s' "$1" ||
              printf '%s' "$2"; }
 
-WORKFLOWS=(.github/workflows/ci.yml .github/workflows/emulator.yml
-           .github/workflows/release.yml)
+# EVERY workflow, globbed rather than listed: a new one that runs a stage on
+# every push is a schedule this has to see, and a hand-kept list would report
+# the old answer for a year.
+WORKFLOWS=()
+while IFS= read -r w; do WORKFLOWS+=("$w"); done < <(
+    find .github/workflows -name '*.yml' -o -name '*.yaml' | sort)
+[ "${#WORKFLOWS[@]}" -gt 0 ] || err "no_workflows_in_.github/workflows"
 
 # Which tools/ci.sh STAGES a workflow names.  A row saying `tools/ci.sh` is
 # only as scheduled as the stage its harness sits in: `bridged` is in
