@@ -342,6 +342,15 @@ stage_host() {
         return 1
     fi
 
+    if tests/perf/peercap-selftest.sh > "$BUILD/peercap-selftest.log" 2>&1; then
+        note "$(sed -n 's/^peercap-selftest: /peercap selftest: /p' \
+              "$BUILD/peercap-selftest.log")"
+    else
+        cat "$BUILD/peercap-selftest.log"
+        fail "tests/perf/peercap-selftest.sh"
+        return 1
+    fi
+
     # THAT TWO RUNS ON ONE MACHINE CANNOT TAKE THE SAME THING.  The emulator
     # harnesses used to hash a run tag into 900 serial-port slots, so two
     # checkouts running the same arm always collided and one guest was driven
