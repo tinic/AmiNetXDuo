@@ -9,8 +9,12 @@
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
 # GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# The binutils pairing is deliberate -- 2.46 cannot assemble GCC 16.2's own
-# output -- so do not "upgrade" it.  Each entry records the remote verified to
+# The binutils pairing is deliberate.  2.46's gas assembles GCC 16.2's output
+# to the same bytes, but its objcopy lost bebbo's TARGET_AMIGA carve-out in
+# copy_relocations_in_section(), so `strip` writes a hunk executable with no
+# HUNK_RELOC32 at all -- exit 0, no diagnostic, LoadSeg() relocates nothing --
+# and the patches below do not apply to it, so -flto does not link.  Do not
+# "upgrade" it.  Each entry records the remote verified to
 # serve its pin: bebbo's GitHub repos are gone and Codeberg does not carry
 # every branch.
 #

@@ -81,14 +81,8 @@ function(profile_binary name)
     # addresses the compiler put in the code, and the report is built on the
     # host from the map beside this binary.
     if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
-        # Through cmake/strip-if-readable.cmake, not straight at strip: these
-        # two are the only binaries here that carry a HUNK_DEBUG block, and
-        # binutils 2.46 will not read one.  See that file for the measurements.
         add_custom_command(TARGET ${name} POST_BUILD
-            COMMAND "${CMAKE_COMMAND}"
-                    "-DSTRIP=${CMAKE_STRIP}"
-                    "-DBINARY=$<TARGET_FILE:${name}>"
-                    -P "${CMAKE_SOURCE_DIR}/cmake/strip-if-readable.cmake"
+            COMMAND "${CMAKE_STRIP}" "$<TARGET_FILE:${name}>"
             VERBATIM)
     endif()
 
