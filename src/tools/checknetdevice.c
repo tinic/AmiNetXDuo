@@ -258,6 +258,14 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Odd-numbered registers did not read as bytes, so the\n"
             "  word-read path some Fast-Ethernet clones need was tried.\n");
         return;
+    case ANXDIAG_CR_RETRY:
+        say("  The chip did not come out of reset, and the reset port is an\n"
+            "  odd-numbered register.  A card that answers only 16-bit I/O\n"
+            "  cycles never sees the byte read that strobes it, so the port\n"
+            "  was strobed again through the word-read path and the command\n"
+            "  register was read a second time.  The reading below is that\n"
+            "  second one.\n");
+        return;
     case ANXDIAG_ODD_PLAIN:
     case ANXDIAG_ODD_WORD:
         say("  Odd registers read as %s: ISR $%02lx, and $5a/$a5 written to\n"
@@ -411,8 +419,57 @@ static VOID cnd_step(const AnxDiagStep *st)
             "  configuration index to write.  The slot was given back.\n");
         return;
     case ANXDIAG_PC_INDEX:
-        say("  Configuration index %lu, from the first CISTPL_CFTABLE_ENTRY.\n",
+        say("  Configuration index %lu.  This is the byte written to the\n"
+            "  card's Configuration Option Register, and it is what puts the\n"
+            "  card into the configuration chosen above.\n", v);
+        return;
+    case ANXDIAG_PC_CFCOUNT:
+        say("  The card describes %lu configuration table %s.  All of\n"
+            "  them are read, not just the first: an entry can describe a\n"
+            "  memory configuration, or an access width this driver cannot\n"
+            "  use, and the next one then still works.\n",
+            v, (ULONG)(APTR)(v == 1 ? "entry" : "entries"));
+        return;
+    case ANXDIAG_PC_CFPICK:
+        if (v == ANXDIAG_ABSENT)
+        {
+            say("  None of those entries parsed into a configuration this\n"
+                "  driver could name, so the first entry's index was written\n"
+                "  anyway.  A card that does not answer after that has a CIS\n"
+                "  this driver does not understand -- send the CIS bytes\n"
+                "  printed above with the report.\n");
+            return;
+        }
+        say("  Entry index %lu was chosen: it decodes %lu address line(s) and\n"
+            "  its descriptor flags are $%02lx.\n",
+            v & 0x3f, (v >> 8) & 0xff, (v >> 16) & 0xff);
+        if (((v >> 24) & 0xffUL) == 1)
+        {
+            say("  It is the ONLY configuration the card offers, and it asks\n"
+                "  for 16-bit accesses while refusing 8-bit ones.  Every\n"
+                "  register path here is byte-wide, so a card that answers\n"
+                "  nothing below is refusing the width, not the address.\n");
+        }
+        return;
+    case ANXDIAG_PC_IOWIN:
+        say("  Its I/O window is %lu byte(s) at $%04lx in the card's own I/O\n"
+            "  space.\n", v & 0xffff, (v >> 16) & 0xffff);
+        return;
+    case ANXDIAG_PC_IOOFF:
+        say("  The registers were looked for at offset $%04lx in the slot's\n"
+            "  I/O space.  $0300 is the card row's assumption and holds for\n"
+            "  any card that leaves its placement to the machine; anything\n"
+            "  else came out of the entry above, which named its own base.\n",
             v);
+        return;
+    case ANXDIAG_PC_MFC:
+        say("  The card is a MULTIFUNCTION card: its CIS has a\n"
+            "  CISTPL_LONGLINK_MFC tuple naming %lu function chain(s).\n"
+            "  card.resource's CopyTuple() follows CISTPL_LONGLINK_A and\n"
+            "  CISTPL_LONGLINK_C and no other link, so the network function's\n"
+            "  own configuration entries are not reachable through it and\n"
+            "  everything read above came from the shared chain.  This card\n"
+            "  cannot be configured by this driver.\n", v);
         return;
     case ANXDIAG_PC_IOMODE:
         say("  The socket was put into I/O mode (CardMiscControl $%02lx).\n",
@@ -568,9 +625,8 @@ static VOID cnd_step(const AnxDiagStep *st)
         return;
     case ANXDIAG_PC_CFTABLE:
         say("  The first configuration table entry begins $%02lx $%02lx $%02lx\n"
-            "  $%02lx.  This driver reads the configuration index out of it and\n"
-            "  assumes the card row's register offset for the rest.  Any other\n"
-            "  offset is recorded in those bytes.\n",
+            "  $%02lx.  It is printed raw because it is the one tuple whose\n"
+            "  meaning depends on every byte before the byte you want.\n",
             (v >> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff);
         return;
 

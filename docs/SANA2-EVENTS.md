@@ -3,15 +3,12 @@
 `anxnet.device` only. One row per condition that reaches `S2_ONEVENT`.
 
 `S2EVENT_ERROR` is a qualifier, not a code: the spec's worked example
-(`sana2device.spec:1067-1071`) says a buffer failure during receive returns
-`ERROR`, `RX` and `BUFF` together, so `ERROR` never travels alone here.
-`cnet.device` drops it on its two BUFF sites and slip.device does the same; the
-spec wins. A waiter matches if ANY bit overlaps, so a request for `ERROR` alone
-is woken by all of these.
-
-`ios2_WireError` carries the whole posted mask, not the intersection with what
-was asked for, so a waiter learns where the error was and not merely that one
-happened.
+(`sana2device.spec:1067-1071`) returns `ERROR`, `RX` and `BUFF` together, so
+`ERROR` never travels alone here — `cnet.device` and `slip.device` drop it on
+their BUFF sites, and the spec wins. A waiter matches if ANY bit overlaps, so a
+request for `ERROR` alone is woken by all of these. `ios2_WireError` carries the
+whole posted mask, not the intersection with what was asked for, so a waiter
+learns where the error was and not merely that one happened.
 
 | Posted | Condition | Site |
 |---|---|---|
@@ -35,43 +32,18 @@ Not posted, deliberately: `S2EVENT_TX` on a successful transmit — cnet's two
 Chip counters are diffed once in the interrupt server rather than raised by each
 core, which is why no card file posts an event.
 
-## Cost when nobody is listening
+## Interrupt context, the mask, and the filter
 
-`nu_EventMask` is the union of every queued request's mask, so a post with no
-waiter is one word read and a branch. It is a `UWORD`: it is read without the
-lock, and a 68000 reads a long in two bus cycles, so a `ULONG` could tear. All
-eight `S2EVENT_*` bits fit a word. It is recomputed at queue, at completion, and
-by `netdev_event_rescan()` from `CMD_FLUSH`, `AbortIO` and close.
+`src/netdev/netdev_event.c` is the implementation and its header is the
+statement: the `nu_EventMask` fast gate and why it is a `UWORD`, the `Disable()`
+that every poster but `S2_ONLINE` needs because the INT2 card server walks the
+same list, and the `S2_PacketFilter` hook's register shape.
 
-## Interrupt context
-
-Every poster but `S2_ONLINE` runs at interrupt: the INT2 card server, the INT3
-watchdog, and card.resource's removal callback. The requests belong to other
-tasks, so `netdev_event()` takes `Disable()` — `Forbid()` is not exclusion
-against the INT2 server walking the same list — removes each request BEFORE
-replying, and does nothing else. No allocation, no `Wait`, no semaphore.
-`ReplyMsg` is a `PutMsg` plus a `Signal` and is interrupt-callable. `Disable()`
-nests, so a caller already holding it is not a special case.
-
-The host test's stub `ReplyMsg` fails if a request is replied while still linked
-into a list. That is the bug this file exists to prevent, and an emulator will
-not catch it.
-
-## The filter
-
-`S2_PacketFilter` takes a `utility.library` Hook, not a function pointer:
-`a0` = hook, `a2` = the `IOSana2Req`, `a1` = the packet data, result in `d0`.
-It runs after the addresses, type, length and flags are filled in and before
-`CopyToBuff` (`standard.txt:301-303`). The data pointer excludes the 14-byte
-header unless RAW was asked for.
-
-TRUE hands the packet over. FALSE returns the `CMD_READ` to its queue with
-`AddHead`, un-replied, and the frame goes on to the next opener and then to
-`S2_READORPHAN` — a rejection is neither a delivery nor a drop, so it does not
-count in `PacketsDropped`. slip.device does the same.
-
-The spec defines the filter for receive only; there is no transmit-side hook.
-Applying it to `S2_READORPHAN` as well as `CMD_READ` is a judgement, not a
-citation.
+| Rule | Effect |
+|---|---|
+| A request is removed from its list BEFORE `ReplyMsg` | the host test's stub `ReplyMsg` fails if a request is replied while still linked. That is the bug this file exists to prevent, and an emulator will not catch it |
+| The filter runs after the addresses, type, length and flags are filled in and before `CopyToBuff` (`standard.txt:301-303`) | the data pointer excludes the 14-byte header unless RAW was asked for |
+| FALSE returns the `CMD_READ` to its queue with `AddHead`, un-replied | the frame goes on to the next opener and then to `S2_READORPHAN`. A rejection is neither a delivery nor a drop, so it does not count in `PacketsDropped`; slip.device does the same |
+| The spec defines the filter for receive only | there is no transmit-side hook, and applying it to `S2_READORPHAN` as well as `CMD_READ` is a judgement, not a citation |
 
 SPDX-License-Identifier: MIT

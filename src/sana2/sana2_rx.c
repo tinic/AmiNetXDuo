@@ -354,9 +354,39 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
 /* ------------------------------------------------------------- delivery */
 
 /*
+ * Dispatch one frame into NetX Duo, on this thread.
+ *
+ * _nx_ip_packet_receive() is documented as called by the application I/O
+ * driver (nx_ip_packet_receive.c:65-68), so the reader is a supported caller.
+ * What the deferred entry points bought was the lock, and the caller holds it:
+ * ami_sana2_rx_drain() takes nx_ip_protection once for the whole run it
+ * drains, the way nx_ip_thread_entry.c holds it for the whole of its event
+ * loop.  The header on that function is where the reasoning lives.
+ */
+static VOID ami_sana2_rx_dispatch(NX_IP *ip, NX_PACKET *packet, UINT type)
+{
+    switch (type)
+    {
+#ifndef NX_DISABLE_IPV4
+    case AMI_ETHERTYPE_ARP:
+        _nx_arp_packet_receive(ip, packet);
+        break;
+
+    case AMI_ETHERTYPE_RARP:
+        _nx_rarp_packet_receive(ip, packet);
+        break;
+#endif
+
+    default:
+        _nx_ip_packet_receive(ip, packet);
+        break;
+    }
+}
+
+/*
  * Both the cooked path (header synthesised) and the raw path (header off the
- * wire) end here, so the two modes must produce the same thing.  The deferred
- * entry points are used because the reader is not the IP thread.
+ * wire) end here, so the two modes must produce the same thing.  Input runs on
+ * this thread, under the lock ami_sana2_rx_drain() is holding.
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSum *sum)
@@ -456,7 +486,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV4);
         break;
 
     case AMI_ETHERTYPE_IPV6:
@@ -485,18 +515,18 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
-        _nx_ip_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV6);
         break;
 
 #ifndef NX_DISABLE_IPV4
     case AMI_ETHERTYPE_ARP:
         iface->stats.packets_received++;
-        _nx_arp_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_ARP);
         break;
 
     case AMI_ETHERTYPE_RARP:
         iface->stats.packets_received++;
-        _nx_rarp_packet_deferred_receive(iface->ip, packet);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_RARP);
         break;
 #endif /* !NX_DISABLE_IPV4 */
 
@@ -764,9 +794,25 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 #endif
 }
 
-static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
+/*
+ * Take up to `budget` replies off the port and return how many there were.
+ *
+ * Bounded, and not by accident.  ami_sana2_rx_complete() puts each slot back on
+ * the wire before it delivers the frame, so a reply that arrives while this
+ * loop is running joins the queue it is draining: on a saturated link the
+ * device can keep it fed for as long as the far end has a window, and this
+ * thread outranks everything and now runs TCP itself.  The budget is what
+ * returns it to the top of the loop, where the baton bracket lets the task
+ * that empties the socket run.
+ *
+ * Errors and control frames count against it: they cost reader time too.
+ */
+static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
 {
+    NX_IP          *ip = rx->iface->ip;
     struct Message *msg;
+    TX_THREAD      *outer;
+    UWORD           took = 0;
 
 #ifdef AMINETXDUO_RXPROBE
     {
@@ -820,7 +866,34 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
     }
 #endif
 
-    while ((msg = GetMsg(rx->port)) != NULL)
+    /*
+     * One lock for the whole run, not one per frame.
+     *
+     * nx_ip_thread_entry.c holds nx_ip_protection across its entire event loop
+     * and gives it back only when it is about to wait, and this loop is the
+     * same shape: every frame it takes walks the same fragment list, the same
+     * ARP cache and the same counters, and taking and giving back the mutex
+     * between each of them buys nothing but the round trips.  The run is
+     * bounded by `budget` above, which is what stops the hold from becoming
+     * open-ended.
+     *
+     * Claiming the IP thread's seat goes with it: _nx_tcp_packet_receive()
+     * then processes each segment here instead of queueing it and waking a
+     * thread that is blocked on the mutex this one holds.  See
+     * NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.  The
+     * saved outer value is not decoration: a loopback send from inside input
+     * re-enters, and the nested call must not give the seat up on its way out.
+     *
+     * What the reader must never do while holding this is block in exec, which
+     * would release the ThreadX baton with the IP mutex held.  Nothing on the
+     * path does: the only device call it reaches is BeginIO(), which queues
+     * and returns, and the packet allocation is NX_NO_WAIT.
+     */
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    outer = _nx_ip_input_thread;
+    _nx_ip_input_thread = tx_thread_identify();
+
+    while (took < budget && (msg = GetMsg(rx->port)) != NULL)
     {
 #ifdef AMINETXDUO_RXPROBE
         if (rx->probe.live != 0)
@@ -832,6 +905,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
         slot->posted = FALSE;
+        took++;
 
         if (rx->stop)
             continue;
@@ -867,7 +941,27 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
             rx->iface->stats.rx_err_io++;
         }
     }
+
+    _nx_ip_input_thread = outer;
+    tx_mutex_put(&ip->nx_ip_protection);
+
+    return took;
 }
+
+#ifndef AMINETXDUO_GREEN_REALM
+/*
+ * Is a completion already queued?  One pointer read of the port's list, and a
+ * miss costs nothing that matters: a reply landing right after it sets the
+ * port's signal, so the Wait() this answer sends the reader into returns at
+ * once.
+ */
+static BOOL ami_sana2_rx_queued(const AmiSana2Rx *rx)
+{
+    const struct List *list = &rx->port->mp_MsgList;
+
+    return (BOOL)(list->lh_Head->ln_Succ != NULL);
+}
+#endif
 
 /* --------------------------------------------------------------- shutdown */
 
@@ -1002,6 +1096,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     AmiSana2Rx *rx    = (AmiSana2Rx *)argument;
     AmiSana2If *iface = rx->iface;
     UWORD       i;
+    UWORD       run;      /* completions taken since the last baton release */
 
     rx->task = FindTask(NULL);
     rx->port = CreateMsgPort();
@@ -1064,6 +1159,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->running = TRUE;
     tx_semaphore_put(&rx->ready);
 
+    run = 0;
+
     while (!rx->stop)
     {
         /*
@@ -1079,6 +1176,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
             tx_thread_sleep(2);
+            run = 0;
             continue;
         }
 
@@ -1088,31 +1186,51 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * running the IP thread.  There is no baton bracket on this path, so
          * the probe's baton leg reads zero here by design.
          */
+        /* The bound belongs to the baton bracket, which this branch does not
+           have; spend none of it here or the budget below underflows. */
+        run = 0;
         (VOID)tx_amiga_green_wait(rx->wake_mask | rx->reap_mask);
 #else
-        ami_sana2_block_enter();
-        Wait(rx->wake_mask | rx->reap_mask);
-#ifdef AMINETXDUO_RXPROBE
+        /*
+         * Block only when there is nothing to take, or when this reader has
+         * had its run.  The bracket is a Forbid(), a ThreadX suspend, a
+         * dispatch and the reverse of all three, and during a burst the device
+         * has usually replied again while the last frame was being delivered,
+         * so the Wait() it wraps would have returned at once.  The bound is
+         * what keeps that from being a monopoly: this thread outranks
+         * everything and now runs TCP itself, so the task that empties the
+         * socket only runs when the reader lets go.
+         */
+        if (run >= AMI_SANA2_RX_RUN_MAX || !ami_sana2_rx_queued(rx))
         {
-            AmiRxProbe *pr = &rx->probe;
-            ULONG       t0 = ami_rxprobe_clock();
-            ULONG       dt;
+            run = 0;
 
-            ami_sana2_block_leave();
+            ami_sana2_block_enter();
+            Wait(rx->wake_mask | rx->reap_mask);
+#ifdef AMINETXDUO_RXPROBE
+            {
+                AmiRxProbe *pr = &rx->probe;
+                ULONG       t0 = ami_rxprobe_clock();
+                ULONG       dt;
 
-            dt = ami_rxprobe_clock() - t0;
-            pr->baton_sum += dt;
-            pr->baton_last = dt;
-            if (dt > pr->baton_max)
-                pr->baton_max = dt;
-            pr->baton_hist[ami_rxprobe_bucket(dt)]++;
-        }
+                ami_sana2_block_leave();
+
+                dt = ami_rxprobe_clock() - t0;
+                pr->baton_sum += dt;
+                pr->baton_last = dt;
+                if (dt > pr->baton_max)
+                    pr->baton_max = dt;
+                pr->baton_hist[ami_rxprobe_bucket(dt)]++;
+            }
 #else
-        ami_sana2_block_leave();
+            ami_sana2_block_leave();
 #endif
+        }
 #endif /* AMINETXDUO_GREEN_REALM */
 
-        ami_sana2_rx_drain(rx);
+        run = (UWORD)(run +
+                      ami_sana2_rx_drain(rx,
+                                         (UWORD)(AMI_SANA2_RX_RUN_MAX - run)));
 
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the

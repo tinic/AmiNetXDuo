@@ -55,8 +55,15 @@ RESULTS="$ROOT/build/bigmem-results.txt"
 POOL_CEILING=520
 POOL_MIN=16
 
-clamp_arm() { # name model cpu fastmem z3mem
-    local name="$1" model="$2" cpu="$3" fast="$4" z3="$5"
+# The window ceiling, written out rather than derived, for the same reason
+# tests/sockopt/sockopt_test.c writes it out: (512 / 8) * 1568.  That test only
+# range-asserts FLOOR <= window <= CEILING, which passes whether or not the
+# ceiling ever bound.  A saturated arm is the one machine where it MUST bind,
+# and until this ran nothing had ever observed it doing so.
+TCP_WINDOW_CEILING=100352
+
+clamp_arm() { # name model cpu fastmem z3mem poolexpect
+    local name="$1" model="$2" cpu="$3" fast="$4" z3="$5" expect="${6:-band}"
     local tag="matrix-clamp-$name" out win queue
 
     if [ ! -f "$ROOT/$BUILD/tests/sockopt/sockopt_test" ]; then
@@ -83,8 +90,17 @@ clamp_arm() { # name model cpu fastmem z3mem
         return 1
     fi
 
-    printf '%-11s clamps PASS  tcp_window=%-7s udp_queue=%s\n' \
-           "$name" "$win" "$queue" >> "$RESULTS"
+    if [ "$expect" = saturated ] && [ "$win" != "$TCP_WINDOW_CEILING" ]; then
+        printf '%-11s clamps FAIL  tcp_window=%-7s udp_queue=%-7s \
+ceiling_bound=0 want=%s\n' \
+               "$name" "$win" "$queue" "$TCP_WINDOW_CEILING" >> "$RESULTS"
+        return 1
+    fi
+
+    printf '%-11s clamps PASS  tcp_window=%-7s udp_queue=%-7s ceiling_bound=%s\n' \
+           "$name" "$win" "$queue" \
+           "$([ "$win" = "$TCP_WINDOW_CEILING" ] && echo 1 || echo 0)" \
+           >> "$RESULTS"
     return 0
 }
 
@@ -129,7 +145,7 @@ run_arm() { # name model cpu fastmem z3mem poolexpect
 
     eval "POOL_${name//-/_}=\${packets:-0}"
 
-    clamp_arm "$name" "$model" "$cpu" "$fast" "$z3" || verdict=FAIL
+    clamp_arm "$name" "$model" "$cpu" "$fast" "$z3" "$expect" || verdict=FAIL
 
     [ "$verdict" = PASS ] && [ "$poolverdict" = PASS ]
 }
@@ -199,6 +215,11 @@ echo "  pool_saturation=FAIL, 32m not above the 8 MB arm  the Zorro III" >&2
 echo "    memory never reached the guest.  It maps on an A3000 and on" >&2
 echo "    neither an A1200 nor an A4000 (measured); check that the run" >&2
 echo "    really booted an A3000 with AMINETXDUO_KICKSTART_A3000." >&2
+echo >&2
+echo "  ceiling_bound=0 on a saturated arm  the pool is big enough for the" >&2
+echo "    window ceiling to bind and it did not: the window came out at" >&2
+echo "    something other than (512 / 8) * 1568.  src/netstack/netstack.c:541" >&2
+echo "    and the SO_RCVBUF answer in src/bsdsocket/sockopt.c." >&2
 echo >&2
 echo "  bring-up red only on the accel arms  the stack does not survive a" >&2
 echo "    machine this size.  src/netstack/netstack.c:541 and everything" >&2

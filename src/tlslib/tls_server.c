@@ -153,6 +153,30 @@ LONG tls_server_identity(TLSConnection *conn, CONST_STRPTR cert_path,
     if (status != NX_SUCCESS)
         return TLS_ERR_BADCERT;
 
+#if (NX_SECURE_TLS_TLS_1_3_ENABLED)
+    /*
+     * AN RSA SERVER STAYS ON TLS 1.2, and an EC one does not.
+     *
+     * TLS 1.3 has one signature scheme family for RSA, RSA-PSS, and nx_crypto
+     * ships no PSS sign -- only a verify.  A 1.3 server with an RSA key
+     * therefore reaches CertificateVerify and fails with
+     * NX_SECURE_TLS_UNKNOWN_CERT_SIG_ALGORITHM, which arrives at the caller as
+     * TLS_ERR_HANDSHAKE with nothing to act on.  1.2 signs with PKCS#1 v1.5,
+     * which nx_crypto does have, so the connection is made rather than
+     * refused.  Client-side RSA is unaffected: it verifies PSS and never
+     * produces it.
+     *
+     * An EC key is left alone deliberately: ECDSA CertificateVerify is
+     * complete, and tests/tls/run-tlsloop.sh has the EC round completing at
+     * 0x0304 with TLS_AES_128_GCM_SHA256.
+     */
+    if (key_type == TLS_KEY_RSA)
+    {
+        (VOID)_nx_secure_tls_session_protocol_version_override(
+                  &conn->tc_Session, NX_SECURE_TLS_VERSION_TLS_1_2);
+    }
+#endif
+
     ObtainSemaphore(&conn->tc_Base->tb_Lock);
     conn->tc_Base->tb_ServerKeys++;
     ReleaseSemaphore(&conn->tc_Base->tb_Lock);

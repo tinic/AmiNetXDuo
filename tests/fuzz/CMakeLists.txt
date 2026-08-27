@@ -442,8 +442,14 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     list(FILTER _fuzz_secure_all EXCLUDE REGEX
          "/nx_secure_tls_record_payload_(en|de)crypt\\.c$")
 
+    # RFC 7301.  The vendored tree declares _nx_secure_tls_alpn_* and calls
+    # them from the ClientHello extension walk, but ships no implementation --
+    # ours is the only one, and it lives outside third_party for the reason
+    # src/tls/CMakeLists.txt gives.  Without it the archive's own callers are
+    # unresolved.
     add_library(fuzz_tls_nx_secure STATIC
         ${_fuzz_secure_all}
+        "${CMAKE_SOURCE_DIR}/src/tls/alpn/nx_secure_tls_alpn.c"
         "${CMAKE_SOURCE_DIR}/src/tls/rfc7905/nx_secure_tls_record_payload_encrypt.c"
         "${CMAKE_SOURCE_DIR}/src/tls/rfc7905/nx_secure_tls_record_payload_decrypt.c")
 

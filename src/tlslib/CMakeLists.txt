@@ -19,10 +19,13 @@
 #   the dozen NetX Duo and ThreadX entry points nx_secure links against itself
 #   (tls_netx.c for the transport and the mutexes, tls_packet.c for the pool).
 #
-#   aminetxduo_common is not linked either, but ONE of its files is:
+#   aminetxduo_common is not linked either, but TWO of its files are:
 #   src/common/ami_random.c, named below.  A machine with Roadshow underneath
 #   has no pool of ours to borrow, so this library carries its own; tls_random.c
-#   is the two symbols that file wants from compat.c.
+#   is the two symbols that file wants from compat.c.  The other is
+#   src/common/ami_diag.c: AMI_ERROR/WARN/INFO are in every shipped binary now,
+#   ami_random.c names one, and this library gets its own serial dial rather
+#   than a copy of the implementation.
 #
 #   The archives are named as FILES below rather than as CMake targets because
 #   target_link_libraries(nx_secure) would pull `netxduo` in transitively and
@@ -41,6 +44,7 @@ set(TLSLIB_SOURCES
     tls_netx.c
     tls_random.c
     "${CMAKE_SOURCE_DIR}/src/common/ami_random.c"
+    "${CMAKE_SOURCE_DIR}/src/common/ami_diag.c"
     tls_conn.c
     tls_alpn.c
     tls_server.c

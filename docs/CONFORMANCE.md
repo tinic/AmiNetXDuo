@@ -2,10 +2,8 @@
 
 Open deviations only. Obligation levels are quoted from the cited text, not
 paraphrased. Upstream = vendored NetX Duo, where a fix goes to the fork; ours =
-`src/`, `port/`, `include/`. Work items are in `BACKLOG.md`.
-
-Every row is self-contained. A row that stops being true is deleted, not
-annotated — git has the history.
+`src/`, `port/`, `include/`. Work items are in `BACKLOG.md`. Every row is
+self-contained; one that stops being true is deleted, not annotated.
 
 ## Violations
 
@@ -45,16 +43,9 @@ out-of-mask `ai_flags` (`addrinfo.c:373`), sticky `IPV6_HOPLIMIT`
 |---|---|---|
 | 4987 §3.4, §3.6 | A connection to a listening port lives in a 512-entry SYN cache at 80 bytes each (~40 KB) until its handshake completes: no socket committed, no packet held. Past the cache the SYN-ACK's ISN is a stateless HalfSipHash-2-4 cookie carrying the MSS index, window scale, SACK-permitted and timestamps, so options are not downgraded under attack, and the peer's ISN is hashed in rather than summed. A RST against a cached connection is checked for sequence number (RFC 5961 §3). On by default, no flag | `nx_tcp_syncache.c` |
 
-Measured on nine emulated cards at 100 SYN/s from forged sources: pre-fix 0 of 5
-legitimate connections complete during the flood, defended 5 of 5, at no
-measurable cost to handshake latency or throughput when nothing is attacking
-(`tests/tools/run-synflood.sh`, `-u` inverts the verdict for a pre-fix build).
-
-The ceiling is the wire, not the cache: at 2000 SYN/s a defended a2065 drops to
-2 of 5, because the emulated LANCE and the 68020 saturate on receiving SYNs and
-transmitting SYN-ACKs. RFC 4987 says no SYN defence addresses a packet-rate
-attack. At 100/s the state the cache protects is already exhausted many times
-over -- 2500 SYNs held 20 s each is about 2000 outstanding against 512 entries.
+Nine emulated cards at 100 SYN/s: pre-fix 0 of 5 legitimate connections
+complete, defended 5 of 5. `tests/tools/run-synflood.sh` carries the figures
+and why the ceiling is the wire and not the cache.
 
 ## Implemented, and where it is not proven
 

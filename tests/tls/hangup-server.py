@@ -14,17 +14,24 @@ reaches when it gives up on a slow client, which is what a 14 MHz 68020
 looks like to anything on the modern internet, without waiting for a real
 server to time out, and to do it deterministically.
 
-Binds 127.0.0.1 on purpose: the emulator's SLIRP maps the guest's 10.0.2.2 to the
-host loopback, so that is the whole reachable surface, and it keeps macOS from
-asking about incoming connections.
+--bind names the address to listen on.  It defaulted to 127.0.0.1 and had no
+option at all, which was right while the guest reached the host through SLIRP's
+10.0.2.2 alias.  A bridged guest cannot reach the machine running the emulator,
+so this now runs on a peer on the segment and binds that machine's own address.
+
+--seconds N exits after N seconds instead of waiting for stdin to close, which
+is what a peer started over ssh with nohup needs: its stdin is /dev/null and it
+would otherwise stop before the first connection arrived.
 
 SPDX-License-Identifier: MIT
 """
 
+import argparse
 import socket
 import struct
 import sys
 import threading
+import time
 
 BEHAVIOURS = (
     (4443, "rst"),
@@ -38,10 +45,10 @@ BEHAVIOURS = (
 READ_MAX = 4096
 
 
-def serve(port, behaviour, stop):
+def serve(bind, port, behaviour, stop):
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", port))
+    listener.bind((bind, port))
     listener.listen(4)
     listener.settimeout(0.5)
 
@@ -95,11 +102,19 @@ def serve(port, behaviour, stop):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--bind", default="127.0.0.1",
+                    help="address to listen on (default 127.0.0.1)")
+    ap.add_argument("--seconds", type=float, default=0.0,
+                    help="run for this long instead of reading stdin")
+    args = ap.parse_args()
+
     stop = threading.Event()
     threads = []
 
     for port, behaviour in BEHAVIOURS:
-        t = threading.Thread(target=serve, args=(port, behaviour, stop),
+        t = threading.Thread(target=serve,
+                             args=(args.bind, port, behaviour, stop),
                              daemon=True)
         t.start()
         threads.append(t)
@@ -107,10 +122,15 @@ def main():
     print("ready", flush=True)
 
     try:
-        while True:
-            line = sys.stdin.readline()
-            if line == "" or line.strip() == "quit":
-                break
+        if args.seconds > 0:
+            deadline = time.monotonic() + args.seconds
+            while time.monotonic() < deadline:
+                time.sleep(0.5)
+        else:
+            while True:
+                line = sys.stdin.readline()
+                if line == "" or line.strip() == "quit":
+                    break
     except KeyboardInterrupt:
         pass
 

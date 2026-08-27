@@ -1,13 +1,11 @@
 # What the other stacks have and we do not
 
-Facts, not plans. What is missing, where the evidence is, and what a user loses.
-Deciding which to build is a separate question and "never" is a legitimate
-answer; `docs/BACKLOG.md` is where a decided one goes.
-
-Compared against **Roadshow 1.15** (`NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsocket_lib.sfd`,
-125 entries; `netinclude/libraries/bsdsocket.h`, 53 tags; `Roadshow-Demo-1.15/Documentation`)
-and **AmiTCP_NG 4.1.5-beta** (`src/netinclude/fd/socket_lib.fd`, `src/api/`,
-`src/kern/`, `src/tools/`).
+Facts, not plans: what is missing, where the evidence is, and what a user loses.
+"never" is a legitimate answer, and `docs/BACKLOG.md` is where a decided one
+goes. Compared against **Roadshow 1.15** (`NDK3.2/SANA+RoadshowTCP-IP/sfd/bsdsocket_lib.sfd`,
+125 entries; `netinclude/libraries/bsdsocket.h`, 53 tags) and **AmiTCP_NG
+4.1.5-beta** (`src/netinclude/fd/socket_lib.fd`, `src/api/`, `src/kern/`,
+`src/tools/`).
 
 ## Not gaps
 
@@ -41,41 +39,34 @@ Three, against Roadshow's 53; we answer 51.
 | `SBTC_LOG_FILE_NAME` `SBTC_LOG_HOOK` | Where the stack's own messages go. This is the mechanism behind Roadshow's `NetLogViewer`: a program cannot redirect the log or catch it |
 | `SBTC_IP_FILTER_HOOK` | The hook the IP filter installs. Goes with the `ipf_*` vectors |
 
-AmiTCP_NG's source carries 34 further tags Roadshow does not define —
-`SBTC_TPM_*` (23), `SBTC_SOWK_*` (5), the `SBTC_TCP_*` counters, `SBTC_SB_MAX`,
-`SBTC_HOSTID`, `SBTC_LINK_SPEED`, `SBTC_DETECTED_RAM`, `SBTC_LOG`,
-`SBTC_COMPAT43`. AmiTCP 4.x and Miami era, so answering any of them is a
-compatibility question about AmiTCP-era software, not a Roadshow one. Roadshow
-answers none of them either. The `TPM`/`SOWK` counters we report in a different
-shape, through `NETSTATUS_STATS`.
+AmiTCP_NG carries 34 further tags Roadshow does not define — `SBTC_TPM_*` (23),
+`SBTC_SOWK_*` (5), the `SBTC_TCP_*` counters, `SBTC_SB_MAX`, `SBTC_HOSTID`,
+`SBTC_LINK_SPEED`, `SBTC_DETECTED_RAM`, `SBTC_LOG`, `SBTC_COMPAT43`. AmiTCP 4.x
+and Miami era, so answering them is a compatibility question about AmiTCP-era
+software and not a Roadshow one; Roadshow answers none of them either. The
+`TPM`/`SOWK` counters are reported in a different shape, through
+`NETSTATUS_STATS`.
 
 ## ARexx: parsed but refused
 
 `netstack_rexx.c:61` declares AmiTCP 3.0b2's whole keyword set,
-`Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL`. Only QUERY, SET and KILL are
-implemented (`:250-258`); READ, ROUTE, ADD and RESET are recognised and refused
-with a "not implemented" error (`:273-279`). ADD and RESET would need AmiTCP's
-mutable in-memory net database, and `src/config/netdb.c` is immutable after
-`ami_netdb_load()`, which is why it needs no lock. AmiTCP_NG implements `KILL`
-alone.
+`Q=QUERY,S=SET,READ,ROUTE,ADD,RESET,KILL`. AmiTCP_NG implements `KILL` alone.
 
-`netstack_rexx.c:153` — `KILL` takes the interfaces down. Now that
-`NETCTRL_STACK_NOTIFY` and `_RELEASE` exist it should do what `NetShutdown`
-does, or the ARexx path stays a third of the job.
+| Keyword | State |
+|---|---|
+| `QUERY` `SET` `KILL` | implemented, `:250-258`. `KILL` takes the interfaces down; now that `NETCTRL_STACK_NOTIFY` and `_RELEASE` exist it should do what `NetShutdown` does (`:153`), or the ARexx path stays a third of the job |
+| `READ` `ROUTE` `ADD` `RESET` | recognised, refused "not implemented" at `:273-279`. `ADD` and `RESET` would need AmiTCP's mutable in-memory net database; `src/config/netdb.c` is immutable after `ami_netdb_load()`, which is why it needs no lock |
 
 ## Missing configuration
 
-`DEVS:NetInterfaces/<name>`. We act on `DEVICE`, `CARD`, `UNIT`, `ID`,
-`CONFIGURE`, `CONFIGURE6`, `IPTYPE`, `IPTYPE6`, `ADDRESS`, `ADDRESS6`,
-`NETMASK`, `GATEWAY`, `GATEWAY6`, `MTU`, `STATE`, `MDNS`, `DOWNGOESOFFLINE`,
-`REQUIRESINITDELAY`, `HARDWAREADDRESS`, and the AmiTCP spellings of four of
-them.
+`DEVS:NetInterfaces/<name>`. The 19 keys acted on are listed at
+`src/config/config_parse.c:78`, with the AmiTCP spellings of four of them.
+`ADDRESS6` takes two lines per interface; every other key takes one.
 
 **The other 21 are accepted and silently dropped**: `config_parse.c:78` maps
 them to `IF_KEY_IGNORED` so a stock Roadshow file produces no warnings, which
-means a user who writes one gets no error, no effect, and nothing to read. Two
-answers are defensible for each — implement it, or refuse it in one line — and
-"accepted, ignored, silent" is neither.
+means a user who writes one gets no error, no effect and nothing to read. Two
+answers are defensible for each — implement it, or refuse it in one line.
 
 | Key | What it would do |
 |---|---|
@@ -91,8 +82,8 @@ answers are defensible for each — implement it, or refuse it in one line — a
 | `NAMESERVER` `DOMAIN` | Per-interface resolver settings; we take both from `DEVS:Internet/name_resolution` |
 | `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
 
-`DEVS:Internet/`: we read `hosts`, `networks`, `protocols`, `services`,
-`routes`, `name_resolution`, plus our own `certificates`, `service_discovery`,
+`DEVS:Internet/`: `hosts`, `networks`, `protocols`, `services`, `routes`,
+`name_resolution`, plus our own `certificates`, `service_discovery`,
 `tcp_handler` and `tlssessions`.
 
 | File | Note |

@@ -137,22 +137,76 @@ static void h_record(NX_PACKET *packet, Destination where)
     h_seen_interface = packet->nx_packet_address.nx_packet_interface_ptr;
 }
 
-VOID _nx_ip_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+/*
+ * The reader calls the direct entry points now, under nx_ip_protection, and
+ * claims the IP thread's seat while it does.  Both halves are checked: a
+ * delivery that skipped the mutex would still record the right destination, so
+ * h_ip_locked records the lock and h_ip_seated records the seat.
+ */
+static int h_ip_locked;
+static int h_ip_seated;
+static int h_lock_depth;
+
+TX_THREAD *_nx_ip_input_thread;
+TX_THREAD *_tx_thread_current_ptr;
+static TX_THREAD h_reader_thread;
+
+TX_THREAD *_tx_thread_identify(VOID)
 {
-    (VOID)ip_ptr;
-    h_record(packet_ptr, TO_IP);
+    return _tx_thread_current_ptr;
 }
 
-VOID _nx_arp_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+/* Both spellings: tx_mutex_get is _txe_mutex_get where ThreadX error checking
+   is on, which it is in this host build, and _tx_mutex_get where it is off,
+   which is the shipping m68k configuration. */
+UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
-    (VOID)ip_ptr;
-    h_record(packet_ptr, TO_ARP);
+    (VOID)mutex_ptr;
+    (VOID)wait_option;
+    h_lock_depth++;
+    return TX_SUCCESS;
 }
 
-VOID _nx_rarp_packet_deferred_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
+{
+    (VOID)mutex_ptr;
+    h_lock_depth--;
+    return TX_SUCCESS;
+}
+
+UINT _txe_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
+{
+    return _tx_mutex_get(mutex_ptr, wait_option);
+}
+
+UINT _txe_mutex_put(TX_MUTEX *mutex_ptr)
+{
+    return _tx_mutex_put(mutex_ptr);
+}
+
+static VOID h_saw_input(NX_PACKET *packet_ptr, Destination where)
+{
+    h_ip_locked = (h_lock_depth > 0);
+    h_ip_seated = (_nx_ip_input_thread == &h_reader_thread);
+    h_record(packet_ptr, where);
+}
+
+VOID _nx_ip_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
-    h_record(packet_ptr, TO_RARP);
+    h_saw_input(packet_ptr, TO_IP);
+}
+
+VOID _nx_arp_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+{
+    (VOID)ip_ptr;
+    h_saw_input(packet_ptr, TO_ARP);
+}
+
+VOID _nx_rarp_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
+{
+    (VOID)ip_ptr;
+    h_saw_input(packet_ptr, TO_RARP);
 }
 
 static int h_releases;
@@ -206,6 +260,13 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
     (VOID)iface; (VOID)task; (VOID)sigbit;
 }
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface) { (VOID)iface; }
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+/* ami_sana2_rx_start()/stop() arm and disarm the lazy-collect tick, and the
+   whole file is compiled here.  The tick lives in sana2_tx.c, which this
+   target does not link, so it is stubbed like the reap binding above. */
+VOID ami_sana2_tx_lazy_start(AmiSana2If *iface) { (VOID)iface; }
+VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface) { (VOID)iface; }
+#endif
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
@@ -242,11 +303,24 @@ static AmiRxSum h_sum_of(const AmiRxSlot *s)
     return sum;
 }
 
+/*
+ * The lock and the seat belong to ami_sana2_rx_drain() now, which is Exec code
+ * this host binary does not run, so the tests take them the way the reader
+ * would and the receiver stubs still check that they were held.
+ */
 static void h_deliver(void)
 {
-    AmiRxSum sum = h_sum_of(&slot);
+    AmiRxSum   sum = h_sum_of(&slot);
+    TX_THREAD *outer;
+
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    outer = _nx_ip_input_thread;
+    _nx_ip_input_thread = tx_thread_identify();
 
     ami_sana2_rx_deliver(&iface, &pkt, &sum);
+
+    _nx_ip_input_thread = outer;
+    tx_mutex_put(&ip.nx_ip_protection);
 }
 
 static void fixture_init(void)
@@ -270,6 +344,12 @@ static void fixture_init(void)
     h_verify_drop    = NX_FALSE;
     h_verify_walks   = 0;
     h_verify_sums    = 0;
+
+    h_ip_locked          = 0;
+    h_ip_seated          = 0;
+    h_lock_depth         = 0;
+    _nx_ip_input_thread  = TX_NULL;
+    _tx_thread_current_ptr = &h_reader_thread;
 }
 
 static void frame_init(UWORD type, ULONG payload)
@@ -320,8 +400,8 @@ static void test_demux(void)
         Destination where;
         const char *what;
     } row[] = {
-        { AMI_ETHERTYPE_IPV4, TO_IP,       "IPv4 goes to the IP thread" },
-        { AMI_ETHERTYPE_IPV6, TO_IP,       "IPv6 goes to the IP thread" },
+        { AMI_ETHERTYPE_IPV4, TO_IP,       "IPv4 goes to the IP receiver" },
+        { AMI_ETHERTYPE_IPV6, TO_IP,       "IPv6 goes to the IP receiver" },
         { AMI_ETHERTYPE_ARP,  TO_ARP,      "ARP goes to the ARP receiver" },
         { AMI_ETHERTYPE_RARP, TO_RARP,     "RARP goes to the RARP receiver" },
         { 0x8100,             TO_RELEASED, "a VLAN tag is not handled here" },
@@ -339,6 +419,21 @@ static void test_demux(void)
         h_deliver();
 
         h_check(h_went == row[i].where, row[i].what);
+
+        /*
+         * Input runs on the reader now, so it has to hold what the IP thread
+         * holds and to say so while it does.  A type that reaches no receiver
+         * never gets that far.
+         */
+        if (row[i].where != TO_RELEASED)
+        {
+            h_check(h_ip_locked, "the receiver ran under nx_ip_protection");
+            h_check(h_ip_seated,
+                    "and with the reader named as the input thread");
+        }
+
+        h_check(h_lock_depth == 0, "and the mutex was given back");
+        h_check(_nx_ip_input_thread == TX_NULL, "and the seat was given up");
     }
 
     /* And an unknown type is counted as one, not as an error: it is a wire

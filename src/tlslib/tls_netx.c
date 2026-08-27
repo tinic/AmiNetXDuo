@@ -384,9 +384,23 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
  * library holds no baton: the arithmetic runs on the caller's own task, Exec
  * preempts it like any other, and the stack is a separate task throughout.
  */
+/*
+ * GCC 16.2's m68k analyser invents an uninitialised return value for this
+ * empty VOID wrapper.  There is no body to analyse, so confine the workaround
+ * to the diagnostic's exact source rather than carrying a file-wide false
+ * positive.  The same suppression stood around this function when it had a
+ * body (`ded4fb54`) and went with the body that replaced it.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+#endif
 VOID tx_thread_relinquish(VOID)
 {
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /*
  * nx_secure's `nxe_*` objects reference _tx_thread_current_ptr and two other

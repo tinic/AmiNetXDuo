@@ -14,7 +14,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT" || exit 2
 
-TOTAL_MAX="${AMINETXDUO_DOC_TOTAL_MAX:-1150}"
+TOTAL_MAX="${AMINETXDUO_DOC_TOTAL_MAX:-800}"
 FILE_MAX="${AMINETXDUO_DOC_FILE_MAX:-250}"
 
 # The shipped manual is not narrative, and it lives under docs/user/, which

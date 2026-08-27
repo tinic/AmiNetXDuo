@@ -467,8 +467,14 @@ LONG queue  = 0;
         (VOID)bsd_CloseSocket(fd);
     }
 
-    /* key=value, so a harness can quote the figures rather than restate them. */
+    /* key=value, so a harness can quote the figures rather than restate them.
+       The ceiling goes out beside the window: the range assertion below passes
+       whether or not the ceiling ever bound, so a reader needs both numbers to
+       tell a saturated pool from one that never reached the clamp. */
     t_log("poolclamp_tcp_window=%ld", window);
+    t_log("poolclamp_tcp_window_ceiling=%ld", (LONG)T_TCP_WINDOW_CEILING);
+    t_log("poolclamp_tcp_ceiling_bound=%ld",
+          (LONG)((window == T_TCP_WINDOW_CEILING) ? 1L : 0L));
     t_log("poolclamp_udp_queue=%ld", queue);
 
     (VOID)t_check((BOOL)(window >= T_TCP_WINDOW_FLOOR &&

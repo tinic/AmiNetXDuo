@@ -533,18 +533,30 @@ if(NOT AMINETXDUO_TCP_ACK_EVERY_N STREQUAL "")
         NX_TCP_ACK_EVERY_N_PACKETS=${AMINETXDUO_TCP_ACK_EVERY_N})
 endif()
 
-# Lazy SANA-II transmit-completion collection.  The shipped design signals a
-# reader per completed CMD_WRITE; during a bulk receive that wake preempts the
-# thread emitting the acknowledgment to collect a reply the next send's own
-# reap walk would have collected anyway, measured at ~0.7 ms of exec glue and
-# two scheduler transitions per acknowledgment on the A1200.  ON parks the
-# reply port PA_IGNORE while sends flow and moves the quiet-link safety net,
-# the eleven-second lesson in sana2_tx.c's header, to a one-tick timer that
-# bounds any completion's collection at ~20 ms.  Behaviour, not layout, so it
-# could be per-target; whole-tree like its neighbours so one flag is one arm
+# Lazy SANA-II transmit-completion collection, and what ships.  The arm this
+# replaced signalled a reader per completed CMD_WRITE; during a bulk receive
+# that wake preempts the thread emitting the acknowledgment to collect a reply
+# the next send's own reap walk would have collected anyway, measured at
+# ~0.7 ms of exec glue and two scheduler transitions per acknowledgment on the
+# A1200.  ON parks the reply port PA_IGNORE while sends flow and moves the
+# quiet-link safety net, the lesson in sana2_tx.c's header, to a one-tick timer
+# that bounds any completion's collection at ~20 ms.  Behaviour, not layout, so
+# it could be per-target; whole-tree like its neighbours so one flag is one arm
 # of an A/B.
+#
+# WHAT MOVED THE DEFAULT.  A1200 at 68020 under Amiberry, bridged, three cards,
+# three interleaved rounds of tests/perf/run-fitzbench.sh -k 512 -r 3 against
+# playhouse4, ON and OFF alternating inside one block:
+#
+#   a2065          read 530.7 vs 498.7 KB/s  +6.4%   write +2.3%
+#   ariadne2       read 442.0 vs 430.7 KB/s  +2.6%   write +2.2%
+#   ne2000_pcmcia  read 466.5 vs 446.7 KB/s  +4.4%   write +1.2%
+#
+# Every round on every card is above its OFF neighbour, and the read figure is
+# the one the project compares on.  Build with -DAMINETXDUO_TX_LAZY_COLLECT=OFF
+# to take it out; the `pathswap` arm in tools/ci.sh is what compiles that side.
 option(AMINETXDUO_TX_LAZY_COLLECT
-       "Collect TX completions lazily, signalling only on a quiet link" OFF)
+       "Collect TX completions lazily, signalling only on a quiet link" ON)
 if(AMINETXDUO_TX_LAZY_COLLECT)
     add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
 endif()
@@ -556,6 +568,31 @@ endif()
 # Wait().  Adopted application callers keep their own Task and the baton
 # protocol.  PROTOTYPE: whole-tree, default OFF, and every existing
 # configuration builds the baton port unchanged when it is off.
+#
+# WHY THE DEFAULT DID NOT MOVE.  A1200 at 68020 under Amiberry, bridged,
+# run-fitzbench.sh -k 512 -r 3, three rounds interleaved against the baton
+# build inside one block:
+#
+#   a2065          read  495.0 vs 498.7  -0.7%   write  408.3 vs 455.7  -10.4%
+#   ariadne2       read  428.7 vs 430.7  -0.5%   write  343.0 vs 373.7   -8.2%
+#   ne2000_pcmcia  read  443.7 vs 446.7  -0.7%   write  362.0 vs 396.7   -8.7%
+#
+# The realm was live, not disengaged: the guest's own NetStat counts 2 baton
+# transitions over a run where the baton build counts 84, so the Exec-level
+# handoffs really did become in-realm stack switches.  They bought nothing on
+# the read figure and cost 8-10% of the write figure on every card.
+#
+# WHAT IS MISSING BEFORE IT IS WORTH REVISITING, specifically:
+#   - an account of where the write loss comes from.  The send path is the one
+#     that hands off to a green reader per completed CMD_WRITE, and nothing
+#     here says whether the loss is the stack switch itself or the realm's
+#     idle Wait() serialising a send behind a receive.
+#   - the counters that would answer that are unreachable in a shipping build:
+#     netstat prints the `green:` line only inside the budget block, which is
+#     AMINETXDUO_RXPROBE-gated, and an RXPROBE build is 4x slower to bring up.
+#   - the test tier has never RUN against it.  It builds -- the whole tree,
+#     tests included -- but tools/ci.sh's `green` arm is TESTS=OFF, so no
+#     ctest and no emulator test has ever executed inside the realm.
 option(AMINETXDUO_GREEN_REALM
        "Run the stack's ThreadX threads as green threads inside one Exec Task" OFF)
 if(AMINETXDUO_GREEN_REALM)
@@ -572,6 +609,31 @@ endif()
 # window credit reopens at settle time instead of fetch time.  Anything but
 # the plain blocking stream read (MSG_PEEK, MSG_WAITALL, OOB, non-blocking,
 # finite timeouts) declines and takes the shipped path unchanged.
+#
+# WHY THE DEFAULT DID NOT MOVE.  A1200 at 68020 under Amiberry, bridged,
+# ON and OFF alternating inside one block:
+#
+#   run-fitzbench.sh -k 512 -r 3, three rounds, read KB/s, ON vs OFF
+#     a2065          492.0 vs 498.7   -1.3%
+#     ariadne2       425.0 vs 430.7   -1.3%
+#     ne2000_pcmcia  423.7 vs 446.7   -5.1%
+#   tests/tools/run-iperf.sh tcp-rx (a plain BLOCKING recv, the shape this
+#   fork serves), four rounds, bit/s, ON vs OFF: 4650914 vs 4680660, -0.6%,
+#   inside the +-0.6% one-block spread and not the same sign in every round.
+#
+# The coverage counter says why, from an RXPROBE build of the same tcp-rx arm:
+# `direct: 4 completed on the IP thread, 1125 classic dequeues`.  The fork is
+# entered only on the FIRST iteration of the fill loop and only when the
+# socket is empty at the call (transfer.c's `copied == 0` gate, and the pump
+# declining in rxdirect.c when a packet is already queued).  A 68020 is the
+# slow end of a bulk transfer, so the socket is nearly always non-empty when
+# recv() is called and the buffer's remaining packets are classic by
+# construction: it fires on 0.35% of dequeues and cannot move a bulk figure.
+#
+# WHAT WOULD MAKE IT WORTH REVISITING: a measurement on a request/response
+# workload (tests/perf/run-reqresp.sh), where each recv() genuinely finds the
+# socket empty, and a fork that also covers the `copied > 0` continuations.
+# A default cannot move on that alone while the read figure is 1-5% down.
 option(AMINETXDUO_RX_DIRECT_COMPLETE
        "Complete a waiting stream recv() directly on the IP thread" OFF)
 if(AMINETXDUO_RX_DIRECT_COMPLETE)

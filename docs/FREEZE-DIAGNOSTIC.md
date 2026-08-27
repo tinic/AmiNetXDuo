@@ -2,19 +2,18 @@
 
 A total lockup writes nothing — no Enforcer hit, no MungWall hit, no log line —
 and a slow leak writes nothing either, because `AvailMem` falls for every
-program on the machine and cannot say whose. So the stack counts both, and
-`netstat -h` prints them.
-
-`netstat -h` opens no library, allocates nothing and takes no lock, so it
-answers while the rest of the stack has stopped answering. `netstat -s -h` and
-`ShowNetStatus MEMORY` do enter the stack, so a packet or two of disagreement
-between them and `netstat -h` is expected. The pool figures under `netstat -h`
-are as of the last thing the stack did.
+program on the machine and cannot say whose. The stack counts both and
+`netstat -h` prints them, opening no library, allocating nothing and taking no
+lock, so it answers while the rest of the stack has stopped answering.
+`netstat -s -h` and `ShowNetStatus MEMORY` do enter the stack, so a packet or
+two of disagreement is expected; the pool figures under `netstat -h` are as of
+the last thing the stack did.
 
 A trail is `netstat -h >>DH0:health.log` on a `Wait 5` loop from an `Execute`
-script, on a real disk, started before the fault. The evidence is the trend, not
-the final block: the last block may still be in a filesystem buffer. A leak is a
-slope — use `Wait 30` and run it long. The counters restart when the stack does.
+script, on a real disk, started before the fault. The evidence is the trend and
+not the final block, which may still be in a filesystem buffer; a leak is a
+slope, so use `Wait 30` and run it long. The counters restart when the stack
+does.
 
 ## The memory block
 
@@ -55,9 +54,7 @@ a statistic.
 semaphore `AmiNetXDuo.Health` while the stack is up. It holds pointers to the
 live counters, so a debugger on a frozen machine reads what the stack had at the
 moment it stopped. Layout is `include/aminetxduo/health.h`; the magic longword
-is `'ANXH'` (`health.h:54`), for finding it by scanning.
-
-`netstat -h` reports no stack running when the mark is absent: nothing has
-started the network, the stack that is up is not this one, or it is a version of
-this one that keeps a different set of counters. Commands and library are
-installed together for that reason.
+`'ANXH'` (`health.h:54`) finds it by scanning. `netstat -h` reports no stack
+running when the mark is absent: nothing has started the network, the stack that
+is up is not this one, or it is a version of this one keeping a different set of
+counters. Commands and library are installed together for that reason.

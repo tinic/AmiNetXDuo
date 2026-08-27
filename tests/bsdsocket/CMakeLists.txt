@@ -327,6 +327,46 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME udp_queue_layout COMMAND test_udp_queue)
 
+    # transfer.c's TCP receive path normally owns a one-buffer NX_PACKET and
+    # can copy directly from it.  Chained and inconsistent packets must still
+    # take NetX Duo's generic walker, and its exact offset boundary is part of
+    # the observable recv behavior.  The helper is inline, so this target
+    # executes the shipping code and links the vendored fallback beneath it.
+    add_executable(test_packet_extract
+        host/test_packet_extract_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_packet_data_extract_offset.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nxe_packet_data_extract_offset.c")
+
+    target_include_directories(test_packet_extract PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_definitions(test_packet_extract PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME packet_extract_shortcut COMMAND test_packet_extract)
+
+    add_executable(test_packet_extract_trace
+        host/test_packet_extract_trace_host.c)
+
+    target_include_directories(test_packet_extract_trace PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_definitions(test_packet_extract_trace PRIVATE
+        TX_ENABLE_EVENT_TRACE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME packet_extract_trace COMMAND test_packet_extract_trace)
+
     add_executable(test_bpf_write_serial
         host/test_bpf_write_serial_host.c
         "${CMAKE_SOURCE_DIR}/src/bsdsocket/bpf.c")

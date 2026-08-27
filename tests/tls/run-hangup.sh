@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # Can a rude peer take the machine down?
+#
+#   tests/tls/run-hangup.sh [-m MODEL] [-t SECONDS] [-c CPU] [-b BUILDDIR]
+#                          [-B INTERFACE] [-H user@host] [-A ADDRESS]
+#
+# BRIDGED, AND THE RUDE PEER IS A DIFFERENT MACHINE.  hangup-server.py used to
+# bind 127.0.0.1 on the machine running the emulator and the guest reached it
+# at 10.0.2.2, SLIRP's alias for the host loopback.  A bridged guest has no
+# such alias and cannot reach the host it runs on -- a frame sent there never
+# comes back to that NIC -- so the four listeners are started on a peer on the
+# segment over ssh, and the URLs name that peer's address.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -9,21 +20,52 @@ MODEL=A1200
 TIMEOUT=300
 CPU=""
 BUILD="${AMINETXDUO_BUILD:-build/tls}"
+IFACE="${AMINETXDUO_HANGUP_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
+PEER="${AMINETXDUO_HANGUP_PEER:-${AMINETXDUO_PEER:-}}"
+PEER_ADDR="${AMINETXDUO_HANGUP_PEER_ADDR:-}"
 
-while getopts "m:t:c:b:" opt; do
+while getopts "m:t:c:b:B:H:A:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        H) PEER="$OPTARG" ;;
+        A) PEER_ADDR="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-b builddir] [-B interface] [-H user@host] [-A address]" >&2; exit 2 ;;
     esac
 done
 
-command -v python3 >/dev/null 2>&1 || {
-    echo "python3 is needed to run the rude peer" >&2; exit 2; }
+kv() { printf '%s=%s\n' "$1" "$2"; }
+refuse() { kv reason "$1"; kv RESULT refused; exit 2; }
 
-HOST=10.0.2.2
+case "$IFACE" in
+    slirp|slirp_inbound)
+        refuse "slirp_carries_the_handshake_itself: -B <interface>" ;;
+esac
+
+[ -n "$PEER" ] ||
+    refuse "no peer: set AMINETXDUO_HANGUP_PEER=<user@host> or pass -H; the rude peer cannot live on the machine running the emulator"
+
+command -v ssh >/dev/null 2>&1 || refuse "no ssh on this host"
+
+if [ -z "$PEER_ADDR" ]; then
+    PEER_ADDR=$(ssh -o ConnectTimeout=10 "$PEER" \
+                    "ip -o -4 addr show scope global |
+                     awk '{split(\$4,a,\"/\"); print a[1]}'" 2>/dev/null |
+                head -1)
+fi
+[ -n "$PEER_ADDR" ] ||
+    refuse "$PEER did not report an address of its own; pass -A <addr>"
+
+# On this segment, and not through a router: a rude peer behind one is
+# measuring the router's idea of a reset rather than the peer's.
+ip -o route get "$PEER_ADDR" 2>/dev/null | grep -q "dev $IFACE " ||
+    refuse "$PEER_ADDR is not on $IFACE's segment"
+
+TAG="${AMINETXDUO_RUN_TAG:-hangup}"
+HOST="$PEER_ADDR"
 
 COMMANDS="$ROOT/build/hangup-commands.txt"
 cat > "$COMMANDS" <<EOF
@@ -35,43 +77,55 @@ SYS:fetch https://$HOST:4446/ QUIET
 EOF
 
 SERVER_LOG="$ROOT/build/hangup-server.log"
+: > "$SERVER_LOG"
 
-FIFO="$ROOT/build/hangup-server.fifo"
-rm -f "$FIFO"
-mkfifo "$FIFO"
+PEER_SCRIPT="/tmp/hangup-server-$TAG.py"
+PEER_LOG="/tmp/hangup-server-$TAG.log"
+KILLPAT="[h]angup-server-$TAG.py"
+PEER_PYTHON="${AMINETXDUO_HANGUP_PYTHON:-python3}"
 
-python3 "$ROOT/tests/tls/hangup-server.py" < "$FIFO" > "$SERVER_LOG" 2>&1 &
-SERVER_PID=$!
-exec 9>"$FIFO"
+ssh "$PEER" "pkill -f \"$KILLPAT\" || true" >/dev/null 2>&1 || true
+scp -q "$ROOT/tests/tls/hangup-server.py" "$PEER:$PEER_SCRIPT" ||
+    refuse "could not stage the rude peer on $PEER"
 
 cleanup() {
-    exec 9>&- || true
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-    rm -f "$FIFO"
+    ssh "$PEER" "pkill -f \"$KILLPAT\" || true" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM HUP
 
+ssh "$PEER" "nohup $PEER_PYTHON $PEER_SCRIPT --bind $PEER_ADDR \
+             --seconds $((TIMEOUT + 120)) \
+             < /dev/null > $PEER_LOG 2>&1 & sleep 1" >/dev/null 2>&1 || true
+
+READY=no
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-    grep -q '^ready$' "$SERVER_LOG" 2>/dev/null && break
-    sleep 0.5
+    if ssh "$PEER" "grep -q '^ready$' $PEER_LOG" 2>/dev/null; then
+        READY=yes
+        break
+    fi
+    sleep 1
 done
-grep -q '^ready$' "$SERVER_LOG" || { echo "rude peer did not start:" >&2
-                                     cat "$SERVER_LOG" >&2; exit 2; }
-echo "==> rude peer up on 127.0.0.1:4443-4446"
+[ "$READY" = yes ] || {
+    ssh "$PEER" "cat $PEER_LOG" 2>/dev/null | sed 's/^/!! /' >&2
+    refuse "the rude peer did not start on $PEER"; }
+
+echo "==> rude peer up on $PEER ($PEER_ADDR:4443-4446)"
 
 CPUARG=()
 [ -z "$CPU" ] || CPUARG=(-c "$CPU")
-
-TAG="${AMINETXDUO_RUN_TAG:-hangup}"
 
 set +e
 AMINETXDUO_RUN_TAG="$TAG" \
 AMINETXDUO_FETCH_COMMANDS="$COMMANDS" \
 AMINETXDUO_BUILD="$BUILD" \
-    "$ROOT/tests/tls/run-fetch.sh" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" "${CPUARG[@]}"
+    "$ROOT/tests/tls/run-fetch.sh" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" \
+        -B "$IFACE" "${CPUARG[@]}"
 rc=$?
 set -e
+
+ssh "$PEER" "cat $PEER_LOG" > "$SERVER_LOG" 2>/dev/null || : > "$SERVER_LOG"
+cleanup
+trap - EXIT INT TERM HUP
 
 echo "---- what the rude peer saw ----"
 cat "$SERVER_LOG"
@@ -83,6 +137,9 @@ echo "---- the verdict ----"
 
 REPORT="$ROOT/build/amiberry-testhd-$TAG/tools.txt"
 
+kv peer "$PEER"
+kv peer_address "$PEER_ADDR"
+kv iface "$IFACE"
 printf 'run_rc=%s\n' "$rc"
 case "$rc" in
     0|77) ;;

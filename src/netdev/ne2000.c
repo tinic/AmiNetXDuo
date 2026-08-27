@@ -346,6 +346,20 @@ static BOOL ne2000_odd_reads_ok(ULONG seen)
 }
 
 /*
+ * Did the chip come out of the reset above?
+ *
+ * ED_CR_STA is deliberately not in the mask: some NE2000 clones come out of
+ * reset with CR bit 1 stuck set and read back 0x23 where the datasheet says
+ * 0x21 (Netgear FA411).  A floating bus reads 0xff, which has TXP set and
+ * fails the comparison either way.
+ */
+static BOOL ne2000_cr_reset_ok(UBYTE cr)
+{
+    return (BOOL)((cr & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STP)) ==
+                  (ED_CR_RD2 | ED_CR_STP));
+}
+
+/*
  * The reset port is whole-file register 31, so its read is itself one of the
  * odd-register reads that cnet16 performs as a word.  The complete pulse stays
  * in one function: changing getodd and merely rereading ISR proves nothing.
@@ -374,19 +388,54 @@ static BOOL ne2000_detect(NetdevNic *nic)
 
     ne2000_probe_reset(nic);
 
-    /*
-     * ED_CR_STA is deliberately not in the mask: some NE2000 clones come out of
-     * reset with CR bit 1 stuck set and read back 0x23 where the datasheet says
-     * 0x21 (Netgear FA411).  A floating bus reads 0xff, which has TXP set and
-     * fails the comparison either way.
-     */
     tmp = NIC_GET(nic, ED_P0_CR);
     netdev_diag_note(ANXDIAG_CR_READ, netdev_diag_card(nic->card), (ULONG)tmp);
-    if ((tmp & (ED_CR_RD2 | ED_CR_TXP | ED_CR_STP)) !=
-        (ED_CR_RD2 | ED_CR_STP))
+    if (!ne2000_cr_reset_ok(tmp))
     {
-        nic->diag_why = (UBYTE)ANXDIAG_WHY_CR;
-        return FALSE;
+        /*
+         * THE RESET NEVER REACHED THE CARD.
+         *
+         * The NE2000 reset port is whole-file register 31, which is ODD, and
+         * ne2000_probe_reset() strobes it by READING it.  On a clone that
+         * asserts -IOIS16 unconditionally -- the cnet16 class, the CNet
+         * SinglePoint and the NetGear FA411 -- a byte read of an odd register
+         * is not a cycle the card answers, so the strobe does nothing and CR
+         * is whatever the previous owner of the socket left in it.  A card
+         * that has already been driven once, which is every warm reboot, then
+         * fails this test and is called incompatible.
+         *
+         * The word path cannot be probed first: ne2000_odd_seen() below reads
+         * ISR after a reset, and there has not been one.  cnet16 has no
+         * chicken and egg because it does not probe at all -- it reads that
+         * port as a word from its very first call (cnet16.device 1.9, the
+         * reset routine: `move.w reset_port-1+even,-(sp) / move.b 1(sp),d0`)
+         * and ships a second binary for the cards that do not need it.
+         *
+         * So: strobe it again through the word path and ask once more.  Writes
+         * are unaffected either way -- they are byte-wide into the odd window
+         * in both drivers -- so only the read had to move.
+         */
+        UWORD ci = netdev_diag_card(nic->card);
+
+        if (!ne2000_odd_window(nic) || !netdev_bus_set_getodd(&nic->bus))
+        {
+            nic->diag_why = (UBYTE)ANXDIAG_WHY_CR;
+            return FALSE;
+        }
+
+        netdev_diag_note(ANXDIAG_CR_RETRY, ci, 1);
+        NE_TRACE("ne: reset port as a word ", 0);
+        ne2000_probe_reset(nic);
+
+        tmp = NIC_GET(nic, ED_P0_CR);
+        netdev_diag_note(ANXDIAG_CR_READ, ci, (ULONG)tmp);
+        if (!ne2000_cr_reset_ok(tmp))
+        {
+            /* Word reads are never the state a failure is left in. */
+            nic->bus.getodd = 0;
+            nic->diag_why = (UBYTE)ANXDIAG_WHY_CR;
+            return FALSE;
+        }
     }
 
     /*
@@ -406,18 +455,33 @@ static BOOL ne2000_detect(NetdevNic *nic)
     }
     else
     {
-        UWORD ci    = netdev_diag_card(nic->card);
-        ULONG plain = ne2000_odd_seen(nic);
+        UWORD ci       = netdev_diag_card(nic->card);
+        /* Which mode the first reading is taken in.  It is the word path
+           already whenever the reset above had to be strobed through it, and
+           the record must not call that reading a byte one. */
+        BOOL  was_word = (BOOL)(nic->bus.getodd != 0);
+        ULONG plain    = ne2000_odd_seen(nic);
 
         /* The odd window, recorded whatever happens next: a PCMCIA row that
            reached here with none is reading the ASIC reset at an odd address
            in the even window. */
         netdev_diag_note(ANXDIAG_ODDWIN, ci, (ULONG)(APTR)nic->bus.odd);
-        netdev_diag_note(ANXDIAG_ODD_PLAIN, ci, plain);
+        netdev_diag_note(was_word ? ANXDIAG_ODD_WORD : ANXDIAG_ODD_PLAIN,
+                         ci, plain);
 
         if (!ne2000_odd_reads_ok(plain))
         {
             ULONG word;
+
+            /* Already the word path and it still does not read: there is no
+               third way to try. */
+            if (was_word)
+            {
+                nic->diag_why =
+                    (UBYTE)(ne2000_odd_isr_ok(plain) ? ANXDIAG_WHY_ODD_BNRY
+                                                     : ANXDIAG_WHY_ODD);
+                return FALSE;
+            }
 
             netdev_diag_note(ANXDIAG_ODD_RETRY, ci, 1);
 

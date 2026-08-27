@@ -356,6 +356,19 @@ struct TLSConnection *tls_TLSOpenA(
 
     if (!TLSBase->tb_CryptoReady)
     {
+        /*
+         * _nx_secure_tls_initialize() IS WHAT CREATES _nx_secure_tls_protection,
+         * and nothing else does: nx_secure documents it as the application's
+         * call, and the only other tx_mutex_create() in the tree is the
+         * per-session transmit mutex.  Without it tls_conn_enter() below takes
+         * a mutex the shim in tls_netx.c has no slot for, gets TX_MUTEX_ERROR
+         * and every TLSOpen() -- client and server alike -- answers
+         * TLS_ERR_NOSTACK.  It has to be here and not in tls_conn_enter(): the
+         * function also resets the process-wide session list, which is empty
+         * only before the first session exists.
+         */
+        _nx_secure_tls_initialize();
+
         /* Idempotent, not re-entrant: hence the semaphore. */
         (VOID)ami_tls_crypto_initialize();
         (VOID)ami_tls_timer_open();
@@ -581,7 +594,11 @@ struct TLSConnection *tls_TLSOpenA(
        bracket: mutexes, plus the process-wide session list. */
     if (tls_conn_enter(conn) != 0)
     {
-        error = TLS_ERR_NOSTACK;
+        /* NOT TLS_ERR_NOSTACK.  The bracket is this library's own; failing to
+           take it says nothing about the socket library the caller handed in,
+           and answering "bsdsocket.library was built without TLS support" for
+           it sent every reader of the failure to the wrong file. */
+        error = TLS_ERR_INTERNAL;
         goto fail;
     }
 

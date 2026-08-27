@@ -1,15 +1,10 @@
 # AmiNetXDuo research index
 
-The engineering record was 22,212 lines across 89 sections. It is now the table
-below: one row per section number cited from the tree, so every existing
-`docs/RESEARCH.md §N` comment still resolves.
-
-**The tree is the authority.** Where a row says *see `file:line`*, that comment is the
-current statement of the finding and the row exists only so the citation lands
-somewhere. Where a row says **superseded**, the section's conclusion is wrong today and
-the named location is what replaced it.
-
-The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
+One row per section number cited from the tree, so every existing
+`docs/RESEARCH.md §N` comment resolves. **The tree is the authority**: *see
+`file:line`* means that comment is the current statement, **superseded** means
+the conclusion is wrong today and the named location replaced it. The full prose
+is in git history, `git show 2b54025b:docs/RESEARCH.md`.
 
 | § | Conclusion | Authority | Status |
 |---|---|---|---|
@@ -18,7 +13,6 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 3.3 | Pin every Amiga ABI struct with `_Static_assert`: the toolchain's `ndk-include/pwd.h` substitutes newlib's 10-field `passwd` over usergroup's 7-field one. | `include/aminetxduo/mbuf.h:245`, `bpf.h:250` | current |
 | 5.4 | `-noixemul` is unusable on this newlib toolchain: it breaks `sys/reent.h`. | `cmake/toolchain-m68k-amigaos.cmake:111` | see code |
 | 5.4 | The 2026-07 build-spike byte counts. | git history | historical |
-| 5.5 | No such section. Nothing cites it. | | dangling |
 | 6.1 | 50 Hz tick. The wakeup source (`UNIT_VBLANK`) is not the time base (`ReadEClock`), and `NX_IP_PERIODIC_RATE` must equal `TX_TIMER_TICKS_PER_SECOND`. | `port/threadx-amiga/inc/tx_port.h:509` | see code |
 | 6.2 | Baton model: one core lock, exactly one ThreadX thread runs at a time. `TX_DISABLE` is `Forbid()`/`Permit()`, never `Disable()`/`Enable()`, because nothing runs at Exec interrupt level. | `port/threadx-amiga/inc/tx_port.h:26` | see code |
 | 6.4 | Build on `nx_tcp_socket_*`/`nxd_*` directly, not on `addons/BSD/nxd_bsd.c`: `WaitSelect` needs sockets plus Exec signals, errno is per-opener at caller-chosen width, and `ObtainSocket` crosses library bases. | `src/bsdsocket/bsdsocket_internal.h:6` | current |

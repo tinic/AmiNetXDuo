@@ -1,0 +1,130 @@
+Amiberry: eject and insert the PCMCIA card over the IPC socket.
+
+WHAT IT IS FOR
+
+anxnet.device installs card.resource removal and insertion callbacks
+(src/netdev/netdev_pcmcia.c, pc_on_removed and pc_on_inserted) and nothing
+had ever fired them, because no emulator could take a PCMCIA network card
+out of the socket while the guest was running.
+
+Amiberry can, and already implements the whole engine: pcmcia_card_check()
+in src/gayle.cpp compares changed_prefs against currprefs every frame and
+calls freepcmcia() or initpcmcia() itself.  What is missing is any headless
+way to reach it.  cfgfile.cpp can only ever set `inserted` TRUE -- there is
+no else branch -- and IPC SET_CONFIG has a hardcoded option whitelist that
+does not include the slot.  The only route that works is IPC LOAD_CONFIG
+with a second .uae lacking `inserted=true`, and that is destructive: it runs
+discard_prefs() + default_prefs() before parsing, which tears down the mount
+list and kills the guest's DH0:.  Measured, and it happens even when the
+config handed to it is unchanged, so it is not about PCMCIA at all.  A guest
+with no drive cannot report what it saw, so no harness can be built on it.
+
+This adds one SET_CONFIG option that flips the flag the existing engine is
+already watching, leaving currprefs alone:
+
+    SET_CONFIG pcmcia_inserted 0        eject
+    SET_CONFIG pcmcia_inserted 1        insert
+
+USED BY
+
+    tests/tools/run-cardeject.sh
+
+APPLIES TO
+
+    Amiberry master @ 149e9aa2.  Both added includes are required; neither
+    arrives transitively.
+
+    git -C <amiberry> apply tools/patches/amiberry/amiberry-ipc-pcmcia-inserted.diff
+    cmake --build <amiberry>/build --parallel 4
+
+    PUT A NUMBER ON --parallel.  Bare `--parallel` passes -j with no argument,
+    which is unlimited make jobs: it took the 8-core lab host to load 264,
+    OOM-killed its own compiler and wedged sshd for every user on the machine
+    for about fifteen minutes.
+
+    Rebuilding in place swaps the binary under any emulator already running
+    from it.  To build beside one instead, compile the single object with
+    `make -f CMakeFiles/amiberry.dir/build.make <obj>` -- the TOP-LEVEL
+    makefile silently no-ops on that path, returning 0 with no output, which
+    looks exactly like a patch that did not apply -- then relink through a
+    copy of CMakeFiles/amiberry.dir/link.txt with the output name changed.
+    A bridged build needs `setcap cap_net_admin,cap_net_raw=eip` on it.
+
+THE PROTOCOL IS TAB SEPARATED
+
+    ProcessCommand() splits the line on a tab, not on spaces:
+
+        'SET_CONFIG\tpcmcia_inserted\t1\n'  ->  b'OK\n'
+        'SET_CONFIG pcmcia_inserted 1\n'    ->  b'ERROR\tUnknown command:
+                                                  SET_CONFIG PCMCIA_INSERTED 1\n'
+        'SET_CONFIG\tnonsense\t1\n'         ->  b'ERROR\tUnknown option: nonsense\n'
+
+    A space-joined command arrives as one token and the reply upper-cases it,
+    which is what makes that error so hard to read.  Otherwise it is as plain
+    as it looks: newline terminated, no length prefix, no JSON, one recv()
+    gets the whole reply, and success begins with the literal OK.
+
+STATUS
+
+    Verified.  Two full eject and reinsert cycles in one boot on an A1200 with
+    ne2000_pcmcia bridged: SET_CONFIG answered OK both ways, the emulator
+    logged `inserted=0` then `inserted=1`, and the GUEST then logged
+    `PCMCIA NE2000 IO configured` with nothing driving it, which is
+    pc_on_inserted() reconfiguring a card it had just been handed.
+    `FILESYS: was not initialized.` count was 0 and the guest kept writing to
+    DH0: afterwards, so the LOAD_CONFIG collateral damage is gone.
+
+    The log markers are `inserted=0` and `inserted=1`.  There is no
+    `freepcmcia` or `initpcmcia` in any log -- those are static C function
+    names, not log text -- so a harness must not grep for them.
+
+    WHAT IT FOUND.  After reinsertion the guest reconfigures the card but the
+    SANA-II interface stays offline and down; the driver does not bring itself
+    back online.  It was online with a working ping before the eject.  That is
+    the defect this patch existed to expose, and tests/tools/run-cardeject.sh
+    gates on it.
+
+THIS PATCH IS LOCAL AND STAYS LOCAL.  It is not to be sent to Amiberry or
+to any repository this project does not own.
+
+diff --git a/src/osdep/amiberry_ipc_socket.cpp b/src/osdep/amiberry_ipc_socket.cpp
+index 8d2a356e..7981b7bc 100644
+--- a/src/osdep/amiberry_ipc_socket.cpp
++++ b/src/osdep/amiberry_ipc_socket.cpp
+@@ -23,6 +23,8 @@
+ #include "gui/gui_handling.h"
+ #include "newcpu.h"
+ #include "blitter.h"
++#include "rommgr.h"
++#include "autoconf.h"
+ #ifdef DEBUGGER
+ #include "debug.h"
+ #endif
+@@ -592,6 +594,27 @@ static std::string HandleSetConfig(const std::vector<std::string>& args)
+ 			changed_prefs.ntscmode = (optval == "true" || optval == "1");
+ 			set_config_changed();
+ 		}
++		// PCMCIA slot: eject and insert the configured card at runtime.
++		else if (optname == "pcmcia_inserted") {
++			const bool want = (optval == "true" || optval == "1");
++			bool found = false;
++			for (int i = 0; i < MAX_EXPANSION_BOARDS; i++) {
++				struct boardromconfig *brc = &changed_prefs.expansionboard[i];
++				if (!brc->device_type)
++					continue;
++				const struct expansionromtype *ert = get_device_expansion_rom(brc->device_type);
++				if (!ert || !(ert->deviceflags & EXPANSIONTYPE_PCMCIA))
++					continue;
++				found = true;
++				if (brc->roms[0].inserted != want) {
++					brc->roms[0].inserted = want;
++					set_config_changed();
++				}
++				break;
++			}
++			if (!found)
++				return make_response(false, {"No PCMCIA board configured"});
++		}
+ 		// Input options
+ 		else if (optname == "tablet_mode") {
+ 			int tablet_mode;

@@ -110,7 +110,7 @@ CROSS_CONFIGS=(
     # completion path, a collect policy, an -O2 file list -- and none of them
     # resizes a structure, so unlike nosack/norxverify they do not each need
     # their own tree to be compiled honestly.
-    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=ON"
+    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF"
     # GREEN_REALM replaces the thread model wholesale and shares an arm with
     # nothing.  TESTS=OFF rides here because it is the one remaining side and
     # it is what makes this arm the cheap one: a libraries-only tree.
@@ -157,7 +157,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=112
+HOST_TESTS_EXPECTED=116
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -318,6 +318,19 @@ stage_host() {
     else
         cat "$BUILD/netdev-delays.log"
         fail "a delay in src/netdev counts bus reads instead of measuring time"
+        return 1
+    fi
+
+    # The mDNS responder still gives the machine back between resource records.
+    # A record is up to four walks of the peer cache, and draining a burst in
+    # one mutex-held pass stopped every acknowledgment leaving the machine for
+    # 100-500 ms at a time.  The yield has to sit at the head of each section
+    # loop; several paths through a record body continue past the bottom of it.
+    if tools/check-mdns-yield.sh > "$BUILD/mdns-yield.log" 2>&1; then
+        note "mdns yield: $(sed -n 's/^mdns_yield=//p' "$BUILD/mdns-yield.log")"
+    else
+        cat "$BUILD/mdns-yield.log"
+        fail "the mDNS responder no longer yields between resource records"
         return 1
     fi
 
@@ -1596,6 +1609,71 @@ stage_reachability() {
     return "$rc"
 }
 
+# -------------------------------------------------------------- fetchtls ----
+#
+# THE SHIPPED `fetch` COMMAND OVER HTTPS, against a server this lab owns.
+#
+# tests/tls/run-fetch.sh is the only thing that ever ran fetch's TLS path and
+# it is `manual`, because four of its nine commands are third-party endpoints
+# and a red there can be somebody else's outage.  That is how 2ec3fab4 shipped
+# a client answering "bsdsocket.library was built without TLS support" on
+# every https: URL.
+#
+# Here `TlsLoop SERVER ... HTTP` and `fetch` are two Shell processes in one
+# guest over 127.0.0.1, with a certificate minted for the run.  Nothing but our
+# own code is in the path, so a red is a defect.  Distinct from tlsloop above:
+# that one is the library against itself, this one is the command users run.
+stage_fetchtls() {
+    hr "the fetch command over HTTPS, lab server (tier 2, needs a ROM)"
+
+    local rc=0
+
+    "$ROOT/tests/tls/run-fetchtls.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  fetch completed a TLS 1.3 handshake, verified the" \
+                "chain and wrote the body it was sent" ;;
+        1) fail "fetchtls: fetch did not complete the transfer -- the" \
+                "fetchtls_* lines above name which half and which check" ;;
+        2) fail "fetchtls: the rig or the PKI refused it before any guest" \
+                "booted" ;;
+        *) fail "fetchtls: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
+# --------------------------------------------------------------- tlsloop ----
+#
+# tls.library shaking hands with itself: a server process and a client process
+# in ONE guest, over 127.0.0.1, both ends the shipped library.
+#
+# It is here because the server half had never been run.  When it first was,
+# two things came out of it in a minute and a half: every TLSOpen() in the
+# tree was answering TLS_ERR_NOSTACK because nothing created
+# _nx_secure_tls_protection, and a 1.3 server with an RSA key cannot sign
+# CertificateVerify.  No peer, no bridge traffic, no internet -- the bytes
+# never leave the guest, so this is a gate and not a weather report.
+stage_tlsloop() {
+    hr "tls.library server against tls.library client (tier 2, needs a ROM)"
+
+    local rc=0
+
+    "$ROOT/tests/tls/run-tlsloop.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  both rounds completed and moved bytes: the EC round at" \
+                "TLS 1.3 and the RSA round at 1.2" ;;
+        1) fail "tlsloop: a round did not complete -- the tlsloop_*_ lines" \
+                "above name which half and which check" ;;
+        2) fail "tlsloop: the rig or the PKI refused it before any guest" \
+                "booted" ;;
+        *) fail "tlsloop: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -1693,6 +1771,25 @@ stage_matrix() {
         2) skip "cpuspeed: the rig refused it before any arm booted" ;;
         *) fail "cpuspeed: an interface did not reach the network on a CPU\
  this tree does not normally run -- the table names which"
+           bad=$((bad + 1)) ;;
+    esac
+
+    # BESIDE cpuspeed, and it asks a different question of the same machines.
+    # cpuspeed asks whether the bring-up survives a faster CPU; this asks HOW
+    # MUCH faster the emulator can actually make it, in the unit the delay code
+    # is written in -- spins of a bare loop per raster line.  The answer is the
+    # ceiling, and the ceiling is what says which claims about an accelerated
+    # Amiga a run here can carry and which stay in the host tier.
+    rc=0
+    "$ROOT/tests/tools/run-gayleratio.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  $(sed -n 's/^gayleratio_ceiling=/spins per line, ceiling /p' \
+                 "$ROOT/build/gayleratio-results.txt" 2>/dev/null | head -1)\
+the PCMCIA card claimed at every rate and the measurement rose with it" ;;
+        2) skip "gayleratio: the rig refused it before any arm booted" ;;
+        *) fail "gayleratio: either the card stopped claiming as the CPU rate\
+ rose, which is the defect src/netdev/netdev_clock.c exists to prevent, or the\
+ measurement stopped tracking the rate -- the table says which"
            bad=$((bad + 1)) ;;
     esac
 
@@ -1894,6 +1991,33 @@ stage_bridged() {
         esac
     fi
 
+    # KICKSTART 2.x, WHICH NOTHING ELSE HERE BOOTS WITH A WORKING LINK.
+    # run-oommsg.sh boots 2.04 to prove a sentence on a 512 KB machine and the
+    # stack never starts there, so anxnet.device's romtag has only ever been
+    # initialised by a V40 exec and card.resource has only ever been V40.
+    # Skipped by name where the two ROMs are not configured: a 3.1 image does
+    # not boot what these arms boot, and a mismatch is a black screen rather
+    # than a test result.
+    printf '\n-- the bring-up on Kickstart 2.04 and 2.05\n'
+    rc=0
+    if [ -z "${AMINETXDUO_KICKSTART_A2000:-}${AMINETXDUO_KICKSTART_V204:-}" ]; then
+        skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
+ exec and card.resource V37 stay unproven"
+    else
+        AMINETXDUO_RUN_TAG=ci-kick2x "$ROOT/tests/tools/run-kick2x.sh" \
+            -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+        case "$rc" in
+            0) note "PASS  the romtag and the PCMCIA claim both work under a" \
+                    "V37 ROM, and each 2.x arm matches its 3.1 pair" ;;
+            2) skip "kick2x: the rig refused it before any arm booted" ;;
+            *) fail "kick2x: an arm that comes up on 3.1 does not come up on\
+ Kickstart 2.x -- the table above says which, and its 3.1 pair is what makes\
+ that a ROM finding"
+               bad=1 ;;
+        esac
+    fi
+
     printf '\n-- NetShutdown, and the programs using the network\n'
     "$ROOT/tests/tools/run-netshutdown.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
@@ -2045,6 +2169,35 @@ stage_bridged() {
         done
     fi
 
+    # AND THE ARM dnsmasq COULD NOT SUPPLY.  Two servers on the link with
+    # different OPTION_PREFERENCE values, the two Advertises sent in both
+    # orders, and the client has to name the preference-200 server both times.
+    # dnsmasq cannot send option 7 at all, so until tests/ipv6/
+    # dhcpv6-prefserver.py existed a two-server link picked by arrival and the
+    # arms above stopped rather than assert on the race.
+    printf '\n-- two DHCPv6 servers, and one of them says it is preferred\n'
+    if [ -z "${AMINETXDUO_DHCPV6_PEER:-}" ]; then
+        skip "dhcpv6pref: AMINETXDUO_DHCPV6_PEER is not set, so there is" \
+             "nowhere to run the two-server responder.  Which of two" \
+             "servers the client takes is unproven on this runner."
+    else
+        rc=0
+        "$ROOT/tests/ipv6/run-dhcpv6-pref.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_DHCPV6_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  the preference-200 server was chosen in both" \
+                    "Advertise orders, on a link that also carries the site" \
+                    "router's own DHCPv6 server" ;;
+            2) fail "dhcpv6pref: an ingredient is missing -- most likely" \
+                    "python3-cap in the peer's home directory, with" \
+                    "CAP_NET_RAW set on it" ; bad=1 ;;
+            4) skip "dhcpv6pref: the link or the peer is not what this" \
+                    "needs -- read the reason= above" ;;
+            *) fail "dhcpv6pref: read the FAIL lines above" ; bad=1 ;;
+        esac
+    fi
+
     # The stall arm is here rather than in the emulator stage because the
     # question is a retransmission ladder against a real peer.  It costs its
     # own two minutes: the socket that asked for nothing has to be watched all
@@ -2080,6 +2233,66 @@ stage_bridged() {
 # The peer's root qdisc is changed for the duration, so it must be idle; the
 # harness refuses to start otherwise rather than producing a number nobody can
 # trust.
+# THE CONSOLE'S SCREENS, on more than one machine and more than one size.
+#
+# NOT IN `bridged`.  Every arm here needs a SECOND HOST: a frame the emulator
+# host sends to a guest of its own never comes back, so the probe has to run
+# somewhere else on the segment or every arm reads as a guest that never came
+# up.  AMINETXDUO_CONSOLE_CLIENT is that host, and without it there is nothing
+# to run rather than something to fail.
+#
+# WHAT EACH GROUP IS FOR.  The aligned A1200 group is the control: it is the
+# coverage this project had, and it tells an unaligned arm that broke from a
+# machine that broke.  The 312x202 groups are the hole that let 1600 columns
+# ship -- a planar screen is allocated in whole 16-pixel words, so 312 sits in
+# 320 and the last 8 columns belong to nobody.  The A600 groups are OCS on a
+# 68000, where HAM6 and EHB had never run at all.  The RTG arm asks for 633
+# columns, which the board gives a 636-byte row, and is the only arm anywhere
+# that makes http_rtg_describe() clamp anything.
+stage_console() {
+    hr "console screens (tier 2, needs a real link and a second host)"
+
+    local rc=0 bad=0
+
+    if [ -z "${AMINETXDUO_CONSOLE_CLIENT:-}" ]; then
+        skip "console: AMINETXDUO_CONSOLE_CLIENT is not set, so there is no" \
+             "machine to ask the guest for a screen -- this host cannot reach" \
+             "a guest of its own"
+        return "$NOTHING"
+    fi
+
+    local entry cname cargs cwhy rest
+    for entry in \
+"aga|-C ham6 -C ham8 -C ehb -m A1200|HAM6, HAM8 and EHB on AGA at 320x256, which is the coverage that already existed" \
+"aga-unaligned|-C ham6 -C ham8 -C ehb -m A1200 -S 312x202|the same three at 312x202, where the screen is 8 columns narrower than its bitmap" \
+"ocs|-C ham6 -C ehb -m A600|HAM6 and EHB on OCS, on a 68000" \
+"ocs-unaligned|-C ham6 -C ehb -m A600 -S 312x202|the same two on OCS at 312x202" \
+"rtg-unaligned|-P -d 8 -m A1200 -S 633x475 -s 20|a 633-column card screen in a 636-byte row, which is the reported defect's own shape" \
+    ; do
+        cname="${entry%%|*}";  rest="${entry#*|}"
+        cargs="${rest%%|*}"
+        cwhy="${entry##*|}"
+
+        printf '\n-- %s\n' "$cwhy"
+        rc=0
+        # shellcheck disable=SC2086
+        "$ROOT/tests/tools/run-console.sh" -b "$BUILD/default" \
+            -c "$AMINETXDUO_CONSOLE_CLIENT" \
+            -o "$BUILD/console-out-$cname" $cargs || rc=$?
+        case "$rc" in
+            0) note "PASS  console $cname" ;;
+            2) skip "console $cname: an ingredient is missing on this machine" ;;
+            *) fail "console $cname: the screen on the wire is not the screen\
+ the guest opened, or the picture did not come back -- the key=value lines\
+ above name the arm and the pixel report"
+               bad=1 ;;
+        esac
+    done
+
+    [ "$bad" = 0 ] || return 1
+    return 0
+}
+
 stage_lossgate() {
     hr "the lossy-link gate (tier 2, needs a peer with tc)"
 
@@ -2191,7 +2404,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -2225,7 +2438,10 @@ for s in "${WANT[@]}"; do
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
+        tlsloop)     stage_tlsloop || srrc=$? ;;
+        fetchtls)    stage_fetchtls || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
+        console)     stage_console || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
         e2e)         stage_e2e || srrc=$? ;;

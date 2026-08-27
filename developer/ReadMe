@@ -190,12 +190,30 @@ variable, so the two sets of generated headers mix, and neither has to be
 re-merged when the other moves.
 
 
-Building the example
---------------------
+Building the examples
+---------------------
 
-    gcc -I Developer/include -o IfNames Developer/examples/IfNames.c
-    gcc -I Developer/include -o V6Only  Developer/examples/V6Only.c
+    FLAGS="-ffunction-sections -fno-optimize-sibling-calls -Wl,--gc-sections"
+
+    gcc -I Developer/include $FLAGS -o IfNames Developer/examples/IfNames.c
+    gcc -I Developer/include $FLAGS -o V6Only  Developer/examples/V6Only.c
+    gcc -I Developer/include $FLAGS -o TLSInfo Developer/examples/TLSInfo.c
+
+The three flags are not a size choice.  Some newlib objects carry DWARF, and
+when one of those is pulled in, the debug sections are given load addresses,
+become loadable DATA hunks, and the linker then writes the executable with no
+relocation table at all.  It exits 0 and reports nothing.  LoadSeg() applies
+the relocations by hand, so an executable that carries none keeps every
+absolute address at its link-time value, and the program takes the machine
+down.  --gc-sections collects the debug sections away and the relocation table
+comes back.  -fno-optimize-sibling-calls travels with -ffunction-sections
+always: a cross-section tail call is the one construct this linker resolves
+twelve bytes short, into the middle of the preceding function.
+
+Check any AmigaOS executable for this with tools/hunkdiff.py --check.
 
 IfNames prints one line per interface -- index and name -- and checks that
 every name maps back to its own index.  V6Only makes an IPv6 socket, sets
-IPV6_V6ONLY, binds to ::1 and prints what getsockname() gives back.
+IPV6_V6ONLY, binds to ::1 and prints what getsockname() gives back.  TLSInfo
+connects to a host, hands the descriptor to tls.library and prints what was
+negotiated.

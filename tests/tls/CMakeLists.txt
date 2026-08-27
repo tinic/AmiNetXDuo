@@ -164,3 +164,25 @@ endif()
 # without it every sample in a static lands on the preceding global.
 target_link_options(tls_https PRIVATE -Wl,--gc-sections
     "-Wl,-Map,${CMAKE_CURRENT_BINARY_DIR}/tls_https.map")
+
+# tls.library as the SERVER, against tls.library as the client, over 127.0.0.1
+# in one guest.  The row this closes said the server state machine was
+# unexercised; what was unexercised was the door to it -- TLSA_Server,
+# tls_server.c and the server branch of tls_conn.c.
+#
+#   tests/tls/run-tlsloop.sh -b build/cm
+#
+# Linked against nothing of ours, for tls_api's reason: the published API is
+# half of what is under test.
+add_executable(tls_loop tls_loop.c)
+target_include_directories(tls_loop PRIVATE "${CMAKE_SOURCE_DIR}/include")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(tls_loop PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+set_target_properties(tls_loop PROPERTIES OUTPUT_NAME "TlsLoop")
+if(TARGET tls_library)
+    add_dependencies(tls_loop tls_library)
+endif()
+if(TARGET bsdsocket_library)
+    add_dependencies(tls_loop bsdsocket_library)
+endif()
