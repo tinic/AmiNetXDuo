@@ -346,6 +346,12 @@ add_executable(fuzz_tls_record
     "${_fuzz_secure_src}/nx_secure_tls_process_handshake_header.c"
     "${_fuzz_secure_src}/nx_secure_tls_process_serverhello.c"
     "${_fuzz_secure_src}/nx_secure_tls_process_serverhello_extensions.c"
+    # RFC 7301.  The ServerHello extension walk reaches it, so the ALPN
+    # response parser is fuzzed by the same corpus rather than needing one of
+    # its own: it is length-prefixed bytes off the wire like everything else
+    # in this target.  src/tls/CMakeLists.txt says why it lives outside
+    # third_party.
+    "${CMAKE_SOURCE_DIR}/src/tls/alpn/nx_secure_tls_alpn.c"
     "${_fuzz_secure_src}/nx_secure_tls_process_certificate_request.c"
     "${_fuzz_secure_src}/nx_secure_tls_ciphersuite_lookup.c"
     "${_fuzz_secure_src}/nx_secure_tls_check_protocol_version.c"

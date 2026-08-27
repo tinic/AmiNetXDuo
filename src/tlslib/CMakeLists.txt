@@ -1,8 +1,8 @@
 # tls.library, TLS for ordinary Amiga programs.
 #
-# Built only when AMINETXDUO_TLS is ON, and shipped alongside a
-# bsdsocket.library from the SAME build: the two share struct layouts and the
-# private context ABI (include/aminetxduo/nxcontext.h).
+# Built only when AMINETXDUO_TLS is ON.  It runs on ANY AmigaOS
+# bsdsocket.library -- ours, Roadshow, AmiTCP, Miami -- because the published
+# vectors are the whole of what it asks for (src/tlslib/tls_sock.c).
 #
 # tls_library.c MUST stay first in the object order, its "moveq #-1,d0 / rts"
 # has to land at offset 0 of the first code hunk, the same rule
@@ -13,14 +13,20 @@
 #   netxduo, threadx, aminetxduo_netstack, aminetxduo_common.
 #
 #   The first three are the singleton that lives in bsdsocket.library; a second
-#   copy here would be a second stack with no interfaces.  The fourth would
-#   drag in src/common/ami_random.c and give the machine a second entropy pool.
-#   All four are reached at run time through the private context instead, and
-#   src/tlslib/tls_netx.c is the forwarding layer.
+#   copy here would be a second stack with no interfaces.  tls.library does not
+#   reach into that one either: it runs on ANY bsdsocket.library, through the
+#   published vectors and nothing else (src/tlslib/tls_sock.c), and supplies
+#   the dozen NetX Duo and ThreadX entry points nx_secure links against itself
+#   (tls_netx.c for the transport and the mutexes, tls_packet.c for the pool).
 #
-#   That is why the archives are named as FILES below rather than as CMake
-#   targets: target_link_libraries(nx_secure) would pull `netxduo` in
-#   transitively and undo the whole design, silently, at link time.
+#   aminetxduo_common is not linked either, but ONE of its files is:
+#   src/common/ami_random.c, named below.  A machine with Roadshow underneath
+#   has no pool of ours to borrow, so this library carries its own; tls_random.c
+#   is the two symbols that file wants from compat.c.
+#
+#   The archives are named as FILES below rather than as CMake targets because
+#   target_link_libraries(nx_secure) would pull `netxduo` in transitively and
+#   undo the whole design, silently, at link time.
 #
 # SPDX-License-Identifier: MIT
 
@@ -30,8 +36,14 @@ option(AMINETXDUO_TLSLIB_LINK
 set(TLSLIB_SOURCES
     tls_library.c       # keep first
     tls_vectors.c
+    tls_sock.c
+    tls_packet.c
     tls_netx.c
+    tls_random.c
+    "${CMAKE_SOURCE_DIR}/src/common/ami_random.c"
     tls_conn.c
+    tls_alpn.c
+    tls_server.c
     tls_hostname.c
     tls_path.c
     tls_store.c
@@ -371,9 +383,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     # the enter/end/delete/leave order and fails if deletion escapes again.
     add_executable(test_tls_close
         test/test_tls_close.c
+        tls_alpn.c
         tls_conn.c
         tls_hostname.c
-        tls_path.c)
+        tls_packet.c
+        tls_path.c
+        tls_server.c)
 
     find_package(Threads REQUIRED)
     target_link_libraries(test_tls_close PRIVATE Threads::Threads)
@@ -417,21 +432,25 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tls_close_serialization COMMAND test_tls_close)
 
-    # tls.library may remain resident across an expunge and reload of
-    # bsdsocket.library.  The borrowed context lives in bsdsocket.library's
-    # segment, so every TLSOpen() must refresh it instead of keeping the first
-    # pointer forever.
-    add_executable(test_tls_netx_bind
-        test/test_tls_netx_bind.c
-        tls_netx.c)
-
-    target_include_directories(test_tls_netx_bind PRIVATE
+    # ---------------------------------------------------------------------
+    # The pool and the transport, the two files that replaced the private LVO.
+    #
+    # tls.library used to borrow bsdsocket.library's NetX Duo -- its packet
+    # pool and its NX_TCP_SOCKET -- through a hand-coded vector at -0x360, so
+    # it ran on our stack and answered TLS_ERR_NOSTACK on every other one.  It
+    # brings both itself now: tls_packet.c is the pool, tls_netx.c is send()
+    # and recv() at the published bsdsocket vectors.
+    #
+    # Both are testable on the host and neither was before.  tls_sock.c has a
+    # POSIX half under TLSLIB_HOST_TEST -- the same call sequence, not a
+    # simulation -- so test_tls_transport drives the shipping functions over a
+    # real socketpair.
+    set(TLSLIB_HOST_TEST_INCLUDES
         "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
         "${CMAKE_SOURCE_DIR}/src/config/test/shim"
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_SOURCE_DIR}/src/tls"
-        "${CMAKE_SOURCE_DIR}/src/crypto68k"
         "${CMAKE_SOURCE_DIR}/include"
         "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
         "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"
@@ -441,7 +460,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/nx_secure/ports"
         "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 
-    target_compile_definitions(test_tls_netx_bind PRIVATE
+    set(TLSLIB_HOST_TEST_DEFINES
         NX_PACKET_ALIGNMENT=8
         NX_INCLUDE_USER_DEFINE_FILE
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h"
@@ -452,14 +471,35 @@ if(NOT CMAKE_CROSSCOMPILING)
         TLSLIB_NO_INLINE_STUBS
         TLSLIB_HOST_TEST)
 
-    target_compile_options(test_tls_netx_bind PRIVATE
-        -Wall -Wextra -UAMINETXDUO_IPV6 -ffunction-sections -fdata-sections)
-    if(APPLE)
-        target_link_options(test_tls_netx_bind PRIVATE -Wl,-dead_strip)
-    else()
-        target_link_options(test_tls_netx_bind PRIVATE -Wl,--gc-sections)
-    endif()
-    set_target_properties(test_tls_netx_bind PROPERTIES C_STANDARD 11)
+    add_executable(test_tls_packet test/test_tls_packet.c tls_packet.c)
 
-    add_test(NAME tls_context_rebind COMMAND test_tls_netx_bind)
+    # RFC 7301.  Both halves are byte manipulation over an
+    # NX_SECURE_TLS_SESSION, so the client offer, the server selection and the
+    # round trip between them all run here; nothing about them needs a network.
+    add_executable(test_tls_alpn
+        test/test_tls_alpn.c
+        tls_alpn.c
+        "${CMAKE_SOURCE_DIR}/src/tls/alpn/nx_secure_tls_alpn.c")
+    add_executable(test_tls_transport
+        test/test_tls_transport.c
+        tls_netx.c
+        tls_packet.c
+        tls_sock.c)
+
+    foreach(_tls_host_test test_tls_packet test_tls_transport test_tls_alpn)
+        target_include_directories(${_tls_host_test} PRIVATE
+            ${TLSLIB_HOST_TEST_INCLUDES})
+        target_compile_definitions(${_tls_host_test} PRIVATE
+            ${TLSLIB_HOST_TEST_DEFINES})
+        # -UAMINETXDUO_IPV6 for the reason the two targets above carry it: it
+        # changes the layout of NX_PACKET, and the vendored headers here are
+        # the linux port's.
+        target_compile_options(${_tls_host_test} PRIVATE
+            -Wall -Wextra -UAMINETXDUO_IPV6)
+        set_target_properties(${_tls_host_test} PROPERTIES C_STANDARD 11)
+    endforeach()
+
+    add_test(NAME tls_packet_pool COMMAND test_tls_packet)
+    add_test(NAME tls_alpn COMMAND test_tls_alpn)
+    add_test(NAME tls_transport COMMAND test_tls_transport)
 endif()

@@ -1,7 +1,7 @@
 /*
  * tls.library, the LVO vector table.
  *
- * Ten user vectors and no reserved slots after them.  A caller reaching past
+ * Eleven user vectors and no reserved slots after them.  A caller reaching past
  * the end of the table lands on the (APTR)-1 terminator, which MakeLibrary()
  * does not turn into a jump.
  *
@@ -31,6 +31,7 @@ const APTR TlsVectorTable[] =
     (APTR)tls_TLSWaitSelect,        /* -0x048  TLSWaitSelect   */
     (APTR)tls_TLSRandom,            /* -0x04e  TLSRandom       */
     (APTR)tls_TLSBuffered,          /* -0x054  TLSBuffered     */
+    (APTR)tls_TLSGetALPN,           /* -0x05a  TLSGetALPN      */
 
     (APTR)-1
 };

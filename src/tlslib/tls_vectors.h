@@ -84,6 +84,12 @@ LONG tls_TLSRandom(register APTR               buffer  TLSLIB_REG("a0"),
 LONG tls_TLSBuffered(register struct TLSConnection *conn    TLSLIB_REG("a0"),
                      register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
 
+/* -90 */
+LONG tls_TLSGetALPN(register struct TLSConnection *conn    TLSLIB_REG("a0"),
+                    register APTR                  buffer  TLSLIB_REG("a1"),
+                    register LONG                  size    TLSLIB_REG("d0"),
+                    register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"));
+
 extern const APTR TlsVectorTable[];
 
 #endif /* AMINETXDUO_TLS_VECTORS_H */

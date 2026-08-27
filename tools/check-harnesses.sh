@@ -170,6 +170,7 @@ tls_bench           handshake and record timings
 test_ptrprobe       where an injected IECLASS_POINTERPOS lands, per display mode; a measured table
 test_ifnames        a Developer drawer example, staged by dist/make-dist.sh
 test_v6only         a Developer drawer example, staged by dist/make-dist.sh
+test_tlsinfo        a Developer drawer example, staged by dist/make-dist.sh
 "
 
 declare -A INSTRUMENT_WHY

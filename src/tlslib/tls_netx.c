@@ -1,244 +1,397 @@
 /*
- * tls.library borrows bsdsocket.library's NetX Duo rather than linking one:
- * ThreadX and NetX Duo are singletons with file-scope state.  The twelve entry
- * points nx_secure needs, and the entropy pool, come through the private LVO.
+ * tls.library, what nx_secure links against when there is no NetX Duo.
+ *
+ * nx_secure is written against NetX Duo and ThreadX.  tls.library links
+ * neither: the stack underneath it is whatever bsdsocket.library the machine
+ * has -- ours, Roadshow, AmiTCP or Miami -- and it is reached through the
+ * published vectors in tls_sock.c and nothing else.  So the handful of NetX
+ * Duo and ThreadX entry points nx_secure calls are defined here, over AmigaOS:
+ *
+ *   nx_tcp_socket_send/receive   send() and recv() on the caller's descriptor
+ *   nx_packet_*                  tls_packet.c, this library's own pool
+ *   tx_mutex_*                   Exec signal semaphores
+ *   tx_thread_identify           TX_NULL: no thread here is a ThreadX thread
+ *   the entropy pool             src/common/ami_random.c, linked in
+ *
+ * WHY THERE IS NO FAST PATH FOR OUR OWN STACK.  There used to be one, and it
+ * was the only path: a private LVO at -0x360 handed tls.library our
+ * bsdsocket.library's NX_TCP_SOCKET and packet pool, and every other stack got
+ * TLS_ERR_NOSTACK.  What it bought was one copy avoided per record.  What it
+ * cost was a second implementation of every function in this file, the two
+ * libraries having to ship from one build, and the ThreadX baton being held by
+ * the caller's task across a handshake -- which is why crypto68k needed a
+ * yield hook at all.  Going through send() and recv() is one memcpy per record
+ * against arithmetic measured in seconds, and it deletes all three costs.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "tls_internal.h"
 
-#include "crypto68k.h"
-
+#include <exec/semaphores.h>
 #include <proto/exec.h>
 
-static const AmiNetXDuoContext *tls_ctx;
-
-/* --------------------------------------------------------- acquisition --- */
+/* ---------------------------------------------------------- the socket --- */
 
 /*
- * The private LVO, called by hand.  The register assignment is stated in
- * include/aminetxduo/nxcontext.h and implemented in src/bsdsocket/nxcontext.c.
+ * NX_TCP_SOCKET is nx_secure's handle for the transport and it reads three of
+ * its fields directly, so the real structure is embedded rather than faked:
+ *
+ *   nx_tcp_socket_client_type      client or server, chosen at session_start
+ *   nx_tcp_socket_ip_ptr           NX_NULL here, and every read of it in
+ *                                  nx_secure is guarded on that
+ *   nx_tcp_socket_connect_ip       only nxd_ip_version is read, to size the
+ *                                  header reserve a record packet asks for
+ *
+ * The descriptor rides behind it.  tls_transport_open() is what makes the two
+ * one object, so the cast in the two entry points below is sound.
  */
-#ifdef TLSLIB_HOST_TEST
-extern LONG tls_test_obtain_context(APTR socket_base,
-                                    const AmiNetXDuoContext **out);
-#define tls_obtain_context tls_test_obtain_context
-#else
-static LONG tls_obtain_context(APTR socket_base, const AmiNetXDuoContext **out)
-{
-    register APTR                      a6 __asm("a6") = socket_base;
-    register const AmiNetXDuoContext **a0 __asm("a0") = out;
-    register ULONG                     d0 __asm("d0") = AMI_NXD_CONTEXT_MAGIC;
-    register ULONG                     d1 __asm("d1") = AMI_NXD_CONTEXT_VERSION;
-    register LONG                      res __asm("d0");
-    register LONG _clob_d1 __asm("d1");
-    register LONG _clob_a0 __asm("a0");
 
-    __asm __volatile ("jsr a6@(-864:W)"     /* -0x360, AMI_NXD_CONTEXT_LVO */
-                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0)
-                      : "r" (a6), "r" (a0), "r" (d0), "r" (d1)
-                      : "a1", "cc", "memory");
-    return res;
+VOID tls_transport_open(TLSTransport *transport, APTR socket_base, LONG fd,
+                        NX_PACKET_POOL *pool, BOOL server, BOOL ipv6)
+{
+    tls_bzero(transport, sizeof(*transport));
+
+    transport->tt_SocketBase = socket_base;
+    transport->tt_Fd         = fd;
+    transport->tt_Pool       = pool;
+
+    transport->tt_Socket.nx_tcp_socket_client_type = server ? NX_FALSE : NX_TRUE;
+    transport->tt_Socket.nx_tcp_socket_ip_ptr      = NX_NULL;
+    transport->tt_Socket.nx_tcp_socket_connect_ip.nxd_ip_version =
+        ipv6 ? NX_IP_VERSION_V6 : NX_IP_VERSION_V4;
 }
-#endif
+
+NX_TCP_SOCKET *tls_transport_socket(TLSTransport *transport)
+{
+    return &transport->tt_Socket;
+}
 
 /*
- * The port only reschedules at ThreadX API boundaries, and the handshake's
- * public-key arithmetic makes no such call, so crypto68k calls this between
- * iterations.  A no-op without the baton, nesting-safe with it.
+ * NetX Duo wait options are timer ticks at NX_IP_PERIODIC_RATE.  WaitSelect()
+ * wants seconds and microseconds, and NX_WAIT_FOREVER wants no timeval at all.
+ * Returns NULL for "block", `store` otherwise.
  */
-static VOID tls_crypto_yield(VOID)
+static const TLSSockTimeval *tls_transport_timeout(ULONG wait_option,
+                                                   TLSSockTimeval *store)
 {
-    const AmiNetXDuoContext *ctx = tls_ctx;
+    ULONG ticks = wait_option;
 
-    if (ctx != NULL)
-    {
-        ctx->nxc_BatonRelease();
-        ctx->nxc_BatonAcquire();
-    }
-}
+    if (ticks == NX_WAIT_FOREVER)
+        return NULL;
 
-LONG tls_netx_bind(APTR socket_base)
-{
-    const AmiNetXDuoContext *ctx = NULL;
+    store->tv_secs  = (LONG)(ticks / NX_IP_PERIODIC_RATE);
+    store->tv_micro = (LONG)(((ticks % NX_IP_PERIODIC_RATE) * 1000000UL) /
+                             NX_IP_PERIODIC_RATE);
 
-    if (socket_base == NULL)
-        return -1;
-
-    /*
-     * A bsdsocket.library built without AMINETXDUO_TLS has no slot at that
-     * offset: the table's (APTR)-1 terminator stops MakeLibrary() before it,
-     * so the jump table's negative region is not that long.
-     */
-    if (((struct Library *)socket_base)->lib_NegSize < (UWORD)(-AMI_NXD_CONTEXT_LVO))
-        return -1;
-
-    if (tls_obtain_context(socket_base, &ctx) != 0)
-        return -1;
-    if (ctx == NULL)
-        return -1;
-
-    /* Checked again here, so a mismatched pair of libraries fails at the bind
-       rather than in the middle of a handshake. */
-    if (ctx->nxc_Magic != AMI_NXD_CONTEXT_MAGIC)
-        return -1;
-    if (ctx->nxc_Version != AMI_NXD_CONTEXT_VERSION)
-        return -1;
-    if (ctx->nxc_Size != (ULONG)sizeof(AmiNetXDuoContext))
-        return -1;
-
-    /* Refreshed on every TLSOpen(): tls.library can stay resident while
-       bsdsocket.library is expunged and reloaded, and its context table lives
-       in the latter's segment.  A failed refresh leaves the previous intact. */
-    tls_ctx         = ctx;
-    c68k_yield_hook = tls_crypto_yield;
-
-    return 0;
-}
-
-const AmiNetXDuoContext *tls_netx_ctx(VOID)
-{
-    return tls_ctx;
-}
-
-/* ------------------------------------------- what nx_secure links against, */
-
-UINT _nx_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
-                         ULONG packet_type, ULONG wait_option)
-{
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
-
-    return tls_ctx->nxc_packet_allocate(pool_ptr, packet_ptr, packet_type,
-                                        wait_option);
-}
-
-UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
-                            ULONG data_size, NX_PACKET_POOL *pool_ptr,
-                            ULONG wait_option)
-{
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
-
-    return tls_ctx->nxc_packet_data_append(packet_ptr, data_start, data_size,
-                                           pool_ptr, wait_option);
-}
-
-UINT _nx_packet_data_extract_offset(NX_PACKET *packet_ptr, ULONG offset,
-                                    VOID *buffer_start, ULONG buffer_length,
-                                    ULONG *bytes_copied)
-{
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
-
-    return tls_ctx->nxc_packet_data_extract_offset(packet_ptr, offset,
-                                                   buffer_start, buffer_length,
-                                                   bytes_copied);
-}
-
-UINT _nx_packet_release(NX_PACKET *packet_ptr)
-{
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
-
-    return tls_ctx->nxc_packet_release(packet_ptr);
+    return store;
 }
 
 UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
                             ULONG wait_option)
 {
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
+    TLSTransport         *transport = (TLSTransport *)(VOID *)socket_ptr;
+    TLSSockTimeval        timeout;
+    const TLSSockTimeval *timeout_ptr;
+    NX_PACKET            *packet = NX_NULL;
+    UINT                  status;
+    LONG                  ready;
+    LONG                  got;
 
-    return tls_ctx->nxc_tcp_socket_receive(socket_ptr, packet_ptr, wait_option);
+    if (socket_ptr == NX_NULL || packet_ptr == NX_NULL)
+        return NX_PTR_ERROR;
+    if (transport->tt_Broken)
+        return NX_NOT_CONNECTED;
+
+    timeout_ptr = tls_transport_timeout(wait_option, &timeout);
+
+    /*
+     * WaitSelect() first and recv() second, never a bare blocking recv():
+     * TLSA_Timeout has to be a ceiling on a peer that goes quiet, and no
+     * bsdsocket.library is required to honour SO_RCVTIMEO.
+     */
+    ready = tls_sock_wait(transport->tt_SocketBase, transport->tt_Fd, FALSE,
+                          timeout_ptr);
+    if (ready == 0)
+        return NX_NO_PACKET;
+    if (ready < 0)
+    {
+        return (tls_sock_errno(transport->tt_SocketBase) == TLS_SOCK_EINTR)
+               ? NX_WAIT_ABORTED : NX_NOT_CONNECTED;
+    }
+
+    status = _nx_packet_allocate(transport->tt_Pool, &packet, NX_RECEIVE_PACKET,
+                                 wait_option);
+    if (status != NX_SUCCESS)
+        return status;
+
+    got = tls_sock_recv(transport->tt_SocketBase, transport->tt_Fd,
+                        packet->nx_packet_prepend_ptr,
+                        (LONG)(packet->nx_packet_data_end -
+                               packet->nx_packet_prepend_ptr));
+
+    if (got <= 0)
+    {
+        LONG err = (got < 0) ? tls_sock_errno(transport->tt_SocketBase) : 0;
+
+        (VOID)_nx_packet_release(packet);
+
+        if (got == 0)
+        {
+            /* A clean FIN.  nx_secure reads NX_NOT_CONNECTED as end of
+               stream, and tls_conn.c turns that into TLS_ERR_CLOSED. */
+            transport->tt_Broken = NX_TRUE;
+            return NX_NOT_CONNECTED;
+        }
+        if (err == TLS_SOCK_EINTR)
+            return NX_WAIT_ABORTED;
+        if (err == TLS_SOCK_EWOULDBLOCK)
+            return NX_NO_PACKET;
+
+        transport->tt_Broken = NX_TRUE;
+        return NX_NOT_CONNECTED;
+    }
+
+    packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + got;
+    packet->nx_packet_length     = (ULONG)got;
+
+    /*
+     * Arrival timing is the one entropy source this library can reach on a
+     * stack that is not ours.  The private LVO used to borrow
+     * bsdsocket.library's pool, which had the SANA-II receive path feeding it;
+     * a record arriving off the wire is the same class of measurement, and it
+     * is what keeps the pool above AMI_RANDOM_INTERNAL_MAX_BITS here.
+     */
+    ami_random_arrival();
+
+    *packet_ptr = packet;
+
+    return NX_SUCCESS;
 }
 
 UINT _nx_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
                          ULONG wait_option)
 {
-    if (tls_ctx == NULL)
-        return NX_NOT_ENABLED;
+    TLSTransport         *transport = (TLSTransport *)(VOID *)socket_ptr;
+    TLSSockTimeval        timeout;
+    const TLSSockTimeval *timeout_ptr;
+    NX_PACKET            *current;
 
-    return tls_ctx->nxc_tcp_socket_send(socket_ptr, packet_ptr, wait_option);
+    if (socket_ptr == NX_NULL || packet_ptr == NX_NULL)
+        return NX_PTR_ERROR;
+    if (transport->tt_Broken)
+        return NX_NOT_CONNECTED;
+
+    timeout_ptr = tls_transport_timeout(wait_option, &timeout);
+
+    for (current = packet_ptr; current != NX_NULL;
+         current = current->nx_packet_next)
+    {
+        const UCHAR *data = current->nx_packet_prepend_ptr;
+        LONG         left = (LONG)(current->nx_packet_append_ptr -
+                                   current->nx_packet_prepend_ptr);
+
+        while (left > 0)
+        {
+            LONG ready;
+            LONG sent;
+
+            ready = tls_sock_wait(transport->tt_SocketBase, transport->tt_Fd,
+                                  TRUE, timeout_ptr);
+            if (ready <= 0)
+            {
+                /*
+                 * A record half on the wire cannot be retried: the peer's
+                 * sequence number has moved.  Say so once and refuse every
+                 * later call rather than corrupt the stream.
+                 */
+                if (data != packet_ptr->nx_packet_prepend_ptr)
+                    transport->tt_Broken = NX_TRUE;
+                return (ready == 0) ? NX_NO_PACKET : NX_NOT_CONNECTED;
+            }
+
+            sent = tls_sock_send(transport->tt_SocketBase, transport->tt_Fd,
+                                 data, left);
+            if (sent > 0)
+            {
+                data += sent;
+                left -= sent;
+                continue;
+            }
+
+            if (sent < 0)
+            {
+                LONG err = tls_sock_errno(transport->tt_SocketBase);
+
+                if (err == TLS_SOCK_EINTR || err == TLS_SOCK_EWOULDBLOCK)
+                    continue;
+            }
+
+            transport->tt_Broken = NX_TRUE;
+            return NX_NOT_CONNECTED;
+        }
+    }
+
+    /* NetX Duo's contract: the stack owns the packet once the send has
+       succeeded, and the caller releases it only on failure. */
+    (VOID)_nx_packet_release(packet_ptr);
+
+    return NX_SUCCESS;
+}
+
+/* ------------------------------------------------------------- mutexes --- */
+
+/*
+ * nx_secure creates exactly one, _nx_secure_tls_protection, and takes it
+ * around every change to the process-wide session list.  Four slots because a
+ * table with a spare is cheaper to reason about than a table that is exactly
+ * full, and because the DTLS half would add a second if it were ever built.
+ *
+ * A table and not an overlay on TX_MUTEX's own storage: nothing here should
+ * depend on ThreadX's structure layout when ThreadX is not linked.
+ *
+ * ObtainSemaphore() is recursive for the owning task and so is a ThreadX mutex
+ * without priority inheritance, so the nesting nx_secure relies on holds.
+ */
+#define TLS_MUTEX_SLOTS 4
+
+typedef struct TLSMutexSlot
+{
+    TX_MUTEX               *tm_Mutex;
+    struct SignalSemaphore  tm_Semaphore;
+} TLSMutexSlot;
+
+static TLSMutexSlot tls_mutex_slots[TLS_MUTEX_SLOTS];
+
+static TLSMutexSlot *tls_mutex_find(TX_MUTEX *mutex_ptr)
+{
+    UINT i;
+
+    for (i = 0; i < TLS_MUTEX_SLOTS; i++)
+    {
+        if (tls_mutex_slots[i].tm_Mutex == mutex_ptr)
+            return &tls_mutex_slots[i];
+    }
+
+    return NULL;
 }
 
 UINT _tx_mutex_create(TX_MUTEX *mutex_ptr, CHAR *name_ptr, UINT inherit)
 {
-    if (tls_ctx == NULL)
-        return TX_NOT_AVAILABLE;
+    TLSMutexSlot *slot = NULL;
+    UINT          i;
 
-    return tls_ctx->nxc_mutex_create(mutex_ptr, name_ptr, inherit);
+    (VOID)name_ptr;
+    (VOID)inherit;
+
+    if (mutex_ptr == TX_NULL)
+        return TX_MUTEX_ERROR;
+
+    Forbid();
+
+    if (tls_mutex_find(mutex_ptr) == NULL)
+    {
+        for (i = 0; i < TLS_MUTEX_SLOTS; i++)
+        {
+            if (tls_mutex_slots[i].tm_Mutex == TX_NULL)
+            {
+                slot = &tls_mutex_slots[i];
+                InitSemaphore(&slot->tm_Semaphore);
+                slot->tm_Mutex = mutex_ptr;
+                break;
+            }
+        }
+    }
+    else
+    {
+        slot = tls_mutex_find(mutex_ptr);
+    }
+
+    Permit();
+
+    return (slot != NULL) ? TX_SUCCESS : TX_NO_MEMORY;
 }
 
 UINT _tx_mutex_delete(TX_MUTEX *mutex_ptr)
 {
-    if (tls_ctx == NULL)
-        return TX_NOT_AVAILABLE;
+    TLSMutexSlot *slot;
 
-    return tls_ctx->nxc_mutex_delete(mutex_ptr);
+    Forbid();
+    slot = tls_mutex_find(mutex_ptr);
+    if (slot != NULL)
+        slot->tm_Mutex = TX_NULL;
+    Permit();
+
+    return (slot != NULL) ? TX_SUCCESS : TX_MUTEX_ERROR;
 }
 
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
-    if (tls_ctx == NULL)
-        return TX_NOT_AVAILABLE;
+    TLSMutexSlot *slot = tls_mutex_find(mutex_ptr);
 
-    return tls_ctx->nxc_mutex_get(mutex_ptr, wait_option);
+    if (slot == NULL)
+        return TX_MUTEX_ERROR;
+
+    if (wait_option == TX_NO_WAIT)
+        return AttemptSemaphore(&slot->tm_Semaphore) ? TX_SUCCESS : TX_NOT_AVAILABLE;
+
+    ObtainSemaphore(&slot->tm_Semaphore);
+
+    return TX_SUCCESS;
 }
 
 UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
 {
-    if (tls_ctx == NULL)
-        return TX_NOT_AVAILABLE;
+    TLSMutexSlot *slot = tls_mutex_find(mutex_ptr);
 
-    return tls_ctx->nxc_mutex_put(mutex_ptr);
+    if (slot == NULL)
+        return TX_MUTEX_ERROR;
+
+    ReleaseSemaphore(&slot->tm_Semaphore);
+
+    return TX_SUCCESS;
 }
 
+/* ------------------------------------------------------------- threads --- */
+
+/*
+ * The one caller in the TLS half is nx_secure_tls_send_record.c, comparing the
+ * answer against the IP thread of the socket's NX_IP.  There is no NX_IP here,
+ * that comparison is guarded on a NX_NULL nx_tcp_socket_ip_ptr, and no task in
+ * this library is a ThreadX thread.  TX_NULL is the truthful answer.
+ */
 TX_THREAD *_tx_thread_identify(VOID)
 {
-    if (tls_ctx == NULL)
-        return TX_NULL;
-
-    return tls_ctx->nxc_thread_identify();
+    return TX_NULL;
 }
 
 /*
- * aminetxduo_tls supplies a relinquish fallback for programs that link the
- * ThreadX core directly.  tls.library does not link that core, and its normal
- * crypto hook is the stronger baton bracket above; provide the symbol only so
- * the shared crypto archive remains linkable.  The fallback is not selected
- * after tls_netx_bind() has installed tls_crypto_yield.
+ * Referenced only by the DTLS half, which is not built.  Defined so that
+ * turning AMINETXDUO_DTLS on is a build that links rather than one that does
+ * not; a millisecond is the smallest thing Delay() can be asked for.
  */
-/*
- * GCC 16.2's m68k analyser invents an uninitialised return value for this
- * VOID wrapper.  Its only path calls another VOID function and then falls off
- * the end, so confine the workaround to the diagnostic's exact source.
- */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
-#endif
-VOID tx_thread_relinquish(VOID)
-{
-    tls_crypto_yield();
-}
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
 UINT _tx_thread_sleep(ULONG timer_ticks)
 {
-    if (tls_ctx == NULL)
-        return TX_NOT_AVAILABLE;
+    tls_delay_ticks(timer_ticks);
 
-    return tls_ctx->nxc_thread_sleep(timer_ticks);
+    return TX_SUCCESS;
+}
+
+/*
+ * crypto68k calls this between iterations of the public-key inner loops.  It
+ * mattered when the caller held the ThreadX baton across a handshake and the
+ * IP thread could not answer the network until the arithmetic finished.  This
+ * library holds no baton: the arithmetic runs on the caller's own task, Exec
+ * preempts it like any other, and the stack is a separate task throughout.
+ */
+VOID tx_thread_relinquish(VOID)
+{
 }
 
 /*
  * nx_secure's `nxe_*` objects reference _tx_thread_current_ptr and two other
- * ThreadX *data* symbols, which cannot be forwarded through a table.  Defining
- * this wrapper keeps that archive member, and those symbols, out of the link.
+ * ThreadX *data* symbols, which no definition here can supply.  Defining this
+ * wrapper keeps that archive member, and those symbols, out of the link.
  */
 UINT _nxe_secure_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
                                            NX_SECURE_X509_CERT *certificate)
@@ -247,53 +400,4 @@ UINT _nxe_secure_tls_local_certificate_add(NX_SECURE_TLS_SESSION *tls_session,
         return NX_PTR_ERROR;
 
     return _nx_secure_tls_local_certificate_add(tls_session, certificate);
-}
-
-/* --------------------------------------------- the machine's entropy pool, */
-
-int ami_random_rand(void)
-{
-    if (tls_ctx == NULL)
-        return 0;
-
-    return tls_ctx->nxc_random_rand();
-}
-
-/*
- * NX_CRYPTO_RBG, where the ECDHE private key comes from.  Not
- * ami_random_rand() in a loop: that one clears bit 31 to keep rand()'s
- * contract, and the gap then lands in every 32-bit word of the key.
- */
-unsigned int ami_crypto_rbg(unsigned int bits, unsigned char *result)
-{
-    if (tls_ctx == NULL)
-        return NX_PTR_ERROR;
-
-    tls_ctx->nxc_random_bytes(result, (ULONG)((bits + 7u) >> 3));
-    return 0u;
-}
-
-VOID ami_random_add_entropy(const void *data, ULONG length, ULONG credit_bits)
-{
-    if (tls_ctx == NULL)
-        return;
-
-    tls_ctx->nxc_random_add_entropy(data, length, credit_bits);
-}
-
-ULONG ami_random_entropy_bits(VOID)
-{
-    if (tls_ctx == NULL)
-        return 0;
-
-    return tls_ctx->nxc_random_entropy_bits();
-}
-
-/*
- * bsdsocket.library seeded the pool at its own OpenLibrary() and this library
- * only runs behind an open one, so there is nothing to do.  The symbol exists
- * because src/tls/tls_amiga.c calls it.
- */
-VOID ami_random_init(VOID)
-{
 }

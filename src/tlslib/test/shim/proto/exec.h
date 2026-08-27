@@ -18,8 +18,15 @@
 #include <exec/libraries.h>
 #include <exec/semaphores.h>
 
+VOID            InitSemaphore(struct SignalSemaphore *sem);
 VOID            ObtainSemaphore(struct SignalSemaphore *sem);
 VOID            ReleaseSemaphore(struct SignalSemaphore *sem);
+LONG            AttemptSemaphore(struct SignalSemaphore *sem);
+
+/* tls_netx.c brackets the mutex table with these; the tests make them
+   counters, because a path that leaves the machine in Forbid() is a hang. */
+VOID            Forbid(VOID);
+VOID            Permit(VOID);
 
 APTR            AllocVec(ULONG size, ULONG requirements);
 VOID            FreeVec(APTR memory);

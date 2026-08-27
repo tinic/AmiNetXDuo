@@ -18,4 +18,8 @@ VOID Close(BPTR fh);
 LONG Read(BPTR fh, APTR buffer, LONG length);
 LONG Write(BPTR fh, const void *buffer, LONG length);
 
+/* tls_runtime.c only, for the NetX Duo tick conversion nothing on the host
+   waits on. */
+VOID Delay(LONG ticks);
+
 #endif

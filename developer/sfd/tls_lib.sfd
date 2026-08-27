@@ -1,0 +1,42 @@
+==id $Id: tls_lib.sfd,v 1.1 2026-08-27 $
+==copyright Copyright (c) 2026 AmiNetXDuo contributors.  SPDX-License-Identifier: MIT
+==libname tls
+* "tls.library", TLS 1.2 and 1.3 over a bsdsocket.library descriptor.
+* Bias 30 puts the first entry at -0x01e.  Entry n is at -(30 + 6n), and
+* src/tlslib/tls_vectors.c is the authority for the table.
+*
+* WHY THIS FILE EXISTS.  The library's entry points were GCC extended-asm
+* stubs in <aminetxduo/tlslib.h> and nothing else, so SAS/C, vbcc, StormC and
+* Aztec could not call the library at all -- no .fd, no SFD, no pragmas.  This
+* is the description every one of those compilers reads, through the headers
+* tools/gen-developer.sh generates from it.
+*
+* The tags, the error codes, struct TLSInfo and struct TLSSelect stay in
+* <aminetxduo/tlslib.h>, which is included below and shipped in the drawer.
+* Same split as bsdsocket.library's: data in aminetxduo/, vectors here.
+*
+* Generated headers come from tools/gen-developer.sh, do not edit them.
+==base _TLSBase
+==bias 30
+==public
+==include <exec/types.h>
+==include <utility/tagitem.h>
+==include <aminetxduo/tlslib.h>
+* Since library version 1.
+struct TLSConnection *TLSOpenA(APTR socketBase, LONG sock, const struct TagItem * tags) (a0,d0,a1)
+==varargs
+struct TLSConnection *TLSOpenTags(APTR socketBase, LONG sock, ULONG tag1, ...) (a0,d0,a1)
+VOID TLSClose(struct TLSConnection * conn) (a0)
+LONG TLSRead(struct TLSConnection * conn, APTR buffer, LONG length) (a0,a1,d0)
+LONG TLSWrite(struct TLSConnection * conn, CONST_APTR buffer, LONG length) (a0,a1,d0)
+LONG TLSPending(struct TLSConnection * conn) (a0)
+LONG TLSInfo(struct TLSConnection * conn, struct TLSInfo * info) (a0,a1)
+CONST_STRPTR TLSErrorString(LONG code) (d0)
+LONG TLSWaitSelect(struct TLSSelect * sel) (a0)
+* Since library version 2.  OpenLibrary("tls.library", 2) before calling these.
+LONG TLSRandom(APTR buffer, LONG length) (a0,d0)
+LONG TLSBuffered(struct TLSConnection * conn) (a0)
+* Since library version 3.  RFC 7301, and OpenLibrary(..., 3).
+LONG TLSGetALPN(struct TLSConnection * conn, APTR buffer, LONG size) (a0,a1,d0)
+* Next free slot: -0x060, entry [11].
+==end
