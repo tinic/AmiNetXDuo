@@ -229,6 +229,14 @@ skip() { SKIPPED+=("$1"); printf '\033[33m-- SKIPPED: %s\033[0m\n' "$1" >&2; }
 # ------------------------------------------------------------ submodules ----
 
 stage_submodules() {
+    # .git/modules/<name>/config keeps the url it was cloned with, so a
+    # checkout made before .gitmodules moved third_party/threadx from
+    # eclipse-threadx to our fork still fetches upstream, and every pin of
+    # ours reads as an object no ref reaches.  Cheap, offline, idempotent;
+    # unconditional because the headers being present is exactly the case
+    # where nothing else would ever fix it.
+    git submodule sync --recursive > /dev/null 2>&1 || true
+
     if [ ! -f third_party/threadx/common/inc/tx_api.h ] ||
        [ ! -f third_party/netxduo/common/inc/nx_api.h ]; then
         hr "submodules"
