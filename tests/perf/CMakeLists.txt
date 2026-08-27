@@ -344,6 +344,7 @@ if(CMAKE_CROSSCOMPILING)
         rfb_planes=rfb020_planes
         rfb_pal_colours=rfb020_pal_colours
         rfb_encode_band=rfb020_encode_band
+        rfb_scroll_probe_due=rfb020_scroll_probe_due
         rfb_packbits=rfb020_packbits
         rfb_unpackbits=rfb020_unpackbits
         rfb_shadow_size=rfb020_shadow_size
@@ -367,6 +368,7 @@ if(CMAKE_CROSSCOMPILING)
         rfb_planes=rfbo2_planes
         rfb_pal_colours=rfbo2_pal_colours
         rfb_encode_band=rfbo2_encode_band
+        rfb_scroll_probe_due=rfbo2_scroll_probe_due
         rfb_packbits=rfbo2_packbits
         rfb_unpackbits=rfbo2_unpackbits
         rfb_shadow_size=rfbo2_shadow_size
@@ -386,6 +388,7 @@ if(CMAKE_CROSSCOMPILING)
         rfb_planes=rfb220_planes
         rfb_pal_colours=rfb220_pal_colours
         rfb_encode_band=rfb220_encode_band
+        rfb_scroll_probe_due=rfb220_scroll_probe_due
         rfb_packbits=rfb220_packbits
         rfb_unpackbits=rfb220_unpackbits
         rfb_shadow_size=rfb220_shadow_size

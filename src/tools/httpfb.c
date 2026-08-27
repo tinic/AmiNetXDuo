@@ -47,13 +47,23 @@
 #define FB_STAT_EVERY       32
 
 /* The floor between grabs, in fiftieths.  A floor rather than a frame rate: the
-   point past which grabbing again cannot produce anything a viewer can see. */
+   point past which grabbing again cannot produce anything a viewer can see.
+   Measured from where a pass BEGAN and not from where it ended, so a pass that
+   already took a fiftieth has served it.  Charged after the pass it was a flat
+   20 ms the pass could not work off, and a cheaper pass then bought idle
+   instead of a sooner frame: 24% of a 75% cap, with the latency to match. */
 #define FB_GRAB_FLOOR       1
 
 /* The share of the machine this may take, as the divisor of the idle owed after
    a frame: a frame costing T ticks is followed by at least T/3 of nothing, so
    the console settles at 75%.  Enforced against measured cost, not a rate. */
 #define FB_IDLE_DIVISOR     3
+
+/* How much idle the duty accounting may bank, in fiftieths.  FB_GRAB_FLOOR can
+   hand back more idle than the share owes, and that has to be credited or the
+   console never notices it is already under its cap.  Bounded, because a
+   session that sat still for a minute must not then run flat out. */
+#define FB_IDLE_BANK        2
 
 /* How often a `refresh` can force a full frame, in fiftieths.  The first ask is
    answered at once; the floor applies to the second and later inside a second,
@@ -135,6 +145,11 @@ static UBYTE          *fb_tx;
    fetched whole once a frame into Fast RAM and the encoder reads that. */
 static UBYTE          *fb_stage;
 static ULONG           fb_stage_len;
+/* Whether the pass in flight took the whole frame at its first band.  It does
+   that only when the encoder is going to look for a scroll, because the probe
+   samples rows the height of the screen; every other pass reads the band it is
+   about to encode and nothing else.  See fb_grab_frame(). */
+static UBYTE           fb_stage_whole;
 static ULONG           fb_shadow_len;
 static ULONG           fb_scratch_len;
 static ULONG           fb_tx_cap;
@@ -181,6 +196,10 @@ static ULONG           fb_pass_ticks;
 /* And what the pass in progress has cost so far, since it is charged a band
    at a time. */
 static ULONG           fb_pass_acc;
+
+/* When the pass in flight began, which is what FB_GRAB_FLOOR is measured from.
+   Zero between passes; a tick of 0 is nudged to 1 by its writer. */
+static ULONG           fb_pass_t0;
 
 /* Tile rows in a band.  Four rows bounds one uninterrupted encode at an eighth
    of a 640x480 screen. */
@@ -1254,7 +1273,7 @@ enum
    must not call Intuition.  What leaves is geometry, palette, units, planes. */
 static int fb_examine(struct Screen *sc, const FbGeometry *want,
                       FbGeometry *now, const UBYTE **planes,
-                      BOOL *palette_moved, BOOL locked)
+                      BOOL *palette_moved, BOOL locked, BOOL pass_start)
 {
     UWORD plane;
     int   what;
@@ -1274,8 +1293,15 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
 
     fb_display_units(sc);
 
-    *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
-                                     fb_colours(want), fb_pal);
+    /* Once a screen pass and not once a band.  A depth-8 ColorMap is sixteen
+       GetRGB32() calls, and colours that move mid-pass restart the pass in any
+       case, so asking again for every band is the same answer at eight times
+       the price.  What it costs is one pass of the old palette under new
+       pixels, against a pass that was going to be reissued anyway. */
+    *palette_moved = pass_start
+                     ? fb_read_palette(sc->ViewPort.ColorMap,
+                                       fb_colours(want), fb_pal)
+                     : FALSE;
 
     /* Colours before pixels, and the encode is skipped entirely on the pass
        that finds them moved. */
@@ -1310,10 +1336,12 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
     *palette_moved = FALSE;
     *encoded = -1L;                     /* nothing encoded this pass */
 
-    /* A band after the first of a chunky pass never touches the screen: the
-       fetch took the whole frame into fb_stage once and every band encodes
-       that copy.  The planar path has no copy and holds the screen for each. */
-    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format))
+    /* A band after the first of a chunky pass that took the whole frame never
+       touches the screen: the fetch holds one moment of it and every band
+       encodes that copy.  A pass that read a band at a time goes the long way
+       round, because its pixels are not in fb_stage yet.  The planar path has
+       no copy at all and holds the screen for each band. */
+    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) && fb_stage_whole)
     {
         const UBYTE *stage = fb_stage;
 
@@ -1334,7 +1362,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
 
     if (pub || fb_listed(sc))
     {
-        rc = fb_examine(sc, want, now, planes, palette_moved, pub);
+        rc = fb_examine(sc, want, now, planes, palette_moved, pub,
+                        (BOOL)(ty0 == 0));
 
         /* Only on a screen that is held, and see above for why.  Attempted and
            never waited for, because the lock is held for as long as a mouse
@@ -1380,10 +1409,41 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format))
         {
-            /* Once a screen pass and not once a band.  The whole frame in
-               contiguous rows is the shape a card reads back fastest, and
-               the copy holds one moment of the screen for the whole pass. */
-            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
+            UWORD ry0;
+            UWORD rrows;
+
+            /* What the pass needs, decided once at its first band.  The scroll
+               probe samples rows the height of the screen, so a pass that is
+               going to run it needs the whole frame in one moment; a pass that
+               is not needs the band it is about to encode and nothing else.
+               At 640x480 truecolour that is 80 KB of Zorro against 600 KB, and
+               the band it reads is the one the encode is about to look at
+               rather than a copy taken up to a pass ago. */
+            if (ty0 == 0)
+                fb_stage_whole =
+                    (UBYTE)(rfb_scroll_probe_due(&fb_enc) ? 1 : 0);
+
+            if (fb_stage_whole)
+            {
+                ry0   = 0;
+                rrows = want->height;
+            }
+            else
+            {
+                ULONG top = (ULONG)ty0 * (ULONG)HTTP_FB_TILE_H;
+                ULONG bot = (ULONG)ty1 * (ULONG)HTTP_FB_TILE_H;
+
+                if (bot > (ULONG)want->height)
+                    bot = (ULONG)want->height;
+
+                ry0   = (UWORD)top;
+                rrows = (UWORD)((bot > top) ? (bot - top) : 0UL);
+            }
+
+            if (rrows == 0)
+                rc = FB_GRAB_UNREADABLE;
+            else if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort,
+                                   fb_stage, ry0, rrows))
                 planes[0] = fb_stage;
             else
                 rc = FB_GRAB_UNREADABLE;
@@ -1437,6 +1497,7 @@ static VOID fb_free_buffers(VOID)
     fb_shadow = NULL;
     fb_stage = NULL;
     fb_stage_len = 0;
+    fb_stage_whole = 0;
     fb_tx_cap = 0;
     fb_tx_len = 0;
     fb_tx_sent = 0;
@@ -2075,7 +2136,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
             ilock = LockIBase(0);
 
         if ((pub || fb_listed(sc)) &&
-            fb_examine(sc, &g, &again, planes, &moved, pub) == FB_GRAB_OK)
+            fb_examine(sc, &g, &again, planes, &moved, pub,
+                       TRUE) == FB_GRAB_OK)
             fb_want_pal = 1;
 
         if (!pub)
@@ -2103,6 +2165,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_band_ty0   = 0;
     fb_pass_ticks = 0;
     fb_pass_acc   = 0;
+    fb_pass_t0    = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2434,9 +2497,12 @@ BOOL http_fb_slice(ULONG now)
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
-        /* The floor stands only until the frame this pass produces has been
-           sent and its real cost is known.  http_fb_write() replaces it. */
-        fb_next_tick = tick + ((fb_band_ty0 == 0) ? (ULONG)FB_GRAB_FLOOR : 0UL);
+        /* Nothing is owed until the pass ends and its real cost is known;
+           http_fb_write() is what sets the next one.  No floor here: added at
+           the first band it fell between that band and the second, so every
+           banded pass carried a 20 ms stall one band in -- which is the one
+           place the floor cannot be about a screen nobody drew on. */
+        fb_next_tick = tick;
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
 
@@ -2445,6 +2511,14 @@ BOOL http_fb_slice(ULONG now)
         fb_frame_t0 = tick;
         if (fb_frame_t0 == 0UL)
             fb_frame_t0 = 1UL;          /* 0 means no frame is in flight */
+
+        /* And the pass's own, which is what the floor is measured from. */
+        if (fb_band_ty0 == 0)
+        {
+            fb_pass_t0 = tick;
+            if (fb_pass_t0 == 0UL)
+                fb_pass_t0 = 1UL;       /* 0 means no pass is in flight */
+        }
     }
 
     /* gt= is the rest of the grab; et= is the pass that reads the planes. */
@@ -2631,6 +2705,7 @@ BOOL http_fb_write(ULONG now)
                three rounds wrong either way.  What was granted is taken off. */
             ULONG owed;
             ULONG idle;
+            ULONG resume;
 
             fb_busy_ticks += cost;
             fb_pass_acc += cost;
@@ -2649,15 +2724,44 @@ BOOL http_fb_write(ULONG now)
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
-            fb_idle_given += idle;
+            resume = done + idle;
 
-            /* The floor is about not re-reading a screen nobody drew on,
-               so it belongs between screen passes and not between the
-               bands of one: mid-pass it would add a tick per band. */
-            if (fb_band_ty0 == 0 && idle < (ULONG)FB_GRAB_FLOOR)
-                idle = (ULONG)FB_GRAB_FLOOR;
+            /* The floor is about not re-reading a screen nobody drew on, and
+               that is a floor on how often a PASS starts.  Measured from where
+               this one began, so a pass that already took a fiftieth owes
+               nothing and a pass that came in under one waits out the rest.
+               Added to the end instead it was a flat 20 ms whatever the pass
+               cost, which is a cheaper pass turning into a later frame.
 
-            fb_next_tick = done + idle;
+               As a remainder and not as an instant, because the clock goes
+               back to zero at midnight: a pass that straddles that has a start
+               later than its end, and a deadline built from it would be a day
+               away.  A wrap counts as nothing served, which costs one pass a
+               day an extra 20 ms. */
+            if (fb_pass_t0 != 0UL)
+            {
+                ULONG since = (done >= fb_pass_t0) ? (done - fb_pass_t0) : 0UL;
+
+                if (since < (ULONG)FB_GRAB_FLOOR &&
+                    (ULONG)FB_GRAB_FLOOR - since > idle)
+                    resume = done + ((ULONG)FB_GRAB_FLOOR - since);
+            }
+            fb_pass_t0 = 0;
+
+            /* Credited with what is really being handed back and not with what
+               the share asked for, floor included, so the accounting can see
+               it is already under the cap.  Banked no further than
+               FB_IDLE_BANK past what is owed. */
+            {
+                ULONG gave = (resume > done) ? (resume - done) : 0UL;
+                ULONG bank = owed + (ULONG)FB_IDLE_BANK;
+
+                fb_idle_given += gave;
+                if (fb_idle_given > bank)
+                    fb_idle_given = bank;
+            }
+
+            fb_next_tick = resume;
             if (fb_next_tick == 0UL)
                 fb_next_tick = 1UL;
         }

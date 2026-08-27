@@ -709,6 +709,30 @@ static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
     return dirty;
 }
 
+/* Enough moved last frame for something to be scrolling.  Under it nothing can
+ * be, and the backoff is not spent on a pass that was never going to look. */
+static int rfb_scroll_maybe(const rfb_encoder *e)
+{
+    return (e->last_dirty >= e->scroll.busy_tiles) || e->last_copy;
+}
+
+/* Whether the next band 0 will look for a scroll.  Exported because the probe
+ * samples rows the whole height of the screen, so a caller that reads its
+ * pixels off a graphics card has to know whether this pass needs the frame in
+ * one moment or only the band it is about to encode.  It answers the state as
+ * it stands and changes none of it: the backoff is spent by the encode. */
+int rfb_scroll_probe_due(const rfb_encoder *e)
+{
+    if (!e || !(e->flags & RFB_F_COPYRECT))
+        return 0;
+    if (!(e->flags & RFB_F_SCROLL_ADAPTIVE))
+        return 1;
+    if (!rfb_scroll_maybe(e))
+        return 0;
+
+    return e->backoff_left ? 0 : 1;
+}
+
 static int rfb_detect_scroll(rfb_encoder *e, const rfb_u8 *src, rfb_copy *cp)
 {
     const rfb_u32 bpr = e->g.bytes_per_row;
@@ -959,16 +983,15 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
     rfb_put16(&o, e->seq++);
 
     if (first && (e->flags & RFB_F_COPYRECT)) {
-        int probe = 1;
-        if (e->flags & RFB_F_SCROLL_ADAPTIVE) {
-            /* Nothing much moved last frame, so nothing can be scrolling. */
-            probe = (e->last_dirty >= e->scroll.busy_tiles) || e->last_copy;
-            /* The backoff doubles after each miss and resets on a hit. */
-            if (probe && e->backoff_left) {
-                e->backoff_left--;
-                probe = 0;
-            }
-        }
+        int probe = rfb_scroll_probe_due(e);
+
+        /* The backoff doubles after each miss and resets on a hit.  Spending
+         * a unit of it is the one thing rfb_scroll_probe_due() must not do,
+         * so the pass it refused for the backoff spends it here. */
+        if (!probe && (e->flags & RFB_F_SCROLL_ADAPTIVE) && e->backoff_left &&
+            rfb_scroll_maybe(e))
+            e->backoff_left--;
+
         if (probe) {
             rfb_copy cp;
             if (rfb_detect_scroll(e, planes[0], &cp)) {
