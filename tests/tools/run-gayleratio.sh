@@ -42,9 +42,13 @@
 # spins the caller's own iteration count is the longer of the two and the wait
 # is the old counted loop, which is every arm here.
 #
-# WHAT REMAINS UNPROVEN ON REAL HARDWARE: that a 300 ms pc_settle() on a
-# machine at 25600 spins per line is 300 ms and not 3.  Nothing in this file
-# can answer it; an accelerated A1200 with a PC Card in the socket can.
+# WHAT THIS FILE CANNOT ANSWER, AND WHAT CAN: that a 300 ms pc_settle() on a
+# machine at 25600 spins per line is 300 ms and not 3.  No emulated arm reaches
+# the ratio.  THE MACHINE THAT DOES EXISTS AND IS ON THE LAN -- amiga-1200
+# (192.168.1.219), a PiStorm32-accelerated A1200 with a 3c589 in the PCMCIA
+# socket -- and tools/hwrun.sh drives it.  Nobody is to write "there is no
+# accelerated machine here" again; run CheckNetDevice on it and read the
+# spins-per-raster-line figure instead.
 #
 # SPDX-License-Identifier: MIT
 
