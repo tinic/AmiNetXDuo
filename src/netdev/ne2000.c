@@ -72,10 +72,19 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
 #endif
 
+/*
+ * Overridable, the same way el3.c's EL3_RAW_GET is and for the same reason:
+ * src/netdev/test/test_netdev_ne2000.c includes this file whole and puts a
+ * chip behind these four.  The word-read path itself is not what that test
+ * drives -- the arithmetic is a big-endian fact and test_netdev_bus.c is where
+ * it is pinned -- so the register file it models is indexed, not addressed.
+ */
+#ifndef NIC_GET
 #define NIC_GET(nic, reg)       netdev_bus_r8(&(nic)->bus, (reg))
 #define NIC_PUT(nic, reg, val)  netdev_bus_w8(&(nic)->bus, (reg), (UBYTE)(val))
 #define ASIC_GET(nic, reg)      netdev_bus_ra8(&(nic)->bus, (reg))
 #define ASIC_PUT(nic, reg, val) netdev_bus_wa8(&(nic)->bus, (reg), (UBYTE)(val))
+#endif
 
 #define NE2000_RESET_STATUS_WAIT_US  10000u
 #define NE2000_RESET_STATUS_SPINS      100u

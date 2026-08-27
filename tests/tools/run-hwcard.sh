@@ -39,6 +39,24 @@
 #              the row was a guru on this card.  A guru is not a message from
 #              here: it is a machine that stops answering ICMP and never
 #              comes back, and both halves are reported.
+#   probeorder does an NE2000 clone that answers only 16-bit cycles come up on
+#              a WARM probe?  NOT IN THE DEFAULT SET and not about the 3c589:
+#              it is the CNet16 question.  The NE2000 reset port is register
+#              31, which is odd, and ne2000_probe_reset() strobes it by
+#              READING it -- a cycle such a card does not answer -- so the
+#              chip is not reset and the command register readback that
+#              follows refuses the card before the word-read probe written
+#              for it is reached.  A COLD BOOT HIDES IT: the chip powers up
+#              with CR at $21 anyway.  This arm therefore takes the probe
+#              record twice, once as booted and once after NetShutdown and
+#              AddNetInterface, and the second one is the warm case.  It
+#              needs -r for the same reason the shutdown arm does.
+#
+#                  tests/tools/run-hwcard.sh -C pcmcia -a probeorder \
+#                      -A <machine> -r <the command that starts httpd>
+#
+#              src/netdev/test/test_netdev_ne2000.c proves the driver's half
+#              of this on a host.  This is the half only the card can answer.
 #
 # ABSENCE IS NOT A FAULT.  The A1200 is usually off.  RESULT=skip and exit 3.
 #
@@ -93,8 +111,9 @@ has_arm() { case ",$ARMS," in *",$1,"*) return 0 ;; esac; return 1; }
 
 for a in ${ARMS//,/ }; do
     case "$a" in
-        identity|payload|overruns|shutdown) ;;
-        *) echo "no such arm: $a (identity, payload, overruns, shutdown)" >&2
+        identity|payload|overruns|shutdown|probeorder) ;;
+        *) echo "no such arm: $a (identity, payload, overruns, shutdown," \
+                "probeorder)" >&2
            exit 2 ;;
     esac
 done
@@ -189,6 +208,12 @@ SPEC="$OUT/payspec.txt"
     echo "ShowNetStatus"
     echo "netstat -s"
 } >> "$CMDS"
+
+# The probe record as the machine booted with it.  RAW, because the readable
+# form is prose and a harness that greps prose is a harness that stops
+# noticing when the prose is reworded.  RAW prints one line per step:
+#   NN. code <n> card <n> value $xxxxxxxx
+has_arm probeorder && echo "CheckNetDevice RAW" >> "$CMDS"
 
 # ------------------------------------------------------- the payload arm --
 
@@ -516,6 +541,63 @@ fi
 
 # ------------------------------------------------------ shutdown --
 
+# ----------------------------------------------------- probeorder --
+#
+# The COLD half, read out of phase A.  Every value is reported whatever it
+# says: which of the two readings the command register passed on is the whole
+# question, and a run that only printed a verdict would throw it away.
+
+raw_last() {
+    sed -n "s/^ *[0-9]*\. code $2 card [-0-9]* value \\\$\([0-9a-fA-F]*\)\$/\1/p" \
+        "$1" | tail -1
+}
+raw_count() {
+    sed -n "s/^ *[0-9]*\. code $2 card [-0-9]* value \\\$[0-9a-fA-F]*\$/x/p" \
+        "$1" | wc -l | tr -d ' '
+}
+
+# include/aminetxduo/anxdiag.h.  Named here because a number in a grep is a
+# number nobody can check.
+D_ATTACH_OK=13
+D_ATTACH_FAIL=14
+D_GETODD=18
+D_CR_READ=20
+D_ODD_PLAIN=26
+D_ODD_WORD=27
+D_CR_RETRY=76
+
+probe_report() {          # <file> <tag>
+    local f="$1" tag="$2"
+
+    echo "probe_${tag}_steps=$(grep -cE '^ *[0-9]+\. code ' "$f" || true)"
+    echo "probe_${tag}_attached=$(raw_count "$f" "$D_ATTACH_OK")"
+    echo "probe_${tag}_refused=$(raw_count "$f" "$D_ATTACH_FAIL")"
+    echo "probe_${tag}_why=$(raw_last "$f" "$D_ATTACH_FAIL")"
+    echo "probe_${tag}_cr_reads=$(raw_count "$f" "$D_CR_READ")"
+    echo "probe_${tag}_cr_last=$(raw_last "$f" "$D_CR_READ")"
+    echo "probe_${tag}_cr_retry=$(raw_count "$f" "$D_CR_RETRY")"
+    echo "probe_${tag}_getodd=$(raw_last "$f" "$D_GETODD")"
+    echo "probe_${tag}_odd_plain=$(raw_count "$f" "$D_ODD_PLAIN")"
+    echo "probe_${tag}_odd_word=$(raw_count "$f" "$D_ODD_WORD")"
+}
+
+if has_arm probeorder; then
+    [ -n "$RESTART" ] || {
+        echo "probeorder_arm=unwired"
+        fail "the probeorder arm needs -r for the same reason the shutdown
+       arm does: the warm probe is taken after NetShutdown, which stops the
+       httpd the report comes back through"
+    }
+    if grep -qE '^ *[0-9]+\. code ' "$REPORT"; then
+        probe_report "$REPORT" cold
+        pass "the cold probe record came back"
+    else
+        echo "probe_cold_steps=0"
+        fail "CheckNetDevice RAW printed no steps in phase A, so there is no
+       probe record to compare the warm one against"
+    fi
+fi
+
 if has_arm shutdown; then
     [ -n "$RESTART" ] || {
         echo "shutdown_arm=unwired"
@@ -525,7 +607,7 @@ if has_arm shutdown; then
     }
 fi
 
-if has_arm shutdown && [ -n "$RESTART" ]; then
+if { has_arm shutdown || has_arm probeorder; } && [ -n "$RESTART" ]; then
     CMDS_B="$OUT/commands-shutdown.txt"
     {
         echo "netstat -i"
@@ -533,6 +615,10 @@ if has_arm shutdown && [ -n "$RESTART" ]; then
         echo "AddNetInterface $IFACE"
         echo "wait 20"
         echo "netstat -i"
+        # THE WARM PROBE.  NetShutdown let the device go and AddNetInterface
+        # claimed the slot again, so this record is a second claim in the same
+        # power cycle -- which is the condition a cold boot hides.
+        has_arm probeorder && echo "CheckNetDevice RAW"
         echo "&$RESTART"
     } > "$CMDS_B"
 
@@ -543,8 +629,30 @@ if has_arm shutdown && [ -n "$RESTART" ]; then
         > "$OUT/phaseB.txt" 2>&1 || RC_B=$?
     sed 's/^/  /' "$OUT/phaseB.txt"
 
+    if has_arm probeorder; then
+        BREPORT="$OUT/phaseB/tools.txt"
+        if [ -f "$BREPORT" ] && grep -qE '^ *[0-9]+\. code ' "$BREPORT"; then
+            probe_report "$BREPORT" warm
+            if [ "$(raw_count "$BREPORT" "$D_ATTACH_OK")" != 0 ]; then
+                pass "the card attached on the WARM claim, which is the claim
+      that used to refuse it"
+            else
+                fail "the card did NOT attach on the warm claim.  probe_warm_why
+      names the reason: 1 is the command register, which is the defect this
+      arm exists for and means the retry did not recover it"
+            fi
+        else
+            echo "probe_warm_steps=0"
+            fail "no warm probe record came back, so the arm answered nothing"
+        fi
+    fi
+
     RET_ICMP=$(sed -n 's/^return_icmp=//p' "$OUT/phaseB.txt" | tail -1)
     RET_HTTP=$(sed -n 's/^return_http=//p' "$OUT/phaseB.txt" | tail -1)
+
+    if ! has_arm shutdown; then
+        : # the phase ran only for the warm probe; the return is not asserted
+    else
     echo "shutdown_return_icmp=${RET_ICMP:-unknown}"
     echo "shutdown_return_http=${RET_HTTP:-unknown}"
 
@@ -566,6 +674,7 @@ if has_arm shutdown && [ -n "$RESTART" ]; then
         fail "the machine is alive -- it answers ICMP -- and did not serve
        HTTP again within $RETURNWAIT s.  That is not a guru: the stack or
        httpd did not come back up"
+    fi
     fi
 fi
 

@@ -466,10 +466,34 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  The card is a MULTIFUNCTION card: its CIS has a\n"
             "  CISTPL_LONGLINK_MFC tuple naming %lu function chain(s).\n"
             "  card.resource's CopyTuple() follows CISTPL_LONGLINK_A and\n"
-            "  CISTPL_LONGLINK_C and no other link, so the network function's\n"
-            "  own configuration entries are not reachable through it and\n"
-            "  everything read above came from the shared chain.  This card\n"
-            "  cannot be configured by this driver.\n", v);
+            "  CISTPL_LONGLINK_C and no other link, so none of those chains\n"
+            "  is reachable through it and the driver read the CIS itself.\n",
+            (v >> 16) & 0xffffUL);
+        if ((v & 0xffffUL) == 0)
+        {
+            say("  That walk found no LAN function in them.\n");
+            return;
+        }
+        say("  That walk reached a LAN function, and everything below came\n"
+            "  out of that function's own chain.\n");
+        return;
+    case ANXDIAG_PC_MFCFUNC:
+        say("  Its CIS chain starts at CIS offset $%06lx and states\n"
+            "  CISTPL_FUNCID %lu.\n", v & 0x00ffffffUL, (v >> 24) & 0xffUL);
+        return;
+    case ANXDIAG_PC_MFCNOLAN:
+        say("  The shared chain says the card is multifunction and no chain\n"
+            "  of it is a LAN function this driver can configure: either no\n"
+            "  function states CISTPL_FUNCID 6, or the one that does offers\n"
+            "  no I/O configuration a byte-wide register path can drive.\n"
+            "  The card is refused here rather than half-configured.\n");
+        return;
+    case ANXDIAG_PC_MFCIOBASE:
+        say("  The function was TOLD where to decode: $%04lx was written\n"
+            "  into its IOBASE_0 and IOBASE_1 configuration registers, so\n"
+            "  the card uses that base and not the one its own CIS named.\n"
+            "  A single-function card has no such registers and is placed by\n"
+            "  the entry's own window instead.\n", v);
         return;
     case ANXDIAG_PC_IOMODE:
         say("  The socket was put into I/O mode (CardMiscControl $%02lx).\n",
@@ -495,6 +519,19 @@ static VOID cnd_step(const AnxDiagStep *st)
         /* Bit 6 is the COR's level-mode interrupt request, left clear: Gayle
            reports the PC Card interrupt as an edge whatever the card asked
            for. Named here so the byte does not have to be looked up. */
+        if ((v & 0x01UL) != 0)
+        {
+            /* A multifunction card's COR is not the configuration index:
+               bits 2..0 are the three enables and only bits 5..3 of the
+               index survive. */
+            say("  The byte written there was $%02lx, a MULTIFUNCTION card's\n"
+                "  option register: index bits $%02lx, function enable,\n"
+                "  interrupt enable%s%s.\n",
+                v, v & 0x38UL,
+                (v & 0x02UL) ? ", address decode" : "",
+                (v & 0x40UL) ? ", level-mode interrupt" : "");
+            return;
+        }
         say("  The byte written there was $%02lx: configuration index %lu,\n"
             "  and bit 6 clear, so the card was not asked for a level-mode\n"
             "  interrupt.\n",

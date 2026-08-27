@@ -362,3 +362,418 @@ UWORD netdev_cis_io_off(const NetdevCisEntry *e, UWORD assumed)
 
     return e->io_base;
 }
+
+/* ------------------------------------------------------ the raw CIS walk -- */
+
+/*
+ * A cursor over the card's CIS, one tuple at a time.
+ *
+ * Every read is bounded by the source's size, so a link that points past the
+ * attribute window ends the walk rather than reading the card's I/O space.
+ * CISTPL_NULL is a pad byte with no length byte after it and is skipped;
+ * CISTPL_END ends the chain.  The tuple count is bounded because a CIS that
+ * links to itself would otherwise spin the romtag init forever.
+ */
+typedef struct
+{
+    const NetdevCisSource *src;
+    ULONG                  at;
+    UWORD                  seen;
+} CisChain;
+
+static VOID cis_chain_begin(CisChain *c, const NetdevCisSource *src, ULONG at)
+{
+    c->src  = src;
+    c->at   = at;
+    c->seen = 0;
+}
+
+static UBYTE cis_src_byte(const NetdevCisSource *src, ULONG off, BOOL *over)
+{
+    if (src == NULL || src->read == NULL || off >= src->size)
+    {
+        *over = TRUE;
+        return 0;
+    }
+
+    return src->read(src->ctx, off);
+}
+
+/*
+ * The next tuple, or FALSE at CISTPL_END, at the end of the window, or after
+ * NETDEV_CIS_MAX_TUPLES.  *body is where the body starts and *len is TPL_LINK
+ * clamped to what the window can actually hand back.
+ */
+static BOOL cis_chain_next(CisChain *c, UBYTE *code, ULONG *body, UWORD *len)
+{
+    BOOL over = FALSE;
+
+    for (;;)
+    {
+        UBYTE tcode;
+        UBYTE link;
+
+        if (c->seen >= NETDEV_CIS_MAX_TUPLES)
+            return FALSE;
+
+        tcode = cis_src_byte(c->src, c->at, &over);
+        if (over)
+            return FALSE;
+
+        if (tcode == (UBYTE)CISTPL_END)
+            return FALSE;
+
+        if (tcode == (UBYTE)CISTPL_NULL)
+        {
+            c->at++;
+            c->seen++;              /* a run of pad bytes is still bounded */
+            continue;
+        }
+
+        link = cis_src_byte(c->src, c->at + 1u, &over);
+        if (over)
+            return FALSE;
+
+        *code = tcode;
+        *body = c->at + 2u;
+        *len  = (UWORD)link;
+
+        if (*body + (ULONG)link > c->src->size)
+        {
+            if (*body >= c->src->size)
+                return FALSE;
+            *len = (UWORD)(c->src->size - *body);
+        }
+
+        c->at = c->at + 2u + (ULONG)link;
+        c->seen++;
+
+        return TRUE;
+    }
+}
+
+/* A tuple body, copied out so the existing parsers can be handed a pointer. */
+static UWORD cis_body_copy(const NetdevCisSource *src, ULONG body, UWORD len,
+                           UBYTE *dst, UWORD max)
+{
+    BOOL  over = FALSE;
+    UWORD i;
+
+    if (len > max)
+        len = max;
+
+    for (i = 0; i < len; i++)
+    {
+        dst[i] = cis_src_byte(src, body + (ULONG)i, &over);
+        if (over)
+            return i;
+    }
+
+    return len;
+}
+
+/* The longest tuple body this walk keeps.  A CISTPL_CFTABLE_ENTRY is the only
+   one it parses in full and no card in the field states a longer one. */
+#define CIS_BODY_MAX    64
+
+UWORD netdev_cis_mfc_chains(const NetdevCisSource *src, ULONG *chains,
+                            UWORD max)
+{
+    CisChain c;
+    UBYTE    code;
+    ULONG    body;
+    UWORD    len;
+
+    if (src == NULL || chains == NULL || max == 0)
+        return 0;
+
+    cis_chain_begin(&c, src, 0);
+
+    while (cis_chain_next(&c, &code, &body, &len))
+    {
+        UBYTE nfn;
+        UWORD i;
+        UWORD kept = 0;
+
+        if (code != (UBYTE)CISTPL_LONGLINK_MFC)
+            continue;
+
+        if (len < 1u)
+            return 0;
+
+        {
+            BOOL over = FALSE;
+
+            nfn = cis_src_byte(src, body, &over);
+            if (over)
+                return 0;
+        }
+
+        /* The body is one count byte and five per function.  A tuple that
+           states more functions than it carries is corrupt, not a card with
+           an unreachable function. */
+        if (nfn == 0 || (UWORD)len < (UWORD)(1u + (UWORD)nfn * 5u))
+            return 0;
+
+        if (nfn > (UBYTE)NETDEV_CIS_MAX_FUNC)
+            nfn = (UBYTE)NETDEV_CIS_MAX_FUNC;
+
+        for (i = 0; i < (UWORD)nfn && kept < max; i++)
+        {
+            BOOL  over = FALSE;
+            ULONG at   = body + 1u + (ULONG)i * 5u;
+            ULONG addr = 0;
+            UWORD j;
+
+            /* TPLMFC_TAS is read and not acted on.  It names common or
+               attribute memory, and on this machine the chains of every
+               multifunction card whose CIS has been seen are in the same
+               attribute window the link itself was read from -- so the
+               reader decides the space, and a chain that is not there fails
+               the CISTPL_LINKTARGET check in netdev_cis_func(). */
+            (VOID)cis_src_byte(src, at, &over);
+            for (j = 0; j < 4u; j++)
+                addr |= ((ULONG)cis_src_byte(src, at + 1u + j, &over)) << (8u * j);
+
+            if (over)
+                return 0;
+
+            chains[kept++] = addr;
+        }
+
+        return kept;
+    }
+
+    return 0;
+}
+
+BOOL netdev_cis_func(const NetdevCisSource *src, ULONG chain,
+                     NetdevCisFunc *out)
+{
+    CisChain c;
+    UBYTE    code;
+    ULONG    body;
+    UWORD    len;
+    UBYTE    buf[CIS_BODY_MAX];
+    BOOL     linktarget = FALSE;
+    UWORD    i;
+
+    if (src == NULL || out == NULL)
+        return FALSE;
+
+    out->chain    = chain;
+    out->cfg_base = 0;
+    out->cfg_mask = 0;
+    out->cfg_last = 0;
+    out->funcid   = 0;
+    out->index    = 0;
+    out->score    = NETDEV_CIS_SCORE_NONE;
+    out->flags    = 0;
+    for (i = 0; i < (UWORD)NETDEV_CIS_NODE_LEN; i++)
+        out->node_id[i] = 0;
+    netdev_cis_cftable(NULL, 0, &out->pick);
+
+    cis_chain_begin(&c, src, chain);
+
+    while (cis_chain_next(&c, &code, &body, &len))
+    {
+        UWORD got = cis_body_copy(src, body, len, buf, (UWORD)sizeof(buf));
+
+        /*
+         * The chain has to open with CISTPL_LINKTARGET carrying "CIS".  That
+         * is the standard's own answer to "was the link address right", and
+         * it is the whole reason a walk that reads raw memory is safe: a
+         * wrong address lands on bytes that are not a link target and the
+         * function is refused rather than configured from noise.
+         */
+        if (!linktarget)
+        {
+            if (code != (UBYTE)CISTPL_LINKTARGET || got < 3u ||
+                buf[0] != 'C' || buf[1] != 'I' || buf[2] != 'S')
+                return FALSE;
+
+            linktarget = TRUE;
+            continue;
+        }
+
+        switch (code)
+        {
+        case CISTPL_FUNCID:
+            if (got >= 1u)
+            {
+                out->funcid = buf[0];
+                out->flags |= NETDEV_CISF_HAS_FUNCID;
+            }
+            break;
+
+        case CISTPL_FUNCE:
+            if (got >= 8u && buf[0] == (UBYTE)CIS_FUNCE_LAN_NODE_ID &&
+                buf[1] == (UBYTE)NETDEV_CIS_NODE_LEN)
+            {
+                for (i = 0; i < (UWORD)NETDEV_CIS_NODE_LEN; i++)
+                    out->node_id[i] = buf[2 + i];
+                out->flags |= NETDEV_CISF_HAS_NODEID;
+            }
+            break;
+
+        case CISTPL_CONFIG:
+        {
+            /* TPCC_SZ, TPCC_LAST, TPCC_RADR, TPCC_RMSK.  Bits 1..0 of TPCC_SZ
+               are the address size less one and bits 5..2 the mask size less
+               one, so both are variable and neither can be assumed. */
+            UBYTE rasz;
+            UBYTE rmsz;
+
+            if (got < 3u)
+                break;
+
+            rasz = (UBYTE)((buf[0] & 0x03u) + 1u);
+            rmsz = (UBYTE)(((buf[0] >> 2) & 0x0fu) + 1u);
+            if ((UWORD)got < (UWORD)(2u + rasz + rmsz))
+                break;
+
+            out->cfg_last = buf[1];
+            out->cfg_base = 0;
+            for (i = 0; i < (UWORD)rasz && i < 4u; i++)
+                out->cfg_base |= ((ULONG)buf[2 + i]) << (8u * i);
+
+            /* TPCC_RADR is an attribute-memory address, not a CIS offset --
+               see the note in netdev_cis.h -- so the bound is the 128 KB
+               window and not the 64 KB of CIS bytes inside it.  Clamped so a
+               corrupt TPCC_RADR cannot put the COR write past the window and
+               into the card's I/O space. */
+            out->cfg_base &= 0x0001ffffUL;
+
+            out->cfg_mask = 0;
+            for (i = 0; i < (UWORD)rmsz && i < 2u; i++)
+                out->cfg_mask |= (UWORD)((UWORD)buf[2 + rasz + i] << (8u * i));
+
+            out->flags |= NETDEV_CISF_HAS_CONFIG;
+            break;
+        }
+
+        case CISTPL_CFTABLE:
+        {
+            NetdevCisEntry e;
+            UWORD          score;
+
+            if (!netdev_cis_cftable(buf, got, &e))
+                break;
+
+            score = netdev_cis_score(&e);
+            if (score <= out->score)
+                break;
+
+            out->score = score;
+            out->pick  = e;
+            out->index = e.index;
+            out->flags |= NETDEV_CISF_HAS_PICK;
+            break;
+        }
+
+        default:
+            break;
+        }
+    }
+
+    if (!linktarget || (out->flags & NETDEV_CISF_HAS_CONFIG) == 0)
+        return FALSE;
+
+    return TRUE;
+}
+
+BOOL netdev_cis_mfc_lan(const NetdevCisSource *src, NetdevCisFunc *out,
+                        UWORD *nfunc)
+{
+    ULONG chains[NETDEV_CIS_MAX_FUNC];
+    UWORD n;
+    UWORD i;
+
+    if (nfunc != NULL)
+        *nfunc = 0;
+
+    if (src == NULL || out == NULL)
+        return FALSE;
+
+    n = netdev_cis_mfc_chains(src, chains, (UWORD)NETDEV_CIS_MAX_FUNC);
+    if (nfunc != NULL)
+        *nfunc = n;
+    if (n == 0)
+        return FALSE;
+
+    for (i = 0; i < n; i++)
+    {
+        NetdevCisFunc fn;
+
+        if (!netdev_cis_func(src, chains[i], &fn))
+            continue;
+
+        /*
+         * The function has to say it is a LAN adapter.  A multifunction card
+         * states CISTPL_FUNCID in every function chain -- that is what the
+         * chains are for -- so an absent one here is not the "assume LAN" case
+         * a single-function card's missing tuple is.
+         */
+        if ((fn.flags & NETDEV_CISF_HAS_FUNCID) == 0 ||
+            fn.funcid != (UBYTE)CIS_FUNC_LAN)
+            continue;
+
+        if ((fn.flags & NETDEV_CISF_HAS_PICK) == 0)
+            continue;
+
+        *out = fn;
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL netdev_cis_has_iobase(const NetdevCisFunc *fn)
+{
+    if (fn == NULL || (fn->flags & NETDEV_CISF_HAS_CONFIG) == 0)
+        return FALSE;
+
+    return (BOOL)((fn->cfg_mask & (UWORD)(1u << CIS_REG_IOBASE_0)) != 0 &&
+                  (fn->cfg_mask & (UWORD)(1u << CIS_REG_IOBASE_1)) != 0);
+}
+
+UBYTE netdev_cis_mfc_cor(const NetdevCisFunc *fn)
+{
+    UBYTE cor;
+
+    if (fn == NULL)
+        return 0;
+
+    cor = (UBYTE)((fn->index & CIS_COR_MFC_MASK) |
+                  CIS_COR_FUNC_ENA | CIS_COR_IREQ_ENA);
+
+    /* Address decode is what makes the card use the base the host wrote into
+       IOBASE_0/1 instead of the one its own CIS named.  Only offered when
+       those registers exist. */
+    if (netdev_cis_has_iobase(fn))
+        cor |= CIS_COR_ADDR_DECODE;
+
+    /* Gayle's card interrupt is a level. */
+    if ((fn->pick.flags & NETDEV_CIS_IRQ_LEVEL) != 0)
+        cor |= CIS_COR_LEVEL_REQ;
+
+    return cor;
+}
+
+UBYTE netdev_cis_mfc_iosize(const NetdevCisFunc *fn)
+{
+    ULONG len;
+
+    if (fn == NULL || (fn->flags & NETDEV_CISF_HAS_PICK) == 0)
+        return 0;
+
+    len = (ULONG)fn->pick.io_len;
+    if (len == 0)
+        return 0;
+    if (len > 256UL)
+        len = 256UL;
+
+    /* The register is the size less one, so a 32-port window is 31. */
+    return (UBYTE)(len - 1UL);
+}

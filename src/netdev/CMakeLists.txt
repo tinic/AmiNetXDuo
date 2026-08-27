@@ -334,6 +334,42 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_bus COMMAND test_netdev_bus)
 
+    # The NE2000 probe ORDER, which is the half test_netdev_bus.c cannot see.
+    # ne2000_detect() demands the command register read back as a reset chip
+    # before it ever asks whether the odd registers can be read, and the reset
+    # port is odd and strobed by READING it -- so on a clone that answers only
+    # 16-bit cycles the card was refused before the probe written for it ran.
+    # Amiberry decodes both PCMCIA windows 1:1 and cannot hold a card that
+    # refuses a byte read, so the retry never fires there and no emulator arm
+    # can cover this. ne2000.c is #included whole and its four register
+    # accessors are replaced: the chip is indexed by register number, because
+    # the word read keeping an odd register in its low half is a big-endian
+    # fact that no little-endian host can hold beside the byte read of the
+    # even register next to it.
+    add_executable(test_netdev_ne2000
+        test/test_netdev_ne2000.c
+        netdev_bus.c
+        netdev_cards.c
+        netdev_clock.c
+        netdev_mcaf.c
+        netdev_macgen.c
+        "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+    target_include_directories(test_netdev_ne2000 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/net68k"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    # ne2000.c puts a register window pointer in a ULONG for the probe record,
+    # which is exact on the m68k this file is written for and narrowing on a
+    # 64-bit host.  The cast is not the test's to fix and the value is only
+    # ever printed, so the warning is off for this target alone.
+    target_compile_options(test_netdev_ne2000 PRIVATE
+        -Wall -Wextra -Wno-pointer-to-int-cast)
+
+    add_test(NAME netdev_ne2000 COMMAND test_netdev_ne2000)
+
     # S2_ONEVENT delivery and the S2_PacketFilter hook.  Every one of its
     # callers is an interrupt, so what it does to another task's IORequest is
     # the part no emulator run can show: a list walked without the mask, or a
