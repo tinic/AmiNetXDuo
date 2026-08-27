@@ -392,6 +392,10 @@ static LONG ed_attach(NetdevNic *nic)
 
     nic->read_hdr  = ed_read_hdr;
     nic->ring_copy = ed_ring_copy;
+    /* A mapped buffer needs no fusion: an unwrapped frame is handed up where
+       it lies and the opener's copy hook sums it while it copies.  What is
+       left for this hook is the wrapped frame, one in a ring's worth. */
+    nic->ring_copy_sum = NULL;
     nic->frame_at  = ed_frame_at;
     nic->write_buf = ed_write_buf;
 

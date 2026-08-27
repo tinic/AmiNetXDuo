@@ -85,6 +85,20 @@ extern const struct NetdevBusOps netdev_bus_generic;
 /* base is the board's register window, and stride is 1, 2 or 4. */
 VOID netdev_bus_setup(NetdevBus *bus, APTR base, UWORD stride, APTR wide);
 
+/*
+ * The fused drain.  netdev_bus_rdata_sum() moves exactly `len` bytes off the
+ * data port and returns the ones-complement longword sum of them, in
+ * n68k_copy_sum_longwords()'s convention, for the price of the drain alone.
+ * A frame that arrives this way is not walked a second time for a checksum.
+ *
+ * Ask netdev_bus_can_sum() first and take the ordinary path when it says no:
+ * the two consume the same number of port accesses for a given length, but
+ * only netdev_bus_rdata_sum() writes exactly `len` bytes, and the caller has
+ * to know which of the two it is about to use before it commits the chip.
+ */
+BOOL netdev_bus_can_sum(const NetdevBus *bus, const UBYTE *dst);
+ULONG netdev_bus_rdata_sum(const NetdevBus *bus, UBYTE *dst, UWORD len);
+
 /* Call after setup for a card whose odd registers live in a second window. */
 VOID netdev_bus_split(NetdevBus *bus, APTR odd);
 

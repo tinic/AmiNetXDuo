@@ -368,11 +368,29 @@ static VOID dp8390_rint(NetdevNic *nic)
 
                     if (dst != NULL)
                     {
-                        (VOID)netdev_ring_copy_exact(
-                            nic, src + NETDEV_HDR_LEN, dst,
-                            (UWORD)(flen - NETDEV_HDR_LEN));
+                        UWORD plen   = (UWORD)(flen - NETDEV_HDR_LEN);
+                        ULONG sum    = 0;
+                        UBYTE summed = 0;
+
+                        /*
+                         * The payload is coming across the bus once whatever
+                         * happens; the adds that ride along with it are free
+                         * beside the accesses, and the walk they replace is
+                         * not.  A core that declines -- a wrapped read, an
+                         * 8-bit port -- leaves the frame to be summed the old
+                         * way, which is what every frame on this path did.
+                         */
+                        if (nic->ring_copy_sum != NULL)
+                            summed = (UBYTE)(nic->ring_copy_sum(
+                                                 nic, src + NETDEV_HDR_LEN,
+                                                 dst, plen, &sum) ? 1 : 0);
+
+                        if (summed == 0)
+                            (VOID)netdev_ring_copy_exact(
+                                nic, src + NETDEV_HDR_LEN, dst, plen);
+
                         nic->rx_packets++;
-                        nic->rx_claimed(nic->rx_arg, token, 0, 0);
+                        nic->rx_claimed(nic->rx_arg, token, sum, summed);
                         goto rx_done;
                     }
                 }
