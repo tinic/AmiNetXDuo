@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 #
-# Run what .github/workflows/release.yml runs, before the tag is pushed.
+# Run what .github/workflows/release.yml runs, before the tag is pushed.  Three
+# releases shipped off a hand-built path because the packing job stayed green
+# while the job that validates the tree failed.
 #
 #   tools/check-release-ready.sh --list   print the job set, build nothing
 #   tools/check-release-ready.sh          run all of it
 #   tools/check-release-ready.sh --no-arms   skip the twelve cross arms
 #
-# WHY THIS EXISTS
-#
-# The Release workflow was red on v0.25.3 (twice) and v0.25.4 and all three
-# archives were built and uploaded by hand instead. Nothing said so: the job
-# that packs the archive stayed green, and the job beside it that validates the
-# tree -- host, host32 and the analyser -- is the one that failed. Three
-# releases shipped off a path nobody could reproduce.
-#
-# The job set is DERIVED from release.yml rather than repeated here, so a stage
-# added to the workflow is a stage this runs. --list is cheap and is asserted
-# by the conformance stage, so the derivation cannot go blind without CI
-# saying so on the next push.
+# The job set is DERIVED from release.yml, so a stage added there is a stage
+# this runs.  --list is asserted by the conformance stage.
 #
 # SPDX-License-Identifier: MIT
 
