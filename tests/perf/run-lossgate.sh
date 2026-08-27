@@ -149,6 +149,24 @@ BUSY=$(ssh "$PEER" "ps -eo args= | grep '[f]itz-serve' | wc -l" 2>/dev/null || e
 
 GUEST=""
 
+# Every arm must be the same guest as the warm-up.  amiberry-run.sh normally
+# derives a MAC from AMINETXDUO_RUN_TAG, but this harness deliberately gives
+# the warm-up and every measured arm different tags.  That made the DHCP
+# server hand out different leases while netem remained aimed at the warm-up's
+# address, so an arm could measure a clean link under a lossy label.
+#
+# Pin one MAC for the whole sweep.  A caller's explicit MAC still wins, as it
+# does in amiberry-run.sh; deriving from the outer tag keeps independent
+# lossgate runs distinct.
+# shellcheck source=../../tools/emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+export AMINETXDUO_AMIBERRY_MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
+echo "==> sweep MAC $AMINETXDUO_AMIBERRY_MAC (warm-up and measured arms)"
+
+guest_address_from() { # transcript
+    sed -n 's/.*online, address \([0-9][0-9.]*\).*/\1/p' "$1" | head -1
+}
+
 # ------------------------------------------------------------------ netem --
 
 peer_tc() { ssh "$PEER" "$PEER_TC $*"; }
@@ -231,7 +249,7 @@ AMINETXDUO_RUN_TAG="$TAG-warm" \
     tail -15 "$OUT/warm.txt" >&2
     exit 2; }
 
-GUEST=$(sed -n 's/.*address \([0-9][0-9.]*\).*/\1/p' "$OUT/warm.txt" | head -1)
+GUEST=$(guest_address_from "$OUT/warm.txt")
 [ -n "$GUEST" ] || GUEST=$(grep -oE '192\.168\.[0-9]+\.[0-9]+' "$OUT/warm.txt" \
                            | grep -v "^$PEER_ADDR$" | head -1 || true)
 [ -n "$GUEST" ] || {
@@ -257,6 +275,18 @@ for rep in $(seq 1 "$REPS"); do
         tests/perf/run-fitzbench.sh -H "$PEER" -A "$PEER_ADDR" -b "$BUILD" \
             $FBFLAGS -k "$KB" -r 1 -T "$TAG-$rep" > "$OUT/arm-$rep.txt" 2>&1 ||
         ARM_RC=$?
+
+    # The fixed MAC should make this equal to the warm-up lease.  Assert it as
+    # well: a board/emulator that ignores the requested MAC must not silently
+    # turn the impaired arm back into a clean-link measurement.
+    ARM_GUEST=$(guest_address_from "$OUT/arm-$rep.txt")
+    if [ -z "$ARM_GUEST" ]; then
+        echo "arm_$rep=failed: no guest address in its transcript" >&2
+        ARM_RC=2
+    elif [ "$ARM_GUEST" != "$GUEST" ]; then
+        echo "arm_$rep=failed: guest leased $ARM_GUEST but netem targets $GUEST" >&2
+        ARM_RC=2
+    fi
 
     awk -v rep="$rep" '
         # fitzbench names the arm as "fitzbench: file=FITZ:fitzbench.dat".
