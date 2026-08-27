@@ -197,6 +197,14 @@ run_arm() { # arm model cpu board driver rom ceiling
     # transcript can be complete and green on a run that then took an illegal
     # instruction outside ROM and never wrote DH0:.done.  That is exactly what
     # romtag-control does, and grading the transcript alone called it a pass.
+    #
+    # WHAT romtag-control ACTUALLY DOES, so nobody chases it as ours: Commodore's
+    # a2065.device on an A2000 at 68000 completes all 13 bring-up checks and then
+    # takes an illegal instruction in teardown -- 00f9 at 0025BA1C under 2.04 and
+    # 00f9 at 0025C834 under 3.1 -- and never writes DH0:.done.  Identical on both
+    # ROMs, so the ROM is not the variable and it is not a Kickstart 2.x finding.
+    # It is the vendor's driver, not ours; the pair is what establishes that, and
+    # same_on_31 below is how this run says so without failing the gate.
     # rc 4 is amiberry-run.sh's illegal-instruction code, 5 the wrong backend,
     # 124 the timeout; all three are the run failing after the bring-up
     # succeeded, and all three matter here.

@@ -99,6 +99,14 @@ const NetdevCard netdev_cards[] =
      * $EE0000 with no autoconfig record, so it is probed rather than found and
      * its register file is a table rather than a stride.  The FIFO at $EE8440
      * is sixteen bytes that take a movem.l, which is what wide_off names.
+     *
+     * UNVERIFIED, AND IT IS NOT GOING TO BE.  Every number in this row comes
+     * from the iComp wiki.  No X-Surf 500 and no ACA500 is on this network, no
+     * emulator models the board, and `tests/tools/run-hwcard.sh -C xsurf500`
+     * says so and skips rather than crediting a run against another card.  A
+     * row nobody can test is not the same as a row that is wrong, and this one
+     * costs nothing while it sits here; if a board ever turns up, that harness
+     * is what proves it.
      */
     { "xsurf500",     0,     0, 0x0000,     1, 0x8440,
       NETDEV_CHIP_NE2000, 100000000UL, 1,       0,       0,       0,
