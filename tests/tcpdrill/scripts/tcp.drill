@@ -159,11 +159,15 @@ tx S seq=0 after=1500 within=3000
 # then nothing, ever, because the driver never handed the packet back and NetX
 # Duo will only resend a packet it has been given back.
 #
-# TWO THINGS RESEND IT, AND BOTH ARE NAMED.  RFC 8985 7.2's tail loss probe is
-# first, one extra copy two round trips after the transmission; the
-# retransmission timeout is behind it and is unmoved by it.  A case asserting
-# only "no sooner than 700 ms" would be asserting that the probe does not
-# exist.  retransmit.drill rt02 has the arithmetic behind 600 and 400..1200.
+# ONE THING RESENDS IT, and that is the assertion rather than an omission.
+# RFC 8985 7.2's tail loss probe is a multiple of SRTT, and SRTT is ZERO on
+# the first segment of a connection: the estimator is armed by the data send
+# path, nx_tcp_socket_send_internal.c, and not by the handshake.  An
+# unmeasured connection therefore gets section 7.2's one second PTO, which
+# cannot land before a timeout floored at NX_TCP_RTO_MINIMUM_MS, also one
+# second, so nothing probes this flight.  retransmit.drill rt02 carries the
+# arithmetic and rt05 is where a connection that has been measured gets its
+# probe.
 #
 # WHAT THE INTERVALS ARE past that -- flat, doubling, and how many there are
 # before the socket gives up -- is the retransmission timer's business and x01
@@ -178,8 +182,7 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=200
-tx PA seq=1 ack=1 len=100 within=600
-tx PA seq=1 ack=1 len=100 after=400 within=1200
+tx PA seq=1 ack=1 len=100 after=700 within=1400
 idle 4000
 txcount 1 12
 
@@ -229,10 +232,11 @@ tx A seq=101 ack=1 len=1 within=6000
 # segment itself, where nothing is in flight and the rule permits it.
 #
 # NO `notx` AFTER THE SEGMENT.  Nothing here acknowledges the 1460 bytes, so
-# the tail loss probe re-sends them about two round trips later, which on this
-# rig is a few milliseconds: a quiet window is not a thing this case can
-# assert.  The 240 bytes not leaving is asserted by `wirebytes` instead, which
-# counts what left and would see them.
+# the retransmission timeout re-sends them about a second later; there is no
+# tail loss probe ahead of it, because SRTT is zero on the first segment of a
+# connection and an unmeasured connection is not probed.  A quiet window
+# would say nothing this case is about either way: the 240 bytes not leaving
+# is asserted by `wirebytes`, which counts what left and would see them.
 case z02_short_send_credits_what_left
 socket
 connect
@@ -266,10 +270,11 @@ wirebytes
 # a second send() go out, in the right order, behind the retransmission that
 # was already due.
 #
-# BOTH RESENDS ARE HERE for the same reason as x02: the probe comes first and
-# the timeout comes behind it, and this case is about neither of them needing a
-# send() to get out.  The `notx` then sits between the first rung and the
-# second, where the queue really is quiet.
+# ONE RESEND IS HERE for the same reason as x02: an unmeasured connection is
+# not probed, so the first rung of the ladder is the first thing that comes
+# back, and this case is about it not needing a send() to get out.  The
+# `notx` then sits between the first rung and the second, where the queue
+# really is quiet.
 case x03_retransmission_needs_no_later_send
 socket
 connect
@@ -278,8 +283,7 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 send 100
 tx PA seq=1 ack=1 len=100 within=200
-tx PA seq=1 ack=1 len=100 within=600
-tx PA seq=1 ack=1 len=100 after=400 within=1200
+tx PA seq=1 ack=1 len=100 after=700 within=1400
 notx 400
 send 100
 tx PA seq=101 ack=1 len=100 within=400
@@ -385,12 +389,13 @@ rx A seq=1 ack=2
 # one that would corrupt a segment, and the URG test in bsd_oob_ip_filter()
 # reads as if that were the case it guards.
 #
-# THE FIRST RESEND IS THE ONE TO LOOK AT, and it is RFC 8985 7.2's tail loss
-# probe rather than the timeout -- the same rebuild, 600 ms earlier.  The line
-# below used to say `after=700 within=1600`, which named the timeout; the
-# `after` was doing no work even then, because the previous line has already
-# taken the original segment off the queue and nothing else is in flight.
-# Naming the probe instead makes the bound tighter, not wider.
+# THE FIRST RESEND IS THE ONE TO LOOK AT, and it is the retransmission
+# timeout's.  RFC 8985 7.2's tail loss probe would be ahead of it, but SRTT is
+# zero on the first segment of a connection and an unmeasured connection is
+# not probed at all; retransmit.drill rt02 states that and rt05 states the
+# measured case.  The `after` does no work here, because the previous line has
+# already taken the original segment off the queue and nothing else is in
+# flight; it is written anyway so the line names the rung it is waiting for.
 case u03_retransmission_is_a_plain_segment
 socket
 connect
@@ -399,7 +404,7 @@ rx SA seq=0 ack=1 win=8192 mss=1460
 tx A seq=1 ack=1
 oob 66
 tx PAU seq=1 ack=1 len=1 urg=1
-tx PA seq=1 ack=1 len=1 within=600
+tx PA seq=1 ack=1 len=1 after=700 within=1400
 rx A seq=1 ack=2
 
 # RFC 793 3.4: a RESET on an established connection tears it down, and the

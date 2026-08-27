@@ -3525,6 +3525,11 @@ static VOID case_abort(LONG s)
     (VOID)s_close(s);
 }
 
+/* How long the wire has to stay quiet before a case is over, and the longest
+   the settle below may take to see it.  */
+#define CASE_SETTLE_QUIET_MS    150UL
+#define CASE_SETTLE_MAX_MS      900UL
+
 static VOID case_end(VOID)
 {
     if (cs.name[0] == '\0')
@@ -3545,12 +3550,46 @@ static VOID case_end(VOID)
     case_abort(cs.lsock);
     cs.lsock = -1;
 
-    Delay(2);
-    pump();
-    while (pend_count != 0)
+    /* SETTLE UNTIL THE WIRE IS QUIET, rather than until a stopwatch says it
+       ought to be.  A teardown's last frame belongs to the case that is
+       ending however long the guest takes to emit it, and this waited a flat
+       Delay(2) for it.  That is a race, and on a host running more than one
+       emulator the guest loses it: halfclose.drill h06 failed twice in nine
+       runs on the abortive close in h05 above it, whose RST arrived after the
+       drain, was popped by h06's first `tx`, and put every expectation in the
+       case one frame out of step -- reported as a stack answering a SYN with
+       a reset.  The queue is drained until nothing has arrived for
+       CASE_SETTLE_QUIET_MS, bounded by CASE_SETTLE_MAX_MS so a socket that
+       will not stop talking cannot hang the run.  */
     {
-        Seg junk;
-        (VOID)pend_pop(&junk);
+        ULONG t0    = tap_eclock_now();
+        ULONG quiet = t0;
+
+        for (;;)
+        {
+            ULONG now;
+
+            Delay(1);
+            pump();
+
+            if (pend_count != 0)
+            {
+                while (pend_count != 0)
+                {
+                    Seg junk;
+                    (VOID)pend_pop(&junk);
+                }
+                quiet = tap_eclock_now();
+            }
+
+            now = tap_eclock_now();
+
+            if ((ticks_to_ms(quiet, now) >= CASE_SETTLE_QUIET_MS) ||
+                (ticks_to_ms(t0, now) >= CASE_SETTLE_MAX_MS))
+            {
+                break;
+            }
+        }
     }
 
     if (cs.fails == 0)
