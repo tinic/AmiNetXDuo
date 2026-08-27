@@ -2000,7 +2000,16 @@ static VOID netdev_begin_io(register struct Device     *dev __asm("a6"),
     (VOID)dev;
 
     io->ios2_Req.io_Error = 0;
-    io->ios2_WireError    = 0;
+    /*
+     * ios2_WireError is an OUTPUT for every command but one.  S2_ONEVENT
+     * carries the event mask the caller is waiting for IN it, so zeroing it
+     * here handed netdev_cmds.c a mask of zero, which that code correctly
+     * refuses as naming no condition: every S2_ONEVENT ever issued to this
+     * device came back S2ERR_NOT_SUPPORTED/S2WERR_BAD_EVENT.  The events the
+     * driver posts had no reachable waiter at all.
+     */
+    if (io->ios2_Req.io_Command != S2_ONEVENT)
+        io->ios2_WireError = 0;
 
     netdev_perform(op, io);
 }

@@ -106,6 +106,24 @@ extern "C" {
 #define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
                                        there is no fallback row either        */
 #define ANXDIAG_PC_RESET       68   /* CardResetCard() at claim, 1 = pulsed   */
+#define ANXDIAG_PC_CFCOUNT     71   /* CISTPL_CFTABLE_ENTRY tuples the walk
+                                       reached before the CIS ran out        */
+#define ANXDIAG_PC_CFPICK      72   /* the entry the walk chose: score << 24 |
+                                       NETDEV_CIS_* flags << 16 | address
+                                       lines << 8 | configuration index, or
+                                       ANXDIAG_ABSENT when none parsed        */
+#define ANXDIAG_PC_IOWIN       73   /* that entry's first I/O window,
+                                       base << 16 | length in bytes           */
+#define ANXDIAG_PC_IOOFF       74   /* the register offset the walk settled on;
+                                       the card row's own unless the CIS
+                                       named a base that overrides it         */
+#define ANXDIAG_PC_MFC         75   /* CISTPL_LONGLINK_MFC: a multifunction
+                                       card, whose per-function CIS chains
+                                       CopyTuple() cannot follow              */
+#define ANXDIAG_CR_RETRY       76   /* the command register did not read back
+                                       as a reset chip, so the reset port was
+                                       strobed again through the word path and
+                                       the question asked once more           */
 #define ANXDIAG_CLOCK          69   /* iterations of a bare spin per raster
                                        line, measured against the beam once at
                                        claim; 0 = no readable beam            */

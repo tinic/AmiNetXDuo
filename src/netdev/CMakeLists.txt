@@ -24,6 +24,7 @@ set(NETDEV_SOURCES
     netdev_clock.c      # a wait measured against the beam, not counted in reads
     netdev_cards.c      # the card table
     netdev_pcmcia.c     # the A600/A1200 slot, which has no autoconfig record
+    netdev_cis.c        # the PC Card configuration table, host-testable
     netdev_isapnp.c     # the X-Surf's chip, which is behind an ISA PnP bridge
     netdev_diag.c       # the probe record, published for CheckNetDevice
     netdev_mcaf.c       # the multicast hash, host-testable
@@ -229,6 +230,23 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_float PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_float COMMAND test_netdev_float)
+
+    # The PC Card configuration table.  netdev_pcmcia.c is m68k inline asm and
+    # Gayle addresses, so the tuple arithmetic was split out to be run here
+    # against real cards' bytes -- the CNet CN40BC vector is the CIS the
+    # emulator has been replaying at this driver all along.
+    add_executable(test_netdev_cis
+        test/test_netdev_cis.c
+        netdev_cis.c)
+
+    target_include_directories(test_netdev_cis PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_cis PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_cis COMMAND test_netdev_cis)
 
     # The EtherLink III, which NOTHING EMULATES: Amiberry's PCMCIA support is
     # NE2000 only, so this test is the only thing that has ever driven el3.c.
