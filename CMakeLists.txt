@@ -229,23 +229,23 @@ if(AMINETXDUO_AREXX)
     add_compile_definitions(AMINETXDUO_AREXX)
 endif()
 
-# The serial diagnostic log: 136 format strings reaching RawPutChar().
+# THE SERIAL DIAGNOSTIC LOG IS NOT AN OPTION.  AMI_ERROR, AMI_WARN and
+# AMI_INFO are compiled into every image, shipping ones included.
 #
-# OFF in every shipping build, this one included.  Nothing on a normal machine
-# captures the serial port, so the strings are written and never read, and
-# they are the largest single thing a build can drop, 12,820 bytes on the
-# 68000 floor tier, more than the ARexx host.  Off,
-# include/aminetxduo/compat.h compiles AMI_ERROR/WARN/INFO to a branch the
-# optimiser removes, arguments still type-checked.
+# It used to be -DAMINETXDUO_LOG, OFF by default, on the argument that nothing
+# on a normal machine captures the serial port and the sentences are the
+# largest single thing a build can drop.  Both halves were wrong.  Sashimi and
+# a null modem both capture RawPutChar, and a user who has hit a fault has
+# nothing to send and we have nothing to ask for -- the one build that could
+# have answered was the one nobody was running.  The size is a fact and it is
+# reported in the release notes.
 #
-# -DAMINETXDUO_LOG=ON is how a build for a bug report is made: a serial
-# capture is the only record of what the stack did before it stopped, so
-# reproducing on a logging build is the first step of any investigation that
-# needs one.
-option(AMINETXDUO_LOG "Build the serial diagnostic log" OFF)
-if(AMINETXDUO_LOG)
-    add_compile_definitions(AMINETXDUO_LOG)
-endif()
+# What is compiled in is not what is printed.  ami_log_level() starts at
+# AMI_LOG_WARN, so a healthy machine writes nothing; ENV:ANXDLOGLEVEL raises it
+# without a rebuild (src/config/config_file.c).  AMI_DEBUG and AMI_TRACE stay
+# behind AMINETXDUO_DEBUG, which a Debug build sets (cmake/toolchain-m68k-
+# amigaos.cmake): those are on per-packet paths and RawPutChar spins on the
+# serial hardware.
 
 # The event ring, which is what a shipped binary has instead of that log.  A
 # code, an interface and a value per event, in BSS, with the sentences in
@@ -611,11 +611,17 @@ if(NOT AMINETXDUO_TCP_LOSS_PROBE)
     add_compile_definitions(AMINETXDUO_TCP_LOSS_PROBE_OFF)
 endif()
 
-# ami_log() verbosity: 0 = errors only ... 4 = trace. Empty keeps compat.c's
-# own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
-set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Override ami_log() verbosity (0..4)")
+# What ami_log_level() STARTS at: 0 = errors only ... 4 = trace.  Empty keeps
+# compat.c's own default (WARN in release, DEBUG when AMINETXDUO_DEBUG is set).
+# A running machine is turned up with ENV:ANXDLOGLEVEL, not with this.
+set(AMINETXDUO_LOG_LEVEL "" CACHE STRING "Where ami_log() verbosity starts (0..4)")
 if(NOT AMINETXDUO_LOG_LEVEL STREQUAL "")
     add_compile_definitions(AMINETXDUO_LOG_LEVEL=${AMINETXDUO_LOG_LEVEL})
+    set(_aminetxduo_log_level_shown "${AMINETXDUO_LOG_LEVEL}")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(_aminetxduo_log_level_shown "3 (debug)")
+else()
+    set(_aminetxduo_log_level_shown "1 (warn)")
 endif()
 
 set(AMINETXDUO_THREADX  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/threadx")
@@ -1062,6 +1068,6 @@ message(STATUS "  green realm ... ${AMINETXDUO_GREEN_REALM}")
 message(STATUS "  mDNS .......... ${AMINETXDUO_MDNS}")
 message(STATUS "  multicast ..... ${AMINETXDUO_MULTICAST}")
 message(STATUS "  ARexx host .... ${AMINETXDUO_AREXX}")
-message(STATUS "  serial log .... ${AMINETXDUO_LOG}")
+message(STATUS "  serial log .... always; starts at ${_aminetxduo_log_level_shown}")
 message(STATUS "  event ring .... ${AMINETXDUO_EVENT_RING} entries")
 message(STATUS "  TCP: device ... ${AMINETXDUO_TCPDEVICE}")

@@ -18,6 +18,9 @@
 
 #include <stdarg.h>
 
+/* Where ami_log_level() starts.  A build option only so a development build
+   can bake a louder one in; the shipped value is what a field machine gets
+   before anybody touches ENV:ANXDLOGLEVEL. */
 #ifndef AMINETXDUO_LOG_LEVEL
 #  ifdef AMINETXDUO_DEBUG
 #    define AMINETXDUO_LOG_LEVEL AMI_LOG_DEBUG
@@ -143,12 +146,34 @@ static VOID put_char(register UBYTE c   __asm("d0"),
         RawPutChar(c);
 }
 
+/*
+ * Plain int, no lock: a torn read cannot happen on a 68k word-aligned longword
+ * and the worst a race costs is one line printed or dropped around the moment
+ * somebody changes it.
+ */
+static int ami_log_max = AMINETXDUO_LOG_LEVEL;
+
+VOID ami_log_level_set(int level)
+{
+    if (level < AMI_LOG_ERROR)
+        level = AMI_LOG_ERROR;
+    else if (level > AMI_LOG_TRACE)
+        level = AMI_LOG_TRACE;
+
+    ami_log_max = level;
+}
+
+int ami_log_level(VOID)
+{
+    return ami_log_max;
+}
+
 VOID ami_log(int level, const char *fmt, ...)
 {
     static const char *const prefix[] = { "ERR ", "WARN", "INFO", "DBG ", "TRC " };
     va_list args;
 
-    if (level > AMINETXDUO_LOG_LEVEL)
+    if (level > ami_log_max)
         return;
     if (level < AMI_LOG_ERROR || level > AMI_LOG_TRACE)
         level = AMI_LOG_INFO;

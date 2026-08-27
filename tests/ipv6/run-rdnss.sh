@@ -88,6 +88,11 @@ NETMASK=255.255.255.0
 CONFIGURE6=AUTO
 EOF
 
+# The mark this harness greps for is at AMI_LOG_INFO, one level above where
+# ami_log_level() starts, so the guest is asked for it.  Nothing else here
+# differs from a user's machine.
+serial_log_stage_env "$STAGE" 2
+
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 wait $SETTLE
@@ -127,7 +132,8 @@ set +e
 AMINETXDUO_RUN_TAG="$TAG" AMINETXDUO_AMIBERRY_MAC="$MAC" \
     "$ROOT/tools/amiberry-run.sh" \
     -N a2065 -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
-    "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
+    "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/env" \
+    "$STAGE/AddNetInterface" \
     "$STAGE/ShowNetStatus" "$STAGE/host" "$STAGE/netstat" \
     "$STAGE/commands.txt" \
     > "$OUT" 2>&1

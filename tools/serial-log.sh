@@ -5,13 +5,21 @@
 #
 #   . "$ROOT/tools/serial-log.sh"
 #
-#   serial_log_path [tag]                    the file tools/amiberry-run.sh wrote
-#   serial_log_state <builddir>              on | off | unknown
+#   serial_log_path [tag]                       the file tools/amiberry-run.sh wrote
+#   serial_log_stage_env <stagedir> <level>     ENV:ANXDLOGLEVEL for the guest
+#   serial_log_state <builddir>                 on | off | unknown
 #   serial_log_have  <file> <builddir> <what>   0 if <what> can be checked
 #
-# AMI_ERROR, AMI_WARN and AMI_INFO compile to `if (0)` unless AMINETXDUO_LOG is
-# defined, and it is OFF by default, so a harness reading guest ami_log() output
-# has a BUILD REQUIREMENT and an empty log is a RESULT, not a passing assertion.
+# AMI_ERROR, AMI_WARN and AMI_INFO are compiled into EVERY build, this tree's
+# shipping configuration included.  What decides whether a line reaches the
+# serial port is the RUNTIME level, ami_log_level(), which starts at
+# AMI_LOG_WARN.  A harness that wants the AMI_LOG_INFO tier -- the bring-up
+# marks, the address lines -- stages ENV:ANXDLOGLEVEL, and that is the whole
+# difference between the guest it runs and the machine a user has.
+#
+# So an empty log is still a RESULT and not a passing assertion, but the cause
+# is no longer a build option: either nothing happened that logs at the level
+# asked for, or the level was never staged, or the run never started.
 #
 # tools/amiberry-run.sh writes `build/amiberry-serial-<tag>.log`, never
 # `build/serial-<tag>.log`; tools/enforcer-run.sh writes the other spelling,
@@ -28,17 +36,29 @@ serial_log_path() {
     echo "${ROOT}/build/amiberry-serial-${1:-${AMINETXDUO_RUN_TAG:-amiberry}}.log"
 }
 
-# Was the library in <builddir> built with the serial log compiled in?
+# Ask the guest for <level>, 0..4, by writing the variable the stack reads at
+# bring-up.  <stagedir>/env is merged into DH0:env by tools/amiberry-run.sh,
+# and envsetup assigns ENV: to it before anything under test runs, so the
+# caller has only to pass "$STAGE/env" among the extras.
 #
-# Echoes on, off or unknown, and returns 0, 1 or 2 to match.  CMakeCache.txt is
-# the answer when there is one.  Failing that the LIBRARY ITSELF is asked: the
-# format strings are only linked when the macros expand to a call, so a build
-# with logging out has none of them.  Measured: 353,476 bytes without,
-# 380,264 with, and `netstack: mark` present in exactly one of the two.  The
-# binary probe is what covers a tree somebody staged by hand or configured
-# through CMAKE_C_FLAGS rather than the option.
+# No trailing newline: ami_config_log_level() accepts one, and leaving it out
+# keeps the file the same two bytes a `SetEnv` on the guest would write.
+serial_log_stage_env() {
+    local stage="$1" level="$2"
+
+    mkdir -p "$stage/env"
+    printf '%s' "$level" > "$stage/env/ANXDLOGLEVEL"
+}
+
+# Does the library in <builddir> carry the diagnostic sentences at all?
+#
+# Echoes on, off or unknown, and returns 0, 1 or 2 to match.  There is no
+# build option to read any more, so the LIBRARY ITSELF is the only answer: the
+# format strings are linked because the macros expand to a call, and a build
+# that has none of them is a stale tree or one somebody configured by hand
+# with the macros defined away.  `off` is a defect now, not a configuration.
 serial_log_state() {
-    local build="$1" cache lib
+    local build="$1" lib
 
     # A caller's -b is relative to the tree, and every harness cd's to it
     # before this is reached; an absolute one is left alone.
@@ -46,19 +66,15 @@ serial_log_state() {
         /*) ;;
         *)  build="${ROOT:-.}/$build" ;;
     esac
-    cache="$build/CMakeCache.txt"
 
-    if [ -f "$cache" ]; then
-        case "$(sed -n 's/^AMINETXDUO_LOG:BOOL=//p' "$cache" | head -1)" in
-            [Oo][Nn]|1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) echo on;  return 0 ;;
-            [Oo][Ff][Ff]|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]) echo off; return 1 ;;
-        esac
-    fi
-
+    # grep straight at the image, not `strings | grep`: every caller of this
+    # runs under `set -o pipefail`, grep -q closes the pipe on its first match,
+    # and strings then dies of SIGPIPE and fails the pipeline -- so the library
+    # that HAS the sentence was reported as the one that has not.
     for lib in "$build/src/bsdsocket/bsdsocket.library" \
                "$build/bsdsocket.library"; do
         [ -f "$lib" ] || continue
-        if strings -a "$lib" 2>/dev/null | grep -q 'netstack: mark'; then
+        if LC_ALL=C grep -qaF 'netstack: mark' "$lib"; then
             echo on; return 0
         fi
         echo off; return 1
@@ -78,9 +94,7 @@ serial_log_state() {
 #
 # -- and returns 0 when there is something to read.  A caller takes the
 # non-zero branch as a FAILURE, not a skip: its assertion has no input, which
-# is a fact about the rig and has to be as loud as a red check.  The diagnosis
-# on stderr names the rebuild, because on this rig the answer has been the
-# build every time it has been looked at.
+# is a fact about the rig and has to be as loud as a red check.
 #
 # <builddir> may be empty when the caller has no build to blame; the state is
 # then reported as unknown and the advice is unchanged.
@@ -99,22 +113,19 @@ serial_log_have() {
         echo "!! $file is $bytes bytes."
         case "$state" in
             off)
-                echo "!! $build was built with AMINETXDUO_LOG=OFF, so AMI_ERROR,"
-                echo "!! AMI_WARN and AMI_INFO compiled to nothing and the guest"
-                echo "!! never wrote a byte to the serial port.  Rebuild it:"
-                echo "!!   cmake -S . -B $build \\"
-                echo "!!     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\"
-                echo "!!     -DCMAKE_BUILD_TYPE=Release \\"
-                echo "!!     -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2" ;;
+                echo "!! $build holds no ami_log() sentences at all.  They are in every"
+                echo "!! build now, so this is a stale tree or one configured by hand."
+                echo "!! Reconfigure and rebuild it." ;;
             on)
-                echo "!! ${build:-the build} HAS the serial log compiled in, so this is"
-                echo "!! not the usual cause: the guest reached nothing that logs, or"
-                echo "!! the run never started.  Read the emulator log beside this file." ;;
+                echo "!! ${build:-the build} HAS the sentences, so what is left is the"
+                echo "!! LEVEL or the run.  ami_log_level() starts at AMI_LOG_WARN, so"
+                echo "!! nothing at AMI_LOG_INFO reaches the port unless the harness"
+                echo "!! stages ENV:ANXDLOGLEVEL (serial_log_stage_env).  Failing that,"
+                echo "!! the guest reached nothing that logs, or the run never started:"
+                echo "!! read the emulator log beside this file." ;;
             *)
-                echo "!! Nothing here can say whether ${build:-the build} has the serial"
-                echo "!! log compiled in; there is no CMakeCache.txt and no library to"
-                echo "!! read.  If it was built without -DAMINETXDUO_LOG=ON, that is the"
-                echo "!! whole of it." ;;
+                echo "!! Nothing here can say what ${build:-the build} holds; there is no"
+                echo "!! library to read.  Build it first." ;;
         esac
     } >&2
     return 1
@@ -132,14 +143,13 @@ serial_log_require_build() {
     [ "$state" = off ] || return 0
 
     {
-        echo "!! $name reads guest ami_log() output, and $build was built with"
-        echo "!! AMINETXDUO_LOG=OFF: AMI_ERROR, AMI_WARN and AMI_INFO compile to"
-        echo "!! nothing, so the serial log comes back 0 bytes and every figure"
-        echo "!! this harness reports would be missing.  Rebuild it:"
+        echo "!! $name reads guest ami_log() output, and there is not one sentence"
+        echo "!! in $build.  AMI_ERROR, AMI_WARN and AMI_INFO are compiled into"
+        echo "!! every build, so a library without them is stale or was configured"
+        echo "!! by hand.  Reconfigure and rebuild it:"
         echo "!!   cmake -S . -B $build \\"
         echo "!!     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \\"
-        echo "!!     -DCMAKE_BUILD_TYPE=Release \\"
-        echo "!!     -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2"
+        echo "!!     -DCMAKE_BUILD_TYPE=Release"
     } >&2
     exit 2
 }

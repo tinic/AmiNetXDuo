@@ -190,9 +190,9 @@ echo "    1. The FIRST line names the failing OPERATION and its CODE." >&2
 echo "       'AddNetInterface: could not open a2065.device unit 0 (error 32)'" >&2
 echo "       and not 'eth0 did not come online'." >&2
 echo >&2
-echo "    2. NOTHING anywhere sends the reader to a log.  AMINETXDUO_LOG is" >&2
-echo "       off in every shipping drawer, so the log does not exist and the" >&2
-echo "       advice cannot be followed." >&2
+echo "    2. NOTHING anywhere sends the reader to a log.  The only log is" >&2
+echo "       the serial port, which a stock machine neither captures nor" >&2
+echo "       shows, so the advice cannot be followed by the reader." >&2
 echo >&2
 echo "  tests/tools/bringupfail-verdict-selftest.sh has a worked example of" >&2
 echo "  the wording for each of the five causes." >&2

@@ -48,9 +48,11 @@ echo "log_advice=FOUND"
 echo >&2
 echo "A shipped command tells the user to consult a log." >&2
 echo >&2
-echo "  AMINETXDUO_LOG is off in every shipping drawer, so no such log is" >&2
-echo "  ever written.  The advice cannot be followed by the person being" >&2
-echo "  given it." >&2
+echo "  The only log the stack has is the serial port, which a stock" >&2
+echo "  machine neither captures nor shows.  It exists -- AMI_ERROR and" >&2
+echo "  AMI_WARN are in every shipping image -- but reaching it needs a" >&2
+echo "  null modem or Sashimi, so the advice cannot be followed by the" >&2
+echo "  person being given it." >&2
 echo >&2
 echo "  Replace the sentence with something the user can ACT on: the" >&2
 echo "  operation that failed, its code, and the file or the line to change." >&2

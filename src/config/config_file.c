@@ -337,6 +337,39 @@ ULONG ami_config_pool_divisor(ULONG fallback)
     return value;
 }
 
+/*
+ * The diagnostic dial: a single digit 0..4 in ENV:ANXDLOGLEVEL.  Anything else
+ * is the fallback, silently -- a mistyped variable must not be the reason a
+ * machine says nothing.
+ */
+LONG ami_config_log_level(LONG fallback)
+{
+    char *buf = (char *)ami_cfg_read_file("ENV:ANXDLOGLEVEL", NULL);
+    LONG  value = fallback;
+    char *p = buf;
+
+    if (buf == NULL)
+        return fallback;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+
+    if (*p >= '0' && *p <= '4')
+    {
+        LONG digit = (LONG)(*p++ - '0');
+
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+
+        if (*p == '\0')
+            value = digit;
+    }
+
+    ami_free(buf);
+
+    return value;
+}
+
 LONG ami_config_load(AmiConfig *cfg)
 {
     if (cfg == NULL)
