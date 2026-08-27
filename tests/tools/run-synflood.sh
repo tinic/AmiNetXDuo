@@ -4,6 +4,18 @@
 # The a2065.device driver is not ours to ship: AMINETXDUO_A2065=<path>, or a
 # copy in build/a2065.device.  The peer needs a python with cap_net_raw; see
 # synflood.py.
+#
+# WHAT THIS MEASURED.  Nine emulated cards at 100 SYN/s from forged sources:
+# pre-fix 0 of 5 legitimate connections complete during the flood, defended
+# 5 of 5, at no measurable cost to handshake latency or throughput when nothing
+# is attacking.  -u inverts the verdict, for a build without the SYN cache.
+#
+# The ceiling is the wire, not the cache: at 2000 SYN/s a defended a2065 drops
+# to 2 of 5, because the emulated LANCE and the 68020 saturate on receiving
+# SYNs and transmitting SYN-ACKs.  RFC 4987 says no SYN defence addresses a
+# packet-rate attack.  At 100/s the state the cache protects is already
+# exhausted many times over -- 2500 SYNs held 20 s each is about 2000
+# outstanding against 512 entries.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail

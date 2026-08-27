@@ -15,13 +15,11 @@ by Commodore's Installer. The install is part of what each launch tests.
 | A3000 | 3.1 40.68 A3000 | plain | FULL | `tools/classicwb.sh -m A3000` |
 | A3000 | 3.1 40.68 A3000 | rtg | P96 | `tools/classicwb.sh -m A3000 -v rtg` |
 
-The Kickstart comes from `~/amiga-assets/env.sh`. A ROM that does not match the
-model and the CPU produces a black screen and an empty log.
-
-The A600 rows differ because ClassicWB FULL states 68020 and 6 MB: an A600 takes
-ClassicWB 68K, the edition published for that machine rather than a reduced
-FULL. P96 states 68020 and a graphics card and Picasso96 is 68020 code, so the
-A600 has no rtg row and the launcher refuses it by name.
+The Kickstart comes from `~/amiga-assets/env.sh`. The A600 rows differ because
+ClassicWB FULL states 68020 and 6 MB: an A600 takes ClassicWB 68K, the edition
+published for that machine rather than a reduced FULL. P96 states 68020 and a
+graphics card and Picasso96 is 68020 code, so the A600 has no rtg row and the
+launcher refuses it by name.
 
 `tools/classicwb.sh -h` lists the options. Output is `key=value` lines;
 `RESULT=UP` and exit 0 mean the guest booted, took a lease, and answered.
@@ -34,8 +32,8 @@ A600 has no rtg row and the launcher refuses it by name.
 | rtg | uaegfx 640x480x8 | `/` drawer, `/shell`, `/console` |
 
 `/console` streams the frontmost screen. The geometry word's format field is 1
-on a card and 0 on the planar fallback, and a board that fails to come up is
-otherwise invisible: Workbench falls back to the chipset silently.
+on a card and 0 on the planar fallback, which is the only sign that a board
+failed to come up: Workbench falls back to the chipset silently.
 
 ## The split
 
@@ -46,17 +44,15 @@ otherwise invisible: Workbench falls back to the chipset silently.
 | Archive | `-b <builddir>`, default `build/cm` | `dist/make-dist.sh` and `clients/dropbear/build.sh` |
 
 The snapshot is ClassicWB installed and settled, and carries no file of ours. A
-launch copies it, builds a release archive from the build directory, unpacks the
-archive on the copy as a download arrives, and boots once with the Installer
-running against it. `-a` takes an archive as given instead. `dbclient` is built
-as well: it comes from `clients/dropbear/build.sh` rather than from CMake, and
-`ssh` is otherwise missing from the archive. A run that wedges its drive costs
-the copy, not the install. The install adds 50 to 92 seconds; a whole launch is
-77 to 151 seconds.
-
-Four steps run after the Installer, each one the Installer's own text describes
-as the user's: `anxnet.device` into `DEVS:Networks` with a `CARD=` line, `MDNS=`
-on, the host name, and httpd on the chosen drawer and port.
+launch copies it, builds a release archive from the build directory, unpacks it
+on the copy, and boots once with the Installer running against it, so a run that
+wedges its drive costs the copy and not the install. `-a` takes an archive as
+given instead. `dbclient` comes from `clients/dropbear/build.sh` rather than
+from CMake, and `ssh` is otherwise missing from the archive. The install adds 50
+to 92 seconds; a whole launch is 77 to 151 seconds. Four steps run after the
+Installer, each one the Installer's own text describes as the user's:
+`anxnet.device` into `DEVS:Networks` with a `CARD=` line, `MDNS=` on, the host
+name, and httpd on the chosen drawer and port.
 
 ## The gates
 
@@ -71,16 +67,14 @@ running on somebody else's driver.
 | `driver_match` | the driver the guest is running on, against the one installed | a guest on `a2065.device` when ours was installed |
 | `served_check` | the `Server:` header of the running server, against the build directory | serving another version |
 
-`install_check` derives its expected set from the archive rather than from a
-list written here, so it cannot drift from what ships. `driver_match` was proved
-by a negative test: the same launch with `a2065.device` staged booted, took a
-lease, served, and exited 1.
-
-`served_check` needs `-c <host>`. A frame the emulator host sends to a guest of
-its own never reaches it, so a request from that host times out against a guest
-that is serving normally. `-c` names another machine on the same segment.
-Without it the first two still run.
+`install_check` derives its expected set from the archive, so it cannot drift
+from what ships. `driver_match` was proved by a negative test: the same launch
+with `a2065.device` staged booted, took a lease, served, and exited 1.
+`served_check` needs `-c <host>`, another machine on the same segment: a frame
+the emulator host sends to a guest of its own never reaches it, so a request
+from that host times out against a guest that is serving normally. Without `-c`
+the first two still run.
 
 Rebuild a snapshot with `~/amiga-assets/classicwb/install.sh <68k|full|p96>`.
-The archives are hash-pinned and verified before use. The snapshot is a cache;
-the script and the archives are the source of truth.
+The archives are hash-pinned. The snapshot is a cache; the script and the
+archives are the source of truth.

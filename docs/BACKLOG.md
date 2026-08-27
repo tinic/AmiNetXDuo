@@ -34,7 +34,6 @@ comment beside the code, not an entry here.
 | Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
 | The xmit leg has never been read on a transfer | built and wired, but no capture run has quoted it beside reap/stuff/post | `tests/perf/run-poolshare.sh:97` |
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:97` |
-| The docs/*.md budget is 1150 where 800 was asked for | the enforced ceiling still exceeds the requested ceiling by 350 lines | `tools/check-doc-budget.sh:17` |
 | Three harnesses still reach the network through SLIRP | `run-livetools.sh` and `run-dnssearch.sh` hardcode 10.0.2.x, and `run-hangup.sh` needs the emulator host's loopback through SLIRP's alias, which a bridged guest cannot reach | `tests/tools/run-livetools.sh`, `tests/tools/run-dnssearch.sh`, `tests/tls/run-hangup.sh` |
 | `run-tcpdrill.sh` still defaults to the fs-uae runner | `RUNNER="${AMINETXDUO_RUNNER:-fsuae}"`, and fs-uae is not what any lab host runs | `tests/tcpdrill/run-tcpdrill.sh:19` |
 | Two harnesses are red on their own premise | `run-dnscache.sh` reads `$HD/host.pcap`, which nothing has written since fs-uae left; `run-resolvebreak.sh` arm 1 returns errno 22 in 1.02 s so arm 3 has nothing to interrupt, and it prints 85899340.92 s from -250 ticks | `tests/tools/run-dnscache.sh`, `tests/tools/run-resolvebreak.sh` |

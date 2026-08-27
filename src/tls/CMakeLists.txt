@@ -3,7 +3,7 @@
 # This is deliberately NOT linked into bsdsocket.library.  docs/RESEARCH.md 9
 # records the decision: TLS ships as a separate library behind its own build
 # option, and is benchmarked on 68020 before any API is promised.  The gate is
-# tests/tls/tls_bench, see docs/RESEARCH.md 5.5 for the numbers it produced.
+# tests/tls/tls_bench, which prints the numbers it produced.
 #
 # Two static libraries, because they have very different dependency shapes:
 #
