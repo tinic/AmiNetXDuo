@@ -481,6 +481,117 @@ static VOID p_nesting_phase(struct Library *base, const char *file_server)
     p_show_list(base, "final");
 }
 
+/*
+ * THE IPv6 HALF OF THE SAME INTERFACE.
+ *
+ * ObtainDomainNameServerList() has always reported the IPv6 servers, and
+ * AddDomainNameServer()/RemoveDomainNameServer() parsed a dotted quad and
+ * nothing else, so an address the list handed a program back could not be
+ * given to RemoveDomainNameServer() at all: it answered EINVAL and the server
+ * stayed for the life of the machine.  Everything below goes through the text
+ * the LIST printed, so a formatting disagreement between the two halves of the
+ * interface fails here rather than in a caller.
+ *
+ * 2001:db8::53 is RFC 3849 documentation space and answers nothing, which is
+ * why nesting is measured on it and not on a resolver the machine is using.
+ */
+#define PROBE_EXTRA_DNS6    "2001:db8::53"
+
+/* The first IPv6 address the list reports, as the list spells it. */
+static BOOL p_first_dns6(struct Library *base, char *out, ULONG size)
+{
+    struct List *list = p_obtain_dns_list(base);
+    BOOL         found = FALSE;
+
+    out[0] = '\0';
+
+    if (list == NULL)
+        return FALSE;
+
+    {
+        struct MinNode *node = (struct MinNode *)list->lh_Head;
+
+        while (!found && node != NULL && node->mln_Succ != NULL)
+        {
+            const struct
+            {
+                struct MinNode  dnsn_MinNode;
+                LONG            dnsn_Size;
+                char           *dnsn_Address;
+                LONG            dnsn_UseCount;
+            } *dns = (VOID *)node;
+            const char *text = dns->dnsn_Address;
+            ULONG       i;
+
+            for (i = 0; text != NULL && text[i] != '\0'; i++)
+                if (text[i] == ':')
+                {
+                    ULONG n = 0;
+
+                    while (text[n] != '\0' && n + 1 < size)
+                    {
+                        out[n] = text[n];
+                        n++;
+                    }
+                    out[n] = '\0';
+                    found = TRUE;
+                    break;
+                }
+
+            node = node->mln_Succ;
+        }
+    }
+
+    p_release_dns_list(base, list);
+    return found;
+}
+
+static VOID p_nesting6_phase(struct Library *base)
+{
+    char listed[64];
+    LONG rc;
+
+    rc = p_add_dns(base, PROBE_EXTRA_DNS6);
+    Printf((CONST_STRPTR)"add6 %s rc %ld use %ld\n", (LONG)PROBE_EXTRA_DNS6,
+           rc, p_dns_use(base, PROBE_EXTRA_DNS6));
+
+    if (!p_first_dns6(base, listed, sizeof(listed)))
+    {
+        Printf((CONST_STRPTR)"listed6: none\n");
+        return;
+    }
+
+    Printf((CONST_STRPTR)"listed6 %s use %ld\n", (LONG)listed,
+           p_dns_use(base, listed));
+
+    /* From here on the address is the LIST's own text, never the literal
+       above: this is a caller doing what the interface invites it to do. */
+    rc = p_add_dns(base, listed);
+    Printf((CONST_STRPTR)"add6 listed rc %ld use %ld\n", rc,
+           p_dns_use(base, listed));
+
+    rc = p_remove_dns(base, listed);
+    Printf((CONST_STRPTR)"remove6 listed rc %ld use %ld\n", rc,
+           p_dns_use(base, listed));
+
+    rc = p_remove_dns(base, listed);
+    Printf((CONST_STRPTR)"remove6 listed rc %ld use %ld\n", rc,
+           p_dns_use(base, listed));
+
+    /* One remove too many: -1 and ENOENT, as the IPv4 half answers. */
+    rc = p_remove_dns(base, listed);
+    Printf((CONST_STRPTR)"remove6 listed again rc %ld errno %ld\n", rc,
+           p_errno(base));
+
+    /* Text that is neither an IPv4 nor an IPv6 address is still EINVAL: the
+       IPv6 form is reached only by strings the dotted quad refused. */
+    rc = p_add_dns(base, "2001:db8::1::2");
+    Printf((CONST_STRPTR)"add6 malformed rc %ld errno %ld\n", rc,
+           p_errno(base));
+
+    p_show_list(base, "final6");
+}
+
 static VOID p_domain_phase(struct Library *base, const char *host,
                            const char *domain)
 {
@@ -573,6 +684,7 @@ int main(int argc, char **argv)
     p_pton_phase(base);
     p_hostname_phase(base, self_name, self_alias);
     p_nesting_phase(base, file_server);
+    p_nesting6_phase(base);
     p_domain_phase(base, host, domain);
 
     CloseLibrary(base);

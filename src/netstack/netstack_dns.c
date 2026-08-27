@@ -183,6 +183,117 @@ static BOOL ami_ns6_same(const ULONG a[4], const ULONG b[4])
                   a[2] == b[2] && a[3] == b[3]);
 }
 
+static VOID ami_ns6_nxd(NXD_ADDRESS *out, const ULONG addr[AMI_CFG_IP6_WORDS])
+{
+    out->nxd_ip_version       = NX_IP_VERSION_V6;
+    out->nxd_ip_address.v6[0] = addr[0];
+    out->nxd_ip_address.v6[1] = addr[1];
+    out->nxd_ip_address.v6[2] = addr[2];
+    out->nxd_ip_address.v6[3] = addr[3];
+}
+
+/*
+ * OWNERSHIP OF AN IPv6 NAME SERVER, the pair ami_ns_dns_reference_add() and
+ * ami_ns_dns_reference_remove() below are for the IPv4 half.
+ *
+ * A router advertisement, DHCPv6 and a Roadshow caller can each name the same
+ * server, and the entry has to outlive any one of them leaving.  The count is
+ * nameserver6_use[], which ObtainDomainNameServerList() reports as
+ * dnsn_UseCount: the first owner creates the entry, later owners deepen the
+ * count, and only the last one to go takes the entry out of the DNS client.
+ *
+ * `nx_status` and `dropped` may be NULL.  `dropped` says the entry left the
+ * list rather than losing one of several owners, which is what the callers log.
+ */
+static BOOL ami_ns_dns6_reference_add(AmiNetStack *ns,
+                                      const ULONG server[AMI_CFG_IP6_WORDS],
+                                      UINT *nx_status)
+{
+    AmiResolverConfig *r = &ns->ns_Config.resolver;
+    NXD_ADDRESS        address;
+    UINT               status;
+    UWORD              i;
+
+    if (nx_status != NULL)
+        *nx_status = NX_SUCCESS;
+
+    for (i = 0; i < r->nameserver6_count; i++)
+        if (ami_ns6_same(r->nameserver6[i], server))
+        {
+            ami_ns_resolver_forbid();
+            r->nameserver6_use[i] =
+                ami_ns_dns_use_deepen(r->nameserver6_use[i]);
+            ami_ns_resolver_permit();
+            return TRUE;
+        }
+
+    if (r->nameserver6_count >= (UWORD)AMI_CFG_MAX_NAMESERVERS)
+        return FALSE;
+
+    ami_ns6_nxd(&address, server);
+
+    status = nxd_dns_server_add(&ns->ns_Dns, &address);
+    if (nx_status != NULL)
+        *nx_status = status;
+    if (status != NX_SUCCESS && status != NX_DNS_DUPLICATE_ENTRY)
+        return FALSE;
+
+    ami_ns_resolver_forbid();
+    (VOID)ami_config_nameserver6_offer(r, server);
+    ami_ns_resolver_permit();
+    return TRUE;
+}
+
+static BOOL ami_ns_dns6_reference_remove(AmiNetStack *ns,
+                                         const ULONG server[AMI_CFG_IP6_WORDS],
+                                         BOOL *dropped, UINT *nx_status)
+{
+    AmiResolverConfig *r = &ns->ns_Config.resolver;
+    NXD_ADDRESS        address;
+    UINT               status;
+    UWORD              at;
+    LONG               use;
+
+    if (nx_status != NULL)
+        *nx_status = NX_SUCCESS;
+    if (dropped != NULL)
+        *dropped = FALSE;
+
+    for (at = 0; at < r->nameserver6_count; at++)
+        if (ami_ns6_same(r->nameserver6[at], server))
+            break;
+
+    /* Nothing of ours to give back.  Not a failure: a source withdrawing a
+       server it never got installed is the ordinary case after a rejection. */
+    if (at == r->nameserver6_count)
+        return TRUE;
+
+    use = ami_ns_dns_use_shallow(r->nameserver6_use[at]);
+    if (use != 0)
+    {
+        ami_ns_resolver_forbid();
+        r->nameserver6_use[at] = use;
+        ami_ns_resolver_permit();
+        return TRUE;
+    }
+
+    ami_ns6_nxd(&address, server);
+
+    status = nxd_dns_server_remove(&ns->ns_Dns, &address);
+    if (nx_status != NULL)
+        *nx_status = status;
+    if (status != NX_SUCCESS && status != NX_DNS_SERVER_NOT_FOUND)
+        return FALSE;
+
+    ami_ns_resolver_forbid();
+    (VOID)ami_config_nameserver6_withdraw(r, server);
+    ami_ns_resolver_permit();
+
+    if (dropped != NULL)
+        *dropped = TRUE;
+    return TRUE;
+}
+
 VOID ami_ns6_rdnss(NX_IP *ip_ptr, UINT interface_index, ULONG *dns_address,
                    ULONG lifetime)
 {
@@ -353,18 +464,19 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
     for (index = ns->ns_Dhcpv6DnsCount; index-- != 0U; )
     {
         NXD_ADDRESS server = ns->ns_Dhcpv6Dns[index];
-        UINT        status;
+        UINT        status = NX_SUCCESS;
+        BOOL        dropped = FALSE;
 
         if (ami_ns_dns_v6_list_names(offered, offered_count,
                                      server.nxd_ip_address.v6) ||
             ami_ns_ra_rdnss_has(&ns->ns_Ra, server.nxd_ip_address.v6, now))
             continue;
 
-        status = nxd_dns_server_remove(&ns->ns_Dns, &server);
         ami_config_format_ip6(server.nxd_ip_address.v6, text,
                               sizeof(sc->text));
 
-        if (status != NX_SUCCESS && status != NX_DNS_SERVER_NOT_FOUND)
+        if (!ami_ns_dns6_reference_remove(ns, server.nxd_ip_address.v6,
+                                          &dropped, &status))
         {
             AMI_WARN("netstack: DHCPv6 name server %s withdrawal failed "
                      "(%ld)", text, (long)status);
@@ -372,11 +484,10 @@ static VOID ami_ns_dns_absorb_dhcpv6(AmiNetStack *ns, AmiNsDns6Scratch *sc)
             return;
         }
 
-        ami_ns_resolver_forbid();
-        (VOID)ami_config_nameserver6_withdraw(r,
-                                              server.nxd_ip_address.v6);
-        ami_ns_resolver_permit();
-        AMI_INFO("netstack: DHCPv6 name server %s withdrawn", text);
+        /* Kept, because a Roadshow caller still holds it.  Its dnsn_UseCount
+           went down by one and the server keeps answering. */
+        if (dropped)
+            AMI_INFO("netstack: DHCPv6 name server %s withdrawn", text);
     }
 
     memset(ns->ns_Dhcpv6Dns, 0, sizeof(ns->ns_Dhcpv6Dns));
@@ -539,7 +650,7 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns, AmiNsDns6Scratch *sc)
         for (i = r->nameserver6_count; i-- != 0; )
         {
             ULONG gone[AMI_CFG_IP6_WORDS];
-            BOOL  withdrawn;
+            BOOL  dropped = FALSE;
 
             for (j = 0; j < ra->rdnss_count; j++)
                 if (ami_ns6_same(r->nameserver6[i],
@@ -557,24 +668,10 @@ static VOID ami_ns_dns_absorb_rdnss(AmiNetStack *ns, AmiNsDns6Scratch *sc)
             gone[2] = r->nameserver6[i][2];
             gone[3] = r->nameserver6[i][3];
 
-            ami_ns_resolver_forbid();
-            withdrawn = ami_config_nameserver6_withdraw(r, gone);
-            ami_ns_resolver_permit();
+            (VOID)ami_ns_dns6_reference_remove(ns, gone, &dropped, NULL);
 
-            if (!withdrawn)
+            if (!dropped)
                 continue;
-
-            {
-                NXD_ADDRESS address;
-
-                address.nxd_ip_version       = NX_IP_VERSION_V6;
-                address.nxd_ip_address.v6[0] = gone[0];
-                address.nxd_ip_address.v6[1] = gone[1];
-                address.nxd_ip_address.v6[2] = gone[2];
-                address.nxd_ip_address.v6[3] = gone[3];
-
-                (VOID)nxd_dns_server_remove(&ns->ns_Dns, &address);
-            }
 
             ami_config_format_ip6(gone, text, sizeof(sc->text));
             AMI_INFO("netstack: advertised name server %s withdrawn", text);
@@ -1990,6 +2087,88 @@ out:
     ami_netstack_leave_free(caller);
     return result;
 }
+
+#ifdef AMINETXDUO_IPV6
+
+/*
+ * The IPv6 half of AddDomainNameServer()/RemoveDomainNameServer().
+ *
+ * ObtainDomainNameServerList() has always reported the IPv6 servers, and until
+ * these existed nothing could take one away again: both entry points parsed a
+ * dotted quad and nothing else, so an advertised resolver was visible and
+ * permanent.  The nesting is the IPv4 rule, and the owner count is shared with
+ * the router advertisement and DHCPv6 paths.
+ */
+static BOOL ami_ns6_unspecified(const ULONG address[AMI_CFG_IP6_WORDS])
+{
+    return (BOOL)(address == NULL ||
+                  (address[0] == 0UL && address[1] == 0UL &&
+                   address[2] == 0UL && address[3] == 0UL));
+}
+
+LONG netstack_dns_server6_add(const ULONG address[AMI_CFG_IP6_WORDS])
+{
+    AmiNetStack  *ns = netstack_get();
+    AmiNetCaller *caller;
+    LONG          result = AMI_NET_OK;
+    UINT          status = NX_SUCCESS;
+
+    if (ami_ns6_unspecified(address))
+        return AMI_NET_ERR_CONFIG;
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
+    /* A full list and a DNS client that refused the server are different
+       answers: the autodoc has ENOBUFS for the first and EINVAL for the
+       second. */
+    if (!ami_ns_dns6_reference_add(ns, address, &status))
+        result = (status == NX_SUCCESS) ? AMI_NET_ERR_NOMEM
+                                        : AMI_NET_ERR_CONFIG;
+
+    ami_netstack_leave_free(caller);
+    return result;
+}
+
+LONG netstack_dns_server6_remove(const ULONG address[AMI_CFG_IP6_WORDS])
+{
+    AmiNetStack       *ns = netstack_get();
+    AmiResolverConfig *r;
+    AmiNetCaller      *caller;
+    LONG               result = AMI_NET_OK;
+    UINT               status = NX_SUCCESS;
+    UWORD              at;
+
+    if (ami_ns6_unspecified(address))
+        return AMI_NET_ERR_CONFIG;
+    if (ns == NULL)
+        return AMI_NET_ERR_STATE;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return AMI_NET_ERR_STATE;
+
+    /* "[ENOENT] The IP address to remove was not found", so the absent case is
+       told apart here rather than inside the reference count, which treats it
+       as a source giving back what it never got. */
+    r = &ns->ns_Config.resolver;
+    for (at = 0; at < r->nameserver6_count; at++)
+        if (ami_ns6_same(r->nameserver6[at], address))
+            break;
+
+    if (at == r->nameserver6_count)
+        result = AMI_NET_ERR_NONAME;
+    else if (!ami_ns_dns6_reference_remove(ns, address, NULL, &status))
+        result = AMI_NET_ERR_CONFIG;
+
+    ami_netstack_leave_free(caller);
+    return result;
+}
+
+#endif /* AMINETXDUO_IPV6 */
 
 LONG netstack_set_domain_name(const char *name)
 {

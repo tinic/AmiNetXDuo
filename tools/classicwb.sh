@@ -995,6 +995,58 @@ case "$DRIVER_IN_USE" in
        exit 1 ;;
 esac
 
+# ------------------------------------------------ the address to serve on --
+#
+# THE SNIFFER SEES IPv4 AND NOTHING ELSE.  On a segment whose DHCP does not
+# answer, the guest falls back to 169.254/16, takes a global address by SLAAC
+# and serves on it perfectly well -- and every URL below named the link-local
+# one, so served_check asked a machine off this segment for an address it can
+# never route to and the launch failed on a guest that was up.
+#
+# ShowNetStatus has already written what the stack holds, and the driver gate
+# above waited for it, so the addresses are on disk by the time this runs.
+# A fe80: address is link-local like the 169.254 one, and a tentative or
+# deprecated address is one the stack itself will not answer on: neither is a
+# candidate.
+serving_address6() { # netstatus.txt
+    awk '
+        $1 == "address6" {
+            split($2, part, "/")
+            addr = part[1]
+            if (addr ~ /^[Ff][Ee]80:/) next
+            if (addr == "::1" || addr == "::") next
+            if ($3 ~ /tentative|duplicate|deprecated/) next
+            print addr
+            exit
+        }' "$1"
+}
+
+# IPv4 FIRST, ALWAYS.  A guest with a real lease is reached exactly as it was
+# before this block existed; the IPv6 address is what a guest with no lease is
+# reached by, not a new preference.  Empty means it has neither.
+serve_host_for() { # ipv4-address netstatus.txt
+    local v6
+    v6=$(serving_address6 "$2")
+    case "$1" in
+        169.254.*|"") [ -z "$v6" ] || printf '[%s]\n' "$v6" ;;
+        *)            printf '%s\n' "$1" ;;
+    esac
+}
+
+ADDR6=$(serving_address6 "$HD/netstatus.txt" || true)
+say address6 "${ADDR6:-none}"
+
+SERVE_HOST=$(serve_host_for "$ADDR" "$HD/netstatus.txt")
+SERVE_ADDR=${SERVE_HOST#[}
+SERVE_ADDR=${SERVE_ADDR%]}
+if [ -z "$SERVE_HOST" ]; then
+    say error "the guest has no address anything can reach it on: its IPv4 is\
+ the link-local $ADDR and it has taken no global IPv6 address"
+    say netstatus "$HD/netstatus.txt"
+    say emulog "$EMULOG"; say drive "$HD"; exit 1
+fi
+say serve_address "$SERVE_ADDR"
+
 # What the running server says it is, asked from somewhere that can hear it.
 #
 # Not from here.  A frame this host sends to a guest of its own never reaches
@@ -1005,14 +1057,14 @@ if [ -n "$CHECKHOST" ]; then
     SERVED=""
     for _ in $(seq 1 30); do
         SERVED=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$CHECKHOST" \
-                 "curl -s -m 5 -D - -o /dev/null http://$ADDR:$PORT/" 2>/dev/null |
+                 "curl -s -m 5 -D - -o /dev/null 'http://$SERVE_HOST:$PORT/'" 2>/dev/null |
                  sed -n 's/^[Ss]erver:[[:space:]]*//p' | tr -d '\r' | head -1 || true)
         [ -n "$SERVED" ] && break
         sleep 2
     done
     say served_by "${SERVED:-none}"
     [ -n "$SERVED" ] || {
-        say error "nothing answered on http://$ADDR:$PORT/ from $CHECKHOST"
+        say error "nothing answered on http://$SERVE_HOST:$PORT/ from $CHECKHOST"
         exit 1; }
     [ "$SERVED" = "AmiNetXDuo-httpd/$ARCH_VER" ] || {
         say error "the guest is serving '$SERVED', not $ARCH_VER"; exit 1; }
@@ -1021,8 +1073,8 @@ fi
 
 # --------------------------------------------------------------------------
 
-HOSTPART="$ADDR"
-[ "$PORT" = 80 ] || HOSTPART="$ADDR:$PORT"
+HOSTPART="$SERVE_HOST"
+[ "$PORT" = 80 ] || HOSTPART="$SERVE_HOST:$PORT"
 say drawer "http://$HOSTPART/"
 say shell "http://$HOSTPART/shell"
 [ "$VARIANT" = rtg ] && say console "http://$HOSTPART/console"

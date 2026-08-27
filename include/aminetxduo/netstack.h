@@ -308,6 +308,14 @@ VOID netstack_dns_absorb_pending(VOID);
    alone. */
 LONG netstack_dns_server_add(ULONG address);
 LONG netstack_dns_server_remove(ULONG address);
+#ifdef AMINETXDUO_IPV6
+/* The same pair for an IPv6 server, host byte order, four words.  Nesting is
+   the IPv4 rule: two adds need two removes, and a server a router
+   advertisement or DHCPv6 also names outlives the caller's own reference.
+   AMI_NET_ERR_NONAME when there is no such server to remove. */
+LONG netstack_dns_server6_add(const ULONG address[4]);
+LONG netstack_dns_server6_remove(const ULONG address[4]);
+#endif
 LONG netstack_set_domain_name(const char *name);
 /* Coherent reads of the live resolver configuration. The raw AmiConfig is
    still suitable for immutable startup fields, but not for this mutable part. */

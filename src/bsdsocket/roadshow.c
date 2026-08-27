@@ -102,7 +102,9 @@ struct List *bsd_ObtainDomainNameServerList(
         node->dnsn_Size    = (LONG)sizeof(*node);
         node->dnsn_Address = (STRPTR)out->bdl_Text[count];
 
-        node->dnsn_UseCount = 1;
+        node->dnsn_UseCount = (out->bdl_Resolver.nameserver6_use[i] != 0)
+                                  ? out->bdl_Resolver.nameserver6_use[i]
+                                  : -1;
 
         AddTail((struct List *)&out->bdl_List, (struct Node *)&node->dnsn_MinNode);
         count++;
@@ -115,49 +117,79 @@ struct List *bsd_ObtainDomainNameServerList(
  * The address arrives as a dotted quad, not as an in_addr: Roadshow's autodoc
  * spells the parameter "char *address", and its own commands pass the text
  * straight through from their arguments.
+ *
+ * THE DOTTED QUAD IS TRIED FIRST AND ITS BEHAVIOUR IS UNCHANGED.  An IPv6
+ * literal is only reached by text that was refused with EINVAL before this
+ * existed, so nothing an IPv4 caller can pass takes a different path than it
+ * did.  It is here because ObtainDomainNameServerList() above reports the IPv6
+ * servers, and a list a caller can read and cannot change is not the published
+ * interface: every address that comes out of the list has to go back in to
+ * RemoveDomainNameServer() and be accepted.
  */
+
+/* AMI_NET_* to the errno the autodoc names for these two calls. */
+static LONG bsd_dns_result(struct AmiSocketBase *SocketBase, LONG result,
+                           LONG missing)
+{
+    switch (result)
+    {
+        case AMI_NET_OK:          return 0;
+        case AMI_NET_ERR_NOMEM:   return bsd_fail(SocketBase, AMI_ENOBUFS);
+        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
+        case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, missing);
+        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
+    }
+}
 
 LONG bsd_AddDomainNameServer(register STRPTR address __asm("a0"),
                              register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     ULONG addr;
+#ifdef AMINETXDUO_IPV6
+    ULONG addr6[AMI_CFG_IP6_WORDS];
+#endif
 
     /* The autodoc splits these: a bad parameter is EFAULT, a parameter that is
        not a valid IP address is EINVAL. */
     if (address == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    if (!ami_config_parse_ip((const char *)address, &addr))
-        return bsd_fail(SocketBase, AMI_EINVAL);
+    if (ami_config_parse_ip((const char *)address, &addr))
+        return bsd_dns_result(SocketBase, netstack_dns_server_add(addr),
+                              AMI_EINVAL);
 
-    switch (netstack_dns_server_add(addr))
-    {
-        case AMI_NET_OK:          return 0;
-        case AMI_NET_ERR_NOMEM:   return bsd_fail(SocketBase, AMI_ENOBUFS);
-        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
-        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
-    }
+#ifdef AMINETXDUO_IPV6
+    if (ami_config_parse_ip6((const char *)address, addr6, NULL))
+        return bsd_dns_result(SocketBase, netstack_dns_server6_add(addr6),
+                              AMI_EINVAL);
+#endif
+
+    return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
 LONG bsd_RemoveDomainNameServer(register STRPTR address __asm("a0"),
                                 register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     ULONG addr;
+#ifdef AMINETXDUO_IPV6
+    ULONG addr6[AMI_CFG_IP6_WORDS];
+#endif
 
     if (address == NULL)
         return bsd_fail(SocketBase, AMI_EFAULT);
 
-    if (!ami_config_parse_ip((const char *)address, &addr))
-        return bsd_fail(SocketBase, AMI_EINVAL);
+    /* "[ENOENT] The IP address to remove was not found", autodoc. */
+    if (ami_config_parse_ip((const char *)address, &addr))
+        return bsd_dns_result(SocketBase, netstack_dns_server_remove(addr),
+                              AMI_ENOENT);
 
-    switch (netstack_dns_server_remove(addr))
-    {
-        case AMI_NET_OK:          return 0;
-        /* "[ENOENT] The IP address to remove was not found", autodoc. */
-        case AMI_NET_ERR_NONAME:  return bsd_fail(SocketBase, AMI_ENOENT);
-        case AMI_NET_ERR_STATE:   return bsd_fail(SocketBase, AMI_ENETDOWN);
-        default:                  return bsd_fail(SocketBase, AMI_EINVAL);
-    }
+#ifdef AMINETXDUO_IPV6
+    if (ami_config_parse_ip6((const char *)address, addr6, NULL))
+        return bsd_dns_result(SocketBase, netstack_dns_server6_remove(addr6),
+                              AMI_ENOENT);
+#endif
+
+    return bsd_fail(SocketBase, AMI_EINVAL);
 }
 
 /*
