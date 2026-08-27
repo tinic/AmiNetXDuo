@@ -11,6 +11,7 @@ BUILD="${AMINETXDUO_BUILD:-$ROOT/build/cm}"
 MODEL="${AMINETXDUO_EMU_MODEL:-A1200}"
 BACKEND="${AMINETXDUO_CONSOLE_BACKEND:-ens18}"
 ADDRESS=192.168.1.232
+ADDRESS_SET=0
 NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
 PORT=8080
@@ -35,8 +36,20 @@ RTG_W=640
 RTG_H=480
 RTG_DEPTHS="8 15 16 24 32"
 
+# The screen the guest opens, when it is not the whole of the mode.  0 means
+# the path's own default: 640x256 for a Workbench arm, 320x256 for a chipset
+# one, and the mode's own size for an RTG one.
+#
+# WHY IT IS A KNOB AT ALL.  An Amiga screen and its bitmap are not the same
+# size: a planar bitmap is allocated in whole 16-pixel words and an RTG board
+# rounds to its own pitch, so a 312-wide screen sits in a 320-wide bitmap and a
+# 632-wide card screen in a 640-wide one.  Serving the allocation instead of
+# the screen is the defect 1ec557b9 fixed, and it survived a year because every
+# size the lab ever asked for was a multiple of 16 with nothing to pad.
+SCREEN_W=0
+SCREEN_H=0
+
 CHIPSET=()
-CHIPSCREEN=""
 CHIP_W=320
 CHIP_H=256
 CHIP_MODES="ham6 ham8 ehb"
@@ -44,9 +57,9 @@ CHIP=""
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
-while getopts "a:p:b:m:B:d:C:t:s:H:o:c:g:A:T:L:RP" opt; do
+while getopts "a:p:b:m:B:d:C:t:s:H:o:c:g:A:T:L:S:RP" opt; do
     case "$opt" in
-        a) ADDRESS="$OPTARG" ;;
+        a) ADDRESS="$OPTARG"; ADDRESS_SET=1 ;;
         p) PORT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -62,11 +75,25 @@ while getopts "a:p:b:m:B:d:C:t:s:H:o:c:g:A:T:L:RP" opt; do
         A) ACTIVITY="$OPTARG" ;;
         L) LATENCY="$OPTARG" ;;
         T) TYPE="$OPTARG" ;;
+        S) case "$OPTARG" in
+               [0-9]*x[0-9]*) SCREEN_W=${OPTARG%%x*}; SCREEN_H=${OPTARG##*x} ;;
+               *) say error "-S takes WxH, not $OPTARG"
+                  say RESULT INFRA
+                  exit 2 ;;
+           esac ;;
         R) RTG=1 ;;
         P) RTG=1; PATTERN=1 ;;
         *) sed -n '3,8p' "$0" >&2; exit 2 ;;
     esac
 done
+
+# Resolved here rather than beside -C, and staged on EVERY arm: at depth 0 it
+# opens nothing and reports the front screen, which is the only way an arm
+# serving the Workbench can say how wide that screen really is.  The size on the
+# wire is measured against the screen and never against what the prefs asked
+# for -- Workbench rounds a 632-pixel request up to 640, and an arm that
+# compared the wire with the request would call that a console defect.
+CHIPSCREEN="${AMINETXDUO_CHIPSCREEN:-$BUILD/tests/perf/chipscreen}"
 
 if [ "$RTG" = 1 ] && [ ${#CHIPSET[@]} -gt 0 ]; then
     say error "-C is a chipset screen and -R and -P are a card's; one run serves one of them"
@@ -93,10 +120,14 @@ if [ ${#CHIPSET[@]} -gt 0 ]; then
                    exit 2 ;;
             esac ;;
     esac
-    CHIPSCREEN="${AMINETXDUO_CHIPSCREEN:-$BUILD/tests/perf/chipscreen}"
     [ -f "$CHIPSCREEN" ] || {
         say error "no $CHIPSCREEN"
         say hint "cmake --build $BUILD --parallel --target chipscreen"
+        say RESULT INFRA
+        exit 2
+    }
+    [ -f "$ROOT/tests/tools/chipscreen-check.py" ] || {
+        say error "no $ROOT/tests/tools/chipscreen-check.py"
         say RESULT INFRA
         exit 2
     }
@@ -144,6 +175,19 @@ elif [ "$RTG" = 1 ]; then
     done
 else
     [ ${#DEPTHS[@]} -gt 0 ] || DEPTHS=(2 4)
+fi
+
+# The mode is chosen by RTG_W x RTG_H and the SCREEN is opened at these, so an
+# RTG arm can ask for a screen narrower than the mode it runs on.  That is the
+# shape of the reported defect: a 1368-wide screen in a 1600-wide bitmap.
+WB_W=640
+WB_H=256
+RTG_SW=$RTG_W
+RTG_SH=$RTG_H
+if [ "$SCREEN_W" != 0 ]; then
+    CHIP_W=$SCREEN_W; CHIP_H=$SCREEN_H
+    WB_W=$SCREEN_W;   WB_H=$SCREEN_H
+    RTG_SW=$SCREEN_W; RTG_SH=$SCREEN_H
 fi
 
 rtg_wire_format() {
@@ -309,6 +353,38 @@ fi
     exit 2
 }
 
+# THE RIG IS SHARED.  Several agents boot guests on this host at once, and this
+# harness used to take a fixed LAN address and no lock at all: two runs then
+# answered for one address and the slower one read as a console that had
+# stopped serving.  The address is claimed against every other run AND pinged
+# against the LAN, so it may safely overlap real hosts.
+# shellcheck source=tools/emu-rig-lock.sh
+. "$ROOT/tools/emu-rig-lock.sh"
+
+rig_claim_name_shared bridged-rig "console ($BACKEND) in $ROOT" || {
+    say RESULT INFRA
+    exit 2
+}
+
+if [ "$ADDRESS_SET" = 0 ]; then
+    rig_claim_address 192.168.1 200 239 "console in $ROOT" >/dev/null || {
+        say error "no free address in 192.168.1.200-239"
+        say RESULT INFRA
+        exit 2
+    }
+    ADDRESS="$RIG_ADDRESS"
+fi
+
+# THE SERIAL PORT, so a machine that never reaches a Shell can be told from one
+# whose httpd is broken.  Both look identical from the network side -- nothing
+# answers -- and that is exactly how a Kickstart that does not match the model
+# reads: an arm that times out with nothing to show.
+rig_claim_port "console in $ROOT" || {
+    say RESULT INFRA
+    exit 2
+}
+SERIAL_PORT="$RIG_PORT"
+
 # shellcheck source=tests/tools/wb31-sys.sh
 . "$ROOT/tests/tools/wb31-sys.sh"
 
@@ -389,6 +465,11 @@ stage() {
     cp "$A2065" "$HD/Devs/Networks/a2065.device"
     cp "$PAGE" "$HD/Console/console.html"
 
+    if [ -f "$CHIPSCREEN" ]; then
+        cp "$CHIPSCREEN" "$HD/C/chipscreen"
+        chmod 755 "$HD/C/chipscreen"
+    fi
+
     cat > "$HD/Devs/NetInterfaces/eth0" <<EOF
 DEVICE=a2065.device
 UNIT=0
@@ -413,10 +494,10 @@ EOF
         cp "$P96DIR/Devs/Monitors/Picasso96" "$HD/Devs/Monitors/$RTG_BOARD"
         rtg_monitor_icon "$HD/Devs/Monitors/$RTG_BOARD.info" "$RTG_BOARD"
         if [ "$PATTERN" = 1 ]; then
-            wb31_screenmode_prefs_id "$HD" 8 "$RTG_MODE_ID" "$RTG_W" "$RTG_H"
+            wb31_screenmode_prefs_id "$HD" 8 "$RTG_MODE_ID" "$RTG_SW" "$RTG_SH"
         else
             wb31_screenmode_prefs_id "$HD" "$depth" "${mode_id:-$RTG_MODE_ID}" \
-                                     "$RTG_W" "$RTG_H"
+                                     "$RTG_SW" "$RTG_SH"
         fi
         if [ "$PATTERN" = 1 ]; then
             cp "$RTGMODES" "$HD/C/rtgmodes"; chmod 755 "$HD/C/rtgmodes"
@@ -425,10 +506,8 @@ EOF
     elif [ -n "$CHIP" ]; then
         wb31_screenmode_prefs_id "$HD" "$depth" "$(arm_mode_id "$CHIP")" \
                                  "$CHIP_W" "$CHIP_H"
-        cp "$CHIPSCREEN" "$HD/C/chipscreen"
-        chmod 755 "$HD/C/chipscreen"
     else
-        wb31_screenmode_prefs "$HD" "$depth"
+        wb31_screenmode_prefs_id "$HD" "$depth" 0x00029000 "$WB_W" "$WB_H"
     fi
 }
 
@@ -463,8 +542,14 @@ EOF
     if [ "$PATTERN" = 1 ]; then
         cat >> "$HD/S/Startup-Sequence" <<EOF
 C:rtgmodes >DH0:rtglist.txt
-Run >NIL: <NIL: C:rtgbars $db_depth $RTG_W $RTG_H
+Run >NIL: <NIL: C:rtgbars $db_depth $RTG_SW $RTG_SH
 C:Wait 5
+EOF
+    fi
+
+    if [ -z "$CHIP" ] && [ -f "$HD/C/chipscreen" ]; then
+        cat >> "$HD/S/Startup-Sequence" <<'EOF'
+C:chipscreen 0 0 0 0 DH0:frontscreen.txt
 EOF
     fi
 
@@ -516,8 +601,14 @@ fi
 MAC=$(printf '02:41:4d:49:%02x:%02x' $(( ($$ >> 8) & 0xff )) $(( $$ & 0xff )))
 
 EMU_PID=""
+READER_PID=""
 cleanup() {
     local n=0
+    if [ -n "$READER_PID" ]; then
+        kill -TERM "$READER_PID" 2>/dev/null || true
+        wait "$READER_PID" 2>/dev/null || true
+        READER_PID=""
+    fi
     [ -n "$EMU_PID" ] || return 0
     kill -TERM "$EMU_PID" 2>/dev/null || true
     while [ "$n" -lt 10 ] && kill -0 "$EMU_PID" 2>/dev/null; do
@@ -540,6 +631,7 @@ reap_xvfb() {
 trap 'cleanup; reap_xvfb' EXIT INT TERM HUP
 
 EMULOG=""
+SERIALLOG=""
 
 boot() {
     local tag="$1"
@@ -548,6 +640,8 @@ boot() {
     local cfg="$ROOT/build/console-$tag.uae"
 
     EMULOG="$ROOT/build/amiberry-console-$tag.log"
+    SERIALLOG="$ROOT/build/console-serial-$tag.log"
+    : > "$SERIALLOG"
 
     cat > "$cfg" <<EOF
 config_description=AmiNetXDuo console $tag
@@ -561,6 +655,8 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 a2065_rom_file=:ENABLED
 a2065_rom_options=mac=$MAC,$BACKEND
+serial_port=tcp://127.0.0.1:$SERIAL_PORT/wait
+uaeserial=false
 EOF
 
     if [ "$RTG" = 1 ]; then
@@ -578,6 +674,27 @@ EOF
 
     ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) >"$EMULOG" 2>&1 &
     EMU_PID=$!
+
+    # `/wait` holds the emulator until this connects, and the emulator has to
+    # have opened the listener first, so the connect is retried.  The reader is
+    # nc's own pid and not this subshell's: killing the subshell alone leaves
+    # the reader on the port, and the next run then refuses to boot.
+    (
+        reader=""
+        trap '[ -z "$reader" ] || kill -TERM "$reader" 2>/dev/null; exit 0' \
+             TERM INT
+        n=0
+        while [ "$n" -lt 90 ]; do
+            kill -0 "$EMU_PID" 2>/dev/null || exit 0
+            nc 127.0.0.1 "$SERIAL_PORT" >> "$SERIALLOG" 2>/dev/null &
+            reader=$!
+            wait "$reader" && exit 0
+            reader=""
+            sleep 1
+            n=$((n + 1))
+        done
+    ) &
+    READER_PID=$!
 }
 
 probe() {
@@ -652,6 +769,9 @@ say model "$MODEL"
 say client "${CLIENT:-this host}"
 say page "$PAGE"
 say activity "$ACTIVITY"
+if [ "$SCREEN_W" != 0 ]; then
+    say screen "${SCREEN_W}x${SCREEN_H} asked for"
+fi
 if [ "$PATTERN" = 1 ]; then
     say pattern "rtgbars colour bars, checked with tests/tools/rtgbars-check.py"
 fi
@@ -727,10 +847,17 @@ for arm in "${ARMS[@]}"; do
         [ "$(alive)" = "200" ] && { up=yes; break; }
     done
     say "${tag}_boot_seconds" "$(( $(date +%s) - started ))"
+    say "${tag}_serial_log" "$SERIALLOG"
 
     if [ "$up" != yes ]; then
         say "${tag}_up" no
         say "${tag}_emulog" "$EMULOG"
+        say "${tag}_serial" "$SERIALLOG"
+        say "${tag}_serial_bytes" \
+            "$( [ -f "$SERIALLOG" ] && wc -c < "$SERIALLOG" | tr -d ' ' \
+                || echo 0)"
+        say "${tag}_serial_tail" \
+            "$(tail -3 "$SERIALLOG" 2>/dev/null | tr '\n' ' ' || true)"
         cleanup
         VERDICT=infra
         continue
@@ -844,6 +971,47 @@ for arm in "${ARMS[@]}"; do
         fi
     fi
 
+    # THE SIZE ON THE WIRE, ON EVERY ARM.  A screen and its bitmap are not the
+    # same size: a 632-pixel planar screen is allocated 640 wide and a 633-pixel
+    # card screen gets a 636-byte row, and the geom word must carry the screen.
+    # That is the defect 1ec557b9 fixed, and the reason it survived a year is
+    # that nothing in the lab ever asked for a size with anything to pad.
+    #
+    # MEASURED AGAINST THE SCREEN, NOT THE REQUEST.  `C:chipscreen ... 0` opens
+    # nothing and reports the front screen, and that report is the reference:
+    # Workbench rounds a 632-pixel request up to 640 and the console is right to
+    # serve 640 when it does.
+    front_size=""
+    if [ -n "$CHIP" ]; then
+        front_size=$(awk -F= '/^screen_size=/ { print $2 }' \
+                     "$HD/chipscreen.txt" 2>/dev/null | tail -1 || true)
+    else
+        front_size=$(awk -F= '/^wb_size=/ { print $2 }' \
+                     "$HD/frontscreen.txt" 2>/dev/null | tail -1 || true)
+    fi
+
+    got_w=$(awk '/^geom=/ { sub(/^geom=/, "", $1); print $1 }' \
+            "$OUTDIR/$tag-probe.txt" 2>/dev/null | sort -u | head -1 || true)
+    got_h=$(awk '/^geom=/ { print $2 }' "$OUTDIR/$tag-probe.txt" \
+            2>/dev/null | sort -u | head -1 || true)
+
+    [ "$SCREEN_W" = 0 ] || say "${tag}_screen_asked" "${SCREEN_W}x${SCREEN_H}"
+    say "${tag}_screen_open" "${front_size:-unknown}"
+    say "${tag}_screen_served" "${got_w:-none}x${got_h:-none}"
+
+    if [ -z "$front_size" ]; then
+        say "${tag}_error" "no front-screen report, so the size on the wire is\
+ measured against nothing"
+        VERDICT=fail
+    elif [ "${got_w:-none}x${got_h:-none}" != "$front_size" ]; then
+        say "${tag}_error" "the screen the guest opened is $front_size and the\
+ geom word says ${got_w:-none}x${got_h:-none}: the console is serving the\
+ bitmap's allocation, not the screen"
+        say "${tag}_hint" "the DWidth clamp in fb_geometry_of(),\
+ src/tools/httpfb.c, and http_rtg_describe(), src/tools/httprtg.c"
+        VERDICT=fail
+    fi
+
     if [ -n "$CHIP" ]; then
         want_fmt=$(arm_wire_format "$CHIP")
         want_depth="$depth"
@@ -891,6 +1059,38 @@ for arm in "${ARMS[@]}"; do
             say "${tag}_error" "-C asked for a $CHIP screen, which is format\
  $want_fmt depth $want_depth on the wire, and the geom word says format\
  ${fmt:-none} depth ${wire_depth:-none}"
+            VERDICT=fail
+        fi
+
+        want_size="$front_size"
+
+        if [ -n "$CLIENT" ]; then
+            scp -q -o BatchMode=yes "$CLIENT:$OUTDIR/$tag.png" \
+                "$OUTDIR/$tag.png" 2>/dev/null || true
+        fi
+
+        # EVERY PIXEL, against the picture chipscreen drew.  A geom word and an
+        # exit code are both right on a frame that is one column out.
+        if [ -f "$OUTDIR/$tag.png" ] && [ -n "$want_size" ]; then
+            set +e
+            python3 "$ROOT/tests/tools/chipscreen-check.py" \
+                "$OUTDIR/$tag.png" --pattern "$CHIP" --size "$want_size" \
+                --depth "$depth" > "$OUTDIR/$tag-pixels.txt" 2>&1
+            crc=$?
+            set -e
+            say "${tag}_pixels_mismatched" \
+                "$(sed -n 's/^mismatched=//p' "$OUTDIR/$tag-pixels.txt" \
+                   | tail -1 || true)"
+            say "${tag}_pixels_report" "$OUTDIR/$tag-pixels.txt"
+            case "$crc" in
+                0) ;;
+                2) VERDICT=infra ;;
+                *) say "${tag}_error" "the picture chipscreen drew did not come\
+ back: see $OUTDIR/$tag-pixels.txt"
+                   VERDICT=fail ;;
+            esac
+        else
+            say "${tag}_error" "no decoded frame at $OUTDIR/$tag.png to check"
             VERDICT=fail
         fi
     fi

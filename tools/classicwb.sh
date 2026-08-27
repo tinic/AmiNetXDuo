@@ -633,10 +633,16 @@ mv "$RESOLV.new" "$RESOLV"
 # ------------------------------------------------------------------ rtg ----
 
 RTG_BOARD=uaegfx
-RTG_MODE_ID=0x50031000
-RTG_W=640
-RTG_H=480
-RTG_DEPTH=8
+# The card screen Workbench opens on.  640x480x8 is the default because it is
+# the one every gate here was written against; the knobs exist because a
+# truecolour screen is a different code path in the console -- a card readback
+# and no palette at all -- and the keystroke figure the 47 ms requirement is
+# about was taken on one.  `tests/perf/rtgmodes`, run on the guest, is what
+# says which mode IDs this board publishes: 0x50041100 is 800x600 at 16 bits.
+RTG_MODE_ID="${AMINETXDUO_CWB_RTG_MODE:-0x50031000}"
+RTG_W="${AMINETXDUO_CWB_RTG_W:-640}"
+RTG_H="${AMINETXDUO_CWB_RTG_H:-480}"
+RTG_DEPTH="${AMINETXDUO_CWB_RTG_DEPTH:-8}"
 
 if [ "$VARIANT" = rtg ]; then
     # ClassicWB P96 ships Picasso96 but is installed for whatever card the

@@ -21,18 +21,25 @@ done
 
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
-PORT_NOSCREEN="${AMINETXDUO_BOOTCONSOLE_PORT:-8891}"
-PORT_SCREEN=$((PORT_NOSCREEN + 1))
+PORT="${AMINETXDUO_BOOTCONSOLE_PORT:-8891}"
+
+# What the screen that arrives late is, and what the session must therefore
+# report.  Fixed here rather than spelled out three times below.
+SCREEN_MODE=00021800
+SCREEN_W=320
+SCREEN_H=256
+SCREEN_D=6
 
 SMOKE="$BUILD/src/tools/ToolsSmoke"
 HTTPD="$BUILD/src/tools/httpd"
 FETCH="$BUILD/src/tools/fetch"
+NC="$BUILD/src/tools/nc"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 ANXNET="$BUILD/src/netdev/anxnet.device"
 CHIPSCREEN="$BUILD/tests/perf/chipscreen"
 CONSOLE_HTML="$ROOT/src/tools/web/console.html"
 
-for f in "$SMOKE" "$HTTPD" "$FETCH" "$BSD" "$ANXNET" "$CHIPSCREEN" \
+for f in "$SMOKE" "$HTTPD" "$FETCH" "$NC" "$BSD" "$ANXNET" "$CHIPSCREEN" \
          "$CONSOLE_HTML"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
@@ -49,6 +56,7 @@ cp "$BSD"          "$STAGE/libs/bsdsocket.library"
 cp "$ANXNET"       "$STAGE/devs/Networks/anxnet.device"
 cp "$HTTPD"        "$STAGE/httpd"
 cp "$FETCH"        "$STAGE/fetch"
+cp "$NC"           "$STAGE/nc"
 cp "$CHIPSCREEN"   "$STAGE/chipscreen"
 cp "$CONSOLE_HTML" "$STAGE/console.html"
 printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
@@ -61,31 +69,51 @@ CARD=a2065
 CONFIGURE=DHCP
 EOF
 
+# THE CONSOLE SESSION, ASKED FOR BY nc.  A browser is the only other client
+# this has, and there is none on the guest: the handshake is a fixed request
+# and `nc CRLF` turns each line ending into the CRLF the protocol wants.  The
+# key is RFC 6455's own example, which is what the accept is computed from --
+# the server checks that it is 24 base64 characters and nothing else.
+#
+# WHY IT MATTERS THAT THIS IS THE SAME httpd.  http_fb_open() ran before any
+# screen existed and remembered that; http_fb_start() reads the front screen
+# AGAIN, per session, and only that second read can name the screen that
+# arrived in between.  A second server started after the screen proves the
+# first read, not this one.
+cat > "$STAGE/wsreq.txt" <<EOF
+GET /console HTTP/1.1
+Host: 127.0.0.1:$PORT
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+Sec-WebSocket-Version: 13
+
+EOF
+
 cat > "$STAGE/commands.txt" <<EOF
 # ---- the boot case: no screen has ever been opened on this machine -----
-&SYS:httpd DH0: $PORT_NOSCREEN -C CONSOLEPAGE DH0:console.html >DH0:httpd-noscreen.txt
+&SYS:httpd DH0: $PORT -C CONSOLEPAGE DH0:console.html >DH0:httpd.txt
 wait 12
-SYS:fetch http://127.0.0.1:$PORT_NOSCREEN/greeting.txt TO DH0:fetched.txt
-SYS:fetch http://127.0.0.1:$PORT_NOSCREEN/console TO DH0:consolepage.txt
-# ---- and then a screen arrives ----------------------------------------
-&SYS:chipscreen 00021800 320 256 6 DH0:chipscreen.txt
+SYS:fetch http://127.0.0.1:$PORT/greeting.txt TO DH0:fetched.txt
+SYS:fetch http://127.0.0.1:$PORT/console TO DH0:consolepage.txt
+# ---- and then a screen arrives, to the server that is ALREADY serving ----
+&SYS:chipscreen $SCREEN_MODE $SCREEN_W $SCREEN_H $SCREEN_D DH0:chipscreen.txt
 wait 8
-&SYS:httpd DH0: $PORT_SCREEN -C CONSOLEPAGE DH0:console.html >DH0:httpd-screen.txt
-wait 12
-SYS:fetch http://127.0.0.1:$PORT_SCREEN/greeting.txt TO DH0:fetched-screen.txt
+&SYS:nc 127.0.0.1 $PORT CRLF <DH0:wsreq.txt >DH0:session.bin
+wait 20
+SYS:fetch http://127.0.0.1:$PORT/greeting.txt TO DH0:fetched-screen.txt
 EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-bootconsole}"
 
-echo "==> httpd -C with no Workbench, port $PORT_NOSCREEN;" \
-     "with a screen, port $PORT_SCREEN"
+echo "==> one httpd -C with no Workbench on port $PORT, and a screen after it"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
     "$SMOKE" \
-    "$STAGE/devs" "$STAGE/libs" "$STAGE/httpd" "$STAGE/fetch" \
+    "$STAGE/devs" "$STAGE/libs" "$STAGE/httpd" "$STAGE/fetch" "$STAGE/nc" \
     "$STAGE/chipscreen" "$STAGE/console.html" "$STAGE/greeting.txt" \
-    "$STAGE/commands.txt"
+    "$STAGE/wsreq.txt" "$STAGE/commands.txt"
 RUN_RC=$?
 set -e
 
@@ -106,14 +134,14 @@ echo "============================================================"
 echo "  httpd -C on a machine with no Workbench"
 echo "============================================================"
 
-BANNER="$HD/httpd-noscreen.txt"
+BANNER="$HD/httpd.txt"
 
-if ! have httpd-noscreen.txt; then
+if ! have httpd.txt; then
     nope "boot_httpd_wrote_nothing (the server never reached its banner)"
     BANNER=/dev/null
 fi
 
-echo "---- httpd's own output, no screen open ----"
+echo "---- httpd's own output, the whole session ----"
 cat "$BANNER" 2>/dev/null || echo "(none)"
 echo
 
@@ -153,21 +181,43 @@ fi
 
 echo
 echo "============================================================"
-echo "  and then a screen arrives"
+echo "  and then a screen arrives, to the server already running"
 echo "============================================================"
 
 echo "---- chipscreen ----"
 cat "$HD/chipscreen.txt" 2>/dev/null || echo "(none)"
-echo "---- httpd's own output, a screen in front ----"
-cat "$HD/httpd-screen.txt" 2>/dev/null || echo "(none)"
 echo
 
-if have httpd-screen.txt &&
-   grep -q "the frontmost screen," "$HD/httpd-screen.txt" &&
-   ! grep -q "no screen is open yet" "$HD/httpd-screen.txt"; then
-    ok "screen_arrives_reported"
+if grep -q "^result=open" "$HD/chipscreen.txt" 2>/dev/null; then
+    ok "screen_opened"
 else
-    nope "screen_arrives_reported (-C no longer names the screen it found)"
+    nope "screen_opened (no screen arrived, so nothing below is a console test)"
+fi
+
+# THE ASSERTION THIS FILE EXISTS FOR.  The line is httpd_log_console_start()'s,
+# it is written when a session starts and not before, and the numbers in it are
+# the ones http_fb_start() read for THIS session.  The startup banner above
+# said there was no screen, so a size here can only have come from the re-read.
+WANT="console started: frontmost screen ${SCREEN_W}x${SCREEN_H}x${SCREEN_D}"
+
+if grep -q "console did not start" "$BANNER" 2>/dev/null; then
+    nope "session_started ($(grep -m1 'console did not start' "$BANNER"))"
+elif grep -q "$WANT" "$BANNER" 2>/dev/null; then
+    ok "session_picked_up_the_late_screen ($WANT)"
+elif grep -q "console started" "$BANNER" 2>/dev/null; then
+    nope "session_picked_up_the_late_screen (it started on \
+$(grep -m1 'console started' "$BANNER" | sed 's/.*screen //'), not \
+${SCREEN_W}x${SCREEN_H}x${SCREEN_D})"
+else
+    nope "session_picked_up_the_late_screen (no session ever started)"
+fi
+
+_bytes=0
+have session.bin && _bytes=$(wc -c < "$HD/session.bin" | tr -d ' ')
+if [ "${_bytes:-0}" -ge 4096 ]; then
+    ok "session_sent_pixels ($_bytes bytes down the socket)"
+else
+    nope "session_sent_pixels (only ${_bytes:-0} bytes came back)"
 fi
 
 if have fetched-screen.txt &&
