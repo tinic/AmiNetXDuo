@@ -846,9 +846,23 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 #endif
 }
 
-static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
+/*
+ * Take up to `budget` replies off the port and return how many there were.
+ *
+ * Bounded, and not by accident.  ami_sana2_rx_complete() puts each slot back on
+ * the wire before it delivers the frame, so a reply that arrives while this
+ * loop is running joins the queue it is draining: on a saturated link the
+ * device can keep it fed for as long as the far end has a window, and this
+ * thread outranks everything and now runs TCP itself.  The budget is what
+ * returns it to the top of the loop, where the baton bracket lets the task
+ * that empties the socket run.
+ *
+ * Errors and control frames count against it: they cost reader time too.
+ */
+static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
 {
     struct Message *msg;
+    UWORD           took = 0;
 
 #ifdef AMINETXDUO_RXPROBE
     {
@@ -902,7 +916,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
     }
 #endif
 
-    while ((msg = GetMsg(rx->port)) != NULL)
+    while (took < budget && (msg = GetMsg(rx->port)) != NULL)
     {
 #ifdef AMINETXDUO_RXPROBE
         if (rx->probe.live != 0)
@@ -914,6 +928,7 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
         LONG       err  = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
 
         slot->posted = FALSE;
+        took++;
 
         if (rx->stop)
             continue;
@@ -949,7 +964,24 @@ static VOID ami_sana2_rx_drain(AmiSana2Rx *rx)
             rx->iface->stats.rx_err_io++;
         }
     }
+
+    return took;
 }
+
+#ifndef AMINETXDUO_GREEN_REALM
+/*
+ * Is a completion already queued?  One pointer read of the port's list, and a
+ * miss costs nothing that matters: a reply landing right after it sets the
+ * port's signal, so the Wait() this answer sends the reader into returns at
+ * once.
+ */
+static BOOL ami_sana2_rx_queued(const AmiSana2Rx *rx)
+{
+    const struct List *list = &rx->port->mp_MsgList;
+
+    return (BOOL)(list->lh_Head->ln_Succ != NULL);
+}
+#endif
 
 /* --------------------------------------------------------------- shutdown */
 
@@ -1084,6 +1116,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     AmiSana2Rx *rx    = (AmiSana2Rx *)argument;
     AmiSana2If *iface = rx->iface;
     UWORD       i;
+    UWORD       run;      /* completions taken since the last baton release */
 
     rx->task = FindTask(NULL);
     rx->port = CreateMsgPort();
@@ -1146,6 +1179,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rx->running = TRUE;
     tx_semaphore_put(&rx->ready);
 
+    run = 0;
+
     while (!rx->stop)
     {
         /*
@@ -1161,6 +1196,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
             tx_thread_sleep(2);
+            run = 0;
             continue;
         }
 
@@ -1170,31 +1206,51 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * running the IP thread.  There is no baton bracket on this path, so
          * the probe's baton leg reads zero here by design.
          */
+        /* The bound belongs to the baton bracket, which this branch does not
+           have; spend none of it here or the budget below underflows. */
+        run = 0;
         (VOID)tx_amiga_green_wait(rx->wake_mask | rx->reap_mask);
 #else
-        ami_sana2_block_enter();
-        Wait(rx->wake_mask | rx->reap_mask);
-#ifdef AMINETXDUO_RXPROBE
+        /*
+         * Block only when there is nothing to take, or when this reader has
+         * had its run.  The bracket is a Forbid(), a ThreadX suspend, a
+         * dispatch and the reverse of all three, and during a burst the device
+         * has usually replied again while the last frame was being delivered,
+         * so the Wait() it wraps would have returned at once.  The bound is
+         * what keeps that from being a monopoly: this thread outranks
+         * everything and now runs TCP itself, so the task that empties the
+         * socket only runs when the reader lets go.
+         */
+        if (run >= AMI_SANA2_RX_RUN_MAX || !ami_sana2_rx_queued(rx))
         {
-            AmiRxProbe *pr = &rx->probe;
-            ULONG       t0 = ami_rxprobe_clock();
-            ULONG       dt;
+            run = 0;
 
-            ami_sana2_block_leave();
+            ami_sana2_block_enter();
+            Wait(rx->wake_mask | rx->reap_mask);
+#ifdef AMINETXDUO_RXPROBE
+            {
+                AmiRxProbe *pr = &rx->probe;
+                ULONG       t0 = ami_rxprobe_clock();
+                ULONG       dt;
 
-            dt = ami_rxprobe_clock() - t0;
-            pr->baton_sum += dt;
-            pr->baton_last = dt;
-            if (dt > pr->baton_max)
-                pr->baton_max = dt;
-            pr->baton_hist[ami_rxprobe_bucket(dt)]++;
-        }
+                ami_sana2_block_leave();
+
+                dt = ami_rxprobe_clock() - t0;
+                pr->baton_sum += dt;
+                pr->baton_last = dt;
+                if (dt > pr->baton_max)
+                    pr->baton_max = dt;
+                pr->baton_hist[ami_rxprobe_bucket(dt)]++;
+            }
 #else
-        ami_sana2_block_leave();
+            ami_sana2_block_leave();
 #endif
+        }
 #endif /* AMINETXDUO_GREEN_REALM */
 
-        ami_sana2_rx_drain(rx);
+        run = (UWORD)(run +
+                      ami_sana2_rx_drain(rx,
+                                         (UWORD)(AMI_SANA2_RX_RUN_MAX - run)));
 
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the

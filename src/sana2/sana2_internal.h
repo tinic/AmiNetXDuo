@@ -96,6 +96,30 @@
 #define AMI_SANA2_RX_REAP_TRIES     25
 #endif
 
+/*
+ * How many completed reads one reader may take before it must release the
+ * ThreadX baton once, even with another completion already on its port.
+ *
+ * The bracket around the reader's Wait() is not free: it takes a Forbid(),
+ * suspends the ThreadX thread, dispatches whatever is ready and reverses all
+ * of it afterwards (src/netstack/netstack_baton.c).  During a burst the device
+ * has usually replied again by the time the last frame has been delivered, so
+ * the Wait() would return at once and the whole bracket bought nothing.
+ *
+ * The bound is not a batch target, it is a fairness boundary.  The reader
+ * outranks everything (src/thread_priorities.h) and now runs TCP itself, so
+ * the thread that empties the socket only runs when the reader lets go.  Eight
+ * is a little over half the read depth an interface at 10 Mbit is planned
+ * with, which puts the release inside a full ring rather than after it.
+ */
+#ifndef AMI_SANA2_RX_RUN_MAX
+#define AMI_SANA2_RX_RUN_MAX        8
+#endif
+
+#if AMI_SANA2_RX_RUN_MAX < 1
+#error "AMI_SANA2_RX_RUN_MAX must be at least one"
+#endif
+
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8
 #endif
