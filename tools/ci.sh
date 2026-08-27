@@ -580,22 +580,33 @@ stage_host() {
 #                     pointer arithmetic through ULONG.  Its other checks run
 #                     at both widths; the real ECDSA verification must run
 #                     here, where ULONG and pointers have the target's shape.
+#   test_tcp_handler  tcp_handler.c reaches a struct FileHandle through
+#                     BADDR(dp_Arg1) and hands its session back through
+#                     fh_Arg1, both LONG.  A pointer survives that round trip
+#                     only where a pointer is four bytes.
+#   test_transfer     transfer.c's eleven _Static_asserts pin struct iovec and
+#                     struct msghdr to the 4.4BSD shape.  At this width they
+#                     hold against glibc's own definitions, unmodified, so the
+#                     file compiles here with nothing weakened.
 #
 # The fuzzers read bytes chosen by someone else: unauthenticated multicast and
 # a TLS server's handshake before any key exists to check it against.  The
 # X.509 harness supplies deterministic verification coverage at the same
-# target-compatible width.
-HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509)
-HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep)$|tls_x509_checks$'
-HOST32_TESTS_EXPECTED=5
+# target-compatible width.  The last two are the socket sources that were
+# outside the host tier until 2026-08-27, both for the same reason: they are
+# the ones whose pointer round trips through 32-bit slots are load-bearing.
+HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto test_tls_x509
+                     test_tcp_handler test_transfer)
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep)$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$'
+HOST32_TESTS_EXPECTED=7
 
 stage_host32() {
-    hr "host tests (32-bit: mDNS, TLS crypto, X.509)"
+    hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"
 
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
         skip "host32: no -m32 on this host (needs gcc-multilib on Debian/Ubuntu),\
- the mDNS, TLS-crypto and X.509 tests did not run"
+ the mDNS, TLS-crypto, X.509, TCP: handler and transfer tests did not run"
         return "$NOTHING"
     fi
 
@@ -614,7 +625,7 @@ stage_host32() {
 
     # An empty or incomplete selection here would otherwise pass as a green
     # stage that tested nothing.  The two fuzzers register two cases each and
-    # the X.509 harness registers one.
+    # the X.509, TCP: handler and transfer harnesses register one apiece.
     local n want
     want="$HOST32_TESTS_EXPECTED"
     n=$( (cd "$BUILD/host32" && ctest -N -R "$HOST32_TEST_REGEX" 2>/dev/null | sed -n 's/^Total Tests: //p') )
@@ -692,7 +703,7 @@ stage_sanitize() {
     if ! (echo 'int main(void){return 0;}' > "$BUILD/m32probe.c" &&
           "${CC:-cc}" -m32 "$BUILD/m32probe.c" -o "$BUILD/m32probe") 2>/dev/null; then
         skip "sanitize32: no -m32 on this host (needs gcc-multilib on\
- Debian/Ubuntu), the mDNS, TLS-crypto and X.509 tests were not sanitized here"
+ Debian/Ubuntu), the 32-bit tier was not sanitized here"
         return 0
     fi
 

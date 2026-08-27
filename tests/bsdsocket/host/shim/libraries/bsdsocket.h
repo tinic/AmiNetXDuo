@@ -45,4 +45,32 @@
 #define FD_ERROR                0x20    /* asynchronous error on socket      */
 #define FD_CLOSE                0x40    /* connection closed                 */
 
+/*
+ * The monitoring hook types and the one message shape transfer.c builds.  NDK
+ * 3.2 netinclude/libraries/bsdsocket.h:688-757; the meanings are in
+ * doc/bsdsocket.doc under AddNetMonitorHook.  MHT_Send is the hook that can
+ * refuse a send before any of it happens, and netmonitor.c asserts its number
+ * is the list index, so both the numbers and the member order are ABI.
+ */
+#define MHT_ICMP                0
+#define MHT_UDP                 1
+#define MHT_TCP_Connect         2
+#define MHT_Connect             3
+#define MHT_Send                4
+#define MHT_Packet              5
+#define MHT_Bind                6
+
+struct SendMonitorMessage
+{
+    LONG             smm_Size;
+    STRPTR           smm_Caller;
+    LONG             smm_Socket;
+    APTR             smm_Buffer;
+    LONG             smm_Len;
+    LONG             smm_Flags;
+    struct sockaddr *smm_To;
+    LONG             smm_ToLen;
+    struct msghdr   *smm_Msg;
+};
+
 #endif

@@ -6,11 +6,14 @@
 # ports that answer the first two.  host_prelude.h is force-included and its
 # comment says why the order in it matters.
 #
-# NOT every file compiles this way.  tcp_handler.c is the one still outside:
-# it is a DOS handler as well as a socket, and needs the whole ACTION_* and
-# ERROR_* vocabulary plus struct FileHandle, which is a shim of its own rather
-# than a constant or two.  The struct timeval collision that used to exclude
-# options.c and select.c with it is gone; host/shim/devices/timer.h says how.
+# EVERY src/bsdsocket file now compiles this way.  The last two in were
+# tcp_handler.c and transfer.c, and they are at the bottom of this file rather
+# than in the block below because they need the target's POINTER width and not
+# only its LONG: the first passes a struct FileHandle and a session pointer
+# through LONG packet arguments, the second pins struct iovec and struct
+# msghdr to the 4.4BSD shape.  Both hold at 32 bits and neither can at 64.
+# The struct timeval collision that used to exclude options.c and select.c is
+# gone as well; host/shim/devices/timer.h says how.
 #
 # SPDX-License-Identifier: MIT
 
@@ -347,4 +350,86 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
     add_test(NAME bpf_write_serialization COMMAND test_bpf_write_serial)
+endif()
+
+# ---------------------------------------------------------------------------
+# The two files that need the TARGET'S POINTER WIDTH, not merely the target's
+# LONG.  Both were listed above as outside the tier, and both are outside for
+# the same reason rather than for the two different ones the comments used to
+# give.
+#
+#   tcp_handler.c   reaches a `struct FileHandle` through BADDR(dp_Arg1) and
+#                   hands its session back through fh_Arg1.  dp_Arg1 and
+#                   fh_Arg1 are LONG, so a pointer only survives that round
+#                   trip where a pointer is four bytes.  Silencing the casts,
+#                   as test_expunge does for two round trips nothing runs,
+#                   would leave the packet paths untestable: here they ARE the
+#                   code under test.
+#
+#   transfer.c      opens with eleven _Static_asserts pinning `struct iovec`
+#                   to 8 bytes and `struct msghdr` to the 4.4BSD 28-byte shape.
+#                   Those were read as "this file can never compile on a
+#                   host".  They can: on i386 glibc's own definitions are that
+#                   shape to the byte -- {void *, size_t} is 0/4/8, and
+#                   msghdr's seven members land on 0,4,8,12,16,20,24 -- so the
+#                   assertions hold as written, against the shipping ABI, with
+#                   nothing shimmed and nothing conditional.  They fail at 64
+#                   bits because the ABI genuinely is not that shape there.
+#
+# So this block is entered only where sizeof(void *) == 4, which on a CI
+# machine means the -m32 configure the `host32` stage makes.  Both targets are
+# in HOST32_TEST_TARGETS in tools/ci.sh; without gcc-multilib the stage skips
+# and says so.
+#
+# tests/perf/host/shim comes FIRST on the include path so tx_port.h is the one
+# with the m68k's type widths.  The vendored linux tx_port.h types LONG as
+# `long` off __x86_64__, and at -m32 that is four bytes but a different type
+# from the shim's exec/types.h `int`, which is a redefinition error rather than
+# a layout difference.
+if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(BSD_HOST32_INCLUDES
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    set(BSD_HOST32_DEFINES
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    # tcp_handler.c, the TCP: AmigaDOS handler.  The test #includes the
+    # translation unit rather than linking it, because the packet vocabulary
+    # is two switch statements inside static functions and the path grammar is
+    # a static as well; what runs is still the shipping code.  Both loops are
+    # driven for real, off a scripted per-port message queue.
+    add_executable(test_tcp_handler host/test_tcp_handler_host.c)
+
+    target_include_directories(test_tcp_handler PRIVATE ${BSD_HOST32_INCLUDES})
+
+    target_compile_options(test_tcp_handler PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_tcp_handler PRIVATE ${BSD_HOST32_DEFINES}
+        AMINETXDUO_TCPDEVICE)
+
+    add_test(NAME tcp_handler_packets COMMAND test_tcp_handler)
+
+    # transfer.c, send/sendto/sendmsg and recv/recvfrom/recvmsg.  The whole
+    # translation unit, so the _Static_asserts on the scatter/gather ABI run
+    # as part of the build rather than being asserted about.
+    add_executable(test_transfer host/test_transfer_host.c
+                                 "${CMAKE_SOURCE_DIR}/src/bsdsocket/transfer.c")
+
+    target_include_directories(test_transfer PRIVATE ${BSD_HOST32_INCLUDES})
+
+    target_compile_options(test_transfer PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_transfer PRIVATE ${BSD_HOST32_DEFINES})
+
+    add_test(NAME transfer_scatter_gather COMMAND test_transfer)
 endif()
