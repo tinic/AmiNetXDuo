@@ -520,6 +520,17 @@ jobs:
           -r AMINETXDUO_A2065 -r AMINETXDUO_PEER --
           tools/ci.sh reachability
 
+      # tls.library as the SERVER, which had never been run at all.  A server
+      # process and a client process in one guest over 127.0.0.1: no peer, no
+      # internet, no third party's certificate.  The first run of it found
+      # that every TLSOpen() in the tree was refusing with TLS_ERR_NOSTACK.
+      - name: tls.library server against tls.library client
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "a tls.library server completes a handshake"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh tlsloop
+
       # THE TWO REGRESSION TESTS THAT NEEDED A REAL LINK AND SO HAD NO HOME.
       #
       # NetShutdown against live services -- httpd serving, nc listening, two

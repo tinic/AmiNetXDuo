@@ -247,6 +247,35 @@ UINT _nx_secure_tls_metadata_size_calculate(
    the server tests, which are about what happens after it. */
 static int h_create_ok;
 
+/*
+ * WHAT CREATES _nx_secure_tls_protection.  Nothing called it for a while, and
+ * the consequence was every TLSOpen() in the tree answering TLS_ERR_NOSTACK,
+ * because tls_conn_enter() then took a mutex the shim in tls_netx.c had no
+ * slot for.  Counted, and checked against session_create below: it has to
+ * happen before the first session exists, because it also resets the
+ * process-wide session list.
+ */
+static int h_initialize_calls;
+static int h_initialize_before_first_create;
+
+VOID _nx_secure_tls_initialize(VOID)
+{
+    h_initialize_calls++;
+}
+
+/* Which protocol version a server session was pinned to, and how often. */
+static USHORT h_version_override;
+static int    h_version_override_calls;
+
+UINT _nx_secure_tls_session_protocol_version_override(
+        NX_SECURE_TLS_SESSION *session, USHORT version)
+{
+    (VOID)session;
+    h_version_override = version;
+    h_version_override_calls++;
+    return NX_SUCCESS;
+}
+
 UINT _nx_secure_tls_session_create(NX_SECURE_TLS_SESSION *session,
                                    const NX_SECURE_TLS_CRYPTO *crypto,
                                    VOID *metadata, ULONG metadata_size)
@@ -256,6 +285,8 @@ UINT _nx_secure_tls_session_create(NX_SECURE_TLS_SESSION *session,
     (VOID)metadata;
     (VOID)metadata_size;
     CHECK(h_depth == 1);
+    if (h_initialize_calls > 0)
+        h_initialize_before_first_create = 1;
     return h_create_ok ? NX_SUCCESS : NX_INVALID_PARAMETERS;
 }
 
@@ -771,12 +802,25 @@ static VOID h_test_server_identity(struct TLSLibBase *base)
         free(second);
     }
 
+    /*
+     * AN RSA SERVER IS PINNED TO TLS 1.2 AND AN EC ONE IS NOT.  1.3 signs
+     * CertificateVerify with RSA-PSS and nx_crypto has no PSS sign, so an
+     * unpinned RSA server reaches CertificateVerify and fails there; the
+     * emulator arm saw exactly that before this existed.  ECDSA
+     * CertificateVerify is complete, so an EC key is left at whatever the
+     * handshake negotiates.
+     */
+    CHECK(h_version_override_calls == 2);        /* the two RSA loads above */
+    CHECK(h_version_override == NX_SECURE_TLS_VERSION_TLS_1_2);
+
     /* TLS_KEY_EC must reach nx_secure as the SEC1 type: handing an EC key to
        the PKCS#1 parser is a certificate that loads and a signature that is
        never valid. */
+    h_version_override_calls = 0;
     CHECK(tls_server_identity(conn, (CONST_STRPTR)cert, (CONST_STRPTR)key,
                               TLS_KEY_EC) == TLS_OK);
     CHECK(h_cert_key_type == NX_SECURE_X509_KEY_TYPE_EC_DER);
+    CHECK(h_version_override_calls == 0);
     tls_server_forget(conn);
 
     /* An unknown key type is refused rather than guessed at. */
@@ -856,6 +900,27 @@ static VOID h_test_open_create_serialized(struct TLSLibBase *base)
     int            leaves = h_leave_calls;
 
     printf("tls_open: session creation stays inside the shared-state lock\n");
+
+    /*
+     * THE FIRST TLSOpen() IN A PROCESS HAS TO CREATE THE PROTECTION MUTEX.
+     * tb_CryptoReady false is that first call.  Without
+     * _nx_secure_tls_initialize() here, tls_conn_enter() takes a mutex the
+     * shim never registered, gets TX_MUTEX_ERROR, and the connection is
+     * refused with TLS_ERR_NOSTACK -- which is what shipped, about our own
+     * bsdsocket.library, for every connection in the tree.
+     */
+    base->tb_CryptoReady = FALSE;
+    h_initialize_calls              = 0;
+    h_initialize_before_first_create = 0;
+
+    conn = tls_TLSOpenA((APTR)base, tags, 3, base);
+    CHECK(conn == NULL);
+    CHECK(h_initialize_calls == 1);
+    CHECK(h_initialize_before_first_create == 1);
+    CHECK(base->tb_CryptoReady);
+
+    enters = h_enter_calls;
+    leaves = h_leave_calls;
 
     base->tb_CryptoReady = TRUE;
     conn = tls_TLSOpenA((APTR)base, tags, 3, base);

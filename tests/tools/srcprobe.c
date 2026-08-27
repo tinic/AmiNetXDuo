@@ -472,6 +472,49 @@ done:
 /* 2001:db8:6724:9::1, a different /64 with no route to it at all. */
 #define OFF6_1      0x67240009UL
 
+/*
+ * THE SECOND STATIC ADDRESS, and the whole of what separates RFC 6724 rule 6
+ * from rule 8 on a real machine.
+ *
+ *   SELF6    2001:db8:6724:1::10/64   policy label 1  (::/0)
+ *   SECOND6  2001:0:6724:1::10/31     policy label 5  (2001::/32, Teredo)
+ *
+ * The destination RULE6_ below is 2001:1:6724:1::99.  It is on-link through
+ * SECOND6's /31 and through nothing else, so there is a route to it; its label
+ * is 1, because 2001:0001:: is not inside 2001:0000::/32.
+ *
+ *   CommonPrefixLen(SECOND6, dest) = 31      rule 8 says SECOND6
+ *   CommonPrefixLen(SELF6,   dest) = 20
+ *   label(dest) == label(SELF6)              rule 6 says SELF6
+ *
+ * Rule 6 runs first, so the answer is SELF6, and the answer is different from
+ * what every rule below it would give.  Rules 1, 2, 3 and 5 cannot decide it:
+ * neither address IS the destination, both are global scope, both are VALID
+ * and both are on eth0.
+ *
+ * THE /31 IS DELIBERATE AND NOT A TYPO.  The policy table's boundary is at
+ * /32, so an on-link prefix that holds addresses with two different labels has
+ * to be shorter than that; /31 is the longest that does, and it is short
+ * enough to leave OFF6_ above off-link, which is what keeps
+ * v6_offlink_no_route_refused meaning what it meant.
+ */
+#define SECOND6_0   0x20010000UL
+#define SECOND6_1   0x67240001UL
+#define SECOND6_2   0UL
+#define SECOND6_3   0x10UL
+
+/* 2001:1:6724:1::99: label 1 like SELF6, on-link through SECOND6's /31. */
+#define RULE6_0     0x20010001UL
+#define RULE6_1     0x67240001UL
+#define RULE6_3     0x99UL
+
+/* 2001:0:6724:2::99: label 5 like SECOND6, same /31.  The control -- rule 6
+   and rule 8 agree here, and the answer has to be the other address, or the
+   arm above is only reporting that SELF6 is always chosen. */
+#define CTRL6_0     0x20010000UL
+#define CTRL6_1     0x67240002UL
+#define CTRL6_3     0x99UL
+
 #define LL6_0       0xFE800000UL        /* fe80::1  */
 
 #define PORT_UDP_V6 7806
@@ -587,6 +630,88 @@ static VOID p_ipv6_source(struct Library *base)
             (VOID)p_check(p_same6(&name, 0, 0, 0, 1),
                           "v6_src_loopback_is_loopback",
                           (LONG)p_word6(&name, 0));
+        }
+        (VOID)p_close(base, s);
+    }
+
+    /*
+     * RULE 6, THE ONE THIS HARNESS COULD NOT REACH.  See SECOND6_ above for
+     * the arithmetic; the short version is that rule 8 would answer SECOND6
+     * and rule 6 answers SELF6.
+     *
+     * The control below runs FIRST, because it is also the wait: the second
+     * address goes through duplicate address detection like the first and is
+     * not a candidate until it is VALID, and running the rule 6 arm before
+     * that would read as rule 6 working when there was only ever one address
+     * to choose from.
+     */
+    {
+        LONG tries;
+
+        for (tries = 0; tries < 30; tries++)
+        {
+            s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
+            if (s < 0)
+                break;
+
+            p_addr6(&sa, CTRL6_0, CTRL6_1, 0, CTRL6_3, PORT_UDP_V6);
+            if (p_connect6(base, s, &sa) == 0)
+            {
+                p_addr6(&name, 0, 0, 0, 0, 0);
+                if (p_getsockname6(base, s, &name) == 0 &&
+                    p_same6(&name, SECOND6_0, SECOND6_1, SECOND6_2, SECOND6_3))
+                {
+                    (VOID)p_close(base, s);
+                    break;
+                }
+            }
+
+            (VOID)p_close(base, s);
+            s = -1;
+            Delay(25);
+        }
+
+        (VOID)p_check((BOOL)(tries < 30), "v6_second_address_ready",
+                      (LONG)tries);
+    }
+
+    /* The control, asserted rather than only waited on. */
+    s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
+    if (s >= 0)
+    {
+        p_addr6(&sa, CTRL6_0, CTRL6_1, 0, CTRL6_3, PORT_UDP_V6);
+        rc = p_connect6(base, s, &sa);
+        if (p_check((BOOL)(rc == 0), "v6_connect_second_prefix",
+                    p_errno(base)))
+        {
+            p_addr6(&name, 0, 0, 0, 0, 0);
+            (VOID)p_getsockname6(base, s, &name);
+            (VOID)p_check(p_same6(&name, SECOND6_0, SECOND6_1, SECOND6_2,
+                                  SECOND6_3),
+                          "v6_src_matching_label_is_second",
+                          (LONG)p_word6(&name, 0));
+        }
+        (VOID)p_close(base, s);
+    }
+
+    /* And rule 6 itself. */
+    s = p_socket(base, P_AF_INET6, P_SOCK_DGRAM, 0);
+    if (s >= 0)
+    {
+        p_addr6(&sa, RULE6_0, RULE6_1, 0, RULE6_3, PORT_UDP_V6);
+        rc = p_connect6(base, s, &sa);
+        if (p_check((BOOL)(rc == 0), "v6_connect_rule6", p_errno(base)))
+        {
+            p_addr6(&name, 0, 0, 0, 0, 0);
+            (VOID)p_getsockname6(base, s, &name);
+
+            (VOID)p_check(p_same6(&name, SELF6_0, SELF6_1, SELF6_2, SELF6_3),
+                          "v6_rule6_label_beats_longest_prefix",
+                          (LONG)p_word6(&name, 0));
+            (VOID)p_check((BOOL)(!p_same6(&name, SECOND6_0, SECOND6_1,
+                                          SECOND6_2, SECOND6_3)),
+                          "v6_rule6_not_the_longer_prefix",
+                          (LONG)p_word6(&name, 1));
         }
         (VOID)p_close(base, s);
     }

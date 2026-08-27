@@ -115,7 +115,12 @@ struct TLSConnection;
  * PKCS#1 for RSA (TLS_KEY_RSA) or SEC1 for EC (TLS_KEY_EC). */
 #define TLSA_PrivateKey     (TLSA_Dummy + 13)
 
-/* ULONG, TLS_KEY_RSA or TLS_KEY_EC.  Default TLS_KEY_RSA. */
+/* ULONG, TLS_KEY_RSA or TLS_KEY_EC.  Default TLS_KEY_RSA.
+ *
+ * A SERVER WITH AN RSA KEY NEGOTIATES TLS 1.2 AND NOT 1.3.  TLS 1.3 signs
+ * CertificateVerify with RSA-PSS and this library has no PSS sign, so the
+ * choice is 1.2 or a refused connection.  An EC key reaches 1.3.  A client is
+ * unaffected either way. */
 #define TLSA_KeyType        (TLSA_Dummy + 14)
 
 #define TLS_KEY_RSA         1   /* DER PKCS#1 */

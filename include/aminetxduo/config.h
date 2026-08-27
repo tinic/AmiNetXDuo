@@ -122,6 +122,28 @@ typedef enum {
 #define AMI_CFG_IP6_ZONE_LEN        16
 #define AMI_CFG_IP6_ZONE_STRLEN     (AMI_CFG_IP6_STRLEN + 1 + AMI_CFG_IP6_ZONE_LEN)
 
+/*
+ * How many static ADDRESS6 lines one interface may carry.
+ *
+ * TWO, and the number comes from the stack and not from taste: NetX Duo sizes
+ * NX_MAX_IPV6_ADDRESSES as NX_MAX_PHYSICAL_INTERFACES * 3, and every IPv6
+ * interface spends one of its three on the fe80::/64 it always has.  A third
+ * static address on one interface is an address some other interface then
+ * cannot have.
+ *
+ * One was the number until 2026-08, and one is what made RFC 6724 Rule 6
+ * untestable on a real machine: separating "prefer matching label" from the
+ * rules above it needs a node holding two global addresses at once, and no
+ * config file could describe one.  tests/tools/run-srcsel.sh is the arm.
+ */
+#define AMI_CFG_MAX_ADDRESS6        2
+
+/* One static IPv6 address and the prefix length it was written with. */
+typedef struct AmiIp6Address {
+    ULONG   addr[AMI_CFG_IP6_WORDS];
+    ULONG   prefix;             /* prefix length in bits, default 64 */
+} AmiIp6Address;
+
 typedef struct AmiIfConfig {
     char        name[AMI_CFG_NAME_LEN];      /* interface name, e.g. "eth0"      */
     char        id[AMI_CFG_NAME_LEN];        /* Roadshow ID=; free text          */
@@ -188,8 +210,13 @@ typedef struct AmiIfConfig {
      * floor build ip6type is always AMI_IP6TYPE_OFF.
      */
     AmiIp6Type  ip6type;
-    ULONG       address6[AMI_CFG_IP6_WORDS]; /* static global address            */
-    ULONG       prefix6;                     /* its prefix length, default 64    */
+
+    /* The ADDRESS6 lines, in the order they were written.  address6_count is
+       0 on an interface that named none, and every reader iterates: there is
+       no single "the" static address any more. */
+    AmiIp6Address address6[AMI_CFG_MAX_ADDRESS6];
+    UWORD       address6_count;
+
     ULONG       gateway6[AMI_CFG_IP6_WORDS]; /* static default router            */
     BOOL        have_gateway6;
 } AmiIfConfig;

@@ -1596,6 +1596,37 @@ stage_reachability() {
     return "$rc"
 }
 
+# --------------------------------------------------------------- tlsloop ----
+#
+# tls.library shaking hands with itself: a server process and a client process
+# in ONE guest, over 127.0.0.1, both ends the shipped library.
+#
+# It is here because the server half had never been run.  When it first was,
+# two things came out of it in a minute and a half: every TLSOpen() in the
+# tree was answering TLS_ERR_NOSTACK because nothing created
+# _nx_secure_tls_protection, and a 1.3 server with an RSA key cannot sign
+# CertificateVerify.  No peer, no bridge traffic, no internet -- the bytes
+# never leave the guest, so this is a gate and not a weather report.
+stage_tlsloop() {
+    hr "tls.library server against tls.library client (tier 2, needs a ROM)"
+
+    local rc=0
+
+    "$ROOT/tests/tls/run-tlsloop.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  both rounds completed and moved bytes: the EC round at" \
+                "TLS 1.3 and the RSA round at 1.2" ;;
+        1) fail "tlsloop: a round did not complete -- the tlsloop_*_ lines" \
+                "above name which half and which check" ;;
+        2) fail "tlsloop: the rig or the PKI refused it before any guest" \
+                "booted" ;;
+        *) fail "tlsloop: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -2045,6 +2076,35 @@ stage_bridged() {
         done
     fi
 
+    # AND THE ARM dnsmasq COULD NOT SUPPLY.  Two servers on the link with
+    # different OPTION_PREFERENCE values, the two Advertises sent in both
+    # orders, and the client has to name the preference-200 server both times.
+    # dnsmasq cannot send option 7 at all, so until tests/ipv6/
+    # dhcpv6-prefserver.py existed a two-server link picked by arrival and the
+    # arms above stopped rather than assert on the race.
+    printf '\n-- two DHCPv6 servers, and one of them says it is preferred\n'
+    if [ -z "${AMINETXDUO_DHCPV6_PEER:-}" ]; then
+        skip "dhcpv6pref: AMINETXDUO_DHCPV6_PEER is not set, so there is" \
+             "nowhere to run the two-server responder.  Which of two" \
+             "servers the client takes is unproven on this runner."
+    else
+        rc=0
+        "$ROOT/tests/ipv6/run-dhcpv6-pref.sh" -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" \
+            -P "$AMINETXDUO_DHCPV6_PEER" || rc=$?
+        case "$rc" in
+            0) note "PASS  the preference-200 server was chosen in both" \
+                    "Advertise orders, on a link that also carries the site" \
+                    "router's own DHCPv6 server" ;;
+            2) fail "dhcpv6pref: an ingredient is missing -- most likely" \
+                    "python3-cap in the peer's home directory, with" \
+                    "CAP_NET_RAW set on it" ; bad=1 ;;
+            4) skip "dhcpv6pref: the link or the peer is not what this" \
+                    "needs -- read the reason= above" ;;
+            *) fail "dhcpv6pref: read the FAIL lines above" ; bad=1 ;;
+        esac
+    fi
+
     # The stall arm is here rather than in the emulator stage because the
     # question is a retransmission ladder against a real peer.  It costs its
     # own two minutes: the socket that asked for nothing has to be watched all
@@ -2191,7 +2251,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -2225,6 +2285,7 @@ for s in "${WANT[@]}"; do
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
+        tlsloop)     stage_tlsloop || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;

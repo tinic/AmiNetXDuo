@@ -554,6 +554,13 @@ static VOID check_resolver(const AmiConfig *cfg)
     }
 }
 
+static BOOL same_address6(const ULONG a[4], const ULONG b[4])
+{
+    return (BOOL)(a[0] == b[0] && a[1] == b[1] &&
+                  a[2] == b[2] && a[3] == b[3] &&
+                  (a[0] | a[1] | a[2] | a[3]) != 0);
+}
+
 static VOID check_collisions(const AmiConfig *cfg)
 {
     UWORD i;
@@ -595,23 +602,36 @@ static VOID check_collisions(const AmiConfig *cfg)
 
             /* The same fault one family over, which nothing checked: two
                ADDRESS6 lines naming one address is duplicate address
-               detection failing on this machine's own wire. */
-            if ((b->address6[0] | b->address6[1] |
-                 b->address6[2] | b->address6[3]) != 0 &&
-                a->address6[0] == b->address6[0] &&
-                a->address6[1] == b->address6[1] &&
-                a->address6[2] == b->address6[2] &&
-                a->address6[3] == b->address6[3])
+               detection failing on this machine's own wire.  Every pair of
+               lines, now that an interface may carry more than one. */
             {
-                char text[AMI_CFG_IP6_STRLEN];
+                UWORD m;
+                UWORD n;
 
-                tool_format_ip6(b->address6, text, sizeof(text));
+                for (m = 0; m < a->address6_count; m++)
+                {
+                    for (n = 0; n < b->address6_count; n++)
+                    {
+                        if (!same_address6(a->address6[m].addr,
+                                           b->address6[n].addr))
+                            continue;
 
-                finding(CNC_DIR_INTERFACES, 0, AMI_CFG_PROBLEM_ERROR);
-                say("      %s and %s are both %s, and two interfaces cannot\n",
-                    (LONG)a->name, (LONG)b->name, (LONG)text);
-                say("      share an address\n");
-                note("Give one of them an ADDRESS6 of its own.");
+                        {
+                            char text[AMI_CFG_IP6_STRLEN];
+
+                            tool_format_ip6(b->address6[n].addr, text,
+                                            sizeof(text));
+
+                            finding(CNC_DIR_INTERFACES, 0,
+                                    AMI_CFG_PROBLEM_ERROR);
+                            say("      %s and %s are both %s, and two "
+                                "interfaces cannot\n",
+                                (LONG)a->name, (LONG)b->name, (LONG)text);
+                            say("      share an address\n");
+                            note("Give one of them an ADDRESS6 of its own.");
+                        }
+                    }
+                }
             }
         }
     }
@@ -808,20 +828,19 @@ static VOID check_netdb_file(const NetdbFile *spec)
     Close(file);
 }
 
-static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
+static VOID check_one_address6(const char *path, const ULONG addr[4])
 {
     char text[AMI_CFG_IP6_STRLEN];
 
-    if ((ifc->address6[0] | ifc->address6[1] |
-         ifc->address6[2] | ifc->address6[3]) == 0)
+    if ((addr[0] | addr[1] | addr[2] | addr[3]) == 0)
         return;
 
-    tool_format_ip6(ifc->address6, text, sizeof(text));
+    tool_format_ip6(addr, text, sizeof(text));
 
     /* ::1, RFC 4291 2.5.3.  The IPv6 127.0.0.1: it always means "this
        machine", so no other machine can reach an interface that has one. */
-    if (ifc->address6[0] == 0 && ifc->address6[1] == 0 &&
-        ifc->address6[2] == 0 && ifc->address6[3] == 1)
+    if (addr[0] == 0 && addr[1] == 0 &&
+        addr[2] == 0 && addr[3] == 1)
     {
         finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_ERROR);
         note("::1 is the loopback address. It always means \"this machine\", "
@@ -832,7 +851,7 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
     }
 
     /* ff00::/8, RFC 4291 2.7.  A group, not a machine. */
-    if ((ifc->address6[0] & 0xFF000000UL) == 0xFF000000UL)
+    if ((addr[0] & 0xFF000000UL) == 0xFF000000UL)
     {
         finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_ERROR);
         say("      %s is a multicast address: it names a group of\n",
@@ -843,7 +862,7 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
 
     /* fe80::/10, RFC 4291 2.5.6.  The interface derives its own link-local
        from the MAC in every mode, so a written one never reaches off-wire. */
-    if ((ifc->address6[0] & 0xFFC00000UL) == 0xFE800000UL)
+    if ((addr[0] & 0xFFC00000UL) == 0xFE800000UL)
     {
         finding(path, keyword_line(path, "ADDRESS6"), AMI_CFG_PROBLEM_WARN);
         say("      %s is a link-local address, which reaches only this\n",
@@ -851,6 +870,39 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
         say("      wire, and the interface gives itself one already\n");
         note("For an address that reaches further, use the prefix this "
              "network uses, or CONFIGURE6 = AUTO to be given one.");
+    }
+}
+
+static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
+{
+    UWORD m;
+    UWORD n;
+
+    for (m = 0; m < ifc->address6_count; m++)
+        check_one_address6(path, ifc->address6[m].addr);
+
+    /* Two ADDRESS6 lines on ONE interface naming one address, which the
+       cross-interface walk above cannot see because it never compares an
+       interface with itself. */
+    for (m = 0; m + 1 < ifc->address6_count; m++)
+    {
+        for (n = (UWORD)(m + 1); n < ifc->address6_count; n++)
+        {
+            char text[AMI_CFG_IP6_STRLEN];
+
+            if (!same_address6(ifc->address6[m].addr, ifc->address6[n].addr))
+                continue;
+
+            tool_format_ip6(ifc->address6[n].addr, text, sizeof(text));
+
+            finding(path, keyword_line(path, "ADDRESS6"),
+                    AMI_CFG_PROBLEM_ERROR);
+            say("      ADDRESS6 names %s twice, and the second line adds\n",
+                (LONG)text);
+            say("      nothing the first did not\n");
+            note("Remove the repeated line, or give it an address of its "
+                 "own.");
+        }
     }
 }
 

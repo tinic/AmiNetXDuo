@@ -927,7 +927,6 @@ LONG bsd_AddInterfaceTagList(register STRPTR name __asm("a0"),
 
 #ifdef AMINETXDUO_IPV6
     cfg.ip6type = AMI_IP6TYPE_AUTO;
-    cfg.prefix6 = 64;
 #endif
 
     if (tags != NULL && bsd_if_parse_add(SocketBase, tags, &cfg) != 0)
