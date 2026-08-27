@@ -47,13 +47,23 @@
 #define FB_STAT_EVERY       32
 
 /* The floor between grabs, in fiftieths.  A floor rather than a frame rate: the
-   point past which grabbing again cannot produce anything a viewer can see. */
+   point past which grabbing again cannot produce anything a viewer can see.
+   Measured from where a pass BEGAN and not from where it ended, so a pass that
+   already took a fiftieth has served it.  Charged after the pass it was a flat
+   20 ms the pass could not work off, and a cheaper pass then bought idle
+   instead of a sooner frame: 24% of a 75% cap, with the latency to match. */
 #define FB_GRAB_FLOOR       1
 
 /* The share of the machine this may take, as the divisor of the idle owed after
    a frame: a frame costing T ticks is followed by at least T/3 of nothing, so
    the console settles at 75%.  Enforced against measured cost, not a rate. */
 #define FB_IDLE_DIVISOR     3
+
+/* How much idle the duty accounting may bank, in fiftieths.  FB_GRAB_FLOOR can
+   hand back more idle than the share owes, and that has to be credited or the
+   console never notices it is already under its cap.  Bounded, because a
+   session that sat still for a minute must not then run flat out. */
+#define FB_IDLE_BANK        2
 
 /* How often a `refresh` can force a full frame, in fiftieths.  The first ask is
    answered at once; the floor applies to the second and later inside a second,
@@ -186,6 +196,10 @@ static ULONG           fb_pass_ticks;
 /* And what the pass in progress has cost so far, since it is charged a band
    at a time. */
 static ULONG           fb_pass_acc;
+
+/* When the pass in flight began, which is what FB_GRAB_FLOOR is measured from.
+   Zero between passes; a tick of 0 is nudged to 1 by its writer. */
+static ULONG           fb_pass_t0;
 
 /* Tile rows in a band.  Four rows bounds one uninterrupted encode at an eighth
    of a 640x480 screen. */
@@ -2151,6 +2165,7 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_band_ty0   = 0;
     fb_pass_ticks = 0;
     fb_pass_acc   = 0;
+    fb_pass_t0    = 0;
     fb_frames     = 0;
     fb_bytes      = 0;
     fb_grab_ticks = 0;
@@ -2482,9 +2497,12 @@ BOOL http_fb_slice(ULONG now)
         if (fb_next_tick != 0UL && (LONG)(tick - fb_next_tick) < 0L)
             return TRUE;
 
-        /* The floor stands only until the frame this pass produces has been
-           sent and its real cost is known.  http_fb_write() replaces it. */
-        fb_next_tick = tick + ((fb_band_ty0 == 0) ? (ULONG)FB_GRAB_FLOOR : 0UL);
+        /* Nothing is owed until the pass ends and its real cost is known;
+           http_fb_write() is what sets the next one.  No floor here: added at
+           the first band it fell between that band and the second, so every
+           banded pass carried a 20 ms stall one band in -- which is the one
+           place the floor cannot be about a screen nobody drew on. */
+        fb_next_tick = tick;
         if (fb_next_tick == 0UL)
             fb_next_tick = 1UL;         /* 0 means it has never grabbed */
 
@@ -2493,6 +2511,14 @@ BOOL http_fb_slice(ULONG now)
         fb_frame_t0 = tick;
         if (fb_frame_t0 == 0UL)
             fb_frame_t0 = 1UL;          /* 0 means no frame is in flight */
+
+        /* And the pass's own, which is what the floor is measured from. */
+        if (fb_band_ty0 == 0)
+        {
+            fb_pass_t0 = tick;
+            if (fb_pass_t0 == 0UL)
+                fb_pass_t0 = 1UL;       /* 0 means no pass is in flight */
+        }
     }
 
     /* gt= is the rest of the grab; et= is the pass that reads the planes. */
@@ -2679,6 +2705,7 @@ BOOL http_fb_write(ULONG now)
                three rounds wrong either way.  What was granted is taken off. */
             ULONG owed;
             ULONG idle;
+            ULONG resume;
 
             fb_busy_ticks += cost;
             fb_pass_acc += cost;
@@ -2697,15 +2724,37 @@ BOOL http_fb_write(ULONG now)
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
-            fb_idle_given += idle;
+            resume = done + idle;
 
-            /* The floor is about not re-reading a screen nobody drew on,
-               so it belongs between screen passes and not between the
-               bands of one: mid-pass it would add a tick per band. */
-            if (fb_band_ty0 == 0 && idle < (ULONG)FB_GRAB_FLOOR)
-                idle = (ULONG)FB_GRAB_FLOOR;
+            /* The floor is about not re-reading a screen nobody drew on, and
+               that is a floor on how often a PASS starts.  Measured from where
+               this one began, so a pass that already took a fiftieth owes
+               nothing and a pass that came in under one waits out the rest.
+               Added to the end instead it was a flat 20 ms whatever the pass
+               cost, which is a cheaper pass turning into a later frame. */
+            if (fb_pass_t0 != 0UL)
+            {
+                ULONG floor_at = fb_pass_t0 + (ULONG)FB_GRAB_FLOOR;
 
-            fb_next_tick = done + idle;
+                if ((LONG)(floor_at - resume) > 0L)
+                    resume = floor_at;
+            }
+            fb_pass_t0 = 0;
+
+            /* Credited with what is really being handed back and not with what
+               the share asked for, floor included, so the accounting can see
+               it is already under the cap.  Banked no further than
+               FB_IDLE_BANK past what is owed. */
+            {
+                ULONG gave = (resume > done) ? (resume - done) : 0UL;
+                ULONG bank = owed + (ULONG)FB_IDLE_BANK;
+
+                fb_idle_given += gave;
+                if (fb_idle_given > bank)
+                    fb_idle_given = bank;
+            }
+
+            fb_next_tick = resume;
             if (fb_next_tick == 0UL)
                 fb_next_tick = 1UL;
         }
