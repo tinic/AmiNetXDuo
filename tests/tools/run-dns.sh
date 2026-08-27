@@ -66,6 +66,10 @@ DOMAIN="${AMINETXDUO_DNS_DOMAIN:-example.com}"
 SELF="${AMINETXDUO_DNS_SELF:-192.168.1.239}"
 GATEWAY="${AMINETXDUO_DNS_GATEWAY:-192.168.1.1}"
 NETMASK="${AMINETXDUO_DNS_NETMASK:-255.255.255.0}"
+# RFC 3849 documentation space: it answers nothing, which is why the nesting
+# is measured on it and not on a resolver the machine is using.  Kept in step
+# with PROBE_EXTRA_DNS6 in tests/tools/dnsprobe.c.
+PROBE_DNS6=2001:db8::53
 SELF_NAME=amiga-probe.localdomain
 SELF_ALIAS=amiga-probe
 
@@ -303,6 +307,69 @@ if grep -q "^dnslist final: $STATIC_DNS use -1 " "$REPORT"; then
     pass "the list ends as it began: $STATIC_DNS, static, use -1"
 else
     fail "the probe did not leave the name server list as it found it"
+fi
+
+# ---- the IPv6 half of the same interface ---------------------------------
+#
+# THE ROW THIS COVERS: ObtainDomainNameServerList() reported the IPv6 servers
+# and neither Add nor Remove would take one, so an address the list handed a
+# program back could not be given to RemoveDomainNameServer().  Everything the
+# probe does after the first Add uses the text the LIST printed.
+
+EXTRA6=$(sed -n "s/^listed6 \([0-9A-Fa-f:]*\) use [-0-9]*$/\1/p" "$REPORT" |
+         head -1)
+if [ -n "$EXTRA6" ]; then
+    pass "ObtainDomainNameServerList reports the IPv6 server as $EXTRA6"
+else
+    fail "no IPv6 server reached the list at all"
+    grep -E "^(add6|listed6)" "$REPORT" >&2 || true
+fi
+
+if grep -q "^add6 $PROBE_DNS6 rc 0 use 1$" "$REPORT"; then
+    pass "AddDomainNameServer accepts an IPv6 literal, use 1 and POSITIVE"
+else
+    fail "AddDomainNameServer refused the IPv6 literal $PROBE_DNS6"
+    grep "^add6 " "$REPORT" >&2 || true
+fi
+
+if grep -q "^add6 listed rc 0 use 2$" "$REPORT"; then
+    pass "a second Add on the listed address nests it to 2"
+else
+    fail "adding the listed IPv6 address again did not nest"
+    grep "^add6 listed" "$REPORT" >&2 || true
+fi
+
+REMOVES6=$(sed -n "s/^remove6 listed rc [-0-9]* use \([-0-9]*\)$/\1/p" \
+           "$REPORT" | tr '\n' ' ')
+if [ "$REMOVES6" = "1 0 " ]; then
+    pass "two Removes take the listed IPv6 address out, one at a time"
+else
+    fail "removing the listed IPv6 address gave use [$REMOVES6], expected 1 0"
+    echo "       this is the row: a server the list reports and nothing" >&2
+    echo "       can take away again." >&2
+    grep "^remove6 listed" "$REPORT" >&2 || true
+fi
+
+if grep -q "^remove6 listed again rc -1 errno 2$" "$REPORT"; then
+    pass "one Remove too many is -1/ENOENT for IPv6 as it is for IPv4"
+else
+    fail "the extra IPv6 Remove did not answer -1/ENOENT"
+    grep "^remove6 listed again" "$REPORT" >&2 || true
+fi
+
+if grep -q "^add6 malformed rc -1 errno 22$" "$REPORT"; then
+    pass "text that is neither address form is still -1/EINVAL"
+else
+    fail "a malformed address was not refused with EINVAL"
+    grep "^add6 malformed" "$REPORT" >&2 || true
+fi
+
+if grep -q "^dnslist final6: $STATIC_DNS use -1 " "$REPORT" &&
+   ! grep -q "^dnslist final6: .*:.* use " "$REPORT"; then
+    pass "the list ends with the IPv4 entry alone: the probe put back what it took"
+else
+    fail "the IPv6 phase did not leave the name server list as it found it"
+    grep "^dnslist final6:" "$REPORT" >&2 || true
 fi
 
 QUALIFIED=$(sed -n "s/^qualified \"$HOST\.$DOMAIN\": \(.*\)$/\1/p" "$REPORT" | head -1)

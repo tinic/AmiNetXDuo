@@ -1227,6 +1227,10 @@ BOOL ami_config_nameserver6_offer(AmiResolverConfig *res,
     res->nameserver6[i][1] = addr[1];
     res->nameserver6[i][2] = addr[2];
     res->nameserver6[i][3] = addr[3];
+    /* One owner, acquired at run time: the same convention nameserver_use[]
+       uses, so ObtainDomainNameServerList() can report both lists the same
+       way. */
+    res->nameserver6_use[i] = 1;
 
     res->nameserver6_count = (UWORD)(i + 1);
 
@@ -1253,6 +1257,7 @@ BOOL ami_config_nameserver6_withdraw(AmiResolverConfig *res,
             res->nameserver6[j - 1][1] = res->nameserver6[j][1];
             res->nameserver6[j - 1][2] = res->nameserver6[j][2];
             res->nameserver6[j - 1][3] = res->nameserver6[j][3];
+            res->nameserver6_use[j - 1] = res->nameserver6_use[j];
         }
 
         res->nameserver6_count--;
@@ -1261,6 +1266,7 @@ BOOL ami_config_nameserver6_withdraw(AmiResolverConfig *res,
         res->nameserver6[res->nameserver6_count][1] = 0UL;
         res->nameserver6[res->nameserver6_count][2] = 0UL;
         res->nameserver6[res->nameserver6_count][3] = 0UL;
+        res->nameserver6_use[res->nameserver6_count] = 0;
 
         return TRUE;
     }

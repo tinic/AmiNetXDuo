@@ -244,12 +244,19 @@ BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
  * convention: negative = static from name_resolution, positive = added at run
  * time, magnitude = references.  A slot in use is never 0.  search[] entries
  * below search_static are static, from it up came off the network, in try order.
+ *
+ * nameserver6_use[] is the same count for the IPv6 servers, and exists for the
+ * same reason: ObtainDomainNameServerList() reports every server it holds, so
+ * RemoveDomainNameServer() has to be able to take any of them away again, and
+ * a server two sources name must survive one of them leaving.  It used to
+ * report a constant 1 for an IPv6 server and no caller could remove one at all.
  */
 typedef struct AmiResolverConfig {
     ULONG   nameserver[AMI_CFG_MAX_NAMESERVERS];
     LONG    nameserver_use[AMI_CFG_MAX_NAMESERVERS];
     UWORD   nameserver_count;
     ULONG   nameserver6[AMI_CFG_MAX_NAMESERVERS][AMI_CFG_IP6_WORDS];
+    LONG    nameserver6_use[AMI_CFG_MAX_NAMESERVERS];
     UWORD   nameserver6_count;
     char    domain[AMI_CFG_DOMAIN_LEN];
     char    search[AMI_CFG_MAX_SEARCH][AMI_CFG_NAME_LEN];

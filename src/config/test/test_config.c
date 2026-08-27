@@ -1868,14 +1868,27 @@ static void test_ra_nameserver6(void)
     CHECK(ami_config_nameserver6_offer(&res, a) == FALSE);
     CHECK(res.nameserver6_count == 1);
 
+    /* nameserver6_use[] is ObtainDomainNameServerList()'s dnsn_UseCount for
+       the IPv6 half: one owner, acquired at run time, so positive and never
+       zero.  It reported a constant 1 before RemoveDomainNameServer() could
+       take an IPv6 server away at all. */
+    CHECK(res.nameserver6_use[0] == 1);
+
     CHECK(ami_config_nameserver6_offer(&res, b) == TRUE);
     CHECK(res.nameserver6_count == 2);
+    CHECK(res.nameserver6_use[1] == 1);
+
+    /* A count belongs to its address and has to travel with it when the list
+       is compacted, not stay at the index it was written to. */
+    res.nameserver6_use[1] = 3;
 
     /* Withdrawing the first leaves the second, and its order. */
     CHECK(ami_config_nameserver6_withdraw(&res, a) == TRUE);
     CHECK(res.nameserver6_count == 1);
     CHECK(res.nameserver6[0][0] == 0x20010DB8UL);
     CHECK(res.nameserver6[0][3] == 0x00000053UL);
+    CHECK(res.nameserver6_use[0] == 3);
+    CHECK(res.nameserver6_use[1] == 0);
 
     /* And a second withdrawal of the same address changes nothing. */
     CHECK(ami_config_nameserver6_withdraw(&res, a) == FALSE);
