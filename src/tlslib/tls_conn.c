@@ -594,7 +594,11 @@ struct TLSConnection *tls_TLSOpenA(
        bracket: mutexes, plus the process-wide session list. */
     if (tls_conn_enter(conn) != 0)
     {
-        error = TLS_ERR_NOSTACK;
+        /* NOT TLS_ERR_NOSTACK.  The bracket is this library's own; failing to
+           take it says nothing about the socket library the caller handed in,
+           and answering "bsdsocket.library was built without TLS support" for
+           it sent every reader of the failure to the wrong file. */
+        error = TLS_ERR_INTERNAL;
         goto fail;
     }
 

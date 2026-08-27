@@ -1609,6 +1609,40 @@ stage_reachability() {
     return "$rc"
 }
 
+# -------------------------------------------------------------- fetchtls ----
+#
+# THE SHIPPED `fetch` COMMAND OVER HTTPS, against a server this lab owns.
+#
+# tests/tls/run-fetch.sh is the only thing that ever ran fetch's TLS path and
+# it is `manual`, because four of its nine commands are third-party endpoints
+# and a red there can be somebody else's outage.  That is how 2ec3fab4 shipped
+# a client answering "bsdsocket.library was built without TLS support" on
+# every https: URL.
+#
+# Here `TlsLoop SERVER ... HTTP` and `fetch` are two Shell processes in one
+# guest over 127.0.0.1, with a certificate minted for the run.  Nothing but our
+# own code is in the path, so a red is a defect.  Distinct from tlsloop above:
+# that one is the library against itself, this one is the command users run.
+stage_fetchtls() {
+    hr "the fetch command over HTTPS, lab server (tier 2, needs a ROM)"
+
+    local rc=0
+
+    "$ROOT/tests/tls/run-fetchtls.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  fetch completed a TLS 1.3 handshake, verified the" \
+                "chain and wrote the body it was sent" ;;
+        1) fail "fetchtls: fetch did not complete the transfer -- the" \
+                "fetchtls_* lines above name which half and which check" ;;
+        2) fail "fetchtls: the rig or the PKI refused it before any guest" \
+                "booted" ;;
+        *) fail "fetchtls: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # --------------------------------------------------------------- tlsloop ----
 #
 # tls.library shaking hands with itself: a server process and a client process
@@ -2264,7 +2298,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|fetchtls|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -2299,6 +2333,7 @@ for s in "${WANT[@]}"; do
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
         tlsloop)     stage_tlsloop || srrc=$? ;;
+        fetchtls)    stage_fetchtls || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
