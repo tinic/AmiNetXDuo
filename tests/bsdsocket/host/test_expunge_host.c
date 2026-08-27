@@ -279,6 +279,9 @@ VOID FreeSignal(LONG n) { (VOID)n; h.free_signal_calls++; }
 VOID CloseDevice(struct IORequest *io) { (VOID)io; h_unreachable("CloseDevice"); }
 struct Process *CreateNewProc(const struct TagItem *t) { (VOID)t; h.create_proc_calls++; return NULL; }
 
+/* Not h_unreachable(): AMI_WARN is on paths this test drives, and it is
+   compiled into every build now rather than out of the default one. */
+VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 VOID ami_free(APTR p) { (VOID)p; h_unreachable("ami_free"); }
 VOID ami_mem_open_delta(LONG d) { (VOID)d; h_unreachable("ami_mem_open_delta"); }
 LONG ami_netdb_load(VOID) { return 0; }
