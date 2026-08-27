@@ -95,9 +95,12 @@ cp "$BSD" "$STAGE/libs/bsdsocket.library"
 cp "$TLS" "$STAGE/libs/tls.library"
 cp "$STORE" "$STAGE/devs/Internet/certificates"
 
+# The staged file already carries no nameserver line, for the reason written
+# in it; this is here so that the phase below still reads a resolver file it
+# wrote itself if that ever changes.
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
-# No nameserver line: the DHCP lease on the bridge carries one, and naming
-# SLIRP's dead 10.0.2.3 here costs the resolver's whole failover time on every
+# No nameserver line: the DHCP lease on the bridge carries one, and a second
+# server this file cannot reach costs the resolver's failover time on every
 # lookup before it gets used.
 domain localdomain
 NREOF

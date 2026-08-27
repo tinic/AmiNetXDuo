@@ -58,8 +58,8 @@ cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 cp "$A2065" "$STAGE/devs/a2065.device"
 
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
-# No nameserver line: the DHCP lease on the bridge carries one, and naming
-# SLIRP's dead 10.0.2.3 here costs the resolver's whole failover time on every
+# No nameserver line: the DHCP lease on the bridge carries one, and a second
+# server this file cannot reach costs the resolver's failover time on every
 # lookup before it gets used.
 domain localdomain
 NREOF

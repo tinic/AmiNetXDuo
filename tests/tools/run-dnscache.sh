@@ -91,12 +91,12 @@ for t in AddNetInterface host; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
-# NO STATIC NAME SERVER.  tests/netstack/devs/Internet/name_resolution still
-# carries `nameserver 10.0.2.3`, fs-uae's SLIRP forwarder, which does not
-# exist on a real segment: every lookup here was sent there first, waited a
-# second, and was then re-sent to the server the lease supplies.  On the wire
-# that is two packets per name, and the count below is a count of packets.
-# The lease's server is the only one this test wants.
+# NO STATIC NAME SERVER.  This is the count of packets a name costs, so a
+# second server would double it: the lease's server is the only one this test
+# wants.  tests/netstack/devs/Internet/name_resolution carried
+# `nameserver 10.0.2.3` -- fs-uae's SLIRP forwarder, on no real segment --
+# until 2026-08-27, which is where the measurement of a wasted second and a
+# doubled query came from; it names no server now, and this stays explicit.
 cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
 # Deliberately empty of servers: the DHCP lease supplies the only one, and a
 # second, unreachable server would double every query on the wire.
