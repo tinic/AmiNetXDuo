@@ -118,10 +118,13 @@ writes name, PC, SR and all registers to the serial log on a CPU exception, and
 `ami_crash_install_alert_hook()` makes a Guru arrive decoded, with the offending
 task named, rather than as hex on a dead screen.
 
-`ami_log()` output needs `-DAMINETXDUO_LOG=ON`, off in every shipping build, and
-off it compiles `AMI_ERROR`/`AMI_WARN`/`AMI_INFO` to a branch `-Os` removes — so
-a capture from a shipped library is not evidence of silence. Reproduce on a
-logging build first.
+`AMI_ERROR`, `AMI_WARN` and `AMI_INFO` compile into every image, shipping ones
+included; what prints is the runtime `ami_log_level()`, which starts at
+`AMI_LOG_WARN`. So a serial capture from a shipped library IS evidence for the
+error and warning tier, and is evidence for nothing above it: `SetEnv
+ANXDLOGLEVEL 2` and restart the network to reach `AMI_INFO`. `AMI_DEBUG` and
+`AMI_TRACE` are per-packet and still need `AMINETXDUO_DEBUG`. Reaching the
+serial port at all takes a null modem or Sashimi.
 
 `netstat -h` reads the health counters without opening a library, allocating or
 taking a lock, so it answers while the rest of the stack has stopped answering.

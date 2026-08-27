@@ -11,9 +11,9 @@ There is no bounty and no guaranteed response time. This is a hobby project.
 
 A useful report states which build (`--version` on any command prints it), which
 SANA-II driver and card, and what the machine received or was asked to do. A
-serial log from a build configured with `-DAMINETXDUO_LOG=ON` is worth more than
-a description of the symptom. A shipped build compiles the log away entirely, so
-silence on the serial port from a shipped build is not evidence.
+serial log is worth more than a description of the symptom, and a shipped build
+writes one: `SetEnv ANXDLOGLEVEL 2`, restart the network, and capture the serial
+port with a null modem or Sashimi.
 
 ## Supported versions
 
