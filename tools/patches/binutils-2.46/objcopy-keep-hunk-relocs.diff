@@ -1,7 +1,6 @@
-NOT APPLIED BY ANY BUILD.  tools/build-toolchain.sh reads only
-tools/patches/binutils/*.diff; this directory is a sibling and is never
-globbed.  It is kept so the next person to try binutils 2.46 does not have to
-find this again.
+Applied by tools/build-toolchain.sh when the binutils pin is on branch
+amiga-2.46.  The pin is still amiga-2.39.0 (tools/build-toolchain.sh:39), which
+selects tools/patches/binutils/ instead; this set is what a pin that moves gets.
 
 Against bebbo's binutils-gdb, branch amiga-2.46, commit
 a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
@@ -28,11 +27,23 @@ Both are correct for ELF, where relocations a stripped image still needs live
 in sections objcopy copies as contents.  On hunk they are the HUNK_RELOC32 that
 this function is the only writer of.
 
-With this applied, 2.46's strip produces byte-identical output to 2.39's, and
-`tools/ci.sh cross` AMINETXDUO_CI_CROSS=nolto is green on a 2.46 toolchain
-(relocation tables: clean images=117).  The LTO arms still do not link: neither
-diff in tools/patches/binutils/ applies to 2.46, and that work would have to be
-redone against 2.46's own LTO support before the pin could move.
+MEASURED, 2026-08-27, a 2.46 toolchain built with this applied over the pinned
+GCC 16.2.0b:
+
+  strip 2.46, WITHOUT this patch
+    check=ok           file=r2.exe hunks=3 relocs=324 bytes=18612
+    check=UNRELOCATED  file=r2.exe hunks=3 relocs=0   bytes=13524   rc=1
+
+  strip 2.46, WITH this patch
+    check=ok           file=r.exe  hunks=3 relocs=324 bytes=18612
+    check=ok           file=r.exe  hunks=3 relocs=324 bytes=14876   rc=0
+
+  the whole tree, -DAMINETXDUO_LTO=OFF, built by that toolchain
+    hunk_relocs=clean images=118 build=build/bu246                  rc=0
+
+The LTO arms still do not link: neither diff in tools/patches/binutils/ applies
+to 2.46, and that work would have to be redone against 2.46's own LTO support
+before the pin could move.
 
 diff --git a/binutils/objcopy.c b/binutils/objcopy.c
 index fdd8bd11..1d3487a2 100644
