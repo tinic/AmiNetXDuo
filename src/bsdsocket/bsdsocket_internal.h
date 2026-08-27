@@ -190,17 +190,29 @@ typedef struct
 #define BSD_TCP_WINDOW_POOL_SHARE   8
 #endif
 
-#ifndef BSD_TCP_WINDOW_CEILING
-#ifdef AMINETXDUO_TCP_WINDOW_SCALING
-#define BSD_TCP_WINDOW_CEILING                                                \
-    (((ULONG)AMI_POOL_MAX_PACKETS / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *        \
-     (ULONG)AMI_POOL_PAYLOAD)
-#else
 /*
- * Without the option, the field itself is the ceiling. The window goes on the
- * wire in sixteen bits and there is nothing to scale it by, so 65535 is what
- * the wire format allows rather than a policy. nxe_tcp_socket_create.c:170
+ * DEFINED ONLY WHERE THERE IS SOMETHING TO HIT.
+ *
+ * Without window scaling the field itself is the ceiling: the window goes on
+ * the wire in sixteen bits and there is nothing to scale it by, so 65535 is
+ * what the wire format allows rather than a policy of ours.
+ * nxe_tcp_socket_create.c:170
+ *
+ * With scaling there is no such number, and the one that used to stand here
+ * was not one either. It was
+ *
+ *     (AMI_POOL_MAX_PACKETS / BSD_TCP_WINDOW_POOL_SHARE) * AMI_POOL_PAYLOAD
+ *
+ * which is `budget` in ami_bsd_tcp_window() spelled over the compile-time
+ * bound of the same pool. Since the pool cannot exceed that bound, and the
+ * window is the budget divided among the live consumers, window <= budget <=
+ * ceiling held by construction and the clamp could not fire. It never had.
+ * The share of the buffer the stack really has is the whole policy; a second
+ * cap derived from the first is a restatement, so it is gone and the clamp
+ * with it. src/bsdsocket/socket.c is where the other half of this lives.
  */
+#ifndef BSD_TCP_WINDOW_CEILING
+#ifndef AMINETXDUO_TCP_WINDOW_SCALING
 #define BSD_TCP_WINDOW_CEILING  65535UL
 #endif
 #endif

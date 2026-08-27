@@ -106,6 +106,7 @@ ULONG ami_bsd_tcp_window(VOID)
     NX_IP          *ip   = netstack_ip();
     ULONG           budget;
     ULONG           window;
+    ULONG           cap;
 
     if (pool == NULL || ip == NULL)
         return (ULONG)BSD_TCP_WINDOW;
@@ -113,19 +114,31 @@ ULONG ami_bsd_tcp_window(VOID)
     budget = (pool->nx_packet_pool_total / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *
              pool->nx_packet_pool_payload_size;
 
+#ifdef BSD_TCP_WINDOW_CEILING
+    cap = (ULONG)BSD_TCP_WINDOW_CEILING;
+#else
+    /* A window-scaling build has no ceiling but the budget: one consumer takes
+       half of it and every further one takes less.  bsdsocket_internal.h says
+       why there is no second number here. */
+    cap = budget;
+#endif
+
     if (budget != last_budget)
     {
         last_budget = budget;
         AMI_INFO("bsdsocket: TCP window budget %ld bytes (pool %ld packets), "
                  "%ld..%ld per socket",
                  (long)budget, (long)pool->nx_packet_pool_total,
-                 (long)BSD_TCP_WINDOW, (long)BSD_TCP_WINDOW_CEILING);
+                 (long)BSD_TCP_WINDOW, (long)cap);
     }
 
     window = budget / (bsd_tcp_consumer_count(ip) + 1UL);
 
-    if (window > (ULONG)BSD_TCP_WINDOW_CEILING)
-        window = (ULONG)BSD_TCP_WINDOW_CEILING;
+#ifdef BSD_TCP_WINDOW_CEILING
+    /* Sixteen bits on the wire, and no window scale option to widen them. */
+    if (window > cap)
+        window = cap;
+#endif
     if (window < (ULONG)BSD_TCP_WINDOW)
         window = (ULONG)BSD_TCP_WINDOW;
 
