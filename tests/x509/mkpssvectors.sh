@@ -48,6 +48,42 @@ mkleaf leaf      int  pss.test      sha256 digest
 mkleaf leaf384   root pss384.test   sha384 digest
 mkleaf leaf_salt root pss-salt.test sha256 max
 
+# A restricted id-RSASSA-PSS key. OpenSSL writes those restrictions into the
+# SubjectPublicKeyInfo AlgorithmIdentifier and necessarily uses PSS whenever
+# the private key signs.
+openssl genpkey -algorithm RSA-PSS -out psskey_root.key \
+    -pkeyopt rsa_keygen_bits:2048 \
+    -pkeyopt rsa_pss_keygen_md:sha256 \
+    -pkeyopt rsa_pss_keygen_mgf1_md:sha256 \
+    -pkeyopt rsa_pss_keygen_saltlen:32 2>/dev/null
+openssl req -new -x509 -key psskey_root.key -out psskey_root.pem -days $DAYS \
+    -subj "/CN=AmiNetXDuo PSS-key Root" -sha256 \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+cat > psskey_leaf.cnf <<'EOF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:pss-key.test
+EOF
+sign psskey_leaf psskey_root leaf "/CN=pss-key.test" sha256 digest
+
+# The same key OID with no parameters means PSS-only but unrestricted. This
+# is common for end-entity keys and explicitly valid under RFC 4055 3.3.
+openssl genpkey -algorithm RSA-PSS -out psskey_any_root.key \
+    -pkeyopt rsa_keygen_bits:2048 2>/dev/null
+openssl req -new -x509 -key psskey_any_root.key -out psskey_any_root.pem -days $DAYS \
+    -subj "/CN=AmiNetXDuo unrestricted PSS-key Root" -sha384 \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+cat > psskey_any_leaf.cnf <<'EOF'
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:pss-key-any.test
+EOF
+sign psskey_any_leaf psskey_any_root leaf "/CN=pss-key-any.test" sha384 digest
+
 emit() {    # emit <c-name> <pem>
     local name=$1 pem=$2
     openssl x509 -in "$pem.pem" -outform DER -out "$pem.der"
@@ -55,7 +91,7 @@ emit() {    # emit <c-name> <pem>
     n=$(wc -c < "$pem.der" | tr -d ' ')
     printf 'static const unsigned char %s[] = {\n' "$name"
     od -An -v -tx1 "$pem.der" | tr -s ' ' | sed 's/^ //' |
-        awk '{ printf "   "; for (i = 1; i <= NF; i++) printf " 0x%s,", $i; printf "\n" }'
+        awk 'NF { printf "   "; for (i = 1; i <= NF; i++) printf " 0x%s,", $i; printf "\n" }'
     printf '};\nstatic const unsigned %s_len = %s;\n\n' "$name" "$n"
 }
 
@@ -85,6 +121,14 @@ cat <<'EOF'
  *                       than at the digest length.  RFC 4055 permits it and
  *                       a verifier that assumes sLen == hLen refuses it.
  *
+ *   x509_psskey_root    CA whose SubjectPublicKeyInfo is id-RSASSA-PSS with
+ *                       SHA-256, MGF1-SHA-256 and a 32-byte minimum salt.
+ *   x509_psskey_leaf    PSS SHA-256 leaf signed by that restricted key.
+ *
+ *   x509_psskey_any_root/leaf
+ *                       The same chain shape with absent SPKI parameters and
+ *                       a SHA-384 signature, exercising unrestricted PSS.
+ *
  * Regenerate with tests/x509/mkpssvectors.sh.
  *
  * SPDX-License-Identifier: MIT
@@ -99,6 +143,10 @@ emit x509_pss_int       int
 emit x509_pss_leaf      leaf
 emit x509_pss_leaf384   leaf384
 emit x509_pss_leaf_salt leaf_salt
+emit x509_psskey_root psskey_root
+emit x509_psskey_leaf psskey_leaf
+emit x509_psskey_any_root psskey_any_root
+emit x509_psskey_any_leaf psskey_any_leaf
 printf '#endif /* AMINETXDUO_X509_PSS_VECTORS_H */\n'
 } > "$OUT"
 

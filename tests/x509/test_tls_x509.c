@@ -32,6 +32,10 @@ extern NX_SECURE_X509_CRYPTO _nx_crypto_x509_cipher_lookup_table[];
 extern const UINT            _nx_crypto_x509_cipher_lookup_table_size;
 extern NX_CRYPTO_METHOD      crypto_method_ecdsa;
 extern NX_CRYPTO_METHOD      crypto_method_ec_secp256;
+extern NX_CRYPTO_METHOD      crypto_method_rsa;
+extern NX_CRYPTO_METHOD      crypto_method_sha256;
+extern NX_CRYPTO_METHOD      crypto_method_sha384;
+extern NX_CRYPTO_METHOD      crypto_method_sha512;
 
 static int failures = 0;
 
@@ -584,7 +588,12 @@ static void test_pss(void)
 {
 static NX_SECURE_X509_CERT cert;
 static unsigned char       tampered[4096];
+static const unsigned char pss_oid[] =
+    {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a};
 UINT                       status;
+UINT                       i;
+UINT                       oid_count;
+UINT                       params_offset;
 
     printf("pss\n");
 
@@ -608,6 +617,137 @@ UINT                       status;
     status = pss_verify(x509_pss_leaf_salt, x509_pss_leaf_salt_len, NX_CRYPTO_NULL, 0);
     check(status == NX_SECURE_X509_SUCCESS, "PSS with a non-digest salt verifies");
 
+    status = pss_verify(x509_psskey_leaf, x509_psskey_leaf_len,
+                        NX_CRYPTO_NULL, 0);
+    check(status != NX_SECURE_X509_SUCCESS,
+          "a PSS-key leaf is not verified under the unrelated RSA root");
+
+    memset(&pss_root,  0, sizeof(pss_root));
+    memset(&pss_leaf,  0, sizeof(pss_leaf));
+    memset(&pss_store, 0, sizeof(pss_store));
+    status = _nx_secure_x509_certificate_initialize(&pss_root,
+                                                    (UCHAR *)x509_psskey_root,
+                                                    (USHORT)x509_psskey_root_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    check(status == NX_SECURE_X509_SUCCESS, "an id-RSASSA-PSS public key parses");
+    check(pss_root.nx_secure_x509_public_algorithm == NX_SECURE_TLS_X509_TYPE_RSA,
+          "a PSS key uses the existing RSA primitive");
+    check(pss_root.nx_secure_x509_public_key_identifier == NX_SECURE_TLS_X509_TYPE_RSA_PSS,
+          "the PSS-only key policy is preserved");
+    check(pss_root.nx_secure_x509_public_key_pss_algorithm ==
+              NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_256,
+          "the PSS-key digest restriction is parsed");
+    check(pss_root.nx_secure_x509_public_key_pss_salt_length == 32,
+          "the PSS-key minimum salt is parsed");
+
+    oid_count = 0;
+    params_offset = 0;
+    if (x509_psskey_root_len <= sizeof(tampered))
+    {
+        memcpy(tampered, x509_psskey_root, x509_psskey_root_len);
+        for (i = 0; i + sizeof(pss_oid) < x509_psskey_root_len; i++)
+        {
+            if (memcmp(&tampered[i], pss_oid, sizeof(pss_oid)) == 0)
+            {
+                oid_count++;
+                if (oid_count == 2)
+                {
+                    params_offset = i + sizeof(pss_oid);
+                    break;
+                }
+            }
+        }
+
+        check(params_offset != 0 && tampered[params_offset] == 0x30,
+              "the PSS-key parameter sequence is located");
+        if (params_offset != 0 && tampered[params_offset] == 0x30)
+        {
+            tampered[params_offset] = 0x05;
+            memset(&cert, 0, sizeof(cert));
+            status = _nx_secure_x509_certificate_initialize(&cert,
+                                                            tampered,
+                                                            (USHORT)x509_psskey_root_len,
+                                                            NX_CRYPTO_NULL, 0,
+                                                            NX_CRYPTO_NULL, 0,
+                                                            NX_SECURE_X509_KEY_TYPE_NONE);
+            check(status != NX_SECURE_X509_SUCCESS,
+                  "non-SEQUENCE PSS-key parameters are refused");
+        }
+    }
+    else
+    {
+        check(0, "the PSS-key root fits the tamper buffer");
+    }
+
+    status = _nx_secure_x509_certificate_initialize(&pss_leaf,
+                                                    (UCHAR *)x509_psskey_leaf,
+                                                    (USHORT)x509_psskey_leaf_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        chain_arm(&pss_root);
+        chain_arm(&pss_leaf);
+        (void)_nx_secure_x509_store_certificate_add(&pss_root, &pss_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_TRUSTED);
+        (void)_nx_secure_x509_store_certificate_add(&pss_leaf, &pss_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_REMOTE);
+        status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    }
+    check(status == NX_SECURE_X509_SUCCESS, "a restricted PSS-key chain verifies");
+
+    pss_root.nx_secure_x509_public_key_pss_salt_length = 31;
+    status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    check(status == NX_SECURE_X509_SUCCESS,
+          "a certificate signature may exceed the PSS-key minimum salt");
+    pss_root.nx_secure_x509_public_key_pss_salt_length = 32;
+    pss_root.nx_secure_x509_public_key_pss_algorithm =
+        NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_384;
+    status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    check(status == NX_SECURE_X509_UNSUPPORTED_SIGNATURE_PARAMETERS,
+          "a PSS-key digest mismatch is refused");
+    pss_root.nx_secure_x509_public_key_pss_algorithm =
+        NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_256;
+    pss_root.nx_secure_x509_public_key_pss_salt_length = 33;
+    status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    check(status == NX_SECURE_X509_UNSUPPORTED_SIGNATURE_PARAMETERS,
+          "a signature below the PSS-key minimum salt is refused");
+    pss_root.nx_secure_x509_public_key_pss_salt_length = 32;
+    pss_leaf.nx_secure_x509_signature_algorithm = NX_SECURE_TLS_X509_TYPE_RSA_SHA_256;
+    status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    check(status == NX_SECURE_X509_WRONG_SIGNATURE_METHOD,
+          "PKCS#1 use of a PSS-only key is refused");
+
+    memset(&pss_root,  0, sizeof(pss_root));
+    memset(&pss_leaf,  0, sizeof(pss_leaf));
+    memset(&pss_store, 0, sizeof(pss_store));
+    status = _nx_secure_x509_certificate_initialize(&pss_root,
+                                                    (UCHAR *)x509_psskey_any_root,
+                                                    (USHORT)x509_psskey_any_root_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    check(status == NX_SECURE_X509_SUCCESS, "a parameterless PSS public key parses");
+    check(pss_root.nx_secure_x509_public_key_pss_algorithm == NX_SECURE_TLS_X509_TYPE_UNKNOWN,
+          "absent PSS-key parameters remain unrestricted");
+    status = _nx_secure_x509_certificate_initialize(&pss_leaf,
+                                                    (UCHAR *)x509_psskey_any_leaf,
+                                                    (USHORT)x509_psskey_any_leaf_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        chain_arm(&pss_root);
+        chain_arm(&pss_leaf);
+        (void)_nx_secure_x509_store_certificate_add(&pss_root, &pss_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_TRUSTED);
+        (void)_nx_secure_x509_store_certificate_add(&pss_leaf, &pss_store,
+                                                    NX_SECURE_X509_CERT_LOCATION_REMOTE);
+        status = _nx_secure_x509_certificate_chain_verify(&pss_store, &pss_leaf, 0);
+    }
+    check(status == NX_SECURE_X509_SUCCESS,
+          "an unrestricted PSS key verifies a SHA-384 signature");
+
     if (x509_pss_leaf_len <= sizeof(tampered))
     {
         memcpy(tampered, x509_pss_leaf, x509_pss_leaf_len);
@@ -621,6 +761,91 @@ UINT                       status;
     {
         check(0, "the PSS leaf fits the tamper buffer");
     }
+}
+
+static void test_pss_schemes(void)
+{
+NX_SECURE_TLS_SESSION session;
+NX_SECURE_X509_CRYPTO method;
+NX_SECURE_X509_CERT   certificate;
+UCHAR                  verify_message[4];
+USHORT                 rsae;
+USHORT                 pss;
+USHORT                 legacy;
+UINT                   status;
+
+    printf("pss schemes\n");
+
+    memset(&session, 0, sizeof(session));
+    memset(&method, 0, sizeof(method));
+    session.nx_secure_tls_1_3 = 1;
+    method.nx_secure_x509_public_cipher_method = &crypto_method_rsa;
+
+    method.nx_secure_x509_hash_method = &crypto_method_sha256;
+    _nx_secure_tls_get_signature_algorithm(&session, &method, &rsae, &pss, &legacy);
+    check(rsae == 0x0804u && pss == 0x0809u && legacy == NX_SECURE_TLS_SIGNATURE_RSA_SHA256,
+          "SHA-256 advertises RSAE, PSS-key and TLS 1.2 schemes");
+
+    method.nx_secure_x509_hash_method = &crypto_method_sha384;
+    _nx_secure_tls_get_signature_algorithm(&session, &method, &rsae, &pss, &legacy);
+    check(rsae == 0x0805u && pss == 0x080au && legacy == NX_SECURE_TLS_SIGNATURE_RSA_SHA384,
+          "SHA-384 advertises both PSS key encodings");
+
+    method.nx_secure_x509_hash_method = &crypto_method_sha512;
+    _nx_secure_tls_get_signature_algorithm(&session, &method, &rsae, &pss, &legacy);
+    check(rsae == 0x0806u && pss == 0x080bu && legacy == NX_SECURE_TLS_SIGNATURE_RSA_SHA512,
+          "SHA-512 advertises both PSS key encodings");
+
+    memset(&session, 0, sizeof(session));
+    memset(&certificate, 0, sizeof(certificate));
+    status = _nx_secure_x509_certificate_initialize(&certificate,
+                                                    (UCHAR *)x509_psskey_root,
+                                                    (USHORT)x509_psskey_root_len,
+                                                    NX_CRYPTO_NULL, 0, NX_CRYPTO_NULL, 0,
+                                                    NX_SECURE_X509_KEY_TYPE_NONE);
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        status = _nx_secure_x509_store_certificate_add(
+            &certificate,
+            &session.nx_secure_tls_credentials.nx_secure_tls_certificate_store,
+            NX_SECURE_X509_CERT_LOCATION_REMOTE);
+    }
+    session.nx_secure_tls_1_3 = 1;
+    verify_message[0] = 0x08;
+    verify_message[1] = 0x04; /* rsa_pss_rsae_sha256 */
+    verify_message[2] = 0;
+    verify_message[3] = 0;
+    if (status == NX_SECURE_X509_SUCCESS)
+    {
+        status = _nx_secure_tls_process_certificate_verify(&session, verify_message,
+                                                           sizeof(verify_message));
+    }
+    check(status == NX_SECURE_TLS_UNSUPPORTED_CERT_SIGN_ALG,
+          "an RSAE scheme is refused for a PSS-only key");
+
+    certificate.nx_secure_x509_public_key_identifier = NX_SECURE_TLS_X509_TYPE_RSA;
+    verify_message[1] = 0x09; /* rsa_pss_pss_sha256 */
+    status = _nx_secure_tls_process_certificate_verify(&session, verify_message,
+                                                       sizeof(verify_message));
+    check(status == NX_SECURE_TLS_UNSUPPORTED_CERT_SIGN_ALG,
+          "a PSS-key scheme is refused for an RSAE key");
+
+    certificate.nx_secure_x509_public_key_identifier = NX_SECURE_TLS_X509_TYPE_RSA_PSS;
+    certificate.nx_secure_x509_public_key_pss_algorithm =
+        NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_256;
+    certificate.nx_secure_x509_public_key_pss_salt_length = 31;
+    status = _nx_secure_tls_process_certificate_verify(&session, verify_message,
+                                                       sizeof(verify_message));
+    check(status == NX_SECURE_TLS_UNSUPPORTED_CERT_SIGN_ALG,
+          "TLS requires PSS-key salt parameters to match exactly");
+
+    certificate.nx_secure_x509_public_key_pss_algorithm =
+        NX_SECURE_TLS_X509_TYPE_RSA_PSS_SHA_384;
+    certificate.nx_secure_x509_public_key_pss_salt_length = 32;
+    status = _nx_secure_tls_process_certificate_verify(&session, verify_message,
+                                                       sizeof(verify_message));
+    check(status == NX_SECURE_TLS_UNSUPPORTED_CERT_SIGN_ALG,
+          "TLS CertificateVerify obeys the PSS-key digest restriction");
 }
 
 static UINT ku_chain_ok(NX_SECURE_X509_CERTIFICATE_STORE *store,
@@ -786,6 +1011,7 @@ int main(void)
     test_chain();
     test_extensions();
     test_pss();
+    test_pss_schemes();
     test_tls_key_usage();
 
     if (failures != 0)
