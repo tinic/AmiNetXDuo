@@ -19,6 +19,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 5.4 | `-noixemul` is unusable on this newlib toolchain: it breaks `sys/reent.h`. | `cmake/toolchain-m68k-amigaos.cmake:111` | see code |
 | 5.4 | The 2026-07 build-spike byte counts. | git history | historical |
 | 5.5 | No such section. Nothing cites it. | | dangling |
+| 6.1 | 50 Hz tick. The wakeup source (`UNIT_VBLANK`) is not the time base (`ReadEClock`), and `NX_IP_PERIODIC_RATE` must equal `TX_TIMER_TICKS_PER_SECOND`. | `port/threadx-amiga/inc/tx_port.h:509` | see code |
 | 6.2 | Baton model: one core lock, exactly one ThreadX thread runs at a time. `TX_DISABLE` is `Forbid()`/`Permit()`, never `Disable()`/`Enable()`, because nothing runs at Exec interrupt level. | `port/threadx-amiga/inc/tx_port.h:26` | see code |
 | 6.4 | Build on `nx_tcp_socket_*`/`nxd_*` directly, not on `addons/BSD/nxd_bsd.c`: `WaitSelect` needs sockets plus Exec signals, errno is per-opener at caller-chosen width, and `ObtainSocket` crosses library bases. | `src/bsdsocket/bsdsocket_internal.h:6` | current |
 | 6.6 | Roadshow's on-disk config layout rather than an invented one, `AMITCP` public port, self-start on first `OpenLibrary`. | `include/aminetxduo/config.h:4` | current; its file list is wrong, see `src/config/config_parse.c:6` |
@@ -50,6 +51,8 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 27 | Ambiguous: two sections are numbered 27. SYN retransmission was flat ~1 s because `NX_TCP_RETRY_SHIFT` defaulted to 0. | `port/netxduo-amiga/inc/nx_user.h:228` | superseded, backoff doubles now |
 | 27.4 | NetX Duo only retransmits a packet the driver has released, and async SANA-II `CMD_WRITE` released only on the next send, so a lone unacked segment was never resent. | `src/sana2/sana2_tx.c:129` | superseded, fixed by deferred processing |
 | 27.6 | `CloseSocket()` emitted a bare RESET where RFC 793 wants a FIN. | `src/bsdsocket/socket.c:555` | superseded, fixed |
+| 33.1 | The keepalive arm is built with a 5 s idle timer so a probe is observable in an emulator run. | `CMakeLists.txt:307` | current, cited as 29 |
+| 33.4 | Per-packet IP-ID randomisation costs 5.2% of loopback because `NX_RAND` is a SHA-256 DRBG, so the ID is seeded once at `nx_ip_create()`. | `src/netstack/netstack.c:815` | current, cited as 29.4 |
 | 35 | An SSH handshake is 97% public-key arithmetic and the largest row is host-key verify at 46%, not the key exchange. Eight 32-bit limbs took 84 s to 12.28 s. | `src/crypto68k/c68k_25519.c` | current |
 | 35.4 | The win is the representation, one `MULU.L` per partial product, not instruction selection. | `src/crypto68k/c68k_25519.S:3` | current; its "no assembly" half is dead, the assembly ships |
 | 37.5 | Refused `connect()` to a port with a listen request leaked one `AmiSocket` and one packet each, 1009 B/s. | `src/bsdsocket/socket.c:684` | superseded, fixed by `bsd_tcp_abort` |
@@ -66,6 +69,7 @@ The full prose is in git history: `git show 2b54025b:docs/RESEARCH.md`.
 | 63 | A frame the emulator's host sends to the guest's MAC never returns to that NIC's pcap, so the peer in any bridged test must be a third machine. | `tests/perf/run-fitzbench.sh:50` | see code |
 | 63.4 | A crashed WinUAE 6.0.3 on a bridged run is an oversized coalesced receive frame in `gotfunc2()`, not our stack. A dead emulator must report `reason=crash`, not rc 0. | `tools/winuae-run.sh:615` | current |
 | 63.5 | Building WinUAE from master on winbuilder: build `winuae_msvc.vcxproj` alone, override `OutDir`, set `WINUAEPUBLICBETA 0` or a modal requester hangs the run under PsExec. | `tools/winuae/a2065-multicast-loopback.patch:28` | current |
+| 75 | Of 2,149 Aminet `comm/` archives none would be fixed by a `miami.library` stub and 12 are made worse, so do not build one. `bsdsocket.library` is the entire probed interface. | `CMakeLists.txt:147` | current |
 | 77 | No such section, it was deleted. `tools/sana2-stage.sh:40` means the driver licence audit: of eight third-party SANA-II drivers, licences permit fetching two. | `tools/sana2-stage.sh:44` | dangling |
 | 77.6 | No such section. Cited comments mean the baton defect: `tx_thread_identify()` returns the global baton holder, not the caller, so a second Task skips adoption and enters NetX Duo unbracketed. | `port/netxduo-amiga/inc/nx_port.h:155`, `src/netstack/netstack.c:197` | dangling; also cited as 78 and 79 |
 | 79.6 | Means 80.3. A size check is not a check: a shim bug returned the right length and the wrong bytes, so every byte is compared. | `tests/bebboget/check.sh:8` | mis-cited |
