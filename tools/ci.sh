@@ -321,6 +321,19 @@ stage_host() {
         return 1
     fi
 
+    # The mDNS responder still gives the machine back between resource records.
+    # A record is up to four walks of the peer cache, and draining a burst in
+    # one mutex-held pass stopped every acknowledgment leaving the machine for
+    # 100-500 ms at a time.  The yield has to sit at the head of each section
+    # loop; several paths through a record body continue past the bottom of it.
+    if tools/check-mdns-yield.sh > "$BUILD/mdns-yield.log" 2>&1; then
+        note "mdns yield: $(sed -n 's/^mdns_yield=//p' "$BUILD/mdns-yield.log")"
+    else
+        cat "$BUILD/mdns-yield.log"
+        fail "the mDNS responder no longer yields between resource records"
+        return 1
+    fi
+
     # Which toolchain a build picks, against a fake cache.  The emulator tier
     # ran under GCC 15.2 for three releases: <cache>/current addressed a tree
     # that was not the pin, and both resolvers took it on "it runs" alone.
