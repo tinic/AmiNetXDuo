@@ -544,6 +544,14 @@ endif()
 # it could be per-target; whole-tree like its neighbours so one flag is one arm
 # of an A/B.
 #
+# UNVERIFIED ON REAL HARDWARE AS OF 2026-08-27, AND THE ONE MACHINE THAT CAN
+# SAY IS amiga-1200 (192.168.1.219), a PiStorm32-accelerated A1200.  What this
+# option removes is CPU work -- exec glue and scheduler transitions -- and that
+# machine's CPU is enormously faster than its chipset, its Gayle bus and its
+# 3c589, so the cost this exists to remove is the cost that got cheap there.
+# The emulated win may shrink or invert.  A measurement is running; until it
+# reports, this default rests on emulation alone.
+#
 # WHAT MOVED THE DEFAULT.  A1200 at 68020 under Amiberry, bridged, three cards,
 # three interleaved rounds of tests/perf/run-fitzbench.sh -k 512 -r 3 against
 # playhouse4, ON and OFF alternating inside one block:
