@@ -61,6 +61,7 @@ software and not a Roadshow one; Roadshow answers none of them either. The
 
 `DEVS:NetInterfaces/<name>`. The 19 keys acted on are listed at
 `src/config/config_parse.c:78`, with the AmiTCP spellings of four of them.
+`ADDRESS6` takes two lines per interface; every other key takes one.
 
 **The other 21 are accepted and silently dropped**: `config_parse.c:78` maps
 them to `IF_KEY_IGNORED` so a stock Roadshow file produces no warnings, which

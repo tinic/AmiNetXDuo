@@ -721,7 +721,10 @@
 
   @{b}ADDRESS6@{ub}    A static address with an optional prefix length. If the
               prefix length is omitted, /64 is assumed. ADDRESS6
-              without CONFIGURE6 means CONFIGURE6=STATIC.
+              without CONFIGURE6 means CONFIGURE6=STATIC. The keyword
+              may be written twice on one interface, each line with its
+              own prefix length; a third line is ignored and a warning
+              names it.
 
   @{b}GATEWAY6@{ub}    The IPv6 default router.
 
