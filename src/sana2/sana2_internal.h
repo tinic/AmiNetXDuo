@@ -101,8 +101,23 @@
 #endif
 
 #include "../thread_priorities.h"
+/*
+ * The reader runs IP input itself (ami_sana2_rx_input), so
+ * its stack has to cover what the IP thread's covers -- AMI_IP_STACK_SIZE,
+ * 4096 -- plus the reader's own frames underneath it: the thread body, the
+ * drain, the completion, the delivery, and the device's BeginIO(), which runs
+ * on whichever stack calls it.  There is no MMU, so a frame that does not fit
+ * writes over what lies below and the machine dies somewhere unrelated.
+ *
+ * tools/check-stack-frames.sh measures the worst case the compiler will admit
+ * to and checks ami_sana2_rx_thread against a budget.  It went from 540 bytes
+ * to 1808 when IP input moved on to the reader, and the script's own
+ * header says its figures run about 800 light against what tests/stack
+ * measures in a guest, because a call through a function pointer is not a
+ * symbol in the assembly.
+ */
 #ifndef AMI_SANA2_RX_STACK_SIZE
-#define AMI_SANA2_RX_STACK_SIZE     4096
+#define AMI_SANA2_RX_STACK_SIZE     8192
 #endif
 
 /* Ticks to spin on a full TX ring before dropping the frame. */

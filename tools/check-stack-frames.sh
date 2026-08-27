@@ -48,6 +48,30 @@ LADDER_EDGES=(
 # exist.
 NOT_A_CALL=( --cut ami_sana2_rx_thread )
 
+# The reader's own edges, and deliberately NOT in LADDER_EDGES.  NetX Duo
+# dispatches the transport receivers and the link driver through function
+# pointers in NX_IP, so without these the reader measures as a leaf that hashes
+# an arrival time.
+#
+# They belong to that one root.  Three of them point at ami_sana2_driver_entry,
+# which every resolver root reaches through a DNS query's send, so measuring
+# any other root with them walks the whole receive path as if the send had
+# started the reader -- 2792 bytes against a budget of 2432 for
+# bsd_getaddrinfo.  Every other root gets NOT_A_CALL instead.
+RX_EDGES=(
+    --edge ami_sana2_rx_thread=ami_sana2_rx_deliver
+    --edge ami_sana2_rx_deliver=ami_sana2_rx_input
+    --edge ami_sana2_rx_input=_nx_ip_packet_receive
+    --edge ami_sana2_rx_input=_nx_arp_packet_receive
+    --edge _nx_ip_packet_receive=_nx_tcp_packet_receive
+    --edge _nx_ip_packet_receive=_nx_udp_packet_receive
+    --edge _nx_ip_packet_receive=_nx_icmp_packet_receive
+    --edge _nx_ip_packet_receive=_nx_igmp_packet_receive
+    --edge _nx_ip_packet_send=ami_sana2_driver_entry
+    --edge _nx_ipv6_packet_send=ami_sana2_driver_entry
+    --edge _nx_arp_packet_send=ami_sana2_driver_entry
+)
+
 # WHAT IS CHECKED, and what each number is for.
 #
 #   binary  root symbol                     budget  measured  what it bounds
@@ -66,7 +90,13 @@ NOT_A_CALL=( --cut ami_sana2_rx_thread )
 # tls.library is not on a Shell stack -- every program that opens it must
 # StackSwap first, and src/tools/fetch.c asks for 64 KB -- so its budget is
 # about noticing growth, not about survival.
+#
+# Neither is the SANA-II reader: AMI_SANA2_RX_STACK_SIZE is 8192 and its budget
+# is a little over a third of that, which is the room the device driver's own
+# BeginIO() frames need underneath.  They run on whichever stack calls them and
+# none of them is a symbol on this path, so nothing here measures them.
 BUDGETS=(
+    "bsdsocket:ami_sana2_rx_thread:3072"
     "bsdsocket:bsd_getaddrinfo:2432"
     "bsdsocket:bsd_getnameinfo:2432"
     "bsdsocket:bsd_gethostbyname:2432"
@@ -135,7 +165,12 @@ for row in "${BUDGETS[@]}"; do
         exit 2
     fi
 
-    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+    case "$sym" in
+        ami_sana2_rx_thread) EXTRA=("${RX_EDGES[@]}") ;;
+        *)                   EXTRA=("${NOT_A_CALL[@]}") ;;
+    esac
+
+    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${EXTRA[@]}" \
           "$dir" "$sym" 2>/dev/null)
     got=${out##*worst_case_bytes=}
     got=${got%%[!0-9]*}
@@ -152,7 +187,7 @@ for row in "${BUDGETS[@]}"; do
     if [ "$got" -gt "$budget" ]; then
         say "stack_frames=FAILED binary=$lib root=$sym bytes=$got budget=$budget"
         say "  the deepest path:"
-        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${EXTRA[@]}" \
             "$dir" "$sym" 2>/dev/null |
             sed -n '2,$p' | sed 's/^/  /'
         rc=1
