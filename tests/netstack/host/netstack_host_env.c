@@ -19,11 +19,14 @@
 
 #include "netstack_host_env.h"
 
+#include "aminetxduo/compat.h"
 #include "aminetxduo/netstatus.h"
 #include "aminetxduo/events.h"
 #include "aminetxduo/budget.h"
 #include "aminetxduo/random.h"
 #include "aminetxduo/config.h"
+
+#include "net68k.h"
 
 #include "netstack_dhcp_hostname.h"
 #include "netstack_gateway.h"
@@ -543,6 +546,44 @@ AmiMemStats *ami_mem_stats(VOID)
 
     return &stats;
 }
+
+/* AMI_ERROR/WARN/INFO are unconditional in every build, so netstack.c names
+   ami_log() whatever the options are; src/common/compat.c is not in this
+   tier.  Discarded: no test here reads a diagnostic. */
+VOID ami_log(int level, const char *fmt, ...)
+{
+    (VOID)level;
+    (VOID)fmt;
+}
+
+int ami_log_level(VOID)
+{
+    return AMI_LOG_WARN;
+}
+
+VOID ami_log_level_set(int level)
+{
+    (VOID)level;
+}
+
+/* ENV:ANXDLOGLEVEL, which no harness here sets: the caller's own level stands. */
+LONG ami_config_log_level(LONG fallback)
+{
+    return fallback;
+}
+
+/* A counter, not a clock.  netstack.c stamps the health mark and the two
+   status callbacks with it and nothing here reads the value back. */
+ULONG ami_millis(VOID)
+{
+    static ULONG ms;
+
+    return ++ms;
+}
+
+/* src/net68k/n68k_rx_verify.c is outside this tier; ami_ns_destroy() prints
+   the counters and nothing here raises them. */
+N68kRxVerifyStats n68k_rx_verify_stats;
 
 /* The one-second heartbeat's callback would otherwise be an undefined
    reference; nothing here runs it. */
