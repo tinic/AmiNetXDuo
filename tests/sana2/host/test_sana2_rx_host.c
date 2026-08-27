@@ -138,12 +138,23 @@ static void h_record(NX_PACKET *packet, Destination where)
 }
 
 /*
- * The reader calls the direct entry points now, under nx_ip_protection.  Both
- * halves are checked: a delivery that skipped the mutex would still record the
- * right destination, so the mutex is asserted separately.
+ * The reader calls the direct entry points now, under nx_ip_protection, and
+ * claims the IP thread's seat while it does.  Both halves are checked: a
+ * delivery that skipped the mutex would still record the right destination, so
+ * h_ip_locked records the lock and h_ip_seated records the seat.
  */
 static int h_ip_locked;
+static int h_ip_seated;
 static int h_lock_depth;
+
+TX_THREAD *_nx_ip_input_thread;
+TX_THREAD *_tx_thread_current_ptr;
+static TX_THREAD h_reader_thread;
+
+TX_THREAD *_tx_thread_identify(VOID)
+{
+    return _tx_thread_current_ptr;
+}
 
 /* Both spellings: tx_mutex_get is _txe_mutex_get where ThreadX error checking
    is on, which it is in this host build, and _tx_mutex_get where it is off,
@@ -176,6 +187,7 @@ UINT _txe_mutex_put(TX_MUTEX *mutex_ptr)
 static VOID h_saw_input(NX_PACKET *packet_ptr, Destination where)
 {
     h_ip_locked = (h_lock_depth > 0);
+    h_ip_seated = (_nx_ip_input_thread == &h_reader_thread);
     h_record(packet_ptr, where);
 }
 
@@ -313,8 +325,11 @@ static void fixture_init(void)
     h_verify_walks   = 0;
     h_verify_sums    = 0;
 
-    h_ip_locked  = 0;
-    h_lock_depth = 0;
+    h_ip_locked          = 0;
+    h_ip_seated          = 0;
+    h_lock_depth         = 0;
+    _nx_ip_input_thread  = TX_NULL;
+    _tx_thread_current_ptr = &h_reader_thread;
 }
 
 static void frame_init(UWORD type, ULONG payload)
@@ -387,12 +402,18 @@ static void test_demux(void)
 
         /*
          * Input runs on the reader now, so it has to hold what the IP thread
-         * holds.  A type that reaches no receiver never gets that far.
+         * holds and to say so while it does.  A type that reaches no receiver
+         * never gets that far.
          */
         if (row[i].where != TO_RELEASED)
+        {
             h_check(h_ip_locked, "the receiver ran under nx_ip_protection");
+            h_check(h_ip_seated,
+                    "and with the reader named as the input thread");
+        }
 
         h_check(h_lock_depth == 0, "and the mutex was given back");
+        h_check(_nx_ip_input_thread == TX_NULL, "and the seat was given up");
     }
 
     /* And an unknown type is counted as one, not as an error: it is a wire

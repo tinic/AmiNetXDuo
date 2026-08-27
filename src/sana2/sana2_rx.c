@@ -396,7 +396,22 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
  */
 static VOID ami_sana2_rx_input(NX_IP *ip, NX_PACKET *packet, UINT type)
 {
+    TX_THREAD *outer;
+
     tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+
+    /*
+     * Claim the IP thread's seat for the length of this call, so that
+     * _nx_tcp_packet_receive() processes the segment here instead of queueing
+     * it and waking a thread that is blocked on the mutex this thread holds.
+     * See NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.
+     * Written under the mutex and restored under it, so the only reader that
+     * can observe it is this one.  `outer` is not paranoia: a loopback send
+     * from in here re-enters IP input, and a nested call must not clear the
+     * seat on the way out.
+     */
+    outer = _nx_ip_input_thread;
+    _nx_ip_input_thread = tx_thread_identify();
 
     switch (type)
     {
@@ -414,6 +429,8 @@ static VOID ami_sana2_rx_input(NX_IP *ip, NX_PACKET *packet, UINT type)
         _nx_ip_packet_receive(ip, packet);
         break;
     }
+
+    _nx_ip_input_thread = outer;
 
     tx_mutex_put(&ip->nx_ip_protection);
 }
