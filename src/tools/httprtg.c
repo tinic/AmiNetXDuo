@@ -347,6 +347,65 @@ static VOID rtg_row8(UBYTE *dst, const UBYTE *src, UWORD pixels,
     }
 }
 
+/* R5G6B5 with the two bytes of every pixel the other way round, which is what
+   Picasso96 gives a 16-bit screen on nearly every board -- the mode is named
+   R5G6B5PC.  The channels are already the wire's, so the whole conversion is a
+   byte swap, and a longword at a time does two pixels in one pass over the row.
+   Through rtg_row16() below this was the slowest thing in the readback: it held
+   every lock route to 2.7 MB/s on an emulated 68030, which is under an eighth
+   of what p96ReadPixelArray converts at, so the probe picked the driver call
+   and a mapping the console could have read directly went unused. */
+static VOID rtg_row_swap16(UBYTE *dst, const UBYTE *src, UWORD pixels)
+{
+    UWORD i = pixels;
+
+    /* Both ends longword-aligned, which a card row and the staging buffer are
+       unless one of them starts on an odd pixel.  A 68000 traps on the wide
+       load when they do not, so the test is correctness before it is speed. */
+    if ((((ULONG)dst | (ULONG)src) & 3UL) == 0UL)
+    {
+        ULONG       *d = (ULONG *)dst;
+        const ULONG *s = (const ULONG *)src;
+
+        /* Eight pixels a turn.  The swap itself is four instructions on a
+           68020 and the loop around it was most of what a two-pixel body
+           cost. */
+        while (i >= 8u)
+        {
+            ULONG a = s[0], b = s[1], c = s[2], e = s[3];
+
+            d[0] = ((a & 0xFF00FF00UL) >> 8) | ((a & 0x00FF00FFUL) << 8);
+            d[1] = ((b & 0xFF00FF00UL) >> 8) | ((b & 0x00FF00FFUL) << 8);
+            d[2] = ((c & 0xFF00FF00UL) >> 8) | ((c & 0x00FF00FFUL) << 8);
+            d[3] = ((e & 0xFF00FF00UL) >> 8) | ((e & 0x00FF00FFUL) << 8);
+            s += 4;
+            d += 4;
+            i = (UWORD)(i - 8u);
+        }
+
+        while (i >= 2u)
+        {
+            ULONG v = *s++;
+
+            *d++ = ((v & 0xFF00FF00UL) >> 8) | ((v & 0x00FF00FFUL) << 8);
+            i = (UWORD)(i - 2u);
+        }
+
+        dst = (UBYTE *)d;
+        src = (const UBYTE *)s;
+    }
+
+    while (i-- != 0u)
+    {
+        UBYTE lo = src[0];
+
+        dst[0] = src[1];
+        dst[1] = lo;
+        src += 2;
+        dst += 2;
+    }
+}
+
 /* One row of `pixels` from the card's format into the wire's. */
 static VOID rtg_cvt_row(UBYTE *dst, const UBYTE *src, UWORD pixels,
                         const RtgSrcFmt *f)
@@ -357,11 +416,18 @@ static VOID rtg_cvt_row(UBYTE *dst, const UBYTE *src, UWORD pixels,
         return;
     }
 
-    /* A screen already in the wire format is the common case on a 68k. */
-    if (f->layout == RTG_L_R565 && f->swap == 0)
-        memcpy(dst, src, (size_t)pixels * 2u);
-    else
-        rtg_row16(dst, src, pixels, f->layout, f->swap);
+    /* The two cases a 16-bit screen is really in.  Neither reaches the general
+       loop, which is left for the 15-bit layouts that have to repack green. */
+    if (f->layout == RTG_L_R565)
+    {
+        if (f->swap == 0)
+            memcpy(dst, src, (size_t)pixels * 2u);   /* already the wire's */
+        else
+            rtg_row_swap16(dst, src, pixels);
+        return;
+    }
+
+    rtg_row16(dst, src, pixels, f->layout, f->swap);
 }
 
 /* --------------------------------------------------------------- routes --- */
