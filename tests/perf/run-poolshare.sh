@@ -116,6 +116,7 @@ IFEOF
     PEER_PID=$!
 
     export AMINETXDUO_RUN_TAG="$TAG"
+    AMINETXDUO_RIG_EXCLUSIVE="poolshare arm $DIV" \
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t $((SECONDS_ARM + 180)) \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \

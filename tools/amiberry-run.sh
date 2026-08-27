@@ -203,6 +203,24 @@ CFG="$ROOT/build/amiberry-$TAG.uae"
 rig_claim_port "amiberry $TAG" || exit 2
 PORT="$RIG_PORT"
 
+# Functional bridged runs share the rig; measurements take it exclusively.
+# Both use the same lock, so a throughput number cannot be collected while a
+# second emulator is consuming the host NIC or CPUs.  SLIRP has neither shared
+# resource and stays outside this interlock.
+case "$BACKEND" in
+    slirp|slirp_inbound|none) ;;
+    *)
+        if [ -n "${AMINETXDUO_RIG_EXCLUSIVE:-}" ]; then
+            rig_claim_name bridged-rig \
+                "$TAG ($BACKEND): $AMINETXDUO_RIG_EXCLUSIVE" || exit 2
+            echo "==> exclusive bridged-rig measurement lock held"
+        else
+            rig_claim_name_shared bridged-rig "$TAG ($BACKEND) in $ROOT" || exit 2
+            echo "==> shared bridged-rig lock held"
+        fi
+        ;;
+esac
+
 # AND NO ORPHANED READER IS AIMED AT IT.  rig_port_readers has the mechanism
 # and the reason it is anchored the way it is.  The reader's own pid goes in a
 # file further down and the trap kills it on every path out, so this run cannot
