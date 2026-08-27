@@ -1,0 +1,225 @@
+Applied by tools/build-toolchain.sh when the binutils pin is on branch
+amiga-2.46.  The pin is still amiga-2.39.0, which selects
+tools/patches/binutils/ instead; this set is what a pin that moves gets.
+
+Against bebbo's binutils-gdb, branch amiga-2.46, commit
+a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
+
+WHAT IT FIXES
+
+-DAMINETXDUO_LTO=ON does not link on an unpatched 2.46: every symbol an LTO
+static library defines comes out undefined.
+
+2.46 already carries LTO support for the HUNK target that 2.39 does not have,
+so the two diffs in tools/patches/binutils/ are not ported -- their five
+repairs are all present here in another form.  gas writes .gnu.lto* as debug
+hunks with contents (1c3ca820, bb49f8ee), amiga_write_section_contents writes
+the { "LTO1", length } header, amiga_slurp_symbol_table reads .gnu.lto_.symtab,
+ld/plugin.c keeps its own copy of the plugin's symbols instead of round-tripping
+the IR dummy BFD through the HUNK writer (amiga_lto_save_symbols), and upstream
+generic_link_check_archive_element reads a claimed member through
+abfd->plugin_dummy_bfd.  What is left is the archive symbol index, which none of
+that reaches.
+
+Three causes, none of them in the Amiga back end:
+
+  1. binutils/ar.c.  Upstream dropped `target = plugin_target' from
+     open_inarch() and derives the archive target from the first member
+     instead, so on this target `ar' now writes a native Amiga library: a
+     concatenation of HUNK_UNITs with NO symbol index at all.  What
+     `nm --print-armap' prints for one is synthesised at read time from each
+     member's HUNK_EXT, and a slim LTO member's HUNK_EXT holds nothing but the
+     __gnu_lto_slim marker.  ld therefore cannot resolve one single symbol such
+     a library defines.  2.39 wrote `!<arch>' for every archive because its ar
+     still forced the plugin target, and its index is computed through the
+     plugin, from the IR.
+
+  2. bfd/plugin.c.  Restoring that in ar.c alone gets `ar: invalid operation':
+     upstream also removed archive support from plugin_vec.  Put back the four
+     entries 2.39 had.
+
+  3. bfd/format.c.  With the archive on the plugin target its members inherit
+     that target with target_defaulted false, and 2.46 turned "specified target
+     did not match" from fall-through into an outright error.  Every member the
+     plugin does not claim -- every .S object -- is then dropped from the index.
+     2.39 fell through to the full target search.  Scoped here to the plugin
+     target, which is a container and not an object format.
+
+  4. bfd/linker.c.  bebbo's marker handling in
+     _bfd_generic_link_add_archive_symbols offers the FIRST slim member of an
+     archive and silently skips every later one: it looks __gnu_lto_slim up as
+     if it were a symbol, and the entry it creates is bfd_link_hash_new, which
+     the type test below marks included and passes over.  Fixed with 1 and 2 in
+     place, a slim archive would still contribute exactly one member.
+
+MEASURED, 2026-08-27, a 2.46 toolchain built with this and
+objcopy-keep-hunk-relocs.diff applied over the pinned GCC 16.2.0b:
+
+  archive index, one slim LTO object and one .S object
+
+    2.39                  _foo in a.o / _bar in a.o / _asmfn in s.o
+    2.46 unpatched        ___gnu_lto_slim in a.o          (s.o absent)
+    2.46 with this        _foo in a.o / _bar in a.o / _asmfn in s.o
+
+  the whole tree, -DAMINETXDUO_LTO=ON, built by that toolchain
+
+    build=ok
+    hunk_relocs=clean images=121                                    rc=0
+    rt_helpers=clean images=41                                      rc=0
+
+  the four shipped images, byte-compared against the same tree built with
+  -DAMINETXDUO_LTO=ON on the pinned 2.39 toolchain
+
+    bsdsocket.library    388496 bytes   identical
+    tls.library          195708 bytes   identical
+    anxnet.device         36108 bytes   identical
+    usergroup.library      7840 bytes   identical
+
+The pin did not move on the strength of that: byte-identical output is no
+reason to republish a prebuilt toolchain that tools/fetch-toolchain.sh pins by
+sha256 on two platforms.
+
+diff --git a/bfd/format.c b/bfd/format.c
+index f35230eb..6391dd8e 100644
+--- a/bfd/format.c
++++ b/bfd/format.c
+@@ -516,6 +516,7 @@ bfd_check_format_matches (bfd *abfd, bfd_format format, char ***matching)
+       && abfd->format == bfd_object
+       && abfd->target_defaulted
+       && !abfd->is_linker_input
++      && !bfd_plugin_target_p (save_targ)
+       && abfd->plugin_format != bfd_plugin_no)
+     {
+       if (bfd_seek (abfd, 0, SEEK_SET) != 0)
+@@ -561,7 +562,8 @@ bfd_check_format_matches (bfd *abfd, bfd_format format, char ***matching)
+ 	}
+       else
+ 	{
+-	  if (!abfd->target_defaulted && !abfd->is_linker_input)
++	  if (!abfd->target_defaulted && !abfd->is_linker_input
++	      && !bfd_plugin_target_p (save_targ))
+ 	    goto err_unrecog;
+ 	  fail_targ = save_targ;
+ 	}
+diff --git a/bfd/linker.c b/bfd/linker.c
+index 06ac63b7..28d785f9 100644
+--- a/bfd/linker.c
++++ b/bfd/linker.c
+@@ -999,24 +999,30 @@ _bfd_generic_link_add_archive_symbols
+ 	    h = bfd_link_hash_lookup (info->hash, arsym->name + 6,
+ 				      false, false, true);
+ 
+-	  bool fail = true;
+-	  if (h == NULL)
+-	    {
+-		  /* Check if this is the LTO marker symbol */
+-		  if (strcmp (arsym->name, "___gnu_lto_slim") == 0)
+-		    {
+-			  h = bfd_link_hash_lookup (info->hash, arsym->name,
+-			  				      true, false, true);
+-			  fail = false;
+-			  included[indx] = 1;
+-		    }
+-	    }
+-
+-	  if (h == NULL)
++	  /* A slim LTO member has nothing in its native symbol table but
++	     the __gnu_lto_slim marker, so that is all `ar' could put in the
++	     archive map and no real symbol will ever match it here.  Offer
++	     the member to CHECKFN anyway: CHECKFN reads its symbols through
++	     the plugin and pulls it in only if it defines something still
++	     undefined, so the scan stays demand-driven.
++
++	     Looking the marker up as if it were a symbol -- creating the
++	     entry, then falling through -- serves the FIRST such member and
++	     silently skips every later one: the entry it created is
++	     bfd_link_hash_new, which the type test below marks included and
++	     passes over.  A slim static library then contributes exactly one
++	     member and the link fails on everything else it defines.  */
++	  bool lto_slim = (h == NULL
++			   && arsym->name[0] == '_'
++			   && arsym->name[1] == '_'
++			   && strcmp (arsym->name + (arsym->name[2] == '_'),
++				      "__gnu_lto_slim") == 0);
++
++	  if (h == NULL && !lto_slim)
+ 	    continue;
+ 
+-	  if (fail
+-		  && h->type != bfd_link_hash_undefined
++	  if (!lto_slim
++	      && h->type != bfd_link_hash_undefined
+ 	      && h->type != bfd_link_hash_common)
+ 	    {
+ 	      if (h->type != bfd_link_hash_undefweak)
+diff --git a/bfd/plugin.c b/bfd/plugin.c
+index bbaf539b..58e1182b 100644
+--- a/bfd/plugin.c
++++ b/bfd/plugin.c
+@@ -994,26 +994,26 @@ const bfd_target plugin_vec =
+   {				/* bfd_check_format.  */
+     _bfd_dummy_target,
+     bfd_plugin_object_p,
+-    _bfd_dummy_target,
++    bfd_generic_archive_p,
+     _bfd_dummy_target
+   },
+   {				/* bfd_set_format.  */
+     _bfd_bool_bfd_false_error,
+     _bfd_bool_bfd_false_error,
+-    _bfd_bool_bfd_false_error,
++    _bfd_generic_mkarchive,
+     _bfd_bool_bfd_false_error,
+   },
+   {				/* bfd_write_contents.  */
+     _bfd_bool_bfd_false_error,
+     _bfd_bool_bfd_false_error,
+-    _bfd_bool_bfd_false_error,
++    _bfd_write_archive_contents,
+     _bfd_bool_bfd_false_error,
+   },
+ 
+   BFD_JUMP_TABLE_GENERIC (bfd_plugin),
+   BFD_JUMP_TABLE_COPY (bfd_plugin),
+   BFD_JUMP_TABLE_CORE (bfd_plugin),
+-  BFD_JUMP_TABLE_ARCHIVE (_bfd_noarchive),
++  BFD_JUMP_TABLE_ARCHIVE (_bfd_archive_coff),
+   BFD_JUMP_TABLE_SYMBOLS (bfd_plugin),
+   BFD_JUMP_TABLE_RELOCS (_bfd_norelocs),
+   BFD_JUMP_TABLE_WRITE (bfd_plugin),
+diff --git a/binutils/ar.c b/binutils/ar.c
+index e865ecb9..ea62b615 100644
+--- a/binutils/ar.c
++++ b/binutils/ar.c
+@@ -40,6 +40,12 @@
+ #define EXT_NAME_LEN 6		/* Ditto for *NIX.  */
+ #endif
+ 
++#if BFD_SUPPORTS_PLUGINS
++static const char *plugin_target = "plugin";
++#else
++static const char *plugin_target = NULL;
++#endif
++
+ /* Forward declarations.  */
+ 
+ static const char *normalize (const char *, bfd *);
+@@ -961,6 +967,18 @@ open_inarch (const char *archive_filename, const char *file)
+ 
+   bfd_set_error (bfd_error_no_error);
+ 
++  /* Create archives on the plugin target when the caller named none.  On
++     the Amiga HUNK target the native archive is a concatenation of HUNK_UNITs
++     with no symbol index at all: the index `nm --print-armap' prints is
++     synthesised at read time from each member's HUNK_EXT, which for a slim
++     LTO member holds nothing but the __gnu_lto_slim marker.  A link against
++     such a library therefore cannot resolve one single symbol the IR defines.
++     The plugin target writes a `!<arch>' container whose index is computed
++     through the plugin, so the real symbols are recorded.  ar did this for
++     every target until 2.42.  */
++  if (arch_target == NULL)
++    arch_target = target = plugin_target;
++
+   if (stat (archive_filename, &sbuf) != 0)
+     {
+ #if !defined(__GO32__) || defined(__DJGPP__)

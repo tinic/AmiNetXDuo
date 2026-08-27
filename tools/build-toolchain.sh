@@ -9,14 +9,14 @@
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
 # GCC 16.2.0b + binutils 2.39.0 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# The binutils pairing is deliberate.  2.46's gas assembles GCC 16.2's output
-# to the same bytes, but its objcopy lost bebbo's TARGET_AMIGA carve-out in
-# copy_relocations_in_section(), so `strip` writes a hunk executable with no
-# HUNK_RELOC32 at all -- exit 0, no diagnostic, LoadSeg() relocates nothing --
-# and the patches below do not apply to it, so -flto does not link.  Do not
-# "upgrade" it.  Each entry records the remote verified to
-# serve its pin: bebbo's GitHub repos are gone and Codeberg does not carry
-# every branch.
+# The binutils pairing is deliberate.  2.46 works: with the two diffs in
+# tools/patches/binutils-2.46/ it builds this tree at -DAMINETXDUO_LTO=ON and
+# emits the four shipped images BYTE FOR BYTE as 2.39 does.  That is the whole
+# reason the pin stays where it is -- identical output is no reason to
+# republish a prebuilt toolchain tools/fetch-toolchain.sh pins by sha256 on two
+# platforms.  Moving it is the one PINS line below; the patch set it selects is
+# already written.  Each entry records the remote verified to serve its pin:
+# bebbo's GitHub repos are gone and Codeberg does not carry every branch.
 #
 # On macOS GNU rsync is REQUIRED: openrsync mishandles libnix's --exclude
 # patterns and silently installs the wrong set of objects.
@@ -153,6 +153,28 @@ else
     echo "!! $CC_PROBE rejects binutils 2.39's objdump.c:4196 and neither" >&2
     echo "   -Wno-incompatible-function-pointer-types nor" >&2
     echo "   -Wno-incompatible-pointer-types demotes it." >&2
+    exit 2
+fi
+
+# GCC needs GMP, MPFR and MPC HEADERS, and a host that has one does not
+# necessarily have the other two: Debian 13 keeps gmp.h under
+# /usr/include/<triple> and carries libmpfr.so.6 with no mpfr.h at all.  The
+# diagnostic without this probe is `configure: error: Building GCC requires GMP
+# 4.2+` an hour in, AFTER binutils has built and installed.  Ask the compiler
+# rather than looking for files: gmp.h sits on a search path no `ls` guesses.
+MPX_MISSING=""
+# shellcheck disable=SC2086  # CPPFLAGS is a flag list and must split
+for h in gmp mpfr mpc; do
+    printf '#include <%s.h>\nint main(void){return 0;}\n' "$h" |
+        "$CC_PROBE" ${CPPFLAGS:-} -fsyntax-only -x c - >/dev/null 2>&1 ||
+        MPX_MISSING="$MPX_MISSING $h.h"
+done
+if [ -n "$MPX_MISSING" ]; then
+    echo "!! GCC cannot be configured without$MPX_MISSING" >&2
+    echo "   Debian/Ubuntu: libgmp-dev libmpfr-dev libmpc-dev" >&2
+    echo "   macOS:         brew install gmp mpfr libmpc" >&2
+    echo "   No packages: build them into a prefix, then export" >&2
+    echo "   CPPFLAGS=-I<prefix>/include and LDFLAGS=-L<prefix>/lib." >&2
     exit 2
 fi
 
@@ -371,12 +393,13 @@ fi
 #
 # WHICH set applies is decided by the branch recorded in PINS above, not by a
 # fixed directory name.  The two diffs above are written against 2.39's bfd and
-# do not apply to 2.46, whose own defect is a different one: the 2.46 rebase
-# dropped bebbo's TARGET_AMIGA carve-out in copy_relocations_in_section(), so
-# `strip` writes a hunk executable with no HUNK_RELOC32 at all and LoadSeg()
-# relocates nothing.  A pin that moves without its patch set is exactly the
-# failure this table exists to make impossible, so an unrecorded branch stops
-# the build rather than quietly producing an unpatched binutils.
+# do not apply to 2.46, which carries LTO support for the HUNK target of its
+# own and needs two different repairs instead: `strip` there drops every
+# HUNK_RELOC32, and `ar` there writes a native Amiga library, which has no
+# symbol index a slim LTO member can appear in.  A pin that moves without its
+# patch set is exactly the failure this table exists to make impossible, so an
+# unrecorded branch stops the build rather than quietly producing an unpatched
+# binutils.
 BU_BRANCH=$(printf '%s\n' "$PINS" | awk -F'|' '$1 == "binutils" { print $4 }')
 case "$BU_BRANCH" in
     amiga-2.39.0) BU_PATCH_SET="binutils" ;;
