@@ -533,18 +533,30 @@ if(NOT AMINETXDUO_TCP_ACK_EVERY_N STREQUAL "")
         NX_TCP_ACK_EVERY_N_PACKETS=${AMINETXDUO_TCP_ACK_EVERY_N})
 endif()
 
-# Lazy SANA-II transmit-completion collection.  The shipped design signals a
-# reader per completed CMD_WRITE; during a bulk receive that wake preempts the
-# thread emitting the acknowledgment to collect a reply the next send's own
-# reap walk would have collected anyway, measured at ~0.7 ms of exec glue and
-# two scheduler transitions per acknowledgment on the A1200.  ON parks the
-# reply port PA_IGNORE while sends flow and moves the quiet-link safety net,
-# the eleven-second lesson in sana2_tx.c's header, to a one-tick timer that
-# bounds any completion's collection at ~20 ms.  Behaviour, not layout, so it
-# could be per-target; whole-tree like its neighbours so one flag is one arm
+# Lazy SANA-II transmit-completion collection, and what ships.  The arm this
+# replaced signalled a reader per completed CMD_WRITE; during a bulk receive
+# that wake preempts the thread emitting the acknowledgment to collect a reply
+# the next send's own reap walk would have collected anyway, measured at
+# ~0.7 ms of exec glue and two scheduler transitions per acknowledgment on the
+# A1200.  ON parks the reply port PA_IGNORE while sends flow and moves the
+# quiet-link safety net, the lesson in sana2_tx.c's header, to a one-tick timer
+# that bounds any completion's collection at ~20 ms.  Behaviour, not layout, so
+# it could be per-target; whole-tree like its neighbours so one flag is one arm
 # of an A/B.
+#
+# WHAT MOVED THE DEFAULT.  A1200 at 68020 under Amiberry, bridged, three cards,
+# three interleaved rounds of tests/perf/run-fitzbench.sh -k 512 -r 3 against
+# playhouse4, ON and OFF alternating inside one block:
+#
+#   a2065          read 530.7 vs 498.7 KB/s  +6.4%   write +2.3%
+#   ariadne2       read 442.0 vs 430.7 KB/s  +2.6%   write +2.2%
+#   ne2000_pcmcia  read 466.5 vs 446.7 KB/s  +4.4%   write +1.2%
+#
+# Every round on every card is above its OFF neighbour, and the read figure is
+# the one the project compares on.  Build with -DAMINETXDUO_TX_LAZY_COLLECT=OFF
+# to take it out; the `pathswap` arm in tools/ci.sh is what compiles that side.
 option(AMINETXDUO_TX_LAZY_COLLECT
-       "Collect TX completions lazily, signalling only on a quiet link" OFF)
+       "Collect TX completions lazily, signalling only on a quiet link" ON)
 if(AMINETXDUO_TX_LAZY_COLLECT)
     add_compile_definitions(AMINETXDUO_TX_LAZY_COLLECT)
 endif()
