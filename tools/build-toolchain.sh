@@ -183,12 +183,19 @@ Darwin)
             echo "   brew install rsync, and make sure $BREW/bin comes first." >&2
             exit 2 ;;
     esac
-    for t in lha makeinfo; do need "$t"; done
+    for t in lha makeinfo bison flex m4; do need "$t"; done
     ;;
 Linux)
     # Nothing beyond the shared objdump.c switch: the system zlib and gmp/mpfr
     # are where configure looks, and rsync is GNU rsync.
-    need makeinfo
+    #
+    # bison, flex and m4 are checked HERE and not left to the build.  binutils
+    # generates its parsers from .y and .l, and a missing m4 does not merely
+    # fail: binutils' configure records `missing m4` in the Makefile, so
+    # installing m4 afterwards fixes nothing until the whole binutils build
+    # directory is deleted.  The diagnostic at that point is
+    # "bison: m4 subprocess failed", three levels down a make log.
+    for t in makeinfo bison flex m4; do need "$t"; done
     command -v lha >/dev/null 2>&1 || command -v lhasa >/dev/null 2>&1 || {
         echo "!! need lha or lhasa to unpack the NDK" >&2; exit 2; }
     ;;
@@ -311,6 +318,25 @@ PY
     echo "==> patched CONFIG_BINUTILS += --with-system-zlib"
 fi
 
+# MAKE_TARGETS deliberately leaves gdb out -- it wants a host GMP and MPFR it
+# does not need here -- but the top-level configure still runs for it, and from
+# binutils 2.46 that configure ERRORS on a host with gmp.h and no mpfr.h rather
+# than dropping the directory.  Nothing this builds comes out of gdb, gprof
+# included, so switch it off where the decision already was.
+if ! grep -q 'disable-gdb' "$SRC/Makefile"; then
+    python3 - "$SRC/Makefile" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "CONFIG_BINUTILS =--prefix=$(PREFIX)"
+i = s.index(anchor)
+j = s.index("\n", i) + 1
+s = s[:j] + "CONFIG_BINUTILS += --disable-gdb --disable-sim\n" + s[j:]
+open(p, "w").write(s)
+PY
+    echo "==> patched CONFIG_BINUTILS += --disable-gdb --disable-sim"
+fi
+
 # -flto.  Two changes to binutils; GCC needs no patch, only the pin above,
 # which moved from 6f4ca1b4 to 60f21496 -- the tip of amiga16.2, and the only
 # one of the two that still exists on the branch.
@@ -342,18 +368,41 @@ fi
 # IR hunk is written without the length header libiberty reads back.  The
 # diffs are against the pinned binutils commit; each is skipped if it is
 # already in the tree, so a rebuild in a populated work directory is a no-op.
-BU_PATCHES="$HERE/patches/binutils"
-if [ -d "$BU_PATCHES" ]; then
-    for patch in "$BU_PATCHES"/*.diff; do
-        [ -f "$patch" ] || continue
-        if git -C "$SRC/projects/binutils" apply --reverse --check "$patch" 2>/dev/null; then
-            echo "    $(basename "$patch") already applied"
-        else
-            echo "    $(basename "$patch")"
-            git -C "$SRC/projects/binutils" apply "$patch"
-        fi
-    done
+#
+# WHICH set applies is decided by the branch recorded in PINS above, not by a
+# fixed directory name.  The two diffs above are written against 2.39's bfd and
+# do not apply to 2.46, whose own defect is a different one: the 2.46 rebase
+# dropped bebbo's TARGET_AMIGA carve-out in copy_relocations_in_section(), so
+# `strip` writes a hunk executable with no HUNK_RELOC32 at all and LoadSeg()
+# relocates nothing.  A pin that moves without its patch set is exactly the
+# failure this table exists to make impossible, so an unrecorded branch stops
+# the build rather than quietly producing an unpatched binutils.
+BU_BRANCH=$(printf '%s\n' "$PINS" | awk -F'|' '$1 == "binutils" { print $4 }')
+case "$BU_BRANCH" in
+    amiga-2.39.0) BU_PATCH_SET="binutils" ;;
+    amiga-2.46)   BU_PATCH_SET="binutils-2.46" ;;
+    *)
+        echo "!! no patch set under tools/patches/ for binutils $BU_BRANCH" >&2
+        echo "   Write one and name it here.  An unpatched binutils links" >&2
+        echo "   images that LoadSeg() will not relocate." >&2
+        exit 2 ;;
+esac
+
+echo "==> binutils patches: tools/patches/$BU_PATCH_SET ($BU_BRANCH)"
+BU_PATCHES="$HERE/patches/$BU_PATCH_SET"
+if [ ! -d "$BU_PATCHES" ]; then
+    echo "!! tools/patches/$BU_PATCH_SET is missing" >&2
+    exit 2
 fi
+for patch in "$BU_PATCHES"/*.diff; do
+    [ -f "$patch" ] || continue
+    if git -C "$SRC/projects/binutils" apply --reverse --check "$patch" 2>/dev/null; then
+        echo "    $(basename "$patch") already applied"
+    else
+        echo "    $(basename "$patch")"
+        git -C "$SRC/projects/binutils" apply "$patch"
+    fi
+done
 
 # ----------------------------------------------------------------- build ----
 

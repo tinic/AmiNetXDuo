@@ -96,13 +96,53 @@
 #define AMI_SANA2_RX_REAP_TRIES     25
 #endif
 
+/*
+ * How many completed reads one reader may take before it must release the
+ * ThreadX baton once, even with another completion already on its port.
+ *
+ * The bracket around the reader's Wait() is not free: it takes a Forbid(),
+ * suspends the ThreadX thread, dispatches whatever is ready and reverses all
+ * of it afterwards (src/netstack/netstack_baton.c).  During a burst the device
+ * has usually replied again by the time the last frame has been delivered, so
+ * the Wait() would return at once and the whole bracket bought nothing.
+ *
+ * The bound is not a batch target, it is a fairness boundary.  The reader
+ * outranks everything (src/thread_priorities.h) and now runs TCP itself, so
+ * the thread that empties the socket only runs when the reader lets go.  Eight
+ * is a little over half the read depth an interface at 10 Mbit is planned
+ * with, which puts the release inside a full ring rather than after it.
+ */
+#ifndef AMI_SANA2_RX_RUN_MAX
+#define AMI_SANA2_RX_RUN_MAX        8
+#endif
+
+#if AMI_SANA2_RX_RUN_MAX < 1
+#error "AMI_SANA2_RX_RUN_MAX must be at least one"
+#endif
+
 #ifndef AMI_SANA2_TX_SLOTS
 #define AMI_SANA2_TX_SLOTS          8
 #endif
 
 #include "../thread_priorities.h"
+/*
+ * The reader runs IP input, and TCP input with it, itself
+ * (ami_sana2_rx_drain), so its stack has to cover what the IP thread's covers
+ * -- AMI_IP_STACK_SIZE, 4096 -- plus the reader's own frames underneath it:
+ * the thread body, the drain, the completion, the delivery, and the device's
+ * BeginIO(), which runs on whichever stack calls it.  There is no MMU, so a
+ * frame that does not fit writes over what lies below and the machine dies
+ * somewhere unrelated.
+ *
+ * tools/check-stack-frames.sh measures the worst case the compiler will admit
+ * to and checks ami_sana2_rx_thread against a budget.  It went from 540 bytes
+ * to 1820 when IP and TCP input moved on to the reader, and the script's own
+ * header says its figures run about 800 light against what tests/stack
+ * measures in a guest, because a call through a function pointer is not a
+ * symbol in the assembly.
+ */
 #ifndef AMI_SANA2_RX_STACK_SIZE
-#define AMI_SANA2_RX_STACK_SIZE     4096
+#define AMI_SANA2_RX_STACK_SIZE     8192
 #endif
 
 /* Ticks to spin on a full TX ring before dropping the frame. */

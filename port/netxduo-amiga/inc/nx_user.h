@@ -17,6 +17,30 @@
 #define NX_IP_PERIODIC_RATE                     50
 
 
+/* ------------------------------------------------------------- receive --- */
+
+/*
+ * The SANA-II reader runs IP input itself, under nx_ip_protection, rather than
+ * queueing every frame to the IP thread (src/sana2/sana2_rx.c,
+ * ami_sana2_rx_input).  TCP is the one protocol that would still cross:
+ * nx_tcp_packet_receive.c queues the segment and wakes the IP thread for any
+ * caller that is not the IP thread itself, which on a bulk read is a context
+ * switch per segment onto a path the reader is already holding the lock for.
+ *
+ * _nx_ip_input_thread names the driver thread that is inside IP input right
+ * now.  It is written only by that thread, and only between taking the mutex
+ * and giving it back, so this comparison answers "am I the thread that already
+ * holds what the IP thread would hold".  Everything else, the IP thread and
+ * every ISR included, takes the stock path.
+ */
+struct TX_THREAD_STRUCT;
+extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
+
+#define NX_TCP_PACKET_RECEIVE_DIRECT(ip_ptr, packet_ptr)                      \
+    ((_nx_ip_input_thread != 0) &&                                            \
+     (_tx_thread_current_ptr == _nx_ip_input_thread))
+
+
 /* --------------------------------------------------------------- packets, */
 
 /* Must match AMI_POOL_PAYLOAD in include/aminetxduo/netstack.h. */
