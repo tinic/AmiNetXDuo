@@ -263,6 +263,35 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         NX_INCLUDE_USER_DEFINE_FILE AMINETXDUO_IPV6)
 
     add_test(NAME dhcp6_status_health COMMAND test_dhcp6)
+
+    # library_runtime.c, for the usergroup.library hold.
+    #
+    # WHY THIS ONE EXISTS.  bsd_usergroup_open() opens usergroup.library and
+    # holds it until expunge, and no caller in this tree ever asks it for
+    # anything: the clients that need the hold are ixemul's ixnet and the rest
+    # of the AmiTCP 4.x world, which reach that library through the base
+    # bsdsocket.library is already holding.  A tidy-up that removed an open
+    # with no matching use would close the stack for them with nothing here
+    # going red, so the hold is asserted against the shipping translation unit.
+    add_executable(test_usergroup_hold host/test_usergroup_host.c
+                                  "${CMAKE_SOURCE_DIR}/src/bsdsocket/library_runtime.c")
+
+    target_include_directories(test_usergroup_hold PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+
+    target_compile_options(test_usergroup_hold PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+
+    target_compile_definitions(test_usergroup_hold PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
+
+    add_test(NAME usergroup_hold COMMAND test_usergroup_hold)
 endif()
 
 # bpf_write() is the only BPF vector that reaches the NetX packet pool. Its

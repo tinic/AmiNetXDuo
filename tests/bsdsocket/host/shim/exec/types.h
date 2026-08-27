@@ -19,6 +19,7 @@ typedef unsigned int    ULONG;
 typedef signed   int    LONG;
 typedef unsigned char  *STRPTR;
 typedef unsigned char   TEXT;
+typedef const unsigned char *CONST_STRPTR;
 typedef void           *APTR;
 typedef short           BOOL;
 

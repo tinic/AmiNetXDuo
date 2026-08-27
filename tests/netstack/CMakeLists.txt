@@ -490,4 +490,87 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME ra_handoff COMMAND test_ra_handoff)
 
+    # ---------------------------------------------------------------------
+    # netstack.c itself, whole, on the host.
+    #
+    # host/netstack_host_env.c answers every Exec call, every tx_amiga_* call,
+    # every NetX Duo entry point and every other src/ symbol the file names,
+    # so what runs is the shipping netstack_startup(), netstack_shutdown(),
+    # netstack_can_unload() and netstack_interface_dhcp_start() rather than a
+    # copy of any of them.  The environment's header says what is steered and
+    # what is merely answered.
+    #
+    # host/shim/tx_amiga.h and not port/threadx-amiga/inc: that one carries the
+    # Amiga tx_port.h, and this tier is the linux ThreadX port with
+    # tests/perf/host/shim's m68k type widths on top.  It must come before
+    # tests/bsdsocket/host/shim-netstatus is anywhere near the path, which is
+    # why no target here puts that directory on it.
+    #
+    # AMINETXDUO_MDNS, AMINETXDUO_AREXX and AMINETXDUO_BPF are compiled OUT
+    # whatever the tree default is, for the reason -UAMINETXDUO_IPV6 is used
+    # above: each pulls in another src/netstack translation unit's worth of
+    # entry points that these two claims say nothing about.  IPv6 stays ON,
+    # because that is the shipping default and its handful of entry points are
+    # already answered.
+    set(NETSTACK_HOST_TU
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
+        host/netstack_host_env.c)
+
+    set(NETSTACK_HOST_INCLUDES
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"         # tx_amiga.h, ours
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim" # exec, dos, proto
+        "${CMAKE_CURRENT_SOURCE_DIR}/host"
+        "${CMAKE_SOURCE_DIR}/src/netstack"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/src/net68k"                # net68k.h, AMINETXDUO_RX_VERIFY
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/addons/dhcp"
+        "${AMINETXDUO_NETXDUO}/addons/dns"
+        "${AMINETXDUO_NETXDUO}/addons/auto_ip"
+        "${AMINETXDUO_NETXDUO}/addons/mdns"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    set(NETSTACK_HOST_DEFINES
+        AMINETXDUO_IPV6
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    # -Wno-unknown-warning-option for Clang: netstack.c carries a
+    # #pragma GCC diagnostic for -Wanalyzer-use-of-uninitialized-value, which
+    # Clang does not have, and under -Werror an unknown group is an error.
+    set(NETSTACK_HOST_OPTIONS
+        -UAMINETXDUO_MDNS -UAMINETXDUO_AREXX -UAMINETXDUO_BPF
+        -Wall -Wextra -Werror
+        $<$<OR:$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:-Wno-unknown-warning-option>)
+
+    # The expunge refusal at the joint: that a FAILED tx_amiga_kernel_stop()
+    # leaves ami_ns_kernel_started set, which is what makes
+    # netstack_can_unload() answer FALSE.  Both halves were already tested
+    # separately and neither test moves if the flag is cleared too early; the
+    # file header says what that costs.
+    add_executable(test_expunge_joint
+        host/test_expunge_joint_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_expunge_joint PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_expunge_joint PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_expunge_joint PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME expunge_joint COMMAND test_expunge_joint)
+
+    # netstack_interface_dhcp_start()'s re-arm.  NX_DHCP_ALREADY_STARTED never
+    # arises in the arm the lab can run, so stop-and-start-again was never
+    # exercised; here the DHCP client answers it on demand.
+    add_executable(test_dhcp_restart
+        host/test_dhcp_restart_host.c ${NETSTACK_HOST_TU})
+
+    target_include_directories(test_dhcp_restart PRIVATE ${NETSTACK_HOST_INCLUDES})
+    target_compile_definitions(test_dhcp_restart PRIVATE ${NETSTACK_HOST_DEFINES})
+    target_compile_options(test_dhcp_restart PRIVATE ${NETSTACK_HOST_OPTIONS})
+
+    add_test(NAME dhcp_restart COMMAND test_dhcp_restart)
+
 endif()
