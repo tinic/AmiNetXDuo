@@ -40,10 +40,10 @@ lists what the board offers.
 on a card and 0 on the planar fallback, which is the only sign that a board
 failed to come up: Workbench falls back to the chipset silently.
 
-A launch on a segment whose DHCP does not answer reports failure for a guest
-that is serving: every URL it prints uses the IPv4 address alone, so the guest
-falls back to 169.254/16, takes a global IPv6 address by SLAAC and answers on
-it, and `served_check` looks at neither.
+A launch prints `serve_address=` and `address6=`. IPv4 is preferred always; on
+a segment whose DHCP does not answer, the guest falls back to 169.254/16 and
+the launcher reaches it on the global IPv6 address SLAAC gave it instead of
+reporting a serving guest as dead.
 
 ## The split
 
