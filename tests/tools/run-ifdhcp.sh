@@ -87,16 +87,43 @@ cp "$TOOLS/netstat"               "$STAGE/netstat"
 cp "$TOOLS/ping"                  "$STAGE/ping"
 cp "$TOOLS/NetCapture"            "$STAGE/NetCapture"
 
-cat > "$STAGE/commands.txt" <<'EOF'
+if [ "$RUNNER" = amiberry ]; then
+    PING_TARGET="${AMINETXDUO_IFDHCP_PING_TARGET:-}"
+    if [ -z "$PING_TARGET" ] && command -v ip >/dev/null 2>&1; then
+        PING_TARGET=$(ip -4 route show default dev "$IFACE" 2>/dev/null |
+            awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i + 1); exit } }')
+        [ -n "$PING_TARGET" ] ||
+            PING_TARGET=$(ip -4 -o addr show dev "$IFACE" scope global 2>/dev/null |
+                awk '{ split($4, a, "/"); print a[1]; exit }')
+    fi
+    [ -n "$PING_TARGET" ] || {
+        echo "cannot derive a reachable IPv4 target from bridged interface $IFACE" >&2
+        echo "set AMINETXDUO_IFDHCP_PING_TARGET to one on the guest's LAN" >&2
+        exit 2
+    }
+else
+    PING_TARGET=10.0.2.2
+fi
+if ! awk -v ip="$PING_TARGET" 'BEGIN {
+        n = split(ip, a, "."); if (n != 4) exit 1
+        for (i = 1; i <= 4; i++)
+            if (a[i] !~ /^[0-9]+$/ || a[i] + 0 > 255) exit 1
+    }'; then
+    echo "invalid IPv4 ping target '$PING_TARGET'" >&2
+    exit 2
+fi
+PING_COMMAND="SYS:ping $PING_TARGET -c 2 -t 20"
+
+cat > "$STAGE/commands.txt" <<EOF
 SYS:ConfigureNetInterface eth0 RELEASE
 SYS:AddNetInterface eth0
-SYS:ping 10.0.2.2 -c 2 -t 20
+$PING_COMMAND
 SYS:netstat -i
 SYS:ShowNetStatus eth0
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 SYS:netstat -i
 SYS:ShowNetStatus eth0
-SYS:ping 10.0.2.2 -c 2 -t 20
+$PING_COMMAND
 SYS:ConfigureNetInterface eth0 RELEASE
 SYS:ShowNetStatus eth0
 SYS:ConfigureNetInterface eth0 RELEASE
@@ -106,7 +133,7 @@ SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20
 wait 9
 SYS:netstat -i
 SYS:ShowNetStatus eth0
-SYS:ping 10.0.2.2 -c 2 -t 20
+$PING_COMMAND
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0
 SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3
@@ -132,6 +159,7 @@ if [ "$RUNNER" = "amiberry" ]; then
         "$STAGE/NetCapture"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
+    AMINETXDUO_AMIBERRY_BACKEND=slirp \
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
         "$STAGE/AddNetInterface" "$STAGE/ConfigureNetInterface" \
@@ -207,12 +235,17 @@ ifaces() { block "SYS:netstat -i" "$1"; }
 status() { block "SYS:ShowNetStatus eth0" "$1"; }
 
 address() { ifaces "$1" | awk '$1 == "eth0" { print $3; exit }'; }
+lease_server() {
+    status "$1" |
+        sed -n 's/.*lease[[:space:]][[:space:]]*from \([0-9][0-9.]*\).*/\1/p' |
+        head -1
+}
 
 pinged() { # nth description
     local out
-    out=$(block "SYS:ping 10.0.2.2 -c 2 -t 20" "$1")
+    out=$(block "$PING_COMMAND" "$1")
     if printf '%s\n' "$out" | grep -q '2 received' &&
-       [ "$(rc_of "SYS:ping 10.0.2.2 -c 2 -t 20" "$1")" = "0" ]; then
+       [ "$(rc_of "$PING_COMMAND" "$1")" = "0" ]; then
         pass "$2"
     else
         fail "$2: no reply came back over eth0"
@@ -233,16 +266,21 @@ says "SYS:ConfigureNetInterface eth0 RELEASE" 1 "The network is not running" \
      "releasing before any add says the network is not running"
 want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 1 5 "and returns WARN"
 
-pinged 1 "eth0 came up by DHCP and the gateway answers over it"
+pinged 1 "eth0 came up by DHCP and $PING_TARGET answers over it"
 LEASED=$(address 1)
-if [ "$LEASED" = "10.0.2.15" ]; then
-    pass "the DHCP server gave it 10.0.2.15"
+if [ -n "$LEASED" ] && [ "$LEASED" != "0.0.0.0" ]; then
+    pass "the DHCP server gave it $LEASED"
 else
-    fail "eth0 is on '${LEASED:-nothing}', not the 10.0.2.15 SLIRP hands out"
+    fail "eth0 has no usable address after DHCP ('${LEASED:-nothing}')"
     ifaces 1 | sed 's/^/       /' >&2
 fi
-says "SYS:ShowNetStatus eth0" 1 "lease +from 10\.0\.2\.2" \
-     "and ShowNetStatus says which server it came from"
+LEASE_SERVER=$(lease_server 1)
+if [ -n "$LEASE_SERVER" ]; then
+    pass "and ShowNetStatus says it came from $LEASE_SERVER"
+else
+    fail "ShowNetStatus did not name the DHCP server"
+    status 1 | sed 's/^/       /' >&2
+fi
 
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 1 0 \
         "CONFIGURE=DHCP on a bound interface is answered inside the timeout"
@@ -257,9 +295,14 @@ else
          "makes it an allocation under the wrong name"
     ifaces 2 | sed 's/^/       /' >&2
 fi
-says "SYS:ShowNetStatus eth0" 2 "lease +from 10\.0\.2\.2" \
-     "and the interface still holds a lease afterwards"
-pinged 2 "and still carries traffic"
+RENEW_SERVER=$(lease_server 2)
+if [ -n "$LEASE_SERVER" ] && [ "$RENEW_SERVER" = "$LEASE_SERVER" ]; then
+    pass "and the interface still holds the lease from $RENEW_SERVER"
+else
+    fail "the renewal's server changed ($LEASE_SERVER -> ${RENEW_SERVER:-nothing})"
+    status 2 | sed 's/^/       /' >&2
+fi
+pinged 2 "and still carries traffic to $PING_TARGET"
 
 want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 2 0 "RELEASE is accepted"
 says "SYS:ConfigureNetInterface eth0 RELEASE" 2 "the lease is released" \
@@ -268,9 +311,15 @@ says "SYS:ConfigureNetInterface eth0 RELEASE" 2 "the lease is released" \
 says_not "SYS:ShowNetStatus eth0" 3 "lease +from" \
          "and ShowNetStatus no longer reports a lease on eth0"
 
-says "SYS:ConfigureNetInterface eth0 RELEASE" 3 "has no lease to release" \
-     "a second RELEASE is refused because the first one really dropped it"
-want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 3 20 "and returns FAIL"
+if status 3 | grep -q '^[[:space:]]*lease6[[:space:]]'; then
+    says "SYS:ConfigureNetInterface eth0 RELEASE" 3 "the lease is released" \
+         "a second RELEASE gives back the remaining DHCPv6 lease"
+    want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 3 0 "and succeeds"
+else
+    says "SYS:ConfigureNetInterface eth0 RELEASE" 3 "has no lease to release" \
+         "a second RELEASE is refused because the first one dropped the only lease"
+    want_rc "SYS:ConfigureNetInterface eth0 RELEASE" 3 20 "and returns FAIL"
+fi
 
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 0 \
         "CONFIGURE=DHCP after a release takes a lease again"
@@ -311,15 +360,20 @@ says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 20" 2 \
      "lease taken" \
      "and says it allocated rather than renewed, which is what it did"
 RETAKEN=$(address 3)
-if [ "$RETAKEN" = "10.0.2.15" ]; then
+if [ -n "$RETAKEN" ] && [ "$RETAKEN" != "0.0.0.0" ]; then
     pass "and the interface is addressed again ($RETAKEN)"
 else
     fail "eth0 is on '${RETAKEN:-nothing}' after re-acquiring"
     ifaces 3 | sed 's/^/       /' >&2
 fi
-says "SYS:ShowNetStatus eth0" 4 "lease +from 10\.0\.2\.2" \
-     "and ShowNetStatus reports a lease once more"
-pinged 3 "and the gateway answers over the re-acquired lease"
+RETAKEN_SERVER=$(lease_server 4)
+if [ -n "$RETAKEN_SERVER" ]; then
+    pass "and ShowNetStatus reports a lease from $RETAKEN_SERVER once more"
+else
+    fail "ShowNetStatus reports no server for the re-acquired lease"
+    status 4 | sed 's/^/       /' >&2
+fi
+pinged 3 "and $PING_TARGET answers over the re-acquired lease"
 
 says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0" 1 \
      "takes its netmask and gateway from the server" \
@@ -348,8 +402,13 @@ says "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 \
      "RELEASE on a name that is not there is reported by name"
 want_rc "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 20 "and returns FAIL"
 
-says "SYS:ShowNetStatus eth0" 5 "lease +from 10\.0\.2\.2" \
-     "and none of the five refusals touched the lease"
+AFTER_REFUSALS_SERVER=$(lease_server 5)
+if [ -n "$RETAKEN_SERVER" ] && [ "$AFTER_REFUSALS_SERVER" = "$RETAKEN_SERVER" ]; then
+    pass "and none of the five refusals touched the lease"
+else
+    fail "the lease changed across the refusal checks"
+    status 5 | sed 's/^/       /' >&2
+fi
 
 QOUT=$(block "SYS:ConfigureNetInterface eth0 QUIET RELEASEADDRESS" 1 |
        grep -v '^----- rc ' || true)
