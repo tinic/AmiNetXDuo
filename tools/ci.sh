@@ -1131,13 +1131,20 @@ stage_ltoprobe() {
         return 1
     fi
 
-    "$ROOT/tests/crypto68k/run-lto-probe.sh" -b "$dir" || rc=$?
+    "$ROOT/tests/crypto68k/run-lto-probe.sh" -b "$dir" \
+        2>&1 | tee "$BUILD/ltoprobe-run.log"
+    rc="${PIPESTATUS[0]}"
     case "$rc" in
         0) note "PASS  tls.library loads and both P-256 paths answer" ;;
         2) fail "lto probe: the harness refused the build directory this stage\
  just configured -- read lto_probe_refused= above" ;;
-        *) fail "lto probe: a late libcall or a P-256 path did not survive the\
- full tls.library link" ;;
+        # The harness answers 1 both for a probe that ran and failed and for
+        # an emulator that never started, and the lto_probe= line above is
+        # what separates them, so it is quoted rather than interpreted here.
+        *) fail "lto probe: $(sed -n 's/^lto_probe=/the probe did not pass: /p' \
+                  "$BUILD/ltoprobe-run.log" | tail -1)
+ -- a late libcall or a P-256 path did not survive the full tls.library link,\
+ unless the line above says the run never started" ;;
     esac
     return "$rc"
 }
