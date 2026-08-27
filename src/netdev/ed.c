@@ -39,6 +39,7 @@
 #include "netdev_nic.h"
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
+#include "netdev_clock.h"
 #include "dp8390reg.h"
 #include "n68k_iocopy.h"
 
@@ -316,18 +317,26 @@ static BOOL ed_test_regs(NetdevNic *nic)
 
 /* --------------------------------------------------------------- attach --- */
 
+#define ED_ATTACH_STOP_SPINS  5000u
+
 static LONG ed_attach(NetdevNic *nic)
 {
     const volatile UBYTE *prom;
     UBYTE ored = 0;
     UBYTE anded = 0xff;
-    UWORD n = 5000;
+    NetdevWait w;
     UWORD i;
 
     /* Stop the chip before anything else touches it. */
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STP);
-    while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) == 0 && --n != 0)
+    netdev_wait_begin(&w, DP8390_STOP_WAIT_US, ED_ATTACH_STOP_SPINS);
+    do
+    {
+        if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != 0)
+            break;
         (VOID)NIC_GET(nic, ED_P0_CR);
+    }
+    while (!netdev_wait_done(&w));
 
     /*
      * NetBSD: interrupts must be inactive while the PROM is read, because on
