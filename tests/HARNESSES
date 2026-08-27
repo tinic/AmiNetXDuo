@@ -145,6 +145,7 @@ tests/tools/run-tcphandler.sh      : tools/ci.sh@nightly            : the TCP: h
 tests/tcpstall/run-tcpstall.sh     : tools/ci.sh@nightly            : a peer that stops answering; the stall must be readable and a deadline must be served
 tests/ipv6/run-mld.sh              : tools/ci.sh@nightly            : the groups this host listens to, announced or not, read out of a capture on the segment
 tests/ipv6/run-dhcpv6.sh           : tools/ci.sh@nightly            : an IPv6-only machine addressed by a real DHCPv6 server on the peer, stateful and router-led
+tests/ipv6/run-dhcpv6-pref.sh      : tools/ci.sh@nightly            : TWO DHCPv6 servers on the link with different OPTION_PREFERENCE values, the two Advertises sent in both orders, and the client has to name the preference-200 one both times. dnsmasq cannot send option 7, so the server is tests/ipv6/dhcpv6-prefserver.py on the peer -- raw Ethernet under a python3 carrying CAP_NET_RAW, because binding UDP 547 would need CAP_NET_BIND_SERVICE
 tests/common/run-rt.sh             : .github/workflows/emulator.yml@nightly : the compiler runtime, both forms, on all five CPU classes
 tests/conformance/run-conformance.sh : .github/workflows/emulator.yml@nightly : the bsdsocktest conformance suite
 tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml@nightly : the AF_INET6 socket surface, RFC 3542
