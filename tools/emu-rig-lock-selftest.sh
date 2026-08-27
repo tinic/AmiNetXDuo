@@ -190,7 +190,52 @@ else
     bad "the named claim stayed held after its holder died"
 fi
 
-# ----------------------------------------- 5. an orphaned reader is found --
+# -------------------------------------- 5. shared claims exclude a writer --
+
+SHARED1=$(mktemp "$AMINETXDUO_RIG_LOCKDIR/shared1.XXXXXX")
+SHARED2=$(mktemp "$AMINETXDUO_RIG_LOCKDIR/shared2.XXXXXX")
+(
+    . "$ROOT/tools/emu-rig-lock.sh"
+    rig_claim_name_shared selftest-shared "shared-one" > /dev/null 2>&1 &&
+        echo held > "$SHARED1"
+    sleep 5
+) &
+S1PID=$!
+(
+    . "$ROOT/tools/emu-rig-lock.sh"
+    rig_claim_name_shared selftest-shared "shared-two" > /dev/null 2>&1 &&
+        echo held > "$SHARED2"
+    sleep 5
+) &
+S2PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -s "$SHARED1" ] && [ -s "$SHARED2" ] && break
+    sleep 0.3
+done
+
+if [ -s "$SHARED1" ] && [ -s "$SHARED2" ]; then
+    ok "two shared users can hold one named claim"
+else
+    bad "the two shared users did not acquire together"
+fi
+if rig_claim_name selftest-shared "exclusive-during-shared" > /dev/null 2>&1; then
+    bad "an exclusive user acquired over shared holders"
+    rig_release_name selftest-shared
+else
+    ok "an exclusive user is refused while shared users hold the claim"
+fi
+
+kill "$S1PID" "$S2PID" 2> /dev/null
+wait "$S1PID" 2> /dev/null
+wait "$S2PID" 2> /dev/null
+if rig_claim_name selftest-shared "exclusive-after-shared" > /dev/null 2>&1; then
+    ok "the exclusive user acquires after shared users leave"
+    rig_release_name selftest-shared
+else
+    bad "the shared claim stayed held after both users left"
+fi
+
+# ----------------------------------------- 6. an orphaned reader is found --
 #
 # And a shell that merely MENTIONS one is not.  The unanchored version of this
 # pattern matched the `bash -c` wrapper around the test that was written to

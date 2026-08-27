@@ -148,6 +148,29 @@ rig_claim_name() { # name [who]
     return 0
 }
 
+# Claim a named resource in shared mode.  Any number of ordinary users may
+# coexist, but rig_claim_name() on the same name refuses until all of them
+# leave.  Performance arms use the exclusive form while ordinary bridged
+# guests use this one, so a measurement cannot share the host NIC or CPUs.
+rig_claim_name_shared() { # name [who]
+    local name="$1" who="${2:-$$}" dir fd
+    dir=$(rig_lockdir)
+
+    : >> "$dir/$name.lock" 2> /dev/null || {
+        echo "cannot create $dir/$name.lock" >&2; return 1; }
+    exec {fd}>>"$dir/$name.lock" || return 1
+    if ! flock -s -n "$fd" 2> /dev/null; then
+        echo "an exclusive run holds '$name' on this host:" >&2
+        sed 's/^/    /' "$dir/$name.lock" >&2 2> /dev/null || true
+        exec {fd}>&-
+        return 1
+    fi
+    printf 'name=%s pid=%s who=%s since=%s (shared)\n' \
+           "$name" "$$" "$who" "$(date +%FT%T)" > "$dir/$name.lock"
+    RIG_HELD_FDS["$name"]="$fd"
+    return 0
+}
+
 rig_release_name() { # name
     local fd="${RIG_HELD_FDS[$1]:-}"
     [ -n "$fd" ] || return 0
