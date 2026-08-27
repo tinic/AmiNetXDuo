@@ -15,8 +15,14 @@
  * process its own descriptor table in any case.  tests/tls/run-tlsloop.sh
  * starts SERVER with ToolsSmoke's `&` and then runs CLIENT.
  *
- *   TlsLoop SERVER PORT 7443 CERT <der> KEY <der> [KEYTYPE RSA|EC]
+ *   TlsLoop SERVER PORT 7443 CERT <der> KEY <der> [KEYTYPE RSA|EC] [HTTP]
  *   TlsLoop CLIENT PORT 7443 HOST <name> [STORE <path>] [NOVERIFY]
+ *
+ * HTTP makes the server answer one GET with an HTTP/1.1 response instead of
+ * the fixed word below, so the client can be the SHIPPED `fetch` command
+ * rather than this program's other half.  tests/tls/run-fetchtls.sh is that
+ * arm: the whole point of it is that nothing but our own code is in the path,
+ * so a red is a defect here and never a third party's outage.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -293,7 +299,20 @@ static LONG bsd_errno(struct Library *base)
 static const char l_request[]  = "AmiNetXDuo TlsLoop request\n";
 static const char l_response[] = "AmiNetXDuo TlsLoop response\n";
 
-static UBYTE l_buffer[512];
+/* What the HTTP arm answers.  Content-Length is a literal, so the two are
+   held together by the size check below rather than by anyone's attention. */
+static const char l_http_body[]  = "AmiNetXDuo fetch over TLS\n";
+static const char l_http_reply[] =
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/plain\r\n"
+    "Content-Length: 26\r\n"
+    "Connection: close\r\n"
+    "\r\n"
+    "AmiNetXDuo fetch over TLS\n";
+
+typedef char l_http_length_agrees[(sizeof(l_http_body) - 1 == 26) ? 1 : -1];
+
+static UBYTE l_buffer[1024];
 
 /* fd_set, open-coded. */
 static ULONG l_readfds[8];
@@ -359,9 +378,37 @@ static VOID l_report_info(struct Library *tbase, struct TLSConnection *tls,
 
 /* ------------------------------------------------------------- the arms --- */
 
+/*
+ * Up to the blank line, and not l_read_all(): a TLS record boundary is not a
+ * message boundary, so a request that fits in one write() can still arrive in
+ * two records, and its length is not known in advance.  Anything past the
+ * head is left in the session; this arm answers one GET and closes.
+ */
+static LONG l_read_head(struct Library *tbase, struct TLSConnection *tls,
+                        UBYTE *buffer, LONG size)
+{
+    LONG got = 0;
+
+    while (got < size)
+    {
+        LONG n = TLSRead(tbase, tls, (APTR)&buffer[got], size - got);
+
+        if (n <= 0)
+            return (got > 0) ? got : n;
+
+        got += n;
+
+        if (got >= 4 && buffer[got - 4] == '\r' && buffer[got - 3] == '\n' &&
+            buffer[got - 2] == '\r' && buffer[got - 1] == '\n')
+            return got;
+    }
+
+    return got;
+}
+
 static VOID l_server(struct Library *sbase, struct Library *tbase, LONG port,
                      const char *cert, const char *key, ULONG key_type,
-                     LONG accept_secs)
+                     BOOL http, LONG accept_secs)
 {
     struct l_sockaddr_in  sa;
     struct l_timeval      tv;
@@ -451,16 +498,33 @@ static VOID l_server(struct Library *sbase, struct Library *tbase, LONG port,
 
     l_report_info(tbase, tls, "server");
 
-    n = l_read_all(tbase, tls, l_buffer, (LONG)sizeof(l_request) - 1);
-    (VOID)l_check((BOOL)(n == (LONG)sizeof(l_request) - 1), "server_read",
-                  (ULONG)n);
-    (VOID)l_check(l_same(l_buffer, n, l_request), "server_read_matches",
-                  (ULONG)n);
+    if (http)
+    {
+        n = l_read_head(tbase, tls, l_buffer, (LONG)sizeof(l_buffer));
+        (VOID)l_check((BOOL)(n > 0), "server_read", (ULONG)n);
+        (VOID)l_check((BOOL)(n >= 4 && l_buffer[0] == 'G' &&
+                             l_buffer[1] == 'E' && l_buffer[2] == 'T' &&
+                             l_buffer[3] == ' '),
+                      "server_read_matches", (ULONG)n);
 
-    n = TLSWrite(tbase, tls, (CONST_APTR)l_response,
-                 (LONG)sizeof(l_response) - 1);
-    (VOID)l_check((BOOL)(n == (LONG)sizeof(l_response) - 1), "server_write",
-                  (ULONG)n);
+        n = TLSWrite(tbase, tls, (CONST_APTR)l_http_reply,
+                     (LONG)sizeof(l_http_reply) - 1);
+        (VOID)l_check((BOOL)(n == (LONG)sizeof(l_http_reply) - 1),
+                      "server_write", (ULONG)n);
+    }
+    else
+    {
+        n = l_read_all(tbase, tls, l_buffer, (LONG)sizeof(l_request) - 1);
+        (VOID)l_check((BOOL)(n == (LONG)sizeof(l_request) - 1), "server_read",
+                      (ULONG)n);
+        (VOID)l_check(l_same(l_buffer, n, l_request), "server_read_matches",
+                      (ULONG)n);
+
+        n = TLSWrite(tbase, tls, (CONST_APTR)l_response,
+                     (LONG)sizeof(l_response) - 1);
+        (VOID)l_check((BOOL)(n == (LONG)sizeof(l_response) - 1), "server_write",
+                      (ULONG)n);
+    }
 
     TLSClose(tbase, tls);
     (VOID)bsd_close_socket(sbase, fd);
@@ -566,7 +630,7 @@ static VOID l_client(struct Library *sbase, struct Library *tbase, LONG port,
 /* --------------------------------------------------------------- entry --- */
 
 #define L_TEMPLATE  "MODE/A,PORT/K/N,CERT/K,KEY/K,KEYTYPE/K,HOST/K,STORE/K," \
-                    "NOVERIFY/S,WAIT/K/N"
+                    "NOVERIFY/S,HTTP/S,WAIT/K/N"
 
 enum
 {
@@ -578,6 +642,7 @@ enum
     L_ARG_HOST,
     L_ARG_STORE,
     L_ARG_NOVERIFY,
+    L_ARG_HTTP,
     L_ARG_WAIT,
     L_ARG_COUNT
 };
@@ -711,7 +776,7 @@ static int l_run(VOID)
             l_server(sbase, tbase, port,
                      (const char *)l_args[L_ARG_CERT],
                      (const char *)l_args[L_ARG_KEY],
-                     key_type, wait_secs);
+                     key_type, (BOOL)(l_args[L_ARG_HTTP] != 0), wait_secs);
         }
     }
     else
