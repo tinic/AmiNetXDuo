@@ -2731,13 +2731,20 @@ BOOL http_fb_write(ULONG now)
                this one began, so a pass that already took a fiftieth owes
                nothing and a pass that came in under one waits out the rest.
                Added to the end instead it was a flat 20 ms whatever the pass
-               cost, which is a cheaper pass turning into a later frame. */
+               cost, which is a cheaper pass turning into a later frame.
+
+               As a remainder and not as an instant, because the clock goes
+               back to zero at midnight: a pass that straddles that has a start
+               later than its end, and a deadline built from it would be a day
+               away.  A wrap counts as nothing served, which costs one pass a
+               day an extra 20 ms. */
             if (fb_pass_t0 != 0UL)
             {
-                ULONG floor_at = fb_pass_t0 + (ULONG)FB_GRAB_FLOOR;
+                ULONG since = (done >= fb_pass_t0) ? (done - fb_pass_t0) : 0UL;
 
-                if ((LONG)(floor_at - resume) > 0L)
-                    resume = floor_at;
+                if (since < (ULONG)FB_GRAB_FLOOR &&
+                    (ULONG)FB_GRAB_FLOOR - since > idle)
+                    resume = done + ((ULONG)FB_GRAB_FLOOR - since);
             }
             fb_pass_t0 = 0;
 
