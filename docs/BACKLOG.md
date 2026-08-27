@@ -53,7 +53,6 @@ comment beside the code, not an entry here.
 | Three more netdev poll bounds are still sized in iterations | `dp8390_halt` 900 vs 1214 us, `ed_attach` 5000 and `ne_probe` 100 wait on ISR.RST | `src/netdev/dp8390.c:86`, `src/netdev/ed.c:324`, `src/netdev/ne2000.c:459` |
 | `C:ssh` is the one artefact that does not reproduce from its own tag | 44 `__FILE__` paths reach it and `-ffile-prefix-map` appears nowhere | `clients/dropbear/build.sh:91` |
 | The ClassicWB hostname collides the way the MAC used to | `NAME` defaults to model plus variant, so two agents claim one mDNS name | `tools/classicwb.sh:114` |
-| Our `telnet` answered no option negotiation the peer recorded | `telnet.c` implements WONT/DONT; may be netpeer returning mid-buffer | `src/tools/telnet.c`, `tests/tools/netpeer.py` |
 | `aamprobe.c` hard-codes `a2065.device` twice | on any other board the re-add is refused with errno 6 and later asserts read poison | `tests/tools/aamprobe.c:669`, `:926` |
 | binutils `amiga-2.46` cannot assemble gcc 16.2's own output | it forces a byte displacement on `jne`/`jeq`; we stay pinned at `amiga-2.39.0` | bebbo's `binutils-gdb` |
 | The console records `.pfs` and nothing else can read it | an MP4 export needs a vendored muxer under the CSP and a lossless codec | `src/tools/web/client/console/pfs.ts` |

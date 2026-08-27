@@ -102,6 +102,8 @@ OPTN = {0: "BINARY", 1: "ECHO", 3: "SGA", 5: "STATUS", 24: "TERMINAL-TYPE",
         31: "WINDOW-SIZE", 32: "TERMINAL-SPEED", 34: "LINEMODE",
         39: "ENVIRONMENT"}
 
+TELNET_DRAIN_SECONDS = 1.0
+
 
 class TelnetHandler(socketserver.BaseRequestHandler):
     def handle(self):
@@ -120,6 +122,7 @@ class TelnetHandler(socketserver.BaseRequestHandler):
         line = bytearray()
         state = 0
         verb = 0
+        closing = False
 
         while True:
             try:
@@ -140,10 +143,15 @@ class TelnetHandler(socketserver.BaseRequestHandler):
                             self.request.sendall(
                                 b"you said: " + bytes(line) + b"\r\n")
                             if text.strip().lower() in ("quit", "exit", "bye"):
-                                self.request.sendall(b"goodbye\r\n")
-                                log("telnet", "answers: %s" %
-                                    ", ".join(answers))
-                                return
+                                if not closing:
+                                    self.request.sendall(b"goodbye\r\n")
+                                    # The scripted client may have written its
+                                    # input before it read our option offer.
+                                    # Do not close on `quit` until its later
+                                    # IAC replies have had a chance to arrive.
+                                    self.request.settimeout(
+                                        TELNET_DRAIN_SECONDS)
+                                    closing = True
                             line.clear()
                     else:
                         line.append(b)
