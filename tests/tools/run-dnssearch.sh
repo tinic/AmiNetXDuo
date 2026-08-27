@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 # THE REGRESSION TEST FOR SHORT NAMES AND THE SEARCH LIST.
-# at 10.0.2.3 forwards to the host's resolver, so this test needs the host to
-# resolve www.example.com and example.com, and needs `.test` and the name
-# `www.example` to be NXDOMAIN.  If the long name does not resolve the test
+#
+#   tests/tools/run-dnssearch.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                                [-B INTERFACE] [-s RESOLVER]
+#
+# BRIDGED.  All three phases wrote `nameserver 10.0.2.3` into
+# DEVS:Internet/name_resolution, which is fs-uae's SLIRP forwarder: the search
+# list was walked by the emulator's resolver and not over a wire.  The server
+# is now the segment's own, read off this host's /etc/resolv.conf, and its
+# answers are checked here before the guest boots -- the phases turn on
+# www.example.com and example.com resolving while `.test`, the bare name and
+# the stem `www.example` are NXDOMAIN, and a resolver that synthesises an
+# address for a name that does not exist makes every assertion below vacuous.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -13,15 +23,27 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+IFACE="${AMINETXDUO_DNSSEARCH_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
+RESOLVER="${AMINETXDUO_DNSSEARCH_RESOLVER:-}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:B:s:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        s) RESOLVER="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B interface] [-s resolver]" >&2; exit 2 ;;
     esac
 done
+
+kv() { printf '%s=%s\n' "$1" "$2"; }
+refuse() { kv reason "$1"; kv RESULT refused; exit 2; }
+
+case "$IFACE" in
+    slirp|slirp_inbound)
+        refuse "slirp_walks_the_emulators_search_list: -B <interface>" ;;
+esac
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -46,6 +68,19 @@ fi
     exit 2
 }
 
+# THE SEGMENT'S OWN RESOLVER.  A bridged guest cannot reach the emulator
+# host's loopback, so a systemd-resolved stub at 127.0.0.53 is refused rather
+# than written into the guest's configuration and timed out.
+if [ -z "$RESOLVER" ]; then
+    RESOLVER=$(awk '/^nameserver/ && $2 !~ /:/ { print $2; exit }' /etc/resolv.conf)
+fi
+[ -n "$RESOLVER" ] ||
+    refuse "this host has no IPv4 name server of its own; -s names one"
+case "$RESOLVER" in
+    127.*|0.0.0.0)
+        refuse "$RESOLVER is on this host's loopback and a bridged guest cannot reach it; -s names one on the segment" ;;
+esac
+
 LONG="${AMINETXDUO_DNS_LONG:-www.example.com}"
 SHORT="${LONG%%.*}"                       # www
 DOMAIN="${LONG#*.}"                       # example.com
@@ -56,6 +91,30 @@ DEAD="${AMINETXDUO_DNS_DEAD:-invalid-aminetxduo.test}"
 GONE="${AMINETXDUO_DNS_GONE:-nosuchhost-aminetxduo}"
 
 GONE_MS="${AMINETXDUO_DNS_GONE_MS:-8000}"
+
+# THE PREMISE, CHECKED BEFORE THE EMULATOR STARTS.  Every phase below is a
+# statement about which of these names resolve; against a resolver that
+# NXDOMAIN-hijacks, or one that cannot see the public DNS, the assertions
+# still run and still say something, and what they say is untrue.
+if command -v dig >/dev/null 2>&1; then
+    dns_status() {
+        dig +time=3 +tries=2 "@$RESOLVER" "$1" 2>/dev/null |
+            sed -n 's/^;; ->>HEADER<<-.*status: \([A-Z]*\),.*/\1/p' | head -1
+    }
+    for want in "$LONG:NOERROR" "$DOMAIN:NOERROR" "$STEM:NXDOMAIN" \
+                "$DEAD:NXDOMAIN" "$GONE:NXDOMAIN"; do
+        n="${want%:*}"; expect="${want#*:}"
+        got=$(dns_status "$n")
+        kv "dns_$n" "${got:-nothing}"
+        [ "$got" = "$expect" ] ||
+            refuse "$RESOLVER answers $n with ${got:-nothing}, and this test needs $expect"
+    done
+else
+    kv dns_premise unchecked
+fi
+
+kv resolver "$RESOLVER"
+kv iface    "$IFACE"
 
 FAILED=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
@@ -90,11 +149,11 @@ run_phase()
     local hd="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
     echo
-    echo "==> phase $tag: booting $MODEL with the A2065 on SLIRP"
+    echo "==> phase $tag: booting $MODEL, a2065 bridged on $IFACE"
     sed 's/^/       /' "$stage/devs/Internet/name_resolution"
 
     set +e
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+    "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$stage/commands.txt" "$stage/devs" "$stage/libs" \
         "$stage/AddNetInterface" "$stage/host" "$stage/ShowNetStatus" \
         > "$ROOT/build/dnssearch-$tag.log" 2>&1
@@ -134,7 +193,7 @@ elapsed_of()
 }
 
 run_phase search \
-"nameserver 10.0.2.3
+"nameserver $RESOLVER
 search $DEAD $DOMAIN
 hostname amiga" \
     "SYS:AddNetInterface eth0" \
@@ -181,7 +240,7 @@ if [ -n "$REPORT" ]; then
 fi
 
 run_phase qualified \
-"nameserver 10.0.2.3
+"nameserver $RESOLVER
 search $TLD
 hostname amiga" \
     "SYS:AddNetInterface eth0" \
@@ -206,7 +265,7 @@ if [ -n "$REPORT" ]; then
 fi
 
 run_phase cache \
-"nameserver 10.0.2.3
+"nameserver $RESOLVER
 hostname amiga" \
     "SYS:AddNetInterface eth0" \
     "SYS:host $LONG" \
@@ -246,9 +305,9 @@ fi
 
 echo
 if [ "$FAILED" -ne 0 ]; then
-    echo "dnssearch: FAILED" >&2
+    kv RESULT fail
     exit 1
 fi
 
-echo "dnssearch: PASSED"
+kv RESULT pass
 exit 0

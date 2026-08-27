@@ -3890,5 +3890,13 @@ int main(void)
 
     if (rc != 0)
         return (int)rc;
-    return (n_fail != 0) ? 5 : 0;
+
+    /* 20, NOT 5.  tools/amiberry-run.sh reserves 4 and 5 for its own rig
+       faults -- 5 is "the run did not get the network backend it asked for" --
+       and hands every other code straight through as the guest's.  So a drill
+       with failures in it came back as 5, and tools/test-verdict.sh printed
+       "This is the RIG, not the code" underneath a transcript that had just
+       named the five checks that went off.  Every other failure exit in this
+       file is already 20. */
+    return (n_fail != 0) ? 20 : 0;
 }

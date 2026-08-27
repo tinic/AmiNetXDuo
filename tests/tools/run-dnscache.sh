@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 # THE REGRESSION TEST FOR THE DNS ANSWER CACHE.
+#
+#   tests/tools/run-dnscache.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR] [-B IFACE]
+#
+# THE WIRE IS WHAT THIS TEST IS FOR: nothing the guest prints can tell a cache
+# that answered from memory from a stack that asked again and got the same
+# answer.  It used to read $HD/host.pcap, which fs-uae wrote out of its SLIRP
+# link and which nothing has written since fs-uae left the tree on 2026-08-04,
+# so the strongest assertion group never ran and the harness reached exit 77
+# every time however healthy the stack was.  The capture is now taken on the
+# host, on the interface the guest is bridged onto, the way
+# tests/tools/run-wirequiet.sh takes one, and a host that cannot take it
+# refuses the run instead of passing it.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -27,12 +40,28 @@ while getopts "m:t:b:B:" opt; do
     esac
 done
 
+kv() { printf '%s=%s\n' "$1" "$2"; }
+refuse() { kv reason "$1"; kv RESULT refused; exit 2; }
+
+case "$IFACE" in
+    slirp|slirp_inbound)
+        refuse "slirp_has_no_segment_to_capture: -B <interface>" ;;
+esac
+
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
 
 for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/host" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
+
+command -v tcpdump >/dev/null 2>&1 ||
+    refuse "no tcpdump on this host, so the wire cannot be observed"
+timeout 10 tcpdump -i "$IFACE" -c 1 -n >/dev/null 2>&1 || {
+    rc=$?
+    [ "$rc" = 124 ] ||
+        refuse "tcpdump cannot read $IFACE as $(id -un); this needs no sudo on a host where it is set up, and running without it would assert nothing"
+}
 
 A2065="${AMINETXDUO_A2065:-}"
 if [ -z "$A2065" ]; then
@@ -62,6 +91,17 @@ for t in AddNetInterface host; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
+# NO STATIC NAME SERVER.  tests/netstack/devs/Internet/name_resolution still
+# carries `nameserver 10.0.2.3`, fs-uae's SLIRP forwarder, which does not
+# exist on a real segment: every lookup here was sent there first, waited a
+# second, and was then re-sent to the server the lease supplies.  On the wire
+# that is two packets per name, and the count below is a count of packets.
+# The lease's server is the only one this test wants.
+cat > "$STAGE/devs/Internet/name_resolution" <<'NREOF'
+# Deliberately empty of servers: the DHCP lease supplies the only one, and a
+# second, unreachable server would double every query on the wire.
+NREOF
+
 {
     echo "SYS:AddNetInterface eth0"
     for _ in 1 2 3; do
@@ -74,6 +114,34 @@ done
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dnscache}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
+# NOT under $HD: tools/amiberry-run.sh removes that directory as it stages the
+# drive, so a capture started before the run and written there is deleted
+# while tcpdump still holds the descriptor.
+PCAP="$ROOT/build/dnscache-$AMINETXDUO_RUN_TAG.pcap"
+TCPDUMPLOG="$ROOT/build/dnscache-$AMINETXDUO_RUN_TAG.tcpdump.log"
+rm -f "$PCAP"
+
+tcpdump -i "$IFACE" -n -s 256 -U -w "$PCAP" 'udp port 53' \
+    > "$TCPDUMPLOG" 2>&1 &
+TCPDUMP_PID=$!
+capture_stop() {
+    [ -n "${TCPDUMP_PID:-}" ] || return 0
+    kill "$TCPDUMP_PID" 2>/dev/null || true
+    wait "$TCPDUMP_PID" 2>/dev/null || true
+    TCPDUMP_PID=""
+}
+trap capture_stop EXIT INT TERM HUP
+
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    grep -q 'listening on' "$TCPDUMPLOG" 2>/dev/null && break
+    sleep 0.5
+done
+grep -q 'listening on' "$TCPDUMPLOG" 2>/dev/null || {
+    capture_stop
+    sed 's/^/       /' "$TCPDUMPLOG" >&2
+    refuse "tcpdump did not start on $IFACE"; }
+echo "==> capturing udp port 53 on $IFACE into $PCAP"
+
 echo "==> booting $MODEL, a2065 bridged on $IFACE"
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
@@ -81,6 +149,10 @@ set +e
     "$STAGE/AddNetInterface" "$STAGE/host"
 RUN_RC=$?
 set -e
+
+sleep 1
+capture_stop
+trap - EXIT INT TERM HUP
 
 REPORT="$HD/tools.txt"
 [ -f "$REPORT" ] || { echo "FAIL: the guest wrote no $REPORT (run rc=$RUN_RC)" >&2; exit 1; }
@@ -92,10 +164,8 @@ echo "====================================================================="
 echo
 
 FAILED=0
-UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
-skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 
 STARTS=$(grep -c "SYS:AddNetInterface eth0 =====" "$REPORT" || true)
 if [ "$STARTS" -eq 1 ]; then
@@ -129,47 +199,63 @@ for name in "$NAME_A" "$NAME_B"; do
     fi
 done
 
-# THE WIRE HALF IS DEAD CODE TODAY and the exit 77 below is why this harness
-# is not a gate: NOTHING WRITES $HD/host.pcap.  It came from fs-uae, which
-# could dump its SLIRP link to a pcap, and fs-uae left the tree on 2026-08-04;
-# tools/amiberry-run.sh writes no capture at all.  So this branch is never
-# taken, the strongest assertion group never runs, and the harness reaches
-# exit 77 every time however healthy the stack is.  Giving it a host-side
-# tcpdump on -B's interface, the way tests/tools/run-wirequiet.sh has one, is
-# what would make it a gate.
-if [ -s "$HD/host.pcap" ]; then
-    tcpdump -r "$HD/host.pcap" -n "udp dst port 53" 2>/dev/null > "$HD/dns.txt" || true
+# ---------------------------------------------------------------- the wire ---
+#
+# The whole point of the file.  The guest's frames are picked out of the
+# capture by its own source address, which is read off the bring-up line
+# rather than assumed: the segment's DHCP server hands out whatever it has.
+#
+# `A?` AND ONLY `A?`.  On a dual-stack segment `host` asks for AAAA as well,
+# and a filter that matched the name anywhere counted both kinds of query
+# against a ceiling meant for one.  The AAAA count is reported beside it and
+# asserted on separately.
+GUESTIP=$(sed -n 's/^.*online, address \([0-9][0-9.]*\).*$/\1/p' "$REPORT" |
+          head -1)
+kv guest_ip "${GUESTIP:-none}"
 
-    TOTAL=$(wc -l < "$HD/dns.txt" | tr -d ' ')
-    echo "  DNS queries seen on the wire: $TOTAL"
-    sed 's/^/       /' "$HD/dns.txt"
+if [ -z "$GUESTIP" ]; then
+    fail "the guest never printed an address, so nothing identifies its queries"
+elif [ ! -s "$PCAP" ]; then
+    fail "the capture $PCAP is empty; the wire was not observed"
+else
+    QUERIES="$ROOT/build/dnscache-$AMINETXDUO_RUN_TAG.queries.txt"
+    tcpdump -r "$PCAP" -n "udp dst port 53 and src host $GUESTIP" \
+        > "$QUERIES" 2>/dev/null || true
+
+    kv wire_queries "$(grep -c . "$QUERIES" || true)"
+    echo "  what the guest asked for:"
+    sed 's/^/       /' "$QUERIES"
 
     for name in "$NAME_A" "$NAME_B"; do
-        N=$(grep -c "$name" "$HD/dns.txt" || true)
-        if [ "$N" -eq 1 ]; then
-            pass "$name was asked for exactly ONCE in three lookups"
+        esc=$(printf '%s' "$name" | sed 's/\./\\./g')
+        A=$(grep -cE " A\\? $esc\\.? " "$QUERIES" || true)
+        AAAA=$(grep -cE " AAAA\\? $esc\\.? " "$QUERIES" || true)
+
+        kv "wire_a_$name" "$A"
+        kv "wire_aaaa_$name" "$AAAA"
+
+        if [ "$A" -eq 1 ]; then
+            pass "$name: exactly ONE A query on the wire for three lookups"
         else
-            fail "$name was asked for $N times in three lookups, expected 1"
+            fail "$name: $A A queries on the wire for three lookups, expected 1"
+        fi
+
+        if [ "$AAAA" -le 1 ]; then
+            pass "$name: $AAAA AAAA query on the wire for three lookups"
+        else
+            fail "$name: $AAAA AAAA queries on the wire for three lookups, expected at most 1"
         fi
     done
-else
-    skip "no host-side capture: the wire was not observed, so the cache was
-       measured only from what the guest printed"
 fi
+
+kv run_rc "$RUN_RC"
+kv pcap   "$PCAP"
 
 echo
 if [ "$FAILED" -ne 0 ]; then
-    echo "dnscache: FAILED" >&2
+    kv RESULT fail
     exit 1
 fi
 
-if [ "$UNRUN" -ne 0 ]; then
-    echo "dnscache: SKIPPED, $UNRUN assertion group(s) did not run" >&2
-    echo "  The wire is what this test is for.  Nothing else here can tell a" >&2
-    echo "  cache that answered from memory from a stack that queried again" >&2
-    echo "  and got the same answer, so this is not a pass." >&2
-    exit 77
-fi
-
-echo "dnscache: PASSED"
+kv RESULT pass
 exit 0

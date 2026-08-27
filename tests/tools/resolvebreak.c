@@ -106,12 +106,24 @@ static ULONG p_ticks(VOID)
     return (ULONG)ds.ds_Minute * 3000UL + (ULONG)ds.ds_Tick;
 }
 
+/*
+ * end BEFORE start is a real outcome here: arm 3 reports the gap between the
+ * moment the break was sent and the moment the lookup came back, and a lookup
+ * that ended first makes that gap negative.  It was subtracted into a ULONG
+ * and divided as one, so -250 ticks printed as "85899340.92 s (-250 ticks)":
+ * an eight-digit number of seconds beside the tick count that contradicts it.
+ * The subtraction stays unsigned, because that is what is correct across the
+ * tick counter's own wrap; only the sign is taken off it before dividing.
+ */
 static VOID p_report(const char *what, ULONG start, ULONG end)
 {
-    ULONG ticks = end - start;
+    LONG        delta = (LONG)(end - start);
+    ULONG       ticks = (delta < 0) ? (ULONG)(-delta) : (ULONG)delta;
+    const char *sign  = (delta < 0) ? "-" : "";
 
-    Printf((CONST_STRPTR)"  %s: %ld.%02ld s (%ld ticks)\n", (LONG)what,
-           (LONG)(ticks / 50UL), (LONG)((ticks % 50UL) * 2UL), (LONG)ticks);
+    Printf((CONST_STRPTR)"  %s: %s%ld.%02ld s (%s%ld ticks)\n", (LONG)what,
+           (LONG)sign, (LONG)(ticks / 50UL), (LONG)((ticks % 50UL) * 2UL),
+           (LONG)sign, (LONG)ticks);
 }
 
 static struct Task *p_parent;
@@ -155,8 +167,16 @@ int main(int argc, char **argv)
     }
 
     {
+        /* 64, not 32.  A DHCPv6 lease advertises a name server whose text
+           form is up to 45 characters ("2607:f598:e1a8:4c00:e63a:6eff:fe03:
+           d5ba" is 39), and at 32 the copy below stopped at 31: the address
+           handed to RemoveDomainNameServer() was a prefix, the call refused it
+           with EINVAL, and THE SERVER STAYED IN THE LIST.  So arm 1 was not
+           asking a black hole at all -- the segment's real resolver was still
+           there and answered "probe.invalid" RCODE 3 in 80 ms, which left arm
+           3 with no lookup to interrupt. */
         struct List *list = p_obtain_dns_list(base);
-        char         found[8][32];
+        char         found[8][64];
         LONG         n = 0;
 
         if (list != NULL)
@@ -179,7 +199,7 @@ int main(int argc, char **argv)
                 {
                     LONG i;
 
-                    for (i = 0; i < 31 && dns->dnsn_Address[i] != '\0'; i++)
+                    for (i = 0; i < 63 && dns->dnsn_Address[i] != '\0'; i++)
                         found[n][i] = dns->dnsn_Address[i];
                     found[n][i] = '\0';
                     n++;
@@ -198,8 +218,41 @@ int main(int argc, char **argv)
 
         while (n-- > 0)
         {
+            LONG rc;
+
             Printf((CONST_STRPTR)"  dropping name server %s\n", (LONG)found[n]);
-            (VOID)p_remove_dns(base, found[n]);
+            rc = p_remove_dns(base, found[n]);
+            if (rc != 0)
+                Printf((CONST_STRPTR)"  WARNING RemoveDomainNameServer(%s) refused, errno %ld\n",
+                       (LONG)found[n], (LONG)p_errno(base));
+        }
+
+        /* WHAT IS LEFT IS THE PREMISE.  Everything below measures how long a
+           lookup blocks with nobody to answer it, and that is only what it
+           measures when this prints the black hole and nothing else. */
+        list = p_obtain_dns_list(base);
+        if (list != NULL)
+        {
+            struct MinNode *node = (struct MinNode *)list->lh_Head;
+
+            while (node != NULL && node->mln_Succ != NULL)
+            {
+                const struct
+                {
+                    struct MinNode  dnsn_MinNode;
+                    LONG            dnsn_Size;
+                    char           *dnsn_Address;
+                    LONG            dnsn_UseCount;
+                } *dns = (VOID *)node;
+
+                if (dns->dnsn_Address != NULL)
+                    Printf((CONST_STRPTR)"  name server in use: %s\n",
+                           (LONG)dns->dnsn_Address);
+
+                node = node->mln_Succ;
+            }
+
+            p_release_dns_list(base, list);
         }
     }
 
