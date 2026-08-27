@@ -17,8 +17,41 @@ typedef unsigned long long u64;
 
 #define RTDIV_ITERS     100000UL
 #define RTDIV_WIDE      20000UL
+
 #define RTDIV_STEP      0x9e3779b97f4a7c15ULL
 #define RTDIV_SEED      0x0123456789abcdefULL
+
+/*
+ * The iteration count, off the command line, for the machines where the
+ * default does not finish inside a harness timeout.  A 68000 has no divide
+ * instruction wider than DIVU.W, so one 64-bit divide there is thousands of
+ * cycles and the default is a quarter of an hour; on an A600 pass 5000.
+ *
+ *   AMINETXDUO_RUN_TAG=rtd tools/amiberry-run.sh -t 300 -m A600 \
+ *       -a 5000 build/cm/tests/perf/rtdiv_anxd
+ *
+ * GetArgStr(), not argv: an AmigaDOS command started the way the harness
+ * starts one sees argc == 1.
+ */
+static ULONG rt_iters(void)
+{
+    const char *args = (const char *)GetArgStr();
+    ULONG       n    = 0UL;
+
+    if (args == NULL)
+        return (RTDIV_ITERS);
+
+    while (*args == ' ' || *args == '\t')
+        args++;
+
+    while (*args >= '0' && *args <= '9')
+    {
+        n = (n * 10UL) + (ULONG)(*args - '0');
+        args++;
+    }
+
+    return ((n != 0UL) ? n : RTDIV_ITERS);
+}
 
 static u64 rt_div_narrow(ULONG iters)
 {
@@ -132,36 +165,43 @@ static VOID rt_report(const char *name, ULONG iters, ULONG ms, u64 acc)
 int main(int argc, char **argv)
 {
     ULONG t0;
+    ULONG iters;
+    ULONG wide;
     u64   acc;
 
     (VOID)argc;
     (VOID)argv;
 
+    iters = rt_iters();
+    wide  = iters / (RTDIV_ITERS / RTDIV_WIDE);   /* the default ratio, kept */
+    if (wide == 0UL)
+        wide = 1UL;
+
     (VOID)ami_millis();                 /* opens timer.device, sets TimerBase */
 
     t0  = ami_millis();
-    acc = rt_div_narrow(RTDIV_ITERS);
-    rt_report("udivdi3_narrow", RTDIV_ITERS, ami_millis() - t0, acc);
+    acc = rt_div_narrow(iters);
+    rt_report("udivdi3_narrow", iters, ami_millis() - t0, acc);
 
     t0  = ami_millis();
-    acc = rt_mod_narrow(RTDIV_ITERS);
-    rt_report("umoddi3_narrow", RTDIV_ITERS, ami_millis() - t0, acc);
+    acc = rt_mod_narrow(iters);
+    rt_report("umoddi3_narrow", iters, ami_millis() - t0, acc);
 
     t0  = ami_millis();
-    acc = rt_div_small(RTDIV_ITERS);
-    rt_report("udivdi3_small", RTDIV_ITERS, ami_millis() - t0, acc);
+    acc = rt_div_small(iters);
+    rt_report("udivdi3_small", iters, ami_millis() - t0, acc);
 
     t0  = ami_millis();
-    acc = rt_mul_kernel(RTDIV_ITERS);
-    rt_report("muldi3", RTDIV_ITERS, ami_millis() - t0, acc);
+    acc = rt_mul_kernel(iters);
+    rt_report("muldi3", iters, ami_millis() - t0, acc);
 
     t0  = ami_millis();
-    acc = rt_div_wide(RTDIV_WIDE);
-    rt_report("udivdi3_wide", RTDIV_WIDE, ami_millis() - t0, acc);
+    acc = rt_div_wide(wide);
+    rt_report("udivdi3_wide", wide, ami_millis() - t0, acc);
 
     t0  = ami_millis();
-    acc = rt_mod_wide(RTDIV_WIDE);
-    rt_report("umoddi3_wide", RTDIV_WIDE, ami_millis() - t0, acc);
+    acc = rt_mod_wide(wide);
+    rt_report("umoddi3_wide", wide, ami_millis() - t0, acc);
 
     return RETURN_OK;
 }
