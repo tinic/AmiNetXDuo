@@ -49,6 +49,13 @@ extern "C" {
    transfer pays it a hundred times a second, at 65536 six times. */
 #define IPERF_UDP_DEFAULT   1470
 #define IPERF_BUF_MIN       64
+/* The read is where the receiving side pays its per-call cost, once per
+   recv() and not once per byte, so the size of the read is a variable a
+   measurement wants to move over a wide range.  8192 was the whole range
+   against a default of 4096, a factor of two, too narrow for the difference
+   to leave the noise; the sweep that found 62% end to end ran to 32768.
+   Nothing resident grows with the ceiling: httpd sizes its own buffer off
+   what httpd plans, and the command allocates one array. */
 #define IPERF_BUF_MAX       65536
 
 /* The port iperf 2 listens on.  iperf 3 uses 5201 and is a different protocol. */

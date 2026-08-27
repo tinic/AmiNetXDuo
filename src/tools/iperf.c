@@ -57,7 +57,7 @@ static VOID iperf_help(VOID)
     tool_printf("  -p PORT                         port to use (5001)\n");
     tool_printf("  -t SECONDS                      how long to run (10)\n");
     tool_printf("  -n KBYTES                       stop after this much instead\n");
-    tool_printf("  -l BYTES                        bytes per send (4096, UDP 1470)\n");
+    tool_printf("  -l BYTES                        bytes per send or recv (4096, UDP 1470)\n");
     tool_printf("  -b KBIT                         UDP send rate, 0 flat out (1000)\n");
     tool_printf("  -q                              print only the key=value line\n");
     tool_printf("  -4 / -6                         pin the address family\n");

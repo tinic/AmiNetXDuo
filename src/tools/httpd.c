@@ -5585,10 +5585,14 @@ static BOOL httpd_preconditions(HttpConn *c)
    measurements would be measuring each other.  A slice per pass of the loop and
    never a blocking call, for the reason CONN_WALK exists. */
 
+/* The two sizes httpd_iperf_start() plans with, and the buffer that holds the
+   larger.  NOT IPERF_BUF_MAX: that is what the iperf COMMAND accepts from -l,
+   and sizing a resident daemon's buffer off a command's ceiling would cost
+   httpd every byte that ceiling ever gains. */
+#define HTTPD_IPERF_TCP_LEN 4096UL
+#define HTTPD_IPERF_BUFLEN  HTTPD_IPERF_TCP_LEN
+
 static IperfRun  httpd_iperf;
-/* The endpoint runs one fixed size, so the daemon carries that buffer and
-   not the ceiling the iperf command sweeps up to. */
-#define HTTPD_IPERF_BUFLEN  4096
 static UBYTE     httpd_iperf_buf[HTTPD_IPERF_BUFLEN];
 static HttpConn *httpd_iperf_owner;      /* NULL when nothing is running    */
 
@@ -5799,8 +5803,7 @@ static BOOL httpd_iperf_hook(HttpConn *c)
     plan.seconds = (ULONG)n;
 
     plan.buflen = (plan.dir == IPERF_UDP_TX || plan.dir == IPERF_UDP_RX)
-                      ? (ULONG)IPERF_UDP_DEFAULT
-                      : (ULONG)HTTPD_IPERF_BUFLEN;
+                      ? (ULONG)IPERF_UDP_DEFAULT : HTTPD_IPERF_TCP_LEN;
 
     if (plan.dir == IPERF_UDP_TX)
         plan.rate_kbit = 1000UL;
