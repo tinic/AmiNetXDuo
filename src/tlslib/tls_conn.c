@@ -279,6 +279,8 @@ static VOID tls_conn_free(TLSConnection *conn)
         tls_bzero(conn->tc_Metadata, conn->tc_MetadataSize);
     tls_free(conn->tc_Metadata);
 
+    tls_server_forget(conn);
+
     tls_packet_pool_delete(&conn->tc_Pool);
     if (conn->tc_PoolMemory != NULL)
         tls_bzero(conn->tc_PoolMemory,
@@ -317,6 +319,10 @@ struct TLSConnection *tls_TLSOpenA(
     CONST_STRPTR             store_path;
     CONST_STRPTR             session_path;
     CONST_STRPTR             alpn;
+    CONST_STRPTR             cert_path;
+    CONST_STRPTR             key_path;
+    ULONG                    key_type;
+    BOOL                     server;
     ULONG                    timeout_ms;
     ULONG                    record_bytes;
     ULONG                    chain;
@@ -368,6 +374,10 @@ struct TLSConnection *tls_TLSOpenA(
     store_path   = (CONST_STRPTR)tls_tag_data(tags, TLSA_TrustStore, 0);
     session_path = (CONST_STRPTR)tls_tag_data(tags, TLSA_SessionFile, 0);
     alpn         = (CONST_STRPTR)tls_tag_data(tags, TLSA_ALPN, 0);
+    cert_path    = (CONST_STRPTR)tls_tag_data(tags, TLSA_Certificate, 0);
+    key_path     = (CONST_STRPTR)tls_tag_data(tags, TLSA_PrivateKey, 0);
+    key_type     = tls_tag_data(tags, TLSA_KeyType, (ULONG)TLS_KEY_RSA);
+    server       = (BOOL)((tls_tag_data(tags, TLSA_Server, 0) != 0) ? TRUE : FALSE);
     timeout_ms   = tls_tag_data(tags, TLSA_Timeout, TLS_DEFAULT_TIMEOUT_MS);
     record_bytes = tls_tag_data(tags, TLSA_RecordBuffer, TLS_DEFAULT_RECORD_BUFFER);
     chain        = tls_tag_data(tags, TLSA_MaxChain, TLS_DEFAULT_CHAIN);
@@ -394,8 +404,20 @@ struct TLSConnection *tls_TLSOpenA(
     conn->tc_RemoteCount = chain;
     conn->tc_Store       = &conn->tc_StoreIndex;
 
-    if (tls_tag_data(tags, TLSA_NoVerify, 0) == 0)
+    /*
+     * A server verifies nothing here.  This library asks for no client
+     * certificate, so there is no chain to check and no name to check it
+     * against; TLSA_HostName, TLSA_TrustStore and TLSA_NoVerify are all
+     * client-side questions and are ignored rather than half-honoured.
+     */
+    if (server)
+    {
+        conn->tc_Flags |= TLSF_SERVER;
+    }
+    else if (tls_tag_data(tags, TLSA_NoVerify, 0) == 0)
+    {
         conn->tc_Flags |= TLSF_VERIFY;
+    }
 
     conn->tc_Timeout = (timeout_ms == 0)
                        ? NX_WAIT_FOREVER
@@ -404,7 +426,13 @@ struct TLSConnection *tls_TLSOpenA(
     if (conn->tc_Timeout == 0)
         conn->tc_Timeout = 1;
 
-    if (hostname != NULL)
+    if (server && (cert_path == NULL || key_path == NULL))
+    {
+        error = TLS_ERR_NOCERT;
+        goto fail;
+    }
+
+    if (hostname != NULL && !server)
     {
         ULONG n = tls_strlen((const char *)hostname);
 
@@ -442,7 +470,13 @@ struct TLSConnection *tls_TLSOpenA(
      * off.  TLSA_SessionFile with an empty string keeps the cache in the
      * library and off the disk.
      */
-    if (tls_tag_data(tags, TLSA_NoResume, 0) == 0)
+    /*
+     * Never for a server.  Resumption here is the CLIENT half of RFC 5077: a
+     * cached master secret offered on the next connection to the same host.
+     * A server has no host to key that on, and nothing in tls_resume.c builds
+     * or issues a ticket.
+     */
+    if (!server && tls_tag_data(tags, TLSA_NoResume, 0) == 0)
     {
         conn->tc_ResumeFlags |= TLSR_ENABLED;
 
@@ -497,7 +531,7 @@ struct TLSConnection *tls_TLSOpenA(
         }
 
         tls_transport_open(&conn->tc_Transport, socket_base, sock,
-                           &conn->tc_Pool, FALSE,
+                           &conn->tc_Pool, server,
                            (BOOL)(peer_family == TLS_SOCK_AF_INET6));
     }
 
@@ -597,6 +631,16 @@ struct TLSConnection *tls_TLSOpenA(
     {
         (VOID)_nx_secure_tls_session_sni_extension_set(&conn->tc_Session,
                                                         &conn->tc_Sni);
+    }
+
+    if ((conn->tc_Flags & TLSF_SERVER) != 0)
+    {
+        error = tls_server_identity(conn, cert_path, key_path, key_type);
+        if (error != TLS_OK)
+        {
+            tls_conn_leave(conn);
+            goto fail_session;
+        }
     }
 
     if (conn->tc_AlpnLength > 0)

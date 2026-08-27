@@ -92,6 +92,35 @@ struct TLSConnection;
  * from TLSOpen(), never a truncated offer. */
 #define TLSA_ALPN           (TLSA_Dummy + 10)
 
+/* ------------------------------------------------------------- server --- */
+
+/*
+ * BOOL.  This descriptor came from accept(), not connect(): shake hands as the
+ * server.  TLSA_Certificate and TLSA_PrivateKey are then required and
+ * TLSA_HostName, TLSA_TrustStore and TLSA_NoVerify are ignored -- this library
+ * asks for no client certificate, so there is nothing for it to verify.
+ *
+ * A HANDSHAKE COSTS THE SERVER WHAT IT COSTS THE CLIENT, and on this hardware
+ * that is seconds of public-key arithmetic per connection, every connection:
+ * a server has no session to resume until a client comes back.  It is a
+ * capability, not a throughput story.
+ */
+#define TLSA_Server         (TLSA_Dummy + 11)
+
+/* STRPTR, required with TLSA_Server.  A file holding ONE certificate as DER,
+ * not PEM and not a chain.  Paths follow TLSA_TrustStore's limit. */
+#define TLSA_Certificate    (TLSA_Dummy + 12)
+
+/* STRPTR, required with TLSA_Server.  The matching private key, DER again:
+ * PKCS#1 for RSA (TLS_KEY_RSA) or SEC1 for EC (TLS_KEY_EC). */
+#define TLSA_PrivateKey     (TLSA_Dummy + 13)
+
+/* ULONG, TLS_KEY_RSA or TLS_KEY_EC.  Default TLS_KEY_RSA. */
+#define TLSA_KeyType        (TLSA_Dummy + 14)
+
+#define TLS_KEY_RSA         1   /* DER PKCS#1 */
+#define TLS_KEY_EC          2   /* DER SEC1   */
+
 /* --------------------------------------------------------------- errors --- */
 
 #define TLS_OK               0
@@ -114,6 +143,8 @@ struct TLSConnection;
 #define TLS_ERR_BADPATH     17  /* trust/session path exceeds internal limit  */
 #define TLS_ERR_BADALPN     18  /* TLSA_ALPN is malformed or too long         */
 #define TLS_ERR_ALPN        19  /* the server picked a protocol not offered   */
+#define TLS_ERR_NOCERT      20  /* TLSA_Server without a certificate and key  */
+#define TLS_ERR_BADCERT     21  /* the certificate or key will not load       */
 
 /* The longest single RFC 7301 protocol name, and the longest encoded list.
  * The IANA registry's longest name is nine bytes; 32 is where a name stops

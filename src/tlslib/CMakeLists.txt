@@ -43,6 +43,7 @@ set(TLSLIB_SOURCES
     "${CMAKE_SOURCE_DIR}/src/common/ami_random.c"
     tls_conn.c
     tls_alpn.c
+    tls_server.c
     tls_hostname.c
     tls_path.c
     tls_store.c
@@ -386,7 +387,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         tls_conn.c
         tls_hostname.c
         tls_packet.c
-        tls_path.c)
+        tls_path.c
+        tls_server.c)
 
     find_package(Threads REQUIRED)
     target_link_libraries(test_tls_close PRIVATE Threads::Threads)

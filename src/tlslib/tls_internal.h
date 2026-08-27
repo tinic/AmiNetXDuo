@@ -77,6 +77,14 @@
    allocated for an HTTP GET. */
 #define TLS_WRITE_CHUNK             2048
 
+/*
+ * A server's own certificate and key, TLSA_Certificate and TLSA_PrivateKey.
+ * A 4096-bit RSA certificate with a full subject runs to about 1.8 KB and its
+ * PKCS#1 key to about 2.4 KB; these are where a file stops being either.
+ */
+#define TLS_SERVER_DER_MAX          4096
+#define TLS_SERVER_KEY_MAX          4096
+
 #define TLS_STORE_PATH_MAX          160
 #define TLS_DEFAULT_STORE           "DEVS:Internet/certificates"
 #define TLS_DEFAULT_SESSIONS        "DEVS:Internet/tlssessions"
@@ -268,6 +276,16 @@ struct TLSLibBase
      */
     char                    tb_SessionPath[TLS_STORE_PATH_MAX];
     BOOL                    tb_SessionsLoaded;
+
+    /*
+     * Server connections holding a registered RSA private key.  The prime
+     * table in src/tls/ami_tls_crypto.c is process-wide and its entries POINT
+     * INTO each connection's key buffer, so it can only be cleared when the
+     * last of them has gone; clearing it per connection would strip the
+     * others of CRT, and not clearing it at all would leave the table
+     * pointing at memory AllocVec() has handed back.  Under tb_Lock.
+     */
+    ULONG                   tb_ServerKeys;
 };
 
 /* ----------------------------------------------------------- transport --- */
@@ -315,6 +333,7 @@ typedef struct TLSTransport
 #define TLSF_HANDSHAKEN     (1UL << 1)
 #define TLSF_EOF            (1UL << 2)
 #define TLSF_BROKEN         (1UL << 3)
+#define TLSF_SERVER         (1UL << 4)   /* TLSA_Server: accept(), not connect() */
 
 struct TLSConnection
 {
@@ -346,6 +365,14 @@ struct TLSConnection
        TLSOpen()'s caller has moved on from its tag list. */
     UBYTE                       tc_Alpn[TLS_ALPN_LIST_MAX];
     UWORD                       tc_AlpnLength;
+
+    /* TLSA_Server's identity.  The DER is parsed in place, so both buffers
+       live as long as the connection; tls_server.c owns them. */
+    NX_SECURE_X509_CERT         tc_LocalCert;
+    UCHAR                      *tc_LocalDer;
+    ULONG                       tc_LocalDerLength;
+    UCHAR                      *tc_LocalKey;
+    ULONG                       tc_LocalKeyLength;
 
     UCHAR                      *tc_Metadata;
     ULONG                       tc_MetadataSize;
@@ -503,6 +530,20 @@ LONG  tls_path_set(char *dst, ULONG size, CONST_STRPTR path);
 /* Turn TLSA_ALPN's comma-separated string into the RFC 7301 wire encoding in
    conn->tc_Alpn.  TLS_ERR_BADALPN rather than a shortened offer. */
 LONG  tls_alpn_encode(TLSConnection *conn, CONST_STRPTR list);
+
+/* --------------------------------------------------------- tls_server.c, */
+
+/*
+ * Load TLSA_Certificate and TLSA_PrivateKey and make them the session's local
+ * identity.  Called after _nx_secure_tls_session_create() and before the
+ * handshake, and only for a TLSA_Server connection.
+ */
+LONG  tls_server_identity(TLSConnection *conn, CONST_STRPTR cert_path,
+                          CONST_STRPTR key_path, ULONG key_type);
+
+/* Free the two buffers and, when this was the last server connection, clear
+   the process-wide prime table that points into them. */
+VOID  tls_server_forget(TLSConnection *conn);
 
 
 /*

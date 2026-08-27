@@ -100,14 +100,19 @@ UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
 }
 
 /*
- * The transport.  Its own behaviour is test_tls_transport.c's subject; here
- * it only has to hand back something session_start() can be given.
+ * The transport.  Its own behaviour is test_tls_transport.c's subject; here it
+ * only has to hand back something session_start() can be given -- and to
+ * record `server`, which is the whole of what puts nx_secure on its server
+ * branch (_nx_secure_tls_session_start() reads nx_tcp_socket_client_type).
  */
+static int h_transport_server = -1;
+
 VOID tls_transport_open(TLSTransport *transport, APTR socket_base, LONG fd,
                         NX_PACKET_POOL *pool, BOOL server, BOOL ipv6)
 {
-    (VOID)socket_base; (VOID)fd; (VOID)pool; (VOID)server; (VOID)ipv6;
+    (VOID)socket_base; (VOID)fd; (VOID)pool; (VOID)ipv6;
     memset(transport, 0, sizeof(*transport));
+    h_transport_server = (server != FALSE);
 }
 
 NX_TCP_SOCKET *tls_transport_socket(TLSTransport *transport)
@@ -162,6 +167,67 @@ const USHORT ami_crypto_ecc_offered_groups[] = { 0 };
 const NX_CRYPTO_METHOD *ami_crypto_ecc_offered_curves[] = { NULL };
 const UINT ami_crypto_ecc_offered_groups_size = 1;
 
+/* ------------------------------------------------ the server identity --- */
+
+static int    h_cert_init_calls;
+static int    h_cert_add_calls;
+static int    h_key_reset_calls;
+static UINT   h_cert_key_type;
+static USHORT h_cert_der_length;
+static USHORT h_cert_key_length;
+
+UINT _nx_secure_x509_certificate_initialize(NX_SECURE_X509_CERT *certificate,
+                                            UCHAR *data, USHORT length,
+                                            UCHAR *raw, USHORT raw_size,
+                                            const UCHAR *key, USHORT key_length,
+                                            UINT key_type)
+{
+    (VOID)certificate; (VOID)data; (VOID)key;
+
+    /* The DER is parsed in place, so a raw buffer here would mean the
+       certificate outliving the bytes it points at. */
+    CHECK(raw == NULL);
+    CHECK(raw_size == 0);
+
+    h_cert_init_calls++;
+    h_cert_der_length = length;
+    h_cert_key_length = key_length;
+    h_cert_key_type   = key_type;
+
+    return NX_SUCCESS;
+}
+
+UINT ami_tls_local_certificate_add(NX_SECURE_TLS_SESSION *session,
+                                   NX_SECURE_X509_CERT *certificate)
+{
+    (VOID)session; (VOID)certificate;
+    h_cert_add_calls++;
+    return NX_SUCCESS;
+}
+
+VOID ami_tls_rsa_key_reset(VOID)
+{
+    h_key_reset_calls++;
+}
+
+/* dos.library, for the two DER files tls_server.c reads. */
+BPTR Open(STRPTR name, LONG mode)
+{
+    (VOID)mode;
+    return (BPTR)fopen((const char *)name, "rb");
+}
+
+VOID Close(BPTR fh)
+{
+    if (fh != (BPTR)0)
+        fclose((FILE *)fh);
+}
+
+LONG Read(BPTR fh, APTR buffer, LONG length)
+{
+    return (LONG)fread(buffer, 1, (size_t)length, (FILE *)fh);
+}
+
 UINT ami_tls_crypto_initialize(VOID) { return NX_SUCCESS; }
 BOOL ami_tls_timer_open(VOID) { return TRUE; }
 ULONG ami_tls_eclock(VOID) { return 0; }
@@ -177,6 +243,10 @@ UINT _nx_secure_tls_metadata_size_calculate(
     return NX_SUCCESS;
 }
 
+/* Off for the ordering tests, which want TLSOpen() to stop right here; on for
+   the server tests, which are about what happens after it. */
+static int h_create_ok;
+
 UINT _nx_secure_tls_session_create(NX_SECURE_TLS_SESSION *session,
                                    const NX_SECURE_TLS_CRYPTO *crypto,
                                    VOID *metadata, ULONG metadata_size)
@@ -186,7 +256,7 @@ UINT _nx_secure_tls_session_create(NX_SECURE_TLS_SESSION *session,
     (VOID)metadata;
     (VOID)metadata_size;
     CHECK(h_depth == 1);
-    return NX_INVALID_PARAMETERS;
+    return h_create_ok ? NX_SUCCESS : NX_INVALID_PARAMETERS;
 }
 
 UINT _nx_secure_tls_ecc_initialize(NX_SECURE_TLS_SESSION *session,
@@ -605,6 +675,175 @@ static VOID h_test_waitselect_wide_descriptor(VOID)
     CHECK(except_words[10] == 0x55555555UL);
 }
 
+/* ------------------------------------------------------ server mode --- */
+
+/*
+ * TLSA_Server, the tag that makes nx_secure's server handshake reachable.
+ *
+ * The identity loader is driven directly rather than through TLSOpenA.  A tag
+ * carries its data in a ULONG, which is a pointer on the target and half of
+ * one on this host, so a path cannot travel through a tag list here; the tag
+ * plumbing that CAN be checked without one is below, and
+ * test_tls_transport.c's server check is the other half -- that a server
+ * transport presents the client_type nx_secure branches on.
+ */
+
+static void h_write_file(const char *path, UBYTE lead, size_t length)
+{
+    FILE  *f = fopen(path, "wb");
+    size_t i;
+
+    CHECK(f != NULL);
+    if (f == NULL)
+        return;
+
+    fputc(lead, f);
+    for (i = 1; i < length; i++)
+        fputc((int)(i & 0xFF), f);
+    fclose(f);
+}
+
+static VOID h_test_server_identity(struct TLSLibBase *base)
+{
+    const char    *cert = "test_tls_close_cert.der";
+    const char    *key  = "test_tls_close_key.der";
+    const char    *pem  = "test_tls_close_cert.pem";
+    const char    *big  = "test_tls_close_big.der";
+    TLSConnection *conn;
+    TLSConnection *second;
+
+    printf("tls_server: the server identity loads, or is refused whole\n");
+
+    h_write_file(cert, 0x30, 512);
+    h_write_file(key, 0x30, 300);
+
+    conn = (TLSConnection *)calloc(1, sizeof(*conn));
+    CHECK(conn != NULL);
+    if (conn == NULL)
+        return;
+    conn->tc_Base = base;
+
+    h_cert_init_calls = 0;
+    h_cert_add_calls  = 0;
+    h_key_reset_calls = 0;
+    base->tb_ServerKeys = 0;
+
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)cert, (CONST_STRPTR)key,
+                              TLS_KEY_RSA) == TLS_OK);
+    CHECK(h_cert_init_calls == 1);
+    CHECK(h_cert_add_calls == 1);
+    CHECK(h_cert_der_length == 512);
+    CHECK(h_cert_key_length == 300);
+    CHECK(h_cert_key_type == NX_SECURE_X509_KEY_TYPE_RSA_PKCS1_DER);
+    CHECK(conn->tc_LocalDerLength == 512);
+    CHECK(conn->tc_LocalKeyLength == 300);
+    CHECK(base->tb_ServerKeys == 1);
+
+    /*
+     * The prime table in ami_tls_crypto.c points into the key buffer, and it
+     * is process-wide.  A second server must not have it cleared out from
+     * under it when the first one closes, and the last one out must clear it
+     * or it points at freed memory.
+     */
+    second = (TLSConnection *)calloc(1, sizeof(*second));
+    CHECK(second != NULL);
+    if (second != NULL)
+    {
+        second->tc_Base = base;
+        CHECK(tls_server_identity(second, (CONST_STRPTR)cert, (CONST_STRPTR)key,
+                                  TLS_KEY_RSA) == TLS_OK);
+        CHECK(base->tb_ServerKeys == 2);
+
+        tls_server_forget(conn);
+        CHECK(base->tb_ServerKeys == 1);
+        CHECK(h_key_reset_calls == 0);
+
+        tls_server_forget(second);
+        CHECK(base->tb_ServerKeys == 0);
+        CHECK(h_key_reset_calls == 1);
+
+        /* Idempotent: TLSClose() calls it and so does a failed TLSOpen(). */
+        tls_server_forget(second);
+        CHECK(h_key_reset_calls == 1);
+        CHECK(second->tc_LocalDer == NULL);
+        CHECK(second->tc_LocalKey == NULL);
+
+        free(second);
+    }
+
+    /* TLS_KEY_EC must reach nx_secure as the SEC1 type: handing an EC key to
+       the PKCS#1 parser is a certificate that loads and a signature that is
+       never valid. */
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)cert, (CONST_STRPTR)key,
+                              TLS_KEY_EC) == TLS_OK);
+    CHECK(h_cert_key_type == NX_SECURE_X509_KEY_TYPE_EC_DER);
+    tls_server_forget(conn);
+
+    /* An unknown key type is refused rather than guessed at. */
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)cert, (CONST_STRPTR)key,
+                              99UL) == TLS_ERR_BADCERT);
+
+    /* No identity at all, and a half one. */
+    CHECK(tls_server_identity(conn, NULL, (CONST_STRPTR)key, TLS_KEY_RSA) ==
+          TLS_ERR_NOCERT);
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)cert, (CONST_STRPTR)"",
+                              TLS_KEY_RSA) == TLS_ERR_NOCERT);
+
+    /* A file that is not there. */
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)cert,
+                              (CONST_STRPTR)"no-such-key.der",
+                              TLS_KEY_RSA) == TLS_ERR_BADCERT);
+    tls_server_forget(conn);
+
+    /* PEM, which is what somebody will hand it first.  Refused on the leading
+       byte rather than three layers down in an X.509 parse. */
+    h_write_file(pem, (UBYTE)'-', 64);
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)pem, (CONST_STRPTR)key,
+                              TLS_KEY_RSA) == TLS_ERR_BADCERT);
+    tls_server_forget(conn);
+
+    /* One byte past the ceiling is refused, never read short: half a DER
+       structure parses as a different one. */
+    h_write_file(big, 0x30, TLS_SERVER_DER_MAX + 1);
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)big, (CONST_STRPTR)key,
+                              TLS_KEY_RSA) == TLS_ERR_BADCERT);
+    tls_server_forget(conn);
+
+    /* Exactly at the ceiling still loads, so the refusal above is the length
+       and not the loop. */
+    h_write_file(big, 0x30, TLS_SERVER_DER_MAX);
+    CHECK(tls_server_identity(conn, (CONST_STRPTR)big, (CONST_STRPTR)key,
+                              TLS_KEY_RSA) == TLS_OK);
+    CHECK(h_cert_der_length == TLS_SERVER_DER_MAX);
+    tls_server_forget(conn);
+
+    free(conn);
+
+    remove(cert);
+    remove(key);
+    remove(pem);
+    remove(big);
+}
+
+static VOID h_test_server_needs_identity(struct TLSLibBase *base)
+{
+    struct TagItem tags[] = {
+        { TLSA_Server, 1 },
+        { TAG_DONE,    0 }
+    };
+
+    printf("tls_open: TLSA_Server without a certificate is refused\n");
+
+    base->tb_CryptoReady = TRUE;
+    h_transport_server = -1;
+
+    /* Before any session exists, and before the transport: a server with no
+       identity has nothing to be a server with, and finding that out at the
+       handshake would mean a ClientHello answered with an alert. */
+    CHECK(tls_TLSOpenA((APTR)base, tags, 5, base) == NULL);
+    CHECK(h_transport_server == -1);
+}
+
 static VOID h_test_open_create_serialized(struct TLSLibBase *base)
 {
     struct TagItem tags[] = {
@@ -625,11 +864,21 @@ static VOID h_test_open_create_serialized(struct TLSLibBase *base)
     CHECK(h_enter_calls == enters + 1);
     CHECK(h_leave_calls == leaves + 1);
     CHECK(h_depth == 0);
+
+    /* And a connection with no TLSA_Server is a client to the transport, so
+       nx_secure takes its client branch.  test_tls_transport.c checks the
+       other end of that: which nx_tcp_socket_client_type each one produces. */
+    CHECK(h_transport_server == 0);
 }
 
 int main(void)
 {
     struct TLSLibBase *base;
+
+    /* Unbuffered: a fault in a stubbed vector loses a buffered line, and the
+       line is what says which check was running. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     TLSConnection     *conn;
 
     printf("tls_close: session deletion stays inside the shared-state lock\n");
@@ -660,6 +909,8 @@ int main(void)
     h_test_waitselect_encrypted_queue();
     h_test_waitselect_wide_descriptor();
     h_test_open_create_serialized(base);
+    h_test_server_needs_identity(base);
+    h_test_server_identity(base);
 
     free(base);
 

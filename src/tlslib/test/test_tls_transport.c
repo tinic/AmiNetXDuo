@@ -323,6 +323,48 @@ static void test_send_failure_keeps_packet(void)
     rig_close(&rig);
 }
 
+static void test_socket_type(void)
+{
+    Rig rig;
+
+    printf("tls_transport: client and server present the client_type "
+           "nx_secure branches on\n");
+
+    if (!rig_open(&rig))
+    {
+        printf("  SKIP: no socketpair\n");
+        return;
+    }
+
+    /*
+     * _nx_secure_tls_session_start() reads nx_tcp_socket_client_type and
+     * NOTHING else to decide whether this session runs the client handshake
+     * or the server one, so this field is the whole of what TLSA_Server does.
+     * Getting it backwards is a server that sends a ClientHello.
+     */
+    tls_transport_open(&rig.transport, (APTR)&rig, rig.fds[0], &rig.pool,
+                       FALSE, FALSE);
+    CHECK(rig.transport.tt_Socket.nx_tcp_socket_client_type == NX_TRUE);
+    CHECK(rig.transport.tt_Socket.nx_tcp_socket_connect_ip.nxd_ip_version ==
+          NX_IP_VERSION_V4);
+
+    tls_transport_open(&rig.transport, (APTR)&rig, rig.fds[0], &rig.pool,
+                       TRUE, TRUE);
+    CHECK(rig.transport.tt_Socket.nx_tcp_socket_client_type == NX_FALSE);
+    CHECK(rig.transport.tt_Socket.nx_tcp_socket_connect_ip.nxd_ip_version ==
+          NX_IP_VERSION_V6);
+
+    /* And no NX_IP behind it, which every read of it in nx_secure is guarded
+       on: there is no NetX Duo instance in this library to point at. */
+    CHECK(rig.transport.tt_Socket.nx_tcp_socket_ip_ptr == NX_NULL);
+
+    /* The address nx_secure is handed is the transport, so the two entry
+       points can cast it back. */
+    CHECK((VOID *)tls_transport_socket(&rig.transport) == (VOID *)&rig.transport);
+
+    rig_close(&rig);
+}
+
 static void test_forbid_balance(void)
 {
     TX_MUTEX mutex;
@@ -367,6 +409,7 @@ int main(void)
     test_receive_hangup();
     test_send_chain();
     test_send_failure_keeps_packet();
+    test_socket_type();
     test_forbid_balance();
 
     printf("%d checks, %d failure(s)\n", checks, failures);
