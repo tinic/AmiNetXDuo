@@ -2145,6 +2145,18 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     return TRUE;
 }
 
+BOOL http_fb_session_geometry(UWORD *w, UWORD *h, UWORD *depth)
+{
+    if (!fb_live)
+        return FALSE;
+
+    if (w != NULL)     *w = fb_geom.width;
+    if (h != NULL)     *h = fb_geom.height;
+    if (depth != NULL) *depth = fb_geom.depth;
+
+    return TRUE;
+}
+
 /* ACTION_FLUSH to every mounted volume, and then the machine goes.  The ports
    are collected under the DosList lock and the packets sent with it given
    back: DoPkt() waits, and the handler can want the DosList to answer. */

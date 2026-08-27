@@ -772,6 +772,21 @@ static VOID httpd_log(const HttpConn *c, const char *fmt, LONG a, LONG b)
     (VOID)Flush(Output());
 }
 
+/* Not behind -v: this is the successful-session counterpart of the
+   unconditional failure line.  The geometry is the one http_fb_start()
+   selected now, not the possibly stale screen from the startup banner. */
+static VOID httpd_log_console_start(const HttpConn *c,
+                                    UWORD width, UWORD height, UWORD depth)
+{
+    if (!httpd_may_log())
+        return;
+
+    tool_printf("[%ld] console started: frontmost screen %ldx%ldx%ld\n",
+                (LONG)(c - httpd_conn), (LONG)width, (LONG)height,
+                (LONG)depth);
+    (VOID)Flush(Output());
+}
+
 /* Every line the client sent, in the order it sent it. */
 static VOID httpd_trace_head(const HttpConn *c, const UBYTE *head, ULONG len)
 {
@@ -6414,6 +6429,13 @@ static BOOL httpd_writable(HttpConn *c)
                 httpd_log(c, "console did not start: %s",
                           (LONG)http_fb_fault(), 0);
                 return FALSE;
+            }
+
+            {
+                UWORD width, height, depth;
+
+                if (http_fb_session_geometry(&width, &height, &depth))
+                    httpd_log_console_start(c, width, height, depth);
             }
 
             c->state = CONN_FB;
