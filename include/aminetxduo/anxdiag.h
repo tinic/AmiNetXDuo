@@ -120,6 +120,10 @@ extern "C" {
 #define ANXDIAG_PC_MFC         75   /* CISTPL_LONGLINK_MFC: a multifunction
                                        card, whose per-function CIS chains
                                        CopyTuple() cannot follow              */
+#define ANXDIAG_CR_RETRY       76   /* the command register did not read back
+                                       as a reset chip, so the reset port was
+                                       strobed again through the word path and
+                                       the question asked once more           */
 #define ANXDIAG_CLOCK          69   /* iterations of a bare spin per raster
                                        line, measured against the beam once at
                                        claim; 0 = no readable beam            */

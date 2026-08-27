@@ -258,6 +258,14 @@ static VOID cnd_step(const AnxDiagStep *st)
         say("  Odd-numbered registers did not read as bytes, so the\n"
             "  word-read path some Fast-Ethernet clones need was tried.\n");
         return;
+    case ANXDIAG_CR_RETRY:
+        say("  The chip did not come out of reset, and the reset port is an\n"
+            "  odd-numbered register.  A card that answers only 16-bit I/O\n"
+            "  cycles never sees the byte read that strobes it, so the port\n"
+            "  was strobed again through the word-read path and the command\n"
+            "  register was read a second time.  The reading below is that\n"
+            "  second one.\n");
+        return;
     case ANXDIAG_ODD_PLAIN:
     case ANXDIAG_ODD_WORD:
         say("  Odd registers read as %s: ISR $%02lx, and $5a/$a5 written to\n"
