@@ -220,7 +220,7 @@ tests/tls/run-hangup.sh            : manual : bridged, peer.  Can a rude peer ta
 
 # Reasons other than "no home".
 
-tests/tools/run-nettools.sh        : manual : peer. nc, telnet, tftp and whois against tests/tools/netpeer.py, with a port forwarded back in
+tests/tools/run-nettools.sh        : manual : bridged, peer, GREEN 2026-08-27.  nc, telnet, traceroute, tftp and whois against tests/tools/netpeer.py, which runs on AMINETXDUO_NETTOOLS_PEER now rather than on the emulator host.  The inbound arm is real for the first time: it needed `uae_slirp_redir`, an FS-UAE option Amiberry has never had, so listen/accept was only ever driven guest-to-guest over 127.0.0.1.  The guest takes a static address, checked free on the segment before the boot, so netpeer.py's dialer knows where to knock, and the dialer's log carries the reverse direction -- `the Amiga sent back 21 bytes: hello from the amiga` -- which no guest-side file can evidence
 tests/tools/run-family.sh          : manual : peer, bridged. -4 and -6 on a guest that really has both; SLIRP carries no IPv6
 tests/tools/run-multiaddr.sh       : manual : bridged. a dual-stack name whose IPv6 is a blackhole is still fetched, and how long each case takes
 tests/tools/run-mdns.sh            : manual : peer, bridged. the responder watched from another machine
