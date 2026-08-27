@@ -130,19 +130,25 @@ BYTE ami_green_checked_waitio(struct IORequest *request);
 struct Message *ami_green_checked_waitport(struct MsgPort *port);
 #endif
 static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
+
+static VOID bt_wait_for(volatile UWORD *flag, const char *what);
+static VOID bt_reap(BtTask *bt);
+
+/* The reaper case and everything only it uses.  A green thread has no native
+   Exec task to become a reaper zombie, so the realm build neither calls it nor
+   compiles it; see bt_test_no_signal_reap() and its call site. */
+#ifndef AMINETXDUO_GREEN_REALM
 static TX_THREAD bt_reap_owner;
 static TX_THREAD bt_reap_target;
 static TX_THREAD bt_overlap_probe;
 static volatile ULONG bt_reap_entry_calls;
-
-static VOID bt_wait_for(volatile UWORD *flag, const char *what);
-static VOID bt_reap(BtTask *bt);
 
 static VOID bt_reap_target_entry(ULONG input)
 {
     (VOID)input;
     bt_reap_entry_calls++;
 }
+#endif /* !AMINETXDUO_GREEN_REALM */
 
 static volatile ULONG bt_mark;
 
@@ -723,7 +729,9 @@ static VOID bt_reap(BtTask *bt)
 }
 
 /* The target's stack is only safe to release once the live-zombie count is back
-   at its baseline. */
+   at its baseline.  Built only where it is called: this case exhausts a native
+   thread's handshake signals and a green thread has none. */
+#ifndef AMINETXDUO_GREEN_REALM
 static VOID bt_test_no_signal_reap(VOID)
 {
     BYTE  held[32];
@@ -861,6 +869,7 @@ static VOID bt_test_no_signal_reap(VOID)
         FreeMem(arena, arena_size);
     }
 }
+#endif /* !AMINETXDUO_GREEN_REALM */
 
 int main(int argc, char **argv)
 {

@@ -348,6 +348,31 @@ static VOID show_budget_holds(const NetStatusRxBudget *b)
 }
 
 /*
+ * The green realm's scheduling census.  All zero from a baton build, so the
+ * lines only appear when there is a realm to report on -- and the library
+ * fills them whether or not it was built with the receive probe, so this is
+ * the one thing in the receive-budget section a shipping build can answer.
+ */
+static VOID show_green_stats(const NetStatusRxBudget *b)
+{
+    if (b->nrb_GreenSwitches == 0 && b->nrb_GreenIdleWaits == 0 &&
+        b->nrb_GreenWaitSlow == 0)
+        return;
+
+    tool_printf("\tgreen:  %lu switches, %lu external handoffs, "
+                "%lu idle waits\n",
+                b->nrb_GreenSwitches, b->nrb_GreenExternal,
+                b->nrb_GreenIdleWaits);
+    tool_printf("\tgreen:  %lu waits latched, %lu slept, %lu STRAY\n",
+                b->nrb_GreenWaitFast, b->nrb_GreenWaitSlow,
+                b->nrb_GreenStray);
+    tool_printf("\tgreen:  %lu fast takes, %lu gated brackets, "
+                "%lu fell back, %lu of 16 realm signal bits out\n",
+                b->nrb_GateFast, b->nrb_GateCalls,
+                b->nrb_GateFallback, b->nrb_RealmSigBits);
+}
+
+/*
  * The receive step budget, when the library was built to keep one
  * (AMINETXDUO_RXPROBE). Any library answers the selector; only an instrumented
  * one has counts.
@@ -368,6 +393,14 @@ static VOID show_budget(VOID)
     b = (NetStatusRxBudget *)(buf + sizeof(NetStatusHeader));
 
     tool_printf("\nreceive budget:\n");
+
+    /* BEFORE the not-instrumented return below, not after it.  The twelve
+       timed legs belong to a probe build; the green census the library fills
+       in every build.  Printed last, as it was, the census sat behind that
+       return, so the one question a shipping realm build could have answered
+       -- where its eight to ten per cent of write goes -- had no instrument
+       anyone could reach. */
+    show_green_stats(b);
 
     if (b->nrb_Drain.nbl_Count == 0 && b->nrb_Settle.nbl_Count == 0 &&
         b->nrb_Fetch.nbl_Count == 0)
@@ -409,24 +442,6 @@ static VOID show_budget(VOID)
        completed in place against packets the blocking dequeue fetched. */
     tool_printf("\tdirect: %lu completed on the IP thread, %lu classic dequeues\n",
                 b->nrb_RxDirect, b->nrb_RxFallback);
-
-    /* All zero from a baton build, so the lines only appear when there is a
-       realm to report on. */
-    if (b->nrb_GreenSwitches != 0 || b->nrb_GreenIdleWaits != 0 ||
-        b->nrb_GreenWaitSlow != 0)
-    {
-        tool_printf("\tgreen:  %lu switches, %lu external handoffs, "
-                    "%lu idle waits\n",
-                    b->nrb_GreenSwitches, b->nrb_GreenExternal,
-                    b->nrb_GreenIdleWaits);
-        tool_printf("\tgreen:  %lu waits latched, %lu slept, %lu STRAY\n",
-                    b->nrb_GreenWaitFast, b->nrb_GreenWaitSlow,
-                    b->nrb_GreenStray);
-        tool_printf("\tgreen:  %lu fast takes, %lu gated brackets, "
-                    "%lu fell back, %lu of 16 realm signal bits out\n",
-                    b->nrb_GateFast, b->nrb_GateCalls,
-                    b->nrb_GateFallback, b->nrb_RealmSigBits);
-    }
 
     show_budget_holds(b);
 }
