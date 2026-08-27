@@ -251,8 +251,13 @@ PEER_PID=""
 
 if [ "$WINUAE" = "1" ]; then
     HD="$ROOT/build/winuae-testhd-$TAG"
+    ENFORCER_LOG=""
+elif [ "$ENFORCE" = "1" ]; then
+    HD="$ROOT/build/testhd-$TAG"
+    ENFORCER_LOG="$ROOT/build/serial-$TAG.log"
 else
     HD="$ROOT/build/amiberry-testhd-$TAG"
+    ENFORCER_LOG=""
 fi
 
 echo
@@ -297,9 +302,10 @@ for name, n in sorted(want.items()):
 print("   %d of %d verified" % (len(want) - bad, len(want)))
 PY
 
-if grep -qE "^(LONG|WORD|BYTE)-(READ|WRITE)" "$ROOT/build/serial-$TAG.log" 2>/dev/null; then
+if [ -n "$ENFORCER_LOG" ] &&
+   grep -qE "^(LONG|WORD|BYTE)-(READ|WRITE)" "$ENFORCER_LOG" 2>/dev/null; then
     echo "-- Enforcer hits"
-    grep -E "^(LONG|WORD|BYTE)-(READ|WRITE)" "$ROOT/build/serial-$TAG.log" | head -20
+    grep -E "^(LONG|WORD|BYTE)-(READ|WRITE)" "$ENFORCER_LOG" | head -20
 fi
 
 echo
