@@ -1696,6 +1696,25 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    # BESIDE cpuspeed, and it asks a different question of the same machines.
+    # cpuspeed asks whether the bring-up survives a faster CPU; this asks HOW
+    # MUCH faster the emulator can actually make it, in the unit the delay code
+    # is written in -- spins of a bare loop per raster line.  The answer is the
+    # ceiling, and the ceiling is what says which claims about an accelerated
+    # Amiga a run here can carry and which stay in the host tier.
+    rc=0
+    "$ROOT/tests/tools/run-gayleratio.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  $(sed -n 's/^gayleratio_ceiling=/spins per line, ceiling /p' \
+                 "$ROOT/build/gayleratio-results.txt" 2>/dev/null | head -1)\
+the PCMCIA card claimed at every rate and the measurement rose with it" ;;
+        2) skip "gayleratio: the rig refused it before any arm booted" ;;
+        *) fail "gayleratio: either the card stopped claiming as the CPU rate\
+ rose, which is the defect src/netdev/netdev_clock.c exists to prevent, or the\
+ measurement stopped tracking the rate -- the table says which"
+           bad=$((bad + 1)) ;;
+    esac
+
     rc=0
     "$ROOT/tests/tools/run-bigmem.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
