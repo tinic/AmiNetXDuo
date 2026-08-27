@@ -30,6 +30,10 @@ MODEL=A1200
 CPU=""
 CLOCK=""
 BOARD=""
+# EXPANDED AS ${BOARDS[@]+...} EVERYWHERE BELOW.  Bash before 4.4 takes
+# "${empty[@]}" as an unbound variable under set -u and takes the run out with
+# a message about a name nobody wrote, and a run with no -N at all -- which is
+# most of the emulator tier -- is exactly that case.
 BOARDS=()
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
@@ -58,8 +62,8 @@ shift $((OPTIND - 1))
 # wins: one card in the machine, silently, and an arm that believed it asked
 # for two.  Two of a kind is not reachable from here and saying so is the whole
 # of the fix.
-for _i in "${!BOARDS[@]}"; do
-    for _j in "${!BOARDS[@]}"; do
+for _i in ${BOARDS[@]+"${!BOARDS[@]}"}; do
+    for _j in ${BOARDS[@]+"${!BOARDS[@]}"}; do
         [ "$_i" -lt "$_j" ] || continue
         [ "${BOARDS[$_i]}" != "${BOARDS[$_j]}" ] || {
             echo "-N ${BOARDS[$_i]} was given twice.  Amiberry keeps one" >&2
@@ -181,7 +185,7 @@ ne2000_pcmcia needs a 68020 or better; this run is ${CPU:-the $MODEL default}.
 EOF
     exit 2
 }
-for _b in "${BOARDS[@]}"; do
+for _b in ${BOARDS[@]+"${BOARDS[@]}"}; do
     pcmcia_cpu_check "$_b"
 done
 
@@ -328,7 +332,7 @@ MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
 # run at a time on a host, and the second is refused with a sentence that says
 # what to do.  SLIRP runs are untouched -- each has a NAT of its own and no
 # shared segment to poison.
-for _b in "${BOARDS[@]}"; do
+for _b in ${BOARDS[@]+"${BOARDS[@]}"}; do
     emu_board_mac_honoured "$_b" || _macless="$_b"
 done
 if [ -n "${_macless:-}" ]; then
@@ -433,7 +437,7 @@ EOF
 # windows collide with 8 MB of Zorro II Fast RAM whether or not there is a
 # Zorro card beside it.
 FASTMEM=8
-for _b in "${BOARDS[@]}"; do
+for _b in ${BOARDS[@]+"${BOARDS[@]}"}; do
     _f=$(emu_board_fastmem "$_b" 8)
     [ "$_f" -ge "$FASTMEM" ] || FASTMEM="$_f"
 done
@@ -508,7 +512,7 @@ if [ -n "$CLOCK" ]; then
     echo "==> CPU clock: multiplier $MULT, nominally $((MULT * 327 / 100)) MHz"
 fi
 _i=0
-for _b in "${BOARDS[@]}"; do
+for _b in ${BOARDS[@]+"${BOARDS[@]}"}; do
     board_lines "$_b" "$(board_mac "$_i")" >> "$CFG"
     _i=$((_i + 1))
 done
@@ -521,7 +525,7 @@ if [ -n "${AMINETXDUO_AMIBERRY_EXTRA:-}" ]; then
 fi
 
 _i=0
-for _b in "${BOARDS[@]}"; do
+for _b in ${BOARDS[@]+"${BOARDS[@]}"}; do
     echo "==> board$_i=$_b backend=$BACKEND mac=$(board_mac "$_i")"
     _i=$((_i + 1))
 done
