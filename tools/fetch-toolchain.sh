@@ -15,10 +15,12 @@
 #   bebbo's amiga-gcc.  tools/build-toolchain.sh is that build, pinned to exact
 #   commits; this script downloads what it produced.
 #
-#   BINUTILS 2.39 IS NOT AN OVERSIGHT.  2.46 cannot assemble GCC 16.2's own
-#   output -- it forces the MIT-syntax pseudo-branches to a byte displacement
-#   and rejects thousands of them -- and its `size` does not recognise some of
-#   our objects, which costs three targets their strip step.  The pairing is
+#   BINUTILS 2.39 IS NOT AN OVERSIGHT.  2.46's gas assembles GCC 16.2's output
+#   to the same bytes, and `size` reads every object here, but its objcopy lost
+#   bebbo's TARGET_AMIGA carve-out in copy_relocations_in_section(): `strip`
+#   then writes a hunk executable with no HUNK_RELOC32 at all, exit 0 and no
+#   diagnostic, and LoadSeg() relocates nothing.  tools/patches/binutils/ does
+#   not apply to 2.46 either, so -flto does not link.  The pairing is
 #   deliberate.
 #
 #   NDK 3.9, NOT NDK 3.2.  Confusingly, 3.2 is the NEWER of the two: it is
