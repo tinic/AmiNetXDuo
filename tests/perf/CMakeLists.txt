@@ -21,6 +21,20 @@
 #
 # SPDX-License-Identifier: MIT
 
+# stallgaps.py's ACK-clock attribution: whether the acknowledgement that ended
+# a progress gap was the thing that ended it.  Pure arithmetic over synthetic
+# segments, so it needs no capture, no emulator and no network, and it is the
+# only thing in the tree that has an opinion about what those numbers mean.
+# Recovered with the functions it covers; both were lost in a rewrite.
+if(NOT CMAKE_CROSSCOMPILING)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME perf_stallgaps
+                 COMMAND "${Python3_EXECUTABLE}"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_stallgaps.py")
+    endif()
+endif()
+
 # perf_test defines _nx_ip_checksum_compute() itself, so it can only be built
 # when the vendored object is out of the core, i.e. when the replacement is
 # switched on.  With -DAMINETXDUO_NET68K_CHECKSUM=OFF the two definitions would

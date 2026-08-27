@@ -268,4 +268,21 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event);
 VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io);
 BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io);
 
+/* netdev_io.c.  Exec calls BeginIO and AbortIO with the device base in a6 and
+   the request in a1; no host compiler can honour that, and the host tier
+   enters both of them the way Exec does, so the annotation is m68k-only and
+   the source is the one that ships.  See test/test_netdev_beginio.c. */
+#ifdef __mc68000__
+#define NETDEV_REG_A6   __asm("a6")
+#define NETDEV_REG_A1   __asm("a1")
+#else
+#define NETDEV_REG_A6
+#define NETDEV_REG_A1
+#endif
+
+VOID netdev_begin_io(register struct Device     *dev NETDEV_REG_A6,
+                     register struct IOSana2Req *io  NETDEV_REG_A1);
+LONG netdev_abort_io(register struct Device     *dev NETDEV_REG_A6,
+                     register struct IOSana2Req *io  NETDEV_REG_A1);
+
 #endif /* AMINETXDUO_NETDEV_INTERNAL_H */

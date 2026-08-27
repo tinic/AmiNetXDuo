@@ -411,23 +411,9 @@ static ULONG ami_ns_pool_packets(VOID)
 
     divisor = ami_config_pool_divisor((ULONG)AMI_POOL_MEM_DIVISOR);
 
-    packets = (avail / divisor) / ami_ns_packet_stride();
-
-    if (packets < (ULONG)AMI_POOL_WORKING_PACKETS)
-    {
-        ULONG afford = (avail / (ULONG)AMI_POOL_MEM_DIVISOR_LOW) /
-                       ami_ns_packet_stride();
-
-        if (afford > (ULONG)AMI_POOL_WORKING_PACKETS)
-            afford = (ULONG)AMI_POOL_WORKING_PACKETS;
-        if (afford > packets)
-            packets = afford;
-    }
-
-    if (packets < (ULONG)AMI_POOL_MIN_PACKETS)
-        packets = (ULONG)AMI_POOL_MIN_PACKETS;
-    if (packets > (ULONG)AMI_POOL_MAX_PACKETS)
-        packets = (ULONG)AMI_POOL_MAX_PACKETS;
+    /* The arithmetic is in netstack_pool.c, where the host tier can drive it
+       over every machine size: test_pool_window_host.c. */
+    packets = ami_ns_pool_packets_for(avail, divisor, ami_ns_packet_stride());
 
     AMI_INFO("netstack: %lu bytes free / %lu, pool = %lu x %lu",
              (unsigned long)avail, (unsigned long)divisor,

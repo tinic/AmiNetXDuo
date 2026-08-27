@@ -214,7 +214,7 @@ MDNS=YES
 EOF
 
 # No name servers and no domain: DHCP supplies both.  Never the file under
-# tests/netstack, which names a SLIRP guest's 10.0.2.3.
+# tests/netstack, whose "domain localdomain" exists on no real network.
 : > "$HD/Devs/Internet/name_resolution"
 [ -z "$NAME" ] || echo "hostname $NAME" >> "$HD/Devs/Internet/name_resolution"
 

@@ -157,7 +157,10 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=117
+# 116, plus netdev_ne2000, pool_window, netdev_beginio and perf_stallgaps.
+# Two branches raised this against the same base on the same day; the merge
+# is the SUM of what each added, not the larger of the two numbers.
+HOST_TESTS_EXPECTED=120
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -229,6 +232,14 @@ skip() { SKIPPED+=("$1"); printf '\033[33m-- SKIPPED: %s\033[0m\n' "$1" >&2; }
 # ------------------------------------------------------------ submodules ----
 
 stage_submodules() {
+    # .git/modules/<name>/config keeps the url it was cloned with, so a
+    # checkout made before .gitmodules moved third_party/threadx from
+    # eclipse-threadx to our fork still fetches upstream, and every pin of
+    # ours reads as an object no ref reaches.  Cheap, offline, idempotent;
+    # unconditional because the headers being present is exactly the case
+    # where nothing else would ever fix it.
+    git submodule sync --recursive > /dev/null 2>&1 || true
+
     if [ ! -f third_party/threadx/common/inc/tx_api.h ] ||
        [ ! -f third_party/netxduo/common/inc/nx_api.h ]; then
         hr "submodules"

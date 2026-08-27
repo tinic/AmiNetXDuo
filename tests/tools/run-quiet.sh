@@ -86,9 +86,8 @@ CONFIGURE=DHCP
 STATE=up
 IFEOF
 
-# Prepended, not written over: the staged name_resolution's nameserver line
-# is the one the rest of the tree tuned (tests/netstack/devs), and replacing
-# it with the gateway costs thirty seconds a lookup on SLIRP.
+# Prepended, not written over: the staged name_resolution (tests/netstack/devs)
+# is what the rest of the tree uses, and this test is about HOSTNAME alone.
 printf 'HOSTNAME anxdquiet\n' > "$STAGE/devs/Internet/name_resolution.new"
 cat "$STAGE/devs/Internet/name_resolution" >> "$STAGE/devs/Internet/name_resolution.new"
 mv "$STAGE/devs/Internet/name_resolution.new" "$STAGE/devs/Internet/name_resolution"

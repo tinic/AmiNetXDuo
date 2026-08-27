@@ -172,9 +172,9 @@ typedef struct
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
 
-#ifndef BSD_TCP_WINDOW
-#define BSD_TCP_WINDOW        8192
-#endif
+/* BSD_TCP_WINDOW, BSD_TCP_WINDOW_POOL_SHARE and BSD_TCP_WINDOW_CEILING are
+   in bsdsocket_window.h, with the derivation that reads them. */
+#include "bsdsocket_window.h"
 
 #define BSD_TCP_RX_MSS_REF      1460
 #define BSD_TCP_RX_QUEUE_SLACK  4
@@ -185,25 +185,6 @@ typedef struct
 #define BSD_UDP_QUEUE_MIN       8
 #define BSD_UDP_QUEUE_CEILING   64
 #define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
-
-#ifndef BSD_TCP_WINDOW_POOL_SHARE
-#define BSD_TCP_WINDOW_POOL_SHARE   8
-#endif
-
-#ifndef BSD_TCP_WINDOW_CEILING
-#ifdef AMINETXDUO_TCP_WINDOW_SCALING
-#define BSD_TCP_WINDOW_CEILING                                                \
-    (((ULONG)AMI_POOL_MAX_PACKETS / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *        \
-     (ULONG)AMI_POOL_PAYLOAD)
-#else
-/*
- * Without the option, the field itself is the ceiling. The window goes on the
- * wire in sixteen bits and there is nothing to scale it by, so 65535 is what
- * the wire format allows rather than a policy. nxe_tcp_socket_create.c:170
- */
-#define BSD_TCP_WINDOW_CEILING  65535UL
-#endif
-#endif
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16

@@ -61,6 +61,15 @@ sub_gitdir() {
     return 0
 }
 
+# What a submodule clone actually points at, reduced to host/path so that an
+# ssh remote and an https one for the same repository compare equal.
+url_key() {
+    printf '%s\n' "$1" |
+        sed -e 's,^[a-z+]*://,,' -e 's,^[^/@]*@,,' -e 's,:,/,' \
+            -e 's,/*$,,' -e 's,\.git$,,' |
+        tr 'A-Z' 'a-z'
+}
+
 # One rev-list per submodule, not one per pin: everything a fresh clone would
 # be able to fetch, which is what "reachable" has to mean here.
 reachable_file() {
@@ -72,6 +81,7 @@ reachable_file() {
 rc=0
 checked=0
 uninitialised=0
+url_stale=""
 
 # ------------------------------------------------ the pins at $COMMIT -------
 
@@ -92,6 +102,26 @@ for name in $names; do
         continue
     fi
     checked=$((checked + 1))
+
+    # 0. THE CLONE POINTS AT THE WRONG REPOSITORY.  `git submodule update`
+    #    takes its url from .git/modules/<name>/config, written once at the
+    #    first init and never revisited.  Changing .gitmodules -- upstream to
+    #    our own fork, which is what happened to third_party/threadx -- leaves
+    #    every clone made before that fetching upstream for ever.  `git fetch
+    #    --all --tags` then succeeds and brings nothing, and each of our own
+    #    pins reads as an object no ref reaches.  Six people in a row
+    #    diagnosed that as pin rot.  It is one `git submodule sync`.
+    want_url="$(git config -f "$WORK/gitmodules" "submodule.$name.url" || true)"
+    have_url="$(git --git-dir="$gitdir" config remote.origin.url || true)"
+    if [ -n "$want_url" ] && [ -n "$have_url" ] &&
+       [ "$(url_key "$want_url")" != "$(url_key "$have_url")" ]; then
+        echo "gitlink_$path=REMOTE_URL_STALE configured=$have_url expected=$want_url"
+        echo "  this clone fetches the wrong repository, so no reachability\
+ answer below is about our pins: run git submodule sync --recursive &&\
+ git submodule update --init --recursive" >&2
+        url_stale="$url_stale $path"
+        rc=1
+    fi
 
     if ! git --git-dir="$gitdir" cat-file -e "$oid^{commit}" 2>/dev/null; then
         use="$(known_bad_use "$path" "$oid")"
@@ -212,7 +242,11 @@ if [ "$COMMIT" = HEAD ]; then
             continue
         fi
         unfetchable=$((unfetchable + 1))
-        echo "history_$path=UNFETCHABLE oid=$oid recorded_by=$(
+        case " $url_stale " in
+            *" $path "*) cause=" cause=remote_url_stale" ;;
+            *)           cause="" ;;
+        esac
+        echo "history_$path=UNFETCHABLE$cause oid=$oid recorded_by=$(
             awk -v p="$path" -v o="$oid" '$1 == p && $2 == o { printf "%s,", $3 }' \
                 "$WORK/history_full" | sed 's/,$//')"
         rc=1

@@ -1,18 +1,32 @@
-# FS-UAE SLIRP: the DNS forwarder is 10.0.2.3.  The GATEWAY is 10.0.2.2 and it
-# does NOT answer DNS -- this file said 10.0.2.2 until 2026-07-25, and every
-# on-Amiga name lookup in the tree was paying for it:
+# NO NAMESERVER LINE, DELIBERATELY.  This file is staged by about thirty
+# harnesses and its only interface is a2065.device on DHCP, so the lease is
+# what carries the name servers on every rig this tree runs on.
+#
+# It said `nameserver 10.0.2.3` until 2026-08-27 -- fs-uae's SLIRP forwarder,
+# which exists on no real segment.  The resolver asks it first because a file
+# server outranks a leased one, waits about a second, and re-sends the query
+# to the server the lease supplied.  On the wire that is two packets and one
+# second per name, on every harness that looks anything up, and the lookups
+# succeeded either way, which is why it survived a rewrite of the comment
+# above it: the line before this one already recorded the same shape of
+# defect, 10.0.2.2 for 10.0.2.3, and fixed the address rather than the idea
+# that this file should name a server at all.
 #
 #   nameserver 10.0.2.2    gethostbyname("example.com")   30.06 s
-#   nameserver 10.0.2.3    gethostbyname("example.com")    0.58 s
+#   nameserver 10.0.2.3    gethostbyname("example.com")    0.58 s   (SLIRP)
+#   nameserver 10.0.2.3    first lookup, bridged          +1 s, 2 packets
+#   no nameserver line     first lookup, bridged           the lease's own
 #
-# Measured from a program linked against nothing of ours, on the 14 MHz A1200
-# profile, same boot image, only this line changed.  The lookups SUCCEEDED
-# either way, which is why nobody noticed: DHCP supplies a working server as
-# well, so the resolver waits out 10.0.2.2, falls back, and answers -- thirty
-# seconds late.  fetch, host, tests/tls/run-fetch.sh and every conformance DNS
-# case were all paying it, and no harness timed a single command.
+# A harness that needs a server this file cannot know -- a static address, no
+# DHCP, a captive resolver -- writes its own over this one at stage time and
+# reads it off the emulator host: tests/tools/run-nettools.sh and
+# tests/tools/run-dnssearch.sh both do, with
 #
-# The thirty seconds is the resolver's own failover time and is worth a look
-# on its own account; see docs/RESEARCH.md.
-nameserver 10.0.2.3
+#   awk '/^nameserver/ && $2 !~ /:/ { print $2; exit }' /etc/resolv.conf
+#
+# and both refuse a 127.x answer, because a bridged guest cannot reach the
+# emulator host's loopback.  Copy that, do not put an address here.
+#
+# The thirty seconds above is the resolver's own failover time and is worth a
+# look on its own account; see docs/RESEARCH.md.
 domain localdomain

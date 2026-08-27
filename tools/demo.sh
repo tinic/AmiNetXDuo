@@ -135,11 +135,9 @@ CONFIGURE=DHCP
 MDNS=YES
 EOF
 
-# Our own name_resolution, never the one under tests/netstack: that file is
-# written for a SLIRP guest and carries "nameserver 10.0.2.3" and "domain
-# localdomain", neither of which exists on a real network.  A demo that
-# inherits it reports a name server it cannot reach and calls itself
-# amiga.localdomain while answering to amiga.local.
+# Our own name_resolution, never the one under tests/netstack: that file
+# carries "domain localdomain", which exists on no real network.  A demo that
+# inherits it calls itself amiga.localdomain while answering to amiga.local.
 #
 # No name servers and no domain: DHCP supplies both.  The hostname is the one
 # line we do write, because this machine has a fixed identity people bookmark.

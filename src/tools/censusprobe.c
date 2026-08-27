@@ -102,8 +102,10 @@ static VOID probe_round(const char *host)
     {
         ToolSockAddrAny to;
 
-        /* The SLIRP forwarder, which tests/netstack/devs says is 10.0.2.3.
-           Nothing waits for a reply: the allocation is in the send. */
+        /* Any address at all: nothing waits for a reply, and the allocation
+           this probe is counting happens in the send.  10.0.2.3 is chosen
+           because it is unroutable on every segment this runs on, so the
+           datagram cannot reach a real name server. */
         (VOID)tool_sock_addr_v4(&to, 0x0A000203UL, 53);
         (VOID)tool_sock_sendto(sb, s, "\0\0\1\0\0\0\0\0\0\0\0\0", 12, &to);
         (VOID)tool_sock_close(sb, s);
