@@ -40,6 +40,7 @@ typedef struct HostDevice
     int     configure_cmds;
     int     flush_cmds;
     int     aborts;
+    int     special_cmds;
 
     int     reads_held;         /* CMD_READs the device owns right now */
     BOOL    unit_online;        /* the DEVICE's state, not iface->online */
@@ -254,6 +255,36 @@ LONG DoIO(struct IORequest *ioreq)
 
         if (s != NULL)
             memset(s, 0, sizeof(*s));
+        break;
+    }
+
+    case S2_GETSPECIALSTATS:
+    {
+        struct Sana2SpecialStatHeader *hdr =
+            (struct Sana2SpecialStatHeader *)req->ios2_StatData;
+        struct Sana2SpecialStatRecord *rec;
+        ULONG n = 0;
+
+        h_dev.special_cmds++;
+        if (hdr == NULL)
+            break;
+
+        rec = (struct Sana2SpecialStatRecord *)(hdr + 1);
+        if (n < hdr->RecordCountMax)
+        {
+            rec[n].Type   = 15;
+            rec[n].Count  = 1234;
+            rec[n].String = (char *)"Vertical-blank interrupt polls";
+            n++;
+        }
+        if (n < hdr->RecordCountMax)
+        {
+            rec[n].Type   = 16;
+            rec[n].Count  = 7;
+            rec[n].String = (char *)"PCMCIA deaf-receiver resets";
+            n++;
+        }
+        hdr->RecordCountSupplied = n;
         break;
     }
 
@@ -640,6 +671,30 @@ static void case_distinct_units(void)
     h_check(h_dev.offline_cmds == 2, "and so does the other");
 }
 
+/* 10. anxnet.device recovery evidence must cross the SANA-II boundary. */
+static void case_special_recovery_stats(void)
+{
+    AmiSana2If    *iface;
+    AmiSana2Stats  stats;
+
+    h_device_reset();
+    iface = h_bring_up_unit(0);
+    h_check(iface != NULL, "the interface opened for special statistics");
+    if (iface == NULL)
+        return;
+
+    ami_sana2_refresh_stats(iface);
+    ami_sana2_get_stats(iface, &stats);
+
+    h_check(h_dev.special_cmds > 0, "S2_GETSPECIALSTATS was issued");
+    h_check(stats.tick_polls == 1234,
+            "the vertical-blank poll count crossed the device boundary");
+    h_check(stats.rx_kicks == 7,
+            "the deaf-receiver reset count crossed the device boundary");
+
+    h_check(h_tear_down(iface), "the statistics interface closes");
+}
+
 /* ------------------------------------------------------------------ main -- */
 
 int main(void)
@@ -655,6 +710,7 @@ int main(void)
     case_offline_refused();
     case_shared_unit();
     case_distinct_units();
+    case_special_recovery_stats();
 
     h_check(h_ports_made > 0, "reply ports were created");
     h_check(h_ports_live == 0, "every reply port was deleted");

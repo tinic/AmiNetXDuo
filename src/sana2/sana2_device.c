@@ -82,6 +82,23 @@ static VOID ami_str_copy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
+static BOOL ami_str_equal(const char *a, const char *b)
+{
+    ULONG i = 0;
+
+    if (a == NULL || b == NULL)
+        return FALSE;
+
+    while (a[i] != '\0' && b[i] != '\0')
+    {
+        if (a[i] != b[i])
+            return FALSE;
+        i++;
+    }
+
+    return (BOOL)(a[i] == b[i]);
+}
+
 /* NewList() lives in amiga.lib, which a shared library cannot reach. */
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags)
@@ -673,6 +690,11 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 {
     struct IOSana2Req       req;
     struct Sana2DeviceStats stats;
+    struct {
+        struct Sana2SpecialStatHeader hdr;
+        struct Sana2SpecialStatRecord rec[24];
+    } special = { 0 };
+    ULONG i;
 
     if (iface == NULL || !iface->device_open)
         return;
@@ -689,6 +711,35 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
     iface->stats.overruns         = stats.Overruns;
     iface->stats.unknown_types    = stats.UnknownTypesReceived;
     iface->stats.reconfigurations = stats.Reconfigurations;
+
+    /*
+     * anxnet.device's two self-recovery counters are special statistics.  Ask
+     * on the same IP-thread reply port as the global counters, then identify
+     * them by their public strings: numeric Type values are private to each
+     * SANA-II driver and cannot safely be interpreted across drivers.
+     */
+    req = iface->templ;
+    special.hdr.RecordCountMax =
+        (ULONG)(sizeof(special.rec) / sizeof(special.rec[0]));
+    req.ios2_StatData = &special;
+
+    if (ami_sana2_command(iface, &req, S2_GETSPECIALSTATS) == 0)
+    {
+        ULONG n = special.hdr.RecordCountSupplied;
+
+        if (n > special.hdr.RecordCountMax)
+            n = special.hdr.RecordCountMax;
+
+        for (i = 0; i < n; i++)
+        {
+            const char *name = special.rec[i].String;
+
+            if (ami_str_equal(name, "Vertical-blank interrupt polls"))
+                iface->stats.tick_polls = special.rec[i].Count;
+            else if (ami_str_equal(name, "PCMCIA deaf-receiver resets"))
+                iface->stats.rx_kicks = special.rec[i].Count;
+        }
+    }
 
 #ifdef AMINETXDUO_RXPROBE
     iface->probe_dev_rx = stats.PacketsReceived;

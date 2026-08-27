@@ -103,6 +103,10 @@ typedef struct AmiSana2Stats {
     /* Of rx_copy_hook, those that came through the private direct-receive
        pair; rx_copy_summed cannot answer this, both paths bump it. */
     ULONG   rx_direct_fill;
+    /* anxnet.device recovery counters read through S2_GETSPECIALSTATS.  Other
+       drivers leave them zero. */
+    ULONG   tick_polls;
+    ULONG   rx_kicks;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
