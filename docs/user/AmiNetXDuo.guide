@@ -2409,6 +2409,10 @@
        neighbours -- return ENOSYS. The parts whose behaviour is fully
        documented (GetDefaultDomainName, ObtainDomainNameServerList,
        In_LocalAddr, In_CanForward) do work.
+    o  @{b}AddDomainNameServer and RemoveDomainNameServer@{ub} take an IPv6
+       literal as well as a dotted quad, so an address
+       ObtainDomainNameServerList reports can be handed straight back to
+       them. They used to refuse every IPv6 address the list printed.
     o  sendmsg() and recvmsg() do work.
 
   @{b}TLS@{ub}
