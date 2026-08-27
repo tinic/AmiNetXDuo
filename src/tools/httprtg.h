@@ -49,7 +49,12 @@ VOID  http_rtg_detach(VOID);
    different native formats or live on different boards. */
 BOOL  http_rtg_attached_to(struct BitMap *bm);
 
-BOOL  http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst);
+/* Rows [y0, y0+rows) of the card's screen into `dst`, which is the base of the
+   whole staging frame and not the band: every row lands at the attach stride,
+   so a band read leaves the rest of the buffer as it was.  `rows` past the
+   bottom is clamped, because a tile grid rounds the height up. */
+BOOL  http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst,
+                    UWORD y0, UWORD rows);
 
 ULONG http_rtg_word(char *out, ULONG cap);
 

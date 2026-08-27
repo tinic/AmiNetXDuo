@@ -135,6 +135,11 @@ static UBYTE          *fb_tx;
    fetched whole once a frame into Fast RAM and the encoder reads that. */
 static UBYTE          *fb_stage;
 static ULONG           fb_stage_len;
+/* Whether the pass in flight took the whole frame at its first band.  It does
+   that only when the encoder is going to look for a scroll, because the probe
+   samples rows the height of the screen; every other pass reads the band it is
+   about to encode and nothing else.  See fb_grab_frame(). */
+static UBYTE           fb_stage_whole;
 static ULONG           fb_shadow_len;
 static ULONG           fb_scratch_len;
 static ULONG           fb_tx_cap;
@@ -1254,7 +1259,7 @@ enum
    must not call Intuition.  What leaves is geometry, palette, units, planes. */
 static int fb_examine(struct Screen *sc, const FbGeometry *want,
                       FbGeometry *now, const UBYTE **planes,
-                      BOOL *palette_moved, BOOL locked)
+                      BOOL *palette_moved, BOOL locked, BOOL pass_start)
 {
     UWORD plane;
     int   what;
@@ -1274,8 +1279,15 @@ static int fb_examine(struct Screen *sc, const FbGeometry *want,
 
     fb_display_units(sc);
 
-    *palette_moved = fb_read_palette(sc->ViewPort.ColorMap,
-                                     fb_colours(want), fb_pal);
+    /* Once a screen pass and not once a band.  A depth-8 ColorMap is sixteen
+       GetRGB32() calls, and colours that move mid-pass restart the pass in any
+       case, so asking again for every band is the same answer at eight times
+       the price.  What it costs is one pass of the old palette under new
+       pixels, against a pass that was going to be reissued anyway. */
+    *palette_moved = pass_start
+                     ? fb_read_palette(sc->ViewPort.ColorMap,
+                                       fb_colours(want), fb_pal)
+                     : FALSE;
 
     /* Colours before pixels, and the encode is skipped entirely on the pass
        that finds them moved. */
@@ -1310,10 +1322,12 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
     *palette_moved = FALSE;
     *encoded = -1L;                     /* nothing encoded this pass */
 
-    /* A band after the first of a chunky pass never touches the screen: the
-       fetch took the whole frame into fb_stage once and every band encodes
-       that copy.  The planar path has no copy and holds the screen for each. */
-    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format))
+    /* A band after the first of a chunky pass that took the whole frame never
+       touches the screen: the fetch holds one moment of it and every band
+       encodes that copy.  A pass that read a band at a time goes the long way
+       round, because its pixels are not in fb_stage yet.  The planar path has
+       no copy at all and holds the screen for each band. */
+    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) && fb_stage_whole)
     {
         const UBYTE *stage = fb_stage;
 
@@ -1334,7 +1348,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
 
     if (pub || fb_listed(sc))
     {
-        rc = fb_examine(sc, want, now, planes, palette_moved, pub);
+        rc = fb_examine(sc, want, now, planes, palette_moved, pub,
+                        (BOOL)(ty0 == 0));
 
         /* Only on a screen that is held, and see above for why.  Attempted and
            never waited for, because the lock is held for as long as a mouse
@@ -1380,10 +1395,41 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
         if (rc == FB_GRAB_OK && !*palette_moved &&
             RFB_FMT_IS_CHUNKY(want->format))
         {
-            /* Once a screen pass and not once a band.  The whole frame in
-               contiguous rows is the shape a card reads back fastest, and
-               the copy holds one moment of the screen for the whole pass. */
-            if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort, fb_stage))
+            UWORD ry0;
+            UWORD rrows;
+
+            /* What the pass needs, decided once at its first band.  The scroll
+               probe samples rows the height of the screen, so a pass that is
+               going to run it needs the whole frame in one moment; a pass that
+               is not needs the band it is about to encode and nothing else.
+               At 640x480 truecolour that is 80 KB of Zorro against 600 KB, and
+               the band it reads is the one the encode is about to look at
+               rather than a copy taken up to a pass ago. */
+            if (ty0 == 0)
+                fb_stage_whole =
+                    (UBYTE)(rfb_scroll_probe_due(&fb_enc) ? 1 : 0);
+
+            if (fb_stage_whole)
+            {
+                ry0   = 0;
+                rrows = want->height;
+            }
+            else
+            {
+                ULONG top = (ULONG)ty0 * (ULONG)HTTP_FB_TILE_H;
+                ULONG bot = (ULONG)ty1 * (ULONG)HTTP_FB_TILE_H;
+
+                if (bot > (ULONG)want->height)
+                    bot = (ULONG)want->height;
+
+                ry0   = (UWORD)top;
+                rrows = (UWORD)((bot > top) ? (bot - top) : 0UL);
+            }
+
+            if (rrows == 0)
+                rc = FB_GRAB_UNREADABLE;
+            else if (http_rtg_read(sc->RastPort.BitMap, &sc->RastPort,
+                                   fb_stage, ry0, rrows))
                 planes[0] = fb_stage;
             else
                 rc = FB_GRAB_UNREADABLE;
@@ -1437,6 +1483,7 @@ static VOID fb_free_buffers(VOID)
     fb_shadow = NULL;
     fb_stage = NULL;
     fb_stage_len = 0;
+    fb_stage_whole = 0;
     fb_tx_cap = 0;
     fb_tx_len = 0;
     fb_tx_sent = 0;
@@ -2075,7 +2122,8 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
             ilock = LockIBase(0);
 
         if ((pub || fb_listed(sc)) &&
-            fb_examine(sc, &g, &again, planes, &moved, pub) == FB_GRAB_OK)
+            fb_examine(sc, &g, &again, planes, &moved, pub,
+                       TRUE) == FB_GRAB_OK)
             fb_want_pal = 1;
 
         if (!pub)

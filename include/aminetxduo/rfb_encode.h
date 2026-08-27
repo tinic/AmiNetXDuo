@@ -209,6 +209,12 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
 long rfb_encode_frame_planes(rfb_encoder *e, const rfb_u8 *const *planes,
                              rfb_u8 *out, rfb_u32 out_cap);
 
+/* Whether the next band 0 will look for a scroll.  The probe samples rows the
+ * whole height of the screen, so a caller reading its pixels back off a
+ * graphics card asks this to decide whether the pass needs the frame in one
+ * moment or only the band it is about to encode.  Reads state, changes none. */
+int rfb_scroll_probe_due(const rfb_encoder *e);
+
 /* PackBits, exposed because the decoder and the tests want the same pair. */
 rfb_u32 rfb_packbits(const rfb_u8 *in, rfb_u32 n, rfb_u8 *out, rfb_u32 cap,
                      int min_run);

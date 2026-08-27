@@ -1108,27 +1108,39 @@ BOOL http_rtg_attached_to(struct BitMap *bm)
 
 /* ------------------------------------------------------------ the fetch --- */
 
-BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst)
+BOOL http_rtg_read(struct BitMap *bm, struct RastPort *rp, UBYTE *dst,
+                   UWORD y0, UWORD rows)
 {
+    UWORD end;
     UWORD y;
 
     if (!http_rtg_attached_to(bm) || rp == NULL || dst == NULL)
         return FALSE;
 
+    /* Clamped rather than refused: the caller's band is a tile grid rounded up
+       and the last row of tiles hangs off the bottom of a screen whose height
+       is not a multiple of the tile. */
+    if (y0 >= rtg_h)
+        return FALSE;
+
+    end = (UWORD)(y0 + rows);
+    if (end > rtg_h || end < y0)
+        end = rtg_h;
+
     /* The RastPort here is the one the caller just locked. */
     rtg_rp = rp;
 
-    for (y = 0; y < rtg_h; )
+    for (y = y0; y < end; )
     {
-        UWORD rows = (UWORD)(rtg_h - y);
+        UWORD n = (UWORD)(end - y);
 
-        if (rows > RTG_STRIP_ROWS)
-            rows = RTG_STRIP_ROWS;
+        if (n > RTG_STRIP_ROWS)
+            n = RTG_STRIP_ROWS;
 
-        if (!rtg_read_via(rtg_route, bm, dst + (ULONG)y * rtg_stride, y, rows))
+        if (!rtg_read_via(rtg_route, bm, dst + (ULONG)y * rtg_stride, y, n))
             return FALSE;
 
-        y = (UWORD)(y + rows);
+        y = (UWORD)(y + n);
     }
 
     return TRUE;
