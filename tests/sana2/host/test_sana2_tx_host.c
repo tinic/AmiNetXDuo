@@ -197,6 +197,43 @@ UINT _tx_thread_sleep(ULONG ticks)
     return TX_SUCCESS;
 }
 
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+/* The lazy-collect tick's ThreadX surface.  The timer is real to the code
+   under test -- create succeeds, so tx_lazy_timer_up is set and the parking
+   in ami_sana2_tx_send() engages -- and this file drives the expiry itself
+   rather than a running ThreadX. */
+static VOID (*h_tick_fn)(ULONG);
+static ULONG h_tick_arg;
+static ULONG h_now;
+
+ULONG _tx_time_get(VOID) { return h_now; }
+
+UINT _txe_timer_create(TX_TIMER *timer_ptr, CHAR *name_ptr,
+                       VOID (*expiration_function)(ULONG), ULONG input,
+                       ULONG initial_ticks, ULONG reschedule_ticks,
+                       UINT auto_activate, UINT size)
+{
+    (VOID)timer_ptr; (VOID)name_ptr; (VOID)initial_ticks;
+    (VOID)reschedule_ticks; (VOID)auto_activate; (VOID)size;
+    h_tick_fn  = expiration_function;
+    h_tick_arg = input;
+    return TX_SUCCESS;
+}
+
+UINT _txe_timer_deactivate(TX_TIMER *timer_ptr)
+{
+    (VOID)timer_ptr;
+    return TX_SUCCESS;
+}
+
+UINT _txe_timer_delete(TX_TIMER *timer_ptr)
+{
+    (VOID)timer_ptr;
+    h_tick_fn = NULL;
+    return TX_SUCCESS;
+}
+#endif /* AMINETXDUO_TX_LAZY_COLLECT */
+
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags)
 {
@@ -582,6 +619,80 @@ static void test_drain_reaps_final_sleep(void)
     h_check(h_releases == 1, "and its packet was released");
 }
 
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+/*
+ * The parking, and the safety net that undoes it.  A send over a PA_SIGNAL
+ * reply port leaves that port PA_IGNORE, so the completion raises no signal
+ * on the reader and the next send's own reap walk collects it.  The one-tick
+ * timer hands PA_SIGNAL back once a tick has passed with no send, which is
+ * what bounds a lone completion on a quiet link.
+ */
+static struct Task h_reader;
+
+static void test_lazy_parks_and_unparks(void)
+{
+    printf("sana2: lazy collect parks the reply port while sends flow\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+
+    h_now = 100;
+    ami_sana2_tx_lazy_start(&iface);
+    h_check(iface.tx_lazy_timer_up == TRUE, "the tick was created");
+    h_check(h_tick_fn != NULL, "and this file can drive its expiry");
+
+    memset(&h_reader, 0, sizeof(h_reader));
+    ami_sana2_tx_reap_bind(&iface, &h_reader, 0);
+    h_check(iface.tx_port.mp_Flags == PA_SIGNAL, "a bound reader signals");
+
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS, "the write is posted");
+    h_check(iface.tx_port.mp_Flags == PA_IGNORE,
+            "and the reply port is parked, so the completion is silent");
+    h_check(iface.tx_lazy_parked == TRUE,
+            "parked because of a send, not because no reader is bound");
+
+    /* Driving the tick needs the AmiSana2If * to survive the round trip
+       through tx_timer_create()'s ULONG argument.  It does on m68k, where
+       both are 32 bits, and it does not on an LP64 host, where the argument
+       arrives truncated: the two assertions below therefore run only where
+       the round trip is lossless.  Everything either side of them is checked
+       on every host. */
+    if ((AmiSana2If *)h_tick_arg == &iface)
+    {
+        /* Inside the same tick a send is still in flight: nothing is handed
+           back. */
+        h_tick_fn(h_tick_arg);
+        h_check(iface.tx_port.mp_Flags == PA_IGNORE,
+                "a tick in the same tick as the send keeps it parked");
+
+        /* Two ticks with no send is a quiet link. */
+        h_now += 2;
+        h_tick_fn(h_tick_arg);
+        h_check(iface.tx_port.mp_Flags == PA_SIGNAL,
+                "a quiet link gets the signalling port back");
+        h_check(iface.tx_lazy_parked == FALSE,
+                "and the parking is forgotten");
+    }
+    else
+    {
+        printf("  (the tick's ULONG argument truncates on this host, so the"
+               " expiry itself was not driven)\n");
+    }
+
+    ami_sana2_tx_lazy_stop(&iface);
+    h_check(iface.tx_lazy_timer_up == FALSE, "stop takes the tick down");
+    h_check(iface.tx_port.mp_Flags == PA_SIGNAL,
+            "and leaves the port signalling, which is the arm without a tick");
+
+    ami_sana2_tx_reap_unbind(&iface);
+    h_check(iface.tx_port.mp_Flags == PA_IGNORE,
+            "unbind means no reader, which is PA_IGNORE again");
+    h_check(iface.tx_lazy_parked == FALSE,
+            "and that PA_IGNORE is not mistaken for a parking");
+}
+#endif /* AMINETXDUO_TX_LAZY_COLLECT */
+
 int main(void)
 {
     frames_init();
@@ -596,6 +707,9 @@ int main(void)
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
     test_drain_reaps_final_sleep();
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+    test_lazy_parks_and_unparks();
+#endif
 
     printf("%lu checks, %lu failures, %s\n", h_checks, h_failures,
            (h_failures == 0) ? "PASS" : "FAIL");

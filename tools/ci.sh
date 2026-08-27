@@ -110,7 +110,7 @@ CROSS_CONFIGS=(
     # completion path, a collect policy, an -O2 file list -- and none of them
     # resizes a structure, so unlike nosack/norxverify they do not each need
     # their own tree to be compiled honestly.
-    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=ON"
+    "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF"
     # GREEN_REALM replaces the thread model wholesale and shares an arm with
     # nothing.  TESTS=OFF rides here because it is the one remaining side and
     # it is what makes this arm the cheap one: a libraries-only tree.

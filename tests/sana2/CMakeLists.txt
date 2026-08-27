@@ -64,7 +64,14 @@ target_compile_options(test_sana2_tx PRIVATE
 # -UAMINETXDUO_IPV6 for the reason the target above carries it, and
 # -UAMINETXDUO_BPF because bpf.h asserts a 68k structure layout that a host
 # compiler does not produce.  The tap is not what this tests.
-target_compile_options(test_sana2_tx PRIVATE -UAMINETXDUO_IPV6 -UAMINETXDUO_BPF)
+#
+# The two -Wno-*-cast are the pointer <-> ULONG round trip through
+# tx_timer_create()'s expiration_input argument, which the lazy-collect tick
+# uses to carry its AmiSana2If *.  ULONG and a pointer are the same width on
+# m68k and are not on an LP64 host; test_sana2_rx carries the same pair for
+# the same round trip through tx_thread_create().
+target_compile_options(test_sana2_tx PRIVATE -UAMINETXDUO_IPV6 -UAMINETXDUO_BPF
+    -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
 
 target_include_directories(test_sana2_tx PRIVATE
     "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"

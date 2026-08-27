@@ -260,6 +260,13 @@ VOID ami_sana2_tx_reap_bind(AmiSana2If *iface, struct Task *task, BYTE sigbit)
     (VOID)iface; (VOID)task; (VOID)sigbit;
 }
 VOID ami_sana2_tx_reap_unbind(AmiSana2If *iface) { (VOID)iface; }
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+/* ami_sana2_rx_start()/stop() arm and disarm the lazy-collect tick, and the
+   whole file is compiled here.  The tick lives in sana2_tx.c, which this
+   target does not link, so it is stubbed like the reap binding above. */
+VOID ami_sana2_tx_lazy_start(AmiSana2If *iface) { (VOID)iface; }
+VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface) { (VOID)iface; }
+#endif
 LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
