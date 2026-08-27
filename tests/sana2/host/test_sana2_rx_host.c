@@ -220,6 +220,35 @@ static UCHAR      buffer[256];
 static NX_PACKET  pkt;
 static AmiRxSlot  slot;
 
+/*
+ * The reader lifts the copy hook's accumulator out of the slot before it
+ * re-arms it, so the delivery takes an AmiRxSum. The tests still set up a slot
+ * -- that is where the copy hook writes -- and hand over what the reader would
+ * have carried.
+ */
+static AmiRxSum h_sum_of(const AmiRxSlot *s)
+{
+    AmiRxSum sum;
+
+    sum.copied = s->copied;
+#ifdef AMINETXDUO_RX_VERIFY
+    sum.sum    = s->sum;
+    sum.summed = s->summed;
+#else
+    sum.sum    = 0;
+    sum.summed = FALSE;
+#endif
+
+    return sum;
+}
+
+static void h_deliver(void)
+{
+    AmiRxSum sum = h_sum_of(&slot);
+
+    ami_sana2_rx_deliver(&iface, &pkt, &sum);
+}
+
 static void fixture_init(void)
 {
     memset(&iface, 0, sizeof(iface));
@@ -307,7 +336,7 @@ static void test_demux(void)
         fixture_init();
         frame_init(row[i].type, 40);
 
-        ami_sana2_rx_deliver(&iface, &pkt, &slot);
+        h_deliver();
 
         h_check(h_went == row[i].where, row[i].what);
     }
@@ -316,7 +345,7 @@ static void test_demux(void)
        with other traffic on it, which is normal. */
     fixture_init();
     frame_init(0x8100, 40);
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(iface.stats.unknown_types == 1, "an unknown type is counted");
     h_check(iface.stats.rx_errors == 0, "and is not an error");
@@ -331,7 +360,7 @@ static void test_header_strip(void)
     fixture_init();
     frame_init(AMI_ETHERTYPE_IPV4, 40);
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_went == TO_IP, "the frame reached the IP thread");
     h_check(h_seen_length == 40, "with the payload's length, header removed");
@@ -354,7 +383,7 @@ static void test_payload_alignment(void)
     h_check(((AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE) & 3) == 0,
             "the pad plus the header is a multiple of four");
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check((((ULONG)(pkt.nx_packet_prepend_ptr - buffer)) & 3) == 0,
             "so the payload starts aligned from the pool block");
@@ -371,7 +400,7 @@ static void test_runt(void)
         fixture_init();
         runt_init(length);
 
-        ami_sana2_rx_deliver(&iface, &pkt, &slot);
+        h_deliver();
 
         h_check(h_went == TO_RELEASED, "a runt reaches no receiver");
         h_check(h_releases == 1, "and goes back to the pool");
@@ -386,7 +415,7 @@ static void test_runt(void)
     fixture_init();
     frame_init(AMI_ETHERTYPE_IPV4, 0);
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_went == TO_IP, "a header with no payload is not a runt");
     h_check(h_seen_length == 0, "and arrives with nothing in it");
@@ -442,7 +471,7 @@ static void test_verify_publishes_only_what_it_checked(void)
     h_verify_caps = NX_INTERFACE_CAPABILITY_IPV4_RX_CHECKSUM |
                     NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_went == TO_IP, "the frame reached the IP thread");
     h_check(pkt.nx_packet_interface_capability_flag == h_verify_caps,
@@ -453,7 +482,7 @@ static void test_verify_publishes_only_what_it_checked(void)
     frame_init(AMI_ETHERTYPE_IPV4, 40);
     h_verify_caps = 0;
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(pkt.nx_packet_interface_capability_flag == 0,
             "a declined frame claims nothing and the stack walks it");
@@ -463,7 +492,7 @@ static void test_verify_publishes_only_what_it_checked(void)
     frame_init(AMI_ETHERTYPE_IPV6, 40);
     h_verify_caps = 0xFFFFFFFFUL;
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_verify_walks == 0 && h_verify_sums == 0,
             "IPv6 is not verified here");
@@ -480,7 +509,7 @@ static void test_verify_drop(void)
     frame_init(AMI_ETHERTYPE_IPV4, 40);
     h_verify_drop = NX_TRUE;
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_went == TO_RELEASED, "it reaches no receiver");
     h_check(h_releases == 1, "and goes back to the pool");
@@ -499,7 +528,7 @@ static void test_verify_uses_the_carried_sum(void)
     slot.sum    = 0x1234;
     slot.copied = 40;
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_verify_sums == 1 && h_verify_walks == 0,
             "a summed slot hands the sum over");
@@ -509,7 +538,7 @@ static void test_verify_uses_the_carried_sum(void)
     slot.summed = FALSE;
     slot.sum    = 0x1234;       /* stale, from the previous frame */
 
-    ami_sana2_rx_deliver(&iface, &pkt, &slot);
+    h_deliver();
 
     h_check(h_verify_walks == 1 && h_verify_sums == 0,
             "an unsummed slot makes the verifier walk instead");

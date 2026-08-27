@@ -209,7 +209,7 @@ VOID ami_sana2_rxprobe_deliver(AmiSana2If *iface, const UCHAR *frame,
 
 #ifdef AMINETXDUO_RX_VERIFY
 
-static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSlot *slot)
+static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSum *sum)
 {
     const UCHAR *ip     = packet->nx_packet_prepend_ptr;
     UINT         rewalk = NX_FALSE;
@@ -253,7 +253,7 @@ static VOID ami_sana2_rxprobe_drop(NX_PACKET *packet, const AmiRxSlot *slot)
     AMI_ERROR("rxprobe drop: seq %08lx lane %s rewalk %ld partial %ld "
               "stored %04lx pseudo %04lx len %ld",
               (unsigned long)seq,
-              (slot != NULL && slot->summed != FALSE) ? "sum" : "walk",
+              (sum != NULL && sum->summed != FALSE) ? "sum" : "walk",
               (long)rewalk, (long)part,
               (unsigned long)stored, (unsigned long)pseudo,
               (long)packet->nx_packet_length);
@@ -359,12 +359,15 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
  * entry points are used because the reader is not the IP thread.
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
-                          const AmiRxSlot *slot)
+                          const AmiRxSum *sum)
 {
     UINT type;
 
 #ifndef AMINETXDUO_RX_VERIFY
-    (VOID)slot;
+    /* The sum the copy carried is only consulted by the verify path, so
+       without it this is the one caller that takes one and reads nothing from
+       it. */
+    (VOID)sum;
 #endif
 
 #ifdef AMINETXDUO_BPF
@@ -416,8 +419,8 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
              * was doing.  A slot that did not sum (misaligned, or no slot at
              * all) passes zero and the verifier walks.
              */
-            if ((slot != NULL) && (slot->summed != FALSE))
-                caps = n68k_rx_verify_sum(packet, slot->sum, slot->copied,
+            if ((sum != NULL) && (sum->summed != FALSE))
+                caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
             else
                 caps = n68k_rx_verify(packet, &drop);
@@ -425,7 +428,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
             if (drop != NX_FALSE)
             {
 #ifdef AMINETXDUO_RXPROBE
-                ami_sana2_rxprobe_drop(packet, slot);
+                ami_sana2_rxprobe_drop(packet, sum);
 #endif
                 nx_packet_release(packet);
                 iface->stats.rx_errors++;
@@ -464,8 +467,8 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
             UINT    drop =  NX_FALSE;
             ULONG   caps;
 
-            if ((slot != NULL) && (slot->summed != FALSE))
-                caps = n68k_rx_verify_sum(packet, slot->sum, slot->copied,
+            if ((sum != NULL) && (sum->summed != FALSE))
+                caps = n68k_rx_verify_sum(packet, sum->sum, sum->copied,
                                           &drop);
             else
                 caps = n68k_rx_verify(packet, &drop);
@@ -540,59 +543,72 @@ static VOID ami_sana2_rx_arm(AmiSana2If *iface, AmiRxSlot *slot)
 #endif
 }
 
+/*
+ * Give one idle slot a packet and hand it back to the device.
+ *
+ * Separate from the sweep below because the interesting caller is
+ * ami_sana2_rx_complete(), which re-posts the slot it has just taken a frame
+ * out of BEFORE delivering that frame. Every re-arm has to happen here, in
+ * front of the BeginIO(), and nowhere after it: the copy hook runs at
+ * interrupt level and the device may complete this read before a store made
+ * after the BeginIO() would have landed.
+ */
+static BOOL ami_sana2_rx_post_slot(AmiSana2Rx *rx, AmiRxSlot *slot)
+{
+    AmiSana2If *iface = rx->iface;
+
+    if (slot->posted)
+        return TRUE;
+
+    if (rx->stop || !iface->online)
+        return FALSE;
+
+    if (slot->packet == NULL)
+    {
+        if (nx_packet_allocate(iface->pool, &slot->packet,
+                               NX_RECEIVE_PACKET, NX_NO_WAIT) != NX_SUCCESS)
+        {
+            slot->packet = NULL;
+            iface->stats.alloc_failures++;
+            return FALSE;
+        }
+    }
+
+    ami_sana2_rx_arm(iface, slot);
+
+    slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
+    slot->req.ios2_Req.io_Command = CMD_READ;
+    slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
+    slot->req.ios2_Req.io_Error   = 0;
+    slot->req.ios2_WireError      = 0;
+    slot->req.ios2_PacketType     = rx->packet_type;
+    slot->req.ios2_DataLength     = 0;
+    slot->req.ios2_Data           = slot;
+    slot->posted                  = TRUE;
+
+    /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
+       SANA2IOF_RAW just set. Both lines it runs are above. */
+    BeginIO((struct IORequest *)&slot->req);
+#ifdef AMINETXDUO_RXPROBE
+    rx->probe.posts++;
+    rx->probe.live++;
+#endif
+
+    return TRUE;
+}
+
 /* Post every idle slot that has, or can get, a packet. Returns how many reads
    are in flight afterwards. */
 static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
-    AmiSana2If *iface = rx->iface;
-    UWORD       i;
-    UWORD       live = 0;
+    UWORD i;
+    UWORD live = 0;
 
     for (i = 0; i < rx->depth; i++)
     {
-        AmiRxSlot *slot = &rx->slot[i];
-
-        if (slot->posted)
-        {
+        if (ami_sana2_rx_post_slot(rx, &rx->slot[i]))
             live++;
-            continue;
-        }
-
-        if (rx->stop || !iface->online)
-            continue;
-
-        if (slot->packet == NULL)
-        {
-            if (nx_packet_allocate(iface->pool, &slot->packet,
-                                   NX_RECEIVE_PACKET, NX_NO_WAIT) != NX_SUCCESS)
-            {
-                slot->packet = NULL;
-                iface->stats.alloc_failures++;
-                continue;
-            }
-        }
-
-        ami_sana2_rx_arm(iface, slot);
-
-        slot->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-        slot->req.ios2_Req.io_Message.mn_ReplyPort    = rx->port;
-        slot->req.ios2_Req.io_Command = CMD_READ;
-        slot->req.ios2_Req.io_Flags   = iface->raw_mode ? SANA2IOF_RAW : 0;
-        slot->req.ios2_Req.io_Error   = 0;
-        slot->req.ios2_WireError      = 0;
-        slot->req.ios2_PacketType     = rx->packet_type;
-        slot->req.ios2_DataLength     = 0;
-        slot->req.ios2_Data           = slot;
-        slot->posted                  = TRUE;
-
-        /* BeginIO(), not SendIO(): SendIO() zeroes io_Flags and drops the
-           SANA2IOF_RAW just set. Both lines it runs are above. */
-        BeginIO((struct IORequest *)&slot->req);
-#ifdef AMINETXDUO_RXPROBE
-        rx->probe.posts++;
-        rx->probe.live++;
-#endif
-        live++;
     }
 
 #ifdef AMINETXDUO_RXPROBE
@@ -632,11 +648,29 @@ BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length)
     return TRUE;
 }
 
+/*
+ * Turn one completed read into a frame, put the slot back on the wire, and
+ * then deliver.
+ *
+ * The order is the point. The ring used to be re-armed at the top of the outer
+ * loop, once the whole drain was done, so every frame in a burst was delivered
+ * with one fewer read outstanding than the interface was configured for, and a
+ * burst of N left the device N short for the length of N deliveries. A SANA-II
+ * device has no buffers: a frame arriving with no CMD_READ outstanding is
+ * gone. AmiTCP_NG re-arms inside its per-frame dispatch for the same reason
+ * (net/if_sana.c:1620), before the mbuf goes upstream.
+ *
+ * Re-arming clears the copy hook's accumulator, which the delivery still
+ * needs, so what belongs to the frame in hand is lifted into an AmiRxSum
+ * first. The failure path re-posts too: the packet is still in the slot, and a
+ * slot held back until the next sweep is a read the device does not have.
+ */
 static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 {
     AmiSana2If *iface  = rx->iface;
     NX_PACKET  *packet = slot->packet;
     ULONG       length = slot->req.ios2_DataLength;
+    AmiRxSum    sum;
     UCHAR      *eth;
 
     if (packet == NULL)
@@ -650,6 +684,7 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
         /* Keep the packet: rearming is cheaper than a pool round trip. */
         iface->stats.rx_errors++;
         iface->stats.rx_err_length++;
+        (VOID)ami_sana2_rx_post_slot(rx, slot);
         return;
     }
 
@@ -701,17 +736,31 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
      */
     ami_random_arrival();
 
+    /* Everything the delivery needs out of the slot, before the slot is
+       re-armed under it. */
+    sum.copied = slot->copied;
+#ifdef AMINETXDUO_RX_VERIFY
+    sum.sum    = slot->sum;
+    sum.summed = slot->summed;
+#else
+    sum.sum    = 0;
+    sum.summed = FALSE;
+#endif
+
     slot->packet = NULL;     /* ownership passes to NetX Duo */
+
+    /* Back on the wire before the frame goes upstream, not after. */
+    (VOID)ami_sana2_rx_post_slot(rx, slot);
 
 #ifdef AMINETXDUO_RXPROBE
     {
         ULONG t0 = ami_budget_clock();
 
-        ami_sana2_rx_deliver(iface, packet, slot);
+        ami_sana2_rx_deliver(iface, packet, &sum);
         ami_budget_drain(ami_budget_clock() - t0);
     }
 #else
-    ami_sana2_rx_deliver(iface, packet, slot);
+    ami_sana2_rx_deliver(iface, packet, &sum);
 #endif
 }
 
