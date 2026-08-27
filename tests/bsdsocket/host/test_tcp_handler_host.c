@@ -373,6 +373,14 @@ const AmiConfig *netstack_config(VOID)
     return &h_cfg;
 }
 
+/* AMI_ERROR/WARN/INFO are compiled into every build now rather than out of the
+   default one, and tcp_handler.c reaches them on paths this test drives. */
+VOID ami_log(int level, const char *fmt, ...)
+{
+    (VOID)level;
+    (VOID)fmt;
+}
+
 /* ------------------------------------------------------ socket vectors ---- */
 
 VOID bsd_bzero(APTR p, ULONG size)

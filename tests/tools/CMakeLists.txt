@@ -229,6 +229,25 @@ if(AMINETXDUO_TLS)
     add_dependencies(test_tlsinfo developer_drawer)
 endif()
 
+# The three drawer examples link the way developer/ReadMe tells a user to, and
+# for the reason it gives: some newlib objects carry DWARF, and once one is
+# pulled in the debug sections are given load addresses, become loadable DATA
+# hunks, and the linker writes the executable with NO RELOCATION TABLE, exit 0
+# and no diagnostic.  TLSInfo reaches the float and locale objects and did
+# exactly that -- 12 hunks, 0 relocations, an image LoadSeg would not relocate
+# (tools/check-hunk-relocs.sh).  IfNames and V6Only are clean today only
+# because they pull fewer objects, which is not a property to rely on.
+#
+# -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS; see
+# src/tools/CMakeLists.txt and docs/RESEARCH.md 25.
+foreach(_ex test_ifnames test_v6only test_tlsinfo)
+    if(TARGET ${_ex})
+        target_compile_options(${_ex} PRIVATE
+            -ffunction-sections -fno-optimize-sibling-calls)
+        target_link_options(${_ex} PRIVATE -Wl,--gc-sections)
+    endif()
+endforeach()
+
 # CycleDrill cycles the library and the interface rather than using them:
 # OpenLibrary/CloseLibrary including the last-close expunge, Online/Offline
 # through NETCTRL_INTERFACE_UP/DOWN, RemoveInterface/AddInterfaceTagList with

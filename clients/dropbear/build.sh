@@ -127,15 +127,21 @@ echo "  CC amiga_dropbear.c"
 # untidy: a second generator, so that the SSH client's randomness and the TCP
 # stack's randomness would have to be argued about separately.
 #
-# These two are built WITHOUT -D__USE_NEW_TIMEVAL__, which the rest of the
+# These three are built WITHOUT -D__USE_NEW_TIMEVAL__, which the rest of the
 # client needs and they cannot have.  ami_random.c calls GetSysTime(), an
 # AmigaOS function taking AmigaOS's `struct TimeVal`; that flag is precisely
 # the switch that hands `struct timeval` to libc instead.  They are separate
 # translation units that share no type with Dropbear, so the two conventions
 # never meet.
+#
+# ami_diag.c is here because ami_random.c calls AMI_INFO(), which is compiled
+# into every build now rather than out of the default one; it is its own
+# translation unit for exactly this reason, so tls.library and this client can
+# take the diagnostic without taking compat.c's timer and memory halves twice.
 AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
 SHIM_OBJS=("$SHIM_O")
-for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c"; do
+for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c" \
+         "$ROOT/src/common/ami_diag.c"; do
     o="$CLIENT_OBJ/db-$(basename "${c%.c}").o"
     echo "  CC $(basename "$c")"
     "$AMIGA_GCC" $AMI_CFLAGS -Wall -c -o "$o" "$c"
