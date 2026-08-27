@@ -31,9 +31,19 @@ launcher refuses it by name.
 | plain | chipset, 640x256 | `/` drawer, `/shell` |
 | rtg | uaegfx 640x480x8 | `/` drawer, `/shell`, `/console` |
 
+The rtg mode is four variables, not three constants: `AMINETXDUO_CWB_RTG_MODE`,
+`_RTG_W`, `_RTG_H`, `_RTG_DEPTH`. `0x50041100` is 800x600x16, which is what a
+truecolour keystroke measurement needs; `tests/perf/rtgmodes` run on the guest
+lists what the board offers.
+
 `/console` streams the frontmost screen. The geometry word's format field is 1
 on a card and 0 on the planar fallback, which is the only sign that a board
 failed to come up: Workbench falls back to the chipset silently.
+
+A launch on a segment whose DHCP does not answer reports failure for a guest
+that is serving: every URL it prints uses the IPv4 address alone, so the guest
+falls back to 169.254/16, takes a global IPv6 address by SLAAC and answers on
+it, and `served_check` looks at neither.
 
 ## The split
 
