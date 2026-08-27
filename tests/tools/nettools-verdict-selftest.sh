@@ -195,6 +195,61 @@ build_good "$T/noecho2"
 printf 'AmiNetXDuo test telnet server\r\nlogin: ' > "$T/noecho2/hd/telnet.txt"
 expect "a telnet transcript with no echo of what was sent" 1 "$T/noecho2"
 
+build_good "$T/noanswers"
+sed -i.bak 's/answers: DO ECHO.*/answers: (none)/' "$T/noanswers/peer.log"
+expect "a telnet client that answered no option negotiation" 1 "$T/noanswers"
+
+# The scripted client can send its input before it reads the server's option
+# offer.  `quit` therefore precedes the IAC replies in the byte stream.  The
+# peer must drain those replies before closing or its evidence says `(none)`
+# even though the client answered every option.
+if python3 - "$ROOT/tests/tools/netpeer.py" <<'PY'
+import importlib.util
+import socket
+import sys
+import threading
+
+path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("netpeer", path)
+netpeer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(netpeer)
+
+seen = []
+netpeer.log = lambda tag, message: seen.append((tag, message))
+
+server, client = socket.socketpair()
+thread = threading.Thread(
+    target=netpeer.TelnetHandler,
+    args=(server, ("127.0.0.1", 1234), object()),
+)
+thread.start()
+
+client.recv(4096)  # option offer and prompt
+client.sendall(
+    b"amiga\r\nquit\r\n"
+    + bytes([
+        netpeer.IAC, netpeer.DO, netpeer.OPT_ECHO,
+        netpeer.IAC, netpeer.DO, netpeer.OPT_SGA,
+        netpeer.IAC, netpeer.WONT, netpeer.OPT_TTYPE,
+        netpeer.IAC, netpeer.WONT, netpeer.OPT_NAWS,
+    ])
+)
+client.shutdown(socket.SHUT_WR)
+thread.join(2)
+client.close()
+server.close()
+
+want = "closed; answers: DO ECHO, DO SGA, WONT TERMINAL-TYPE, WONT WINDOW-SIZE"
+if thread.is_alive() or ("telnet", want) not in seen:
+    raise SystemExit("netpeer did not drain negotiation after quit: %r" % (seen,))
+PY
+then
+    pass=$((pass + 1))
+else
+    fail=$((fail + 1))
+    echo "SELFTEST FAIL: netpeer stopped reading at quit" >&2
+fi
+
 # ---- the PUT that never left -----------------------------------------------
 build_good "$T/noput"
 grep -v from-amiga "$T/noput/peer.log" > "$T/noput/peer.log.new"

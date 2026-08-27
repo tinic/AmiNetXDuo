@@ -104,8 +104,13 @@ nettools_verdict() {
             echo "nettools_telnet_session=complete"
         fi
 
-        echo "nettools_telnet_answers=\"$(sed -n 's/.*answers: //p' "$peerlog" |
-                                          head -1)\""
+        local telnet_answers
+        telnet_answers=$(sed -n 's/.*answers: //p' "$peerlog" | head -1)
+        echo "nettools_telnet_answers=\"$telnet_answers\""
+        if [ "$telnet_answers" != \
+             "DO ECHO, DO SGA, WONT TERMINAL-TYPE, WONT WINDOW-SIZE" ]; then
+            _nv_fail telnet_option_negotiation_was_not_answered
+        fi
     else
         echo "nettools_peerlog=missing"
         _nv_fail netpeer_wrote_no_log_so_half_the_evidence_is_gone
