@@ -333,6 +333,15 @@ stage_host() {
         return 1
     fi
 
+    if tools/classicwb-identity-selftest.sh > \
+            "$BUILD/classicwb-identity.log" 2>&1; then
+        note "$(cat "$BUILD/classicwb-identity.log")"
+    else
+        cat "$BUILD/classicwb-identity.log"
+        fail "tools/classicwb-identity-selftest.sh"
+        return 1
+    fi
+
     # THAT TWO RUNS ON ONE MACHINE CANNOT TAKE THE SAME THING.  The emulator
     # harnesses used to hash a run tag into 900 serial-port slots, so two
     # checkouts running the same arm always collided and one guest was driven
