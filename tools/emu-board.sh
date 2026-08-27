@@ -92,6 +92,36 @@ emu_board_mac_honoured() { # board
     esac
 }
 
+# WHAT THE X-SURF-100 ARM CANNOT MEASURE, so that nobody spends an afternoon
+# comparing drivers on it again.
+#
+# The card's data port is mirrored across 128 bytes at board+$8880 so a
+# `movem.l` reads sixteen longwords from sixteen addresses and every one of
+# them is the FIFO; src/netdev/netdev_bus.c takes that path and iComp's
+# x-surf-100.device does not.  On real Zorro II a long access is one bus cycle
+# against two, which is where the difference between the two drivers lives.
+#
+# AMIBERRY CHARGES PER ACCESS, NOT PER BUS CYCLE.  ariadne2_lget
+# (src/qemuvga/ne2000.cpp:1910) answers a longword with two ne2000_wget calls,
+# so the wide window costs exactly what two word reads cost and the saving the
+# real card gives is not modelled.  The ordering comes out inverted: on a
+# user's A3000 with a real X-Surf-100, Fitz read 949 KB/s on Roadshow, 938 on
+# our anxnet.device and 918 on ours over iComp's driver, while here, A1200 with
+# xsurf100z2, bridged, n=3 interleaved in one block at host load 3.9-10.6:
+#
+#   ours over x-surf-100.device   461 460 463    mean 461
+#   Roadshow over the same        440 438 384    mean 421
+#   ours over anxnet.device       438 442 443    mean 441
+#
+#   tests/perf/run-fitzbench.sh -a -N xsurf100z2 -m A1200 -H playhouse4
+#
+# Every arm is reproducible to under 1.1 per cent within the block, so this is
+# not noise: it is the emulator pricing the one thing under study at zero.  A
+# comparison BETWEEN STACKS on one driver is still sound here -- nothing above
+# the SANA-II boundary depends on how a bus cycle is charged -- and a
+# comparison BETWEEN DRIVERS is not, on this board or any other whose driver
+# earns its rate from the shape of its port accesses.
+
 # HOW MUCH FAST RAM A BOARD LEAVES ROOM FOR.  $1 board, $2 what the caller
 # would otherwise use.  Prints a figure in MB.
 #
