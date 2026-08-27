@@ -70,14 +70,25 @@ static AmiSocket            h_sock[H_FDS];
 static NX_PACKET_POOL       h_pool;
 static NX_IP                h_ip;
 
-/* A fake packet.  Only the members transfer.c and the stubs read are used. */
+/*
+ * A fake packet.  Only the members transfer.c and the stubs read are used.
+ *
+ * THE LENGTH IS `nx.nx_packet_length` AND NOT A MEMBER OF ITS OWN.  It used to
+ * be, and the two then disagreed the moment anything read the field instead of
+ * calling nx_packet_length_get(): `bsd_packet_length()` in packet_extract.h
+ * does exactly that on a non-trace build, which is correct on target -- the
+ * field IS the length there -- and read zero here, so every send that was cut
+ * short credited the caller with nothing.  One truth, so a stub cannot drift
+ * from the target again.
+ */
 typedef struct HPacket
 {
     NX_PACKET   nx;
-    ULONG       length;
     BOOL        in_use;
     BOOL        released;
 } HPacket;
+
+#define h_len(p)    ((p)->nx.nx_packet_length)
 
 static HPacket h_pkt[H_PKTS];
 
@@ -517,7 +528,7 @@ UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
         return h.append_status;
 
     if (p != NULL)
-        p->length += data_size;
+        h_len(p) += data_size;
 
     h.appended += data_size;
 
@@ -534,7 +545,7 @@ UINT _nxe_packet_length_get(NX_PACKET *packet_ptr, ULONG *length)
 {
     HPacket *p = h_from_nx(packet_ptr);
 
-    *length = (p != NULL) ? p->length : 0UL;
+    *length = (p != NULL) ? h_len(p) : 0UL;
 
     return NX_SUCCESS;
 }
@@ -587,7 +598,7 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
 
     if (status == NX_SUCCESS)
     {
-        h.sent_bytes += p->length;
+        h.sent_bytes += h_len(p);
         p->in_use     = FALSE;
 
         return status;
@@ -597,9 +608,9 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
        _nx_tcp_socket_send_internal() does. */
     if (h.send_trim > 0)
     {
-        ULONG gone = (h.send_trim < p->length) ? h.send_trim : p->length;
+        ULONG gone = (h.send_trim < h_len(p)) ? h.send_trim : h_len(p);
 
-        p->length    -= gone;
+        h_len(p)     -= gone;
         h.sent_bytes += gone;
     }
 
@@ -658,7 +669,7 @@ UINT _nxde_udp_socket_send(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
 
     if (p != NULL)
     {
-        h.sent_bytes += p->length;
+        h.sent_bytes += h_len(p);
         p->in_use     = FALSE;
     }
 
