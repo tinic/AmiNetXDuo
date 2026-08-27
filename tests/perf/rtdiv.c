@@ -50,6 +50,27 @@ static u64 rt_mod_narrow(ULONG iters)
     return acc;
 }
 
+/*
+ * A divisor below 65536, which is the shape the software divide finishes in
+ * two DIVU.W with no estimate at all.  Separate from the narrow arm above,
+ * whose divisors run past 65536 two thirds of the way through and so price
+ * the two arms of ami_divu64_32_soft() mixed together.
+ */
+static u64 rt_div_small(ULONG iters)
+{
+    u64   acc = 0ULL;
+    u64   n   = RTDIV_SEED;
+    ULONG i;
+
+    for (i = 0; i < iters; i++)
+    {
+        acc += n / (u64)((i & 0xFFFUL) | 1UL);
+        n   += RTDIV_STEP;
+    }
+
+    return acc;
+}
+
 static u64 rt_div_wide(ULONG iters)
 {
     u64   acc = 0ULL;
@@ -125,6 +146,10 @@ int main(int argc, char **argv)
     t0  = ami_millis();
     acc = rt_mod_narrow(RTDIV_ITERS);
     rt_report("umoddi3_narrow", RTDIV_ITERS, ami_millis() - t0, acc);
+
+    t0  = ami_millis();
+    acc = rt_div_small(RTDIV_ITERS);
+    rt_report("udivdi3_small", RTDIV_ITERS, ami_millis() - t0, acc);
 
     t0  = ami_millis();
     acc = rt_mul_kernel(RTDIV_ITERS);
