@@ -153,6 +153,7 @@ tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml@nightly : th
 tests/clients/run-clients.sh       : .github/workflows/emulator.yml@nightly : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml@nightly : a TLS 1.3 handshake, on both CPU arms
 tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml@nightly : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server
+tests/tls/run-tlsloop.sh           : tools/ci.sh@nightly            : tls.library as the SERVER against tls.library as the client, two Shell processes in one guest over 127.0.0.1. Hermetic: no peer, no internet, no third party's certificate. Two rounds, because the key type picks the protocol version -- an EC key reaches TLS 1.3 and an RSA key is held at 1.2, nx_crypto having no RSA-PSS sign
 tests/tools/run-addifup.sh         : .github/workflows/emulator.yml@nightly : AddNetInterface comes back
 tests/tools/run-hostname-mac.sh    : .github/workflows/emulator.yml@nightly : two unnamed machines take two names
 tests/tools/run-hostname.sh        : .github/workflows/emulator.yml@nightly : hostname across its whole surface

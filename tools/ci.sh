@@ -1596,6 +1596,37 @@ stage_reachability() {
     return "$rc"
 }
 
+# --------------------------------------------------------------- tlsloop ----
+#
+# tls.library shaking hands with itself: a server process and a client process
+# in ONE guest, over 127.0.0.1, both ends the shipped library.
+#
+# It is here because the server half had never been run.  When it first was,
+# two things came out of it in a minute and a half: every TLSOpen() in the
+# tree was answering TLS_ERR_NOSTACK because nothing created
+# _nx_secure_tls_protection, and a 1.3 server with an RSA key cannot sign
+# CertificateVerify.  No peer, no bridge traffic, no internet -- the bytes
+# never leave the guest, so this is a gate and not a weather report.
+stage_tlsloop() {
+    hr "tls.library server against tls.library client (tier 2, needs a ROM)"
+
+    local rc=0
+
+    "$ROOT/tests/tls/run-tlsloop.sh" -b "$BUILD/default" \
+        -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+
+    case "$rc" in
+        0) note "PASS  both rounds completed and moved bytes: the EC round at" \
+                "TLS 1.3 and the RSA round at 1.2" ;;
+        1) fail "tlsloop: a round did not complete -- the tlsloop_*_ lines" \
+                "above name which half and which check" ;;
+        2) fail "tlsloop: the rig or the PKI refused it before any guest" \
+                "booted" ;;
+        *) fail "tlsloop: exit $rc" ;;
+    esac
+    return "$rc"
+}
+
 # ---------------------------------------------------------------- cards6 ----
 #
 # EVERY network card again, and off-LAN IPv6 this time: a global address off
@@ -2191,7 +2222,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|tlsloop|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -2225,6 +2256,7 @@ for s in "${WANT[@]}"; do
         capture)     stage_capture || srrc=$? ;;
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
+        tlsloop)     stage_tlsloop || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
