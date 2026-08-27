@@ -29,4 +29,9 @@ struct Task {
     APTR        tc_UserData;
 };
 
+/* NDK exec/tasks.h:94.  bsd_tcp_handler_start() waits on it for the control
+   process to report whether TCP: was published. */
+#define SIGB_SINGLE 4
+#define SIGF_SINGLE (1L << SIGB_SINGLE)
+
 #endif

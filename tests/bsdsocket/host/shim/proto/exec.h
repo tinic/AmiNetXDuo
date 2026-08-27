@@ -69,7 +69,9 @@ LONG  WaitIO(struct IORequest *ioRequest);
 struct IORequest *CheckIO(struct IORequest *ioRequest);
 BYTE  DoIO(struct IORequest *ioRequest);
 
-struct Library *OpenLibrary(const char *libName, ULONG version);
+/* CONST_STRPTR, for the reason OpenDevice() above carries: every caller in
+   the tree casts the literal to STRPTR, which is unsigned. */
+struct Library *OpenLibrary(const UBYTE *libName, ULONG version);
 VOID  CloseLibrary(struct Library *library);
 
 VOID  NewList(struct List *list);
@@ -78,6 +80,13 @@ VOID  AddHead(struct List *list, struct Node *node);
 VOID  Remove(struct Node *node);
 struct Node *RemHead(struct List *list);
 struct Node *FindName(struct List *list, const char *name);
+
+/* netstack.c publishes and withdraws its own public port, and reads free
+   memory for the pool sizing. */
+VOID  AddPort(struct MsgPort *port);
+VOID  RemPort(struct MsgPort *port);
+struct MsgPort *FindPort(const UBYTE *name);
+ULONG AvailMem(ULONG requirements);
 
 VOID  CacheClearU(VOID);
 VOID  SetTaskPri(struct Task *task, LONG priority);
