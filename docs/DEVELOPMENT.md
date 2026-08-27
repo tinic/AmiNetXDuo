@@ -44,7 +44,7 @@ any combination; the release set is
 |---|---|---|
 | `toolchain` | resolve or download the pinned `m68k-amigaos-gcc`; warns if the local one is not the pinned one | network |
 | `host` | the pre-build gates, then builds the host test targets and runs `ctest`; the count is exact against `HOST_TESTS_EXPECTED` in `tools/ci.sh`, so adding a test turns CI red until that line is raised | nothing |
-| `host32` | `fuzz_mdns` and `fuzz_tls_crypto`, which need `sizeof(void*) == 4` | `-m32` (gcc-multilib) |
+| `host32` | the targets needing `sizeof(void*) == 4`: the two fuzzers, and the socket files whose static assertions pin the 4.4BSD `iovec`/`msghdr` shape | `-m32` (gcc-multilib) |
 | `cross` | every cross configuration in `CROSS_CONFIGS`, warnings fatal (`cmake/ci-warnings.cmake`) | toolchain |
 | `web` | httpd's terminal page still matches the TypeScript it is generated from, and vendored xterm.js is untouched | node |
 | `analyze` | `tools/analyze.sh` — GCC `-fanalyzer` vs a triaged baseline. **Not in the default set** | toolchain |
@@ -53,6 +53,8 @@ any combination; the release set is
 | `cards` | boots every supported network card, one guest each, and proves each carries bytes both ways | ROM, bridge, peer |
 | `e2e` | installs the shipped archive on a real Workbench 3.1, reboots, drives it from another machine | ROM, licensed Workbench, LhA, peer |
 | `wirequiet` | what the machine puts on the wire when nobody asked it to: every card, a settle, then a window of idle counted off this host's NIC with `tcpdump`. Nothing else asserts on what the guest EMITS, which is how a DHCPv6 client rebinding twenty-five times a second passed every other stage | ROM, bridge, `tcpdump` |
+| `ltoprobe` | the one harness needing its own configure, `AMINETXDUO_CRYPTO68K_LTO_PROBE=ON`, which no `CROSS_CONFIGS` arm builds | toolchain |
+| `matrix` `capture` `bridged` `cards6` `lossgate` `smb` `e2ecards` | the rest of the on-Amiga arms, one subject each; `.github/workflows/emulator.yml` is what passes them | ROM, bridge, peer |
 | `reachability` | whether the machine still answers ARP and a connect while it is doing a TLS handshake, probed from a peer once a second; the gate is the longest stretch of silence, which is the shape the 44 s dropout had. Takes `-k` because the verdict depends on the emulated clock | ROM, bridge, peer |
 
 Environment: `AMIGA_TOOLCHAIN_ROOT`, `AMINETXDUO_CI_BUILD` (default `build/ci`),
@@ -70,9 +72,9 @@ configuration some cross arm compiles), and the per-harness transcript graders
 ## On-Amiga harnesses
 
 **`tests/HARNESSES` is the index**, and `tools/check-harnesses.sh` keeps it
-honest. Each row is `<path> : <runner> : <note>`, where the runner is a file
-that invokes it, `chained:<path>`, or `manual` with a reason code (`peer`,
-`bridged`, `bench`, `asset`, `windows`, `UNWIRED`). Read that file rather than
+honest. Each row is `<path> : <runner>@<when> : <note>`, where `<when>` is `push`,
+`nightly`, `release` or `hand` and the runner is a file that invokes it, `chained:<path>`, or `manual` with a reason code (`peer`,
+`bridged`, `bench`, `asset`, `windows`, `SLIRP`, `RED`, `BLOCKED`). Read that file rather than
 a list here — a list here would go stale and nothing would catch it.
 
 | Runner | Host | Use |
