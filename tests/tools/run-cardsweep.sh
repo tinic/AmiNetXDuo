@@ -49,6 +49,10 @@ esac
 
 . "$ROOT/tools/sana2-stage.sh"
 
+# The wire, at the peer, for every arm.  See KEEPDIR below for why it is on
+# unconditionally rather than on a re-run of something that already failed.
+. "$ROOT/tests/perf/peercap.sh"
+
 
 card_rows() { cards_rows "$ONLY"; }
 
@@ -102,6 +106,16 @@ guest_bytes() { # transcript dir
     ' "$1"
 }
 
+guest_field() { # transcript dir field
+    awk -v want="$2" -v f="$3" '
+        $0 ~ ("dir=" want "([^-a-z]|$)") {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ ("^" f "=")) { sub(("^" f "="), "", $i); v = $i }
+        }
+        END { print (v == "" ? "none" : v) }
+    ' "$1"
+}
+
 peer_bytes() { # peerlogdir name...
     _dir=$1; shift
     _t=0
@@ -120,6 +134,18 @@ RESULTS="$ROOT/build/cardsweep-results.txt"
 : > "$RESULTS"
 LOGDIR="$ROOT/build/cardsweep-logs"
 rm -rf "$LOGDIR"; mkdir -p "$LOGDIR"
+
+# WHAT A FAILING ARM LEAVES BEHIND, and the one directory here that the next
+# sweep does not delete.  $LOGDIR is wiped at the top of every sweep, so the
+# evidence for an arm that failed once and never again lived exactly as long as
+# it took somebody to run the sweep a second time -- which is how an arm that
+# reported no TCP in either direction ended up unattributable.  A passing arm
+# leaves nothing here; a failing one leaves the peer's capture, the guest's own
+# transcript and the guest's serial log, which between them say whether
+# anything was on the wire, in which direction, and what the guest thought it
+# had configured.
+KEEPDIR="$ROOT/build/cardsweep-failures"
+mkdir -p "$KEEPDIR"
 
 SWEEP_START=$(date +%s)
 NPASS=0; NFAIL=0; NSKIP=0; NCARRIED=0; IDX=0
@@ -166,6 +192,14 @@ while read -r -u 3 board model addr mac; do
     rm -f "$ROOT/build/amiberry-testhd-$tag/tools.txt" \
           "$ROOT/build/iperf-peers-$tag" 2>/dev/null || true
 
+    # Everything to and from this guest, ARP included, and not one port: what
+    # has to be readable afterwards is whether the guest was on the wire at
+    # all, which the five iperf ports on their own cannot say.  Failing to
+    # start is not fatal to the arm -- the sweep is a measurement first.
+    capped=no
+    AMINETXDUO_PEERCAP_FILTER="host $addr or arp" \
+        peercap_start "$PEERHOST" "" "$LOGDIR" "$tag" && capped=yes
+
     set +e
     env AMINETXDUO_RUN_TAG="$tag" \
         AMINETXDUO_AMIBERRY_MAC="02:41:4d:49:$mac" \
@@ -186,6 +220,10 @@ while read -r -u 3 board model addr mac; do
     rc=$?
     set -e
 
+    if [ "$capped" = yes ]; then
+        peercap_stop "$PEERHOST" "$LOGDIR" "$tag" || capped=no
+    fi
+
     t1=$(date +%s)
     wall=$((t1 - t0))
 
@@ -198,6 +236,7 @@ while read -r -u 3 board model addr mac; do
     peers="$ROOT/build/iperf-peers-$tag"
 
     iface_rc=""
+    upeer=none
     tx=0; rx=0; utx=0
     if [ -f "$report" ]; then
         iface_rc=$(block_rc "$report" "SYS:AddNetInterface eth0")
@@ -205,6 +244,12 @@ while read -r -u 3 board model addr mac; do
         rx=$(guest_bytes "$report" tcp-rx)
         utx=$(guest_bytes "$report" udp-tx)
     fi
+    # WHAT udp_tx_bytes IS AND IS NOT.  It counts what the guest handed to
+    # send(), and a UDP send returns as soon as NetX Duo accepts the packet --
+    # an unresolved next hop queues and drops with no error reaching the socket.
+    # So it is evidence the guest ran, and none at all that anything left the
+    # machine.  peer_udp_rx_bytes and this are what say that.
+    upeer=$(guest_field "$report" udp-tx peerreport)
     peer_rx=$(peer_bytes "$peers" tcp size)
     peer_tx=$(peer_bytes "$peers" srvtcp)
     peer_urx=$(peer_bytes "$peers" udp)
@@ -231,14 +276,35 @@ while read -r -u 3 board model addr mac; do
         why=" reason=\"the guest wrote no transcript at all\""
     elif [ "${iface_rc:-1}" != 0 ]; then
         why=" reason=\"the interface did not come online\""
+    elif [ "$peer_rx" = 0 ] && [ "$peer_tx" = 0 ] && [ "$peer_urx" = 0 ]; then
+        why=" reason=\"online, and not one byte reached the peer either way.\
+ udp_tx_bytes=$utx is what the guest handed to send() and needs no answer, so\
+ it does not make this a TCP fault\""
     elif [ "$peer_rx" = 0 ] && [ "$peer_tx" = 0 ]; then
-        why=" reason=\"online, and not one byte reached the peer either way\""
+        why=" reason=\"the peer received $peer_urx UDP bytes from the guest and\
+ nothing over TCP either way, so the guest reached the wire; udp_peerreport=$upeer\
+ says whether anything came back\""
     elif [ "$peer_tx" = 0 ]; then
         why=" reason=\"the guest can send and cannot be sent to\""
     elif [ "$peer_rx" = 0 ]; then
         why=" reason=\"the guest can be sent to and cannot send\""
     else
         why=" reason=\"counts disagree with the peer, or an assertion in run-iperf.sh failed\""
+    fi
+
+    kept=none
+    if [ "$status" = pass ]; then
+        rm -f "$LOGDIR/$tag.pcap" "$LOGDIR/$tag.ss"
+    else
+        kept="$KEEPDIR/$tag"
+        rm -rf "$kept"; mkdir -p "$kept"
+        for f in "$LOGDIR/$tag.pcap" "$LOGDIR/$tag.ss" "$LOGDIR/$board.log" \
+                 "$report" "$ROOT/build/amiberry-serial-$tag.log"; do
+            if [ -f "$f" ]; then cp -a "$f" "$kept/" 2>/dev/null || true; fi
+        done
+        if [ -d "$peers" ]; then
+            cp -a "$peers" "$kept/peers" 2>/dev/null || true
+        fi
     fi
 
     case "$status" in
@@ -248,11 +314,11 @@ while read -r -u 3 board model addr mac; do
         *)           NFAIL=$((NFAIL + 1)) ;;
     esac
 
-    printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s wall_s=%s log=%s%s\n' \
+    printf 'card=%s board=%s model=%s driver=%s driver_source=%s anxcard=%s status=%s rc=%s iface_rc=%s tx_bytes=%s peer_rx_bytes=%s rx_bytes=%s peer_tx_bytes=%s udp_tx_bytes=%s peer_udp_rx_bytes=%s udp_peerreport=%s wall_s=%s log=%s evidence=%s%s\n' \
            "$board" "$board" "$model" "$drv" "$SANA2_SEL_SOURCE" \
            "${anxcard:-none}" "$status" "$rc" "${iface_rc:-none}" \
-           "$tx" "$peer_rx" "$rx" "$peer_tx" "$utx" "$peer_urx" "$wall" \
-           "$LOGDIR/$board.log" "$why" | tee -a "$RESULTS"
+           "$tx" "$peer_rx" "$rx" "$peer_tx" "$utx" "$peer_urx" "$upeer" \
+           "$wall" "$LOGDIR/$board.log" "$kept" "$why" | tee -a "$RESULTS"
 done 3<<EOF
 $(card_rows)
 EOF
