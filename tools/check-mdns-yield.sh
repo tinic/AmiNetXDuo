@@ -48,7 +48,7 @@ body=$(awk '/^static VOID _nx_mdns_yield\(/ { on = 1 }
             on && /^}/ { exit }' "$SRC")
 
 order=$(printf '%s\n' "$body" |
-        sed -n 's/.*\(tx_mutex_put\|tx_thread_relinquish\|tx_mutex_get\).*/\1/p' |
+        sed -E -n 's/.*(tx_mutex_put|tx_thread_relinquish|tx_mutex_get).*/\1/p' |
         tr '\n' ' ')
 
 case "$order" in

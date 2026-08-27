@@ -61,7 +61,7 @@ _ks="${_ks%_}"
 # The library says so itself now, which is the only thing that works on a
 # binary out of a release archive rather than a build tree.
 _arch=$(strings -a "$BUILD/src/bsdsocket/bsdsocket.library" 2>/dev/null |
-        sed -n 's/.*\$VER: bsdsocket\.library .* \([0-9]\{5\}\|any\)$/\1/p' | head -1)
+        sed -E -n 's/.*\$VER: bsdsocket\.library .* ([0-9]{5}|any)$/\1/p' | head -1)
 [ -n "$_arch" ] ||
 _arch=$(sed -n 's/^AMINETXDUO_CPU:[^=]*=//p' "$BUILD/CMakeCache.txt" 2>/dev/null)
 [ -n "$_arch" ] || _arch=$(grep -m1 -oE '\-m68[0-9]+' \
