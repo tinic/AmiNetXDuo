@@ -20,6 +20,21 @@ endif()
 target_compile_options(test_cardgrab PRIVATE -Wall -Wextra)
 set_target_properties(test_cardgrab PROPERTIES OUTPUT_NAME "CardGrab")
 
+# CardWatch is the witness for the card being pulled out and put back.  It
+# holds the unit open across the whole cycle because the driver requires it:
+# the PCMCIA worker only brings a reinserted card back online while an opener
+# is still there, and a device with no openers could be expunged between the
+# two halves, which would test a fresh probe rather than a reinsertion.
+add_executable(test_cardwatch cardwatch.c)
+target_include_directories(test_cardwatch PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_cardwatch PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_cardwatch PRIVATE -Wall -Wextra)
+set_target_properties(test_cardwatch PROPERTIES OUTPUT_NAME "CardWatch")
+
 add_executable(test_clockset clockset.c)
 target_include_directories(test_clockset PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)
