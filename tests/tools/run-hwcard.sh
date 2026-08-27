@@ -142,6 +142,27 @@ if [ "$CARD" = xsurf500 ]; then
     exit 3
 fi
 
+# ------------------------------------------------- is there a machine --
+#
+# ASKED BEFORE ANYTHING IS SET UP.  The A1200 is off more often than it is
+# on, and a skip that has already started a peer on another host, claimed a
+# block of ports and copied a spec around is a skip that cost something.
+# hwrun.sh -n is the same resolver and the same two probes, so the answer
+# here cannot differ from the answer phase A would get.
+PROBE_RC=0
+"$ROOT/tools/hwrun.sh" -A "$TARGET" -p "$PORT" -n > "$OUT/probe.txt" 2>&1 ||
+    PROBE_RC=$?
+grep -E '^(target_|resolved_by|hw_)' "$OUT/probe.txt" || true
+if [ "$PROBE_RC" = 3 ]; then
+    echo "RESULT=skip"
+    grep -v -E '^(target_|resolved_by|hw_|RESULT)' "$OUT/probe.txt" >&2 || true
+    exit 3
+fi
+[ "$PROBE_RC" = 0 ] || {
+    echo "RESULT=fail"
+    cat "$OUT/probe.txt" >&2
+    exit 1; }
+
 # ------------------------------------------------------------- staging --
 
 STAGE="$OUT/stage"
@@ -285,6 +306,16 @@ fi
 stop_peer() {
     [ -n "$PEER_PID" ] && kill "$PEER_PID" 2>/dev/null || true
     PEER_PID=""
+    # And the process it was managing, wherever it is.  Killing timeout(1)
+    # is not always killing the peer, and a peer left holding its ports is
+    # the next run's diagnosis rather than this one's.
+    if [ "$PEERHOST" = local ]; then
+        pkill -f "[p]aypeer-$TAG" 2>/dev/null || true
+    elif [ -n "$PEERHOST" ]; then
+        ssh -o ConnectTimeout=10 "$PEERHOST" \
+            "pkill -f '[p]aypeer-$TAG' 2>/dev/null; exit 0" \
+            > /dev/null 2>&1 || true
+    fi
 }
 trap stop_peer EXIT INT TERM HUP
 
@@ -296,21 +327,30 @@ if [ -s "$SPEC" ]; then
     # remaining cases spent paysum's own TIMEOUT retrying a SYN into nothing
     # -- which reads as a slow machine, not as a peer that went home.
     PEER_LIFE=$((CMDTIME + 360))
+    # A COPY UNDER THE TAG'S OWN NAME, in both modes.  The peer holds its
+    # whole port block for PEER_LIFE, which is minutes, and a run that ended
+    # early leaves one standing; the next run of the same tag then reports
+    # "the peer died before the run started" with eight Address already in
+    # use behind it and nothing about the machine.  The name is what lets
+    # this kill its own predecessor and nobody else's.
+    PEER_PY="/tmp/paypeer-$TAG.py"
+    PEER_SPEC="/tmp/payspec-$TAG.txt"
     if [ "$PEERHOST" = local ]; then
-        timeout $((PEER_LIFE + 60)) python3 "$ROOT/tests/tools/paypeer.py" \
-            matrix --spec "$SPEC" --lifetime "$PEER_LIFE" \
+        cp "$ROOT/tests/tools/paypeer.py" "$PEER_PY"
+        cp "$SPEC" "$PEER_SPEC"
+        pkill -f "[p]aypeer-$TAG" 2>/dev/null || true
+        timeout $((PEER_LIFE + 60)) python3 "$PEER_PY" \
+            matrix --spec "$PEER_SPEC" --lifetime "$PEER_LIFE" \
             > "$OUT/peer.out" 2> "$OUT/peer.err" &
         PEER_PID=$!
     else
-        REMOTE_PY="/tmp/paypeer-$TAG.py"
-        REMOTE_SPEC="/tmp/payspec-$TAG.txt"
-        scp -q "$ROOT/tests/tools/paypeer.py" "$PEERHOST:$REMOTE_PY"
-        scp -q "$SPEC" "$PEERHOST:$REMOTE_SPEC"
+        scp -q "$ROOT/tests/tools/paypeer.py" "$PEERHOST:$PEER_PY"
+        scp -q "$SPEC" "$PEERHOST:$PEER_SPEC"
         ssh -o ConnectTimeout=10 "$PEERHOST" \
             "pkill -f '[p]aypeer-$TAG' 2>/dev/null; exit 0" || true
         ssh -o ConnectTimeout=10 "$PEERHOST" \
-            "timeout $((PEER_LIFE + 60)) python3 $REMOTE_PY matrix \
-                 --spec $REMOTE_SPEC --lifetime $PEER_LIFE" \
+            "timeout $((PEER_LIFE + 60)) python3 $PEER_PY matrix \
+                 --spec $PEER_SPEC --lifetime $PEER_LIFE" \
             > "$OUT/peer.out" 2> "$OUT/peer.err" &
         PEER_PID=$!
     fi

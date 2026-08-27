@@ -4,7 +4,7 @@
 #
 #   tools/hwrun.sh [-A TARGET] [-p PORT] [-t SECONDS] [-w SECONDS]
 #                  [-o OUTDIR] [-D DRAWER] [-H HOSTADDR] [-d]
-#                  <commands.txt> <file> ...
+#                  [-n] <commands.txt> <file> ...
 #
 # WHY THIS EXISTS
 #
@@ -44,10 +44,11 @@ OUT=""
 DRAWER="${AMINETXDUO_HW_DRAWER:-RAM:hwrun}"
 HOSTADDR="${AMINETXDUO_HW_HOSTADDR:-}"
 DETACH=no
+PROBE=no
 
 usage() { sed -n '3,8p' "$0" >&2; }
 
-while getopts "A:p:t:w:o:D:H:dh" opt; do
+while getopts "A:p:t:w:o:D:H:dnh" opt; do
     case "$opt" in
         A) TARGET="$OPTARG" ;;
         p) PORT="$OPTARG" ;;
@@ -57,20 +58,30 @@ while getopts "A:p:t:w:o:D:H:dh" opt; do
         D) DRAWER="$OPTARG" ;;
         H) HOSTADDR="$OPTARG" ;;
         d) DETACH=yes ;;
+        n) PROBE=yes ;;
         h) usage; exit 0 ;;
         *) usage; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
 
-[ "$#" -ge 1 ] || { usage; exit 2; }
-
-CMDFILE="$1"; shift
-[ -f "$CMDFILE" ] || { echo "hwrun: no command list at $CMDFILE" >&2; exit 2; }
+# -n asks the reachability question and nothing else, so a caller can find
+# out whether there is a machine before it starts a peer, claims ports or
+# copies anything anywhere.  It takes no command list.
+if [ "$PROBE" = no ]; then
+    [ "$#" -ge 1 ] || { usage; exit 2; }
+    CMDFILE="$1"; shift
+    [ -f "$CMDFILE" ] ||
+        { echo "hwrun: no command list at $CMDFILE" >&2; exit 2; }
+else
+    CMDFILE=""
+fi
 
 TAG="${AMINETXDUO_RUN_TAG:-hwrun}"
 OUT="${OUT:-$ROOT/build/hwrun-$TAG}"
-rm -rf "$OUT"; mkdir -p "$OUT"
+if [ "$PROBE" = no ]; then
+    rm -rf "$OUT"; mkdir -p "$OUT"
+fi
 
 # ------------------------------------------------------------- the target --
 #
@@ -177,6 +188,11 @@ if [ "$HTTP" != yes ]; then
         echo "  the name is known here; the machine is not on the wire." >&2
     fi
     exit 3
+fi
+
+if [ "$PROBE" = yes ]; then
+    echo "RESULT=pass"
+    exit 0
 fi
 
 # -------------------------------------------------------- what to send it --
