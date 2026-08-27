@@ -166,6 +166,9 @@ static LONG tls_error_from_nx(UINT status)
     case NX_SECURE_X509_KEY_USAGE_ERROR:
         return TLS_ERR_KEYUSAGE;
 
+    case NX_SECURE_TLS_ALPN_PROTOCOL_MISMATCH:
+        return TLS_ERR_ALPN;
+
     case NX_NO_PACKET:
     case NX_WAIT_ABORTED:
         return TLS_ERR_TIMEOUT;
@@ -313,6 +316,7 @@ struct TLSConnection *tls_TLSOpenA(
     CONST_STRPTR             hostname;
     CONST_STRPTR             store_path;
     CONST_STRPTR             session_path;
+    CONST_STRPTR             alpn;
     ULONG                    timeout_ms;
     ULONG                    record_bytes;
     ULONG                    chain;
@@ -363,6 +367,7 @@ struct TLSConnection *tls_TLSOpenA(
     hostname     = (CONST_STRPTR)tls_tag_data(tags, TLSA_HostName, 0);
     store_path   = (CONST_STRPTR)tls_tag_data(tags, TLSA_TrustStore, 0);
     session_path = (CONST_STRPTR)tls_tag_data(tags, TLSA_SessionFile, 0);
+    alpn         = (CONST_STRPTR)tls_tag_data(tags, TLSA_ALPN, 0);
     timeout_ms   = tls_tag_data(tags, TLSA_Timeout, TLS_DEFAULT_TIMEOUT_MS);
     record_bytes = tls_tag_data(tags, TLSA_RecordBuffer, TLS_DEFAULT_RECORD_BUFFER);
     chain        = tls_tag_data(tags, TLSA_MaxChain, TLS_DEFAULT_CHAIN);
@@ -413,6 +418,10 @@ struct TLSConnection *tls_TLSOpenA(
         error = TLS_ERR_NOHOSTNAME;
         goto fail;
     }
+
+    error = tls_alpn_encode(conn, alpn);
+    if (error != TLS_OK)
+        goto fail;
 
     if ((conn->tc_Flags & TLSF_VERIFY) != 0)
     {
@@ -588,6 +597,19 @@ struct TLSConnection *tls_TLSOpenA(
     {
         (VOID)_nx_secure_tls_session_sni_extension_set(&conn->tc_Session,
                                                         &conn->tc_Sni);
+    }
+
+    if (conn->tc_AlpnLength > 0)
+    {
+        /* tc_Alpn is already validated by tls_alpn_encode(), so the only way
+           this fails is a bug on this side. */
+        if (_nx_secure_tls_alpn_protocol_set(&conn->tc_Session, conn->tc_Alpn,
+                                             conn->tc_AlpnLength) != NX_SUCCESS)
+        {
+            tls_conn_leave(conn);
+            error = TLS_ERR_INTERNAL;
+            goto fail_session;
+        }
     }
 
     /* tls_time_now() answers 0 when the clock is unset, and 0 is nx_secure's

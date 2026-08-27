@@ -20,7 +20,7 @@ extern "C" {
  * exceptions.  Exec opens on lib_Version >= the version asked for, so a caller
  * compiled against a newer header would jump past an older library's jump
  * table.  Ask for what you use, not for TLS_LIB_VERSION. */
-#define TLS_LIB_VERSION     2
+#define TLS_LIB_VERSION     3
 #define TLS_LIB_REVISION    0
 
 /* How many user vectors each version has.  TLS_LIB_VECTORS is derived from
@@ -28,6 +28,7 @@ extern "C" {
  * it at build time, so a new vector cannot ship without the version moving. */
 #define TLS_LIB_VECTORS_V1  8
 #define TLS_LIB_VECTORS_V2  10
+#define TLS_LIB_VECTORS_V3  11
 
 #define TLS_LIB_VECTORS_FOR_(v) TLS_LIB_VECTORS_V##v
 #define TLS_LIB_VECTORS_FOR(v)  TLS_LIB_VECTORS_FOR_(v)
@@ -78,6 +79,19 @@ struct TLSConnection;
  * master secret to disk.  Paths over 159 bytes: TLS_ERR_BADPATH, never cut. */
 #define TLSA_SessionFile    (TLSA_Dummy + 9)
 
+/* STRPTR.  RFC 7301 application protocols to offer, most preferred first, as
+ * one comma-separated string: "h2,http/1.1".  What the server picked is read
+ * back with TLSGetALPN().
+ *
+ * HTTP/2 over TLS EXISTS ONLY OVER A NEGOTIATED "h2" (RFC 7540 3.2).  A client
+ * that does not offer it must not send an HTTP/2 preface, and a server that
+ * does not answer has not agreed to one.
+ *
+ * Names are 1..32 bytes and the whole list is at most TLS_ALPN_LIST_MAX bytes
+ * once encoded, one length byte per name.  Anything else is TLS_ERR_BADALPN
+ * from TLSOpen(), never a truncated offer. */
+#define TLSA_ALPN           (TLSA_Dummy + 10)
+
 /* --------------------------------------------------------------- errors --- */
 
 #define TLS_OK               0
@@ -98,6 +112,15 @@ struct TLSConnection;
 #define TLS_ERR_BADHOSTNAME 15  /* host name exceeds the verifier/SNI limit   */
 #define TLS_ERR_KEYUSAGE    16  /* leaf keyUsage forbids the negotiated use   */
 #define TLS_ERR_BADPATH     17  /* trust/session path exceeds internal limit  */
+#define TLS_ERR_BADALPN     18  /* TLSA_ALPN is malformed or too long         */
+#define TLS_ERR_ALPN        19  /* the server picked a protocol not offered   */
+
+/* The longest single RFC 7301 protocol name, and the longest encoded list.
+ * The IANA registry's longest name is nine bytes; 32 is where a name stops
+ * being an identifier.  The list ceiling is what keeps a ClientHello inside
+ * the 500-byte cache nx_secure copies it into. */
+#define TLS_ALPN_NAME_MAX   32
+#define TLS_ALPN_LIST_MAX   64
 
 /* ----------------------------------------------------------------- info --- */
 
@@ -185,14 +208,37 @@ struct TLSSelect
 #define TLS_LVO_TLSRandom       (-78)
 #define TLS_LVO_TLSBuffered     (-84)
 
+/* Since version 3.  Same rule: open with 3 to call it. */
+#define TLS_LVO_TLSGetALPN      (-90)
+
 /* The last vector, so a caller that wants to check rather than trust can
    compare against lib_NegSize. */
-#define TLS_LVO_LAST            TLS_LVO_TLSBuffered
+#define TLS_LVO_LAST            TLS_LVO_TLSGetALPN
 
-/* Everything below is m68k assembly against the library's jump table, which a
- * host compiler cannot parse.  Define TLSLIB_NO_INLINE_STUBS to get the tags,
- * the error codes and the LVOs without it. */
-#ifndef TLSLIB_NO_INLINE_STUBS
+/* ------------------------------------------------------ the two paths --- */
+
+/*
+ * THIS HEADER IS THE DATA HALF.  The vectors are described in
+ * developer/sfd/tls_lib.sfd, which tools/gen-developer.sh turns into
+ * <proto/tls.h>, <clib/tls_protos.h>, <inline/tls.h>, the SAS/C and StormC
+ * pragmas and an assembler LVO include -- so every AmigaOS compiler can call
+ * the library, which was not true while these stubs were the only route in.
+ *
+ *   #include <proto/tls.h>       any compiler.  A global TLSBase, or
+ *                                #define TLS_BASE_NAME to hold two.
+ *   #include <aminetxduo/tlslib.h>   GCC only.  The stubs below, each taking
+ *                                the base explicitly.
+ *
+ * They are alternatives, not layers: both spell the same eleven names.
+ * <proto/tls.h> pulls this header in for the tags and the structures and the
+ * stubs then compile out, so a program that wants both writes the proto
+ * include FIRST.
+ *
+ * Everything below is m68k assembly against the library's jump table, which a
+ * host compiler cannot parse either.  Define TLSLIB_NO_INLINE_STUBS to get the
+ * tags, the error codes and the LVOs without it.
+ */
+#if !defined(TLSLIB_NO_INLINE_STUBS) && !defined(CLIB_TLS_PROTOS_H)
 
 /* Inline stubs, each taking the library base explicitly so a program can hold
  * two.  a0 and a1 must be "+r" and not plain inputs: d0, d1, a0 and a1 are
@@ -355,7 +401,28 @@ static __inline LONG TLSRandom(struct Library *base, APTR buffer, LONG length)
     return res;
 }
 
-#endif /* TLSLIB_NO_INLINE_STUBS */
+/* The RFC 7301 protocol the server agreed to, written NUL-terminated into
+ * `buffer`.  Returns its length, 0 when nothing was negotiated -- which for
+ * HTTP means HTTP/1.1 by the pre-ALPN default -- or -1.  A buffer shorter than
+ * the name is -1 and writes nothing; TLS_ALPN_NAME_MAX + 1 always fits. */
+static __inline LONG TLSGetALPN(struct Library *base,
+                                struct TLSConnection *conn,
+                                APTR buffer, LONG size)
+{
+    register struct Library       *a6 __asm("a6") = base;
+    register struct TLSConnection *a0 __asm("a0") = conn;
+    register APTR                  a1 __asm("a1") = buffer;
+    register LONG                  d0 __asm("d0") = size;
+    register LONG                  res __asm("d0");
+
+    __asm __volatile ("jsr a6@(-90:W)"
+                      : "=r" (res), "+r" (a0), "+r" (a1)
+                      : "r" (a6), "r" (d0)
+                      : "d1", "cc", "memory");
+    return res;
+}
+
+#endif /* !TLSLIB_NO_INLINE_STUBS && !CLIB_TLS_PROTOS_H */
 
 #ifdef __cplusplus
 }

@@ -78,6 +78,17 @@ list(APPEND NX_SECURE_SOURCES
      "${CMAKE_CURRENT_SOURCE_DIR}/rfc7905/nx_secure_tls_record_payload_encrypt.c"
      "${CMAKE_CURRENT_SOURCE_DIR}/rfc7905/nx_secure_tls_record_payload_decrypt.c")
 
+# RFC 7301, ALPN.  nx_secure has none, which is why nothing built on it could
+# negotiate HTTP/2: h2 over TLS is defined only over a negotiated "h2"
+# (RFC 7540 3.2), never by assumption.  This adds it rather than replacing
+# anything, so it is an append and not an exclusion.  It lives here and not in
+# third_party/ so that a submodule bump is a merge of the seven one-line call
+# sites in nx_secure and nothing else; the ProtocolNameList field in
+# NX_SECURE_TLS_SESSION is the one thing that cannot live outside the vendored
+# header.
+list(APPEND NX_SECURE_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/alpn/nx_secure_tls_alpn.c")
+
 add_library(nx_secure STATIC ${NX_SECURE_SOURCES})
 target_include_directories(nx_secure PUBLIC ${AMINETXDUO_TLS_INCLUDES})
 target_link_libraries(nx_secure PUBLIC nx_crypto netxduo)

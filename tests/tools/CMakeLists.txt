@@ -207,6 +207,28 @@ target_compile_options(test_v6only PRIVATE -Wall -Wextra)
 set_target_properties(test_v6only PROPERTIES OUTPUT_NAME "V6Only")
 add_dependencies(test_v6only developer_drawer)
 
+# TLSInfo is the same check for tls.library, and it is the reason
+# developer/sfd/tls_lib.sfd exists.  The library's entry points used to be GCC
+# extended-asm stubs in <aminetxduo/tlslib.h> and nothing else, so no other
+# compiler could reach them; this compiles against <proto/tls.h> -- the header
+# sfdc generates, from the same description SAS/C and vbcc read -- with the
+# staged drawer and the NDK as the whole include path.  A vector missing from
+# the SFD, or a type that never reaches Developer/, fails here.
+#
+# Built only in a TLS configuration: <proto/tls.h> is staged either way, but a
+# drawer with no tls.library in it has nothing for this to open.
+if(AMINETXDUO_TLS)
+    add_executable(test_tlsinfo "${AMINETXDUO_DEVELOPER_STAGE}/examples/TLSInfo.c")
+    target_include_directories(test_tlsinfo PRIVATE
+                               "${AMINETXDUO_DEVELOPER_STAGE}/include")
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(test_tlsinfo PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
+    target_compile_options(test_tlsinfo PRIVATE -Wall -Wextra)
+    set_target_properties(test_tlsinfo PROPERTIES OUTPUT_NAME "TLSInfo")
+    add_dependencies(test_tlsinfo developer_drawer)
+endif()
+
 # CycleDrill cycles the library and the interface rather than using them:
 # OpenLibrary/CloseLibrary including the last-close expunge, Online/Offline
 # through NETCTRL_INTERFACE_UP/DOWN, RemoveInterface/AddInterfaceTagList with

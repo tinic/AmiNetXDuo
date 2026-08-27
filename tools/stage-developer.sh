@@ -40,7 +40,12 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #   tcp.h      TCP_USER_TIMEOUT and TCP_STALLINFO, the two IPPROTO_TCP option
 #              numbers <netinet/tcp.h> has no room for. Option numbers and one
 #              struct, no vectors, same shape as in6.h.
-PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h)
+#   tlslib.h   tls.library's tags, error codes, struct TLSInfo and struct
+#              TLSSelect.  The VECTORS are in developer/sfd/tls_lib.sfd like
+#              every other library's, so this half is the data half; the two
+#              together are what makes tls.library callable from SAS/C and
+#              vbcc, which it was not.
+PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h)
 
 # Copy only when the bytes differ.  The CMake build re-runs this on EVERY
 # build (developer_drawer, tests/tools/CMakeLists.txt) so that editing a
@@ -68,6 +73,8 @@ while IFS= read -r f; do
     stage "$ROOT/developer/include/$f" "$DEST/include/$f"
 done < <(cd "$ROOT/developer/include" && find . -type f)
 stage "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/aminetxduo_lib.sfd"
+stage "$ROOT/developer/sfd/tls_lib.sfd"        "$DEST/sfd/tls_lib.sfd"
 stage "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
 stage "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/IfNames.c"
 stage "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/V6Only.c"
+stage "$ROOT/developer/examples/TLSInfo.c"     "$DEST/examples/TLSInfo.c"

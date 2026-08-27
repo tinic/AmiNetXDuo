@@ -219,6 +219,22 @@ UINT _nx_secure_tls_session_sni_extension_set(NX_SECURE_TLS_SESSION *session,
     return NX_SUCCESS;
 }
 
+/* The ALPN pair is test_tls_alpn.c's subject; tls_alpn.c is linked here only
+   because tls_conn.c calls its encoder on the TLSOpen() path. */
+UINT _nx_secure_tls_alpn_protocol_set(NX_SECURE_TLS_SESSION *session,
+                                      const UCHAR *list, USHORT length)
+{
+    (VOID)session; (VOID)list; (VOID)length;
+    return NX_SUCCESS;
+}
+
+UINT _nx_secure_tls_alpn_protocol_get(NX_SECURE_TLS_SESSION *session,
+                                      const UCHAR **protocol, UCHAR *length)
+{
+    (VOID)session; (VOID)protocol; (VOID)length;
+    return NX_SECURE_TLS_EXTENSION_NOT_FOUND;
+}
+
 UINT _nx_secure_tls_session_time_function_set(NX_SECURE_TLS_SESSION *session,
                                                ULONG (*time_func)(void))
 {

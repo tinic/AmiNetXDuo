@@ -42,6 +42,7 @@ set(TLSLIB_SOURCES
     tls_random.c
     "${CMAKE_SOURCE_DIR}/src/common/ami_random.c"
     tls_conn.c
+    tls_alpn.c
     tls_hostname.c
     tls_path.c
     tls_store.c
@@ -381,6 +382,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # the enter/end/delete/leave order and fails if deletion escapes again.
     add_executable(test_tls_close
         test/test_tls_close.c
+        tls_alpn.c
         tls_conn.c
         tls_hostname.c
         tls_packet.c
@@ -468,13 +470,21 @@ if(NOT CMAKE_CROSSCOMPILING)
         TLSLIB_HOST_TEST)
 
     add_executable(test_tls_packet test/test_tls_packet.c tls_packet.c)
+
+    # RFC 7301.  Both halves are byte manipulation over an
+    # NX_SECURE_TLS_SESSION, so the client offer, the server selection and the
+    # round trip between them all run here; nothing about them needs a network.
+    add_executable(test_tls_alpn
+        test/test_tls_alpn.c
+        tls_alpn.c
+        "${CMAKE_SOURCE_DIR}/src/tls/alpn/nx_secure_tls_alpn.c")
     add_executable(test_tls_transport
         test/test_tls_transport.c
         tls_netx.c
         tls_packet.c
         tls_sock.c)
 
-    foreach(_tls_host_test test_tls_packet test_tls_transport)
+    foreach(_tls_host_test test_tls_packet test_tls_transport test_tls_alpn)
         target_include_directories(${_tls_host_test} PRIVATE
             ${TLSLIB_HOST_TEST_INCLUDES})
         target_compile_definitions(${_tls_host_test} PRIVATE
@@ -488,5 +498,6 @@ if(NOT CMAKE_CROSSCOMPILING)
     endforeach()
 
     add_test(NAME tls_packet_pool COMMAND test_tls_packet)
+    add_test(NAME tls_alpn COMMAND test_tls_alpn)
     add_test(NAME tls_transport COMMAND test_tls_transport)
 endif()

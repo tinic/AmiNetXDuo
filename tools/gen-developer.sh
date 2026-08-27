@@ -19,7 +19,13 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Two libraries, two SFDs, two header sets.  aminetxduo_lib.sfd is what
+# bsdsocket.library adds past the end of the NDK's own SFD; tls_lib.sfd is the
+# whole of tls.library, which had no machine-readable description at all and
+# was therefore callable from GCC and from nothing else.
 SFD="$ROOT/developer/sfd/aminetxduo_lib.sfd"
+TLS_SFD="$ROOT/developer/sfd/tls_lib.sfd"
 
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
@@ -38,19 +44,25 @@ if [ -z "$SFDC" ]; then
 fi
 
 gen() {
-    # gen <mode> <relative output path>
-    local mode="$1" out="$2$3"
+    # gen <sfd> <mode> <dest root> <relative output path>
+    local sfd="$1" mode="$2" out="$3$4"
     mkdir -p "$(dirname "$out")"
-    "$SFDC" --quiet --target=m68k-amigaos --mode="$mode" "$SFD" \
+    "$SFDC" --quiet --target=m68k-amigaos --mode="$mode" "$sfd" \
         | sed '/^\*\*       All Rights Reserved$/d' > "$out"
 }
 
 emit() {
-    gen clib    "$1" /clib/aminetxduo_protos.h
-    gen macros  "$1" /inline/aminetxduo.h
-    gen proto   "$1" /proto/aminetxduo.h
-    gen pragmas "$1" /pragmas/aminetxduo_pragmas.h
-    gen lvo     "$1" /lvo/aminetxduo_lib.i
+    gen "$SFD" clib    "$1" /clib/aminetxduo_protos.h
+    gen "$SFD" macros  "$1" /inline/aminetxduo.h
+    gen "$SFD" proto   "$1" /proto/aminetxduo.h
+    gen "$SFD" pragmas "$1" /pragmas/aminetxduo_pragmas.h
+    gen "$SFD" lvo     "$1" /lvo/aminetxduo_lib.i
+
+    gen "$TLS_SFD" clib    "$1" /clib/tls_protos.h
+    gen "$TLS_SFD" macros  "$1" /inline/tls.h
+    gen "$TLS_SFD" proto   "$1" /proto/tls.h
+    gen "$TLS_SFD" pragmas "$1" /pragmas/tls_pragmas.h
+    gen "$TLS_SFD" lvo     "$1" /lvo/tls_lib.i
 }
 
 DEST="$ROOT/developer/include"

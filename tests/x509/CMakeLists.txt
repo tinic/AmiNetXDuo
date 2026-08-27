@@ -37,6 +37,11 @@ list(FILTER _x509_secure_all EXCLUDE REGEX
 file(GLOB _x509_crypto_all "${_x509_crypto_src}/*.c")
 list(FILTER _x509_crypto_all EXCLUDE REGEX "self_test")
 
+# RFC 7301.  src/tls/CMakeLists.txt appends the same file to the shipping
+# nx_secure archive; the ClientHello and ServerHello extension builders call
+# into it, so an archive without it does not link.
+list(APPEND _x509_secure_all "${CMAKE_SOURCE_DIR}/src/tls/alpn/nx_secure_tls_alpn.c")
+
 add_library(test_x509_nx_secure STATIC ${_x509_secure_all})
 add_library(test_x509_nx_crypto STATIC ${_x509_crypto_all})
 

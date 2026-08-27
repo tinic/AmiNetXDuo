@@ -341,6 +341,12 @@ struct TLSConnection
     UCHAR                       tc_HostName[NX_SECURE_X509_DNS_NAME_MAX + 1];
     USHORT                      tc_HostNameLength;
 
+    /* TLSA_ALPN, wire-encoded.  In the connection because nx_secure keeps the
+       pointer and reads it when it builds the ClientHello, long after
+       TLSOpen()'s caller has moved on from its tag list. */
+    UBYTE                       tc_Alpn[TLS_ALPN_LIST_MAX];
+    UWORD                       tc_AlpnLength;
+
     UCHAR                      *tc_Metadata;
     ULONG                       tc_MetadataSize;
     UCHAR                      *tc_RecordBuffer;
@@ -491,6 +497,12 @@ LONG  tls_hostname_set(TLSConnection *conn, CONST_STRPTR hostname, ULONG length)
 
 /* Copy a caller-supplied filesystem identity whole or reject it. */
 LONG  tls_path_set(char *dst, ULONG size, CONST_STRPTR path);
+
+/* ----------------------------------------------------------- tls_alpn.c, */
+
+/* Turn TLSA_ALPN's comma-separated string into the RFC 7301 wire encoding in
+   conn->tc_Alpn.  TLS_ERR_BADALPN rather than a shortened offer. */
+LONG  tls_alpn_encode(TLSConnection *conn, CONST_STRPTR list);
 
 
 /*
