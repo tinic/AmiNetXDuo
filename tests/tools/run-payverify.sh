@@ -8,6 +8,14 @@
 #                                [-g GATEWAY] [-6 PEERV6] [-F v4|v6|both]
 #                                [-S] [-Q]
 #
+# THE CARD THIS CANNOT REACH.
+#
+# -N takes a board tools/amiberry-run.sh can build, and there is no 3c589
+# among them: no emulator models an EtherLink III.  The same proof on the
+# real card is tests/tools/run-hwcard.sh's `payload` arm, which runs the
+# same paysum against the same tests/tools/paypeer.py over the same spec
+# file, on the machine that has one.
+#
 # WHY THIS EXISTS
 #
 # SPDX-License-Identifier: MIT
