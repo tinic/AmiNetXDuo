@@ -24,14 +24,12 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
-# binutils 2.39, not 2.46: 2.46's gas assembles GCC 16.2 to the same bytes and
-# its `size` reads every object here, but its objcopy lost bebbo's TARGET_AMIGA
-# carve-out in copy_relocations_in_section(), so `strip` writes a hunk
-# executable with no HUNK_RELOC32, exit 0 and no diagnostic, and LoadSeg()
-# relocates nothing.  tools/patches/binutils/ does not apply to 2.46 either, so
-# -flto does not link.  tools/patches/binutils-2.46/ holds the repair for
-# whoever moves the pin.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing
-# types and the sources are written to the spellings both accept.
+# binutils 2.39, not 2.46: a 2.46 toolchain patched by
+# tools/patches/binutils-2.46/ builds this tree at -DAMINETXDUO_LTO=ON and
+# emits the four shipped images byte for byte as this one does, and identical
+# output does not pay for a new asset on two platforms whose sha256 is pinned
+# below.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
+# sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
 # 16.2.1 rather than a rebuilt 16.2.0: the content is different -- gcc moved to
 # 60f21496, binutils carries the two bfd LTO patches and is configured

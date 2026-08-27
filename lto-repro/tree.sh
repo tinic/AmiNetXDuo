@@ -17,7 +17,7 @@ args=(-S . -B "$B"
       -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake
       -DCMAKE_BUILD_TYPE=Release)
 if [ "$LTO" = "lto" ]; then
-    args+=(-DCMAKE_PROJECT_INCLUDE="$ROOT/.repro/lto.cmake"
+    args+=(-DCMAKE_PROJECT_INCLUDE="$ROOT/lto-repro/lto.cmake"
            -DCMAKE_AR="$TC/bin/m68k-amigaos-gcc-ar"
            -DCMAKE_RANLIB="$TC/bin/m68k-amigaos-gcc-ranlib"
            -DCMAKE_NM="$TC/bin/m68k-amigaos-gcc-nm")
