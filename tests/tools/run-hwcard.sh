@@ -146,7 +146,12 @@ if [ -z "$CARD_INDEX" ]; then
     echo "run-hwcard: src/netdev/netdev_cards.c has no row called '$CARD'" >&2
     exit 2
 fi
-WANT_UNIT=$(( (CARD_INDEX + 1) * 100 ))
+# include/aminetxduo/anxnet.h:16, read out of the header rather than written
+# down a second time here.
+UNIT_PIN=$(sed -n "s/^#define ANXNET_UNIT_PIN  *\([0-9][0-9]*\).*/\1/p" \
+           include/aminetxduo/anxnet.h | head -1)
+UNIT_PIN="${UNIT_PIN:-100}"
+WANT_UNIT=$(( (CARD_INDEX + 1) * UNIT_PIN ))
 echo "card_index=$CARD_INDEX"
 echo "card_expected_unit=$WANT_UNIT"
 
@@ -193,7 +198,8 @@ need() {
     cp "$1" "$STAGE/"
 }
 need "$TOOLS/ToolsSmoke"
-has_arm payload && need "$TOOLS/paysum"
+has_arm payload  && need "$TOOLS/paysum"
+has_arm identity && need "$TOOLS/CheckNetDevice"
 
 CMDS="$OUT/commands.txt"
 SPEC="$OUT/payspec.txt"
@@ -209,11 +215,17 @@ SPEC="$OUT/payspec.txt"
     echo "netstat -s"
 } >> "$CMDS"
 
-# The probe record as the machine booted with it.  RAW, because the readable
+# THE UNIT NUMBER DOES NOT NAME A CARD unless it is a pin, so the probe
+# record is what identity is read out of.  CheckNetDevice is run FROM THE
+# DRAWER: it is a test tool on an installed machine, not a C: command, and
+# the C: copy is whatever release the machine has installed.
+has_arm identity && echo "$DRAWER/CheckNetDevice" >> "$CMDS"
+
+# The same record, RAW, for the probe-order arm.  RAW because the readable
 # form is prose and a harness that greps prose is a harness that stops
 # noticing when the prose is reworded.  RAW prints one line per step:
 #   NN. code <n> card <n> value $xxxxxxxx
-has_arm probeorder && echo "CheckNetDevice RAW" >> "$CMDS"
+has_arm probeorder && echo "$DRAWER/CheckNetDevice RAW" >> "$CMDS"
 
 # ------------------------------------------------------- the payload arm --
 
@@ -431,14 +443,60 @@ if has_arm identity; then
         UNIT=$(printf '%s' "$DEVLINE" | sed -E 's/.*unit ([0-9]+)\).*/\1/')
         echo "card_device=$DEV"
         echo "card_unit=$UNIT"
+
+        # A UNIT NUMBER IS NOT A CARD NAME.  include/aminetxduo/anxnet.h:16
+        # and src/netdev/netdev_device.c:1507: below ANXNET_UNIT_PIN the unit
+        # is a POSITION IN THE PROBE ORDER, and only at or above it does the
+        # number name a card type.  The installer writes UNIT=0 into
+        # DEVS:NetInterfaces/<name>, so an ordinary machine answers on unit 0,
+        # and reading that as "some other card" failed this arm on the one
+        # machine the harness exists for -- with 29 of 29 payload cases
+        # passing underneath it.
+        #
+        # A pin is believed as a pin.  A probe-order unit is resolved against
+        # the driver's own probe record, which is where a card's identity
+        # actually lives, and CheckNetDevice prints it.
         if [ "$UNIT" = "$WANT_UNIT" ]; then
+            echo "card_unit_kind=pin"
             echo "card_match=yes"
             pass "$IFACE is on $DEV unit $UNIT, which is $CARD's row"
-        else
+        elif [ "$UNIT" -ge "$UNIT_PIN" ] 2>/dev/null; then
+            echo "card_unit_kind=pin"
             echo "card_match=no"
-            fail "$IFACE is on $DEV unit $UNIT and $CARD's unit is" \
-                 "$WANT_UNIT -- this machine is running another card and" \
-                 "every number below belongs to that one"
+            fail "$IFACE is on $DEV unit $UNIT, which pins another card:" \
+                 "$CARD's pin is $WANT_UNIT.  Every number below belongs" \
+                 "to whatever that unit names"
+        else
+            echo "card_unit_kind=probe_order"
+            PROBED=$(awk -v want="CARD \"$CARD\"" '
+                $0 == want        { in_s = 1; next }
+                in_s && /^CARD "/ { exit }
+                in_s              { print }' "$REPORT")
+            PROBE_UNIT=$(printf "%s\n" "$PROBED" |
+                         sed -n "s/.*This card is unit \([0-9][0-9]*\) of.*/\1/p" |
+                         head -1)
+            if printf "%s\n" "$PROBED" | grep -qx "  ATTACHED."; then
+                echo "card_probe_attached=yes"
+            else
+                echo "card_probe_attached=no"
+            fi
+            echo "card_probe_unit=${PROBE_UNIT:-none}"
+            if [ -z "$PROBE_UNIT" ]; then
+                echo "card_match=unknown"
+                fail "unit $UNIT is a probe-order unit, so it names no card," \
+                     "and the probe record holds no attached $CARD." \
+                     "Nothing here establishes which card $IFACE is on"
+            elif [ "$PROBE_UNIT" = "$UNIT" ]; then
+                echo "card_match=yes"
+                pass "$IFACE is on $DEV unit $UNIT, and the probe record" \
+                     "gives that unit to $CARD"
+            else
+                echo "card_match=no"
+                fail "$IFACE is on $DEV unit $UNIT and the probe record" \
+                     "gives $CARD unit $PROBE_UNIT -- this machine is" \
+                     "running another card and every number below belongs" \
+                     "to that one"
+            fi
         fi
     fi
 

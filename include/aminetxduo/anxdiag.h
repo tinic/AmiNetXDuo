@@ -105,7 +105,10 @@ extern "C" {
                                        before a chip answered; 0 = at once    */
 #define ANXDIAG_PC_NOROW       55   /* the CIS named a card no row drives, and
                                        there is no fallback row either        */
-#define ANXDIAG_PC_RESET       68   /* CardResetCard() at claim, 1 = pulsed   */
+#define ANXDIAG_PC_RESET       68   /* milliseconds the slot's reset line was
+                                       held at claim, through Gayle's own
+                                       latch: Gayle never asserts CC_RESET
+                                       itself.  Not a flag                    */
 #define ANXDIAG_PC_CFCOUNT     71   /* CISTPL_CFTABLE_ENTRY tuples the walk
                                        reached before the CIS ran out        */
 #define ANXDIAG_PC_CFPICK      72   /* the entry the walk chose: score << 24 |

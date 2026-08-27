@@ -537,6 +537,20 @@ static VOID cnd_step(const AnxDiagStep *st)
             "  interrupt.\n",
             v, v & 0x3fUL);
         return;
+    case ANXDIAG_PC_RESET:
+        /* WITHOUT THIS ARM the step fell through to the unknown-step message,
+           which tells the reader their command is older than the driver --
+           about a step defined in the same tree, carrying the one number the
+           PCMCIA reset is measured in. */
+        say("  The slot's reset line was held for %lu ms before the CIS was\n"
+            "  walked.  Gayle never asserts CC_RESET to the socket itself,\n"
+            "  which is the documented A1200 bug, so the driver holds it\n"
+            "  through Gayle's latch instead; PC Cards require 100-200 ms.\n"
+            "  This is the length that was ASKED FOR.  What it costs is\n"
+            "  paced by the delay clock below, and a machine whose spins per\n"
+            "  raster line are far under a line's worth holds it longer than\n"
+            "  this rather than shorter.\n", v);
+        return;
     case ANXDIAG_CLOCK:
         if (v == 0)
         {
