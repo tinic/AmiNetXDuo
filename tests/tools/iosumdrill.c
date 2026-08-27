@@ -221,8 +221,90 @@ static VOID live(ULONG len)
     FreeMem(buf, ARENA);
 }
 
+/* ------------------------------------------- the 32-bit mirrored window --- */
+
+/*
+ * n68k_port_in_l_sum() takes a longword count and has no tail: the 1..3 bytes
+ * that do not fill a longword come off the word port, which is the caller's
+ * business.  So the reference here is over whole longwords only.
+ */
+static ULONG ref_lsum(ULONG longs, ULONG portval)
+{
+    ULONG sum = 0UL;
+
+    while (longs-- != 0UL)
+    {
+        sum += portval;
+        if (sum < portval)
+            sum++;                      /* end-around carry, per add */
+    }
+
+    return sum;
+}
+
+static VOID one_long(ULONG longs, ULONG portval)
+{
+    static volatile ULONG port;
+    UBYTE  *buf;
+    UBYTE  *dst;
+    ULONG   bytes = longs << 2;
+    ULONG   got;
+    ULONG   want;
+    BOOL    bytes_ok = TRUE;
+    ULONG   i;
+
+    buf = (UBYTE *)AllocMem(ARENA, MEMF_PUBLIC | MEMF_CLEAR);
+    if (buf == NULL)
+    {
+        Printf((STRPTR)"FAIL: out of memory at longs %ld\n", (LONG)longs);
+        failures++;
+        return;
+    }
+
+    for (i = 0UL; i < ARENA; i++)
+        buf[i] = (UBYTE)GUARD;
+
+    /* PRE is 4, so the destination is longword aligned, which is what the
+       routine requires and what the receive slot's payload pointer is. */
+    dst  = buf + PRE;
+    port = portval;
+
+    got  = n68k_port_in_l_sum(dst, (const volatile void *)&port, longs);
+    want = ref_lsum(longs, portval);
+
+    for (i = 0UL; i < PRE; i++)
+    {
+        if (buf[i] != (UBYTE)GUARD)
+            bytes_ok = FALSE;
+    }
+
+    for (i = 0UL; i < bytes; i += 4UL)
+    {
+        if (*(const ULONG *)(const APTR)(dst + i) != portval)
+            bytes_ok = FALSE;
+    }
+
+    for (i = bytes; i < bytes + 4UL; i++)
+    {
+        if (dst[i] != (UBYTE)GUARD)
+            bytes_ok = FALSE;
+    }
+
+    ck("long drained bytes", bytes, (ULONG)(portval >> 16), bytes_ok);
+
+    if (got != want)
+        Printf((STRPTR)"     long sum got $%08lx want $%08lx (longs %ld)\n",
+               (LONG)got, (LONG)want, (LONG)longs);
+    ck("long fused sum", bytes, (ULONG)(portval >> 16),
+       (BOOL)(got == want));
+
+    FreeMem(buf, ARENA);
+}
+
 int main(void)
 {
+    static const ULONG lports[] = { 0x12345678UL, 0xFF01FF01UL, 0x80000000UL,
+                                    0x00000001UL, 0xFFFFFFFFUL, 0xABABABABUL };
     static const UWORD ports[] = { 0x1234u, 0xFF01u, 0x8000u, 0x0001u,
                                    0xFFFFu, 0xABABu };
     /* Every tail residue at several magnitudes, and the two sizes this bug was
@@ -259,6 +341,18 @@ int main(void)
         live(64UL + l);
         live(331UL + l);
         live(1460UL + l);
+    }
+
+    /* The mirrored-window form.  The lengths are the whole-longword parts of
+       the same frame sizes: 0, one, the four-longword block boundary either
+       side, and a full Ethernet payload. */
+    for (p = 0UL; p < (ULONG)(sizeof(lports) / sizeof(lports[0])); p++)
+    {
+        static const ULONG longs[] = { 0, 1, 2, 3, 4, 5, 7, 8, 9,
+                                       11, 25, 82, 128, 364, 365, 375 };
+
+        for (l = 0UL; l < (ULONG)(sizeof(longs) / sizeof(longs[0])); l++)
+            one_long(longs[l], lports[p]);
     }
 
     Printf((STRPTR)"%ld checks, %ld failures\n", (LONG)checks, (LONG)failures);

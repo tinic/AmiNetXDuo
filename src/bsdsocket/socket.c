@@ -112,13 +112,22 @@ ULONG ami_bsd_tcp_window(VOID)
     budget = ami_bsd_tcp_budget(pool->nx_packet_pool_total,
                                 pool->nx_packet_pool_payload_size);
 
+#ifdef BSD_TCP_WINDOW_CEILING
+    cap = (ULONG)BSD_TCP_WINDOW_CEILING;
+#else
+    /* A window-scaling build has no ceiling but the budget: one consumer takes
+       half of it and every further one takes less.  bsdsocket_internal.h says
+       why there is no second number here. */
+    cap = budget;
+#endif
+
     if (budget != last_budget)
     {
         last_budget = budget;
         AMI_INFO("bsdsocket: TCP window budget %ld bytes (pool %ld packets), "
                  "%ld..%ld per socket",
                  (long)budget, (long)pool->nx_packet_pool_total,
-                 (long)BSD_TCP_WINDOW, (long)BSD_TCP_WINDOW_CEILING);
+                 (long)BSD_TCP_WINDOW, (long)cap);
     }
 
     return ami_bsd_tcp_window_for(pool->nx_packet_pool_total,

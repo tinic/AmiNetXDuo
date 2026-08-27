@@ -207,11 +207,233 @@ static void test_refused(void)
     ok("a regmap bus refuses getodd", netdev_bus_set_getodd(&bus) == FALSE);
 }
 
+/* --------------------------------------------------- the fused drain ------ */
+
+/*
+ * netdev_bus_rdata_sum() on the host, where the assembly is not what runs:
+ * n68k_iocopy.c's C forms are.  What is checked here is the arithmetic and the
+ * exact-length store, which are the same on both.  The instructions themselves
+ * are checked in the guest, by tests/tools/IoSumDrill.
+ *
+ * Two things are NOT claims about the host's byte order.  A whole word off the
+ * port is written by a word store and is read back as a word; only the odd
+ * trailing byte is written by a byte store, and only that one is read back as
+ * a byte.  The sum is computed from the port value, never from memory.
+ */
+#define SUM_GUARD   0xA5u
+#define SUM_PRE     4u
+#define SUM_MAX     1600u
+
+/* A union so the arena itself is longword aligned: the long drain requires
+   it of its destination, and a plain UBYTE array promises nothing. */
+static union { ULONG l[(SUM_PRE + SUM_MAX + 8u + 3u) / 4u];
+               UBYTE b[SUM_PRE + SUM_MAX + 8u]; } sum_arena_u;
+#define sum_arena (sum_arena_u.b)
+
+static ULONG sum_add(ULONG sum, ULONG w)
+{
+    sum += w;
+    if (sum < w)
+        sum++;
+
+    return sum;
+}
+
+/* The 1..3 byte residue, off the 16-bit port at value `p`, positioned as the
+   final partial longword and zero padded. */
+static ULONG sum_tail(UWORD p, UWORD tail)
+{
+    if (tail == 1u)
+        return (ULONG)(p & 0xff00u) << 16;
+    if (tail == 2u)
+        return (ULONG)p << 16;
+
+    return ((ULONG)p << 16) | (ULONG)(p & 0xff00u);
+}
+
+static int sum_guards_ok(UWORD len)
+{
+    UWORD i;
+
+    for (i = 0; i < SUM_PRE; i++)
+    {
+        if (sum_arena[i] != (UBYTE)SUM_GUARD)
+            return 0;
+    }
+    for (i = 0; i < 8u; i++)
+    {
+        if (sum_arena[SUM_PRE + len + i] != (UBYTE)SUM_GUARD)
+            return 0;
+    }
+
+    return 1;
+}
+
+static UBYTE *sum_reset(void)
+{
+    UWORD i;
+
+    for (i = 0; i < (UWORD)sizeof(sum_arena); i++)
+        sum_arena[i] = (UBYTE)SUM_GUARD;
+
+    return sum_arena + SUM_PRE;
+}
+
+/* One length through the word port. */
+static void sum_one_word(NetdevBus *bus, volatile UWORD *port, UWORD pv,
+                         UWORD len)
+{
+    UBYTE *dst = sum_reset();
+    ULONG  want = 0;
+    ULONG  got;
+    UWORD  i;
+    int    bytes_ok = 1;
+    char   what[64];
+
+    *port = pv;
+
+    got = netdev_bus_rdata_sum(bus, dst, len);
+
+    for (i = 0; i + 4u <= len; i += 4u)
+        want = sum_add(want, ((ULONG)pv << 16) | (ULONG)pv);
+    if ((len & 3u) != 0)
+        want = sum_add(want, sum_tail(pv, (UWORD)(len & 3u)));
+
+    for (i = 0; i + 2u <= len; i += 2u)
+    {
+        if (*(const UWORD *)(const void *)(dst + i) != pv)
+            bytes_ok = 0;
+    }
+    if ((len & 1u) != 0 && dst[len - 1u] != (UBYTE)(pv >> 8))
+        bytes_ok = 0;
+    if (!sum_guards_ok(len))
+        bytes_ok = 0;
+
+    sprintf(what, "word drain, len %u: exactly len bytes", (unsigned)len);
+    ok(what, bytes_ok);
+
+    sprintf(what, "word drain, len %u: sum", (unsigned)len);
+    if (got != want)
+        printf("     got 0x%08lx want 0x%08lx\n", (unsigned long)got,
+               (unsigned long)want);
+    ok(what, got == want);
+}
+
+/* The same through the 32-bit mirrored window, whose residue still comes off
+   the word port, exactly as the plain long drain takes it. */
+static void sum_one_long(NetdevBus *bus, volatile ULONG *wide,
+                         volatile UWORD *port, ULONG qv, UWORD pv, UWORD len)
+{
+    UBYTE *dst = sum_reset();
+    ULONG  want = 0;
+    ULONG  got;
+    UWORD  whole = (UWORD)(len & ~3u);
+    UWORD  tail  = (UWORD)(len & 3u);
+    UWORD  i;
+    int    bytes_ok = 1;
+    char   what[64];
+
+    *wide = qv;
+    *port = pv;
+
+    got = netdev_bus_rdata_sum(bus, dst, len);
+
+    for (i = 0; i < whole; i += 4u)
+        want = sum_add(want, qv);
+    if (tail != 0)
+        want = sum_add(want, sum_tail(pv, tail));
+
+    for (i = 0; i < whole; i += 4u)
+    {
+        if (*(const ULONG *)(const void *)(dst + i) != qv)
+            bytes_ok = 0;
+    }
+    if (tail >= 2u && *(const UWORD *)(const void *)(dst + whole) != pv)
+        bytes_ok = 0;
+    if ((tail == 1u || tail == 3u) &&
+        dst[whole + tail - 1u] != (UBYTE)(pv >> 8))
+        bytes_ok = 0;
+    if (!sum_guards_ok(len))
+        bytes_ok = 0;
+
+    sprintf(what, "long drain, len %u: exactly len bytes", (unsigned)len);
+    ok(what, bytes_ok);
+
+    sprintf(what, "long drain, len %u: sum", (unsigned)len);
+    if (got != want)
+        printf("     got 0x%08lx want 0x%08lx\n", (unsigned long)got,
+               (unsigned long)want);
+    ok(what, got == want);
+}
+
+/* The register file, with the data port where a stride-2 setup puts it: the
+   word at byte 32, which is ASIC register 0. */
+static union { UWORD w[32]; ULONG l[16]; UBYTE b[64]; } sum_regs;
+static union { ULONG l;     UBYTE b[4];             }   sum_wide;
+
+static void test_rdata_sum(void)
+{
+    /* Every tail residue at several magnitudes, and the two lengths the word
+       form's original defect was found at: 331 is a DHCP offer's payload and
+       46 the shortest Ethernet payload there is. */
+    static const UWORD lens[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 31, 32, 33, 34,
+                                  35, 46, 100, 331, 512, 1460, 1461, 1462,
+                                  1463, 1500 };
+    volatile UWORD *wport = &sum_regs.w[16];
+    volatile ULONG *lport = &sum_wide.l;
+    NetdevBus       bus;
+    UWORD           i;
+
+    netdev_bus_setup(&bus, sum_regs.b, 2, NULL);
+
+    for (i = 0; i < (UWORD)(sizeof(lens) / sizeof(lens[0])); i++)
+        sum_one_word(&bus, wport, 0xC3D9u, lens[i]);
+
+    /* Two more port values: the sums above would agree with a routine that
+       lost the high byte of every word. */
+    sum_one_word(&bus, wport, 0xFF01u, 331u);
+    sum_one_word(&bus, wport, 0x0001u, 1462u);
+
+    netdev_bus_setup(&bus, sum_regs.b, 2, sum_wide.b);
+    bus.dmode = NETDEV_DMODE_LONG;
+
+    for (i = 0; i < (UWORD)(sizeof(lens) / sizeof(lens[0])); i++)
+        sum_one_long(&bus, lport, wport, 0xDEADBEEFUL, 0xC3D9u, lens[i]);
+
+    sum_one_long(&bus, lport, wport, 0xFFFFFFFFUL, 0xFFFFu, 1460u);
+    sum_one_long(&bus, lport, wport, 0x00000001UL, 0x0001u, 47u);
+}
+
+/*
+ * The refusals.  A caller that asks first is told no before it has committed
+ * the chip to a burst only the fused form would drain.
+ */
+static void test_can_sum(void)
+{
+    NetdevBus    bus;
+    const UBYTE *even = sum_arena;   /* a UWORD-aligned object, by its union */
+
+    netdev_bus_setup(&bus, sum_regs.b, 2, NULL);
+
+    ok("a word port with an even destination can sum",
+       netdev_bus_can_sum(&bus, even) == TRUE);
+    ok("an odd destination cannot",
+       netdev_bus_can_sum(&bus, even + 1) == FALSE);
+
+    bus.dmode = NETDEV_DMODE_BYTE;
+    ok("an 8-bit port cannot", netdev_bus_can_sum(&bus, even) == FALSE);
+
+    bus.dmode = NETDEV_DMODE_LONG;
+    ok("a 32-bit window can", netdev_bus_can_sum(&bus, even) == TRUE);
+}
+
 int main(void)
 {
     test_split();
     test_getodd();
     test_refused();
+    test_rdata_sum();
+    test_can_sum();
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
 

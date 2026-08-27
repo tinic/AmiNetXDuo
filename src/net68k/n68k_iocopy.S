@@ -307,4 +307,56 @@ _n68k_port_in_w_sum:
         movem.l sp@+,d2-d5
         rts
 
+| ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs)
+|
+| The same fusion for the 32-bit mirrored window: drain `longs` longwords into
+| `to`, summing as they go, in exactly n68k_port_in_w_sum()'s convention so the
+| verifier cannot tell which window produced the answer.  The destination must
+| be longword aligned, which is the same requirement the plain long drain
+| already carries.
+|
+| No movem here, unlike n68k_port_in.  Every longword has to reach a data
+| register to be added, and movem's saving is that it does not put them in
+| named registers one at a time.  What is left of it is the instruction pair
+| below: ADD sets X to the carry and ADDX with a zero source folds it back
+| without a branch, which is the same trick the word form uses.
+        .globl  _n68k_port_in_l_sum
+_n68k_port_in_l_sum:
+        movem.l d2-d5,sp@-
+        movea.l sp@(20),a0              | to
+        movea.l sp@(24),a1              | port
+        move.l  sp@(28),d0              | longwords
+        moveq   #0,d1                   | sum
+        moveq   #0,d5                   | ADDX source: add carry only
+
+        move.l  d0,d3
+        lsr.l   #2,d3                   | four-longword blocks
+        move.l  d0,d4
+        and.l   #3,d4                   | longwords after them
+        tst.l   d3
+        beq     .Lpls_rest
+.Lpls_block:
+        .rept   4
+        move.l  a1@,d2
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d5,d1                   | end-around carry, per add
+        .endr
+        subq.l  #1,d3
+        bne     .Lpls_block
+.Lpls_rest:
+        tst.l   d4
+        beq     .Lpls_done
+.Lpls_one:
+        move.l  a1@,d2
+        move.l  d2,a0@+
+        add.l   d2,d1
+        addx.l  d5,d1
+        subq.l  #1,d4
+        bne     .Lpls_one
+.Lpls_done:
+        move.l  d1,d0
+        movem.l sp@+,d2-d5
+        rts
+
 #endif /* AMINETXDUO_NET68K_ASM */

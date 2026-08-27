@@ -42,6 +42,12 @@ VOID n68k_port_in_w(void *to, const volatile void *port, ULONG blocks);
 ULONG n68k_port_in_w_sum(void *to, const volatile void *port, ULONG bytes);
 VOID n68k_port_out_w(volatile void *port, const void *from, ULONG blocks);
 
+/* The same fusion for a 32-bit mirrored data window.  `longs` is a count of
+   longwords and there is no tail: the caller takes the 1..3 bytes that do not
+   fill one off the 16-bit port, which is what the plain long drain does too.
+   Destination must be longword aligned. */
+ULONG n68k_port_in_l_sum(void *to, const volatile void *port, ULONG longs);
+
 #ifdef __cplusplus
 }
 #endif

@@ -20,8 +20,12 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 CROSS_CONFIGS=(
     "default:"
     # Coverage only.  `default` is the shipping arm and dist/make-dist.sh
-    # refuses to pack a build with LTO off or -flto missing.
-    "nolto:-DAMINETXDUO_LTO=OFF"
+    # refuses to pack a build with LTO off or -flto missing.  TESTS=OFF rides
+    # here because it is the one remaining side of that option and this is the
+    # arm with nothing downstream of it, so it is also what makes this the
+    # cheap one: a libraries-only tree.  It used to ride on `green`, which is
+    # precisely what kept every test in this file out of the realm.
+    "nolto:-DAMINETXDUO_LTO=OFF -DAMINETXDUO_TESTS=OFF"
     "noipv6:-DAMINETXDUO_IPV6=OFF"
     # mDNS off is a real code path and not only a smaller library: the browse
     # reaches src/netstack through calls that are not compiled here, and
@@ -112,9 +116,13 @@ CROSS_CONFIGS=(
     # their own tree to be compiled honestly.
     "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF"
     # GREEN_REALM replaces the thread model wholesale and shares an arm with
-    # nothing.  TESTS=OFF rides here because it is the one remaining side and
-    # it is what makes this arm the cheap one: a libraries-only tree.
-    "green:-DAMINETXDUO_GREEN_REALM=ON -DAMINETXDUO_TESTS=OFF"
+    # nothing.  IT BUILDS THE TESTS, and stage_emulator runs them: the option
+    # turns every Exec handoff into a stack switch inside one task, on a
+    # machine with no MMU where an over-run stack is a silent overwrite and
+    # not a fault.  While TESTS=OFF rode here the arm proved only that the
+    # realm compiles, and not one line of it had ever been executed under a
+    # load by anything in this file.
+    "green:-DAMINETXDUO_GREEN_REALM=ON"
 )
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
@@ -1297,9 +1305,20 @@ stage_emulator() {
         return 1
     fi
 
-    local entry exe timeout dir arm cpuopt tag budget
-    dir=default
-    for arm in a1200 a600; do
+    # THREE PASSES, NOT TWO.  The first two are one build on two machines; the
+    # third is one machine and a different thread model.  The realm arm is
+    # skipped by name when the cross stage did not build it, because a pass
+    # that silently did not happen is what this pass exists to end.
+    local entry exe timeout dir arm pair cpuopt tag budget
+    for pair in default:a1200 default:a600 green:a1200; do
+        dir="${pair%%:*}"
+        arm="${pair##*:}"
+
+        if [ ! -d "$BUILD/$dir" ]; then
+            skip "emulator: no $BUILD/$dir, so the $dir arm ran no tests"
+            continue
+        fi
+
         # These budgets multiply the per-test ceilings below.  They are ceilings,
         # not fixed waits, so a passing run finishes long before them and paying
         # for headroom is free, and the hosted GitHub runner is markedly slower
@@ -1322,7 +1341,7 @@ stage_emulator() {
             cpuopt="";         tag="68020"; budget=2
         fi
 
-        printf '\n\033[1m-- emulator: %s\033[0m\n' "$tag"
+        printf '\n\033[1m-- emulator: %s, %s\033[0m\n' "$tag" "$dir"
 
         for entry in "${EMULATOR_TESTS[@]}"; do
             exe="${entry%%:*}"
@@ -1330,19 +1349,38 @@ stage_emulator() {
             # A 68000 is roughly a quarter of the 68020 here, so the same work
             # needs a longer rope before a timeout means anything.
             timeout=$(( timeout * budget ))
-            printf '\n-- %s (%s)\n' "$exe" "$tag"
+            # NOT RUN IN THE REALM, and that is a defect recorded, not a
+            # harness quirk.  lifecycle phase (e) deletes a thread blocked in
+            # an Exec Wait(), which is the SANA-II reader stuck in WaitIO().
+            # A green thread that blocks in Exec blocks the realm's one host
+            # task, so nothing in the realm can run and tx_thread_terminate()
+            # from another task never returns: rc 124 after 240 s here on
+            # 2026-08-27, last line "phase e: it is blocked inside Exec".
+            #
+            # The realm's net for this is `#define Wait` in three of the
+            # library's own internal headers and it is compiled only under
+            # AMINETXDUO_RXPROBE, so a shipping realm build has no net at all
+            # and no translation unit outside those three has one in any
+            # build.  The other eight harnesses gate the arm meanwhile.
+            if [ "$dir:$exe" = "green:tools/smoke/lifecycle" ]; then
+                skip "emulator/green: lifecycle phase (e) deadlocks the realm;\
+ a green thread inside an Exec Wait() cannot be terminated from outside it"
+                continue
+            fi
+
+            printf '\n-- %s (%s, %s)\n' "$exe" "$tag" "$dir"
             if [ ! -f "$BUILD/$dir/$exe" ]; then
-                fail "emulator/$tag: $exe was not built"
+                fail "emulator/$dir/$tag: $exe was not built"
                 continue
             fi
             local log
-            log="$BUILD/emu-$tag-$(basename "$exe").log"
-            if AMINETXDUO_RUN_TAG="ci-$tag" "$EMU_RUNNER" $cpuopt \
+            log="$BUILD/emu-$dir-$tag-$(basename "$exe").log"
+            if AMINETXDUO_RUN_TAG="ci-$dir-$tag" "$EMU_RUNNER" $cpuopt \
                    -t "$timeout" "$BUILD/$dir/$exe" > "$log" 2>&1; then
                 note "PASS  $(grep -E '[0-9]+ checks' "$log" | tail -1)"
             else
                 tail -25 "$log"
-                fail "emulator/$tag: $exe"
+                fail "emulator/$dir/$tag: $exe"
             fi
         done
     done

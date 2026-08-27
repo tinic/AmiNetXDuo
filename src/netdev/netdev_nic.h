@@ -163,6 +163,20 @@ struct NetdevNic
     LONG  (*ring_copy)(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount);
 
     /*
+     * ring_copy for the direct-receive destination, with the Internet checksum
+     * of what was moved for the price of the move.  Exactly `amount` bytes are
+     * written, so the caller needs no netdev_ring_copy_exact() around it.
+     *
+     * FALSE, having touched neither the chip nor the destination, whenever the
+     * fusion does not apply -- a wrapped read, an 8-bit port, an odd
+     * destination -- and the caller then takes the ordinary path and the frame
+     * is walked for its checksum as before.  NULL for a core that has no fused
+     * form at all.
+     */
+    BOOL  (*ring_copy_sum)(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount,
+                           ULONG *sum);
+
+    /*
      * A pointer straight into the card's own buffer, or NULL when the frame
      * must be staged.  Set only by cores whose buffer is memory-mapped; the
      * receive path then makes one pass over the frame.  NULL for a wrapped

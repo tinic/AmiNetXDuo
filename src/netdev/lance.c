@@ -537,6 +537,7 @@ LONG lance_attach(NetdevNic *nic)
     nic->mem_ring  = 0;
     nic->txb_cnt   = LE_TX_RING;
     nic->tx_at     = lance_tx_at;
+    nic->ring_copy_sum = NULL;  /* no ring_copy either: see below */
     nic->frame_at  = NULL;      /* the receive path hands up the ring buffer
                                    itself, so there is nothing to translate */
 

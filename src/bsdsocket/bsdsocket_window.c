@@ -18,8 +18,11 @@ ULONG ami_bsd_tcp_window_for(ULONG pool_packets, ULONG payload,
 
     window = ami_bsd_tcp_budget(pool_packets, payload) / (consumers + 1UL);
 
+#ifdef BSD_TCP_WINDOW_CEILING
+    /* Sixteen bits on the wire, and no window scale option to widen them. */
     if (window > (ULONG)BSD_TCP_WINDOW_CEILING)
         window = (ULONG)BSD_TCP_WINDOW_CEILING;
+#endif
     if (window < (ULONG)BSD_TCP_WINDOW)
         window = (ULONG)BSD_TCP_WINDOW;
 

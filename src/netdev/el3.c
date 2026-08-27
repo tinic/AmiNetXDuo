@@ -896,6 +896,7 @@ LONG el3_attach(NetdevNic *nic)
     nic->txb_inuse = 0;
     nic->read_hdr  = NULL;
     nic->ring_copy = NULL;
+    nic->ring_copy_sum = NULL;  /* el3_rint() fuses its own FIFO drain */
     nic->frame_at  = NULL;
     nic->tx_at     = NULL;
     nic->write_buf = NULL;

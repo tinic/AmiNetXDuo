@@ -206,6 +206,90 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
         *port = (UWORD)(src[i] << 8);
 }
 
+/* --------------------------------------------------------- fused drain ---- */
+
+/*
+ * Only the shape of the destination and the width of the port decide this, so
+ * the caller can ask before it programs the chip.  An 8-bit port has no fused
+ * form -- the routines below read words -- and an odd destination cannot be
+ * written as words at all on a 68000.
+ */
+BOOL netdev_bus_can_sum(const NetdevBus *bus, const UBYTE *dst)
+{
+    return (BOOL)(bus->dmode != NETDEV_DMODE_BYTE && BUS_ALIGN(dst, 1) == 0);
+}
+
+static ULONG bus_sum_add(ULONG sum, ULONG w)
+{
+    sum += w;
+    if (sum < w)
+        sum++;                          /* end-around carry, per add */
+
+    return sum;
+}
+
+/*
+ * The 1..3 bytes that do not fill a longword, off the 16-bit port, positioned
+ * as the final partial longword and padded with zeroes: what a walk over the
+ * same bytes does with a partial trailing longword.  The chip hands out whole
+ * words, so a one-byte residue still costs a word read and a three-byte one
+ * costs two -- which is exactly what rounding the remote-DMA count up to a
+ * word already told the chip to expect.
+ */
+static ULONG bus_tail_sum(const NetdevBus *bus, UBYTE *dst, UWORD tail)
+{
+    volatile UWORD *port = (volatile UWORD *)bus->asic;
+    UWORD           t0   = *port;
+    ULONG           w;
+
+    if (tail == 1u)
+    {
+        dst[0] = (UBYTE)(t0 >> 8);
+        w = (ULONG)(t0 & 0xff00u) << 16;
+    }
+    else if (tail == 2u)
+    {
+        *(UWORD *)(APTR)dst = t0;
+        w = (ULONG)t0 << 16;
+    }
+    else
+    {
+        UWORD t1 = *port;
+
+        *(UWORD *)(APTR)dst = t0;
+        dst[2] = (UBYTE)(t1 >> 8);
+        w = ((ULONG)t0 << 16) | (ULONG)(t1 & 0xff00u);
+    }
+
+    return w;
+}
+
+/*
+ * Drain and sum in one pass.  The frame is on the far side of a bus access
+ * whichever way it comes across, and the add that follows the move is free
+ * beside it; walking the same bytes again afterwards is not.
+ */
+ULONG netdev_bus_rdata_sum(const NetdevBus *bus, UBYTE *dst, UWORD len)
+{
+    ULONG sum;
+    UWORD whole;
+    UWORD tail;
+
+    if (bus_long_ok(bus, dst, len))
+    {
+        whole = (UWORD)(len & (UWORD)~3u);
+        tail  = (UWORD)(len & 3u);
+
+        sum = n68k_port_in_l_sum(dst, bus->wide, (ULONG)(whole >> 2));
+        if (tail != 0u)
+            sum = bus_sum_add(sum, bus_tail_sum(bus, dst + whole, tail));
+
+        return sum;
+    }
+
+    return n68k_port_in_w_sum(dst, bus->asic, (ULONG)len);
+}
+
 const struct NetdevBusOps netdev_bus_generic = { bus_rdata, bus_wdata };
 
 /* The odd-register window, for a bus whose register file is not contiguous. */

@@ -163,23 +163,33 @@ static VOID ne2000_dma_start(NetdevNic *nic, LONG src, UWORD amount, UWORD over)
     nic->dma_left = over;
 }
 
-static VOID ne2000_readmem(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
+/*
+ * Put the chip in a position to hand out `rounded` bytes from `src`, without
+ * saying who reads them.  Separate from ne2000_readmem() because the fused
+ * drain below needs the same arrangement and a different read.
+ */
+static VOID ne2000_dma_for(NetdevNic *nic, LONG src, UWORD rounded)
 {
-    amount = (UWORD)((amount + 1u) & ~1u);
-
     /*
      * The burst already running is at this address with room to spare, so the
      * chip needs telling nothing: reading the port continues it.
      */
-    if (nic->dma_left >= amount && nic->dma_pos == src)
+    if (nic->dma_left >= rounded && nic->dma_pos == src)
     {
-        nic->dma_pos  = src + (LONG)amount;
-        nic->dma_left = (UWORD)(nic->dma_left - amount);
+        nic->dma_pos  = src + (LONG)rounded;
+        nic->dma_left = (UWORD)(nic->dma_left - rounded);
     }
     else
     {
-        ne2000_dma_start(nic, src, amount, 0);
+        ne2000_dma_start(nic, src, rounded, 0);
     }
+}
+
+static VOID ne2000_readmem(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
+{
+    amount = (UWORD)((amount + 1u) & ~1u);
+
+    ne2000_dma_for(nic, src, amount);
 
     netdev_bus_rdata(&nic->bus, dst, amount);
 }
@@ -251,6 +261,32 @@ static LONG ne2000_ring_copy(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount)
     ne2000_readmem(nic, src, dst, amount);
 
     return src + amount;
+}
+
+/*
+ * ring_copy for a direct-receive destination, with the checksum of what was
+ * moved for the price of the move.  Declined, having done nothing at all, when
+ * the read would wrap the ring: the second segment would begin at whatever
+ * byte phase the first left off at, and the sum is over longwords counted from
+ * the start of the payload.  A wrap is one frame in a ring's worth, and the
+ * caller has an ordinary path for it.
+ */
+static BOOL ne2000_ring_copy_sum(NetdevNic *nic, LONG src, UBYTE *dst,
+                                 UWORD amount, ULONG *sum)
+{
+    if (src + (LONG)amount > nic->mem_end)
+        return FALSE;
+    if (!netdev_bus_can_sum(&nic->bus, dst))
+        return FALSE;
+
+    /* The chip is told the same rounded-up count ne2000_readmem() would tell
+       it, because it hands out whole words either way.  What differs is that
+       the drain below stores only the bytes the caller asked for. */
+    ne2000_dma_for(nic, src, (UWORD)((amount + 1u) & ~1u));
+
+    *sum = netdev_bus_rdata_sum(&nic->bus, dst, amount);
+
+    return TRUE;
 }
 
 /*
@@ -678,6 +714,7 @@ static LONG ne2000_attach(NetdevNic *nic)
 
     nic->read_hdr  = ne2000_read_hdr;
     nic->ring_copy = ne2000_ring_copy;
+    nic->ring_copy_sum = ne2000_ring_copy_sum;
     nic->frame_at  = NULL;   /* a port has no address to hand out */
     nic->write_buf = ne2000_write_buf;
 
