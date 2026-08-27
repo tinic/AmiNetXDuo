@@ -1,0 +1,69 @@
+NOT APPLIED BY ANY BUILD.  tools/build-toolchain.sh reads only
+tools/patches/binutils/*.diff; this directory is a sibling and is never
+globbed.  It is kept so the next person to try binutils 2.46 does not have to
+find this again.
+
+Against bebbo's binutils-gdb, branch amiga-2.46, commit
+a50544a917284847c99e97d41c69ece9d5cb2fef (https://franke.ms/git/bebbo/binutils-gdb).
+
+WHAT IT FIXES
+
+`m68k-amigaos-strip` on a hunk executable writes it back with no HUNK_RELOC32
+at all -- exit 0, no diagnostic -- and LoadSeg() then relocates nothing, so
+every absolute address keeps its link-time value.  `objcopy --strip-all` does
+the same and `-K` does not save it.  Measured on the pinned GCC 16.2.0b: a
+four-line C file loses 278 of 278 relocations, and one cross arm of this tree
+shipped 40 of 77 images unrelocated.  tools/check-hunk-relocs.sh is what
+catches it; nothing else does.
+
+Two causes, both in copy_relocations_in_section():
+
+  1. bebbo's amiga-2.39.0 carries `#ifdef TARGET_AMIGA || 1` in the
+     strip_symbols == STRIP_ALL reloc filter (2.39 objcopy.c:4367), which keeps
+     every relocation.  The amiga-2.46 rebase dropped it.
+  2. Upstream 2.46 added an earlier short-circuit that forces relsize = 0 for
+     the same case before the filter is reached.
+
+Both are correct for ELF, where relocations a stripped image still needs live
+in sections objcopy copies as contents.  On hunk they are the HUNK_RELOC32 that
+this function is the only writer of.
+
+With this applied, 2.46's strip produces byte-identical output to 2.39's, and
+`tools/ci.sh cross` AMINETXDUO_CI_CROSS=nolto is green on a 2.46 toolchain
+(relocation tables: clean images=117).  The LTO arms still do not link: neither
+diff in tools/patches/binutils/ applies to 2.46, and that work would have to be
+redone against 2.46's own LTO support before the pin could move.
+
+diff --git a/binutils/objcopy.c b/binutils/objcopy.c
+index fdd8bd11..1d3487a2 100644
+--- a/binutils/objcopy.c
++++ b/binutils/objcopy.c
+@@ -4527,8 +4527,13 @@ copy_relocations_in_section (bfd *ibfd, sec_ptr isection, bfd *obfd)
+   /* Core files and DWO files do not need to be relocated.  */
+   if (bfd_get_format (obfd) == bfd_core
+       || strip_symbols == STRIP_NONDWO
++#ifndef TARGET_AMIGA
++      /* A hunk executable carries its relocations as HUNK_RELOC32, not as a
++	 section the copy loop reproduces, so dropping them here leaves an
++	 image LoadSeg() will not relocate.  */
+       || (strip_symbols == STRIP_ALL
+ 	  && htab_elements (keep_specific_htab) == 0)
++#endif
+       || discard_relocations (ibfd, isection))
+     relsize = 0;
+   else
+@@ -4586,8 +4591,12 @@ copy_relocations_in_section (bfd *ibfd, sec_ptr isection, bfd *obfd)
+ 	    if (relpp[i]->sym_ptr_ptr
+ 		/* PR 20096 */
+ 		&& *relpp[i]->sym_ptr_ptr
+-		&& is_specified_symbol (bfd_asymbol_name (*relpp[i]->sym_ptr_ptr),
+-					keep_specific_htab))
++		&& (is_specified_symbol (bfd_asymbol_name (*relpp[i]->sym_ptr_ptr),
++					 keep_specific_htab)
++#ifdef TARGET_AMIGA
++		    || 1
++#endif
++		   ))
+ 	      *w_relpp++ = relpp[i];
+ 	  relcount = w_relpp - relpp;
+ 	  *w_relpp = 0;
