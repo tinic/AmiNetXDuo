@@ -88,6 +88,17 @@
 #endif
 
 /*
+ * How long ami_sana2_rx_drain() waits for nx_ip_protection before it looks at
+ * rx->stop again.  Not a tuning knob and not a timeout on the lock: the mutex
+ * is retaken at once unless a stop is in flight, and the stop holds it for as
+ * long as it waits for this thread.  One tick, so the join sees the reader
+ * gone in its first sleep.
+ */
+#ifndef AMI_SANA2_RX_LOCK_TICKS
+#define AMI_SANA2_RX_LOCK_TICKS     1
+#endif
+
+/*
  * How long a reader waits for the device to give its queued CMD_READs back.
  * 25 x 2 ticks is one second: generous for a driver that honours AbortIO(),
  * bounded for one that does not.

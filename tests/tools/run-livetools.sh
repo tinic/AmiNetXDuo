@@ -3,7 +3,11 @@
 # THE REGRESSION TEST FOR "the command says the network is down while it is up".
 #
 #   tests/tools/run-livetools.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                                [-B INTERFACE]
+#                                [-B INTERFACE] [-N BOARD]
+#
+# -N NAMES THE CARD, and every board in tests/tools/cards.sh is an answer.  It
+# was a2065 and nothing else, and one card is what let an interface that could
+# not be brought back up reach a user.
 #
 # BRIDGED.  It was SLIRP: the command list embedded 10.0.2.2 in five lines and
 # two assertions compared against the literals 10.0.2.15 and 10.0.2.2, so what
@@ -27,6 +31,7 @@ MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 IFACE="${AMINETXDUO_LIVETOOLS_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
+BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 GATEWAY="${AMINETXDUO_LIVETOOLS_GATEWAY:-}"
 # Somewhere off this segment that answers ICMP, for the second ping.
 OFFNET="${AMINETXDUO_LIVETOOLS_OFFNET:-8.8.8.8}"
@@ -35,14 +40,17 @@ OFFNET="${AMINETXDUO_LIVETOOLS_OFFNET:-8.8.8.8}"
 # "the route was removed" are both unreadable.
 DUMMYNET="${AMINETXDUO_LIVETOOLS_DUMMYNET:-192.168.77.0}"
 
-while getopts "m:t:b:B:g:" opt; do
+while getopts "m:t:b:B:g:N:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
+        N) BOARD="$OPTARG" ;;
         g) GATEWAY="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B interface] [-g gateway]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2
+           echo "          [-B interface] [-g gateway] [-N board]" >&2
+           exit 2 ;;
     esac
 done
 
@@ -84,7 +92,7 @@ for f in "$TOOLS/ToolsSmoke" "$TOOLS/AddNetInterface" "$TOOLS/ShowNetStatus" \
 done
 
 A2065="${AMINETXDUO_A2065:-}"
-if [ -z "$A2065" ]; then
+if [ -z "$A2065" ] && [ "$BOARD" = a2065 ]; then
     for candidate in \
         "$ROOT/build/a2065.device" \
         "$HOME/amiga-os-src/os-source/other_networking/sana2/bin/devs/a2065.device"
@@ -92,10 +100,10 @@ if [ -z "$A2065" ]; then
         [ -f "$candidate" ] && { A2065="$candidate"; break; }
     done
 fi
-[ -n "$A2065" ] && [ -f "$A2065" ] || {
+if [ "$BOARD" = a2065 ] && { [ -z "$A2065" ] || [ ! -f "$A2065" ]; }; then
     echo "No a2065.device found. Set AMINETXDUO_A2065=<path>." >&2
     exit 2
-}
+fi
 
 # ------------------------------------------------------------- staging ---
 
@@ -103,7 +111,22 @@ STAGE="$ROOT/build/livetools-stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
-cp "$A2065" "$STAGE/devs/a2065.device"
+
+# shellcheck source=../../tools/sana2-stage.sh
+. "$ROOT/tools/sana2-stage.sh"
+
+if [ -z "${AMINETXDUO_SANA2_DRIVER:-}" ]; then
+    if [ "$BOARD" = a2065 ]; then
+        export AMINETXDUO_SANA2_DRIVER="$A2065"
+    else
+        _want=$(sana2_driver_for "$BOARD")
+        _have=$(sana2_local_driver "$_want")
+        [ -n "$_have" ] && [ -f "$_have" ] &&
+            export AMINETXDUO_SANA2_DRIVER="$_have"
+    fi
+fi
+
+sana2_stage "$BOARD" "$STAGE/devs"
 cp "$BSD"   "$STAGE/libs/bsdsocket.library"
 for t in AddNetInterface ShowNetStatus netstat ping Online Offline \
          CheckNetConfig GetNetStatus AddNetRoute DeleteNetRoute NetShutdown; do
@@ -148,9 +171,9 @@ EOF
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-livetools}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL, a2065 bridged on $IFACE, gateway $GATEWAY"
+echo "==> booting $MODEL, $BOARD bridged on $IFACE, gateway $GATEWAY"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/env" \
     "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/netstat" \
