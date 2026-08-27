@@ -57,7 +57,7 @@ usage: tools/classicwb.sh [-m A600|A1200|A3000] [-v plain|rtg] [-b builddir]
   -b  build directory the archive is built from  (default build/cm)
   -a  install this archive instead of building one from -b
   -B  bridge interface                             (default ens18)
-  -n  hostname and mDNS name          (default amiga-<model>-<variant>)
+  -n  hostname and mDNS name    (default amiga-<model>-<variant>-<mac-tail>)
   -p  httpd port                                      (default 80)
   -t  seconds before the guest is stopped          (default 28800)
   -s  snapshot store         (default ~/amiga-assets/classicwb/snapshots)
@@ -111,7 +111,28 @@ case "$MODEL:$VARIANT" in
     *) say error "unknown model $MODEL, want A600, A1200 or A3000"; exit 2 ;;
 esac
 
-[ -n "$NAME" ] || NAME="amiga-$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')-$VARIANT"
+# One MAC per combination AND PER CHECKOUT, so two of these on one wire are
+# two machines.  The model and the variant alone are not enough: separate
+# agents booting the same model and variant must still have separate network
+# identities.  $ROOT makes the derived address stable per checkout.
+#
+# The default host name has to describe that same identity.  Otherwise the
+# guests no longer collide at Ethernet but still both probe the same .local
+# name.  Keep the readable model/variant and append the three-byte tail used by
+# the stack's own hardware-derived host names.  An explicit -n is untouched.
+. "$ROOT/tools/emu-mac.sh"
+MAC="${AMINETXDUO_CWB_MAC:-$(emu_mac_for_tag "cwb:$MODEL:$VARIANT:$ROOT")}"
+MAC_COMPACT=$(printf '%s' "$MAC" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+case "$MAC_COMPACT" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *) say error "bad ClassicWB MAC '$MAC'"; exit 2 ;;
+esac
+
+if [ -z "$NAME" ]; then
+    NAME="amiga-$(printf '%s' "$MODEL" | tr '[:upper:]' '[:lower:]')-$VARIANT-${MAC_COMPACT: -6}"
+fi
+say mac "$MAC"
+say hostname "$NAME"
 
 # The asset store carries the ROMs and exports the Kickstart each model needs.
 # Skipping it boots a machine with no ROM, and the error names the ROM rather
@@ -767,21 +788,6 @@ if [ "$VARIANT" = rtg ]; then
     export SDL_VIDEODRIVER="${AMINETXDUO_CWB_SDL_VIDEO:-x11}"
     say xvfb "$XDISP pid $XVFB_PID"
 fi
-
-# One MAC per combination AND PER CHECKOUT, so two of these on one wire are
-# two machines.  The model and the variant alone are not enough and it has
-# already cost a run: two agents each booting an A3000/rtg guest out of their
-# own tree derived the same address, the second came up on the first's, and
-# what failed was an assertion somewhere else -- a neighbour cache keeps
-# whichever answered last and nothing reports the collision.
-#
-# $ROOT is what tells the two trees apart, and it is stable, so one tree keeps
-# one address across runs.  The derivation is emu-mac.sh's, the same one every
-# other bridged harness uses, which also keeps this clear of the demo instance
-# on 02:41:4d:49:00:77: a derived address is never fifth-byte 0x00.
-. "$ROOT/tools/emu-mac.sh"
-MAC="${AMINETXDUO_CWB_MAC:-$(emu_mac_for_tag "cwb:$MODEL:$VARIANT:$ROOT")}"
-say mac "$MAC"
 
 CFG="$ROOT/build/$TAG.uae"
 cat > "$CFG" <<EOF
