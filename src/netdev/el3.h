@@ -15,13 +15,14 @@
 #include "netdev_cards.h"
 
 /*
- * Is an EtherLink III decoding at this row's register base?  Addresses the
- * card off the row, because the slot has to be identified before there is a
- * unit to identify it into.  Accepts the manufacturer ID in either byte
- * order.  Which order it was is measured again, into the unit, by
- * el3_attach().
+ * Is an EtherLink III decoding at this address?  A raw address rather than a
+ * card row, because the slot has to be identified before there is a unit to
+ * identify it into AND because the row's register offset is only an
+ * assumption until the CIS walk in netdev_pcmcia.c has confirmed or replaced
+ * it.  Accepts the manufacturer ID in either byte order.  Which order it was
+ * is measured again, into the unit, by el3_attach().
  */
-BOOL  el3_answers(const NetdevCard *card);
+BOOL  el3_answers(ULONG regs);
 
 LONG  el3_attach(NetdevNic *nic);
 LONG  el3_init(NetdevNic *nic);

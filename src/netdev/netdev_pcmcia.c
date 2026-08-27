@@ -6,6 +6,7 @@
 
 #include "netdev_internal.h"
 #include "netdev_cards.h"
+#include "netdev_cis.h"
 #include "netdev_clock.h"
 #include "netdev_macgen.h"
 #include "netdev_float.h"
@@ -138,6 +139,7 @@ static VOID pc_trace(const char *s, ULONG v)
 #define PC_ATTR_STRIDE      2
 
 /* Card Information Structure tuples, PC Card standard, release 2. */
+#define CISTPL_LONGLINK_MFC 0x06
 #define CISTPL_VERS_1       0x15
 #define CISTPL_CONFIG       0x1a
 #define CISTPL_CFTABLE      0x1b
@@ -154,10 +156,14 @@ static VOID pc_trace(const char *s, ULONG v)
 
 static UBYTE pc_last_cr;
 
-static BOOL pc_dp8390_answers(const NetdevCard *card)
+/*
+ * `regs` rather than card->base + card->reg_off: the row's offset is an
+ * assumption and the CIS walk below can replace it, so the address the chip is
+ * looked for at has to be passed in.
+ */
+static BOOL pc_dp8390_answers(const NetdevCard *card, ULONG regs)
 {
-    volatile UBYTE *cr =
-        (volatile UBYTE *)(ULONG)(card->base + card->reg_off);
+    volatile UBYTE *cr = (volatile UBYTE *)regs;
     BOOL            ok;
 
     ok = netdev_cr_answers(cr, card->stride, &pc_last_cr);
@@ -166,12 +172,12 @@ static BOOL pc_dp8390_answers(const NetdevCard *card)
     return ok;
 }
 
-static BOOL pc_chip_answers(const NetdevCard *card)
+static BOOL pc_chip_answers(const NetdevCard *card, ULONG regs)
 {
     if (card->chip == NETDEV_CHIP_EL3)
-        return el3_answers(card);
+        return el3_answers(regs);
 
-    return pc_dp8390_answers(card);
+    return pc_dp8390_answers(card, regs);
 }
 
 /*
@@ -195,13 +201,13 @@ static VOID pc_settle(ULONG us)
 #define PC_SETTLE_ROUNDS    20
 #define PC_SETTLE_US        2000
 
-static BOOL pc_chip_settles(const NetdevCard *card, UWORD *rounds)
+static BOOL pc_chip_settles(const NetdevCard *card, ULONG regs, UWORD *rounds)
 {
     UWORD i;
 
     for (i = 0; i < PC_SETTLE_ROUNDS; i++)
     {
-        if (pc_chip_answers(card))
+        if (pc_chip_answers(card, regs))
         {
             *rounds = i;
             return TRUE;
@@ -213,6 +219,18 @@ static BOOL pc_chip_settles(const NetdevCard *card, UWORD *rounds)
 
     return FALSE;
 }
+
+/*
+ * A configuration index is six bits, so 64 entries is the standard's own
+ * ceiling.  32 bounds the walk at romtag-init time and no LAN card has ever
+ * described half that many; the walk stops at the first 8-bit I/O entry in any
+ * case, which is entry 0 on every card that already worked.
+ */
+#define PC_MAX_CFTABLE  32
+
+static NetdevCisEntry pc_pick;
+static BOOL           pc_have_pick;
+static UBYTE          pc_first_index;
 
 static UBYTE pc_cis[80];
 static UWORD pc_cis_len;
@@ -235,7 +253,7 @@ static VOID pc_cis_keep(const UBYTE *buf, UWORD len)
 /* Read one tuple, keep it for the fingerprint, and hand it back.  buf is
    PC_TUPLE_BUF bytes.  CopyTuple() does not clear beyond the tuple body, so
    this clears the buffer and returns the clamped body length. */
-static BOOL pc_cis_read(struct CardHandle *h, UBYTE code, UBYTE *buf,
+static BOOL pc_cis_read(struct CardHandle *h, ULONG code, UBYTE *buf,
                         UWORD *body_len)
 {
     UWORD i;
@@ -246,7 +264,7 @@ static BOOL pc_cis_read(struct CardHandle *h, UBYTE code, UBYTE *buf,
     if (body_len != NULL)
         *body_len = 0;
 
-    if (!pc_copy_tuple(h, buf, (ULONG)code, (ULONG)PC_TUPLE_BODY))
+    if (!pc_copy_tuple(h, buf, code, (ULONG)PC_TUPLE_BODY))
         return FALSE;
 
     /* buf[1] is TPL_LINK, the body length.  Clamped to what was asked for and
@@ -741,6 +759,9 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     volatile UBYTE  *attr;
     ULONG            cfg_base;
     UBYTE            index;
+    UWORD            reg_off;
+    ULONG            regs;
+    APTR             board;
     UWORD            tuple_len;
     UWORD            ci = ANXDIAG_NOCARD;
 
@@ -867,29 +888,116 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
         cfg_base &= 0x0001ffffUL;
     }
 
-    /* CISTPL_CFTABLE_ENTRY's first byte holds the configuration index in its
-       low six bits.  The first entry is the one to take: a LAN card's first
-       entry is its I/O configuration. */
+    /*
+     * Walk EVERY CISTPL_CFTABLE_ENTRY, not just the first.  CopyTuple()'s
+     * tuplecode carries an occurrence count in its high word -- (n << 16) |
+     * code returns the (n+1)th tuple of that code -- so the whole table is
+     * reachable through the documented interface and no attribute-memory read
+     * of our own is needed.  A plain NE2000 clone's first entry is its I/O
+     * configuration, which is why assuming it worked; a card whose first entry
+     * describes memory, or a width this driver cannot drive, needs the walk.
+     */
     pc_trace("pc: cfgbase ", cfg_base);
     netdev_diag_note(ANXDIAG_PC_CFGBASE, ci, cfg_base);
-    if (!pc_cis_read(handle, CISTPL_CFTABLE, buf, &tuple_len) ||
-        tuple_len < 1u)
     {
-        pc_trace("pc: no cftable ", 0);
-        netdev_diag_note(ANXDIAG_PC_NOCFTABLE, ci, 0);
-        pc_reject_owned(keep_handle);
-        return NULL;
+        UWORD n;
+        UWORD seen = 0;
+        UWORD best = NETDEV_CIS_SCORE_NONE;
+
+        pc_have_pick = FALSE;
+        pc_first_index = 0;
+
+        for (n = 0; n < PC_MAX_CFTABLE; n++)
+        {
+            NetdevCisEntry e;
+            UWORD          score;
+
+            /* A CopyTuple() that finds nothing has scanned the whole CIS to
+               decide that, so the loop stops at the first miss and the break
+               below stops it earlier still: a card whose first entry is
+               already the best possible costs exactly one scan, which is what
+               it cost before the walk existed. */
+            if (!pc_cis_read(handle, ((ULONG)n << 16) | (ULONG)CISTPL_CFTABLE,
+                             buf, &tuple_len) || tuple_len < 1u)
+                break;
+            seen++;
+
+            if (n == 0)
+            {
+                pc_first_index = (UBYTE)(buf[2] & 0x3f);
+                netdev_diag_note(ANXDIAG_PC_CFTABLE, ci,
+                                 ((ULONG)buf[2] << 24) | ((ULONG)buf[3] << 16) |
+                                 ((ULONG)buf[4] << 8) | (ULONG)buf[5]);
+            }
+
+            if (!netdev_cis_cftable(buf + 2, tuple_len, &e))
+                continue;   /* longer than PC_TUPLE_BODY, or a corrupt entry */
+
+            score = netdev_cis_score(&e);
+            if (score <= best)
+                continue;
+
+            best         = score;
+            pc_pick      = e;
+            pc_have_pick = TRUE;
+            if (best >= NETDEV_CIS_SCORE_BEST)
+                break;      /* nothing can beat an 8-bit I/O configuration */
+        }
+
+        netdev_diag_note(ANXDIAG_PC_CFCOUNT, ci, (ULONG)seen);
+
+        if (seen == 0)
+        {
+            pc_trace("pc: no cftable ", 0);
+            netdev_diag_note(ANXDIAG_PC_NOCFTABLE, ci, 0);
+            pc_reject_owned(keep_handle);
+            return NULL;
+        }
+
+        if (pc_have_pick)
+        {
+            index = pc_pick.index;
+            netdev_diag_note(ANXDIAG_PC_CFPICK, ci,
+                             ((ULONG)best << 24) |
+                             ((ULONG)pc_pick.flags << 16) |
+                             ((ULONG)pc_pick.io_lines << 8) |
+                             (ULONG)pc_pick.index);
+            netdev_diag_note(ANXDIAG_PC_IOWIN, ci,
+                             ((ULONG)pc_pick.io_base << 16) |
+                             (ULONG)pc_pick.io_len);
+        }
+        else
+        {
+            /* Nothing in the table parsed into a configuration this driver
+               could name.  The first entry's index is what it wrote before the
+               walk existed, so the card is still tried rather than refused. */
+            index = pc_first_index;
+            netdev_diag_note(ANXDIAG_PC_CFPICK, ci, ANXDIAG_ABSENT);
+        }
     }
-    index = (UBYTE)(buf[2] & 0x3f);
     pc_trace("pc: index ", (ULONG)index);
     netdev_diag_note(ANXDIAG_PC_INDEX, ci, (ULONG)index);
 
-    /* The rest of the entry is recorded, not parsed: the I/O descriptor needs
-       a walk of the power and timing descriptors before it, and the row's
-       register offset is assumed instead. */
-    netdev_diag_note(ANXDIAG_PC_CFTABLE, ci,
-                     ((ULONG)buf[2] << 24) | ((ULONG)buf[3] << 16) |
-                     ((ULONG)buf[4] << 8) | (ULONG)buf[5]);
+    /*
+     * A multifunction card hangs its per-function CIS chains off
+     * CISTPL_LONGLINK_MFC, and card.resource's CopyTuple() follows
+     * CISTPL_LONGLINK_A and CISTPL_LONGLINK_C and nothing else -- the
+     * card.resource autodoc names those two, CISTPL_NO_LINK and
+     * CISTPL_LINKTARGET as the whole set it understands, and
+     * CISTPL_LONGLINK_MFC is not in it.  The network function's own entries
+     * are not in anything CopyTuple() can return and the walk above saw the
+     * shared chain alone.  Asked only when the walk found no configuration,
+     * because a miss costs a scan of the whole CIS and this is the one case
+     * where the answer is worth it: it turns "the card did not answer" into
+     * the reason it could not.
+     */
+    if (!pc_have_pick && pc_cis_read(handle, CISTPL_LONGLINK_MFC, buf,
+                                     &tuple_len))
+    {
+        pc_trace("pc: mfc ", (ULONG)(tuple_len >= 1u ? buf[2] : 0));
+        netdev_diag_note(ANXDIAG_PC_MFC, ci,
+                         (ULONG)(tuple_len >= 1u ? buf[2] : 0));
+    }
 
     card = netdev_card_by_cis(manf, prod);
     if (card == NULL)
@@ -901,6 +1009,23 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     }
     ci = netdev_diag_card(card);
     netdev_diag_note(ANXDIAG_PC_CARD, ci, (ULONG)ci);
+
+    /*
+     * The row's reg_off is an assumption and the CIS is the measurement.  They
+     * agree for every card that leaves its placement to the host, which is
+     * what five decoded address lines means; they do not for a card that names
+     * its own base and decodes enough lines to mean it.  Gayle fixes the Amiga
+     * address, so `board` is moved by the difference instead: netdev_add_unit()
+     * builds every register address off board + reg_off, the odd-byte window
+     * included, and one shift moves them all.
+     */
+    reg_off = card->reg_off;
+    if (pc_have_pick)
+        reg_off = netdev_cis_io_off(&pc_pick, card->reg_off);
+    regs  = (ULONG)card->base + (ULONG)reg_off;
+    board = (APTR)(ULONG)((ULONG)card->base +
+                          (ULONG)reg_off - (ULONG)card->reg_off);
+    netdev_diag_note(ANXDIAG_PC_IOOFF, ci, (ULONG)reg_off);
 
     /*
      * The socket comes up as a memory socket, so both bits must be set before
@@ -939,7 +1064,7 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
         netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
         netdev_diag_note(ANXDIAG_PC_CORVAL, ci, (ULONG)cor);
 
-        if (!pc_chip_settles(card, &rounds))
+        if (!pc_chip_settles(card, regs, &rounds))
         {
             netdev_diag_note(ANXDIAG_PC_CR, ci, (ULONG)pc_last_cr);
             netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
@@ -952,13 +1077,12 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
             pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
             netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);
 
-            if (!pc_chip_settles(card, &rounds))
+            if (!pc_chip_settles(card, regs, &rounds))
             {
                 pc_trace("pc: chip silent ", 0);
                 netdev_diag_note(ANXDIAG_PC_CR2, ci, (ULONG)pc_last_cr);
                 netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
-                netdev_diag_note(ANXDIAG_PC_SILENT, ci,
-                                 (ULONG)(card->base + card->reg_off));
+                netdev_diag_note(ANXDIAG_PC_SILENT, ci, regs);
                 pc_reject_owned(keep_handle);
                 return NULL;
             }
@@ -982,13 +1106,12 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     netdev_diag_note(ANXDIAG_PC_IRQMODE, ci,
                      (ULONG)CardResource->lib_Version);
 
-    pc_trace("pc: claimed ", (ULONG)card->base);
-    netdev_diag_note(ANXDIAG_PC_CLAIMED, ci,
-                     (ULONG)(card->base + card->reg_off));
+    pc_trace("pc: claimed ", (ULONG)board);
+    netdev_diag_note(ANXDIAG_PC_CLAIMED, ci, regs);
 
     *card_out = card;
 
-    return (APTR)(ULONG)card->base;
+    return board;
 }
 
 VOID netdev_pcmcia_release(VOID)

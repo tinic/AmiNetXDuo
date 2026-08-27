@@ -156,13 +156,13 @@ static VOID el3_reset_wait(volatile UWORD *cmd)
     while (!netdev_wait_done(&w));
 }
 
-BOOL el3_answers(const NetdevCard *card)
+BOOL el3_answers(ULONG regs)
 {
     /* unsigned long, not ULONG: ULONG is 32 bits and test/test_netdev_el3.c
        compiles this file for a 64-bit host, where the narrower cast is a
        -Werror diagnostic. */
     volatile UWORD *base = (volatile UWORD *)(volatile void *)
-                           (unsigned long)(card->base + card->reg_off);
+                           (unsigned long)regs;
     UWORD           id;
 
     EL3_RAW_PUT(&base[EL3_COMMAND / 2], EL3_CMD(EL3_C_RESET, 0)); /* 0 either way */
