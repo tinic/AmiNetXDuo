@@ -90,6 +90,25 @@ static VOID p_abort_config(struct Library *base,
                       : "a1", "cc", "memory");
 }
 
+static LONG p_query_interface(struct Library *base, const char *name,
+                              struct TagItem *tags)
+{
+    register struct Library *a6  __asm("a6") = base;
+    register CONST_APTR      a0  __asm("a0") = (CONST_APTR)name;
+    register APTR            a1  __asm("a1") = (APTR)tags;
+    register LONG            res __asm("d0");
+    register LONG _clob_d1 __asm("d1");
+    register LONG _clob_a0 __asm("a0");
+    register LONG _clob_a1 __asm("a1");
+
+    __asm __volatile ("jsr a6@(-468:W)"     /* QueryInterfaceTagList -0x1d4 */
+                      : "=r" (res), "=r" (_clob_d1), "=r" (_clob_a0),
+                        "=r" (_clob_a1)
+                      : "r" (a6), "r" (a0), "r" (a1)
+                      : "cc", "memory");
+    return res;
+}
+
 static LONG p_add_interface(struct Library *base, const char *name,
                             const char *device, LONG unit,
                             struct TagItem *tags)
@@ -390,6 +409,8 @@ int main(int argc, char **argv)
     struct Node                     *node;
     struct TagItem                   tags[16];
     char                             ifname[16];
+    char                             devname[64];
+    LONG                             devunit;
     char                             too_long[300];
     LONG                             rc;
     ULONG                            i;
@@ -462,6 +483,51 @@ int main(int argc, char **argv)
         DeleteMsgPort(port);
         CloseLibrary(base);
         return RETURN_FAIL;
+    }
+
+    /* WHICH DEVICE THIS INTERFACE IS ON.  Two arms below remove the interface
+       and add it back, and both used to spell "a2065.device" unit 0.  On any
+       other board the add is refused (errno 6, the device is not there), the
+       machine is left with no interface, and every assertion after it reads
+       poison while reporting a shape rather than a failure.  Ask the stack
+       instead: the harness's card selection is already in the answer.
+       Queried HERE, before anything removes the interface, and COPIED, because
+       the STRPTR belongs to a row that RemoveInterface takes away. */
+    {
+        STRPTR         qdev  = NULL;
+        LONG           qunit = 0;
+        struct TagItem qtags[3];
+
+        qtags[0].ti_Tag  = IFQ_DeviceName;
+        qtags[0].ti_Data = (ULONG)&qdev;
+        qtags[1].ti_Tag  = IFQ_DeviceUnit;
+        qtags[1].ti_Data = (ULONG)&qunit;
+        qtags[2].ti_Tag  = TAG_DONE;
+        qtags[2].ti_Data = 0;
+
+        devname[0] = '\0';
+        devunit    = 0;
+
+        if (p_query_interface(base, ifname, qtags) == 0 && qdev != NULL)
+        {
+            for (i = 0; i + 1 < sizeof(devname) && qdev[i] != '\0'; i++)
+                devname[i] = (char)qdev[i];
+            devname[i] = '\0';
+            devunit    = qunit;
+        }
+
+        if (devname[0] == '\0')
+        {
+            /* No answer is not a licence to guess a board: say so, and let the
+               two re-add arms report the refusal as the finding it is. */
+            Printf((CONST_STRPTR)"device: UNANSWERED, the re-add arms cannot "
+                                 "name a device\n");
+        }
+        else
+        {
+            Printf((CONST_STRPTR)"device: %s unit %ld\n", (LONG)devname,
+                   devunit);
+        }
     }
 
     tags[0].ti_Tag = TAG_DONE;
@@ -666,8 +732,9 @@ int main(int argc, char **argv)
         rc = p_remove_interface(base, ifname, 0);
         Printf((CONST_STRPTR)"live: remove %s: rc %ld\n", (LONG)ifname, rc);
 
-        rc = p_add_interface(base, ifname, "a2065.device", 0, NULL);
-        Printf((CONST_STRPTR)"live: add %s: rc %ld\n", (LONG)ifname, rc);
+        rc = p_add_interface(base, ifname, devname, devunit, NULL);
+        Printf((CONST_STRPTR)"live: add %s on %s unit %ld: rc %ld\n",
+               (LONG)ifname, (LONG)devname, devunit, rc);
 
         ltags[0].ti_Tag  = CAAMTA_ReplyPort;
         ltags[0].ti_Data = (ULONG)port;
@@ -773,8 +840,9 @@ int main(int argc, char **argv)
         rc = p_remove_interface(base, ifname, 0);
         Printf((CONST_STRPTR)"slow: remove %s: rc %ld\n", (LONG)ifname, rc);
 
-        rc = p_add_interface(base, ifname, "a2065.device", 0, NULL);
-        Printf((CONST_STRPTR)"slow: add %s: rc %ld\n", (LONG)ifname, rc);
+        rc = p_add_interface(base, ifname, devname, devunit, NULL);
+        Printf((CONST_STRPTR)"slow: add %s on %s unit %ld: rc %ld\n",
+               (LONG)ifname, (LONG)devname, devunit, rc);
 
         stags[0].ti_Tag  = IFC_State;
         stags[0].ti_Data = SM_Down;
