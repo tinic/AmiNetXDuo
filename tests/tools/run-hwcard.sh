@@ -173,7 +173,12 @@ SPEC="$OUT/payspec.txt"
 
 PEERADDR=""
 PEER_PID=""
-PORT_BASE=$((31000 + ($(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 300) * 10))
+# A BLOCK OF 100 PER TAG, the size tests/tools/run-payverify.sh uses and for
+# the same reason: the payload arm's full list is 27 cases and the overruns
+# arm sits at +90, so a block of 10 put one tag's load port inside the next
+# tag's cases.  31000..61000, clear of run-payverify's 30000 block and of
+# run-iperf's 20000s.
+PORT_BASE=$((31000 + ($(printf '%s' "$TAG" | cksum | cut -d' ' -f1) % 300) * 100))
 CONN_TOTAL=0
 
 if has_arm payload || has_arm overruns; then
@@ -214,8 +219,11 @@ if has_arm payload || has_arm overruns; then
 fi
 
 if has_arm payload; then
-    RX_LENS="1 3 1459 1460 1461 65537 1048575"
-    TX_LENS="1 1461 65537"
+    # tests/tools/run-payverify.sh's own lengths, because this is that
+    # harness's proof on the card it cannot reach and a shorter list would
+    # be a weaker claim wearing the same name.  -Q is for a rig check.
+    RX_LENS="1 2 3 4 5 1459 1460 1461 1462 1463 4095 4096 4097 65535 65536 65537 1048573 1048574 1048575 1048576"
+    TX_LENS="1 3 1460 1461 65537 1048575"
     [ "$QUICK" = no ] || { RX_LENS="1 1461 65537"; TX_LENS="1461"; }
 
     port=$PORT_BASE
@@ -245,10 +253,18 @@ fi
 # ------------------------------------------------------ the overruns arm --
 
 if has_arm overruns; then
+    # WHAT TURNS THIS INTO AN EFFECT.  One run gives the count for the
+    # binary the machine is running.  The change under test is el3.c
+    # releasing the receive FIFO's head packet before the call up into the
+    # stack rather than after, and its effect is the DIFFERENCE between two
+    # runs of this arm with the two libraries installed, at the same load
+    # and on the same card.  overruns_delta and loss_ppm are printed so the
+    # comparison is arithmetic and not a reading of two transcripts.
+    #
     # One long receive is the load: the head of the FIFO has to be released
     # and the next frame taken while the stack is still carrying the last
     # one.  4 MB at 10 Mbit is about four seconds of continuous frames.
-    OVR_PORT=$((PORT_BASE + 900))
+    OVR_PORT=$((PORT_BASE + 90))
     OVR_LEN=4194304
     [ "$QUICK" = no ] || OVR_LEN=1048576
     OVR_SEED=$((PORT_BASE + 7))

@@ -5,6 +5,18 @@
 #   tests/tools/run-cycledrill.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
 #                                 [-N board] [-B backend] [-n]
 #
+# THE HALF THIS CANNOT REACH.
+#
+# The open report behind this drill is a guru after NetShutdown, and it came
+# off a 3c589 -- a card no emulator models, so nothing here can boot one.
+# Three cycles on a2065/A1200 match the task lists name for name and this is
+# green; that is a fact about the a2065.  The 3c589 half is
+# tests/tools/run-hwcard.sh's `shutdown` arm, which drives the real machine
+# through its own httpd and asks ICMP and HTTP separately afterwards, because
+# a machine that stopped and a stack that did not come back look the same
+# from one probe.  There is no -A here: this harness builds a drive and boots
+# it, and the machine that has the card is already switched on.
+#
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
