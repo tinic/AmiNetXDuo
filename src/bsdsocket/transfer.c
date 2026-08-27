@@ -8,6 +8,7 @@
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/budget.h"
 #include "netmonitor.h"
+#include "packet_extract.h"
 #include "udp_queue.h"
 
 #include "nx_ip.h"
@@ -144,15 +145,7 @@ static VOID bsd_iov_advance(BsdIovCursor *cur, ULONG bytes)
     }
 }
 
-static ULONG bsd_packet_len(NX_PACKET *packet)
-{
-    ULONG length = 0;
-
-    if (packet != NULL)
-        nx_packet_length_get(packet, &length);
-
-    return length;
-}
+/* ---------------------------------------------------------------- packet, */
 
 static VOID bsd_drop_pending(AmiSocket *sock)
 {
@@ -233,7 +226,7 @@ UINT bsd_send_once(VOID *arg, ULONG wait)
  */
 static LONG bsd_send_consumed(NX_PACKET *packet, LONG filled)
 {
-    LONG left = (LONG)bsd_packet_len(packet);
+    LONG left = (LONG)bsd_packet_length(packet);
 
     if (left < 0 || left >= filled)
         return 0;
@@ -973,7 +966,7 @@ static BOOL bsd_recv_parked(AmiSocket *sock, LONG len)
     if (sock->as_RxPending == NULL)
         return FALSE;
 
-    length = bsd_packet_len(sock->as_RxPending);
+    length = bsd_packet_length(sock->as_RxPending);
     if (length <= sock->as_RxOffset)
         return FALSE;               /* drained, the next call releases it */
 
@@ -1189,7 +1182,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             }
         }
 
-        length = bsd_packet_len(sock->as_RxPending);
+        length = bsd_packet_length(sock->as_RxPending);
         if (length <= sock->as_RxOffset)
         {
             /* nx_packet_release() hands the packet back to the shared pool and
@@ -1212,9 +1205,8 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
             want = chunk;
 
         moved  = 0;
-        status = nx_packet_data_extract_offset(sock->as_RxPending,
-                                               sock->as_RxOffset,
-                                               dst, want, &moved);
+        status = bsd_packet_extract(sock->as_RxPending, sock->as_RxOffset,
+                                    dst, want, &moved);
         if (status != NX_SUCCESS || moved == 0)
         {
             if (copied > 0)
@@ -1311,7 +1303,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
        that arrived over IPv6. */
     nxd_udp_source_extract(packet, &src_ip, &src_port);
 
-    length = bsd_packet_len(packet);
+    length = bsd_packet_length(packet);
 
     while (taken < length && (LONG)taken < len)
     {
@@ -1406,7 +1398,7 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
 
     bsd_raw_source(packet, &src);
 
-    length = bsd_packet_len(packet);
+    length = bsd_packet_length(packet);
 
     while (taken < length && (LONG)taken < len)
     {
