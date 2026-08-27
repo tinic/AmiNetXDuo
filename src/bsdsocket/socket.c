@@ -105,6 +105,7 @@ ULONG ami_bsd_tcp_window(VOID)
     NX_PACKET_POOL *pool = netstack_pool();
     NX_IP          *ip   = netstack_ip();
     ULONG           budget;
+    ULONG           cap;
 
     if (pool == NULL || ip == NULL)
         return (ULONG)BSD_TCP_WINDOW;
@@ -116,7 +117,7 @@ ULONG ami_bsd_tcp_window(VOID)
     cap = (ULONG)BSD_TCP_WINDOW_CEILING;
 #else
     /* A window-scaling build has no ceiling but the budget: one consumer takes
-       half of it and every further one takes less.  bsdsocket_internal.h says
+       half of it and every further one takes less.  bsdsocket_window.h says
        why there is no second number here. */
     cap = budget;
 #endif

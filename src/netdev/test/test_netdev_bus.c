@@ -309,10 +309,10 @@ static void sum_one_word(NetdevBus *bus, volatile UWORD *port, UWORD pv,
     if (!sum_guards_ok(len))
         bytes_ok = 0;
 
-    sprintf(what, "word drain, len %u: exactly len bytes", (unsigned)len);
+    snprintf(what, sizeof(what), "word drain, len %u: exactly len bytes", (unsigned)len);
     ok(what, bytes_ok);
 
-    sprintf(what, "word drain, len %u: sum", (unsigned)len);
+    snprintf(what, sizeof(what), "word drain, len %u: sum", (unsigned)len);
     if (got != want)
         printf("     got 0x%08lx want 0x%08lx\n", (unsigned long)got,
                (unsigned long)want);
@@ -356,10 +356,10 @@ static void sum_one_long(NetdevBus *bus, volatile ULONG *wide,
     if (!sum_guards_ok(len))
         bytes_ok = 0;
 
-    sprintf(what, "long drain, len %u: exactly len bytes", (unsigned)len);
+    snprintf(what, sizeof(what), "long drain, len %u: exactly len bytes", (unsigned)len);
     ok(what, bytes_ok);
 
-    sprintf(what, "long drain, len %u: sum", (unsigned)len);
+    snprintf(what, sizeof(what), "long drain, len %u: sum", (unsigned)len);
     if (got != want)
         printf("     got 0x%08lx want 0x%08lx\n", (unsigned long)got,
                (unsigned long)want);
