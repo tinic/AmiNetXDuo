@@ -598,18 +598,57 @@ static void test_interface_ipv6(void)
     CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
     CHECK(cfg.iptype == AMI_IPTYPE_DHCP);
     CHECK(cfg.ip6type == AMI_IP6TYPE_STATIC);
-    CHECK(cfg.prefix6 == 48);
-    CHECK(cfg.address6[0] == 0x20010db8UL && cfg.address6[3] == 0x10UL);
+    CHECK(cfg.address6_count == 1);
+    CHECK(cfg.address6[0].prefix == 48);
+    CHECK(cfg.address6[0].addr[0] == 0x20010db8UL &&
+          cfg.address6[0].addr[3] == 0x10UL);
     CHECK(cfg.have_gateway6);
     CHECK(cfg.gateway6[0] == 0xfe800000UL && cfg.gateway6[3] == 1UL);
 
-    /* No IPv6 keyword at all: AUTO, prefix 64, no address, no router. */
+    /* No IPv6 keyword at all: AUTO, no address, no router. */
     printf("interface file: ipv6 defaults\n");
     strcpy(buf, "device=a2065.device\nconfigure=dhcp\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
     CHECK(cfg.ip6type == AMI_IP6TYPE_AUTO);
-    CHECK(cfg.prefix6 == 64);
+    CHECK(cfg.address6_count == 0);
     CHECK(!cfg.have_gateway6);
+
+    /* TWO ADDRESS6 lines: a ULA and a global at once, which is what RFC 6724
+       rule 6 needs a node to hold and what one line per interface could not
+       describe.  Order is the file order. */
+    printf("interface file: two address6 lines\n");
+    strcpy(buf, "device=a2065.device\nconfigure6=static\n"
+                "address6=fd00:6724:1::10/64\n"
+                "address6=2001:db8:6724:1::10/64\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.ip6type == AMI_IP6TYPE_STATIC);
+    CHECK(cfg.address6_count == 2);
+    CHECK(cfg.address6[0].addr[0] == 0xfd006724UL);
+    CHECK(cfg.address6[0].prefix == 64);
+    CHECK(cfg.address6[1].addr[0] == 0x20010db8UL);
+    CHECK(cfg.address6[1].prefix == 64);
+
+    /* Each line carries its own prefix length. */
+    printf("interface file: per-line prefix length\n");
+    strcpy(buf, "device=a2065.device\n"
+                "address6=2001:0:1::10/16\n"
+                "address6=2001:db8::10\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.address6_count == 2);
+    CHECK(cfg.address6[0].prefix == 16);
+    CHECK(cfg.address6[1].prefix == 64);
+
+    /* One line past the ceiling is refused and the ones already taken stay:
+       an interface with its first address is more use than one with none. */
+    printf("interface file: address6 ceiling\n");
+    strcpy(buf, "device=a2065.device\n"
+                "address6=2001:db8::1\n"
+                "address6=2001:db8::2\n"
+                "address6=2001:db8::3\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
+    CHECK(cfg.address6_count == AMI_CFG_MAX_ADDRESS6);
+    CHECK(cfg.address6[0].addr[3] == 1UL);
+    CHECK(cfg.address6[1].addr[3] == 2UL);
 
     /* ADDRESS6 with no CONFIGURE6 implies STATIC, as ADDRESS implies a
        static IPv4 interface. */
@@ -617,7 +656,8 @@ static void test_interface_ipv6(void)
     strcpy(buf, "device=a2065.device\naddress6=2001:db8::5\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
     CHECK(cfg.ip6type == AMI_IP6TYPE_STATIC);
-    CHECK(cfg.prefix6 == 64);
+    CHECK(cfg.address6_count == 1);
+    CHECK(cfg.address6[0].prefix == 64);
 
     /* CONFIGURE6 wins over the implication, whichever order they appear in. */
     printf("interface file: configure6 wins\n");
@@ -642,7 +682,7 @@ static void test_interface_ipv6(void)
                 "address6=2001:db8::5/42949672960\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &cfg) == AMI_CFG_OK);
     CHECK(cfg.ip6type == AMI_IP6TYPE_LINKLOCAL);
-    CHECK(cfg.prefix6 == 64);
+    CHECK(cfg.address6_count == 0);
 }
 
 #endif /* AMINETXDUO_IPV6 */

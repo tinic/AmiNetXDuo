@@ -522,7 +522,6 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     /* The IPv6 default is AUTO: link-local always, plus a global address if
        a router advertisement arrives.  CONFIGURE6=OFF turns IPv6 off. */
     out->ip6type = AMI_IP6TYPE_AUTO;
-    out->prefix6 = 64;
 #endif
 
     if (name != NULL)
@@ -794,12 +793,18 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
 #ifdef AMINETXDUO_IPV6
             case IF_KEY_ADDRESS6:
-                /* ADDRESS6 with no CONFIGURE6 implies STATIC. */
+                /* ADDRESS6 with no CONFIGURE6 implies STATIC.  Repeat the
+                   keyword and the interface carries both addresses: an Amiga
+                   holding a ULA and a global at once is what RFC 6724 rule 6
+                   needs, and one line per interface could not describe it. */
             {
-                char zone[AMI_CFG_IP6_ZONE_LEN];
+                char          zone[AMI_CFG_IP6_ZONE_LEN];
+                AmiIp6Address parsed;
 
-                if (!ami_config_parse_ip6_zone(value, out->address6,
-                                               &out->prefix6, zone,
+                parsed.prefix = 64;
+
+                if (!ami_config_parse_ip6_zone(value, parsed.addr,
+                                               &parsed.prefix, zone,
                                                sizeof(zone)))
                 {
                     AMI_WARN("config: %s: bad ADDRESS6 '%s'", out->name, value);
@@ -808,9 +813,30 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 {
                     /* Warned about above. The address is not taken. */
                 }
-                else if (!have_configure6)
+                else if (out->address6_count >= AMI_CFG_MAX_ADDRESS6)
                 {
-                    out->ip6type = AMI_IP6TYPE_STATIC;
+                    /* The ceiling is the stack's, see AMI_CFG_MAX_ADDRESS6.
+                       Refusing the extra line and keeping the ones already
+                       taken is the only behaviour that leaves the interface
+                       usable. */
+                    AMI_WARN("config: %s: more than %ld ADDRESS6 lines, "
+                             "'%s' ignored", out->name,
+                             (long)AMI_CFG_MAX_ADDRESS6, value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN, "ADDRESS6",
+                                     value,
+                                     "An interface carries at most two static "
+                                     "IPv6 addresses, because the third slot "
+                                     "the stack has per interface holds the "
+                                     "link-local address.  This line was "
+                                     "ignored.");
+                }
+                else
+                {
+                    out->address6[out->address6_count] = parsed;
+                    out->address6_count++;
+
+                    if (!have_configure6)
+                        out->ip6type = AMI_IP6TYPE_STATIC;
                 }
                 break;
             }
@@ -892,9 +918,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     }
 
 #ifdef AMINETXDUO_IPV6
-    if (out->ip6type == AMI_IP6TYPE_STATIC &&
-        (out->address6[0] | out->address6[1] |
-         out->address6[2] | out->address6[3]) == 0)
+    if (out->ip6type == AMI_IP6TYPE_STATIC && out->address6_count == 0)
     {
         /* Degrade rather than refuse: link-local always works, and every IPv6
            interface is required to have that address in any case. */
@@ -918,8 +942,7 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
         if (out->ip6type != AMI_IP6TYPE_OFF)
             v6_plan = (BOOL)(have_configure6 || out->have_gateway6 ||
                              out->iptype == AMI_IPTYPE_NONE ||
-                             (out->address6[0] | out->address6[1] |
-                              out->address6[2] | out->address6[3]) != 0);
+                             out->address6_count != 0);
 #endif
 
         if (!v4_plan && !v6_plan)

@@ -62,6 +62,13 @@ MASK="${AMINETXDUO_SRC_MASK:-255.255.255.0}"
 
 SELF6="${AMINETXDUO_SRC_SELF6:-2001:db8:6724:1::10/64}"
 
+# THE SECOND STATIC ADDRESS, and why the /31 is not a typo: see the SECOND6_
+# block in tests/tools/srcprobe.c.  It puts the guest on two global prefixes
+# with two different RFC 6724 policy labels at once, which is the only shape in
+# which rule 6 can be told from the rules below it.  A config file could not
+# describe it until ADDRESS6 could be repeated.
+SECOND6="${AMINETXDUO_SRC_SECOND6:-2001:0:6724:1::10/31}"
+
 
 STAGE="$ROOT/build/srcsel-stage"
 rm -rf "$STAGE"
@@ -78,6 +85,7 @@ NETMASK=$MASK
 GATEWAY=$PEER
 CONFIGURE6=STATIC
 ADDRESS6=$SELF6
+ADDRESS6=$SECOND6
 STATE=up
 IFEOF
 
@@ -115,6 +123,7 @@ echo "srcsel_backend=$IFACE"
 echo "srcsel_mac=$AMINETXDUO_AMIBERRY_MAC"
 echo "srcsel_self=$SELF"
 echo "srcsel_self6=$SELF6"
+echo "srcsel_second6=$SECOND6"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
@@ -184,6 +193,12 @@ for want in \
     v6_src_linklocal_is_not_global \
     v6_connect_loopback \
     v6_src_loopback_is_loopback \
+    v6_second_address_ready \
+    v6_connect_second_prefix \
+    v6_src_matching_label_is_second \
+    v6_connect_rule6 \
+    v6_rule6_label_beats_longest_prefix \
+    v6_rule6_not_the_longer_prefix \
     v6_offlink_no_route_refused
 do
     if grep -Fqx "$want=ok" "$REPORT"; then

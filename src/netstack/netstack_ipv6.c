@@ -14,6 +14,19 @@
 
 #include <proto/exec.h>
 
+/*
+ * AMI_CFG_MAX_ADDRESS6 is a promise the config parser makes about how many
+ * ADDRESS6 lines it will take, and this is the stack it has to be kept
+ * against: NetX Duo gives an interface NX_MAX_IPV6_ADDRESSES /
+ * NX_MAX_PHYSICAL_INTERFACES slots, and one of them always holds the
+ * fe80::/64.  Over the line, the parser accepts an address that
+ * nxd_ipv6_address_set() then refuses -- or, worse, one it takes out of
+ * another interface's share.
+ */
+_Static_assert(AMI_CFG_MAX_ADDRESS6 + 1 <=
+               (NX_MAX_IPV6_ADDRESSES / NX_MAX_PHYSICAL_INTERFACES),
+               "AMI_CFG_MAX_ADDRESS6 exceeds the IPv6 slots per interface");
+
 static VOID ami_ns6_address_changed(NX_IP *ip_ptr, UINT status,
                                     UINT interface_index, UINT address_index,
                                     ULONG *address);
@@ -241,21 +254,33 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
 
     if (cfg->ip6type == AMI_IP6TYPE_STATIC)
     {
-        NXD_ADDRESS addr;
-        UINT        gindex = 0;
+        UWORD n;
 
-        addr.nxd_ip_version       = NX_IP_VERSION_V6;
-        addr.nxd_ip_address.v6[0] = cfg->address6[0];
-        addr.nxd_ip_address.v6[1] = cfg->address6[1];
-        addr.nxd_ip_address.v6[2] = cfg->address6[2];
-        addr.nxd_ip_address.v6[3] = cfg->address6[3];
-
-        status = nxd_ipv6_address_set(&ns->ns_Ip, (UINT)i, &addr,
-                                      cfg->prefix6, &gindex);
-        if (status != NX_SUCCESS)
+        /*
+         * Every ADDRESS6 line, and a rejected one does not stop the next: an
+         * interface that got its first address on is more use than one that
+         * got none because its second was wrong.  The link-local above is
+         * already in place, so the interface has at most AMI_CFG_MAX_ADDRESS6
+         * of the three IPv6 slots NetX Duo gives it.
+         */
+        for (n = 0; n < cfg->address6_count; n++)
         {
-            AMI_ERROR("netstack: %s: ADDRESS6 rejected (%ld)",
-                      cfg->name, (long)status);
+            NXD_ADDRESS addr;
+            UINT        gindex = 0;
+
+            addr.nxd_ip_version       = NX_IP_VERSION_V6;
+            addr.nxd_ip_address.v6[0] = cfg->address6[n].addr[0];
+            addr.nxd_ip_address.v6[1] = cfg->address6[n].addr[1];
+            addr.nxd_ip_address.v6[2] = cfg->address6[n].addr[2];
+            addr.nxd_ip_address.v6[3] = cfg->address6[n].addr[3];
+
+            status = nxd_ipv6_address_set(&ns->ns_Ip, (UINT)i, &addr,
+                                          cfg->address6[n].prefix, &gindex);
+            if (status != NX_SUCCESS)
+            {
+                AMI_ERROR("netstack: %s: ADDRESS6 %ld rejected (%ld)",
+                          cfg->name, (long)n, (long)status);
+            }
         }
     }
     if (cfg->ip6type == AMI_IP6TYPE_AUTO)

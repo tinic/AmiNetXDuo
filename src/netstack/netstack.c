@@ -3330,7 +3330,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     if (slot_cfg->ip6type == AMI_IP6TYPE_OFF)
     {
         slot_cfg->ip6type = AMI_IP6TYPE_AUTO;
-        slot_cfg->prefix6 = 64;
     }
 #endif
 
