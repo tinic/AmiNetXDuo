@@ -59,7 +59,7 @@ invokes() {
 
 # ---------------------------------------------------------- read the rows --
 
-declare -A ROW_RUNNER ROW_NOTE
+declare -A ROW_RUNNER ROW_NOTE ROW_SCHED
 rows=0
 while IFS= read -r line; do
     case "$line" in ''|'#'*) continue ;; esac
@@ -69,8 +69,14 @@ while IFS= read -r line; do
     runner=$(printf '%s' "$line" | cut -d: -f2 | sed 's/^ *//; s/ *$//')
     note=$(printf '%s' "$line" | cut -d: -f3- | sed 's/^ *//; s/ *$//')
 
+    # A wired runner carries its SCHEDULE: `<runner>@<when>`.  See WHEN A
+    # WIRED ROW ACTUALLY RUNS below for why the runner alone is not the claim.
+    sched=""
+    case "$runner" in *@*) sched="${runner##*@}"; runner="${runner%@*}" ;; esac
+
     if [ -n "${ROW_RUNNER[$path]:-}" ]; then err "duplicate_row:$path"; continue; fi
     ROW_RUNNER[$path]="$runner"
+    ROW_SCHED[$path]="$sched"
     ROW_NOTE[$path]="$note"
     rows=$((rows + 1))
 done < "$MANIFEST"
@@ -102,6 +108,8 @@ for path in "${!ROW_RUNNER[@]}"; do
     manual)
         manual=$((manual + 1))
         [ -n "$note" ] || err "manual_with_no_reason:$path"
+        [ -z "${ROW_SCHED[$path]}" ] ||
+            err "manual_with_a_schedule:$path->${ROW_SCHED[$path]}"
         # The direction that goes stale silently: somebody wires it up and the
         # manifest still calls it a hole, so the next reader closes a hole
         # that is already closed and the one beside it stays open.
@@ -223,42 +231,263 @@ say guest_instruments "$instruments"
 say guest_unrun "$unrun"
 say harnesses_manual "$manual"
 say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
+# Rows written against SLIRP.  Bridged is the only mode this project uses, so
+# a 10.0.2.x literal in the guest's command list, its staged configuration or
+# its assertions is a rewrite and not a missing home; counting those as
+# UNWIRED said four harnesses were waiting for a runner when what they are
+# waiting for is a gateway discovered at run time.
+say harnesses_slirp "$(grep -c ': manual : SLIRP' "$MANIFEST" || true)"
 # Rows that DO run and DO assert and are failing on a product finding.  They
 # are not holes and counting them as UNWIRED hid seven of them behind one
 # number; they are also not coverage, so they get a line of their own.
 say harnesses_red "$(grep -c ': manual : RED' "$MANIFEST" || true)"
 
-# --------------------------------------------- a runner that does not fire --
+# ------------------------------------------------- every SELFTEST too --
 #
-# THE GAP THE ROWS ABOVE CANNOT SEE.  Everything so far asks whether a runner
-# INVOKES the harness.  Whether that runner ever RUNS is a separate question
-# and no row records it: fifteen rows name .github/workflows/emulator.yml,
-# which is `workflow_dispatch`, a nightly `schedule` and `push: tags`, so
-# nothing in it fires on a pull request or a push to a branch.  That is a
-# deliberate choice -- the tier takes 7-20 minutes and would be cancelled by
-# the next push -- but it means "wired" there and "wired" to tools/ci.sh are
-# not the same claim, and a reader of this manifest cannot tell them apart.
+# THE SAME HOLE, ONE CLASS OVER, and it is the class with no manifest in
+# front of it.  tools/web/console-selftest.mjs decodes with the real planar
+# modules and compares every pixel against a reference built the other way
+# round -- 111 checks -- and it was named by no stage at all, so it had
+# never gone red in CI.  A harness at least has a row here to go stale; a
+# selftest has nothing, and `tests/*/*-verdict-selftest.sh` in tools/ci.sh
+# looks like a rule that covers them all until you notice where it does not
+# reach.
 #
-# REPORTED, NOT FAILED.  The row is correct; it is the runner's schedule that
-# is the fact, and turning a deliberate schedule into a build failure would
-# only teach people to stop reading this script.  What it must not do is stay
-# invisible.
-ondemand=0
-for path in "${!ROW_RUNNER[@]}"; do
-    runner="${ROW_RUNNER[$path]}"
-    case "$runner" in .github/workflows/*.yml) ;; *) continue ;; esac
-    [ -f "$runner" ] || continue
-    # A workflow that runs on a branch push or a pull request fires on the
-    # work; one with only dispatch, cron and tags does not.  `push:` with
-    # nothing but `tags:` under it is the second kind, which is why the test
-    # is for `branches:` and `pull_request:` rather than for `push:`.
-    if grep -qE '^[[:space:]]*(pull_request|branches):' "$runner"; then
+# TWO WAYS TO BE RUN, and both are checked:
+#
+#   the glob in tools/ci.sh, which is `tests/*/*-verdict-selftest.sh` and
+#     SKIPS A FILE THAT IS NOT EXECUTABLE (`[ -x "$st" ] || continue`), so a
+#     chmod is enough to take a grader out of CI in silence.  A file that
+#     matches the pattern and is not +x is reported.
+#   a literal path in a runner or in a harness, the way the rest of this
+#     script asks the question.
+#
+# ci.yml is not a runner here for the reason it is not one above: every
+# selftest path in it is an argument to shellcheck.
+SELFTEST_GLOB='tests/*/*-verdict-selftest.sh'
+
+# Not a gate, with the reason.  Held both directions: an exemption something
+# does run is an error.
+SELFTEST_EXEMPT="
+tools/profiler/selftest.sh  proves the profiler end to end and needs an emulator, a ROM and a build configured with AMINETXDUO_PROFILER=ON; the profiler is an instrument and profverify is its gate
+"
+declare -A SELFTEST_WHY
+while read -r t why; do
+    [ -n "$t" ] || continue
+    SELFTEST_WHY[$t]="$why"
+done <<< "$SELFTEST_EXEMPT"
+
+selftests=0 selftests_unrun=0 selftests_exempt=0
+while IFS= read -r st; do
+    selftests=$((selftests + 1))
+
+    named=""
+    # shellcheck disable=SC2254
+    case "$st" in
+    $SELFTEST_GLOB)
+        if invokes tools/ci.sh "$SELFTEST_GLOB"; then
+            if [ -x "$st" ]; then
+                named="tools/ci.sh (the glob)"
+            else
+                err "selftest_not_executable_so_the_glob_skips_it:$st"
+            fi
+        fi ;;
+    esac
+
+    if [ -z "$named" ]; then
+        # THIS SCRIPT IS NOT A RUNNER, and it took itself for one: the
+        # exemption table above names tools/profiler/selftest.sh, which is a
+        # mention, so the exempt row reported itself as run.
+        while IFS= read -r f; do
+            case "$f" in "$st"|"${BASH_SOURCE[0]#./}"|tools/check-harnesses.sh)
+                continue ;; esac
+            invokes "$f" "$st" && { named="$f"; break; }
+        done < <( { find tests install/test -name 'run-*.sh'
+                    find tools -name '*.sh'
+                    printf '%s\n' "${RUNNERS[@]}"; } | sed 's|^\./||' | sort -u)
+    fi
+
+    if [ -n "${SELFTEST_WHY[$st]+set}" ]; then
+        selftests_exempt=$((selftests_exempt + 1))
+        [ -n "$named" ] && err "selftest_exempt_but_$named-runs_it:$st"
         continue
     fi
-    printf 'harness_runner_ondemand=%s->%s\n' "$path" "$runner"
-    ondemand=$((ondemand + 1))
+
+    [ -n "$named" ] && continue
+    err "no_runner_for_selftest:$st"
+    selftests_unrun=$((selftests_unrun + 1))
+done < <(find tools tests install -name '*selftest*' \
+              ! -name '*.log' ! -name '*.txt' | sed 's|^\./||' | sort)
+
+say selftests "$selftests"
+say selftests_exempt "$selftests_exempt"
+say selftests_unrun "$selftests_unrun"
+
+# ------------------------------------- WHEN A WIRED ROW ACTUALLY RUNS --------
+#
+# THE GAP THE ROWS ABOVE CANNOT SEE.  Everything so far asks whether a runner
+# INVOKES the harness.  Whether that runner ever RUNS is a different question,
+# and "wired" was one word for three unlike claims: fifteen rows named
+# .github/workflows/emulator.yml, which is dispatch, a nightly cron and tags,
+# so nothing in it fires on a pull request; twelve more named tools/ci.sh in a
+# stage no workflow passes to it at all, which is a person typing a command.
+# Both read as covered beside a row that runs on every push.
+#
+# So the schedule is part of the row now: `<runner>@<when>`, and it is
+# COMPUTED here and compared, the same both-directions honesty the `manual`
+# rows are held to.  A row cannot claim a schedule it does not have, and a row
+# whose runner starts firing on pushes cannot keep calling itself nightly.
+#
+#   push      a workflow that fires on a branch push or a pull request
+#   nightly   a workflow with a `schedule:`
+#   release   a workflow that fires on a tag and nothing else
+#   hand      no workflow runs it.  A person types it.  Legal -- tools/emurun.sh
+#             and tools/demo.sh are entry points, not schedulers -- and it is
+#             the number to watch, because it is the one that looks like
+#             coverage from a distance and is not.
+#
+# NOT a value judgement about the schedule.  Tier 2 boots an emulator and takes
+# 7-20 minutes; nightly is the right answer for it and turning that into a
+# build failure would only teach people to stop reading this script.  What it
+# must not do is stay invisible.
+
+# The strongest trigger a workflow has.  A workflow with both a cron and a tag
+# push is nightly: the nightly one is what fires without anybody doing
+# anything.
+wf_class() { # workflow -> push|nightly|release|none
+    local f="$1"
+    [ -f "$f" ] || { printf none; return; }
+    if grep -qE '^[[:space:]]*(pull_request|branches):' "$f"; then
+        printf push
+    elif grep -qE '^[[:space:]]*schedule:' "$f"; then
+        printf nightly
+    elif grep -qE '^[[:space:]]*tags:' "$f"; then
+        printf release
+    else
+        printf none
+    fi
+}
+
+rank() { case "$1" in push) printf 4 ;; nightly) printf 3 ;; release) printf 2 ;;
+                      hand) printf 1 ;; *) printf 0 ;; esac; }
+stronger() { [ "$(rank "$1")" -ge "$(rank "$2")" ] && printf '%s' "$1" ||
+             printf '%s' "$2"; }
+
+# EVERY workflow, globbed rather than listed: a new one that runs a stage on
+# every push is a schedule this has to see, and a hand-kept list would report
+# the old answer for a year.
+WORKFLOWS=()
+while IFS= read -r w; do WORKFLOWS+=("$w"); done < <(
+    find .github/workflows -name '*.yml' -o -name '*.yaml' | sort)
+[ "${#WORKFLOWS[@]}" -gt 0 ] || err "no_workflows_in_.github/workflows"
+
+# Which tools/ci.sh STAGES a workflow names.  A row saying `tools/ci.sh` is
+# only as scheduled as the stage its harness sits in: `bridged` is in
+# emulator.yml, `matrix` was in nothing.
+declare -A WF_STAGES WF_CLASS
+for w in "${WORKFLOWS[@]}"; do
+    WF_CLASS[$w]=$(wf_class "$w")
+    WF_STAGES[$w]=$(grep -v '^[[:space:]]*#' "$w" 2>/dev/null |
+                    sed -n 's|.*tools/ci\.sh||p' | tr -d "'\"" | tr ' ' '\n' |
+                    grep -E '^[a-z][a-z0-9]*$' | sort -u | tr '\n' ' ')
 done
-say harnesses_ondemand "$ondemand"
+
+# Which stage function of tools/ci.sh runs each harness.
+#
+# A MESSAGE IS NOT AN INVOCATION, and both are in there: stage_conformance's
+# failure text names tests/conformance/run-conformance.sh across four
+# backslash-continued lines to say what cannot start, which would have put
+# that harness in a stage ci.yml runs on every push.  The continuation is
+# tracked, because the second and third lines of that string start with the
+# path and look like commands.
+declare -A PATH_STAGES
+while IFS=$'\t' read -r fn hp; do
+    case " ${PATH_STAGES[$hp]:-} " in *" $fn "*) continue ;; esac
+    PATH_STAGES[$hp]="${PATH_STAGES[$hp]:-}$fn "
+done < <(awk '
+    { l = $0; sub(/^[[:space:]]*/, "", l) }
+    substr(l, 1, 1) == "#" { next }
+    /^[a-z0-9_]+\(\)[[:space:]]*\{/ { fn = $0; sub(/\(\).*/, "", fn) }
+    /^\}/ { fn = "" }
+    {
+        if (!incont)
+            msg = (l ~ /^(fail|note|skip|echo|printf|say|hr)[[:space:]]/)
+        incont = ($0 ~ /\\[[:space:]]*$/)
+    }
+    msg { next }
+    fn ~ /^stage_/ {
+        s = $0
+        while (match(s, /(tests|install)\/[a-z0-9\/_-]*run-[a-z0-9-]+\.sh/)) {
+            print substr(fn, 7) "\t" substr(s, RSTART, RLENGTH)
+            s = substr(s, RSTART + RLENGTH)
+        }
+    }
+' tools/ci.sh)
+
+computed_class() { # harness path, runner -> push|nightly|release|hand|none
+    local path="$1" runner="$2" best=none w s
+    case "$runner" in
+    .github/workflows/*.yml)
+        printf '%s' "${WF_CLASS[$runner]:-$(wf_class "$runner")}"
+        return ;;
+    tools/ci.sh)
+        for s in ${PATH_STAGES[$path]:-}; do
+            for w in "${WORKFLOWS[@]}"; do
+                case " ${WF_STAGES[$w]} " in
+                    *" $s "*) best=$(stronger "$best" "${WF_CLASS[$w]}") ;;
+                esac
+            done
+        done ;;
+    *)
+        for w in "${WORKFLOWS[@]}"; do
+            invokes "$w" "$runner" &&
+                best=$(stronger "$best" "${WF_CLASS[$w]}")
+        done ;;
+    esac
+    [ "$best" = none ] && best=hand
+    printf '%s' "$best"
+}
+
+declare -A SCHED_COUNT
+for k in push nightly release hand; do SCHED_COUNT[$k]=0; done
+
+for path in "${!ROW_RUNNER[@]}"; do
+    runner="${ROW_RUNNER[$path]}"
+    [ "$runner" = manual ] && continue
+    [ -f "$path" ] || continue
+
+    # A chained row runs exactly when the harness that calls it runs.
+    resolved="$runner"
+    case "$runner" in
+        chained:*) resolved="${ROW_RUNNER[${runner#chained:}]:-manual}"
+                   [ "$resolved" = manual ] && continue
+                   path_for_stage="${runner#chained:}" ;;
+        *)         path_for_stage="$path" ;;
+    esac
+
+    got=$(computed_class "$path_for_stage" "$resolved")
+    want="${ROW_SCHED[$path]}"
+
+    if [ -z "$want" ]; then
+        err "wired_row_with_no_schedule:$path(is:$got)"
+        continue
+    fi
+    case "$want" in
+        push|nightly|release|hand) ;;
+        *) err "unknown_schedule:$path->$want"; continue ;;
+    esac
+    if [ "$want" != "$got" ]; then
+        err "schedule_is_wrong:$path->declared_$want,actually_$got"
+        continue
+    fi
+    SCHED_COUNT[$got]=$(( ${SCHED_COUNT[$got]} + 1 ))
+    [ "$got" = hand ] && printf 'harness_hand=%s->%s\n' "$path" "$runner"
+done
+
+say harnesses_on_push    "${SCHED_COUNT[push]}"
+say harnesses_nightly    "${SCHED_COUNT[nightly]}"
+say harnesses_on_release "${SCHED_COUNT[release]}"
+say harnesses_by_hand    "${SCHED_COUNT[hand]}"
 
 # --------------------------------------------------- references that dangle --
 #

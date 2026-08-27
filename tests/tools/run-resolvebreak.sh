@@ -12,21 +12,26 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=1200
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
-IFACE="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
+# BRIDGED, AND ONLY BRIDGED.  This used to carry two branches, `-A` picking
+# between them: one passed -B and one did not, so the default was
+# AMINETXDUO_RUNNER=fsuae falling through to amiberry-run.sh with no backend,
+# which is SLIRP.  Nothing else differed between them.  The measurement does
+# not need SLIRP -- the blackhole is 192.0.2.1 and the name is probe.invalid,
+# neither of which anything on a real segment answers -- and a run over the
+# emulator's own TCP/IP is not a measurement of this stack blocking.
+IFACE="${AMINETXDUO_RESOLVEBREAK_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 LIBRARY=""
 DELAY=5
 
-while getopts "m:t:b:l:d:AB:" opt; do
+while getopts "m:t:b:l:d:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         l) LIBRARY="$OPTARG" ;;
         d) DELAY="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
         B) IFACE="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-l library] [-d seconds] [-A [-B backend]]" >&2; exit 2 ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-l library] [-d seconds] [-B interface]" >&2; exit 2 ;;
     esac
 done
 
@@ -63,21 +68,14 @@ SYS:AddNetInterface eth0
 SYS:ResolveBreak $BLACKHOLE $NAME $DELAY
 EOF
 
+HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
+
 set +e
-if [ "$RUNNER" = "amiberry" ]; then
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL under Amiberry, a2065 on $IFACE"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" \
-        -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/ResolveBreak"
-else
-    HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
-    echo "==> booting $MODEL with the A2065 on SLIRP"
-    "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-        "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-        "$STAGE/AddNetInterface" "$STAGE/ResolveBreak"
-fi
+echo "==> booting $MODEL under Amiberry, a2065 bridged on $IFACE"
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" \
+    -t "$TIMEOUT" \
+    "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/AddNetInterface" "$STAGE/ResolveBreak"
 RUN_RC=$?
 set -e
 

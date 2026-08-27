@@ -9,9 +9,11 @@
 # tests/tools/cards.sh for what each board is and which machine it needs, and
 # tools/sana2-stage.sh for the driver that opens it.
 #
-# THE MAC IS SET EXPLICITLY: left alone the emulator invents one.  The A2065
-# keeps only the last three bytes -- a2065.cpp overwrites the first three with
-# Commodore's 00:80:10 -- while the NE2000 boards take the whole address.
+# THE MAC IS SET EXPLICITLY: left alone the emulator invents one.  How much of
+# it survives is per board and is written down at emu_board_mac_honoured below;
+# the A2065 and the Ariadne keep only the last three bytes, the Zorro NE2000
+# boards take the whole address, and the PCMCIA NE2000 needs a patched
+# emulator to take any of it.
 #
 # SPDX-License-Identifier: MIT
 
@@ -48,16 +50,45 @@ emu_board_lines() { # board mac backend [extra-options]
 
 # DOES THE EMULATOR ACTUALLY USE THE mac= WE WROTE?  $1 board.  0 yes, 1 no.
 #
-# On every board but one, yes.  On ne2000_pcmcia, NO, and the option is accepted
-# in silence: Amiberry builds it with a NULL autoconfig_info, so ethernet_getmac
-# fails and the card takes `td->mac`, the HOST INTERFACE's address.
+# MEASURED, board by board, rather than reasoned about: one config per board
+# with a distinct mac=, and the address the emulator logs for the card at
+# reset.  Amiberry 149e9aa2 on playhouse3, host interface bc:24:11:93:e8:8b:
 #
-# A caller that puts this board on a bridge cannot give two guests distinct
-# identities, so it must not run two at once.
+#   ariadne2 hydra eb920 xsurf xsurf100z2 xsurf100z3   all six bytes
+#   a2065 ariadne                        the last three, and that is enough
+#   ne2000_pcmcia                        NONE OF IT
+#
+# a2065 and ariadne are the same driver: a2065.cpp:1516 reads mac= and then
+# a2065.cpp:1519 puts the OUI the guest drivers expect back over the first
+# three bytes (00:80:10 Commodore, 00:60:30 Village Tronic).  Two runs with
+# different mac= still differ, which is the only property this answers.
+#
+# ne2000_pcmcia takes none of it AND SAYS NOTHING.  cfgfile.cpp:6025 does parse
+# the option -- ne2000pcmcia carries the same ethernet_settings table as every
+# other card (expansion.cpp:6490), so mac= lands in the board's
+# romconfig.configtext.  Nothing then reads it.  The board is not an autoconfig
+# board: gayle.cpp builds it directly and passes no autoconfig record
+# (`ne2000->init(ne2000_board_state, NULL)`, gayle.cpp:1590), so
+# ne2000_init_pcmcia (ne2000.cpp:1443) has no rc to take configtext from and
+# hands NULL down, ethernet_getmac returns false on it (ethernet.cpp:398), and
+# ne2000_init_2 falls back to `td->mac` (ne2000.cpp:1383) -- the HOST
+# INTERFACE's own address.  Every guest on the bridge is then one hardware
+# address at several IP addresses, which is not a collision anything reports:
+# the frames arrive, and what fails is an assertion somewhere else.
+#
+# A LOCAL AMIBERRY PATCH FIXES IT -- give that call an autoconfig_info whose
+# rc is get_device_romconfig(&currprefs, ROMTYPE_NE2KPCMCIA, 0), which is the
+# same lookup ethernet_enumerate() already does for the backend one line
+# later.  A patched emulator announces it, `PCMCIA NE2000 mac=<address>`, so
+# THIS ASKS THE BINARY rather than carrying a version number: an unpatched
+# emulator still gets the interlock, and the day the patch lands nothing here
+# has to be remembered.
 emu_board_mac_honoured() { # board
     case "$1" in
-    ne2000_pcmcia) return 1 ;;
-    *)             return 0 ;;
+    ne2000_pcmcia)
+        [ -n "${AMIBERRY:-}" ] && [ -r "$AMIBERRY" ] &&
+            LC_ALL=C grep -aqF 'PCMCIA NE2000 mac=' "$AMIBERRY" ;;
+    *)  return 0 ;;
     esac
 }
 

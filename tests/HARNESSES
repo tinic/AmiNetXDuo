@@ -14,7 +14,7 @@
 #
 # FORMAT
 #
-#   <path> : <runner> : <note>
+#   <path> : <runner>@<when> : <note>
 #
 # <runner> is one of
 #
@@ -24,7 +24,34 @@
 #                    have a row, and the chain must end at a runner.
 #   manual           nothing invokes it.  <note> must say why, and the check
 #                    fails if a runner does invoke it after all, so a row
-#                    cannot go stale in the quiet direction.
+#                    cannot go stale in the quiet direction.  A `manual` row
+#                    takes no <when>: there is no schedule to state.
+#
+# <when> IS PART OF THE CLAIM, and it is computed and compared rather than
+# believed.  Naming a runner says something invokes the harness; it does not
+# say anything ever starts that runner.  Both of these had shipped here as one
+# word:
+#
+#   fifteen rows named .github/workflows/emulator.yml, which is dispatch, a
+#   nightly cron and tags, so nothing in it fires on a pull request; and
+#   twelve rows named tools/ci.sh in a STAGE no workflow ever passed to it,
+#   which is a person typing a command.
+#
+# Beside a row that runs on every push, all three read as covered.  So:
+#
+#   push      a workflow that fires on a branch push or a pull request
+#   nightly   a workflow with a `schedule:`.  Tier 2 boots an emulator and
+#             takes 7-20 minutes, so this is the right answer for it and it is
+#             not a defect -- it is a different claim from `push`
+#   release   a workflow that fires on a tag and nothing else
+#   hand      no workflow runs it.  A person types it.  Legal, and the number
+#             to watch: it is the one that looks like coverage from a distance
+#
+# tools/check-harnesses.sh resolves the harness through its runner -- and,
+# for tools/ci.sh, through the stage function that holds it -- to the workflow
+# triggers that actually fire, and fails on a row that declares anything else.
+# A row cannot claim a schedule it does not have, and a harness whose runner
+# starts firing on pushes cannot keep calling itself nightly.
 #
 # A `manual` row is a coverage hole with a reason, not a resolved question.
 # The reason codes are:
@@ -37,6 +64,14 @@
 #   windows   WinUAE, so a Windows host
 #   UNWIRED   nothing prevents it running where the rest of tier 2 runs.
 #             It simply has no home.  This is the list that should shrink.
+#   SLIRP     written against SLIRP, and bridged is the only mode this project
+#             uses.  It puts 10.0.2.x into the guest's own command list, its
+#             staged configuration or its assertions, so it cannot be moved to
+#             a real segment by passing -B: something has to discover the
+#             gateway or the resolver at run time first.  A DIFFERENT fact
+#             from UNWIRED -- the home exists, the harness cannot be put in it
+#             as written -- and each note below says which literal is the
+#             blocker.
 #   RED       it runs where tier 2 runs, it asserts, and it is FAILING on
 #             something that is not rig state.  Wiring it would put a known
 #             red in a gate, so it stays out until the finding is answered --
@@ -86,64 +121,68 @@
 
 # --------------------------------------------------- invoked by a runner --
 
-install/test/run-smbmount.sh       : tools/ci.sh                    : an SMB share mounted on a real Workbench, which is what GitHub #3 and #4 are about
-install/test/run-workbench.sh      : tools/ci.sh                    : the release archive on a real Workbench 3.1
-install/test/run-workbench-cards.sh: tools/ci.sh                    : the same install and power cycle on every card in tests/tools/cards.sh, because the gate above booted the A2065 and nothing else
-tests/perf/run-lossgate.sh         : tools/ci.sh                    : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
-tests/netdev/run-netdelay.sh       : tools/ci.sh                    : the netdev delays at 68020 and 68060, held to timer.device rather than to their own iteration count; the 68060 arm is the accelerator one
-tests/tools/run-arpretry.sh        : tools/ci.sh                    : the guest's first ARP is lost on purpose; the connect must still complete
-tests/tools/run-cardsweep.sh       : tools/ci.sh                    : every network card, one boot each
-tests/tools/run-cpuspeed.sh        : tools/ci.sh                    : the same bring-up at 68030/68040/68060 and at two emulator speed settings, on the PCMCIA claim path and a control board. Nothing here had ever booted a CPU but the A1200's 68EC020
-tests/tools/run-bigmem.sh          : tools/ci.sh                    : the packet-pool arithmetic at 32 MB and 128 MB. It had only ever run at 0 MB and 8 MB
-tests/tools/run-multidef.sh        : tools/ci.sh                    : three, four and eight files in DEVS:NetInterfaces/. Written against the contract and red when it landed -- the cap was 2 and a round of eight listed two -- green since the cap was lifted, without an assertion changing
-tests/tools/run-bootconsole.sh     : tools/ci.sh                    : `httpd <drawer> -C` where S:User-Startup runs it -- a machine with no Workbench, no screen open, no network card and no peer. It must come up, serve a file and /console over loopback, say the screen is missing exactly once rather than exit 10 over it, and report the geometry normally once a screen does exist
-tests/tools/run-ifslots.sh         : tools/ci.sh                    : which interface gets the hardware when the drawer describes more than there are slots. Six claims and two guards: five definitions boot and are all listed; a definition that is NOT first in directory order can be brought up; four attach at once and the fifth is refused by name; a slot is never taken for an interface that cannot open its device, nor kept from one that stood down for an add that then failed; a route that cannot be installed does not destroy the interface; the slot frees on RemoveNetInterface without leaking; and a live interface reports its OWN name when an earlier definition's card is missing. A boot that does not finish exits 2 rather than deciding a claim
-tests/tools/run-ifsurvive.sh      : tools/ci.sh                    : remove one interface, then use another one on the SAME device unit. Two interfaces on a2065.device UNIT=0; the one that is removed is DHCP and is added SECOND, so it owns the machine gateway NetX installs at bind. While both are up an ARP/ping exchange and three resolutions through an OFF-LINK server go out; then it is removed and the survivor must still have a wire (on-link ping, link not down, address kept) AND still reach off-link -- the default route is READ BACK, because an on-link ping passes with no gateway at all -- and still resolve a name, with the time that resolution took reported against a stall threshold, a stall being the symptom rather than an outright failure. Then the survivor goes too and nothing may be left holding the unit. The two bugs that shipped through this gap: S2_OFFLINE addressed to the device rather than to the last opener of the unit, and nx_ip_interface_detach clearing the gateway machine-wide. A rig with no route off SLIRP says so and decides the off-link half neither way; a boot that writes no transcript, or stops before "===== done", exits 2 and decides nothing
-tests/tools/run-bringupfail.sh     : tools/ci.sh                    : what a user is told when bring-up fails, per cause. Written against the contract and red when it landed -- three causes carried no code and three commands named a debug log no shipping build writes -- green since both were fixed
-tests/tools/run-checkconfig.sh     : tools/ci.sh                    : a DEVS: that is wrong in seven ways a parser cannot see -- a driver that is not on the machine, a broadcast address, a non-contiguous netmask, an off-network router, two interfaces on one card, a bad hosts line, a bad services line -- plus one correct file that must not be complained about. Written against the contract and red when it landed, 20 of 22; green since the drawer ceiling was lifted (dd4b3cee) and the router and name-server checks stopped being gated on the default ip6type, without an assertion or the fixture changing
-tests/tools/run-cardsweep6.sh      : tools/ci.sh                    : every network card again, and whether IPv6 reaches past the router
-tests/tools/run-ifconfigure6.sh    : tools/ci.sh                    : ConfigureNetInterface on an interface that has only IPv6; bridged, so it is in the bridged stage rather than the emulator tier
-tests/tools/run-netcapture.sh      : tools/ci.sh                    : NetCapture on every card: the frames are ping's, the filter is checked against an unfiltered capture of the same seconds, and tcpdump reads the files
-tests/tools/run-netshutdown.sh     : tools/ci.sh                    : NetShutdown, and what it does to the programs using the network
-tests/tools/run-events.sh          : tools/ci.sh                    : the library's event ring reaching a user: the codes are recorded on the machine and the sentences come out of ShowNetStatus, which nothing off the machine can check
-tests/tools/run-tcphandler.sh      : tools/ci.sh                    : the TCP: handler, driven by Commodore's own Type and Copy
-tests/tcpstall/run-tcpstall.sh     : tools/ci.sh                    : a peer that stops answering; the stall must be readable and a deadline must be served
-tests/ipv6/run-mld.sh              : tools/ci.sh                    : the groups this host listens to, announced or not, read out of a capture on the segment
-tests/ipv6/run-dhcpv6.sh           : tools/ci.sh                    : an IPv6-only machine addressed by a real DHCPv6 server on the peer, stateful and router-led
-tests/common/run-rt.sh             : .github/workflows/emulator.yml : the compiler runtime, both forms, on all five CPU classes
-tests/conformance/run-conformance.sh : .github/workflows/emulator.yml : the bsdsocktest conformance suite
-tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml : the AF_INET6 socket surface, RFC 3542
-tests/sockopt/run-sockopt.sh       : .github/workflows/emulator.yml : the socket-option test; needs no driver and no card, only a ROM
-tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml : the crypto68k assembly against its own reference, on the 68020 and the 68000, which are different code
-tests/crypto68k/run-lto-probe.sh   : manual : UNWIRED. fast full-tls.library-link regression for late LTO libcalls and P-256; no network, card or peer
-tests/clients/run-clients.sh       : .github/workflows/emulator.yml : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
-tests/tls/run-tls13.sh             : .github/workflows/emulator.yml : a TLS 1.3 handshake, on both CPU arms
-tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server
-tests/tools/run-addifup.sh         : .github/workflows/emulator.yml : AddNetInterface comes back
-tests/tools/run-hostname-mac.sh    : .github/workflows/emulator.yml : two unnamed machines take two names
-tests/tools/run-hostname.sh        : .github/workflows/emulator.yml : hostname across its whole surface
-tests/tools/run-ifconfigure.sh     : .github/workflows/emulator.yml : ConfigureNetInterface, static half
-tests/tools/run-ifdhcp.sh          : .github/workflows/emulator.yml : ConfigureNetInterface, DHCP half
-tests/tools/run-ifremove.sh        : .github/workflows/emulator.yml : RemoveNetInterface across its surface
-tests/tools/run-iperf.sh           : .github/workflows/emulator.yml : iperf, byte counts against a peer
+install/test/run-smbmount.sh       : tools/ci.sh@nightly            : an SMB share mounted on a real Workbench, which is what GitHub #3 and #4 are about
+install/test/run-workbench.sh      : tools/ci.sh@nightly            : the release archive on a real Workbench 3.1
+install/test/run-workbench-cards.sh: tools/ci.sh@nightly            : the same install and power cycle on every card in tests/tools/cards.sh, because the gate above booted the A2065 and nothing else
+tests/perf/run-lossgate.sh         : tools/ci.sh@nightly            : throughput on a link that loses packets, gated on tests/perf/lossgate-baseline.txt
+tests/netdev/run-netdelay.sh       : tools/ci.sh@nightly            : the netdev delays at 68020 and 68060, held to timer.device rather than to their own iteration count; the 68060 arm is the accelerator one
+tests/tools/run-arpretry.sh        : tools/ci.sh@nightly            : the guest's first ARP is lost on purpose; the connect must still complete
+tests/tools/run-cardsweep.sh       : tools/ci.sh@nightly            : every network card, one boot each
+tests/tools/run-cpuspeed.sh        : tools/ci.sh@nightly            : the same bring-up at 68030/68040/68060 and at two emulator speed settings, on the PCMCIA claim path and a control board. Nothing here had ever booted a CPU but the A1200's 68EC020
+tests/tools/run-bigmem.sh          : tools/ci.sh@nightly            : the packet-pool arithmetic at 32 MB and 128 MB. It had only ever run at 0 MB and 8 MB
+tests/tools/run-multidef.sh        : tools/ci.sh@nightly            : three, four and eight files in DEVS:NetInterfaces/. Written against the contract and red when it landed -- the cap was 2 and a round of eight listed two -- green since the cap was lifted, without an assertion changing
+tests/tools/run-bootconsole.sh     : tools/ci.sh@nightly            : `httpd <drawer> -C` where S:User-Startup runs it -- a machine with no Workbench, no screen open, no network card and no peer. It must come up, serve a file and /console over loopback, say the screen is missing exactly once rather than exit 10 over it, and report the geometry normally once a screen does exist
+tests/tools/run-ifslots.sh         : tools/ci.sh@nightly            : which interface gets the hardware when the drawer describes more than there are slots. Six claims and two guards: five definitions boot and are all listed; a definition that is NOT first in directory order can be brought up; four attach at once and the fifth is refused by name; a slot is never taken for an interface that cannot open its device, nor kept from one that stood down for an add that then failed; a route that cannot be installed does not destroy the interface; the slot frees on RemoveNetInterface without leaking; and a live interface reports its OWN name when an earlier definition's card is missing. A boot that does not finish exits 2 rather than deciding a claim
+tests/tools/run-ifsurvive.sh      : tools/ci.sh@nightly            : remove one interface, then use another one on the SAME device unit. Two interfaces on a2065.device UNIT=0; the one that is removed is DHCP and is added SECOND, so it owns the machine gateway NetX installs at bind. While both are up an ARP/ping exchange and three resolutions through an OFF-LINK server go out; then it is removed and the survivor must still have a wire (on-link ping, link not down, address kept) AND still reach off-link -- the default route is READ BACK, because an on-link ping passes with no gateway at all -- and still resolve a name, with the time that resolution took reported against a stall threshold, a stall being the symptom rather than an outright failure. Then the survivor goes too and nothing may be left holding the unit. The two bugs that shipped through this gap: S2_OFFLINE addressed to the device rather than to the last opener of the unit, and nx_ip_interface_detach clearing the gateway machine-wide. A rig with no route off SLIRP says so and decides the off-link half neither way; a boot that writes no transcript, or stops before "===== done", exits 2 and decides nothing
+tests/tools/run-bringupfail.sh     : tools/ci.sh@nightly            : what a user is told when bring-up fails, per cause. Written against the contract and red when it landed -- three causes carried no code and three commands named a debug log no shipping build writes -- green since both were fixed
+tests/tools/run-checkconfig.sh     : tools/ci.sh@nightly            : a DEVS: that is wrong in seven ways a parser cannot see -- a driver that is not on the machine, a broadcast address, a non-contiguous netmask, an off-network router, two interfaces on one card, a bad hosts line, a bad services line -- plus one correct file that must not be complained about. Written against the contract and red when it landed, 20 of 22; green since the drawer ceiling was lifted (dd4b3cee) and the router and name-server checks stopped being gated on the default ip6type, without an assertion or the fixture changing
+tests/tools/run-cardsweep6.sh      : tools/ci.sh@nightly            : every network card again, and whether IPv6 reaches past the router
+tests/tools/run-ifconfigure6.sh    : tools/ci.sh@nightly            : ConfigureNetInterface on an interface that has only IPv6; bridged, so it is in the bridged stage rather than the emulator tier
+tests/tools/run-netcapture.sh      : tools/ci.sh@nightly            : NetCapture on every card: the frames are ping's, the filter is checked against an unfiltered capture of the same seconds, and tcpdump reads the files
+tests/tools/run-netshutdown.sh     : tools/ci.sh@nightly            : NetShutdown, and what it does to the programs using the network
+tests/tools/run-events.sh          : tools/ci.sh@nightly            : the library's event ring reaching a user: the codes are recorded on the machine and the sentences come out of ShowNetStatus, which nothing off the machine can check
+tests/tools/run-tcphandler.sh      : tools/ci.sh@nightly            : the TCP: handler, driven by Commodore's own Type and Copy
+tests/tcpstall/run-tcpstall.sh     : tools/ci.sh@nightly            : a peer that stops answering; the stall must be readable and a deadline must be served
+tests/ipv6/run-mld.sh              : tools/ci.sh@nightly            : the groups this host listens to, announced or not, read out of a capture on the segment
+tests/ipv6/run-dhcpv6.sh           : tools/ci.sh@nightly            : an IPv6-only machine addressed by a real DHCPv6 server on the peer, stateful and router-led
+tests/common/run-rt.sh             : .github/workflows/emulator.yml@nightly : the compiler runtime, both forms, on all five CPU classes
+tests/conformance/run-conformance.sh : .github/workflows/emulator.yml@nightly : the bsdsocktest conformance suite
+tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml@nightly : the AF_INET6 socket surface, RFC 3542
+tests/sockopt/run-sockopt.sh       : .github/workflows/emulator.yml@nightly : the socket-option test; needs no driver and no card, only a ROM
+tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml@nightly : the crypto68k assembly against its own reference, on the 68020 and the 68000, which are different code
+tests/clients/run-clients.sh       : .github/workflows/emulator.yml@nightly : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
+tests/tls/run-tls13.sh             : .github/workflows/emulator.yml@nightly : a TLS 1.3 handshake, on both CPU arms
+tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml@nightly : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server
+tests/tools/run-addifup.sh         : .github/workflows/emulator.yml@nightly : AddNetInterface comes back
+tests/tools/run-hostname-mac.sh    : .github/workflows/emulator.yml@nightly : two unnamed machines take two names
+tests/tools/run-hostname.sh        : .github/workflows/emulator.yml@nightly : hostname across its whole surface
+tests/tools/run-ifconfigure.sh     : .github/workflows/emulator.yml@nightly : ConfigureNetInterface, static half
+tests/tools/run-ifdhcp.sh          : .github/workflows/emulator.yml@nightly : ConfigureNetInterface, DHCP half
+tests/tools/run-ifremove.sh        : .github/workflows/emulator.yml@nightly : RemoveNetInterface across its surface
+tests/tools/run-iperf.sh           : .github/workflows/emulator.yml@nightly : iperf, byte counts against a peer
 tests/tools/run-payverify.sh       : manual : payload CONTENT against a peer -- both ends hash a position-dependent pattern, so a placement bug the fused receive sum would certify fails the join. Manual for the same reasons as the guest-as-server iperf arms: peer + bridged, it needs a third machine the guest can call. The tier is run on the playhouse rig
-tests/tools/run-mdnsctl.sh         : .github/workflows/emulator.yml : the responder switched on and off
-tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml : NetSetup writes a usable configuration
-tests/tools/run-onoff.sh           : .github/workflows/emulator.yml : Online and Offline
-tests/tools/run-quiet.sh           : .github/workflows/emulator.yml : what QUIET means, everywhere
-tests/tools/run-shownetservices.sh : .github/workflows/emulator.yml : ShowNetServices and its window
+tests/tools/run-mdnsctl.sh         : .github/workflows/emulator.yml@nightly : the responder switched on and off
+tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml@nightly : NetSetup writes a usable configuration
+tests/tools/run-onoff.sh           : .github/workflows/emulator.yml@nightly : Online and Offline
+tests/tools/run-quiet.sh           : .github/workflows/emulator.yml@nightly : what QUIET means, everywhere
+tests/tools/run-shownetservices.sh : .github/workflows/emulator.yml@nightly : ShowNetServices and its window
 install/test/run-all.sh            : manual : every installer scenario on a real Workbench 3.1, about fifteen minutes. Repaired onto run-workbench.sh; it reports key=value counts and exits 77 when nothing reached a verdict, so a box with no licensed Workbench cannot read as a full sweep. Manual because it needs that Workbench, the ADFs and a peer. STATIC is run-workbench.sh -S, which answers the DHCP question by the LABEL of its second button rather than by a page index
-tests/tools/run-wirequiet.sh       : tools/ci.sh                    : what the machine puts on the wire when nobody asked it to: every card, a settle, then a window of idle counted off this host's NIC with tcpdump. Nothing else here asserts on what the guest EMITS, which is how a DHCPv6 client rebinding twenty-five times a second passed every stage
-tests/tls/run-reachability.sh      : tools/ci.sh                    : does the machine still answer ARP and a connect while it is doing a TLS handshake, probed from a peer once a second; the gate is the longest stretch of silence, which is the shape the 44 s dropout had
-tests/compare/run-compare.sh       : tools/emurun.sh                : the same workload on another stack
-tests/udpdrill/run-udpdrill.sh     : tools/ci.sh                    : the UDP receive path, the bind-address filter, and the largest datagram a route takes. 108 checks against a floor of 108, on a tap device it makes in its own address space: no card, no backend, no peer
-tests/leak/run-leak.sh             : tools/ci.sh                    : the refused-connect leak, seven arms of thirty-two socket lifecycles
-tests/concurrent/run-concurrent.sh : tools/ci.sh                    : eight applications, each with its own library open
-tests/stack/run-stack.sh           : tools/ci.sh                    : the API called from the stack a Shell command has, which on a machine with no MMU is a silent overwrite of whatever is below it
-tests/libraries/run-libraries.sh   : tools/ci.sh                    : the shared-library load: open, close, expunge, reopen
-tests/tools/run-toolsay.sh         : tools/ci.sh                    : the branches where a shipped command reached a return and printed no sentence at all: arp's two absence explanations, its truncated list, and NetTrace's connect failure
-tests/netstack/run-amiberry.sh     : tools/ci.sh                    : netstack bring-up, Amiberry
-tests/tools/run-arexx.sh           : tools/ci.sh                    : the AmiTCP ARexx host, driven by Commodore's own RexxMast, RX and WaitForPort. AMITCP is a port 31 of the 2,149 comm/ archives surveyed send commands to, and only the real interpreter can say whether RexxSysLib is satisfied by it, so the arm skips by name on a machine without AMINETXDUO_AMIGA_REXX (or ~/amiga-rexx) rather than substituting anything of ours
+tests/tools/run-wirequiet.sh       : tools/ci.sh@nightly            : what the machine puts on the wire when nobody asked it to: every card, a settle, then a window of idle counted off this host's NIC with tcpdump. Nothing else here asserts on what the guest EMITS, which is how a DHCPv6 client rebinding twenty-five times a second passed every stage
+tests/tls/run-reachability.sh      : tools/ci.sh@nightly            : does the machine still answer ARP and a connect while it is doing a TLS handshake, probed from a peer once a second; the gate is the longest stretch of silence, which is the shape the 44 s dropout had
+tests/compare/run-compare.sh       : tools/emurun.sh@hand           : the same workload on another stack
+tests/udpdrill/run-udpdrill.sh     : tools/ci.sh@nightly            : the UDP receive path, the bind-address filter, and the largest datagram a route takes. 108 checks against a floor of 108, on a tap device it makes in its own address space: no card, no backend, no peer
+tests/leak/run-leak.sh             : tools/ci.sh@nightly            : the refused-connect leak, seven arms of thirty-two socket lifecycles
+tests/concurrent/run-concurrent.sh : tools/ci.sh@nightly            : eight applications, each with its own library open
+tests/stack/run-stack.sh           : tools/ci.sh@nightly            : the API called from the stack a Shell command has, which on a machine with no MMU is a silent overwrite of whatever is below it
+tests/libraries/run-libraries.sh   : tools/ci.sh@nightly            : the shared-library load: open, close, expunge, reopen
+tests/tools/run-toolsay.sh         : tools/ci.sh@nightly            : the branches where a shipped command reached a return and printed no sentence at all: arp's two absence explanations, its truncated list, and NetTrace's connect failure
+tests/netstack/run-amiberry.sh     : tools/ci.sh@nightly            : netstack bring-up, Amiberry
+tests/tools/run-arexx.sh           : tools/ci.sh@nightly            : the AmiTCP ARexx host, driven by Commodore's own RexxMast, RX and WaitForPort. AMITCP is a port 31 of the 2,149 comm/ archives surveyed send commands to, and only the real interpreter can say whether RexxSysLib is satisfied by it, so the arm skips by name on a machine without AMINETXDUO_AMIGA_REXX (or ~/amiga-rexx) rather than substituting anything of ours
+tests/crypto68k/run-lto-probe.sh   : tools/ci.sh@nightly            : the full-tls.library-link regression for late LTO libcalls and P-256. The one harness that needs its own configure -- AMINETXDUO_CRYPTO68K_LTO_PROBE=ON is in no CROSS_CONFIGS arm, so it refused every build directory it was ever handed. tools/ci.sh ltoprobe does the configure, builds tls_library and the probe, and runs it: a ROM and nothing else, about fifteen seconds in the guest
+tests/tools/run-ifquery.sh         : tools/ci.sh@nightly            : the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the counters, and the address-allocation message against the DHCP server on the wire. In the bridged stage because that is the only place there is a real server to lease from
+tests/tools/run-dnscache.sh        : manual : BLOCKED on a capture nothing writes. The regression test for the DNS answer cache. Its strongest assertion group -- each name asked for ONCE on the wire in three lookups -- reads $HD/host.pcap, which fs-uae used to dump for its SLIRP link and which tools/amiberry-run.sh does not write at all, so the branch is never taken and the harness reaches its own exit 77 every time however healthy the stack is. Run bridged on 2026-08-27 the guest half is green once the answer count stops counting AAAA lines (fixed here): three A answers per name, one value each. A host-side tcpdump on -B's interface, the way tests/tools/run-wirequiet.sh has one, is what would make it a gate
+tests/tools/run-resolvebreak.sh    : manual : RED bridged, on its own premise. How long a name lookup blocks on a blackholed server, and whether Ctrl-C gets the task back. The fs-uae/SLIRP branch it carried is gone and it is bridged now (-B, ens18 by default), and run that way on 2026-08-27 the lookup does not block: arm 1 came back after 1.02 s with errno 22 and no answer, so arm 3 reports "the lookup ended before the break was sent" and there is nothing for Ctrl-C to interrupt. Arm 3 also prints 85899340.92 s from -250 ticks, which is a wrapped subtraction in the probe. Both are findings and neither is rig state, so it stays out of the gate until they are answered
+tests/tools/run-oommsg.sh          : tools/ci.sh@nightly            : out of memory, and which message blames what: a 512 KB A2000 on a 68000, the only arm anywhere that boots Kickstart 2.04. What it asserts is the WORDING, so it needs no link and no peer, only that second ROM -- skipped by name where AMINETXDUO_KICKSTART_A2000 is unset, because a 3.1 image does not boot an A2000
 
 # ------------------------------------------------- nothing invokes these --
 #
@@ -157,16 +196,12 @@ tests/tools/run-arexx.sh           : tools/ci.sh                    : the AmiTCP
 # run is an unknown.
 
 tests/atf/run-atf.sh                : manual : AtfTcpSocket PRODUCES NOTHING. It has the serial log every other harness has (aa658929) and prints not one byte on it -- not the first statement of atfc_run(), not a pre-main constructor -- so there is no DH0:.done and the run ends at the timeout. NOT the guest stack: unchanged under `stack 200000`. NOT the missing mathieeedoubbas.library: staged, and the behaviour is unchanged. A pre-push tree took `Exception 3 ... at ffffffff` at 12.8 s; the landed binary takes no exception at all and hangs silently, and the only difference is one dropped serial call, i.e. code layout. A fault that moves with layout is memory corruption, not a fixed bad jump, so where it dies is not yet established. Do not wire it until it runs
-tests/tools/run-livetools.sh       : manual : UNWIRED. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead)
-tests/tools/run-dnscache.sh        : manual : UNWIRED. the regression test for the DNS answer cache
-tests/tools/run-dnssearch.sh       : manual : UNWIRED. the regression test for short names and the search list
+tests/tools/run-livetools.sh       : manual : SLIRP. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead). The guest's command list is written before the boot and embeds SLIRP's gateway in five commands -- `ping 10.0.2.2`, and the three AddNetRoute/DeleteNetRoute lines that add, clear and restore the default route -- and two assertions compare against the literals 10.0.2.15 and 10.0.2.2. To run bridged it needs the segment's gateway discovered on the host (`ip route show default dev <iface>`) and substituted into both, and the leased-address assertion read out of the transcript rather than compared to a constant
+tests/tools/run-dnssearch.sh       : manual : SLIRP. the regression test for short names and the search list. All three phases write `nameserver 10.0.2.3` into DEVS:Internet/name_resolution, which is SLIRP's forwarder; the search-list assertions themselves are resolver-agnostic. To run bridged it needs the segment's resolver discovered on the host and written there instead, and that resolver has to give NXDOMAIN for `.test` and for the stem of the long name, which is what the phases turn on
 tests/tools/run-routes.sh          : manual : bridged. the regression test for the IPv4 routing table; AddNetRoute and DeleteNetRoute have no other home. The ARP-on-the-wire half needs an unprivileged tcpdump on -B's interface
-tests/tools/run-ifquery.sh         : manual : UNWIRED. the Roadshow interface and statistics APIs
 tests/tools/run-ifreadd.sh         : manual : bridged. AddInterfaceTagList() gives back an interface that works
 tests/tools/run-cycledrill.sh      : manual : open/expunge/reopen and Online/Offline lifetime drill; the unresolved shutdown report requires a physical 3c589
 tests/tools/run-srcsel.sh          : manual : bridged. outbound source selection
-tests/tools/run-oommsg.sh          : manual : UNWIRED. out of memory, and which message blames what
-tests/tools/run-resolvebreak.sh    : manual : UNWIRED. how long a name lookup blocks, and whether Ctrl-C gets it back
 tests/tools/run-mcastrace.sh       : manual : bridged. two openers racing for one row of the multicast table
 tests/tools/run-evpost.sh          : manual : bridged. a socket event signalled at a Task that has exited
 tests/tools/run-apidrill.sh        : manual : bridged. the whole-vector-surface leak drill. RED: shutdown leaks 2 bytes and one task per call, on every board
@@ -179,9 +214,9 @@ tests/ipv6/run-link.sh             : manual : bridged. the IPv6 link test; the r
 tests/ipv6/run-tools-amiberry.sh   : manual : bridged. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all. Both routers are read off -B's interface, and a segment with no IPv6 router stops the run before it boots. RED: three commands lost the lines that explain their refusals
 tests/ipv6/run-bringup.sh          : manual : bridged. Measures the `netstack: mark <event> <ms> ms` lines FROM THE BUILD THAT SHIPS; the marks are at AMI_LOG_INFO and the guest is asked for that tier with a staged ENV:ANXDLOGLEVEL, not with a build option. `serial_log_require_build` refuses before boot when the library carries no sentences at all, and every empty or markless repetition is an incomplete failure rather than a zero-time pass
 tests/tls/run-api.sh               : manual : bridged. a real HTTPS URL through tls.library
-tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
+tests/tls/run-fetch.sh             : manual : bridged, asset. the fetch command against real URLs. It is bridged now -- it took -B and passed it, having previously fallen through to SLIRP with a header still claiming fs-uae -- but four of its nine commands are third-party endpoints (example.com, and three badssl.com hosts chosen for their certificates), so a red here can be somebody else's outage. Same reason tests/tls/run-api.sh and run-https.sh are not gates
 tests/tls/run-https.sh             : manual : bridged. the real-HTTPS handshake
-tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the machine down. IT ASSERTS NOTHING TODAY: it forwards tests/tls/run-fetch.sh's custom-command status, which is now a SKIP rather than a pass, so the four cases its header documents are visibly unchecked instead of invisibly so
+tests/tls/run-hangup.sh            : manual : SLIRP, peer. can a rude peer take the machine down. It DOES assert -- tests/tls/hangup-verdict.sh grades the transcript and it tolerates run-fetch.sh's rc 77 -- so the older note here saying it checks nothing was stale. What blocks it is HOST=10.0.2.2 (run-hangup.sh:26): the four rude servers are started on the emulator host's loopback and reached through SLIRP's host alias. Bridged, a guest cannot reach the machine running it -- a frame sent there never comes back to that NIC's pcap -- so hangup-server.py has to move to AMINETXDUO_PEER and the URLs to that address
 
 # Reasons other than "no home".
 

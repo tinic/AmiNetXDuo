@@ -10,13 +10,20 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+# BRIDGED.  The two names are resolved by whatever the DHCP server on the
+# segment hands out, and nothing below knows or cares which server that is.
+# It used to take the backend it inherited, which with nothing set is SLIRP,
+# and a cache result taken there is the emulator's own resolver rather than
+# ours.
+IFACE="${AMINETXDUO_DNSCACHE_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B iface]" >&2; exit 2 ;;
     esac
 done
 
@@ -67,9 +74,9 @@ done
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dnscache}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
+echo "==> booting $MODEL, a2065 bridged on $IFACE"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/host"
 RUN_RC=$?
@@ -97,16 +104,22 @@ else
     fail "the command list ran $STARTS times, the machine reset"
 fi
 
+# `has address `, NOT `^$name `.  On a dual-stack segment `host` prints an
+# IPv6 line as well, so three lookups produced five or six lines and two
+# distinct ones, and this read that as "five answers, two of them different".
+# Measured bridged on 2026-08-27: example.com 3 A lines, one value, plus 2
+# AAAA lines -- the FIRST lookup of a name carries no AAAA.  The cache
+# question is about the A answer, and the AAAA lines are a separate one.
 for name in "$NAME_A" "$NAME_B"; do
-    ANSWERS=$(grep -c "^$name " "$REPORT" || true)
-    UNIQUE=$(grep "^$name " "$REPORT" | sort -u | wc -l | tr -d ' ')
+    ANSWERS=$(grep -c "^$name has address " "$REPORT" || true)
+    UNIQUE=$(grep "^$name has address " "$REPORT" | sort -u | wc -l | tr -d ' ')
 
     if [ "$ANSWERS" -eq 3 ]; then
         pass "$name resolved on all three lookups"
     else
         fail "$name produced $ANSWERS answers, expected 3"
-        echo "       (SLIRP forwards to the host's resolver, can this host" >&2
-        echo "        resolve $name?)" >&2
+        echo "       (the resolver is the one the segment's DHCP server" >&2
+        echo "        handed out; can it resolve $name?)" >&2
     fi
 
     if [ "$UNIQUE" -eq 1 ] && [ "$ANSWERS" -gt 0 ]; then
@@ -116,6 +129,14 @@ for name in "$NAME_A" "$NAME_B"; do
     fi
 done
 
+# THE WIRE HALF IS DEAD CODE TODAY and the exit 77 below is why this harness
+# is not a gate: NOTHING WRITES $HD/host.pcap.  It came from fs-uae, which
+# could dump its SLIRP link to a pcap, and fs-uae left the tree on 2026-08-04;
+# tools/amiberry-run.sh writes no capture at all.  So this branch is never
+# taken, the strongest assertion group never runs, and the harness reaches
+# exit 77 every time however healthy the stack is.  Giving it a host-side
+# tcpdump on -B's interface, the way tests/tools/run-wirequiet.sh has one, is
+# what would make it a gate.
 if [ -s "$HD/host.pcap" ]; then
     tcpdump -r "$HD/host.pcap" -n "udp dst port 53" 2>/dev/null > "$HD/dns.txt" || true
 
