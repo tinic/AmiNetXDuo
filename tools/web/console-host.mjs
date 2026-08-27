@@ -19,6 +19,10 @@
  *     selftest decodes with the browser's own module and writes the result
  *     out as a file somebody can look at.
  *
+ *   - an APNG reader, which is the same argument about the export: the page
+ *     writes one so that other software can open a recording, and the only
+ *     way to know it did is to open it with something that is not the writer.
+ *
  * No dependencies.  zlib and a 40-line CRC are the whole of what a PNG needs
  * and the tree vendors its dependencies deliberately.
  *
@@ -630,6 +634,154 @@ export function readPng(buf) {
   }
 
   return { width: w, height: h, rgba: out };
+}
+
+/*
+ * APNG in, every frame composited, out.
+ *
+ * A reference reader, and it shares no line with the encoder it checks:
+ * client/console/apng.ts writes rectangles, chooses a filter per row and
+ * folds a repeated frame into its predecessor's delay, and every one of those
+ * is a way to produce a file that is structurally a PNG and shows the wrong
+ * picture.  This walks the chunks the way the specification says a decoder
+ * does -- CRC every one, follow the sequence numbers, paint each frame into
+ * its own rectangle over what was already there -- so a comparison against
+ * the frames that went in is a comparison against the format and not against
+ * my own idea of it.
+ *
+ * Only what the encoder emits is accepted: 8-bit truecolour, dispose NONE,
+ * blend SOURCE.  A file with anything else in it is a file this was not
+ * written to read, and saying so is more use than drawing it wrong.
+ */
+export function readApng(buf) {
+  if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) {
+    throw new Error("not a PNG");
+  }
+
+  let at = 8;
+  let width = 0, height = 0;
+  let declared = -1, plays = -1;
+  const seqs = [];
+  const kinds = [];
+  const frames = [];
+  let cur = null;
+  let ended = false;
+
+  while (at + 8 <= buf.length) {
+    const len = buf.readUInt32BE(at);
+    const kind = buf.toString("latin1", at + 4, at + 8);
+    if (at + 12 + len > buf.length) {
+      throw new Error("chunk " + kind + " runs off the end");
+    }
+    const body = buf.subarray(at + 8, at + 8 + len);
+    const want = buf.readUInt32BE(at + 8 + len);
+    const got = crc32(buf.subarray(at + 4, at + 8 + len));
+    if (want !== got) throw new Error("chunk " + kind + " has a bad CRC");
+    at += 12 + len;
+    kinds.push(kind);
+
+    if (kind === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      if (body[8] !== 8 || body[9] !== 2) {
+        throw new Error("APNG is " + body[8] + "-bit type " + body[9] +
+                        ", this reads 8-bit truecolour only");
+      }
+      if (body[12] !== 0) throw new Error("an interlaced APNG");
+    } else if (kind === "acTL") {
+      declared = body.readUInt32BE(0);
+      plays = body.readUInt32BE(4);
+    } else if (kind === "fcTL") {
+      seqs.push(body.readUInt32BE(0));
+      cur = {
+        w: body.readUInt32BE(4), h: body.readUInt32BE(8),
+        x: body.readUInt32BE(12), y: body.readUInt32BE(16),
+        delayMs: body.readUInt16BE(20) * 1000 / body.readUInt16BE(22),
+        dispose: body[24], blend: body[25],
+        parts: [],
+      };
+      if (cur.dispose !== 0 || cur.blend !== 0) {
+        throw new Error("frame " + frames.length + " disposes " + cur.dispose +
+                        " blends " + cur.blend);
+      }
+      if (cur.x + cur.w > width || cur.y + cur.h > height) {
+        throw new Error("frame " + frames.length + " is outside the canvas");
+      }
+      frames.push(cur);
+    } else if (kind === "IDAT" || kind === "fdAT") {
+      if (cur === null) throw new Error("an " + kind + " before any fcTL");
+      if (kind === "fdAT") {
+        seqs.push(body.readUInt32BE(0));
+        cur.parts.push(body.subarray(4));
+      } else {
+        cur.parts.push(body);
+      }
+    } else if (kind === "IEND") {
+      ended = true;
+      break;
+    }
+  }
+
+  if (!ended) throw new Error("no IEND");
+  if (frames.length === 0) throw new Error("no frames");
+  for (let i = 0; i < seqs.length; i++) {
+    if (seqs[i] !== i) {
+      throw new Error("sequence number " + seqs[i] + " where " + i +
+                      " was due");
+    }
+  }
+
+  /* Composited into one canvas that persists across frames, which is what
+     dispose NONE means and what makes a rectangle a frame at all. */
+  const canvas = Buffer.alloc(width * height * 4, 0xff);
+  const out = [];
+
+  for (const f of frames) {
+    const rows = unfilter(inflateSync(Buffer.concat(f.parts)), f.w, f.h, 3);
+    for (let y = 0; y < f.h; y++) {
+      for (let x = 0; x < f.w; x++) {
+        const s = y * f.w * 3 + x * 3;
+        const d = ((f.y + y) * width + f.x + x) * 4;
+        canvas[d] = rows[s];
+        canvas[d + 1] = rows[s + 1];
+        canvas[d + 2] = rows[s + 2];
+        canvas[d + 3] = 255;
+      }
+    }
+    out.push({ x: f.x, y: f.y, w: f.w, h: f.h, delayMs: f.delayMs,
+               rgba: Buffer.from(canvas) });
+  }
+
+  return { width, height, declared, plays, kinds, frames: out };
+}
+
+/* PNG's five row filters undone, in place, for a bpp-byte pixel. */
+function unfilter(raw, w, h, bpp) {
+  const stride = w * bpp;
+  if (raw.length !== h * (stride + 1)) {
+    throw new Error("a frame inflated to " + raw.length + " bytes, " + w + "x" +
+                    h + " needs " + h * (stride + 1));
+  }
+
+  const out = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = out.subarray(y * stride, (y + 1) * stride);
+    raw.copy(line, 0, y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    const prev = y === 0 ? null : out.subarray((y - 1) * stride, y * stride);
+
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0;
+      const b = prev === null ? 0 : prev[i];
+      const c = prev === null || i < bpp ? 0 : prev[i - bpp];
+      if (filter === 1) line[i] = (line[i] + a) & 0xff;
+      else if (filter === 2) line[i] = (line[i] + b) & 0xff;
+      else if (filter === 3) line[i] = (line[i] + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) line[i] = (line[i] + paeth(a, b, c)) & 0xff;
+      else if (filter !== 0) throw new Error("PNG filter " + filter);
+    }
+  }
+  return out;
 }
 
 function paeth(a, b, c) {

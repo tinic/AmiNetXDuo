@@ -1012,6 +1012,30 @@ stage_web() {
         return 1
     fi
 
+    #
+    # THE MODULES, RUN.  Everything above is "the page matches its sources"
+    # and "the types line up", and neither is a statement about pixels: a
+    # planar unpack with the plane order reversed typechecks, builds, and
+    # draws a picture.  console-selftest.mjs imports the page's own modules
+    # outside a browser and checks the decode against a reference built the
+    # other way round, the .pfs round trip, and the APNG export against a
+    # reader that shares no line with the encoder.
+    #
+    # It was in the tree and in no stage, so none of it had ever gone red in
+    # CI.  It is 1.5 s and it needs the bundler this stage has already made
+    # sure of.
+    #
+    if node tools/web/console-selftest.mjs \
+            > "$BUILD/web-console-selftest.log" 2>&1; then
+        note "console selftest: $(grep -c '^ok    ' \
+              "$BUILD/web-console-selftest.log" || true) checks passed"
+    else
+        cat "$BUILD/web-console-selftest.log"
+        fail "web (console selftest: the viewer's modules do not agree with\
+ their references)"
+        return 1
+    fi
+
     # And every vendored drawer is meant to be upstream's, byte for byte.
     # Each carries its own PROVENANCE: a comment block and then a plain
     # sha256sum list, which is why the comments are stripped and the rest is
