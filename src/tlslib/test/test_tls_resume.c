@@ -157,6 +157,13 @@ VOID Close(BPTR fh)
         fclose((FILE *)fh);
 }
 
+/* tls_runtime.c comes along for tls_alloc() and the string helpers; nothing
+   this test drives waits. */
+VOID Delay(LONG ticks)
+{
+    (VOID)ticks;
+}
+
 LONG Read(BPTR fh, APTR buffer, LONG length)
 {
     return (LONG)fread(buffer, 1, (size_t)length, (FILE *)fh);

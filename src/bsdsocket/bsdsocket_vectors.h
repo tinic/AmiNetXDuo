@@ -34,10 +34,6 @@
  */
 #include "aminetxduo/ifindex.h"
 
-/* Used by the private vector below. */
-#ifdef AMINETXDUO_TLS_CONTEXT
-#include "aminetxduo/nxcontext.h"
-#endif
 
 /* Shared stubs for unimplemented slots: set errno to ENOSYS and return the
  * failure value for their return type.  Never leave a NULL in the table, a
@@ -551,15 +547,6 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                      register ULONG servlen __asm("d2"),
                      register ULONG flags __asm("d3"),
                      register struct AmiSocketBase *SocketBase __asm("a6"));
-
-/* LVO -0x360, PRIVATE: hands tls.library the NetX Duo singleton, nxcontext.h */
-#ifdef AMINETXDUO_TLS_CONTEXT
-LONG bsd_ObtainNetXDuoContext(
-        register ULONG                    magic       __asm("d0"),
-        register ULONG                    version     __asm("d1"),
-        register const AmiNetXDuoContext **ctx        __asm("a0"),
-        register struct AmiSocketBase    *SocketBase  __asm("a6"));
-#endif
 
 /* LVO -0x366, PRIVATE: a snapshot of the running stack, netstatus.h */
 LONG bsd_NetStackQuery(

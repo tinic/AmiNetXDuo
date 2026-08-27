@@ -249,10 +249,9 @@ mkdir -p "$TREE/C" "$TREE/Libs" "$TREE/Devs/Internet" "$TREE/Devs/Networks" \
          "$TREE/Docs" "$TREE/Examples" "$TREE/Terminal"
 
 # The full build at the top of Libs: and Devs/Networks:, minimal one drawer
-# down.  tls.library ships with the bsdsocket.library FROM THE SAME BUILD --
-# the two share struct layouts and a private context ABI
-# (include/aminetxduo/nxcontext.h) -- which one directory per build keeps
-# impossible to get wrong.
+# down.  One drawer per build, which is what keeps a drawer internally
+# consistent; tls.library no longer needs the bsdsocket.library beside it and
+# runs on Roadshow, AmiTCP and Miami as well.
 #
 # THE 68000 GETS ENCRYPTION NOW.  There used to be no 68000 tls.library at all:
 # §9's M9 gate measured the handshake on the 68020 floor and rejected it below.

@@ -274,7 +274,6 @@ ULONG tls_store_count(const TLSStore *store)
 
 static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG size)
 {
-    const AmiNetXDuoContext *ctx;
     ULONG lo, hi, mid;
     ULONG offset = 0;
     ULONG length = 0;
@@ -310,21 +309,13 @@ static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG si
         return 0;
 
     /*
-     * The one disk access inside the handshake, so inside the ThreadX bracket
-     * with the baton held.  dos.library blocks in Exec, so the baton is
-     * returned across it; both calls are no-ops for a caller without it.
+     * The one disk access inside the handshake.  It used to need the ThreadX
+     * baton returned around it; tls.library holds no baton now, so a blocking
+     * dos.library call here stalls this task and nothing else.
      */
-    ctx = tls_netx_ctx();
-    if (ctx != NULL)
-        ctx->nxc_BatonRelease();
-
     fh = Open((STRPTR)store->ts_Path, MODE_OLDFILE);
     if (fh == (BPTR)0)
-    {
-        if (ctx != NULL)
-            ctx->nxc_BatonAcquire();
         return 0;
-    }
 
     if (Seek(fh, (LONG)offset, OFFSET_BEGINNING) < 0 ||
         Read(fh, buffer, (LONG)length) != (LONG)length)
@@ -333,9 +324,6 @@ static ULONG tls_store_fetch(TLSStore *store, ULONG key, UCHAR *buffer, ULONG si
     }
 
     Close(fh);
-
-    if (ctx != NULL)
-        ctx->nxc_BatonAcquire();
 
     return length;
 }

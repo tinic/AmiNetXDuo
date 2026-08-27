@@ -57,14 +57,6 @@ if(AMINETXDUO_TCPDEVICE)
     list(APPEND BSDSOCKET_SOURCES tcp_handler.c)
 endif()
 
-# nxcontext.c is the ONE private LVO tls.library needs (see
-# include/aminetxduo/nxcontext.h). It exists only in an AMINETXDUO_TLS build,
-# both as an object and as a vector-table slot, so that a default build of
-# bsdsocket.library is byte-identical to a build of a tree without any of this.
-if(AMINETXDUO_TLS)
-    list(APPEND BSDSOCKET_SOURCES nxcontext.c)
-endif()
-
 # mcast.c is the RFC 1112 membership surface. It is the only thing that calls
 # NetX Duo's IGMP services, so leaving it out is what keeps the nx_igmp_*
 # objects out of the link, see the floor tier in dist/make-dist.sh.
@@ -87,10 +79,6 @@ endif()
 
 # A shared library has no startup code and must not drag in newlib's stdio.
 target_compile_options(aminetxduo_bsdsocket PRIVATE -Wall -Wextra)
-
-if(AMINETXDUO_TLS)
-    target_compile_definitions(aminetxduo_bsdsocket PUBLIC AMINETXDUO_TLS_CONTEXT=1)
-endif()
 
 # ---------------------------------------------------------------- generator --
 #
@@ -141,11 +129,6 @@ if(AMINETXDUO_BSDSOCKET_LINK)
 
     if(AMINETXDUO_BPF)
         target_link_libraries(bsdsocket_library PRIVATE aminetxduo_bpf)
-    endif()
-
-    if(AMINETXDUO_TLS)
-        target_compile_definitions(bsdsocket_library PRIVATE
-                                   AMINETXDUO_TLS_CONTEXT=1)
     endif()
 
     # -nostartfiles, not -nostdlib: there is no crt0 in a shared library, but

@@ -108,38 +108,37 @@ static ULONG tls_tag_data(const struct TagItem *tags, Tag want, ULONG def)
 
 /* ------------------------------------------------------------ brackets --- */
 
+/*
+ * nx_secure keeps one process-wide list of live sessions and guards it with
+ * _nx_secure_tls_protection, which it creates on the first session_create()
+ * and takes inside every call that touches the list.  tls.library needs the
+ * same lock one level up, for the pairs it performs that nx_secure performs
+ * singly: session_end() followed by session_delete() has to be one step, or a
+ * second task can delete between them.
+ *
+ * It is the SAME mutex and not a second one, so the two orderings cannot
+ * disagree; the shim in tls_netx.c puts it on an Exec signal semaphore, which
+ * is recursive for the owning task, so nx_secure's own nesting still works.
+ *
+ * NEVER held across the handshake or a record read.  nx_secure drops it around
+ * every blocking transport call by design, and an outer holder here would undo
+ * that and serialise every TLS connection in the machine behind one.
+ */
 static LONG tls_conn_enter(TLSConnection *conn)
 {
-    const AmiNetXDuoContext *ctx = tls_netx_ctx();
-
-    if (conn == NULL || ctx == NULL)
+    if (conn == NULL)
         return -1;
 
-    if (conn->tc_Nest > 0)
-    {
-        conn->tc_Nest++;
-        return 0;
-    }
-
-    if (ctx->nxc_Enter(&conn->tc_Caller) != AMI_NET_OK)
-        return -1;
-
-    conn->tc_Nest = 1;
-
-    return 0;
+    return (_tx_mutex_get(&_nx_secure_tls_protection, TX_WAIT_FOREVER) ==
+            TX_SUCCESS) ? 0 : -1;
 }
 
 static VOID tls_conn_leave(TLSConnection *conn)
 {
-    const AmiNetXDuoContext *ctx = tls_netx_ctx();
-
-    if (conn == NULL || ctx == NULL || conn->tc_Nest <= 0)
+    if (conn == NULL)
         return;
 
-    if (--conn->tc_Nest > 0)
-        return;
-
-    ctx->nxc_Leave(&conn->tc_Caller);
+    (VOID)_tx_mutex_put(&_nx_secure_tls_protection);
 }
 
 /* -------------------------------------------------------------- errors --- */
@@ -277,6 +276,12 @@ static VOID tls_conn_free(TLSConnection *conn)
         tls_bzero(conn->tc_Metadata, conn->tc_MetadataSize);
     tls_free(conn->tc_Metadata);
 
+    tls_packet_pool_delete(&conn->tc_Pool);
+    if (conn->tc_PoolMemory != NULL)
+        tls_bzero(conn->tc_PoolMemory,
+                  tls_packet_pool_bytes(conn->tc_PoolPackets));
+    tls_free(conn->tc_PoolMemory);
+
     tls_bzero(conn, sizeof(*conn));
     tls_free(conn);
 }
@@ -302,7 +307,6 @@ struct TLSConnection *tls_TLSOpenA(
         register LONG                  sock        TLSLIB_REG("d0"),
         register struct TLSLibBase    *TLSBase     TLSLIB_REG("a6"))
 {
-    const AmiNetXDuoContext *ctx;
     TLSConnection           *conn = NULL;
     LONG                    *error_out;
     LONG                     error = TLS_ERR_INTERNAL;
@@ -327,14 +331,18 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* ---- the stack ----------------------------------------------------- */
 
-    ObtainSemaphore(&TLSBase->tb_Lock);
-
-    if (tls_netx_bind(socket_base) != 0)
+    /*
+     * Any bsdsocket.library will do, and this is the whole of what is asked of
+     * it: that its jump table reaches the vectors tls_sock.c calls.  Every
+     * stack since AmiTCP 4.3 does; a base that does not is not one.
+     */
+    if (!tls_sock_have_lvo(socket_base, TLS_SOCK_LVO_LAST))
     {
-        ReleaseSemaphore(&TLSBase->tb_Lock);
         error = TLS_ERR_NOSTACK;
         goto fail;
     }
+
+    ObtainSemaphore(&TLSBase->tb_Lock);
 
     if (!TLSBase->tb_CryptoReady)
     {
@@ -346,7 +354,9 @@ struct TLSConnection *tls_TLSOpenA(
 
     ReleaseSemaphore(&TLSBase->tb_Lock);
 
-    ctx = tls_netx_ctx();
+    /* The entropy pool is this library's own now (src/common/ami_random.c),
+       so it is seeded here rather than borrowed already seeded. */
+    (VOID)ami_tls_seed_rng();
 
     /* ---- the tags ------------------------------------------------------ */
 
@@ -448,14 +458,39 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* ---- the transport -------------------------------------------------- */
 
-    conn->tc_Socket = ctx->nxc_TcpSocket(socket_base, sock);
-    if (conn->tc_Socket == NX_NULL)
     {
-        error = TLS_ERR_BADSOCKET;
-        goto fail;
-    }
+        UWORD peer_port   = 0;
+        UWORD peer_family = TLS_SOCK_AF_INET;
 
-    conn->tc_Port = (UWORD)conn->tc_Socket->nx_tcp_socket_connect_port;
+        if (!tls_sock_is_connected_tcp(socket_base, sock, &peer_port,
+                                       &peer_family))
+        {
+            error = TLS_ERR_BADSOCKET;
+            goto fail;
+        }
+
+        conn->tc_Port = peer_port;
+
+        conn->tc_PoolPackets = tls_packet_pool_count(record_bytes);
+        conn->tc_PoolMemory  =
+            tls_alloc(tls_packet_pool_bytes(conn->tc_PoolPackets));
+        if (conn->tc_PoolMemory == NULL)
+        {
+            error = TLS_ERR_NOMEM;
+            goto fail;
+        }
+
+        if (tls_packet_pool_create(&conn->tc_Pool, conn->tc_PoolMemory,
+                                   conn->tc_PoolPackets) != NX_SUCCESS)
+        {
+            error = TLS_ERR_INTERNAL;
+            goto fail;
+        }
+
+        tls_transport_open(&conn->tc_Transport, socket_base, sock,
+                           &conn->tc_Pool, FALSE,
+                           (BOOL)(peer_family == TLS_SOCK_AF_INET6));
+    }
 
     /* ---- the trust store ------------------------------------------------ */
 
@@ -533,6 +568,10 @@ struct TLSConnection *tls_TLSOpenA(
     conn->tc_Session.nx_secure_tls_ecc.nx_secure_tls_ecc_curves =
         ami_crypto_ecc_offered_curves;
 
+    /* Before session_start(): it would otherwise reach for the packet pool of
+       the socket's NX_IP, and there is no NX_IP here. */
+    conn->tc_Session.nx_secure_tls_packet_pool = &conn->tc_Pool;
+
     (VOID)_nx_secure_tls_session_packet_buffer_set(&conn->tc_Session,
                                                     conn->tc_RecordBuffer,
                                                     conn->tc_RecordBufferSize);
@@ -578,29 +617,25 @@ struct TLSConnection *tls_TLSOpenA(
 
     /* ---- the handshake -------------------------------------------------- */
 
-    /* Outside the bracket: this reads a file, and a disk access inside the
-       bracket holds the baton away from the IP thread. */
     tls_resume_prepare(conn);
-
-    if (tls_conn_enter(conn) != 0)
-    {
-        error = TLS_ERR_NOSTACK;
-        goto fail_session;
-    }
 
     start_ticks = ami_tls_eclock();
 
     TLS13_PROBE("start.in ", conn->tc_Timeout);
 
-    status = _nx_secure_tls_session_start(&conn->tc_Session, conn->tc_Socket,
+    /*
+     * NOT inside tls_conn_enter(): the handshake blocks on the network for as
+     * long as TLSA_Timeout allows, and nx_secure drops the protection mutex
+     * around every one of those waits itself.
+     */
+    status = _nx_secure_tls_session_start(&conn->tc_Session,
+                                           tls_transport_socket(&conn->tc_Transport),
                                            conn->tc_Timeout);
 
     TLS13_PROBE("start.out ", (ULONG)status);
 
     conn->tc_HandshakeMillis =
         ami_tls_eclock_micros(ami_tls_eclock() - start_ticks) / 1000UL;
-
-    tls_conn_leave(conn);
 
     if (status != NX_SUCCESS)
     {
@@ -648,8 +683,6 @@ fail:
 VOID tls_TLSClose(register struct TLSConnection *conn    TLSLIB_REG("a0"),
                   register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
-    const AmiNetXDuoContext *ctx = tls_netx_ctx();
-
     (VOID)TLSBase;
 
     if (conn == NULL)
@@ -657,16 +690,17 @@ VOID tls_TLSClose(register struct TLSConnection *conn    TLSLIB_REG("a0"),
 
     if (tls_conn_enter(conn) == 0)
     {
-        if (conn->tc_Pending != NX_NULL && ctx != NULL)
+        if (conn->tc_Pending != NX_NULL)
         {
-            (VOID)ctx->nxc_packet_release(conn->tc_Pending);
+            (VOID)_nx_packet_release(conn->tc_Pending);
             conn->tc_Pending = NX_NULL;
         }
 
         (VOID)_nx_secure_tls_session_end(&conn->tc_Session,
                                           5UL * NX_IP_PERIODIC_RATE);
 
-        /* Under the baton: session_delete() edits NetX Secure's global list. */
+        /* Under the same lock as the end above: session_delete() edits
+           NetX Secure's global list, and the two must be one step. */
         (VOID)_nx_secure_tls_session_delete(&conn->tc_Session);
 
         tls_conn_leave(conn);
@@ -687,15 +721,14 @@ LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
                  register LONG                  length  TLSLIB_REG("d0"),
                  register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
-    const AmiNetXDuoContext *ctx = tls_netx_ctx();
-    NX_PACKET               *packet = NX_NULL;
-    ULONG                    available;
-    ULONG                    copied = 0;
-    UINT                     status;
+    NX_PACKET *packet = NX_NULL;
+    ULONG      available;
+    ULONG      copied = 0;
+    UINT       status;
 
     (VOID)TLSBase;
 
-    if (conn == NULL || buffer == NULL || ctx == NULL)
+    if (conn == NULL || buffer == NULL)
         return -1;
     if (length <= 0)
         return 0;
@@ -710,15 +743,10 @@ LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
         if ((conn->tc_Flags & TLSF_EOF) != 0)
             return 0;
 
-        if (tls_conn_enter(conn) != 0)
-        {
-            conn->tc_Error = TLS_ERR_NOSTACK;
-            return -1;
-        }
-
+        /* No outer lock: this blocks on the network for TLSA_Timeout, and
+           nx_secure drops the protection mutex around that wait itself. */
         status = _nx_secure_tls_session_receive(&conn->tc_Session, &packet,
                                                  conn->tc_Timeout);
-        tls_conn_leave(conn);
 
         tls_trace("[resume] session_receive -> %ld packet %lx state %ld",
                   (LONG)status, (LONG)packet,
@@ -767,10 +795,9 @@ LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
 
     if (available > 0)
     {
-        status = ctx->nxc_packet_data_extract_offset(conn->tc_Pending,
-                                                      conn->tc_PendingOffset,
-                                                      buffer, available,
-                                                      &copied);
+        status = _nx_packet_data_extract_offset(conn->tc_Pending,
+                                                conn->tc_PendingOffset,
+                                                buffer, available, &copied);
         if (status != NX_SUCCESS)
         {
             conn->tc_Error = TLS_ERR_IO;
@@ -782,7 +809,7 @@ LONG tls_TLSRead(register struct TLSConnection *conn    TLSLIB_REG("a0"),
 
     if (conn->tc_PendingOffset >= conn->tc_Pending->nx_packet_length)
     {
-        (VOID)ctx->nxc_packet_release(conn->tc_Pending);
+        (VOID)_nx_packet_release(conn->tc_Pending);
         conn->tc_Pending       = NX_NULL;
         conn->tc_PendingOffset = 0;
     }
@@ -797,17 +824,16 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
                   register LONG                  length  TLSLIB_REG("d0"),
                   register struct TLSLibBase    *TLSBase TLSLIB_REG("a6"))
 {
-    const AmiNetXDuoContext *ctx = tls_netx_ctx();
-    NX_PACKET_POOL          *pool;
-    NX_PACKET               *packet;
-    const UBYTE             *src = (const UBYTE *)buffer;
-    LONG                     sent = 0;
-    ULONG                    chunk;
-    UINT                     status = NX_SUCCESS;
+    NX_PACKET_POOL *pool;
+    NX_PACKET      *packet;
+    const UBYTE    *src = (const UBYTE *)buffer;
+    LONG            sent = 0;
+    ULONG           chunk;
+    UINT            status = NX_SUCCESS;
 
     (VOID)TLSBase;
 
-    if (conn == NULL || buffer == NULL || ctx == NULL)
+    if (conn == NULL || buffer == NULL)
         return -1;
     if (length <= 0)
         return 0;
@@ -817,19 +843,10 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
         return -1;
     }
 
-    pool = ctx->nxc_Pool();
-    if (pool == NX_NULL)
-    {
-        conn->tc_Error = TLS_ERR_IO;
-        return -1;
-    }
+    pool = &conn->tc_Pool;
 
-    if (tls_conn_enter(conn) != 0)
-    {
-        conn->tc_Error = TLS_ERR_NOSTACK;
-        return -1;
-    }
-
+    /* No outer lock, for the reason TLSRead() gives: a send blocks on the
+       network and nx_secure drops the protection mutex around it. */
     while (sent < length)
     {
         chunk = (ULONG)(length - sent);
@@ -842,11 +859,11 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
         if (status != NX_SUCCESS || packet == NX_NULL)
             break;
 
-        status = ctx->nxc_packet_data_append(packet, (VOID *)&src[sent], chunk,
-                                              pool, conn->tc_Timeout);
+        status = _nx_packet_data_append(packet, (VOID *)&src[sent], chunk,
+                                        pool, conn->tc_Timeout);
         if (status != NX_SUCCESS)
         {
-            (VOID)ctx->nxc_packet_release(packet);
+            (VOID)_nx_packet_release(packet);
             break;
         }
 
@@ -854,14 +871,12 @@ LONG tls_TLSWrite(register struct TLSConnection *conn    TLSLIB_REG("a0"),
                                               conn->tc_Timeout);
         if (status != NX_SUCCESS)
         {
-            (VOID)ctx->nxc_packet_release(packet);
+            (VOID)_nx_packet_release(packet);
             break;
         }
 
         sent += (LONG)chunk;
     }
-
-    tls_conn_leave(conn);
 
     if (sent == 0 && length > 0)
     {
@@ -961,28 +976,26 @@ LONG tls_TLSBuffered(register struct TLSConnection *conn    TLSLIB_REG("a0"),
 /* ---------------------------------------------------------- TLSRandom --- */
 
 /*
- * Random bytes from the machine's entropy pool, a SHA-256 hash DRBG borrowed
- * from bsdsocket.library.  Returns the number of bytes written, or -1; never
+ * Random bytes from this library's own entropy pool, the SHA-256 hash DRBG in
+ * src/common/ami_random.c.  Returns the number of bytes written, or -1; never
  * partially fills.
  */
 LONG tls_TLSRandom(register APTR               buffer  TLSLIB_REG("a0"),
                    register LONG               length  TLSLIB_REG("d0"),
                    register struct TLSLibBase *TLSBase TLSLIB_REG("a6"))
 {
-    const AmiNetXDuoContext *ctx;
-
     (VOID)TLSBase;
 
     if (buffer == NULL || length < 0)
         return -1;
 
-    /* The pool lives in bsdsocket.library, reached through the private context. */
-    ctx = tls_netx_ctx();
-    if (ctx == NULL)
-        return -1;
+    /* The pool seeds itself on first use, but that collection takes tens of
+       milliseconds, so ask for it explicitly rather than inside a handshake. */
+    (VOID)ami_tls_seed_rng();
 
-    /* Bytes, not rand() draws: nxc_random_rand() clears bit 31 of every draw. */
-    ctx->nxc_random_bytes(buffer, (ULONG)length);
+    /* Bytes, not ami_random_rand() draws: that one clears bit 31 to stay
+       inside rand()'s range, and the gap lands in every word of a key. */
+    ami_random_bytes(buffer, (ULONG)length);
 
     return length;
 }

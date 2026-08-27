@@ -11,7 +11,7 @@
  * gethostbyaddr_r) and every vector not yet implemented point at bsd_enosys()
  * rather than NULL.
  *
- * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 99 implemented, 40 stubbed (7 of them NULL-returning, 1 FALSE-returning).
+ * Coverage: 139 ABI vectors (121 named, 18 reserved/private), 99 implemented, 41 stubbed (7 of them NULL-returning, 1 FALSE-returning).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -170,12 +170,7 @@ const APTR BsdVectorTable[] =
     (APTR)bsd_enosys,                    /* -0x354 [141] reserved */
     (APTR)bsd_enosys,                    /* -0x35a [142] reserved */
 
-    /* -0x360 [143] bsd_ObtainNetXDuoContext, PRIVATE: hands tls.library the NetX Duo singleton, nxcontext.h */
-#ifdef AMINETXDUO_TLS_CONTEXT
-    (APTR)bsd_ObtainNetXDuoContext,
-#else
-    (APTR)bsd_enosys,
-#endif
+    (APTR)bsd_enosys,                    /* -0x360 [143] reserved, was bsd_ObtainNetXDuoContext */
 
     /* -0x366 [144] bsd_NetStackQuery, PRIVATE: a snapshot of the running stack, netstatus.h */
     (APTR)bsd_NetStackQuery,

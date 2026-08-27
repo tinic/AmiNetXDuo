@@ -4,10 +4,9 @@
  * No crt0, so this library opens DOSBase itself (the trust store is a file).
  * The memory and string helpers are here rather than borrowed from src/common
  * because this library is standalone in the same way usergroup.library is.
- * Everything else it needs comes either from its own objects or, at run time,
- * from bsdsocket.library through the private context.  A link against
- * aminetxduo_common brings in a second entropy pool, which tls_netx.c exists
- * to avoid, in exchange for an AllocVec() wrapper.
+ * Everything else it needs comes from its own objects; the only thing it asks
+ * the machine's bsdsocket.library for is send(), recv() and WaitSelect(), at
+ * the published vectors (tls_sock.c).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -17,7 +16,9 @@
 #include "tls.h"                /* ami_tls_timer_close() */
 
 #include <exec/memory.h>
+#include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <proto/dos.h>
 #include <proto/exec.h>
 
 struct DosLibrary *DOSBase;
@@ -63,6 +64,33 @@ VOID tls_bzero(APTR ptr, ULONG size)
 
     while (size-- > 0)
         *p++ = 0;
+}
+
+VOID tls_memcpy(APTR dst, const void *src, ULONG size)
+{
+    UBYTE       *d = (UBYTE *)dst;
+    const UBYTE *s = (const UBYTE *)src;
+
+    while (size-- > 0)
+        *d++ = *s++;
+}
+
+/*
+ * NetX Duo counts in NX_IP_PERIODIC_RATE ticks and Delay() counts in fiftieths
+ * of a second.  Rounded up, so a caller that asked to wait always does.
+ */
+VOID tls_delay_ticks(ULONG ticks)
+{
+    ULONG fiftieths;
+
+    if (ticks == 0)
+        return;
+
+    fiftieths = (ticks * 50UL + (NX_IP_PERIODIC_RATE - 1UL)) / NX_IP_PERIODIC_RATE;
+    if (fiftieths == 0)
+        fiftieths = 1;
+
+    Delay((LONG)fiftieths);
 }
 
 ULONG tls_strlen(const char *s)

@@ -1,12 +1,18 @@
 /*
- * tls.library, TLSClose() keeps every NetX Secure operation inside the
- * ThreadX bracket.
+ * tls.library, TLSClose() keeps every NetX Secure operation inside one lock.
  *
- * TLS sessions share process-wide created-object state and protection
- * mutexes.  session_end() was bracketed but session_delete() ran after leave,
- * so two Exec Tasks closing different connections could mutate that shared
- * state concurrently as plain, unadopted Tasks.  This host test records the
- * call order at the vector boundary.  EDL is safe; the old ELD order fails.
+ * TLS sessions share process-wide created-object state.  session_end() was
+ * bracketed but session_delete() ran after the bracket, so two Exec Tasks
+ * closing different connections could mutate that shared state concurrently.
+ * This host test records the call order at the vector boundary.  EDL is safe;
+ * the old ELD order fails.
+ *
+ * The bracket used to be the ThreadX baton, borrowed from our own
+ * bsdsocket.library over a private LVO.  tls.library runs on any stack now and
+ * borrows nothing, so the bracket is _nx_secure_tls_protection -- nx_secure's
+ * OWN mutex, taken one level up, so that the two orderings cannot disagree.
+ * The invariant under test did not change and neither did this test's shape:
+ * only which pair of calls is instrumented.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -59,50 +65,73 @@ static VOID h_mark(char c)
     }
 }
 
-static LONG h_enter(AmiNetCaller *caller)
+/*
+ * The instrumented pair.  tls_conn.c reaches nx_secure's protection mutex
+ * through these, and nothing else in this link defines them, so every
+ * acquisition the shipping code makes is counted here.
+ */
+TX_MUTEX _nx_secure_tls_protection;
+
+UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
-    (VOID)caller;
+    (VOID)wait_option;
+
+    CHECK(mutex_ptr == &_nx_secure_tls_protection);
 
     (VOID)pthread_mutex_lock(&h_baton);
     CHECK(h_depth == 0);
     h_depth++;
     h_enter_calls++;
-    return AMI_NET_OK;
+
+    return TX_SUCCESS;
 }
 
-static VOID h_leave(AmiNetCaller *caller)
+UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
 {
-    (VOID)caller;
+    CHECK(mutex_ptr == &_nx_secure_tls_protection);
 
     CHECK(h_depth == 1);
     h_mark('L');
     h_depth--;
     h_leave_calls++;
     (VOID)pthread_mutex_unlock(&h_baton);
+
+    return TX_SUCCESS;
 }
 
-static NX_TCP_SOCKET *h_tcp_socket(APTR socket_base, LONG fd)
+/*
+ * The transport.  Its own behaviour is test_tls_transport.c's subject; here
+ * it only has to hand back something session_start() can be given.
+ */
+VOID tls_transport_open(TLSTransport *transport, APTR socket_base, LONG fd,
+                        NX_PACKET_POOL *pool, BOOL server, BOOL ipv6)
 {
-    (VOID)socket_base;
-    (VOID)fd;
+    (VOID)socket_base; (VOID)fd; (VOID)pool; (VOID)server; (VOID)ipv6;
+    memset(transport, 0, sizeof(*transport));
+}
+
+NX_TCP_SOCKET *tls_transport_socket(TLSTransport *transport)
+{
+    (VOID)transport;
     return &h_socket;
 }
 
-static const AmiNetXDuoContext h_context =
+BOOL tls_sock_have_lvo(APTR base, ULONG lvo)
 {
-    .nxc_TcpSocket = h_tcp_socket,
-    .nxc_Enter = h_enter,
-    .nxc_Leave = h_leave
-};
-
-LONG tls_netx_bind(APTR socket_base)
-{
-    return (socket_base != NULL) ? 0 : -1;
+    (VOID)lvo;
+    return (BOOL)((base != NULL) ? TRUE : FALSE);
 }
 
-const AmiNetXDuoContext *tls_netx_ctx(VOID)
+BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family)
 {
-    return &h_context;
+    (VOID)fd;
+
+    if (port != NULL)
+        *port = 443;
+    if (family != NULL)
+        *family = TLS_SOCK_AF_INET;
+
+    return (BOOL)((base != NULL) ? TRUE : FALSE);
 }
 
 VOID ObtainSemaphore(struct SignalSemaphore *semaphore)
@@ -137,6 +166,8 @@ UINT ami_tls_crypto_initialize(VOID) { return NX_SUCCESS; }
 BOOL ami_tls_timer_open(VOID) { return TRUE; }
 ULONG ami_tls_eclock(VOID) { return 0; }
 ULONG ami_tls_eclock_micros(ULONG ticks) { return ticks; }
+ULONG ami_tls_seed_rng(VOID) { return 256; }
+VOID  ami_random_bytes(APTR buffer, ULONG length) { memset(buffer, 0, length); }
 
 UINT _nx_secure_tls_metadata_size_calculate(
         const NX_SECURE_TLS_CRYPTO *crypto, ULONG *size)
@@ -289,6 +320,11 @@ VOID tls_store_close(TLSStore *store)
 VOID tls_bzero(APTR ptr, ULONG size)
 {
     memset(ptr, 0, (size_t)size);
+}
+
+VOID tls_memcpy(APTR dst, const void *src, ULONG size)
+{
+    memcpy(dst, src, (size_t)size);
 }
 
 VOID tls_free(APTR ptr)
@@ -564,7 +600,7 @@ static VOID h_test_open_create_serialized(struct TLSLibBase *base)
     int            enters = h_enter_calls;
     int            leaves = h_leave_calls;
 
-    printf("tls_open: session creation stays inside ThreadX serialization\n");
+    printf("tls_open: session creation stays inside the shared-state lock\n");
 
     base->tb_CryptoReady = TRUE;
     conn = tls_TLSOpenA((APTR)base, tags, 3, base);
@@ -580,7 +616,7 @@ int main(void)
     struct TLSLibBase *base;
     TLSConnection     *conn;
 
-    printf("tls_close: session deletion stays inside ThreadX serialization\n");
+    printf("tls_close: session deletion stays inside the shared-state lock\n");
 
     base = (struct TLSLibBase *)calloc(1, sizeof(*base));
     conn = (TLSConnection *)calloc(1, sizeof(*conn));

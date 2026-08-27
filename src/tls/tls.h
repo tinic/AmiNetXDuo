@@ -27,6 +27,14 @@ BOOL  ami_tls_timer_open(VOID);
 VOID  ami_tls_timer_close(VOID);
 
 /*
+ * The E-Clock unit ami_tls_timer_open() holds.  Named, not static, because
+ * src/common/ami_random.c reaches timer.device through the conventional
+ * `TimerBase` and tls.library links that file without src/common/compat.c;
+ * src/tlslib/tls_random.c is where the two names are tied together.
+ */
+extern struct Device *ami_tls_timer_base;
+
+/*
  * TRUE once ami_tls_timer_open() has succeeded.  A crypto method must not
  * OpenDevice() in the middle of a handshake, so ami_tls_crypto.c asks this
  * rather than opening the timer itself.

@@ -1979,15 +1979,6 @@ static LONG pr_getnameinfo(LONG v, Regs *r)
     return PREP_OK;
 }
 
-static LONG pr_nxcontext(LONG v, Regs *r)
-{
-    ptr_out = NULL;
-    r->d0 = (v == 0) ? 0x414E5844UL : 0xdeadbeefUL;     /* 'ANXD' */
-    r->d1 = 0x00020001UL;
-    r->a0 = (APTR)&ptr_out;
-    return PREP_OK;
-}
-
 static LONG pr_netstackquery(LONG v, Regs *r)
 {
     zero(&q_health, sizeof(q_health));
@@ -2263,7 +2254,11 @@ static const VecRow vectors[] =
     E_("reserved.141",        852, t_852, VC_STUB_L),
     E_("reserved.142",        858, t_858, VC_STUB_L),
 
-    V_("ObtainNetXDuoContext",864, t_864, VC_IMPL, 2, DEF_ITERS, pr_nxcontext,  NULL),
+    /* -0x360 held ObtainNetXDuoContext, the private vector tls.library used
+       to borrow this library's NetX Duo through.  tls.library runs on any
+       bsdsocket.library now and the slot answers ENOSYS. */
+    E_("reserved.143",        864, t_864, VC_STUB_L),
+
     V_("NetStackQuery",       870, t_870, VC_IMPL, 2, FEW_ITERS, pr_netstackquery, NULL),
     V_("NetStackControl",     876, t_876, VC_IMPL, 2, FEW_ITERS, pr_netstackcontrol, NULL),
 

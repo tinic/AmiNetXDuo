@@ -29,6 +29,8 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
+#include "nx_packet.h"          /* the four _nx_packet_* this library defines */
+#include "nx_tcp.h"             /* and the two _nx_tcp_socket_* it defines    */
 #include "nx_secure_tls.h"
 #include "nx_secure_x509.h"
 
@@ -38,9 +40,10 @@
 #include <exec/semaphores.h>
 #include <dos/dos.h>
 
-#include "aminetxduo/netstack.h"
-#include "aminetxduo/nxcontext.h"
+#include "aminetxduo/random.h"
 #include "aminetxduo/tlslib.h"
+
+#include "tls_sock.h"
 
 /* ------------------------------------------------------------- sizing --- */
 
@@ -267,6 +270,45 @@ struct TLSLibBase
     BOOL                    tb_SessionsLoaded;
 };
 
+/* ----------------------------------------------------------- transport --- */
+
+/*
+ * The packet pool tls.library brings itself, sized for one connection.
+ *
+ * TLS_PACKET_PAYLOAD has to hold the largest record this library builds: the
+ * header reserve a TCP packet asks for (NX_IPv6_TCP_PACKET, 76), the record
+ * header, an explicit IV, TLS_WRITE_CHUNK of plaintext and an AEAD tag.  2560
+ * leaves about 400 bytes of slack over that worst case.
+ *
+ * The count is derived from TLSA_RecordBuffer rather than fixed, because that
+ * tag is the ceiling on a record and a decrypted record is a CHAIN of these
+ * (nx_secure_tls_record_payload_decrypt.c allocates one and appends).
+ * tls_packet_pool_count() does the arithmetic; TLS_PACKET_SPARE is what is
+ * held outside that chain -- one being received, one being built for the wire,
+ * one already decrypted and waiting for TLSRead(), and one over.
+ */
+#define TLS_PACKET_PAYLOAD          2560
+#define TLS_PACKET_SPARE            4
+
+/*
+ * NX_TCP_SOCKET first and by value, not by pointer: nx_secure is handed
+ * &tt_Socket and reads its fields, and _nx_tcp_socket_send() and
+ * _nx_tcp_socket_receive() cast the same address back to this.
+ */
+typedef struct TLSTransport
+{
+    NX_TCP_SOCKET   tt_Socket;
+
+    APTR            tt_SocketBase;
+    LONG            tt_Fd;
+    NX_PACKET_POOL *tt_Pool;
+
+    /* Set once a record went out half-written or the peer hung up.  Every
+       later call answers NX_NOT_CONNECTED rather than resuming a stream whose
+       sequence numbers no longer line up. */
+    UINT            tt_Broken;
+} TLSTransport;
+
 /* ---------------------------------------------------------- connection --- */
 
 #define TLSF_VERIFY         (1UL << 0)   /* chain + host name are checked    */
@@ -281,7 +323,14 @@ struct TLSConnection
 
     APTR                        tc_SocketBase;
     LONG                        tc_Fd;
-    NX_TCP_SOCKET              *tc_Socket;
+
+    /* The transport and the packets, both this library's own.  See
+       tls_netx.c for why there is no longer a path through our stack's
+       internals. */
+    TLSTransport                tc_Transport;
+    NX_PACKET_POOL              tc_Pool;
+    APTR                        tc_PoolMemory;
+    ULONG                       tc_PoolPackets;
 
     ULONG                       tc_Flags;
     LONG                        tc_Error;
@@ -291,9 +340,6 @@ struct TLSConnection
     NX_SECURE_X509_DNS_NAME     tc_Sni;
     UCHAR                       tc_HostName[NX_SECURE_X509_DNS_NAME_MAX + 1];
     USHORT                      tc_HostNameLength;
-
-    AmiNetCaller                tc_Caller;
-    LONG                        tc_Nest;
 
     UCHAR                      *tc_Metadata;
     ULONG                       tc_MetadataSize;
@@ -352,14 +398,27 @@ typedef struct TLSConnection TLSConnection;
 
 /* ------------------------------------------------------------ tls_netx.c, */
 
+/* ---------------------------------------------------------- tls_netx.c, */
+
 /*
- * The stack, borrowed from bsdsocket.library.  tls_netx_bind() is called for
- * every TLSOpen() with the caller's SocketBase.  It refreshes the context in
- * case bsdsocket.library was expunged and reloaded while tls.library remained
- * resident.  After a success tls_netx_ctx() is non-NULL.
+ * The transport nx_secure sees.  tls_transport_socket() is what goes to
+ * _nx_secure_tls_session_start(); the two entry points nx_secure calls on it,
+ * _nx_tcp_socket_send() and _nx_tcp_socket_receive(), are send() and recv() on
+ * tt_Fd.  `ipv6` only sizes the header reserve a record packet asks for.
  */
-LONG                     tls_netx_bind(APTR socket_base);
-const AmiNetXDuoContext *tls_netx_ctx(VOID);
+VOID           tls_transport_open(TLSTransport *transport, APTR socket_base,
+                                  LONG fd, NX_PACKET_POOL *pool, BOOL server,
+                                  BOOL ipv6);
+NX_TCP_SOCKET *tls_transport_socket(TLSTransport *transport);
+
+/* -------------------------------------------------------- tls_packet.c, */
+
+/* Blocks a connection needs for a given TLSA_RecordBuffer, and the memory
+   that many take.  One allocation per connection, freed with it. */
+ULONG tls_packet_pool_count(ULONG record_bytes);
+ULONG tls_packet_pool_bytes(ULONG packets);
+UINT  tls_packet_pool_create(NX_PACKET_POOL *pool, VOID *memory, ULONG packets);
+VOID  tls_packet_pool_delete(NX_PACKET_POOL *pool);
 
 /* ---------------------------------------------------------- tls_store.c, */
 
@@ -412,6 +471,11 @@ VOID  tls_runtime_close(VOID);
 APTR  tls_alloc(ULONG size);
 VOID  tls_free(APTR ptr);
 VOID  tls_bzero(APTR ptr, ULONG size);
+VOID  tls_memcpy(APTR dst, const void *src, ULONG size);
+
+/* Delay() over NetX Duo timer ticks.  Rounds up, so a non-zero request never
+   becomes a busy return. */
+VOID  tls_delay_ticks(ULONG ticks);
 ULONG tls_strlen(const char *s);
 VOID  tls_strncpy(char *dst, const char *src, ULONG size);
 

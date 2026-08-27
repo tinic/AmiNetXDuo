@@ -22,7 +22,7 @@
 
 #include "tls.h"
 
-struct Device                     *ami_tls_timer_base;
+struct Device                     *ami_tls_timer_base;   /* declared in tls.h */
 
 static struct timerequest          ami_tls_req;
 static struct MsgPort              ami_tls_port;
