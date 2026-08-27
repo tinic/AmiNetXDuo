@@ -15,10 +15,16 @@ ADDRESS=
 NETMASK=255.255.255.0
 GATEWAY=192.168.1.1
 DIVISORS="16 8"
+# The application read size, in bytes, one arm per value.  Fetch (notify to
+# recv()) is paid per call and not per byte, so the read size decides how
+# OFTEN it is paid: 8192 pays it an eighth as often as 1024 over the same
+# bytes.  Nothing varied it until this existed, and the leg was read as if
+# the size of the read did not enter into it.
+READSIZES="4096"
 SECONDS_ARM=20
 PORT=5201
 
-while getopts "b:B:P:N:m:a:d:s:" opt; do
+while getopts "b:B:P:N:m:a:d:r:s:" opt; do
     case "$opt" in
         b) BUILDDIR="$OPTARG" ;;
         B) IFACE="$OPTARG" ;;
@@ -27,9 +33,11 @@ while getopts "b:B:P:N:m:a:d:s:" opt; do
         m) MODEL="$OPTARG" ;;
         a) ADDRESS="$OPTARG" ;;
         d) DIVISORS="$OPTARG" ;;
+        r) READSIZES="$OPTARG" ;;
         s) SECONDS_ARM="$OPTARG" ;;
         *) echo "usage: $0 -b BUILDDIR -B IFACE -P PEERSSH [-N board]" \
-                "[-m model] [-a addr] [-d \"16 8\"] [-s seconds]" >&2; exit 2 ;;
+                "[-m model] [-a addr] [-d \"16 8\"] [-r \"4096 8192\"]" \
+                "[-s seconds]" >&2; exit 2 ;;
     esac
 done
 
@@ -60,15 +68,18 @@ echo "cpu=$(sed -n 's/^AMINETXDUO_CPU:STRING=//p' \
     "$BUILDDIR/CMakeCache.txt" 2>/dev/null || echo unknown)" \
      "arch=$(sed -n 's/^AMIGA_ARCH_FLAGS:STRING=//p' \
     "$BUILDDIR/CMakeCache.txt" 2>/dev/null || echo unknown)"
-echo "divisors=$DIVISORS fastmem=${AMINETXDUO_FASTMEM:-unset}"
+echo "divisors=$DIVISORS readsizes=$READSIZES" \
+     "fastmem=${AMINETXDUO_FASTMEM:-unset} z3mem=${AMINETXDUO_Z3MEM:-unset}"
 echo "guest_address=$ADDRESS"
 
 RESULTS="$ROOT/build/poolshare-results-$$"
 mkdir -p "$RESULTS"
 
 for DIV in $DIVISORS; do
-    TAG="poolshare$DIV"
-    STAGE="$ROOT/build/poolshare-stage-$DIV"
+  for RSZ in $READSIZES; do
+    ARM="$DIV-$RSZ"
+    TAG="poolshare$ARM"
+    STAGE="$ROOT/build/poolshare-stage-$ARM"
     rm -rf "$STAGE"
     mkdir -p "$STAGE/libs"
     cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
@@ -94,16 +105,16 @@ IFEOF
     {
         echo "echo >ENV:ANXDPOOLDIV $DIV"
         echo "SYS:AddNetInterface eth0"
-        echo "SYS:iperf -s -p $PORT -t $((SECONDS_ARM + 40))"
+        echo "SYS:iperf -s -p $PORT -t $((SECONDS_ARM + 40)) -l $RSZ"
         echo "SYS:netstat -s"
     } > "$STAGE/commands.txt"
 
-    PCAP="$RESULTS/arm-$DIV.pcap"
+    PCAP="$RESULTS/arm-$ARM.pcap"
     timeout $((SECONDS_ARM + 220)) tcpdump -i "$IFACE" -s 128 -w "$PCAP" \
         "host $ADDRESS and tcp port $PORT" >/dev/null 2>&1 &
     TCPDUMP_PID=$!
 
-    PEERLOG="$RESULTS/arm-$DIV.peer"
+    PEERLOG="$RESULTS/arm-$ARM.peer"
     scp -q "$ROOT/tests/tools/iperfpeer.py" "$PEERSSH:/tmp/iperfpeer.$$.py"
     ssh -o BatchMode=yes "$PEERSSH" "
         for i in \$(seq 1 60); do
@@ -116,12 +127,12 @@ IFEOF
     PEER_PID=$!
 
     export AMINETXDUO_RUN_TAG="$TAG"
-    AMINETXDUO_RIG_EXCLUSIVE="poolshare arm $DIV" \
+    AMINETXDUO_RIG_EXCLUSIVE="poolshare arm $ARM" \
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t $((SECONDS_ARM + 180)) \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
         "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" \
-        "$STAGE/netstat" > "$RESULTS/arm-$DIV.run" 2>&1
+        "$STAGE/netstat" > "$RESULTS/arm-$ARM.run" 2>&1
     RUN_RC=$?
 
     wait "$PEER_PID"
@@ -129,18 +140,19 @@ IFEOF
     wait "$TCPDUMP_PID" 2>/dev/null
 
     HD="$ROOT/build/amiberry-testhd-$TAG"
-    cp "$HD/tools.txt" "$RESULTS/arm-$DIV.guest" 2>/dev/null
+    cp "$HD/tools.txt" "$RESULTS/arm-$ARM.guest" 2>/dev/null
 
-    echo "==== arm $DIV (emulator rc=$RUN_RC) ===="
+    echo "==== arm divisor=$DIV readsize=$RSZ (emulator rc=$RUN_RC) ===="
     grep -E "peer_bytes=|never accepted" "$PEERLOG" | tail -1
     grep -E "packets free|fewest|pool empty|window" \
-        "$RESULTS/arm-$DIV.guest" 2>/dev/null | head -4
+        "$RESULTS/arm-$ARM.guest" 2>/dev/null | head -4
     if [ -s "$PCAP" ]; then
         Z=$(tcpdump -n -r "$PCAP" 2>/dev/null | grep -c "win 0,")
         W=$(tcpdump -n -r "$PCAP" 2>/dev/null |
             grep -oE "win [0-9]+" | sort -t' ' -k2 -n | tail -1)
         echo "wire: zero_windows=$Z max_advertised=$W"
     fi
+  done
 done
 
 echo

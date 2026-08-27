@@ -46,7 +46,14 @@ extern "C" {
 /* iperf 2's own default datagram, and the ceiling this tool will send. */
 #define IPERF_UDP_DEFAULT   1470
 #define IPERF_BUF_MIN       64
-#define IPERF_BUF_MAX       8192
+/* The read is where the receiving side pays its per-call cost, once per
+   recv() and not once per byte, so the size of the read is a variable a
+   measurement wants to move over a wide range.  8192 was the whole range
+   against a default of 4096, a factor of two, which is too narrow for the
+   difference to leave the noise.  32768 is an eightfold span above the
+   default.  Nothing resident grows with it: httpd sizes its own buffer off
+   what httpd plans, and the command allocates one array. */
+#define IPERF_BUF_MAX       32768
 
 /* The port iperf 2 listens on.  iperf 3 uses 5201 and is a different protocol. */
 #define IPERF_PORT          5001
