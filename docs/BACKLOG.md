@@ -45,7 +45,6 @@ comment beside the code, not an entry here.
 | Amiberry cannot eject a PCMCIA card, so removal is unexercised | `pc_on_removed`/`pc_on_inserted` have never fired, nor the reset order | `src/netdev/netdev_pcmcia.c:363`, `:386` |
 | Two card rows have never run on their hardware | `xsurf500` is from the iComp wiki and `3c589` from the 3Com manual | `src/netdev/netdev_cards.c` |
 | `AMINETXDUO_AMIBERRY_MAC` is ignored for `ne2000_pcmcia` | Amiberry uses the host NIC address, so the second consecutive run has a dead RX | `tools/emu-board.sh`, `tests/tools/cards.sh` |
-| `peercap_tcpdump_state` turns a transient ssh failure into a missing binary | it discards stderr and exits 2; two of its three callers have no retry | `tests/perf/peercap.sh` |
 | `aamprobe.c` hard-codes `a2065.device` twice | on any other board the re-add is refused with errno 6 and later asserts read poison | `tests/tools/aamprobe.c:669`, `:926` |
 | binutils `amiga-2.46` cannot assemble gcc 16.2's own output | it forces a byte displacement on `jne`/`jeq`; we stay pinned at `amiga-2.39.0` | bebbo's `binutils-gdb` |
 | The console records `.pfs` and nothing else can read it | an MP4 export needs a vendored muxer under the CSP and a lossless codec | `src/tools/web/client/console/pfs.ts` |

@@ -11,9 +11,24 @@ PEERCAP_IFACE="${AMINETXDUO_PEER_IFACE:-any}"
 PEERCAP_TMP="${AMINETXDUO_PEER_TMP:-/tmp}"
 
 PEERCAP_MAX="${AMINETXDUO_PEERCAP_MAX:-1800}"
+PEERCAP_SSH_RETRIES="${AMINETXDUO_PEERCAP_SSH_RETRIES:-3}"
+PEERCAP_SSH_RETRY_DELAY="${AMINETXDUO_PEERCAP_SSH_RETRY_DELAY:-1}"
+
+case "$PEERCAP_SSH_RETRIES" in
+    ""|0|*[!0-9]*) PEERCAP_SSH_RETRIES=3 ;;
+esac
 
 peercap_tcpdump_state() { # peer
-    ssh -o ConnectTimeout=10 "$1" "
+    local peer="$1" attempt=1 state err
+
+    err=$(mktemp "${TMPDIR:-/tmp}/peercap-ssh.XXXXXX") || {
+        echo "peercap: cannot make a temporary file for the ssh diagnostic" >&2
+        echo transport
+        return 2
+    }
+
+    while [ "$attempt" -le "$PEERCAP_SSH_RETRIES" ]; do
+        if state=$(ssh -o ConnectTimeout=10 "$peer" "
         t=$PEERCAP_TCPDUMP
         case \"\$t\" in
             */*) [ -f \"\$t\" ] || { echo missing; exit 0; }
@@ -29,12 +44,37 @@ peercap_tcpdump_state() { # peer
             esac
             exit 0
         done
-        echo nogetcap" 2>/dev/null
+        echo nogetcap" 2>"$err"); then
+            rm -f "$err"
+            printf '%s\n' "$state"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$PEERCAP_SSH_RETRIES" ] &&
+           [ "$PEERCAP_SSH_RETRY_DELAY" != 0 ]; then
+            sleep "$PEERCAP_SSH_RETRY_DELAY"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    echo "peercap: ssh to $peer failed $PEERCAP_SSH_RETRIES time(s) while " \
+         "checking $PEERCAP_TCPDUMP" >&2
+    if [ -s "$err" ]; then
+        sed 's/^/  /' "$err" >&2
+    else
+        echo "  ssh produced no diagnostic" >&2
+    fi
+    rm -f "$err"
+    echo transport
+    return 2
 }
 
 peercap_resolve_tcpdump() { # peer
-    local peer="$1" state
-    state=$(peercap_tcpdump_state "$peer")
+    local peer="$1" state rc=0
+    state=$(peercap_tcpdump_state "$peer") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        return 1
+    fi
     case "$state" in
         ok|nogetcap) return 0 ;;
         stripped)
