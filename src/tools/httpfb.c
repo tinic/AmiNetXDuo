@@ -212,6 +212,41 @@ static ULONG           fb_pass_t0;
    when its own band comes round. */
 #define FB_BAND_WHEN        2
 
+/* The fewest and the most bands an input event is chased for.  The event is
+   handed to input.device and returns at once, so the character is not on the
+   screen yet when the band after it is produced; the band the last change was
+   in is read again until one of them carries a change, or until the chase runs
+   out.  What it is really bounded by is a screen pass -- chase past that and
+   the pass has covered the whole screen anyway -- so the count is the number
+   of bands in one, which is what fb_chase_bands() works out.  At four attempts
+   fixed, one sample in ten of a 800x600 truecolour screen ran out of chase and
+   waited for the pass: 143 ms against 68 ms at the ninetieth percentile. */
+#define FB_CHASE_MIN        4
+#define FB_CHASE_MAX        32
+
+/* Bands still owed to the input event that arrived, and the tile row the last
+   change was seen at.  A Shell echoes a keystroke into the cell its cursor is
+   in, which is where the change before it was, so the band that answers a key
+   is the band that answered the last one.
+
+   WHY THIS IS NOT A LUXURY.  Without it the answer to a keystroke waits for
+   the pass to come round to the band the cursor is in, which is uniform over a
+   whole screen pass: the mean is half a pass and the ninetieth percentile is
+   nearly all of one.  A 800x600 truecolour pass is a megabyte of card readback
+   and the same again of compare, and no amount of making that cheaper turns
+   half of it into the 47 ms the requirement asks for. */
+static UBYTE           fb_input_left;
+static UWORD           fb_hot_ty0;
+static UBYTE           fb_hot_have;
+
+/* Bands in one screen pass, which is how many an input event is chased for. */
+static UBYTE fb_chase_bands(VOID);
+
+/* The band in flight is a chased one, produced beside the pass rather than as
+   part of it.  Read in fb_grab_frame(), which must not answer it out of a
+   staging copy taken before the key arrived. */
+static UBYTE           fb_band_hot;
+
 /* A resync is a sequence, and asking twice must not restart it: a second
    refresh inside one would re-queue geom and re-clear a shadow the viewer has
    not yet been given a frame from. */
@@ -1341,7 +1376,8 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
        encodes that copy.  A pass that read a band at a time goes the long way
        round, because its pixels are not in fb_stage yet.  The planar path has
        no copy at all and holds the screen for each band. */
-    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) && fb_stage_whole)
+    if (ty0 != 0 && RFB_FMT_IS_CHUNKY(want->format) && fb_stage_whole &&
+        !fb_band_hot)
     {
         const UBYTE *stage = fb_stage;
 
@@ -1423,7 +1459,9 @@ static int fb_grab_frame(const FbGeometry *want, FbGeometry *now,
                 fb_stage_whole =
                     (UBYTE)(rfb_scroll_probe_due(&fb_enc) ? 1 : 0);
 
-            if (fb_stage_whole)
+            /* A chased band reads its own rows whatever the pass decided:
+               the point of it is pixels newer than the pass has. */
+            if (fb_stage_whole && !fb_band_hot)
             {
                 ry0   = 0;
                 rrows = want->height;
@@ -1779,6 +1817,19 @@ static VOID fb_inject_pointer(rfb_s32 x, rfb_s32 y)
     fb_write_event();
 }
 
+static UBYTE fb_chase_bands(VOID)
+{
+    ULONG n = ((ULONG)fb_enc.tiles_y + (ULONG)FB_BAND_ROWS - 1UL) /
+              (ULONG)FB_BAND_ROWS;
+
+    if (n < (ULONG)FB_CHASE_MIN)
+        n = (ULONG)FB_CHASE_MIN;
+    if (n > (ULONG)FB_CHASE_MAX)
+        n = (ULONG)FB_CHASE_MAX;
+
+    return (UBYTE)n;
+}
+
 /* The buttons, as the difference between what is held now and what was held
    before.  A mask that arrives with two bits changed produces two events,
    because IECODE carries one button. */
@@ -1819,6 +1870,9 @@ static VOID fb_inject_buttons(rfb_s32 mask)
         fb_event.ie_X = 0;
         fb_event.ie_Y = 0;
         fb_write_event();
+        /* A button that changed, and not a pointer that moved: the pointer is
+           the viewer's own overlay and moving it changes no pixel here. */
+        fb_input_left = fb_chase_bands();
     }
 }
 
@@ -1834,6 +1888,7 @@ static VOID fb_inject_key(rfb_s32 raw, rfb_s32 qual, BOOL down)
        and Intuition reads all of it off this field. */
     fb_event.ie_Qualifier = (UWORD)(((ULONG)qual & 0xFFFFUL) | fb_buttons);
     fb_write_event();
+    fb_input_left = fb_chase_bands();
 }
 
 /* A refresh, honoured, coalesced or deferred.  The shadow goes and geom and pal
@@ -2163,6 +2218,10 @@ BOOL http_fb_start(struct Library *sb, LONG sock,
     fb_busy_ticks = 0;
     fb_idle_given = 0;
     fb_band_ty0   = 0;
+    fb_band_hot   = 0;
+    fb_input_left = 0;
+    fb_hot_ty0    = 0;
+    fb_hot_have   = 0;
     fb_pass_ticks = 0;
     fb_pass_acc   = 0;
     fb_pass_t0    = 0;
@@ -2528,26 +2587,80 @@ BOOL http_fb_slice(ULONG now)
            shorter than one band is a single band covering all of it. */
         UWORD rows = (UWORD)((fb_pass_ticks >= (ULONG)FB_BAND_WHEN)
                              ? FB_BAND_ROWS : fb_enc.tiles_y);
-        UWORD ty1 = (UWORD)(fb_band_ty0 + rows);
+        UWORD ty0;
+        UWORD ty1;
+        rfb_u32 was_dirty = fb_enc.st.tiles_dirty;
+
+        /* A key is owed an answer and the console knows which band the last
+           change was in, so that one is produced before the rest of the pass.
+           The pass keeps its place: this is a band BESIDE it and not a band OF
+           it, which is why it is only ever taken with a band either side of
+           it -- the encoder's per-frame work, the scroll probe at tile row
+           zero and the counters a pass closes at the last tile row, then stays
+           where it belongs and a chased band is a plain middle one. */
+        fb_band_hot = 0;
+        if (fb_input_left != 0 && fb_hot_have &&
+            fb_pass_ticks >= (ULONG)FB_BAND_WHEN &&
+            fb_hot_ty0 != 0 &&
+            (ULONG)fb_hot_ty0 + (ULONG)rows < (ULONG)fb_enc.tiles_y &&
+            fb_hot_ty0 != fb_band_ty0)
+            fb_band_hot = 1;
+
+        ty0 = fb_band_hot ? fb_hot_ty0 : fb_band_ty0;
+        ty1 = (UWORD)(ty0 + rows);
 
         if (ty1 > fb_enc.tiles_y)
             ty1 = (UWORD)fb_enc.tiles_y;
 
-        fb_band_last = (UBYTE)(ty1 >= fb_enc.tiles_y);
+        fb_band_last = (UBYTE)(!fb_band_hot && ty1 >= fb_enc.tiles_y);
 
         t0 = fb_ticks();
         rc = fb_grab_frame(&fb_geom, &seen, &palette_moved,
                            &fb_tx[10], fb_tx_cap - 10UL, &n,
-                           fb_band_ty0, ty1);
+                           ty0, ty1);
         t1 = fb_ticks();
+
+        /* Where the change was, which is where the next one will be.  Asked of
+           the encoder's own counter rather than of the message length, because
+           a band that sent nothing still wrote a header. */
+        if (rc == FB_GRAB_OK && !palette_moved &&
+            fb_enc.st.tiles_dirty != was_dirty)
+        {
+            fb_hot_ty0  = ty0;
+            fb_hot_have = 1;
+            fb_input_left = 0;          /* the viewer has its answer */
+        }
+        else if (fb_input_left != 0)
+        {
+            /* Every band and not only a chased one.  A key that draws nothing
+               -- a qualifier on its own, a keystroke nothing on the screen is
+               listening for -- otherwise leaves the chase set for ever, and
+               with it the idle the duty cycle owes: a screen too cheap to be
+               banded produces no chased bands at all and would have run flat
+               out from the first such key to the next thing that moved. */
+            fb_input_left--;
+        }
 
         /* Where the next one starts.  Anything but a clean band restarts the
            pass: half of one picture followed by half of another is worse
-           than a repeated frame. */
-        if (rc == FB_GRAB_OK && !palette_moved)
-            fb_band_ty0 = fb_band_last ? 0 : ty1;
-        else
+           than a repeated frame.  A CLEAN chased band changes nothing here --
+           the pass was not the thing that just ran -- but a failed one still
+           restarts it, because a screen that changed shape under the session
+           leaves both the pass's place and the hot band describing a tile grid
+           that is gone. */
+        if (rc != FB_GRAB_OK)
+        {
             fb_band_ty0 = 0;
+            fb_hot_have = 0;
+        }
+        else if (palette_moved)
+        {
+            fb_band_ty0 = 0;
+        }
+        else if (!fb_band_hot)
+        {
+            fb_band_ty0 = fb_band_last ? 0 : ty1;
+        }
     }
     if (t1 >= t0)
         fb_encode_ticks += t1 - t0;
@@ -2699,7 +2812,13 @@ BOOL http_fb_write(ULONG now)
         {
             ULONG done = fb_ticks();
             ULONG cost = (done >= fb_frame_t0) ? (done - fb_frame_t0) : 0UL;
-            int   pass_done = (fb_band_ty0 == 0);
+            /* A chased band is not a pass boundary even when it went out
+               with the pass at tile row zero: charging one as a pass sets
+               fb_pass_ticks to what a single band cost, and the pass after it
+               then reads as cheap enough to take whole -- one uninterrupted
+               encode of the entire screen, which is the opposite of what the
+               chase is for. */
+            int   pass_done = (fb_band_ty0 == 0 && !fb_band_hot);
             /* Against the running totals rather than against this band
                alone: a band costs a handful of ticks and dividing one by
                three rounds wrong either way.  What was granted is taken off. */
@@ -2724,6 +2843,16 @@ BOOL http_fb_write(ULONG now)
 
             owed = fb_busy_ticks / (ULONG)FB_IDLE_DIVISOR;
             idle = (owed > fb_idle_given) ? (owed - fb_idle_given) : 0UL;
+
+            /* Except that somebody typed while this pass was running.  The
+               share and the floor are both about not spending the machine on
+               a screen nobody drew on, and a key that has not been answered
+               yet is the one moment that is not what is happening.  Measured
+               at a fifth of a second of the wait on the pass that carries a
+               keystroke's answer. */
+            if (fb_input_left != 0)
+                idle = 0UL;
+
             resume = done + idle;
 
             /* The floor is about not re-reading a screen nobody drew on, and
@@ -2738,7 +2867,7 @@ BOOL http_fb_write(ULONG now)
                later than its end, and a deadline built from it would be a day
                away.  A wrap counts as nothing served, which costs one pass a
                day an extra 20 ms. */
-            if (fb_pass_t0 != 0UL)
+            if (fb_pass_t0 != 0UL && fb_input_left == 0)
             {
                 ULONG since = (done >= fb_pass_t0) ? (done - fb_pass_t0) : 0UL;
 

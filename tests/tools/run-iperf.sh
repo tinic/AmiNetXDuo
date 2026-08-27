@@ -148,6 +148,13 @@ fi
 STAGE="$ROOT/build/iperf-stage-$AMINETXDUO_RUN_TAG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/libs"
+
+# AMI_LOG_INFO on the serial port, which is the tier the bring-up marks are at.
+# The measured arms log nothing at it -- the per-packet sentences are DEBUG and
+# TRACE -- so this costs the figures nothing and gives a boot that never moved a
+# byte a record of what it thought it had configured.
+. "$ROOT/tools/serial-log.sh"
+serial_log_stage_env "$STAGE" 2
 cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
 [ -z "$A2065" ] || cp "$A2065" "$STAGE/devs/a2065.device"
 
@@ -216,6 +223,13 @@ cp "$TOOLS/netstat"         "$STAGE/netstat"
 # list and the checks move together.
 {
     echo "SYS:AddNetInterface eth0"
+    # Before a byte has been measured, so every counter below has a zero to be
+    # read against and a boot that moved nothing still says WHERE it stopped.
+    # An arm that fails prints no result line at all -- see iperf.c, where
+    # iperf_result_line() is on the branch a failure does not take -- so the
+    # transcript's `dir=` totals cannot tell a failed arm from one that ran and
+    # moved nothing.  These can.
+    echo "SYS:netstat -s"
     echo "SYS:iperf -h"
     echo "SYS:iperf $PEERADDR -p $PORT_TCP -t $SECS"
     echo "SYS:iperf -u $PEERADDR -p $PORT_UDP -t $SECS -b 2000"
@@ -322,12 +336,14 @@ if [ -n "$IFACE" ]; then
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
-        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat"
+        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat" \
+        "$STAGE/env"
 else
     echo "==> booting $MODEL with the A2065 on SLIRP"
     "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
-        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat"
+        "$STAGE/libs" "$STAGE/AddNetInterface" "$STAGE/iperf" "$STAGE/netstat" \
+        "$STAGE/env"
 fi
 RUN_RC=$?
 set -e
@@ -636,11 +652,12 @@ if [ "$SERVER_ARMS" = yes ]; then
     U_OFFERED=$(peer_val srvudp peer_packets)
     U_GOT=$(guest_val "$SRVUDP" 1 packets)
 
-    D_OVR=$(ns_delta 1 2 "$NS_OVR")
-    D_ERR=$(ns_delta 1 2 "$NS_ERR")
-    D_UNK=$(ns_delta 1 2 "$NS_UNK")
-    D_BUF=$(ns_delta 1 2 "$NS_BUF")
-    D_UDP=$(ns_delta 1 2 "$NS_UDP")
+    # 2 and 3, not 1 and 2: the first reading is now the one taken at bring-up.
+    D_OVR=$(ns_delta 2 3 "$NS_OVR")
+    D_ERR=$(ns_delta 2 3 "$NS_ERR")
+    D_UNK=$(ns_delta 2 3 "$NS_UNK")
+    D_BUF=$(ns_delta 2 3 "$NS_BUF")
+    D_UDP=$(ns_delta 2 3 "$NS_UDP")
 
     printf 'udp_rx_offered=%s udp_rx_delivered=%s dev_overruns=%s dev_rx_errors=%s dev_unknown_types=%s pool_buffer_failures=%s udp_socket_dropped=%s\n' \
            "${U_OFFERED:-0}" "${U_GOT:-0}" "$D_OVR" "$D_ERR" "$D_UNK" \
