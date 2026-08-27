@@ -357,6 +357,19 @@ stage_host() {
         return 1
     fi
 
+    # WHICH ADDRESS THE LAUNCHER REACHES THE GUEST ON.  A guest on a segment
+    # whose DHCP does not answer serves on the address it took by SLAAC, and
+    # every URL the launcher printed named the 169.254 one it fell back to.
+    if tools/classicwb-serve-selftest.sh > \
+            "$BUILD/classicwb-serve.log" 2>&1; then
+        note "classicwb serve selftest: $(sed -n 's/^checks=//p' \
+              "$BUILD/classicwb-serve.log")"
+    else
+        cat "$BUILD/classicwb-serve.log"
+        fail "tools/classicwb-serve-selftest.sh"
+        return 1
+    fi
+
     if tests/perf/peercap-selftest.sh > "$BUILD/peercap-selftest.log" 2>&1; then
         note "$(sed -n 's/^peercap-selftest: /peercap selftest: /p' \
               "$BUILD/peercap-selftest.log")"

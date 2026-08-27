@@ -261,6 +261,7 @@ jobs:
             tools/package-toolchain-mirror.sh \
             tools/amiga-toolchain.sh \
             tools/toolchain-resolve-selftest.sh \
+            tools/classicwb-serve-selftest.sh \
             tools/amiberry-run.sh \
             tools/classicwb.sh \
             tools/logcap.sh \
