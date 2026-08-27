@@ -709,6 +709,13 @@ static rfb_u32 rfb_probe_pass(rfb_encoder *e, const rfb_u8 *src,
     return dirty;
 }
 
+/* Enough moved last frame for something to be scrolling.  Under it nothing can
+ * be, and the backoff is not spent on a pass that was never going to look. */
+static int rfb_scroll_maybe(const rfb_encoder *e)
+{
+    return (e->last_dirty >= e->scroll.busy_tiles) || e->last_copy;
+}
+
 /* Whether the next band 0 will look for a scroll.  Exported because the probe
  * samples rows the whole height of the screen, so a caller that reads its
  * pixels off a graphics card has to know whether this pass needs the frame in
@@ -720,9 +727,7 @@ int rfb_scroll_probe_due(const rfb_encoder *e)
         return 0;
     if (!(e->flags & RFB_F_SCROLL_ADAPTIVE))
         return 1;
-
-    /* Nothing much moved last frame, so nothing can be scrolling. */
-    if (!((e->last_dirty >= e->scroll.busy_tiles) || e->last_copy))
+    if (!rfb_scroll_maybe(e))
         return 0;
 
     return e->backoff_left ? 0 : 1;
@@ -981,10 +986,10 @@ long rfb_encode_band(rfb_encoder *e, const rfb_u8 *const *planes,
         int probe = rfb_scroll_probe_due(e);
 
         /* The backoff doubles after each miss and resets on a hit.  Spending
-         * it is the one thing rfb_scroll_probe_due() cannot do, so it is done
-         * here against the same condition the predicate answered. */
+         * a unit of it is the one thing rfb_scroll_probe_due() must not do,
+         * so the pass it refused for the backoff spends it here. */
         if (!probe && (e->flags & RFB_F_SCROLL_ADAPTIVE) && e->backoff_left &&
-            ((e->last_dirty >= e->scroll.busy_tiles) || e->last_copy))
+            rfb_scroll_maybe(e))
             e->backoff_left--;
 
         if (probe) {
