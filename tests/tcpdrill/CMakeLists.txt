@@ -31,7 +31,7 @@ target_compile_options(test_tcpdrill PRIVATE -Wall -Wextra)
 # and rwndupdate.drill s03 on expectations, not on behaviour.  Read rather than
 # repeated, the same way cmake/AmiNetXDuoVersion.cmake reads its pins, so there
 # is one place to change and no copy to forget.
-set(_anxd_bsd_h "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_internal.h")
+set(_anxd_bsd_h "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.h")
 file(READ "${_anxd_bsd_h}" _anxd_bsd_src)
 
 string(REGEX MATCH "#define[ \t]+BSD_TCP_WINDOW[ \t]+([0-9]+)"
@@ -50,7 +50,7 @@ if(NOT _anxd_m)
 endif()
 set(_anxd_share ${CMAKE_MATCH_1})
 
-set(_anxd_ns_h "${CMAKE_SOURCE_DIR}/include/aminetxduo/netstack.h")
+set(_anxd_ns_h "${CMAKE_SOURCE_DIR}/include/aminetxduo/pool.h")
 file(READ "${_anxd_ns_h}" _anxd_ns_src)
 string(REGEX MATCH "#define[ \t]+AMI_POOL_PAYLOAD[ \t]+([0-9]+)"
        _anxd_m "${_anxd_ns_src}")

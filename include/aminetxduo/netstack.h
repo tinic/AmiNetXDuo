@@ -9,6 +9,7 @@
 
 #include <exec/types.h>
 #include "aminetxduo/config.h"
+#include "aminetxduo/pool.h"
 
 #include "tx_api.h"
 #include "nx_api.h"
@@ -145,12 +146,9 @@ const AmiIfConfig *netstack_iface_config(UWORD nx_index);
    is no pool. */
 VOID netstack_pool_sample(VOID);
 
-/* Packet pool sizing: computed from AvailMem() at startup and clamped to this
-   range.  AMI_POOL_MAX_PACKETS also bounds BSD_TCP_WINDOW_CEILING
-   (src/bsdsocket/bsdsocket_internal.h) and through it the ACK threshold. */
-#define AMI_POOL_PAYLOAD        1568        /* 1500 MTU + 14 eth + slack, 4-aligned */
-#define AMI_POOL_MIN_PACKETS    16
-#define AMI_POOL_MAX_PACKETS    512
+/* Packet pool sizing lives in aminetxduo/pool.h, included above:
+   AMI_POOL_PAYLOAD, AMI_POOL_MIN_PACKETS, AMI_POOL_MAX_PACKETS and the
+   arithmetic that turns AvailMem() into a packet count. */
 
 /* Interface handles.  Index 0..count-1 in configuration order; the loopback
    interface is always present and is not counted here. */

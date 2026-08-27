@@ -52,14 +52,8 @@
  */
 #define AMI_AUTOIP_STACK_SIZE       4096
 
-/* Fraction of AvailMem() the packet pool can claim (1/AMI_POOL_MEM_DIVISOR). */
-#define AMI_POOL_MEM_DIVISOR        16
-
-/* Below AMI_POOL_WORKING_PACKETS the eighth-share TCP budget cannot back the
-   8192-byte floor window, and the machine spends the transfer advertising
-   zero.  Reached by taking 1/AMI_POOL_MEM_DIVISOR_LOW instead, never more. */
-#define AMI_POOL_WORKING_PACKETS    96
-#define AMI_POOL_MEM_DIVISOR_LOW    8
+/* AMI_POOL_MEM_DIVISOR, AMI_POOL_WORKING_PACKETS and AMI_POOL_MEM_DIVISOR_LOW
+   are in aminetxduo/pool.h with the arithmetic that reads them. */
 
 #ifdef AMINETXDUO_IPV6
 /*

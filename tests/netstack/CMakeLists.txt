@@ -355,6 +355,28 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_persist COMMAND test_tcp_persist)
 
+    # The third of the three v0.25.3/v0.25.5 window fixes, and the only one
+    # that was measured rather than gated: the pool arithmetic that stopped a
+    # machine with no Fast RAM advertising a window its own packet pool could
+    # not hold.  Both halves of that coupling compile standalone -- the pool
+    # sizing in src/netstack/netstack_pool.c, the window in
+    # src/bsdsocket/bsdsocket_window.c -- so this drives them over every
+    # machine size, packet stride and ENV:ANXDPOOLDIV value at once, which is
+    # what a throughput run on one emulator cannot do.
+    add_executable(test_pool_window
+        host/test_pool_window_host.c
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket/bsdsocket_window.c")
+
+    target_include_directories(test_pool_window PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim"     # exec/types.h
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include")
+
+    target_compile_options(test_pool_window PRIVATE -Wall -Wextra -Werror)
+
+    add_test(NAME pool_window COMMAND test_pool_window)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
@@ -547,6 +569,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # already answered.
     set(NETSTACK_HOST_TU
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack.c"
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_pool.c"
         host/netstack_host_env.c)
 
     set(NETSTACK_HOST_INCLUDES

@@ -105,13 +105,12 @@ ULONG ami_bsd_tcp_window(VOID)
     NX_PACKET_POOL *pool = netstack_pool();
     NX_IP          *ip   = netstack_ip();
     ULONG           budget;
-    ULONG           window;
 
     if (pool == NULL || ip == NULL)
         return (ULONG)BSD_TCP_WINDOW;
 
-    budget = (pool->nx_packet_pool_total / (ULONG)BSD_TCP_WINDOW_POOL_SHARE) *
-             pool->nx_packet_pool_payload_size;
+    budget = ami_bsd_tcp_budget(pool->nx_packet_pool_total,
+                                pool->nx_packet_pool_payload_size);
 
     if (budget != last_budget)
     {
@@ -122,14 +121,9 @@ ULONG ami_bsd_tcp_window(VOID)
                  (long)BSD_TCP_WINDOW, (long)BSD_TCP_WINDOW_CEILING);
     }
 
-    window = budget / (bsd_tcp_consumer_count(ip) + 1UL);
-
-    if (window > (ULONG)BSD_TCP_WINDOW_CEILING)
-        window = (ULONG)BSD_TCP_WINDOW_CEILING;
-    if (window < (ULONG)BSD_TCP_WINDOW)
-        window = (ULONG)BSD_TCP_WINDOW;
-
-    return window;
+    return ami_bsd_tcp_window_for(pool->nx_packet_pool_total,
+                                  pool->nx_packet_pool_payload_size,
+                                  bsd_tcp_consumer_count(ip));
 }
 
 /*

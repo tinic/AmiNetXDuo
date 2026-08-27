@@ -14,6 +14,7 @@ set(NETSTACK_SOURCES
     netstack_dns_lease.c
     netstack_dns_status.c
     netstack_gateway.c
+    netstack_pool.c
     netstack_retry.c)
 
 # The ARexx host.  Without it netstack.c opens the AMITCP port itself, so the
