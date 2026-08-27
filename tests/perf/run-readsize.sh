@@ -156,7 +156,7 @@ PEEREOF
 BOOT=1
 while [ "$BOOT" -le "$BOOTS" ]; do
     TAG="readsize-b$BOOT-$$"
-    STAGE="$ROOT/build/readsize-stage-$BOOT"
+    STAGE="$ROOT/build/readsize-stage-$BOOT-$$"
     rm -rf "$STAGE"
     mkdir -p "$STAGE/libs"
     cp -R "$ROOT/tests/netstack/devs" "$STAGE/devs"
@@ -176,6 +176,15 @@ ADDRESS=$ADDRESS
 NETMASK=$NETMASK
 GATEWAY=$GATEWAY
 IFEOF
+    # anxnet.device covers a family of cards out of one binary and is told
+    # which by CARD=.  Without the line it opens nothing, and the run reads as
+    # "anxnet.device unit 0 did not answer" -- on THE DEFAULT BOARD here, whose
+    # sana2_select() answer is anxnet.device with CARD=pcmcia, so this harness
+    # could not bring an interface up as shipped.  tools/sana2-stage.sh writes
+    # the same line for everything that goes through sana2_stage; a vendor
+    # driver has no CARD= and gets none.
+    [ -z "$SANA2_SEL_CARD" ] ||
+        echo "CARD=$SANA2_SEL_CARD" >> "$STAGE/devs/NetInterfaces/eth0"
 
     {
         echo "SYS:AddNetInterface eth0"
@@ -208,7 +217,11 @@ IFEOF
         tr ' ' ',' || echo unknown)"
 
     export AMINETXDUO_RUN_TAG="$TAG"
-    AMINETXDUO_RIG_EXCLUSIVE="readsize boot $BOOT" \
+    # Exclusive by default, because peer_* is host wall clock and an arm that
+    # shares the host CPUs is measuring the other run as much as this one.  An
+    # override rather than a hardcode: a lab running eight guests refuses this
+    # claim outright, and a figure taken alongside is worth more than none.
+    AMINETXDUO_RIG_EXCLUSIVE="${AMINETXDUO_RIG_EXCLUSIVE-readsize boot $BOOT}" \
     "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" \
         -t "$BUDGET" \
         "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" \
@@ -216,6 +229,9 @@ IFEOF
         "$STAGE/netstat" > "$RESULTS/boot-$BOOT.run" 2>&1
     RUN_RC=$?
 
+    # An emulator that refused to start has no guest for the peer to reach,
+    # and the peer would spend the whole plan knocking before saying so.
+    [ "$RUN_RC" = 0 ] || kill "$PEER_PID" 2>/dev/null
     wait "$PEER_PID"
     kill "$TCPDUMP_PID" 2>/dev/null
     wait "$TCPDUMP_PID" 2>/dev/null
