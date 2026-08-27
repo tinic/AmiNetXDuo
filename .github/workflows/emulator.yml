@@ -454,6 +454,61 @@ jobs:
           -r AMINETXDUO_A2065 --
           tools/ci.sh cards6
 
+      # THE STAGES tools/ci.sh HAD AND NO WORKFLOW EVER NAMED.
+      #
+      # tests/HARNESSES called twelve harnesses wired to tools/ci.sh while the
+      # only thing that ran their stage was a person typing it, so twelve rows
+      # read as coverage and were not.  tools/check-harnesses.sh computes the
+      # schedule now and the four steps below and the e2e-cards one further
+      # down are what make those rows true rather than relabelled.
+      #
+      # Every machine but the A1200's 68EC020: 68030/68040/68060 at two clocks,
+      # 32 MB and 128 MB of Fast, three to eight interface definitions in one
+      # drawer, the wording every bring-up failure gets, which interface takes
+      # a slot when the drawer describes more than there are, an interface
+      # removed out from under another on the same device unit, seven kinds of
+      # wrong DEVS: that a parser cannot see, and httpd from S:User-Startup on
+      # a machine with no screen.  A ROM and a driver; no peer.
+      - name: The machine matrix
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "CPU, memory, interface count and refusal wording"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh matrix
+
+      # NetCapture on every card, read back with tcpdump: the frames are
+      # ping's, and the filter is checked against an unfiltered capture of the
+      # same seconds.  The peer is optional and its absence is a skipped HALF,
+      # not a skipped arm -- without one the pcap files are read by the machine
+      # that wrote them.
+      - name: NetCapture, every card
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "NetCapture writes files another machine can read"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh capture
+
+      # What the machine puts on the wire when nobody asked it to.  Nothing
+      # else here asserts on what the guest EMITS, which is how a DHCPv6 client
+      # rebinding twenty-five times a second passed every other stage.
+      - name: The wire, with the machine idle
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "every card goes quiet after bring-up"
+          -r AMINETXDUO_A2065 --
+          tools/ci.sh wirequiet
+
+      # Is the machine still on the network while it is inside a certificate
+      # chain?  It was not: the peer's neighbour entry went FAILED for about
+      # 44 s.  The gate is the longest stretch of silence, probed from the peer
+      # once a second, so a peer is a requirement rather than a half.
+      - name: Reachable during a TLS handshake
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "the machine answers throughout a TLS handshake"
+          -r AMINETXDUO_A2065 -r AMINETXDUO_PEER --
+          tools/ci.sh reachability
+
       # THE TWO REGRESSION TESTS THAT NEEDED A REAL LINK AND SO HAD NO HOME.
       #
       # NetShutdown against live services -- httpd serving, nc listening, two
@@ -569,6 +624,22 @@ jobs:
           tools/ci-arm.sh -n "Release archive on a real Workbench 3.1"
           -r AMINETXDUO_ADF_DIR -r AMINETXDUO_INSTALLER -r AMINETXDUO_PEER --
           tools/ci.sh e2e
+
+      # THE SAME INSTALL, ON EVERY CARD.  The step above boots the A2065 and
+      # nothing else, and did so silently: run-workbench.sh staged the driver
+      # by name and wrote two literal a2065 lines into the emulator config, so
+      # every release this project has cut was gated on one network card.
+      #
+      # A narrower question than the step above and a different ingredient
+      # list: no peer, because nothing drives the machine from outside it, but
+      # the vendor drivers have to be in the asset store.  Does the archive
+      # install, and does the power cycle bring the network up on THIS card.
+      - name: Release archive on every card
+        if: ${{ !cancelled() && steps.dist.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "Release archive on a real Workbench, every card"
+          -r AMINETXDUO_ADF_DIR -r AMINETXDUO_INSTALLER --
+          tools/ci.sh e2ecards
 
       # A CANCELLED RUN LEAVES ITS GUESTS BEHIND.
       #
