@@ -1894,6 +1894,33 @@ stage_bridged() {
         esac
     fi
 
+    # KICKSTART 2.x, WHICH NOTHING ELSE HERE BOOTS WITH A WORKING LINK.
+    # run-oommsg.sh boots 2.04 to prove a sentence on a 512 KB machine and the
+    # stack never starts there, so anxnet.device's romtag has only ever been
+    # initialised by a V40 exec and card.resource has only ever been V40.
+    # Skipped by name where the two ROMs are not configured: a 3.1 image does
+    # not boot what these arms boot, and a mismatch is a black screen rather
+    # than a test result.
+    printf '\n-- the bring-up on Kickstart 2.04 and 2.05\n'
+    rc=0
+    if [ -z "${AMINETXDUO_KICKSTART_A2000:-}${AMINETXDUO_KICKSTART_V204:-}" ]; then
+        skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
+ exec and card.resource V37 stay unproven"
+    else
+        AMINETXDUO_RUN_TAG=ci-kick2x "$ROOT/tests/tools/run-kick2x.sh" \
+            -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+        case "$rc" in
+            0) note "PASS  the romtag and the PCMCIA claim both work under a" \
+                    "V37 ROM, and each 2.x arm matches its 3.1 pair" ;;
+            2) skip "kick2x: the rig refused it before any arm booted" ;;
+            *) fail "kick2x: an arm that comes up on 3.1 does not come up on\
+ Kickstart 2.x -- the table above says which, and its 3.1 pair is what makes\
+ that a ROM finding"
+               bad=1 ;;
+        esac
+    fi
+
     printf '\n-- NetShutdown, and the programs using the network\n'
     "$ROOT/tests/tools/run-netshutdown.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
