@@ -188,10 +188,20 @@ verdict_guest() {
                  echo "      for. The transcript above is of a guest on some other" >&2
                  echo "      link, whatever it says. This is the RIG, not the code." >&2
                  [ -n "$why" ] || why=wrong_backend ;;
-            *)   echo "FAIL: $name: the run exited $run_rc and the transcript reports" >&2
-                 echo "      $failures failures. The two disagree, so this is not a" >&2
-                 echo "      pass in either direction." >&2
-                 [ -n "$why" ] || why=exit_disagrees ;;
+            # A NONZERO EXIT BESIDE FAILURES IS NOT A DISAGREEMENT.  This arm
+            # said "the two disagree" whatever the transcript held, so a guest
+            # that failed its own checks AND returned the code it returns for
+            # that was reported as a contradiction.  They only disagree when
+            # the transcript is clean.
+            *)   if [ "$failures" -ne 0 ]; then
+                     echo "FAIL: $name: the run exited $run_rc, which is what this" >&2
+                     echo "      guest returns for a transcript with failures in it." >&2
+                 else
+                     echo "FAIL: $name: the run exited $run_rc and the transcript reports" >&2
+                     echo "      no failures. The two disagree, so this is not a" >&2
+                     echo "      pass in either direction." >&2
+                     [ -n "$why" ] || why=exit_disagrees
+                 fi ;;
         esac
         bad=1
     fi

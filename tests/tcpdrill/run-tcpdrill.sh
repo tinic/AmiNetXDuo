@@ -3,7 +3,14 @@
 # Run the tcpdrill scripts under an emulator.
 #
 #   tests/tcpdrill/run-tcpdrill.sh [-m MODEL] [-t SECS] [-b BUILD] [-T TAG]
-#                                  [-s SCRIPT|all] [-A]
+#                                  [-s SCRIPT|all]
+#
+# Amiberry, and only Amiberry.  This carried RUNNER=${AMINETXDUO_RUNNER:-fsuae}
+# and a -A to flip it, and neither ever selected anything: the run below has
+# always been tools/amiberry-run.sh.  All the default did was name the fs-uae
+# serial log, build/serial-<tag>.log, for a transcript amiberry-run.sh writes
+# to build/amiberry-serial-<tag>.log -- so every failing case sent the reader
+# to a file that does not exist.
 #
 # SPDX-License-Identifier: MIT
 
@@ -16,17 +23,15 @@ TIMEOUT=300
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 TAG="tcpdrill"
 SCRIPT="$ROOT/tests/tcpdrill/scripts/tcp.drill"
-RUNNER="${AMINETXDUO_RUNNER:-fsuae}"
 
-while getopts "m:t:b:T:s:A" opt; do
+while getopts "m:t:b:T:s:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
         T) TAG="$OPTARG" ;;
         s) SCRIPT="$OPTARG" ;;
-        A) RUNNER=amiberry ;;
-        *) echo "usage: $0 [-m model] [-t secs] [-b build] [-T tag] [-s script] [-A]" >&2
+        *) echo "usage: $0 [-m model] [-t secs] [-b build] [-T tag] [-s script]" >&2
            exit 2 ;;
     esac
 done
@@ -37,8 +42,6 @@ DRILL="$ROOT/$BUILD/tests/tcpdrill/TcpDrill"
 if [ "$SCRIPT" = all ]; then
     rc=0
     nskip=0
-    ARM_A=()
-    [ "$RUNNER" = amiberry ] && ARM_A=(-A)
 
     for s in "$ROOT"/tests/tcpdrill/scripts/*.drill; do
         name=$(basename "$s" .drill)
@@ -55,7 +58,7 @@ if [ "$SCRIPT" = all ]; then
 
         arm=0
         "$0" -m "$MODEL" -t "$TIMEOUT" -b "$BUILD" -T "$TAG-$name" -s "$s" \
-            "${ARM_A[@]+"${ARM_A[@]}"}" > "$out" 2>&1 || arm=$?
+            > "$out" 2>&1 || arm=$?
 
         verdict=$(grep -E 'case\(s\)' "$out" | tail -1)
         echo "$name: ${verdict:-no verdict} rc=$arm"
@@ -114,11 +117,7 @@ fi
 
 echo
 echo "emulator log: build/tcpdrill-$TAG.log"
-if [ "$RUNNER" = "amiberry" ]; then
-    echo "serial log:   build/amiberry-serial-$TAG.log"
-else
-    echo "serial log:   build/serial-$TAG.log"
-fi
+echo "serial log:   build/amiberry-serial-$TAG.log"
 echo "guest files:  $HD"
 
 verdict_guest_cases "tcpdrill-$(basename "$SCRIPT" .drill)" \
