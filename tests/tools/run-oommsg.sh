@@ -85,8 +85,10 @@ echo
 
 
 FAILED=0
+UNRUN=0
 fail() { echo "FAIL: $*" >&2; FAILED=1; }
 pass() { echo "  ok: $*"; }
+skip() { echo "  --: $*"; UNRUN=$((UNRUN + 1)); }
 
 expect() {
     local what="$1"; shift
@@ -131,8 +133,21 @@ else
     fail "AddNetInterface exited '$RC', not 20, a failure reported as success"
 fi
 
+# THE LAST ASSERTION NEEDS A LOGGING BUILD, and it used to fail without one
+# rather than say so.  serial_log_have only asks whether the file has bytes in
+# it, and amiberry-run.sh now echoes a run token into the first line of every
+# transcript, so on an AMINETXDUO_LOG=OFF build the log is 35 bytes -- not
+# empty, and carrying nothing this can grep for.  What the seven assertions
+# above check is the WORDING a user sees, which a shipping build produces; the
+# stack's own AMI_ERROR is a different instrument and its absence is not a
+# defect in the message.
 SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
-if ! serial_log_have "$SERIAL" "$BUILD" "the stack's own refusal"; then
+LOGSTATE=$(serial_log_state "$BUILD" 2>/dev/null || echo unknown)
+if [ "$LOGSTATE" != on ]; then
+    skip "the stack's own refusal was NOT CHECKED: $BUILD is\
+ AMINETXDUO_LOG=$LOGSTATE, so netstack_startup writes nothing.  The seven\
+ assertions above are what a user sees and they did run"
+elif ! serial_log_have "$SERIAL" "$BUILD" "the stack's own refusal"; then
     fail "the stack's own refusal was NOT CHECKED: the serial log is empty"
 elif grep -qi "netstack_startup failed" "$SERIAL"; then
     pass "the stack refused for the reason the text describes"
@@ -145,6 +160,11 @@ echo
 if [ "$FAILED" -ne 0 ]; then
     echo "oommsg: FAILED" >&2
     exit 1
+fi
+
+if [ "$UNRUN" -ne 0 ]; then
+    echo "oommsg: PASSED, $UNRUN assertion(s) did not run (above)"
+    exit 0
 fi
 
 echo "oommsg: PASSED"

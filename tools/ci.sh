@@ -1012,6 +1012,25 @@ stage_web() {
         return 1
     fi
 
+    # THE DECODER'S OWN PIXELS, which nothing above reaches: --check says the
+    # committed page matches its TypeScript, and tsc says the types agree.
+    # Neither runs the planar unpack.  A viewer that draws garbage typechecks
+    # fine -- bit order, plane order and the padding in bytesPerRow are four
+    # ways to be wrong that all produce a picture rather than an error -- and
+    # this decodes with the real modules and compares every pixel against a
+    # reference built the other way round.  111 checks.
+    #
+    # It had been named by no stage at all, so it had never gone red in CI.
+    # It builds its own bundle with the esbuild this stage has already
+    # guaranteed, so a ROM, a guest and a network are all beside the point.
+    if node tools/web/console-selftest.mjs > "$BUILD/web-console-selftest.log" 2>&1; then
+        note "console decoder: $(grep -c '^ok' "$BUILD/web-console-selftest.log") checks passed"
+    else
+        cat "$BUILD/web-console-selftest.log"
+        fail "web (the console decoder does not reproduce its reference pixels)"
+        return 1
+    fi
+
     # And every vendored drawer is meant to be upstream's, byte for byte.
     # Each carries its own PROVENANCE: a comment block and then a plain
     # sha256sum list, which is why the comments are stripped and the rest is
@@ -1792,7 +1811,6 @@ stage_bridged() {
 "toolsay|tests/tools/run-toolsay.sh|-B @|the branches where a shipped command reached a return and printed no sentence at all" \
 "netstack|tests/netstack/run-amiberry.sh|-B @|netstack bring-up (14 checks, floor 12)" \
 "ifquery|tests/tools/run-ifquery.sh|-B @|the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the statistics counters, and the address-allocation message against the DHCP server on the wire" \
-"dnscache|tests/tools/run-dnscache.sh|-B @|the DNS answer cache: six lookups of two names, the same answer every time, and each name asked for ONCE on the wire" \
 "resolvebreak|tests/tools/run-resolvebreak.sh|-B @|how long a name lookup blocks on a blackholed server, and whether Ctrl-C gets the task back" \
     ; do
         hname="${entry%%|*}";  rest="${entry#*|}"

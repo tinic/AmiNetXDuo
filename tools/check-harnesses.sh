@@ -242,6 +242,87 @@ say harnesses_slirp "$(grep -c ': manual : SLIRP' "$MANIFEST" || true)"
 # number; they are also not coverage, so they get a line of their own.
 say harnesses_red "$(grep -c ': manual : RED' "$MANIFEST" || true)"
 
+# ------------------------------------------------- every SELFTEST too --
+#
+# THE SAME HOLE, ONE CLASS OVER, and it is the class with no manifest in
+# front of it.  tools/web/console-selftest.mjs decodes with the real planar
+# modules and compares every pixel against a reference built the other way
+# round -- 111 checks -- and it was named by no stage at all, so it had
+# never gone red in CI.  A harness at least has a row here to go stale; a
+# selftest has nothing, and `tests/*/*-verdict-selftest.sh` in tools/ci.sh
+# looks like a rule that covers them all until you notice where it does not
+# reach.
+#
+# TWO WAYS TO BE RUN, and both are checked:
+#
+#   the glob in tools/ci.sh, which is `tests/*/*-verdict-selftest.sh` and
+#     SKIPS A FILE THAT IS NOT EXECUTABLE (`[ -x "$st" ] || continue`), so a
+#     chmod is enough to take a grader out of CI in silence.  A file that
+#     matches the pattern and is not +x is reported.
+#   a literal path in a runner or in a harness, the way the rest of this
+#     script asks the question.
+#
+# ci.yml is not a runner here for the reason it is not one above: every
+# selftest path in it is an argument to shellcheck.
+SELFTEST_GLOB='tests/*/*-verdict-selftest.sh'
+
+# Not a gate, with the reason.  Held both directions: an exemption something
+# does run is an error.
+SELFTEST_EXEMPT="
+tools/profiler/selftest.sh  proves the profiler end to end and needs an emulator, a ROM and a build configured with AMINETXDUO_PROFILER=ON; the profiler is an instrument and profverify is its gate
+"
+declare -A SELFTEST_WHY
+while read -r t why; do
+    [ -n "$t" ] || continue
+    SELFTEST_WHY[$t]="$why"
+done <<< "$SELFTEST_EXEMPT"
+
+selftests=0 selftests_unrun=0 selftests_exempt=0
+while IFS= read -r st; do
+    selftests=$((selftests + 1))
+
+    named=""
+    # shellcheck disable=SC2254
+    case "$st" in
+    $SELFTEST_GLOB)
+        if invokes tools/ci.sh "$SELFTEST_GLOB"; then
+            if [ -x "$st" ]; then
+                named="tools/ci.sh (the glob)"
+            else
+                err "selftest_not_executable_so_the_glob_skips_it:$st"
+            fi
+        fi ;;
+    esac
+
+    if [ -z "$named" ]; then
+        # THIS SCRIPT IS NOT A RUNNER, and it took itself for one: the
+        # exemption table above names tools/profiler/selftest.sh, which is a
+        # mention, so the exempt row reported itself as run.
+        while IFS= read -r f; do
+            case "$f" in "$st"|"${BASH_SOURCE[0]#./}"|tools/check-harnesses.sh)
+                continue ;; esac
+            invokes "$f" "$st" && { named="$f"; break; }
+        done < <( { find tests install/test -name 'run-*.sh'
+                    find tools -name '*.sh'
+                    printf '%s\n' "${RUNNERS[@]}"; } | sed 's|^\./||' | sort -u)
+    fi
+
+    if [ -n "${SELFTEST_WHY[$st]+set}" ]; then
+        selftests_exempt=$((selftests_exempt + 1))
+        [ -n "$named" ] && err "selftest_exempt_but_$named-runs_it:$st"
+        continue
+    fi
+
+    [ -n "$named" ] && continue
+    err "no_runner_for_selftest:$st"
+    selftests_unrun=$((selftests_unrun + 1))
+done < <(find tools tests install -name '*selftest*' \
+              ! -name '*.log' ! -name '*.txt' | sed 's|^\./||' | sort)
+
+say selftests "$selftests"
+say selftests_exempt "$selftests_exempt"
+say selftests_unrun "$selftests_unrun"
+
 # ------------------------------------- WHEN A WIRED ROW ACTUALLY RUNS --------
 #
 # THE GAP THE ROWS ABOVE CANNOT SEE.  Everything so far asks whether a runner

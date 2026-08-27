@@ -104,9 +104,15 @@ else
     fail "the command list ran $STARTS times, the machine reset"
 fi
 
+# `has address `, NOT `^$name `.  On a dual-stack segment `host` prints an
+# IPv6 line as well, so three lookups produced five or six lines and two
+# distinct ones, and this read that as "five answers, two of them different".
+# Measured bridged on 2026-08-27: example.com 3 A lines, one value, plus 2
+# AAAA lines -- the FIRST lookup of a name carries no AAAA.  The cache
+# question is about the A answer, and the AAAA lines are a separate one.
 for name in "$NAME_A" "$NAME_B"; do
-    ANSWERS=$(grep -c "^$name " "$REPORT" || true)
-    UNIQUE=$(grep "^$name " "$REPORT" | sort -u | wc -l | tr -d ' ')
+    ANSWERS=$(grep -c "^$name has address " "$REPORT" || true)
+    UNIQUE=$(grep "^$name has address " "$REPORT" | sort -u | wc -l | tr -d ' ')
 
     if [ "$ANSWERS" -eq 3 ]; then
         pass "$name resolved on all three lookups"
@@ -123,6 +129,14 @@ for name in "$NAME_A" "$NAME_B"; do
     fi
 done
 
+# THE WIRE HALF IS DEAD CODE TODAY and the exit 77 below is why this harness
+# is not a gate: NOTHING WRITES $HD/host.pcap.  It came from fs-uae, which
+# could dump its SLIRP link to a pcap, and fs-uae left the tree on 2026-08-04;
+# tools/amiberry-run.sh writes no capture at all.  So this branch is never
+# taken, the strongest assertion group never runs, and the harness reaches
+# exit 77 every time however healthy the stack is.  Giving it a host-side
+# tcpdump on -B's interface, the way tests/tools/run-wirequiet.sh has one, is
+# what would make it a gate.
 if [ -s "$HD/host.pcap" ]; then
     tcpdump -r "$HD/host.pcap" -n "udp dst port 53" 2>/dev/null > "$HD/dns.txt" || true
 
