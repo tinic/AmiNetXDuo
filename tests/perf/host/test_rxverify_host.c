@@ -70,17 +70,40 @@ ULONG   i;
     return (USHORT)(~sum & 0xFFFFUL);
 }
 
-/* What the copy hook hands the fused entry: the ones-complement longword sum
-   of what it copied, end-around carry, starting at the IP header. */
+/*
+ * What the copy hook hands the fused entry: the ones-complement longword sum
+ * of what it copied, end-around carry, starting at the IP header.
+ *
+ * Assembled big-endian, because that is the machine the hook runs on and the
+ * value it produces there is byte order dependent.  The last longword is the
+ * bytes that arrived, padded with zeroes -- ami_sana2_copy_to_buff() builds it
+ * that way through a byte array, so a frame whose length is not a multiple of
+ * four still contributes a whole longword.  A model that dropped that tail
+ * would agree with the verifier only on lengths divisible by four, which is
+ * every hand-written fixture in this file and no real frame in particular.
+ */
 static ULONG carried_sum(const UCHAR *p, ULONG bytes)
 {
 ULONG   acc = 0;
 ULONG   i;
+ULONG   k;
 
     for (i = 0; i + 3 < bytes; i += 4)
     {
     ULONG w = ((ULONG)p[i] << 24) | ((ULONG)p[i + 1] << 16) |
               ((ULONG)p[i + 2] << 8) | (ULONG)p[i + 3];
+
+        acc += w;
+        if (acc < w)
+            acc++;
+    }
+
+    if (i < bytes)
+    {
+    ULONG w = 0;
+
+        for (k = 0; i + k < bytes; k++)
+            w |= (ULONG)p[i + k] << (24 - (8 * k));
 
         acc += w;
         if (acc < w)
@@ -265,9 +288,8 @@ USHORT  sum;
     {
     ULONG j;
 
-        /* An echo request, or a neighbour solicitation, depending on what the
-           caller put in byte 0 -- filled in by the caller after this returns
-           would be too late for the checksum, so it is done here. */
+        /* An echo request.  Filled in here and not by the caller afterwards,
+           because the checksum below has to cover it. */
         up[0] = 128;                        /* echo request */
         up[1] = 0;
         up[4] = 0x12; up[5] = 0x34;         /* identifier */
@@ -275,16 +297,37 @@ USHORT  sum;
         for (j = 8; j < upper.bytes; j++)
             up[j] = (UCHAR)(0x40 + j);
     }
+    else if (upper.protocol == NX_PROTOCOL_UDP)
+    {
+    ULONG j;
+
+        up[0] = 0x30; up[1] = 0x39;         /* source port 12345 */
+        up[2] = 0x00; up[3] = 0x35;         /* dest port 53 */
+        up[4] = (UCHAR)(upper.bytes >> 8);
+        up[5] = (UCHAR)(upper.bytes & 0xFF);
+        for (j = 8; j < upper.bytes; j++)
+            up[j] = (UCHAR)(0x70 + j);
+    }
     else
     {
         fill_tcp(up, upper.bytes);
     }
 
     sum = ref_sum(up, upper.bytes, addr, 32, upper.protocol);
+
     if (upper.protocol == NX_PROTOCOL_ICMPV6)
     {
         up[2] = (UCHAR)(sum >> 8);
         up[3] = (UCHAR)(sum & 0xFF);
+    }
+    else if (upper.protocol == NX_PROTOCOL_UDP)
+    {
+        /* A computed zero goes on the wire as all ones: zero means "no
+           checksum", which the verifier declines rather than checks. */
+        if (sum == 0)
+            sum = 0xFFFF;
+        up[6] = (UCHAR)(sum >> 8);
+        up[7] = (UCHAR)(sum & 0xFF);
     }
     else
     {
@@ -362,6 +405,184 @@ char        label[128];
     ck(label, walk_flags == want_bits);
     snprintf(label, sizeof label, "%s: fused bits", what);
     ck(label, fused_flags == want_bits);
+}
+
+/* ------------------------------------------------------------- the fuzz -- */
+
+static ULONG    fz_state = 0x12345678UL;
+
+static ULONG fz_next(void)
+{
+    fz_state = (fz_state * 1103515245UL + 12345UL) & 0xFFFFFFFFUL;
+
+    return ((fz_state >> 8) & 0xFFFFFFUL);
+}
+
+/*
+ * One random chain, against the two properties that matter and nothing else.
+ *
+ * THE TEST DOES NOT RE-DERIVE THE ACCEPT RULE.  Encoding "hop-by-hop is
+ * walked, ESP is not" here would compare the implementation with a copy of
+ * itself and pass on a shared misreading.  What it knows instead is the truth
+ * about the frame, because it built it: where the transport header is, what
+ * protocol it is, and whether the checksum on it is right.  So:
+ *
+ *   both entry points must answer identically
+ *   a dropped frame must really carry a bad checksum
+ *   a cleared frame must really carry a good one, under the right protocol
+ *
+ * A declined frame asserts nothing, which is the point: declining is a
+ * statement about this file and not about the frame.
+ */
+static void fuzz_one(unsigned long round)
+{
+V6Ext       chain[6];
+V6Upper     upper;
+NX_PACKET   packet;
+ULONG       extlen = 0;
+ULONG       frame;
+ULONG       at;
+ULONG       walk_flags;
+ULONG       fused_flags;
+ULONG       want;
+UINT        walk_drop  = 99;
+UINT        fused_drop = 99;
+UINT        count;
+UINT        i;
+int         corrupt;
+char        label[64];
+
+    count = (UINT)(fz_next() % 5UL);
+
+    for (i = 0; i < count; i++)
+    {
+    ULONG kind = fz_next() % 10UL;
+
+        memset(&chain[i], 0, sizeof chain[i]);
+
+        switch (kind)
+        {
+        case 0:                             /* hop-by-hop, 8 or 16 bytes */
+        case 1:
+            chain[i] = tlv8(0);
+            if ((fz_next() & 1UL) != 0UL)
+            {
+                chain[i].bytes   = 16;
+                chain[i].tail[0] = 1;
+                chain[i].tail[2] = 12;      /* PadN over the rest */
+            }
+            break;
+
+        case 2:                             /* destination options */
+            chain[i] = tlv8(60);
+            break;
+
+        case 3:                             /* with a home address option */
+            chain[i].type    = 60;
+            chain[i].bytes   = 24;
+            chain[i].tail[0] = 2;
+            chain[i].tail[1] = 201;
+            chain[i].tail[2] = 16;
+            chain[i].tail[19] = 1;
+            chain[i].tail[20] = 1;
+            break;
+
+        case 4:                             /* routing */
+            chain[i].type    = 43;
+            chain[i].bytes   = 8;
+            chain[i].tail[1] = 4;
+            chain[i].tail[2] = (UCHAR)(fz_next() & 3UL);   /* segments left */
+            break;
+
+        case 5:                             /* fragment */
+        case 6:
+            chain[i].type    = 44;
+            chain[i].bytes   = 8;
+            chain[i].tail[1] = (UCHAR)(fz_next() & 0x07UL);
+            chain[i].tail[2] = (UCHAR)(fz_next() & 0xFFUL);
+            break;
+
+        case 7:                             /* authentication */
+            chain[i].type    = 51;
+            chain[i].bytes   = 24;
+            chain[i].tail[0] = 4;           /* (4 + 2) * 4 */
+            break;
+
+        case 8:                             /* ESP */
+            chain[i].type  = 50;
+            chain[i].bytes = 8;
+            break;
+
+        default:                            /* no next header */
+            chain[i].type  = 59;
+            chain[i].bytes = 8;
+            break;
+        }
+
+        extlen += chain[i].bytes;
+    }
+
+    switch (fz_next() % 3UL)
+    {
+    case 0:  upper.protocol = NX_PROTOCOL_TCP;    upper.bytes = 20 + (fz_next() % 40UL); break;
+    case 1:  upper.protocol = NX_PROTOCOL_UDP;    upper.bytes =  8 + (fz_next() % 40UL); break;
+    default: upper.protocol = NX_PROTOCOL_ICMPV6; upper.bytes =  8 + (fz_next() % 40UL); break;
+    }
+
+    upper.bytes &= ~1UL;                    /* keep ref_sum's odd tail out of it */
+    if (upper.protocol == NX_PROTOCOL_TCP && upper.bytes < 20)
+        upper.bytes = 20;
+    if (upper.bytes < 8)
+        upper.bytes = 8;
+
+    frame = build_v6x(chain, count, upper, 0);
+    at    = 40 + extlen;
+
+    /* Corrupt a transport byte, never an extension header one: the transport
+       checksum does not cover those, so a frame corrupted there is still a
+       good frame and the assertion below would be wrong about it. */
+    corrupt = ((fz_next() & 3UL) == 0UL) ? 1 : 0;
+    if (corrupt)
+        buf6[at + (fz_next() % upper.bytes)] ^= 0xFF;
+
+    memset(&packet, 0, sizeof packet);
+    packet.nx_packet_prepend_ptr = buf6;
+    packet.nx_packet_append_ptr  = buf6 + frame;
+    packet.nx_packet_length      = frame;
+    packet.nx_packet_data_start  = buf6;
+    packet.nx_packet_data_end    = buf6 + 2048;
+    walk_flags = n68k_rx_verify(&packet, &walk_drop);
+
+    memset(&packet, 0, sizeof packet);
+    packet.nx_packet_prepend_ptr = buf6;
+    packet.nx_packet_append_ptr  = buf6 + frame;
+    packet.nx_packet_length      = frame;
+    packet.nx_packet_data_start  = buf6;
+    packet.nx_packet_data_end    = buf6 + 2048;
+    fused_flags = n68k_rx_verify_sum(&packet, carried_sum(buf6, frame), frame,
+                                     &fused_drop);
+
+    snprintf(label, sizeof label, "fuzz %lu: entries agree", round);
+    ck(label, walk_flags == fused_flags && walk_drop == fused_drop);
+
+    snprintf(label, sizeof label, "fuzz %lu: dropped a good frame", round);
+    ck(label, (walk_drop == NX_FALSE) || (corrupt != 0));
+
+    switch (upper.protocol)
+    {
+    case NX_PROTOCOL_TCP:
+        want = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;    break;
+    case NX_PROTOCOL_UDP:
+        want = NX_INTERFACE_CAPABILITY_UDP_RX_CHECKSUM;    break;
+    default:
+        want = NX_INTERFACE_CAPABILITY_ICMPV6_RX_CHECKSUM; break;
+    }
+
+    snprintf(label, sizeof label, "fuzz %lu: cleared a bad frame", round);
+    ck(label, (walk_flags == 0UL) || (corrupt == 0));
+
+    snprintf(label, sizeof label, "fuzz %lu: named the right protocol", round);
+    ck(label, (walk_flags == 0UL) || (walk_flags == want));
 }
 
 int main(void)
@@ -641,6 +862,17 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
     }
 
 #endif /* FEATURE_NX_IPV6 */
+
+#ifdef FEATURE_NX_IPV6
+    {
+    unsigned long r;
+
+        for (r = 0; r < 20000UL; r++)
+            fuzz_one(r);
+
+        printf("v6 chain fuzz                      %lu rounds\n", r);
+    }
+#endif
 
     printf("%s\n", failures == 0 ? "PASS" : "FAIL");
     return failures ? 1 : 0;
