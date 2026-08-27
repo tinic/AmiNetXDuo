@@ -44,7 +44,6 @@ comment beside the code, not an entry here.
 | `AMINETXDUO_AMIBERRY_MAC` is ignored for `ne2000_pcmcia` | Amiberry hands that board the host NIC address, so two bridged runs share one; detected and refused rather than fixed, one at a time per host | `tools/emu-board.sh:57`, `tools/amiberry-run.sh:284` |
 | `aamprobe.c` hard-codes `a2065.device` twice | on any other board the re-add is refused with errno 6 and later asserts read poison | `tests/tools/aamprobe.c:669`, `:926` |
 | binutils `amiga-2.46` cannot assemble gcc 16.2's own output | it forces a byte displacement on `jne`/`jeq`; we stay pinned at `amiga-2.39.0` | bebbo's `binutils-gdb` |
-| The console records `.pfs` and nothing outside this tree reads it | an export needs a muxer inlined into the single-file page and a lossless codec; there is no CSP anywhere in the tree, the constraint is the build | `src/tools/web/client/console/pfs.ts` |
 | No arm reaches the accelerated-Gayle timing ratio | an emulated bus read costs host time, not guest time; needs real hardware | `tests/tools/run-cpuspeed.sh:30` |
 | No arm puts two network boards in one machine | one `-N` per run and `emu_board_lines` is called once, so non-zero `UNIT` is untested; `CARD=` itself is exercised by the card sweeps | `tools/amiberry-run.sh:40` |
 | Payload content is unverified on a real 3c589 | the physical arm was never staged and Amiberry emulates no EtherLink III | `tests/tools/run-payverify.sh` |
