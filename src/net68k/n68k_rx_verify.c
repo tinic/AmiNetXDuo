@@ -151,7 +151,7 @@ ULONG   plen;
 ULONG   end;
 ULONG   at =  40UL;
 ULONG   hlen;
-UINT    walked =  0U;
+UINT    walked =  0U;         /* only to bound the loop */
 UINT    next;
 
     if (length < 40UL)
@@ -282,11 +282,6 @@ UINT    next;
         return (NX_FALSE);
     }
 
-    if (walked != 0U)
-    {
-        n68k_rx_verify_stats.v6_ext++;
-    }
-
     *protocol =  next;
     *offset   =  (UINT)at;
     *payload  =  (UINT)(end - at);
@@ -363,6 +358,10 @@ UINT        ok;
 
     n68k_rx_verify_stats.transport_ok++;
     n68k_rx_verify_stats.v6_ok++;
+    if (offset > 40U)
+    {
+        n68k_rx_verify_stats.v6_ext++;
+    }
 
     return (n68k_rxv6_bit(protocol));
 }
@@ -683,6 +682,10 @@ UINT    offset;
         n68k_rx_verify_stats.transport_ok++;
         n68k_rx_verify_stats.v6_ok++;
         n68k_rx_verify_stats.from_copy++;
+        if (offset > 40U)
+        {
+            n68k_rx_verify_stats.v6_ext++;
+        }
 
         return (n68k_rxv6_bit(protocol));
     }
