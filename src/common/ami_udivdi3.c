@@ -586,6 +586,57 @@ u32     mid;
 #endif
 }
 
+/*
+ * 32x32 -> the low 32 only.
+ *
+ * A whole MULU.W cheaper than ami_umul32_wide() on a part without MULU.L: the
+ * high halves' product lands entirely above bit 31 and is thrown away, so
+ * three of the four partial products are all a caller who shifts the answer
+ * left can use.
+ */
+static __inline__ __attribute__((always_inline)) u32 ami_umul32_low(u32 a, u32 b)
+{
+#if (defined(__mc68020__) || defined(__mc68030__) || defined(__mc68040__)) && \
+    !defined(__mc68060__)
+
+u32     product = a;
+
+
+    __asm__ ("mulu.l %1,%0" : "+d" (product) : "dmi" (b));
+
+    return(product);
+
+#else
+
+#ifdef AMI_RT_ASM
+    /* The 68020 up, the 68060 included: the 32-bit-result MULU.L is the form
+       none of them dropped.  Signed or unsigned makes no difference to the
+       low 32 bits, which is why __mulsi3() spells it the same way. */
+    if (ami_rt_020 != 0)
+    {
+    u32     product = a;
+
+        __asm__ (AMI_CHIP_020 "muls.l %1,%0" AMI_CHIP_HOME
+                 : "+d" (product) : "d" (b));
+
+        return(product);
+    }
+#endif
+
+    {
+u16     a_lo = (u16)a;
+u16     a_hi = (u16)(a >> 16);
+u16     b_lo = (u16)b;
+u16     b_hi = (u16)(b >> 16);
+
+
+    return(((u32)a_lo * (u32)b_lo) +
+           ((((u32)a_lo * (u32)b_hi) + ((u32)a_hi * (u32)b_lo)) << 16));
+    }
+
+#endif
+}
+
 u64 __muldi3(u64 a, u64 b);
 
 AMI_LATE_LIBCALL(__muldi3) u64 __muldi3(u64 a, u64 b)
@@ -596,10 +647,13 @@ u32     b_lo = (u32)b;
 u64     product = ami_umul32_wide(a_lo, b_lo);
 
 
-    /* Cross terms go through ami_umul32_wide(), not `a_lo * b_hi`, to keep
-       this file free of __mulsi3 calls on a 68000. */
-    product += (u64)(u32)ami_umul32_wide(a_lo, (u32)(b >> 32)) << 32;
-    product += (u64)(u32)ami_umul32_wide((u32)(a >> 32), b_lo) << 32;
+    /* Both cross terms are shifted 32 left, so only their low halves survive
+       and ami_umul32_low() is the right multiply for them -- ami_umul32_wide()
+       computed a high half that was discarded, three MULU.W wasted per call on
+       a 68000.  Neither goes through `a_lo * b_hi`: that lowers to __mulsi3,
+       which is in this file. */
+    product += (u64)(ami_umul32_low(a_lo, (u32)(b >> 32)) +
+                     ami_umul32_low((u32)(a >> 32), b_lo)) << 32;
 
     return(product);
 }
