@@ -3,6 +3,15 @@
 # THE REGRESSION TEST FOR "the command says the network is down while it is up".
 #
 #   tests/tools/run-livetools.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
+#                                [-B INTERFACE]
+#
+# BRIDGED.  It was SLIRP: the command list embedded 10.0.2.2 in five lines and
+# two assertions compared against the literals 10.0.2.15 and 10.0.2.2, so what
+# it exercised was the emulator's own NAT rather than this stack on a wire.
+# The gateway is now read off the host's routing table for -B's interface, and
+# the leased address is read out of the transcript instead of compared to a
+# constant -- a DHCP server on a real segment does not hand out the same
+# address twice.
 #
 # SPDX-License-Identifier: MIT
 
@@ -17,15 +26,51 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+IFACE="${AMINETXDUO_LIVETOOLS_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
+GATEWAY="${AMINETXDUO_LIVETOOLS_GATEWAY:-}"
+# Somewhere off this segment that answers ICMP, for the second ping.
+OFFNET="${AMINETXDUO_LIVETOOLS_OFFNET:-8.8.8.8}"
+# A destination for the AddNetRoute/DeleteNetRoute pair.  It must not be a
+# network this segment already has a route to, or "the route was added" and
+# "the route was removed" are both unreadable.
+DUMMYNET="${AMINETXDUO_LIVETOOLS_DUMMYNET:-192.168.77.0}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:B:g:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        g) GATEWAY="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B interface] [-g gateway]" >&2; exit 2 ;;
     esac
 done
+
+case "$IFACE" in
+    slirp|slirp_inbound)
+        echo "livetools_refused=slirp: this measures the commands against a real" >&2
+        echo "segment; -B names the host NIC the guest bridges onto" >&2
+        exit 2 ;;
+esac
+
+command -v ip >/dev/null 2>&1 || { echo "no ip(8) on this host" >&2; exit 2; }
+
+[ -n "$(ip -o -4 addr show dev "$IFACE" 2>/dev/null)" ] || {
+    echo "no IPv4 address on $IFACE; -B names the host NIC the guest bridges onto" >&2
+    exit 2; }
+
+if [ -z "$GATEWAY" ]; then
+    GATEWAY=$(ip -o -4 route show default dev "$IFACE" 2>/dev/null |
+              awk '{ print $3; exit }')
+fi
+[ -n "$GATEWAY" ] || {
+    echo "no default gateway on $IFACE; -g names something on this segment" >&2
+    echo "that answers ICMP and can carry a default route" >&2
+    exit 2; }
+ping -c 1 -W 3 "$GATEWAY" >/dev/null 2>&1 || {
+    echo "$GATEWAY does not answer this host, so a guest that cannot ping it" >&2
+    echo "says nothing about the commands" >&2
+    exit 2; }
 
 TOOLS="$ROOT/$BUILD/src/tools"
 BSD="$ROOT/$BUILD/src/bsdsocket/bsdsocket.library"
@@ -69,7 +114,7 @@ done
 # is read off it.  Ask the guest for that tier.
 serial_log_stage_env "$STAGE" 2
 
-cat > "$STAGE/commands.txt" <<'EOF'
+cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus
 SYS:ShowNetStatus ALL
@@ -80,8 +125,8 @@ SYS:netstat -i
 SYS:netstat -r
 SYS:netstat -s
 SYS:netstat -a
-SYS:ping 10.0.2.2 -c 3 -t 20
-SYS:ping 8.8.8.8 -c 2 -t 20
+SYS:ping $GATEWAY -c 3 -t 20
+SYS:ping $OFFNET -c 2 -t 20
 SYS:Offline eth0
 SYS:ShowNetStatus
 SYS:Online eth0
@@ -89,11 +134,11 @@ SYS:ShowNetStatus
 SYS:CheckNetConfig
 SYS:GetNetStatus
 SYS:GetNetStatus CHECK=INTERFACES,BCASTINTERFACES,RESOLVER,ROUTES,DEFAULTROUTE
-SYS:AddNetRoute NETDESTINATION=192.168.77.0 GATEWAY=10.0.2.2
+SYS:AddNetRoute NETDESTINATION=$DUMMYNET GATEWAY=$GATEWAY
 SYS:netstat -r
-SYS:DeleteNetRoute DESTINATION=192.168.77.0
-SYS:DeleteNetRoute DEFAULTGATEWAY=10.0.2.2
-SYS:AddNetRoute DEFAULTGATEWAY=10.0.2.2
+SYS:DeleteNetRoute DESTINATION=$DUMMYNET
+SYS:DeleteNetRoute DEFAULTGATEWAY=$GATEWAY
+SYS:AddNetRoute DEFAULTGATEWAY=$GATEWAY
 SYS:NetShutdown
 SYS:GetNetStatus CHECK=INTERFACES
 EOF
@@ -103,9 +148,9 @@ EOF
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-livetools}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
+echo "==> booting $MODEL, a2065 bridged on $IFACE, gateway $GATEWAY"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/env" \
     "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/netstat" \
@@ -177,16 +222,38 @@ EOF
 
 # ---- the positive half: what a command that CAN see the stack must show ----
 
-if grep -q "10\.0\.2\.15" "$REPORT"; then
-    pass "the leased address 10.0.2.15 was reported"
+# THE LEASED ADDRESS IS READ, NOT ASSERTED.  A real DHCP server hands out
+# whatever it has; what can be checked is that the guest got one, and that it
+# is an address on the segment the emulator was bridged onto rather than a
+# link-local or a leftover.
+GUESTIP=$(sed -n 's/^.*online, address \([0-9][0-9.]*\).*$/\1/p' "$REPORT" |
+          head -1)
+if [ -z "$GUESTIP" ]; then
+    fail "the guest never printed an address of its own"
+elif ! ip -o route get "$GUESTIP" 2>/dev/null |
+         grep -q "dev $IFACE .*src "; then
+    fail "the guest's address $GUESTIP is not on $IFACE's segment"
+    ip -o route get "$GUESTIP" 2>&1 | sed 's/^/       /' >&2
 else
-    fail "no command reported the leased address 10.0.2.15"
+    pass "the guest leased $GUESTIP, which is on $IFACE's segment"
 fi
 
-if grep -q "10\.0\.2\.2" "$REPORT"; then
-    pass "the gateway 10.0.2.2 was reported"
+# More than once: AddNetInterface prints it as it comes up, and a command that
+# can see the stack prints it again.  Exactly one occurrence means every
+# reader of the live configuration came back empty, which is the defect this
+# file is named after.
+SAW=0
+[ -z "$GUESTIP" ] || SAW=$(grep -cF -- "$GUESTIP" "$REPORT" || true)
+if [ "$SAW" -gt 1 ]; then
+    pass "the leased address was read back by $((SAW - 1)) further line(s)"
 else
-    fail "no command reported the gateway 10.0.2.2"
+    fail "only the bring-up line mentioned ${GUESTIP:-the leased address}: no command read it back"
+fi
+
+if grep -qF -- "$GATEWAY" "$REPORT"; then
+    pass "the gateway $GATEWAY was reported"
+else
+    fail "no command reported the gateway $GATEWAY"
 fi
 
 if grep -Eqi '(packets received|received)[^0-9]*[1-9][0-9]*' "$REPORT"; then
@@ -195,10 +262,10 @@ else
     fail "every counter reported was zero, the stats path is not live"
 fi
 
-if grep -Eq 'bytes from 10\.0\.2\.2' "$REPORT"; then
-    pass "ping 10.0.2.2 got a reply"
+if grep -qF "bytes from $GATEWAY" "$REPORT"; then
+    pass "ping $GATEWAY got a reply"
 else
-    fail "ping 10.0.2.2 got no reply"
+    fail "ping $GATEWAY got no reply"
 fi
 
 if grep -Eq '0% packet loss|[1-9][0-9]* received' "$REPORT"; then
@@ -234,24 +301,24 @@ check_rc 0 \
     "SYS:GetNetStatus CHECK=INTERFACES,BCASTINTERFACES,RESOLVER,ROUTES,DEFAULTROUTE" \
     "GetNetStatus finds the network ready"
 
-check_rc 0 "SYS:AddNetRoute NETDESTINATION=192.168.77.0 GATEWAY=10.0.2.2" \
+check_rc 0 "SYS:AddNetRoute NETDESTINATION=$DUMMYNET GATEWAY=$GATEWAY" \
     "AddNetRoute added a route"
 
-if awk '$0 == "===== SYS:netstat -r =====" { on = 1; next }
+if awk -v want="$DUMMYNET" '$0 == "===== SYS:netstat -r =====" { on = 1; next }
         on && /^----- / { on = 0 }
-        on && /192\.168\.77\.0/ { found = 1 }
+        on && index($0, want) { found = 1 }
         END { exit !found }' "$REPORT"; then
     pass "netstat -r shows the route that was added"
 else
-    fail "netstat -r does not show 192.168.77.0, AddNetRoute added nothing"
+    fail "netstat -r does not show $DUMMYNET, AddNetRoute added nothing"
 fi
 
-check_rc 0 "SYS:DeleteNetRoute DESTINATION=192.168.77.0" \
+check_rc 0 "SYS:DeleteNetRoute DESTINATION=$DUMMYNET" \
     "DeleteNetRoute removed it again"
 
-check_rc 0 "SYS:DeleteNetRoute DEFAULTGATEWAY=10.0.2.2" \
+check_rc 0 "SYS:DeleteNetRoute DEFAULTGATEWAY=$GATEWAY" \
     "DeleteNetRoute cleared the default route"
-check_rc 0 "SYS:AddNetRoute DEFAULTGATEWAY=10.0.2.2" \
+check_rc 0 "SYS:AddNetRoute DEFAULTGATEWAY=$GATEWAY" \
     "AddNetRoute set it back"
 
 check_rc 0 "SYS:NetShutdown" "NetShutdown stopped the interfaces"
@@ -259,10 +326,15 @@ check_rc 5 "SYS:GetNetStatus CHECK=INTERFACES" \
     "and the network is no longer ready"
 
 echo
+printf 'iface=%s\n' "$IFACE"
+printf 'gateway=%s\n' "$GATEWAY"
+printf 'guest_ip=%s\n' "${GUESTIP:-none}"
+printf 'boots=%s\n' "$BOOTS"
+printf 'run_rc=%s\n' "$RUN_RC"
 if [ "$FAILED" -ne 0 ]; then
-    echo "livetools: FAILED" >&2
+    printf 'RESULT=fail\n'
     exit 1
 fi
 
-echo "livetools: PASSED"
+printf 'RESULT=pass\n'
 exit 0
