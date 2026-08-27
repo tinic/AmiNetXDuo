@@ -39,7 +39,7 @@
 
 /*
  * AMI_SANA2_RX_POOL_SHARE must move together with
- * src/bsdsocket/bsdsocket_internal.h's BSD_TCP_WINDOW_POOL_SHARE: the window is
+ * src/bsdsocket/bsdsocket_window.h's BSD_TCP_WINDOW_POOL_SHARE: the window is
  * the bytes a peer may have in flight and the read queue is where they land.
  * sana2 is below bsdsocket and cannot include its header.
  */
