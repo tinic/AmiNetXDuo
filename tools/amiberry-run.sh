@@ -2,10 +2,14 @@
 #
 # Run an AmigaOS executable under Amiberry on Linux and capture its output.
 #
-#   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]
+#   tools/amiberry-run.sh [-t SECONDS] [-m MODEL] [-c CPU] [-N BOARD]...
 #                         [-B BACKEND] [-a ARGS] <executable> [extra files...]
 #
-# -N takes WinUAE's board keys unchanged.  -B is slirp, slirp_inbound or a host
+# -N takes WinUAE's board keys unchanged, AND MAY BE REPEATED (or given a
+# comma-separated list) to put SEVERAL boards in one machine.  Each board gets
+# an address of its own, and the second one is what makes a non-zero SANA-II
+# unit reachable: anxnet.device numbers its units in probe order, so a machine
+# with one board has only unit 0 to open.  -B is slirp, slirp_inbound or a host
 # interface name, and the name goes in BARE, not `netmode=<name>`; an unmatched
 # name silently selects slirp, so the run is verified against the emulator log.
 # A host NIC needs CAP_NET_RAW on the amiberry binary, a tap or bridge
@@ -26,10 +30,11 @@ MODEL=A1200
 CPU=""
 CLOCK=""
 BOARD=""
+BOARDS=()
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-slirp}"
 GUEST_ARGS="${AMINETXDUO_GUEST_ARGS:-}"
 
-USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board] [-B backend] [-a args] <executable> [files...]"
+USAGE="usage: $0 [-t seconds] [-m model] [-c cpu] [-N board]... [-B backend] [-a args] <executable> [files...]"
 
 while getopts "t:m:c:k:N:B:a:" opt; do
     case "$opt" in
@@ -37,7 +42,8 @@ while getopts "t:m:c:k:N:B:a:" opt; do
         m) MODEL="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         k) CLOCK="$OPTARG" ;;
-        N) BOARD="$OPTARG" ;;
+        N) IFS=, read -r -a _n <<< "$OPTARG"
+           BOARDS+=("${_n[@]}") ;;
         B) BACKEND="$OPTARG" ;;
         a) GUEST_ARGS="$OPTARG" ;;
         *) echo "$USAGE" >&2; exit 2 ;;
@@ -46,6 +52,27 @@ done
 shift $((OPTIND - 1))
 
 [ $# -ge 1 ] || { echo "$USAGE" >&2; exit 2; }
+
+# One board key may appear once.  Amiberry has ONE config key per board type,
+# so `-N a2065 -N a2065` writes a2065_rom_options twice and the second line
+# wins: one card in the machine, silently, and an arm that believed it asked
+# for two.  Two of a kind is not reachable from here and saying so is the whole
+# of the fix.
+for _i in "${!BOARDS[@]}"; do
+    for _j in "${!BOARDS[@]}"; do
+        [ "$_i" -lt "$_j" ] || continue
+        [ "${BOARDS[$_i]}" != "${BOARDS[$_j]}" ] || {
+            echo "-N ${BOARDS[$_i]} was given twice.  Amiberry keeps one" >&2
+            echo "config key per board type, so the second would overwrite" >&2
+            echo "the first and the machine would have one card in it." >&2
+            echo "Two boards means two DIFFERENT boards." >&2
+            exit 2; }
+    done
+done
+
+# $BOARD is the FIRST board and every single-board path below still reads it,
+# so a one-board run is byte for byte the run it always was.
+BOARD="${BOARDS[0]:-}"
 
 EXE="$1"; shift
 [ -f "$EXE" ] || { echo "no such executable: $EXE" >&2; exit 2; }
@@ -154,7 +181,9 @@ ne2000_pcmcia needs a 68020 or better; this run is ${CPU:-the $MODEL default}.
 EOF
     exit 2
 }
-pcmcia_cpu_check "$BOARD"
+for _b in "${BOARDS[@]}"; do
+    pcmcia_cpu_check "$_b"
+done
 
 # The keys themselves are in tools/emu-board.sh, shared with
 # install/test/run-workbench.sh: the release gate writes its own config -- it
@@ -164,9 +193,27 @@ pcmcia_cpu_check "$BOARD"
 # shellcheck source=emu-board.sh
 . "$ROOT/tools/emu-board.sh"
 
-board_lines() {
-    emu_board_lines "$1" "$MAC" "$BACKEND" \
+board_lines() { # board mac
+    emu_board_lines "$1" "$2" "$BACKEND" \
                     "${AMINETXDUO_AMIBERRY_BOARD_OPTIONS:-}" || exit 2
+}
+
+# THE ADDRESS FOR THE Nth BOARD.  Board 0 is the run's own address and is
+# unchanged, so nothing that ever ran one board moves.  A later board goes
+# through the same derivation under a modified tag rather than by arithmetic on
+# the first address: two boards in one machine must differ from each other AND
+# from every other run's, and the tag hash is what already guarantees the
+# second half of that.
+#
+# AMINETXDUO_AMIBERRY_MAC PINS THE FIRST BOARD ONLY.  A caller that needs a
+# fixed address for a second one has no board to pin it to today; the harnesses
+# that pin (the release gate, the card sweeps) all boot one card.
+board_mac() { # index
+    if [ "$1" = 0 ]; then
+        printf '%s\n' "$MAC"
+    else
+        emu_mac_for_tag "$TAG#$1"
+    fi
 }
 
 # ------------------------------------------------------------------ staging --
@@ -281,13 +328,17 @@ MAC="${AMINETXDUO_AMIBERRY_MAC:-$(emu_mac_for_tag "$TAG")}"
 # run at a time on a host, and the second is refused with a sentence that says
 # what to do.  SLIRP runs are untouched -- each has a NAT of its own and no
 # shared segment to poison.
-if [ -n "$BOARD" ] && ! emu_board_mac_honoured "$BOARD"; then
+for _b in "${BOARDS[@]}"; do
+    emu_board_mac_honoured "$_b" || _macless="$_b"
+done
+if [ -n "${_macless:-}" ]; then
+    BOARD_MACLESS="$_macless"
     case "$BACKEND" in
         slirp|slirp_inbound) ;;
         *)
-            if ! rig_claim_name "bridged-$BOARD" "$TAG ($BACKEND) in $ROOT"; then
+            if ! rig_claim_name "bridged-$BOARD_MACLESS" "$TAG ($BACKEND) in $ROOT"; then
                 echo >&2
-                echo "REFUSING to start a second bridged $BOARD run on this host." >&2
+                echo "REFUSING to start a second bridged $BOARD_MACLESS run on this host." >&2
                 echo >&2
                 echo "  Amiberry ignores mac= for this board and gives every" >&2
                 echo "  guest the host interface's own address (gayle.cpp:1590)," >&2
@@ -299,7 +350,7 @@ if [ -n "$BOARD" ] && ! emu_board_mac_honoured "$BOARD"; then
                 echo "  and may be run bridged in parallel." >&2
                 exit 2
             fi
-            echo "==> bridged $BOARD interlock held (mac= is ignored on this board)"
+            echo "==> bridged $BOARD_MACLESS interlock held (mac= is ignored on this board)"
             ;;
     esac
 fi
@@ -378,7 +429,14 @@ EOF
 # install/test/run-workbench.sh could not see it, and that is how the release
 # gate came to write fastmem_size=8 under a PCMCIA card: cnet.device answered
 # `cannot open cnet.device unit 0 (-1)` and nothing else.
-FASTMEM=$(emu_board_fastmem "$BOARD" 8)
+# The LOWEST ceiling any board in the machine asks for: a PCMCIA card's
+# windows collide with 8 MB of Zorro II Fast RAM whether or not there is a
+# Zorro card beside it.
+FASTMEM=8
+for _b in "${BOARDS[@]}"; do
+    _f=$(emu_board_fastmem "$_b" 8)
+    [ "$_f" -ge "$FASTMEM" ] || FASTMEM="$_f"
+done
 
 # AMINETXDUO_FASTMEM=<MB> takes it away again, 0 included.  The pool and the
 # receive window come off AvailMem(), so the 1 MB machine in
@@ -449,7 +507,11 @@ if [ -n "$CLOCK" ]; then
     echo "cpu_multiplier=$MULT" >> "$CFG"
     echo "==> CPU clock: multiplier $MULT, nominally $((MULT * 327 / 100)) MHz"
 fi
-board_lines "$BOARD" >> "$CFG"
+_i=0
+for _b in "${BOARDS[@]}"; do
+    board_lines "$_b" "$(board_mac "$_i")" >> "$CFG"
+    _i=$((_i + 1))
+done
 
 # AMINETXDUO_AMIBERRY_EXTRA appends raw `key=value` lines, semicolon separated,
 # so the settings above can be swept without editing this file.
@@ -458,7 +520,11 @@ if [ -n "${AMINETXDUO_AMIBERRY_EXTRA:-}" ]; then
     echo "==> extra config: ${AMINETXDUO_AMIBERRY_EXTRA}"
 fi
 
-[ -z "$BOARD" ] || echo "==> $BOARD on backend '$BACKEND', MAC $MAC"
+_i=0
+for _b in "${BOARDS[@]}"; do
+    echo "==> board$_i=$_b backend=$BACKEND mac=$(board_mac "$_i")"
+    _i=$((_i + 1))
+done
 echo "==> $EXE_NAME under $MODEL (timeout ${TIMEOUT}s)"
 
 # ------------------------------------------------------------------ running --

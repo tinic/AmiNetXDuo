@@ -1,0 +1,41 @@
+diff --git a/src/cfgfile.cpp b/src/cfgfile.cpp
+index e68a13cd..697305db 100644
+--- a/src/cfgfile.cpp
++++ b/src/cfgfile.cpp
+@@ -7066,8 +7066,24 @@ void cfgfile_compatibility_romtype(struct uae_prefs *p)
+ 	}
+ #endif
+ 
+-	static const int restricted_net[] = {
+-		ROMTYPE_A2065, ROMTYPE_NE2KPCMCIA, ROMTYPE_NE2KPCI, ROMTYPE_NE2KISA,
++	// ONE BOARD PER EMULATED CHIP, which is not the same as one board per
++	// machine.  Each device model below keeps its whole chip state in
++	// file-scope statics (a2065.cpp:44-78, qemuvga/ne2000.cpp:77-133 and
++	// :1563), so two boards drawn from ONE list are a single chip with two
++	// sets of registers pointed at it.  Boards from DIFFERENT lists share
++	// nothing at all -- separate state, separate netdriverdata, separate
++	// uaenet instance -- and an Amiga with a Zorro LANCE in a slot and a PC
++	// Card in the socket is an ordinary machine.  The single list this
++	// replaces refused that pair as well, and refused it silently.
++	//
++	// ROMTYPE_ARIADNE was in no list at all and is a2065.cpp's second board
++	// (a2065.cpp:1304), so an Ariadne beside an A2065 was permitted and would
++	// have shared one LANCE.
++	static const int restricted_net_lance[] = {
++		ROMTYPE_A2065, ROMTYPE_ARIADNE,
++		0 };
++	static const int restricted_net_ne2000[] = {
++		ROMTYPE_NE2KPCMCIA, ROMTYPE_NE2KPCI, ROMTYPE_NE2KISA,
+ 		ROMTYPE_ARIADNE2, ROMTYPE_XSURF, ROMTYPE_XSURF100Z2, ROMTYPE_XSURF100Z3,
+ 		ROMTYPE_HYDRA, ROMTYPE_LANROVER,
+ 		0 };
+@@ -7094,7 +7110,8 @@ void cfgfile_compatibility_romtype(struct uae_prefs *p)
+ 		}
+ 	}
+ 
+-	romtype_restricted(p, restricted_net);
++	romtype_restricted(p, restricted_net_lance);
++	romtype_restricted(p, restricted_net_ne2000);
+ 	romtype_restricted(p, restricted_x86);
+ 	romtype_restricted(p, restricted_pci);
+ 
