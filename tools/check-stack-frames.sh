@@ -33,6 +33,21 @@ LADDER_EDGES=(
     --edge netstack_resolve_until=ami_ns_resolve_once
 )
 
+# A thread entry point is dispatched, never called.  ami_sana2_rx_start() puts
+# the reader's in a tx_thread_create() argument, which is a `lea` in the
+# assembly and indistinguishable from a call, so every root that reaches
+# ami_sana2_driver_entry -- every resolver root does, through the send a DNS
+# query makes -- walks the whole receive path as though its own send had
+# started the reader.  It measures ami_sana2_driver_entry at 728 bytes today,
+# 540 of which is that.
+#
+# It changes no verdict while the reader is shallow: bsd_getaddrinfo's deepest
+# path is 2016 bytes through mDNS and the entropy pool, which is further than
+# the receive path reaches.  It stops being harmless the moment anything moves
+# work on to the reader, and then it fails a budget for a call that does not
+# exist.
+NOT_A_CALL=( --cut ami_sana2_rx_thread )
+
 # WHAT IS CHECKED, and what each number is for.
 #
 #   binary  root symbol                     budget  measured  what it bounds
@@ -120,7 +135,8 @@ for row in "${BUDGETS[@]}"; do
         exit 2
     fi
 
-    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "$dir" "$sym" 2>/dev/null)
+    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+          "$dir" "$sym" 2>/dev/null)
     got=${out##*worst_case_bytes=}
     got=${got%%[!0-9]*}
 
@@ -136,7 +152,8 @@ for row in "${BUDGETS[@]}"; do
     if [ "$got" -gt "$budget" ]; then
         say "stack_frames=FAILED binary=$lib root=$sym bytes=$got budget=$budget"
         say "  the deepest path:"
-        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "$dir" "$sym" 2>/dev/null |
+        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+            "$dir" "$sym" 2>/dev/null |
             sed -n '2,$p' | sed 's/^/  /'
         rc=1
     else
