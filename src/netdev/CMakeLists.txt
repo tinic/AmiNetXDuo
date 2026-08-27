@@ -13,7 +13,8 @@ option(AMINETXDUO_NETDEV_LINK
        "Link DEVS:Networks/anxnet.device, the NE2000/DP8390 family driver" ON)
 
 set(NETDEV_SOURCES
-    netdev_device.c     # keep first: romtag, entry guard, Open/BeginIO
+    netdev_device.c     # keep first: romtag, entry guard, Open
+    netdev_io.c         # BeginIO/AbortIO field handling, host-testable
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_queue.c      # queued IORequest invariants, host-testable
     netdev_cmds.c       # the S2_* table
@@ -359,6 +360,30 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_event PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_event COMMAND test_netdev_event)
+
+    # What BeginIO does to a request before it dispatches it.  netdev_event.c
+    # is driven directly by the test above, which is why it stayed green over
+    # a BeginIO that cleared ios2_WireError for every command including
+    # S2_ONEVENT, whose event mask arrives IN that field: every event request
+    # this device ever received named no condition and was refused.  This
+    # enters through the real netdev_begin_io() with netdev_cmds.c replaced by
+    # a recorder, and asserts the general rule -- io_Error, ios2_WireError
+    # where it is an output, and not one byte more.
+    add_executable(test_netdev_beginio
+        test/test_netdev_beginio.c
+        netdev_io.c)
+
+    target_include_directories(test_netdev_beginio PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_beginio PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_beginio COMMAND test_netdev_beginio)
 
     # The private SANA-II direct-receive handshake.  The EL3 test proves the
     # FIFO half; this proves the device selects exactly one eligible CMD_READ,
