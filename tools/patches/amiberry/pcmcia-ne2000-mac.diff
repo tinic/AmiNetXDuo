@@ -1,0 +1,23 @@
+diff --git a/src/gayle.cpp b/src/gayle.cpp
+index d255fe26..b7d5e695 100644
+--- a/src/gayle.cpp
++++ b/src/gayle.cpp
+@@ -1587,7 +1587,17 @@ static int initpcmcia (const TCHAR *path, int readonly, int type, int reset, str
+ 		ne2000 = &ne2000_pci_board_pcmcia;
+ 		ne2000_board_state = xcalloc(pci_board_state, 1);
+ 		ne2000_board_state->irq_callback = ne2000_pcmcia_irq_callback;
+-		if (!ne2000->init(ne2000_board_state, NULL)) {
++		// The card is not an autoconfig board, so there is no autoconfig_info
++		// to carry its rom_options.  Passing NULL left ne2000_init_2() with no
++		// mac= to parse and it fell back to the host interface's own address,
++		// which gives every guest on one bridge the same station address.
++		// ethernet_enumerate() already finds the romconfig by romtype; the MAC
++		// comes out of the same record.
++		struct autoconfig_info ne2000_aci = {};
++		ne2000_aci.rc = get_device_romconfig(&currprefs, ROMTYPE_NE2KPCMCIA, 0);
++		write_log(_T("PCMCIA NE2000 mac=%s\n"),
++			ne2000_aci.rc && ne2000_aci.rc->configtext[0] ? ne2000_aci.rc->configtext : _T("(host interface)"));
++		if (!ne2000->init(ne2000_board_state, &ne2000_aci)) {
+ 			write_log(_T("NE2000 init failed\n"));
+ 		} else {
+ 			pcmcia_readonly = true;

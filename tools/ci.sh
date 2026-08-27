@@ -1774,6 +1774,25 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    # BESIDE cpuspeed, and it asks a different question of the same machines.
+    # cpuspeed asks whether the bring-up survives a faster CPU; this asks HOW
+    # MUCH faster the emulator can actually make it, in the unit the delay code
+    # is written in -- spins of a bare loop per raster line.  The answer is the
+    # ceiling, and the ceiling is what says which claims about an accelerated
+    # Amiga a run here can carry and which stay in the host tier.
+    rc=0
+    "$ROOT/tests/tools/run-gayleratio.sh" -b "$BUILD/default" || rc=$?
+    case "$rc" in
+        0) note "PASS  $(sed -n 's/^gayleratio_ceiling=/spins per line, ceiling /p' \
+                 "$ROOT/build/gayleratio-results.txt" 2>/dev/null | head -1)\
+the PCMCIA card claimed at every rate and the measurement rose with it" ;;
+        2) skip "gayleratio: the rig refused it before any arm booted" ;;
+        *) fail "gayleratio: either the card stopped claiming as the CPU rate\
+ rose, which is the defect src/netdev/netdev_clock.c exists to prevent, or the\
+ measurement stopped tracking the rate -- the table says which"
+           bad=$((bad + 1)) ;;
+    esac
+
     rc=0
     "$ROOT/tests/tools/run-bigmem.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
@@ -1969,6 +1988,33 @@ stage_bridged() {
                     "snapshots come back, and nothing hangs" ;;
             2) fail "arexx: an ingredient is missing on this machine" ; bad=1 ;;
             *) fail "arexx: the transcript above is the whole run" ; bad=1 ;;
+        esac
+    fi
+
+    # KICKSTART 2.x, WHICH NOTHING ELSE HERE BOOTS WITH A WORKING LINK.
+    # run-oommsg.sh boots 2.04 to prove a sentence on a 512 KB machine and the
+    # stack never starts there, so anxnet.device's romtag has only ever been
+    # initialised by a V40 exec and card.resource has only ever been V40.
+    # Skipped by name where the two ROMs are not configured: a 3.1 image does
+    # not boot what these arms boot, and a mismatch is a black screen rather
+    # than a test result.
+    printf '\n-- the bring-up on Kickstart 2.04 and 2.05\n'
+    rc=0
+    if [ -z "${AMINETXDUO_KICKSTART_A2000:-}${AMINETXDUO_KICKSTART_V204:-}" ]; then
+        skip "kick2x: no Kickstart 2.04 configured, so the romtag under a V37\
+ exec and card.resource V37 stay unproven"
+    else
+        AMINETXDUO_RUN_TAG=ci-kick2x "$ROOT/tests/tools/run-kick2x.sh" \
+            -b "$BUILD/default" \
+            -B "${AMINETXDUO_AMIBERRY_BACKEND:-ens18}" || rc=$?
+        case "$rc" in
+            0) note "PASS  the romtag and the PCMCIA claim both work under a" \
+                    "V37 ROM, and each 2.x arm matches its 3.1 pair" ;;
+            2) skip "kick2x: the rig refused it before any arm booted" ;;
+            *) fail "kick2x: an arm that comes up on 3.1 does not come up on\
+ Kickstart 2.x -- the table above says which, and its 3.1 pair is what makes\
+ that a ROM finding"
+               bad=1 ;;
         esac
     fi
 
