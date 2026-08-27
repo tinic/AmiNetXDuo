@@ -1,5 +1,5 @@
 diff --git a/src/cfgfile.cpp b/src/cfgfile.cpp
-index e68a13cd..697305db 100644
+index e68a13cd..a67455a1 100644
 --- a/src/cfgfile.cpp
 +++ b/src/cfgfile.cpp
 @@ -7066,8 +7066,24 @@ void cfgfile_compatibility_romtype(struct uae_prefs *p)
@@ -29,11 +29,15 @@ index e68a13cd..697305db 100644
  		ROMTYPE_ARIADNE2, ROMTYPE_XSURF, ROMTYPE_XSURF100Z2, ROMTYPE_XSURF100Z3,
  		ROMTYPE_HYDRA, ROMTYPE_LANROVER,
  		0 };
-@@ -7094,7 +7110,8 @@ void cfgfile_compatibility_romtype(struct uae_prefs *p)
+@@ -7094,7 +7110,12 @@ void cfgfile_compatibility_romtype(struct uae_prefs *p)
  		}
  	}
  
 -	romtype_restricted(p, restricted_net);
++	// SAID OUT LOUD, so a harness can ask the binary whether it carries this
++	// rather than carry a version number of its own.  A stock Amiberry keeps
++	// one net board per machine and says nothing about it.
++	write_log(_T("net boards: one per chip (LANCE and NE2000 are separate)\n"));
 +	romtype_restricted(p, restricted_net_lance);
 +	romtype_restricted(p, restricted_net_ne2000);
  	romtype_restricted(p, restricted_x86);
