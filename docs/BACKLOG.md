@@ -53,6 +53,5 @@ comment beside the code, not an entry here.
 | No arm varies the application read size | fetch is paid per recv(); a 32 KB read would pay it an eighth as often, never measured | `tests/perf/run-poolshare.sh:97` |
 | The docs/*.md budget is 1150 where 800 was asked for | the enforced ceiling still exceeds the requested ceiling by 350 lines | `tools/check-doc-budget.sh:17` |
 | No arm prices the 64-bit-divisor branch on a 68000 | rtdiv ran on an A1200 only; that branch now enters a 32-iteration fallback once per divide | `src/common/ami_udivdi3.c:87` |
-| Three more harnesses name a serial log their runner never writes | the `-e` lane spelling on amiberry/winuae lanes; the greps match nothing | `tests/compare/run-legacy-client.sh:300` |
 | A poolshare KB/s row cannot say the rig was quiet | the interlock is per-board, so CI's bridged guests share ens18 and the cores | `tools/amiberry-run.sh:270` |
 | Three tool headers stay over 20 comment lines | each header IS the `--help` text, printed by a hardcoded `sed -n` range, so trimming it needs a code edit | `tools/fetch-toolchain.sh:164` |
