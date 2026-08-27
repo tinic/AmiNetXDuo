@@ -67,10 +67,14 @@ serial_log_state() {
         *)  build="${ROOT:-.}/$build" ;;
     esac
 
+    # grep straight at the image, not `strings | grep`: every caller of this
+    # runs under `set -o pipefail`, grep -q closes the pipe on its first match,
+    # and strings then dies of SIGPIPE and fails the pipeline -- so the library
+    # that HAS the sentence was reported as the one that has not.
     for lib in "$build/src/bsdsocket/bsdsocket.library" \
                "$build/bsdsocket.library"; do
         [ -f "$lib" ] || continue
-        if strings -a "$lib" 2>/dev/null | grep -q 'netstack: mark'; then
+        if LC_ALL=C grep -qaF 'netstack: mark' "$lib"; then
             echo on; return 0
         fi
         echo off; return 1
