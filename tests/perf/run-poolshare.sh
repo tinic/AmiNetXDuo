@@ -146,6 +146,16 @@ IFEOF
     grep -E "peer_bytes=|never accepted" "$PEERLOG" | tail -1
     grep -E "packets free|fewest|pool empty|window" \
         "$RESULTS/arm-$ARM.guest" 2>/dev/null | head -4
+
+    # The three legs a frame pays on its way out and the one the socket pays
+    # to reach them, and the one the application pays to collect what came in.
+    # Only a probe build keeps any of them (-DAMINETXDUO_RXPROBE=ON); a
+    # shipping build prints "not instrumented" and these lines are absent.
+    # Quoted TOGETHER, because xmit alone says nothing: the question is how
+    # the transmit half divides, and each leg is only large or small next to
+    # the other three.
+    sed -n 's/^[[:space:]]*\(fetch,\|xmit,\|reap,\|stuff,\|post,\)/leg \1/p' \
+        "$RESULTS/arm-$ARM.guest" 2>/dev/null
     if [ -s "$PCAP" ]; then
         Z=$(tcpdump -n -r "$PCAP" 2>/dev/null | grep -c "win 0,")
         W=$(tcpdump -n -r "$PCAP" 2>/dev/null |
