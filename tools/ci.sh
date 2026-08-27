@@ -1084,6 +1084,64 @@ stage_analyze() {
 # pass under Amiberry.
 EMU_RUNNER="${AMINETXDUO_EMU_RUNNER:-tools/amiberry-run.sh}"
 
+# ------------------------------------------------------- the LTO probe ----
+#
+# THE ONE HARNESS THAT NEEDS ITS OWN CONFIGURE, which is why it had no home.
+# tests/crypto68k/run-lto-probe.sh refuses (exit 2) unless the build directory
+# it is given was configured with AMINETXDUO_CRYPTO68K_LTO_PROBE=ON, and no
+# arm in CROSS_CONFIGS turns it on -- so a row could name a runner all day and
+# the runner would decline.
+#
+# It reproduces a real failure and nothing else does: only the FULL
+# tls.library link brought back the late libcall the P-256 path lost to LTO,
+# so a second static link is not the same test.  Library init runs the field
+# known answers and both scalar-multiply paths in about fifteen seconds.
+#
+# A ROM and nothing else: no bsdsocket.library, no interface, no driver, no
+# network, no peer.  Two targets are built rather than the tree, because the
+# probe is a loader for tls.library and everything else in the configuration
+# is the same code the `default` arm already compiled.
+stage_ltoprobe() {
+    hr "crypto68k LTO probe (tier 2, needs a ROM)"
+
+    local dir="$BUILD/ltoprobe" rc=0
+
+    if [ -z "${AMINETXDUO_KICKSTART:-}" ]; then
+        skip "lto probe: no AMINETXDUO_KICKSTART, so the P-256 paths in a real\
+ tls.library link are unproven on this runner"
+        return "$NOTHING"
+    fi
+    export AMINETXDUO_KICKSTART
+
+    cmake -S . -B "$dir" \
+        -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-m68k-amigaos.cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMINETXDUO_CRYPTO68K_LTO_PROBE=ON \
+        > "$BUILD/ltoprobe-configure.log" 2>&1 || {
+            tail -30 "$BUILD/ltoprobe-configure.log"
+            fail "lto probe: configure"
+            return 1; }
+
+    if ! cmake --build "$dir" --parallel "$JOBS" \
+             --target tls_library crypto68k_lto_probe \
+             > "$BUILD/ltoprobe-build.log" 2>&1; then
+        tail -30 "$BUILD/ltoprobe-build.log"
+        fail "lto probe: the tls.library link with the probe in it did not\
+ build, which is itself the failure this arm exists to catch"
+        return 1
+    fi
+
+    "$ROOT/tests/crypto68k/run-lto-probe.sh" -b "$dir" || rc=$?
+    case "$rc" in
+        0) note "PASS  tls.library loads and both P-256 paths answer" ;;
+        2) fail "lto probe: the harness refused the build directory this stage\
+ just configured -- read lto_probe_refused= above" ;;
+        *) fail "lto probe: a late libcall or a P-256 path did not survive the\
+ full tls.library link" ;;
+    esac
+    return "$rc"
+}
+
 stage_emulator() {
     hr "emulator tests (tier 2)"
 
@@ -1664,6 +1722,29 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    # THE SMALLEST MACHINE IN THE TREE, and the only arm anywhere that boots
+    # Kickstart 2.04: a 512 KB A2000 on a 68000, where AddNetInterface runs out
+    # of memory partway through bring-up.  What it asserts is the WORDING --
+    # that the refusal blames the allocation and not the cable -- so it needs
+    # no link and no peer, only a second ROM.  It is skipped rather than
+    # failed where that ROM is not configured, because a 3.1 image does not
+    # boot an A2000 and a mismatch is a black screen, not a test result.
+    rc=0
+    if [ -z "${AMINETXDUO_KICKSTART_A2000:-}" ]; then
+        skip "oommsg: AMINETXDUO_KICKSTART_A2000 is not set, so nothing here\
+ boots Kickstart 2.04 and what a 512 KB machine is told when bring-up runs out\
+ of memory is unproven"
+    else
+        "$ROOT/tests/tools/run-oommsg.sh" -b "$BUILD/default" || rc=$?
+        case "$rc" in
+            0) note "PASS  the out-of-memory refusal names memory" ;;
+            2) skip "oommsg: the rig refused it before the guest booted" ;;
+            *) fail "oommsg: a machine that ran out of memory during bring-up\
+ is told something else -- the assertion list above says what it printed"
+               bad=$((bad + 1)) ;;
+        esac
+    fi
+
     return "$bad"
 }
 
@@ -1703,6 +1784,9 @@ stage_bridged() {
 "libraries|tests/libraries/run-libraries.sh|-B @|the shared-library load: open, close, expunge, reopen (30 checks, floor 24)" \
 "toolsay|tests/tools/run-toolsay.sh|-B @|the branches where a shipped command reached a return and printed no sentence at all" \
 "netstack|tests/netstack/run-amiberry.sh|-B @|netstack bring-up (14 checks, floor 12)" \
+"ifquery|tests/tools/run-ifquery.sh|-B @|the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the statistics counters, and the address-allocation message against the DHCP server on the wire" \
+"dnscache|tests/tools/run-dnscache.sh|-B @|the DNS answer cache: six lookups of two names, the same answer every time, and each name asked for ONCE on the wire" \
+"resolvebreak|tests/tools/run-resolvebreak.sh|-B @|how long a name lookup blocks on a blackholed server, and whether Ctrl-C gets the task back" \
     ; do
         hname="${entry%%|*}";  rest="${entry#*|}"
         hpath="${rest%%|*}";   rest="${rest#*|}"
@@ -2046,7 +2130,7 @@ stage_submodules
 # Anything but a pure host run needs the cross compiler.
 for s in "${WANT[@]}"; do
     case "$s" in
-        cross|analyze|conformance|emulator|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
+        cross|analyze|conformance|emulator|ltoprobe|e2e|e2ecards|cards|cards6|capture|wirequiet|reachability|bridged|lossgate|smb|matrix)
             stage_toolchain; break ;;
     esac
 done
@@ -2073,6 +2157,7 @@ for s in "${WANT[@]}"; do
         analyze)     stage_analyze || srrc=$? ;;
         conformance) stage_conformance || srrc=$? ;;
         emulator)    stage_emulator || srrc=$? ;;
+        ltoprobe)    stage_ltoprobe || srrc=$? ;;
         cards)       stage_cards || srrc=$? ;;
         matrix)      stage_matrix || srrc=$? ;;
         cards6)      stage_cards6 || srrc=$? ;;

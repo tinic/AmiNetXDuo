@@ -215,6 +215,17 @@ jobs:
           tools/ci-arm.sh -n "crypto68k assembly vs its reference" --
           tests/crypto68k/run-crypto.sh -b build/ci/default
 
+      # The late-LTO regression for crypto68k's P-256, which needs a build
+      # directory nothing else configures: AMINETXDUO_CRYPTO68K_LTO_PROBE=ON,
+      # and only the FULL tls.library link reproduces the libcall the P-256
+      # path lost.  The stage does the configure, builds two targets and runs
+      # it -- about fifteen seconds in the guest.  A ROM and nothing else.
+      - name: crypto68k survives the tls.library LTO link
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "P-256 through a real tls.library link" --
+          tools/ci.sh ltoprobe
+
       # The sequences a ported client issues, as against the vectors it calls:
       # non-blocking connect then writable then SO_ERROR, a wide sparse select
       # set, FIONREAD before a read, half-close both ways.  1651 lines and 100

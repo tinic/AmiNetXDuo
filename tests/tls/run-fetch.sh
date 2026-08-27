@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Run the `fetch` command against real URLs, under FS-UAE on SLIRP.
+# Run the `fetch` command against real URLs.
+#
+# BRIDGED.  The header said "under FS-UAE on SLIRP" and nothing had started
+# fs-uae since 2026-08-04; what it actually did was call amiberry-run.sh with
+# no backend, which is SLIRP, so every https: line was carried by the
+# emulator's own TCP/IP rather than by this stack.
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -10,15 +15,17 @@ TIMEOUT=420
 CPU=""
 CLOCK=""
 BUILD="${AMINETXDUO_BUILD:-build/tls}"
+IFACE="${AMINETXDUO_FETCH_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 
-while getopts "m:t:c:k:b:" opt; do
+while getopts "m:t:c:k:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         c) CPU="$OPTARG" ;;
         k) CLOCK="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-c cpu] [-k MHz] [-b builddir] [-B iface]" >&2; exit 2 ;;
     esac
 done
 
@@ -96,7 +103,7 @@ CPUARG=()
 [ -z "$CLOCK" ] || CPUARG+=(-k "$CLOCK")
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" "${CPUARG[@]}" \
      "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/fetch" \
      "$STAGE/AddNetInterface" "$STAGE/commands.txt"
 RUN_RC=$?

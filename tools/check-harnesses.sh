@@ -231,6 +231,12 @@ say guest_instruments "$instruments"
 say guest_unrun "$unrun"
 say harnesses_manual "$manual"
 say harnesses_unwired "$(grep -c ': manual : UNWIRED' "$MANIFEST" || true)"
+# Rows written against SLIRP.  Bridged is the only mode this project uses, so
+# a 10.0.2.x literal in the guest's command list, its staged configuration or
+# its assertions is a rewrite and not a missing home; counting those as
+# UNWIRED said four harnesses were waiting for a runner when what they are
+# waiting for is a gateway discovered at run time.
+say harnesses_slirp "$(grep -c ': manual : SLIRP' "$MANIFEST" || true)"
 # Rows that DO run and DO assert and are failing on a product finding.  They
 # are not holes and counting them as UNWIRED hid seven of them behind one
 # number; they are also not coverage, so they get a line of their own.

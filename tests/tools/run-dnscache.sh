@@ -10,13 +10,20 @@ cd "$ROOT"
 MODEL=A1200
 TIMEOUT=240
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
+# BRIDGED.  The two names are resolved by whatever the DHCP server on the
+# segment hands out, and nothing below knows or cares which server that is.
+# It used to take the backend it inherited, which with nothing set is SLIRP,
+# and a cache result taken there is the emulator's own resolver rather than
+# ours.
+IFACE="${AMINETXDUO_DNSCACHE_IFACE:-${AMINETXDUO_AMIBERRY_BACKEND:-ens18}}"
 
-while getopts "m:t:b:" opt; do
+while getopts "m:t:b:B:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
         b) BUILD="$OPTARG" ;;
-        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir]" >&2; exit 2 ;;
+        B) IFACE="$OPTARG" ;;
+        *) echo "usage: $0 [-m model] [-t seconds] [-b builddir] [-B iface]" >&2; exit 2 ;;
     esac
 done
 
@@ -67,9 +74,9 @@ done
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-dnscache}"
 HD="$ROOT/build/amiberry-testhd-$AMINETXDUO_RUN_TAG"
 
-echo "==> booting $MODEL with the A2065 on SLIRP"
+echo "==> booting $MODEL, a2065 bridged on $IFACE"
 set +e
-"$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
+"$ROOT/tools/amiberry-run.sh" -N a2065 -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
     "$STAGE/AddNetInterface" "$STAGE/host"
 RUN_RC=$?
@@ -105,8 +112,8 @@ for name in "$NAME_A" "$NAME_B"; do
         pass "$name resolved on all three lookups"
     else
         fail "$name produced $ANSWERS answers, expected 3"
-        echo "       (SLIRP forwards to the host's resolver, can this host" >&2
-        echo "        resolve $name?)" >&2
+        echo "       (the resolver is the one the segment's DHCP server" >&2
+        echo "        handed out; can it resolve $name?)" >&2
     fi
 
     if [ "$UNIQUE" -eq 1 ] && [ "$ANSWERS" -gt 0 ]; then

@@ -64,6 +64,14 @@
 #   windows   WinUAE, so a Windows host
 #   UNWIRED   nothing prevents it running where the rest of tier 2 runs.
 #             It simply has no home.  This is the list that should shrink.
+#   SLIRP     written against SLIRP, and bridged is the only mode this project
+#             uses.  It puts 10.0.2.x into the guest's own command list, its
+#             staged configuration or its assertions, so it cannot be moved to
+#             a real segment by passing -B: something has to discover the
+#             gateway or the resolver at run time first.  A DIFFERENT fact
+#             from UNWIRED -- the home exists, the harness cannot be put in it
+#             as written -- and each note below says which literal is the
+#             blocker.
 #   RED       it runs where tier 2 runs, it asserts, and it is FAILING on
 #             something that is not rig state.  Wiring it would put a known
 #             red in a gate, so it stays out until the finding is answered --
@@ -142,7 +150,6 @@ tests/conformance/run-conformance.sh : .github/workflows/emulator.yml@nightly : 
 tests/ipv6/run-socket.sh           : .github/workflows/emulator.yml@nightly : the AF_INET6 socket surface, RFC 3542
 tests/sockopt/run-sockopt.sh       : .github/workflows/emulator.yml@nightly : the socket-option test; needs no driver and no card, only a ROM
 tests/crypto68k/run-crypto.sh      : .github/workflows/emulator.yml@nightly : the crypto68k assembly against its own reference, on the 68020 and the 68000, which are different code
-tests/crypto68k/run-lto-probe.sh   : manual : UNWIRED. fast full-tls.library-link regression for late LTO libcalls and P-256; no network, card or peer
 tests/clients/run-clients.sh       : .github/workflows/emulator.yml@nightly : the sequences curl, wget and nc issue; A2065-gated, because client_patterns.c installs no interface of its own
 tests/tls/run-tls13.sh             : .github/workflows/emulator.yml@nightly : a TLS 1.3 handshake, on both CPU arms
 tests/tls/run-tls12ext.sh          : .github/workflows/emulator.yml@nightly : RFC 7366 and RFC 7627, negotiated and used, against openssl s_server
@@ -171,6 +178,11 @@ tests/libraries/run-libraries.sh   : tools/ci.sh@nightly            : the shared
 tests/tools/run-toolsay.sh         : tools/ci.sh@nightly            : the branches where a shipped command reached a return and printed no sentence at all: arp's two absence explanations, its truncated list, and NetTrace's connect failure
 tests/netstack/run-amiberry.sh     : tools/ci.sh@nightly            : netstack bring-up, Amiberry
 tests/tools/run-arexx.sh           : tools/ci.sh@nightly            : the AmiTCP ARexx host, driven by Commodore's own RexxMast, RX and WaitForPort. AMITCP is a port 31 of the 2,149 comm/ archives surveyed send commands to, and only the real interpreter can say whether RexxSysLib is satisfied by it, so the arm skips by name on a machine without AMINETXDUO_AMIGA_REXX (or ~/amiga-rexx) rather than substituting anything of ours
+tests/crypto68k/run-lto-probe.sh   : tools/ci.sh@nightly            : the full-tls.library-link regression for late LTO libcalls and P-256. The one harness that needs its own configure -- AMINETXDUO_CRYPTO68K_LTO_PROBE=ON is in no CROSS_CONFIGS arm, so it refused every build directory it was ever handed. tools/ci.sh ltoprobe does the configure, builds tls_library and the probe, and runs it: a ROM and nothing else, about fifteen seconds in the guest
+tests/tools/run-ifquery.sh         : tools/ci.sh@nightly            : the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the counters, and the address-allocation message against the DHCP server on the wire. In the bridged stage because that is the only place there is a real server to lease from
+tests/tools/run-dnscache.sh        : tools/ci.sh@nightly            : the regression test for the DNS answer cache: six lookups of two names, the same answer every time, and each name asked for ONCE on the wire. It took whatever backend it inherited, which with nothing set is SLIRP and measures the emulator's resolver; it takes -B now and the bridged stage gives it one
+tests/tools/run-resolvebreak.sh    : tools/ci.sh@nightly            : how long a name lookup blocks on a blackholed server, and whether Ctrl-C gets the task back. It carried two branches picked by -A, one passing -B and one not, so the default was AMINETXDUO_RUNNER=fsuae falling through to SLIRP; the branch is gone and it is bridged
+tests/tools/run-oommsg.sh          : tools/ci.sh@nightly            : out of memory, and which message blames what: a 512 KB A2000 on a 68000, the only arm anywhere that boots Kickstart 2.04. What it asserts is the WORDING, so it needs no link and no peer, only that second ROM -- skipped by name where AMINETXDUO_KICKSTART_A2000 is unset, because a 3.1 image does not boot an A2000
 
 # ------------------------------------------------- nothing invokes these --
 #
@@ -184,16 +196,12 @@ tests/tools/run-arexx.sh           : tools/ci.sh@nightly            : the AmiTCP
 # run is an unknown.
 
 tests/atf/run-atf.sh                : manual : AtfTcpSocket PRODUCES NOTHING. It has the serial log every other harness has (aa658929) and prints not one byte on it -- not the first statement of atfc_run(), not a pre-main constructor -- so there is no DH0:.done and the run ends at the timeout. NOT the guest stack: unchanged under `stack 200000`. NOT the missing mathieeedoubbas.library: staged, and the behaviour is unchanged. A pre-push tree took `Exception 3 ... at ffffffff` at 12.8 s; the landed binary takes no exception at all and hangs silently, and the only difference is one dropped serial call, i.e. code layout. A fault that moves with layout is memory corruption, not a fixed bad jump, so where it dies is not yet established. Do not wire it until it runs
-tests/tools/run-livetools.sh       : manual : UNWIRED. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead)
-tests/tools/run-dnscache.sh        : manual : UNWIRED. the regression test for the DNS answer cache
-tests/tools/run-dnssearch.sh       : manual : UNWIRED. the regression test for short names and the search list
+tests/tools/run-livetools.sh       : manual : SLIRP. the regression test for "the command says the network is down while it is up" (v0.2.0 shipped ping, netstat and ShowNetStatus with their live paths dead). The guest's command list is written before the boot and embeds SLIRP's gateway in five commands -- `ping 10.0.2.2`, and the three AddNetRoute/DeleteNetRoute lines that add, clear and restore the default route -- and two assertions compare against the literals 10.0.2.15 and 10.0.2.2. To run bridged it needs the segment's gateway discovered on the host (`ip route show default dev <iface>`) and substituted into both, and the leased-address assertion read out of the transcript rather than compared to a constant
+tests/tools/run-dnssearch.sh       : manual : SLIRP. the regression test for short names and the search list. All three phases write `nameserver 10.0.2.3` into DEVS:Internet/name_resolution, which is SLIRP's forwarder; the search-list assertions themselves are resolver-agnostic. To run bridged it needs the segment's resolver discovered on the host and written there instead, and that resolver has to give NXDOMAIN for `.test` and for the stem of the long name, which is what the phases turn on
 tests/tools/run-routes.sh          : manual : bridged. the regression test for the IPv4 routing table; AddNetRoute and DeleteNetRoute have no other home. The ARP-on-the-wire half needs an unprivileged tcpdump on -B's interface
-tests/tools/run-ifquery.sh         : manual : UNWIRED. the Roadshow interface and statistics APIs
 tests/tools/run-ifreadd.sh         : manual : bridged. AddInterfaceTagList() gives back an interface that works
 tests/tools/run-cycledrill.sh      : manual : open/expunge/reopen and Online/Offline lifetime drill; the unresolved shutdown report requires a physical 3c589
 tests/tools/run-srcsel.sh          : manual : bridged. outbound source selection
-tests/tools/run-oommsg.sh          : manual : UNWIRED. out of memory, and which message blames what
-tests/tools/run-resolvebreak.sh    : manual : UNWIRED. how long a name lookup blocks, and whether Ctrl-C gets it back
 tests/tools/run-mcastrace.sh       : manual : bridged. two openers racing for one row of the multicast table
 tests/tools/run-evpost.sh          : manual : bridged. a socket event signalled at a Task that has exited
 tests/tools/run-apidrill.sh        : manual : bridged. the whole-vector-surface leak drill. RED: shutdown leaks 2 bytes and one task per call, on every board
@@ -206,9 +214,9 @@ tests/ipv6/run-link.sh             : manual : bridged. the IPv6 link test; the r
 tests/ipv6/run-tools-amiberry.sh   : manual : bridged. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all. Both routers are read off -B's interface, and a segment with no IPv6 router stops the run before it boots. RED: three commands lost the lines that explain their refusals
 tests/ipv6/run-bringup.sh          : manual : bridged. Measures the `netstack: mark <event> <ms> ms` lines from a logging build; `serial_log_require_build` refuses before boot when logging is off, and every empty or markless repetition is an incomplete failure rather than a zero-time pass
 tests/tls/run-api.sh               : manual : bridged. a real HTTPS URL through tls.library
-tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
+tests/tls/run-fetch.sh             : manual : bridged, asset. the fetch command against real URLs. It is bridged now -- it took -B and passed it, having previously fallen through to SLIRP with a header still claiming fs-uae -- but four of its nine commands are third-party endpoints (example.com, and three badssl.com hosts chosen for their certificates), so a red here can be somebody else's outage. Same reason tests/tls/run-api.sh and run-https.sh are not gates
 tests/tls/run-https.sh             : manual : bridged. the real-HTTPS handshake
-tests/tls/run-hangup.sh            : manual : UNWIRED. can a rude peer take the machine down. IT ASSERTS NOTHING TODAY: it forwards tests/tls/run-fetch.sh's custom-command status, which is now a SKIP rather than a pass, so the four cases its header documents are visibly unchecked instead of invisibly so
+tests/tls/run-hangup.sh            : manual : SLIRP, peer. can a rude peer take the machine down. It DOES assert -- tests/tls/hangup-verdict.sh grades the transcript and it tolerates run-fetch.sh's rc 77 -- so the older note here saying it checks nothing was stale. What blocks it is HOST=10.0.2.2 (run-hangup.sh:26): the four rude servers are started on the emulator host's loopback and reached through SLIRP's host alias. Bridged, a guest cannot reach the machine running it -- a frame sent there never comes back to that NIC's pcap -- so hangup-server.py has to move to AMINETXDUO_PEER and the URLs to that address
 
 # Reasons other than "no home".
 
