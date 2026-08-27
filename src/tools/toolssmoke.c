@@ -17,11 +17,68 @@
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ToolsSmoke");
 
-#define REPORT      "DH0:tools.txt"
 #define REDIRECT_IN  " <NIL:"
-#define REDIRECT_OUT " >>DH0:tools.txt"
 
-#define COMMANDS    "DH0:commands.txt"
+/*
+ * WHERE THE REPORT AND THE COMMAND LIST LIVE.
+ *
+ * DH0: is the drive tools/amiberry-run.sh builds, and it was written into
+ * three string literals here.  A machine that is not that emulator has no
+ * DH0: -- the real A1200 in the lab boots from a drive of another name -- so
+ * ToolsSmoke could not run on one at all.  The drawer is an argument now, and
+ * DH0: is only its default.
+ */
+#define DEF_DIR     "DH0:"
+#define MAX_DIR     48
+
+static char report_path[MAX_DIR + 16]   = DEF_DIR "tools.txt";
+static char commands_path[MAX_DIR + 16] = DEF_DIR "commands.txt";
+static char redirect_out[MAX_DIR + 20]  = " >>" DEF_DIR "tools.txt";
+
+#define REPORT       ((const char *)report_path)
+#define COMMANDS     ((const char *)commands_path)
+#define REDIRECT_OUT ((const char *)redirect_out)
+
+/* Append `tail` to `dst` at `at`, and return where it now ends. */
+static int path_put(char *dst, int at, const char *tail)
+{
+    int i;
+
+    for (i = 0; tail[i] != '\0'; i++)
+        dst[at++] = tail[i];
+    dst[at] = '\0';
+
+    return at;
+}
+
+/*
+ * Point the three paths at `dir`.  A separator is added unless the drawer
+ * already ends in one: "DH0:" and "Work:anxd/" both name a drawer, and
+ * "Work:anxd" needs the slash this puts there.
+ */
+static void set_dir(const char *dir)
+{
+    char base[MAX_DIR + 2];
+    int  n = 0;
+
+    while (dir[n] != '\0' && n < MAX_DIR)
+    {
+        base[n] = dir[n];
+        n++;
+    }
+    if (n > 0 && base[n - 1] != ':' && base[n - 1] != '/')
+        base[n++] = '/';
+    base[n] = '\0';
+
+    if (n == 0)
+        return;
+
+    path_put(report_path,   path_put(report_path,   0, base), "tools.txt");
+    path_put(commands_path, path_put(commands_path, 0, base), "commands.txt");
+    path_put(redirect_out,
+             path_put(redirect_out, path_put(redirect_out, 0, " >>"), base),
+             "tools.txt");
+}
 /*
  * Truncation at this ceiling is silent, so it sits well above what any staged
  * list uses.  A run that stops reading at line 40 looks like a set of commands
@@ -62,7 +119,7 @@ static char  script[MAX_COMMANDS][MAX_LINE];
 static ULONG script_count;
 
 /*
- * Read DH0:commands.txt into `script`. Returns 0 when there is no such file,
+ * Read the command list into `script`. Returns 0 when there is no such file,
  * in which case the built-in list above is used.
  */
 static ULONG load_script(void)
@@ -158,7 +215,7 @@ static int line_holds(const char *hay, const char *needle)
    the Shell could not start it, which is what `failures` counts. */
 static int run_command(const char *command)
 {
-    char             line[MAX_LINE + 40];
+    char             line[MAX_LINE + MAX_DIR + 40];
     struct DateStamp started;
     LONG             rc;
     int              n = 0;
@@ -297,7 +354,7 @@ static int line_holds_any(const char *hay, const char *list)
 static int attempt_met(LONG from, const char *needle, const char *stop)
 {
     BPTR fh = Open((CONST_STRPTR)REPORT, MODE_OLDFILE);
-    char line[MAX_LINE + 40];
+    char line[MAX_LINE + MAX_DIR + 40];
     int  met = 0;
 
     if (fh == (BPTR)0)
@@ -423,8 +480,22 @@ int main(int argc, char **argv)
     int             i;
     int             failures = 0;
 
+    struct RDArgs  *rda;
+    LONG            args[1];
+
     (void)argc;
     (void)argv;
+
+    /* A Shell command started from a script sees argc == 1 here, so the
+       drawer arrives through ReadArgs and never through argv. */
+    args[0] = 0;
+    rda = ReadArgs((CONST_STRPTR)"DIR", args, NULL);
+    if (rda != NULL)
+    {
+        if (args[0] != 0)
+            set_dir((const char *)args[0]);
+        FreeArgs(rda);
+    }
 
     /* No "please insert volume DEVS:" requester is answered on a machine with
        nobody at the keyboard. */
@@ -434,7 +505,9 @@ int main(int argc, char **argv)
     fh = Open((CONST_STRPTR)REPORT, MODE_NEWFILE);
     if (fh == (BPTR)0)
     {
-        PutStr((CONST_STRPTR)"ToolsSmoke: cannot create " REPORT "\n");
+        PutStr((CONST_STRPTR)"ToolsSmoke: cannot create ");
+        PutStr((CONST_STRPTR)report_path);
+        PutStr((CONST_STRPTR)"\n");
         self->pr_WindowPtr = old_window;
         return RETURN_FAIL;
     }

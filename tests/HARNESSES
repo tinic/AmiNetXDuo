@@ -62,6 +62,14 @@
 #   asset     needs something not ours to ship: a third-party client, a
 #             licensed Workbench, another vendor's stack
 #   windows   WinUAE, so a Windows host
+#   hardware  a machine on the desk and not an emulator.  A DIFFERENT fact
+#             from `bridged` or `peer`: those name something the lab has and
+#             a runner has to be given.  This one names something no emulator
+#             models at all, so there is no arm to wire it to and running it
+#             is a person switching a machine on.  The harness answers the
+#             absence rather than failing over it: a target that does not
+#             resolve or does not answer exits 3, the convention
+#             tests/perf/run-ackscope.sh set
 #   UNWIRED   nothing prevents it running where the rest of tier 2 runs.
 #             It simply has no home.  This is the list that should shrink.
 #   SLIRP     written against SLIRP, and bridged is the only mode this project
@@ -161,6 +169,7 @@ tests/tools/run-ifdhcp.sh          : .github/workflows/emulator.yml@nightly : Co
 tests/tools/run-ifremove.sh        : .github/workflows/emulator.yml@nightly : RemoveNetInterface across its surface
 tests/tools/run-iperf.sh           : .github/workflows/emulator.yml@nightly : iperf, byte counts against a peer
 tests/tools/run-payverify.sh       : manual : payload CONTENT against a peer -- both ends hash a position-dependent pattern, so a placement bug the fused receive sum would certify fails the join. Manual for the same reasons as the guest-as-server iperf arms: peer + bridged, it needs a third machine the guest can call. The tier is run on the playhouse rig
+tests/tools/run-hwcard.sh          : manual : the 3c589 in the real A1200, which no emulator models -- `hardware`, and the machine is usually off, so a target that does not answer exits 3 rather than deciding a claim. Four arms. identity: the interface is on OUR driver and on that card's own unit, which src/netdev/netdev_cards.c pins at (row index + 1) * 100, so a run against a machine that fell back to another card cannot be read as coverage of this one. payload: the bytes both ways, hashed at both ends against a position-dependent pattern -- the proof tests/tools/run-payverify.sh makes on the cards it can reach. overruns: the receive overrun count read either side of a load, which is where a wire number for src/netdev/el3.c's FIFO-hold change comes from; it is proven only in the C mock at src/netdev/test/test_netdev_el3.c:35. shutdown: NetShutdown, and then ICMP and HTTP asked SEPARATELY, because a machine that stopped and a stack that did not come back look the same from one probe and the open report is a guru. Driven by tools/hwrun.sh, which pulls the staged binaries onto the machine over its own httpd and runs them through /shell; xsurf500 is in the same table and there is no such board here, so -C xsurf500 says so and skips
 tests/tools/run-mdnsctl.sh         : .github/workflows/emulator.yml@nightly : the responder switched on and off
 tests/tools/run-netsetup.sh        : .github/workflows/emulator.yml@nightly : NetSetup writes a usable configuration
 tests/tools/run-onoff.sh           : .github/workflows/emulator.yml@nightly : Online and Offline
