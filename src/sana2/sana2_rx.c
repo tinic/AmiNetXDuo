@@ -354,65 +354,17 @@ VOID ami_sana2_rxprobe_report(const AmiSana2If *iface)
 /* ------------------------------------------------------------- delivery */
 
 /*
- * Run one frame's input on this thread, holding what the IP thread holds while
- * it does the same thing.
+ * Dispatch one frame into NetX Duo, on this thread.
  *
  * _nx_ip_packet_receive() is documented as called by the application I/O
  * driver (nx_ip_packet_receive.c:65-68), so the reader is a supported caller.
- * What the deferred entry points bought was the lock: nx_ip_thread_entry.c
- * takes nx_ip_protection before every _nx_ip_packet_receive() and before the
- * ARP and RARP dispatches, and so does every socket call and every send.
- * Without it the reader walks the fragment list, the ARP cache, the ICMP
- * socket list and the IP counters while an application thread is inside them.
- * The mutex is what makes calling the direct entry points from here equivalent
- * to the IP thread calling them.
- *
- * The mutex is recursive for its owner, which is not incidental:
- * nx_udp_packet_receive.c takes it again underneath, exactly as it does under
- * the IP thread today.
- *
- * TX_WAIT_FOREVER is a ThreadX suspension, not an exec Wait(): the scheduler
- * takes the baton back the way it does for any other blocking ThreadX service,
- * so no ami_sana2_block_enter() bracket belongs here and none is wanted.  What
- * the reader must never do inside this is block in exec, which would release
- * the baton while holding the IP mutex; nothing on the path does.  The only
- * device call it reaches is ami_sana2_tx_send()'s BeginIO(), which queues and
- * returns.
- *
- * The lock also keeps sana2_tx.c's invariant.  Its header says a packet may
- * only be released where every other send runs, under nx_ip_protection, which
- * is why ami_sana2_tx_defer() hands the reap to the IP thread rather than
- * doing it.  The reader now reaches ami_sana2_tx_send() from in here -- an
- * ICMP echo reply, an ARP reply, a fragment -- and that calls
- * ami_sana2_tx_reap() and so nx_packet_transmit_release().  It is the mutex,
- * and nothing else, that makes that legal.
- *
- * THE PRICE.  nx_ip_create.c creates this mutex TX_NO_INHERIT.  The readers
- * are priority 1 and the IP thread is 2 (src/thread_priorities.h) precisely so
- * that nothing preempts the thread feeding a device with no buffers of its
- * own.  A reader blocked here gives the IP thread no boost, so AutoIP, the
- * mDNS responder and the DHCPv6 client at 3 and 4 may all run ahead of the
- * thread a priority-1 reader is queued behind.
+ * What the deferred entry points bought was the lock, and the caller holds it:
+ * ami_sana2_rx_drain() takes nx_ip_protection once for the whole run it
+ * drains, the way nx_ip_thread_entry.c holds it for the whole of its event
+ * loop.  The header on that function is where the reasoning lives.
  */
-static VOID ami_sana2_rx_input(NX_IP *ip, NX_PACKET *packet, UINT type)
+static VOID ami_sana2_rx_dispatch(NX_IP *ip, NX_PACKET *packet, UINT type)
 {
-    TX_THREAD *outer;
-
-    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
-
-    /*
-     * Claim the IP thread's seat for the length of this call, so that
-     * _nx_tcp_packet_receive() processes the segment here instead of queueing
-     * it and waking a thread that is blocked on the mutex this thread holds.
-     * See NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.
-     * Written under the mutex and restored under it, so the only reader that
-     * can observe it is this one.  `outer` is not paranoia: a loopback send
-     * from in here re-enters IP input, and a nested call must not clear the
-     * seat on the way out.
-     */
-    outer = _nx_ip_input_thread;
-    _nx_ip_input_thread = tx_thread_identify();
-
     switch (type)
     {
 #ifndef NX_DISABLE_IPV4
@@ -429,16 +381,12 @@ static VOID ami_sana2_rx_input(NX_IP *ip, NX_PACKET *packet, UINT type)
         _nx_ip_packet_receive(ip, packet);
         break;
     }
-
-    _nx_ip_input_thread = outer;
-
-    tx_mutex_put(&ip->nx_ip_protection);
 }
 
 /*
  * Both the cooked path (header synthesised) and the raw path (header off the
  * wire) end here, so the two modes must produce the same thing.  Input runs on
- * this thread, under the IP thread's own lock: see ami_sana2_rx_input().
+ * this thread, under the lock ami_sana2_rx_drain() is holding.
  */
 VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
                           const AmiRxSum *sum)
@@ -538,7 +486,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
-        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_IPV4);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV4);
         break;
 
     case AMI_ETHERTYPE_IPV6:
@@ -567,18 +515,18 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
         }
 #endif
         iface->stats.packets_received++;
-        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_IPV6);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_IPV6);
         break;
 
 #ifndef NX_DISABLE_IPV4
     case AMI_ETHERTYPE_ARP:
         iface->stats.packets_received++;
-        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_ARP);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_ARP);
         break;
 
     case AMI_ETHERTYPE_RARP:
         iface->stats.packets_received++;
-        ami_sana2_rx_input(iface->ip, packet, AMI_ETHERTYPE_RARP);
+        ami_sana2_rx_dispatch(iface->ip, packet, AMI_ETHERTYPE_RARP);
         break;
 #endif /* !NX_DISABLE_IPV4 */
 
@@ -861,7 +809,9 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
  */
 static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
 {
+    NX_IP          *ip = rx->iface->ip;
     struct Message *msg;
+    TX_THREAD      *outer;
     UWORD           took = 0;
 
 #ifdef AMINETXDUO_RXPROBE
@@ -916,6 +866,33 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
     }
 #endif
 
+    /*
+     * One lock for the whole run, not one per frame.
+     *
+     * nx_ip_thread_entry.c holds nx_ip_protection across its entire event loop
+     * and gives it back only when it is about to wait, and this loop is the
+     * same shape: every frame it takes walks the same fragment list, the same
+     * ARP cache and the same counters, and taking and giving back the mutex
+     * between each of them buys nothing but the round trips.  The run is
+     * bounded by `budget` above, which is what stops the hold from becoming
+     * open-ended.
+     *
+     * Claiming the IP thread's seat goes with it: _nx_tcp_packet_receive()
+     * then processes each segment here instead of queueing it and waking a
+     * thread that is blocked on the mutex this one holds.  See
+     * NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.  The
+     * saved outer value is not decoration: a loopback send from inside input
+     * re-enters, and the nested call must not give the seat up on its way out.
+     *
+     * What the reader must never do while holding this is block in exec, which
+     * would release the ThreadX baton with the IP mutex held.  Nothing on the
+     * path does: the only device call it reaches is BeginIO(), which queues
+     * and returns, and the packet allocation is NX_NO_WAIT.
+     */
+    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    outer = _nx_ip_input_thread;
+    _nx_ip_input_thread = tx_thread_identify();
+
     while (took < budget && (msg = GetMsg(rx->port)) != NULL)
     {
 #ifdef AMINETXDUO_RXPROBE
@@ -964,6 +941,9 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
             rx->iface->stats.rx_err_io++;
         }
     }
+
+    _nx_ip_input_thread = outer;
+    tx_mutex_put(&ip->nx_ip_protection);
 
     return took;
 }

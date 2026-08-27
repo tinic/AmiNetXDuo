@@ -296,11 +296,24 @@ static AmiRxSum h_sum_of(const AmiRxSlot *s)
     return sum;
 }
 
+/*
+ * The lock and the seat belong to ami_sana2_rx_drain() now, which is Exec code
+ * this host binary does not run, so the tests take them the way the reader
+ * would and the receiver stubs still check that they were held.
+ */
 static void h_deliver(void)
 {
-    AmiRxSum sum = h_sum_of(&slot);
+    AmiRxSum   sum = h_sum_of(&slot);
+    TX_THREAD *outer;
+
+    tx_mutex_get(&ip.nx_ip_protection, TX_WAIT_FOREVER);
+    outer = _nx_ip_input_thread;
+    _nx_ip_input_thread = tx_thread_identify();
 
     ami_sana2_rx_deliver(&iface, &pkt, &sum);
+
+    _nx_ip_input_thread = outer;
+    tx_mutex_put(&ip.nx_ip_protection);
 }
 
 static void fixture_init(void)

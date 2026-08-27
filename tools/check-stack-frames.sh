@@ -60,9 +60,9 @@ NOT_A_CALL=( --cut ami_sana2_rx_thread )
 # bsd_getaddrinfo.  Every other root gets NOT_A_CALL instead.
 RX_EDGES=(
     --edge ami_sana2_rx_thread=ami_sana2_rx_deliver
-    --edge ami_sana2_rx_deliver=ami_sana2_rx_input
-    --edge ami_sana2_rx_input=_nx_ip_packet_receive
-    --edge ami_sana2_rx_input=_nx_arp_packet_receive
+    --edge ami_sana2_rx_deliver=ami_sana2_rx_dispatch
+    --edge ami_sana2_rx_dispatch=_nx_ip_packet_receive
+    --edge ami_sana2_rx_dispatch=_nx_arp_packet_receive
     --edge _nx_ip_packet_receive=_nx_tcp_packet_receive
     --edge _nx_ip_packet_receive=_nx_udp_packet_receive
     --edge _nx_ip_packet_receive=_nx_icmp_packet_receive
