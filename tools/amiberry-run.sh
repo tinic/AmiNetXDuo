@@ -761,19 +761,17 @@ if [ -s "$SERIAL" ]; then
     cat "$SERIAL"
     [ ! -s "$SERIALTS" ] || echo "(same output, timestamped: $SERIALTS)"
 else
-    # THIS IS ALMOST ALWAYS THE BUILD, not the serial path.  AMI_ERROR,
-    # AMI_WARN and AMI_INFO compile to `if (0)` unless AMINETXDUO_LOG is
-    # defined and it is OFF by default, so a library built the ordinary way
-    # never writes a byte here.  What is left is whatever the guest program
-    # puts on the port itself with RawPutChar, and a ToolsSmoke guest puts
-    # nothing.  Measured on this rig: tests/stack wrote 0 bytes against a
-    # default build and 3,847 against -DAMINETXDUO_LOG=ON, same minute, same
-    # machine.
+    # THIS IS ALMOST ALWAYS THE LEVEL, not the serial path.  AMI_ERROR,
+    # AMI_WARN and AMI_INFO are compiled into every build, but ami_log_level()
+    # starts at AMI_LOG_WARN: a run in which nothing went wrong writes nothing.
+    # What is left is whatever the guest program puts on the port itself with
+    # RawPutChar, and a ToolsSmoke guest puts nothing.
     echo "(empty, nothing was written to the serial port)"
-    echo "  The library's AMI_ERROR/AMI_WARN/AMI_INFO calls compile to nothing"
-    echo "  without -DAMINETXDUO_LOG=ON, and the guest program writes to the"
-    echo "  port only if it carries a RawPutChar tracer of its own.  Rebuild"
-    echo "  with -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2 for a log."
+    echo "  ami_log_level() starts at AMI_LOG_WARN, so a run that hit no"
+    echo "  warning and no error is silent, and the guest program writes to"
+    echo "  the port only if it carries a RawPutChar tracer of its own.  For"
+    echo "  the AMI_LOG_INFO tier, stage ENV:ANXDLOGLEVEL=2 into the drive"
+    echo "  (serial_log_stage_env in tools/serial-log.sh)."
 fi
 
 for produced in "$HD"/*.txt "$HD"/*.log; do

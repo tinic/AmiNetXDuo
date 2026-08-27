@@ -143,6 +143,10 @@ sana2_stage "$BOARD" "$STAGE/devs"
 
 printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
 
+# "netstack: starting ThreadX" is at AMI_LOG_INFO, and the reboot control
+# below is read off it.  Ask the guest for that tier.
+serial_log_stage_env "$STAGE" 2
+
 # A background listener's output must be redirected by its own line: a
 # detached process shares no console and its Output() is NIL: (toolssmoke.c).
 if [ "$MODE" = ipv6 ]; then
@@ -241,7 +245,7 @@ echo "==> $BUILD ($MODE) on $MODEL, $BOARD on $IFACE, eth0 with ADDRESS6=fd00::1
 set +e
 "$ROOT/tools/amiberry-run.sh" -N "$BOARD" -B "$IFACE" -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
-    "$STAGE/greeting.txt" \
+    "$STAGE/env" "$STAGE/greeting.txt" \
     $(for t in $STAGED_TOOLS; do echo "$STAGE/$t"; done)
 RUN_RC=$?
 set -e
@@ -308,8 +312,8 @@ if serial_log_have "$SERIAL" "$BUILD" "the boot count off the serial log" \
     BOOT_SRC="the serial log"
 else
     BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
-    BOOT_SRC="the transcript (the serial log is empty; build with
-           -DAMINETXDUO_LOG=ON for the stronger instrument)"
+    BOOT_SRC="the transcript (the serial log is empty; the stronger
+           instrument reads it, so find out why nothing was written)"
 fi
 if [ "$BOOTS" -gt 1 ]; then
     bad "THE MACHINE REBOOTED: $BOOT_SRC shows $BOOTS starts, a command

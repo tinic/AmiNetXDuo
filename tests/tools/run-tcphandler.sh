@@ -357,7 +357,8 @@ if serial_log_have "$SERIAL" "$BUILD" "which DOS packets went unanswered"; then
     fi
 else
     note "which DOS packets went unanswered was NOT CHECKED: the serial log is
-       empty.  Build with -DAMINETXDUO_LOG=ON to make this assertion exist"
+       empty.  The sentences are in every build, so raise the level the guest
+       runs at (serial_log_stage_env) to make this assertion exist"
 fi
 
 echo

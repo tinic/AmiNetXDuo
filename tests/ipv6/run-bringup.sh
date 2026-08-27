@@ -12,7 +12,12 @@ cd "$ROOT"
 . "$ROOT/tools/serial-log.sh"
 
 BACKEND="${AMINETXDUO_AMIBERRY_BACKEND:-ens18}"
-BUILD="${AMINETXDUO_BUILD:-build/v6log}"
+# THE BUILD THAT SHIPS.  This used to default to build/v6log, a tree configured
+# -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2, so the headline bring-up figure
+# described a library no user ran.  The sentences are in every build now and
+# the level is a runtime dial, so the ordinary tree answers and the only thing
+# staged for the guest is ENV:ANXDLOGLEVEL.
+BUILD="${AMINETXDUO_BUILD:-build/cm}"
 MODEL=A1200
 TIMEOUT=120
 REPS=5
@@ -71,6 +76,12 @@ CONFIGURE=DHCP
 CONFIGURE6=AUTO
 EOF
 
+# AMI_LOG_INFO, which is where the marks are.  ami_log_level() starts one
+# level below it, so a machine with no such variable prints warnings and
+# errors and nothing else -- and that is the difference between this guest and
+# a user's, in full.
+serial_log_stage_env "$STAGE" 2
+
 cat > "$STAGE/commands.txt" <<EOF
 SYS:AddNetInterface DEVS:NetInterfaces/eth0
 wait $SETTLE
@@ -94,7 +105,8 @@ for rep in $(seq 1 "$REPS"); do
     set +e
     AMINETXDUO_RUN_TAG="$TAG" "$ROOT/tools/amiberry-run.sh" \
         -N a2065 -B "$BACKEND" -m "$MODEL" -t "$TIMEOUT" \
-        "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
+        "$SMOKE" "$STAGE/devs" "$STAGE/libs" "$STAGE/env" \
+        "$STAGE/AddNetInterface" \
         "$STAGE/ShowNetStatus" "$STAGE/netstat" "$STAGE/commands.txt" \
         > "$ROOT/build/$TAG.out" 2>&1
     rc=$?
@@ -119,7 +131,7 @@ for rep in $(seq 1 "$REPS"); do
 
     if [ -z "$t_start" ]; then
         echo "rep=$rep result=nomarks run_rc=$rc serial=$SERIAL"
-        echo "  (no 'netstack: mark' lines: build with -DAMINETXDUO_LOG=ON -DAMINETXDUO_LOG_LEVEL=2)"
+        echo "  (no 'netstack: mark' lines: ENV:ANXDLOGLEVEL never reached the guest, or it never booted)"
         missing=$((missing + 1))
         RESULTS+=("")
         continue

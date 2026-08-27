@@ -177,7 +177,7 @@ tests/netstack/run-fitzquery.sh    : manual : asset. needs the Fitz binary, whic
 tests/tcpdrill/run-tcpdrill.sh     : manual : RED on one retransmission defect in x02_data_is_retransmitted, x03_retransmission_needs_no_later_send, and u03_retransmission_is_a_plain_segment
 tests/ipv6/run-link.sh             : manual : bridged. the IPv6 link test; the router findings only carry information on a segment that has one
 tests/ipv6/run-tools-amiberry.sh   : manual : bridged. the shipped commands over IPv6; nslookup, NetTrace, traceroute and whois have no other home at all. Both routers are read off -B's interface, and a segment with no IPv6 router stops the run before it boots. RED: three commands lost the lines that explain their refusals
-tests/ipv6/run-bringup.sh          : manual : bridged. Measures the `netstack: mark <event> <ms> ms` lines from a logging build; `serial_log_require_build` refuses before boot when logging is off, and every empty or markless repetition is an incomplete failure rather than a zero-time pass
+tests/ipv6/run-bringup.sh          : manual : bridged. Measures the `netstack: mark <event> <ms> ms` lines FROM THE BUILD THAT SHIPS; the marks are at AMI_LOG_INFO and the guest is asked for that tier with a staged ENV:ANXDLOGLEVEL, not with a build option. `serial_log_require_build` refuses before boot when the library carries no sentences at all, and every empty or markless repetition is an incomplete failure rather than a zero-time pass
 tests/tls/run-api.sh               : manual : bridged. a real HTTPS URL through tls.library
 tests/tls/run-fetch.sh             : manual : UNWIRED. the fetch command against real URLs
 tests/tls/run-https.sh             : manual : bridged. the real-HTTPS handshake

@@ -65,6 +65,10 @@ for t in AddNetInterface ShowNetStatus netstat ping Online Offline \
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
+# "netstack: starting ThreadX" is at AMI_LOG_INFO, and the boot count below
+# is read off it.  Ask the guest for that tier.
+serial_log_stage_env "$STAGE" 2
+
 cat > "$STAGE/commands.txt" <<'EOF'
 SYS:AddNetInterface eth0
 SYS:ShowNetStatus
@@ -103,6 +107,7 @@ echo "==> booting $MODEL with the A2065 on SLIRP"
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
     "$TOOLS/ToolsSmoke" "$STAGE/commands.txt" "$STAGE/devs" "$STAGE/libs" \
+    "$STAGE/env" \
     "$STAGE/AddNetInterface" "$STAGE/ShowNetStatus" "$STAGE/netstat" \
     "$STAGE/ping" "$STAGE/Online" "$STAGE/Offline" \
     "$STAGE/CheckNetConfig" "$STAGE/GetNetStatus" "$STAGE/AddNetRoute" \
@@ -134,8 +139,8 @@ if serial_log_have "$SERIAL" "$BUILD" "the boot count off the serial log" \
     BOOT_SRC="the serial log"
 else
     BOOTS=$(grep -c "^===== SYS:AddNetInterface eth0 =====" "$REPORT" || true)
-    BOOT_SRC="the transcript (the serial log is empty; build with
-       -DAMINETXDUO_LOG=ON for the stronger instrument)"
+    BOOT_SRC="the transcript (the serial log is empty; the stronger
+       instrument reads it, so find out why nothing was written)"
 fi
 
 if [ "$BOOTS" -gt 1 ]; then
