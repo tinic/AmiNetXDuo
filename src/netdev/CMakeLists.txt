@@ -196,10 +196,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     # ed.c is #included by the test, not listed here: read_hdr, ring_copy and
     # write_buf are static and the test would otherwise be changing the code
     # it tests.  netdev_bus.c is linked because attach reaches the registers
-    # through it, which is the only part of the probe a host can drive.
+    # through it.  With no beam on the host, netdev_clock.c preserves the old
+    # register-count floor while compiling the measured stop deadline.
     add_executable(test_netdev_ed
         test/test_netdev_ed.c
         netdev_bus.c
+        netdev_clock.c
         "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
 
     target_include_directories(test_netdev_ed PRIVATE

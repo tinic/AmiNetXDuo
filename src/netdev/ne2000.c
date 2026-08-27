@@ -77,6 +77,9 @@ extern ULONG netdev_time_rdc;  /* netdev_device.c reports it */
 #define ASIC_GET(nic, reg)      netdev_bus_ra8(&(nic)->bus, (reg))
 #define ASIC_PUT(nic, reg, val) netdev_bus_wa8(&(nic)->bus, (reg), (UBYTE)(val))
 
+#define NE2000_RESET_STATUS_WAIT_US  10000u
+#define NE2000_RESET_STATUS_SPINS      100u
+
 /*
  * There is no timer open when a unit is probed and a device cannot Delay(), so
  * the millisecond arms are measured against the beam with the bus-read count
@@ -367,7 +370,7 @@ static BOOL ne2000_detect(NetdevNic *nic)
 {
     UBYTE test_buffer[32];
     UBYTE tmp;
-    UWORD i;
+    NetdevWait reset_wait;
 
     ne2000_probe_reset(nic);
 
@@ -456,7 +459,9 @@ static BOOL ne2000_detect(NetdevNic *nic)
 
     NIC_PUT(nic, ED_P0_CR, ED_CR_RD2 | ED_CR_PAGE_0 | ED_CR_STA);
 
-    for (i = 0; i < 100; i++)
+    netdev_wait_begin(&reset_wait, NE2000_RESET_STATUS_WAIT_US,
+                      NE2000_RESET_STATUS_SPINS);
+    do
     {
         if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) == ED_ISR_RST)
         {
@@ -465,6 +470,7 @@ static BOOL ne2000_detect(NetdevNic *nic)
         }
         ne_delay(nic, 100);
     }
+    while (!netdev_wait_done(&reset_wait));
 
     /* Monitor mode, so the buffer test is not raced by an arriving frame. */
     NIC_PUT(nic, ED_P0_RCR, ED_RCR_MON);

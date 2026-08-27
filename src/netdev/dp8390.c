@@ -23,6 +23,7 @@
 #include "netdev_nic.h"
 #include "dp8390.h"
 #include "netdev_bsdtypes.h"
+#include "netdev_clock.h"
 #include "dp8390reg.h"
 
 #include <proto/exec.h>
@@ -75,20 +76,26 @@ VOID dp8390_config(NetdevNic *nic)
 
 /*
  * The poll waits for the frame in progress to finish, which at 10 Mbit is at
- * most 1214 us for a maximum-length frame; 900 iterations is that worst case
- * and a margin.  It is a bound for the case where ISR.RST never arrives, which
- * is every emulated NE2000.
+ * most 1214 us for a maximum-length frame.  The old 900 register reads remain
+ * the floor; measured time is the bound for the case where ISR.RST never
+ * arrives, which is every emulated NE2000.
  */
-#define DP8390_HALT_POLLS   900
+#define DP8390_HALT_SPINS   900u
 
 VOID dp8390_halt(NetdevNic *nic)
 {
-    UWORD n = DP8390_HALT_POLLS;
+    NetdevWait w;
 
     NIC_PUT(nic, ED_P0_CR, nic->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
+    netdev_wait_begin(&w, DP8390_STOP_WAIT_US, DP8390_HALT_SPINS);
 
-    while ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) == 0 && --n != 0)
+    do
+    {
+        if ((NIC_GET(nic, ED_P0_ISR) & ED_ISR_RST) != 0)
+            break;
         dp_pause(nic, 1);
+    }
+    while (!netdev_wait_done(&w));
 
     /*
      * STP does not deassert INT.  The chip asserts while ISR & IMR is non-zero

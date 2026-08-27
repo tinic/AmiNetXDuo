@@ -13,6 +13,10 @@
 #define DP8390_TX_OFFLINE   2
 #define DP8390_TX_FAILED    3
 
+/* A 1518-byte frame occupies a 10-Mbit wire for 1214.4 us.  STP finishes the
+   frame already in progress before ISR.RST is raised; leave measured margin. */
+#define DP8390_STOP_WAIT_US  1500u
+
 VOID  dp8390_config(NetdevNic *nic);
 LONG  dp8390_init(NetdevNic *nic);
 VOID  dp8390_halt(NetdevNic *nic);
