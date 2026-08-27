@@ -1431,6 +1431,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
     ULONG               ext_addr = 0;
     char                ext_host[AMI_CFG_NAME_LEN];
     char                addr[AMI_CFG_NAME_LEN];
+    const char         *router6 = NULL;
     UWORD               i;
     UWORD               shown = 0;
 
@@ -1534,8 +1535,12 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
             address_text(snap.gateway, addr, sizeof(addr));
             tool_printf("Default route:  %s\n", (LONG)addr);
         }
-        else if (cfg->default_gateway != 0)
+        else if (!have_live && cfg->default_gateway != 0)
         {
+            /* The file is evidence only when the running route table cannot
+               be read. Once a live snapshot says there is no IPv4 default,
+               printing this stale value would claim a route the machine does
+               not have. */
             address_text(cfg->default_gateway, addr, sizeof(addr));
             tool_printf("Default route:  %s (configured)\n", (LONG)addr);
         }
@@ -1546,7 +1551,7 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
              * machine's only route off its own network is one a router
              * advertisement gave it.
              */
-            const char *router6 = default_router6();
+            router6 = default_router6();
 
             if (router6 != NULL)
                 tool_printf("Default route:  %s (IPv6)\n", (LONG)router6);
@@ -1695,7 +1700,8 @@ static LONG report(const Wanted *w, const AmiConfig *cfg, BOOL from_disk)
 
         if (!any_dhcp && !elsewhere)
         {
-            if (cfg->default_gateway == 0 && (!have_live || !snap.have_gateway))
+            if ((have_live && !snap.have_gateway && router6 == NULL) ||
+                (!have_live && cfg->default_gateway == 0))
             {
                 problem_head();
                 tool_printf("  * There is no default route, so only machines "

@@ -307,14 +307,16 @@ else
  surviving interface has no wire"
 fi
 
-# BUG 2, afedeb06.  READ THE GATEWAY BACK.  An on-link ping passes with no
-# gateway at all, so the two checks above cannot see this one.  A FLOOR, not a
-# proof: ShowNetStatus can print the CONFIGURED gateway, so this reads non-zero
-# either way once the survivor has a GATEWAY line.  The resolution below is
-# what actually decides it; see docs/BACKLOG.md.
-gw2=$(gateway_of "$(block "SYS:ShowNetStatus" 2)")
+# BUG 2, afedeb06.  READ THE LIVE GATEWAY BACK.  An on-link ping passes with no
+# gateway at all, so the two checks above cannot see this one. ShowNetStatus
+# uses the configured value only when it cannot read the running stack; this
+# second report is live, so a non-zero answer is the route NetX is using.
+status2=$(block "SYS:ShowNetStatus" 2)
+gw2=$(gateway_of "$status2")
 echo "  default route: '$gw1' with both up, '$gw2' after zeth1 was removed"
-if [ -n "$gw2" ] && [ "$gw2" != 0.0.0.0 ]; then
+if printf '%s\n' "$status2" | grep -qE '^Default route:.*\(configured\)'; then
+    fail "ShowNetStatus substituted a configured route for the live table"
+elif [ -n "$gw2" ] && [ "$gw2" != 0.0.0.0 ]; then
     pass "the machine still reports a default route after zeth1 was removed:\
  $gw2"
 else
@@ -384,6 +386,13 @@ if block "SYS:ShowNetStatus EVENTS" 1 | grep -qi "offline.*fail"; then
     fail "the last interface out could not take the unit offline"
 else
     pass "the last one out took the unit offline without a refusal"
+fi
+
+final_status=$(block "SYS:ShowNetStatus EVENTS" 1)
+if printf '%s\n' "$final_status" | grep -qE '^Default route:[[:space:]]+none$'; then
+    pass "ShowNetStatus reports no live route after the last interface is gone"
+else
+    fail "ShowNetStatus substituted a configured gateway after all live routes were removed"
 fi
 
 printf 'ifsurvive: %d checks, %d failures\n' "$TOTAL" "$BAD" >> "$CHECKS"
