@@ -889,7 +889,31 @@ static UWORD ami_sana2_rx_drain(AmiSana2Rx *rx, UWORD budget)
      * path does: the only device call it reaches is BeginIO(), which queues
      * and returns, and the packet allocation is NX_NO_WAIT.
      */
-    tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER);
+    /*
+     * NOT TX_WAIT_FOREVER.  ami_sana2_rx_stop() runs inside
+     * _nx_ip_driver_interface_direct_command(), which holds this same mutex
+     * across the whole NX_LINK_DISABLE and then waits seconds for this thread
+     * to put its "exited" semaphore.  A reader woken by that stop always
+     * reaches this line before it retests rx->stop, so waiting forever here IS
+     * the deadlock: the reader waits for the mutex, the stopper waits for the
+     * reader, and the interface comes back orphaned.  A stop is also the one
+     * thing this run has nothing left to do for -- the loop below drops every
+     * message on rx->stop anyway -- so give the mutex up and let the loop end.
+     */
+    while (tx_mutex_get(&ip->nx_ip_protection,
+                        AMI_SANA2_RX_LOCK_TICKS) != TX_SUCCESS)
+    {
+        if (rx->stop)
+            return took;
+    }
+
+    /* Set while this was waiting: the same, minus the round trip below. */
+    if (rx->stop)
+    {
+        tx_mutex_put(&ip->nx_ip_protection);
+        return took;
+    }
+
     outer = _nx_ip_input_thread;
     _nx_ip_input_thread = tx_thread_identify();
 
