@@ -227,7 +227,12 @@ export class View {
   }
 
   /*
-   * A PNG of the Amiga's screen, as a canvas for the caller to encode.
+   * The Amiga's screen as RGBA, for whatever wants to write a file of it.
+   *
+   * ONE COMPOSITION, TWO FILES.  The screenshot encodes a single call of this
+   * and the APNG export encodes one per frame, so a still and a recording of
+   * the same moment are the same pixels: there is no second path that could
+   * put the pointer somewhere else or stretch the picture differently.
    *
    * WHAT IT CAPTURES, AND WHY IT IS NOT A SCREENSHOT OF THE PAGE
    *
@@ -265,13 +270,14 @@ export class View {
    *   for anything that wants to do its own correction.
    *
    *   The stretch is a whole-number row and column duplication done here
-   *   rather than by drawImage: an integer nearest-neighbour scale is exact,
+   *   rather than by the canvas: an integer nearest-neighbour scale is exact,
    *   and doing it explicitly means no smoothing setting, no colour space
    *   and no resampler is between the palette and the file.  ZOOM is not
    *   applied at all -- it is how big the picture is on the page, not what
    *   the picture is.
    */
-  snapshot(native: boolean): { canvas: HTMLCanvasElement; w: number; h: number } | null {
+  compose(native: boolean):
+      { rgba: Uint8ClampedArray<ArrayBuffer>; w: number; h: number } | null {
     const img = this.image;
     const s = this.screen;
     if (img === null || s.width === 0 || s.height === 0) return null;
@@ -280,15 +286,11 @@ export class View {
     const w = s.width * a.x;
     const h = s.height * a.y;
 
-    const out = document.createElement("canvas");
-    out.width = w;
-    out.height = h;
-    const ctx = out.getContext("2d", { alpha: false });
-    if (ctx === null) return null;
-
-    const dst = ctx.createImageData(w, h);
+    /* Its own buffer, not one borrowed from a canvas: the exporter keeps the
+       frame it was given until the next one arrives, to compare against. */
+    const rgba = new Uint8ClampedArray(w * h * 4);
     const src = new Uint32Array(img.data.buffer);
-    const d32 = new Uint32Array(dst.data.buffer);
+    const d32 = new Uint32Array(rgba.buffer);
 
     for (let y = 0; y < h; y++) {
       const si = ((y / a.y) | 0) * s.width;
@@ -300,23 +302,59 @@ export class View {
       }
     }
 
-    ctx.putImageData(dst, 0, 0);
-
     /*
      * The pointer over the top, at the same whole-number scale, and only when
      * one is actually being drawn: `told` is what separates the Amiga's
      * pointer from the placeholder this page starts with.
+     *
+     * Blended here rather than by drawImage for the reason the stretch above
+     * is done by hand: a smoothed pointer over unsmoothed pixels is the one
+     * part of the file that would not be the Amiga's own colours.  A sprite
+     * pixel is either opaque or absent, so there is nothing to mix.
      */
     const at = this.drawnAt;
     if (at !== null && this.told) {
-      /* Nearest neighbour, for the reason the stretch above is done by hand:
-         a smoothed pointer over unsmoothed pixels is the one part of the file
-         that would not be the Amiga's own colours. */
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(this.ptr, 0, 0, s.width, s.height, 0, 0, w, h);
+      const p = this.pointer;
+      const ox = at.x - p.hotX;
+      const oy = at.y - p.hotY;
+      for (let py = 0; py < p.h; py++) {
+        const sy = oy + py;
+        if (sy < 0 || sy >= s.height) continue;
+        for (let px = 0; px < p.w; px++) {
+          const sx = ox + px;
+          if (sx < 0 || sx >= s.width) continue;
+          const so = (py * p.w + px) * 4;
+          if (p.rgba[so + 3] === 0) continue;
+          for (let dy = 0; dy < a.y; dy++) {
+            for (let dx = 0; dx < a.x; dx++) {
+              const o = ((sy * a.y + dy) * w + sx * a.x + dx) * 4;
+              rgba[o] = p.rgba[so];
+              rgba[o + 1] = p.rgba[so + 1];
+              rgba[o + 2] = p.rgba[so + 2];
+              rgba[o + 3] = 255;
+            }
+          }
+        }
+      }
     }
 
-    return { canvas: out, w: w, h: h };
+    return { rgba, w, h };
+  }
+
+  /* The same picture on a canvas, for the one caller that wants the browser
+     to encode it.  Nothing is decided here: compose() is the picture. */
+  snapshot(native: boolean): { canvas: HTMLCanvasElement; w: number; h: number } | null {
+    const c = this.compose(native);
+    if (c === null) return null;
+
+    const out = document.createElement("canvas");
+    out.width = c.w;
+    out.height = c.h;
+    const ctx = out.getContext("2d", { alpha: false });
+    if (ctx === null) return null;
+
+    ctx.putImageData(new ImageData(c.rgba, c.w, c.h), 0, 0);
+    return { canvas: out, w: c.w, h: c.h };
   }
 
   clearPointer(): void {

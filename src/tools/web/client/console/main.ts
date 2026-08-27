@@ -23,6 +23,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+import { Apng } from "./apng";
 import { attachInput } from "./input";
 import {
   PFS_MAX_FRAMES,
@@ -257,6 +258,9 @@ function loadCapture(name: string, buf: ArrayBuffer): void {
 
   scrubEl.max = String(c.frameCount - 1);
   setTransport(c.frameCount >= 2);
+  /* Not one of the transport gadgets: a one-frame capture has nothing to step
+     to and still exports, as an APNG of one frame. */
+  expEl.disabled = false;
 
   srcEl.textContent = name;
   say("up", "capture, " + c.frameCount + " frames over " +
@@ -372,6 +376,7 @@ function heard(w: string): void {
       cap = null;
       setPlaying(false);
       setTransport(false);
+      expEl.disabled = true;
       /*
        * NOTHING TO WAIT FOR ON A TRUECOLOUR SCREEN.  A 16-bit pixel carries
        * its own colour, so no `pal` follows the geom and none ever will; a
@@ -513,6 +518,7 @@ function update(buf: ArrayBuffer): void {
 const urlEl = $("url") as HTMLInputElement;
 const liveEl = $("live") as HTMLButtonElement;
 const shotEl = $("shot") as HTMLButtonElement;
+const expEl = $("export") as HTMLButtonElement;
 
 /*
  * There is one Workbench screen and one input.device, so the server takes one
@@ -632,6 +638,80 @@ function saveShot(native: boolean): void {
 }
 
 shotEl.onclick = (e: MouseEvent) => saveShot(e.shiftKey);
+
+/*
+ * THE EXPORT.
+ *
+ * The same recording, in a file something else can open.  A .pfs is what the
+ * capture side wrote and is the right thing to keep; an APNG is the copy that
+ * can be attached to a bug report, and apng.ts says why it is that and not an
+ * MP4.  Both, not one instead of the other -- the recorder is unchanged.
+ *
+ * IT WALKS THE PLAYER AND NOT THE FILE.  Each frame is shown and then
+ * composed, which is the same pair of calls a screenshot makes, so the export
+ * has the palette, the aspect and the pointer that were on the screen and
+ * cannot drift from what was being watched.  It also means the picture on the
+ * page is the progress bar.
+ *
+ * The transport is dead while it runs: a Play during the walk would be a
+ * second thing calling showFrame(), and the frames would come out interleaved.
+ */
+let exporting = false;
+
+async function saveExport(native: boolean): Promise<void> {
+  const c = cap;
+  if (c === null) { say("down", "there is no capture to export"); return; }
+  if (exporting) return;
+
+  exporting = true;
+  expEl.disabled = true;
+  setPlaying(false);
+  setTransport(false);
+
+  const was = frame;
+
+  try {
+    showFrame(0);
+    const first = view.compose(native);
+    if (first === null) throw new Error("there is no screen to export");
+
+    const png = new Apng(first.w, first.h);
+
+    /* The last frame has no successor to be timed against.  The gap before it
+       is the only honest guess, and a single-frame capture gets a tenth of a
+       second so that the file is not one with a zero delay in it. */
+    const tail = c.frameCount >= 2
+      ? c.times[c.frameCount - 1] - c.times[c.frameCount - 2] : 100;
+
+    for (let i = 0; i < c.frameCount; i++) {
+      if (i > 0) showFrame(i);
+      const f = i === 0 ? first : view.compose(native);
+      if (f === null) throw new Error("the screen went away mid-export");
+      await png.add(f.rgba,
+                    i + 1 < c.frameCount ? c.times[i + 1] - c.times[i] : tail);
+      if ((i & 15) === 0) {
+        say("", "exporting " + (i + 1) + " / " + c.frameCount);
+      }
+    }
+
+    const out = png.finish();
+    const name = "amiga-" + first.w + "x" + first.h +
+                 (native ? "-native" : "") + "-" + stamp() + ".png";
+    download(new Blob([out], { type: "image/apng" }), name);
+    say("up", "saved " + name + ", " + png.frames + " frames, " +
+              (out.length / 1024).toFixed(0) + " KB");
+  } catch (e) {
+    say("down", "the export would not write: " +
+                (e instanceof Error ? e.message : String(e)));
+  } finally {
+    exporting = false;
+    expEl.disabled = cap === null;
+    setTransport(cap !== null && cap.frameCount >= 2);
+    seek(was);
+  }
+}
+
+expEl.onclick = (e: MouseEvent) => void saveExport(e.shiftKey);
 
 /* ---------------------------------------------------------- the recorder -- */
 

@@ -33,6 +33,7 @@ import {
   makeGeometry,
   packBits,
   palette,
+  readApng,
   readPng,
   synth,
   synthChunky,
@@ -59,7 +60,8 @@ await esbuild.build({
   stdin: {
     contents: 'export * from "./planar";\n' +
               'export * from "./pfs";\n' +
-              'export * from "./tiles";\n',
+              'export * from "./tiles";\n' +
+              'export * from "./apng";\n',
     resolveDir: SRC,
     loader: "ts",
   },
@@ -793,6 +795,152 @@ for (const [name, format, depth, want] of [
   const a = M.pixelAspect(screen);
   ok(name + ": a 320x256 screen is displayed 2:2",
      a.x === 2 && a.y === 2, a.x + ":" + a.y);
+}
+
+/* ----------------------------------------------------------- the export -- */
+
+/*
+ * THE RECORDING IN A FILE SOMETHING ELSE OPENS.
+ *
+ * .pfs is the capture's own layout and only this page reads it, so the export
+ * is the answer to "I recorded the fault, here it is" -- and an export nobody
+ * can open is the bug it was written to fix.  What is checked is therefore not
+ * that the encoder ran: it is that a reader which shares no line with it walks
+ * the chunks, follows the sequence numbers, paints each rectangle where the
+ * file says, and lands on the pixels that went in.
+ *
+ * LOSSLESS IS THE WHOLE POINT and it is an exact comparison for that reason.
+ * A screen of flat palette entries and one-pixel bevels is the material every
+ * lossy codec destroys, so "close enough" is not a grade this can be given.
+ */
+async function exportRoundTrip(label, cap) {
+  const w = cap.screen.width;
+  const h = cap.screen.height;
+
+  const source = [];
+  for (let i = 0; i < cap.frameCount; i++) {
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    M.decodeInto(cap.screen, cap.frames, M.frameAt(cap, i), cap.palette,
+                 new Uint32Array(rgba.buffer));
+    source.push(rgba);
+  }
+
+  const png = new M.Apng(w, h);
+  let total = 0;
+  for (let i = 0; i < source.length; i++) {
+    const ms = i + 1 < cap.frameCount ? cap.times[i + 1] - cap.times[i] : 40;
+    total += ms;
+    await png.add(source[i], ms);
+  }
+  const bytes = Buffer.from(png.finish());
+
+  let got;
+  try {
+    got = readApng(bytes);
+  } catch (e) {
+    ok(label + ": the export is a readable APNG", false, e.message);
+    return bytes;
+  }
+
+  ok(label + ": the export is a readable APNG",
+     got.width === w && got.height === h,
+     got.width + "x" + got.height);
+  ok(label + ": acTL counts the frames that are in it",
+     got.declared === got.frames.length && got.declared === png.frames,
+     got.declared + " declared, " + got.frames.length + " present, " +
+     png.frames + " written");
+  ok(label + ": it rounds for ever", got.plays === 0, "plays " + got.plays);
+
+  /* The still picture a viewer that knows nothing about APNG shows, which the
+     specification requires to be the whole canvas. */
+  const f0 = got.frames[0];
+  ok(label + ": the first frame is the whole canvas",
+     f0.x === 0 && f0.y === 0 && f0.w === w && f0.h === h,
+     f0.w + "x" + f0.h + " at " + f0.x + "," + f0.y);
+
+  let bad = -1;
+  for (let i = 0; i < source.length && bad < 0; i++) {
+    if (!sameRGB(got.frames[i].rgba, source[i], w * h)) bad = i;
+  }
+  ok(label + ": every frame comes back pixel for pixel", bad < 0,
+     bad < 0 ? "" : "frame " + bad + " differs");
+
+  const ran = got.frames.reduce((n, f) => n + f.delayMs, 0);
+  ok(label + ": the frame times are the recording's",
+     Math.abs(ran - total) < 1, ran + " ms against " + total);
+
+  /* The reason a recording of a mostly-still screen is not one picture per
+     frame.  A synthesised capture moves a box, so the frames after the first
+     have to be smaller than the screen or the diffing is not happening. */
+  const area = got.frames.slice(1).reduce((n, f) => n + f.w * f.h, 0);
+  ok(label + ": frames after the first carry only what changed",
+     got.frames.length < 2 || area < (got.frames.length - 1) * w * h,
+     Math.round(area / Math.max(1, got.frames.length - 1)) +
+     " px a frame of " + w * h);
+
+  console.log("export %s %d frames  %d bytes  %d B/frame  %s%% of the .pfs",
+              label.padEnd(8), got.frames.length, bytes.length,
+              Math.round(bytes.length / got.frames.length),
+              (bytes.length * 100 / (cap.frameCount * cap.stride)).toFixed(1));
+
+  return bytes;
+}
+
+console.log("");
+const apngPlanar = await exportRoundTrip("planar",
+  M.parsePfs(bufferToArrayBuffer(writePfs(synth(640, 256, 3, 24)))));
+await exportRoundTrip("chunky",
+  M.parsePfs(bufferToArrayBuffer(writePfs(synthChunky(320, 240, 12)))));
+await exportRoundTrip("rgb565",
+  M.parsePfs(bufferToArrayBuffer(writePfs(synthRgb565(320, 240, 12)))));
+console.log("");
+
+/*
+ * That the reader above is checking anything.  Every "comes back pixel for
+ * pixel" is worth exactly what its reader's refusals are worth, and a reader
+ * that accepted a corrupted chunk would pass all of them.
+ */
+{
+  const wrecked = Buffer.from(apngPlanar);
+  wrecked[wrecked.length - 20] ^= 0x01;
+  ok("export: a corrupted chunk is refused, so the reader is reading",
+     throws(() => readApng(wrecked)));
+}
+
+/*
+ * A frame that drew nothing is not a frame.  An idle Workbench sends the same
+ * picture again and again, and a file with one picture per arrival is a file
+ * that is mostly repeats -- so a repeat becomes time on the frame in front of
+ * it instead, and the recording still runs for as long as it ran.
+ */
+{
+  const w = 64, h = 48;
+  const flat = new Uint8ClampedArray(w * h * 4).fill(0xff);
+  const png = new M.Apng(w, h);
+  await png.add(flat, 100);
+  await png.add(Uint8ClampedArray.from(flat), 250);
+  await png.add(Uint8ClampedArray.from(flat), 650);
+  const got = readApng(Buffer.from(png.finish()));
+
+  ok("export: a frame that changed nothing is not written",
+     got.frames.length === 1, got.frames.length + " frames");
+  ok("export: its time goes to the frame in front of it",
+     got.frames[0].delayMs === 1000, got.frames[0].delayMs + " ms");
+}
+
+/* delay_num is sixteen bits, so a frame held longer than 65.5 seconds has to
+   be timed in hundredths.  An idle screen left alone over lunch is that case,
+   and the alternative is a frame that flashes past in a millisecond. */
+{
+  const w = 16, h = 16;
+  const a = new Uint8ClampedArray(w * h * 4).fill(0x11);
+  const b = new Uint8ClampedArray(w * h * 4).fill(0x22);
+  const png = new M.Apng(w, h);
+  await png.add(a, 70000);
+  await png.add(b, 40);
+  const got = readApng(Buffer.from(png.finish()));
+  ok("export: a frame held over a minute keeps its time",
+     got.frames[0].delayMs === 70000, got.frames[0].delayMs + " ms");
 }
 
 /* ------------------------------------------------------------ the clock -- */
