@@ -1757,6 +1757,15 @@ static LONG ami_ns_bring_up(VOID)
     LONG          status;
     UINT          txstatus;
 
+    /*
+     * First, before anything here can want to say something: ENV:ANXDLOGLEVEL
+     * is how a machine in the field is turned up, and the marks below are at
+     * AMI_LOG_INFO.  This is a DOS read, and so is the ami_config_load() two
+     * statements down, so there is nothing new about where it may be called
+     * from.
+     */
+    ami_log_level_set((int)ami_config_log_level((LONG)ami_log_level()));
+
     ns = (AmiNetStack *)ami_alloc((ULONG)sizeof(AmiNetStack));
     if (ns == NULL)
     {

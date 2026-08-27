@@ -98,10 +98,9 @@ VOID tool_error(const char *fmt, ...)
  * five lines of prose, and the prose had two faults that no amount of writing
  * fixes.  It never named the call that refused, so the sentence could not be
  * looked up in the source or reported to anybody; and its usual last suggestion
- * was to consult a debug log, which no shipped build can produce, because
- * AMI_ERROR and friends compile to nothing without AMINETXDUO_LOG
- * (src/common/compat.h, docs/BACKLOG.md).  It sent users to look for a file
- * that does not exist.
+ * was to consult a debug log, which a stock machine cannot read: the only log
+ * the stack has is the serial port, and reaching it takes a null modem or
+ * Sashimi.  It sent users to look for a file that does not exist.
  *
  * The shape now is: tool_error() with the operation and its code, then at most
  * one of these naming something that EXISTS -- a command to run, a line in a

@@ -96,10 +96,11 @@ CROSS_CONFIGS=(
     # the gate that keeps them here, tools/check-option-coverage.sh, asks only
     # that each option's other side is compiled somewhere.
     #
-    # Seven diagnostics that only ADD -- counters, a probe, a symbol table, the
+    # Six diagnostics that only ADD -- counters, a probe, a symbol table, the
     # sampling profiler.  None changes a struct a shipped image lays out, so
     # one build compiles them all and a break in any is a break in this arm.
-    "instr:-DAMINETXDUO_LOG=ON -DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON"
+    # The serial log is not among them any more: it is in every build.
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON"
     # One RTO estimator in three options: early retransmit and the tail loss
     # probe both read what TCP_RTT measures, so RTT=OFF with either of the
     # other two ON is not a configuration to defend.  All three off together
@@ -839,12 +840,14 @@ stage_cross() {
                 fail "a shipped image takes libgcc's 64-bit helpers ($name)"
             fi
 
-            # And that no diagnostic sentence is inside a resident image.  The
-            # event ring exists because AMINETXDUO_LOG cannot be on in a
-            # shipped build; the moment a message is added to a library "just
-            # this once", the ring is a worse serial log rather than a cheaper
-            # one.  Every configuration, because an image is only as small as
-            # its largest build.
+            # And that the event ring's sentences are outside every resident
+            # image while the ami_log() tier is inside it.  The ring answers a
+            # user who has only ShowNetStatus; the serial tier answers one who
+            # can capture RawPutChar.  They are different mechanisms and the
+            # moment a ring message is written as prose in a library, the ring
+            # is a worse serial log rather than a second answer.  Every
+            # configuration, because an image is only as small as its largest
+            # build.
             if tools/check-no-diag-strings.sh "$BUILD/$name" \
                     > "$BUILD/$name-diag-strings.log" 2>&1; then
                 note "$(sed -n 's/^diag_strings=/diagnostic strings: /p' \

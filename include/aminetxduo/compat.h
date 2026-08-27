@@ -81,6 +81,17 @@ VOID ami_mem_open_delta(LONG delta);
 VOID ami_log(int level, const char *fmt, ...);
 
 /*
+ * How much of it comes out, AMI_LOG_ERROR..AMI_LOG_TRACE.  A RUNTIME dial and
+ * not a build option: the fault tier is in every shipped image, and a machine
+ * that has just faulted is turned up where it stands rather than being sent a
+ * different binary.  Out of range is clamped.  AMINETXDUO_LOG_LEVEL is only
+ * the value it starts at; ENV:ANXDLOGLEVEL is what a user sets, read once at
+ * bring-up (src/config/config_file.c, src/netstack/netstack.c).
+ */
+VOID ami_log_level_set(int level);
+int  ami_log_level(VOID);
+
+/*
  * The compiler runtime's own CPU choice.  Pass non-zero when SysBase->AttnFlags
  * has AFF_68020; never calling it leaves the 68000 routines, correct anywhere.
  */
@@ -94,18 +105,19 @@ void ami_rt_cpu_select(int have_68020, int have_mulul);
 #  define AMI_TRACE(...)  ((void)0)
 #endif
 /*
- * AMINETXDUO_LOG off compiles the three out; AMINETXDUO_LOG_LEVEL does not.
- * `if (0)` rather than `((void)0)` so arguments stay type-checked and used.
+ * These three are in EVERY build, shipped ones included.  A user who hits a
+ * fault in the field has to be able to send us something, and a diagnostic
+ * that only a rebuild can reach is not one.  What is compiled in costs the
+ * image its sentences; what is PRINTED is ami_log_level(), which starts at
+ * AMI_LOG_WARN, so a shipped machine writes nothing to the serial port until
+ * something goes wrong.
+ *
+ * AMI_DEBUG and AMI_TRACE above stay behind AMINETXDUO_DEBUG.  Those sit on
+ * per-packet paths, and RawPutChar spins on the serial hardware.
  */
-#ifdef AMINETXDUO_LOG
-#  define AMI_ERROR(...)  ami_log(AMI_LOG_ERROR, __VA_ARGS__)
-#  define AMI_WARN(...)   ami_log(AMI_LOG_WARN,  __VA_ARGS__)
-#  define AMI_INFO(...)   ami_log(AMI_LOG_INFO,  __VA_ARGS__)
-#else
-#  define AMI_ERROR(...)  do { if (0) ami_log(AMI_LOG_ERROR, __VA_ARGS__); } while (0)
-#  define AMI_WARN(...)   do { if (0) ami_log(AMI_LOG_WARN,  __VA_ARGS__); } while (0)
-#  define AMI_INFO(...)   do { if (0) ami_log(AMI_LOG_INFO,  __VA_ARGS__); } while (0)
-#endif
+#define AMI_ERROR(...)  ami_log(AMI_LOG_ERROR, __VA_ARGS__)
+#define AMI_WARN(...)   ami_log(AMI_LOG_WARN,  __VA_ARGS__)
+#define AMI_INFO(...)   ami_log(AMI_LOG_INFO,  __VA_ARGS__)
 
 /* --------------------------------------------------------------- utilities */
 

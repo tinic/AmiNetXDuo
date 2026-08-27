@@ -376,6 +376,17 @@ BOOL ami_config_hostname_valid(const char *name);
 ULONG ami_config_pool_divisor(ULONG fallback);
 
 /*
+ * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
+ *
+ * `fallback` unless ENV:ANXDLOGLEVEL holds a single digit 0 to 4.  The
+ * sentences are in every shipped image (aminetxduo/compat.h), so this is the
+ * whole of what a user does to make a machine that has faulted say what it is
+ * doing: SetEnv ANXDLOGLEVEL 2, restart the network, capture the serial port.
+ * Read once, at bring-up, so it cannot change under a running stack.
+ */
+LONG ami_config_log_level(LONG fallback);
+
+/*
  * "amiga-490007" from 00:80:10:49:00:07: the name a machine none of the four
  * sources named answers to, so that two unconfigured machines on one segment
  * do not both claim amiga.local. The last three octets in lower-case hex,

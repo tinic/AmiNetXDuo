@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
 #
-# No diagnostic sentence may be inside a shipped library or device.
+# The two diagnostic mechanisms are where they belong.
 #
 #   tools/check-no-diag-strings.sh <build-dir>
+#
+# THE EVENT RING'S sentences must be OUTSIDE every shipped library and device.
+# The ring is a code, an interface and a value; the words are in the command
+# that prints them, src/tools/tool_events.c.  A user with no serial capture
+# reads it with ShowNetStatus, which is why it may not depend on anything the
+# library says.  The first scan below fails on a table sentence found in an
+# image.
+#
+# THE ami_log() TIER must be INSIDE bsdsocket.library.  AMI_ERROR, AMI_WARN and
+# AMI_INFO used to need -DAMINETXDUO_LOG, which defaulted OFF, so a user who
+# hit a fault in the field had nothing to send and we had nothing to ask for.
+# They are unconditional now (include/aminetxduo/compat.h) and what is PRINTED
+# is a runtime level.  The second scan fails when a shipped library holds none
+# of those sentences, which is what a regression to a compile-time gate looks
+# like from outside.
 #
 # SPDX-License-Identifier: MIT
 
@@ -137,6 +152,78 @@ fi
 if [ "$rc" = 0 ]; then
     echo "diag_strings=clean images=$checked sentences=$nstrings\
  scanned=${names#,}${absent:+ absent=${absent#,}}"
+fi
+
+# ------------------------------------------------ and the tier that DOES ship
+#
+# Every AMI_ERROR/AMI_WARN/AMI_INFO format string in the tree, and how many are
+# in bsdsocket.library.  Not all of them, and the count is not the assertion: a
+# sentence belongs to whichever component it is written in, and -Os and LTO
+# drop the ones on paths the linker proved unreachable.  ZERO is the failure,
+# and zero is exactly what a compile-time gate turned back off produces.
+
+LIB="$BUILD/src/bsdsocket/bsdsocket.library"
+
+if [ ! -f "$LIB" ]; then
+    echo "diag_tier=skipped reason=no_library image=$LIB"
+    exit "$rc"
+fi
+
+TIER=$(cd "$ROOT" && MINLEN="$MINLEN" python3 - <<'TIERPY'
+import os, re, subprocess
+
+# The first argument of every AMI_ERROR/AMI_WARN/AMI_INFO call, with C's
+# adjacent-literal concatenation applied.  A call whose format is not a literal
+# is skipped; there are none, and one would carry no sentence anyway.
+CALL = re.compile(r'\bAMI_(?:ERROR|WARN|INFO)\s*\(\s*'
+                  r'((?:"(?:[^"\\\n]|\\.)*"\s*)+)')
+LIT = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+
+out = set()
+listed = subprocess.run(["git", "ls-files", "src"],
+                        capture_output=True, text=True).stdout.split()
+for path in listed:
+    if not path.endswith(".c"):
+        continue
+    try:
+        src = open(path, encoding='utf-8', errors='replace').read()
+    except OSError:
+        continue
+    for m in CALL.finditer(src):
+        body = "".join(LIT.findall(m.group(1)))
+        out.add(body.encode('utf-8').decode('unicode_escape'))
+
+minlen = int(os.environ['MINLEN'])
+for s in sorted(out):
+    if len(s) >= minlen:
+        print(s)
+TIERPY
+)
+
+total=0
+found=0
+while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    total=$((total + 1))
+    if LC_ALL=C grep -qaF -- "$s" "$LIB"; then
+        found=$((found + 1))
+    fi
+done <<< "$TIER"
+
+if [ "$total" = 0 ]; then
+    echo "diag_tier=skipped reason=no_sentences_in_source"
+    exit "$rc"
+fi
+
+if [ "$found" = 0 ]; then
+    echo "diag_tier=MISSING found=0 of=$total image=bsdsocket.library"
+    echo "  bsdsocket.library holds not one AMI_ERROR/AMI_WARN/AMI_INFO"
+    echo "  sentence, so a user who hits a fault has nothing to capture."
+    echo "  The three are unconditional in include/aminetxduo/compat.h; if"
+    echo "  they have been put back behind a build option, that is the defect."
+    rc=1
+else
+    echo "diag_tier=present found=$found of=$total image=bsdsocket.library"
 fi
 
 exit "$rc"
