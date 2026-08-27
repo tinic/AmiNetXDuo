@@ -88,7 +88,12 @@ LOG="$OUT-configure.log"
 mkdir -p "$OUT"
 
 SHIM_INC="$ROOT/clients/dropbear/include"
-DB_CFLAGS="-I$SHIM_INC $AMIGA_CLIENT_CFLAGS -I$AMIGA_NDK -I$ROOT/include -DFD_SETSIZE=256"
+# __FILE__ reaches Dropbear's diagnostics in dozens of translation units.  A
+# checkout path is neither program data nor a reproducible release identity;
+# map the whole source tree to the same spelling in every clone.  GCC's
+# -ffile-prefix-map covers both macro strings and debug paths.
+REPRO_CFLAGS="-ffile-prefix-map=$ROOT=."
+DB_CFLAGS="$REPRO_CFLAGS -I$SHIM_INC $AMIGA_CLIENT_CFLAGS -I$AMIGA_NDK -I$ROOT/include -DFD_SETSIZE=256"
 [ "$TRACE" = "1" ] && DB_CFLAGS="$DB_CFLAGS -DDEBUG_TRACE=1"
 
 # The server, if one is being built, does not fork.
@@ -128,7 +133,7 @@ echo "  CC amiga_dropbear.c"
 # the switch that hands `struct timeval` to libc instead.  They are separate
 # translation units that share no type with Dropbear, so the two conventions
 # never meet.
-AMI_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
+AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
 SHIM_OBJS=("$SHIM_O")
 for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c"; do
     o="$CLIENT_OBJ/db-$(basename "${c%.c}").o"
@@ -505,6 +510,23 @@ if [ "$KEEP_SYMBOLS" = "0" ]; then
     [ "$WANT_SCP" = "1" ] &&
         "$AMIGA_TOOLCHAIN_ROOT/bin/m68k-amigaos-strip" "$OUT/scp-runner"
 fi
+
+# A compile added outside DB_CFLAGS/AMI_CFLAGS must not silently make the
+# release checkout-dependent again.  Test the artifact, not our intention.
+for p in $PROGRAMS; do
+    [ -f "$OUT/$p" ] || continue
+    if strings "$OUT/$p" | grep -F "$ROOT" >/dev/null; then
+        echo "!! $p embeds the checkout path $ROOT" >&2
+        echo "   compile every source with $REPRO_CFLAGS" >&2
+        exit 1
+    fi
+done
+[ "$WANT_SCP" = "1" ] && {
+    if strings "$OUT/scp-runner" | grep -F "$ROOT" >/dev/null; then
+        echo "!! scp-runner embeds the checkout path $ROOT" >&2
+        exit 1
+    fi
+}
 
 echo
 for p in $PROGRAMS; do
