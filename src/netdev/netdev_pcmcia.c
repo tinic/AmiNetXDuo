@@ -135,20 +135,44 @@ static VOID pc_trace(const char *s, ULONG v)
 #define pc_trace(s, v)  ((VOID)0)
 #endif
 
-/* Attribute memory is byte-per-word: the card's byte n is at 2n. */
+/* Attribute memory is byte-per-word: the card's byte n is at 2n.  The tuple
+   codes and the configuration register numbers are in netdev_cis.h, beside the
+   walk that reads them. */
 #define PC_ATTR_STRIDE      2
+#define PC_ATTR_BASE        0x00a00000UL
+#define PC_ATTR_SIZE        0x00020000UL  /* the window, 128 KB             */
+#define PC_ATTR_CIS_BYTES   0x00010000UL  /* CIS bytes inside it, at 2n     */
 
-/* Card Information Structure tuples, PC Card standard, release 2. */
-#define CISTPL_LONGLINK_MFC 0x06
-#define CISTPL_VERS_1       0x15
-#define CISTPL_CONFIG       0x1a
-#define CISTPL_CFTABLE      0x1b
-#define CISTPL_MANFID       0x20
-#define CISTPL_FUNCID       0x21
-#define CISTPL_FUNCE        0x22
-#define CIS_FUNC_LAN        6
+/*
+ * The card's CIS, read directly.
+ *
+ * card.resource's CopyTuple() follows CISTPL_LONGLINK_A, CISTPL_LONGLINK_C,
+ * CISTPL_NO_LINK and CISTPL_LINKTARGET -- cardres.doc names those four and no
+ * others -- so a multifunction card's per-function chains, which hang off
+ * CISTPL_LONGLINK_MFC, are not reachable through it at all.  This is the whole
+ * Amiga half of the walk that reaches them: everything else is in netdev_cis.c,
+ * where a host can run it.
+ */
+static UBYTE pc_attr_read(APTR ctx, ULONG off)
+{
+    volatile UBYTE *attr;
 
-#define CIS_FUNCE_LAN_NODE_ID   0x04
+    (VOID)ctx;
+    attr = (volatile UBYTE *)(PC_ATTR_BASE +
+                              (off * (ULONG)PC_ATTR_STRIDE));
+
+    return *attr;
+}
+
+/* One configuration register, in the card's attribute space.  TPCC_RADR is
+   already an address there and the registers are two apart -- see the unit
+   note in netdev_cis.h -- so this is a plain add and not a doubling. */
+static volatile UBYTE *pc_config_reg(ULONG cfg_base, UWORD reg)
+{
+    return (volatile UBYTE *)(PC_ATTR_BASE +
+                              ((cfg_base + (ULONG)reg * 2UL) &
+                               (PC_ATTR_SIZE - 1UL)));
+}
 
 /* Configuration Option Register, offset from the configuration base the
    CISTPL_CONFIG tuple gives. */
@@ -231,6 +255,10 @@ static BOOL pc_chip_settles(const NetdevCard *card, ULONG regs, UWORD *rounds)
 static NetdevCisEntry pc_pick;
 static BOOL           pc_have_pick;
 static UBYTE          pc_first_index;
+
+/* The LAN function of a multifunction card, and whether the walk found one. */
+static NetdevCisFunc  pc_fn;
+static BOOL           pc_mfc;
 
 static UBYTE pc_cis[80];
 static UWORD pc_cis_len;
@@ -764,6 +792,7 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     APTR             board;
     UWORD            tuple_len;
     UWORD            ci = ANXDIAG_NOCARD;
+    UBYTE            funcid = (UBYTE)CIS_FUNC_LAN;
 
     /* A second claim -- a card taken out and another put in -- must not read
        the first card's CIS. */
@@ -788,11 +817,19 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
             pc_reject_owned(keep_handle);
             return NULL;
         }
-        pc_trace("pc: funcid ", (ULONG)buf[2]);
-        netdev_diag_note(ANXDIAG_PC_FUNCID, ci, (ULONG)buf[2]);
-        if (buf[2] != CIS_FUNC_LAN)
+        funcid = buf[2];
+        pc_trace("pc: funcid ", (ULONG)funcid);
+        netdev_diag_note(ANXDIAG_PC_FUNCID, ci, (ULONG)funcid);
+        /*
+         * CIS_FUNC_MULTI is not "this is not a LAN card".  It is what a
+         * multifunction card states in the shared chain, and the real function
+         * codes are one per chain in the chains CISTPL_LONGLINK_MFC names --
+         * so the answer to "is there a LAN adapter here" is the walk below and
+         * not this tuple.
+         */
+        if (funcid != (UBYTE)CIS_FUNC_LAN && funcid != (UBYTE)CIS_FUNC_MULTI)
         {
-            netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, (ULONG)buf[2]);
+            netdev_diag_note(ANXDIAG_PC_NOTLAN, ci, (ULONG)funcid);
             pc_reject_owned(keep_handle);
             return NULL;
         }
@@ -848,6 +885,94 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
     {
         netdev_diag_note(ANXDIAG_PC_FUNCE, ci, ANXDIAG_ABSENT);
     }
+
+    /*
+     * A multifunction card's per-function CIS chains hang off
+     * CISTPL_LONGLINK_MFC, which CopyTuple() does not follow, so the shared
+     * chain it does reach has no CISTPL_CONFIG and no CISTPL_CFTABLE_ENTRY in
+     * it at all.  Reading the CIS directly is the only way to those chains,
+     * and it is asked of every card rather than only of one that stated
+     * CIS_FUNC_MULTI: it costs the tuple headers of the shared chain, which is
+     * less than one CopyTuple() scan, and a card with no such tuple answers
+     * "not multifunction" at the first pass.
+     */
+    {
+        NetdevCisSource src;
+        UWORD           nfunc = 0;
+
+        src.read = pc_attr_read;
+        src.ctx  = NULL;
+        src.size = PC_ATTR_CIS_BYTES;
+
+        pc_mfc = netdev_cis_mfc_lan(&src, &pc_fn, &nfunc);
+        if (nfunc != 0)
+        {
+            pc_trace("pc: mfc ", (ULONG)nfunc);
+            netdev_diag_note(ANXDIAG_PC_MFC, ci,
+                             ((ULONG)nfunc << 16) |
+                             (ULONG)(pc_mfc ? 1u : 0u));
+        }
+    }
+
+    if (pc_mfc)
+    {
+        /*
+         * Everything the CopyTuple() path below reads, read out of the LAN
+         * function's own chain instead.  A station address in that chain is
+         * the function's own and beats one in the shared chain, which on a
+         * LAN-plus-modem card is not necessarily the LAN half's.
+         */
+        cfg_base       = pc_fn.cfg_base;
+        index          = pc_fn.index;
+        pc_pick        = pc_fn.pick;
+        pc_have_pick   = TRUE;
+        pc_first_index = pc_fn.index;
+
+        if ((pc_fn.flags & NETDEV_CISF_HAS_NODEID) != 0)
+        {
+            UWORD i;
+
+            for (i = 0; i < NETDEV_ADDR_LEN; i++)
+                pc_node_id[i] = pc_fn.node_id[i];
+            pc_have_node_id = netdev_mac_usable(pc_node_id);
+            netdev_diag_note(ANXDIAG_PC_NODEID, ci,
+                             (ULONG)(pc_have_node_id ? 1u : 0u));
+        }
+
+        netdev_diag_note(ANXDIAG_PC_MFCFUNC, ci,
+                         ((ULONG)pc_fn.funcid << 24) |
+                         (pc_fn.chain & 0x00ffffffUL));
+        netdev_diag_note(ANXDIAG_PC_CFGBASE, ci, cfg_base);
+        netdev_diag_note(ANXDIAG_PC_CFPICK, ci,
+                         ((ULONG)pc_fn.score << 24) |
+                         ((ULONG)pc_pick.flags << 16) |
+                         ((ULONG)pc_pick.io_lines << 8) |
+                         (ULONG)pc_pick.index);
+        netdev_diag_note(ANXDIAG_PC_IOWIN, ci,
+                         ((ULONG)pc_pick.io_base << 16) |
+                         (ULONG)pc_pick.io_len);
+    }
+    else if (funcid == (UBYTE)CIS_FUNC_MULTI)
+    {
+        /* The card says it is multifunction and no chain of it is a LAN
+           function this driver can configure.  Refused here rather than
+           carried into a CopyTuple() path that would find no CISTPL_CONFIG
+           and report the wrong reason. */
+        pc_trace("pc: mfc, no lan function ", 0);
+        netdev_diag_note(ANXDIAG_PC_MFCNOLAN, ci, (ULONG)funcid);
+        pc_reject_owned(keep_handle);
+        return NULL;
+    }
+    else
+    {
+    /*
+     * NOT A MULTIFUNCTION CARD.  The shared chain is the card's only chain and
+     * CopyTuple() reaches all of it, so the path below is the one every card
+     * that has ever worked here takes, unchanged.  It is left at its own
+     * indentation inside this branch on purpose: re-indenting it would have
+     * turned "one card class now takes a different path" into a diff that
+     * touches every line of the path it does not.
+     */
 
     /* CISTPL_CONFIG carries the configuration register base, in the card's
        own attribute address space.  TPCC_SZ says how many bytes of base
@@ -975,29 +1100,11 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
             netdev_diag_note(ANXDIAG_PC_CFPICK, ci, ANXDIAG_ABSENT);
         }
     }
+
+    }   /* not a multifunction card */
+
     pc_trace("pc: index ", (ULONG)index);
     netdev_diag_note(ANXDIAG_PC_INDEX, ci, (ULONG)index);
-
-    /*
-     * A multifunction card hangs its per-function CIS chains off
-     * CISTPL_LONGLINK_MFC, and card.resource's CopyTuple() follows
-     * CISTPL_LONGLINK_A and CISTPL_LONGLINK_C and nothing else -- the
-     * card.resource autodoc names those two, CISTPL_NO_LINK and
-     * CISTPL_LINKTARGET as the whole set it understands, and
-     * CISTPL_LONGLINK_MFC is not in it.  The network function's own entries
-     * are not in anything CopyTuple() can return and the walk above saw the
-     * shared chain alone.  Asked only when the walk found no configuration,
-     * because a miss costs a scan of the whole CIS and this is the one case
-     * where the answer is worth it: it turns "the card did not answer" into
-     * the reason it could not.
-     */
-    if (!pc_have_pick && pc_cis_read(handle, CISTPL_LONGLINK_MFC, buf,
-                                     &tuple_len))
-    {
-        pc_trace("pc: mfc ", (ULONG)(tuple_len >= 1u ? buf[2] : 0));
-        netdev_diag_note(ANXDIAG_PC_MFC, ci,
-                         (ULONG)(tuple_len >= 1u ? buf[2] : 0));
-    }
 
     card = netdev_card_by_cis(manf, prod);
     if (card == NULL)
@@ -1054,15 +1161,42 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
      * failed to bring a chip up.
      */
     {
-        UBYTE cor    = index;
+        /*
+         * A single-function card takes the configuration index in the COR and
+         * nothing else.  A MULTIFUNCTION CARD DOES NOT: bits 2..0 of its COR
+         * are function enable, address decode and interrupt enable, so only
+         * bits 5..3 of the index survive and the three control bits go in
+         * underneath it.  Writing the plain index to one leaves the function
+         * disabled and decoding nothing, which is a card that answers at no
+         * address rather than a card that answers at the wrong one.
+         */
+        UBYTE cor    = pc_mfc ? netdev_cis_mfc_cor(&pc_fn) : index;
         UWORD rounds = 0;
 
         pc_used = 1;
-        attr = (volatile UBYTE *)(ULONG)(0x00a00000UL + cfg_base + PC_COR_OFF);
+        attr = pc_config_reg(cfg_base, CIS_REG_COR);
         *attr = cor;
         pc_trace("pc: cor ", (ULONG)(APTR)attr);
         netdev_diag_note(ANXDIAG_PC_COR, ci, (ULONG)(APTR)attr);
         netdev_diag_note(ANXDIAG_PC_CORVAL, ci, (ULONG)cor);
+
+        /*
+         * And a multifunction card is told where to decode rather than
+         * assuming it, which is the one thing that makes such a card usable
+         * here at all: Gayle fixes the Amiga address, the card row fixes the
+         * offset inside it, and COR_ADDR_DECODE above makes the card use what
+         * these two registers say instead of the base its own CIS named.
+         * Written after the COR, which is the order Linux uses.
+         */
+        if (pc_mfc && netdev_cis_has_iobase(&pc_fn))
+        {
+            *pc_config_reg(cfg_base, CIS_REG_IOBASE_0) = (UBYTE)(reg_off & 0xffu);
+            *pc_config_reg(cfg_base, CIS_REG_IOBASE_1) = (UBYTE)(reg_off >> 8);
+            if ((pc_fn.cfg_mask & (UWORD)(1u << CIS_REG_IOSIZE)) != 0)
+                *pc_config_reg(cfg_base, CIS_REG_IOSIZE) =
+                    netdev_cis_mfc_iosize(&pc_fn);
+            netdev_diag_note(ANXDIAG_PC_MFCIOBASE, ci, (ULONG)reg_off);
+        }
 
         if (!pc_chip_settles(card, regs, &rounds))
         {
@@ -1070,9 +1204,9 @@ static APTR pc_configure_owned(const NetdevCard **card_out, BOOL keep_handle)
             netdev_diag_note(ANXDIAG_PC_SETTLE, ci, (ULONG)rounds);
 
             attr = (volatile UBYTE *)(ULONG)
-                       (0x00a00000UL +
+                       (PC_ATTR_BASE +
                         (((cfg_base + PC_COR_OFF) * PC_ATTR_STRIDE) &
-                         0x0001ffffUL));
+                         (PC_ATTR_SIZE - 1UL)));
             *attr = cor;
             pc_trace("pc: cor doubled ", (ULONG)(APTR)attr);
             netdev_diag_note(ANXDIAG_PC_COR2, ci, (ULONG)(APTR)attr);

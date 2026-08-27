@@ -118,8 +118,17 @@ extern "C" {
                                        the card row's own unless the CIS
                                        named a base that overrides it         */
 #define ANXDIAG_PC_MFC         75   /* CISTPL_LONGLINK_MFC: a multifunction
-                                       card, whose per-function CIS chains
-                                       CopyTuple() cannot follow              */
+                                       card.  functions << 16 | 1 when the raw
+                                       CIS walk reached a LAN function of it,
+                                       | 0 when it did not                    */
+#define ANXDIAG_PC_MFCFUNC     77   /* the multifunction chain the walk took:
+                                       CISTPL_FUNCID << 24 | the CIS offset
+                                       the function's chain starts at        */
+#define ANXDIAG_PC_MFCNOLAN    78   /* the card is multifunction and no chain
+                                       of it is a LAN function this driver
+                                       can configure                          */
+#define ANXDIAG_PC_MFCIOBASE   79   /* the I/O base written into the function's
+                                       IOBASE_0/1 configuration registers      */
 #define ANXDIAG_CR_RETRY       76   /* the command register did not read back
                                        as a reset chip, so the reset port was
                                        strobed again through the word path and

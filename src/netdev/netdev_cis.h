@@ -98,4 +98,165 @@ UWORD netdev_cis_score(const NetdevCisEntry *e);
  */
 UWORD netdev_cis_io_off(const NetdevCisEntry *e, UWORD assumed);
 
+/* ------------------------------------------------------ the raw CIS walk -- */
+
+/*
+ * Card Information Structure tuple codes, PC Card standard release 2.  Here
+ * rather than in netdev_pcmcia.c because the walk below reads them itself.
+ */
+#define CISTPL_NULL         0x00
+#define CISTPL_DEVICE       0x01
+#define CISTPL_LONGLINK_MFC 0x06
+#define CISTPL_CHECKSUM     0x10
+#define CISTPL_LONGLINK_A   0x11
+#define CISTPL_LONGLINK_C   0x12
+#define CISTPL_LINKTARGET   0x13
+#define CISTPL_NO_LINK      0x14
+#define CISTPL_VERS_1       0x15
+#define CISTPL_CONFIG       0x1a
+#define CISTPL_CFTABLE      0x1b
+#define CISTPL_MANFID       0x20
+#define CISTPL_FUNCID       0x21
+#define CISTPL_FUNCE        0x22
+#define CISTPL_END          0xff
+
+/* CISTPL_FUNCID values.  0 is the one that matters here: a multifunction card
+   states it in the shared chain and states the real function in each of the
+   chains CISTPL_LONGLINK_MFC names. */
+#define CIS_FUNC_MULTI      0
+#define CIS_FUNC_SERIAL     2
+#define CIS_FUNC_LAN        6
+
+/* CISTPL_FUNCE subtuple: the LAN function's station address. */
+#define CIS_FUNCE_LAN_NODE_ID   0x04
+
+/* CISTPL_LONGLINK_MFC target address space, TPLMFC_TAS. */
+#define CIS_MFC_COMMON      0
+#define CIS_MFC_ATTR        1
+
+#define NETDEV_CIS_NODE_LEN 6
+
+/*
+ * A reader over the card's own CIS address space, byte by byte.
+ *
+ * card.resource's CopyTuple() understands CISTPL_LONGLINK_A, CISTPL_LONGLINK_C,
+ * CISTPL_NO_LINK and CISTPL_LINKTARGET -- the cardres.doc autodoc names those
+ * four and no others -- so a multifunction card's per-function chains, which
+ * hang off CISTPL_LONGLINK_MFC, are not reachable through it at all.  The walk
+ * below reads the CIS itself instead, and the one Amiga-specific fact (the
+ * card's byte n is at 0xA00000 + 2n) stays in the reader netdev_pcmcia.c
+ * supplies, so everything here runs on a host over a recorded CIS.
+ *
+ * `size` bounds every read: a corrupt link that points past the window ends
+ * the walk instead of wandering into the card's I/O space at 0xA20000.
+ */
+typedef UBYTE (*NetdevCisReadFn)(APTR ctx, ULONG off);
+
+typedef struct
+{
+    NetdevCisReadFn read;
+    APTR            ctx;
+    ULONG           size;
+} NetdevCisSource;
+
+/* A CIS is 64 KB of card address space at most, and a chain of more tuples
+   than this is a runaway rather than a card. */
+#define NETDEV_CIS_MAX_FUNC     8
+#define NETDEV_CIS_MAX_TUPLES   64
+
+/* What one function's chain said about itself. */
+typedef struct
+{
+    ULONG          chain;       /* where the chain began                     */
+    ULONG          cfg_base;    /* TPCC_RADR, the configuration register base */
+    UWORD          cfg_mask;    /* TPCC_RMSK, low 16 bits: registers present */
+    UBYTE          cfg_last;    /* TPCC_LAST                                 */
+    UBYTE          funcid;      /* CISTPL_FUNCID, valid with _HAS_FUNCID     */
+    UBYTE          index;       /* the chosen entry's configuration index    */
+    UWORD          score;       /* netdev_cis_score() of the chosen entry    */
+    NetdevCisEntry pick;
+    UBYTE          node_id[NETDEV_CIS_NODE_LEN];
+    UBYTE          flags;
+} NetdevCisFunc;
+
+#define NETDEV_CISF_HAS_CONFIG  0x01u
+#define NETDEV_CISF_HAS_PICK    0x02u
+#define NETDEV_CISF_HAS_FUNCID  0x04u
+#define NETDEV_CISF_HAS_NODEID  0x08u
+
+/*
+ * Configuration register numbers.  Register n is at TPCC_RADR + 2n, which is
+ * why TPCC_RMSK is a bit per register and not a bit per byte.
+ *
+ * TWO UNITS MEET HERE AND THEY ARE NOT THE SAME.  A CIS offset -- what
+ * CISTPL_LONGLINK_MFC names, and what NetdevCisSource reads -- counts the
+ * card's CIS bytes, and attribute memory holds byte n at address 2n.  TPCC_RADR
+ * does not: it is already an address in that space, which is why its registers
+ * are two apart rather than one.  So the COR of a function is at
+ * attribute_base + cfg_base, and CIS byte n is at attribute_base + 2n.  Linux
+ * says the same thing in one line each: pcmcia_read_cis_mem() doubles a CIS
+ * offset, and pcmcia_access_config() halves TPCC_RADR before handing it to the
+ * same routine.
+ */
+#define CIS_REG_COR         0u
+#define CIS_REG_CCSR        1u
+#define CIS_REG_IOBASE_0    5u
+#define CIS_REG_IOBASE_1    6u
+#define CIS_REG_IOSIZE      9u
+
+/*
+ * Configuration Option Register bits.
+ *
+ * A single-function card takes the whole six-bit configuration index.  A
+ * multifunction card does not: bits 2..0 are function enable, address decode
+ * and interrupt enable, so only bits 5..3 of the index are written and the
+ * three control bits go in underneath it.  Writing a single-function COR to a
+ * multifunction card leaves the function disabled and decoding nothing.
+ */
+#define CIS_COR_CONFIG_MASK 0x3fu
+#define CIS_COR_MFC_MASK    0x38u
+#define CIS_COR_FUNC_ENA    0x01u
+#define CIS_COR_ADDR_DECODE 0x02u
+#define CIS_COR_IREQ_ENA    0x04u
+#define CIS_COR_LEVEL_REQ   0x40u
+
+/*
+ * How many function chains CISTPL_LONGLINK_MFC names, and where each begins.
+ * Zero means the card is not multifunction -- no such tuple, or one this walk
+ * could not believe.  Writes at most `max` chain addresses.
+ */
+UWORD netdev_cis_mfc_chains(const NetdevCisSource *src, ULONG *chains,
+                            UWORD max);
+
+/*
+ * Walk one function's chain and fill *out.  FALSE means the chain is not one:
+ * it must open with CISTPL_LINKTARGET carrying "CIS", which is what says the
+ * link address was right, and it must carry a CISTPL_CONFIG, which is what
+ * says the function can be configured at all.
+ */
+BOOL netdev_cis_func(const NetdevCisSource *src, ULONG chain,
+                     NetdevCisFunc *out);
+
+/*
+ * The LAN function of a multifunction card, or FALSE when there is none.
+ * *nfunc, when it is not NULL, is left holding how many functions the card
+ * named whatever the answer is -- 0 for a card that is not multifunction --
+ * so a caller can tell "not a multifunction card" from "multifunction and no
+ * function of it is a LAN adapter this driver could drive".
+ */
+BOOL netdev_cis_mfc_lan(const NetdevCisSource *src, NetdevCisFunc *out,
+                        UWORD *nfunc);
+
+/*
+ * The byte to write to a multifunction card's COR for this function, and the
+ * value for its I/O size register.  io_off is the base the host has chosen,
+ * which on this machine is fixed by Gayle and by the card row.
+ */
+UBYTE netdev_cis_mfc_cor(const NetdevCisFunc *fn);
+UBYTE netdev_cis_mfc_iosize(const NetdevCisFunc *fn);
+
+/* Does this function's CISTPL_CONFIG say the I/O base registers exist?  Only
+   then can the host tell the card where to decode. */
+BOOL netdev_cis_has_iobase(const NetdevCisFunc *fn);
+
 #endif /* NETDEV_CIS_H */
