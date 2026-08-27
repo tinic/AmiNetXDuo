@@ -325,10 +325,26 @@ rig_owner_pid() { # inode
 # `pgrep -f` matches anywhere in the whole argv, so an UNANCHORED pattern hits
 # any shell whose command line happens to contain the text -- including the very
 # command a person types to test this.
+# `pgrep -a` is procps and macOS does not have it, so the listing is done with
+# ps(1), which both have.  The regex still goes to pgrep -f, so the anchoring
+# that keeps a shell merely MENTIONING a port out of the answer is unchanged.
+rig_pgrep_af() { # regex
+    local pids p args
+    pids=$(pgrep -f "$1" 2> /dev/null) || return 0
+    for p in $pids; do
+        [ "$p" = "$$" ] && continue
+        args=$(ps -o args= -p "$p" 2> /dev/null | head -1)
+        [ -n "$args" ] && printf '%s %s\n' "$p" "$args"
+    done
+    return 0
+}
+
+# `[Pp]ython3?` because Homebrew's python3 execs a binary called `Python`,
+# inside Python.app, so an anchored `python3` matches nothing on a Mac and the
+# reader goes unseen.
 rig_port_readers() { # port
-    pgrep -af "^[^ ]*python3[^ ]* .*serial-timestamp\.py 127\.0\.0\.1 $1 " \
-        2> /dev/null || true
-    pgrep -af "^[^ ]*nc 127\.0\.0\.1 $1\$" 2> /dev/null || true
+    rig_pgrep_af "^[^ ]*[Pp]ython3?[^ ]* .*serial-timestamp\.py 127\.0\.0\.1 $1 "
+    rig_pgrep_af "^[^ ]*nc 127\.0\.0\.1 $1\$"
 }
 
 # A one-line description of a pid, for a refusal that names the other run
