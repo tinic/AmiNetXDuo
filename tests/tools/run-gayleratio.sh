@@ -46,8 +46,11 @@
 # with a PiStorm32 and a 3c589 in the socket, and CheckNetDevice on it reports
 #
 #   spins_per_line=25   us_per_line=63   gayleratio_timed_path_binds=no
+#   spins_per_line=27   us_per_line=63   gayleratio_timed_path_binds=no
 #
-# TWENTY-FIVE, not 25600.  The accelerated constant in
+# Two readings, either side of a power cycle, on the same machine.
+#
+# TWENTY-FIVE AND TWENTY-SEVEN, not 25600.  The accelerated constant in
 # src/netdev/test/test_netdev_clock.c:176 is not what an accelerated machine
 # measures, and neither is the 256 at :175 what a stock one does -- the whole
 # emulated table above tops out at 54.  The reason is the same one that makes
