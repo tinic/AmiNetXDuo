@@ -5586,7 +5586,10 @@ static BOOL httpd_preconditions(HttpConn *c)
    never a blocking call, for the reason CONN_WALK exists. */
 
 static IperfRun  httpd_iperf;
-static UBYTE     httpd_iperf_buf[IPERF_BUF_MAX];
+/* The endpoint runs one fixed size, so the daemon carries that buffer and
+   not the ceiling the iperf command sweeps up to. */
+#define HTTPD_IPERF_BUFLEN  4096
+static UBYTE     httpd_iperf_buf[HTTPD_IPERF_BUFLEN];
 static HttpConn *httpd_iperf_owner;      /* NULL when nothing is running    */
 
 /* Compiled in, and small enough for httpd_body_text()'s 2 KB of out[].  No CDN,
@@ -5796,7 +5799,8 @@ static BOOL httpd_iperf_hook(HttpConn *c)
     plan.seconds = (ULONG)n;
 
     plan.buflen = (plan.dir == IPERF_UDP_TX || plan.dir == IPERF_UDP_RX)
-                      ? (ULONG)IPERF_UDP_DEFAULT : 4096UL;
+                      ? (ULONG)IPERF_UDP_DEFAULT
+                      : (ULONG)HTTPD_IPERF_BUFLEN;
 
     if (plan.dir == IPERF_UDP_TX)
         plan.rate_kbit = 1000UL;

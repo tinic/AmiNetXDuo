@@ -63,6 +63,9 @@ echo "cpu=$(sed -n 's/^AMINETXDUO_CPU:STRING=//p' \
 echo "divisors=$DIVISORS fastmem=${AMINETXDUO_FASTMEM:-unset}"
 echo "guest_address=$ADDRESS"
 
+# shellcheck source=netstatkv.sh
+. "$ROOT/tests/perf/netstatkv.sh"
+
 RESULTS="$ROOT/build/poolshare-results-$$"
 mkdir -p "$RESULTS"
 
@@ -132,14 +135,27 @@ IFEOF
     cp "$HD/tools.txt" "$RESULTS/arm-$DIV.guest" 2>/dev/null
 
     echo "==== arm $DIV (emulator rc=$RUN_RC) ===="
+    echo "arm=$DIV emulator_rc=$RUN_RC"
     grep -E "peer_bytes=|never accepted" "$PEERLOG" | tail -1
-    grep -E "packets free|fewest|pool empty|window" \
-        "$RESULTS/arm-$DIV.guest" 2>/dev/null | head -4
+    # The pool keys AND the receive budget.  The transmit half of answering a
+    # segment -- xmit, reap, stuff, post -- is instrumented and was never once
+    # quoted here; a pool arm that moves reap but not xmit is a different
+    # finding from one that moves both.
+    if [ -s "$RESULTS/arm-$DIV.guest" ]; then
+        netstat_kv "$RESULTS/arm-$DIV.guest"
+    else
+        echo "guest_report=missing"
+    fi
     if [ -s "$PCAP" ]; then
-        Z=$(tcpdump -n -r "$PCAP" 2>/dev/null | grep -c "win 0,")
-        W=$(tcpdump -n -r "$PCAP" 2>/dev/null |
-            grep -oE "win [0-9]+" | sort -t' ' -k2 -n | tail -1)
-        echo "wire: zero_windows=$Z max_advertised=$W"
+        # src-filtered: the guest is the receiver, so its own advertisement
+        # is the one under test.  Unfiltered, the peer's Linux window is the
+        # larger of the two and max_advertised reported the peer.
+        Z=$(tcpdump -n -r "$PCAP" "src host $ADDRESS" 2>/dev/null |
+            grep -c "win 0,")
+        W=$(tcpdump -n -r "$PCAP" "src host $ADDRESS" 2>/dev/null |
+            grep -oE "win [0-9]+" | awk '{ if ($2+0 > m) m = $2+0 } END
+                                          { print m+0 }')
+        echo "zero_windows=$Z max_advertised=$W"
     fi
 done
 
