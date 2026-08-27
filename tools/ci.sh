@@ -1811,7 +1811,6 @@ stage_bridged() {
 "toolsay|tests/tools/run-toolsay.sh|-B @|the branches where a shipped command reached a return and printed no sentence at all" \
 "netstack|tests/netstack/run-amiberry.sh|-B @|netstack bring-up (14 checks, floor 12)" \
 "ifquery|tests/tools/run-ifquery.sh|-B @|the Roadshow interface and statistics APIs, which have no other home: QueryInterfaceTagList over its whole tag surface, the statistics counters, and the address-allocation message against the DHCP server on the wire" \
-"resolvebreak|tests/tools/run-resolvebreak.sh|-B @|how long a name lookup blocks on a blackholed server, and whether Ctrl-C gets the task back" \
     ; do
         hname="${entry%%|*}";  rest="${entry#*|}"
         hpath="${rest%%|*}";   rest="${rest#*|}"

@@ -142,7 +142,10 @@ fi
 # stack's own AMI_ERROR is a different instrument and its absence is not a
 # defect in the message.
 SERIAL=$(serial_log_path "$AMINETXDUO_RUN_TAG")
-LOGSTATE=$(serial_log_state "$BUILD" 2>/dev/null || echo unknown)
+# `|| true`, not `|| echo unknown`: serial_log_state PRINTS the state and
+# returns 1 for `off`, so the fallback appended a second line and the message
+# read "AMINETXDUO_LOG=off\nunknown".
+LOGSTATE=$(serial_log_state "$BUILD" 2>/dev/null) || true
 if [ "$LOGSTATE" != on ]; then
     skip "the stack's own refusal was NOT CHECKED: $BUILD is\
  AMINETXDUO_LOG=$LOGSTATE, so netstack_startup writes nothing.  The seven\
