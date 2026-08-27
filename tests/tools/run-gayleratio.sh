@@ -42,13 +42,31 @@
 # spins the caller's own iteration count is the longer of the two and the wait
 # is the old counted loop, which is every arm here.
 #
-# WHAT THIS FILE CANNOT ANSWER, AND WHAT CAN: that a 300 ms pc_settle() on a
-# machine at 25600 spins per line is 300 ms and not 3.  No emulated arm reaches
-# the ratio.  THE MACHINE THAT DOES EXISTS AND IS ON THE LAN -- amiga-1200
-# (192.168.1.219), a PiStorm32-accelerated A1200 with a 3c589 in the PCMCIA
-# socket -- and tools/hwrun.sh drives it.  Nobody is to write "there is no
-# accelerated machine here" again; run CheckNetDevice on it and read the
-# spins-per-raster-line figure instead.
+# MEASURED ON THE ACCELERATED A1200, 2026-08-27.  amiga-1200.local is an A1200
+# with a PiStorm32 and a 3c589 in the socket, and CheckNetDevice on it reports
+#
+#   spins_per_line=25   us_per_line=63   gayleratio_timed_path_binds=no
+#
+# TWENTY-FIVE, not 25600.  The accelerated constant in
+# src/netdev/test/test_netdev_clock.c:176 is not what an accelerated machine
+# measures, and neither is the 256 at :175 what a stock one does -- the whole
+# emulated table above tops out at 54.  The reason is the same one that makes
+# the table saturate: the loop body is a read of $DFF004, and a PiStorm does
+# not accelerate the chipset, so the spin rate is a property of the Gayle and
+# chip bus rather than of the CPU.  This machine is SLOWER per spin than the
+# 14 MHz reference the counts were calibrated on -- 25 spins to a 63 us line
+# is 2.5 us a spin against the reference 0.25 us -- so the unconditional floor
+# in netdev_wait_begin() (us * 4 spins, 1200000 of them for the Gayle hold)
+# decides every wait here and decides it LONG, not short.  The failure this
+# clock was written against is the opposite of the one real hardware shows.
+#
+# WHAT REMAINS UNPROVEN: that any machine reaches a spin rate at which the beam
+# clock binds.  Nothing in this lab does, emulated or physical.
+#
+# AND NOBODY IS TO WRITE "there is no accelerated machine here" AGAIN.  That
+# sentence stood in this file, in CHANGELOG.md and in three backlog rows while
+# amiga-1200 sat on the LAN answering port 80.  Run CheckNetDevice on it and
+# read the figure.
 #
 # SPDX-License-Identifier: MIT
 

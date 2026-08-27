@@ -65,6 +65,8 @@ def main():
                     help="seconds allowed for any one command")
     ap.add_argument("-c", "--command", action="append", default=[],
                     help="a command to run; repeatable, else read stdin")
+    ap.add_argument("--take", action="store_true",
+                    help="take the terminal off whoever holds it")
     ap.add_argument("-h", "--help", action="help")
     a = ap.parse_args()
 
@@ -88,11 +90,34 @@ def main():
               % (a.address, a.port, e), file=sys.stderr)
         return 3
 
+    if ws.status == 503 and a.take:
+        # ?take=1 is httpd own reclaim, src/tools/httpd.c:3619.  The first
+        # request only lets the holder go -- it answers 503 as well, saying
+        # so -- and the second is the one that gets the terminal.
+        d.WsConn(timeout=a.timeout, path=d.TERM + "?take=1")
+        ws = d.WsConn(timeout=a.timeout)
+
     if ws.status != 101:
-        print("shell_state=no_terminal")
-        print("hwshell: %s:%d answered %s to the /shell upgrade.  httpd "
-              "serves /shell only with -T." % (a.address, a.port, ws.status),
-              file=sys.stderr)
+        if ws.status == 503:
+            # 503 IS NOT "NO TERMINAL".  httpd serves one Shell at a time and
+            # answers 503 for as long as somebody holds it, which is exactly
+            # what the timeout branch below leaves behind.  Reporting that as
+            # "httpd serves /shell only with -T" sent the next reader looking
+            # for a switch that was there all along, and cost a run on
+            # amiga-1200 doing it.  httpd says which of the two it is in the
+            # body; that is what goes out here.
+            print("shell_state=busy")
+            print("hwshell: %s:%d answered 503 to the /shell upgrade: %s  "
+                  "Pass --take to take it off a session that has stopped "
+                  "reading."
+                  % (a.address, a.port,
+                     ws.buf.decode("latin-1", "replace").strip()),
+                  file=sys.stderr)
+        else:
+            print("shell_state=no_terminal")
+            print("hwshell: %s:%d answered %s to the /shell upgrade.  httpd "
+                  "serves /shell only with -T."
+                  % (a.address, a.port, ws.status), file=sys.stderr)
         return 3
 
     # KEYSTROKES ARE BINARY FRAMES.  src/tools/httpterm.c:1721 puts opcode 2
