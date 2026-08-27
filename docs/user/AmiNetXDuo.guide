@@ -1561,9 +1561,9 @@
       xsurf      xsurf100    xsurf500    pcmcia      3c589
 
   pcmcia is any NE2000-compatible card in the slot of an A600 or A1200.
-  3c589 is the 3Com EtherLink III. xsurf500 and 3c589 have never been
-  run on the hardware they are written for. A report of either one
-  working, or not working, is wanted.
+  3c589 is the 3Com EtherLink III, and has run on real hardware.
+  xsurf500 has never been run on the hardware it is written for. A
+  report of it working, or not working, is wanted.
 
   xsurf carries its chip behind an ISA Plug and Play bridge, and the
   driver configures it at boot. That sequence has been run against an

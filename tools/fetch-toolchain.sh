@@ -1,92 +1,22 @@
 #!/usr/bin/env bash
 #
-# Acquire the pinned m68k-amigaos cross toolchain.
+# Acquire the pinned m68k-amigaos cross toolchain: GCC 16.2.0b, binutils
+# 2.39.0, NDK 3.9, built by tools/build-toolchain.sh from pinned commits.
 #
-#   tools/fetch-toolchain.sh              # fetch (or reuse) and report the root
+#   tools/fetch-toolchain.sh              # fetch (or reuse), report the root
 #   eval "$(tools/fetch-toolchain.sh --export)"   # ... and export it
 #   tools/fetch-toolchain.sh --print-root # just say where it would be
 #   tools/fetch-toolchain.sh --print-sha  # this platform's asset sha256
+#   tools/fetch-toolchain.sh --check-crt0     # crt0 shape
 #   tools/fetch-toolchain.sh --check-inlines  # NDK inline register ABI
 #   tools/fetch-toolchain.sh --force      # re-fetch even if cached
 #
-# WHAT IS PINNED, AND WHY THIS PARTICULAR THING
+# Assets cover Linux x86_64 and macOS arm64; any other host builds its own.
+# One release is the only download source -- nothing else publishes this
+# pairing -- so a bad hash stops, loudly, and writes nothing.
 #
-#   GCC 16.2.0b for m68k-amigaos, binutils 2.39.0, NDK 3.9 headers, built from
-#   bebbo's amiga-gcc.  tools/build-toolchain.sh is that build, pinned to exact
-#   commits; this script downloads what it produced.
-#
-#   BINUTILS 2.39 IS NOT AN OVERSIGHT.  2.46 cannot assemble GCC 16.2's own
-#   output -- it forces the MIT-syntax pseudo-branches to a byte displacement
-#   and rejects thousands of them -- and its `size` does not recognise some of
-#   our objects, which costs three targets their strip step.  The pairing is
-#   deliberate.
-#
-#   NDK 3.9, NOT NDK 3.2.  Confusingly, 3.2 is the NEWER of the two: it is
-#   Hyperion's 2021 SDK, and it renamed some long-standing types (`struct
-#   timerequest` -> `struct TimeRequest`, and so on) while keeping the old
-#   names as aliases.  The sources are written to the spellings both NDKs
-#   accept, which costs nothing and lets anyone build the tree with whichever
-#   NDK their toolchain shipped.
-#
-# ONE SOURCE.  THIS IS A REAL CHANGE, AND NOT A PAPERED-OVER ONE.
-#
-#   Until GCC 15.2 this script had a second route: the AmigaPorts image
-#   docker.io/amigadev/crosstools:m68k-amigaos-gcc10, whose /opt/m68k-amigaos
-#   layer WAS the toolchain, fetched by content digest if our release was
-#   unreachable.  That fallback is gone, because it was never a fallback for
-#   this toolchain -- it published GCC 15.2 with a different binutils, and no
-#   registry, distro, PPA, Homebrew tap or nixpkgs derivation publishes GCC
-#   16.2 + binutils 2.39.0 for m68k-amigaos at all.  There is nothing to fall
-#   back TO.
-#
-#   So the release asset below is now the single point of failure for a
-#   download, and pretending otherwise by leaving dead code in would be worse
-#   than saying it.  The mitigation is not a mirror, it is that the build is
-#   reproducible: if this release goes away, tools/build-toolchain.sh rebuilds
-#   the same toolchain from pinned commits on either supported host.
-#
-#   github.com/tinic/AmiNetXDuo/releases/tag/toolchain-m68k-amigaos-gcc-16.2.0
-#
-#   A BAD HASH IS NOT A REASON TO CARRY ON.  Unreachable release -> a network
-#   error, say so.  Release reachable but the bytes are wrong -> stop, loudly,
-#   and write nothing.  The first is weather; the second means something is
-#   serving us a toolchain we did not ask for.
-#
-# ONE ASSET PER PLATFORM
-#
-#   The binaries are native host executables, so there is one asset per
-#   host platform and the pin is per platform too.  Covered:
-#
-#       Linux x86_64      built on Debian 13.5, glibc 2.41
-#       macOS arm64       built on macOS 26.5, Apple Silicon
-#
-#   NOT covered, and there is no asset to serve them: macOS x86_64 and Linux
-#   aarch64.  Those hosts get an error naming the platform and pointing at
-#   tools/build-toolchain.sh, which builds on either of them; what they must
-#   not get is a silent download of binaries that cannot execute.
-#
-# WHERE IT LANDS
-#
-#   $AMINETXDUO_TOOLCHAIN_CACHE, or ~/.cache/aminetxduo/toolchain by default:
-#
-#       <cache>/<sha12>/           the extracted tree
-#       <cache>/current            symlink to it
-#
-#   <sha12> is the first 12 hex of THIS PLATFORM's asset hash, so two
-#   platforms sharing a home directory over NFS do not fight over one path,
-#   and a pin bump lands in a new directory rather than half-overwriting the
-#   old one.
-#
-#   cmake/toolchain-m68k-amigaos.cmake and tools/amiga-toolchain.sh both look
-#   at <cache>/current, so nothing else has to be told about it.
-#
-# ENVIRONMENT
-#
-#   AMINETXDUO_TOOLCHAIN_CACHE   where to unpack (default ~/.cache/...)
-#   AMINETXDUO_TOOLCHAIN_URL     fetch the tarball from here instead of the
-#                                release (an internal mirror, or a file:// URL
-#                                for testing).  Still hash-checked against this
-#                                platform's pin.
+#   AMINETXDUO_TOOLCHAIN_CACHE   where to unpack (default ~/.cache/aminetxduo)
+#   AMINETXDUO_TOOLCHAIN_URL     a mirror; still hash-checked against the pin
 #
 # SPDX-License-Identifier: MIT
 
@@ -94,6 +24,10 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
+# binutils 2.39, not 2.46: 2.46 forces MIT-syntax pseudo-branches to a byte
+# displacement and rejects GCC 16.2's own output, and its `size` misreads some
+# of our objects.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types
+# and the sources are written to the spellings both accept.
 TC_GCC_VERSION="16.2.0b"
 # 16.2.1 rather than a rebuilt 16.2.0: the content is different -- gcc moved to
 # 60f21496, binutils carries the two bfd LTO patches and is configured
@@ -161,7 +95,7 @@ while [ $# -gt 0 ]; do
         --check-crt0) MODE="checkcrt0" ;;
         --check-inlines) MODE="checkinlines" ;;
         --force)      FORCE=1 ;;
-        -h|--help)    sed -n '2,89p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "usage: $0 [--export|--print-root|--print-sha|--check-crt0|--check-inlines] [--force]" >&2; exit 2 ;;
     esac
     shift

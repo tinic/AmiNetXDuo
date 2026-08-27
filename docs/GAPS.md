@@ -65,29 +65,31 @@ does, or the ARexx path stays a third of the job.
 
 ## Missing configuration
 
-`DEVS:NetInterfaces/<name>`. We act on `DEVICE`, `UNIT`, `ID`, `CONFIGURE`,
-`CONFIGURE6`, `IPTYPE`, `ADDRESS`, `ADDRESS6`, `NETMASK`, `GATEWAY`,
-`GATEWAY6`, `MTU`, `STATE`, `MDNS`, and the AmiTCP spellings of four of them.
+`DEVS:NetInterfaces/<name>`. We act on `DEVICE`, `CARD`, `UNIT`, `ID`,
+`CONFIGURE`, `CONFIGURE6`, `IPTYPE`, `IPTYPE6`, `ADDRESS`, `ADDRESS6`,
+`NETMASK`, `GATEWAY`, `GATEWAY6`, `MTU`, `STATE`, `MDNS`, `DOWNGOESOFFLINE`,
+`REQUIRESINITDELAY`, `HARDWAREADDRESS`, and the AmiTCP spellings of four of
+them.
 
-**The other 22 are accepted and silently dropped**: `config_parse.c` maps them
-to `IF_KEY_IGNORED` so a stock Roadshow file produces no warnings, which means a
-user who writes one gets no error, no effect, and nothing to read. Two answers
-are defensible for each — implement it, or refuse it in one line — and
+**The other 21 are accepted and silently dropped**: `config_parse.c:78` maps
+them to `IF_KEY_IGNORED` so a stock Roadshow file produces no warnings, which
+means a user who writes one gets no error, no effect, and nothing to read. Two
+answers are defensible for each — implement it, or refuse it in one line — and
 "accepted, ignored, silent" is neither.
 
 | Key | What it would do |
 |---|---|
-| `REQUIRESINITDELAY` | A second's pause after opening a device that needs one. The manual names the original Ariadne, a card we have had trouble with |
-| `HARDWAREADDRESS` | Set the MAC. Two guests on one bridge collide without it, and so do two real cards sharing an address |
 | `ALIAS` | A second address on one interface |
 | `COPYMODE` | Which SANA-II copy mode the driver is asked for |
 | `IPREQUESTS` `WRITEREQUESTS` `ARPREQUESTS` | How many requests are queued to the driver at once — the throughput knob for a slow card |
 | `POINTTOPOINT` `DESTINATION` | Point-to-point links |
 | `MULTICAST` | Asking the driver for multicast explicitly |
-| `DOWNGOESOFFLINE` `REPORTOFFLINE` | Whether taking an interface down sends `S2_OFFLINE`, and whether that is reported |
+| `REPORTOFFLINE` | Whether an interface going offline is reported |
 | `METRIC` `PRIORITY`/`PRI` | Ordering two interfaces |
 | `LEASE` `DHCPUNICAST` | DHCP lease time and unicast renewal (`ID` we do read) |
-| `FILTER` `DEBUG` `ARPTYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
+| `BROADCASTADDRESS` | A broadcast address other than the one the netmask implies |
+| `NAMESERVER` `DOMAIN` | Per-interface resolver settings; we take both from `DEVS:Internet/name_resolution` |
+| `FILTER` `DEBUG` `ARPTYPE`/`HARDWARETYPE` `LINKSTATUSCOMMAND` | Packet filter, driver debug, ARP hardware type, link-change command |
 
 `DEVS:Internet/`: we read `hosts`, `networks`, `protocols`, `services`,
 `routes`, `name_resolution`, plus our own `certificates`, `service_discovery`,
@@ -97,7 +99,7 @@ are defensible for each — implement it, or refuse it in one line — and
 |---|---|
 | `users`, `groups` | **We read `passwd` and `group` instead** (`ug_db.c:31-40`), which are AmiTCP's names. Roadshow's manual §2675 and §3371 call them `users` and `groups`, and says each "uses a different format" from the Unix file — so this is two questions, the name and whether the contents would parse if renamed. Neither has been checked against a real Roadshow install, and `README.md` claims we read the same configuration files Roadshow does |
 | `rpc` | RPC program numbers, `getrpcbyname()`. Niche |
-| `servers` | The inetd-style superserver table. Out of scope while we ship no daemons, and `docs/BACKLOG.md` should say so rather than leave it looking forgotten |
+| `servers` | The inetd-style superserver table. Out of scope while we ship no daemons |
 
 ## Missing commands
 

@@ -17,8 +17,9 @@ cd "$ROOT" || exit 2
 TOTAL_MAX="${AMINETXDUO_DOC_TOTAL_MAX:-1150}"
 FILE_MAX="${AMINETXDUO_DOC_FILE_MAX:-250}"
 
-# AmiNetXDuo.guide is the shipped manual, not narrative.  Nothing else may
-# join this list.
+# The shipped manual is not narrative, and it lives under docs/user/, which
+# the docs/*.md glob below cannot reach anyway.  This list stays as the record
+# of that, and nothing else may join it.
 EXEMPT="docs/user/AmiNetXDuo.guide"
 
 total=0

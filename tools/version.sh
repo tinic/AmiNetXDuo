@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Print the AmiNetXDuo version, without configuring cmake and without running
-# an Amiga binary.
+# an Amiga binary: a workflow has to name its artefacts before, or without, a
+# build.  Reads the same three files cmake/AmiNetXDuoVersion.cmake reads and
+# applies the same pin check; the `version_scheme` host test diffs the two.
 #
 #   tools/version.sh              0.1.0+nx6.5.1     the compound version
 #   tools/version.sh --product    0.1.0             ours alone
@@ -12,19 +14,6 @@
 #   tools/version.sh --tag        v0.1.0            the release tag for it
 #   tools/version.sh --env        KEY=VALUE lines, for $GITHUB_OUTPUT
 #   tools/version.sh --check H    H is a generated version.h; do we agree?
-#
-# WHY THIS EXISTS SEPARATELY FROM CMAKE
-#
-# A workflow has to label its own artefacts before, or without, a build:
-# naming the .lha, naming an upload, deciding whether a tag matches the tree.
-# Making that require a configured build directory would mean a job that only
-# uploads has to compile first, and making it require running a built m68k
-# binary would mean it cannot be done at all on a Linux runner.
-#
-# So this reads the same three files cmake/AmiNetXDuoVersion.cmake reads --
-# the project() line, nx_api.h, tx_api.h, and applies the same pin check.
-# The two implementations agreeing is enforced by the `version_scheme` host
-# test, which diffs this script's answers against the generated header.
 #
 # SPDX-License-Identifier: MIT
 

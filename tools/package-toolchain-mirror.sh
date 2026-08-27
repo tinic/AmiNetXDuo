@@ -1,37 +1,17 @@
 #!/usr/bin/env bash
 #
 # Build the toolchain tarball that tools/fetch-toolchain.sh downloads from our
-# GitHub release, and print the sha256 to pin it by.
+# GitHub release, and print the sha256 to pin it by.  tools/build-toolchain.sh
+# --package <file> calls this, which is the normal way to get here.
 #
-#   tools/package-toolchain-mirror.sh --from <root>
-#   tools/package-toolchain-mirror.sh --from <root> --out /tmp/x.tar.xz
+#   tools/package-toolchain-mirror.sh --from <root> [--out /tmp/x.tar.xz]
 #
-#   tools/build-toolchain.sh --package <file> calls this for you, which is the
-#   normal way to get here.
-#
-# WHY THIS EXISTS
-#
-#   CI needs a working m68k-amigaos toolchain and there is no upstream that
-#   publishes this one: GCC 16.2 paired with binutils 2.39.0 exists as no
-#   image, package or tarball anywhere, so we build it (tools/build-toolchain.sh)
-#   and host the result.  Hosting a binary is cheap; hosting it without a
-#   written-down way to REMAKE it is how a mirror turns into a mystery blob
-#   nobody dares touch.  That way is the build script; this script is only the
-#   wrapping, and it is separate so that re-cutting an asset from a tree you
-#   already have does not mean rebuilding for an hour.
-#
-#   PACKAGE WHAT YOU BUILT, NEVER WHAT YOU DOWNLOADED.  `--from` is required
-#   for exactly that reason: pointing it at the fetch cache would copy from the
-#   last copy, and any drift would become permanent.
-#
-# THE OUTPUT IS NOT BIT-REPRODUCIBLE
-#
-#   tar member order comes from readdir, and xz output varies by version, so
-#   two runs on two machines will not produce identical bytes.  They produce
-#   identical TREES, which is what matters and what this script checks.  The
-#   sha256 printed at the end is therefore a fact about the artifact you just
-#   made: paste it into the right TC_SHA256_* in tools/fetch-toolchain.sh
-#   whenever you upload a new one.
+# `--from` is required so an asset is cut from a tree that was BUILT, never
+# from the fetch cache: copying from the last copy makes drift permanent.
+# The output is not bit-reproducible -- tar member order comes from readdir and
+# xz output varies by version -- so the sha256 printed at the end is a fact
+# about this artifact.  Paste it into the right TC_SHA256 in
+# tools/fetch-toolchain.sh whenever a new one is uploaded.
 #
 # SPDX-License-Identifier: MIT
 
@@ -59,7 +39,7 @@ while [ $# -gt 0 ]; do
         --from) FROM="$2"; shift ;;
         --out)  OUT="$2"; shift ;;
         --platform) PLATFORM="$2"; shift ;;
-        -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
         *) echo "usage: $0 --from <toolchain root> [--out <file.tar.xz>] [--platform <name>]" >&2; exit 2 ;;
     esac
     shift

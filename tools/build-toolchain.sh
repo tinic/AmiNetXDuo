@@ -86,7 +86,7 @@ while [ $# -gt 0 ]; do
             done
             printf 'NDK3.9.lha        sha256:%s %s\n' "$PIN_NDK_SHA256" "$PIN_NDK_URL"
             exit 0 ;;
-        -h|--help)  sed -n '2,50p' "$0"; exit 0 ;;
+        -h|--help)  sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "usage: $0 [--work DIR] [--prefix DIR] [--package FILE.tar.xz] [-j N] [--fetch-only]" >&2; exit 2 ;;
     esac
     shift
