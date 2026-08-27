@@ -167,6 +167,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
             info->stats.rx_copy_hook     = src->nsi_RxCopyHook;
             info->stats.rx_copy_summed   = src->nsi_RxCopySummed;
             info->stats.rx_direct_fill   = src->nsi_RxDirectFill;
+            info->stats.tick_polls       = src->nsi_TickPolls;
+            info->stats.rx_kicks         = src->nsi_RxKicks;
             info->stats.alloc_failures   = src->nsi_AllocFailures;
         }
     }

@@ -166,6 +166,8 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
     tool_printf("  transmit errors   %10lu    receive errors    %10lu\n",
                 st->tx_errors, st->rx_errors);
     tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
+    tool_printf("  vblank RX polls   %10lu    deaf RX resets    %10lu\n",
+                st->tick_polls, st->rx_kicks);
 }
 
 /*

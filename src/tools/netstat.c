@@ -544,6 +544,8 @@ static VOID show_stats(const AmiConfig *cfg, const ToolSnapshot *snap)
         tool_printf("  unknown types     %10lu    reconfigurations  %10lu\n",
                     st->unknown_types, st->reconfigurations);
         tool_printf("  buffer failures   %10lu\n", st->alloc_failures);
+        tool_printf("  vblank RX polls   %10lu    deaf RX resets    %10lu\n",
+                    st->tick_polls, st->rx_kicks);
 
         /* A card whose receive fill produces no sum has its frames walked a
            second time for a checksum that move could have produced. */

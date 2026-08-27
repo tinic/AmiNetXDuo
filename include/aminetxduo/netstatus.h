@@ -22,7 +22,7 @@ extern "C" {
 /* Bump on any change to a record or control-block shape: the version checks in
    src/bsdsocket/netstatus.c are exact equality in both directions, so two
    different shapes under one version number cannot be told apart. */
-#define AMI_NETSTATUS_VERSION       11
+#define AMI_NETSTATUS_VERSION       12
 
 /* Fixed widths every record shares. */
 #define NETSTATUS_NAME_LEN      32
@@ -42,7 +42,7 @@ extern "C" {
 /* Callers MUST check lib_Revision >= this before any netstatus call: an older
    library has no such vector and the jump lands past the table terminator.
    Bump when a netstatus vector is added or AMI_NETSTATUS_VERSION moves. */
-#define AMI_NETSTATUS_MIN_REVISION  7
+#define AMI_NETSTATUS_MIN_REVISION  8
 
 /* ------------------------------------------------------------ selectors --- */
 #define NETSTATUS_SYSTEM        1   /* one NetStatusSystem                   */
@@ -162,6 +162,9 @@ typedef struct NetStatusInterface
     /* Of nsi_RxCopyHook, fills that came through the private direct-receive
        pair.  The summed counter cannot answer this. */
     ULONG   nsi_RxDirectFill;
+    /* anxnet.device recovery counters; zero for other SANA-II drivers. */
+    ULONG   nsi_TickPolls;
+    ULONG   nsi_RxKicks;
 } NetStatusInterface;
 
 /* ----------------------------------------------- NETSTATUS_ADDRESSES6 --- */

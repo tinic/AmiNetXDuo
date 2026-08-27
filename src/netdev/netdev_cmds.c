@@ -105,6 +105,8 @@ static const char netdev_stat_cis[]   = "Address taken from the card's CIS";
 static const char netdev_stat_derv[]  = "Address derived, PROM was blank";
 static const char netdev_stat_godd[]  = "Odd registers read as words";
 static const char netdev_stat_drx[]   = "Direct receive fills";
+static const char netdev_stat_tick[]  = "Vertical-blank interrupt polls";
+static const char netdev_stat_kick[]  = "PCMCIA deaf-receiver resets";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -187,6 +189,12 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
        actually negotiated and used.  Appended so every existing record keeps
        its numeric Type for callers which learned the older table by index. */
     STAT(netdev_stat_drx,   unit->nu_RxDirect);
+
+    /* These are recovery, not traffic, counters.  A nonzero value is the
+       evidence that the card stopped interrupting or booted deaf, and must
+       survive the SANA-II boundary to be useful in a field report. */
+    STAT(netdev_stat_tick,  unit->nu_TickPolls);
+    STAT(netdev_stat_kick,  unit->nu_RxKicks);
 
 #undef STAT
 
