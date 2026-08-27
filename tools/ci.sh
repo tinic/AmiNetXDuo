@@ -2080,6 +2080,66 @@ stage_bridged() {
 # The peer's root qdisc is changed for the duration, so it must be idle; the
 # harness refuses to start otherwise rather than producing a number nobody can
 # trust.
+# THE CONSOLE'S SCREENS, on more than one machine and more than one size.
+#
+# NOT IN `bridged`.  Every arm here needs a SECOND HOST: a frame the emulator
+# host sends to a guest of its own never comes back, so the probe has to run
+# somewhere else on the segment or every arm reads as a guest that never came
+# up.  AMINETXDUO_CONSOLE_CLIENT is that host, and without it there is nothing
+# to run rather than something to fail.
+#
+# WHAT EACH GROUP IS FOR.  The aligned A1200 group is the control: it is the
+# coverage this project had, and it tells an unaligned arm that broke from a
+# machine that broke.  The 312x202 groups are the hole that let 1600 columns
+# ship -- a planar screen is allocated in whole 16-pixel words, so 312 sits in
+# 320 and the last 8 columns belong to nobody.  The A600 groups are OCS on a
+# 68000, where HAM6 and EHB had never run at all.  The RTG arm asks for 633
+# columns, which the board gives a 636-byte row, and is the only arm anywhere
+# that makes http_rtg_describe() clamp anything.
+stage_console() {
+    hr "console screens (tier 2, needs a real link and a second host)"
+
+    local rc=0 bad=0
+
+    if [ -z "${AMINETXDUO_CONSOLE_CLIENT:-}" ]; then
+        skip "console: AMINETXDUO_CONSOLE_CLIENT is not set, so there is no" \
+             "machine to ask the guest for a screen -- this host cannot reach" \
+             "a guest of its own"
+        return "$NOTHING"
+    fi
+
+    local entry cname cargs cwhy rest
+    for entry in \
+"aga|-C ham6 -C ham8 -C ehb -m A1200|HAM6, HAM8 and EHB on AGA at 320x256, which is the coverage that already existed" \
+"aga-unaligned|-C ham6 -C ham8 -C ehb -m A1200 -S 312x202|the same three at 312x202, where the screen is 8 columns narrower than its bitmap" \
+"ocs|-C ham6 -C ehb -m A600|HAM6 and EHB on OCS, on a 68000" \
+"ocs-unaligned|-C ham6 -C ehb -m A600 -S 312x202|the same two on OCS at 312x202" \
+"rtg-unaligned|-P -d 8 -m A1200 -S 633x475 -s 20|a 633-column card screen in a 636-byte row, which is the reported defect's own shape" \
+    ; do
+        cname="${entry%%|*}";  rest="${entry#*|}"
+        cargs="${rest%%|*}"
+        cwhy="${entry##*|}"
+
+        printf '\n-- %s\n' "$cwhy"
+        rc=0
+        # shellcheck disable=SC2086
+        "$ROOT/tests/tools/run-console.sh" -b "$BUILD/default" \
+            -c "$AMINETXDUO_CONSOLE_CLIENT" \
+            -o "$BUILD/console-out-$cname" $cargs || rc=$?
+        case "$rc" in
+            0) note "PASS  console $cname" ;;
+            2) skip "console $cname: an ingredient is missing on this machine" ;;
+            *) fail "console $cname: the screen on the wire is not the screen\
+ the guest opened, or the picture did not come back -- the key=value lines\
+ above name the arm and the pixel report"
+               bad=1 ;;
+        esac
+    done
+
+    [ "$bad" = 0 ] || return 1
+    return 0
+}
+
 stage_lossgate() {
     hr "the lossy-link gate (tier 2, needs a peer with tc)"
 
@@ -2226,6 +2286,7 @@ for s in "${WANT[@]}"; do
         wirequiet)   stage_wirequiet || srrc=$? ;;
         reachability) stage_reachability || srrc=$? ;;
         bridged)     stage_bridged || srrc=$? ;;
+        console)     stage_console || srrc=$? ;;
         lossgate)    stage_lossgate || srrc=$? ;;
         smb)         stage_smb || srrc=$? ;;
         e2e)         stage_e2e || srrc=$? ;;
