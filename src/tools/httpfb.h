@@ -47,6 +47,10 @@ BOOL http_fb_available(VOID);
 BOOL http_fb_start(struct Library *sb, LONG sock,
                    const UBYTE *first, ULONG first_len, ULONG now);
 
+/* The geometry selected by the current session, which may differ from the
+   startup banner after a screen-mode or front-screen change. */
+BOOL http_fb_session_geometry(UWORD *w, UWORD *h, UWORD *depth);
+
 /* Give it back.  Safe to call when there is no session. */
 VOID http_fb_stop(VOID);
 
