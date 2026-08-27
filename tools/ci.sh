@@ -157,7 +157,7 @@ host_test_targets() { # builddir
 #
 # Adding a test therefore turns CI red until this is raised.  That is the
 # maintenance the gate is made of, and it is one line.
-HOST_TESTS_EXPECTED=112
+HOST_TESTS_EXPECTED=113
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_select, test_rxdirect,
@@ -318,6 +318,19 @@ stage_host() {
     else
         cat "$BUILD/netdev-delays.log"
         fail "a delay in src/netdev counts bus reads instead of measuring time"
+        return 1
+    fi
+
+    # The mDNS responder still gives the machine back between resource records.
+    # A record is up to four walks of the peer cache, and draining a burst in
+    # one mutex-held pass stopped every acknowledgment leaving the machine for
+    # 100-500 ms at a time.  The yield has to sit at the head of each section
+    # loop; several paths through a record body continue past the bottom of it.
+    if tools/check-mdns-yield.sh > "$BUILD/mdns-yield.log" 2>&1; then
+        note "mdns yield: $(sed -n 's/^mdns_yield=//p' "$BUILD/mdns-yield.log")"
+    else
+        cat "$BUILD/mdns-yield.log"
+        fail "the mDNS responder no longer yields between resource records"
         return 1
     fi
 

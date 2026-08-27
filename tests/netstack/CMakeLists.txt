@@ -322,6 +322,39 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME tcp_sws COMMAND test_tcp_sws)
 
+    # The two receiver-side acknowledgment holes that left a sender in persist
+    # backoff, both fixed in 0.25.3 as submodule commits with no test in this
+    # tree: an unanswered window probe (tinic/netxduo bfedf066) and a sub-MSS
+    # advertisement nothing reopened until the application had drained half the
+    # buffer (0a00c482).  Asserted as protocol signatures against the real
+    # receive path and the real fast periodic, because they are properties of
+    # the state machine and hold on every card -- a throughput threshold under
+    # emulation would guard the emulator's timing instead.
+    add_executable(test_tcp_persist
+        host/test_tcp_persist_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_data_check.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_fast_periodic_processing.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_ack.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_packet_send_control.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_sack_option_build.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c")
+
+    target_compile_options(test_tcp_persist PRIVATE -UAMINETXDUO_IPV6)
+
+    target_include_directories(test_tcp_persist PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_THREADX}/common/inc")
+
+    target_compile_definitions(test_tcp_persist PRIVATE
+        NX_INCLUDE_USER_DEFINE_FILE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+    add_test(NAME tcp_persist COMMAND test_tcp_persist)
+
     # Whether a name lookup stops when it is told to, the retransmission
     # ladder on its own, with the DNS client replaced by scripted answers and
     # the clock by a variable.  A black hole, a Ctrl-C and a mistyped name are
