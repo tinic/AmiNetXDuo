@@ -568,6 +568,31 @@ endif()
 # Wait().  Adopted application callers keep their own Task and the baton
 # protocol.  PROTOTYPE: whole-tree, default OFF, and every existing
 # configuration builds the baton port unchanged when it is off.
+#
+# WHY THE DEFAULT DID NOT MOVE.  A1200 at 68020 under Amiberry, bridged,
+# run-fitzbench.sh -k 512 -r 3, three rounds interleaved against the baton
+# build inside one block:
+#
+#   a2065          read  495.0 vs 498.7  -0.7%   write  408.3 vs 455.7  -10.4%
+#   ariadne2       read  428.7 vs 430.7  -0.5%   write  343.0 vs 373.7   -8.2%
+#   ne2000_pcmcia  read  443.7 vs 446.7  -0.7%   write  362.0 vs 396.7   -8.7%
+#
+# The realm was live, not disengaged: the guest's own NetStat counts 2 baton
+# transitions over a run where the baton build counts 84, so the Exec-level
+# handoffs really did become in-realm stack switches.  They bought nothing on
+# the read figure and cost 8-10% of the write figure on every card.
+#
+# WHAT IS MISSING BEFORE IT IS WORTH REVISITING, specifically:
+#   - an account of where the write loss comes from.  The send path is the one
+#     that hands off to a green reader per completed CMD_WRITE, and nothing
+#     here says whether the loss is the stack switch itself or the realm's
+#     idle Wait() serialising a send behind a receive.
+#   - the counters that would answer that are unreachable in a shipping build:
+#     netstat prints the `green:` line only inside the budget block, which is
+#     AMINETXDUO_RXPROBE-gated, and an RXPROBE build is 4x slower to bring up.
+#   - the test tier has never RUN against it.  It builds -- the whole tree,
+#     tests included -- but tools/ci.sh's `green` arm is TESTS=OFF, so no
+#     ctest and no emulator test has ever executed inside the realm.
 option(AMINETXDUO_GREEN_REALM
        "Run the stack's ThreadX threads as green threads inside one Exec Task" OFF)
 if(AMINETXDUO_GREEN_REALM)
@@ -584,6 +609,31 @@ endif()
 # window credit reopens at settle time instead of fetch time.  Anything but
 # the plain blocking stream read (MSG_PEEK, MSG_WAITALL, OOB, non-blocking,
 # finite timeouts) declines and takes the shipped path unchanged.
+#
+# WHY THE DEFAULT DID NOT MOVE.  A1200 at 68020 under Amiberry, bridged,
+# ON and OFF alternating inside one block:
+#
+#   run-fitzbench.sh -k 512 -r 3, three rounds, read KB/s, ON vs OFF
+#     a2065          492.0 vs 498.7   -1.3%
+#     ariadne2       425.0 vs 430.7   -1.3%
+#     ne2000_pcmcia  423.7 vs 446.7   -5.1%
+#   tests/tools/run-iperf.sh tcp-rx (a plain BLOCKING recv, the shape this
+#   fork serves), four rounds, bit/s, ON vs OFF: 4650914 vs 4680660, -0.6%,
+#   inside the +-0.6% one-block spread and not the same sign in every round.
+#
+# The coverage counter says why, from an RXPROBE build of the same tcp-rx arm:
+# `direct: 4 completed on the IP thread, 1125 classic dequeues`.  The fork is
+# entered only on the FIRST iteration of the fill loop and only when the
+# socket is empty at the call (transfer.c's `copied == 0` gate, and the pump
+# declining in rxdirect.c when a packet is already queued).  A 68020 is the
+# slow end of a bulk transfer, so the socket is nearly always non-empty when
+# recv() is called and the buffer's remaining packets are classic by
+# construction: it fires on 0.35% of dequeues and cannot move a bulk figure.
+#
+# WHAT WOULD MAKE IT WORTH REVISITING: a measurement on a request/response
+# workload (tests/perf/run-reqresp.sh), where each recv() genuinely finds the
+# socket empty, and a fork that also covers the `copied > 0` continuations.
+# A default cannot move on that alone while the read figure is 1-5% down.
 option(AMINETXDUO_RX_DIRECT_COMPLETE
        "Complete a waiting stream recv() directly on the IP thread" OFF)
 if(AMINETXDUO_RX_DIRECT_COMPLETE)
