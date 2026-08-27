@@ -23,6 +23,17 @@ trap 'rm -rf "$AMINETXDUO_RIG_LOCKDIR"' EXIT
 # shellcheck source=emu-rig-lock.sh
 . "$ROOT/tools/emu-rig-lock.sh"
 
+# Nothing below can be evaluated without flock(1); every claim would refuse
+# for the same reason and nine identical refusals prove nothing.  Exit 3 is
+# this file's "could not be evaluated here".
+if ! rig_have_flock; then
+    echo "rig_lock_selftest=0 wrong unproven=all reason=no-flock(1)"
+    echo "rig-lock selftest: flock(1) is not installed, so no claim on this"
+    echo "  host can be taken or refused.  A host that runs emulator arms"
+    echo "  needs util-linux's flock; a host that only builds does not."
+    exit 3
+fi
+
 WRONG=0
 ok()   { printf '  ok   %s\n' "$1"; }
 bad()  { printf '  WRONG %s\n' "$1"; WRONG=$((WRONG + 1)); }
@@ -43,7 +54,7 @@ else
 fi
 
 rig_release_port
-eval "exec ${A_FD}>&-" 2> /dev/null || true
+[ -n "$A_FD" ] && eval "exec ${A_FD}>&-" 2> /dev/null || true
 
 # ------------------------------------- 2. a busy port is never handed out --
 
@@ -288,7 +299,8 @@ fi
 
 echo
 if [ "$WRONG" = 0 ] && [ "${UNPROVEN:-0}" != 0 ]; then
-    echo "rig_lock_selftest=0 wrong unproven=$UNPROVEN"
+    echo "rig_lock_selftest=0 wrong unproven=$UNPROVEN reason=the live-address\
+ probe cannot run here, unprivileged ICMP is off and ping has no cap_net_raw"
     echo "rig-lock selftest: exclusive and released; the live-address probe"
     echo "  could not run on this host, so that one claim is UNPROVEN here."
     exit 3

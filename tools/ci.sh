@@ -367,8 +367,10 @@ stage_host() {
         0) note "rig lock selftest: $(sed -n 's/^rig_lock_selftest=//p' \
                  "$BUILD/rig-lock-selftest.log")" ;;
         3) cat "$BUILD/rig-lock-selftest.log"
-           skip "rig lock selftest: the live-address claim is unproven on this\
- host -- unprivileged ICMP is off and ping has no cap_net_raw" ;;
+           rlwhy=$(sed -n 's/.*reason=//p' "$BUILD/rig-lock-selftest.log" \
+                   | head -1)
+           skip "rig lock selftest: unproven on this host\
+${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         *) cat "$BUILD/rig-lock-selftest.log"
            fail "two runs on one host can take the same port, name or address"
            return 1 ;;
@@ -1015,11 +1017,27 @@ stage_web() {
     # And every vendored drawer is meant to be upstream's, byte for byte.
     # Each carries its own PROVENANCE: a comment block and then a plain
     # sha256sum list, which is why the comments are stripped and the rest is
-    # handed to sha256sum as it stands.
+    # handed to the checker as it stands.  macOS ships a sha256sum with no
+    # --check, so every drawer read as edited there; shasum takes the same
+    # list.
+    #
+    # The probe checks a line that must verify -- /dev/null's own hash -- so a
+    # tool that takes --check and a tool that prints usage for it are told
+    # apart by the answer, not by the name.
+    local SHA256_CHECK
+    local _empty=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    if printf '%s  /dev/null\n' "$_empty" | sha256sum --check --status 2> /dev/null; then
+        SHA256_CHECK="sha256sum --check --status"
+    elif command -v shasum > /dev/null 2>&1; then
+        SHA256_CHECK="shasum -a 256 --check --status"
+    else
+        fail "web (no sha256sum --check and no shasum, cannot verify vendored bytes)"
+        return 1
+    fi
     for v in src/tools/web/vendor/*/; do
         [ -f "$v/PROVENANCE" ] || continue
         if (cd "$v" && grep -v '^#' PROVENANCE | grep . |
-                sha256sum --check --status) 2> /dev/null; then
+                $SHA256_CHECK) 2> /dev/null; then
             note "vendored $(basename "$v") matches its recorded hashes"
         else
             fail "web ($v has been edited, see its PROVENANCE)"

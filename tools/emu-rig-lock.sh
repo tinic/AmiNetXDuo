@@ -25,6 +25,25 @@
 # that function rather than at the end of the run.
 declare -gA RIG_HELD_FDS 2> /dev/null || true
 
+# flock(1) IS THE MUTEX.  Without it every claim below would look like a lock
+# that was taken and a port that was busy, and rig_claim_port would blame a
+# holder that does not exist -- macOS has no flock(1), and that is exactly what
+# it reported.  Answer once, and answer with the cause.
+RIG_FLOCK=${RIG_FLOCK:-}
+rig_have_flock() {
+    [ -n "$RIG_FLOCK" ] && { [ "$RIG_FLOCK" = yes ] && return 0 || return 1; }
+    if command -v flock > /dev/null 2>&1; then RIG_FLOCK=yes; return 0; fi
+    RIG_FLOCK=no
+    return 1
+}
+
+rig_no_flock() {
+    echo "flock(1) is not installed, so nothing on this host can arbitrate" >&2
+    echo "  the rig.  A host that runs emulator arms needs util-linux's" >&2
+    echo "  flock; a host that only builds does not, and does not claim." >&2
+    return 1
+}
+
 # The directory, created if it is not there.  0700: the lock files carry the
 # holder's pid and command, which is nobody else's business.
 rig_lockdir() {
@@ -74,6 +93,7 @@ PY
 # fight over the same first candidates.  It is a scheduling hint and nothing
 # depends on it: correctness is the lock.
 rig_claim_port() { # who [base] [span]
+    rig_have_flock || { rig_no_flock; return 1; }
     local who="${1:-anon}" base="${2:-12000}" span="${3:-900}"
     local dir p i off fd tried=0
     dir=$(rig_lockdir)
@@ -130,6 +150,7 @@ rig_release_port() {
 # are the previous holder's record, which is the difference between "somebody
 # else is running" and a sentence a caller can act on.
 rig_claim_name() { # name [who]
+    rig_have_flock || { rig_no_flock; return 1; }
     local name="$1" who="${2:-$$}" dir fd
     dir=$(rig_lockdir)
 
@@ -153,6 +174,7 @@ rig_claim_name() { # name [who]
 # leave.  Performance arms use the exclusive form while ordinary bridged
 # guests use this one, so a measurement cannot share the host NIC or CPUs.
 rig_claim_name_shared() { # name [who]
+    rig_have_flock || { rig_no_flock; return 1; }
     local name="$1" who="${2:-$$}" dir fd
     dir=$(rig_lockdir)
 
@@ -206,6 +228,7 @@ rig_prober_usable() {
 # failure this is really about, and it survives the run that caused it by as
 # long as the switch's table does.
 rig_claim_address() { # prefix first last [who]
+    rig_have_flock || { rig_no_flock; return 1; }
     local prefix="$1" first="$2" last="$3" who="${4:-$$}"
     local dir n addr fd off span i
     dir=$(rig_lockdir)
