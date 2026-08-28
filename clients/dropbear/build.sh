@@ -204,11 +204,19 @@ if [ "$PROFILE" = "1" ]; then
 fi
 
 # Reconfigure when the flags change; Dropbear caches config.h and a stale one
-# is silent.
+# is silent.  The objects go with it: make compares mtimes, not flags, so a
+# tree built before a flag existed is "up to date" forever and links an
+# artifact the flag was added to prevent.
 STAMP="$OUT/.amiga-flags"
+# The leading word is a schema tag, and it is what retires a build tree written
+# by the version of this script that stamped the flags at configure time: such
+# a stamp says the flags are in effect over objects that never saw them.
+STAMP_CONTENT="artifact-verified $DB_CFLAGS"
 if [ ! -f "$OUT/config.h" ] || [ ! -f "$STAMP" ] || \
-   [ "$(cat "$STAMP")" != "$DB_CFLAGS" ]; then
+   [ "$(cat "$STAMP")" != "$STAMP_CONTENT" ]; then
     echo "==> configuring dropbear in ${BUILD}"
+    find "$OUT" -name '*.o' -delete 2>/dev/null
+    rm -f "$OUT"/libtomcrypt/libtomcrypt.a "$OUT"/libtommath/libtommath.a
     (
         cd "$OUT"
         CC="$AMIGA_GCC" \
@@ -233,7 +241,6 @@ if [ ! -f "$OUT/config.h" ] || [ ! -f "$STAMP" ] || \
         tail -30 "$LOG" >&2
         exit 1
     }
-    printf '%s' "$DB_CFLAGS" > "$STAMP"
 fi
 
 # The one thing worth failing loudly on.  Without <netinet/in.h> Dropbear does
@@ -523,7 +530,8 @@ for p in $PROGRAMS; do
     [ -f "$OUT/$p" ] || continue
     if strings "$OUT/$p" | grep -F "$ROOT" >/dev/null; then
         echo "!! $p embeds the checkout path $ROOT" >&2
-        echo "   compile every source with $REPRO_CFLAGS" >&2
+        echo "   $REPRO_CFLAGS is set, so this is a stale object tree:" >&2
+        echo "   rm -rf $OUT and build again" >&2
         exit 1
     fi
 done
@@ -533,6 +541,11 @@ done
         exit 1
     fi
 }
+
+# Written HERE and nowhere earlier: the stamp claims an artifact was produced
+# with these flags, so a run that configured and then produced nothing must not
+# leave a stamp saying the flags are in effect.
+printf '%s' "$STAMP_CONTENT" > "$STAMP"
 
 echo
 for p in $PROGRAMS; do
